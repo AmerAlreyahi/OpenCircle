@@ -1568,35 +1568,88 @@ fn snip_toolbar_parts_sheet() {
             slider::bare(1..=32, 5, 110.0, true, |_| ())
         }),
         row("menu row", Act::Rest, |ar| {
-            option_list::action(
-                '\u{e258}',
-                s(ar, "Pin to screen", "تثبيت"),
-                Some("Ctrl+P"),
-                false,
-                Some(()),
-            )
+            menu_row(ar, "Pin to screen", "تثبيت", &["Ctrl", "P"], Look::Rest)
         }),
         row("  keyboard", Act::Rest, |ar| {
-            option_list::action(
-                '\u{e258}',
-                s(ar, "Pin to screen", "تثبيت"),
-                Some("Ctrl+P"),
-                true,
-                Some(()),
-            )
+            menu_row(ar, "Pin to screen", "تثبيت", &["Ctrl", "P"], Look::Keyboard)
         }),
         row("  dimmed", Act::Rest, |ar| {
-            option_list::action(
-                '\u{e4d6}',
-                s(ar, "Long capture", "لقطة طويلة"),
-                None,
-                false,
-                None::<()>,
+            menu_row(ar, "Long capture", "لقطة طويلة", &[], Look::Dimmed)
+        }),
+        row("  reading", Act::Rest, |ar| {
+            menu_row(ar, "Copy text", "نسخ النص", &[], Look::Reading)
+        }),
+        row("  external mark", Act::Rest, |ar| {
+            menu_row(
+                ar,
+                "Ask AI",
+                "اسأل",
+                &["Ctrl", "Shift", "E"],
+                Look::External,
+            )
+        }),
+        row("  three keys, dimmed", Act::Rest, |ar| {
+            menu_row(
+                ar,
+                "Translate",
+                "ترجمة",
+                &["Ctrl", "Shift", "T"],
+                Look::Dimmed,
+            )
+        }),
+        row("menu foot", Act::Rest, |ar| {
+            option_list::action_menu(
+                268.0,
+                vec![menu_row(
+                    ar,
+                    "Copy text",
+                    "نسخ النص",
+                    &["Ctrl", "Shift", "X"],
+                    Look::Dimmed,
+                )],
+                Some(option_list::foot(
+                    s(ar, "No text found in this area", "لا يوجد نص في هذه المنطقة"),
+                    ar,
+                )),
             )
         }),
         row("panel", Act::Rest, |ar| {
             surface::panel(super::super::text::text(Role::NOTE, s(ar, "Panel", "لوحة"))).into()
         }),
     ];
-    sheet("snip_toolbar_parts", Size::new(300.0, 48.0), &rows);
+    sheet("snip_toolbar_parts", Size::new(300.0, 80.0), &rows);
+}
+
+/// How a gallery menu row shows (`menu_row`).
+#[derive(Clone, Copy)]
+enum Look {
+    Rest,
+    Keyboard,
+    Dimmed,
+    Reading,
+    External,
+}
+
+/// A More-menu row for the gallery sheet.
+fn menu_row(
+    ar: bool,
+    latin: &'static str,
+    arabic: &'static str,
+    keys: &[&str],
+    look: Look,
+) -> Element<'static, ()> {
+    use super::super::option_list;
+    option_list::action(option_list::ActionRow {
+        lead: match look {
+            Look::External => option_list::logo_mark(16),
+            _ => option_list::glyph('\u{e258}', false),
+        },
+        label: s(ar, latin, arabic),
+        external: matches!(look, Look::External),
+        caps: keys.iter().map(|k| k.to_string()).collect(),
+        reading: matches!(look, Look::Reading),
+        focused: matches!(look, Look::Keyboard),
+        press: (!matches!(look, Look::Dimmed)).then_some(()),
+        rtl: ar,
+    })
 }

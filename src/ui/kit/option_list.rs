@@ -336,53 +336,165 @@ pub fn item<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// A menu row that runs something (Snip's More): its `glyph` (16 px,
-/// `text_sub`), `label` (13 px `text`), its `key` (mono, muted) at the end;
-/// `hover` under the cursor or when `focused`; no `on_press` = dimmed.
-pub fn action<'a, Message: Clone + 'a>(
-    glyph: char,
-    label: &'a str,
-    key: Option<&'a str>,
-    focused: bool,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    use button::Status;
-    let (role, small) = (Role::MENU, Role::KEYCAP);
-    let live = on_press.is_some();
-    let ink = move |c: iced::Color| if live { c } else { faded(c, 0.45) };
-    let content = row![
-        text(glyph)
-            .font(super::icon::FONT)
-            .size(super::tokens::size::ICON)
-            .color(ink(c().text_sub)),
-        text(label)
-            .size(role.size)
-            .font(font(role))
-            .color(ink(c().text)),
-        Space::new().width(Fill),
-    ]
-    .push(key.map(|k| {
-        text(k)
-            .size(small.size)
-            .font(font(small))
-            .color(ink(c().text_muted))
+/// A glyph of the icon font as a row's lead: 16 px, `text_sub` (`text` when
+/// `hot`).
+pub fn glyph<'a, Message: 'a>(glyph: char, hot: bool) -> Element<'a, Message> {
+    text(glyph)
+        .font(super::icon::FONT)
+        .size(size::ICON)
+        .color(if hot { c().text } else { c().text_sub })
+        .into()
+}
+
+/// The OpenCircle logo as a row's lead, `px` square (Ask AI: never sparkles).
+pub fn logo_mark<'a, Message: 'a>(px: u32) -> Element<'a, Message> {
+    iced::widget::image(super::logo::logo(px))
+        .width(px as f32)
+        .height(px as f32)
+        .into()
+}
+
+/// One row of an action menu (Snip's More): icon 16, label, an optional mark
+/// after it (the 12 px external-link of a row that leaves the app), room, then
+/// its key caps (one per key) or, while `reading`, the loading mark in their
+/// place. 32 px tall, radius 9, 12 px / 500; `hover` under the pointer,
+/// `accent_soft` for the keyboard's row; no `press` = dimmed to 38 %.
+/// `rtl`: mirrored (the icon at the right); the caps stay Latin, left to right.
+pub struct ActionRow<'a, Message> {
+    pub lead: Element<'a, Message>,
+    pub label: &'a str,
+    pub external: bool,
+    pub caps: Vec<String>,
+    pub reading: bool,
+    pub focused: bool,
+    pub press: Option<Message>,
+    pub rtl: bool,
+}
+
+/// The row's height (the design's 34 px pitch with the gap).
+pub const ACTION_H: f32 = 32.0;
+const ACTION_GAP: f32 = 2.0;
+/// Room in an action row (`gap-2.5`, `pl-2.5 pr-2`).
+const ACTION_SPACE: f32 = 10.0;
+const ACTION_PAD: [f32; 2] = [0.0, 8.0];
+/// The action menu's inner padding (`padding: 8px 6px`).
+const ACTION_MENU_PAD: [f32; 2] = [8.0, 6.0];
+/// The foot's row, and its hairline's margin.
+pub const FOOT_H: f32 = 28.0;
+const FOOT_RULE: f32 = 5.0;
+/// Between a row's caps (`gap: 4px`).
+const CAP_GAP: f32 = 4.0;
+/// An external-link mark (`kitIcon('external', 12)`).
+const EXTERNAL: f32 = 12.0;
+
+/// How wide a key's cap is: its text and 6 px each side, at least a square.
+pub fn cap_width(label: &str) -> f32 {
+    let role = Role::KEYCAP;
+    (super::text::width(label, role.size, font(role)) + 12.0).max(size::KEYCAP_H)
+}
+
+/// A row's caps, one cell per key.
+pub fn caps<'a, Message: 'a>(keys: &[String], live: bool) -> Element<'a, Message> {
+    row(keys.iter().map(|k| {
+        let cap = match live {
+            true => super::keycap::keycap(k.clone()),
+            false => super::keycap::dimmed(k.clone()),
+        };
+        container(cap).width(cap_width(k)).into()
     }))
-    .spacing(ITEM_PAD)
-    .align_y(Center);
+    .spacing(CAP_GAP)
+    .into()
+}
+
+pub fn action<'a, Message: Clone + 'a>(r: ActionRow<'a, Message>) -> Element<'a, Message> {
+    use button::Status;
+    let role = Role::CONTROL;
+    let live = r.press.is_some();
+    let ink = move |colour: iced::Color| if live { colour } else { faded(colour, 0.38) };
+    let label = text(r.label)
+        .size(role.size)
+        .font(font(role))
+        .color(ink(c().text));
+    let external = r
+        .external
+        .then(|| icon(Icon::External, EXTERNAL).color(ink(c().text_muted)));
+    let trail: Option<Element<'a, Message>> = match (r.reading, r.caps.is_empty()) {
+        (true, _) => Some(logo_mark(14)),
+        (false, true) => None,
+        (false, false) => Some(caps(&r.caps, live)),
+    };
+    let mut parts: Vec<Element<'a, Message>> = vec![r.lead, label.into()];
+    parts.extend(external.map(Element::from));
+    parts.push(Space::new().width(Fill).into());
+    parts.extend(trail);
+    // the caps keep their own order; the row around them mirrors
+    if r.rtl {
+        parts.reverse();
+    }
+    let content = row(parts).spacing(ACTION_SPACE).align_y(Center);
+    let focused = r.focused;
     button(container(content).center_y(Fill))
         .width(Fill)
-        .height(ITEM_H)
-        .padding([0.0, ITEM_PAD])
-        .on_press_maybe(on_press)
+        .height(ACTION_H)
+        .padding(ACTION_PAD)
+        .on_press_maybe(r.press)
         .style(move |_, status| {
-            let hot = focused || (live && matches!(status, Status::Hovered | Status::Pressed));
+            let hovered = live && matches!(status, Status::Hovered | Status::Pressed);
+            let fill = match (focused, hovered) {
+                (true, _) => Some(c().accent_soft),
+                (_, true) => Some(c().hover),
+                _ => None,
+            };
             button::Style {
-                background: hot.then(|| c().hover.into()),
+                background: fill.map(Into::into),
                 text_color: c().text,
                 border: Border::default().rounded(radius::MENU_ITEM),
                 ..button::Style::default()
             }
         })
+        .into()
+}
+
+/// The foot of an action menu: a hairline and one 28 px line of `words` in
+/// `text_sub` (11.5 px), like the language picker's hint.
+pub fn foot<'a, Message: 'a>(words: &'a str, rtl: bool) -> Element<'a, Message> {
+    let role = Role::ROW_DESC;
+    let line = container(
+        text(words)
+            .size(role.size)
+            .font(font(role))
+            .color(c().text_sub),
+    )
+    .padding([0.0, ACTION_SPACE])
+    .height(FOOT_H)
+    .center_y(FOOT_H);
+    let line = match rtl {
+        true => line.align_right(Fill),
+        false => line.width(Fill),
+    };
+    column![
+        container(divider()).padding(Padding {
+            top: FOOT_RULE,
+            left: 4.0,
+            right: 4.0,
+            bottom: 0.0,
+        }),
+        line
+    ]
+    .into()
+}
+
+/// An action menu `width` wide: `items` (rows and `separator`s) 2 px apart on
+/// the widget surface, radius 14, and a `foot` when it has something to say.
+pub fn action_menu<'a, Message: 'a>(
+    width: f32,
+    items: Vec<Element<'a, Message>>,
+    foot: Option<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let list = column(items).spacing(ACTION_GAP);
+    surface(Material::Widget, radius::DROPDOWN, column![list].push(foot))
+        .padding(ACTION_MENU_PAD)
+        .width(width)
         .into()
 }
 

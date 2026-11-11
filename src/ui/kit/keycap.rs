@@ -13,6 +13,11 @@ pub fn keycap<'a, Message: 'a>(label: impl Into<String>) -> Element<'a, Message>
     cap(label.into(), 1.0)
 }
 
+/// A key of a row that is off: the cap at 38 %.
+pub fn dimmed<'a, Message: 'a>(label: impl Into<String>) -> Element<'a, Message> {
+    cap(label.into(), 0.38)
+}
+
 fn cap<'a, Message: 'a>(label: String, alpha: f32) -> Element<'a, Message> {
     let fade = move |colour: Color| faded(colour, alpha);
     // the edge is the outer box showing round the face: 1 px, 2 px below
