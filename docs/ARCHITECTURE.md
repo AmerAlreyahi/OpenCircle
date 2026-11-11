@@ -210,8 +210,15 @@ lands at the wrong end in Arabic), aligns text columns with `.align_x(kit::dir::
 the caption buttons top left, segmented/Off-On order, slider and progress from the right, dropdowns, cards, hero).
 Never mirrored: key caps, numbers, paths, URLs, the logo, colour strips, preview stages. A wrapped right-to-left
 paragraph goes in a column (a `sub` straight in a container was laid out past its edge). Older screens with their own
-`rtl: bool` (language picker, Snip toolbar, Steps strip, ruler, long-capture hint) take `kit::dir::rtl()` when they
-move onto the table (part 2).
+`rtl: bool` (Snip toolbar, Steps strip, ruler, long-capture hint, `option_list::foot` / `ActionRow`) take
+`kit::dir::rtl()` when they move onto the table (part 2b); the language picker, `option_list::{opener, choice, group}`
+and `field::search` already do. A floating window (toast, update pill / card, tray menu: `ui::windows`) is built and
+its size measured inside `windows::spoken(..)`; the translate session's `view` sets the direction itself. Backend code
+never writes a sentence the user reads: it returns a typed value (`update::Answer`, `hotkey::Reserved`,
+`config::ShortcutFault`, `ai::models::Tag`, the settings `Why`, `ocr::OcrError`) whose `Display` stays English for logs
+and tests, and the UI maps it to table keys (`general::answer_words`, `model_download::why`, `model_list::ai_words`).
+A pill text a backend names is `Said(S::key)` (`actions::copy::COPIED_PILL`). The release notes are the release's own
+English text: the What's new card keeps them as one left-to-right block (`update_card::quoted`).
 
 **Add a colour**: a theme colour goes in every theme of `kit/themes.rs`; one
 that is the same in every theme in `kit::tokens::fixed`. Nowhere else.
