@@ -53,6 +53,24 @@ fn detect_size(width: u32, height: u32) -> (u32, u32) {
     (side(width), side(height))
 }
 
+/// Rows each full-size detector strip owns (#169), and how far it sees past
+/// them: a line up to twice `STRIP_SEE` tall has its middle in one strip and
+/// lies whole in it. 256 rows: 214 / 306 MB peak at 1080p / 3440 (448: 239 /
+/// 436), CER-all 0.172 (448: 0.177).
+// ponytail: a line over 128 px tall (a banner) can be cut by a strip's edge;
+// shrunk detection for such lines if that shows up.
+const STRIP: u32 = 256;
+const STRIP_SEE: u32 = 64;
+
+/// The strips (owned rows: top, bottom) of an image `height` tall that own
+/// rows of `rows` (all for `None`).
+fn strips(height: u32, rows: Option<(f32, f32)>) -> Vec<(u32, u32)> {
+    (0..height.div_ceil(STRIP))
+        .map(|s| (s * STRIP, ((s + 1) * STRIP).min(height)))
+        .filter(|&(a, b)| rows.is_none_or(|(top, bottom)| (a as f32) < bottom && top < b as f32))
+        .collect()
+}
+
 /// Lines read per recognizer run, at most. One run over all 72 lines of a busy
 /// 1080p screen grew RAM to 1.2 GB (ORT keeps its peak); 8 kept it ~250 MB at
 /// the same speed.
@@ -545,18 +563,12 @@ impl Engine {
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
-        let (boxes, (dw, dh)) = self.detect(&img, width, height)?;
-        let boxes: Vec<[f32; 4]> = boxes
-            .into_iter()
-            .filter(|b| {
-                let middle = b[1] + b[3] / 2.0;
-                rows.is_none_or(|(top, bottom)| (top as f32..bottom as f32).contains(&middle))
-            })
-            .collect();
         let first = match read {
             Read::One(i) => i,
             Read::Auto => self.auto,
         };
+        let rows = rows.map(|(top, bottom)| (top as f32, bottom as f32));
+        let (boxes, (dw, dh)) = self.lines_for(first, &img, rows)?;
         let n = boxes.len();
         let q =
             |i: usize, blocks: &[TextBlock]| quality(blocks, n, models::RECOGNIZERS[i].script());
@@ -586,6 +598,59 @@ impl Engine {
     /// the size detection ran at.
     fn detect(&mut self, img: &RgbImage, width: u32, height: u32) -> Result<Detected, OcrError> {
         self.detect_at(img, width, height, detect_size(width, height))
+    }
+
+    /// The lines of `img` whose middle is in `rows` (all for `None`), found
+    /// as recognizer `i` reads them best, and the detector's input size:
+    /// shrunk (`detect`) for a Latin reader; at full size in strips
+    /// (`detect_strips`) for the others (#169: 14-16 px Arabic shrunk to 10
+    /// px read loose boxes and lost lines; at full size missed lines went
+    /// 1.3 % -> 0 %, CER-all 0.301 -> 0.172; Latin pages read as well
+    /// shrunk, 3x faster).
+    fn lines_for(
+        &mut self,
+        i: usize,
+        img: &RgbImage,
+        rows: Option<(f32, f32)>,
+    ) -> Result<Detected, OcrError> {
+        let (w, h) = img.dimensions();
+        let (boxes, size) = match models::RECOGNIZERS[i].script() {
+            Script::Latin => self.detect(img, w, h)?,
+            _ => (self.detect_strips(img, &strips(h, rows))?, (w, h)),
+        };
+        let inside = |b: &[f32; 4]| {
+            let middle = b[1] + b[3] / 2.0;
+            rows.is_none_or(|(top, bottom)| (top..bottom).contains(&middle))
+        };
+        Ok((boxes.into_iter().filter(inside).collect(), size))
+    }
+
+    /// The lines of `img` at full size in `strips` (owned rows: top, bottom),
+    /// each seen `STRIP_SEE` past its rows (one full-size pass held 798 MB at
+    /// 3440x1440, strips of 256 rows 306 MB); a line is in the strip that
+    /// owns its middle.
+    fn detect_strips(
+        &mut self,
+        img: &RgbImage,
+        strips: &[(u32, u32)],
+    ) -> Result<Vec<[f32; 4]>, OcrError> {
+        let (w, h) = img.dimensions();
+        let mut out = Vec::new();
+        for &(y0, y1) in strips {
+            let top = y0.saturating_sub(STRIP_SEE);
+            let bottom = (y1 + STRIP_SEE).min(h);
+            let part = image::imageops::crop_imm(img, 0, top, w, bottom - top).to_image();
+            let (pw, ph) = part.dimensions();
+            let full = (pw.div_ceil(32) * 32, ph.div_ceil(32) * 32);
+            let (boxes, _) = self.detect_at(&part, pw, ph, full)?;
+            let owned = y0 as f32..y1 as f32;
+            out.extend(
+                (boxes.into_iter())
+                    .map(|b| [b[0], b[1] + top as f32, b[2], b[3]])
+                    .filter(|b| owned.contains(&(b[1] + b[3] / 2.0))),
+            );
+        }
+        Ok(out)
     }
 
     /// `detect` with the detector's input at `(dw, dh)`.
@@ -637,13 +702,21 @@ impl Engine {
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
-        let (boxes, _) = self.detect(&img, width, height)?;
         let inside = |b: &[f32; 4], k: &[f32; 4]| {
             let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
             (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
         };
-        let left: Vec<[f32; 4]> = (boxes.into_iter())
-            .filter(|b| !known.iter().any(|k| inside(b, k)))
+        let unknown = |b: &[f32; 4]| !known.iter().any(|k| inside(b, k));
+        // found shrunk (cheap); the rows with lines left are found again at
+        // full size (the non-Latin readers' size, `lines_for`)
+        let (boxes, _) = self.detect(&img, width, height)?;
+        let left: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
+        let owning = |&(a, b): &(u32, u32)| {
+            (left.iter()).any(|l| (a as f32..b as f32).contains(&(l[1] + l[3] / 2.0)))
+        };
+        let full: Vec<(u32, u32)> = strips(height, None).into_iter().filter(owning).collect();
+        let left: Vec<[f32; 4]> = (self.detect_strips(&img, &full)?.into_iter())
+            .filter(unknown)
             .collect();
         let mut best: Vec<(f32, TextBlock)> = Vec::new();
         for i in 0..models::RECOGNIZERS.len() {
@@ -992,6 +1065,18 @@ mod tests {
             "right to left"
         );
         assert_eq!(joined(vec![], line, false), None);
+    }
+
+    /// #169: full-size detection runs in strips of `STRIP` rows; only those
+    /// that own rows wanted.
+    #[test]
+    fn full_size_detection_runs_in_strips() {
+        assert_eq!(strips(1080, None).len(), 5);
+        assert_eq!(strips(1080, None)[4], (1024, 1080));
+        assert_eq!(strips(200, None), [(0, 200)], "a small image: one strip");
+        // a band of rows 300..420: the strip that owns them only
+        assert_eq!(strips(1080, Some((300.0, 420.0))), [(256, 512)]);
+        assert_eq!(strips(1080, Some((500.0, 520.0))), [(256, 512), (512, 768)]);
     }
 
     #[test]
