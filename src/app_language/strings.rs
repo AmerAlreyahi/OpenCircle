@@ -1218,4 +1218,6 @@ strings! {
         | "استخدم مفاتيح التعديل ثم مفتاحًا واحدًا، مثل Ctrl+Shift+Space";
     sc_modifier: "Needs at least one modifier (Ctrl, Alt, Shift, Super)"
         | "يلزم مفتاح تعديل واحد على الأقل (Ctrl أو Alt أو Shift أو Super)";
+    wn_empty: "See the release page for what changed."
+        | "راجع صفحة الإصدار لمعرفة ما تغيّر.";
 }

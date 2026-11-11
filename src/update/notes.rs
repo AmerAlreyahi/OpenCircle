@@ -40,9 +40,6 @@ pub struct Notes {
 pub const HIGHLIGHTS: usize = 6;
 /// A folded section keeps at most this many lines.
 const MAX_ITEMS: usize = 40;
-/// Notes with nothing to show.
-const EMPTY: &str = "See the release page for what changed.";
-
 /// A block of the notes: a bullet or a paragraph (its lines joined).
 #[derive(Debug, PartialEq)]
 enum Block {
@@ -118,7 +115,7 @@ pub fn parse(markdown: &str) -> Notes {
         None => bullets(&sections[0].1),
     };
     let more = highlights.len().saturating_sub(HIGHLIGHTS);
-    let mut notes = Notes {
+    Notes {
         summary: paragraph
             .map(|p| inline(&drop_title(p)))
             .unwrap_or_default(),
@@ -126,11 +123,7 @@ pub fn parse(markdown: &str) -> Notes {
         more,
         fixes: named(&["fix", "bug fix"]).map_or_else(Vec::new, |(_, b)| bullets(b)),
         upgrade: named(&["upgrade"]).map_or_else(Vec::new, |(_, b)| bullets(b)),
-    };
-    if notes.summary.is_empty() && notes.highlights.is_empty() {
-        notes.summary = inline(EMPTY);
     }
-    notes
 }
 
 /// "**OpenCircle v0.1.4: Ask AI ...**" -> "**Ask AI ...**": the card's title
@@ -326,7 +319,7 @@ mod tests {
         let n = parse("Small fixes.\n- One\n- Two");
         assert_eq!(plain(&n.summary), "Small fixes.");
         assert_eq!(n.highlights.len(), 2);
-        assert_eq!(plain(&parse("").summary), EMPTY);
+        assert!(parse("").summary.is_empty());
         // not a web link: its text only; an image is never a link
         let n = parse("- [x](javascript:alert(1)) ![img](https://e.x/i.png)");
         assert!(n.highlights[0].iter().all(|s| s.link.is_none()));

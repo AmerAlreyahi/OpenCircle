@@ -15,6 +15,7 @@ use crate::ui::kit::button::{FOLD_H, Kind, button, fold, label, regular};
 use crate::ui::kit::dir;
 use crate::ui::kit::icon::{Icon, icon};
 use crate::ui::kit::panel_frame::{PADDING, frame, height};
+use crate::ui::kit::text::paragraph;
 use crate::ui::kit::text::{Ink, LINKED_LINE, font, lines, muted, styled, width};
 use crate::ui::kit::tokens::{Role, radius, size, space};
 use crate::update::{NoteLine, NoteStyle, Notes, parse_notes, plain_note};
@@ -98,6 +99,11 @@ impl Card {
         .map(|(i, (t, l))| (i, t, l.as_slice(), self.open[i]))
     }
 
+    /// The notes have nothing to show: the card says to see the release page.
+    fn nothing(&self) -> bool {
+        self.notes.summary.is_empty() && self.notes.highlights.is_empty()
+    }
+
     /// The card's window (logical px): as tall as what it shows, up to `MAX_HEIGHT`.
     pub fn size(&self) -> Size {
         let tall = |line: &NoteLine, role: Role, wrap: f32| {
@@ -106,6 +112,13 @@ impl Card {
         };
         let bullet = width("•", TEXT.size, font(TEXT)) + BULLET_GAP;
         let mut blocks = Vec::new();
+        if self.nothing() {
+            blocks.push(
+                lines(t!(wn_empty), TEXT.size, font(TEXT), BODY).max(1) as f32
+                    * TEXT.size
+                    * LINKED_LINE,
+            );
+        }
         if !self.notes.summary.is_empty() {
             blocks.push(tall(&self.notes.summary, TEXT, BODY));
         }
@@ -161,6 +174,9 @@ fn quoted<'a>(build: impl FnOnce() -> Element<'a, Msg>) -> Element<'a, Msg> {
 pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
     let n = &c.notes;
     let mut body = column![].spacing(GAP);
+    if c.nothing() {
+        body = body.push(paragraph(crate::ui::kit::text::sub(TEXT, t!(wn_empty))));
+    }
     if !n.summary.is_empty() {
         body = body.push(quoted(|| styled(runs(&n.summary), TEXT, Msg::Link)));
     }
@@ -291,7 +307,11 @@ mod tests {
     #[test]
     fn empty_notes_still_say_something() {
         let c = Card::installed("9.9.9", "", "https://e.x/r");
-        assert!(plain_note(&c.notes.summary).contains("release page"));
+        assert!(
+            shot::texts(view(&c, RADIUS))
+                .iter()
+                .any(|t| t.contains("release page"))
+        );
         assert!(c.size().height < 200.0, "{:?}", c.size());
     }
 
