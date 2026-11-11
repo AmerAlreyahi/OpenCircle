@@ -609,9 +609,15 @@ pub struct Screen {
     /// The lines of each read stretch of rows, by its first row: top to bottom.
     parts: Vec<(f32, Vec<Line>)>,
     rows: Rows,
-    /// Lines the second reader found in other scripts (`ocr::recognize_except`):
-    /// they replace any first-read line they overlap.
+    /// Lines the second reader found in other scripts (`ocr::read_screen`
+    /// after Windows OCR): they replace any first-read line they overlap.
     extra: Vec<Line>,
+    /// The rows the second reader read.
+    other_rows: Rows,
+    /// Every line the helper found on the screen (image px): the ones in
+    /// rows not read yet are still being read (#169: the working cursor and
+    /// "N of M lines").
+    found: Vec<Rectangle>,
 }
 
 /// `a`'s middle is in `b`'s box (image px).
@@ -658,9 +664,29 @@ impl Screen {
         first.chain(&self.extra)
     }
 
-    /// The second reader's lines (`extra`).
-    pub fn add_extra(&mut self, lines: Vec<Line>) {
-        self.extra = lines;
+    /// The second reader read `band` (image px) and found `lines` there
+    /// (`extra`); only rows it hadn't read take its lines.
+    pub fn add_extra(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
+        for (a, b) in self.other_rows.mark(band_of(band), screen.height) {
+            let centre = |l: &&Line| (a..b).contains(&l.bounds.center_y());
+            self.extra.extend(lines.iter().filter(centre).cloned());
+        }
+    }
+
+    /// The next band for the second reader, the unread row nearest `y`
+    /// first; `None` once it read the whole screen.
+    pub fn next_other(&self, y: f32, screen: Size) -> Option<Rectangle> {
+        Some(rect(self.other_rows.next_band(y, screen.height)?, screen))
+    }
+
+    /// The rows the second reader needs to read in `band` (`unread`'s).
+    pub fn other_unread(&self, band: Rectangle, screen: Size) -> Option<(f32, f32)> {
+        self.other_rows.unread(band_of(band), screen.height)
+    }
+
+    /// Every line the helper found on the screen (image px).
+    pub fn set_found(&mut self, found: Vec<Rectangle>) {
+        self.found = found;
     }
 
     /// The band to read first for row `y` (touched) on a `screen`-sized
@@ -782,7 +808,12 @@ mod tests {
         // the second reader's lines: in reading order, replacing what they overlap
         let arabic = line("القائمة", 50.0, 10.0 + 30.0 * 3.0);
         let beside = line("مرحبا", 900.0, 10.0 + 30.0 * 5.0);
-        text.add_extra(vec![arabic.clone(), beside.clone()]);
+        let whole = Rectangle::with_size(screen);
+        assert_eq!(
+            text.next_other(500.0, screen).map(|b| b.height),
+            Some(144.0)
+        );
+        text.add_extra(whole, vec![arabic.clone(), beside.clone()], screen);
         let all = text.lines();
         assert_eq!(all.len(), page.len() + 1, "one replaced, one added");
         assert_eq!(all[3], arabic);
@@ -790,12 +821,14 @@ mod tests {
             (all[5].text.as_str(), all[6].text.as_str()),
             ("line 5", "مرحبا")
         );
-        text.add_extra(Vec::new());
-        assert_eq!(text.lines(), page, "none: as before");
+        // rows it read already take nothing twice; it is done
+        text.add_extra(whole, vec![arabic.clone()], screen);
+        assert_eq!(text.lines().len(), page.len() + 1);
+        assert_eq!(text.next_other(500.0, screen), None);
         assert!(reads <= 13, "{reads} bands");
         // a band over rows already read adds nothing twice
         text.add(first, ocr(first), screen);
-        assert_eq!(text.lines(), page);
+        assert_eq!(text.lines().len(), page.len() + 1);
     }
 
     const ALL: Rectangle = Rectangle {

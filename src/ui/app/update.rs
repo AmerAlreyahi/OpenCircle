@@ -636,20 +636,16 @@ impl App {
                         let screen = self.o.screen;
                         // (Windows OCR's closer read replaces its quick one)
                         let first = self.o.screen_text.add_read(source, band, lines, screen);
-                        // (the helper: its first band and its last, the VM's timings)
+                        // (#169: the first lines under the pointer, and all of
+                        // them: the VM's timings; Windows: the second reader's
+                        // last band is the end, if one reads)
                         let whole = self.o.screen_text.is_whole(self.o.screen.height);
-                        if system || first || whole {
-                            let what = match system || whole {
-                                true => "screen text ready",
-                                false => "first screen text",
-                            };
-                            match self.o.appear {
-                                Some((at, _)) => crate::log!(
-                                    "[opencircle] {what} {} ms after the first frame",
-                                    at.elapsed().as_millis()
-                                ),
-                                None => crate::log!("[opencircle] {what} before the first frame"),
-                            }
+                        if first {
+                            self.log_mark("first lines under the pointer");
+                        }
+                        let other = system && ocr::reads_other_scripts();
+                        if whole && !other && (first || !system) {
+                            self.log_mark("screen text ready");
                         }
                         let done = self.more_text();
                         let released = self.release_held();
@@ -672,23 +668,36 @@ impl App {
                 }
             }
             Message::ScreenText(..) => Task::none(), // closed or opened again meanwhile
-            Message::ScreenOther(opening, read)
+            Message::ScreenOther(opening, band, read)
                 if opening == self.opening && self.o.frame.is_some() =>
             {
+                self.o.other_reading = None;
                 match read {
-                    Ok(lines) if !lines.is_empty() => {
-                        crate::log!("[opencircle] the second reader added {} lines", lines.len());
-                        self.o.screen_text.add_extra(lines);
-                        self.more_text()
+                    Ok(lines) => {
+                        if !lines.is_empty() {
+                            crate::log!(
+                                "[opencircle] the second reader added {} lines",
+                                lines.len()
+                            );
+                        }
+                        let screen = self.o.screen;
+                        self.o.screen_text.add_extra(band, lines, screen);
+                        let done = self.more_text();
+                        Task::batch([done, self.read_other_scripts()])
                     }
-                    Ok(_) => Task::none(),
                     Err(e) => {
                         crate::log!("[opencircle] the second reader didn't read: {e}");
+                        self.o.other_read = true; // (the next opening tries again)
                         Task::none()
                     }
                 }
             }
             Message::ScreenOther(..) => Task::none(),
+            Message::ScreenFound(opening, found) if opening == self.opening => {
+                self.o.screen_text.set_found(found);
+                Task::none()
+            }
+            Message::ScreenFound(..) => Task::none(),
             Message::ScreenLines(opening, window, read)
                 if opening == self.opening && self.o.frame.is_some() =>
             {

@@ -374,6 +374,18 @@ impl App {
     pub(in crate::ui) fn log_frames(&self, what: &str) {
         log_gaps(what, &self.frame_times);
     }
+
+    /// Logs `what` (a mark of reading the screen's text) with the time since
+    /// the overlay's first frame: the VM's timings.
+    pub(in crate::ui) fn log_mark(&self, what: &str) {
+        match self.o.appear {
+            Some((at, _)) => crate::log!(
+                "[opencircle] {what} {} ms after the first frame",
+                at.elapsed().as_millis()
+            ),
+            None => crate::log!("[opencircle] {what} before the first frame"),
+        }
+    }
 }
 
 /// The gaps between the frames in `times`, as `what`; then forgets them.

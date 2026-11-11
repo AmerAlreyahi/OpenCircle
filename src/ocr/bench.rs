@@ -497,7 +497,13 @@ fn run(
             e.recognize(rgba, w, h, Read::Auto).unwrap()
         }
         "except" => e.recognize_except(rgba, w, h, &[]).unwrap(),
-        "linux-main" => linux_main(e, p),
+        "linux-main" => main_bands(e, p, &[], true, false),
+        "linux-first" => main_bands(e, p, &[], true, true),
+        "main-new" => {
+            let extra = main_bands(e, p, known3, false, false);
+            shown(en, extra)
+        }
+        "win-first" => main_bands(e, p, known3, false, true),
         "except-known" => e.recognize_except(rgba, w, h, known).unwrap(),
         "except-known3" => e.recognize_except(rgba, w, h, known3).unwrap(),
         // what main mode shows: the stand-in's lines, each replaced by a
@@ -506,18 +512,7 @@ fn run(
         "main-today" | "main-r3" => {
             let known = if path == "main-today" { known } else { known3 };
             let extra = e.recognize_except(rgba, w, h, known).unwrap();
-            let inside = |a: &[f32; 4], b: &[f32; 4]| {
-                let (x, y) = (a[0] + a[2] / 2.0, a[1] + a[3] / 2.0);
-                (b[0]..b[0] + b[2]).contains(&x) && (b[1]..b[1] + b[3]).contains(&y)
-            };
-            let over = |a: &TextBlock, b: &TextBlock| {
-                inside(&a.bounds, &b.bounds) || inside(&b.bounds, &a.bounds)
-            };
-            let first = en
-                .iter()
-                .filter(|l| !extra.iter().any(|x| over(l, x)))
-                .cloned();
-            first.chain(extra.iter().cloned()).collect()
+            shown(en, extra)
         }
         // Windows OCR reads an Arabic page as noise (`misread`, measured 0.32
         // words on the VM); the English reader's noise here may pass as words,
@@ -542,40 +537,59 @@ fn run(
     }
 }
 
-/// Linux main mode as the app reads a screen once text is used: bands from
-/// the pointer (mid-screen) out (`ocr::screen`), each band's crop sent to
-/// the helper with the rows it is read for (`ui::app::text::read_band`).
-fn linux_main(e: &mut Engine, p: &Page) -> Vec<TextBlock> {
-    use super::screen::{Next, Rows, Wants, next};
-    e.auto = 0; // a fresh helper: English first
-    let (w, h) = (p.w, p.h);
+/// Main mode as the app reads a screen (#169): bands from the pointer
+/// (mid-screen) out (`ocr::screen`), each band's rows read by
+/// `Engine::read_screen` (the screen sent with the first band only). Linux:
+/// `known` empty, the Latin reader reads (a fresh helper: English first).
+/// Windows: the second reader after Windows OCR (`known`: its lines read as
+/// words, the stand-in's here), Latin lines left to it. `first`: the band
+/// under the pointer only ("first lines under the pointer").
+fn main_bands(
+    e: &mut Engine,
+    p: &Page,
+    known: &[[f32; 4]],
+    latin: bool,
+    first: bool,
+) -> Vec<TextBlock> {
+    use super::screen::Rows;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static KEY: AtomicU64 = AtomicU64::new(1);
+    if latin {
+        e.auto = 0;
+    }
+    let h = p.h as f32;
+    let key = KEY.fetch_add(1, Ordering::Relaxed);
+    let mut img = Some(to_rgb(&p.rgba, p.w, p.h).unwrap());
     let mut rows = Rows::default();
     let mut out = Vec::new();
-    let wants = Wants {
-        source: Source::Helper,
-        started: true,
-        touches: &[],
-        waits: false,
-        text_used: true,
-        pointer: h as f32 / 2.0,
-    };
-    while let Next::Band { band, .. } = next(&rows, h as f32, &wants) {
-        let Some((top, bottom)) = rows.unread(band, h as f32) else {
-            rows.mark(band, h as f32);
-            continue;
-        };
-        let y0 = band.top as u32;
-        let bh = (band.height as u32).min(h - y0);
-        let crop = &p.rgba[(y0 * w * 4) as usize..((y0 + bh) * w * 4) as usize];
-        let r = (top as u32 - y0, bottom as u32 - y0);
-        let got = e.recognize_rows(crop, w, bh, Read::Auto, Some(r)).unwrap();
-        out.extend(got.into_iter().map(|mut b| {
-            b.bounds[1] += y0 as f32;
-            b
-        }));
-        rows.mark(band, h as f32);
+    let mut band = Some(Rows::touched(h / 2.0, h));
+    while let Some(b) = band {
+        if let Some((top, bottom)) = rows.unread(b, h) {
+            let read = e
+                .read_screen(key, img.take(), (top, bottom), known, latin)
+                .unwrap();
+            out.extend(read.lines);
+        }
+        rows.mark(b, h);
+        if first {
+            break;
+        }
+        band = rows.next_band(h / 2.0, h);
     }
     out
+}
+
+/// What main mode shows on Windows: Windows OCR's (the stand-in's) lines,
+/// each replaced by a second-reader line over it (`Screen::iter`: either
+/// one's middle in the other's box).
+fn shown(en: &[TextBlock], extra: Vec<TextBlock>) -> Vec<TextBlock> {
+    let over =
+        |a: &TextBlock, b: &TextBlock| holds(&b.bounds, &a.bounds) || holds(&a.bounds, &b.bounds);
+    let first = en
+        .iter()
+        .filter(|l| !extra.iter().any(|x| over(l, x)))
+        .cloned();
+    first.chain(extra.iter().cloned()).collect()
 }
 
 fn median(mut v: Vec<f64>) -> f64 {
@@ -645,7 +659,10 @@ fn screen_text_corpus() {
         // the stand-in for Windows OCR (not timed; skipped when no path needs
         // it, so a peak RSS is the path's own)
         let standin = (paths.iter()).any(|p| {
-            p.starts_with("except-known") || p.starts_with("main-") || p == "translate-win"
+            p.starts_with("except-known")
+                || p.starts_with("main-")
+                || p == "translate-win"
+                || p == "win-first"
         });
         let en = match standin {
             true => e.recognize(&p.rgba, p.w, p.h, Read::One(0)).unwrap(),

@@ -117,8 +117,12 @@ pub(in crate::ui) enum Message {
     Frame(Instant),
     /// OCR read this band of this opening's frame (main mode, on demand).
     ScreenText(u32, Rectangle, Result<Vec<word::Line>, String>),
-    /// The second reader's lines (other scripts) for this opening's frame.
-    ScreenOther(u32, Result<Vec<word::Line>, String>),
+    /// The second reader's lines (other scripts) in this band of this
+    /// opening's frame.
+    ScreenOther(u32, Rectangle, Result<Vec<word::Line>, String>),
+    /// Every line the helper found on this opening's frame (image px), the
+    /// known ones aside: those not read yet are being read (#169).
+    ScreenFound(u32, Vec<Rectangle>),
     /// Another screen's text (`Screen::lines`): the opening, its window, the read.
     ScreenLines(u32, window::Id, Result<Vec<word::Line>, String>),
     /// The text reader's helper of this opening has started (after its

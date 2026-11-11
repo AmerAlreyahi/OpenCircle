@@ -15,7 +15,7 @@ pub(crate) mod worker;
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, gently_here, hold, keep_warm, when_idle};
 pub use worker::{
-    WORKER_ARG, reads_other_scripts, recognize_as, recognize_band, recognize_except,
+    WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_except,
     recognize_in_child, translate_in_child, warm, worker_main,
 };
 
@@ -61,6 +61,8 @@ fn detect_size(width: u32, height: u32) -> (u32, u32) {
 // shrunk detection for such lines if that shows up.
 const STRIP: u32 = 256;
 const STRIP_SEE: u32 = 64;
+/// A strip's owned rows (top, bottom).
+type Strip = (u32, u32);
 
 /// The strips (owned rows: top, bottom) of an image `height` tall that own
 /// rows of `rows` (all for `None`).
@@ -452,6 +454,40 @@ pub struct Engine {
     /// The last Latin and non-Latin recognizers that read most lines.
     latin: usize,
     other: Option<usize>,
+    /// The screen `read_screen` reads a part at a time.
+    frame: Option<Frame>,
+}
+
+/// `Engine::read_screen`'s error for a screen it doesn't hold (the helper
+/// started again): the app sends the picture once more.
+pub const NO_FRAME: &str = "the screen isn't held";
+
+/// A screen read a part at a time: its picture and the lines found on it
+/// (shrunk, and at full size by strip: owned rows -> lines).
+pub(crate) struct Frame {
+    key: u64,
+    img: RgbImage,
+    shrunk: Option<Vec<[f32; 4]>>,
+    strips: Vec<(Strip, Vec<[f32; 4]>)>,
+}
+
+impl Frame {
+    fn new(key: u64, img: RgbImage) -> Frame {
+        Frame {
+            key,
+            img,
+            shrunk: None,
+            strips: Vec::new(),
+        }
+    }
+}
+
+/// A part of a screen read (`Engine::read_screen`): its lines, and every
+/// line found on the screen that isn't known (image px).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ScreenRead {
+    pub lines: Vec<TextBlock>,
+    pub found: Vec<[f32; 4]>,
 }
 
 impl Engine {
@@ -497,6 +533,7 @@ impl Engine {
             auto: 0,
             latin: 0,
             other: None,
+            frame: None,
         })
     }
 
@@ -559,7 +596,7 @@ impl Engine {
         let img = to_rgb(rgba, width, height)?;
         let rows = rows.map(|(top, bottom)| (top as f32, bottom as f32));
         let Read::One(i) = read else {
-            return self.per_line(&img, rows, &[], true);
+            return self.per_line(&mut Frame::new(0, img), rows, &[], true);
         };
         let (boxes, (dw, dh)) = self.lines_for(i, &img, rows)?;
         let detected = start.elapsed();
@@ -586,13 +623,13 @@ impl Engine {
     /// read it: main mode's and translate's second reader).
     fn per_line(
         &mut self,
-        img: &RgbImage,
+        f: &mut Frame,
         rows: Option<(f32, f32)>,
         known: &[[f32; 4]],
         latin: bool,
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
-        let h = img.height();
+        let (w, h) = f.img.dimensions();
         let installed = |i: usize| models::installed(models::RECOGNIZERS[i]);
         let script = |i: usize| models::RECOGNIZERS[i].script();
         let mut others: Vec<usize> = (0..models::RECOGNIZERS.len())
@@ -609,11 +646,17 @@ impl Engine {
         let mut fallback: Vec<TextBlock> = Vec::new();
         let latin_first =
             latin_reader.filter(|_| script(self.auto) == Script::Latin || others.is_empty());
+        let inside = |b: &[f32; 4]| {
+            let middle = b[1] + b[3] / 2.0;
+            rows.is_none_or(|(top, bottom)| (top..bottom).contains(&middle))
+        };
         let full: Vec<(u32, u32)> = match (latin_first, known.is_empty()) {
             (Some(l), _) => {
-                let (boxes, _) = self.lines_for(l, img, rows)?;
-                let boxes: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
-                let read = self.read_each(l, img, &boxes)?;
+                let boxes = self.shrunk(f)?;
+                let boxes: Vec<[f32; 4]> = (boxes.into_iter())
+                    .filter(|b| inside(b) && unknown(b))
+                    .collect();
+                let read = self.read_each(l, &f.img, &boxes)?;
                 let texts: Vec<&str> = (read.iter())
                     .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
                     .collect();
@@ -633,20 +676,18 @@ impl Engine {
             // found shrunk first (cheap): only the strips with lines left
             // are found again at full size
             (None, false) => {
-                let (boxes, _) = self.detect(img, img.width(), h)?;
-                let left: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
+                let boxes = self.shrunk(f)?;
+                let left: Vec<[f32; 4]> = (boxes.into_iter())
+                    .filter(|b| inside(b) && unknown(b))
+                    .collect();
                 owning(strips(h, rows), &left)
             }
             (None, true) => strips(h, rows),
         };
         let first = kept.len();
-        let inside = |b: &[f32; 4]| {
-            let middle = b[1] + b[3] / 2.0;
-            rows.is_none_or(|(top, bottom)| (top..bottom).contains(&middle))
-        };
         let mut boxes: Vec<[f32; 4]> = match others.is_empty() || full.is_empty() {
             true => Vec::new(),
-            false => self.detect_strips(img, &full)?,
+            false => self.full(f, &full)?,
         };
         boxes.retain(|b| inside(b) && unknown(b) && !kept.iter().any(|(_, k)| holds(&k.bounds, b)));
         let mut last: Vec<Option<TextBlock>> = vec![None; boxes.len()];
@@ -654,7 +695,7 @@ impl Engine {
             if boxes.is_empty() {
                 break;
             }
-            let read = self.read_each(o, img, &boxes)?;
+            let read = self.read_each(o, &f.img, &boxes)?;
             let (mut rest, mut rest_last) = (Vec::new(), Vec::new());
             for ((b, r), before) in boxes.into_iter().zip(read).zip(last) {
                 match r {
@@ -683,7 +724,7 @@ impl Engine {
                 }
             }
             let boxes: Vec<[f32; 4]> = need.iter().map(|(b, _)| *b).collect();
-            let read = self.read_each(l, img, &boxes)?;
+            let read = self.read_each(l, &f.img, &boxes)?;
             let letters = |t: &TextBlock| t.text.chars().any(char::is_alphabetic);
             for ((_, before), r) in need.into_iter().zip(read) {
                 match (r.filter(letters), before) {
@@ -710,8 +751,7 @@ impl Engine {
             }
         }
         crate::log!(
-            "[opencircle] ocr per line {}x{h}: {} lines kept ({first} Latin first, {other} another script, {} Latin after), {} strips at full size, {} known, {} ms",
-            img.width(),
+            "[opencircle] ocr per line {w}x{h}: {} lines kept ({first} Latin first, {other} another script, {} Latin after), {} strips at full size, {} known, {} ms",
             kept.len(),
             kept.len() - first - other,
             full.len(),
@@ -828,7 +868,76 @@ impl Engine {
         known: &[[f32; 4]],
     ) -> Result<Vec<TextBlock>, OcrError> {
         let img = to_rgb(rgba, width, height)?;
-        self.per_line(&img, None, known, false)
+        self.per_line(&mut Frame::new(0, img), None, known, false)
+    }
+
+    /// Main mode's screen text, a part at a time (#169): the lines whose
+    /// middle is in `rows` (image px) and not in a `known` box, read line
+    /// by line (`per_line`; `latin`: the Latin reader may read, else Windows
+    /// OCR did), and every line found on the screen not in a known box
+    /// (`found`: the lines still to read show the working cursor). The
+    /// screen `key` comes with its picture once (`img`); the lines found on
+    /// it are kept for its later parts, so it is detected once per opening
+    /// (#169 R7: Linux main mode detected every band again). Without a
+    /// picture for a key not held: `NO_FRAME`.
+    pub fn read_screen(
+        &mut self,
+        key: u64,
+        img: Option<RgbImage>,
+        rows: (f32, f32),
+        known: &[[f32; 4]],
+        latin: bool,
+    ) -> Result<ScreenRead, OcrError> {
+        let mut f = match (img, self.frame.take()) {
+            (Some(img), _) => Frame::new(key, img),
+            (None, Some(f)) if f.key == key => f,
+            _ => return Err(OcrError::Engine(NO_FRAME.into())),
+        };
+        let read = self.per_line(&mut f, Some(rows), known, latin);
+        let found = self.shrunk(&mut f).map(|boxes| {
+            let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
+            boxes.into_iter().filter(unknown).collect()
+        });
+        self.frame = Some(f);
+        Ok(ScreenRead {
+            lines: read?,
+            found: found?,
+        })
+    }
+
+    /// Forgets the screen `read_screen` keeps (its picture and lines).
+    pub fn forget_screen(&mut self) {
+        self.frame = None;
+    }
+
+    /// The lines of `f` found shrunk (`detect`), once per frame.
+    fn shrunk(&mut self, f: &mut Frame) -> Result<Vec<[f32; 4]>, OcrError> {
+        if let Some(boxes) = &f.shrunk {
+            return Ok(boxes.clone());
+        }
+        let (w, h) = f.img.dimensions();
+        let (boxes, _) = self.detect(&f.img, w, h)?;
+        f.shrunk = Some(boxes.clone());
+        Ok(boxes)
+    }
+
+    /// The lines of `f` at full size in `strips` (`detect_strips`), each
+    /// strip found once per frame.
+    fn full(&mut self, f: &mut Frame, strips: &[(u32, u32)]) -> Result<Vec<[f32; 4]>, OcrError> {
+        let mut out = Vec::new();
+        for s in strips {
+            let at = f.strips.iter().position(|(t, _)| t == s);
+            let at = match at {
+                Some(at) => at,
+                None => {
+                    let boxes = self.detect_strips(&f.img, std::slice::from_ref(s))?;
+                    f.strips.push((*s, boxes));
+                    f.strips.len() - 1
+                }
+            };
+            out.extend_from_slice(&f.strips[at].1);
+        }
+        Ok(out)
     }
 
     /// Recognizer `i` on the `boxes` of `img`: the lines it read.

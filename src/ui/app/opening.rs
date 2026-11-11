@@ -57,8 +57,16 @@ pub(in crate::ui) struct Opening {
     /// The band OCR reads now (one at a time: the helper serves one request
     /// at a time anyway).
     pub(in crate::ui) reading: Option<Rectangle>,
-    /// The second reader (other scripts than Windows OCR's) was started.
+    /// The second reader (other scripts than Windows OCR's) was started,
+    /// and the band it reads now.
     pub(in crate::ui) other_read: bool,
+    pub(in crate::ui) other_reading: Option<Rectangle>,
+    /// Windows OCR's lines the second reader leaves alone (image px x scale:
+    /// frame px), once judged (`ocr::system::read_well`).
+    pub(in crate::ui) other_known: Option<std::sync::Arc<Vec<[f32; 4]>>>,
+    /// The frame went to the helper (`ocr::read_screen`): later parts send
+    /// only its key.
+    pub(in crate::ui) frame_sent: bool,
     /// A tap or Shift+click waiting for the band under it.
     pub(in crate::ui) awaits: Option<(Point, Await)>,
     /// Ctrl+A waits for the whole screen to be read.
@@ -225,6 +233,9 @@ impl Default for Opening {
             screen_text: word::Screen::default(),
             reading: None,
             other_read: false,
+            other_reading: None,
+            other_known: None,
+            frame_sent: false,
             awaits: None,
             want_all: false,
             held: None,

@@ -237,43 +237,64 @@ impl App {
         let Some((top, bottom)) = self.o.screen_text.unread(band, self.o.screen) else {
             return Task::none();
         };
-        let at = |y: f32| ((y * self.o.scale) as u32).saturating_sub(y0);
-        let rows = (at(top), at(bottom));
+        let scale = self.o.scale;
+        // the helper: the whole frame's rows (frame px), the frame sent once
+        let rows = (top * scale, bottom * scale);
         self.o.reading = Some(band);
-        let (scale, opening) = (self.o.scale, self.opening);
+        let opening = self.opening;
+        let system =
+            (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
+        let send_frame = system.is_none() && !std::mem::replace(&mut self.o.frame_sent, true);
         let held = self
             .o
             .helper
             .as_ref()
             .map(Arc::downgrade)
             .unwrap_or_default();
-        let system =
-            (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
         background(move |tx| {
             // closed meanwhile: nothing to read for (and no helper started)
             let Some(_held) = held.upgrade() else {
                 return;
             };
-            let send = |read: Result<Vec<TextBlock>, ocr::OcrError>| {
+            let send = |read: Result<Vec<TextBlock>, ocr::OcrError>, origin: [u32; 2]| {
                 let lines = read.map(|blocks| {
-                    let mut lines = word::lines(blocks, [x0, y0], scale);
+                    let mut lines = word::lines(blocks, origin, scale);
                     word::measure(&mut lines, &pixels, width, height, scale);
                     lines
                 });
-                let _ = tx.unbounded_send(lines.map_err(|e| e.to_string()));
-            };
-            let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
-                return send(Err(ocr::OcrError::BadImage("an empty band".into())));
+                let _ = tx.unbounded_send(Part::Read(lines.map_err(|e| e.to_string())));
             };
             let Some(setting) = system else {
-                return send(ocr::recognize_band(
-                    &c.rgba, c.width, c.height, rows, gently,
-                ));
+                let key = u64::from(opening);
+                let read = ocr::read_screen(
+                    key,
+                    &pixels,
+                    width,
+                    height,
+                    send_frame,
+                    rows,
+                    &[],
+                    true,
+                    gently,
+                );
+                return match read {
+                    Ok(read) => {
+                        let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
+                        send(Ok(read.lines), [0, 0])
+                    }
+                    Err(e) => send(Err(e), [0, 0]),
+                };
+            };
+            let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
+                return send(
+                    Err(ocr::OcrError::BadImage("an empty band".into())),
+                    [x0, y0],
+                );
             };
             // its language known now: a right-to-left one goes to the helper
             if ocr::route(setting, Some(ocr::system::language())) == ocr::Source::Helper {
                 let rtl = "Windows OCR: a right-to-left language";
-                return send(Err(ocr::OcrError::Engine(rtl.into())));
+                return send(Err(ocr::OcrError::Engine(rtl.into())), [x0, y0]);
             }
             // fast, then (small text) doubled: each read replaces the last
             for (i, &k) in ocr::system::passes(scale, c.width, c.height)
@@ -282,21 +303,27 @@ impl App {
             {
                 match ocr::system::recognize(&c.rgba, c.width, c.height, k) {
                     Err(e) if i > 0 => crate::log!("[opencircle] Windows OCR's second read: {e}"),
-                    read => send(read),
+                    read => send(read, [x0, y0]),
                 }
             }
         })
-        .map(move |read| Message::ScreenText(opening, band, read))
+        .map(move |part| match part {
+            Part::Found(found) => Message::ScreenFound(opening, found),
+            Part::Read(read) => Message::ScreenText(opening, band, read),
+        })
     }
 
     /// After Windows OCR's read (one language: the user's Windows language),
-    /// the second reader reads the lines it didn't, in the script that suits
-    /// each (Arabic, Russian, Chinese, ... : whichever recognizers are on
-    /// disk), gently, once per opening (owner, 2026-10-30). Nothing without
-    /// such a recognizer.
+    /// the second reader reads the lines it didn't read well, each in the
+    /// script that suits it (Arabic, Russian, Chinese, ... : whichever
+    /// recognizers are on disk), gently, band by band from the pointer out
+    /// (#169: they become selectable as they are read), once per opening
+    /// (owner, 2026-10-30). Nothing without such a recognizer.
     pub(in crate::ui) fn read_other_scripts(&mut self) -> Task<Message> {
         if self.o.other_read
+            || self.o.other_reading.is_some()
             || self.o.text_by != Some(ocr::Source::System)
+            || !self.o.screen_text.is_whole(self.o.screen.height)
             || !ocr::reads_other_scripts()
         {
             return Task::none();
@@ -311,14 +338,41 @@ impl App {
             return Task::none();
         };
         let (width, height, pixels) = (*width, *height, pixels.clone());
-        self.o.other_read = true;
-        let scale = self.o.scale;
-        let lines: Vec<(String, [f32; 4])> = (self.o.screen_text.lines().into_iter())
-            .map(|l| {
-                let r = l.bounds * scale;
-                (l.text, [r.x, r.y, r.width, r.height])
-            })
-            .collect();
+        let (scale, screen) = (self.o.scale, self.o.screen);
+        let Some(band) = self.o.screen_text.next_other(self.o.pointer.y, screen) else {
+            self.o.other_read = true; // all read
+            self.log_mark("screen text ready (the second reader's last line)");
+            return Task::none();
+        };
+        let Some((top, bottom)) = self.o.screen_text.other_unread(band, screen) else {
+            self.o.screen_text.add_extra(band, Vec::new(), screen);
+            return self.read_other_scripts();
+        };
+        // lines read as real words are Windows OCR's; one that reads like
+        // noise may be another script it misread: the second reader reads it
+        if self.o.other_known.is_none() {
+            let lines = self.o.screen_text.lines();
+            let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+            let language = ocr::system::known().flatten();
+            let well = ocr::system::read_well(&texts, language);
+            let known: Vec<[f32; 4]> = (lines.iter().zip(&well))
+                .filter(|(_, well)| **well)
+                .map(|(l, _)| {
+                    let r = l.bounds * scale;
+                    [r.x, r.y, r.width, r.height]
+                })
+                .collect();
+            crate::log!(
+                "[opencircle] Windows OCR: {} lines, {} read as words",
+                lines.len(),
+                known.len()
+            );
+            self.o.other_known = Some(Arc::new(known));
+        }
+        let known = self.o.other_known.clone().unwrap_or_default();
+        let rows = (top * scale, bottom * scale);
+        let send_frame = !std::mem::replace(&mut self.o.frame_sent, true);
+        self.o.other_reading = Some(band);
         let opening = self.opening;
         let held = (self.o.helper.as_ref())
             .map(Arc::downgrade)
@@ -327,28 +381,22 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return; // closed meanwhile
             };
-            // lines read as real words are Windows OCR's; one that reads
-            // like noise may be another script it misread: the second
-            // reader reads there
-            let texts: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
-            let well = ocr::system::read_well(&texts, ocr::system::language());
-            let known: Vec<[f32; 4]> = (lines.iter().zip(well))
-                .filter(|(_, well)| *well)
-                .map(|((_, b), _)| *b)
-                .collect();
-            crate::log!(
-                "[opencircle] Windows OCR: {} lines, {} read as words",
-                lines.len(),
-                known.len()
+            let key = u64::from(opening);
+            let read = ocr::read_screen(
+                key, &pixels, width, height, send_frame, rows, &known, false, true,
             );
-            let read = ocr::recognize_except(&pixels, width, height, &known, true).map(|blocks| {
-                let mut lines = word::lines(blocks, [0, 0], scale);
+            let read = read.map(|read| {
+                let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
+                let mut lines = word::lines(read.lines, [0, 0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
                 lines
             });
-            let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
+            let _ = tx.unbounded_send(Part::Read(read.map_err(|e| e.to_string())));
         })
-        .map(move |read| Message::ScreenOther(opening, read))
+        .map(move |part| match part {
+            Part::Found(found) => Message::ScreenFound(opening, found),
+            Part::Read(read) => Message::ScreenOther(opening, band, read),
+        })
     }
 
     /// The held release (and the events after it) go on, now that the band
@@ -696,4 +744,18 @@ impl App {
         let picked = (self.o.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
         picked.or(self.o.word.as_ref()).map(word::Picked::text)
     }
+}
+
+/// A part of the screen's text as the helper sends it: the lines it found
+/// (first), then the band's lines read.
+enum Part {
+    Found(Vec<Rectangle>),
+    Read(Result<Vec<word::Line>, String>),
+}
+
+/// The helper's `found` lines (frame px) in image px.
+fn found(boxes: Vec<[f32; 4]>, scale: f32) -> Vec<Rectangle> {
+    (boxes.into_iter())
+        .map(|[x, y, w, h]| Rectangle::new(Point::new(x, y), iced::Size::new(w, h)) * (1.0 / scale))
+        .collect()
 }

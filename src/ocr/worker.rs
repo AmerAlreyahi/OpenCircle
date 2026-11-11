@@ -20,21 +20,25 @@ use std::time::Instant;
 #[cfg(test)]
 use super::session::Session;
 use super::session::{self, MAX_REQUEST};
-use super::{Engine, OcrError, Read, TextBlock, check_image, models, models_dir};
+use super::{
+    Engine, NO_FRAME, OcrError, Read, ScreenRead, TextBlock, check_image, models, models_dir,
+    to_rgb,
+};
 use crate::mt::{self, Pair, Translator};
 
 /// The hidden subcommand that runs the worker.
 pub const WORKER_ARG: &str = "ocr-worker";
 const OCR: u8 = b'o';
-/// OCR of a band of the screen (main mode's text, #123): `b`, the recognizer
-/// (one byte, as `OCR`'s), gently (`Gentle`, one byte: 0 or 1), the rows to
-/// read (top, bottom: u32 LE each; a line is read if its middle is in them),
-/// then as `OCR`: width, height, RGBA.
-const BAND: u8 = b'b';
 /// Main mode's second reader (`Engine::recognize_except`): `x`, gently (one
 /// byte), how many known boxes (u32 LE), each as four f32 LE (x, y, w, h;
 /// image px), then as `OCR`: width, height, RGBA.
 const EXCEPT: u8 = b'x';
+/// Main mode's screen text, a part at a time (`Engine::read_screen`): `s`,
+/// gently (one byte), the Latin reader may read (one byte), the screen's key
+/// (u64 LE), the rows (top, bottom: f32 LE each), how many known boxes (u32
+/// LE) and each as `EXCEPT`'s, then whether the picture follows (one byte)
+/// and, if so, as `OCR`: width, height, RGBA. Reply `ScreenRead`.
+const SCREEN: u8 = b's';
 /// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
 const WARM: u8 = b'w';
 const TRANSLATE: u8 = b't';
@@ -80,32 +84,6 @@ pub fn recognize_as(
     recognize_via(session::call, rgba, width, height, read)
 }
 
-/// `recognize_in_child` for a band of main mode's screen text (#123): only
-/// the lines whose middle is in `rows` (top, bottom; image px) are read (the
-/// rest is cut by its edges or read already). `gently`: on at most two of
-/// the helper's cores at below-normal priority (`Gentle`), so the overlay
-/// and the rest of the PC keep the others.
-pub fn recognize_band(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-    rows: (u32, u32),
-    gently: bool,
-) -> Result<Vec<TextBlock>, OcrError> {
-    check_image(rgba, width, height)?;
-    let read = Read::for_source(&crate::config::current().translate.source);
-    ready(read)?;
-    let header = [
-        [BAND, read.byte(), u8::from(gently)].as_slice(),
-        &rows.0.to_le_bytes(),
-        &rows.1.to_le_bytes(),
-        &width.to_le_bytes(),
-        &height.to_le_bytes(),
-    ]
-    .concat();
-    parse(session::call(&[&header, rgba])?)
-}
-
 /// Some recognizer for a script Windows OCR doesn't read for the user is on
 /// disk: the second reader has something to read with.
 pub fn reads_other_scripts() -> bool {
@@ -139,6 +117,61 @@ pub fn recognize_except(
     header.extend_from_slice(&width.to_le_bytes());
     header.extend_from_slice(&height.to_le_bytes());
     parse(session::call(&[&header, rgba])?)
+}
+
+/// Main mode's screen text, a part at a time, in the helper (#169,
+/// `Engine::read_screen`): the lines whose middle is in `rows` (image px)
+/// and not in a `known` box (Windows OCR's lines read well), and every line
+/// found on the screen not known. The screen (`key`: one per opening) goes
+/// to the helper with the first part (`send`); after that only its key,
+/// unless the helper started again since. `latin`: the Latin reader may
+/// read (Linux); else lines in Latin letters are Windows OCR's. `gently` as
+/// as before: on at most two of the helper's cores at below-normal
+/// priority (`Gentle`), so the overlay and the rest of the PC keep the others.
+#[allow(clippy::too_many_arguments)]
+pub fn read_screen(
+    key: u64,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    send: bool,
+    rows: (f32, f32),
+    known: &[[f32; 4]],
+    latin: bool,
+    gently: bool,
+) -> Result<ScreenRead, OcrError> {
+    check_image(rgba, width, height)?;
+    match latin {
+        true => ready(Read::Auto)?,
+        false if !reads_other_scripts() => {
+            return Ok(ScreenRead {
+                lines: Vec::new(),
+                found: Vec::new(),
+            });
+        }
+        false => {}
+    }
+    let call = |send: bool| {
+        let mut header = vec![SCREEN, u8::from(gently), u8::from(latin)];
+        header.extend_from_slice(&key.to_le_bytes());
+        header.extend_from_slice(&rows.0.to_le_bytes());
+        header.extend_from_slice(&rows.1.to_le_bytes());
+        header.extend_from_slice(&(known.len() as u32).to_le_bytes());
+        for v in known.iter().flatten() {
+            header.extend_from_slice(&v.to_le_bytes());
+        }
+        header.push(u8::from(send));
+        if !send {
+            return parse(session::call(&[&header])?);
+        }
+        header.extend_from_slice(&width.to_le_bytes());
+        header.extend_from_slice(&height.to_le_bytes());
+        parse(session::call(&[&header, rgba])?)
+    };
+    match call(send) {
+        Err(OcrError::Engine(e)) if !send && e == NO_FRAME => call(true),
+        read => read,
+    }
 }
 
 /// Starts the helper (held: it stays warm) and loads the engine and the
@@ -240,7 +273,7 @@ fn parse<T: serde::de::DeserializeOwned>(reply: Vec<u8>) -> Result<T, OcrError> 
 pub fn worker_main() -> ExitCode {
     let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
     let idle = heap_keeper();
-    let mut engine = None;
+    let mut engine: Option<Engine> = None;
     let mut translator = None;
     loop {
         let (id, request) = match session::read_frame(&mut input, MAX_REQUEST) {
@@ -249,9 +282,15 @@ pub fn worker_main() -> ExitCode {
             Err(_) => return ExitCode::FAILURE,
         };
         *idle.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        // only main mode's screen requests come one after another for one screen
+        if request.first() != Some(&SCREEN)
+            && let Some(e) = engine.as_mut()
+        {
+            e.forget_screen();
+        }
         let reply = match request.split_first() {
+            Some((&SCREEN, body)) => json(screen_here(body, &mut engine)),
             Some((&OCR, body)) => json(recognize_here(body, &mut engine)),
-            Some((&BAND, body)) => json(band_here(body, &mut engine)),
             Some((&EXCEPT, body)) => json(except_here(body, &mut engine)),
             Some((&WARM, body)) => {
                 let _gentle = Gentle::begin();
@@ -314,19 +353,33 @@ fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBl
     loaded(engine)?.recognize(rgba, w, h, read)
 }
 
-fn band_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>, OcrError> {
+fn screen_here(body: &[u8], engine: &mut Option<Engine>) -> Result<ScreenRead, OcrError> {
     let short = || OcrError::BadImage("short request".into());
-    let (head, body) = body.split_first_chunk::<10>().ok_or_else(short)?;
-    let read =
-        Read::from_byte(head[0]).ok_or_else(|| OcrError::BadImage("unknown recognizer".into()))?;
-    let u32_at = |i: usize| u32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
-    let rows = (u32_at(2), u32_at(6));
-    let (size, rgba) = body.split_first_chunk::<8>().ok_or_else(short)?;
-    let w = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
-    let h = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
-    check_image(rgba, w, h)?;
-    let _gentle = (head[1] != 0).then(Gentle::begin);
-    loaded(engine)?.recognize_rows(rgba, w, h, read, Some(rows))
+    let (head, body) = body.split_first_chunk::<22>().ok_or_else(short)?;
+    let f32_at = |i: usize| f32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+    let key = u64::from_le_bytes(head[2..10].try_into().expect("8 bytes"));
+    let rows = (f32_at(10), f32_at(14));
+    let n = u32::from_le_bytes([head[18], head[19], head[20], head[21]]) as usize;
+    if n > MAX_KNOWN || body.len() < n * 16 + 1 {
+        return Err(short());
+    }
+    let (boxes, body) = body.split_at(n * 16);
+    let f = |b: &[u8]| f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let known: Vec<[f32; 4]> = (boxes.as_chunks::<16>().0.iter())
+        .map(|b| [f(&b[0..]), f(&b[4..]), f(&b[8..]), f(&b[12..])])
+        .collect();
+    let img = match body.split_first() {
+        Some((0, _)) => None,
+        Some((_, body)) => {
+            let (size, rgba) = body.split_first_chunk::<8>().ok_or_else(short)?;
+            let w = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
+            let h = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
+            Some(to_rgb(rgba, w, h)?)
+        }
+        None => return Err(short()),
+    };
+    let _gentle = (head[0] != 0).then(Gentle::begin);
+    loaded(engine)?.read_screen(key, img, rows, &known, head[1] != 0)
 }
 
 fn except_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>, OcrError> {
