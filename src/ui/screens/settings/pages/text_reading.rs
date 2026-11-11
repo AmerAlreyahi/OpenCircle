@@ -3,8 +3,9 @@
 //! and a way to add a missing language. Listed on Windows only (Linux has the
 //! one reader). The design's "Keep ready", GPU and NVIDIA rows are not
 //! settings OpenCircle has.
+use crate::t;
 use iced::Element;
-use iced::widget::{Space, column, row};
+use iced::widget::{Space, column};
 
 use super::super::state::{Message, Pick, State};
 use crate::config::TextReader;
@@ -23,9 +24,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     });
     let mut control = column![segmented(
         &[
-            (TextReader::Auto, "Auto"),
-            (TextReader::Windows, "Fast"),
-            (TextReader::PpOcr, "Accurate"),
+            (TextReader::Auto, t!(t_auto)),
+            (TextReader::Windows, t!(t_fast)),
+            (TextReader::PpOcr, t!(t_accurate)),
         ],
         reader,
         from,
@@ -35,19 +36,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
     .spacing(space::GAP);
     if let Some(note) = state.reader_note() {
         let add = button(
-            label("Add in Windows"),
+            label(t!(t_add)),
             Kind::Elevated,
             Some(Message::OpenLanguageSettings),
         );
         control = control
             .push(sub(Role::ROW_DESC, note))
-            .push(row![Space::new().width(iced::Fill), add]);
+            .push(crate::dir_row![Space::new().width(iced::Fill), add]);
     }
-    setting_row::row(
-        title("Engine"),
-        "Auto picks the best for the language on screen. Fast: Windows' own; Accurate: PaddleOCR",
-        control,
-    )
+    setting_row::row(title(t!(t_engine)), t!(t_engine_desc_src), control)
 }
 
 /// Windows' language settings (never installs anything itself).
@@ -79,10 +76,13 @@ impl State {
         if missing.is_empty() || self.draft.selection.text_reader == TextReader::PpOcr {
             return None;
         }
-        let names: Vec<&str> = missing.iter().map(|c| lang::name(c)).collect();
-        Some(format!(
-            "Windows has no text recognition for {}. Using the downloaded reader.",
-            names.join(", ")
+        let names: Vec<&str> = missing
+            .iter()
+            .map(|c| crate::app_language::language_name(c))
+            .collect();
+        Some(crate::app_language::fmt(
+            crate::app_language::S::t_note_lang,
+            &[&names.join(", ")],
         ))
     }
 }

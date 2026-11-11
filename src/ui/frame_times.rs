@@ -757,14 +757,24 @@ fn settings_frame_times() {
     use settings::{Message as M, Section};
     // 3840x2160 at 200 % and 250 % (the owner's 4K laptop, 120 Hz: 8.3 ms a
     // frame): the window at its size, and maximised (the work area)
-    for (k, size) in [
-        (2.0, settings::WINDOW_SIZE),
-        (2.0, Size::new(1920.0, 1032.0)),
-        (2.5, settings::WINDOW_SIZE),
-        (2.5, Size::new(1536.0, 816.0)),
-    ] {
+    // in English, then in Arabic (right to left: the same frames)
+    let arabic = |s: &mut settings::State, ar: bool| {
+        if ar {
+            let _ = settings::update(s, M::AppLanguage(crate::app_language::Choice("ar")));
+        }
+    };
+    for (k, size, ar) in [false, true].into_iter().flat_map(|ar| {
+        [
+            (2.0, settings::WINDOW_SIZE, ar),
+            (2.0, Size::new(1920.0, 1032.0), ar),
+            (2.5, settings::WINDOW_SIZE, ar),
+            (2.5, Size::new(1536.0, 816.0), ar),
+        ]
+    }) {
+        let lang = if ar { " ar" } else { "" };
         // General -> Appearance on frame 1, then the glide's frames (real time)
         let mut s = settings_at(Section::General);
+        arabic(&mut s, ar);
         std::thread::sleep(Duration::from_millis(300));
         let _ = settings::update(&mut s, M::Tick);
         let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
@@ -783,9 +793,10 @@ fn settings_frame_times() {
             },
             still,
         );
-        report("page switch", size, k, &t);
+        report(&format!("page switch{lang}"), size, k, &t);
         // the Appearance page at rest, scrolled 40 px a frame
         let mut s = settings_at(Section::Appearance);
+        arabic(&mut s, ar);
         std::thread::sleep(Duration::from_millis(300));
         let _ = settings::update(&mut s, M::Tick);
         let at = Point::new(size.width * 0.6, size.height * 0.5);
@@ -810,8 +821,9 @@ fn settings_frame_times() {
             |_, _, _| {},
             wheel,
         );
-        report("appearance scroll", size, k, &t);
+        report(&format!("appearance scroll{lang}"), size, k, &t);
     }
+    crate::app_language::set(crate::app_language::Lang::En);
 }
 
 /// The frames after a Settings page switch: their damage (logical px).

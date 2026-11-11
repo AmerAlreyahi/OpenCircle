@@ -1,10 +1,12 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
 //! OS, the save folder, updates.
+use crate::app_language::{S, tr};
+use crate::t;
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, row};
+use iced::widget::{column, container};
 use iced::{Center, Element, Fill};
 
-use super::super::state::{Message, Pick, State, UPDATE_PRIVACY, issue};
+use super::super::state::{Message, Pick, State, issue};
 use crate::config::DefaultAction;
 use crate::ui::kit::button::{Kind, button, label, labelled, labelled_width};
 use crate::ui::kit::field::field;
@@ -15,7 +17,9 @@ use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::{Why, hint, tip};
 
-const OFF_ON: [&str; 2] = ["Off", "On"];
+fn off_on() -> [&'static str; 2] {
+    [t!(c_off), t!(c_on)]
+}
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
@@ -25,27 +29,46 @@ pub fn view(state: &State) -> Element<'_, Message> {
         _ => None,
     });
     let actions = [
-        (DefaultAction::Lens, "Search"),
-        (DefaultAction::Ai, "Ask AI"),
-        (DefaultAction::Text, "Text"),
-        (DefaultAction::Copy, "Copy"),
+        (DefaultAction::Lens, t!(g_default_search)),
+        (DefaultAction::Ai, t!(g_default_ai)),
+        (DefaultAction::Text, t!(g_default_text)),
+        (DefaultAction::Copy, t!(g_default_copy)),
     ];
-    let mut rows = column![setting_row::row(
-        title("Default action"),
-        "What Enter does after you select something",
-        segmented(
-            &actions,
-            general.default_action,
-            from,
-            glide,
-            Message::DefaultAction
-        ),
-    )];
+    let mut rows = column![
+        language_row(state),
+        setting_row::row(
+            title(t!(g_default)),
+            t!(g_default_desc),
+            segmented(
+                &actions,
+                general.default_action,
+                from,
+                glide,
+                Message::DefaultAction
+            ),
+        )
+    ];
     rows = rows.push(start_row(state));
     rows = rows.push(folder_row(state));
     rows = rows.push(update_row(state));
     rows = rows.push(updates_row(state));
     rows.into()
+}
+
+/// App language (owner, 2026-11-11): "Your language (…)" (follows the
+/// onboarding pick; the default), then each language in its own name. A
+/// pick speaks at once in every window (no restart).
+fn language_row(state: &State) -> Element<'_, Message> {
+    use crate::app_language::{CHOICES, Choice};
+    let now = CHOICES
+        .into_iter()
+        .find(|c| c.0 == state.draft.general.app_language)
+        .unwrap_or(Choice(""));
+    setting_row::row(
+        title(t!(g_lang)),
+        t!(g_lang_desc),
+        crate::ui::kit::dropdown::dropdown(&CHOICES, Some(now), "", Message::AppLanguage),
+    )
 }
 
 /// Updates: what waits and when GitHub last answered; Check now, or the
@@ -62,15 +85,15 @@ fn updates_row(state: &State) -> Element<'_, Message> {
     );
     let control: Element<'_, Message> = match waiting {
         None => button(
-            label("Check now"),
+            label(t!(g_updates_check)),
             Kind::Elevated,
             Some(Message::CheckUpdate),
         ),
         Some((_, how)) => {
             let (glyph, words) = match how {
-                How::Restart => (Icon::Restart, "Restart now"),
-                How::Setup => (Icon::Shield, "Restart now"),
-                How::GetIt => (Icon::External, "Get it"),
+                How::Restart => (Icon::Restart, t!(g_restart_now)),
+                How::Setup => (Icon::Shield, t!(g_restart_now)),
+                How::GetIt => (Icon::External, t!(g_get_it)),
             };
             let main = labelled(
                 glyph.glyph(),
@@ -80,10 +103,14 @@ fn updates_row(state: &State) -> Element<'_, Message> {
                 false,
                 Some(Message::RestartToUpdate),
             );
-            let notes = button(label("What's new"), Kind::Quiet, Some(Message::WhatsNew));
-            container(row![notes, main].spacing(space::GAP * 2.0).align_y(Center))
-                .align_right(Fill)
-                .into()
+            let notes = button(label(t!(g_whats_new)), Kind::Quiet, Some(Message::WhatsNew));
+            container(
+                crate::dir_row![notes, main]
+                    .spacing(space::GAP * 2.0)
+                    .align_y(Center),
+            )
+            .align_right(Fill)
+            .into()
         }
     };
     setting_row::row(title(head), line, control)
@@ -96,14 +123,14 @@ fn switch<'a>(
     m: fn(bool) -> Message,
 ) -> Element<'a, Message> {
     let (from, glide) = state.thumb(on, pick);
-    boolean(OFF_ON, on, from, glide, m)
+    boolean(off_on(), on, from, glide, m)
 }
 
 /// Start with the OS (Settings, and onboarding's last step).
 pub fn start_row(state: &State) -> Element<'_, Message> {
     setting_row::row(
-        title(START_LABEL),
-        "OpenCircle waits in the tray, with no window",
+        title(tr(START_LABEL)),
+        t!(g_start_desc),
         switch(
             state,
             state.draft.general.autostart,
@@ -119,8 +146,8 @@ pub fn start_row(state: &State) -> Element<'_, Message> {
 /// Keep OpenCircle up to date (Settings, and onboarding's first step).
 pub fn update_row(state: &State) -> Element<'_, Message> {
     setting_row::row(
-        title("Keep OpenCircle up to date"),
-        UPDATE_PRIVACY,
+        title(t!(g_update)),
+        t!(g_update_desc),
         switch(
             state,
             state.draft.update.auto == Some(true),
@@ -135,11 +162,7 @@ pub fn update_row(state: &State) -> Element<'_, Message> {
 
 /// Where Save starts (General and Snip: the one folder).
 pub(super) fn folder_row(state: &State) -> Element<'_, Message> {
-    setting_row::row(
-        title("Save folder"),
-        "Where Save starts. Files are OpenCircle-date-time.png",
-        folder(state),
-    )
+    setting_row::row(title(t!(g_folder)), t!(g_folder_desc), folder(state))
 }
 
 /// The folder (cut in the middle when long: the tooltip shows it whole), and
@@ -148,7 +171,7 @@ fn folder(state: &State) -> Element<'_, Message> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = match folder.is_empty() {
         true => crate::actions::save::default_folder().map_or_else(
-            || "Chosen by your system".into(),
+            || t!(g_folder_system).into(),
             |p| p.to_string_lossy().into_owned(),
         ),
         false => shorten(folder),
@@ -160,25 +183,25 @@ fn folder(state: &State) -> Element<'_, Message> {
     ))
     .width(Fill);
     let value = if folder.is_empty() || shorten(folder) == folder {
-        tip(value, "Save folder", Position::Top)
+        tip(value, t!(g_folder), Position::Top)
     } else {
-        hint(value, "Save folder", Why::Cut(folder), Position::Top)
+        hint(value, t!(g_folder), Why::Cut(folder), Position::Top)
     };
     let browse = button(
-        label("Browse…"),
+        label(t!(c_browse)),
         Kind::Elevated,
         Some(Message::BrowseFolder),
     );
     let reset = button(
-        label("Reset"),
+        label(t!(c_reset)),
         Kind::Elevated,
         (!folder.is_empty()).then_some(Message::ClearFolder),
     );
     let mut col = column![setting_row::field_with(
         value,
         [
-            tip(browse, "Choose the save folder", Position::Bottom),
-            tip(reset, "Use the system's folder", Position::Bottom),
+            tip(browse, t!(g_folder_tip_browse), Position::Bottom),
+            tip(reset, t!(g_folder_tip_reset), Position::Bottom),
         ],
     )]
     .spacing(space::GAP);
@@ -201,8 +224,8 @@ fn shorten(path: &str) -> String {
 }
 
 /// The Start-with-the-OS switch's label (Settings and onboarding).
-pub const START_LABEL: &str = if cfg!(windows) {
-    "Start OpenCircle when Windows starts"
+pub const START_LABEL: S = if cfg!(windows) {
+    S::g_start_win
 } else {
-    "Start OpenCircle when you log in"
+    S::g_start_linux
 };

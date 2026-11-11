@@ -3,6 +3,8 @@
 //! only when its button is clicked (the page itself never touches the
 //! network: the avatar and the profile are bundled, refreshed at each release
 //! by `scripts/refresh-about.sh`).
+use crate::app_language::{S, fmt};
+use crate::t;
 use std::sync::LazyLock;
 
 use iced::widget::image;
@@ -31,28 +33,23 @@ pub const NOTICE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/d
 pub const PROFILE_URL: &str = "https://github.com/AmerAlreyahi";
 
 /// Who made what we ship or download: (what, made by, licence). The full texts
-/// are in the repository's docs/NOTICE.md.
-pub const NOTICES: [(&str, &str, &str); 11] = [
-    (
-        "Text recognition",
-        "PaddleOCR PP-OCRv5, Baidu",
-        "Apache-2.0",
-    ),
-    ("OCR ONNX export", "oar-ocr, GreatV", "Apache-2.0"),
-    ("ONNX Runtime", "Microsoft", "MIT"),
-    (
-        "Local translation",
-        "OPUS-MT, Helsinki-NLP; ONNX by Xenova",
-        "CC BY 4.0 / Apache-2.0",
-    ),
-    ("iced", "The iced contributors", "MIT"),
-    ("tiny-skia", "Yevhenii Reizner", "BSD-3-Clause"),
-    ("cosmic-text", "System76", "MIT / Apache-2.0"),
-    ("Lucide icons", "Lucide contributors", "ISC"),
-    ("Inter font", "Rasmus Andersson", "OFL-1.1"),
-    ("Noto Sans Arabic", "Google", "OFL-1.1"),
-    ("JetBrains Mono", "JetBrains", "OFL-1.1"),
-];
+/// are in the repository's docs/NOTICE.md. (A function: what each is, in the
+/// app's language; names and licences stay as written.)
+pub fn made_by() -> [(&'static str, &'static str, &'static str); 11] {
+    [
+        (t!(ab_n1), "PaddleOCR PP-OCRv5, Baidu", "Apache-2.0"),
+        (t!(ab_n2), "oar-ocr, GreatV", "Apache-2.0"),
+        (t!(ab_n3), "Microsoft", t!(ab_mit)),
+        (t!(ab_n4), t!(ab_n4b), "CC BY 4.0 / Apache-2.0"),
+        ("iced", t!(ab_n5b), t!(ab_mit)),
+        ("tiny-skia", "Yevhenii Reizner", "BSD-3-Clause"),
+        ("cosmic-text", "System76", "MIT / Apache-2.0"),
+        (t!(ab_n8), t!(ab_n8b), "ISC"),
+        (t!(ab_n9), "Rasmus Andersson", "OFL-1.1"),
+        ("Noto Sans Arabic", "Google", "OFL-1.1"),
+        ("JetBrains Mono", "JetBrains", "OFL-1.1"),
+    ]
+}
 
 /// One preview-clip credit: the clips it covers, its text, and its links
 /// (name, address). It shows only while one of its clips is bundled; the same
@@ -315,7 +312,7 @@ fn clip_notice<'a>() -> Option<Element<'a, Message>> {
     if lines.is_empty() {
         return None;
     }
-    let mut list = column![text(Role::ROW_TITLE, "Preview clips")].spacing(space::GAP);
+    let mut list = column![text(Role::ROW_TITLE, t!(ab_clips))].spacing(space::GAP);
     for (i, credit) in lines.into_iter().enumerate() {
         if i > 0 {
             list = list.push(divider());
@@ -331,29 +328,25 @@ fn clip_notice<'a>() -> Option<Element<'a, Message>> {
 
 /// Logo, name, version, what it is, and its links.
 fn app<'a>() -> Element<'a, Message> {
-    let names = row![
+    let names = crate::dir_row![
         text(Role::APP_NAME, "OpenCircle"),
         chip(concat!("v", env!("CARGO_PKG_VERSION")).into()),
-        pill("Pure Rust · iced", false, None),
-        pill("MIT", false, None),
+        pill(t!(ab_stack), false, None),
+        pill(t!(ab_mit), false, None),
     ]
     .spacing(BUTTON_GAP)
     .align_y(Center);
-    let what = sub(
-        Role::NOTE,
-        "Open-source desktop Circle to Search for Windows & Linux: circle anything on \
-         screen to search in your browser, read text (OCR), translate in place, or ask AI.",
-    );
-    let head = row![
+    let what = sub(Role::NOTE, t!(ab_what));
+    let head = crate::dir_row![
         tile(logo((LOGO_TILE - 2.0 * TILE_PAD) as u32), LOGO_TILE),
         column![names, what].spacing(space::GAP).width(Fill),
     ]
     .spacing(TILE_GAP)
     .align_y(Center);
-    let links = row![
-        link("GitHub", PROJECT),
-        link("Website", WEBSITE),
-        link("MIT licence", LICENSE),
+    let links = crate::dir_row![
+        link(t!(ab_github), PROJECT),
+        link(t!(ab_website), WEBSITE),
+        link(t!(ab_licence), LICENSE),
     ]
     .spacing(BUTTON_GAP);
     card(column![head, links].spacing(CARD_GAP))
@@ -362,35 +355,40 @@ fn app<'a>() -> Element<'a, Message> {
 /// The developer: avatar, name, handle, bio, and their links.
 fn developer<'a>() -> Element<'a, Message> {
     let p = profile();
-    let head = row![
+    let head = crate::dir_row![
         tile(avatar(), AVATAR_TILE),
         column![
-            row![
+            crate::dir_row![
                 text(Role::PAGE_TITLE, p.name.as_str()),
                 accent(Role::KEYCAP, format!("@{}", p.login)),
             ]
             .spacing(BUTTON_GAP)
             .align_y(Center),
-            sub(Role::NOTE, p.bio.as_str()),
+            // the profile's bio in English; the table's Arabic draft in Arabic
+            sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])),
         ]
         .spacing(space::GAP)
+        .align_x(crate::ui::kit::dir::start())
         .width(Fill),
     ]
     .spacing(TILE_GAP)
     .align_y(Center);
     let star = fill(
-        row![
+        crate::dir_row![
             icon::icon(icon::Icon::Star, 12.0).color(themes::current().c.accent),
-            accent(Role::CONTROL, "Star OpenCircle").line_height(1.5),
+            accent(Role::CONTROL, t!(ab_star)).line_height(1.5),
         ]
         .spacing(space::GAP)
         .align_y(Center),
         Some(Message::OpenLink(PROJECT.into())),
     );
-    let links = row![
-        link("GitHub profile", PROFILE_URL),
+    let links = crate::dir_row![
+        link(t!(ab_profile), PROFILE_URL),
         star,
-        fill(label("Website"), Some(Message::OpenLink(p.website.clone()))),
+        fill(
+            label(t!(ab_website)),
+            Some(Message::OpenLink(p.website.clone()))
+        ),
     ]
     .spacing(BUTTON_GAP);
     card(column![head, links].spacing(CARD_GAP))
@@ -399,30 +397,29 @@ fn developer<'a>() -> Element<'a, Message> {
 /// Who made what we ship: one row each (name and maker, then licence), and
 /// the link to the full texts.
 fn notices<'a>() -> Element<'a, Message> {
-    let head = row![
+    let head = crate::dir_row![
         column![
-            text(Role::ROW_TITLE, "Made by others"),
-            sub(
-                Role::ROW_DESC,
-                "Downloaded on first use, under their own licences"
-            ),
+            text(Role::ROW_TITLE, t!(ab_others)),
+            sub(Role::ROW_DESC, t!(ab_others_desc)),
         ]
         .width(Fill),
         button(
-            label("All licences"),
+            label(t!(ab_all)),
             Kind::Elevated,
             Some(Message::OpenLink(NOTICE.into()))
         ),
     ]
     .align_y(Center);
     let mut list = column![];
-    for (i, (what, by, licence)) in NOTICES.into_iter().enumerate() {
+    for (i, (what, by, licence)) in made_by().into_iter().enumerate() {
         if i > 0 {
             list = list.push(divider());
         }
         list = list.push(
-            row![
-                column![text(Role::CONTROL, what), sub(Role::ROW_DESC, by)].width(Fill),
+            crate::dir_row![
+                column![text(Role::CONTROL, what), sub(Role::ROW_DESC, by)]
+                    .width(Fill)
+                    .align_x(crate::ui::kit::dir::start()),
                 pill(licence, true, Some(LICENCE)),
             ]
             .align_y(Center)
@@ -435,11 +432,11 @@ fn notices<'a>() -> Element<'a, Message> {
 fn problems<'a>() -> Element<'a, Message> {
     let b = |s, m| button(label(s), Kind::Elevated, Some(m));
     setting_row::row(
-        title("Problems"),
-        "Copy a report to paste into an issue. Nothing is sent",
-        row![
-            b("Copy diagnostics", Message::CopyDiagnostics),
-            b("Report a problem", Message::ReportProblem),
+        title(t!(ab_problems)),
+        t!(ab_problems_desc),
+        crate::dir_row![
+            b(t!(ab_diag), Message::CopyDiagnostics),
+            b(t!(ab_report), Message::ReportProblem),
         ]
         .spacing(space::GAP),
     )
@@ -447,9 +444,9 @@ fn problems<'a>() -> Element<'a, Message> {
 
 fn telemetry<'a>() -> Element<'a, Message> {
     setting_row::row(
-        title("Telemetry"),
-        "A capture leaves this PC only when you choose an action",
-        pill("None", false, None),
+        title(t!(ab_telemetry)),
+        t!(ab_telemetry_desc),
+        pill(t!(ab_none), false, None),
     )
 }
 
@@ -488,10 +485,14 @@ mod tests {
     #[test]
     fn notices_credit_the_models_we_download() {
         let notice = include_str!("../../../../../docs/NOTICE.md");
-        for key in ["Helsinki-NLP", "Xenova", "PaddleOCR", "ONNX Runtime"] {
+        for key in ["Helsinki-NLP", "Xenova", "PaddleOCR", t!(ab_n3)] {
             assert!(notice.contains(key), "{key} is in docs/NOTICE.md");
         }
-        let all: String = NOTICES.iter().map(|n| format!("{} {}", n.1, n.2)).collect();
+        let all: String = made_by()
+            .iter()
+            .map(|n| format!("{} {}", n.1, n.2))
+            .collect();
+
         for key in [
             "Helsinki-NLP",
             "Xenova",

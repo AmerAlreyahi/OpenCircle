@@ -3,6 +3,7 @@
 //! shortcut box of the one width. A click records; the row's line then says
 //! how to cancel, and a key that can't be used says why under its name, in
 //! red.
+use crate::t;
 use iced::Element;
 use iced::widget::column;
 use iced::widget::tooltip::Position;
@@ -14,9 +15,6 @@ use crate::ui::kit::text::{error, text};
 use crate::ui::kit::tokens::Role;
 use crate::ui::kit::tooltip::tip;
 
-/// The page's note (`PAGES`).
-pub const NOTE: &str = "Click any box to record keys";
-
 pub fn view(state: &State) -> Element<'_, Message> {
     column(state.slots().map(|slot| row(state, slot))).into()
 }
@@ -24,11 +22,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// One shortcut's row (also on the Snip page).
 pub(super) fn row(state: &State, slot: Slot) -> Element<'_, Message> {
     let (label, hint, name) = match slot {
-        Slot::Capture => (
-            "Open OpenCircle",
-            "Starts a capture",
-            "Open OpenCircle shortcut",
-        ),
+        Slot::Capture => (t!(k_open), t!(k_open_desc), t!(k_open_tip)),
         Slot::Quick(i) => {
             let t = &state.quick_text[i];
             (t.label.as_str(), t.hint.as_str(), t.tip.as_str())
@@ -47,17 +41,19 @@ pub(super) fn row(state: &State, slot: Slot) -> Element<'_, Message> {
     };
     let hint = match (recording, slot) {
         (false, _) => hint,
-        (true, Slot::Capture) => "Esc cancels",
-        (true, Slot::Quick(_)) => "Esc cancels · Delete clears",
+        (true, Slot::Capture) => t!(k_esc),
+        (true, Slot::Quick(_)) => t!(k_cancel),
     };
     let field = shortcut_field(
         key_labels(state.shortcut(slot)),
         field_state,
-        "Press keys…",
+        t!(c_press_keys),
+        t!(c_not_set),
         Message::Record(slot),
     );
     // the problem under the name, above the hint
-    let mut name_block = column![text(Role::ROW_TITLE, label)];
+    let mut name_block =
+        column![text(Role::ROW_TITLE, label)].align_x(crate::ui::kit::dir::start());
     if let Some(p) = problem {
         name_block = name_block.push(error(Role::ROW_DESC, p));
     }

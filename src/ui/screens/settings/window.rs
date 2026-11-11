@@ -6,11 +6,13 @@
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
 //! with the GPU renderer.
-use iced::widget::{Space, column, container, row};
+use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill, Padding};
 
 use super::state::{Message, State};
 use super::{pages, previews};
+use crate::app_language::{S, count, tr};
+use crate::t;
 use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::chip::{Tone, status};
 use crate::ui::kit::divider::divider;
@@ -33,15 +35,17 @@ const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const OS: &str = if cfg!(windows) { "Windows" } else { "Linux" };
 
 pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
+    // the whole window in the app's language and direction
+    let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
     let logo = crate::ui::kit::logo::logo(16);
     let header = regular(
         logo,
-        "OpenCircle Settings",
+        t!(win_title),
         pill(state),
         Some(maximised),
         Message::Caption,
     );
-    let mut main = column![row![nav(state), page(state)].height(Fill)];
+    let mut main = column![crate::dir_row![nav(state), page(state)].height(Fill)];
     if state.asking_close {
         main = main.push(close_question());
     }
@@ -58,12 +62,17 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
 fn pill(state: &State) -> Element<'_, Message> {
     let n = state.problems.len();
     let (line, tone) = if n > 0 {
-        let what = if n == 1 { "problem" } else { "problems" };
-        (format!("{n} {what} to fix before saving"), Tone::Error)
+        let forms = [
+            S::win_pill_one,
+            S::win_pill_two,
+            S::win_pill_few,
+            S::win_pill_many,
+        ];
+        (count(n, forms), Tone::Error)
     } else if let Some(notice) = &state.notice {
         (notice.clone(), Tone::Error)
     } else if state.asking_close {
-        ("Save your changes before closing?".into(), Tone::Error)
+        (t!(win_ask_close).into(), Tone::Error)
     } else {
         return Space::new().into();
     };
@@ -81,8 +90,8 @@ fn nav(state: &State) -> Element<'_, Message> {
     let shown: Vec<_> = pages::visible(&state.draft.labs).collect();
     let items: Vec<Item<'static>> = (shown.iter())
         .map(|p| Item {
-            label: p.title,
-            badge: p.badge,
+            label: tr(p.title),
+            badge: p.badge.map(tr),
         })
         .collect();
     let at = |id| shown.iter().position(|p| p.id == id);
@@ -98,17 +107,21 @@ fn nav(state: &State) -> Element<'_, Message> {
         from,
         glide,
         move |i| Message::Section(ids[i]),
+        // (in RTL the footer mirrors: the version at the right)
         [VERSION, OS],
     )
 }
 
 fn page(state: &State) -> Element<'_, Message> {
     let page = pages::of(state.section);
-    let mut title =
-        row![text(Role::PAGE_TITLE, page.title), Space::new().width(Fill)].align_y(Center);
+    let mut title = vec![
+        text(Role::PAGE_TITLE, tr(page.title)).into(),
+        Space::new().width(Fill).into(),
+    ];
     if let Some(note) = page.note {
-        title = title.push(sub(Role::ROW_DESC, note));
+        title.push(sub(Role::ROW_DESC, tr(note)).into());
     }
+    let title = crate::ui::kit::dir::row(title).align_y(Center);
     let body = column![title, Space::new().height(TITLE_GAP),]
         .push(previews::view(state))
         .push((page.view)(state));
@@ -122,11 +135,11 @@ fn page(state: &State) -> Element<'_, Message> {
 fn close_question<'a>() -> Element<'a, Message> {
     let b = |s, m| button(label(s), Kind::Elevated, Some(m));
     container(
-        row![
+        crate::dir_row![
             Space::new().width(Fill),
-            b("Discard", Message::CloseDiscard),
-            b("Keep editing", Message::CloseKeep),
-            b("Save", Message::CloseSave),
+            b(t!(win_discard), Message::CloseDiscard),
+            b(t!(win_keep_editing), Message::CloseKeep),
+            b(t!(win_save), Message::CloseSave),
         ]
         .spacing(space::GAP)
         .align_y(Center),

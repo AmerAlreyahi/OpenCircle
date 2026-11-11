@@ -136,6 +136,10 @@ pub struct Picker {
     pub rtl: bool,
     /// Picks are remembered as recent (config); onboarding writes nothing before Finish.
     pub saves_recent: bool,
+    /// Each language in its own name, its name in the app's language beside
+    /// it in grey (onboarding's "Your language": a reader of any language
+    /// finds theirs). Off: the names as today.
+    pub endonyms: bool,
 }
 
 impl Picker {
@@ -153,6 +157,7 @@ impl Picker {
             recent: [saved.recent_sources, saved.recent_targets],
             rtl: false,
             saves_recent: true,
+            endonyms: false,
         }
     }
 
@@ -527,8 +532,18 @@ impl Picker {
                         ringed: self.ring == Some(i),
                         hovered: self.hover == Some(i),
                         needs_ai: self.needs_ai(code),
+                        aside: None,
                     };
-                    let name = self.name(code);
+                    let (name, look) = match (self.endonyms, lang::find(code)) {
+                        (true, Some(l)) => {
+                            let ours = crate::app_language::language_name(l.code);
+                            let aside =
+                                (ours.trim_start_matches('\u{200F}') != l.native).then_some(ours);
+                            (l.native, Look { aside, ..look })
+                        }
+                        _ => (self.name(code), look),
+                    };
+
                     let bold = (name.to_lowercase().len() == name.len() && !q.is_empty())
                         .then(|| name.to_lowercase().find(&q).map(|a| (a, a + q.len())))
                         .flatten();

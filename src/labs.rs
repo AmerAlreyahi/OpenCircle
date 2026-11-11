@@ -33,17 +33,6 @@ impl Feature {
             Feature::Live => "Live translate",
         }
     }
-
-    /// One honest line: what it is, and that it is unfinished.
-    pub fn blurb(self) -> &'static str {
-        match self {
-            Feature::Song => "Find the song playing on your PC. Unfinished; may change",
-            Feature::Pins => {
-                "Keep a part of a window live above your windows. Unfinished; may change"
-            }
-            Feature::Live => "Keep the screen translated as it changes. Unfinished; may change",
-        }
-    }
 }
 
 /// `[labs]`: which unfinished features are on.

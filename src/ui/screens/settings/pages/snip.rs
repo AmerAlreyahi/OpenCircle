@@ -5,7 +5,8 @@
 //! the save folder (General's, the one folder), the pointer, the timer, how
 //! tall a long capture may grow, and Recent captures (its switch is on
 //! History).
-use iced::widget::{Space, column, row};
+use crate::t;
+use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Slot, State};
@@ -15,7 +16,9 @@ use crate::ui::kit::button::{Kind, button, label};
 use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 
-const OFF_ON: [&str; 2] = ["Off", "On"];
+fn off_on() -> [&'static str; 2] {
+    [t!(c_off), t!(c_on)]
+}
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let d = &state.draft.snip;
@@ -40,13 +43,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let mut rows = column(snips.into_iter().map(|slot| shortcuts::row(state, slot)));
     if state.print_screen_taken && on_print_screen {
         rows = rows.push(pick(
-            "Print Screen key",
-            "Windows opens its own screen capture with it. To snip with Print Screen, \
-             turn off \"Use the Print screen key to open screen capture\" in Windows",
-            row![
+            t!(s_prtsc),
+            t!(s_prtsc_desc),
+            crate::dir_row![
                 Space::new().width(Fill),
                 button(
-                    label("Open Windows settings"),
+                    label(t!(s_prtsc_settings)),
                     Kind::Elevated,
                     Some(Message::OpenKeyboardSettings),
                 )
@@ -55,14 +57,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ));
     }
     let recent = match d.history {
-        true => "On: the last 20, on this PC only. Kept and cleared in History",
-        false => "Off: nothing is kept. Turn it on in History",
+        true => t!(s_recent_on),
+        false => t!(s_recent_off),
     };
     rows = rows.extend([
         pick(
-            "Copy when picked",
-            "The picked area is also copied, ready to paste into an AI chat",
-            boolean(OFF_ON, copies, copies, 1.0, move |copy| {
+            t!(s_copy),
+            t!(s_copy_desc),
+            boolean(off_on(), copies, copies, 1.0, move |copy| {
                 let after = if copy {
                     SnipAfter::Both
                 } else {
@@ -72,14 +74,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
             }),
         ),
         pick(
-            "Image size",
-            "Long edge for Copy and Save; AI chats shrink bigger ones anyway",
+            t!(s_size),
+            t!(s_size_desc),
             segmented(
                 &[
                     (1024, "1024"),
                     (1568, "1568"),
                     (2048, "2048"),
-                    (0, "Original"),
+                    (0, t!(s_original)),
                 ],
                 d.max_edge,
                 d.max_edge,
@@ -88,10 +90,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         pick(
-            "Save as",
-            "The file Save writes",
+            t!(s_as),
+            t!(s_as_desc),
             segmented(
-                &[(Format::Png, "PNG"), (Format::Jpeg, "JPEG")],
+                &[(Format::Png, t!(s_png)), (Format::Jpeg, t!(s_jpeg))],
                 d.format,
                 d.format,
                 1.0,
@@ -99,10 +101,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         pick(
-            "Save size",
-            "Copy always uses the image size",
+            t!(s_save_size),
+            t!(s_save_size_desc),
             segmented(
-                &[(false, "Image size"), (true, "Original")],
+                &[(false, t!(s_size)), (true, t!(s_original))],
                 d.save_original,
                 d.save_original,
                 1.0,
@@ -111,17 +113,22 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
         general::folder_row(state),
         pick(
-            "Mouse pointer",
-            "Draw the pointer into the capture",
-            boolean(OFF_ON, d.cursor, d.cursor, 1.0, move |cursor| {
+            t!(s_pointer),
+            t!(s_pointer_desc),
+            boolean(off_on(), d.cursor, d.cursor, 1.0, move |cursor| {
                 edit(&|s| s.cursor = cursor)
             }),
         ),
         pick(
-            "Timer",
-            "Wait before a snip captures, so you can open a menu first",
+            t!(s_timer),
+            t!(s_timer_desc),
             segmented(
-                &[(0, "Off"), (3, "3 s"), (5, "5 s"), (10, "10 s")],
+                &[
+                    (0, t!(c_off)),
+                    (3, t!(s_t3)),
+                    (5, t!(s_t5)),
+                    (10, t!(s_t10)),
+                ],
                 d.delay,
                 d.delay,
                 1.0,
@@ -129,8 +136,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         pick(
-            "Long capture",
-            "How tall a long capture may grow; taller takes more memory",
+            t!(s_long),
+            t!(s_long_desc),
             segmented(
                 &LONG_MAX.map(|px| (px, px_label(px))),
                 d.long_max,
@@ -139,7 +146,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 move |px| edit(&|s| s.long_max = px),
             ),
         ),
-        history::link("Recent captures", recent),
+        history::link(t!(s_recent), recent),
     ]);
     rows.into()
 }
@@ -147,9 +154,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// A long-capture limit as the page shows it.
 fn px_label(px: u32) -> &'static str {
     match px {
-        5_000 => "5,000 px",
-        10_000 => "10,000 px",
-        _ => "20,000 px",
+        5_000 => t!(s_px5),
+        10_000 => t!(s_px10),
+        _ => t!(s_px20),
     }
 }
 

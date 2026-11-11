@@ -14,6 +14,8 @@
 //! to the OS keyring through `KeyStore`, is never shown, and is never part of any
 //! `Debug` output (`Secret` is redacted).
 
+use crate::app_language::S;
+use crate::t;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
@@ -158,9 +160,9 @@ pub(super) enum Busy {
 impl Busy {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Busy::Checking => "Checking…",
-            Busy::Saving => "Saving…",
-            Busy::Removing => "Removing…",
+            Busy::Checking => t!(key_checking),
+            Busy::Saving => t!(key_saving),
+            Busy::Removing => t!(key_removing),
         }
     }
 }
@@ -228,30 +230,30 @@ pub const KEY_MASK: &str = "••••••••••••";
 /// What a key field calls its key (tooltips are the controls' names).
 #[derive(Debug, Clone, Copy)]
 pub struct KeyLabels {
-    pub placeholder: &'static str,
-    pub field: &'static str,
-    pub save: &'static str,
-    pub replace: &'static str,
-    pub remove: &'static str,
-    pub keep: &'static str,
+    pub placeholder: S,
+    pub field: S,
+    pub save: S,
+    pub replace: S,
+    pub remove: S,
+    pub keep: S,
 }
 
 pub(super) const API_KEY: KeyLabels = KeyLabels {
-    placeholder: "Paste your API key",
-    field: "API key",
-    save: "Save the API key",
-    replace: "Replace the API key",
-    remove: "Remove the API key",
-    keep: "Keep the saved API key",
+    placeholder: S::ai_key_ph,
+    field: S::ai_key,
+    save: S::ai_key_save_tip,
+    replace: S::ai_key_replace_tip,
+    remove: S::ai_key_remove_tip,
+    keep: S::ai_key_keep_tip,
 };
 
 pub(super) const SONG_KEY: KeyLabels = KeyLabels {
-    placeholder: "Paste your AudD API token",
-    field: "AudD API token",
-    save: "Save the AudD token",
-    replace: "Replace the AudD token",
-    remove: "Remove the AudD token",
-    keep: "Keep the saved AudD token",
+    placeholder: S::song_key_ph,
+    field: S::song_key,
+    save: S::song_key_save_tip,
+    replace: S::song_key_replace_tip,
+    remove: S::song_key_remove_tip,
+    keep: S::song_key_keep_tip,
 };
 
 impl KeyField {
@@ -335,7 +337,7 @@ impl KeyField {
             }
             KeyMessage::Save | KeyMessage::Remove if self.busy.is_some() => {}
             KeyMessage::Save if self.input.is_empty() => {
-                self.error = Some("Paste your key first".into())
+                self.error = Some(t!(key_paste_first).into())
             }
             KeyMessage::Save => {
                 let work = Work::Save(self.input.clone());
@@ -365,28 +367,46 @@ impl KeyField {
 
 pub use crate::ai::providers::{CUSTOM, PRESETS, Preset};
 
+/// A language in a Settings list, named in the app's language at each draw.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Named(pub Language);
+
+impl std::fmt::Display for Named {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self.0.code {
+            lang::AUTO => t!(tr_detect),
+            code => crate::app_language::language_name(code),
+        })
+    }
+}
+
 /// The Source dropdown: "Detect automatically", then what OCR can read.
-pub(super) static SOURCES: LazyLock<Vec<Language>> = LazyLock::new(|| {
+pub(super) static SOURCES: LazyLock<Vec<Named>> = LazyLock::new(|| {
     let auto = Language {
         code: lang::AUTO,
-        name: "Detect automatically",
         ..LANGUAGES[1]
     };
     let readable = LANGUAGES.iter().filter(|l| l.ocr.is_some()).copied();
-    std::iter::once(auto).chain(readable).collect()
+    std::iter::once(auto).chain(readable).map(Named).collect()
 });
+
+/// The Target dropdown: every language.
+pub(super) static TARGETS: LazyLock<Vec<Named>> =
+    LazyLock::new(|| LANGUAGES.iter().copied().map(Named).collect());
 
 pub(super) fn action_name(id: &str, live: bool) -> String {
     match (id, live) {
-        ("snip", _) => "Snip".into(),
-        ("translate", false) => "Translate".into(),
-        ("translate", true) => "Translate (live, Beta)".into(),
-        ("ai_explain", _) => "Explain with AI".into(),
-        ("copy_text", _) => "Copy text".into(),
-        ("edit", _) => "Snip".into(),
-        ("lens", _) => "Search with Lens".into(),
-        ("colour_picker", _) => "Pick a colour".into(),
-        ("ruler", _) => "Measure the screen".into(),
+        ("snip", _) => t!(nav_snip).into(),
+        ("translate", false) => t!(nav_translate).into(),
+        ("translate", true) => t!(k_translate_live).into(),
+        ("ai_explain", _) => t!(k_explain).into(),
+        ("copy_text", _) => t!(k_copytext).into(),
+        ("edit", _) => t!(nav_snip).into(),
+        ("lens", _) => t!(k_lens).into(),
+        ("colour_picker", _) => t!(k_colour).into(),
+        ("ruler", _) => t!(k_ruler).into(),
+        ("song_search", _) => t!(lb_song).into(),
+        ("live_pin", _) => t!(k_live_pin).into(),
         (other, _) => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
@@ -399,21 +419,21 @@ pub(super) fn action_name(id: &str, live: bool) -> String {
 
 pub(super) fn target_name(t: Target) -> &'static str {
     match t {
-        Target::FullScreen => "Whole screen",
-        Target::Circle => "The area you circle",
-        Target::LastRegion => "The last region",
-        Target::Window => "The window you click",
+        Target::FullScreen => t!(k_whole),
+        Target::Circle => t!(k_circle),
+        Target::LastRegion => t!(k_last_region),
+        Target::Window => t!(k_window),
     }
 }
 
 /// The hint under a quick action's name: snip shows what the mode does.
 pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
     match (q.action.as_str(), q.target) {
-        ("snip", _) => "Click a window or drag an area",
-        ("song_search", _) => "Listens and names the song (needs a key)",
-        ("live_pin", _) => "Pick a part of a window: it floats on top, kept up to date",
-        ("colour_picker", _) => "Click copies HEX, Shift+click RGB",
-        ("ruler", _) => "Drag to measure in pixels",
+        ("snip", _) => t!(s_row_desc),
+        ("song_search", _) => t!(k_song_desc),
+        ("live_pin", _) => t!(k_pin_desc),
+        ("colour_picker", _) => t!(k_colour_desc),
+        ("ruler", _) => t!(k_ruler_desc),
         (_, t) => target_name(t),
     }
 }
@@ -519,10 +539,6 @@ pub enum Section {
     About,
 }
 
-/// What the update switch says it does (Settings and onboarding).
-pub const UPDATE_PRIVACY: &str = "Downloads new versions in the background; they install when \
-     OpenCircle restarts. Sends only the version request: nothing about you or your screen";
-
 /// A shortcut field: the capture shortcut or quick action `n`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
@@ -534,6 +550,20 @@ pub(super) struct SlotText {
     pub(super) label: String,
     pub(super) hint: String,
     pub(super) tip: String,
+}
+
+/// The quick actions' words, in the app's language (made again when it changes).
+fn quick_text(config: &Config) -> Vec<SlotText> {
+    (config.quick_actions.iter())
+        .map(|q| {
+            let label = action_name(&q.action, q.live);
+            SlotText {
+                hint: quick_hint(q).to_string(),
+                tip: crate::app_language::fmt(S::k_tip, &[&label]),
+                label,
+            }
+        })
+        .collect()
 }
 
 pub struct State {
@@ -665,6 +695,8 @@ pub enum Message {
     /// The header: drag, minimise, maximise, close (the shell does them).
     Caption(Caption),
     DefaultAction(DefaultAction),
+    /// General's App language: "" = your language (the onboarding pick), else en | ar.
+    AppLanguage(crate::app_language::Choice),
     Autostart(bool),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
@@ -777,13 +809,13 @@ pub struct PaletteChoice(pub(super) ColourSet);
 impl fmt::Display for PaletteChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.0 {
-            ColourSet::Spectrum => "Spectrum",
-            ColourSet::Aurora => "Aurora",
-            ColourSet::Sunset => "Sunset",
-            ColourSet::Ocean => "Ocean",
-            ColourSet::Neon => "Neon",
-            ColourSet::Mono => "Mono",
-            ColourSet::TwoColour => "Two colours of my own",
+            ColourSet::Spectrum => t!(lk_spectrum),
+            ColourSet::Aurora => t!(cu_aurora),
+            ColourSet::Sunset => t!(cu_sunset),
+            ColourSet::Ocean => t!(cu_ocean),
+            ColourSet::Neon => t!(cu_neon),
+            ColourSet::Mono => t!(cu_mono),
+            ColourSet::TwoColour => t!(cu_colours_two),
         })
     }
 }
@@ -805,11 +837,11 @@ pub struct BarChoice(pub(super) BarStyle);
 impl fmt::Display for BarChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self.0 {
-            BarStyle::Glass => "Glass (app theme)",
-            BarStyle::GlassDark => "Dark glass",
-            BarStyle::GlassLight => "Light glass",
-            BarStyle::Solid => "Solid",
-            BarStyle::Outline => "Outline",
+            BarStyle::Glass => t!(cu_glass),
+            BarStyle::GlassDark => t!(cu_glass_dark),
+            BarStyle::GlassLight => t!(cu_glass_light),
+            BarStyle::Solid => t!(cu_solid),
+            BarStyle::Outline => t!(cu_outline),
         })
     }
 }
@@ -947,6 +979,7 @@ impl State {
         store: Box<dyn KeyStore>,
     ) -> Self {
         theme::apply(config.theme);
+        crate::app_language::apply(&config.general);
         let mut config = config;
         config.add_new_quick_actions(); // their rows show; the file gets them at the next save
         let store: Arc<dyn KeyStore> = store.into();
@@ -955,18 +988,7 @@ impl State {
             Some(owner) => KeyField::new(bind(&store, owner)),
             None => KeyField::idle(),
         };
-        let quick_text = config
-            .quick_actions
-            .iter()
-            .map(|q| {
-                let label = action_name(&q.action, q.live);
-                SlotText {
-                    hint: quick_hint(q).to_string(),
-                    tip: format!("{label} shortcut"),
-                    label,
-                }
-            })
-            .collect();
+        let quick_text = quick_text(&config);
         let interval = config.translate.live_interval_ms.to_string();
         let (recognizers, profile) = crate::ocr::system::windows_languages();
         let mut s = State {
@@ -991,7 +1013,7 @@ impl State {
             notice: warnings
                 .first()
                 // Not "reset": an unknown or unread provider is kept off, not defaulted.
-                .map(|w| format!("Some saved settings were invalid ({w})")),
+                .map(|w| crate::app_language::fmt(S::win_invalid, &[&w])),
             desktop: crate::hotkey::desktop_key,
             edge_mode: EdgeMode::Overlay,
             picker: None,
@@ -1062,6 +1084,8 @@ impl State {
     pub fn set_language(&mut self, code: &str) {
         self.draft.translate.target = code.into();
         self.draft.general.language = code.into();
+        // picking Arabic turns the app (onboarding first) Arabic at once
+        crate::app_language::apply(&self.draft.general);
         self.revalidate();
     }
 
@@ -1102,7 +1126,7 @@ impl State {
 
     pub(super) fn label(&self, slot: Slot) -> &str {
         match slot {
-            Slot::Capture => "Open OpenCircle",
+            Slot::Capture => t!(k_open),
             Slot::Quick(i) => &self.quick_text[i].label,
         }
     }
@@ -1126,13 +1150,13 @@ impl State {
             return None;
         }
         if self.print_screen_taken && parse_shortcut(shortcut).ok() == print_screen() {
-            return Some("Windows' screen capture uses this key".into());
+            return Some(t!(k_prtsc_windows).into());
         }
         Some(match (self.desktop)(shortcut)? {
-            DesktopKey::Other(keys) => format!("In use: {keys}. {}", managed()),
-            DesktopKey::UsedBy(name) => format!("Used by {name}"),
+            DesktopKey::Other(keys) => crate::app_language::fmt(S::k_in_use, &[&keys, &managed()]),
+            DesktopKey::UsedBy(name) => crate::app_language::fmt(S::k_used_by, &[&name]),
             // the desktop bound nothing: another app (or the desktop) holds the key
-            DesktopKey::Unassigned | DesktopKey::Taken => TAKEN.into(),
+            DesktopKey::Unassigned | DesktopKey::Taken => t!(k_taken).into(),
             DesktopKey::Failed => {
                 let command = match slot {
                     Slot::Capture => "opencircle capture".to_string(),
@@ -1140,9 +1164,7 @@ impl State {
                         format!("opencircle run {}", self.draft.quick_actions[i].action)
                     }
                 };
-                format!(
-                    "No shortcut service here: bind \"{command}\" in your desktop's keyboard settings"
-                )
+                crate::app_language::fmt(S::k_no_service, &[&command])
             }
         })
     }
@@ -1176,7 +1198,10 @@ impl State {
         }
         for other in self.slots().filter(|&o| o != slot) {
             if parse_shortcut(self.shortcut(other)).is_ok_and(|h| h == hotkey) {
-                return Err(format!("Already used by {}", self.label(other)));
+                return Err(crate::app_language::fmt(
+                    S::k_already,
+                    &[&self.label(other)],
+                ));
             }
         }
         Ok(shortcut)
@@ -1219,9 +1244,6 @@ impl State {
         }
     }
 }
-
-/// Wayland, modifiers pressed and released with no key recorded.
-const TAKEN: &str = "Taken by another app: pick another key";
 
 /// Print Screen alone: the key Windows' own screen capture can keep.
 pub(super) fn print_screen() -> Option<global_hotkey::hotkey::HotKey> {
@@ -1417,7 +1439,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     .as_ref()
                     .is_some_and(|(s, _)| *s == slot);
                 if why.is_some() || !noted {
-                    state.shortcut_error = Some((slot, why.unwrap_or_else(|| TAKEN.into())));
+                    state.shortcut_error = Some((slot, why.unwrap_or_else(|| t!(k_taken).into())));
                 }
             }
         }
@@ -1466,6 +1488,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::DefaultAction(a) => state.draft.general.default_action = a,
         Message::Autostart(on) => state.draft.general.autostart = on,
+        Message::AppLanguage(code) => {
+            state.draft.general.app_language = code.0.into();
+            // every window speaks it at its next redraw (no restart)
+            crate::app_language::apply(&state.draft.general);
+            state.quick_text = quick_text(&state.draft);
+        }
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::TextReader(v) => state.draft.selection.text_reader = v,
         Message::OpenLanguageSettings => open_language_settings(),
@@ -1545,7 +1573,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ReportProblem => return Outcome::OpenLink(crate::diagnostics::issue_url()),
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
         Message::CheckUpdate => {
-            state.update_status = Some("Checking…".into());
+            state.update_status = Some(t!(key_checking).into());
             return Outcome::CheckUpdate;
         }
         Message::UpdateStatus(status) => state.update_status = Some(status),
@@ -1727,12 +1755,12 @@ pub(super) fn set_lab(state: &mut State, feature: Feature, on: bool) -> Outcome 
 
 pub(super) fn save(state: &mut State) -> Outcome {
     if !state.problems.is_empty() {
-        state.notice = Some("Fix the problems above first".into());
+        state.notice = Some(t!(win_fix_first).into());
         return Outcome::None;
     }
     // Never a dead button: with nothing to save it says so.
     if !state.dirty() {
-        state.notice = Some("Nothing to save".into());
+        state.notice = Some(t!(win_nothing).into());
         return Outcome::None;
     }
     // A write is on its way: `written` saves again if the draft still differs.
@@ -1761,7 +1789,7 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
             // The failed edit stays in the draft (auto-save retries it); the switches
             // flipped meanwhile are still written.
             state.closing = false;
-            state.notice = Some(format!("Could not save: {e}"));
+            state.notice = Some(crate::app_language::fmt(S::win_save_failed, &[&e]));
             if state.queued_labs.is_empty() {
                 return Outcome::None;
             }

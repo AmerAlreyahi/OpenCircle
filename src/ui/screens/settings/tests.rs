@@ -72,7 +72,12 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     let (mut s, _) = state(Some(path.clone()));
     assert!(s.draft.general.autostart);
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == pages::START_LABEL), "{texts:?}");
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == crate::app_language::tr(pages::START_LABEL)),
+        "{texts:?}"
+    );
     update(&mut s, Message::Autostart(false));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.problems);
@@ -133,7 +138,12 @@ fn song_search_section_saves_a_write_only_token_and_its_choices() {
     );
     update(&mut s, Message::Section(Section::Song));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == SONG_PRIVACY), "{texts:?}");
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == crate::app_language::tr(SONG_PRIVACY)),
+        "{texts:?}"
+    );
     assert!(texts.iter().any(|t| t.contains("dashboard.audd.io")));
     // Write-only: once saved, the token is never shown again.
     update(
@@ -301,7 +311,9 @@ fn page(s: &mut State, section: Section) -> Vec<String> {
 }
 
 fn sidebar(s: &State) -> Vec<&'static str> {
-    pages::visible(&s.draft.labs).map(|p| p.title).collect()
+    pages::visible(&s.draft.labs)
+        .map(|p| crate::app_language::tr(p.title))
+        .collect()
 }
 
 #[test]
@@ -357,7 +369,10 @@ fn hidden_features_have_no_settings_page_row_or_shortcut() {
     let labs = page(&mut s, Section::Labs);
     for f in Feature::ALL {
         assert!(labs.iter().any(|t| t == f.title()), "{labs:?}");
-        assert!(labs.iter().any(|t| t == f.blurb()), "{labs:?}");
+        assert!(
+            labs.iter().any(|t| t.ends_with("Unfinished; may change")),
+            "{labs:?}"
+        );
     }
     // The entries are still in the draft (and so in the file): hidden, not deleted.
     assert!(s.draft.quick_actions.iter().any(|q| q.action == "snip"));
@@ -569,7 +584,7 @@ fn save_round_trips_through_a_temp_config() {
     update(&mut s, Message::Preset(preset("Ollama (local)")));
     update(&mut s, Message::ModelPick("llama3:8b".into()));
     update(&mut s, Message::Target(LANGUAGES[1]));
-    update(&mut s, Message::Source(SOURCES[2]));
+    update(&mut s, Message::Source(SOURCES[2].0));
     update(&mut s, Message::DefaultAction(DefaultAction::Copy));
     update(&mut s, Message::Folder(Some(std::env::temp_dir())));
     update(&mut s, Message::LiveInterval("2500".into()));
@@ -587,7 +602,7 @@ fn save_round_trips_through_a_temp_config() {
     assert_eq!(back.ai.base_url, "http://localhost:11434/v1");
     assert_eq!(back.ai.model, "llama3:8b");
     assert_eq!(back.translate.target, "en");
-    assert_eq!(back.translate.source, SOURCES[2].code);
+    assert_eq!(back.translate.source, SOURCES[2].0.code);
     assert_eq!(back.translate.engine, Engine::Offline);
     assert_eq!(back.general.default_action, DefaultAction::Copy);
     assert_eq!(
@@ -674,7 +689,10 @@ fn a_saved_key_shows_as_dots_only() {
     let (mut s, store) = state(None);
     update(&mut s, Message::Preset(preset("OpenAI")));
     update(&mut s, Message::Section(Section::Ai));
-    assert_eq!(super::state::API_KEY.placeholder, "Paste your API key");
+    assert_eq!(
+        crate::app_language::tr(super::state::API_KEY.placeholder),
+        "Paste your API key"
+    );
     update(
         &mut s,
         Message::ApiKey(KeyMessage::Input(Secret::new(key.clone()))),
@@ -1158,7 +1176,12 @@ fn every_control_has_its_own_label() {
         unique.dedup();
         // one page never has two controls of one name (a row shown on two
         // pages, like Snip's shortcuts and the save folder, is fine)
-        assert_eq!(labels, unique, "duplicate control labels on {}", page.title);
+        assert_eq!(
+            labels,
+            unique,
+            "duplicate control labels on {}",
+            crate::app_language::tr(page.title)
+        );
         all.extend(labels);
     }
     all.sort();
@@ -1174,7 +1197,7 @@ fn no_visible_tooltip_repeats_its_control() {
     for page in &PAGES {
         update(&mut s, Message::Section(page.id));
         let _ = view(&s);
-        assert_tips_add_something(page.title);
+        assert_tips_add_something(crate::app_language::tr(page.title));
     }
     // Text that says what it is shows no tooltip: Settings has none by default.
     update(&mut s, Message::Section(Section::General));
@@ -1675,8 +1698,13 @@ fn every_shortcut_field_is_the_same_size() {
         ("Ctrl+C", Field::Recording),
         ("Ctrl+Shift+T", Field::Conflict),
     ] {
-        let e: Element<'_, Message> =
-            shortcut_field(keys(shortcut), field, "Press keys…", Message::Save);
+        let e: Element<'_, Message> = shortcut_field(
+            keys(shortcut),
+            field,
+            "Press keys…",
+            "Not set",
+            Message::Save,
+        );
         let got = e.as_widget().size();
         assert_eq!(
             (got.width, got.height),
@@ -1733,7 +1761,9 @@ fn renders_every_section_in_both_themes() {
                 );
                 press(&mut s, chord(true, true, "Space"));
             }
-            let slug = label.to_lowercase().replace(" & ", "-");
+            let slug = crate::app_language::tr(label)
+                .to_lowercase()
+                .replace(" & ", "-");
             let file = format!("settings-{slug}-{name}");
             let px = shot::save(&file, view(&s), WINDOW_SIZE);
             let window = crate::ui::kit::themes::c().bg;
@@ -1912,7 +1942,11 @@ fn every_rows_control_shares_one_column_on_every_page() {
         update(&mut s, Message::Section(page.id));
         let found = shot::containers(view(&s), WINDOW_SIZE, CONTROL);
         if !matches!(page.id, Section::Privacy) {
-            assert!(!found.is_empty(), "{}: no rows", page.title);
+            assert!(
+                !found.is_empty(),
+                "{}: no rows",
+                crate::app_language::tr(page.title)
+            );
         }
         columns.extend(found.into_iter().map(|b| (page.title, b.x, b.width)));
     }
@@ -2184,7 +2218,7 @@ fn every_theme_card_renders_its_swatches() {
     use crate::ui::kit::themes::{self, SAPPHIRE, THEMES};
     for t in THEMES {
         themes::set(t);
-        let px = shot::render(theme_card::<()>(t, false, ()), 200, 48);
+        let px = shot::render(theme_card::<()>(t, (t.name, t.desc), false, ()), 200, 48);
         for dot in t.swatch {
             let [r, g, b, _] = dot.into_rgba8();
             let near = |p: &[u8]| p.iter().zip([r, g, b]).all(|(&a, b)| a.abs_diff(b) <= 6);
@@ -2294,13 +2328,20 @@ fn play_preview_downloads_only_on_the_click() {
     assert_eq!(update(&mut s, Message::Fetch("ai")), Outcome::None, "once");
     update(&mut s, Message::Fetched("ai", false));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == FAILED) && texts.iter().any(|t| t == "Play preview"));
+    assert!(
+        texts.iter().any(|t| t == crate::app_language::tr(FAILED))
+            && texts.iter().any(|t| t == "Play preview")
+    );
     // the retry clears the note
     assert!(matches!(
         update(&mut s, Message::Fetch("ai")),
         Outcome::Fetch(..)
     ));
-    assert!(!shot::texts(view(&s)).iter().any(|t| t == FAILED));
+    assert!(
+        !shot::texts(view(&s))
+            .iter()
+            .any(|t| t == crate::app_language::tr(FAILED))
+    );
     update(&mut s, Message::Fetched("ai", true));
     assert!(s.fetching.is_empty() && s.failed.is_empty());
 }
@@ -2819,4 +2860,65 @@ fn a_typed_model_id_is_offered_and_kept() {
     assert!(s.model_list.models.is_empty());
     update(&mut s, Message::ModelQuery("local".into()));
     assert_eq!(s.model_list.choices(), [("local", None, true)]);
+}
+
+/// App language: "Your language (English)" first, then each language in its
+/// own name; a pick speaks at once (no restart), saves only that key, and
+/// "Your language" goes back to following the onboarding pick.
+#[test]
+fn the_app_language_switches_live_both_ways() {
+    use crate::app_language::{self, CHOICES, Choice, Lang};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    let names: Vec<String> = CHOICES.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        names,
+        ["Your language (English)", "English", "\u{200F}العربية"]
+    );
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "App language"));
+    update(&mut s, Message::AppLanguage(Choice("ar")));
+    assert_eq!(app_language::current(), Lang::Ar);
+    assert_eq!(s.draft.general.app_language, "ar");
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t == "\u{200F}لغة التطبيق")
+    );
+    update(&mut s, Message::AppLanguage(Choice("")));
+    assert_eq!(app_language::current(), Lang::En);
+    assert!(
+        s.draft.general.app_language.is_empty(),
+        "the key is written only when picked"
+    );
+    app_language::set(Lang::En);
+}
+
+/// Every page in Arabic, right to left, as drawn in Sapphire and Daylight
+/// (every Labs feature on, the custom look's rows shown). The English
+/// goldens are untouched by the mirroring: they pass as they were.
+#[test]
+fn every_page_in_arabic_matches_its_golden_image() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        s.draft.look.theme = LookTheme::Custom;
+        update(&mut s, Message::AppLanguage(Choice("ar")));
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        for section in shown {
+            update(&mut s, Message::Section(section));
+            themes::set(theme);
+            let slug = format!("{section:?}").to_lowercase();
+            let file = format!("settings-{slug}-ar-{}", theme.id);
+            let size = Size::new(WINDOW_SIZE.width, 900.0);
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            let _ = shot::save(&file, view(&s), size);
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

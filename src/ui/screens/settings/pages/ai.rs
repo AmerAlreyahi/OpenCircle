@@ -4,8 +4,10 @@
 //! server's URL, the model and the key (key + Save; mono where a value is
 //! code). The design's sign-in, local-model and answer-style parts belong to
 //! AI online and are not drawn.
+use crate::app_language::tr;
+use crate::t;
 use iced::widget::tooltip::Position;
-use iced::widget::{Space, column, row};
+use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
 use super::super::state::{
@@ -35,12 +37,12 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
         _ => None,
     });
     let stays = setting_row::row(
-        title("AI chat stays open"),
-        "Keep the chat above other apps. Its pin unpins and closes it",
+        title(t!(ai_stays)),
+        t!(ai_stays_desc),
         segmented(
             &[
-                (StaysOpen::FollowUp, "After a follow-up"),
-                (StaysOpen::Always, "Always"),
+                (StaysOpen::FollowUp, t!(ai_stays_follow)),
+                (StaysOpen::Always, t!(ai_stays_always)),
             ],
             chat.stays_open,
             from,
@@ -50,10 +52,10 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
     );
     // its switch is on History (the one place for what is kept)
     let keep = super::history::link(
-        "Chat history",
+        t!(ai_hist),
         match chat.keep_history {
-            true => "On: chats, text only, kept on this PC. Kept and cleared in History",
-            false => "Off: no chat is kept. Turn it on in History",
+            true => t!(ai_hist_on),
+            false => t!(ai_hist_off),
         },
     );
     column![stays, keep].into()
@@ -77,8 +79,8 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
 fn model_row(state: &State, preset: Preset) -> Element<'_, Message> {
     let ai = &state.draft.ai;
     let example = match preset.model {
-        "" => "Type or load a model id".to_string(),
-        m => format!("e.g. {m}"),
+        "" => t!(ai_model_type).to_string(),
+        m => crate::app_language::fmt(crate::app_language::S::ai_model_eg, &[&m]),
     };
     let on = model_list::On {
         opened: Message::ModelsOpened,
@@ -88,11 +90,11 @@ fn model_row(state: &State, preset: Preset) -> Element<'_, Message> {
         load: Message::LoadModels,
     };
     let field = state.model_list.view(&ai.model, &example, on);
-    let mut control = column![tip(field, "Model", Position::Top)].spacing(space::GAP);
+    let mut control = column![tip(field, t!(ai_model), Position::Top)].spacing(space::GAP);
     if let Some(e) = issue(&state.problems, "ai.model") {
         control = control.push(error(Role::ROW_DESC, e));
     }
-    setting_row::row(title("Model"), "The model id sent to the provider", control)
+    setting_row::row(title(t!(ai_model)), t!(ai_model_desc), control)
 }
 
 /// An AI provider with a model, a server and a key (not the browser, not an
@@ -107,7 +109,10 @@ pub fn keyed(state: &State) -> bool {
 /// Browser | AI provider (Settings, and onboarding's AI step).
 pub fn provider_row(state: &State) -> Element<'_, Message> {
     let ai = &state.draft.ai;
-    let options = [(Choice::Browser, "Browser"), (Choice::Ai, "AI provider")];
+    let options = [
+        (Choice::Browser, t!(ai_browser)),
+        (Choice::Ai, t!(ai_provider)),
+    ];
     // An unknown value from the file: none is chosen until a pick.
     let now = match ai.provider {
         Provider::Browser => Choice::Browser,
@@ -131,10 +136,10 @@ pub fn provider_row(state: &State) -> Element<'_, Message> {
         provider = provider.push(error(Role::ROW_DESC, e));
     }
     setting_row::row(
-        title("Answers from"),
+        title(t!(ai_from)),
         match ai.provider {
-            Provider::Browser => "Google AI Mode in your browser. No key",
-            _ => "Who answers your questions",
+            Provider::Browser => t!(ai_from_browser),
+            _ => t!(ai_from_desc),
         },
         provider,
     )
@@ -144,11 +149,11 @@ pub fn provider_row(state: &State) -> Element<'_, Message> {
 pub fn preset_row(state: &State) -> Element<'_, Message> {
     let preset = Preset::of(&state.draft.ai);
     setting_row::row(
-        title("Provider"),
-        "The service that answers, with your key",
+        title(t!(ai_prov)),
+        t!(ai_prov_desc),
         tip(
-            dropdown(PRESETS, preset, "Choose a provider", Message::Preset),
-            "AI provider",
+            dropdown(PRESETS, preset, t!(ai_prov_choose), Message::Preset),
+            t!(ai_provider),
             Position::Top,
         ),
     )
@@ -161,8 +166,8 @@ pub fn url_row(state: &State) -> Option<Element<'_, Message>> {
     Preset::of(ai).filter(Preset::custom)?;
     Some(text_row(
         state,
-        ("Server URL", "Your own server or any compatible API"),
-        ("https://my-server.example/v1", &ai.base_url, "ai.base_url"),
+        (t!(ai_url), t!(ai_url_desc)),
+        (t!(ai_url_ph), &ai.base_url, "ai.base_url"),
         Message::BaseUrl,
     ))
 }
@@ -171,10 +176,10 @@ pub fn url_row(state: &State) -> Option<Element<'_, Message>> {
 pub fn key_row(state: &State) -> Element<'_, Message> {
     let local = Preset::of(&state.draft.ai).is_some_and(|p| p.local);
     setting_row::row(
-        title("API key"),
+        title(t!(ai_key)),
         match local {
-            true => "Not needed for a server on this PC",
-            false => "Kept in your system keyring, never in a file",
+            true => t!(ai_key_local),
+            false => t!(ai_key_desc),
         },
         state.key.view().map(Message::ApiKey),
     )
@@ -218,36 +223,47 @@ impl KeyField {
                     (error(Role::ROW_DESC, why.clone()).into(), vec![])
                 }
                 (KeyStatus::Saved, false) => (
-                    tip(input("", KEY_MASK, false, false), l.field, Position::Top),
+                    tip(
+                        input("", KEY_MASK, false, false),
+                        tr(l.field),
+                        Position::Top,
+                    ),
                     vec![
                         tip(
-                            b("Replace", KeyMessage::Replace),
-                            l.replace,
+                            b(t!(ai_key_replace), KeyMessage::Replace),
+                            tr(l.replace),
                             Position::Bottom,
                         ),
-                        tip(b("Remove", KeyMessage::Remove), l.remove, Position::Bottom),
+                        tip(
+                            b(t!(ai_key_remove), KeyMessage::Remove),
+                            tr(l.remove),
+                            Position::Bottom,
+                        ),
                     ],
                 ),
                 _ => {
-                    let mut field = input(l.placeholder, self.input.expose(), false, false)
+                    let mut field = input(tr(l.placeholder), self.input.expose(), false, false)
                         .on_input(|s| KeyMessage::Input(Secret::new(s)))
                         .secure(true);
                     if wait.is_none() {
                         field = field.on_submit(KeyMessage::Save);
                     }
-                    let save = b("Save key", KeyMessage::Save);
-                    let mut buttons = vec![tip(save, l.save, Position::Bottom)];
+                    let save = b(t!(ai_key_save), KeyMessage::Save);
+                    let mut buttons = vec![tip(save, tr(l.save), Position::Bottom)];
                     if self.replacing {
-                        let keep = b("Cancel", KeyMessage::Cancel);
-                        buttons.push(tip(keep, l.keep, Position::Bottom));
+                        let keep = b(t!(c_cancel), KeyMessage::Cancel);
+                        buttons.push(tip(keep, tr(l.keep), Position::Bottom));
                     }
-                    (tip(field, l.field, Position::Top), buttons)
+                    (tip(field, tr(l.field), Position::Top), buttons)
                 }
             };
         let buttons = if wait.is_none() { buttons } else { Vec::new() };
         let mut col = column![setting_row::field_with(field, buttons)].spacing(space::GAP);
         if let Some(w) = wait {
-            col = col.push(row![Space::new().width(Fill), sub(Role::ROW_DESC, w)]);
+            col = col.push(crate::dir_row![
+                Space::new().width(Fill),
+                sub(Role::ROW_DESC, w)
+            ]);
         }
         if let Some(e) = &self.error {
             col = col.push(error(Role::ROW_DESC, e.clone()));

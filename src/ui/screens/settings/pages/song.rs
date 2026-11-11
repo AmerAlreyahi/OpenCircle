@@ -1,6 +1,7 @@
 //! Song search (`settings-window.js` "SONG SEARCH", Labs): the service (AudD
 //! with your own token until the no-key service lands), its token, what to
 //! listen to, the history, and what is sent (the design's note card).
+use crate::t;
 use iced::Element;
 use iced::widget::{Space, column};
 
@@ -15,19 +16,19 @@ use crate::ui::kit::text::sub;
 use crate::ui::kit::tokens::{Role, space};
 
 /// What song search sends, and when (also in docs/privacy.md).
-pub const SONG_PRIVACY: &str = "When you press the music button, a ~10-second clip of the audio you choose is sent to AudD. Nothing is recorded at any other time.";
+pub const SONG_PRIVACY: crate::app_language::S = crate::app_language::S::song_privacy;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let song = &state.draft.song;
     let mut rows = column![setting_row::row(
-        title("Service"),
-        "Free fingerprint lookups can't name a short clip, so this needs your own key",
+        title(t!(song_service)),
+        t!(song_need_key),
         pill(SERVICE.name(), false, None),
     )];
     if let Some(field) = &state.song_key {
         rows = rows.push(setting_row::row(
-            title("API token"),
-            "Sign up at dashboard.audd.io and paste your token. Kept in your system keyring",
+            title(t!(song_token)),
+            t!(song_sign_up),
             field.view().map(Message::SongKey),
         ));
     }
@@ -36,15 +37,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
         _ => None,
     });
     rows = rows.push(setting_row::row(
-        title("Listen to"),
+        title(t!(song_listen)),
         match song.source {
-            SongSource::System => "What this PC plays: a video, a game, a stream",
-            SongSource::Microphone => "Your microphone: music playing near you",
+            SongSource::System => t!(song_pc_desc),
+            SongSource::Microphone => t!(song_mic_desc),
         },
         segmented(
             &[
-                (SongSource::System, "This PC"),
-                (SongSource::Microphone, "Microphone"),
+                (SongSource::System, t!(song_pc)),
+                (SongSource::Microphone, t!(song_mic)),
             ],
             song.source,
             from,
@@ -57,11 +58,17 @@ pub fn view(state: &State) -> Element<'_, Message> {
         _ => None,
     });
     rows = rows.push(setting_row::row(
-        title("History"),
-        "Recent songs, kept only on this PC. Off deletes them",
-        boolean(["Off", "On"], song.history, from, t, Message::SongHistory),
+        title(t!(nav_history)),
+        t!(song_recent),
+        boolean(
+            [t!(c_off), t!(c_on)],
+            song.history,
+            from,
+            t,
+            Message::SongHistory,
+        ),
     ));
     rows.push(Space::new().height(space::ROW_Y))
-        .push(card(sub(Role::NOTE, SONG_PRIVACY)))
+        .push(card(sub(Role::NOTE, crate::app_language::tr(SONG_PRIVACY))))
         .into()
 }

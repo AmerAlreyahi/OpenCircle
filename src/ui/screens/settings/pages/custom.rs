@@ -1,9 +1,10 @@
 //! The custom look's rows (Appearance, under the look cards while Custom is
 //! picked; the design has no Custom card): its colours, glow, dim, corners,
 //! bars and each mode's screen edge.
+use crate::t;
 use iced::Element;
+use iced::widget::column;
 use iced::widget::tooltip::Position;
-use iced::widget::{column, row};
 
 use super::super::state::{BARS, BarChoice, Message, PALETTES, PaletteChoice, State};
 use crate::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
@@ -25,16 +26,16 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     let edge = c.edge(state.edge_mode);
     let row_of = |name, desc, control| setting_row::row(title(name), desc, control);
     let mut rows = vec![row_of(
-        "Colours",
-        "The screen edge, selection and buttons",
+        t!(cu_colours),
+        t!(cu_colours_desc),
         tip(
             dropdown(
                 &PALETTES,
                 Some(PaletteChoice(c.palette)),
-                "Choose colours",
+                t!(cu_choose),
                 Message::Palette,
             ),
-            "Look colours",
+            t!(cu_look_colours),
             Position::Top,
         ),
     )];
@@ -49,9 +50,10 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
                 Position::Top,
             )
         };
-        let mut control =
-            column![row![dot(0, "First colour"), dot(1, "Second colour")].spacing(space::GAP)]
-                .spacing(space::GAP);
+        let mut control = column![
+            crate::dir_row![dot(0, t!(cu_first)), dot(1, t!(cu_second))].spacing(space::GAP)
+        ]
+        .spacing(space::GAP);
         if let Some(i) = state.picker {
             control = control.push(picker(
                 &theme::ANNOTATION,
@@ -61,11 +63,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
                 Message::Hex,
             ));
         }
-        rows.push(row_of(
-            "Your two colours",
-            "From the top-left corner round to the opposite one",
-            control.into(),
-        ));
+        rows.push(row_of(t!(cu_two), t!(cu_two_desc), control.into()));
     }
     let edge_style = match edge.style {
         // a "thin" edge from an older config shows as the glow it now is
@@ -75,30 +73,30 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     let modes = edge_modes(&state.draft.labs);
     rows.extend([
         row_of(
-            "Glow strength",
-            "How bright the edge glow is",
+            t!(cu_glow),
+            t!(cu_glow_desc),
             tip(
                 slider(crate::config::GLOW, c.glow, " %", Message::Glow),
-                "Glow strength",
+                t!(cu_glow),
                 Position::Top,
             ),
         ),
         row_of(
-            "Dim",
-            "How much the frozen screen darkens",
+            t!(cu_dim),
+            t!(cu_dim_desc),
             tip(
                 slider(crate::config::DIM, c.dim, " %", Message::Dim),
-                "Dim strength",
+                t!(cu_dim_tip),
                 Position::Top,
             ),
         ),
         row_of(
-            "Selection corners",
-            "The brackets on a snapped box",
+            t!(cu_corners),
+            t!(cu_corners_desc),
             segmented(
                 &[
-                    (BracketColour::White, "White"),
-                    (BracketColour::Accent, "Accent"),
+                    (BracketColour::White, t!(cu_white)),
+                    (BracketColour::Accent, t!(cu_accent)),
                 ],
                 c.brackets,
                 c.brackets,
@@ -107,12 +105,12 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
             ),
         ),
         row_of(
-            "Corner style",
-            "Four corners, or a frame all round",
+            t!(cu_style),
+            t!(cu_style_desc),
             segmented(
                 &[
-                    (BracketStyle::Corners, "Corners"),
-                    (BracketStyle::Frame, "Frame"),
+                    (BracketStyle::Corners, t!(cu_corners_opt)),
+                    (BracketStyle::Frame, t!(cu_frame)),
                 ],
                 c.bracket_style,
                 c.bracket_style,
@@ -125,24 +123,24 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
     // changes nothing, so its row stays hidden (the config key is kept).
     if GLASS_BARS {
         rows.push(row_of(
-            "Bars and pills",
-            "The action bar, chips and panels",
+            t!(cu_bars),
+            t!(cu_bars_desc),
             tip(
                 dropdown(
                     &BARS,
                     Some(BarChoice(c.bar)),
-                    "Choose a style",
+                    t!(cu_style_choose),
                     Message::Bar,
                 ),
-                "Bar style",
+                t!(cu_bar_style),
                 Position::Top,
             ),
         ));
     }
     // (Circle and Snip at least: never a one-choice row)
     rows.push(row_of(
-        "Screen edge for",
-        "Each mode has its own edge",
+        t!(cu_edge_for),
+        t!(cu_edge_for_desc),
         segmented(
             &modes,
             state.edge_mode,
@@ -152,10 +150,13 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
         ),
     ));
     rows.push(row_of(
-        "Edge style",
-        "A soft glow along the screen edge, or none",
+        t!(cu_edge),
+        t!(cu_edge_desc),
         segmented(
-            &[(EdgeStyle::Glow, "Glow"), (EdgeStyle::None, "None")],
+            &[
+                (EdgeStyle::Glow, t!(cu_glow_opt)),
+                (EdgeStyle::None, t!(cu_none)),
+            ],
             edge_style,
             edge_style,
             1.0,
@@ -167,10 +168,10 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
 
 /// The Screen edge segments: Live only while it is on in Labs.
 fn edge_modes(labs: &Labs) -> Vec<(EdgeMode, &'static str)> {
-    let mut modes = vec![(EdgeMode::Overlay, "Circle")];
+    let mut modes = vec![(EdgeMode::Overlay, t!(cu_circle))];
     if labs.has(Feature::Live) {
-        modes.push((EdgeMode::Live, "Live"));
+        modes.push((EdgeMode::Live, t!(cu_live)));
     }
-    modes.push((EdgeMode::Snip, "Snip"));
+    modes.push((EdgeMode::Snip, t!(cu_snip)));
     modes
 }

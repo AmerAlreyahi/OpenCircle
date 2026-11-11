@@ -4,6 +4,7 @@
 use iced::Element;
 
 use super::state::{Message, Section, State};
+use crate::app_language::S;
 use crate::labs::{Feature, Labs};
 
 pub mod about;
@@ -39,22 +40,18 @@ pub use song::SONG_PRIVACY;
 
 pub struct Page {
     pub id: Section,
-    pub title: &'static str,
+    pub title: S,
     /// A note at the right of the page's title.
-    pub note: Option<&'static str>,
+    pub note: Option<S>,
     /// The sidebar item's badge.
-    pub badge: Option<&'static str>,
+    pub badge: Option<S>,
     /// Listed only while this Labs feature is on.
     pub lab: Option<Feature>,
     /// The page under its title.
     pub view: for<'a> fn(&'a State) -> Element<'a, Message>,
 }
 
-const fn page(
-    id: Section,
-    title: &'static str,
-    view: for<'a> fn(&'a State) -> Element<'a, Message>,
-) -> Page {
+const fn page(id: Section, title: S, view: for<'a> fn(&'a State) -> Element<'a, Message>) -> Page {
     Page {
         id,
         title,
@@ -67,31 +64,31 @@ const fn page(
 
 /// In the design's order, except Shortcuts: after every feature page (owner, 2026-11-10).
 pub const PAGES: [Page; 13] = [
-    page(Section::General, "General", general::view),
-    page(Section::Appearance, "Appearance", appearance::view),
-    page(Section::Look, "Look & behaviour", look::view),
-    page(Section::Ai, "Ask AI", ai::view),
-    page(Section::TextReading, "Text reading", text_reading::view),
-    page(Section::Translate, "Translate", translate::view),
-    page(Section::Snip, "Snip", snip::view),
+    page(Section::General, S::nav_general, general::view),
+    page(Section::Appearance, S::nav_appearance, appearance::view),
+    page(Section::Look, S::nav_look, look::view),
+    page(Section::Ai, S::nav_ai, ai::view),
+    page(Section::TextReading, S::nav_text, text_reading::view),
+    page(Section::Translate, S::nav_translate, translate::view),
+    page(Section::Snip, S::nav_snip, snip::view),
     Page {
         lab: Some(Feature::Song),
-        ..page(Section::Song, "Song search", song::view)
+        ..page(Section::Song, S::lb_song, song::view)
     },
-    page(Section::History, "History", history::view),
+    page(Section::History, S::nav_history, history::view),
     Page {
-        note: Some(shortcuts::NOTE),
-        ..page(Section::Shortcuts, "Shortcuts", shortcuts::view)
+        note: Some(S::k_note),
+        ..page(Section::Shortcuts, S::nav_shortcuts, shortcuts::view)
     },
     Page {
-        note: Some(privacy::NOTE),
-        ..page(Section::Privacy, "Privacy", privacy::view)
+        note: Some(S::p_note),
+        ..page(Section::Privacy, S::nav_privacy, privacy::view)
     },
-    page(Section::About, "About", about::view),
+    page(Section::About, S::nav_about, about::view),
     Page {
-        note: Some("All off by default · Hidden when off"),
-        badge: Some("Exp"),
-        ..page(Section::Labs, "Labs", labs::view)
+        note: Some(S::lb_note),
+        badge: Some(S::nav_exp),
+        ..page(Section::Labs, S::nav_labs, labs::view)
     },
 ];
 

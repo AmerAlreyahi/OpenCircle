@@ -8,6 +8,8 @@
 //! loop while the page is open (`player`), also at later visits, from disk.
 //! No still yet (owner, 2026-10-30): only the heading, no Hide / Show preview
 //! and no stage; the still's file appearing shows both.
+use crate::app_language::{S, tr};
+use crate::t;
 use iced::widget::column;
 use iced::{Element, Padding};
 
@@ -28,8 +30,8 @@ pub struct Hero {
     pub page: Section,
     /// Its name in `[appearance].hidden_previews`.
     pub key: &'static str,
-    pub title: &'static str,
-    pub desc: &'static str,
+    pub title: S,
+    pub desc: S,
     /// Shown only while this Labs feature is on.
     pub lab: Option<Feature>,
     /// The feature's shortcut in `config` ("" = not set).
@@ -53,8 +55,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Look,
         key: "look",
-        title: "Circle to Search",
-        desc: "Circle anything and search in your browser.",
+        title: S::l_hero,
+        desc: S::l_hero_desc,
         lab: None,
         shortcut: capture,
         clips: |_| &["circle-1", "circle-2", "circle-3"],
@@ -62,8 +64,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::TextReading,
         key: "text_reading",
-        title: "Text reading",
-        desc: "Select screen text and copy it into any app.",
+        title: S::nav_text,
+        desc: S::t_hero_desc,
         lab: None,
         shortcut: copy_text,
         clips: |_| &["text"],
@@ -71,8 +73,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Translate,
         key: "translate",
-        title: "Translate",
-        desc: "Read your screen in your language, in place.",
+        title: S::nav_translate,
+        desc: S::tr_hero_desc,
         lab: None,
         shortcut: translate,
         clips: |_| &["translate-page", "translate-2", "translate-3"],
@@ -80,8 +82,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Ai,
         key: "ai",
-        title: "Ask AI",
-        desc: "Ask a question about what is on your screen.",
+        title: S::nav_ai,
+        desc: S::ai_hero_desc,
         lab: None,
         shortcut: ask,
         clips: ai_clips,
@@ -89,8 +91,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Snip,
         key: "snip",
-        title: "Snip",
-        desc: "Capture, mark up and copy a picture.",
+        title: S::nav_snip,
+        desc: S::s_hero_desc,
         lab: None,
         shortcut: snip,
         clips: |_| &["snip-blur", "snip-comment", "snip-long"],
@@ -99,8 +101,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Translate,
         key: "live",
-        title: "Live translate",
-        desc: "Follow game and video dialogue in your language.",
+        title: S::lb_live,
+        desc: S::lb_live_hero,
         lab: Some(Feature::Live),
         shortcut: live,
         clips: |_| &["live"],
@@ -108,8 +110,8 @@ pub const HEROES: [Hero; 7] = [
     Hero {
         page: Section::Song,
         key: "song",
-        title: "Song search",
-        desc: "Name a song playing on your PC or microphone.",
+        title: S::lb_song,
+        desc: S::lb_song_hero,
         lab: Some(Feature::Song),
         shortcut: song,
         clips: |_| &["song"],
@@ -188,7 +190,7 @@ pub fn clips(
 }
 
 /// The calm line under a stage whose download failed.
-pub const FAILED: &str = "Couldn't download the preview. Check your connection and try again.";
+pub const FAILED: S = S::c_preview_failed;
 
 /// The page's previews, `None` when it has none.
 pub fn view(state: &State) -> Option<Element<'_, Message>> {
@@ -200,25 +202,34 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
             let has_clip = player.is_some() || !chosen(h, &state.draft).is_empty();
             // the clips aren't on disk yet: the click that downloads them
             let play = match state.fetching.contains(&h.key) {
-                true => Some(("Downloading…", None)),
+                true => Some((t!(c_downloading), None)),
                 false => (player.is_some_and(|(_, p)| !p.on_disk()) && !reduced)
-                    .then_some(("Play preview", Some(Message::Fetch(h.key)))),
+                    .then_some((t!(c_play_preview), Some(Message::Fetch(h.key)))),
             };
             hero(hero::Hero {
-                title: h.title,
-                desc: h.desc,
+                title: tr(h.title),
+                desc: tr(h.desc),
                 lab: h.lab.is_some(),
                 keys: key_labels((h.shortcut)(&state.draft)),
                 shown,
                 toggle: has_clip.then_some(Message::Preview(h.key, !shown)),
                 play,
-                note: state.failed.contains(&h.key).then_some(FAILED),
+                note: state.failed.contains(&h.key).then_some(tr(FAILED)),
                 frame: player.and_then(|(_, p)| p.frame().cloned()),
                 width: (state.stage.clone(), state.scale, state.win_h),
                 pager: player.and_then(|(_, p)| {
                     let (at, n) = p.position();
                     (n > 1).then_some((at, n, Message::Step(h.key, -1), Message::Step(h.key, 1)))
                 }),
+                words: hero::Words {
+                    labs: t!(nav_labs),
+                    no_shortcut: t!(c_no_shortcut),
+                    hide: t!(c_hide_preview),
+                    show: t!(c_show_preview),
+                    preview: t!(c_preview),
+                    previous: t!(c_prev_preview),
+                    next: t!(c_next_preview),
+                },
             })
         })
         .collect();

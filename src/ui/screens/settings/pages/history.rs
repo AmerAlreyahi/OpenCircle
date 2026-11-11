@@ -3,7 +3,8 @@
 //! its switch, how many are kept and a Clear; then Clear all, which asks
 //! first. The switches live only here: Snip and AI link to this page.
 //! Counting and clearing run off the UI thread (`Outcome::History`).
-use iced::widget::{Space, column, row};
+use crate::t;
+use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Pick, Section, State};
@@ -14,7 +15,9 @@ use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
 
-const OFF_ON: [&str; 2] = ["Off", "On"];
+fn off_on() -> [&'static str; 2] {
+    [t!(c_off), t!(c_on)]
+}
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
@@ -22,9 +25,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let captures = row_of(
         state,
         Kind::Captures,
-        "Recent captures",
-        "The last 20 snips, on this PC only. Off deletes them",
-        boolean(OFF_ON, d.snip.history, d.snip.history, 1.0, move |on| {
+        t!(s_recent),
+        t!(h_captures_desc),
+        boolean(off_on(), d.snip.history, d.snip.history, 1.0, move |on| {
             Message::Snip(crate::config::SnipConfig {
                 history: on,
                 ..snip.clone()
@@ -38,9 +41,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let chats = row_of(
         state,
         Kind::Chats,
-        "Chat history",
-        "AI chats, text only, on this PC. Off deletes them",
-        boolean(OFF_ON, d.chat.keep_history, from, t, Message::KeepChats),
+        t!(ai_hist),
+        t!(h_chats_desc),
+        boolean(off_on(), d.chat.keep_history, from, t, Message::KeepChats),
     );
     column![captures, chats, clear_all(state)].into()
 }
@@ -55,19 +58,19 @@ fn row_of<'a>(
 ) -> Element<'a, Message> {
     let n = state.kept.map(|k| k.of(kind));
     let count = match n {
-        None => "Counting…".to_string(),
-        Some(0) => "Nothing kept".to_string(),
+        None => t!(h_counting).to_string(),
+        Some(0) => t!(h_none).to_string(),
         Some(1) => "1 kept".to_string(),
-        Some(n) => format!("{n} kept"),
+        Some(n) => crate::app_language::fmt(crate::app_language::S::h_kept, &[&n]),
     };
     let clear = button(
-        label("Clear"),
+        label(t!(h_clear)),
         Button::Remove,
         n.is_some_and(|n| n > 0)
             .then_some(Message::ClearHistory(kind)),
     );
-    let under =
-        row![sub(Role::ROW_DESC, count), Space::new().width(Fill), clear].align_y(iced::Center);
+    let under = crate::dir_row![sub(Role::ROW_DESC, count), Space::new().width(Fill), clear]
+        .align_y(iced::Center);
     let control = column![switch, under].spacing(space::GAP);
     setting_row::row(title(name), desc, control)
 }
@@ -75,40 +78,36 @@ fn row_of<'a>(
 /// Clear all: a quiet button; pressed, the row asks to be sure.
 fn clear_all(state: &State) -> Element<'_, Message> {
     if state.clearing_all {
-        let buttons = row![
+        let buttons = crate::dir_row![
             Space::new().width(Fill),
             button(
-                label("Cancel"),
+                label(t!(c_cancel)),
                 Button::Elevated,
                 Some(Message::KeepHistory)
             ),
             // the elevated button, its words in the danger colour
             button(
-                error(Role::CONTROL, "Delete all").line_height(1.5),
+                error(Role::CONTROL, t!(h_delete_all)).line_height(1.5),
                 Button::Elevated,
                 Some(Message::ClearAll(true)),
             ),
         ]
         .spacing(space::GAP)
         .align_y(iced::Center);
-        return setting_row::row(
-            title("Clear all"),
-            "Delete every kept capture and chat? This can't be undone",
-            buttons,
-        );
+        return setting_row::row(title(t!(h_all)), t!(h_delete_ask), buttons);
     }
     let any = state
         .kept
         .is_some_and(|k| Kind::ALL.iter().any(|&x| k.of(x) > 0));
     let ask = button(
-        label("Clear all…"),
+        label(t!(h_all_btn)),
         Button::Remove,
         any.then_some(Message::ClearAll(false)),
     );
     setting_row::row(
-        title("Clear all"),
-        "Every kept capture and chat on this PC",
-        row![Space::new().width(Fill), ask],
+        title(t!(h_all)),
+        t!(h_all_desc),
+        crate::dir_row![Space::new().width(Fill), ask],
     )
 }
 
@@ -116,9 +115,13 @@ fn clear_all(state: &State) -> Element<'_, Message> {
 /// button that opens History (Snip's Recent captures, AI's Chat history).
 pub fn link<'a>(name: &'a str, desc: &'a str) -> Element<'a, Message> {
     let open = button(
-        label("Open History"),
+        label(t!(c_open_history)),
         Button::Elevated,
         Some(Message::Section(Section::History)),
     );
-    setting_row::row(title(name), desc, row![Space::new().width(Fill), open])
+    setting_row::row(
+        title(name),
+        desc,
+        crate::dir_row![Space::new().width(Fill), open],
+    )
 }
