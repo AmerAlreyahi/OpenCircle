@@ -27,8 +27,14 @@ pub fn tag() -> String {
 
 /// The language the user reads: Windows' first display language (Settings >
 /// Language), else `LANGUAGE`'s first entry, else `tag`; "en" when there is
-/// none.
+/// none. The test hook `OPENCIRCLE_TEST_LANGUAGE` stands in for the OS's (the
+/// setup or onboarding in another language, without changing Windows').
 pub fn language() -> String {
+    if let Some(test) = super::test_hook("OPENCIRCLE_TEST_LANGUAGE")
+        && !test.is_empty()
+    {
+        return clean(&test.to_string_lossy());
+    }
     #[cfg(windows)]
     {
         use windows::System::UserProfile::GlobalizationPreferences;

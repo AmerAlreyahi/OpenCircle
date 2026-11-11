@@ -580,10 +580,15 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     {
         crate::log!("[opencircle] start with Windows: {e}");
     }
+    // in Windows' display language, as the setup window (no config is read)
+    let lang = crate::sys::locale::language();
+    crate::app_language::set(
+        crate::app_language::Lang::of(&lang).unwrap_or(crate::app_language::Lang::En),
+    );
     if !quiet
         && msi::ask_yes_no(
-            "Uninstall OpenCircle",
-            "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install.",
+            crate::app_language::tr(crate::app_language::S::su_uninstall_title),
+            crate::app_language::tr(crate::app_language::S::su_forget_ask),
         )
     {
         remove_user_data();

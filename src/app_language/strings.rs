@@ -1220,4 +1220,98 @@ strings! {
         | "يلزم مفتاح تعديل واحد على الأقل (Ctrl أو Alt أو Shift أو Super)";
     wn_empty: "See the release page for what changed."
         | "راجع صفحة الإصدار لمعرفة ما تغيّر.";
+
+    // ---------- added with the kit leftovers (the Setup and uninstall window; owner's check) ----------
+    su_window_title: "OpenCircle Setup"
+        | "إعداد OpenCircle";
+    su_title: "OpenCircle"
+        | "OpenCircle";
+    su_ready: "OpenCircle is ready"
+        | "OpenCircle جاهز";
+    su_intro: "Circle anything on your screen to search, read text, translate in place, or ask AI."
+        | "أحِط أي شيء على شاشتك بدائرة لتبحث عنه أو تقرأ نصه أو تترجمه في مكانه أو تسأل عنه الذكاء الاصطناعي.";
+    su_installed: "Installed cleanly. Press {} anytime to circle your screen."
+        | "اكتمل التثبيت. اضغط {} في أي وقت لتحيط شاشتك بدائرة.";
+    su_install: "Install OpenCircle"
+        | "تثبيت OpenCircle";
+    su_update: "Update OpenCircle"
+        | "تحديث OpenCircle";
+    su_repair: "Repair OpenCircle"
+        | "إصلاح OpenCircle";
+    su_customize: "Customize install"
+        | "تخصيص التثبيت";
+    su_for_everyone: "For everyone on this PC"
+        | "لكل مستخدمي هذا الجهاز";
+    su_replaces: "Updates v{} · keeps your settings"
+        | "يحدّث v{} · ويُبقي إعداداتك";
+    su_same: "Already installed · repairs it"
+        | "مثبّت بالفعل · سيُصلحه";
+    su_folder: "Folder"
+        | "المجلد";
+    su_preparing: "Preparing…"
+        | "جارٍ التحضير…";
+    su_copying: "Installing OpenCircle to your PC…"
+        | "جارٍ تثبيت OpenCircle على جهازك…";
+    su_finishing: "Finishing…"
+        | "جارٍ الإنهاء…";
+    su_launch: "Launch OpenCircle"
+        | "تشغيل OpenCircle";
+    su_starting: "Starting OpenCircle…"
+        | "جارٍ تشغيل OpenCircle…";
+    su_start_with_windows: "Start with Windows"
+        | "التشغيل مع بدء Windows";
+    su_pick_title: "Choose where to install OpenCircle"
+        | "اختر مكان تثبيت OpenCircle";
+    su_uninstall_title: "Uninstall OpenCircle"
+        | "إزالة OpenCircle";
+    su_uninstall_intro: "Removes OpenCircle from this PC. Your settings can stay for a later install."
+        | "يزيل OpenCircle من هذا الجهاز. يمكن أن تبقى إعداداتك لتثبيت لاحق.";
+    su_uninstall_intro_remove: "Removes OpenCircle from this PC, with its settings, models and keys."
+        | "يزيل OpenCircle من هذا الجهاز مع إعداداته ونماذجه ومفاتيحه.";
+    su_uninstall: "Uninstall"
+        | "إزالة";
+    su_your_data: "Settings, models and keys"
+        | "الإعدادات والنماذج والمفاتيح";
+    su_keep: "Keep"
+        | "إبقاء";
+    su_remove: "Remove"
+        | "إزالة";
+    su_removing: "Removing OpenCircle…"
+        | "جارٍ إزالة OpenCircle…";
+    su_removed: "OpenCircle was removed"
+        | "أُزيل OpenCircle";
+    su_removed_kept: "Your settings, models and keys are kept for a later install."
+        | "أُبقيت إعداداتك ونماذجك ومفاتيحك لتثبيت لاحق.";
+    su_removed_all: "Your settings, models and keys were removed too."
+        | "أُزيلت إعداداتك ونماذجك ومفاتيحك أيضًا.";
+    su_close: "Close"
+        | "إغلاق";
+    su_no_folder: "Choose a folder."
+        | "اختر مجلدًا.";
+    su_not_local: "Use a folder on this PC, like {}."
+        | "استخدم مجلدًا على هذا الجهاز، مثل {}.";
+    su_drive_root: "Choose a folder, not a whole drive."
+        | "اختر مجلدًا، لا قرصًا كاملًا.";
+    su_bad_character: "A folder name can't contain {}."
+        | "لا يمكن أن يحتوي اسم المجلد على {}.";
+    su_reserved: "Windows reserves that name. Choose another."
+        | "يحجز Windows هذا الاسم. اختر اسمًا آخر.";
+    su_too_long: "That path is too long. Choose a shorter one."
+        | "هذا المسار طويل جدًا. اختر مسارًا أقصر.";
+    su_err_cancelled: "Setup was cancelled."
+        | "أُلغي الإعداد.";
+    su_err_busy: "Another installation is running. Wait for it to finish, then try again."
+        | "يجري تثبيت آخر. انتظر حتى ينتهي ثم حاول مرة أخرى.";
+    su_err_denied: "Windows did not allow the install. Try again and choose Yes when Windows asks."
+        | "لم يسمح Windows بالتثبيت. حاول مرة أخرى واختر «نعم» عندما يسأل Windows.";
+    su_err_other_version: "Another version of OpenCircle is installed. Remove it in Settings > Apps first."
+        | "إصدار آخر من OpenCircle مثبّت. أزله أولًا من الإعدادات > التطبيقات.";
+    su_err_code: "Setup could not finish (Windows Installer error {})."
+        | "تعذّر إكمال الإعداد (خطأ Windows Installer رقم {}).";
+    su_err_windows_only: "The setup runs on Windows only."
+        | "يعمل الإعداد على Windows فقط.";
+    su_not_started: "OpenCircle did not start. Start it from the Start menu."
+        | "لم يبدأ OpenCircle. شغّله من قائمة ابدأ.";
+    su_forget_ask: "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install."
+        | "هل تريد أيضًا إزالة إعدادات OpenCircle والنماذج التي نزّلتها والمفاتيح المحفوظة؟\n\nاختر «لا» لإبقائها لتثبيت لاحق.";
 }

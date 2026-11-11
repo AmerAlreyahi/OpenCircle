@@ -218,6 +218,10 @@ iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 # coming: a box drawn across two screens moved on the other screen only after
 # the drag (2 frames in a second's drag). "OpenCircle patch" in its src/lib.rs.
 iced_winit = { path = "vendor/iced_winit" }
+# iced 0.14's graphics core with one fix (`text::align`, "OpenCircle patch" in its src/text.rs):
+# a one-line right-to-left text with an alignment (an Arabic centred line) was placed twice by
+# it and drawn past its box. Drop once upstream has it.
+iced_graphics = { path = "vendor/iced_graphics" }
 # cosmic-text 0.15.0 (iced's text engine) with one fix: a wrapped line broke only inside a run of
 # one direction, so the first word of the next run (a Latin name in an Arabic line, and back)
 # stayed on a full line, past the width: Arabic descriptions drawn past their column. "OpenCircle

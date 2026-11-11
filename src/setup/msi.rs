@@ -17,8 +17,8 @@ use super::Installed;
 pub enum Event {
     /// 0..1 of the way.
     Progress(f32),
-    /// Finished: done, or why not (a sentence for the user).
-    Done(Result<(), String>),
+    /// Finished: done, or why not (the window words it).
+    Done(Result<(), Fault>),
 }
 
 /// The MSI on disk while the setup runs, in a folder of its own that goes with it.
@@ -149,25 +149,53 @@ impl Progress {
     }
 }
 
-/// `MsiInstallProduct`'s answer as a sentence; `last` = the installer's last
-/// error message, if it sent one.
-pub fn outcome(code: u32, last: Option<&str>) -> Result<(), String> {
+/// Why an install or uninstall did not finish (the setup window words it in
+/// its language; `Display` is the English, for the log).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fault {
+    Cancelled,
+    /// Another installation is running.
+    Busy,
+    /// Windows did not allow it (the UAC prompt was refused).
+    Denied,
+    /// Another version of the product is installed.
+    OtherVersion,
+    /// Windows Installer's own last message (in Windows' language).
+    Said(String),
+    /// Windows Installer's error code, with no message.
+    Code(u32),
+    /// Not on Windows.
+    #[cfg(not(windows))]
+    WindowsOnly,
+}
+
+impl std::fmt::Display for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Fault::Cancelled => f.write_str("Setup was cancelled."),
+            Fault::Busy => f.write_str("Another installation is running."),
+            Fault::Denied => f.write_str("Windows did not allow the install."),
+            Fault::OtherVersion => f.write_str("Another version of OpenCircle is installed."),
+            Fault::Said(text) => f.write_str(text),
+            Fault::Code(code) => write!(f, "Windows Installer error {code}."),
+            #[cfg(not(windows))]
+            Fault::WindowsOnly => f.write_str("The setup runs on Windows only."),
+        }
+    }
+}
+
+/// `MsiInstallProduct`'s answer; `last` = the installer's last error
+/// message, if it sent one.
+pub fn outcome(code: u32, last: Option<&str>) -> Result<(), Fault> {
     match code {
         0 | 3010 | 1641 => Ok(()), // done (3010 / 1641: Windows wants a restart)
-        1602 | 1223 => Err("Setup was cancelled.".into()),
-        1618 => {
-            Err("Another installation is running. Wait for it to finish, then try again.".into())
-        }
-        1625 => Err(
-            "Windows did not allow the install. Try again and choose Yes when Windows asks.".into(),
-        ),
-        1638 => Err(
-            "Another version of OpenCircle is installed. Remove it in Settings > Apps first."
-                .into(),
-        ),
+        1602 | 1223 => Err(Fault::Cancelled),
+        1618 => Err(Fault::Busy),
+        1625 => Err(Fault::Denied),
+        1638 => Err(Fault::OtherVersion),
         _ => Err(match last {
-            Some(text) if !text.trim().is_empty() => text.trim().to_string(),
-            _ => format!("Setup could not finish (Windows Installer error {code})."),
+            Some(text) if !text.trim().is_empty() => Fault::Said(text.trim().to_string()),
+            _ => Fault::Code(code),
         }),
     }
 }
@@ -189,12 +217,12 @@ pub fn installed(_: &Package) -> Option<Installed> {
 
 #[cfg(not(windows))]
 pub fn install(_: &Package, _: &str, _: bool, report: &dyn Fn(Event)) {
-    report(Event::Done(Err("The setup runs on Windows only.".into())));
+    report(Event::Done(Err(Fault::WindowsOnly)));
 }
 
 #[cfg(not(windows))]
 pub fn uninstall(_: &str, report: &dyn Fn(Event)) {
-    report(Event::Done(Err("The setup runs on Windows only.".into())));
+    report(Event::Done(Err(Fault::WindowsOnly)));
 }
 
 #[cfg(not(windows))]
@@ -236,9 +264,9 @@ mod win {
         KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_MENU, keybd_event,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, IDYES, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST,
-        MB_YESNO, MessageBoxW, SetForegroundWindow, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
-        WS_VISIBLE,
+        CreateWindowExW, DestroyWindow, IDYES, MB_ICONQUESTION, MB_RIGHT, MB_RTLREADING,
+        MB_SETFOREGROUND, MB_TOPMOST, MB_YESNO, MESSAGEBOX_STYLE, MessageBoxW, SetForegroundWindow,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
     };
     use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
@@ -509,7 +537,15 @@ mod win {
                 owner,
                 &HSTRING::from(text),
                 &HSTRING::from(title),
-                MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND,
+                MB_YESNO
+                    | MB_ICONQUESTION
+                    | MB_TOPMOST
+                    | MB_SETFOREGROUND
+                    // right to left (Arabic): read and laid out from the right
+                    | match crate::app_language::rtl() {
+                        true => MB_RTLREADING | MB_RIGHT,
+                        false => MESSAGEBOX_STYLE(0),
+                    },
             );
             if let Some(owner) = owner {
                 let _ = DestroyWindow(owner);
@@ -552,23 +588,21 @@ mod tests {
     }
 
     #[test]
-    fn install_results_read_as_sentences() {
+    fn install_results_read_as_faults() {
         assert_eq!(outcome(0, None), Ok(()));
         assert_eq!(outcome(3010, None), Ok(()));
-        assert_eq!(outcome(1602, None), Err("Setup was cancelled.".into()));
-        assert!(
-            outcome(1618, None)
-                .unwrap_err()
-                .contains("Another installation")
-        );
+        assert_eq!(outcome(1602, None), Err(Fault::Cancelled));
+        assert_eq!(outcome(1618, None), Err(Fault::Busy));
         assert_eq!(
             outcome(
                 1603,
                 Some(" A newer version of OpenCircle is already installed. ")
             ),
-            Err("A newer version of OpenCircle is already installed.".into())
+            Err(Fault::Said(
+                "A newer version of OpenCircle is already installed.".into()
+            ))
         );
-        assert!(outcome(1603, None).unwrap_err().contains("1603"));
+        assert_eq!(outcome(1603, None), Err(Fault::Code(1603)));
     }
 
     #[test]

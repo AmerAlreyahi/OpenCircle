@@ -3,19 +3,22 @@
 //! Install (folder under "Customize install") → progress → Launch, with "Start
 //! with Windows" on the last step. Composed from kit parts; the blurs the CPU
 //! renderer can't draw (the emblem's halo, the buttons' glow) are baked
-//! images (`scripts/installer-art.py`). Every string is in `EN` (one table to
-//! translate; rows use Fill spacers, no fixed x, so they can mirror for Arabic).
+//! images (`scripts/installer-art.py`). Every string is in the app's string
+//! table (`su_*`); there is no config at install time, so the window speaks
+//! Windows' display language (`language`): Arabic is mirrored by `kit::dir`.
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use iced::widget::image::Handle;
 use iced::widget::text::LineHeight;
-use iced::widget::{Space, column, container, image, row, stack, text};
+use iced::widget::{Space, column, container, image, stack, text};
 use iced::window;
 use iced::{Center, Element, Fill, Padding, Size, Subscription, Task};
 
-use crate::setup::msi::{self, Package};
+use crate::app_language::{Lang, S, fmt, tr};
+use crate::dir_row;
+use crate::setup::msi::{self, Fault, Package};
 use crate::setup::{self as setup_core, BadFolder, Installed};
 use crate::ui::kit::button::{self, Kind, cta_label};
 use crate::ui::kit::divider::divider;
@@ -86,112 +89,37 @@ const PANEL_BOTTOM: f32 = 8.0;
 const META: f32 = 11.0;
 const CHEVRON: f32 = 10.0;
 
-/// Every user-visible string (English; an Arabic table goes beside it).
-struct Strings {
-    window_title: &'static str,
-    title: &'static str,
-    ready: &'static str,
-    intro: &'static str,
-    /// `{}` = the capture shortcut.
-    installed: &'static str,
-    install: &'static str,
-    update: &'static str,
-    repair: &'static str,
-    customize: &'static str,
-    for_everyone: &'static str,
-    /// `{}` = the installed version.
-    replaces: &'static str,
-    same: &'static str,
-    folder: &'static str,
-    browse: &'static str,
-    preparing: &'static str,
-    copying: &'static str,
-    finishing: &'static str,
-    try_again: &'static str,
-    launch: &'static str,
-    starting: &'static str,
-    start_with_windows: &'static str,
-    off: &'static str,
-    on: &'static str,
-    pick_title: &'static str,
-    uninstall_title: &'static str,
-    uninstall_intro: &'static str,
-    uninstall_intro_remove: &'static str,
-    uninstall: &'static str,
-    your_data: &'static str,
-    keep: &'static str,
-    remove: &'static str,
-    removing: &'static str,
-    removed: &'static str,
-    removed_kept: &'static str,
-    removed_all: &'static str,
-    close: &'static str,
-    no_folder: &'static str,
-    not_local: &'static str,
-    drive_root: &'static str,
-    bad_character: &'static str,
-    reserved: &'static str,
-    too_long: &'static str,
-}
-
-const EN: Strings = Strings {
-    window_title: "OpenCircle Setup",
-    title: "OpenCircle",
-    ready: "OpenCircle is ready",
-    intro: "Circle anything on your screen to search, read text, translate in place, or ask AI.",
-    installed: "Installed cleanly. Press {} anytime to circle your screen.",
-    install: "Install OpenCircle",
-    update: "Update OpenCircle",
-    repair: "Repair OpenCircle",
-    customize: "Customize install",
-    for_everyone: "For everyone on this PC",
-    replaces: "Updates v{} · keeps your settings",
-    same: "Already installed · repairs it",
-    folder: "Folder",
-    browse: "…",
-    preparing: "Preparing…",
-    copying: "Installing OpenCircle to your PC…",
-    finishing: "Finishing…",
-    try_again: "Try again",
-    launch: "Launch OpenCircle",
-    starting: "Starting OpenCircle…",
-    start_with_windows: "Start with Windows",
-    off: "Off",
-    on: "On",
-    pick_title: "Choose where to install OpenCircle",
-    uninstall_title: "Uninstall OpenCircle",
-    uninstall_intro: "Removes OpenCircle from this PC. Your settings can stay for a later install.",
-    uninstall_intro_remove: "Removes OpenCircle from this PC, with its settings, models and keys.",
-    uninstall: "Uninstall",
-    your_data: "Settings, models and keys",
-    keep: "Keep",
-    remove: "Remove",
-    removing: "Removing OpenCircle…",
-    removed: "OpenCircle was removed",
-    removed_kept: "Your settings, models and keys are kept for a later install.",
-    removed_all: "Your settings, models and keys were removed too.",
-    close: "Close",
-    no_folder: "Choose a folder.",
-    not_local: r"Use a folder on this PC, like C:\Program Files\OpenCircle.",
-    drive_root: "Choose a folder, not a whole drive.",
-    bad_character: "A folder name can't contain < > : \" | ? or *.",
-    reserved: "Windows reserves that name. Choose another.",
-    too_long: "That path is too long. Choose a shorter one.",
-};
-
-fn fill(template: &str, value: &str) -> String {
-    template.replacen("{}", value, 1)
-}
-
-fn why(bad: BadFolder) -> &'static str {
+fn why(bad: BadFolder) -> String {
     match bad {
-        BadFolder::Empty => EN.no_folder,
-        BadFolder::NotLocal => EN.not_local,
-        BadFolder::DriveRoot => EN.drive_root,
-        BadFolder::BadCharacter => EN.bad_character,
-        BadFolder::ReservedName => EN.reserved,
-        BadFolder::TooLong => EN.too_long,
+        BadFolder::Empty => tr(S::su_no_folder).into(),
+        BadFolder::NotLocal => fmt(S::su_not_local, &[&r"C:\Program Files\OpenCircle"]),
+        BadFolder::DriveRoot => tr(S::su_drive_root).into(),
+        BadFolder::BadCharacter => fmt(S::su_bad_character, &[&"< > : \" | ? *"]),
+        BadFolder::ReservedName => tr(S::su_reserved).into(),
+        BadFolder::TooLong => tr(S::su_too_long).into(),
     }
+}
+
+/// Why it did not finish, in the window's language (Windows Installer's own
+/// message as it said it: Windows words it in its language).
+fn words(fault: &Fault) -> String {
+    match fault {
+        Fault::Cancelled => tr(S::su_err_cancelled).into(),
+        Fault::Busy => tr(S::su_err_busy).into(),
+        Fault::Denied => tr(S::su_err_denied).into(),
+        Fault::OtherVersion => tr(S::su_err_other_version).into(),
+        Fault::Said(text) => text.clone(),
+        Fault::Code(code) => fmt(S::su_err_code, &[code]),
+        #[cfg(not(windows))]
+        Fault::WindowsOnly => tr(S::su_err_windows_only).into(),
+    }
+}
+
+/// The language the window speaks: Windows' display language when the app
+/// has it (Arabic), else English (`OPENCIRCLE_TEST_LANGUAGE` stands in for
+/// Windows' in tests: `sys::locale::language`).
+fn language() -> Lang {
+    Lang::of(&crate::sys::locale::language()).unwrap_or(Lang::En)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,7 +127,7 @@ enum Step {
     Configure,
     Installing,
     Finish,
-    Failed(String),
+    Failed(Fault),
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +197,7 @@ pub struct State {
 
 /// The setup's whole program: the window until it closes.
 pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
+    crate::app_language::set(language());
     let started = std::time::Instant::now();
     let package = match Package::write(msi_bytes) {
         Ok(p) => Arc::new(p),
@@ -308,6 +237,7 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
 /// The uninstall window (`setup::uninstall_ui`): removes the installed product
 /// `code` from `folder`, and the user's data too if they choose so.
 pub fn run_uninstall(code: String, folder: String) -> iced::Result {
+    crate::app_language::set(language());
     let (config, _) = crate::config::Config::peek();
     let shown = Config {
         shortcut: config.shortcut,
@@ -346,8 +276,8 @@ fn show(make: impl Fn() -> State + 'static) -> iced::Result {
     }
     app.default_font(ui_font())
         .title(|s: &State, _| match s.uninstall {
-            Some(_) => EN.uninstall_title.to_string(),
-            None => EN.window_title.to_string(),
+            Some(_) => tr(S::su_uninstall_title).to_string(),
+            None => tr(S::su_window_title).to_string(),
         })
         .theme(|_: &State, _| Some(theme()))
         .subscription(State::subscription)
@@ -530,7 +460,7 @@ impl State {
             Message::Browse => {
                 let start = PathBuf::from(&self.folder);
                 crate::ui::app::background::background(move |tx| {
-                    let mut dialog = rfd::FileDialog::new().set_title(EN.pick_title);
+                    let mut dialog = rfd::FileDialog::new().set_title(tr(S::su_pick_title));
                     if let Some(parent) = start.parent().filter(|p| p.is_dir()) {
                         dialog = dialog.set_directory(parent);
                     }
@@ -589,7 +519,10 @@ impl State {
                 Task::none()
             }
             Message::Msi(msi::Event::Done(Ok(()))) => self.go(Step::Finish),
-            Message::Msi(msi::Event::Done(Err(why))) => self.go(Step::Failed(why)),
+            Message::Msi(msi::Event::Done(Err(why))) => {
+                crate::log!("[opencircle] setup: did not finish: {why}");
+                self.go(Step::Failed(why))
+            }
             Message::Retry => self.go(Step::Configure),
             Message::Autostart(on) => {
                 if on != self.autostart {
@@ -608,8 +541,9 @@ impl State {
             },
             Message::Left(Ok(())) => self.close(),
             Message::Left(Err(why)) => {
+                crate::log!("[opencircle] setup: {why}");
                 self.leaving = false;
-                self.launch_error = Some(why);
+                self.launch_error = Some(tr(S::su_not_started).into());
                 Task::none()
             }
         }
@@ -652,6 +586,7 @@ impl State {
     }
 
     pub fn view(&self, _: window::Id) -> Element<'_, Message> {
+        let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
         let rise = RISE * (1.0 - motion::progress(self.risen, self.now, motion::MORPH, Curve::Out));
         // the window's inside is 418 px (a 1 px rim): backdrop, glow, content
         let backdrop = column![
@@ -696,13 +631,13 @@ impl State {
     fn intro(&self) -> String {
         let (uninstall, finished) = (self.uninstall.is_some(), self.step == Step::Finish);
         match (&self.launch_error, finished) {
-            _ if uninstall && finished && self.remove_data => EN.removed_all.to_string(),
-            _ if uninstall && finished => EN.removed_kept.to_string(),
-            _ if uninstall && self.remove_data => EN.uninstall_intro_remove.to_string(),
-            _ if uninstall => EN.uninstall_intro.to_string(),
+            _ if uninstall && finished && self.remove_data => tr(S::su_removed_all).to_string(),
+            _ if uninstall && finished => tr(S::su_removed_kept).to_string(),
+            _ if uninstall && self.remove_data => tr(S::su_uninstall_intro_remove).to_string(),
+            _ if uninstall => tr(S::su_uninstall_intro).to_string(),
             (Some(why), true) => why.clone(),
-            (None, true) => fill(EN.installed, &self.shortcut),
-            (_, false) => EN.intro.to_string(),
+            (None, true) => fmt(S::su_installed, &[&self.shortcut]),
+            (_, false) => tr(S::su_intro).to_string(),
         }
     }
 
@@ -710,12 +645,12 @@ impl State {
         let finished = self.step == Step::Finish;
         let uninstall = self.uninstall.is_some();
         let heading = match (uninstall, finished) {
-            (true, true) => EN.removed,
-            (true, false) => EN.uninstall_title,
-            (false, true) => EN.ready,
-            (false, false) => EN.title,
+            (true, true) => tr(S::su_removed),
+            (true, false) => tr(S::su_uninstall_title),
+            (false, true) => tr(S::su_ready),
+            (false, false) => tr(S::su_title),
         };
-        let title = row![
+        let title = dir_row![
             ktext::text(Role::APP_NAME, heading),
             chip::chip(format!("v{}", self.version)),
         ]
@@ -793,11 +728,11 @@ impl State {
     fn action(&self) -> Element<'_, Message> {
         match &self.step {
             Step::Configure if self.uninstall.is_some() => {
-                let data = row![
-                    ktext::sub(Role::ROW_DESC, EN.your_data),
+                let data = dir_row![
+                    ktext::sub(Role::ROW_DESC, tr(S::su_your_data)),
                     Space::new().width(Fill),
                     segmented::inline_boolean(
-                        [EN.keep, EN.remove],
+                        [tr(S::su_keep), tr(S::su_remove)],
                         self.remove_data,
                         self.data_glide.0,
                         motion::progress(
@@ -812,7 +747,7 @@ impl State {
                 .align_y(Center);
                 column![
                     cta(
-                        cta_label(EN.uninstall, None),
+                        cta_label(tr(S::su_uninstall), None),
                         Kind::Danger,
                         Message::Install
                     ),
@@ -823,34 +758,38 @@ impl State {
                 ]
                 .into()
             }
-            Step::Finish if self.uninstall.is_some() => {
-                cta(cta_label(EN.close, None), Kind::Accent, Message::Close)
-            }
+            Step::Finish if self.uninstall.is_some() => cta(
+                cta_label(tr(S::su_close), None),
+                Kind::Accent,
+                Message::Close,
+            ),
             Step::Configure => {
                 let label = match &self.installed {
-                    None => EN.install,
-                    Some(i) if i.same => EN.repair,
-                    Some(_) => EN.update,
+                    None => tr(S::su_install),
+                    Some(i) if i.same => tr(S::su_repair),
+                    Some(_) => tr(S::su_update),
                 };
                 let status = match &self.installed {
-                    None => EN.for_everyone.to_string(),
-                    Some(i) if i.same => EN.same.to_string(),
-                    Some(i) => fill(EN.replaces, &i.version),
+                    None => tr(S::su_for_everyone).to_string(),
+                    Some(i) if i.same => tr(S::su_same).to_string(),
+                    Some(i) => fmt(S::su_replaces, &[&i.version]),
                 };
                 let chevron = if self.open { "▴" } else { "▾" };
                 let customize = link(
-                    row![
-                        text(EN.customize).size(Role::ROW_DESC.size),
+                    dir_row![
+                        text(tr(S::su_customize))
+                            .size(ktext::size(Role::ROW_DESC))
+                            .font(ktext::font(Role::ROW_DESC)),
                         text(chevron).font(ktext::MONO).size(CHEVRON),
                     ]
                     .spacing(space::GAP)
                     .align_y(Center),
                     Message::Customize,
                 );
-                let below = row![
+                let below = dir_row![
                     customize,
                     Space::new().width(Fill),
-                    row![chip::dot(SUCCESS), muted(status)]
+                    dir_row![chip::dot(SUCCESS), muted(status)]
                         .spacing(space::GAP)
                         .align_y(Center),
                 ]
@@ -874,13 +813,13 @@ impl State {
             Step::Installing => {
                 let share = self.bar_at();
                 let stage = match self.bar.1 {
-                    _ if self.uninstall.is_some() => EN.removing,
-                    s if s < 0.38 => EN.preparing,
-                    s if s < 0.78 => EN.copying,
-                    _ => EN.finishing,
+                    _ if self.uninstall.is_some() => tr(S::su_removing),
+                    s if s < 0.38 => tr(S::su_preparing),
+                    s if s < 0.78 => tr(S::su_copying),
+                    _ => tr(S::su_finishing),
                 };
                 let progress = panel(column![
-                    row![
+                    dir_row![
                         ktext::sub(Role::CONTROL, stage),
                         Space::new().width(Fill),
                         ktext::accent(Role::FIGURE, format!("{}%", (share * 100.0).round())),
@@ -898,11 +837,11 @@ impl State {
                 .into()
             }
             Step::Failed(why) => {
-                let message = container(ktext::error(Role::NOTE, why).width(Fill))
+                let message = container(ktext::error(Role::NOTE, words(why)).width(Fill))
                     .height(FAILED_H)
                     .center_y(FAILED_H);
                 let retry = link(
-                    text(EN.try_again).size(META).font(ui_font()),
+                    text(tr(S::md_try_again)).size(META).font(ui_font()),
                     Message::Retry,
                 );
                 column![
@@ -913,17 +852,28 @@ impl State {
                 .into()
             }
             Step::Finish => {
-                let label = row![
-                    cta_label(if self.leaving { EN.starting } else { EN.launch }, None),
-                    ktext::text(Role::CTA, "→").color(ON_ACCENT),
+                let starting = tr(if self.leaving {
+                    S::su_starting
+                } else {
+                    S::su_launch
+                });
+                // the arrow points the way the line reads
+                let arrow = if crate::ui::kit::dir::rtl() {
+                    "←"
+                } else {
+                    "→"
+                };
+                let label = dir_row![
+                    cta_label(starting, None),
+                    ktext::text(Role::CTA, arrow).color(ON_ACCENT),
                 ]
                 .spacing(TITLE_GAP)
                 .align_y(Center);
-                let start = row![
-                    ktext::sub(Role::ROW_DESC, EN.start_with_windows),
+                let start = dir_row![
+                    ktext::sub(Role::ROW_DESC, tr(S::su_start_with_windows)),
                     Space::new().width(Fill),
                     segmented::inline_boolean(
-                        [EN.off, EN.on],
+                        [tr(S::c_off), tr(S::c_on)],
                         self.autostart,
                         self.autostart_glide.0,
                         motion::progress(
@@ -955,7 +905,7 @@ impl State {
             true => format!("{}…", self.folder.chars().take(MAX).collect::<String>()),
             false => self.folder.clone(),
         };
-        let mut line = row![muted(path).font(ktext::MONO), Space::new().width(Fill)]
+        let mut line = dir_row![muted(path).font(ktext::MONO), Space::new().width(Fill)]
             .padding([0.0, LINE_X])
             .height(PATH_H)
             .align_y(Center);
@@ -969,12 +919,12 @@ impl State {
     fn drawer(&self) -> Element<'_, Message> {
         let locked = self.folder_locked();
         let on_input = (!locked).then_some(Message::Folder);
-        let folder = row![
-            ktext::sub(Role::ROW_DESC, EN.folder),
-            row![
+        let folder = dir_row![
+            ktext::sub(Role::ROW_DESC, tr(S::su_folder)),
+            dir_row![
                 container(field(&self.folder, on_input, Message::Install)).width(Fill),
                 button::button(
-                    button::label(EN.browse),
+                    button::label("…"),
                     Kind::Elevated,
                     (!locked).then_some(Message::Browse)
                 ),
@@ -1108,9 +1058,7 @@ mod tests {
         installing.step = Step::Installing;
         installing.bar = (0.46, 0.46, installing.now);
         let mut failed = state(None);
-        failed.step = Step::Failed(
-            "Another installation is running. Wait for it to finish, then try again.".into(),
-        );
+        failed.step = Step::Failed(Fault::Busy);
         let mut finish = state(None);
         finish.step = Step::Finish;
         // Start with Windows turned off (the thumb on the first pill)
@@ -1175,6 +1123,34 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
+    /// Each setup screen in Arabic (Windows' display language Arabic):
+    /// mirrored, the table's words, dark and light, at 100 %; no text drawn
+    /// past its box.
+    #[test]
+    fn every_screen_in_arabic_matches_its_golden_image() {
+        use crate::app_language::{self, Lang};
+        app_language::set(Lang::Ar);
+        let mut failed = Vec::new();
+        for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))
+            .chain(screens().into_iter().map(|n| (n, true)))
+        {
+            set_light(light);
+            let name = match light {
+                true => format!("{name}-ar-light"),
+                false => format!("{name}-ar"),
+            };
+            let size = Size::new(WIDTH, s.height());
+            failed.extend(golden::check("setup", &name, size, &[1.0], || {
+                s.view(window::Id::unique())
+            }));
+            let past = shot::drawn_past_their_box(s.view(window::Id::unique()), size);
+            failed.extend(past.into_iter().map(|p| format!("{name}: {p}")));
+        }
+        set_light(false);
+        app_language::set(Lang::En);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
     #[test]
     fn no_text_is_cut_off_on_any_screen() {
         for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))
@@ -1205,8 +1181,8 @@ mod tests {
         s.step = Step::Installing;
         let _ = s.update(Message::Msi(msi::Event::Progress(0.5)));
         assert_eq!(s.bar.1, 0.5);
-        let _ = s.update(Message::Msi(msi::Event::Done(Err("no".into()))));
-        assert_eq!(s.step, Step::Failed("no".into()));
+        let _ = s.update(Message::Msi(msi::Event::Done(Err(Fault::Cancelled))));
+        assert_eq!(s.step, Step::Failed(Fault::Cancelled));
         let _ = s.update(Message::Retry);
         assert_eq!(s.step, Step::Configure);
         let _ = s.update(Message::Msi(msi::Event::Done(Ok(()))));
@@ -1231,9 +1207,9 @@ mod tests {
         let _ = s.update(Message::Launch);
         assert!(started.elapsed() < std::time::Duration::from_millis(500));
         assert!(s.leaving);
-        let _ = s.update(Message::Left(Err("OpenCircle did not start.".into())));
+        let _ = s.update(Message::Left(Err("did not answer".into())));
         assert!(!s.leaving, "Launch can be pressed again");
-        assert_eq!(s.launch_error.as_deref(), Some("OpenCircle did not start."));
+        assert_eq!(s.launch_error.as_deref(), Some(tr(S::su_not_started)));
         assert_eq!(s.step, Step::Finish);
     }
 
@@ -1275,7 +1251,7 @@ mod tests {
         s.uninstall = Some("{046BC980-BD0C-45D2-B990-202898DD0BAD}".into());
         s.finish = |_, _, _, _| panic!("the uninstall keeps no choice and starts nothing");
         assert!(!s.remove_data, "keeps the data unless asked");
-        assert_eq!(s.intro(), EN.uninstall_intro);
+        assert_eq!(s.intro(), tr(S::su_uninstall_intro));
         let _ = s.update(Message::RemoveData(true));
         assert!(
             !s.intro().contains("can stay"),
