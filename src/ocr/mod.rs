@@ -514,9 +514,6 @@ pub struct Engine {
     recs: Vec<(usize, TextRecognitionPredictor)>,
     /// `Auto`'s first try: the recognizer that read most lines last time.
     auto: usize,
-    /// The screen being read has lines of two scripts: two recognizers stay
-    /// loaded (else one: a second held a 3440 screen's helper ~40 MB higher).
-    two: bool,
     /// The last Latin and non-Latin recognizers that read most lines.
     latin: usize,
     other: Option<usize>,
@@ -541,7 +538,9 @@ pub(crate) struct Frame {
     grid: Option<Grid>,
     /// Every line to read was read (`ScreenRead::done`).
     done: bool,
-    /// Lines of a Latin and a non-Latin script were kept (`Engine::two`).
+    /// Lines of a Latin and a non-Latin script were kept: both recognizers
+    /// stay loaded between its parts (else the one that read nothing is
+    /// freed after each part: a second held a 3440 helper ~40 MB higher).
     two: bool,
     /// `ScreenRead::noise` of the last part read.
     noise: u32,
@@ -626,7 +625,6 @@ impl Engine {
             auto: 0,
             latin: 0,
             other: None,
-            two: false,
             frame: None,
         })
     }
@@ -637,7 +635,7 @@ impl Engine {
             let rec = self.recs.remove(k);
             self.recs.push(rec);
         } else {
-            if self.recs.len() > usize::from(self.two) {
+            if self.recs.len() >= 2 {
                 self.recs.remove(0); // freed before the next one loads
             }
             let files = models::RECOGNIZERS[i];
@@ -724,7 +722,6 @@ impl Engine {
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let (w, h) = f.img.dimensions();
-        self.two = f.two;
         let installed = |i: usize| models::installed(models::RECOGNIZERS[i]);
         let script = |i: usize| models::RECOGNIZERS[i].script();
         let mut others: Vec<usize> = (0..models::RECOGNIZERS.len())
@@ -799,8 +796,12 @@ impl Engine {
                 }
                 let lines: Vec<[f32; 4]> = left.iter().map(|(b, _)| *b).collect();
                 fallback.extend(left.into_iter().filter_map(|(_, r)| r));
-                let grid = self.grid(f, rows)?;
-                few(strips(h, grid.owned, rows), lines, boxes.len())
+                // (the grid only when strips are needed: it may find a band)
+                let strips = match lines.len() * 5 <= boxes.len() {
+                    true => Vec::new(),
+                    false => strips(h, self.grid(f, rows)?.owned, rows),
+                };
+                few(strips, lines, boxes.len())
             }
             // found shrunk first (cheap): only the strips with lines left
             // are found again at full size
@@ -811,8 +812,11 @@ impl Engine {
                 // (judged on the whole screen: a few left are read all at
                 // once, in one run, whatever the rows; the English page's
                 // second reader read them band by band in 1641 ms, at once 963)
-                let grid = self.grid(f, rows)?;
-                match few(strips(h, grid.owned, rows), left, all) {
+                let strips = match left.len() * 5 <= all {
+                    true => Vec::new(),
+                    false => strips(h, self.grid(f, rows)?.owned, rows),
+                };
+                match few(strips, left, all) {
                     (full, direct) if full.is_empty() => {
                         let direct: Vec<[f32; 4]> = (direct.into_iter())
                             .filter(|b| !f.read.contains(b))
@@ -899,11 +903,10 @@ impl Engine {
             (0..count.len()).any(|i| count[i] > 0 && (script(i) == Script::Latin) == latin)
         };
         f.two |= kept_by(true) && kept_by(false);
-        self.two = f.two;
         if let Some(best) = most.max_by_key(|&i| count[i]) {
             // (one script on this screen so far: the other reader's memory
             // goes back, #169: two loaded held 3440's peak 7-45 % over main's)
-            if !self.two {
+            if !f.two {
                 self.recs.retain(|(i, _)| count[*i] > 0);
             }
             self.auto = best;
@@ -1151,8 +1154,11 @@ impl Engine {
     fn full(&mut self, f: &mut Frame, strips: &[(u32, u32)]) -> Result<Vec<[f32; 4]>, OcrError> {
         let grid = self.grid(f, None)?;
         let mut out = Vec::new();
-        if grid.shrunk {
-            // large text: the shrunk lines are found well (no strip again)
+        if grid.shrunk && f.shrunk.is_some() {
+            // large text: the shrunk lines are found well (no strip again);
+            // not found yet (Linux bands): strips at that scale instead (the
+            // whole screen found shrunk held a 150 % helper at 309 MB, main's
+            // bands 202)
             let owns = |b: &&[f32; 4]| {
                 let middle = b[1] + b[3] / 2.0;
                 strips
