@@ -687,7 +687,7 @@ impl App {
         let read = self.read_more(); // its text, once the starting screen's is read
         open.discard()
             .chain(place_window(id, place))
-            .chain(window::set_mode(id, Mode::Fullscreen))
+            .chain(windows::show(id, Mode::Fullscreen))
             .chain(window::gain_focus(self.overlay))
             .chain(read)
     }

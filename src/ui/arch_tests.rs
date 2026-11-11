@@ -301,6 +301,24 @@ fn one_scrollbar_and_one_dropdown() {
     assert!(found.is_empty(), "{found:#?}");
 }
 
+/// Our windows are shown by `platform::windows::show` (X11: "always on top"
+/// again once mapped, #172). The overlay's hiding (update.rs) leaves full-screen
+/// on its way out, not to show it.
+#[test]
+fn only_the_window_helper_shows_windows() {
+    for (name, src) in sources("") {
+        if ["platform/windows.rs", "app/update.rs", "arch_tests.rs"].contains(&name.as_str()) {
+            continue;
+        }
+        for l in code(&src) {
+            assert!(
+                !(l.contains("set_mode(") && (l.contains("Windowed") || l.contains("Fullscreen"))),
+                "{name}: show a window with windows::show: {l}"
+            );
+        }
+    }
+}
+
 /// Every runtime resize of our windows goes through `platform::monitor::resize`
 /// (Wayland sends no `Resized` for a program's resize: one place to handle it).
 #[test]

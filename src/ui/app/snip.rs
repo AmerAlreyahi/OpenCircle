@@ -256,7 +256,7 @@ impl App {
         let others = super::screens::close_all(&std::mem::take(&mut self.o.screens));
         // never left clear by an opening that hadn't faded in yet (`show`)
         others
-            .chain(window::set_mode(self.overlay, Mode::Windowed))
+            .chain(windows::show(self.overlay, Mode::Windowed))
             .chain(windows::opacity(self.overlay, 1.0))
             .chain(crate::ui::platform::monitor::resize(
                 self.overlay,

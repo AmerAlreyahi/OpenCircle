@@ -464,7 +464,7 @@ impl App {
             .map(Message::Windows)
             .chain(clear)
             .chain(place_window(self.overlay, place))
-            .chain(window::set_mode(self.overlay, Mode::Fullscreen))
+            .chain(windows::show(self.overlay, Mode::Fullscreen))
             .chain(windows::foreground(self.overlay));
         // (Windows: topmost again once it fades in, `relevel`)
         show.chain(chat)

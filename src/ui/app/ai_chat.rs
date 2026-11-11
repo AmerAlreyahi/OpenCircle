@@ -246,7 +246,7 @@ impl App {
         let overlay = self.overlay;
         let shown = move |id| match handover {
             true => windows::opacity(id, 0.0)
-                .chain(window::set_mode(id, window::Mode::Windowed))
+                .chain(windows::show(id, window::Mode::Windowed))
                 .chain(background(|tx| {
                     std::thread::sleep(HANDOVER_BEAT);
                     let _ = tx.unbounded_send(());
@@ -255,7 +255,7 @@ impl App {
             // (winit shows a window activated: the overlay takes the keys back)
             false => windows::keep_above(id, overlay)
                 .chain(windows::opacity(id, 0.0))
-                .chain(window::set_mode(id, window::Mode::Windowed))
+                .chain(windows::show(id, window::Mode::Windowed))
                 .chain(windows::foreground(overlay))
                 .chain(windows::fade(id, true, windows::POPUP, false)),
         };
@@ -320,11 +320,10 @@ impl App {
         let hide = snip || w.out;
         if hide != w.hidden {
             w.hidden = hide;
-            let mode = match hide {
-                true => window::Mode::Hidden,
-                false => window::Mode::Windowed,
-            };
-            tasks.push(window::set_mode(w.id, mode));
+            tasks.push(match hide {
+                true => window::set_mode(w.id, window::Mode::Hidden),
+                false => windows::show(w.id, window::Mode::Windowed),
+            });
             if !hide && open {
                 tasks.push(windows::foreground(overlay));
             }

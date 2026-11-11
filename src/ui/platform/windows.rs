@@ -161,8 +161,23 @@ pub const TOAST: Motion = Motion {
 /// (`fade`; the task ends at once, the fade runs on).
 pub fn appear<T: Send + 'static>(id: window::Id, how: Motion) -> Task<T> {
     opacity(id, 0.0)
-        .chain(window::set_mode(id, window::Mode::Windowed))
+        .chain(show(id, window::Mode::Windowed))
         .chain(fade(id, true, how, false))
+}
+
+/// Shows our always-on-top window `id` in `mode` (a floating one Windowed, the
+/// overlay Fullscreen): THE way one is shown. X11: "always on top" again once
+/// mapped. A window manager drops a state asked while the window was unmapped
+/// (EWMH: `_NET_WM_STATE` messages are for mapped windows; winit asks at
+/// creation), so a window opened hidden came back as a normal one (#172, KDE
+/// X11): the chat under any window the user activated, the overlay under the
+/// Plasma panel (KWin keeps docks over a full-screen window that isn't "above").
+/// Windows keeps the level itself; Wayland has none.
+pub fn show<T: Send + 'static>(id: window::Id, mode: window::Mode) -> Task<T> {
+    let shown = window::set_mode(id, mode);
+    #[cfg(target_os = "linux")]
+    let shown = shown.chain(window::set_level(id, Level::AlwaysOnTop));
+    shown
 }
 
 /// Closes the window `id`: a floating one fades out first (by its `Motion`),

@@ -29,7 +29,7 @@ pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
     POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, floating_in_captures,
     foreground, forget, hide_from_capture, hole, is_floating, keep_above, no_backdrop, opacity,
-    reshape, screen, setup_window, uncut,
+    reshape, screen, setup_window, show, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::capture::live;
@@ -1107,7 +1107,7 @@ impl Windows {
         };
         crate::log!("[opencircle] floating windows back");
         let mut tasks: Vec<Task<Msg>> = (out.hidden.into_iter())
-            .map(|id| window::set_mode(id, window::Mode::Windowed))
+            .map(|id| show(id, window::Mode::Windowed))
             .collect();
         for mut pin in out.pins {
             // ponytail: a live pin's frames stay keyed by its first window (Wayland has no live pins).
