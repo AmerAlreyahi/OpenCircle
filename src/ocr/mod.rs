@@ -63,6 +63,9 @@ const STRIP: u32 = 256;
 const STRIP_SEE: u32 = 64;
 /// A strip's owned rows (top, bottom).
 type Strip = (u32, u32);
+/// Rows a Latin band sees past its own (`Engine::band`): main mode's bands
+/// overlap by 24 rows (`ocr::screen`), so a line up to 48 rows tall is whole.
+const BAND_SEE: f32 = 24.0;
 
 /// The strips (owned rows: top, bottom) of an image `height` tall that own
 /// rows of `rows` (all for `None`).
@@ -131,7 +134,7 @@ fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
 fn longest(i: usize) -> f32 {
     match models::RECOGNIZERS[i].rtl() {
         true => 15.0,
-        false => 60.0,
+        false => 66.0, // (cut at 60, a French page's 61-65 heights lines read worse)
     }
 }
 
@@ -401,6 +404,22 @@ fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
     (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
 }
 
+/// Lines `left` of `all` for the non-Latin readers: the strips owning them
+/// to find again at full size, or, when they are few (a fifth or less: a
+/// page in the user's language with a stray line or icon), themselves as
+/// found (an English page's second reader went 963 -> 1900 ms on the Win10
+/// VM re-finding three of them at full size).
+fn few(
+    strips: Vec<(u32, u32)>,
+    left: Vec<[f32; 4]>,
+    all: usize,
+) -> (Vec<(u32, u32)>, Vec<[f32; 4]>) {
+    match left.len() * 5 <= all {
+        true => (Vec::new(), left),
+        false => (owning(strips, &left), Vec::new()),
+    }
+}
+
 /// Of `strips`, those that own the middle of one of `lines`.
 fn owning(strips: Vec<(u32, u32)>, lines: &[[f32; 4]]) -> Vec<(u32, u32)> {
     let owns = |&(a, b): &(u32, u32)| {
@@ -650,9 +669,14 @@ impl Engine {
             let middle = b[1] + b[3] / 2.0;
             rows.is_none_or(|(top, bottom)| (top..bottom).contains(&middle))
         };
-        let full: Vec<(u32, u32)> = match (latin_first, known.is_empty()) {
+        // (the strips to find again at full size, the lines to read as found)
+        let (full, direct): (Vec<(u32, u32)>, Vec<[f32; 4]>) = match (latin_first, known.is_empty())
+        {
             (Some(l), _) => {
-                let boxes = self.shrunk(f)?;
+                let boxes = match rows {
+                    Some(rows) => self.band(&f.img, rows)?,
+                    None => self.shrunk(f)?,
+                };
                 let boxes: Vec<[f32; 4]> = (boxes.into_iter())
                     .filter(|b| inside(b) && unknown(b))
                     .collect();
@@ -671,24 +695,26 @@ impl Engine {
                         }
                     }
                 }
-                owning(strips(h, rows), &left)
+                few(strips(h, rows), left, boxes.len())
             }
             // found shrunk first (cheap): only the strips with lines left
             // are found again at full size
             (None, false) => {
                 let boxes = self.shrunk(f)?;
-                let left: Vec<[f32; 4]> = (boxes.into_iter())
-                    .filter(|b| inside(b) && unknown(b))
-                    .collect();
-                owning(strips(h, rows), &left)
+                let all = boxes.len();
+                let left: Vec<[f32; 4]> = boxes.into_iter().filter(|b| unknown(b)).collect();
+                // (judged on the whole screen, read in these rows)
+                let (full, direct) = few(strips(h, rows), left, all);
+                (full, direct.into_iter().filter(|b| inside(b)).collect())
             }
-            (None, true) => strips(h, rows),
+            (None, true) => (strips(h, rows), Vec::new()),
         };
         let first = kept.len();
         let mut boxes: Vec<[f32; 4]> = match others.is_empty() || full.is_empty() {
             true => Vec::new(),
             false => self.full(f, &full)?,
         };
+        boxes.extend(direct);
         boxes.retain(|b| inside(b) && unknown(b) && !kept.iter().any(|(_, k)| holds(&k.bounds, b)));
         let mut last: Vec<Option<TextBlock>> = vec![None; boxes.len()];
         for &o in &others {
@@ -894,20 +920,46 @@ impl Engine {
             _ => return Err(OcrError::Engine(NO_FRAME.into())),
         };
         let read = self.per_line(&mut f, Some(rows), known, latin);
-        let found = self.shrunk(&mut f).map(|boxes| {
-            let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
-            boxes.into_iter().filter(unknown).collect()
-        });
+        // (only once found anyway: a Latin page read in bands never needs
+        // the whole screen found, ~150 ms on 2 cores at 1080p)
+        let unknown = |b: &&[f32; 4]| !known.iter().any(|k| holds(k, b));
+        let found = (f.shrunk.iter().flatten())
+            .filter(unknown)
+            .copied()
+            .collect();
         self.frame = Some(f);
         Ok(ScreenRead {
             lines: read?,
-            found: found?,
+            found,
         })
     }
 
     /// Forgets the screen `read_screen` keeps (its picture and lines).
     pub fn forget_screen(&mut self) {
         self.frame = None;
+    }
+
+    /// The lines of `img` in `rows` as a Latin reader reads them best: the
+    /// band (with `BAND_SEE` rows around) found shrunk on its own. Found on
+    /// the whole screen shrunk instead, an English page in bands read CER
+    /// 0.210 against 0.001 (`ocr::bench`, h-en-1080): looser boxes.
+    fn band(
+        &mut self,
+        img: &RgbImage,
+        (top, bottom): (f32, f32),
+    ) -> Result<Vec<[f32; 4]>, OcrError> {
+        let (w, h) = img.dimensions();
+        let y0 = (top - BAND_SEE).max(0.0) as u32;
+        let y1 = ((bottom + BAND_SEE) as u32).min(h);
+        if y1 <= y0 {
+            return Ok(Vec::new());
+        }
+        let part = image::imageops::crop_imm(img, 0, y0, w, y1 - y0).to_image();
+        let (boxes, _) = self.detect(&part, w, y1 - y0)?;
+        Ok((boxes.into_iter())
+            .map(|b| [b[0], b[1] + y0 as f32, b[2], b[3]])
+            .filter(|b| (top..bottom).contains(&(b[1] + b[3] / 2.0)))
+            .collect())
     }
 
     /// The lines of `f` found shrunk (`detect`), once per frame.
@@ -1278,6 +1330,12 @@ mod tests {
             [(256, 512), (768, 1024)]
         );
         assert!(owning(strips(1080, None), &[]).is_empty());
+        // a few lines left of a page read: read as found, no strip again
+        assert_eq!(
+            few(strips(1080, None), lines.to_vec(), 10),
+            (vec![], lines.to_vec())
+        );
+        assert_eq!(few(strips(1080, None), lines.to_vec(), 9).0.len(), 2);
         assert!(holds(&[0.0, 0.0, 100.0, 20.0], &[40.0, 5.0, 10.0, 10.0]));
         assert!(!holds(&[0.0, 0.0, 100.0, 20.0], &[95.0, 5.0, 20.0, 10.0]));
     }

@@ -496,6 +496,68 @@ mod tests {
         );
     }
 
+    /// #169: real Windows OCR (en-US, Win10 VM, the doubled read the app
+    /// makes) of the corpus' Arabic article in Edge, with Edge's "Translate
+    /// page" bubble: only the bubble's English lines count as read.
+    #[test]
+    fn real_windows_ocr_noise_on_arabic_is_not_read_well() {
+        let windows_ocr = [
+            "Translate page from Arabic?",
+            "Translate to",
+            "English",
+            "Translate",
+            "*Jsß.Lo",
+            "pJl WS-i-?",
+            "Not now",
+            "Ss.e.ö Ol.?-.ij",
+            "e.i..ll",
+            "& JIJ OlÄ.j",
+            "0.0",
+            ". Y-Lö>-i-ll 0.04-0.231 Jili>b. li±j öJlpJb .eJlæll ljLåiil 0.0 0>1.0-11 cu-II I-en-i-is lei-a-bs cp-II 0-0 js-$ ö9ÄJl",
+            "-IL. 0-0 1-e-Ö4JÄ-i öli±i9 .ä-uJlJJ19 J-osJl CI-L,DJI ülcl-„u b-ü)l ulJi19 0.0 6-1.1 )99-GJl J-lÄ-i9 äkögll Vill ae-Li-aJl 631.0 69+-11",
+            ".öJlxJ ,ß-wJl VD-II Jug-II 1+1! a-LB-i",
+            "tot-II",
+            "ZIJ-II r",
+            "*.B-il",
+            "OJ! ü-Las ej pl-a-Ils jb.>Jl Thi-il e-ll-i-s .diilp a-o.e-o J! leicl)j &lÄLil , p.-dl 0.319-11 Uls-Å-ipJl ö9ÄJl OJ! Qlsl-ü-ö-ll Ublsßl",
+            ".Op.-dl öJbjJl & Y-c L!SJSi9 Js-Li-h-.o!",
+            ".pæJl 09-11 61-1>-11 0-0 1+6.1 ,o.bJlzos oxo-II Isjl-&ü-il Jlji .wilLJ19 VI-iSJ19 Jl-?ill 0-0 01.59 öclß9 cu-i>Jls cliLl 'I-oi coli.AJl GINI ÜS}ÄJI",
+            "'—.Å-bÄ-fs",
+            ",vJLéJl leio öpj JS épj ljloj 89--2.0.11 a-i-i-is .äJJi9-o ö)lp J-b OJ! cli>.-i9 Q! y.iJ19 Biinll Jlb-oill GIs-LuJill &-bl-i-Jl WI 90ii",
+            ". NJ-OILI baj JJ —-2.11 JS-WI Bj .cl-aJb VIJI k!hNl Jl-oill I.e.g-ö J).i-f vüJl GI-?JI leio 41.11 0.c öhöJl",
+            ".æb9i Jiji a-i-04-ö 'IJI cp-Lö>.ill Olé-i-Ils 09-0>-11 ocu-ö>.ilb .l.æ-ö Q! y-Las-II üyj.-ll &-l-b4S t.-i.Dl OJ! 0.0 09-1 cp.æ>-i-ll",
+            ".BcLi Up-ho-II cp-II Jib Olc 0>1.0-11 cloJl Y-i-i s.-u-uy-w!l ,o.uS-aJb hé.ÄJls N-hÄiJ19 a-I-Jl WS—II y-L>-i-ll 0-0",
+            "(OE JYL) ülJLJI ZIJ!",
+            "u lÄ-o",
+            "I-iz J.,AJI",
+            "I-iB 131-0",
+            "013 Oly.æ.i-j",
+            "k.>-LÄl",
+            "-i.e.-GE-uJl",
+            "IS-ulJi",
+            "IS-ulJi",
+            "b'so.",
+            "J.UI",
+            "&IGJI",
+            "JLJI",
+        ];
+        let well = super::read_well(&windows_ocr, Some("en-US"));
+        let read: Vec<&str> = (windows_ocr.iter().zip(&well))
+            .filter(|(_, w)| **w)
+            .map(|(t, _)| *t)
+            .collect();
+        assert_eq!(
+            read,
+            [
+                "Translate page from Arabic?",
+                "Translate to",
+                "English",
+                "Translate",
+                "Not now"
+            ]
+        );
+    }
+
     #[test]
     fn windows_ocr_is_never_tried_off_windows() {
         let want = if cfg!(windows) { None } else { Some(None) };
