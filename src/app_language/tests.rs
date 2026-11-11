@@ -160,7 +160,8 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
         if name.ends_with("about.rs") {
             continue; // the credits stay English (legal attribution)
         }
-        let src = std::fs::read_to_string(&f).unwrap();
+        // (a Windows checkout has CRLF line ends: the split below must still find the test module)
+        let src = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
         // production code only: up to an inline test module
         let src = src.split("#[cfg(test)]\nmod tests {").next().unwrap();
         for line in src.lines() {
