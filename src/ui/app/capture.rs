@@ -505,6 +505,11 @@ impl App {
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
     /// once old enough. The window is shrunk and hidden in steps (see `Hiding`).
     pub(in crate::ui) fn close(&mut self) -> Task<Message> {
+        // A pinned chat drawn on the overlay: its own window comes up over the
+        // same spot first (no blank beat); the overlay goes when it is up.
+        if self.o.is_some() && self.chat.as_ref().is_some_and(|c| c.window.is_none()) {
+            return self.float_chat().chain(Task::done(Message::ChatHandedOver));
+        }
         // a long capture ends with it; the window shows in screenshots again
         let mut chat = Task::none();
         if let Some(long) = self.scroll() {

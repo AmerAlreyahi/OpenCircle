@@ -4954,9 +4954,14 @@ fn the_follow_up_that_pins_the_chat_closes_the_overlay() {
     let (mut app, id) = start();
     assert!(app.o.is_some() && app.chat.is_none(), "one question: open");
     chat_turn(&mut app, id, "And the trend?", "Up.");
-    assert!(app.o.is_none(), "the follow-up closed the overlay");
+    // its own window comes up over the overlay first (no blank beat) ...
     let chat = app.chat.as_ref().expect("the chat stays");
     assert!(chat.window.is_some(), "in its own window");
+    assert!(app.o.is_some(), "the overlay stays until it is up");
+    // ... then the overlay goes
+    let _ = app.update(Message::ChatHandedOver);
+    assert!(app.o.is_none(), "the follow-up closed the overlay");
+    let chat = app.chat.as_ref().unwrap();
     assert_eq!(chat.panel.chat().unwrap().turns.len(), 2, "both answers");
 
     // the header's pin pins by hand: the overlay stays, a later question too
@@ -5029,6 +5034,8 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     assert!(app.chat.is_some());
     // the overlay closes: the chat goes on in its own window
     let _ = app.update(Message::Escape);
+    assert!(app.o.is_some(), "its window comes up over it first");
+    let _ = app.update(Message::ChatHandedOver);
     assert!(app.o.is_none());
     let window = app
         .chat

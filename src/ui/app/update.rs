@@ -282,6 +282,7 @@ impl App {
             Message::AiChat(id, msg) => self.on_ai_chat(id, msg),
             Message::ChatMoved(id, at) => self.chat_moved(id, at),
             Message::ChatSettle(moves) => self.chat_settle(moves),
+            Message::ChatHandedOver => self.close(),
             Message::ChatDocked(moves, k) => self.chat_docked(moves, k, &monitor::places()),
             Message::ChatFrame(now) => {
                 if let Some(chat) = &mut self.chat {
@@ -461,7 +462,7 @@ impl App {
                     self.o.reveal = None;
                     self.o.appear = None;
                     self.frame_times.borrow_mut().clear();
-                    let fade = windows::fade(self.overlay, true, windows::POPUP, false);
+                    let fade = windows::fade(self.overlay, true, windows::POPUP, true);
                     revealed = Task::batch([self.relevel(), fade.chain(self.unfloat_chat())]);
                 }
                 // a new result card grows open from its first frame
@@ -778,6 +779,7 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::AiChat(..)
             | Message::ChatMoved(..)
             | Message::ChatSettle(_)
+            | Message::ChatHandedOver
             | Message::ChatDocked(..)
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)

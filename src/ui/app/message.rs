@@ -53,6 +53,8 @@ pub(in crate::ui) enum Message {
     /// moving after this many moves (it docks); a frame of its spinner.
     ChatMoved(iced::window::Id, iced::Point),
     ChatSettle(u32),
+    /// The pinned chat's own window is up over the overlay: the overlay can go.
+    ChatHandedOver,
     /// The same with its window's scale: dock on the monitor it is on.
     ChatDocked(u32, f32),
     ChatFrame(std::time::Instant),

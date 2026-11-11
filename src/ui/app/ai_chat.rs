@@ -64,6 +64,9 @@ pub(in crate::ui) fn held_in(at: Point, size: Size, desk: Rectangle) -> Point {
 /// it: no release is reported).
 const SETTLE: Duration = Duration::from_millis(250);
 
+/// How long the chat's new window paints before it takes over from the overlay.
+const HANDOVER_BEAT: Duration = Duration::from_millis(60);
+
 /// Ask AI only opens the browser: the provider is Google AI Mode (no key).
 fn hands_off() -> bool {
     #[cfg(test)]
@@ -192,8 +195,18 @@ impl App {
             windows::POPUP,
         );
         chat.window = Some(id);
+        // Shown fully clear over the overlay's own drawing of the same card,
+        // given a beat to paint, then solid at once: the overlay can go with
+        // no blank beat (the owner's flash, #170); a fade would show it.
         open.then(move |id| {
-            place_window::<()>(id, place).chain(windows::appear(id, windows::POPUP))
+            place_window::<()>(id, place)
+                .chain(windows::opacity(id, 0.0))
+                .chain(window::set_mode(id, window::Mode::Windowed))
+                .chain(background(|tx| {
+                    std::thread::sleep(HANDOVER_BEAT);
+                    let _ = tx.unbounded_send(());
+                }))
+                .chain(windows::opacity(id, 1.0))
         })
         .discard()
     }
