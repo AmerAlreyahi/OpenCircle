@@ -445,7 +445,8 @@ mod tests {
             let lang = if ar { "ar" } else { "en" };
             for theme in [&SAPPHIRE, &DAYLIGHT] {
                 themes::set(theme);
-                let chips: [(&str, fn() -> Element<'static, ()>); 3] = [
+                type Chip = fn() -> Element<'static, ()>;
+                let chips: [(&str, Chip); 3] = [
                     ("hint", || hint(crate::ui::app::hint()).into()),
                     ("protected", || hint(crate::ui::app::protected()).into()),
                     ("select", || action_chip(t!(bar_select_text).into(), ())),

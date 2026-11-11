@@ -170,6 +170,62 @@ fn the_part_2a_surfaces_write_no_words_of_their_own() {
     assert!(found.is_empty(), "words outside the table: {found:#?}");
 }
 
+/// The whole UI (owner, 2026-11-11, part 2b): every file of `src/ui/` and
+/// `src/actions/` writes no word of its own: what the user reads comes from
+/// the table. The files below hold text that is not for the user (a prompt for
+/// the model, a page for the browser, OS and font names, the key names a
+/// shortcut is written in) or is listed in `UNCONVERTED`.
+#[test]
+fn the_whole_ui_writes_no_words_of_its_own() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            let name = p.to_string_lossy().replace('\\', "/");
+            if p.is_dir() {
+                if !name.ends_with("/testing") {
+                    walk(&p, out);
+                }
+            } else if p.extension().is_some_and(|x| x == "rs")
+                && !EXEMPT_FILES.iter().any(|f| name.ends_with(f))
+            {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(std::path::Path::new("src/ui"), &mut files);
+    walk(std::path::Path::new("src/actions"), &mut files);
+    let found = words_outside_the_table(&files);
+    assert!(found.is_empty(), "words outside the table: {found:#?}");
+}
+
+/// Files of the UI that hold no user-visible words, and why.
+const EXEMPT_FILES: &[&str] = &[
+    // tests and their harness
+    "/tests.rs",
+    "/arch_tests.rs",
+    "/frame_times.rs",
+    "/snip_shots.rs",
+    // the model's own prompts (English, sent to the provider), the AI setup steps
+    "src/actions/ask.rs",
+    // the page the browser posts the picture from (no words), QR content tests
+    "src/actions/search_in_browser/page.rs",
+    "src/actions/qr.rs",
+    // OS, window-class and font names; the tray icon's decode checks
+    "src/ui/platform/shape.rs",
+    "src/ui/platform/tray.rs",
+    "src/ui/platform/monitor.rs",
+    "src/ui/platform/windows.rs",
+    "src/ui/kit/text.rs",
+    // the look and theme names: ids and English fallbacks; Settings shows them from the table
+    "src/ui/kit/looks.rs",
+    "src/ui/kit/themes.rs",
+    // the kit's English default words (tests): Settings always passes its own
+    "src/ui/kit/hero.rs",
+    // the installer's own window (its words are the Setup block of the table)
+    "src/ui/screens/setup/mod.rs",
+];
+
 /// The user-visible-looking literals of `files` (production code) that are
 /// not in `NOT_UI`: two words or more, or one capitalised word.
 fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
@@ -192,14 +248,31 @@ fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
         // (a Windows checkout has CRLF line ends: the split below must still find the test module)
         let src = std::fs::read_to_string(f).unwrap().replace("\r\n", "\n");
         // production code only: up to an inline test module
-        let src = src.split("#[cfg(test)]\nmod tests {").next().unwrap();
+        let src = src
+            .split("#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap()
+            .split("#[cfg(test)]\npub(in crate::ui) mod tests {")
+            .next()
+            .unwrap()
+            .split("#[cfg(test)]\npub(crate) mod tests {")
+            .next()
+            .unwrap()
+            .split("\n#[test]\n")
+            .next()
+            .unwrap();
         for line in src.lines() {
             let l = line.trim_start();
             if l.starts_with("//") || l.starts_with("#[") || l.contains("log!(") {
                 continue;
             }
-            for lit in literals(l) {
-                if words(&lit) && !NOT_UI.contains(&lit.as_str()) {
+            for lit in literals(l.split(" // ").next().unwrap_or(l)) {
+                if words(&lit)
+                    && !NOT_UI.contains(&lit.as_str())
+                    && !UI_NOT_WORDS.contains(&lit.as_str())
+                    && !UNCONVERTED.contains(&lit.as_str())
+                    && !lit.starts_with("[opencircle]")
+                {
                     found.push(format!("{name}: {lit:?}"));
                 }
             }
@@ -293,6 +366,123 @@ const NOT_UI: &[&str] = &[
     "ModelsJob({:?})",
     "just checked",
     "Auto",
+];
+
+/// Literals of the rest of the UI that are not words for the user: key names
+/// and shortcuts (written in Latin key names in every language), the targets
+/// of a hover chip (`Snip`'s ladder ids), the labels frame-time measurements
+/// print, environment names, test-hook content, the model's prompts (English,
+/// sent to the provider) and numbers with their unit.
+const UI_NOT_WORDS: &[&str] = &[
+    // key names and shortcuts
+    "Enter",
+    "Shift+Enter",
+    "Ctrl+C",
+    "Ctrl+S",
+    "Ctrl+P",
+    "Ctrl+Z",
+    "Ctrl+Enter",
+    "Ctrl+Shift+Space",
+    "RGB",
+    // Latin technical / product names on a badge or chip
+    "AI",
+    "UI",
+    "Google AI Mode",
+    "OpenCircle AI",
+    // measurements and format-only text
+    "{px} px",
+    "{w}×{h} px",
+    "x {}  y {}",
+    "{label} · {keys}",
+    "rgb({r}, {g}, {b})",
+    "{dx} × {dy} px",
+    "{dx} × {dy} px · {} × {} at {at} %",
+    "{len} px · Δx {dx} · Δy {dy}",
+    "{n} px",
+    "{n} px · {} at {at} %",
+    " · {} at {at} %",
+    "Step({} B)",
+    "Crop({}x{})",
+    // the info chip's target ids (the words drawn come from the table)
+    "Element",
+    "Window",
+    "Screen",
+    "Window: {t}",
+    "Element: {what}",
+    // frame-time measurement labels and internal states (logs, never drawn)
+    "bar drag",
+    "bar glide",
+    "card drag",
+    "card resize",
+    "chat drag",
+    "chat glide",
+    "toolbar drag",
+    "ruler drag",
+    "snip drag",
+    "snip area drag",
+    "drag, screen at {:?}",
+    "drag, starting screen",
+    "colour picker",
+    "a tool runs",
+    "opening animation",
+    "screen text ready",
+    "first screen text",
+    "still waiting",
+    "live layer",
+    "live pin",
+    "beside the area",
+    "moved beside the area",
+    "over the area (kept out of captures)",
+    "in the area's corner (left out: {cover:?})",
+    "none (tray only)",
+    "Ctrl+{letter}",
+    // errors and panics that only reach the log
+    "capture failed: no screenshot after {} s; try again",
+    "no text found",
+    "no monitor found",
+    "an empty band",
+    "no reader in tests",
+    "the overlay's state changed while closed",
+    "Windows OCR: a right-to-left language",
+    "a Crop's buffer is width * height * 4 bytes",
+    "a bundled PNG decodes",
+    "the bundled tones decode",
+    // OCR noise the screen-text reader filters out (Windows' activation watermark)
+    "Activate Windows",
+    "Go to Settings, now!",
+    // environment variables and the pop-up helper's wire format
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "WAYLAND_SOCKET",
+    "OPENCIRCLE_TEST_SHOT",
+    "OPENCIRCLE_TEST_LIVE_SHOT",
+    "OPENCIRCLE_TEST_DIR",
+    "OPENCIRCLE_TEST_OPEN",
+    "frame {} {} {} {} {} {} {} {height} {} {} {pw} {ph} {lw} {lh}",
+    // test-hook content (`OPENCIRCLE_TEST_OPEN`)
+    "Copied",
+    "Couldn't save the picture",
+    "## Fixes- [A crash](https://example.com) when the screen sleeps- Text selection on a second screen",
+    // the model's prompts for a game-scene explanation (sent to the provider)
+    "In this game scene, {} was translated as {}. Answer in the language ",
+    "{target}: the meaning of the words, then ONE line on what they ",
+];
+
+/// User-visible English that is NOT in the table yet (listed so the test
+/// stays honest: a new word outside the table fails, these do not):
+/// the translate / live backend's sentences (`translate::Problem`, "nothing
+/// to translate there"), the share sheet's title and errors, the name of the
+/// text-recognition model in a download question, a live capture's failure
+/// note, and the AI setup steps (`actions/ask.rs`, exempt above).
+const UNCONVERTED: &[&str] = &[
+    "nothing to translate there",
+    "the captured frame is not RGBA",
+    "capture failed: {e}",
+    "OpenCircle capture",
+    "share: no share sheet on this platform yet",
+    "share: no window",
+    "share: {what}: {err}",
+    "the {} text-recognition model",
 ];
 
 /// Every character the Arabic strings use has a glyph in the bundled fonts

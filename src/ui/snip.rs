@@ -9,6 +9,8 @@
 //! Long capture: the user scrolls the page under the picked area by hand while
 //! a thread grabs and stitches it (`screens::long_capture`, `scroll::by_hand`).
 //! The colour picker and the ruler run on the frozen screen (`screens::tools`).
+use crate::app_language::{S, fmt};
+use crate::t;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
@@ -96,23 +98,41 @@ pub enum Msg {
 /// The freeze hint shows this long (or until a drag starts).
 pub const HINT_SECS: u64 = 2;
 /// The info chip's ladder (the wheel's steps).
+/// (the English names label a target: ids the chip's words are chosen by)
 const LADDER: [&str; 3] = ["Element", "Window", "Screen"];
+
+/// The info chip's ladder in the app's language.
+fn ladder() -> [&'static str; 3] {
+    [t!(sn_element), t!(sn_window), t!(sn_screen)]
+}
+
 /// What the freeze hint says (Region, Window).
-const HINT_REGION: [(Option<&str>, &str); 4] = [
-    (None, "Click a window"),
-    (None, "Drag an area"),
-    (Some("Enter"), "Full screen"),
-    (Some("Esc"), "Cancel"),
-];
+fn hint_region() -> [key_hint::Group<'static>; 4] {
+    [
+        (None, t!(sn_hint_click_window)),
+        (None, t!(sn_hint_drag)),
+        (Some("Enter"), t!(sn_hint_full)),
+        (Some("Esc"), t!(sn_hint_cancel)),
+    ]
+}
+
 /// With several screens, when it fits: Shift+Enter too.
-const HINT_ALL: [(Option<&str>, &str); 5] = [
-    (None, "Click a window"),
-    (None, "Drag an area"),
-    (Some("Enter"), "Full screen"),
-    (Some("Shift+Enter"), "All screens"),
-    (Some("Esc"), "Cancel"),
-];
-const HINT_WINDOW: [(Option<&str>, &str); 2] = [(None, "Click a window"), (Some("Esc"), "Cancel")];
+fn hint_all() -> [key_hint::Group<'static>; 5] {
+    [
+        (None, t!(sn_hint_click_window)),
+        (None, t!(sn_hint_drag)),
+        (Some("Enter"), t!(sn_hint_full)),
+        (Some("Shift+Enter"), t!(sn_hint_all)),
+        (Some("Esc"), t!(sn_hint_cancel)),
+    ]
+}
+
+fn hint_window() -> [key_hint::Group<'static>; 2] {
+    [
+        (None, t!(sn_hint_click_window)),
+        (Some("Esc"), t!(sn_hint_cancel)),
+    ]
+}
 
 /// What a pick leads to.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -608,7 +628,7 @@ impl Snip {
                 let shown = image(picture.clone()).content_fit(iced::ContentFit::Contain);
                 let open =
                     icon_button::option(shown, State::default(), Msg::OpenRecent(path.clone()));
-                tip(open, "A recent capture", Position::Bottom)
+                tip(open, t!(sn_recent_capture), Position::Bottom)
             });
             let clear = icon_button(
                 Icon::Close.glyph(),
@@ -616,9 +636,9 @@ impl Snip {
                 Some(Msg::ClearRecent),
             );
             let strip = row![
-                sub(Role::META, "Recent"),
+                sub(Role::META, t!(sn_recent)),
                 row(shots).spacing(space::GAP),
-                tip(clear, "Clear recent captures", Position::Bottom),
+                tip(clear, t!(sn_clear_recent), Position::Bottom),
             ]
             .spacing(space::GAP)
             .padding([0.0, space::GAP])
@@ -630,19 +650,18 @@ impl Snip {
         match self.kind {
             _ if !self.hinting => {}
             Kind::Region if self.desktop.is_empty() => {
-                let hint = "Click for this screen or drag an area · Esc to close";
-                top = top.push(surface::hint(hint));
+                top = top.push(surface::hint(t!(sn_hint_click_screen)));
             }
             Kind::Region => {
+                let every = hint_all();
                 let all = self.monitors.len() > 1
-                    && key_hint::width(&HINT_ALL) + 2.0 * space::PAGE[0] <= self.place.size().width;
-                let groups: &[key_hint::Group<'_>] = match all {
-                    true => &HINT_ALL,
-                    false => &HINT_REGION,
-                };
-                top = top.push(key_hint(groups, false));
+                    && key_hint::width(&every) + 2.0 * space::PAGE[0] <= self.place.size().width;
+                top = top.push(match all {
+                    true => key_hint(&every),
+                    false => key_hint(&hint_region()),
+                });
             }
-            Kind::Window => top = top.push(key_hint(&HINT_WINDOW, false)),
+            Kind::Window => top = top.push(key_hint(&hint_window())),
             Kind::Full => {}
         }
         container(top).center_x(Fill).padding(space::PAGE[0]).into()
@@ -652,12 +671,12 @@ impl Snip {
     pub fn pill_view(&self) -> Option<Element<'_, Msg>> {
         let bar = if let Some((_, left)) = self.countdown {
             let label = match left {
-                0 => "Capturing…".to_string(),
-                n => format!("Capturing in {n} s · open a menu now"),
+                0 => t!(sn_capturing).to_string(),
+                n => fmt(S::sn_capturing_in, &[&n]),
             };
             row![
                 text(Role::NOTE, label),
-                button::regular("Cancel", false, Some(Msg::Cancel)),
+                button::regular(t!(sn_hint_cancel), false, Some(Msg::Cancel)),
             ]
         } else {
             return None;
@@ -729,8 +748,8 @@ impl Snip {
                 None => (t.label.clone(), None),
             };
             let step = LADDER.iter().position(|s| *s == kind).unwrap_or(1);
-            let kind: &'static str = LADDER[step];
-            let chip = chip::info(kind, title, size_of(t.rect), &LADDER, step);
+            let ladder = ladder();
+            let chip = chip::info(ladder[step], title, size_of(t.rect), &ladder, step);
             // 8 px above the outline's top-left, else inside it
             let r = t.rect;
             let spot = match r.y >= INFO_H + 8.0 {
@@ -742,7 +761,7 @@ impl Snip {
         }
         if let Some(r) = drag.filter(|r| r.width >= 1.0 && r.height >= 1.0) {
             let snapped = self.snap(at) != at;
-            let note = snapped.then_some("Snapped");
+            let note = snapped.then_some(t!(sn_snapped));
             let chip = chip::readout(size_of(r), false, note);
             // under (or over) the edge the pointer drags, aligned to the
             // area's side it is on

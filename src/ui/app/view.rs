@@ -60,7 +60,7 @@ impl App {
         (long.window.unwrap_or(self.overlay) == window).then(|| {
             let look = crate::ui::theme::accent_of(&config::look());
             let bar = self.long_bar();
-            long.view(on.work, bar, look, false).map(Message::Snip)
+            long.view(on.work, bar, look).map(Message::Snip)
         })
     }
 

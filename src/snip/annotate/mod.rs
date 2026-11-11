@@ -72,6 +72,7 @@ pub fn badge(
     layer.pm
 }
 
+use crate::app_language::S;
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
@@ -114,8 +115,8 @@ pub struct ToolInfo {
     pub tool: Tool,
     /// Lucide glyph (listed in `assets/lucide/subset.sh`).
     pub icon: char,
-    /// Tooltip: its name and key, `Name (K)`.
-    pub tip: &'static str,
+    /// Its name (the string table); the tooltip is `Name (K)`.
+    pub name: S,
     /// Its key (no Ctrl) while the editor is open.
     pub key: char,
     /// The toolbar group (button) it is in.
@@ -123,13 +124,6 @@ pub struct ToolInfo {
     /// The tool it is an option of (an arrow with a label: Arrow's "Label"),
     /// else itself (a tool of its group's panel).
     pub slot: Tool,
-}
-
-impl ToolInfo {
-    /// Its name (the tooltip without the key).
-    pub fn name(&self) -> &'static str {
-        self.tip.split(" (").next().unwrap_or(self.tip)
-    }
 }
 
 /// The grouped toolbar's tool buttons (owner approved, 2026-11-02): each
@@ -156,8 +150,15 @@ impl Group {
     /// Each group's tool before one was used.
     const FIRST: [Tool; 5] = [Tool::Select, Tool::Arrow, Tool::Pen, Tool::Text, Tool::Blur];
 
-    pub fn name(self) -> &'static str {
-        ["Select", "Shapes", "Draw", "Text", "Hide"][self as usize]
+    /// Its name (Select and Text are their tool's own: one tooltip, not two).
+    pub fn name(self) -> S {
+        [
+            S::tl_select,
+            S::grp_shapes,
+            S::grp_draw,
+            S::tl_text,
+            S::grp_hide,
+        ][self as usize]
     }
 
     /// The tools of its panel's top row (options such as Label are not
@@ -185,67 +186,61 @@ pub fn fills_inside(tool: Tool) -> bool {
 
 /// Every tool, in toolbar order (its options right after it).
 pub const TOOLS: &[ToolInfo] = &[
-    tool(Tool::Select, '\u{e1c2}', "Select (V)", 'v', Group::Select),
-    tool(Tool::Crop, '\u{e0af}', "Crop (X)", 'x', Group::Select),
-    tool(Tool::Rect, '\u{e16a}', "Rectangle (R)", 'r', Group::Shapes),
-    tool(Tool::Ellipse, '\u{e07a}', "Ellipse (O)", 'o', Group::Shapes),
-    tool(Tool::Line, '\u{e521}', "Line (L)", 'l', Group::Shapes),
-    tool(Tool::Arrow, '\u{e497}', "Arrow (A)", 'a', Group::Shapes),
+    tool(Tool::Select, '\u{e1c2}', S::tl_select, 'v', Group::Select),
+    tool(Tool::Crop, '\u{e0af}', S::tl_crop, 'x', Group::Select),
+    tool(Tool::Rect, '\u{e16a}', S::tl_rect, 'r', Group::Shapes),
+    tool(Tool::Ellipse, '\u{e07a}', S::tl_ellipse, 'o', Group::Shapes),
+    tool(Tool::Line, '\u{e521}', S::tl_line, 'l', Group::Shapes),
+    tool(Tool::Arrow, '\u{e497}', S::tl_arrow, 'a', Group::Shapes),
     option(
         Tool::ArrowLabel,
         '\u{e544}',
-        "Arrow with a label (W)",
+        S::tl_arrow_label,
         'w',
         (Tool::Arrow, Group::Shapes),
     ),
-    tool(Tool::Pen, '\u{e133}', "Pen (P)", 'p', Group::Draw),
+    tool(Tool::Pen, '\u{e133}', S::tl_pen, 'p', Group::Draw),
     tool(
         Tool::Highlighter,
         '\u{e0f7}',
-        "Highlighter (H)",
+        S::tl_highlighter,
         'h',
         Group::Draw,
     ),
-    tool(Tool::Text, '\u{e197}', "Text (T)", 't', Group::Text),
+    tool(Tool::Text, '\u{e197}', S::tl_text, 't', Group::Text),
     option(
         Tool::Label,
         '\u{e182}',
-        "Text on a background (E)",
+        S::tl_label,
         'e',
         (Tool::Text, Group::Text),
     ),
-    tool(Tool::Callout, '\u{e11a}', "Callout (C)", 'c', Group::Text),
-    tool(
-        Tool::Step,
-        '\u{e1d0}',
-        "Numbered steps (N)",
-        'n',
-        Group::Text,
-    ),
+    tool(Tool::Callout, '\u{e11a}', S::tl_callout, 'c', Group::Text),
+    tool(Tool::Step, '\u{e1d0}', S::tl_step, 'n', Group::Text),
     option(
         Tool::Pointer,
         '\u{e123}',
-        "Pointer (I)",
+        S::tl_pointer,
         'i',
         (Tool::Step, Group::Text),
     ),
-    tool(Tool::Blur, '\u{e0b8}', "Blur (B)", 'b', Group::Hide),
-    tool(Tool::Redact, '\u{e16b}', "Redact (K)", 'k', Group::Hide),
+    tool(Tool::Blur, '\u{e0b8}', S::tl_blur, 'b', Group::Hide),
+    tool(Tool::Redact, '\u{e16b}', S::tl_redact, 'k', Group::Hide),
     tool(
         Tool::Spotlight,
         '\u{e29d}',
-        "Spotlight (S)",
+        S::tl_spotlight,
         's',
         Group::Hide,
     ),
-    tool(Tool::Magnifier, '\u{e1b5}', "Magnify (M)", 'm', Group::Hide),
+    tool(Tool::Magnifier, '\u{e1b5}', S::tl_magnify, 'm', Group::Hide),
 ];
 
-const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: Group) -> ToolInfo {
+const fn tool(tool: Tool, icon: char, name: S, key: char, group: Group) -> ToolInfo {
     ToolInfo {
         tool,
         icon,
-        tip,
+        name,
         key,
         group,
         slot: tool,
@@ -256,14 +251,14 @@ const fn tool(tool: Tool, icon: char, tip: &'static str, key: char, group: Group
 const fn option(
     tool: Tool,
     icon: char,
-    tip: &'static str,
+    name: S,
     key: char,
     (slot, group): (Tool, Group),
 ) -> ToolInfo {
     ToolInfo {
         tool,
         icon,
-        tip,
+        name,
         key,
         group,
         slot,

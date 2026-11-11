@@ -164,9 +164,9 @@ impl Tool {
         let bar: Element<'a, Msg> = match self.which {
             Which::Picker => {
                 let under = self.colour(frame, scale, view);
-                picker::toolbar(under, recent, false)
+                picker::toolbar(under, recent)
             }
-            Which::Ruler => ruler::toolbar(self.ruler.mode, measure.as_ref(), false),
+            Which::Ruler => ruler::toolbar(self.ruler.mode, measure.as_ref()),
         };
         // under the toolbar: the Copied pill, the hint
         // (a click on it is never a pick or a measure)
@@ -177,7 +177,7 @@ impl Tool {
             top = top.push(toast(what, Tone::Ok, radius::PILL));
         }
         if hinting {
-            top = top.push(key_hint(hint(self.which), false));
+            top = top.push(key_hint(&hint(self.which)));
         }
         // ponytail: always at the top (the overlay sees every move, also over
         // the toolbar, so one that moved away from the pointer could never be
@@ -208,10 +208,10 @@ pub fn frame_px(p: Point, scale: f32, view: overlay::View) -> (i32, i32) {
 }
 
 /// The key hints, by tool.
-pub fn hint(which: Which) -> &'static [key_hint::Group<'static>] {
+pub fn hint(which: Which) -> [key_hint::Group<'static>; 4] {
     match which {
-        Which::Picker => &picker::HINT,
-        Which::Ruler => &ruler::HINT,
+        Which::Picker => picker::freeze_hint(),
+        Which::Ruler => ruler::freeze_hint(),
     }
 }
 

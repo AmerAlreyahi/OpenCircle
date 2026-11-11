@@ -515,7 +515,7 @@ mod tests {
         let _ = app.on_snip_toolbar(E::MenuEdge(true));
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let last = &toolbar::more_rows(editor)[editor.row.unwrap()];
-        assert_eq!(last.name.0, "Screen ruler");
+        assert_eq!(crate::app_language::tr(last.name), "Screen ruler");
         let _ = app.on_snip_toolbar(E::MenuEdge(false));
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let first = &toolbar::more_rows(editor)[editor.row.unwrap()];

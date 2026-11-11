@@ -2,6 +2,8 @@
 //! the "Listening… N s" pill with Cancel, then the result card (cover, title,
 //! artist, album · year, links opened only on click). The work is `crate::music`.
 
+use crate::app_language::{S, fmt};
+use crate::t;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -160,21 +162,21 @@ impl Session {
     pub fn view(&self, screen: Size) -> Element<'_, Msg> {
         let (body, footer): (Element<'_, Msg>, Option<Element<'_, Msg>>) = match &self.state {
             State::Listening(heard) => {
-                return pill(status(format!(
-                    "Listening… {} s",
-                    LISTEN_SECS.saturating_sub(*heard)
+                return pill(status(fmt(
+                    S::sg_listening,
+                    &[&LISTEN_SECS.saturating_sub(*heard)],
                 )));
             }
-            State::Looking => return pill(status("Identifying…".to_string())),
+            State::Looking => return pill(status(t!(sg_identifying).to_string())),
             State::Found(song, cover) => (self.result(song, cover.as_ref()), None),
             State::Failed(why) => {
-                let retry = actions(("Try again", Msg::Retry), []);
+                let retry = actions((t!(md_try_again), Msg::Retry), []);
                 (error(Role::NOTE, why.as_str()).into(), Some(retry))
             }
         };
         let header = card::Header {
             glyph: MUSIC,
-            title: "Song search",
+            title: t!(bar_song),
             chip: None,
             menu: false,
             held: false,
@@ -244,7 +246,7 @@ impl Session {
             .take(RECENT)
             .collect();
         if !recent.is_empty() {
-            body = body.push(line(Role::SECTION, "Recent"));
+            body = body.push(line(Role::SECTION, t!(sn_recent)));
             for e in recent {
                 body = body.push(note(format!("{} · {}", e.title, e.artist)));
             }
@@ -265,7 +267,7 @@ fn pill<'a>(content: Element<'a, Msg>) -> Element<'a, Msg> {
 
 /// The listening / identifying pill (`.as-toast`): a note, the text, Cancel.
 fn status<'a>(text_line: String) -> Element<'a, Msg> {
-    let cancel = button(label("Cancel"), Kind::Quiet, Some(Msg::Cancel));
+    let cancel = button(label(t!(c_cancel)), Kind::Quiet, Some(Msg::Cancel));
     let glyph = accent(Role::NOTE, MUSIC.to_string())
         .font(FONT)
         .size(size::ICON);

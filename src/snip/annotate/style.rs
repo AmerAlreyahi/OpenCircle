@@ -1,5 +1,6 @@
 //! Style presets (one click: colour + weight + the tool they are for) and the
 //! copy / paste style between items.
+use crate::app_language::S;
 use iced::Color;
 
 use super::document::{Item, Shape};
@@ -37,10 +38,10 @@ pub const NOTE_FONT: iced::Font = iced::Font {
 };
 
 pub struct Preset {
-    /// On its chip.
-    pub short: &'static str,
+    /// On its chip (the string table).
+    pub short: S,
     /// Its tooltip (with its key, `key`).
-    pub name: &'static str,
+    pub name: S,
     pub key: &'static str,
     /// Index into `ANNOTATION`.
     pub colour: usize,
@@ -53,8 +54,8 @@ pub struct Preset {
 /// Keys 1–9 pick these, in order.
 pub const PRESETS: &[Preset] = &[
     Preset {
-        short: "Red box",
-        name: "Red box + arrow",
+        short: S::ps_red_short,
+        name: S::ps_red,
         key: "1",
         colour: 0,
         width: Width::Medium,
@@ -69,8 +70,8 @@ pub const PRESETS: &[Preset] = &[
         ],
     },
     Preset {
-        short: "Highlight",
-        name: "Highlight yellow",
+        short: S::ps_hl_short,
+        name: S::ps_hl,
         key: "2",
         colour: 2,
         width: Width::Medium,
@@ -78,8 +79,8 @@ pub const PRESETS: &[Preset] = &[
         keeps: &[Tool::Highlighter],
     },
     Preset {
-        short: "Callout",
-        name: "Blue callout",
+        short: S::tl_callout,
+        name: S::ps_call,
         key: "3",
         colour: 5,
         width: Width::Medium,
@@ -87,8 +88,8 @@ pub const PRESETS: &[Preset] = &[
         keeps: &[Tool::Callout, Tool::Label, Tool::ArrowLabel],
     },
     Preset {
-        short: "Redact",
-        name: "Redact: a solid black box; on a selected box, fills it",
+        short: S::tl_redact,
+        name: S::ps_redact,
         key: "4",
         colour: 11,
         width: Width::Medium,

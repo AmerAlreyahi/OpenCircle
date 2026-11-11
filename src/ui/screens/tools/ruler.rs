@@ -4,6 +4,8 @@
 //! nearest strong colour change each way along that axis (a gap or a box's
 //! width, live under the pointer); a box (W × H; its corners snap to window
 //! and control edges as a snip's do). Ctrl+C copies the measure as text.
+use crate::t;
+use crate::ui::kit::dir;
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Geometry};
 use iced::widget::{Space, canvas as draw, pin, stack};
@@ -38,12 +40,14 @@ const READOUT_GAP: f32 = 16.0;
 const READOUT_ROOM: f32 = 240.0;
 
 /// The freeze hint while the ruler starts.
-pub const HINT: [Group<'static>; 4] = [
-    (None, "Drag to measure"),
-    (Some("Shift"), "0° · 45° · 90°"),
-    (Some("Ctrl+C"), "Copy"),
-    (Some("Esc"), "Close"),
-];
+pub fn freeze_hint() -> [Group<'static>; 4] {
+    [
+        (None, t!(sn_ruler_drag)),
+        (Some("Shift"), "0° · 45° · 90°"),
+        (Some("Ctrl+C"), t!(c_copy)),
+        (Some("Esc"), t!(sn_close)),
+    ]
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -340,31 +344,14 @@ impl canvas::Program<Msg> for Marks {
 }
 
 /// The toolbar: the four modes (`mode` chosen), the measure (`measure`), ×.
-/// `rtl`: mirrored.
-pub fn toolbar<'a>(mode: Mode, measure: Option<&Measure>, rtl: bool) -> Element<'a, Msg> {
-    let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
+/// Mirrored in a right-to-left view (`kit::dir`).
+pub fn toolbar<'a>(mode: Mode, measure: Option<&Measure>) -> Element<'a, Msg> {
     let side = iced::widget::tooltip::Position::Bottom;
     let modes = [
-        (
-            Mode::Line,
-            LINE,
-            ar("Line: any angle (Shift: 45°)", "خط: أي زاوية (Shift: 45°)"),
-        ),
-        (
-            Mode::Across,
-            ACROSS,
-            ar("Across: to the nearest edges", "أفقي: إلى أقرب حافتين"),
-        ),
-        (
-            Mode::Down,
-            DOWN,
-            ar("Up and down: to the nearest edges", "رأسي: إلى أقرب حافتين"),
-        ),
-        (
-            Mode::Box,
-            BOX,
-            ar("Box: width × height", "مربع: العرض × الارتفاع"),
-        ),
+        (Mode::Line, LINE, t!(sn_ruler_line)),
+        (Mode::Across, ACROSS, t!(sn_ruler_across)),
+        (Mode::Down, DOWN, t!(sn_ruler_updown)),
+        (Mode::Box, BOX, t!(sn_ruler_box)),
     ];
     let mut parts: Vec<Element<'a, Msg>> = (modes.into_iter())
         .map(|(m, glyph, tip)| {
@@ -385,8 +372,8 @@ pub fn toolbar<'a>(mode: Mode, measure: Option<&Measure>, rtl: bool) -> Element<
         Some(m) => chip::readout(m.text(), m.live, None),
         None => {
             let what = match mode {
-                Mode::Line | Mode::Box => ar("Drag to measure", "اسحب للقياس"),
-                Mode::Across | Mode::Down => ar("Point at a gap", "أشر إلى فراغ"),
+                Mode::Line | Mode::Box => t!(sn_ruler_drag),
+                Mode::Across | Mode::Down => t!(sn_ruler_gap),
             };
             sub(Role::META, what).into()
         }
@@ -394,12 +381,9 @@ pub fn toolbar<'a>(mode: Mode, measure: Option<&Measure>, rtl: bool) -> Element<
     let close = icon_button::square(CLOSE, State::default(), Some(Msg::Close));
     parts.extend([
         divider::vertical(DIVIDER_H),
-        hint(close, ar("Close", "إغلاق"), Why::Keys("Esc"), side),
+        hint(close, t!(sn_close), Why::Keys("Esc"), side),
     ]);
-    if rtl {
-        parts.reverse();
-    }
-    let line = iced::widget::Row::with_children(parts)
+    let line = iced::widget::Row::with_children(dir::order(parts))
         .spacing(space::GAP)
         .padding([0.0, space::GAP])
         .align_y(iced::Center);

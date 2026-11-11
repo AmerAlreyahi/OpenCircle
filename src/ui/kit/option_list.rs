@@ -381,7 +381,8 @@ pub fn logo_mark<'a, Message: 'a>(px: u32) -> Element<'a, Message> {
 /// its key caps (one per key) or, while `reading`, the loading mark in their
 /// place. 32 px tall, radius 9, 12 px / 500; `hover` under the pointer,
 /// `accent_soft` for the keyboard's row; no `press` = dimmed to 38 %.
-/// `rtl`: mirrored (the icon at the right); the caps stay Latin, left to right.
+/// Right to left (`kit::dir`): mirrored (the icon at the right); the caps stay
+/// Latin, left to right.
 pub struct ActionRow<'a, Message> {
     pub lead: Element<'a, Message>,
     pub label: &'a str,
@@ -390,7 +391,6 @@ pub struct ActionRow<'a, Message> {
     pub reading: bool,
     pub focused: bool,
     pub press: Option<Message>,
-    pub rtl: bool,
 }
 
 /// The row's height (the design's 34 px pitch with the gap).
@@ -450,7 +450,7 @@ pub fn action<'a, Message: Clone + 'a>(r: ActionRow<'a, Message>) -> Element<'a,
     parts.push(Space::new().width(Fill).into());
     parts.extend(trail);
     // the caps keep their own order; the row around them mirrors
-    if r.rtl {
+    if super::dir::rtl() {
         parts.reverse();
     }
     let content = row(parts).spacing(ACTION_SPACE).align_y(Center);
@@ -479,7 +479,7 @@ pub fn action<'a, Message: Clone + 'a>(r: ActionRow<'a, Message>) -> Element<'a,
 
 /// The foot of an action menu: a hairline and one 28 px line of `words` in
 /// `text_sub` (11.5 px), like the language picker's hint.
-pub fn foot<'a, Message: 'a>(words: &'a str, rtl: bool) -> Element<'a, Message> {
+pub fn foot<'a, Message: 'a>(words: &'a str) -> Element<'a, Message> {
     let role = Role::ROW_DESC;
     let line = container(
         text(words)
@@ -490,7 +490,7 @@ pub fn foot<'a, Message: 'a>(words: &'a str, rtl: bool) -> Element<'a, Message> 
     .padding([0.0, ACTION_SPACE])
     .height(FOOT_H)
     .center_y(FOOT_H);
-    let line = match rtl {
+    let line = match super::dir::rtl() {
         true => line.align_right(Fill),
         false => line.width(Fill),
     };

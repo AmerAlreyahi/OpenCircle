@@ -1565,7 +1565,7 @@ mod tests {
         assert_eq!(app.toolbar_on(), Some(id));
         assert!(!bar.intersects(&local), "{bar:?}");
         let screen = Rectangle::with_size(app.o.screens[0].place.size());
-        let hint = long.hint_spot(on.work, bar, false).expect("its hint");
+        let hint = long.hint_spot(on.work, bar).expect("its hint");
         assert!(screen.contains(hint), "{hint:?}");
         // the picture: beside the area on that screen, 1:1 at its scale
         let (w, h) = (150, 300);

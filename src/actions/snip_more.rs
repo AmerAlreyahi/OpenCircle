@@ -13,6 +13,7 @@
 use iced::Rectangle;
 
 use super::Crop;
+use crate::app_language::S;
 use crate::config::Config;
 use crate::ocr::TextBlock;
 
@@ -37,14 +38,14 @@ impl Row {
         }
     }
 
-    /// The row's name (Latin, Arabic); Translate reads "Show original" while
-    /// the translation is on.
-    pub fn label(self, translated: bool) -> (&'static str, &'static str) {
+    /// The row's name (the string table); Translate reads "Show original"
+    /// while the translation is on.
+    pub fn label(self, translated: bool) -> S {
         match self {
-            Row::CopyText => ("Copy text", "نسخ النص"),
-            Row::AskAi => ("Ask AI", "اسأل الذكاء الاصطناعي"),
-            Row::Translate if translated => ("Show original", "إظهار الأصل"),
-            Row::Translate => ("Translate", "ترجمة"),
+            Row::CopyText => S::act_copy_text,
+            Row::AskAi => S::nav_ai,
+            Row::Translate if translated => S::sn_show_original,
+            Row::Translate => S::act_translate,
         }
     }
 
@@ -96,14 +97,11 @@ pub enum Why {
 }
 
 impl Why {
-    /// The menu foot's words (Latin, Arabic).
-    pub fn words(self) -> (&'static str, &'static str) {
+    /// The menu foot's words (the string table).
+    pub fn words(self) -> S {
         match self {
-            Why::NoText => ("No text found in this area", "لا يوجد نص في هذه المنطقة"),
-            Why::LongCapture => (
-                "Translate works on one screen at a time",
-                "الترجمة تعمل على شاشة واحدة في كل مرة",
-            ),
+            Why::NoText => S::sn_no_text,
+            Why::LongCapture => S::sn_one_screen,
         }
     }
 }
@@ -125,14 +123,11 @@ pub fn why(row: Row, info: &Info, long: bool) -> Option<Why> {
 }
 
 /// The menu foot: the first row's reason, else Ask AI's browser note.
-pub fn foot(info: &Info, long: bool) -> Option<(&'static str, &'static str)> {
+pub fn foot(info: &Info, long: bool) -> Option<S> {
     if let Some(w) = Row::ALL.iter().find_map(|&r| why(r, info, long)) {
         return Some(w.words());
     }
-    info.browser.then_some((
-        "Opens in your browser with this picture",
-        "يفتح في متصفحك مع هذه الصورة",
-    ))
+    info.browser.then_some(S::sn_opens_browser)
 }
 
 /// A shortcut ("Ctrl+Shift+X") as one cap per key; nothing for an unbound one.
@@ -358,20 +353,23 @@ mod tests {
         assert_eq!(why(Row::AskAi, &info, true), None);
         assert_eq!(why(Row::Translate, &info, true), Some(Why::LongCapture));
         assert_eq!(
-            foot(&info, true).unwrap().0,
+            crate::app_language::tr(foot(&info, true).unwrap()),
             "Translate works on one screen at a time"
         );
         // "Show original" always works
         info.translated = true;
         assert_eq!(why(Row::Translate, &info, true), None);
-        assert_eq!(Row::Translate.label(true).0, "Show original");
+        assert_eq!(
+            crate::app_language::tr(Row::Translate.label(true)),
+            "Show original"
+        );
         // no AI key: the browser note
         let browser = Info {
             browser: true,
             ..Info::default()
         };
         assert_eq!(
-            foot(&browser, false).unwrap().0,
+            crate::app_language::tr(foot(&browser, false).unwrap()),
             "Opens in your browser with this picture"
         );
         assert_eq!(foot(&Info::default(), false), None);

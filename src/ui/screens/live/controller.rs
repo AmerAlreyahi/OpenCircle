@@ -9,6 +9,8 @@
 //! its state and view (kit parts only: the widget surface, the grip, the
 //! language picker's openers and list, `.oc-btn`s); `live_layer` owns the
 //! window.
+use crate::app_language::{S, fmt};
+use crate::t;
 use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Size};
 
@@ -112,7 +114,7 @@ impl Controller {
         self.picker.close();
         self.minimised = false;
         self.ask = Some(Ask {
-            what: format!("{what} (about {mb} MB)"),
+            what: fmt(S::lc_about, &[&what, &mb]),
             progress: None,
             error: None,
         });
@@ -170,9 +172,16 @@ impl Controller {
         let controls = row![
             container(grip(Msg::Drag)).center_y(CHIP_HEIGHT),
             self.picker.chips().map(Msg::Picker),
-            cell(if self.paused { "Resume" } else { "Pause" }, Msg::Pause),
-            cell("Hide", Msg::Minimise),
-            cell("Stop", Msg::Stop),
+            cell(
+                if self.paused {
+                    t!(lc_resume)
+                } else {
+                    t!(lc_pause)
+                },
+                Msg::Pause
+            ),
+            cell(t!(lc_hide), Msg::Minimise),
+            cell(t!(chat_stop), Msg::Stop),
         ]
         .spacing(SPACING)
         .align_y(Center);
@@ -217,18 +226,17 @@ fn cell<'a>(name: &'a str, msg: Msg) -> Element<'a, Msg> {
 /// Stop), or the progress.
 fn ask_view(ask: &Ask, width: f32) -> Element<'static, Msg> {
     let line: Element<'static, Msg> = match &ask.error {
-        Some(e) => error(Role::NOTE, format!("Download failed: {e}")).into(),
-        None => note(format!(
-            "Live translate needs {}. Download it? Nothing you translate leaves your PC.",
-            ask.what
-        ))
-        .into(),
+        Some(e) => error(Role::NOTE, fmt(S::lc_failed, &[e])).into(),
+        None => note(fmt(S::lc_needs, &[&ask.what])).into(),
     };
     let below: Element<'static, Msg> = match ask.progress {
         Some(done) => container(progress::bar(done)).center_y(CHIP_HEIGHT).into(),
-        None => row![cell("Download", Msg::Download), cell("Cancel", Msg::Stop)]
-            .spacing(SPACING)
-            .into(),
+        None => row![
+            cell(t!(md_download), Msg::Download),
+            cell(t!(c_cancel), Msg::Stop)
+        ]
+        .spacing(SPACING)
+        .into(),
     };
     column![container(line).height(ASK_TEXT).width(Fill), below]
         .spacing(SPACING)

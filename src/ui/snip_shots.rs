@@ -347,7 +347,8 @@ fn the_long_capture_count_mirrors() {
             ("rtl", 3240, false, true),
             ("limit-rtl", MAX_HEIGHT, true, true),
         ] {
-            let view = long_capture::count::<crate::ui::snip::Msg>(height, full, false, rtl);
+            let _ar = rtl.then(super::kit::testing::arabic);
+            let view = long_capture::count::<crate::ui::snip::Msg>(height, full, false);
             let px = super::kit::testing::shot::render(view, size.width as u32, size.height as u32);
             let name = format!("snip-7-count-{name}-{}@1x", theme.id);
             if golden::enabled() {
@@ -377,20 +378,12 @@ fn the_screen_tool_toolbars_mirror() {
         themes::set(theme);
         for rtl in [false, true] {
             let dir = if rtl { "rtl" } else { "ltr" };
+            let _ar = rtl.then(super::kit::testing::arabic);
             let bars = [
-                ("picker-empty", picker::toolbar(None, &[], rtl)),
-                (
-                    "picker",
-                    picker::toolbar(Some([30, 144, 255]), &recent, rtl),
-                ),
-                (
-                    "ruler",
-                    ruler::toolbar(ruler::Mode::Line, Some(&measure), rtl),
-                ),
-                (
-                    "ruler-empty",
-                    ruler::toolbar(ruler::Mode::Across, None, rtl),
-                ),
+                ("picker-empty", picker::toolbar(None, &[])),
+                ("picker", picker::toolbar(Some([30, 144, 255]), &recent)),
+                ("ruler", ruler::toolbar(ruler::Mode::Line, Some(&measure))),
+                ("ruler-empty", ruler::toolbar(ruler::Mode::Across, None)),
             ];
             for (name, bar) in bars {
                 let (w, h) = (620, 60);

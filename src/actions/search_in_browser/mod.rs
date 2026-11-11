@@ -17,8 +17,7 @@ pub const ACTION: Action = Action {
 };
 
 /// What the user reads when the selection is one flat colour (nothing is sent).
-pub const BLANK: &str =
-    "Nothing was sent: this area is one plain colour. Select an area with a picture or text in it.";
+pub const BLANK: crate::app_language::Said = crate::app_language::Said(S::pill_blank);
 
 /// `crop` as the PNG Lens gets, every pixel opaque (a screen has no
 /// see-through pixels, and a zero alpha from any capture path would reach Lens
@@ -28,7 +27,7 @@ pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
     let (pixels, _) = rgba.as_chunks_mut::<4>();
     pixels.iter_mut().for_each(|p| p[3] = 255);
     if pixels.windows(2).all(|w| w[0] == w[1]) {
-        return Err(BLANK.into());
+        return Err(BLANK.to_string());
     }
     super::encode_png(crop.width, crop.height, &rgba)
 }
@@ -107,10 +106,14 @@ mod tests {
             [0, 0, 0, 255],
             [40, 90, 200, 255],
         ] {
-            assert_eq!(search_png(&flat(colour)), Err(BLANK.into()), "{colour:?}");
+            assert_eq!(
+                search_png(&flat(colour)),
+                Err(BLANK.to_string()),
+                "{colour:?}"
+            );
             assert_eq!(
                 open(&flat(colour)).map(drop),
-                Err(BLANK.into()),
+                Err(BLANK.to_string()),
                 "never handed off"
             );
         }

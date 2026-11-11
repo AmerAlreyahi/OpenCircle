@@ -178,11 +178,11 @@ struct Live {
 }
 
 /// A live pin's opacity steps (its button walks them) and their tooltips.
-const OPACITY: [(f32, &str); 4] = [
-    (1.0, "Opacity: 100 %"),
-    (0.8, "Opacity: 80 %"),
-    (0.6, "Opacity: 60 %"),
-    (0.4, "Opacity: 40 %"),
+const OPACITY: [(f32, crate::app_language::S); 4] = [
+    (1.0, crate::app_language::S::pin_op_100),
+    (0.8, crate::app_language::S::pin_op_80),
+    (0.6, crate::app_language::S::pin_op_60),
+    (0.4, crate::app_language::S::pin_op_40),
 ];
 /// Live pins open at once: each holds a window capture and a thread.
 pub const MAX_LIVE: usize = 4;
@@ -291,19 +291,20 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
             )
         };
         // its word "Drag" says it: no tooltip (owner rule: only when it adds)
-        let drag = dragout::SUPPORTED.then(|| chip::drag_out(PinMsg::DragOut));
+        let drag =
+            dragout::SUPPORTED.then(|| chip::drag_out(PinMsg::DragOut, crate::t!(chip_drag)));
         let live = pin.live.as_ref().map(|l| {
             let tool = |glyph, message, label| {
                 let button = icon_button::square(glyph, State::default(), Some(message));
                 hint(button, label, Why::Icon, Side::Bottom)
             };
             row![
-                tool(OPACITY_GLYPH, PinMsg::Opacity, OPACITY[l.opacity].1),
                 tool(
-                    THROUGH,
-                    PinMsg::ClickThrough,
-                    "Let clicks pass through (back: tray menu)"
+                    OPACITY_GLYPH,
+                    PinMsg::Opacity,
+                    crate::app_language::tr(OPACITY[l.opacity].1)
                 ),
+                tool(THROUGH, PinMsg::ClickThrough, crate::t!(pin_through)),
             ]
             .spacing(space::GAP)
         });
@@ -313,9 +314,14 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
             row![
                 drag,
                 live,
-                button(COPY, PinMsg::Copy, "Copy", "Ctrl+C"),
-                button(SAVE, PinMsg::Save, "Save", "Ctrl+S"),
-                button(Icon::Close.glyph(), PinMsg::Close, "Close", "Esc"),
+                button(COPY, PinMsg::Copy, crate::t!(c_copy), "Ctrl+C"),
+                button(SAVE, PinMsg::Save, crate::t!(c_save), "Ctrl+S"),
+                button(
+                    Icon::Close.glyph(),
+                    PinMsg::Close,
+                    crate::t!(sn_close),
+                    "Esc"
+                ),
             ]
             .spacing(space::GAP)
             .align_y(iced::Center),
@@ -457,7 +463,7 @@ impl Windows {
         if fresh {
             // a cleared strip's steps go now (its window shows the new strip)
             let id = self.steps.take().and_then(|(id, _)| id);
-            let rtl = false; // the app's UI is Latin today
+            let rtl = super::kit::dir::rtl(); // the strip docks on the side the text starts
             self.steps = Some((id, Strip::new(monitor, inset, rtl)));
         }
         super::background(move |tx| match steps::Step::new(&crop) {
@@ -1646,7 +1652,7 @@ impl Windows {
         };
         Some(chrome::frame(
             super::kit::logo::logo(16),
-            "Screenshot permission",
+            crate::t!(win_t_perm_head),
             self.mode(window),
             page,
             move |e| Msg::Chrome(window, e),
@@ -1655,30 +1661,30 @@ impl Windows {
 
     pub fn title(&self, window: window::Id) -> &'static str {
         if self.pins.iter().any(|p| p.id == window) {
-            return "OpenCircle pin";
+            return crate::t!(win_t_pin);
         }
         if self.steps_window() == Some(window) {
-            return "OpenCircle steps";
+            return crate::t!(win_t_steps);
         }
         if self.id(Kind::Permission) == Some(window) {
-            return "OpenCircle needs screenshot permission";
+            return crate::t!(o_needs_shots);
         }
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
-            return "OpenCircle update";
+            return crate::t!(win_t_update);
         }
         if self
             .update_pill
             .as_ref()
             .is_some_and(|(p, ..)| *p == window)
         {
-            return "OpenCircle update status";
+            return crate::t!(win_t_update_status);
         }
         if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == window) {
-            return "OpenCircle menu";
+            return crate::t!(win_t_menu);
         }
         match (self.id(Kind::Settings), self.id(Kind::Onboarding)) {
-            (Some(id), _) if id == window => "OpenCircle Settings",
-            (_, Some(id)) if id == window => "Welcome to OpenCircle",
+            (Some(id), _) if id == window => crate::t!(win_title),
+            (_, Some(id)) if id == window => crate::t!(o_title),
             _ => "OpenCircle",
         }
     }
@@ -2024,7 +2030,7 @@ fn test_hook() -> Task<Msg> {
 fn pick_folder() -> Task<Msg> {
     let start = super::background(|tx| {
         let picked = rfd::FileDialog::new()
-            .set_title("Choose the save folder")
+            .set_title(crate::t!(dlg_folder))
             .pick_folder();
         let _ = tx.unbounded_send(picked);
     });

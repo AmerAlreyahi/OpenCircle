@@ -18,18 +18,18 @@ pub const ACTION: Action = Action {
 
 /// The text reader's models aren't here: Copy text never fetches them itself
 /// (only the download card does, on the user's click).
-pub const NEEDS_READER: &str = "Get the text reader first: press Copy text in the overlay.";
+pub const NEEDS_READER: crate::app_language::Said = crate::app_language::Said(S::pill_need_reader);
 
 /// Reads `crop`'s text and copies it (the pill's text, or why not). Never
 /// downloads: without the models it says so (the overlay shows the download
 /// card before it gets here; the quick action and `run text` get this answer).
 fn copy_read(crop: Crop) -> Result<String, String> {
     if !models_present() {
-        return Err(NEEDS_READER.into());
+        return Err(NEEDS_READER.to_string());
     }
     let text = read(&crop, |_| {})?;
     if text.trim().is_empty() {
-        return Err("No text found in the selection.".into());
+        return Err(crate::t!(pill_no_text).into());
     }
     super::copy::text(text).map(|()| super::copy::COPIED_PILL.to_string())
 }

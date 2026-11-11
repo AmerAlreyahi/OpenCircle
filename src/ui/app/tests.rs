@@ -1057,7 +1057,7 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
             !picture.intersects(&bar) && !picture.intersects(&area),
             "{picture:?}"
         );
-        let hint = long.hint_spot(app.o.screen, bar, false);
+        let hint = long.hint_spot(app.o.screen, bar);
         let hint = hint.unwrap_or_else(|| panic!("the hint shows at y {y}"));
         assert!(hint.x + 1.0 < area.x && hint.y >= 0.0, "{hint:?}");
         // cancelled: back to the picked area, the toolbar docked on it again

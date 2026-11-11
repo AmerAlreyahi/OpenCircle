@@ -30,7 +30,6 @@ fn interval() -> Duration {
     Duration::from_millis(crate::config::current().translate.live_interval_ms.into())
 }
 /// The first live run's note, shown once.
-const NOTE: &str = "Games must run borderless or windowed";
 const NOTE_TIME: Duration = Duration::from_secs(6);
 /// Test hook: after the first patches (or error), the layer is saved here (PNG).
 const TEST_SHOT: &str = "OPENCIRCLE_TEST_LIVE_SHOT";
@@ -257,7 +256,7 @@ impl Live {
     fn notice(&self) -> Option<String> {
         match (&self.error, self.note) {
             (Some(e), _) => Some(e.clone()),
-            (None, true) => Some(NOTE.into()),
+            (None, true) => Some(crate::t!(live_note).into()),
             (None, false) => None,
         }
     }

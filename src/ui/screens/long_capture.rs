@@ -13,6 +13,9 @@
 //! is kept out of the grabs (`corner`; owner, 2026-11-03). A calm hint near the
 //! area until the first scroll. The grabbing and stitching run on a thread
 //! (`capture::scroll::by_hand`).
+use crate::app_language::{S, fmt};
+use crate::t;
+use crate::ui::kit::dir;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -142,8 +145,8 @@ impl Long {
     }
 
     /// Where the hint is drawn (none once scrolled, or without a free spot).
-    pub fn hint_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
-        let width = key_hint::width(&self.hint(rtl));
+    pub fn hint_spot(&self, screen: Size, bar: Rectangle) -> Option<Point> {
+        let width = key_hint::width(&self.hint());
         let picture = self.picture(screen, bar);
         (!self.scrolled() && !self.lost).then(|| hint_at(bar, self.area, picture, width, screen))?
     }
@@ -153,11 +156,11 @@ impl Long {
     /// area, right above its edge, else right under it; clear of the toolbar
     /// and the picture. None where neither fits: nothing of ours goes over the
     /// area while capturing (the count chip still says "Scroll back").
-    pub fn note_spot(&self, screen: Size, bar: Rectangle, rtl: bool) -> Option<Point> {
+    pub fn note_spot(&self, screen: Size, bar: Rectangle) -> Option<Point> {
         if !self.lost || self.full {
             return None;
         }
-        let (width, h) = (key_hint::width(&note(rtl)), key_hint::HEIGHT);
+        let (width, h) = (key_hint::width(&note()), key_hint::HEIGHT);
         let x =
             (self.area.center_x() - width / 2.0).clamp(GAP, (screen.width - GAP - width).max(GAP));
         let picture = self.picture(screen, bar);
@@ -177,14 +180,8 @@ impl Long {
 
     /// The outline, the picture with its count and the hint on a `screen`
     /// big overlay whose toolbar is at `bar`; `look` = the active look's
-    /// pair, for the outline. `rtl`: the count's corner and wording mirrored.
-    pub fn view(
-        &self,
-        screen: Size,
-        bar: Rectangle,
-        look: (Color, Color),
-        rtl: bool,
-    ) -> Element<'_, Msg> {
+    /// pair, for the outline. Right to left (`kit::dir`): the count's wording mirrored.
+    pub fn view(&self, screen: Size, bar: Rectangle, look: (Color, Color)) -> Element<'_, Msg> {
         let shown = self
             .picture(screen, bar)
             .zip(self.preview.as_ref())
@@ -210,7 +207,7 @@ impl Long {
                 true => (r.x + r.width - cw).max(0.0),
                 false => r.x,
             };
-            let chip = container(count(self.height, self.full, self.lost, rtl)).width(cw);
+            let chip = container(count(self.height, self.full, self.lost)).width(cw);
             let chip = match left {
                 true => chip.align_right(cw),
                 false => chip.align_left(cw),
@@ -232,11 +229,11 @@ impl Long {
                 layers = layers.push(pin(chip).position(Point::new(x, y)));
             }
         }
-        if let Some(spot) = self.hint_spot(screen, bar, rtl) {
-            layers = layers.push(pin(key_hint(&self.hint(rtl), rtl)).position(spot));
+        if let Some(spot) = self.hint_spot(screen, bar) {
+            layers = layers.push(pin(key_hint(&self.hint())).position(spot));
         }
-        if let Some(spot) = self.note_spot(screen, bar, rtl) {
-            layers = layers.push(pin(key_hint(&note(rtl), rtl)).position(spot));
+        if let Some(spot) = self.note_spot(screen, bar) {
+            layers = layers.push(pin(key_hint(&note())).position(spot));
         }
         layers.into()
     }
@@ -244,37 +241,25 @@ impl Long {
 
 impl Long {
     /// The hint until the first scroll.
-    fn hint(&self, rtl: bool) -> [key_hint::Group<'static>; 1] {
-        [(None, scroll_hint(rtl))]
-    }
-}
-
-/// "Scroll to capture the page" (the hint here and in Wayland's pop-up).
-fn scroll_hint(rtl: bool) -> &'static str {
-    match rtl {
-        true => "مرّر لالتقاط الصفحة",
-        false => "Scroll to capture the page",
+    fn hint(&self) -> [key_hint::Group<'static>; 1] {
+        [(None, t!(sn_scroll_hint))]
     }
 }
 
 /// The gap note while the page jumped too far to match.
-fn note(rtl: bool) -> [key_hint::Group<'static>; 1] {
-    match rtl {
-        true => [(None, "قفزت الصفحة: مرّر للخلف قليلًا")],
-        false => [(None, "The page jumped: scroll back a little")],
-    }
+fn note() -> [key_hint::Group<'static>; 1] {
+    [(None, t!(sn_page_jumped))]
 }
 
 /// The count chip: `3,240 px`, with "Limit reached" / "Scroll back".
-pub fn count<'a, M: 'a>(height: u32, full: bool, lost: bool, rtl: bool) -> Element<'a, M> {
-    let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
+pub fn count<'a, M: 'a>(height: u32, full: bool, lost: bool) -> Element<'a, M> {
     let note = match () {
-        _ if full => Some(ar("Limit reached", "بلغت الحد")),
-        _ if lost => Some(ar("Scroll back", "مرّر للخلف")),
+        _ if full => Some(t!(sn_limit)),
+        _ if lost => Some(t!(sn_scroll_back)),
         _ => None,
     };
-    let label = match rtl {
-        true => format!("{} بكسل", group(height)),
+    let label = match dir::rtl() {
+        true => fmt(S::sn_px, &[&group(height)]),
         false => px(height),
     };
     chip::readout(label, false, note)
@@ -419,14 +404,8 @@ pub fn popup_room(area: Rectangle, screen: Size, scale: f32) -> Option<(Size, bo
 
 /// The tip beside the pop-up while a whole-screen capture hasn't scrolled
 /// yet (`popup_view`).
-fn tip(rtl: bool) -> [key_hint::Group<'static>; 1] {
-    match rtl {
-        true => [(None, "نصيحة: اسحب الجزء الذي يتمرّر فقط لصفحة أنظف")],
-        false => [(
-            None,
-            "Tip: drag just the part that scrolls for a cleaner page",
-        )],
-    }
+fn tip() -> [key_hint::Group<'static>; 1] {
+    [(None, t!(sn_lc_tip))]
 }
 
 /// The pop-up's corner over the area when it sits inside (`popup_room`):
@@ -509,7 +488,7 @@ fn inside_parts(width: f32, picture: Size, tip: bool) -> Vec<(Rectangle, f32)> {
         parts.push((Rectangle::new(at, framed), 0.0));
     }
     if tip {
-        let pill = Size::new(key_hint::width(&self::tip(false)), key_hint::HEIGHT);
+        let pill = Size::new(key_hint::width(&self::tip()), key_hint::HEIGHT);
         let at = Point::new(width - pill.width, POPUP_PANEL.height + CHIP_GAP);
         parts.push((Rectangle::new(at, pill), radius::FULL));
     }
@@ -585,7 +564,6 @@ pub fn popup_view<'a>(
     left: bool,
     tip: bool,
     inside: bool,
-    rtl: bool,
 ) -> Element<'a, Finish> {
     use crate::ui::kit::button::{self, Kind};
     use crate::ui::kit::icon::Icon;
@@ -608,7 +586,7 @@ pub fn popup_view<'a>(
     });
     let top = match end {
         Some(end) => chip::readout(end.to_string(), false, None),
-        None => count(height, full, lost, rtl),
+        None => count(height, full, lost),
     };
     let tool = |glyph, kind, how| button::tool(glyph, kind, false, Some(how));
     let buttons = row![
@@ -618,11 +596,11 @@ pub fn popup_view<'a>(
         tool(Icon::Close.glyph(), Kind::Elevated, Finish::Cancel),
     ]
     .spacing(space::GAP);
-    let keys = match rtl {
-        true => "المفاتيح تعمل بعد «تم»",
-        false => "Keys work after Done",
-    };
-    let hint = column![muted(Role::META, scroll_hint(rtl)), muted(Role::META, keys)].height(HINT_H);
+    let hint = column![
+        muted(Role::META, t!(sn_scroll_hint)),
+        muted(Role::META, t!(sn_keys_after_done))
+    ]
+    .height(HINT_H);
     let panel = column![top, buttons, hint].spacing(PANEL_GAP);
     let panel = surface(Material::Widget, radius::DROPDOWN, panel)
         .padding(PANEL_PAD)
@@ -639,7 +617,7 @@ pub fn popup_view<'a>(
             .width(Fill)
             .align_x(iced::alignment::Horizontal::Right);
         if tip {
-            parts = parts.push(key_hint(&self::tip(rtl), rtl));
+            parts = parts.push(key_hint(&self::tip()));
         }
         return parts.into();
     }
@@ -937,7 +915,7 @@ mod tests {
         assert_eq!(px(3240), "3,240 px");
         assert_eq!(px(20_000), "20,000 px");
         assert_eq!(group(1_234_567), "1,234,567");
-        let texts = crate::ui::kit::testing::shot::texts(count::<Msg>(20_000, true, false, false));
+        let texts = crate::ui::kit::testing::shot::texts(count::<Msg>(20_000, true, false));
         assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
     }
 
@@ -1021,35 +999,31 @@ mod tests {
             preview: None,
         };
         long.update(update(400, false));
-        assert_eq!(long.note_spot(SCREEN, bar, false), None);
+        assert_eq!(long.note_spot(SCREEN, bar), None);
         long.update(update(400, true));
-        let at = long.note_spot(SCREEN, bar, false).expect("a note");
-        let width = key_hint::width(&note(false));
+        let at = long.note_spot(SCREEN, bar).expect("a note");
+        let width = key_hint::width(&note());
         assert_eq!(
             at.y + key_hint::HEIGHT + 8.0,
             area.y,
             "right above the area"
         );
         assert_eq!(at.x + width / 2.0, area.center_x(), "centred on it");
-        assert_eq!(
-            long.hint_spot(SCREEN, bar, false),
-            None,
-            "one note at a time"
-        );
+        assert_eq!(long.hint_spot(SCREEN, bar), None, "one note at a time");
         // an area at the screen's top: under it (the toolbar elsewhere)
         let high = rect(300.0, 0.0, 500.0, 400.0);
         let mut top = Long::new(high, Arc::default(), 1.0);
         top.update(update(400, true));
         let far = rect(0.0, 700.0, 10.0, 10.0);
-        let at = top.note_spot(SCREEN, far, false).unwrap();
+        let at = top.note_spot(SCREEN, far).unwrap();
         assert_eq!(at.y, high.height + 8.0);
         // a full-screen area: no note over the page
         let mut full = Long::new(rect(0.0, 0.0, 1280.0, 720.0), Arc::default(), 1.0);
         full.update(update(720, true));
-        assert_eq!(full.note_spot(SCREEN, far, false), None);
+        assert_eq!(full.note_spot(SCREEN, far), None);
         // matched again: gone
         long.update(update(500, false));
-        assert_eq!(long.note_spot(SCREEN, bar, false), None);
+        assert_eq!(long.note_spot(SCREEN, bar), None);
     }
 
     #[test]
@@ -1128,7 +1102,7 @@ mod tests {
         let (r, left) = popup_at(area, screen, Size::ZERO, true, 1.0).unwrap();
         assert!(left, "its content against its right edge");
         assert_eq!((r.x + r.width, r.y), (area.width - GAP, GAP), "{r:?}");
-        let tip_w = key_hint::width(&tip(false));
+        let tip_w = key_hint::width(&tip());
         assert_eq!(r.width, tip_w.ceil().max(POPUP_PANEL.width));
         assert_eq!(r.height, POPUP_PANEL.height + CHIP_GAP + key_hint::HEIGHT);
         let (grown, _) = popup_at(area, screen, most, false, 1.0).unwrap();

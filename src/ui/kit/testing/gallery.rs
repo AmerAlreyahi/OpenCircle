@@ -1470,7 +1470,8 @@ fn key_hint_sheet() {
                 (Some("Enter"), s(ar, "Full screen", "ملء الشاشة")),
                 (Some("Esc"), s(ar, "Cancel", "إلغاء")),
             ];
-            key_hint(&groups, ar)
+            let _d = super::super::dir::scope(ar);
+            key_hint(&groups)
         }),
         row("keyboard", Act::Rest, |ar| {
             let groups = [
@@ -1479,7 +1480,8 @@ fn key_hint_sheet() {
                 (Some("Ctrl"), s(ar, "Resize", "تغيير الحجم")),
                 (Some("Enter"), s(ar, "Copy", "نسخ")),
             ];
-            key_hint(&groups, ar)
+            let _d = super::super::dir::scope(ar);
+            key_hint(&groups)
         }),
     ];
     sheet("key_hint", Size::new(520.0, 52.0), &rows);
@@ -1627,6 +1629,7 @@ fn snip_toolbar_parts_sheet() {
             )
         }),
         row("menu foot", Act::Rest, |ar| {
+            let _d = super::super::dir::scope(ar);
             option_list::action_menu(
                 268.0,
                 vec![menu_row(
@@ -1636,10 +1639,11 @@ fn snip_toolbar_parts_sheet() {
                     &["Ctrl", "Shift", "X"],
                     Look::Dimmed,
                 )],
-                Some(option_list::foot(
-                    s(ar, "No text found in this area", "لا يوجد نص في هذه المنطقة"),
+                Some(option_list::foot(s(
                     ar,
-                )),
+                    "No text found in this area",
+                    "لا يوجد نص في هذه المنطقة",
+                ))),
             )
         }),
         row("panel", Act::Rest, |ar| {
@@ -1668,6 +1672,7 @@ fn menu_row(
     look: Look,
 ) -> Element<'static, ()> {
     use super::super::option_list;
+    let _d = super::super::dir::scope(ar);
     option_list::action(option_list::ActionRow {
         lead: match look {
             Look::External => option_list::logo_mark(16),
@@ -1679,6 +1684,5 @@ fn menu_row(
         reading: matches!(look, Look::Reading),
         focused: matches!(look, Look::Keyboard),
         press: (!matches!(look, Look::Dimmed)).then_some(()),
-        rtl: ar,
     })
 }

@@ -1513,4 +1513,300 @@ strings! {
         | "حذف";
     chat_load_failed: "Couldn't open that chat"
         | "تعذّر فتح هذه المحادثة";
+    // added in part 2b: Snip (tool and group names, toolbar, panels, More, Steps, long capture, ruler, colour picker, freeze hints)
+    tl_select: "Select"
+        | "تحديد";
+    tl_crop: "Crop"
+        | "اقتصاص";
+    tl_rect: "Rectangle"
+        | "مستطيل";
+    tl_ellipse: "Ellipse"
+        | "شكل بيضاوي";
+    tl_line: "Line"
+        | "خط";
+    tl_arrow: "Arrow"
+        | "سهم";
+    tl_arrow_label: "Arrow with a label"
+        | "سهم بتسمية";
+    tl_pen: "Pen"
+        | "قلم";
+    tl_highlighter: "Highlighter"
+        | "قلم تمييز";
+    tl_text: "Text"
+        | "نص";
+    tl_label: "Text on a background"
+        | "نص على خلفية";
+    tl_callout: "Callout"
+        | "فقاعة";
+    tl_step: "Numbered steps"
+        | "خطوات مرقمة";
+    tl_pointer: "Pointer"
+        | "مؤشر";
+    tl_blur: "Blur"
+        | "تمويه";
+    tl_redact: "Redact"
+        | "حجب";
+    tl_spotlight: "Spotlight"
+        | "تسليط الضوء";
+    tl_magnify: "Magnify"
+        | "تكبير";
+    grp_shapes: "Shapes"
+        | "الأشكال";
+    grp_draw: "Draw"
+        | "الرسم";
+    grp_hide: "Hide"
+        | "الإخفاء";
+    sn_move: "Move toolbar"
+        | "تحريك شريط الأدوات";
+    sn_drag_out: "Drag the picture into any app"
+        | "اسحب الصورة إلى أي تطبيق";
+    sn_colour: "Colour"
+        | "اللون";
+    sn_undo: "Undo"
+        | "تراجع";
+    sn_redo: "Redo"
+        | "إعادة";
+    sn_more: "More"
+        | "المزيد";
+    sn_size: "Size"
+        | "الحجم";
+    sn_font_size: "Font size"
+        | "حجم الخط";
+    sn_outline: "Outline"
+        | "الإطار";
+    sn_fill: "Fill"
+        | "التعبئة";
+    sn_fill_note: "rectangle, ellipse"
+        | "مستطيل، شكل بيضاوي";
+    sn_label: "Label"
+        | "تسمية";
+    sn_sans: "Sans"
+        | "سانس";
+    sn_serif: "Serif"
+        | "سيريف";
+    sn_mono: "Mono"
+        | "أحادي";
+    sn_none: "None"
+        | "بلا";
+    sn_back_outline: "Outline"
+        | "إطار";
+    sn_box: "Box"
+        | "مربع";
+    sn_font: "Font"
+        | "الخط";
+    sn_bold: "Bold"
+        | "عريض";
+    sn_back: "Back"
+        | "خلف";
+    sn_pointer: "Pointer"
+        | "مؤشر";
+    sn_legend: "Legend"
+        | "وسيلة الإيضاح";
+    sn_auto: "Auto"
+        | "تلقائي";
+    sn_line: "line"
+        | "السطر";
+    sn_brush: "Brush"
+        | "الفرشاة";
+    sn_pixel: "Pixel size"
+        | "حجم البكسل";
+    sn_line_help: "Line help"
+        | "مساعدة السطر";
+    sn_stays: "stays on the line"
+        | "تبقى على السطر";
+    sn_uses_colour: "Uses the colour"
+        | "يستخدم اللون";
+    sn_steps_of: "{} of {} steps"
+        | "{} من {} خطوات";
+    sn_update_step: "Update step"
+        | "حدّث الخطوة";
+    sn_update_tip: "Update the step"
+        | "حدّث الخطوة";
+    sn_add_step: "Add step"
+        | "أضف الخطوة";
+    sn_add_tip: "Add as the next step"
+        | "أضف كخطوة تالية";
+    sn_steps_full: "Steps full"
+        | "الخطوات ممتلئة";
+    sn_steps_full_tip: "Steps full (12 of 12) · Copy all or clear to add more"
+        | "الخطوات ممتلئة (12 من 12) · انسخ الكل أو امسح لإضافة المزيد";
+    sn_long_capture: "Long capture"
+        | "لقطة طويلة";
+    sn_add_to_steps: "Add to steps"
+        | "أضف إلى الخطوات";
+    sn_pin: "Pin to screen"
+        | "تثبيت على الشاشة";
+    sn_live_pin: "Live pin"
+        | "تثبيت مباشر";
+    sn_share: "Share"
+        | "مشاركة";
+    sn_colour_picker: "Colour picker"
+        | "منتقي الألوان";
+    sn_ruler: "Screen ruler"
+        | "مسطرة الشاشة";
+    sn_show_original: "Show original"
+        | "إظهار الأصل";
+    sn_no_text: "No text found in this area"
+        | "لا يوجد نص في هذه المنطقة";
+    sn_one_screen: "Translate works on one screen at a time"
+        | "الترجمة تعمل على شاشة واحدة في كل مرة";
+    sn_opens_browser: "Opens in your browser with this picture"
+        | "يفتح في متصفحك مع هذه الصورة";
+    sn_nudge_px: "1 px"
+        | "1 بكسل";
+    sn_nudge_10: "10 px"
+        | "10 بكسل";
+    sn_nudge_resize: "Resize"
+        | "تغيير الحجم";
+    sn_nudge_copy: "Copy"
+        | "نسخ";
+    sn_nudge_back: "Back"
+        | "رجوع";
+    sn_hint_click_window: "Click a window"
+        | "انقر على نافذة";
+    sn_hint_drag: "Drag an area"
+        | "اسحب منطقة";
+    sn_hint_full: "Full screen"
+        | "ملء الشاشة";
+    sn_hint_all: "All screens"
+        | "كل الشاشات";
+    sn_hint_cancel: "Cancel"
+        | "إلغاء";
+    sn_hint_click_screen: "Click for this screen or drag an area · Esc to close"
+        | "انقر لهذه الشاشة أو اسحب منطقة · Esc للإغلاق";
+    sn_element: "Element"
+        | "عنصر";
+    sn_window: "Window"
+        | "نافذة";
+    sn_screen: "Screen"
+        | "الشاشة";
+    sn_recent_capture: "A recent capture"
+        | "لقطة حديثة";
+    sn_recent: "Recent"
+        | "الأخيرة";
+    sn_clear_recent: "Clear recent captures"
+        | "مسح اللقطات الأخيرة";
+    sn_capturing: "Capturing…"
+        | "جارٍ الالتقاط…";
+    sn_capturing_in: "Capturing in {} s · open a menu now"
+        | "الالتقاط خلال {} ث · افتح قائمة الآن";
+    sn_snapped: "Snapped"
+        | "ملتقطة";
+    sn_steps_cleared: "Steps cleared"
+        | "مُسحت الخطوات";
+    sn_step_copy_all: "Copy all"
+        | "نسخ الكل";
+    sn_step_clear: "Clear steps"
+        | "مسح الخطوات";
+    sn_step_tip: "Step · click to copy · double-click to edit"
+        | "خطوة · انقر للنسخ · انقر مرتين للتعديل";
+    sn_scroll_hint: "Scroll to capture the page"
+        | "مرّر لالتقاط الصفحة";
+    sn_page_jumped: "The page jumped: scroll back a little"
+        | "قفزت الصفحة: مرّر للخلف قليلًا";
+    sn_limit: "Limit reached"
+        | "بلغت الحد";
+    sn_scroll_back: "Scroll back"
+        | "مرّر للخلف";
+    sn_lc_tip: "Tip: drag just the part that scrolls for a cleaner page"
+        | "نصيحة: اسحب الجزء الذي يتمرّر فقط لصفحة أنظف";
+    sn_keys_after_done: "Keys work after Done"
+        | "المفاتيح تعمل بعد «تم»";
+    sn_px: "{} px"
+        | "{} بكسل";
+    sn_ruler_drag: "Drag to measure"
+        | "اسحب للقياس";
+    sn_ruler_gap: "Point at a gap"
+        | "أشر إلى فراغ";
+    sn_ruler_line: "Line: any angle (Shift: 45°)"
+        | "خط: أي زاوية (Shift: 45°)";
+    sn_ruler_across: "Across: to the nearest edges"
+        | "أفقي: إلى أقرب حافتين";
+    sn_ruler_updown: "Up and down: to the nearest edges"
+        | "رأسي: إلى أقرب حافتين";
+    sn_ruler_box: "Box: width × height"
+        | "مربع: العرض × الارتفاع";
+    sn_close: "Close"
+        | "إغلاق";
+    sn_pick_copies: "Click copies HEX"
+        | "النقر ينسخ HEX";
+    sn_pick_recent: "Picked colours show here"
+        | "تظهر هنا الألوان المختارة";
+    ps_red_short: "Red box"
+        | "مربع أحمر";
+    ps_red: "Red box + arrow"
+        | "مربع أحمر + سهم";
+    ps_hl_short: "Highlight"
+        | "تمييز";
+    ps_hl: "Highlight yellow"
+        | "تمييز أصفر";
+    ps_call: "Blue callout"
+        | "فقاعة زرقاء";
+    ps_redact: "Redact: a solid black box; on a selected box, fills it"
+        | "حجب: مربع أسود مصمت؛ وعلى مربع محدد يملؤه";
+    sn_pick_image: "Pick a colour from the image"
+        | "اختر لونًا من الصورة";
+    sn_copy_style: "Copy style"
+        | "نسخ النمط";
+    sn_paste_style: "Paste style"
+        | "لصق النمط";
+    sn_presets: "Presets"
+        | "الإعدادات المسبقة";
+    // added in part 2b: pins, window titles, pills, the live controller and the song search
+    pin_op_100: "Opacity: 100 %"
+        | "الشفافية: 100 %";
+    pin_op_80: "Opacity: 80 %"
+        | "الشفافية: 80 %";
+    pin_op_60: "Opacity: 60 %"
+        | "الشفافية: 60 %";
+    pin_op_40: "Opacity: 40 %"
+        | "الشفافية: 40 %";
+    pin_through: "Let clicks pass through (back: tray menu)"
+        | "السماح بمرور النقرات (للعودة: قائمة علبة النظام)";
+    win_t_perm_head: "Screenshot permission"
+        | "إذن التقاط الشاشة";
+    win_t_pin: "OpenCircle pin"
+        | "تثبيت OpenCircle";
+    win_t_steps: "OpenCircle steps"
+        | "خطوات OpenCircle";
+    win_t_update: "OpenCircle update"
+        | "تحديث OpenCircle";
+    win_t_update_status: "OpenCircle update status"
+        | "حالة تحديث OpenCircle";
+    win_t_menu: "OpenCircle menu"
+        | "قائمة OpenCircle";
+    dlg_folder: "Choose the save folder"
+        | "اختر مجلد الحفظ";
+    pill_blank: "Nothing was sent: this area is one plain colour. Select an area with a picture or text in it."
+        | "لم يُرسَل شيء: هذه المنطقة بلون واحد. حدّد منطقة فيها صورة أو نص.";
+    pill_need_reader: "Get the text reader first: press Copy text in the overlay."
+        | "نزّل قارئ النص أولًا: اضغط «نسخ النص» على الشاشة المجمّدة.";
+    pill_no_text: "No text found in the selection."
+        | "لم يُعثر على نص في التحديد.";
+    chip_drag: "Drag"
+        | "اسحب";
+    lc_about: "{} (about {} MB)"
+        | "{} (حوالي {} MB)";
+    lc_resume: "Resume"
+        | "استئناف";
+    lc_pause: "Pause"
+        | "إيقاف مؤقت";
+    lc_hide: "Hide"
+        | "إخفاء";
+    lc_failed: "Download failed: {}"
+        | "فشل التنزيل: {}";
+    lc_needs: "Live translate needs {}. Download it? Nothing you translate leaves your PC."
+        | "تحتاج الترجمة الحية إلى {}. هل تريد تنزيله؟ لا يغادر ما تترجمه جهازك.";
+    sg_listening: "Listening… {} s"
+        | "جارٍ الاستماع… {} ث";
+    sg_identifying: "Identifying…"
+        | "جارٍ التعرّف…";
+    win_t_live: "OpenCircle live translate"
+        | "الترجمة الحية في OpenCircle";
+    win_t_live_ctl: "OpenCircle live translate controls"
+        | "عناصر تحكم الترجمة الحية في OpenCircle";
+    win_t_chat: "OpenCircle AI"
+        | "ذكاء OpenCircle";
+    live_note: "Games must run borderless or windowed"
+        | "يجب تشغيل الألعاب بلا إطار أو في نافذة";
 }

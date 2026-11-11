@@ -1,7 +1,7 @@
 //! A hint pill with keys (Snip's "Click a window · Drag an area · [Enter]
 //! Full screen · [Esc] Cancel"): groups of an optional keycap and a label,
-//! a 3 px dot between them, on the widget surface, 36 px tall, round. `rtl`
-//! runs the groups right to left (Arabic); keycaps stay Latin.
+//! a 3 px dot between them, on the widget surface, 36 px tall, round. In a
+//! right-to-left view (`kit::dir`) the groups run right to left; keycaps stay Latin.
 use iced::widget::{container, row};
 use iced::{Center, Element};
 
@@ -17,7 +17,8 @@ pub const HEIGHT: f32 = 36.0;
 /// One group: its key (if any) and its label.
 pub type Group<'a> = (Option<&'a str>, &'a str);
 
-pub fn key_hint<'a, Message: 'a>(groups: &[Group<'a>], rtl: bool) -> Element<'a, Message> {
+pub fn key_hint<'a, Message: 'a>(groups: &[Group<'a>]) -> Element<'a, Message> {
+    let rtl = super::dir::rtl();
     let mut items: Vec<Element<'a, Message>> = Vec::new();
     let mut ordered: Vec<&Group<'a>> = groups.iter().collect();
     if rtl {

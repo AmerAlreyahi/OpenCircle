@@ -325,13 +325,13 @@ impl App {
 
     pub(in crate::ui) fn title(&self, window: window::Id) -> String {
         if self.live.as_ref().and_then(live_layer::Live::window) == Some(window) {
-            return "OpenCircle live translate".into();
+            return crate::t!(win_t_live).into();
         }
         if self.live.as_ref().and_then(live_layer::Live::controller) == Some(window) {
-            return "OpenCircle live translate controls".into();
+            return crate::t!(win_t_live_ctl).into();
         }
         if self.chat_win.as_ref().is_some_and(|w| w.id == window) {
-            return "OpenCircle AI".into();
+            return crate::t!(win_t_chat).into();
         }
         self.windows.title(window).to_string()
     }

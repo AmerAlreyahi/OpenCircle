@@ -11,9 +11,12 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 
 use crate::actions::share;
 use crate::actions::snip_more::{self, Read, Row};
+use crate::app_language::{S, fmt, tr};
 use crate::snip::annotate::{
-    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, Width, dragout, info,
+    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
 };
+use crate::t;
+use crate::ui::kit::dir;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, State};
 use crate::ui::kit::surface::{self, Material, surface};
@@ -128,19 +131,14 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
 /// what it sends (`None`: dimmed), and which of the three text rows it is.
 pub struct MoreRow {
     pub glyph: char,
-    pub name: (&'static str, &'static str),
+    pub name: S,
     pub caps: Vec<String>,
     pub message: Option<Message>,
     pub of: Option<Row>,
 }
 
 impl MoreRow {
-    fn plain(
-        glyph: char,
-        name: (&'static str, &'static str),
-        key: Option<&'static str>,
-        message: Option<Message>,
-    ) -> Self {
+    fn plain(glyph: char, name: S, key: Option<&'static str>, message: Option<Message>) -> Self {
         MoreRow {
             glyph,
             name,
@@ -182,7 +180,7 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         .collect();
     rows.push(MoreRow::plain(
         SCROLL,
-        ("Long capture", "لقطة طويلة"),
+        S::sn_long_capture,
         None,
         (e.scroll && idle).then_some(Message::Scroll),
     ));
@@ -190,44 +188,39 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     rows.push(match steps_on(e) {
         false => MoreRow::plain(
             LIST_PLUS,
-            ("Add to steps", "أضف إلى الخطوات"),
+            S::sn_add_to_steps,
             Some("Ctrl+Enter"),
             live(Message::AddStep),
         ),
-        true => MoreRow::plain(COPY, ("Copy", "نسخ"), Some("Ctrl+C"), Some(Message::Copy)),
+        true => MoreRow::plain(COPY, S::c_copy, Some("Ctrl+C"), Some(Message::Copy)),
     });
     rows.push(MoreRow::plain(
         PIN,
-        ("Pin to screen", "تثبيت على الشاشة"),
+        S::sn_pin,
         Some("Ctrl+P"),
         Some(Message::Pin),
     ));
     if live_pin() {
         let m = (e.scroll && idle).then_some(Message::LivePin);
-        rows.push(MoreRow::plain(
-            LIVE_PIN,
-            ("Live pin", "تثبيت مباشر"),
-            None,
-            m,
-        ));
+        rows.push(MoreRow::plain(LIVE_PIN, S::sn_live_pin, None, m));
     }
     if share::SUPPORTED {
         rows.push(MoreRow::plain(
             SHARE,
-            ("Share", "مشاركة"),
+            S::sn_share,
             None,
             Some(Message::Share),
         ));
     }
     rows.push(MoreRow::plain(
         PIPETTE,
-        ("Colour picker", "منتقي الألوان"),
+        S::sn_colour_picker,
         None,
         live(Message::ScreenTool(ScreenTool::Picker)),
     ));
     rows.push(MoreRow::plain(
         crate::ui::screens::tools::ruler::ICON,
-        ("Screen ruler", "مسطرة الشاشة"),
+        S::sn_ruler,
         None,
         live(Message::ScreenTool(ScreenTool::Ruler)),
     ));
@@ -276,27 +269,25 @@ thread_local! {
     /// Where tooltips go (the toolbar's side away from the area), for this build.
     static TIP_SIDE: std::cell::Cell<tooltip::Position> =
         const { std::cell::Cell::new(tooltip::Position::Bottom) };
-    /// Right to left (the goldens' Arabic; the app's UI is Latin today).
-    static RTL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Builds the next toolbars right to left (`true`), with Arabic words.
-#[cfg(test)]
-pub fn set_rtl(on: bool) {
-    RTL.set(on);
-}
-
-/// `latin`, or `arabic` right to left.
-fn ar(latin: &'static str, arabic: &'static str) -> &'static str {
-    if RTL.get() { arabic } else { latin }
+/// A tool's tooltip, `Name (K)`, in the app's language: built once per tool
+/// and language (a handful of short strings kept for the run).
+fn tip(t: &'static ToolInfo) -> &'static str {
+    type Cache = std::collections::HashMap<(char, bool), &'static str>;
+    thread_local!(static TIPS: std::cell::RefCell<Cache> = std::cell::RefCell::default());
+    let key = (t.key, dir::rtl());
+    TIPS.with(|c| {
+        *(c.borrow_mut().entry(key)).or_insert_with(|| {
+            let name = format!("{} ({})", tr(t.name), t.key.to_ascii_uppercase());
+            Box::leak(name.into_boxed_str())
+        })
+    })
 }
 
 /// A line of items, mirrored right to left.
-fn line<'a>(mut items: Vec<Element<'a, Message>>) -> iced::widget::Row<'a, Message> {
-    if RTL.get() {
-        items.reverse();
-    }
-    iced::widget::Row::with_children(items)
+fn line<'a>(items: Vec<Element<'a, Message>>) -> iced::widget::Row<'a, Message> {
+    iced::widget::Row::with_children(dir::order(items))
         .spacing(SPACING)
         .align_y(iced::Center)
 }
@@ -338,17 +329,14 @@ fn build(
     // a long capture running: only what finishes it stays live
     let idle = !e.capturing;
     let live = |m: Message| idle.then_some(m);
-    let mut items: Vec<Element<'_, Message>> = vec![hinted(
-        grip::mover(Message::Grab),
-        ar("Move toolbar", "تحريك شريط الأدوات"),
-        Why::Icon,
-    )];
+    let mut items: Vec<Element<'_, Message>> =
+        vec![hinted(grip::mover(Message::Grab), t!(sn_move), Why::Icon)];
     let px = e.doc.view().size();
     let label = format!("{} × {}", px.width.round(), px.height.round());
     let chip = match dragout::SUPPORTED && idle {
         true => hinted(
             chip::size_handle(label, e.area_held(), Message::DragOut),
-            ar("Drag the picture into any app", "اسحب الصورة إلى أي تطبيق"),
+            t!(sn_drag_out),
             Why::Drag,
         ),
         false => chip::readout(label, e.area_held(), None),
@@ -364,9 +352,9 @@ fn build(
         let s = state(idle && current == g, &m);
         at.push((Menu::Options(g), items.len()));
         // "Shapes · Arrow (A)"; Select's own name once
-        let (label, why) = match g.name() == shown.name() {
-            true => (shown.tip, Why::Icon),
-            false => (g.name(), Why::Keys(shown.tip)),
+        let (label, why) = match g.name() == shown.name {
+            true => (tip(shown), Why::Icon),
+            false => (tr(g.name()), Why::Keys(tip(shown))),
         };
         items.push(hinted(
             icon_button::square(shown.icon, s, live(m)),
@@ -377,7 +365,7 @@ fn build(
     at.push((Menu::Colour, items.len()));
     items.push(hinted(
         colour::swatch(e.ink(), e.menu == Some(Menu::Colour), live(Message::Picker)),
-        ar("Colour", "اللون"),
+        t!(sn_colour),
         Why::Icon,
     ));
     let undo = Message::UndoClick;
@@ -385,7 +373,7 @@ fn build(
     at.push((Menu::Undo, items.len()));
     items.push(hinted(
         icon_button::square(UNDO, s, live(undo)),
-        ar("Undo", "تراجع"),
+        t!(sn_undo),
         Why::Keys("Ctrl+Z"),
     ));
     items.push(divide());
@@ -394,7 +382,7 @@ fn build(
     at.push((Menu::More, items.len()));
     items.push(hinted(
         icon_button::square(Icon::More.glyph(), s, Some(more)),
-        ar("More", "المزيد"),
+        t!(sn_more),
         Why::Icon,
     ));
     items.push(divide());
@@ -408,7 +396,7 @@ fn build(
         focused(&Message::Save),
         Some(Message::Save),
     );
-    items.push(hinted(save, ar("Save", "حفظ"), Why::Keys("Ctrl+S")));
+    items.push(hinted(save, t!(c_save), Why::Keys("Ctrl+S")));
 
     let toolbar = surface(
         match e.held {
@@ -432,7 +420,7 @@ fn build(
     let w = widths(steps_on(e));
     let i = at.iter().find(|(m, _)| *m == menu).map_or(0, |(_, i)| *i);
     let mut x = bar::PAD + w[..i].iter().map(|w| w + SPACING).sum::<f32>();
-    if RTL.get() {
+    if dir::rtl() {
         x = size_for(e).width - x - w[i];
     }
     let left = x + w[i] / 2.0 - width / 2.0;
@@ -482,29 +470,9 @@ fn sizes<'a>(
 /// The slider's room beside the presets.
 const SLIDER_W: f32 = size::PANEL - 2.0 * space::PANEL - 102.0 - SPACING;
 
-/// A tool's name in the panel (Arabic right to left).
+/// A tool's name in the panel.
 fn name_of(tool: Tool) -> &'static str {
-    let latin = info(tool).name();
-    if !RTL.get() {
-        return latin;
-    }
-    match tool {
-        Tool::Select => "تحديد",
-        Tool::Rect => "مستطيل",
-        Tool::Ellipse => "شكل بيضاوي",
-        Tool::Line => "خط",
-        Tool::Arrow => "سهم",
-        Tool::Pen => "قلم",
-        Tool::Highlighter => "قلم تمييز",
-        Tool::Text => "نص",
-        Tool::Callout => "فقاعة",
-        Tool::Step => "خطوات مرقمة",
-        Tool::Blur => "تمويه",
-        Tool::Redact => "حجب",
-        Tool::Spotlight => "تسليط الضوء",
-        Tool::Magnifier => "تكبير",
-        _ => latin,
-    }
+    tr(info(tool).name)
 }
 
 /// A group's panel (a click on its active button): the group's tools, the
@@ -519,7 +487,7 @@ fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
                 t.icon,
                 base.tool == t.tool,
                 Some(Message::Tool(t.tool)),
-                t.tip,
+                tip(t),
             )
         })
         .collect();
@@ -547,12 +515,7 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         let chosen = Width::ALL.iter().position(|w| w.stroke() == e.stroke);
         let presets = segmented::presets(chosen, None, false, |i| Message::Width(Width::ALL[i]));
         let slider = slider::bare(crate::config::STROKE, px, SLIDER_W, false, Message::Stroke);
-        sizes(
-            ar("Size", "الحجم"),
-            format!("{px} px"),
-            presets,
-            Some(slider),
-        )
+        sizes(t!(sn_size), format!("{px} px"), presets, Some(slider))
     };
     let font = || {
         let px = e.text_size.round() as u8;
@@ -563,16 +526,11 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         let slider = slider::bare(crate::config::TEXT_SIZE, px, SLIDER_W, false, |v| {
             Message::TextSize(f32::from(v))
         });
-        sizes(
-            ar("Font size", "حجم الخط"),
-            format!("{px} px"),
-            presets,
-            Some(slider),
-        )
+        sizes(t!(sn_font_size), format!("{px} px"), presets, Some(slider))
     };
     let outline = || {
         switch(
-            ar("Outline", "الإطار"),
+            t!(sn_outline),
             None,
             e.outline,
             Some(Message::Outline(!e.outline)),
@@ -589,11 +547,11 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let shape = crate::snip::annotate::fills_inside(tool);
             let mut o = vec![stroke(), outline()];
             // shown dimmed for lines, so the panel doesn't jump
-            let note = (!shape).then(|| ar("rectangle, ellipse", "مستطيل، شكل بيضاوي"));
+            let note = (!shape).then(|| t!(sn_fill_note));
             let fill = shape.then_some(Message::Fill(!e.fill));
-            o.push(switch(ar("Fill", "التعبئة"), note, e.fill && shape, fill));
+            o.push(switch(t!(sn_fill), note, e.fill && shape, fill));
             if tool == Tool::Arrow {
-                o.push(variant(ar("Label", "تسمية"), Tool::Arrow, Tool::ArrowLabel));
+                o.push(variant(t!(sn_label), Tool::Arrow, Tool::ArrowLabel));
             }
             o
         }
@@ -606,14 +564,14 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
                 ..style
             };
             let faces = [
-                (F::Sans, ar("Sans", "سانس")),
-                (F::Serif, ar("Serif", "سيريف")),
-                (F::Mono, ar("Mono", "أحادي")),
+                (F::Sans, t!(sn_sans)),
+                (F::Serif, t!(sn_serif)),
+                (F::Mono, t!(sn_mono)),
             ];
             let backs = [
-                (B::None, ar("None", "بلا")),
-                (B::Outline, ar("Outline", "إطار")),
-                (B::Box, ar("Box", "مربع")),
+                (B::None, t!(sn_none)),
+                (B::Outline, t!(sn_back_outline)),
+                (B::Box, t!(sn_box)),
             ];
             let face = segmented::inline(&faces, style.font, style.font, 1.0, move |font| {
                 Message::TextStyle(TextStyle { font, ..style })
@@ -623,14 +581,14 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             });
             vec![
                 font(),
-                option(ar("Font", "الخط"), None, None, Some(face)),
+                option(t!(sn_font), None, None, Some(face)),
                 switch(
-                    ar("Bold", "عريض"),
+                    t!(sn_bold),
                     None,
                     style.bold,
                     Some(Message::TextStyle(bold)),
                 ),
-                option(ar("Back", "خلف"), None, None, Some(back)),
+                option(t!(sn_back), None, None, Some(back)),
             ]
         }
         Tool::Callout => vec![font(), outline()],
@@ -638,14 +596,9 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let presets =
                 segmented::presets(width_at, None, false, |i| Message::Width(Width::ALL[i]));
             vec![
-                sizes(ar("Size", "الحجم"), String::new(), presets, None),
-                variant(ar("Pointer", "مؤشر"), Tool::Step, Tool::Pointer),
-                switch(
-                    ar("Legend", "وسيلة الإيضاح"),
-                    None,
-                    e.doc.legend,
-                    Some(Message::Legend),
-                ),
+                sizes(t!(sn_size), String::new(), presets, None),
+                variant(t!(sn_pointer), Tool::Step, Tool::Pointer),
+                switch(t!(sn_legend), None, e.doc.legend, Some(Message::Legend)),
             ]
         }
         Tool::Blur => {
@@ -656,33 +609,28 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let brush =
                 segmented::presets(at, None, auto, |i| Message::BlurSize(Some(Width::ALL[i])));
             let to = if auto { Some(Width::Medium) } else { None };
-            let chip = button::switch(ar("Auto", "تلقائي"), auto, Message::BlurSize(to));
-            let value = if auto { ar("line", "السطر") } else { "" };
+            let chip = button::switch(t!(sn_auto), auto, Message::BlurSize(to));
+            let value = if auto { t!(sn_line) } else { "" };
             let cell = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let cells = segmented::presets(cell, None, false, |i| Message::BlurCell(Width::ALL[i]));
             let px = e.blur_cell.cell();
             vec![
                 column![
-                    option(ar("Brush", "الفرشاة"), None, Some(value.into()), Some(chip)),
+                    option(t!(sn_brush), None, Some(value.into()), Some(chip)),
                     line(vec![brush]),
                 ]
                 .spacing(SPACING)
                 .into(),
-                sizes(
-                    ar("Pixel size", "حجم البكسل"),
-                    format!("{px} px"),
-                    cells,
-                    None,
-                ),
+                sizes(t!(sn_pixel), format!("{px} px"), cells, None),
                 switch(
-                    ar("Line help", "مساعدة السطر"),
-                    Some(ar("stays on the line", "تبقى على السطر")),
+                    t!(sn_line_help),
+                    Some(t!(sn_stays)),
                     e.assist,
                     Some(Message::Assist),
                 ),
             ]
         }
-        Tool::Redact => vec![muted(Role::META, ar("Uses the colour", "يستخدم اللون")).into()],
+        Tool::Redact => vec![muted(Role::META, t!(sn_uses_colour)).into()],
         _ => Vec::new(),
     }
 }
@@ -690,22 +638,19 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
 /// Undo's second click: Undo, Redo and where the history is.
 fn undo_panel(e: &Annotator) -> Element<'_, Message> {
     let (done, all) = e.doc.steps();
-    let steps = match RTL.get() {
-        true => format!("{done} من {all} خطوات"),
-        false => format!("{done} of {all} steps"),
-    };
+    let steps = fmt(S::sn_steps_of, &[&done, &all]);
     let items = vec![
         icon(
             UNDO,
             false,
             (done > 0).then_some(Message::Undo),
-            ar("Undo", "تراجع"),
+            t!(sn_undo),
         ),
         icon(
             REDO,
             false,
             (done < all).then_some(Message::Redo),
-            ar("Redo", "إعادة"),
+            t!(sn_redo),
         ),
         Space::new().width(Fill).into(),
         sub(Role::META, steps).into(),
@@ -719,26 +664,23 @@ fn primary<'a>(e: &Annotator, focused: bool) -> Element<'a, Message> {
     let accent = button::Kind::Accent;
     if !steps_on(e) {
         let copy = button::tool(COPY, accent, focused, Some(Message::Copy));
-        return hinted(copy, ar("Copy", "نسخ"), Why::Keys("Ctrl+C"));
+        return hinted(copy, t!(c_copy), Why::Keys("Ctrl+C"));
     }
     let n = e.steps.unwrap_or(0);
     let (label, tip, why) = match e.updating {
         Some(i) => (
-            step_label(("Update step", "حدّث الخطوة"), i + 1),
-            ar("Update the step", "حدّث الخطوة"),
+            step_label(S::sn_update_step, i + 1),
+            t!(sn_update_tip),
             Why::Keys("Enter"),
         ),
         None if !e.adds_step() => (
-            ar("Steps full", "الخطوات ممتلئة").to_string(),
-            ar(
-                "Steps full (12 of 12) · Copy all or clear to add more",
-                "الخطوات ممتلئة (12 من 12) · انسخ الكل أو امسح لإضافة المزيد",
-            ),
+            t!(sn_steps_full).to_string(),
+            t!(sn_steps_full_tip),
             Why::Icon,
         ),
         None => (
-            step_label(("Add step", "أضف الخطوة"), n + 1),
-            ar("Add as the next step", "أضف كخطوة تالية"),
+            step_label(S::sn_add_step, n + 1),
+            t!(sn_add_tip),
             Why::Keys("Enter"),
         ),
     };
@@ -748,8 +690,8 @@ fn primary<'a>(e: &Annotator, focused: bool) -> Element<'a, Message> {
 }
 
 /// "Add step 2": the words, then the number.
-fn step_label(words: (&'static str, &'static str), n: usize) -> String {
-    format!("{} {n}", ar(words.0, words.1))
+fn step_label(words: S, n: usize) -> String {
+    format!("{} {n}", tr(words))
 }
 
 /// More's width: 268 px, 304 in Arabic (the longest label grows it).
@@ -760,13 +702,13 @@ pub const MORE_W_AR: f32 = 304.0;
 /// share, the screen tools (arrow keys walk it); its foot says why a row is
 /// off (arrow keys skip those) or where Ask AI goes.
 fn more_panel(e: &Annotator) -> Element<'_, Message> {
-    let rtl = RTL.get();
+    let rtl = dir::rtl();
     let mut items: Vec<Element<'_, Message>> = Vec::new();
     for (i, r) in more_rows(e).into_iter().enumerate() {
         if i == TEXT_ROWS {
             items.push(option_list::separator());
         }
-        let label = if rtl { r.name.1 } else { r.name.0 };
+        let label = tr(r.name);
         let lead = match r.of {
             Some(Row::AskAi) => option_list::logo_mark(16),
             _ => option_list::glyph(r.glyph, false),
@@ -782,11 +724,9 @@ fn more_panel(e: &Annotator) -> Element<'_, Message> {
             reading,
             focused: e.row == Some(i),
             press: r.message,
-            rtl,
         }));
     }
-    let foot = snip_more::foot(&e.more, e.capturing)
-        .map(|(latin, arabic)| option_list::foot(if rtl { arabic } else { latin }, rtl));
+    let foot = snip_more::foot(&e.more, e.capturing).map(|words| option_list::foot(tr(words)));
     option_list::action_menu(if rtl { MORE_W_AR } else { MORE_W }, items, foot)
 }
 
@@ -819,19 +759,19 @@ pub fn place_popover(at: Rectangle, bar_height: f32, screen: Rectangle) -> Vecto
 fn colour_panel(e: &Annotator) -> Element<'_, Message> {
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
-        ar("Pick a colour from the image", "اختر لونًا من الصورة"),
+        t!(sn_pick_image),
         Why::Keys("D"),
     );
     let style = line(vec![
         eyedropper,
-        chip::action(ar("Copy style", "نسخ النمط").into(), Message::CopyStyle),
-        chip::action(ar("Paste style", "لصق النمط").into(), Message::PasteStyle),
+        chip::action(t!(sn_copy_style).into(), Message::CopyStyle),
+        chip::action(t!(sn_paste_style).into(), Message::PasteStyle),
     ]);
     let preset = |i: usize| -> Element<'_, Message> {
         let p = &PRESETS[i];
         hinted(
-            chip::action(p.short.into(), Message::Preset(i)),
-            p.name,
+            chip::action(tr(p.short).into(), Message::Preset(i)),
+            tr(p.name),
             Why::Keys(p.key),
         )
     };
@@ -842,7 +782,7 @@ fn colour_panel(e: &Annotator) -> Element<'_, Message> {
         .collect::<Vec<Element<'_, Message>>>();
     let more = column![
         style,
-        caption(Role::SECTION, ar("Presets", "الإعدادات المسبقة")),
+        caption(Role::SECTION, t!(sn_presets)),
         column(pairs).spacing(SPACING)
     ]
     .spacing(SPACING);
@@ -890,7 +830,7 @@ mod tests {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
             for rtl in [false, true] {
-                set_rtl(rtl);
+                let _ar = rtl.then(crate::ui::kit::testing::arabic);
                 let mut colour = editor();
                 colour.update(Message::Picker);
                 let mut undo = editor();
@@ -961,7 +901,6 @@ mod tests {
                 }
             }
         }
-        set_rtl(false);
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }

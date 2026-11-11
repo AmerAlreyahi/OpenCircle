@@ -4,6 +4,8 @@
 //! HEX where the arrows put the pointer (1 px, Shift 10 px); the last
 //! `RECENT` colours sit in the toolbar, a click copies one again. They are
 //! kept for this run of the app only (nothing is written).
+use crate::t;
+use crate::ui::kit::dir;
 use iced::widget::{Space, canvas, row};
 use iced::{Color, Element, Fill, Point};
 
@@ -27,12 +29,14 @@ pub const RECENT: usize = 8;
 const DIVIDER_H: f32 = 24.0;
 
 /// The freeze hint while the picker starts.
-pub const HINT: [Group<'static>; 4] = [
-    (None, "Click copies HEX"),
-    (Some("Shift"), "RGB"),
-    (Some("← ↑ → ↓"), "1 px"),
-    (Some("Esc"), "Close"),
-];
+pub fn freeze_hint() -> [Group<'static>; 4] {
+    [
+        (None, t!(sn_pick_copies)),
+        (Some("Shift"), "RGB"),
+        (Some("← ↑ → ↓"), t!(sn_nudge_px)),
+        (Some("Esc"), t!(sn_close)),
+    ]
+}
 
 /// `rgb(r, g, b)`, as CSS writes it.
 pub fn rgb([r, g, b]: [u8; 3]) -> String {
@@ -85,9 +89,8 @@ pub fn loupe<'a>(
 }
 
 /// The toolbar: the colour under the pointer (`under`), the recent ones,
-/// ×. `rtl`: mirrored.
-pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]], rtl: bool) -> Element<'a, Msg> {
-    let ar = |latin: &'a str, arabic: &'a str| if rtl { arabic } else { latin };
+/// ×. Mirrored in a right-to-left view (`kit::dir`).
+pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]]) -> Element<'a, Msg> {
     let now = chip::readout(
         under.map_or_else(|| "#------".into(), |c| crate::config::Rgb(c).hex(true)),
         true,
@@ -95,13 +98,7 @@ pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]], rtl: bool) -> Ele
     );
     let mut parts: Vec<Element<'a, Msg>> = vec![now];
     match recent.is_empty() {
-        true => parts.push(
-            sub(
-                Role::META,
-                ar("Picked colours show here", "تظهر هنا الألوان المختارة"),
-            )
-            .into(),
-        ),
+        true => parts.push(sub(Role::META, t!(sn_pick_recent)).into()),
         false => parts.push(colour::recent(recent, Msg::Recopy)),
     }
     let close = icon_button::square(CLOSE, State::default(), Some(Msg::Close));
@@ -109,15 +106,12 @@ pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]], rtl: bool) -> Ele
         divider::vertical(DIVIDER_H),
         hint(
             close,
-            ar("Close", "إغلاق"),
+            t!(sn_close),
             Why::Keys("Esc"),
             iced::widget::tooltip::Position::Bottom,
         ),
     ]);
-    if rtl {
-        parts.reverse();
-    }
-    let line = iced::widget::Row::with_children(parts)
+    let line = iced::widget::Row::with_children(dir::order(parts))
         .spacing(space::GAP)
         .padding([0.0, space::GAP])
         .align_y(iced::Center);

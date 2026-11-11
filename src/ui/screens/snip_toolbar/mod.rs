@@ -1,6 +1,7 @@
 //! The Snip toolbar and its canvas: the annotation editor (`crate::snip::annotate`) over
 //! the frozen frame, its toolbar docked where the bottom bar is (the host
 //! places it: same anchors, same drag).
+use crate::t;
 use iced::mouse;
 use iced::widget::{container, image, mouse_area, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Size};
@@ -15,13 +16,15 @@ use crate::ui::kit::key_hint::{self, key_hint};
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
 
 /// Snip's keyboard hint (after an arrow key) and its position readout's width.
-const NUDGE_HINT: [key_hint::Group<'static>; 5] = [
-    (Some("← ↑ → ↓"), "1 px"),
-    (Some("Shift"), "10 px"),
-    (Some("Ctrl"), "Resize"),
-    (Some("Enter"), "Copy"),
-    (Some("Esc"), "Back"),
-];
+fn nudge_hint() -> [key_hint::Group<'static>; 5] {
+    [
+        (Some("← ↑ → ↓"), t!(sn_nudge_px)),
+        (Some("Shift"), t!(sn_nudge_10)),
+        (Some("Ctrl"), t!(sn_nudge_resize)),
+        (Some("Enter"), t!(sn_nudge_copy)),
+        (Some("Esc"), t!(sn_nudge_back)),
+    ]
+}
 const POSITION_W: f32 = 120.0;
 /// Snip's handles scale in after the pick (the design's 120 ms).
 const HANDLES_IN: std::time::Duration = std::time::Duration::from_millis(120);
@@ -247,7 +250,7 @@ impl SnipToolbar {
         // ponytail: shown until the next press, not the design's 2 s / 800 ms fades.
         if toolbar.is_some() && self.annotator.movable && self.annotator.nudged {
             let canvas = shown;
-            let hint = key_hint(&NUDGE_HINT, false);
+            let hint = key_hint(&nudge_hint());
             let y = (canvas.y - 8.0 - key_hint::HEIGHT).max(8.0);
             let hint = container(hint).center_x(screen.width);
             layers = layers.push(pin(hint).position(Point::new(0.0, y)));

@@ -414,7 +414,6 @@ impl Helper {
             self.left,
             tip,
             self.inside,
-            false,
         )
         .map(Event::Click)
     }

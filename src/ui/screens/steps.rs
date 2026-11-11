@@ -10,6 +10,8 @@
 //! each keeps its capture as PNG bytes (a screenshot packs to a few % of its
 //! raw pixels) and a thumbnail of at most `THUMB` px (92 KB), so 12 steps of
 //! 1080p screens hold a few MB instead of 100.
+use crate::t;
+use crate::ui::kit::dir;
 use std::sync::Arc;
 
 use iced::widget::tooltip::Position as Side;
@@ -517,10 +519,7 @@ impl Strip {
     }
 
     fn cleared_words(&self) -> (&'static str, &'static str) {
-        match self.rtl {
-            true => ("مُسحت الخطوات", "تراجع"),
-            false => ("Steps cleared", "Undo"),
-        }
+        (t!(sn_steps_cleared), t!(sn_undo))
     }
 
     /// The strip (or the cleared pill), drawn in its window.
@@ -530,21 +529,19 @@ impl Strip {
             let tone = toast::Tone::Neutral;
             return toast::with_action(label, tone, corners, action, Msg::Undo);
         }
-        let mut top = vec![
+        let top = vec![
             grip::small(Msg::Grab),
             Space::new().width(Fill).into(),
             tip(thumb::close(Msg::Clear), self.words().clear, Side::Bottom),
         ];
-        if self.rtl {
-            top.reverse();
-        }
-        let top = container(iced::widget::Row::with_children(top).align_y(Center)).height(TOP);
+        let top = container(iced::widget::Row::with_children(dir::order(top)).align_y(Center))
+            .height(TOP);
         let thumbs = self.shown().into_iter().enumerate().map(|(place, i)| {
             let look = Look {
                 hover: self.hover == Some(i) && self.drag.is_none(),
                 lifted: self.drag.is_some_and(|(from, _)| from == i),
                 focused: self.focus == Some(i) && self.drag.is_none(),
-                rtl: self.rtl,
+                rtl: dir::rtl(),
             };
             let picture = thumb::step(
                 self.steps[i].thumb.clone(),
@@ -585,17 +582,10 @@ impl Strip {
     }
 
     fn words(&self) -> Words {
-        match self.rtl {
-            true => Words {
-                copy_all: "نسخ الكل",
-                clear: "مسح الخطوات",
-                step: "خطوة · انقر للنسخ · انقر مرتين للتعديل",
-            },
-            false => Words {
-                copy_all: "Copy all",
-                clear: "Clear steps",
-                step: "Step · click to copy · double-click to edit",
-            },
+        Words {
+            copy_all: t!(sn_step_copy_all),
+            clear: t!(sn_step_clear),
+            step: t!(sn_step_tip),
         }
     }
 }

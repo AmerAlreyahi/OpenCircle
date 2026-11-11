@@ -299,17 +299,14 @@ pub fn floating<'a, Message: Clone + 'a>(
 /// 12): the grip dots in `accent` and "Drag". A press starts the OS drag of the
 /// image (a button reacts on release, too late); the edge turns `accent`
 /// under the cursor.
-pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message) -> Element<'a, Message> {
+pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message, word: &'a str) -> Element<'a, Message> {
     use iced::widget::{hover, mouse_area};
     let look = |edge: Color, ink: Color| {
         let dots = text(super::icon::Icon::Grip.glyph())
             .font(super::icon::FONT)
             .size(14)
             .color(c().accent);
-        let label = text("Drag")
-            .size(11)
-            .font(weight(Weight::Medium))
-            .color(ink);
+        let label = text(word).size(11).font(weight(Weight::Medium)).color(ink);
         container(row![dots, label].spacing(space::GAP).align_y(Center))
             .center_x(63)
             .center_y(30)
@@ -423,7 +420,7 @@ pub fn info<'a, Message: 'a>(
     kind: &'a str,
     title: Option<String>,
     size_label: String,
-    steps: &'a [&'a str],
+    steps: &[&'a str],
     at: usize,
 ) -> Element<'a, Message> {
     use super::tokens::Role;
