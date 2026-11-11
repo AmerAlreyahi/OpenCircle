@@ -880,6 +880,16 @@ production systems.
 - No second hotfix (owner, 2026-11-11, "language"): the KDE X11 start crash fix (and the other Linux fixes, #172) ships with
   the Languages release, not as its own release. That release stays numbered v0.1.7 and is the last 0.1.x.
 
+- Recommended defaults taken (owner, 2026-11-11, "yes, do recommended"): (1) GNOME Wayland: the pinned AI chat keeps
+  today's behaviour (the desktop places it; no XWayland keyboard-grabbing window). (2) KDE Wayland: TRY capture through
+  ScreenCast as a measured test behind the existing switch (before -> after on the VM; show the owner KDE's share
+  indicator before it becomes the default). (3) Onboarding's language step does not say the pick "is used for the app"
+  (only true for English and Arabic). (4) Arabic UI part 2 (overlay, bar, chat, Snip, tray, update widgets, installer;
+  the left scrollbar, Noto on Windows 10, the setting-row overflow) follows part 1, with a Windows VM pass.
+- Snip Studio design, LATER (owner, 2026-11-11): the current design is clear but "should be better", with the tool
+  OPTIONS UNFOLDED (visible without a second click); panels collapsible. A new design round before the Studio is built
+  (0.5.0); the eleven open Studio questions are answered in that round, not now.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
