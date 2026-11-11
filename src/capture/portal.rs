@@ -35,7 +35,17 @@ pub fn capture() -> Result<Frame, CaptureError> {
     {
         return super::screencast::capture(&conn);
     }
-    Ok(read_and_delete(&screenshot()?)?)
+    // the desktop's part (its grab and PNG) apart from ours (#172: KDE Wayland's 1-3 s)
+    let asked = std::time::Instant::now();
+    let path = screenshot()?;
+    let answered = asked.elapsed();
+    let frame = read_and_delete(&path)?;
+    crate::log!(
+        "[opencircle] screenshot portal answered in {} ms, decoded in {} ms",
+        answered.as_millis(),
+        (asked.elapsed() - answered).as_millis()
+    );
+    Ok(frame)
 }
 
 /// One screenshot request just for its permission dialog (ScreenCast's dialog where
