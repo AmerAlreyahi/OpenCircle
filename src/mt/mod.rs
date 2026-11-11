@@ -2656,6 +2656,38 @@ mod tests {
             .map_or(0, |kb| kb / 1024)
     }
 
+    /// Peak memory of one translation along `OC_ROUTE` (e.g. `it:ar`), each
+    /// pair loaded in turn as the helper does, with whatever decoder is on
+    /// disk (put a v1 file in place to compare). One process per run (the
+    /// peak is the process's): `OC_ROUTE=en:ar cargo test --release
+    /// mt::tests::real_route_peak -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_route_peak_memory() {
+        let route_of = std::env::var("OC_ROUTE").unwrap_or("en:ar".into());
+        let (src, tgt) = route_of.split_once(':').unwrap();
+        let mut text: Vec<String> = [
+            "Your journey begins in the old harbour town.",
+            "Collect three crystals before the gate closes at nightfall.",
+            "The merchant will not trade with you until you finish his quest.",
+            "Press the button to open the inventory and equip the sword.",
+            "Settings were saved. Restart the game to apply the new language.",
+        ]
+        .iter()
+        .cycle()
+        .take(32)
+        .map(|s| s.to_string())
+        .collect();
+        for p in route(src, tgt).unwrap() {
+            p.ensure(|_, _| {}).unwrap(); // (a verified v1 decoder is kept)
+            let v = if p.outdated() { "v1" } else { "v2" };
+            let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+            text = tr.translate(&text).unwrap();
+            println!("{} ({v} decoder): peak {} MB", p.dir, rss_mb("VmHWM:"));
+        }
+        println!("{route_of}: {}", text[0]);
+    }
+
     /// Pairs added 2026-10-30 download (pinned hashes) and translate a line,
     /// one route through English too (Italian -> en -> Spanish is direct, so
     /// Dutch -> en -> Arabic): `cargo test mt::tests::real_more_pairs -- --ignored --nocapture`
