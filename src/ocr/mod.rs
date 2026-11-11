@@ -101,6 +101,11 @@ impl Grid {
     /// are `line` px tall (median).
     fn new(width: u32, line: f32, shrunk: f32) -> Grid {
         let scale = (LINE_PX / line.max(1.0)).clamp(MIN_DETECT_SCALE, 1.0);
+        // within 30 % of the shrunk scale (150 %: 0.64 against 0.5): the
+        // shrunk scale itself (Linux bands at 150 % found 0.64 strips: +60 %
+        // time against main's shrunk bands, CER 0.135 -> 0.105 either way)
+        let shrunk_ok = scale <= shrunk * 1.3;
+        let scale = if shrunk_ok { shrunk } else { scale };
         let px = width as f32 * scale * scale;
         let rows = ((STRIP_PIXELS / px.max(1.0)) as u32).clamp(128, 384);
         let see = rows / 6;
@@ -108,7 +113,7 @@ impl Grid {
             scale,
             owned: rows - 2 * see,
             see,
-            shrunk: scale <= shrunk * 1.15,
+            shrunk: shrunk_ok,
         }
     }
 }
