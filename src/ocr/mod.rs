@@ -80,6 +80,26 @@ fn rec_batch_len(boxes: &[[f32; 4]]) -> usize {
     n
 }
 
+/// `boxes` as recognizer runs (indices): sorted by shape (narrow first) and
+/// split by `rec_batch_len`. A run is padded to its widest line, so alike
+/// shapes go together (as PaddleOCR does); callers put the lines in reading
+/// order. The second reader batched in detection order: a 1080p Arabic
+/// article took 2418 ms on 2 cores, sorted 1264 ms (#169).
+fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
+    let ratio = |b: &[f32; 4]| b[2] / b[3].max(1.0);
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&a, &b| ratio(&boxes[a]).total_cmp(&ratio(&boxes[b])));
+    let sorted: Vec<[f32; 4]> = order.iter().map(|&i| boxes[i]).collect();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while from < sorted.len() {
+        let n = rec_batch_len(&sorted[from..]);
+        out.push(order[from..from + n].to_vec());
+        from += n;
+    }
+    out
+}
+
 /// One line of text found in the image.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextBlock {
@@ -422,16 +442,13 @@ impl Engine {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
         let (boxes, (dw, dh)) = self.detect(&img, width, height)?;
-        let mut boxes: Vec<[f32; 4]> = boxes
+        let boxes: Vec<[f32; 4]> = boxes
             .into_iter()
             .filter(|b| {
                 let middle = b[1] + b[3] / 2.0;
                 rows.is_none_or(|(top, bottom)| (top as f32..bottom as f32).contains(&middle))
             })
             .collect();
-        // A batch is padded to its widest line: batch alike shapes (as
-        // PaddleOCR does). `reading_order` restores the order.
-        boxes.sort_by(|a, b| (a[2] / a[3]).total_cmp(&(b[2] / b[3])));
         let first = match read {
             Read::One(i) => i,
             Read::Auto => self.auto,
@@ -565,12 +582,9 @@ impl Engine {
         let rtl = models::RECOGNIZERS[i].rtl();
         let rec = self.recognizer(i)?;
         let mut blocks = Vec::with_capacity(boxes.len());
-        let mut rest = boxes;
-        while !rest.is_empty() {
-            let (chunk, tail) = rest.split_at(rec_batch_len(rest));
-            rest = tail;
-            let crops = chunk
-                .iter()
+        for run in runs(boxes) {
+            let chunk: Vec<&[f32; 4]> = run.iter().map(|&j| &boxes[j]).collect();
+            let crops = (chunk.iter())
                 .map(|b| {
                     let [x, y, w, h] = b.map(|v| v as u32);
                     image::imageops::crop_imm(img, x, y, w, h).to_image()
@@ -582,7 +596,7 @@ impl Engine {
                     let text = text.trim();
                     blocks.push(TextBlock {
                         text: if rtl { reverse_rtl(text) } else { text.into() },
-                        bounds: *bounds,
+                        bounds: **bounds,
                         confidence,
                     });
                 }
@@ -802,6 +816,21 @@ mod tests {
         assert_eq!(
             run(&[5.0, 5.0, 5.0, 5.0, 94.0, 94.0, 94.0, 94.0]),
             [4, 2, 2]
+        );
+    }
+
+    /// #169: lines are read in runs of alike shapes whatever order they
+    /// were found in (the second reader's were in detection order).
+    #[test]
+    fn lines_are_batched_by_shape() {
+        let ratios = [5.0, 94.0, 5.0, 94.0, 6.0, 94.0, 5.0, 94.0];
+        let boxes: Vec<_> = ratios.iter().map(|r| [0.0, 0.0, r * 40.0, 40.0]).collect();
+        let got: Vec<Vec<f32>> = (runs(&boxes).iter())
+            .map(|run| run.iter().map(|&j| ratios[j]).collect())
+            .collect();
+        assert_eq!(
+            got,
+            [vec![5.0, 5.0, 5.0, 6.0], vec![94.0, 94.0], vec![94.0, 94.0]]
         );
     }
 
