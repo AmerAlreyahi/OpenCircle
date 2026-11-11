@@ -908,6 +908,10 @@ production systems.
 - Start menu (owner, 2026-11-11): on Windows the overlay opening under an open Start menu is fixed LATER, in v0.1.8.
 - Reset shortcuts (owner, 2026-11-11): Settings > Shortcuts gets "Reset shortcuts to default".
 
+- Setting-row buttons (owner, 2026-11-11; applies "Settings harmony"): a Settings row whose control is one button ("Check
+  now", "Open history", "Open Appearance", "Reset to defaults", "Update now" ...) fills the control column like every other
+  control (same width, height and position, label centred), from one kit part; never a small button at the column's edge.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
