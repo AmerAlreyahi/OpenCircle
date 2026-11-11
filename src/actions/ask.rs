@@ -6,13 +6,14 @@ use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Run};
 use crate::ai::{self, Role};
+use crate::app_language::S;
 use crate::config::{AiConfig, Config, Provider};
 use crate::secrets::{self, Secret};
 use crate::store::chats as history;
 
 pub const ACTION: Action = Action {
     id: "ai",
-    label: "Ask AI",
+    label: S::nav_ai,
     key: Key {
         ctrl: false,
         letter: 'a',
@@ -31,7 +32,8 @@ Use Markdown only where it helps: short lists, tables, fenced code blocks.";
 /// front of the text read from the selection.
 #[derive(Debug, Clone, Copy)]
 pub struct Preset {
-    pub label: &'static str,
+    /// The chip's text (the string table); the prompt is what the model is asked, in English.
+    pub label: S,
     /// `{lang}` = the translate target's language code (Settings).
     pub prompt: &'static str,
 }
@@ -46,29 +48,29 @@ impl Preset {
 /// The first one is what the Explain quick action asks.
 pub const PRESETS: [Preset; 6] = [
     Preset {
-        label: "Explain",
+        label: S::pre_explain,
         prompt: "Explain what this is and what it means, in simple words.",
     },
     Preset {
-        label: "Summarize",
+        label: S::pre_summarize,
         prompt: "Summarize this in a few short points.",
     },
     Preset {
-        label: "Is this a scam?",
+        label: S::pre_scam,
         prompt: "Could this be a scam or phishing? Point out any warning signs, \
                  and tell me what to do.",
     },
     Preset {
-        label: "Fact-check",
+        label: S::pre_fact,
         prompt: "Fact-check this. Which claims hold up, which do not, \
                  and how can I verify them?",
     },
     Preset {
-        label: "Solve step by step",
+        label: S::pre_solve,
         prompt: "Solve this step by step, then give the final answer.",
     },
     Preset {
-        label: "Translate",
+        label: S::act_translate,
         prompt: "Translate all the text here into the language with the code \"{lang}\".",
     },
 ];
@@ -528,7 +530,10 @@ pub(crate) mod tests {
 
     #[test]
     fn presets_are_the_six_suggestions_in_order() {
-        let labels: Vec<_> = PRESETS.iter().map(|p| p.label).collect();
+        let labels: Vec<_> = PRESETS
+            .iter()
+            .map(|p| crate::app_language::tr(p.label))
+            .collect();
         assert_eq!(
             labels,
             [
@@ -541,8 +546,12 @@ pub(crate) mod tests {
             ]
         );
         for (i, p) in PRESETS.iter().enumerate() {
-            assert!(p.prompt.len() > p.label.len(), "{}", p.label);
-            assert!(!p.text("ar").contains("{lang}"), "{}", p.label);
+            assert!(
+                p.prompt.len() > crate::app_language::tr(p.label).len(),
+                "{:?}",
+                p.label
+            );
+            assert!(!p.text("ar").contains("{lang}"), "{:?}", p.label);
             assert!(PRESETS[i + 1..].iter().all(|q| q.label != p.label));
         }
         // Only Translate names a language, and it gets the configured one.

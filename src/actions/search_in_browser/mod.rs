@@ -3,10 +3,11 @@
 pub mod page;
 
 use super::{Action, Crop, Key, Run};
+use crate::app_language::S;
 
 pub const ACTION: Action = Action {
     id: "lens",
-    label: "Search in browser",
+    label: S::act_search,
     key: Key {
         ctrl: false,
         letter: 'l',

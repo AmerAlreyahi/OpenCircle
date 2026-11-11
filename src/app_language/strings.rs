@@ -1314,4 +1314,75 @@ strings! {
         | "لم يبدأ OpenCircle. شغّله من قائمة ابدأ.";
     su_forget_ask: "Also remove your OpenCircle settings, downloaded models and saved keys?\n\nChoose No to keep them for a later install."
         | "هل تريد أيضًا إزالة إعدادات OpenCircle والنماذج التي نزّلتها والمفاتيح المحفوظة؟\n\nاختر «لا» لإبقائها لتثبيت لاحق.";
+    // added in part 2b: the overlay's bar, hints and action names
+    c_copy: "Copy"
+        | "نسخ";
+    c_save: "Save"
+        | "حفظ";
+    act_search: "Search in browser"
+        | "بحث في المتصفح";
+    act_copy_text: "Copy text"
+        | "نسخ النص";
+    act_translate: "Translate"
+        | "ترجمة";
+    bar_hint: "Circle, drag or tap anything · Esc to close"
+        | "ارسم دائرة أو اسحب أو انقر على أي شيء · Esc للإغلاق";
+    bar_protected: "This window is protected; it can't be captured"
+        | "هذه النافذة محمية؛ لا يمكن التقاطها";
+    bar_ask_1: "Ask OpenCircle AI about your screen…"
+        | "اسأل ذكاء OpenCircle الاصطناعي عن شاشتك…";
+    bar_ask_2: "Ask AI about your screen…"
+        | "اسأل الذكاء الاصطناعي عن شاشتك…";
+    bar_ask_3: "Ask OpenCircle AI…"
+        | "اسأل ذكاء OpenCircle…";
+    bar_ask_4: "Ask AI…"
+        | "اسأل الذكاء الاصطناعي…";
+    bar_screen_in: "Screen included"
+        | "الشاشة مضمّنة";
+    bar_question_only: "Question only"
+        | "السؤال فقط";
+    bar_open_chat: "Open OpenCircle AI chat"
+        | "فتح محادثة ذكاء OpenCircle";
+    bar_live: "Live translate (Beta)"
+        | "الترجمة الحية (تجريبي)";
+    bar_song: "Song search"
+        | "البحث عن أغنية";
+    bar_snip_image: "Snip image"
+        | "لقطة للصورة";
+    bar_snip_screen: "Snip the screen"
+        | "لقطة للشاشة";
+    bar_select_text: "Select text"
+        | "تحديد النص";
+    bar_reading: "Reading text…"
+        | "جارٍ قراءة النص…";
+    bar_qr: "QR code: {}"
+        | "رمز QR: {}";
+    bar_qr_marks: "Hidden text-direction marks"
+        | "علامات اتجاه نص مخفية";
+    bar_open_link: "Open link · {}"
+        | "فتح الرابط · {}";
+    bar_open_host: "Open {}"
+        | "فتح {}";
+    bar_write_to: "Write {}"
+        | "مراسلة {}";
+    pill_failed: "That didn't work"
+        | "لم تنجح العملية";
+    pill_qr_copied: "QR text copied"
+        | "تم نسخ نص رمز QR";
+    pill_browser_short: "Couldn't open your browser"
+        | "تعذّر فتح المتصفح";
+    pill_text_copied: "Text copied"
+        | "تم نسخ النص";
+    pill_no_text_copied: "No text copied"
+        | "لم يُنسخ أي نص";
+    pre_explain: "Explain"
+        | "اشرح";
+    pre_summarize: "Summarize"
+        | "لخّص";
+    pre_scam: "Is this a scam?"
+        | "هل هذا احتيال؟";
+    pre_fact: "Fact-check"
+        | "تحقق من الحقائق";
+    pre_solve: "Solve step by step"
+        | "حلّ خطوة بخطوة";
 }

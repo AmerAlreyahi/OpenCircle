@@ -1,3 +1,4 @@
+use crate::app_language::{S, Said};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -538,10 +539,10 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
         rgba: [0, 0, 0, 255].repeat(600 * 360),
     };
     let (mut app, area) = selected_app(&black);
-    assert!(!overlay_texts(&app).contains(&PROTECTED.to_string()));
+    assert!(!overlay_texts(&app).contains(&protected().to_string()));
     let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
     let texts = overlay_texts(&app);
-    assert!(texts.contains(&PROTECTED.to_string()), "{texts:?}");
+    assert!(texts.contains(&protected().to_string()), "{texts:?}");
     let texts = overlay_texts(&app);
     assert!(
         texts.contains(&search_in_browser::ACTION.icon.to_string()),
@@ -555,7 +556,7 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
     };
     let (mut app, area) = selected_app(&grey);
     let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
-    assert!(!overlay_texts(&app).contains(&PROTECTED.to_string()));
+    assert!(!overlay_texts(&app).contains(&protected().to_string()));
 }
 
 /// An open overlay on a `w` x `h` frame at `scale`; pixel (x, y) is
@@ -2216,12 +2217,15 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     );
     crate::ui::kit::testing::shot::save("reader-downloading", app.view(app.overlay), app.o.screen);
     // another opening's download says nothing here
-    let stale = Message::Reader(app.opening.wrapping_add(1), Err("x".into()));
+    let stale = Message::Reader(app.opening.wrapping_add(1), Err(S::md_err_other));
     let _ = app.update(stale);
     assert_eq!(app.o.reader, Reader::Downloading(0.42));
-    let _ = app.update(step(Err("no network".into())));
+    let _ = app.update(step(Err(S::md_err_offline)));
     let texts = overlay_texts(&app);
-    assert!(texts.contains(&"no network".to_string()), "{texts:?}");
+    assert!(
+        texts.contains(&crate::app_language::tr(S::md_err_offline).to_string()),
+        "{texts:?}"
+    );
     assert!(
         note_clicks(&app)
             .iter()
@@ -2790,7 +2794,9 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         "{tips:?}"
     );
     assert!(
-        texts.iter().any(|t| ASK_PLACEHOLDERS.contains(&t.as_str())),
+        texts
+            .iter()
+            .any(|t| ask_placeholders().contains(&t.as_str())),
         "{texts:?}"
     );
     // the three labelled pills, in the design's order
@@ -3992,7 +3998,7 @@ fn ctrl_c_in_select_text_mode_copies_the_boxs_text_not_its_picture() {
     let mut early = select_text_app();
     early.o.text_mode.as_mut().unwrap().lines = None;
     let task = early.update(Message::Overlay(ctrl_c));
-    let reading = early.o.toast == Some("Reading text…");
+    let reading = early.o.toast == Some(Said(S::bar_reading));
     let asking = early.o.copy_after; // no models: the download card, then it copies
     assert!(reading || asking, "reads the box (or asks for its model)");
     run_task(&mut early, task);
@@ -4546,7 +4552,7 @@ fn copy_text_without_models_shows_the_download_card_then_copies() {
     let opening = app.opening;
     let _ = app.update(Message::Reader(opening, Ok(text::Progress::Reading)));
     assert!(!app.o.copy_after);
-    assert_eq!(app.o.toast, Some("Reading text…"));
+    assert_eq!(app.o.toast, Some(Said(S::bar_reading)));
     // Not now: nothing is copied afterwards
     text::MODELS_HERE.set(Some(false));
     let mut app = open_app(1280, 800, 1.0);
@@ -5180,7 +5186,7 @@ fn the_pinned_chats_black_spot_is_no_protected_app() {
         area,
         qr::scan_around(&app.crop().unwrap(), app.chat_hole(), &[[0, 0, w, h]]),
     ));
-    assert!(overlay_texts(&app).contains(&PROTECTED.to_string()));
+    assert!(overlay_texts(&app).contains(&protected().to_string()));
 }
 
 /// The glow's breath rests while a selection is drawn, moved or resized (each

@@ -2,6 +2,7 @@
 //! holds it only while the overlay is open (`Open`). Closing takes it whole,
 //! so no field (the frame, the text read) outlives its opening.
 
+use crate::app_language::Said;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Instant;
@@ -111,7 +112,7 @@ pub(in crate::ui) struct Opening {
     /// The shown monitor's origin (logical px): the key of `App::regions`.
     pub(in crate::ui) origin: Point,
     /// A short status over the frame (copy text).
-    pub(in crate::ui) toast: Option<&'static str>,
+    pub(in crate::ui) toast: Option<Said>,
     /// Wayland: the Copy / Save pill over the frame (its text, done or not,
     /// where), held a moment before the overlay closes (`App::toast_for`).
     pub(in crate::ui) result: Option<(String, bool, Point)>,

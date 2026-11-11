@@ -7,6 +7,7 @@ use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
 use crate::actions::{self, Action, qr, search_in_browser, text};
+use crate::app_language::{S, Said};
 use crate::capture::CaptureError;
 use crate::config::{self, Target};
 use crate::labs::BarButton;
@@ -81,7 +82,7 @@ pub(in crate::ui) enum Message {
     Confirm(PillPlace, Result<String, String>),
     /// A link opened (or text copied) off the UI thread: the overlay closes,
     /// after this pill if any.
-    ThenClose(Option<&'static str>),
+    ThenClose(Option<Said>),
     /// Lens is open in the browser (the page is held), or why it could not.
     SearchOpened(Result<(), String>),
     /// The toast has been shown long enough.
@@ -128,7 +129,7 @@ pub(in crate::ui) enum Message {
     ReaderDownload,
     /// The download card's Not now / Cancel: no note for this opening.
     ReaderDismiss,
-    Reader(u32, Result<text::Progress, String>),
+    Reader(u32, Result<text::Progress, S>),
     /// The "Select text" chip under a snapped box, and the lines OCR read in it.
     SelectText,
     TextLines(Rectangle, Result<Vec<word::Line>, String>),

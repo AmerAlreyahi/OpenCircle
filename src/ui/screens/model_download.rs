@@ -143,15 +143,20 @@ const TEXT_LINE: f32 = 1.6;
 /// Why a download stopped, in the app's language: what the user can do about
 /// it (the detail goes to the log).
 pub fn why(e: &crate::ocr::OcrError) -> String {
+    tr(why_key(e)).into()
+}
+
+/// The string saying why (a state that crosses threads carries the key, the
+/// UI words it in the language it speaks when it draws).
+pub fn why_key(e: &crate::ocr::OcrError) -> S {
     use crate::ocr::OcrError;
     crate::log!("[opencircle] model download failed: {e}");
     match e {
-        OcrError::Unreachable { server: true } => t!(md_err_server),
-        OcrError::Unreachable { server: false } => t!(md_err_offline),
-        OcrError::Checksum(_) => t!(md_err_damaged),
-        _ => t!(md_err_other),
+        OcrError::Unreachable { server: true } => S::md_err_server,
+        OcrError::Unreachable { server: false } => S::md_err_offline,
+        OcrError::Checksum(_) => S::md_err_damaged,
+        _ => S::md_err_other,
     }
-    .into()
 }
 
 /// `bytes` as the design writes it: whole MB, at least 1.

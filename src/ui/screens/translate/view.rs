@@ -8,7 +8,7 @@ use super::{Card, Msg, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ai::Fix;
-use crate::app_language::{S, fmt};
+use crate::app_language::{S, fmt, tr};
 use crate::t;
 use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
 use crate::ui::kit::button::{Kind, button, label as button_label};
@@ -53,7 +53,7 @@ impl Session {
         let _dir = dir::scope(crate::app_language::rtl());
         let card =
             |body: Element<'a, Msg>, footer: Option<Element<'a, Msg>>, title: Option<&'a str>| {
-                let title = title.unwrap_or(actions::translate::ACTION.label);
+                let title = title.unwrap_or(tr(actions::translate::ACTION.label));
                 let header = Header {
                     glyph: actions::translate::ACTION.icon,
                     title,
@@ -156,7 +156,7 @@ impl Session {
         };
         hint(
             button,
-            actions::snip::ACTION.label,
+            tr(actions::snip::ACTION.label),
             why,
             iced::widget::tooltip::Position::Bottom,
         )
@@ -286,6 +286,6 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
         ));
     }
     let ask = &actions::ask::ACTION;
-    let buttons = actions((t!(tp_explain), Msg::Explain), [(ask.label, Msg::Ask)]);
+    let buttons = actions((t!(tp_explain), Msg::Explain), [(tr(ask.label), Msg::Ask)]);
     (body.into(), buttons)
 }

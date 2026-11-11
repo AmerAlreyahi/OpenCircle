@@ -7,17 +7,19 @@ use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
 use crate::actions::{self, qr, search_in_browser, text};
+use crate::app_language::{S, fmt, tr};
 use crate::labs::{self, BarButton};
+use crate::t;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
-use crate::ui::app::{ASK_INPUT, ASK_PLACEHOLDERS, App, LIVE, Reader};
+use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::error;
 use crate::ui::kit::tokens::{Role, radius, size};
 use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{button, chip, divider, field, grip};
+use crate::ui::kit::{button, chip, dir, divider, field, grip};
 use crate::ui::song;
 
 impl App {
@@ -47,14 +49,14 @@ impl App {
         let on = self.o.include;
         let include = field::toggle(Icon::Screen, on, kbd(Stop::Include), Message::IncludeScreen);
         let named = match on {
-            true => "Screen included",
-            false => "Question only",
+            true => t!(bar_screen_in),
+            false => t!(bar_question_only),
         };
         let slots = (
-            hint(logo, "Open OpenCircle AI chat", Why::Icon, top),
+            hint(logo, t!(bar_open_chat), Why::Icon, top),
             field::pair(
                 hint(include, named, Why::Icon, top),
-                hint(badge, "Ask AI", Why::Keys("Enter"), top),
+                hint(badge, t!(nav_ai), Why::Keys("Enter"), top),
             ),
         );
         let field = field::slots(
@@ -77,19 +79,19 @@ impl App {
             (
                 BarButton::Search,
                 search_in_browser::ACTION.icon,
-                search_in_browser::ACTION.label,
+                tr(search_in_browser::ACTION.label),
                 &keys.search,
             ),
             (
                 BarButton::CopyText,
                 text::ACTION.icon,
-                "Copy text",
+                tr(text::ACTION.label),
                 &keys.copy_text,
             ),
             (
                 BarButton::Translate,
                 actions::translate::ACTION.icon,
-                actions::translate::ACTION.label,
+                tr(actions::translate::ACTION.label),
                 &keys.translate,
             ),
         ]
@@ -115,21 +117,19 @@ impl App {
             };
             hint(pill, label, why, top)
         });
-        let pills = iced::widget::row(pills)
-            .spacing(bar::PILL_GAP)
-            .align_y(iced::Center);
+        let pills = dir::row(pills).spacing(bar::PILL_GAP).align_y(iced::Center);
         let icons: Vec<_> = [
             (
                 BarButton::Live,
                 LIVE,
-                "Live translate (Beta)",
+                t!(bar_live),
                 &keys.live,
                 self.live.is_some(),
             ),
             (
                 BarButton::Song,
                 song::MUSIC,
-                "Song search",
+                t!(bar_song),
                 &keys.song,
                 false,
             ),
@@ -137,9 +137,9 @@ impl App {
                 BarButton::Edit,
                 actions::snip::ACTION.icon,
                 if selected {
-                    "Snip image"
+                    t!(bar_snip_image)
                 } else {
-                    "Snip the screen"
+                    t!(bar_snip_screen)
                 },
                 &keys.edit,
                 false,
@@ -156,11 +156,13 @@ impl App {
         })
         .collect();
         let line = || container(divider::vertical(bar::DIVIDER_H)).center_x(bar::DIVIDER);
-        let mut row = iced::widget::row![grip::grip(Message::BarGrab), field, line(), pills]
+        let mut row = crate::dir_row![grip::grip(Message::BarGrab), field, line(), pills]
             .spacing(bar::SPACING)
             .align_y(iced::Center);
         if !icons.is_empty() {
-            row = row.push(line()).extend(icons);
+            row = icons
+                .into_iter()
+                .fold(row.push(line()), |row, icon| row.push(icon));
         }
         // Held: the design's accent ring round it.
         let material = match self.o.bar_drag {
@@ -186,7 +188,7 @@ impl App {
             Reader::Idle => return None,
             Reader::Missing(bytes) => (*bytes, Stage::Ask),
             Reader::Downloading(done) => (crate::ocr::models::full_size(), Stage::at(*done)),
-            Reader::Failed(e) => (crate::ocr::models::full_size(), Stage::Failed(e)),
+            Reader::Failed(e) => (crate::ocr::models::full_size(), Stage::Failed(tr(*e))),
         };
         // ponytail: a started download can't be stopped (it runs on unseen)
         let dismiss = match self.o.reader {
@@ -241,7 +243,11 @@ impl App {
 
 /// The placeholder that fits a field `width` wide, in the UI font.
 pub(in crate::ui) fn ask_placeholder(width: f32) -> &'static str {
-    crate::ui::kit::text::fitting(&ASK_PLACEHOLDERS, field::SLOTS_TEXT, bar::text_room(width))
+    crate::ui::kit::text::fitting(
+        &ask_placeholders(),
+        field::SLOTS_TEXT,
+        bar::text_room(width),
+    )
 }
 
 /// A round button of the bottom bar, named `label` (its tooltip adds `keys`);
@@ -274,20 +280,17 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
     let glyph = crate::ui::kit::text::text(Role::NOTE, crate::actions::copy::ACTION.icon)
         .font(FONT)
         .size(size::ICON);
-    let mut chips = iced::widget::row![
-        glyph,
-        chip::action(format!("QR code: {}", shown.text), copy),
-    ]
-    .spacing(bar::QR_GAP)
-    .align_y(iced::Center);
+    let mut chips = crate::dir_row![glyph, chip::action(fmt(S::bar_qr, &[&shown.text]), copy),]
+        .spacing(bar::QR_GAP)
+        .align_y(iced::Center);
     if shown.warn {
-        chips = chips.push(error(Role::NOTE, "Hidden text-direction marks"));
+        chips = chips.push(error(Role::NOTE, t!(bar_qr_marks)));
     }
     let host = qr::web_url(text).and_then(crate::sys::open::web_host);
     if let (Some(open), Some(host)) = (open, host) {
         // The whole host on the button (like the selection's link chips): the
         // site it really opens, never cut.
-        chips = chips.push(chip::action(format!("Open link · {host}"), open));
+        chips = chips.push(chip::action(fmt(S::bar_open_link, &[&host]), open));
     }
     surface(
         Material::Widget,
@@ -306,11 +309,11 @@ pub fn link_chip<'a, Message: Clone + 'a>(
     open: Message,
 ) -> Element<'a, Message> {
     use crate::actions::entities::Kind;
-    let verb = match entity.kind {
-        Kind::Email => "Write",
-        _ => "Open",
+    let key = match entity.kind {
+        Kind::Email => S::bar_write_to,
+        _ => S::bar_open_host,
     };
-    action_chip(format!("{verb} {}", entity.shown()), open)
+    action_chip(fmt(key, &[&entity.shown()]), open)
 }
 
 /// One acting chip floating beside a selection (a link's Open, Select text):
@@ -369,6 +372,68 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
+    /// The bar in Arabic: the same parts mirrored (the pills' words in order
+    /// from the right), both themes, 1x and 2x; the grip, the logo and the
+    /// key caps keep their shapes.
+    #[test]
+    fn every_arabic_bar_state_matches_its_golden_image() {
+        let _ar = crate::ui::kit::testing::arabic();
+        let mut app = open_app(1280, 800, 1.0);
+        app.o.labs = crate::labs::Labs::all_on();
+        let size = app.bar_size().1;
+        let mut failed = Vec::new();
+        let mut shoot = |app: &App, state: &str| {
+            for theme in [&SAPPHIRE, &DAYLIGHT] {
+                themes::set(theme);
+                let name = format!("bar-{state}-ar-{}", theme.id);
+                failed.extend(golden::check("screens", &name, size, &[1.0, 2.0], || {
+                    app.bottom_bar()
+                }));
+            }
+        };
+        shoot(&app, "rest");
+        let (a, b) = (
+            iced::Point::new(200.0, 150.0),
+            iced::Point::new(500.0, 350.0),
+        );
+        drag(&mut app, a, b, false);
+        app.o.ai_chat = None;
+        shoot(&app, "selected");
+        app.o.bar_focus = Some(Stop::Field);
+        app.o.ask = "ما هذا الخطأ؟ what is it".into();
+        shoot(&app, "typed");
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// The pills read Search in browser, Copy text, Translate from the left
+    /// in English and from the right in Arabic.
+    #[test]
+    fn the_bar_reads_from_the_right_in_arabic() {
+        let order = |ar: bool| {
+            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let mut app = open_app(1280, 800, 1.0);
+            app.o.labs = crate::labs::Labs::all_on();
+            let size = app.bar_size().1;
+            let pills = [
+                tr(search_in_browser::ACTION.label),
+                tr(text::ACTION.label),
+                tr(actions::translate::ACTION.label),
+            ];
+            let at = crate::ui::kit::testing::shot::texts_at(app.bottom_bar(), size);
+            let x = |label: &str| {
+                at.iter()
+                    .find(|(_, t)| t == label)
+                    .map_or(f32::NAN, |(b, _)| b.center_x())
+            };
+            pills.map(x)
+        };
+        let [a, b, c] = order(false);
+        assert!(a < b && b < c, "English from the left: {a} {b} {c}");
+        let [a, b, c] = order(true);
+        assert!(a > b && b > c, "Arabic from the right: {a} {b} {c}");
+    }
+
     #[test]
     fn qr_chip_offers_copy_and_open_only_for_links() {
         let screen = Size::new(1200.0, 420.0);
@@ -410,7 +475,7 @@ mod tests {
     #[test]
     fn a_floating_chip_draws_one_outline() {
         let (w, h) = (200u32, bar::HEIGHT as u32);
-        let chip = container(action_chip("Select text".into(), ())).center(iced::Fill);
+        let chip = container(action_chip(t!(bar_select_text).into(), ())).center(iced::Fill);
         let px = crate::ui::kit::testing::shot::render(chip.into(), w, h);
         let at = |y: u32| &px[((y * w + w / 2) * 4) as usize..][..3];
         let mut edges = 0;

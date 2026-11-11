@@ -2,6 +2,7 @@
 //! replaced by its translation in place. `crate::translate` does the work,
 //! `ui/translate.rs` shows it, `ui/live_layer.rs` repeats it (live mode).
 use super::{Action, Key, Run, ask};
+use crate::app_language::S;
 use crate::config::{self, AiConfig, Engine, Provider};
 use crate::mt;
 use crate::ocr::models;
@@ -11,7 +12,7 @@ use crate::translate::pipeline::{Real, Via};
 
 pub const ACTION: Action = Action {
     id: "translate",
-    label: "Translate",
+    label: S::act_translate,
     key: Key {
         ctrl: false,
         letter: 'r',

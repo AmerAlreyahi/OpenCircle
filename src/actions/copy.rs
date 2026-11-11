@@ -8,7 +8,7 @@ use crate::app_language::{S, Said};
 
 pub const ACTION: Action = Action {
     id: "copy",
-    label: "Copy",
+    label: S::c_copy,
     key: Key {
         ctrl: true,
         letter: 'c',

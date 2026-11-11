@@ -1,5 +1,6 @@
 //! The overlay's view (moves to ui/screens with the UI plan).
 
+use crate::t;
 use iced::widget::{canvas, container, image, opaque, pin, space, stack};
 use iced::window::{self};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
@@ -18,9 +19,7 @@ use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
 use crate::ui::screens::toast;
 use crate::ui::snip;
 
-use super::{
-    App, CHIP_SPACE, HINT, LINK_WIDTH, PROTECTED, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode,
-};
+use super::{App, CHIP_SPACE, LINK_WIDTH, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode};
 
 impl App {
     /// The starting screen's glow breathes once the opening is over, and rests
@@ -266,7 +265,7 @@ impl App {
         let top = if let Some(pill) = snip.and_then(|s| s.pill_view()) {
             pill.map(Message::Snip) // Wayland only (above)
         } else if let Some(toast) = self.o.toast {
-            container(surface::hint(toast))
+            container(surface::hint(crate::app_language::tr(toast.0)))
                 .center_x(Fill)
                 .padding(24)
                 .into()
@@ -309,7 +308,9 @@ impl App {
             }
         } else {
             // slides down into place as the overlay opens
-            let hint = container(surface::hint(HINT)).center_x(Fill).padding(24);
+            let hint = container(surface::hint(super::hint()))
+                .center_x(Fill)
+                .padding(24);
             let rise = (1.0 - self.appeared()) * SLIDE;
             iced::widget::float(hint)
                 .translate(move |_, _| Vector::new(0.0, -rise))
@@ -355,7 +356,7 @@ impl App {
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
         if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
             let room = self.room();
-            let pill = container(surface::hint(PROTECTED))
+            let pill = container(surface::hint(super::protected()))
                 .center_x(room.width)
                 .padding(24);
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
@@ -468,9 +469,9 @@ impl App {
         let mut below = area;
         if selection.kind == overlay::Kind::Snap {
             let label = match &self.o.text_mode {
-                None => "Select text",
-                Some(TextMode { lines: None, .. }) => "Reading text…",
-                Some(_) => "Done",
+                None => t!(bar_select_text),
+                Some(TextMode { lines: None, .. }) => t!(bar_reading),
+                Some(_) => t!(wn_done),
             };
             let size = Size::new(SELECT_WIDTH, bar::HEIGHT);
             let at = chips_at(area, size, room, bar);

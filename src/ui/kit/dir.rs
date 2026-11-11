@@ -14,22 +14,24 @@ use iced::widget::Row;
 use iced::{Element, Padding};
 
 thread_local! {
-    static RTL: Cell<bool> = const { Cell::new(false) };
+    /// A view's own direction (`scope`); none = the app language's.
+    static RTL: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
-/// Right to left now (while a view that set it is being built).
+/// Right to left now: what a view set for its build (`scope`), else the app
+/// language's direction (so a bar or a card measured outside any view agrees
+/// with the one drawn).
 pub fn rtl() -> bool {
-    RTL.get()
+    RTL.get().unwrap_or_else(crate::app_language::rtl)
 }
 
 /// The direction for as long as the guard lives (a view's whole build): the
-/// one before comes back when it drops, so views that don't set it (the
-/// overlay, until it speaks Arabic) stay left to right.
+/// one before comes back when it drops.
 #[must_use]
-pub struct Scope(bool);
+pub struct Scope(Option<bool>);
 
 pub fn scope(rtl: bool) -> Scope {
-    Scope(RTL.replace(rtl))
+    Scope(RTL.replace(Some(rtl)))
 }
 
 impl Drop for Scope {

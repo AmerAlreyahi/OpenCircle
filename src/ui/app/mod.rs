@@ -8,6 +8,7 @@ pub(in crate::ui) mod opening;
 pub(in crate::ui) mod quick;
 pub(in crate::ui) mod word;
 
+use crate::app_language::S;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -45,10 +46,15 @@ pub(in crate::ui) mod updates;
 pub(in crate::ui) mod view;
 pub(in crate::ui) mod zoom;
 
-pub(in crate::ui) const HINT: &str = "Circle, drag or tap anything · Esc to close";
+/// The hint over the screen as the overlay opens (the app's language).
+pub(in crate::ui) fn hint() -> &'static str {
+    crate::t!(bar_hint)
+}
 
 /// Shown over a selection that came out black (DRM / protected windows).
-pub(in crate::ui) const PROTECTED: &str = "This window is protected; it can't be captured";
+pub(in crate::ui) fn protected() -> &'static str {
+    crate::t!(bar_protected)
+}
 
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
@@ -60,17 +66,13 @@ pub(in crate::ui) const ASK_INPUT: &str = "overlay-ask";
 /// switch is on, Song search and Edit. All there in every state, so it never
 /// changes size; Search in browser and Copy text are dimmed until something is
 /// selected. Nothing is sent until the user picks one (`[selection] after`).
-/// The field's placeholder.
-pub(in crate::ui) const ASK_PLACEHOLDER: &str = "Ask OpenCircle AI about your screen…";
-
-/// Shorter ones where the font or a narrow screen leaves the field too little
-/// room for it (#144): never cut off mid-word.
-pub(in crate::ui) const ASK_PLACEHOLDERS: [&str; 4] = [
-    ASK_PLACEHOLDER,
-    "Ask AI about your screen…",
-    "Ask OpenCircle AI…",
-    "Ask AI…",
-];
+/// The field's placeholder, then shorter ones where the font or a narrow
+/// screen leaves the field too little room for it (#144): never cut off
+/// mid-word.
+pub(in crate::ui) fn ask_placeholders() -> [&'static str; 4] {
+    use crate::t;
+    [t!(bar_ask_1), t!(bar_ask_2), t!(bar_ask_3), t!(bar_ask_4)]
+}
 
 /// How long the bar takes to turn into the editing toolbar (and back),
 /// and to settle on a new spot after a drag (the design's drag release).
@@ -139,7 +141,7 @@ pub(in crate::ui) enum Reader {
     /// Downloading them (0..=1), after that click.
     Downloading(f32),
     /// The download failed (why); the note offers it again.
-    Failed(String),
+    Failed(S),
 }
 
 pub(in crate::ui) const CHIP_SPACE: f32 = 12.0;

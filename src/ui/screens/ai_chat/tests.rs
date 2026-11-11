@@ -133,7 +133,12 @@ fn ask_panel_offers_the_six_presets() {
     let _ = panel.update(Msg::Ready(Ok(Arc::new(ask::tests::browser_setup()))));
     let texts = crate::ui::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     for preset in PRESETS {
-        assert!(texts.iter().any(|t| t == preset.label), "{texts:?}");
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == crate::app_language::tr(preset.label)),
+            "{texts:?}"
+        );
     }
     assert!(not_blank(&crate::ui::kit::testing::shot::save(
         "panel-ask-presets",

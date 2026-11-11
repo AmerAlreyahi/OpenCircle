@@ -8,7 +8,7 @@ use crate::config::{Format, SnipConfig};
 
 pub const ACTION: Action = Action {
     id: "save",
-    label: "Save",
+    label: S::c_save,
     key: Key {
         ctrl: true,
         letter: 's',

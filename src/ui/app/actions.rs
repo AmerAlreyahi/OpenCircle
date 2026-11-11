@@ -1,5 +1,6 @@
 //! Running actions on a selection: pills, quick actions, auto-search, QR, translate, song.
 
+use crate::app_language::{S, Said};
 use std::time::Instant;
 
 use iced::futures::channel::mpsc::UnboundedSender;
@@ -47,11 +48,11 @@ impl App {
         };
         let failed = |e: String| {
             crate::log!("QR chip failed: {e}");
-            "That didn't work"
+            Said(S::pill_failed)
         };
         match act {
             qr::Act::Copy => background(move |tx| {
-                let pill = copy::text(text).map_or_else(failed, |()| "QR text copied");
+                let pill = copy::text(text).map_or_else(failed, |()| Said(S::pill_qr_copied));
                 let _ = tx.unbounded_send(Message::ThenClose(Some(pill)));
             }),
             qr::Act::Open => match qr::web_url(&text).map(str::to_string) {
@@ -81,7 +82,7 @@ impl App {
             };
             let pill = opened.err().map(|e| {
                 crate::log!("link chip failed: {e}");
-                "That didn't work"
+                Said(S::pill_failed)
             });
             let _ = tx.unbounded_send(Message::ThenClose(pill));
         })
@@ -108,7 +109,7 @@ impl App {
                 Ok(()) => None,
                 Err(e) => {
                     crate::log!("[opencircle] text search not opened: {e}");
-                    Some("Couldn't open your browser")
+                    Some(Said(S::pill_browser_short))
                 }
             };
             let _ = tx.unbounded_send(Message::ThenClose(pill));
@@ -331,7 +332,7 @@ impl App {
                 let Some(crop) = self.stacked() else {
                     return Task::none();
                 };
-                self.o.toast = Some("Reading text…");
+                self.o.toast = Some(Said(S::bar_reading));
                 background(move |tx| {
                     let read = text::read(&crop, |_| {});
                     let copied = read.and_then(|t| match t.trim() {

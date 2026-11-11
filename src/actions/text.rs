@@ -2,11 +2,12 @@
 //! process (`crate::ocr`); its models are downloaded once, only after the user
 //! agrees (the download card; the app asks before it ever gets here).
 use super::{Action, Crop, Key, Run};
+use crate::app_language::S;
 use crate::ocr::{self, TextBlock};
 
 pub const ACTION: Action = Action {
     id: "text",
-    label: "Copy text",
+    label: S::act_copy_text,
     key: Key {
         ctrl: false,
         letter: 't',
@@ -62,7 +63,7 @@ thread_local! {
 /// Blocking (download, helper process): call off the UI thread. Fetches any
 /// missing model, then reads `crop`. `progress` gets whole-percent steps only.
 pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, String> {
-    download(&mut progress)?;
+    download(&mut progress).map_err(|e| e.to_string())?;
     progress(Progress::Reading);
     let blocks =
         ocr::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())?;
@@ -71,7 +72,7 @@ pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, S
 
 /// Blocking: fetches any missing OCR model (only after the user agreed),
 /// reporting whole-percent `Progress::Download` steps.
-pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), String> {
+pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), ocr::OcrError> {
     let mut shown = None;
     ocr::ensure_models(|done, total| {
         let percent = done * 100 / total.max(1);
@@ -83,7 +84,6 @@ pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), String> {
         }
     })
     .map(drop)
-    .map_err(|e| e.to_string())
 }
 
 /// OCR lines (already in reading order) as text: boxes on one row joined by

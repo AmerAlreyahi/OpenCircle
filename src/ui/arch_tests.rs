@@ -148,6 +148,8 @@ fn kit_depends_only_on_tokens() {
                 // (`dir_row!` is the kit's own macro, exported at the crate root)
                 !line[i..].starts_with("crate::ui::kit")
                     && !line[i..].starts_with("crate::dir_row!")
+                    // (`kit::dir` is the one bridge to the app's language: its direction)
+                    && !(name == "kit/dir.rs" && line[i..].starts_with("crate::app_language::rtl"))
             });
             assert!(!outside, "{name} reaches outside the kit: {}", line.trim());
         }

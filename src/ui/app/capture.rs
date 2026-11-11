@@ -1,5 +1,6 @@
 //! Opening an overlay: the capture, the frame, showing and closing the window.
 
+use crate::app_language::Said;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -493,7 +494,7 @@ impl App {
     }
 
     /// Shows `message` over the frame for a moment, then closes the overlay.
-    pub(in crate::ui) fn toast_then_close(&mut self, message: &'static str) -> Task<Message> {
+    pub(in crate::ui) fn toast_then_close(&mut self, message: Said) -> Task<Message> {
         self.o.toast = Some(message);
         Self::hold_then_close()
     }

@@ -1,5 +1,6 @@
 //! Message dispatch: every message to its handler.
 
+use crate::app_language::{S, Said};
 use std::time::Instant;
 
 use iced::window::{self, Mode};
@@ -282,10 +283,10 @@ impl App {
             Message::SearchOpened(opened) => self.on_search_opened(opened),
             Message::TextRead(copied) if self.o.toast.is_some() => {
                 self.o.toast = Some(match copied {
-                    Ok(()) => "Text copied",
+                    Ok(()) => Said(S::pill_text_copied),
                     Err(e) => {
                         crate::log!("copy text failed: {e}");
-                        "No text copied"
+                        Said(S::pill_no_text_copied)
                     }
                 });
                 Self::hold_then_close()
@@ -716,7 +717,9 @@ impl App {
                     let progress = |p| {
                         let _ = tx.unbounded_send(Ok(p));
                     };
-                    let done = text::download(progress).map(|()| text::Progress::Reading);
+                    let done = text::download(progress)
+                        .map(|()| text::Progress::Reading)
+                        .map_err(|e| crate::ui::screens::model_download::why_key(&e));
                     let _ = tx.unbounded_send(done);
                 })
                 .map(move |step| Message::Reader(opening, step))

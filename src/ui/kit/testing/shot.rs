@@ -462,6 +462,26 @@ pub fn texts<Message>(view: Element<'_, Message>) -> Vec<String> {
     collect.0
 }
 
+/// Every text of `view` laid out in `size`, with where it sits (the order
+/// of a mirrored row).
+pub fn texts_at<Message>(view: Element<'_, Message>, size: Size) -> Vec<(Rectangle, String)> {
+    use iced::advanced::widget::{Id, Operation};
+    struct Collect(Vec<(Rectangle, String)>);
+    impl Operation for Collect {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn text(&mut self, _: Option<&Id>, bounds: Rectangle, text: &str) {
+            self.0.push((bounds, text.to_string()));
+        }
+    }
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut collect = Collect(Vec::new());
+    ui.operate(&renderer, &mut collect);
+    collect.0
+}
+
 /// The bounds of every container of `view` (laid out in `size`) whose id is `id`.
 pub fn containers<Message>(
     view: Element<'_, Message>,

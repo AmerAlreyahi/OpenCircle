@@ -142,7 +142,7 @@ pub fn slots<'a, Message: Clone + 'a>(
     (left, right): (Element<'a, Message>, Element<'a, Message>),
 ) -> Element<'a, Message> {
     use super::text::LINE;
-    use iced::widget::{container, row, space, stack};
+    use iced::widget::{container, space, stack};
     use iced::{Center, Padding};
     let inner = width - 2.0 * RING;
     let input = text_input(placeholder, value)
@@ -153,11 +153,12 @@ pub fn slots<'a, Message: Clone + 'a>(
         .font(super::text::weight(Weight::Normal))
         .line_height(LINE)
         .width(inner)
-        .padding(
+        .align_x(super::dir::start())
+        .padding(super::dir::pad(
             Padding::new((SLOTS_H - SLOTS_TEXT * LINE) / 2.0)
                 .left(SLOTS_LEFT)
                 .right(SLOTS_RIGHT),
-        )
+        ))
         .style(move |_, status| {
             let on = focused || matches!(status, text_input::Status::Focused { .. });
             text_input::Style {
@@ -172,8 +173,8 @@ pub fn slots<'a, Message: Clone + 'a>(
                 selection: c().accent_soft,
             }
         });
-    let over = row![left, space::horizontal(), right]
-        .padding(Padding::ZERO.left(8).right(6))
+    let over = crate::dir_row![left, space::horizontal(), right]
+        .padding(super::dir::pad(Padding::ZERO.left(8).right(6)))
         .width(inner)
         .height(SLOTS_H)
         .align_y(Center);
@@ -282,7 +283,7 @@ pub fn pair<'a, Message: 'a>(
     first: Element<'a, Message>,
     second: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    iced::widget::row![first, second]
+    crate::dir_row![first, second]
         .spacing(4)
         .align_y(iced::Center)
         .into()

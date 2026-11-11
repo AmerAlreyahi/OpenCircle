@@ -29,8 +29,8 @@ pub const ACTIONS: &[Action] = &[
 pub struct Action {
     /// Stable name (logs, later the config's quick actions).
     pub id: &'static str,
-    /// Button text.
-    pub label: &'static str,
+    /// Button text (a key of the string table).
+    pub label: crate::app_language::S,
     pub key: Key,
     /// Glyph in `assets/lucide/lucide-subset.ttf` (must be listed in its `subset.sh`).
     pub icon: char,
