@@ -246,7 +246,7 @@ fn foreign_keys<S: Store>(store: &S) -> Vec<(HotKey, String)> {
 }
 
 /// "Ctrl+Shift+Space" as a GTK accelerator, "<Control><Shift>space".
-fn accelerator(hotkey: HotKey) -> String {
+pub(super) fn accelerator(hotkey: HotKey) -> String {
     let mods = [
         (Modifiers::CONTROL, "<Control>"),
         (Modifiers::ALT, "<Alt>"),

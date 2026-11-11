@@ -41,7 +41,8 @@ thread_local! {
 pub fn bind(tx: Triggers) {
     std::thread::spawn(move || {
         // No portal (GNOME before 48): OpenCircle's own entries in GNOME's custom shortcuts.
-        if !present() && super::gnome::adopt(&bindings()) {
+        // KDE Plasma 5: its own shortcut service, KGlobalAccel.
+        if !present() && (super::gnome::adopt(&bindings()) || super::kde::adopt(tx.clone())) {
             return;
         }
         if let Err(e) = serve(tx) {

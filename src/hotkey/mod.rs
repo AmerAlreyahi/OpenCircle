@@ -7,6 +7,8 @@
 #[cfg(target_os = "linux")]
 mod gnome;
 #[cfg(target_os = "linux")]
+mod kde;
+#[cfg(target_os = "linux")]
 mod portal;
 mod quick_id;
 mod socket;
@@ -220,7 +222,7 @@ fn managed_on(desktop: &str) -> &'static str {
     if desktop.split(':').any(|d| d.eq_ignore_ascii_case("gnome")) {
         "Your desktop manages this shortcut: change it in Settings → Apps → OpenCircle → Global Shortcuts"
     } else if desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")) {
-        "Your desktop manages this shortcut: change it in System Settings → Keyboard → Shortcuts"
+        "Your desktop manages this shortcut: change it in System Settings → Shortcuts → OpenCircle"
     } else {
         "Your desktop manages this shortcut: change it in its keyboard shortcut settings"
     }
@@ -268,7 +270,7 @@ pub fn taken_shortcuts() -> Vec<String> {
 /// Wayland, the desktop hasn't answered yet, or not a running shortcut).
 pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
     #[cfg(target_os = "linux")]
-    if let Some(name) = gnome::used_by(shortcut) {
+    if let Some(name) = gnome::used_by(shortcut).or_else(|| kde::used_by(shortcut)) {
         return Some(DesktopKey::UsedBy(name));
     }
     let refused = parse_shortcut(shortcut).is_ok_and(|h| taken().contains(&h));
@@ -287,7 +289,7 @@ pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
 /// Why a key is not ours to record: the UI words it in its language
 /// (`Display` is the English of the tests and logs).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // only GNOME names reserved keys
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // only Linux desktops name reserved keys
 pub enum Reserved {
     /// GNOME's Unicode input (Ctrl+Shift+U).
     Unicode,
@@ -295,7 +297,7 @@ pub enum Reserved {
     UnicodeKeys,
     Screenshots,
     Super,
-    /// One of the user's own desktop shortcuts: its name.
+    /// One of the user's own desktop shortcuts, or the KDE action holding the key: its name.
     UsedBy(String),
 }
 
@@ -318,8 +320,10 @@ pub fn unusable_reason(shortcut: &str) -> Option<Reserved> {
     #[cfg(target_os = "linux")]
     if !cfg!(test) {
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        return gnome::reserved_on(&desktop, shortcut)
-            .or_else(|| gnome::used_by(shortcut).map(Reserved::UsedBy));
+        return gnome::reserved_on(&desktop, shortcut).or_else(|| {
+            let user = gnome::used_by(shortcut).or_else(|| kde::holder_of(shortcut));
+            user.map(Reserved::UsedBy)
+        });
     }
     let _ = shortcut;
     None
@@ -341,7 +345,30 @@ pub fn eaten_key_reason(ctrl: bool, alt: bool, shift: bool, logo: bool) -> Optio
 /// custom shortcuts), for a reset or an uninstall. Only ours; nothing elsewhere.
 pub fn forget_desktop_shortcuts() {
     #[cfg(target_os = "linux")]
-    gnome::forget();
+    {
+        gnome::forget();
+        kde::forget();
+    }
+}
+
+/// At quit: KDE lets go of our keys until the next start (they stay in its settings).
+pub fn stop() {
+    #[cfg(target_os = "linux")]
+    kde::release();
+}
+
+/// The per-desktop fallback that holds the shortcuts when the portal is missing (GNOME's
+/// custom shortcuts, KDE's KGlobalAccel): brought in line with the plan. `false` = none.
+#[cfg(target_os = "linux")]
+fn fallback_sync(held_off: bool) -> bool {
+    if gnome::active() {
+        gnome::sync(&bindings(), held_off);
+    } else if kde::active() {
+        kde::sync(&bindings(), held_off);
+    } else {
+        return false;
+    }
+    true
 }
 
 /// A registry value `snipping_has_print_screen` reads.
@@ -570,6 +597,11 @@ pub fn start(tx: Triggers, cfg: &Config) {
         portal::bind(tx);
         return;
     }
+    // KDE on X11 too: one arbiter for every key, so KDE's own and ours never collide
+    #[cfg(target_os = "linux")]
+    if kde::adopt(tx.clone()) {
+        return;
+    }
 
     GlobalHotKeyEvent::set_event_handler(Some(move |event: GlobalHotKeyEvent| {
         if event.state == HotKeyState::Pressed && !suspended() {
@@ -603,12 +635,12 @@ pub fn reload(cfg: &Config) {
     *bindings() = planned;
 
     #[cfg(target_os = "linux")]
+    if fallback_sync(suspended()) {
+        return;
+    }
+    #[cfg(target_os = "linux")]
     if crate::capture::wayland_session() {
-        if gnome::active() {
-            gnome::sync(&bindings(), suspended());
-        } else {
-            portal::rebind();
-        }
+        portal::rebind();
         return;
     }
     GRAB.with_borrow_mut(|slot| match slot {
@@ -635,9 +667,7 @@ pub fn suspend(on: bool) {
         if on { "held off" } else { "back on" }
     );
     #[cfg(target_os = "linux")]
-    if gnome::active() {
-        gnome::sync(&bindings(), on); // keys cleared while recording, back after
-    }
+    fallback_sync(on); // GNOME: keys cleared while recording; KDE: all blocked; back after
     GRAB.with_borrow_mut(|slot| match slot {
         Some(grab) if on => {
             let _ = grab.manager.unregister_all(&grab.held);
@@ -1132,7 +1162,7 @@ mod tests {
         assert!(
             managed_on("ubuntu:GNOME").ends_with("Settings → Apps → OpenCircle → Global Shortcuts")
         );
-        assert!(managed_on("KDE").contains("System Settings → Keyboard → Shortcuts"));
+        assert!(managed_on("KDE").contains("System Settings → Shortcuts → OpenCircle"));
         assert!(managed_on("Hyprland").starts_with("Your desktop manages this shortcut"));
     }
 

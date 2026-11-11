@@ -162,7 +162,8 @@ change a key in OpenCircle's Settings, the desktop may keep its stored one
 works and where to change it:
 
 - **GNOME:** Settings → Apps → OpenCircle → Global Shortcuts.
-- **KDE Plasma:** System Settings → Keyboard → Shortcuts.
+- **KDE Plasma:** System Settings → Shortcuts → OpenCircle (Plasma 6:
+  System Settings → Keyboard → Shortcuts).
 
 ## Wayland without the shortcut portal
 
@@ -177,6 +178,11 @@ them in step with its Settings. It never touches your own entries; a key one of
 them already uses, or one GNOME keeps for itself, is refused in Settings with
 the reason.
 
+On KDE Plasma without the portal (Plasma 5, on Wayland and X11), OpenCircle
+registers its keys with KDE's own shortcut service: they show in System Settings →
+Shortcuts → OpenCircle, where you can change them (see
+[Linux notes](linux-notes.md#kde-plasma)).
+
 Elsewhere, if the portal is missing or you decline, Settings names the command
 for each shortcut: bind it yourself. Use the full path to the binary if it is
 not on your `PATH` (for an AppImage, the path of the file).
@@ -185,8 +191,8 @@ not on your `PATH` (for an AppImage, the path of the file).
 Shortcuts → **+**. Name: "OpenCircle", command: `opencircle capture`, then set
 the keys.
 
-**KDE Plasma:** System Settings → Keyboard → Shortcuts → **Add New → Command
-or Script**. Command: `opencircle capture`, then assign the keys.
+**KDE Plasma (by hand, only if you want more bindings):** System Settings →
+Keyboard → Shortcuts → **Add New → Command or Script**. Command: `opencircle capture`, then assign the keys.
 
 **Hyprland / Sway:** add a binding to your config, for example
 `bind = CTRL SHIFT, Space, exec, opencircle capture` (Hyprland) or

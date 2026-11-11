@@ -58,9 +58,22 @@ stop_app() {
   [ -x "$BIN" ] && "$BIN" quit >/dev/null 2>&1 || true
 }
 
+# OpenCircle's keys in KDE's shortcut settings (KGlobalAccel, KDE Plasma): removed with
+# the app. Nothing happens on other desktops (no KDE service is started for this).
+forget_kde_keys() {
+  command -v busctl >/dev/null 2>&1 || return 0
+  set -- org.kde.kglobalaccel /kglobalaccel org.kde.KGlobalAccel
+  busctl --user --auto-start=no call "$@" allActionsForComponent as 1 com.opencircle.app 2>/dev/null |
+    grep -o '"[^"]*"' | awk 'NR % 4 == 2' | tr -d '"' |
+    while read -r action; do
+      busctl --user --auto-start=no call "$@" unregister ss com.opencircle.app "$action" >/dev/null 2>&1
+    done
+}
+
 uninstall() {
   found=0
   stop_app
+  forget_kde_keys
   for f in "$BIN" "$ICON" "$DESKTOP" "$AUTOSTART"; do
     [ -e "$f" ] || continue
     # A desktop entry we did not write (a package's, or the user's) stays.

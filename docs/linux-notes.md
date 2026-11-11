@@ -23,7 +23,8 @@ what it installed (your settings stay).
 ## X11
 
 Everything works the straightforward way: the screen is captured directly,
-shortcuts are real global key grabs, the window list is available so Snip can
+shortcuts are real global key grabs (on KDE Plasma: KDE's shortcut service, see
+[KDE Plasma](#kde-plasma)), the window list is available so Snip can
 outline and pick windows, and Long capture works while you scroll. Live translate is
 supported.
 
@@ -32,7 +33,7 @@ supported.
 | Need | How OpenCircle gets it |
 |---|---|
 | Screen capture | The desktop's Screenshot portal. On GNOME before 46 (for example Ubuntu 22.04), whose Screenshot portal asks on every capture, OpenCircle uses the ScreenCast portal instead: GNOME asks once (**Share**), then captures without asking again. That needs GStreamer's PipeWire plugin (`gstreamer1.0-pipewire` on Debian/Ubuntu); without it the Screenshot portal is used. |
-| Global shortcuts | The GlobalShortcuts portal (GNOME 48+, KDE Plasma 6, Hyprland's portal). The desktop asks you once. On GNOME without the portal (before 48), OpenCircle adds its keys to GNOME's own custom shortcuts (named "OpenCircle: ..."), so they work with no dialog; a key GNOME keeps for itself (for example a `Super` shortcut) is refused in Settings with the reason. Where there is no shortcut service at all (for example KDE Plasma 5), Settings names the command to bind yourself: see [Shortcuts](shortcuts.md#wayland-without-the-shortcut-portal). |
+| Global shortcuts | The GlobalShortcuts portal (GNOME 48+, KDE Plasma 6, Hyprland's portal). The desktop asks you once. On GNOME without the portal (before 48), OpenCircle adds its keys to GNOME's own custom shortcuts (named "OpenCircle: ..."), so they work with no dialog; a key GNOME keeps for itself (for example a `Super` shortcut) is refused in Settings with the reason. On KDE Plasma without the portal (Plasma 5), OpenCircle registers its keys with KDE's own shortcut service: see [KDE Plasma](#kde-plasma). Where there is no shortcut service at all, Settings names the command to bind yourself: see [Shortcuts](shortcuts.md#wayland-without-the-shortcut-portal). |
 | Snip | There is no window list: drag an area, or click (or press `Enter`) to take the screen under the pointer. Long capture works (see below). Copy, Save, the toolbar and its tools, Steps, the colour picker and the screen ruler all work. Share (Windows' share sheet) is Windows only. |
 | Search in browser, Ask AI (Browser) | The page that carries your picture to Google Lens is served once from 127.0.0.1, never written to a file, so snap and Flatpak browsers (for example Ubuntu's snap Firefox) open it too. |
 | Live translate | Not available; each press of the translate shortcut translates once. |
@@ -58,6 +59,22 @@ menu has **Finish**, **Copy**, **Save** and **Cancel**. The pop-up needs
 XWayland (GNOME, KDE and most wlroots desktops run it); without XWayland the
 tray is the only sign. Long capture needs a ScreenCast portal of version 4 or
 later and GStreamer's PipeWire plugin; without them its button is dimmed.
+
+### KDE Plasma
+
+On KDE Plasma (X11 and Wayland) OpenCircle registers every shortcut with KDE's own
+shortcut service, the one KDE's apps use, unless the desktop offers the
+GlobalShortcuts portal (Plasma 6 on Wayland), which is then used. The keys work
+with no dialog and appear in System Settings → Shortcuts under **OpenCircle**:
+
+- A key you change there is the one that works, also after a restart; OpenCircle's
+  Settings shows it under that shortcut.
+- A key you record in OpenCircle's Settings is written to KDE at once. A key another
+  KDE action already uses is refused with its name (for example "Used by KWin:
+  Switch to Desktop 1").
+- A shortcut you clear in OpenCircle's Settings is removed from KDE, and
+  `install.sh --uninstall` removes them all.
+- While OpenCircle is not running, its keys stay in KDE's list but do nothing.
 
 ### Changing a shortcut
 

@@ -254,7 +254,9 @@ fn main() -> ExitCode {
     let _tray = ui::start_tray(tx.clone());
     update::start(tx.clone());
 
-    match ui::run(rx) {
+    let ran = ui::run(rx);
+    hotkey::stop();
+    match ran {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             crate::log!("{e}");
