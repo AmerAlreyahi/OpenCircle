@@ -346,13 +346,32 @@ impl App {
                 return settings.chain(section).map(Message::Windows);
             }
             msg => {
+                // a question asked in the overlay's own chat, which is not pinned yet
+                let asks = matches!(
+                    msg,
+                    ai_chat::Msg::Submit | ai_chat::Msg::Regenerate | ai_chat::Msg::Preset(_)
+                ) && open
+                    && !resident
+                    && !panel.pinned();
                 let task = panel.update(msg);
                 // the chat's Include screen is the AI field's (one state)
                 if let (Some(on), true) = (panel.include(), open) {
                     self.o.include = on;
                 }
                 self.keep_chat();
-                return task.map(move |msg| Message::AiChat(id, msg));
+                let task = task.map(move |msg| Message::AiChat(id, msg));
+                // The follow-up that pinned the chat ends the tool: the pinned
+                // chat goes on alone (owner suggestion, #170). Not in Snip, not
+                // mid-drag; "Always" pinned it from the first question, no close.
+                let free = !self.o.drawing && self.o.chat_drag.is_none();
+                if asks
+                    && self.chat.is_some()
+                    && free
+                    && !matches!(self.o.purpose, Purpose::Snip(_))
+                {
+                    return Task::batch([task, self.close()]);
+                }
+                return task;
             }
         }
         Task::none()

@@ -4376,6 +4376,7 @@ fn the_docked_chat_never_covers_the_bar() {
         let id = app.o.ai_chat.as_ref().unwrap().0;
         api_ready(&mut app, id, b"first");
         chat_turn(&mut app, id, "What is this?", "A chart.");
+        let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin)); // (a follow-up would close the overlay)
         chat_turn(&mut app, id, "And the trend?", "Up.");
         assert!(app.chat.is_some(), "pinned");
         app.o.selection = None;
@@ -4930,6 +4931,47 @@ fn api_ready(app: &mut App, id: u32, png: &[u8]) {
     ));
 }
 
+/// The follow-up that pins the chat ends the tool by itself (no Esc): the
+/// pinned chat goes on in its own window. The first question, the header's pin
+/// and a drag in progress do not close it (#170).
+#[test]
+fn the_follow_up_that_pins_the_chat_closes_the_overlay() {
+    let start = || {
+        let mut app = open_app(800, 600, 1.0);
+        drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_chat(crop, None));
+        let id = app.o.ai_chat.as_ref().unwrap().0;
+        api_ready(&mut app, id, b"first");
+        chat_turn(&mut app, id, "What is this?", "A chart.");
+        (app, id)
+    };
+    let (mut app, id) = start();
+    assert!(app.o.is_some() && app.chat.is_none(), "one question: open");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_none(), "the follow-up closed the overlay");
+    let chat = app.chat.as_ref().expect("the chat stays");
+    assert!(chat.window.is_some(), "in its own window");
+    assert_eq!(chat.panel.chat().unwrap().turns.len(), 2, "both answers");
+
+    // the header's pin pins by hand: the overlay stays, a later question too
+    let (mut app, id) = start();
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_some() && app.chat.is_some(), "pinned by hand");
+
+    // a drag in progress is never cut short
+    let (mut app, id) = start();
+    app.o.drawing = true;
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_some() && app.chat.is_some(), "mid-drag: open");
+}
+
 /// A quick question closes on a click outside; a follow-up pins the chat: it
 /// survives clicks, the overlay closing (its own window) and the next capture,
 /// whose question goes into the SAME chat with its crop. One chat only; its
@@ -4971,6 +5013,7 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let id = app.o.ai_chat.as_ref().unwrap().0;
     api_ready(&mut app, id, b"first");
     chat_turn(&mut app, id, "What is this?", "A chart.");
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin)); // (a follow-up would close the overlay)
     chat_turn(&mut app, id, "And the trend?", "Up.");
     assert!(
         app.o.ai_chat.is_none() && app.chat.is_some(),
