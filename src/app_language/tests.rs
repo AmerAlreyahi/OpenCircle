@@ -315,3 +315,51 @@ fn every_character_of_the_arabic_table_has_a_bundled_glyph() {
     }
     assert!(missing.is_empty(), "no glyph for {missing:?}");
 }
+
+/// The language names the pickers show (each language's own name and its
+/// name in English and Arabic): which of them the bundled fonts (Noto Sans
+/// Arabic, Inter) cover. A language not covered is drawn from the system's
+/// fallback face in the app (and as a "missing glyph" box in the goldens, which
+/// never read system fonts), so this list is a decision, not an accident:
+/// adding a bundled face (or a language) changes it on purpose.
+#[test]
+fn the_language_names_the_pickers_show_are_covered_or_listed() {
+    let noto = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/NotoSansArabic.ttf"), 0)
+        .unwrap();
+    let inter = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/Inter.ttf"), 0).unwrap();
+    let covered = |s: &str| {
+        s.chars().all(|c| {
+            matches!(c, '\u{200F}' | '\u{2066}'..='\u{2069}')
+                || noto.glyph_index(c).is_some()
+                || inter.glyph_index(c).is_some()
+        })
+    };
+    let mut uncovered = Vec::new();
+    for l in crate::translate::lang::LANGUAGES {
+        let names = [l.native, l.name, language_name_in(l.code, Lang::Ar)];
+        if !names.iter().all(|n| covered(n)) {
+            uncovered.push(l.code);
+        }
+    }
+    uncovered.sort_unstable();
+    // Latin and Arabic-script names (Urdu, Persian included) are bundled; these
+    // draw from the system's own fonts until a face is bundled for them
+    assert_eq!(
+        uncovered, UNCOVERED,
+        "the bundled fonts' coverage of the language names changed"
+    );
+}
+
+/// `code`'s name in `lang` (the table; the app's current language is restored).
+fn language_name_in(code: &str, lang: Lang) -> &'static str {
+    let was = current();
+    set(lang);
+    let name = language_name(code);
+    set(was);
+    name
+}
+
+/// Languages whose native name the bundled fonts don't cover (see above).
+const UNCOVERED: &[&str] = &[
+    "he", "hi", "ja", "ko", "ru", "th", "uk", "vi", "zh", "zh-Hant",
+];

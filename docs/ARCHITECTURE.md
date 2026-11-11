@@ -153,6 +153,14 @@ control lands with its first user and gets a gallery sheet in `kit/testing/galle
 beside it that composes kit parts (`setting_row`, `segmented`, `card`, …); a golden in
 `the_ported_pages_match_their_golden_images` (Sapphire + Daylight).
 
+**Goldens render with the bundled fonts only** (`kit::text::load`, test builds off Windows): the test font system
+drops every system face, so a golden never depends on the machine (CI's image and a dev PC have different fonts). A
+character the bundled faces (Inter, Noto Sans Arabic, JetBrains Mono subsets) don't cover (Cyrillic, Greek, Hebrew,
+CJK, Hindi, Thai, Latin Extended-A) is the same missing-glyph box everywhere, by design; text meant to show must use
+a kit font (`kit::text::*`, never a bare `iced::widget::text` without `.font`). Windows keeps its own fonts and does
+not compare goldens (`golden::enabled`). `the_language_names_the_pickers_show_are_covered_or_listed` lists the
+languages whose names the bundled fonts don't cover.
+
 **Add a feature preview** (the hero at the top of a feature's Settings page, only for a
 feature that ships; owner 2026-10-27/28): one `Hero` entry in
 `ui/screens/settings/previews/mod.rs` `HEROES` (its page, `hidden_previews` key, title, line,

@@ -77,6 +77,21 @@ pub fn load() {
                 }
             }
         }
+        // Tests draw with the bundled faces ONLY (goldens must not depend on
+        // the machine's fonts: a character they lack is the same "missing
+        // glyph" box on every machine, not whatever face this one falls back
+        // to). Windows keeps its own fonts: its goldens are not compared
+        // (`golden::enabled`) and the UI font there is Segoe UI.
+        #[cfg(all(test, not(windows)))]
+        {
+            let system: Vec<_> = (db.faces())
+                .filter(|f| !matches!(f.source, fontdb::Source::Binary(_)))
+                .map(|f| f.id)
+                .collect();
+            for id in system {
+                db.remove_face(id);
+            }
+        }
     });
 }
 
