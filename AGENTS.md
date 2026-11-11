@@ -912,6 +912,15 @@ production systems.
   now", "Open history", "Open Appearance", "Reset to defaults", "Update now" ...) fills the control column like every other
   control (same width, height and position, label centred), from one kit part; never a small button at the column's edge.
 
+- About page, clean and minimal (owner, 2026-11-11, "do recommended ... something clean and minimal"; planning #177): the
+  lead's recommended redesign is approved to BUILD (no separate design round): a maximum content width; compact app and
+  developer cards with small links (no full-width link buttons); "Made by others" as an aligned list (first few + "Show
+  all"); preview clip credits as one short line per clip with one link icon, folded under one heading, plus one link to
+  the full notices on GitHub (the per-clip credit stays in the app: required by the clips' licences; the Google
+  non-affiliation line stays verbatim); English legal text as one left-to-right block under its Arabic heading; a clear
+  "Something not working?" card near the top (Copy diagnostics, Report a problem; nothing is sent) and a quiet "Report a
+  problem" link in the Settings sidebar footer; not in the tray menu. When in doubt: fewer elements.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
