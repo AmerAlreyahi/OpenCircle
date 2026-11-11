@@ -97,6 +97,8 @@ fn start_detached() -> std::io::Result<()> {
 }
 
 fn main() -> ExitCode {
+    #[cfg(target_os = "linux")]
+    sys::init_x11_threads();
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
     sys::mem::limit_malloc_arenas();

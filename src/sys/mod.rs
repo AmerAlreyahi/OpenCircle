@@ -66,6 +66,47 @@ fn only_inside(value: &str, appdir: &str) -> bool {
             .all(|p| p == appdir || p.starts_with(&format!("{appdir}/")))
 }
 
+/// Makes libX11 thread-safe: run first thing in `main`, before any thread starts.
+/// The tray's GTK thread (AppIndicator) and winit both talk Xlib; without
+/// `XInitThreads()` before the first Xlib call of the process they race and
+/// crash (KDE X11 at every start, #172; GNOME X11 only by luck of timing).
+/// libX11 is opened at run time, so a Wayland-only system without it still starts.
+/// Returns whether libX11 was there.
+#[cfg(target_os = "linux")]
+pub fn init_x11_threads() -> bool {
+    // SAFETY: dlopen/dlsym by name, the handle is kept open (never closed);
+    // XInitThreads takes nothing, is called before any thread exists, and a
+    // second call (winit's own) is a no-op.
+    unsafe {
+        let lib = libc::dlopen(c"libX11.so.6".as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL);
+        if lib.is_null() {
+            return false;
+        }
+        let f = libc::dlsym(lib, c"XInitThreads".as_ptr());
+        if !f.is_null() {
+            let init: extern "C" fn() -> std::ffi::c_int = std::mem::transmute(f);
+            init();
+        }
+        true
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn xlib_is_made_thread_safe_first_in_main() {
+    // the crash comes back if anything starts a thread or opens X before it
+    let main = include_str!("../main.rs");
+    let body = &main[main.find("fn main() -> ExitCode {").unwrap()..];
+    let first = body.lines().nth(1).unwrap().trim();
+    assert_eq!(first, "#[cfg(target_os = \"linux\")]");
+    assert!(
+        body.lines()
+            .nth(2)
+            .unwrap()
+            .contains("sys::init_x11_threads()")
+    );
+}
+
 /// Run first thing in `main`, before any thread starts (env changes are not thread-safe).
 pub fn fix_appimage_env() {
     let Some(appdir) = std::env::var_os("APPDIR") else {
