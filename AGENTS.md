@@ -858,6 +858,20 @@ production systems.
 - Bar beside the open chat (owner, 2026-11-11, lead's reading of "ok all"; SUPERSEDES "result card replaces the bar" for the
   AI chat): while the AI chat is open on the overlay the bar stays beside it, so Translate and Copy text keep working.
 
+- Arabic UI design approved (owner, 2026-11-11, "i approve the lang and the lang design": every recommended default; sheets
+  .claude/artifacts/design/render/out/arabic/, ARABIC_UI_SPEC.md, strings ARABIC_STRINGS.md = the seed of the string table).
+  In Arabic: whole layout mirrored; window buttons top left on every OS; Off/On and multi-option controls reversed, sliders
+  and progress fill right to left, scrollbar left; Western digits 0-9; product/service/technical names stay Latin, feature
+  names translated (Snip = لقطة الشاشة, Circle to Search = البحث بالدائرة, Labs = ميزات تجريبية); theme and look names
+  translated; Noto Sans Arabic on every OS (+1 px, more line height, no letter-spacing); General gets "App language"
+  ("Your language (...)" = follows onboarding, then each language in its own name); onboarding lists each language in its
+  own name; About's legal credits stay English; the owner supplies or corrects the Arabic bio and any wording.
+- Arabic text-reading fixes approved (owner, 2026-11-11, lead's reading of the same message; planning #169): sorted
+  batches, long lines cut, Windows OCR lines trusted only when they are real words in the user's language, the reader
+  chosen per line, lines found at full size in strips, Linux detects once per opening; with the approved Reading text
+  state. Each must show before -> after on the measurement set and may not slow English pages. Latin words and digits
+  inside Arabic lines: a later measured step.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
