@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.5 published (2026-11-10); next: 0.1.6 Languages + live border, then Game translation (0.2.0).**
+(both local only). Status: **v0.1.5 published (2026-11-10); next: v0.1.6 hotfix (About page crash), then 0.1.7 Languages + live border, then Game translation (0.2.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -824,6 +824,12 @@ production systems.
   export (Markdown / HTML / images folder) lives on the Steps strip next to Copy all. Design round + owner OK first.
 - AI errors (owner, 2026-11-10, v0.1.5): provider errors show as a calm card: a short plain headline, the provider's own
   message small and grey (two lines, "Show details"), one fix button (Choose another model / Retry); red only for the icon.
+
+- Hotfix v0.1.6 (owner, 2026-11-11, "do it"): v0.1.5 closes when Settings > About opens (the release build bundled the
+  GitHub avatar, now a JPEG, under a PNG name). The fix ships alone as v0.1.6 with the normal update gate and no security
+  review; "Languages + live border" and everything planned as 0.1.6 above moves to v0.1.7 (still the last 0.1.x: it carries
+  the security review and QA gates). Release gate from now on: open Settings > About on the DRAFT exe (only release
+  builds bundle the downloaded avatar). A file fetched at build time is never decoded with a panic.
 
 ## Domain quirks
 
