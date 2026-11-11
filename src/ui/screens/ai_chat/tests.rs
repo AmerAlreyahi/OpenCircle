@@ -554,14 +554,20 @@ fn the_chat_matches_its_golden_images() {
         ),
     ];
     let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
-        for (name, panel) in &states {
-            let panel = panel();
-            let file = format!("chat-{name}-{}", theme.id);
-            failed.extend(golden::check("screens", &file, CARD, &[1.0], || {
-                panel.view(at, Size::new(1920.0, 1080.0), false)
-            }));
+    // in an English UI, then in an Arabic one (mirrored: the user's side and the
+    // AI's, the header, the drawer; an English answer stays left to right there)
+    for ui_ar in [false, true] {
+        let _ar = ui_ar.then(crate::ui::kit::testing::arabic);
+        let ui = if ui_ar { "-uiar" } else { "" };
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for (name, panel) in &states {
+                let panel = panel();
+                let file = format!("chat-{name}{ui}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, CARD, &[1.0], || {
+                    panel.view(at, Size::new(1920.0, 1080.0), false)
+                }));
+            }
         }
     }
     themes::set(&SAPPHIRE);

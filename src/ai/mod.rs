@@ -124,11 +124,12 @@ pub enum Fix {
 
 impl Fix {
     pub fn label(self) -> &'static str {
+        use crate::t;
         match self {
-            Fix::Model => "Choose another model",
-            Fix::Key => "Check the key",
-            Fix::Settings => "Open settings",
-            Fix::Retry => "Retry",
+            Fix::Model => t!(fix_model),
+            Fix::Key => t!(fix_key),
+            Fix::Settings => t!(fix_settings),
+            Fix::Retry => t!(fix_retry),
         }
     }
 }
@@ -137,25 +138,27 @@ impl AiError {
     /// The error card's headline: short and plain, by kind. `provider`: the
     /// provider's name as Settings shows it ("" when unknown).
     pub fn headline(&self, provider: &str) -> String {
-        let who = if provider.is_empty() {
-            "The AI provider"
-        } else {
-            provider
+        use crate::app_language::{S, fmt};
+        use crate::t;
+        let who = match provider.is_empty() {
+            true => t!(err_the_provider),
+            false => provider,
         };
+        let busy = |key: S| fmt(key, &[&who]);
         match self {
-            AiError::NotConfigured(_) => "AI isn't set up yet".into(),
-            AiError::Auth(..) => "The API key was rejected".into(),
-            AiError::RateLimited(_) => "Too many requests, wait a moment".into(),
-            AiError::Server(..) => format!("{who} is busy right now"),
-            AiError::Rejected(404, _) => "This model isn't available".into(),
-            AiError::Rejected(..) => format!("{who} turned the request down"),
-            AiError::Refused => "The answer was blocked".into(),
-            AiError::Network(_) => "No connection".into(),
-            AiError::Dropped(_) => "The connection dropped".into(),
-            AiError::BadResponse(_) => format!("{who} sent an answer OpenCircle can't read"),
-            AiError::Offline(_) => "Local translation failed".into(),
-            AiError::AlreadyIn(name) => format!("Already in {name}"),
-            AiError::Browser(_) => "Couldn't open your browser".into(),
+            AiError::NotConfigured(_) => t!(err_unset).into(),
+            AiError::Auth(..) => t!(err_auth).into(),
+            AiError::RateLimited(_) => t!(err_limit).into(),
+            AiError::Server(..) => busy(S::err_busy),
+            AiError::Rejected(404, _) => t!(err_no_model).into(),
+            AiError::Rejected(..) => busy(S::err_turned_down),
+            AiError::Refused => t!(err_blocked).into(),
+            AiError::Network(_) => t!(err_no_conn).into(),
+            AiError::Dropped(_) => t!(err_dropped).into(),
+            AiError::BadResponse(_) => busy(S::err_unreadable),
+            AiError::Offline(_) => t!(err_local).into(),
+            AiError::AlreadyIn(name) => fmt(S::err_already, &[name]),
+            AiError::Browser(_) => t!(err_browser).into(),
         }
     }
 
@@ -167,7 +170,7 @@ impl AiError {
             | AiError::Server(code, why)
             | AiError::Rejected(code, why) => http(*code, why),
             AiError::RateLimited(why) => http(429, why),
-            AiError::Refused => "The model declined to answer this request.".into(),
+            AiError::Refused => crate::t!(err_declined).into(),
             AiError::NotConfigured(why)
             | AiError::Network(why)
             | AiError::Dropped(why)

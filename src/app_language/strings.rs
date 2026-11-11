@@ -1385,4 +1385,132 @@ strings! {
         | "تحقق من الحقائق";
     pre_solve: "Solve step by step"
         | "حلّ خطوة بخطوة";
+    // added in part 2b: the AI chat
+    c_edit: "Edit"
+        | "تعديل";
+    chat_new: "+ New"
+        | "+ جديدة";
+    chat_new_tip: "New chat"
+        | "محادثة جديدة";
+    chat_unpin: "Unpin and close"
+        | "إلغاء التثبيت والإغلاق";
+    chat_pin: "Pin chat"
+        | "تثبيت المحادثة";
+    chat_ready: "Getting ready…"
+        | "جارٍ التحضير…";
+    chat_thought: "Thought for {} s"
+        | "فكّر لمدة {} ث";
+    chat_opening: "Opening your browser…"
+        | "جارٍ فتح المتصفح…";
+    chat_regenerate: "Regenerate"
+        | "إعادة التوليد";
+    chat_lens: "Search the image with Lens"
+        | "البحث عن الصورة عبر Lens";
+    chat_stopped: "Stopped."
+        | "أُوقف.";
+    chat_intro: "Circle anything on your screen or ask a question below."
+        | "ارسم دائرة حول أي شيء في شاشتك أو اطرح سؤالًا أدناه.";
+    chat_region: "Selected screen region · {}"
+        | "منطقة الشاشة المحددة · {}";
+    chat_no_shot: "Screenshot not kept"
+        | "لم تُحفظ لقطة الشاشة";
+    chat_attached: "Screen selection attached"
+        | "تم إرفاق تحديد الشاشة";
+    chat_include: "Include screen"
+        | "تضمين الشاشة";
+    chat_stop: "Stop"
+        | "إيقاف";
+    chat_send: "Send"
+        | "إرسال";
+    chat_back: "Back to the chat"
+        | "العودة إلى المحادثة";
+    chat_workspace: "Workspace"
+        | "مساحة العمل";
+    chat_tab_settings: "Settings"
+        | "الإعدادات";
+    chat_search: "Search chats…"
+        | "ابحث في المحادثات…";
+    chat_hist_off: "Chat history is off (Settings, Ask AI). Nothing is saved."
+        | "سجل المحادثات متوقف (الإعدادات، صفحة «اسأل الذكاء الاصطناعي»). لا يُحفظ شيء.";
+    chat_none: "No saved chats yet."
+        | "لا توجد محادثات محفوظة بعد.";
+    chat_no_match: "No matching conversations"
+        | "لا توجد محادثات مطابقة";
+    chat_clear: "Clear all"
+        | "مسح الكل";
+    chat_local: "Local on this PC"
+        | "محلي على هذا الجهاز";
+    chat_classifier: "This looks like a safety classifier: it rates messages instead of answering them. Pick a chat model."
+        | "يبدو أن هذا مصنّف أمان: يقيّم الرسائل بدل أن يجيب عنها. اختر نموذج محادثة.";
+    chat_open_ai: "Open AI & model settings →"
+        | "فتح إعدادات الذكاء الاصطناعي والنموذج ←";
+    chat_ph_first: "Message OpenCircle AI…"
+        | "اكتب رسالة إلى ذكاء OpenCircle…";
+    chat_ph_follow: "Ask a follow-up…"
+        | "اطرح سؤال متابعة…";
+    chat_just: "Just now"
+        | "الآن";
+    chat_min_ago: "{}m ago"
+        | "قبل {} د";
+    chat_hour_ago: "{}h ago"
+        | "قبل {} س";
+    chat_yesterday: "Yesterday"
+        | "أمس";
+    chat_opened: "Opened in your browser."
+        | "فُتح في المتصفح.";
+    chat_opened_short: "Opened in your browser"
+        | "فُتح في المتصفح";
+    chat_opened_sel: "Opened in your browser with your selection"
+        | "فُتح في المتصفح مع تحديدك";
+    chat_copied_dot: "Copied."
+        | "تم النسخ.";
+    chat_browser_name: "Browser (Google AI Mode)"
+        | "المتصفح (Google AI Mode)";
+    // the error cards (headline, fix) - the provider's own message stays as received
+    err_unset: "AI isn't set up yet"
+        | "لم يُعدّ الذكاء الاصطناعي بعد";
+    err_auth: "The API key was rejected"
+        | "رُفض مفتاح API";
+    err_limit: "Too many requests, wait a moment"
+        | "طلبات كثيرة جدًا، انتظر قليلًا";
+    err_busy: "{} is busy right now"
+        | "{} مشغول الآن";
+    err_the_provider: "The AI provider"
+        | "مزوّد الذكاء الاصطناعي";
+    err_no_model: "This model isn't available"
+        | "هذا النموذج غير متاح";
+    err_turned_down: "{} turned the request down"
+        | "رفض {} الطلب";
+    err_blocked: "The answer was blocked"
+        | "حُجبت الإجابة";
+    err_no_conn: "No connection"
+        | "لا يوجد اتصال";
+    err_dropped: "The connection dropped"
+        | "انقطع الاتصال";
+    err_unreadable: "{} sent an answer OpenCircle can't read"
+        | "أرسل {} إجابة لا يستطيع OpenCircle قراءتها";
+    err_local: "Local translation failed"
+        | "فشلت الترجمة على الجهاز";
+    err_already: "Already in {}"
+        | "النص بـ{} بالفعل";
+    err_browser: "Couldn't open your browser"
+        | "تعذّر فتح المتصفح";
+    err_declined: "The model declined to answer this request."
+        | "رفض النموذج الإجابة عن هذا الطلب.";
+    fix_model: "Choose another model"
+        | "اختر نموذجًا آخر";
+    fix_key: "Check the key"
+        | "تحقق من المفتاح";
+    fix_settings: "Open settings"
+        | "فتح الإعدادات";
+    fix_retry: "Retry"
+        | "إعادة المحاولة";
+    err_details: "Show details"
+        | "إظهار التفاصيل";
+    err_hide: "Hide details"
+        | "إخفاء التفاصيل";
+    chat_del: "Del"
+        | "حذف";
+    chat_load_failed: "Couldn't open that chat"
+        | "تعذّر فتح هذه المحادثة";
 }

@@ -383,6 +383,7 @@ fn card_sheet() {
                 open: (),
                 star: (),
                 delete: (),
+                delete_label: s(ar, "Del", "حذف"),
             })
         }
     };
@@ -438,6 +439,11 @@ fn error_card_sheet() {
                 on_details: (),
                 fix: Some(fix),
                 retry: long.then_some(()),
+                words: crate::ui::kit::error_card::Words {
+                    show: s(ar, "Show details", "إظهار التفاصيل"),
+                    hide: s(ar, "Hide details", "إخفاء التفاصيل"),
+                    retry: s(ar, "Retry", "إعادة المحاولة"),
+                },
             })
         }
     };
@@ -768,7 +774,7 @@ fn markdown_sheet() {
     fn md(latin: &str, arabic: &str) -> impl Fn(bool) -> Element<'static, ()> + 'static {
         let parse = |s: &str| -> &'static Content { Box::leak(Box::new(Content::parse(s))) };
         let (latin, arabic) = (parse(latin), parse(arabic));
-        move |ar| markdown(if ar { arabic } else { latin }.items()).map(|_| ())
+        move |ar| markdown(if ar { arabic } else { latin }.items(), "Copy").map(|_| ())
     }
     let rows = vec![
         row(

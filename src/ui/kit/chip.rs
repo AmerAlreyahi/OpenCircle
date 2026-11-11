@@ -131,17 +131,21 @@ fn marked<'a, Message: 'a>(
         .size(11)
         .font(weight(Weight::Normal))
         .color(faded(c().text, 0.85));
-    container(row![mark.into(), line].spacing(space::GAP).align_y(Center))
-        .padding([2, 10])
-        .style(|_| container::Style {
-            background: Some(c().hover.into()),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().divider),
-            ..container::Style::default()
-        })
-        .into()
+    container(
+        crate::dir_row![mark.into(), line]
+            .spacing(space::GAP)
+            .align_y(Center),
+    )
+    .padding([2, 10])
+    .style(|_| container::Style {
+        background: Some(c().hover.into()),
+        border: Border::default()
+            .rounded(radius::FULL)
+            .width(1)
+            .color(c().divider),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// A 6 px round dot of `colour` (a status: the setup's "for everyone").
@@ -193,7 +197,7 @@ pub fn attached<'a, Message: 'a>(
             border: Border::default().rounded(SMALL),
             ..container::Style::default()
         });
-    let line = row![
+    let line = crate::dir_row![
         tile,
         text(label)
             .size(11)

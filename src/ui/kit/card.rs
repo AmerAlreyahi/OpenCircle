@@ -186,6 +186,8 @@ pub struct Chat<'a, Message> {
     pub open: Message,
     pub star: Message,
     pub delete: Message,
+    /// The delete button's word ("Del").
+    pub delete_label: &'a str,
 }
 
 pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Message> {
@@ -216,7 +218,7 @@ pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Mes
             )
         });
     let del = button(
-        plain("Del")
+        plain(chat.delete_label)
             .size(10)
             .font(super::text::weight(Weight::Normal)),
     )
@@ -235,27 +237,32 @@ pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Mes
     // the card's padding and edges, the star and its gap, Del and its gap
     let room = chat.width - 2.0 * (space::CARD[1] + 1.0) - (STAR + space::GAP) - 36.0;
     let title = super::text::cut(chat.title, TITLE, font, room.max(0.0));
-    let title = row![star, plain(title).size(TITLE).font(font)]
+    let title = crate::dir_row![star, plain(title).size(TITLE).font(font)]
         .spacing(space::GAP)
         .align_y(Center);
     let meta_font = super::text::weight(Weight::Normal);
-    let meta = row![plain(chat.when).size(META).font(meta_font)]
-        .push(chat.crop.map(|crop| {
-            row![
+    let meta = crate::dir_row![plain(chat.when).size(META).font(meta_font)].spacing(8);
+    let meta = match chat.crop {
+        Some(crop) => meta.push(
+            crate::dir_row![
                 plain("·").size(META).font(meta_font),
                 plain(crop)
                     .size(META)
                     .font(super::text::mono(Weight::Normal))
             ]
-            .spacing(8)
-        }))
-        .spacing(8);
+            .spacing(8),
+        ),
+        None => meta,
+    };
     let meta = container(meta).style(|_| container::Style {
         text_color: Some(c().text_sub),
         ..container::Style::default()
     });
-    let lines = column![title, meta].spacing(2).width(Fill);
-    let content = row![lines, del].spacing(8).align_y(Center);
+    let lines = column![title, meta]
+        .spacing(2)
+        .width(Fill)
+        .align_x(super::dir::start());
+    let content = crate::dir_row![lines, del].spacing(8).align_y(Center);
     container(pick(content, chat.selected, Some(chat.open)))
         .width(chat.width)
         .into()

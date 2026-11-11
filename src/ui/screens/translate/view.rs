@@ -266,7 +266,7 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
             match turn.answer.is_empty() && card.chat.status == Status::Streaming {
                 true => note(t!(tp_thinking)).width(Fill).into(),
                 // Markdown, as the chat shows it (lines shape by their own direction)
-                false => markdown::markdown(card.answer.items()).map(Msg::Answer),
+                false => markdown::markdown(card.answer.items(), t!(c_copy)).map(Msg::Answer),
             },
         );
     }

@@ -3,14 +3,17 @@
 //! `hover`, links in `accent` that act only on a click, and code blocks on
 //! `.oc-code-surface` (radius 12) with a header strip (the language, Copy).
 //! iced's own parser and widgets (`markdown` feature) with no syntax
-//! highlighter. Right-to-left lines (Arabic) shape and align by their own
-//! direction (cosmic-text bidi); the layout stays left to right.
+//! highlighter. Every paragraph, list item and quote has the direction of its
+//! own first letter (an English answer stays left to right in an Arabic UI and
+//! the other way round: bullets and quote bars at the side the text starts);
+//! code is always left to right.
 use iced::font::Weight;
-use iced::widget::markdown::{self, HeadingLevel, Item, Settings, Style, Text, Viewer};
+use iced::widget::markdown::{self, Bullet, HeadingLevel, Item, Settings, Style, Text, Viewer};
 use iced::widget::{column, container, rich_text, row, text};
 use iced::{Border, Element, Fill, Padding, Pixels};
 
 use super::button::{Kind, button, label};
+use super::dir::{first_strong_rtl, rtl_letter};
 use super::text::{mono, ui_font, weight};
 use super::themes::{c, current};
 use super::tokens::{Role, fixed, radius};
@@ -64,7 +67,10 @@ fn settings() -> Settings {
     }
 }
 
-struct Answer;
+/// The answer viewer; `copy` is the code blocks' Copy button (the app's language).
+struct Answer {
+    copy: &'static str,
+}
 
 impl<'a> Viewer<'a, Act> for Answer {
     fn on_link_click(url: markdown::Uri) -> Act {
@@ -104,6 +110,58 @@ impl<'a> Viewer<'a, Act> for Answer {
         markdown::table(&Cell, settings, columns, rows)
     }
 
+    fn unordered_list(&self, settings: Settings, bullets: &'a [Bullet]) -> Element<'a, Act> {
+        let list = list(self, settings, bullets, |_, _| {
+            text("•").size(settings.text_size).font(ui_font()).into()
+        });
+        container(list).padding([0.0, settings.spacing.0]).into()
+    }
+
+    fn ordered_list(
+        &self,
+        settings: Settings,
+        start: u64,
+        bullets: &'a [Bullet],
+    ) -> Element<'a, Act> {
+        let digits = ((start + bullets.len() as u64).max(1) as f32)
+            .log10()
+            .ceil();
+        list(self, settings, bullets, move |i, rtl| {
+            let side = match rtl {
+                true => iced::alignment::Horizontal::Left,
+                false => iced::alignment::Horizontal::Right,
+            };
+            text(format!("{}.", i as u64 + start))
+                .size(settings.text_size)
+                .font(ui_font())
+                .align_x(side)
+                .width(settings.text_size * ((digits / 2.0).ceil() + 1.0))
+                .into()
+        })
+    }
+
+    fn quote(&self, settings: Settings, contents: &'a [Item]) -> Element<'a, Act> {
+        let rtl = contents
+            .first()
+            .is_some_and(|i| item_rtl(i, settings.style));
+        let body = column(
+            contents
+                .iter()
+                .enumerate()
+                .map(|(i, content)| markdown::item(self, settings, content, i)),
+        )
+        .spacing(settings.spacing.0);
+        let bar = iced::widget::rule::vertical(4);
+        let parts: [Element<'a, Act>; 2] = match rtl {
+            true => [body.into(), bar.into()],
+            false => [bar.into(), body.into()],
+        };
+        row(parts)
+            .height(iced::Length::Shrink)
+            .spacing(settings.spacing.0)
+            .into()
+    }
+
     fn code_block(
         &self,
         settings: Settings,
@@ -120,7 +178,7 @@ impl<'a> Viewer<'a, Act> for Answer {
             .font(mono(Weight::Normal))
             .color(c().text_sub);
         let copy = button(
-            label("Copy").size(STRIP_TEXT),
+            label(self.copy).size(STRIP_TEXT),
             Kind::Quiet,
             Some(Act::Copy(code.trim_end().to_string())),
         );
@@ -147,6 +205,57 @@ impl<'a> Viewer<'a, Act> for Answer {
     }
 }
 
+/// What a bullet holds.
+fn items(bullet: &Bullet) -> &[Item] {
+    match bullet {
+        Bullet::Point { items } | Bullet::Task { items, .. } => items,
+    }
+}
+
+/// A list: each bullet's marker at the side its own text starts (iced's own
+/// list layout, mirrored per bullet).
+fn list<'a>(
+    viewer: &Answer,
+    settings: Settings,
+    bullets: &'a [Bullet],
+    marker: impl Fn(usize, bool) -> Element<'a, Act>,
+) -> Element<'a, Act> {
+    column(bullets.iter().enumerate().map(|(i, bullet)| {
+        let rtl = (items(bullet).first()).is_some_and(|item| item_rtl(item, settings.style));
+        let mark = match bullet {
+            Bullet::Task { done, .. } => Element::from(
+                container(iced::widget::checkbox(*done).size(settings.text_size)).center_y(
+                    iced::widget::text::LineHeight::default().to_absolute(settings.text_size),
+                ),
+            ),
+            Bullet::Point { .. } => marker(i, rtl),
+        };
+        let inner = Settings {
+            spacing: settings.spacing * 0.6,
+            ..settings
+        };
+        let body = markdown::view_with(items(bullet), inner, viewer);
+        let parts: [Element<'a, Act>; 2] = match rtl {
+            true => [container(body).width(Fill).into(), mark],
+            false => [mark, body],
+        };
+        row(parts).spacing(settings.spacing).into()
+    }))
+    .spacing(settings.spacing * 0.75)
+    .into()
+}
+
+/// An item starts right to left (a paragraph or heading by its first letter).
+fn item_rtl(item: &Item, style: Style) -> bool {
+    match item {
+        Item::Paragraph(line) | Item::Heading(_, line) => {
+            let spans = line.spans(style);
+            first_strong_rtl(&spans.iter().map(|s| s.text.as_ref()).collect::<String>())
+        }
+        _ => false,
+    }
+}
+
 /// A table's cell: as wide as its text (a table sizes its columns to them).
 struct Cell;
 
@@ -169,15 +278,14 @@ impl<'a> Viewer<'a, Act> for Cell {
 /// falls back only to a face of the same style (it would draw boxes).
 fn block<'a>(line: &Text, style: Style, size: Pixels) -> Element<'a, Act> {
     let spans = upright(line, style);
-    let first = (spans.iter().flat_map(|s| s.text.chars())).find(|c| c.is_alphabetic());
+    let rtl = first_strong_rtl(&spans.iter().map(|s| s.text.as_ref()).collect::<String>());
     let block = rich_text(spans)
         .size(size)
+        .width(Fill)
         .on_link_click(Answer::on_link_click);
-    // As wide as its text, moved to the right edge: iced 0.14 draws a
-    // one-line right-to-left text with `align_x(Right)` past the edge.
-    match first.is_some_and(rtl) {
-        true => container(block).align_right(Fill).into(),
-        false => block.width(Fill).into(),
+    match rtl {
+        true => block.align_x(iced::alignment::Horizontal::Right).into(),
+        false => block.into(),
     }
 }
 
@@ -188,7 +296,7 @@ fn upright(line: &Text, style: Style) -> Vec<iced::advanced::text::Span<'static,
             let mut span = span.clone();
             if let Some(font) = &mut span.font
                 && font.style != iced::font::Style::Normal
-                && span.text.chars().any(rtl)
+                && span.text.chars().any(rtl_letter)
             {
                 font.style = iced::font::Style::Normal;
             }
@@ -197,14 +305,9 @@ fn upright(line: &Text, style: Style) -> Vec<iced::advanced::text::Span<'static,
         .collect()
 }
 
-/// A letter of a right-to-left script (Hebrew, Arabic and their presentation forms).
-fn rtl(c: char) -> bool {
-    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
-}
-
 /// `items` (parsed with `markdown::Content`) in the theme's text colour.
-pub fn markdown<'a>(items: &'a [Item]) -> Element<'a, Act> {
-    container(markdown::view_with(items, settings(), &Answer))
+pub fn markdown<'a>(items: &'a [Item], copy: &'static str) -> Element<'a, Act> {
+    container(markdown::view_with(items, settings(), &Answer { copy }))
         .width(Fill)
         .style(|_| container::Style::default().color(c().text))
         .into()
@@ -229,7 +332,7 @@ mod tests {
 
     #[test]
     fn right_to_left_letters_are_found() {
-        assert!("مرحبا".chars().all(rtl) && "שלום".chars().all(rtl));
-        assert!(!"Hello, 123 «»".chars().any(rtl));
+        assert!("مرحبا".chars().all(rtl_letter) && "שלום".chars().all(rtl_letter));
+        assert!(!"Hello, 123 «»".chars().any(rtl_letter));
     }
 }

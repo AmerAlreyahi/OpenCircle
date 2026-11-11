@@ -3,9 +3,12 @@
 //! only, in the one result card frame (`kit::panel_frame::chat_frame`).
 use std::sync::Arc;
 
+use crate::app_language::{S, fmt, tr};
+use crate::t;
+
 use iced::widget::tooltip::Position;
-use iced::widget::{column, container, markdown as md, row, stack};
-use iced::{Center, Element, Fill, Rectangle, Right, Size};
+use iced::widget::{column, container, markdown as md, stack};
+use iced::{Center, Element, Fill, Rectangle, Size};
 
 use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
 use crate::actions;
@@ -17,8 +20,9 @@ use crate::ui::keys;
 use crate::ui::kit::bubble::bubble;
 use crate::ui::kit::button::{Kind, button, cta_label, label};
 use crate::ui::kit::chip::Tone;
+use crate::ui::kit::dir;
 use crate::ui::kit::dropdown::dropdown;
-use crate::ui::kit::error_card::{ErrorCard, error_card};
+use crate::ui::kit::error_card::{ErrorCard, Words, error_card};
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::icon_button::{self, icon_button};
 use crate::ui::kit::markdown;
@@ -81,7 +85,7 @@ pub fn actions<'a, M: Clone + 'a>(
     main: (&'a str, M),
     others: impl IntoIterator<Item = (&'a str, M)>,
 ) -> Element<'a, M> {
-    let mut line = row![button(cta_label(main.0, None), Kind::Accent, Some(main.1))]
+    let mut line = dir::row([button(cta_label(main.0, None), Kind::Accent, Some(main.1))])
         .spacing(ACTIONS_GAP)
         .align_y(Center);
     for (name, msg) in others {
@@ -130,20 +134,20 @@ impl AiChat {
         if chatting {
             // the header's end: a new chat and the pin (no close button: Esc
             // or a click outside closes an unpinned chat; a pinned one, its pin)
-            let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
-            let new = hint(new, "New chat", Why::Icon, Position::Bottom);
+            let new = button(label(t!(chat_new)), Kind::Elevated, Some(Msg::NewChat));
+            let new = hint(new, t!(chat_new_tip), Why::Icon, Position::Bottom);
             let state = icon_button::State {
                 active: self.pinned,
                 ..Default::default()
             };
             // pinned: "pin-off" on the filled (active) button, so it reads at a glance
             let (glyph, tip) = match self.pinned {
-                true => (Icon::Unpin, "Unpin and close"),
-                false => (Icon::Pin, "Pin chat"),
+                true => (Icon::Unpin, t!(chat_unpin)),
+                false => (Icon::Pin, t!(chat_pin)),
             };
             let pin = icon_button(glyph.glyph(), state, Some(Msg::Pin));
             let pin = hint(pin, tip, Why::Icon, Position::Bottom);
-            let ends = row![new, pin].spacing(space::GAP).align_y(Center);
+            let ends = dir::row([new, pin]).spacing(space::GAP).align_y(Center);
             let card = frame::chat_frame(
                 header,
                 Some(ends.into()),
@@ -180,7 +184,7 @@ impl AiChat {
         let Some(Ok(ready)) = setup else {
             let line: Element<'a, Msg> = match setup {
                 Some(Err(steps)) => scroll(note(steps.as_str())).height(Fill).into(),
-                _ => note("Getting ready…").into(),
+                _ => note(t!(chat_ready)).into(),
             };
             return (line, None);
         };
@@ -193,27 +197,29 @@ impl AiChat {
             log = log.push(self.question(i, turn, !streaming && !browser));
             let mut answer = column![].spacing(STACK).width(Fill);
             if let Some(thought) = turn.thought {
-                let line = format!("Thought for {:.1} s", thought.as_secs_f32());
+                let line = fmt(S::chat_thought, &[&format!("{:.1}", thought.as_secs_f32())]);
                 answer = answer.push(chip::logo(line, crate::ui::kit::logo::logo(14)));
             }
             let busy = last && streaming;
             if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
-                answer = answer.push(markdown::markdown(parsed.items()).map(Msg::Answer));
+                answer =
+                    answer.push(markdown::markdown(parsed.items(), t!(c_copy)).map(Msg::Answer));
             } else if busy {
                 answer = answer.push(match browser {
-                    true => note("Opening your browser…").into(),
+                    true => note(t!(chat_opening)).into(),
                     false => spinner::thinking(
                         crate::ui::kit::logo::logo(16),
                         self.spin.map_or(0.0, |(_, turn)| turn),
                         motion::reduced(),
-                        "Thinking…",
+                        t!(tp_thinking),
                     ),
                 });
             }
             if !turn.answer.is_empty() && !busy && !browser {
-                let mut tools = row![quiet("Copy", Msg::CopyTurn(i, true))].spacing(ACTIONS_GAP);
+                let mut tools =
+                    dir::row([quiet(t!(c_copy), Msg::CopyTurn(i, true))]).spacing(ACTIONS_GAP);
                 if last {
-                    tools = tools.push(quiet("Regenerate", Msg::Regenerate));
+                    tools = tools.push(quiet(t!(chat_regenerate), Msg::Regenerate));
                 }
                 answer = answer.push(tools);
             }
@@ -224,11 +230,7 @@ impl AiChat {
         }
         // Questions about the picture itself: Lens takes the crop (browser provider).
         if browser && chat.status == Status::Done {
-            let lens = button(
-                label("Search the image with Lens"),
-                Kind::Quiet,
-                Some(Msg::Search),
-            );
+            let lens = button(label(t!(chat_lens)), Kind::Quiet, Some(Msg::Search));
             log = log.push(lens);
         }
         match &chat.status {
@@ -244,25 +246,25 @@ impl AiChat {
                     fix,
                 ));
             }
-            Status::Cancelled => log = log.push(note("Stopped.")),
+            Status::Cancelled => log = log.push(note(t!(chat_stopped))),
             _ => {}
         }
         if chat.turns.is_empty() {
             let prompts = PRESETS
                 .iter()
                 .enumerate()
-                .map(|(i, p)| chip::action(p.label.to_string(), Msg::Preset(i)));
+                .map(|(i, p)| chip::action(tr(p.label).to_string(), Msg::Preset(i)));
             log = log.push(
                 column![
-                    note("Circle anything on your screen or ask a question below."),
-                    row(prompts).spacing(CHIPS_GAP).wrap()
+                    note(t!(chat_intro)),
+                    iced::widget::row(prompts).spacing(CHIPS_GAP).wrap()
                 ]
                 .spacing(STACK),
             );
         }
         log = match &self.note {
-            Some(Ok(done)) => log.push(note(*done)),
-            Some(Err(e)) => log.push(error(Role::NOTE, e)),
+            Some(Ok(done)) => log.push(note(tr(done.0))),
+            Some(Err(e)) => log.push(error(Role::NOTE, tr(e.0))),
             None => log,
         };
         let placeholder = placeholder(chat);
@@ -280,20 +282,20 @@ impl AiChat {
     /// The user's turn `i`: the selection's chip when it went along, the
     /// bubble, and Copy / Edit (`editable`: not while an answer streams).
     fn question<'a>(&'a self, i: usize, turn: &'a Turn, editable: bool) -> Element<'a, Msg> {
-        let mut side = column![].spacing(STACK).align_x(Right).width(Fill);
+        let mut side = column![].spacing(STACK).align_x(dir::end()).width(Fill);
         if turn.screen {
             side = side.push(chip::status(
                 match turn.shot {
-                    Some((w, h)) => format!("Selected screen region · {w}×{h} px"),
-                    None => "Screenshot not kept".to_string(),
+                    Some((w, h)) => fmt(S::chat_region, &[&format!("{w}×{h} px")]),
+                    None => t!(chat_no_shot).to_string(),
                 },
                 Tone::Busy,
             ));
         }
         side = side.push(bubble(&turn.question));
-        let mut tools = row![quiet("Copy", Msg::CopyTurn(i, false))].spacing(ACTIONS_GAP);
+        let mut tools = dir::row([quiet(t!(c_copy), Msg::CopyTurn(i, false))]).spacing(ACTIONS_GAP);
         if editable {
-            tools = tools.push(quiet("Edit", Msg::EditTurn(i)));
+            tools = tools.push(quiet(t!(c_edit), Msg::EditTurn(i)));
         }
         side.push(tools).into()
     }
@@ -310,8 +312,8 @@ impl AiChat {
         streaming: bool,
     ) -> Element<'a, Msg> {
         let size = format!("{}×{} px", self.crop.width, self.crop.height);
-        let top = attached.then(|| chip::attached("UI", "Screen selection attached", size));
-        let switch = crate::ui::kit::button::switch("Include screen", include, Msg::IncludeScreen);
+        let top = attached.then(|| chip::attached("UI", t!(chat_attached), size));
+        let switch = crate::ui::kit::button::switch(t!(chat_include), include, Msg::IncludeScreen);
         self.follow_up(placeholder, streaming, top, Some(switch))
     }
 
@@ -331,18 +333,18 @@ impl AiChat {
         let send = match streaming {
             true => hint(
                 round(Icon::Stop, Msg::Stop),
-                "Stop",
+                t!(chat_stop),
                 Why::Icon,
                 Position::Top,
             ),
             false => hint(
                 round(Icon::Send, Msg::Submit),
-                "Send",
+                t!(chat_send),
                 Why::Keys("Enter"),
                 Position::Top,
             ),
         };
-        let controls = row![]
+        let controls = dir::row([])
             .push(extra)
             .push(iced::widget::space::horizontal())
             .push(send)
@@ -369,17 +371,25 @@ impl AiChat {
             icon_button::State::default(),
             Some(Msg::Drawer(None)),
         );
-        let back = hint(back, "Back to the chat", Why::Icon, Position::Bottom);
+        let back = hint(back, t!(chat_back), Why::Icon, Position::Bottom);
         let tabs = segmented::inline(
-            &[(Tab::History, "History"), (Tab::Settings, "Settings")],
+            &[
+                (Tab::History, t!(nav_history)),
+                (Tab::Settings, t!(chat_tab_settings)),
+            ],
             tab,
             tab,
             1.0,
             |t| Msg::Drawer(Some(t)),
         );
-        let top = row![
+        let top = crate::dir_row![
             back,
-            container(crate::ui::kit::text::text(Role::CARD_HEADING, "Workspace")).width(Fill),
+            container(crate::ui::kit::text::text(
+                Role::CARD_HEADING,
+                t!(chat_workspace)
+            ))
+            .width(Fill)
+            .align_x(dir::start()),
             tabs
         ]
         .spacing(space::GAP)
@@ -394,13 +404,16 @@ impl AiChat {
     /// This PC's saved chats, favourites then newest first: the search field
     /// and a new chat, a card per chat (star, open, delete), and the footer.
     fn history_view(&self, width: f32) -> Vec<Element<'_, Msg>> {
-        let search = field::input("Search chats…", &self.find, false, false)
+        let search = field::input(t!(chat_search), &self.find, false, false)
+            .align_x(dir::start())
             .on_input(Msg::Find)
             .width(Fill);
-        let new = button(label("+ New"), Kind::Elevated, Some(Msg::NewChat));
-        let top = row![search, new].spacing(space::GAP).align_y(Center);
+        let new = button(label(t!(chat_new)), Kind::Elevated, Some(Msg::NewChat));
+        let top = crate::dir_row![search, new]
+            .spacing(space::GAP)
+            .align_y(Center);
         if !config::current().chat.keep_history {
-            let off = note("Chat history is off (Settings > Ask AI). Nothing is saved.");
+            let off = note(t!(chat_hist_off));
             return vec![top.into(), off.into()];
         }
         let open = match &self.state {
@@ -419,22 +432,19 @@ impl AiChat {
                 open: Msg::OpenSaved(entry.id.clone()),
                 star: Msg::Star(entry.id.clone(), !entry.star),
                 delete: Msg::DeleteSaved(entry.id.clone()),
+                delete_label: t!(chat_del),
             }));
         }
         let list: Element<'_, Msg> = match self.listed.is_empty() {
-            true if self.find.trim().is_empty() => note("No saved chats yet.").into(),
-            true => container(note("No matching conversations"))
-                .center_x(Fill)
-                .into(),
+            true if self.find.trim().is_empty() => note(t!(chat_none)).into(),
+            true => container(note(t!(chat_no_match))).center_x(Fill).into(),
             false => scroll(cards).height(Fill).into(),
         };
-        let clear = button(label("Clear all"), Kind::Remove, Some(Msg::ClearHistory));
-        let footer = row![
-            container(crate::ui::kit::text::muted(
-                Role::CARD_DESC,
-                "Local on this PC"
-            ))
-            .width(Fill),
+        let clear = button(label(t!(chat_clear)), Kind::Remove, Some(Msg::ClearHistory));
+        let footer = crate::dir_row![
+            container(crate::ui::kit::text::muted(Role::CARD_DESC, t!(chat_local)))
+                .width(Fill)
+                .align_x(dir::start()),
             clear
         ]
         .align_y(Center);
@@ -448,23 +458,24 @@ impl AiChat {
         let cfg = config::current();
         let stays = segmented(
             &[
-                (StaysOpen::FollowUp, "After a follow-up"),
-                (StaysOpen::Always, "Always"),
+                (StaysOpen::FollowUp, t!(ai_stays_follow)),
+                (StaysOpen::Always, t!(ai_stays_always)),
             ],
             cfg.chat.stays_open,
             cfg.chat.stays_open,
             1.0,
             Msg::StaysOpen,
         );
-        let provider = dropdown(&PICKS[..], picked(&cfg.ai), "Choose a provider", Msg::Pick);
+        let provider = dropdown(&PICKS[..], picked(&cfg.ai), t!(ai_prov_choose), Msg::Pick);
         let mut part = column![
-            sub(Role::LABEL, "AI chat stays open"),
+            sub(Role::LABEL, t!(ai_stays)),
             stays,
-            sub(Role::LABEL, "Provider"),
+            sub(Role::LABEL, t!(ai_prov)),
             provider,
         ]
         .spacing(STACK)
-        .width(Fill);
+        .width(Fill)
+        .align_x(dir::start());
         if cfg.ai.provider != config::Provider::Browser {
             let on = model_list::On {
                 opened: Msg::ModelsOpened,
@@ -475,21 +486,17 @@ impl AiChat {
             };
             let example = Preset::of(&cfg.ai)
                 .filter(|p| !p.model.is_empty())
-                .map_or("Type or load a model id".to_string(), |p| {
-                    format!("e.g. {}", p.model)
+                .map_or(t!(ai_model_type).to_string(), |p| {
+                    fmt(S::ai_model_eg, &[&p.model])
                 });
             let model = self.models.view(&cfg.ai.model, &example, on);
-            part = part.push(sub(Role::LABEL, "Model")).push(model);
+            part = part.push(sub(Role::LABEL, t!(ai_model))).push(model);
             if classifier(&cfg.ai.model) {
-                part = part.push(error(
-                    Role::NOTE,
-                    "This looks like a safety classifier: it rates messages instead of \
-                     answering them. Pick a chat model.",
-                ));
+                part = part.push(error(Role::NOTE, t!(chat_classifier)));
             }
         }
         part.push(crate::ui::kit::button::fill(
-            label("Open AI & model settings →"),
+            label(t!(chat_open_ai)),
             Some(Msg::OpenAiSettings),
         ))
         .into()
@@ -535,14 +542,19 @@ pub fn ai_error<'a, M: Clone + 'a>(
         on_details,
         fix: fix.map(|f| (f.label(), on(f))),
         retry: retry.then(|| on(Fix::Retry)),
+        words: Words {
+            show: t!(err_details),
+            hide: t!(err_hide),
+            retry: t!(fix_retry),
+        },
     })
 }
 
 /// The composer's placeholder: a first message, then a follow-up.
 pub(super) fn placeholder(chat: &Chat) -> &'static str {
     match chat.turns.is_empty() {
-        true => "Message OpenCircle AI…",
-        false => "Ask a follow-up…",
+        true => t!(chat_ph_first),
+        false => t!(chat_ph_follow),
     }
 }
 
@@ -553,10 +565,10 @@ pub(super) fn ago(then: u64, now: u64) -> String {
     const HOUR: u64 = 60 * MIN;
     const DAY: u64 = 24 * HOUR;
     match now.saturating_sub(then) {
-        s if s < MIN => "Just now".into(),
-        s if s < HOUR => format!("{}m ago", s / MIN),
-        s if s < DAY => format!("{}h ago", s / HOUR),
-        s if s < 2 * DAY => "Yesterday".into(),
+        s if s < MIN => t!(chat_just).into(),
+        s if s < HOUR => fmt(S::chat_min_ago, &[&(s / MIN)]),
+        s if s < DAY => fmt(S::chat_hour_ago, &[&(s / HOUR)]),
+        s if s < 2 * DAY => t!(chat_yesterday).into(),
         _ => crate::log::date(then),
     }
 }

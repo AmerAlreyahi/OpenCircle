@@ -20,6 +20,7 @@ use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::{self, Crop};
 use crate::ai;
 use crate::ai::providers::{self, Preset};
+use crate::app_language::{S, Said};
 use crate::config::{self, Provider, StaysOpen};
 use crate::store::{self, chats};
 use crate::ui::background;
@@ -55,7 +56,7 @@ impl std::fmt::Display for Pick {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Some(p) => p.fmt(f),
-            None => f.write_str("Browser (Google AI Mode)"),
+            None => f.write_str(crate::t!(chat_browser_name)),
         }
     }
 }
@@ -127,7 +128,7 @@ pub enum Msg {
     /// Search the crop with Lens (the chat's "Search the image with Lens").
     Search,
     /// What a link's click did (its note).
-    Acted(Result<&'static str, String>),
+    Acted(Result<Said, Said>),
     /// A focused field gave a key back (`keys`); the App handles it.
     Key(keys::Keyed),
     /// Ask AI: send the selection with the next question, or not.
@@ -204,7 +205,7 @@ pub struct AiChat {
     /// The running stream; dropping the handle aborts it.
     work: Option<task::Handle>,
     /// What the last link click did (or why it could not).
-    note: Option<Result<&'static str, String>>,
+    note: Option<Result<Said, Said>>,
     /// The logo spinner while the AI has not answered yet: since when, and
     /// how far through its turn at the latest frame (`tick`).
     spin: Option<(Instant, f32)>,
@@ -454,7 +455,10 @@ impl AiChat {
                 (*chat, *editing) = (Chat::from_saved(saved), None);
                 (self.work, self.summarizing, self.drawer) = (None, None, None);
             }
-            (_, Msg::Loaded(Err(e))) => self.note = Some(Err(e)),
+            (_, Msg::Loaded(Err(e))) => {
+                crate::log!("[opencircle] a saved chat did not open: {e}");
+                self.note = Some(Err(Said(S::chat_load_failed)));
+            }
             (_, Msg::DeleteSaved(id)) => {
                 let Some(db) = store::path() else {
                     return Task::none();
@@ -564,8 +568,11 @@ impl AiChat {
                     // Only on a click, and only a web link (`open_link`).
                     Act::Link(url) => background(move |tx| {
                         let done = crate::sys::open::open_link(&url)
-                            .map(|()| "Opened in your browser.")
-                            .map_err(|e| format!("Could not open the link: {e}"));
+                            .map(|()| Said(S::chat_opened))
+                            .map_err(|e| {
+                                crate::log!("[opencircle] a link did not open: {e}");
+                                Said(S::pill_no_browser)
+                            });
                         let _ = tx.unbounded_send(Msg::Acted(done));
                     }),
                     Act::Copy(code) => copy(code),
@@ -813,8 +820,11 @@ fn save_config(
 fn copy(text: String) -> Task<Msg> {
     background(move |tx| {
         let done = actions::copy::text(text)
-            .map(|()| "Copied.")
-            .map_err(|e| format!("Could not copy: {e}"));
+            .map(|()| Said(S::chat_copied_dot))
+            .map_err(|e| {
+                crate::log!("[opencircle] copy failed: {e}");
+                Said(S::pill_copy_failed)
+            });
         let _ = tx.unbounded_send(Msg::Acted(done));
     })
 }
@@ -855,10 +865,10 @@ fn open_in_browser_with(
     let prompt = ai::browser::question(prompt, None); // trimmed
     if !include {
         ai_mode(&prompt)?;
-        return Ok("Opened in your browser".into());
+        return Ok(crate::t!(chat_opened_short).into());
     }
     lens(crop, &prompt)?;
-    Ok("Opened in your browser with your selection".into())
+    Ok(crate::t!(chat_opened_sel).into())
 }
 
 #[cfg(test)]

@@ -7,7 +7,7 @@ use std::f32::consts::TAU;
 use std::time::Duration;
 
 use iced::border::Radius;
-use iced::widget::{container, image, row};
+use iced::widget::{container, image};
 use iced::{Center, Element, Fill, Radians, Rotation};
 
 use super::text::sub;
@@ -53,7 +53,7 @@ pub fn thinking<'a, Message: 'a>(
     label: &'a str,
 ) -> Element<'a, Message> {
     container(
-        row![spinner(logo, THINKING, turn, still), sub(Role::NOTE, label)]
+        crate::dir_row![spinner(logo, THINKING, turn, still), sub(Role::NOTE, label)]
             .spacing(ROW_GAP)
             .align_y(Center),
     )

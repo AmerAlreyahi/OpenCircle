@@ -2,7 +2,7 @@
 //! tone, a short plain headline, the cause small and muted (at most two lines;
 //! "Show details" for the rest), then one fix button and, where it helps,
 //! Retry. Only the icon is red; the text keeps the normal tokens.
-use iced::widget::{column, container, row};
+use iced::widget::{column, container};
 use iced::{Border, Center, Element, Fill};
 
 use super::button::{Kind, button, label, regular};
@@ -36,6 +36,16 @@ pub struct ErrorCard<M> {
     pub fix: Option<(&'static str, M)>,
     /// A quiet Retry beside the fix (`None` when the fix is Retry itself).
     pub retry: Option<M>,
+    /// The words on the card, in the app's language.
+    pub words: Words,
+}
+
+/// "Show details", "Hide details" and "Retry".
+#[derive(Debug, Clone, Copy)]
+pub struct Words {
+    pub show: &'static str,
+    pub hide: &'static str,
+    pub retry: &'static str,
 }
 
 /// The detail cut to `LINES` lines with "…" at `width` px, or `None` when it fits.
@@ -64,38 +74,52 @@ fn detail_width(width: f32) -> f32 {
     (width - 2.0 * PAD - size::ICON - ICON_GAP).max(1.0)
 }
 
+/// The provider's own message, as received: its lines start where its own
+/// content does (an English message stays left to right in an Arabic card).
+fn detail_text<'a, M: 'a>(detail: String) -> Element<'a, M> {
+    let start = super::dir::content_start(&detail);
+    muted(Role::NOTE, detail)
+        .line_height(LINE)
+        .width(Fill)
+        .align_x(start)
+        .into()
+}
+
 pub fn error_card<'a, M: Clone + 'a>(card: ErrorCard<M>) -> Element<'a, M> {
     let headline = text::text(Role::ROW_TITLE, card.headline);
-    let mut body = column![headline].spacing(STACK).width(Fill);
+    let mut body = column![headline]
+        .spacing(STACK)
+        .width(Fill)
+        .align_x(super::dir::start());
     if !card.detail.is_empty() {
         let short = (!card.open)
             .then(|| clamp(&card.detail, detail_width(card.width)))
             .flatten();
         let long = card.open || short.is_some();
         let shown: Element<'a, M> = match short {
-            Some(short) => muted(Role::NOTE, short).line_height(LINE).into(),
-            None => muted(Role::NOTE, card.detail).line_height(LINE).into(),
+            Some(short) => detail_text(short),
+            None => detail_text(card.detail),
         };
         body = body.push(shown);
         if long {
             let toggle = if card.open {
-                "Hide details"
+                card.words.hide
             } else {
-                "Show details"
+                card.words.show
             };
             body = body.push(button(label(toggle), Kind::Quiet, Some(card.on_details)));
         }
     }
-    let mut actions = row![].spacing(ACTIONS_GAP).align_y(Center);
+    let mut actions = super::dir::row([]).spacing(ACTIONS_GAP).align_y(Center);
     if let Some((name, msg)) = card.fix {
         actions = actions.push(regular(name, false, Some(msg)));
     }
     if let Some(retry) = card.retry {
-        actions = actions.push(button(label("Retry"), Kind::Quiet, Some(retry)));
+        actions = actions.push(button(label(card.words.retry), Kind::Quiet, Some(retry)));
     }
     body = body.push(container(actions).padding([4, 0]));
     let mark = container(icon(Icon::Alert, size::ICON).color(fixed::DANGER)).padding([1, 0]);
-    container(row![mark, body].spacing(ICON_GAP))
+    container(crate::dir_row![mark, body].spacing(ICON_GAP))
         .padding(PAD)
         .width(Fill)
         .style(|_| container::Style {
@@ -132,6 +156,11 @@ mod tests {
                 on_details: (),
                 fix: Some(("Choose another model", ())),
                 retry: Some(()),
+                words: Words {
+                    show: "Show details",
+                    hide: "Hide details",
+                    retry: "Retry",
+                },
             });
             super::super::testing::shot::texts(card)
         };

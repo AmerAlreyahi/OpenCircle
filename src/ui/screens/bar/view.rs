@@ -434,6 +434,35 @@ mod tests {
         assert!(a > b && b > c, "Arabic from the right: {a} {b} {c}");
     }
 
+    /// The hint over the screen, the protected-window note and the Select
+    /// text chip, in English and Arabic.
+    #[test]
+    fn the_hint_chips_match_their_golden_images() {
+        use crate::ui::kit::surface::hint;
+        let mut failed = Vec::new();
+        for ar in [false, true] {
+            let _ar = ar.then(crate::ui::kit::testing::arabic);
+            let lang = if ar { "ar" } else { "en" };
+            for theme in [&SAPPHIRE, &DAYLIGHT] {
+                themes::set(theme);
+                let chips: [(&str, fn() -> Element<'static, ()>); 3] = [
+                    ("hint", || hint(crate::ui::app::hint()).into()),
+                    ("protected", || hint(crate::ui::app::protected()).into()),
+                    ("select", || action_chip(t!(bar_select_text).into(), ())),
+                ];
+                for (name, chip) in chips {
+                    let file = format!("chip-{name}-{lang}-{}", theme.id);
+                    let size = Size::new(520.0, bar::HEIGHT + 8.0);
+                    failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                        container(chip()).center(iced::Fill).into()
+                    }));
+                }
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
     #[test]
     fn qr_chip_offers_copy_and_open_only_for_links() {
         let screen = Size::new(1200.0, 420.0);

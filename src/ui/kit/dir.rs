@@ -258,6 +258,28 @@ pub fn line(height: f32) -> f32 {
     }
 }
 
+/// A letter of a right-to-left script (Hebrew, Arabic and their presentation forms).
+pub fn rtl_letter(c: char) -> bool {
+    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+}
+
+/// `text` reads right to left: its first letter is of a right-to-left script
+/// (the first-strong rule: a message or a paragraph has the direction of its
+/// own content, whatever the UI's direction is).
+pub fn first_strong_rtl(text: &str) -> bool {
+    text.chars()
+        .find(|c| c.is_alphabetic())
+        .is_some_and(rtl_letter)
+}
+
+/// Where `text`'s lines start: by its own content (`first_strong_rtl`).
+pub fn content_start(text: &str) -> Horizontal {
+    match first_strong_rtl(text) {
+        true => Horizontal::Right,
+        false => Horizontal::Left,
+    }
+}
+
 /// `row!` in reading order: `dir_row![a, b]` puts `a` at the start side.
 #[macro_export]
 macro_rules! dir_row {
@@ -287,5 +309,19 @@ mod tests {
         }
         assert!(!rtl());
         assert_eq!(order(vec![1, 2]), [1, 2]);
+    }
+
+    /// A paragraph takes the direction of its first letter, not of the UI.
+    #[test]
+    fn a_text_has_the_direction_of_its_first_strong_letter() {
+        assert!(first_strong_rtl("مرحبا hello"));
+        assert!(
+            first_strong_rtl("  123 «مرحبا»"),
+            "digits and signs are neutral"
+        );
+        assert!(!first_strong_rtl("hello مرحبا"));
+        assert!(!first_strong_rtl("1234"), "no letter: the UI decides");
+        assert_eq!(content_start("שלום"), Horizontal::Right);
+        assert_eq!(content_start("Hello"), Horizontal::Left);
     }
 }

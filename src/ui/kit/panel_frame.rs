@@ -9,7 +9,7 @@
 //! the same `.as-card` floating over the frozen frame (`card`): where it goes,
 //! how a drag moves or resizes it, the room it leaves free, and its frame. One
 //! place, so every card floats, opens and moves the same way.
-use iced::widget::{Space, column, container, mouse_area, opaque, pin, row, stack};
+use iced::widget::{Space, column, container, mouse_area, opaque, pin, stack};
 use iced::{Border, Center, Element, Fill, Length, Point, Rectangle, Size, Vector, mouse};
 
 use super::icon::{Icon, icon};
@@ -322,14 +322,26 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
             .color(c().accent)
             .into(),
     };
-    let heading = row![glyph, text(Role::PAGE_TITLE, header.title)]
-        .push(header.chip.map(|chip| super::chip::pill(chip, false, None)))
-        .spacing(ICON_GAP)
-        .align_y(Center);
-    let heading = mouse_area(container(heading).width(Fill).center_y(TOP))
-        .on_press(on(Event::Grab(Drag::Move)))
-        .interaction(mouse::Interaction::Grab);
-    let top = row![heading].push(ends).align_y(Center);
+    let heading = crate::dir_row![glyph, text(Role::PAGE_TITLE, header.title)];
+    let heading = match header.chip {
+        Some(chip) => heading.push(super::chip::pill(chip, false, None)),
+        None => heading,
+    }
+    .spacing(ICON_GAP)
+    .align_y(Center);
+    let heading = mouse_area(
+        container(heading)
+            .width(Fill)
+            .center_y(TOP)
+            .align_x(super::dir::start()),
+    )
+    .on_press(on(Event::Grab(Drag::Move)))
+    .interaction(mouse::Interaction::Grab);
+    let top = match ends {
+        Some(ends) => crate::dir_row![heading, ends],
+        None => crate::dir_row![heading],
+    }
+    .align_y(Center);
     let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
     if let Some(footer) = footer {
         // (the chat is the card with the drawer menu)
@@ -414,8 +426,13 @@ pub fn drawer<'a, Message: 'a>(
         .padding(DRAWER_PAD)
         .width(size.width)
         .height(size.height);
+    // slides over from the side the text starts
+    let x = match super::dir::rtl() {
+        true => at.width - DRAWER_INSET - size.width,
+        false => DRAWER_INSET,
+    };
     pin(opaque(panel))
-        .position(at.position() + Vector::new(DRAWER_INSET, DRAWER_INSET))
+        .position(at.position() + Vector::new(x, DRAWER_INSET))
         .into()
 }
 
