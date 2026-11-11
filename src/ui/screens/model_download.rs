@@ -242,7 +242,9 @@ fn body<'a, M: Clone + 'a>(
             let mut c =
                 said(fmt(S::md_on_pc, &[&does])).push(buttons(t!(md_download), t!(md_not_now)));
             if let Some(provider) = on.provider {
-                let link = text(t!(md_provider)).size(crate::ui::kit::text::size(Role::META));
+                let link = text(t!(md_provider))
+                    .size(crate::ui::kit::text::size(Role::META))
+                    .font(crate::ui::kit::text::font(Role::META));
                 c = c.push(Space::new().height(ABOVE_LINK)).push(
                     container(button(link, Kind::Quiet, Some(provider)))
                         .width(Fill)

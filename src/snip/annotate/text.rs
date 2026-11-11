@@ -55,7 +55,7 @@ impl Font {
         match self {
             Font::Sans => SANS,
             Font::Serif => Family::Serif,
-            Font::Mono => Family::Monospace,
+            Font::Mono => Family::Name("JetBrains Mono"),
         }
     }
 }

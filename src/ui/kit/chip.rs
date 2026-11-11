@@ -426,6 +426,7 @@ pub fn info<'a, Message: 'a>(
     let sub = |s: String| {
         text(s)
             .size(super::text::size(Role::CONTROL))
+            .font(weight(Weight::Normal))
             .color(c().text_sub)
     };
     let mut line = row![

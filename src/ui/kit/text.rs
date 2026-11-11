@@ -43,18 +43,50 @@ const BUNDLED: &str = "Inter";
 /// The bundled Arabic face (`FONTS`), the fallback for Arabic in every font.
 const ARABIC: &str = "Noto Sans Arabic";
 
-/// Loads `FONTS` into the UI's font system (once; iced's own load of the same
-/// bytes is then a no-op) and registers the Arabic face at every weight.
+/// The bundled variable faces (`wght` 400-700; mono 400-600).
+const VARIABLE: [&str; 3] = [BUNDLED, ARABIC, "JetBrains Mono"];
+
+/// Registers each `VARIABLE` face at every weight.
 ///
-/// The text engine (cosmic-text) falls back for another script only to faces
-/// of exactly the asked weight, and a variable font is registered once, at
-/// its default (400). So Arabic in a 500 or 600 role (or in `MONO`) fell to
-/// whatever face had some Arabic (DejaVu on Linux): unjoined, spaced letters.
-/// The extra entries share the font's bytes; each is drawn at its weight
-/// (the variable font's `wght` axis).
+/// The text engine (cosmic-text) takes a named family's face only at exactly
+/// the asked weight, else the first face of ANY family at that weight that
+/// has the characters, and a variable font is registered once, at its
+/// default (400). So a 500/600/700 Inter (labels, bold markdown, the Snip
+/// text tool) was drawn by the system's face of that weight (Ubuntu Sans
+/// SemiBold, DejaVu Sans Bold, Segoe UI Bold), and Arabic in a 500 role by
+/// whatever face had some Arabic: unjoined, spaced letters. The extra entries
+/// share the font's bytes; each is drawn at its weight (the `wght` axis).
+/// A character none of them has still falls to the system's faces.
+fn every_weight(db: &mut iced::advanced::graphics::text::cosmic_text::fontdb::Database) {
+    use iced::advanced::graphics::text::cosmic_text::fontdb;
+    let ours: Vec<fontdb::FaceInfo> = (db.faces())
+        .filter(|f| matches!(f.source, fontdb::Source::Binary(_)))
+        .filter(|f| {
+            f.families
+                .iter()
+                .any(|(name, _)| VARIABLE.contains(&name.as_str()))
+        })
+        .cloned()
+        .collect();
+    for face in ours {
+        for weight in (100..=900).step_by(100) {
+            if weight != face.weight.0 {
+                db.push_face_info(fontdb::FaceInfo {
+                    weight: fontdb::Weight(weight),
+                    ..face.clone()
+                });
+            }
+        }
+    }
+}
+
+/// Loads `FONTS` into the UI's font system (once; iced's own load of the same
+/// bytes is then a no-op) and registers the bundled faces at every weight
+/// (`every_weight`).
 pub fn load() {
     static DONE: std::sync::Once = std::sync::Once::new();
     DONE.call_once(|| {
+        #[cfg(all(test, not(windows)))]
         use iced::advanced::graphics::text::cosmic_text::fontdb;
         let mut fonts = iced::advanced::graphics::text::font_system()
             .write()
@@ -63,20 +95,7 @@ pub fn load() {
             fonts.load_font(f.into());
         }
         let db = fonts.raw().db_mut();
-        let arabic: Vec<fontdb::FaceInfo> = (db.faces())
-            .filter(|f| f.families.iter().any(|(name, _)| name == ARABIC))
-            .cloned()
-            .collect();
-        for face in arabic {
-            for weight in (100..=900).step_by(100) {
-                if weight != face.weight.0 {
-                    db.push_face_info(fontdb::FaceInfo {
-                        weight: fontdb::Weight(weight),
-                        ..face.clone()
-                    });
-                }
-            }
-        }
+        every_weight(db);
         // Tests draw with the bundled faces ONLY (goldens must not depend on
         // the machine's fonts: a character they lack is the same "missing
         // glyph" box on every machine, not whatever face this one falls back
@@ -270,11 +289,12 @@ pub fn sub<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
     text(role, s).color(themes::current().c.text_sub)
 }
 
-/// A wrapped paragraph in a box as wide as its room (a row's description, a
-/// card's lines): right to left it fills the room and ends at its right
-/// edge. (Shrunk to its widest line, iced lays a right-to-left paragraph out
-/// again at that width and a long one was drawn past the box's edge.) Left
-/// to right it is as it was.
+/// A wrapped paragraph in a box as wide as its room (a card's lines): right
+/// to left it fills the room and starts at its right edge, where a column
+/// that is not start-aligned would leave it at the left. Left to right it is
+/// as it was. (The lines themselves wrap inside the room: a line with a Latin
+/// name in Arabic was laid out wider than its room by the text engine until
+/// its vendored fix, `vendor/cosmic-text`.)
 pub fn paragraph(line: Text<'_>) -> Text<'_> {
     match super::dir::rtl() {
         true => line
@@ -478,5 +498,49 @@ mod tests {
             .collect();
         drop(fonts);
         assert!(other.is_empty(), "not in the mono face: {other:?}");
+    }
+
+    /// A 500/600/700 Inter is drawn by Inter, even where the machine has
+    /// another face of exactly that weight (Linux's DejaVu Sans Bold, Ubuntu
+    /// Sans SemiBold): bold markdown, the Snip text tool and the hover chip's
+    /// title were drawn by the system's face (or by none at all).
+    #[test]
+    fn every_weight_is_drawn_by_the_bundled_face_beside_a_system_face() {
+        use iced::advanced::graphics::text::cosmic_text::{FontSystem, fontdb};
+        let mut db = fontdb::Database::new();
+        for f in super::FONTS {
+            db.load_font_data(f.to_vec());
+        }
+        // a "system" Latin face at each weight a role uses, named as one the
+        // engine's script fallback asks for first (Inter's bytes: its glyphs
+        // cover the same text)
+        let inter = (db.faces())
+            .find(|f| f.families[0].0 == "Inter")
+            .unwrap()
+            .clone();
+        for weight in [500, 600, 700] {
+            db.push_face_info(fontdb::FaceInfo {
+                families: vec![("DejaVu Sans".into(), fontdb::Language::English_UnitedStates)],
+                weight: fontdb::Weight(weight),
+                ..inter.clone()
+            });
+        }
+        super::every_weight(&mut db);
+        let mut fs = FontSystem::new_with_locale_and_db("en-US".into(), db);
+        let mut wrong = Vec::new();
+        for (family, weight) in [("Inter", 500), ("Inter", 600), ("Inter", 700)] {
+            let mut buf = Buffer::new(&mut fs, Metrics::new(12.0, 18.0));
+            let attrs = Attrs::new().family(Family::Name(family)).weight(W(weight));
+            buf.set_text(&mut fs, "Key Action", &attrs, Shaping::Advanced, None);
+            buf.shape_until_scroll(&mut fs, false);
+            for g in buf.layout_runs().flat_map(|r| r.glyphs.iter()) {
+                let face = fs.db().face(g.font_id).unwrap().families[0].0.clone();
+                if face != family || g.font_weight.0 != weight {
+                    wrong.push(format!("{family} {weight}: {face} {}", g.font_weight.0));
+                }
+            }
+        }
+        wrong.dedup();
+        assert!(wrong.is_empty(), "{wrong:?}");
     }
 }

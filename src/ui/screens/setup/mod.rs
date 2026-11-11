@@ -901,7 +901,10 @@ impl State {
                 let message = container(ktext::error(Role::NOTE, why).width(Fill))
                     .height(FAILED_H)
                     .center_y(FAILED_H);
-                let retry = link(text(EN.try_again).size(META), Message::Retry);
+                let retry = link(
+                    text(EN.try_again).size(META).font(ui_font()),
+                    Message::Retry,
+                );
                 column![
                     panel(message),
                     Space::new().height(BELOW_PANEL),
@@ -984,9 +987,13 @@ impl State {
         .align_y(Center);
         let mut drawer = column![divider(), Space::new().height(BELOW_DIVIDER), folder];
         if let Some(bad) = self.bad {
-            drawer = drawer
-                .push(Space::new().height(ABOVE_BAR))
-                .push(text(why(bad)).size(META).color(DANGER).height(ERROR_H));
+            drawer = drawer.push(Space::new().height(ABOVE_BAR)).push(
+                text(why(bad))
+                    .size(META)
+                    .font(ui_font())
+                    .color(DANGER)
+                    .height(ERROR_H),
+            );
         }
         drawer.into()
     }
@@ -1008,7 +1015,10 @@ fn link<'a>(content: impl Into<Element<'a, Message>>, on_press: Message) -> Elem
 
 /// A muted 11 px line (the status, the install path).
 fn muted<'a>(s: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
-    text(s).size(META).color(themes::c().text_muted)
+    text(s)
+        .size(META)
+        .font(ui_font())
+        .color(themes::c().text_muted)
 }
 
 /// A recessed panel (the progress, why it failed): 14 px inside (8 px below:

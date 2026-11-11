@@ -337,3 +337,62 @@ fn only_the_monitor_helper_calls_window_resize() {
         }
     }
 }
+
+/// Every text the app draws names a bundled face through the kit (`kit::text`:
+/// its roles, `ui_font`, `weight`, `mono`): nothing asks for the renderer's
+/// default or a generic family, which the machine's fonts answer (or none: a
+/// title drawn as nothing). Outside the kit no screen builds iced's text
+/// widgets itself. Test code is not scanned. The one generic family left is
+/// the Snip text tool's "Serif" (the user's pick; no serif is bundled).
+#[test]
+fn every_text_names_a_bundled_face() {
+    const GENERIC: [&str; 7] = [
+        "Font::DEFAULT",
+        "Font::default()",
+        "Font::MONOSPACE",
+        "Family::SansSerif",
+        "Family::Monospace",
+        "Family::Cursive",
+        "Family::Fantasy",
+    ];
+    const WIDGETS: [&str; 2] = ["widget::text(", "rich_text("];
+    let snip: Vec<(String, String)> = ["src/snip/annotate/text.rs", "src/snip/annotate/style.rs"]
+        .iter()
+        .map(|p| (p.to_string(), std::fs::read_to_string(p).unwrap()))
+        .collect();
+    let mut found = Vec::new();
+    for (name, src) in sources("").into_iter().chain(snip) {
+        let test_only = name.starts_with("kit/testing/") || name.ends_with("tests.rs");
+        if name == "arch_tests.rs" || name == "frame_times.rs" || test_only {
+            continue;
+        }
+        let src = src.replace("\r\n", "\n");
+        let shipped = src.split("#[cfg(test)]").next().unwrap_or("");
+        let lines: Vec<&str> = code(shipped).collect();
+        for (i, line) in lines.iter().enumerate() {
+            let generic = GENERIC.iter().any(|w| line.contains(w));
+            let widget = !name.starts_with("kit/") && WIDGETS.iter().any(|w| line.contains(w));
+            // a text widget without a face: drawn in the renderer's default
+            let faceless = name != "kit/text.rs"
+                && bare_text_call(line)
+                && !lines[i..(i + 6).min(lines.len())]
+                    .iter()
+                    .any(|l| l.contains(".font("));
+            if generic || widget || faceless {
+                found.push(format!("{name}: {}", line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{found:#?}");
+}
+
+/// `line` calls iced's `text(..)` itself (not the kit's `text(Role::..)`, a
+/// method, or a function named `..text`).
+fn bare_text_call(line: &str) -> bool {
+    !line.contains("fn ")
+        && line.match_indices("text(").any(|(i, _)| {
+            let role = line[i + 5..].starts_with("Role") || line[i + 5..].starts_with("role");
+            let before = line[..i].chars().next_back();
+            !role && !before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | ':' | '.'))
+        })
+}

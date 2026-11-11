@@ -32,7 +32,8 @@ pub const NOTE_HINT: Color = Color::from_rgb8(120, 120, 130);
 pub const NOTE_FONT: iced::Font = iced::Font {
     family: iced::font::Family::Name("Inter"), // as the annotations (`text::SANS`)
     weight: iced::font::Weight::Semibold,
-    ..iced::Font::DEFAULT
+    stretch: iced::font::Stretch::Normal,
+    style: iced::font::Style::Normal,
 };
 
 pub struct Preset {
