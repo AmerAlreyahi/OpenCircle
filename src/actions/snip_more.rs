@@ -231,20 +231,14 @@ pub fn keep_hidden(dst: &mut [u8], src: &[u8], width: usize, area: [usize; 4], h
 }
 
 /// The lines of `blocks` that are not under a hidden part (a second guard
-/// after `mask`: a line is dropped when its middle or any corner is hidden).
+/// after `mask`, which already painted the hidden pixels out: a line whose
+/// middle is hidden is dropped; one only touching it keeps its readable part).
 pub fn visible(blocks: Vec<TextBlock>, hidden: &Hidden) -> Vec<TextBlock> {
     blocks
         .into_iter()
         .filter(|b| {
             let [x, y, w, h] = b.bounds;
-            let points = [
-                (x + w / 2.0, y + h / 2.0),
-                (x, y),
-                (x + w, y),
-                (x, y + h),
-                (x + w, y + h),
-            ];
-            !points.iter().any(|&(px, py)| hidden.covers(px, py))
+            !hidden.covers(x + w / 2.0, y + h / 2.0)
         })
         .collect()
 }
@@ -291,10 +285,12 @@ mod tests {
         let blocks = vec![
             block("public", [0.0, 0.0, 100.0, 9.0]),
             block("secret", [0.0, 10.0, 100.0, 10.0]),
-            block("half secret", [0.0, 15.0, 100.0, 10.0]),
+            block("half secret", [0.0, 12.0, 100.0, 10.0]),
+            // only touching the hidden part: what is readable of it stays
+            block("next line", [0.0, 18.0, 100.0, 10.0]),
         ];
         let kept = visible(blocks, &hidden);
-        assert_eq!(text_of(&kept), "public");
+        assert_eq!(text_of(&kept), "public\nnext line");
     }
 
     /// Spotlight dims everything outside its boxes: that part is hidden too.

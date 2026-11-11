@@ -3341,3 +3341,24 @@ fn more_rows_get_the_picture_decided_for_them() {
     );
     assert!(!hidden.covers(5.0, 5.0));
 }
+
+/// What a blur hides is its footprint, not the pixels its mosaic reads around
+/// it: the lines beside it still copy (found on the VM: the reach, 190 px,
+/// took the whole page's text).
+#[test]
+fn a_blur_hides_its_footprint_not_its_reach() {
+    let blur = item(Shape::Blur {
+        points: vec![pt(200.0, 150.0), pt(260.0, 150.0)],
+        size: 20.0,
+        cell: 6.0,
+        seed: 3,
+    });
+    let doc = doc_with(checker(500, 300), vec![blur]);
+    let hidden = super::hidden(&doc);
+    assert!(hidden.covers(230.0, 150.0), "the stroke itself");
+    assert!(
+        !hidden.covers(230.0, 110.0),
+        "a line 40 px above is not hidden"
+    );
+    assert!(!hidden.covers(100.0, 150.0), "nor text beside it");
+}

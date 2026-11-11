@@ -450,8 +450,8 @@ pub fn hidden(doc: &Document) -> crate::actions::snip_more::Hidden {
     let mut out = crate::actions::snip_more::Hidden::default();
     for item in &doc.items {
         match item.shape {
-            Shape::Blur { .. } | Shape::Redact { .. } => out.boxes.push(item.bounds()),
-            Shape::Spotlight { .. } => out.lit.push(item.bounds()),
+            Shape::Blur { .. } | Shape::Redact { .. } => out.boxes.push(item.frame()),
+            Shape::Spotlight { .. } => out.lit.push(item.frame()),
             _ => {}
         }
     }
