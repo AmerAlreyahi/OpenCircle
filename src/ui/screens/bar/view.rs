@@ -406,6 +406,28 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
+    /// A measurement, not a check: the bar's build + layout + draw, English and
+    /// Arabic (`cargo test bar_frame_cost -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "a measurement"]
+    fn bar_frame_cost() {
+        let cost = |ar: bool| {
+            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let mut app = open_app(1280, 800, 1.0);
+            app.o.labs = crate::labs::Labs::all_on();
+            let size = app.bar_size().1;
+            let (w, h) = (size.width as u32, size.height as u32);
+            let _ = crate::ui::kit::testing::shot::render(app.bottom_bar(), w, h); // warm
+            let t = std::time::Instant::now();
+            for _ in 0..40 {
+                let _ = crate::ui::kit::testing::shot::render(app.bottom_bar(), w, h);
+            }
+            t.elapsed().as_secs_f64() * 1000.0 / 40.0
+        };
+        let (en, ar) = (cost(false), cost(true));
+        println!("bar frame (build+layout+draw): English {en:.2} ms, Arabic {ar:.2} ms");
+    }
+
     /// The pills read Search in browser, Copy text, Translate from the left
     /// in English and from the right in Arabic.
     #[test]

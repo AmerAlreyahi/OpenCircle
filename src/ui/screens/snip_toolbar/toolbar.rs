@@ -815,6 +815,28 @@ mod tests {
         e
     }
 
+    /// A measurement, not a check: the toolbar with its Text panel open, English
+    /// and Arabic (`cargo test toolbar_frame_cost -- --ignored --nocapture`).
+    #[test]
+    #[ignore = "a measurement"]
+    fn toolbar_frame_cost() {
+        let cost = |ar: bool| {
+            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let mut e = editor();
+            e.update(Message::Tool(Tool::Text));
+            e.update(Message::Slot(Tool::Text));
+            let at = (size_for(&e).width as u32, 360);
+            let _ = crate::ui::kit::testing::shot::render(view(&e), at.0, at.1); // warm
+            let t = std::time::Instant::now();
+            for _ in 0..40 {
+                let _ = crate::ui::kit::testing::shot::render(view(&e), at.0, at.1);
+            }
+            t.elapsed().as_secs_f64() * 1000.0 / 40.0
+        };
+        let (en, ar) = (cost(false), cost(true));
+        println!("toolbar + Text panel (build+layout+draw): English {en:.2} ms, Arabic {ar:.2} ms");
+    }
+
     /// The bar, each group's panel, Colour, Undo's and More, the drag states
     /// (the toolbar held; the area held: its size live), in Sapphire and
     /// Daylight, Latin and Arabic (right to left).
