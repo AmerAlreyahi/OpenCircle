@@ -835,6 +835,11 @@ production systems.
   the security review and QA gates). Release gate from now on: open Settings > About on the DRAFT exe (only release
   builds bundle the downloaded avatar). A file fetched at build time is never decoded with a panic.
 
+- Arabic and mixed-language text reading (owner, 2026-11-11, planning #169, in v0.1.7 before the Arabic UI): reading Arabic
+  off the screen in main mode is too slow and misses lines and common Arabic fonts; a frame with two or more languages must
+  read each block in its own language. No fix may cost performance: the best balance of reliability and speed, proved
+  before -> after on a fixed measurement set (Arabic, mixed, English control). Measure and diagnose first, then fix.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
