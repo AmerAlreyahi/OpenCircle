@@ -27,9 +27,9 @@ use super::{settings, shape, theme, update_card, update_pill};
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
-    POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, floating_in_captures,
-    foreground, forget, hide_from_capture, hole, is_floating, keep_above, no_backdrop, opacity,
-    reshape, screen, setup_window, show, uncut,
+    POPUP, TOAST, activate_next, appear, clear_now, clear_theme, close, cut, fade, floating,
+    floating_in_captures, foreground, forget, hide_from_capture, hole, is_floating, keep_above,
+    no_backdrop, opacity, reshape, screen, setup_window, show, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::app_language::S;

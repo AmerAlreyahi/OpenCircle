@@ -4358,6 +4358,7 @@ dependencies = [
  "iced",
  "iced_runtime",
  "iced_tiny_skia",
+ "iced_winit",
  "image",
  "interprocess",
  "keyring",

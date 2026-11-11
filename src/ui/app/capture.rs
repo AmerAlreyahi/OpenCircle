@@ -382,6 +382,7 @@ impl App {
     /// it full-screen where it was closed (see `can_hide_windows`).
     pub(in crate::ui) fn show(&mut self) -> Task<Message> {
         if !self.overlay_open {
+            windows::activate_next();
             let (id, open) = windows::screen(overlay_window(Some(self.o.screen)));
             crate::log!("[opencircle] overlay window opened");
             (self.overlay, self.overlay_open) = (id, true);

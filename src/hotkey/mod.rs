@@ -4,6 +4,7 @@
 //! `plan` turns the config into a list of `Binding`s; that list is the one source of
 //! truth for registering with the OS, for routing a key press to its `Trigger`, and
 //! for the stable ids the Wayland portal needs.
+pub mod activation;
 #[cfg(target_os = "linux")]
 mod gnome;
 #[cfg(target_os = "linux")]

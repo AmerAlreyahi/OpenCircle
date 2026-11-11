@@ -1,6 +1,9 @@
 //! Single instance + CLI trigger: later launches send one line to the running app.
 //! Protocol: one ASCII line, `capture` or `run <action> [<target>]`; anything else
 //! is dropped (see `parse_command`, the one place that decides what is accepted).
+//! An optional second line `activate <token>` carries the desktop's activation token
+//! (`XDG_ACTIVATION_TOKEN` / `DESKTOP_STARTUP_ID` the launcher gave the CLI): the
+//! overlay opens activated with it. A copy that reads one line ignores it.
 //!
 //! The endpoint is per user, so another account can neither squat it (making our
 //! instance think one is already running) nor send it commands:
@@ -19,6 +22,8 @@ use crate::config::Target;
 /// Longest accepted command line; anything longer is dropped.
 const MAX_LINE: u64 = 64;
 const MAX_ACTION: usize = 32;
+/// Longest accepted token line (`activate ` + token + newline); longer is dropped.
+const MAX_TOKEN_LINE: u64 = 256;
 
 /// A command from a later launch. Built only by `parse_command` / `from_args`, so an
 /// action here is always well-formed and known.
@@ -126,20 +131,68 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
     }
 }
 
-/// Reads one command from a peer: at most `MAX_LINE` bytes, valid UTF-8, complete.
-fn read_command(peer: impl Read) -> Result<Command, String> {
+/// Reads one command from a peer: at most `MAX_LINE` bytes, valid UTF-8, complete;
+/// then the optional activation token line (at most `MAX_TOKEN_LINE` bytes).
+fn read_command(peer: impl Read) -> Result<(Command, Option<String>), String> {
+    let mut peer = BufReader::new(peer.take(MAX_LINE + MAX_TOKEN_LINE));
     let mut line = String::new();
-    BufReader::new(peer.take(MAX_LINE))
+    (&mut peer)
+        .take(MAX_LINE)
         .read_line(&mut line)
         .map_err(|e| e.to_string())?;
-    parse_command(&line)
+    let command = parse_command(&line)?;
+    let mut next = String::new();
+    let _ = peer.read_line(&mut next);
+    Ok((command, parse_token_line(&next)))
 }
 
-/// Sends `command` to the running instance. `Err` = no instance is running.
+/// The token of an `activate <token>\n` line; anything else is none.
+fn parse_token_line(line: &str) -> Option<String> {
+    let token = line.strip_prefix("activate ")?.strip_suffix('\n')?;
+    valid_token(token).then(|| token.to_string())
+}
+
+/// A token we pass on: printable ASCII, no spaces, of a sane length.
+fn valid_token(token: &str) -> bool {
+    (1..=(MAX_TOKEN_LINE as usize - "activate \n".len())).contains(&token.len())
+        && token.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// The activation token the desktop gave this launch: Wayland's
+/// `XDG_ACTIVATION_TOKEN` in a Wayland session, else X11's `DESKTOP_STARTUP_ID`
+/// (startup notification); the other one when only it is set.
+#[cfg(any(target_os = "linux", test))]
+fn launch_token(wayland: bool, xdg: Option<String>, startup_id: Option<String>) -> Option<String> {
+    let (first, second) = match wayland {
+        true => (xdg, startup_id),
+        false => (startup_id, xdg),
+    };
+    first
+        .filter(|t| valid_token(t))
+        .or(second.filter(|t| valid_token(t)))
+}
+
+/// Sends `command` to the running instance, with this launch's activation token
+/// (if the desktop gave one). `Err` = no instance is running.
 pub fn forward(command: &str) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let token = launch_token(
+        crate::sys::session::wayland_session(),
+        std::env::var("XDG_ACTIVATION_TOKEN").ok(),
+        std::env::var("DESKTOP_STARTUP_ID").ok(),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let token: Option<String> = None;
     let mut stream = LocalSocketStream::connect(endpoint()?)?;
-    stream.write_all(command.as_bytes())?;
-    stream.write_all(b"\n")
+    stream.write_all(wire(command, token.as_deref()).as_bytes())
+}
+
+/// What `forward` sends: the command line, then the token line if there is one.
+fn wire(command: &str, token: Option<&str>) -> String {
+    match token {
+        Some(t) => format!("{command}\nactivate {t}\n"),
+        None => format!("{command}\n"),
+    }
 }
 
 /// The version a running instance answers: `Ok(None)` = one runs but gives no
@@ -222,10 +275,13 @@ pub fn listen(tx: Triggers) -> io::Result<()> {
                 let mut conn = conn;
                 // Dropped silently: the peer is a script, not a person to explain to.
                 match read_command(&mut conn) {
-                    Ok(Command::Version) => {
+                    Ok((Command::Version, _)) => {
                         let _ = writeln!(conn, "version {}", env!("CARGO_PKG_VERSION"));
                     }
-                    Ok(command) => {
+                    Ok((command, token)) => {
+                        if let Some(token) = token {
+                            super::activation::offer(token);
+                        }
                         let _ = tx.unbounded_send(super::trigger(&command, Instant::now()));
                     }
                     Err(_) => {}
@@ -431,7 +487,7 @@ mod tests {
 
     #[test]
     fn reads_from_a_peer_with_limits() {
-        let read = |bytes: &[u8]| read_command(io::Cursor::new(bytes.to_vec()));
+        let read = |bytes: &[u8]| read_command(io::Cursor::new(bytes.to_vec())).map(|(c, _)| c);
         assert_eq!(read(b"capture\n"), Ok(Command::Capture));
         assert!(read(b"capture\n\xff").is_ok(), "only the first line counts");
         assert!(read(b"run tran\xffslate\n").is_err(), "invalid UTF-8");
@@ -442,6 +498,53 @@ mod tests {
         assert!(read(long.as_bytes()).is_err());
         let just_over = format!("run {}\n", "a".repeat(MAX_LINE as usize));
         assert!(read(just_over.as_bytes()).is_err());
+    }
+
+    /// The token rides on a second line: a copy that reads one line (v0.1.x) still
+    /// runs the command, and ours takes the token only from a well-formed line.
+    #[test]
+    fn the_activation_token_travels_on_a_second_line() {
+        let read = |bytes: &str| read_command(io::Cursor::new(bytes.as_bytes().to_vec()));
+        let token = "gnome-shell/OpenCircle/2345-0-host_TIME98765";
+        let sent = wire("capture", Some(token));
+        assert_eq!(sent, format!("capture\nactivate {token}\n"));
+        assert_eq!(read(&sent), Ok((Command::Capture, Some(token.into()))));
+        assert_eq!(read("capture\n"), Ok((Command::Capture, None)));
+        assert_eq!(wire("capture", None), "capture\n");
+        // the old reader: the first line alone is the command
+        assert_eq!(
+            parse_command(sent.split_inclusive('\n').next().unwrap()),
+            Ok(Command::Capture)
+        );
+        assert_eq!(
+            read(&wire("run snip circle", Some("abc"))),
+            Ok((run_of("snip", Some(Target::Circle)), Some("abc".into())))
+        );
+        for bad in [
+            "capture\nactivate \n",
+            "capture\nactivate a b\n",
+            "capture\nactivate abc",
+            "capture\nactivate ab\x1bc\n",
+            "capture\nactivate\tabc\n",
+            "capture\nfocus abc\n",
+            &format!("capture\nactivate {}\n", "a".repeat(300)),
+        ] {
+            assert_eq!(read(bad), Ok((Command::Capture, None)), "{bad:?}");
+        }
+        // a bad command is refused whatever follows
+        assert!(read("nope\nactivate abc\n").is_err());
+    }
+
+    #[test]
+    fn the_launch_token_follows_the_session() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(launch_token(true, s("wl"), s("x")), s("wl"));
+        assert_eq!(launch_token(false, s("wl"), s("x")), s("x"));
+        assert_eq!(launch_token(true, None, s("x")), s("x"));
+        assert_eq!(launch_token(false, s("wl"), None), s("wl"));
+        assert_eq!(launch_token(true, s(""), s("x")), s("x"), "empty = unset");
+        assert_eq!(launch_token(true, s("a b"), None), None);
+        assert_eq!(launch_token(true, None, None), None);
     }
 
     #[test]

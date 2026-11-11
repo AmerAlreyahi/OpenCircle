@@ -124,6 +124,9 @@ fn serve(tx: Triggers) -> Result<(), String> {
                         activated_id(params, &session.borrow()).filter(|_| !super::suspended());
                     let trigger = id.and_then(|id| route_id(&bindings(), &id, Instant::now()));
                     if let Some(trigger) = trigger {
+                        if let Some(token) = activation_token(params) {
+                            super::activation::offer(token);
+                        }
                         let _ = tx.unbounded_send(trigger);
                     }
                 }
@@ -299,6 +302,18 @@ fn activated_id(params: &Variant, session: &str) -> Option<String> {
     .flatten()
 }
 
+/// The `activation_token` an Activated signal's options carry (GlobalShortcuts v2:
+/// "a token that can be used to activate a window in response to the shortcut").
+fn activation_token(params: &Variant) -> Option<String> {
+    (params.is_container() && params.n_children() >= 4)
+        .then(|| params.child_value(3).get::<VariantDict>())
+        .flatten()?
+        .lookup::<String>("activation_token")
+        .ok()
+        .flatten()
+        .filter(|t| !t.is_empty())
+}
+
 /// The human-readable keys the desktop gave shortcut `id`, from `a(sa{sv})`.
 fn trigger_of(list: &Variant, id: &str) -> Option<String> {
     list.iter()
@@ -343,6 +358,25 @@ mod tests {
         let other = "/org/freedesktop/portal/desktop/session/1_9/x";
         assert_eq!(activated_id(&activated(other, "capture"), session), None);
         assert_eq!(activated_id(&"junk".to_variant(), session), None);
+    }
+
+    #[test]
+    fn takes_the_activation_token_the_signal_carries() {
+        let path = ObjectPath::try_from("/org/freedesktop/portal/desktop/session/1_9/oc").unwrap();
+        let with = |token: Option<&str>| {
+            let options = VariantDict::new(None);
+            if let Some(t) = token {
+                options.insert("activation_token", t);
+            }
+            (path.clone(), "capture", 7u64, options).to_variant()
+        };
+        assert_eq!(
+            activation_token(&with(Some("kwin-42"))).as_deref(),
+            Some("kwin-42")
+        );
+        assert_eq!(activation_token(&with(None)), None);
+        assert_eq!(activation_token(&with(Some(""))), None);
+        assert_eq!(activation_token(&"junk".to_variant()), None);
     }
 
     #[test]

@@ -6,6 +6,8 @@ pub mod mem;
 pub mod open;
 pub mod serve_once;
 pub mod session;
+#[cfg(target_os = "linux")]
+pub mod shell;
 pub mod spawn;
 
 use std::ffi::OsString;

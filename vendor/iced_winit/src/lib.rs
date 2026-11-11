@@ -65,6 +65,19 @@ use std::mem::ManuallyDrop;
 use std::slice;
 use std::sync::Arc;
 
+/// OpenCircle patch: the desktop's activation token (Wayland xdg-activation, X11
+/// startup notification) for the next window created, once. winit takes a token
+/// only at window creation (`with_activation_token`); iced has no way to pass one.
+static NEXT_ACTIVATION_TOKEN: std::sync::Mutex<Option<String>> =
+    std::sync::Mutex::new(None);
+
+/// OpenCircle patch: the next window opened is activated with `token`.
+pub fn activate_next_window(token: String) {
+    *NEXT_ACTIVATION_TOKEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(token);
+}
+
 /// Runs a [`Program`] with the provided settings.
 pub fn run<P>(program: P) -> Result<(), Error>
 where
@@ -326,6 +339,22 @@ where
                                         self.id.clone(),
                                     )
                                     .with_visible(false);
+
+                                // OpenCircle patch: see `activate_next_window`
+                                #[cfg(target_os = "linux")]
+                                let window_attributes = match NEXT_ACTIVATION_TOKEN
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .take()
+                                {
+                                    Some(token) => {
+                                        use winit::platform::startup_notify::WindowAttributesExtStartupNotify;
+                                        window_attributes.with_activation_token(
+                                            winit::window::ActivationToken::from_raw(token),
+                                        )
+                                    }
+                                    None => window_attributes,
+                                };
 
                                 #[cfg(target_arch = "wasm32")]
                                 let window_attributes = {

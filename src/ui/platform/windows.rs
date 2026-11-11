@@ -615,7 +615,12 @@ mod tests {
 /// AllowSetForegroundWindow from our own process all failed). Then only
 /// joining the foreground thread's input for the call works; it is skipped
 /// for a hung window (attaching would hang us with it).
+///
+/// Linux: the shell's overview (GNOME's Activities) is drawn over every window;
+/// it is left first, else the overlay stays behind it (#173, `sys::shell`).
 pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
+    #[cfg(target_os = "linux")]
+    crate::sys::shell::leave_overview();
     window::gain_focus(id)
         .chain(window::run(id, |w| {
             #[cfg(windows)]
@@ -628,6 +633,20 @@ pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
             let _ = w;
         }))
         .discard()
+}
+
+/// The window opened next takes the activation token its trigger brought (the
+/// desktop's permission to come to the front: Wayland xdg-activation, X11
+/// startup notification), once; elsewhere there is none.
+pub fn activate_next() {
+    let token = crate::hotkey::activation::take();
+    #[cfg(target_os = "linux")]
+    if let Some(token) = token {
+        crate::log!("[opencircle] the window opens with the desktop's activation token");
+        iced_winit::activate_next_window(token);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = token;
 }
 
 /// Whether `foreground` must join the foreground thread's input: another
