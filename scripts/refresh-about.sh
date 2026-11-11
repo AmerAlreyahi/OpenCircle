@@ -25,5 +25,17 @@ login = "$login"
 website = "$blog"
 bio = "$bio"
 TOML
-# GitHub resizes avatars itself (s=128) and serves a PNG.
-curl -fsSL "https://avatars.githubusercontent.com/u/80674857?v=4&s=128" -o assets/about/avatar.png
+# GitHub resizes avatars itself (s=128) and serves a PNG or a JPEG (JPEG since 2026-11); the file keeps
+# the name avatar.png and the app sniffs its content. Accept only real image bytes, else keep the committed
+# avatar (a bad download must never reach a release; never fail the release for an avatar).
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+if curl -fsSL "https://avatars.githubusercontent.com/u/80674857?v=4&s=128" -o "$tmp"; then
+  magic=$(head -c 3 "$tmp" | od -An -tx1 | tr -d ' \n')
+  case "$magic" in
+    89504e|ffd8ff) cp "$tmp" assets/about/avatar.png ;;
+    *) echo "::warning::refresh-about: the avatar download is not a PNG or JPEG; kept the committed one" ;;
+  esac
+else
+  echo "::warning::refresh-about: the avatar download failed; kept the committed one"
+fi

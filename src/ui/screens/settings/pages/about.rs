@@ -17,7 +17,7 @@ use crate::ui::kit::card::card;
 use crate::ui::kit::chip::{chip, pill};
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::logo::logo;
-use crate::ui::kit::logo::png_handle;
+use crate::ui::kit::logo::try_decode;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{accent, sub, text};
@@ -244,15 +244,40 @@ pub struct Profile {
 
 pub fn profile() -> &'static Profile {
     static PROFILE: LazyLock<Profile> = LazyLock::new(|| {
-        toml::from_str(include_str!("../../../../../assets/about/profile.toml"))
-            .expect("assets/about/profile.toml parses")
+        toml::from_str(include_str!("../../../../../assets/about/profile.toml")).unwrap_or_else(
+            |e| {
+                crate::log!("[opencircle] about: profile.toml unreadable: {e}");
+                Profile {
+                    name: "Amer Alreyahi".into(),
+                    login: "AmerAlreyahi".into(),
+                    website: PROFILE_URL.into(),
+                    bio: "Building fast, private desktop tools.".into(),
+                }
+            },
+        )
     });
     &PROFILE
 }
 
+/// The avatar is fetched at release time (`scripts/refresh-about.sh`), so it is not a trusted
+/// asset: sniff the content (GitHub serves JPEG today), never trust the `.png` name.
+fn decode_avatar(bytes: &[u8]) -> Option<Handle> {
+    if let Some((w, h, rgba)) = try_decode(bytes) {
+        return Some(Handle::from_rgba(w, h, rgba));
+    }
+    let img = ::image::load_from_memory(bytes).ok()?.to_rgba8();
+    Some(Handle::from_rgba(img.width(), img.height(), img.into_raw()))
+}
+
 fn avatar() -> Handle {
-    static AVATAR: LazyLock<Handle> =
-        LazyLock::new(|| png_handle(include_bytes!("../../../../../assets/about/avatar.png")));
+    static AVATAR: LazyLock<Handle> = LazyLock::new(|| {
+        decode_avatar(include_bytes!("../../../../../assets/about/avatar.png")).unwrap_or_else(
+            || {
+                crate::log!("[opencircle] about: the bundled avatar does not decode");
+                logo(AVATAR_TILE as u32)
+            },
+        )
+    });
     AVATAR.clone()
 }
 
@@ -445,7 +470,19 @@ mod tests {
         for url in [PROJECT, WEBSITE, LICENSE, NOTICE, PROFILE_URL] {
             assert!(https(url), "{url}");
         }
-        assert!(include_bytes!("../../../../../assets/about/avatar.png").starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn the_avatar_decodes_whatever_format_the_release_fetched() {
+        let bundled = include_bytes!("../../../../../assets/about/avatar.png");
+        assert!(decode_avatar(bundled).is_some(), "the bundled file");
+        let mut jpeg = Vec::new();
+        ::image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode(&[200u8; 8 * 8 * 3], 8, 8, ::image::ExtendedColorType::Rgb8)
+            .unwrap();
+        assert!(decode_avatar(&jpeg).is_some(), "a JPEG named avatar.png");
+        assert!(decode_avatar(b"not an image at all").is_none());
+        assert!(decode_avatar(&bundled[..40]).is_none(), "truncated");
     }
 
     #[test]

@@ -143,13 +143,21 @@ pub fn png_handle(bytes: &[u8]) -> Handle {
 }
 
 fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
+    try_decode(bytes).expect("a bundled PNG decodes")
+}
+
+/// The one PNG decoder: RGBA pixels, or None for anything that is not a plain RGBA PNG.
+pub fn try_decode(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
         .read_info()
-        .expect("a bundled PNG");
-    let mut rgba = vec![0; reader.output_buffer_size().expect("sized")];
-    let info = reader.next_frame(&mut rgba).expect("the PNG decodes");
+        .ok()?;
+    let mut rgba = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut rgba).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
     rgba.truncate(info.buffer_size());
-    (info.width, info.height, rgba)
+    Some((info.width, info.height, rgba))
 }
 
 #[cfg(test)]
