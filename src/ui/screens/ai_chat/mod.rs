@@ -112,6 +112,8 @@ pub enum Msg {
     Card(panel_frame::Event),
     /// An edit in the composer (typing, a new line, a paste).
     Edit(text_editor::Action),
+    /// A press in the composer's box beside its field: focus the field.
+    FocusInput,
     /// Enter / send in the follow-up input.
     Submit,
     /// A suggestion chip (index into `PRESETS`).
@@ -403,6 +405,7 @@ impl AiChat {
     fn on(&mut self, msg: Msg) -> Task<Msg> {
         match (&mut self.state, msg) {
             (_, Msg::Edit(action)) => self.input.perform(action),
+            (_, Msg::FocusInput) => return operation::focus(INPUT),
             (_, Msg::Pin) => self.pinned = true,
             (State::Ask { .. }, Msg::Card(Event::Menu)) => {
                 let tab = match self.drawer {

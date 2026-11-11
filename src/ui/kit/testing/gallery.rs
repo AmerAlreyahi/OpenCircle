@@ -1235,18 +1235,28 @@ fn text_area_sheet() {
                 (),
                 None,
                 controls(ar),
+                (),
             )
         }),
         row("one line", Act::Rest, move |ar| {
             let text = content(line(ar).into());
-            text_area("t", "", text, |_| (), (), None, controls(ar))
+            text_area("t", "", text, |_| (), (), None, controls(ar), ())
         }),
         row("focused", Act::Click, move |ar| {
             let text = content(line(ar).into());
-            text_area("t", "", text, |_| (), (), None, controls(ar))
+            text_area("t", "", text, |_| (), (), None, controls(ar), ())
         }),
         row("seven lines", Act::Rest, move |ar| {
-            text_area("t", "", content(many(ar)), |_| (), (), None, controls(ar))
+            text_area(
+                "t",
+                "",
+                content(many(ar)),
+                |_| (),
+                (),
+                None,
+                controls(ar),
+                (),
+            )
         }),
         row("attached", Act::Rest, move |ar| {
             let label = s(ar, "Screen selection attached", "تحديد الشاشة مرفق");
@@ -1259,6 +1269,7 @@ fn text_area_sheet() {
                 (),
                 Some(chip),
                 controls(ar),
+                (),
             )
         }),
     ];

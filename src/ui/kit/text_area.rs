@@ -7,7 +7,7 @@
 //! nothing round the box (the caret shows it).
 use iced::keyboard::{self, key::Named};
 use iced::widget::text_editor::{self, Action, Binding, Content, KeyPress, Status};
-use iced::widget::{column, container};
+use iced::widget::{column, container, mouse_area};
 use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
@@ -44,7 +44,10 @@ pub fn binding<M: Clone>(press: KeyPress, on_enter: &M) -> Option<Binding<M>> {
 }
 
 /// The composer with `content` in its field (`id`, `placeholder`; `on_action`
-/// edits it): `top` over the field, `controls` under it.
+/// edits it): `top` over the field, `controls` under it. A press anywhere in the
+/// box that no part takes (its padding, beside the line) is `on_focus`: the caller
+/// focuses the field (`operation::focus(id)`), so the whole box is the field.
+#[allow(clippy::too_many_arguments)]
 pub fn text_area<'a, M: Clone + 'a>(
     id: &'static str,
     placeholder: &'a str,
@@ -53,6 +56,7 @@ pub fn text_area<'a, M: Clone + 'a>(
     on_enter: M,
     top: Option<Element<'a, M>>,
     controls: Element<'a, M>,
+    on_focus: M,
 ) -> Element<'a, M> {
     let field = text_editor::TextEditor::new(content)
         .id(id)
@@ -78,7 +82,7 @@ pub fn text_area<'a, M: Clone + 'a>(
         .push(controls)
         .spacing(GAP)
         .width(Fill);
-    container(parts)
+    let boxed = container(parts)
         .padding(BOX_PAD)
         .width(Fill)
         .style(|_| container::Style {
@@ -88,7 +92,10 @@ pub fn text_area<'a, M: Clone + 'a>(
                 .width(1)
                 .color(c().rim),
             ..container::Style::default()
-        })
+        });
+    mouse_area(boxed)
+        .on_press(on_focus)
+        .interaction(iced::mouse::Interaction::Text)
         .into()
 }
 
@@ -120,6 +127,31 @@ mod tests {
         let mut unfocused = press(Named::Enter, Modifiers::empty());
         unfocused.status = Status::Active;
         assert!(binding(unfocused, &"send").is_none(), "only while focused");
+    }
+
+    #[test]
+    fn a_press_anywhere_in_the_box_focuses_the_field() {
+        // X11 (#172): a click above or beside the text line did nothing
+        let content = Content::with_text("hi");
+        let view = || {
+            let controls = iced::widget::space::horizontal().height(28).into();
+            text_area(
+                "t",
+                "",
+                &content,
+                |_| "edit",
+                "send",
+                None,
+                controls,
+                "focus",
+            )
+        };
+        let size = iced::Size::new(400.0, 120.0);
+        let pad = crate::ui::kit::testing::shot::click(view(), size, iced::Point::new(4.0, 4.0));
+        assert_eq!(pad, ["focus"], "the box's padding focuses the field");
+        let right =
+            crate::ui::kit::testing::shot::click(view(), size, iced::Point::new(390.0, 40.0));
+        assert_eq!(right, ["focus"], "beside the controls too");
     }
 
     #[test]

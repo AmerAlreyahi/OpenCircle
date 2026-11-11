@@ -356,6 +356,7 @@ impl AiChat {
             Msg::Submit,
             top,
             controls.into(),
+            Msg::FocusInput,
         );
         keys::guard(composer, Msg::Key)
     }
