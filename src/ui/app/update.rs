@@ -699,6 +699,20 @@ impl App {
                 Task::none()
             }
             Message::ScreenFound(..) => Task::none(),
+            // the second reader read all it had to at once: no more bands
+            Message::ScreenOtherDone(opening) if opening == self.opening => {
+                let screen = self.o.screen;
+                self.o
+                    .screen_text
+                    .add_extra(Rectangle::with_size(screen), Vec::new(), screen);
+                Task::none()
+            }
+            Message::ScreenOtherDone(_) => Task::none(),
+            Message::ScreenNoise(opening, n) if opening == self.opening => {
+                self.note_noise(n);
+                Task::none()
+            }
+            Message::ScreenNoise(..) => Task::none(),
             Message::ScreenLines(opening, window, read)
                 if opening == self.opening && self.o.frame.is_some() =>
             {
@@ -723,11 +737,12 @@ impl App {
                 // click on the next opening's note starts a second one (the
                 // checksums catch a clash). Share one download if that shows up.
                 let opening = self.opening;
-                background(|tx| {
+                let rec = self.o.script_reader;
+                background(move |tx| {
                     let progress = |p| {
                         let _ = tx.unbounded_send(Ok(p));
                     };
-                    let done = text::download(progress)
+                    let done = text::download_reader(rec, progress)
                         .map(|()| text::Progress::Reading)
                         .map_err(|e| crate::ui::screens::model_download::why_key(&e));
                     let _ = tx.unbounded_send(done);
@@ -739,6 +754,10 @@ impl App {
                     Ok(text::Progress::Download(done)) => self.o.reader = Reader::Downloading(done),
                     Ok(text::Progress::Reading) => {
                         (self.o.ocr_ready, self.o.reader) = (text::models_present(), Reader::Idle);
+                        // the reader for the script found: it reads at once (sheet b8)
+                        if self.o.script_reader.take().is_some() {
+                            return self.read_again();
+                        }
                         self.note_reader();
                         // Copy text was waiting for the models: now copy.
                         if std::mem::take(&mut self.o.copy_after) {
@@ -755,6 +774,7 @@ impl App {
             }
             Message::ReaderDismiss => {
                 self.o.copy_after = false;
+                self.o.script_reader = None;
                 self.o.reader = Reader::Idle;
                 Task::none()
             }

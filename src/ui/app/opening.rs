@@ -67,6 +67,14 @@ pub(in crate::ui) struct Opening {
     /// The frame went to the helper (`ocr::read_screen`): later parts send
     /// only its key.
     pub(in crate::ui) frame_sent: bool,
+    /// The reader offered for the script found (#169, sheet b7): the card
+    /// asks for it, once per opening.
+    pub(in crate::ui) script_reader: Option<&'static crate::ocr::models::Recognizer>,
+    pub(in crate::ui) script_offered: bool,
+    /// The card's line for it ("Read Arabic text").
+    pub(in crate::ui) script_does: String,
+    /// Lines the Latin reader read as noise with no other reader on disk.
+    pub(in crate::ui) noise: usize,
     /// Copy text's spinner while the screen's text is read: since when, and
     /// its turn (`kit::spinner`).
     pub(in crate::ui) text_spin: Option<(Instant, f32)>,
@@ -239,6 +247,10 @@ impl Default for Opening {
             other_reading: None,
             other_known: None,
             frame_sent: false,
+            script_reader: None,
+            script_offered: false,
+            script_does: String::new(),
+            noise: 0,
             text_spin: None,
             awaits: None,
             want_all: false,

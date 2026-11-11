@@ -198,6 +198,24 @@ pub(crate) fn recognizer_for(source: &str) -> &'static Recognizer {
     (RECOGNIZERS.into_iter().find(|r| Some(r.id) == id)).unwrap_or(&EN)
 }
 
+/// The non-Latin recognizer for the first of `languages` (codes) that isn't
+/// on disk (#169: a screen read as noise is offered the reader for the
+/// script its user reads).
+pub(crate) fn missing_reader(languages: &[String]) -> Option<&'static Recognizer> {
+    (languages.iter())
+        .map(|l| recognizer_for(l))
+        .find(|r| r.script() != crate::translate::lang::Script::Latin && !installed(r))
+}
+
+/// Downloads recognizer `rec` (and what OCR needs besides), `progress` as
+/// `ensure`'s.
+pub(crate) fn ensure_reader(
+    rec: &'static Recognizer,
+    progress: impl FnMut(u64, u64),
+) -> Result<(), OcrError> {
+    ensure(&ocr_files(rec), progress)
+}
+
 /// OCR's files for one recognizer (ONNX Runtime first) and where each goes.
 pub(crate) fn ocr_files(rec: &'static Recognizer) -> Vec<(PathBuf, &'static ModelFile)> {
     let dir = models_dir();

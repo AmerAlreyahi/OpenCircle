@@ -1893,6 +1893,28 @@ fn reading_the_screen_shows_how_far_it_is() {
     assert!(empty.no_text(), "no text found on this screen");
 }
 
+/// #169 (sheet b7): text read as noise with no reader for its script on
+/// disk: the reader for the user's language is offered, once per opening,
+/// in the existing download card; not before 3 such lines.
+#[test]
+fn a_screen_read_as_noise_offers_the_readers_language() {
+    let mut cfg = crate::config::current();
+    cfg.translate.target = "ar".into();
+    crate::config::set_current(cfg);
+    let mut app = reader_app();
+    let _ = app.update(Message::ScreenNoise(app.opening, 2));
+    assert!(matches!(app.o.reader, Reader::Idle), "2 lines: not yet");
+    let _ = app.update(Message::ScreenNoise(app.opening, 2));
+    let rec = app.o.script_reader.expect("the Arabic reader is offered");
+    assert_eq!(rec.id, "arabic");
+    assert!(matches!(app.o.reader, Reader::Missing(bytes) if bytes > 0));
+    assert_eq!(app.o.script_does, "Read Arabic text");
+    let _ = app.update(Message::ReaderDismiss);
+    let _ = app.update(Message::ScreenNoise(app.opening, 5));
+    assert!(matches!(app.o.reader, Reader::Idle), "once per opening");
+    crate::config::set_current(crate::config::Config::default());
+}
+
 /// `reader_app` with all its screen read.
 fn read_app() -> App {
     let mut app = reader_app();

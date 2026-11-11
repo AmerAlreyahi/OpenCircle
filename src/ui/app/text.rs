@@ -129,6 +129,50 @@ impl App {
         }
     }
 
+    /// `n` more lines read as noise with no reader for their script on disk:
+    /// from 3 on, the reader for the user's language (app language, translate
+    /// target and source, the system's language) is offered, if one isn't on
+    /// disk (#169, sheet b7: once per opening, the existing download card).
+    pub(in crate::ui) fn note_noise(&mut self, n: usize) {
+        self.o.noise += n;
+        if self.o.script_offered || self.o.noise < 3 || !matches!(self.o.reader, Reader::Idle) {
+            return;
+        }
+        let cfg = crate::config::current();
+        let system = std::env::var("LANG")
+            .ok()
+            .map(|l| l.chars().take(2).collect());
+        let mut languages = vec![
+            crate::app_language::current().code().to_string(),
+            cfg.translate.target.clone(),
+            cfg.translate.source.clone(),
+        ];
+        languages.extend(system);
+        if let Some(rec) = ocr::models::missing_reader(&languages) {
+            self.o.script_offered = true;
+            self.o.script_reader = Some(rec);
+            self.o.script_does = format!("Read {} text", rec.script);
+            let bytes = ocr::models::missing_bytes(&ocr::models::ocr_files(rec));
+            crate::log!("[opencircle] the {} text reader is offered", rec.script);
+            self.o.reader = Reader::Missing(bytes);
+        }
+    }
+
+    /// The reader for the script found is on disk now: the screen's text is
+    /// read again (Windows: the second reader; Linux: every band).
+    pub(in crate::ui) fn read_again(&mut self) -> Task<Message> {
+        match self.o.text_by {
+            Some(ocr::Source::System) => {
+                self.o.other_read = false;
+                self.read_other_scripts()
+            }
+            _ => {
+                self.o.screen_text = word::Screen::default();
+                self.read_more()
+            }
+        }
+    }
+
     /// Main mode's text can be read: Windows OCR or the OCR models here, no
     /// translation shown.
     pub(in crate::ui) fn reads_text(&self) -> bool {
@@ -327,6 +371,9 @@ impl App {
                 return match read {
                     Ok(read) => {
                         let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
+                        if read.noise > 0 {
+                            let _ = tx.unbounded_send(Part::Noise(read.noise as usize));
+                        }
                         send(Ok(read.lines), [0, 0])
                     }
                     Err(e) => send(Err(e), [0, 0]),
@@ -356,6 +403,8 @@ impl App {
         })
         .map(move |part| match part {
             Part::Found(found) => Message::ScreenFound(opening, found),
+            Part::Done => Message::ScreenOtherDone(opening),
+            Part::Noise(n) => Message::ScreenNoise(opening, n),
             Part::Read(read) => Message::ScreenText(opening, band, read),
         })
     }
@@ -371,8 +420,22 @@ impl App {
             || self.o.other_reading.is_some()
             || self.o.text_by != Some(ocr::Source::System)
             || !self.o.screen_text.is_whole(self.o.screen.height)
-            || !ocr::reads_other_scripts()
         {
+            return Task::none();
+        }
+        if !ocr::reads_other_scripts() {
+            // no reader for another script: Windows OCR's noise says one is needed
+            self.o.other_read = true;
+            let lines = self.o.screen_text.lines();
+            let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+            let well = ocr::system::read_well(&texts, ocr::system::known().flatten());
+            let letters = |t: &&str| t.chars().any(char::is_alphabetic);
+            let noise = (texts.iter().zip(&well))
+                .filter(|(t, w)| letters(t) && !**w)
+                .count();
+            if noise * 10 >= texts.len() * 3 {
+                self.note_noise(noise);
+            }
             return Task::none();
         }
         let Some(image::Handle::Rgba {
@@ -434,6 +497,9 @@ impl App {
             );
             let read = read.map(|read| {
                 let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
+                if read.done {
+                    let _ = tx.unbounded_send(Part::Done);
+                }
                 let mut lines = word::lines(read.lines, [0, 0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
                 lines
@@ -442,6 +508,8 @@ impl App {
         })
         .map(move |part| match part {
             Part::Found(found) => Message::ScreenFound(opening, found),
+            Part::Done => Message::ScreenOtherDone(opening),
+            Part::Noise(n) => Message::ScreenNoise(opening, n),
             Part::Read(read) => Message::ScreenOther(opening, band, read),
         })
     }
@@ -797,6 +865,10 @@ impl App {
 /// (first), then the band's lines read.
 enum Part {
     Found(Vec<Rectangle>),
+    /// The second reader read all there is (`ScreenRead::done`).
+    Done,
+    /// Lines read as noise, no reader for their script (`ScreenRead::noise`).
+    Noise(usize),
     Read(Result<Vec<word::Line>, String>),
 }
 

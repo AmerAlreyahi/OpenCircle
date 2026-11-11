@@ -72,9 +72,17 @@ pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, S
 
 /// Blocking: fetches any missing OCR model (only after the user agreed),
 /// reporting whole-percent `Progress::Download` steps.
-pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), ocr::OcrError> {
+pub fn download(progress: impl FnMut(Progress)) -> Result<(), ocr::OcrError> {
+    download_reader(None, progress)
+}
+
+/// `download` for recognizer `rec` (the configured source's for `None`).
+pub(crate) fn download_reader(
+    rec: Option<&'static ocr::models::Recognizer>,
+    mut progress: impl FnMut(Progress),
+) -> Result<(), ocr::OcrError> {
     let mut shown = None;
-    ocr::ensure_models(|done, total| {
+    let each = |done: u64, total: u64| {
         let percent = done * 100 / total.max(1);
         // a retry's wait redraws the card too ("Retrying...")
         let now = (percent, ocr::models::retrying());
@@ -82,8 +90,11 @@ pub fn download(mut progress: impl FnMut(Progress)) -> Result<(), ocr::OcrError>
             shown = Some(now);
             progress(Progress::Download(percent as f32 / 100.0));
         }
-    })
-    .map(drop)
+    };
+    match rec {
+        Some(rec) => ocr::models::ensure_reader(rec, each),
+        None => ocr::ensure_models(each).map(drop),
+    }
 }
 
 /// OCR lines (already in reading order) as text: boxes on one row joined by

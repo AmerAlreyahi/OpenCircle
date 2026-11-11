@@ -216,6 +216,24 @@ impl App {
             Reader::Downloading(done) => (crate::ocr::models::full_size(), Stage::at(*done)),
             Reader::Failed(e) => (crate::ocr::models::full_size(), Stage::Failed(tr(*e))),
         };
+        // the reader for the script found (sheet b7): named, its own size
+        let (bytes, model) = match self.o.script_reader {
+            Some(rec) => {
+                let size = rec.model.size + rec.dict.size;
+                let bytes = if matches!(stage, Stage::Ask) {
+                    bytes
+                } else {
+                    size
+                };
+                let model = download::Model {
+                    name: download::SCRIPTS.name,
+                    does: &self.o.script_does,
+                    ..download::SCRIPTS
+                };
+                (bytes, model)
+            }
+            None => (bytes, download::OCR),
+        };
         // ponytail: a started download can't be stopped (it runs on unseen)
         let dismiss = match self.o.reader {
             Reader::Downloading(_) => None,
@@ -226,7 +244,7 @@ impl App {
             dismiss,
             provider: None,
         };
-        Some(download::card(&download::OCR, bytes, stage, on))
+        Some(download::card(&model, bytes, stage, on))
     }
 
     /// `note` centred on the bar (`bar`, in the logical px of the window

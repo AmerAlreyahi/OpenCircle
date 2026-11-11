@@ -123,6 +123,11 @@ pub(in crate::ui) enum Message {
     /// Every line the helper found on this opening's frame (image px), the
     /// known ones aside: those not read yet are being read (#169).
     ScreenFound(u32, Vec<Rectangle>),
+    /// The second reader read all there is on this opening's frame.
+    ScreenOtherDone(u32),
+    /// The helper read this many lines as noise with no reader for their
+    /// script on disk (#169: the reader for the user's language is offered).
+    ScreenNoise(u32, usize),
     /// Another screen's text (`Screen::lines`): the opening, its window, the read.
     ScreenLines(u32, window::Id, Result<Vec<word::Line>, String>),
     /// The text reader's helper of this opening has started (after its
