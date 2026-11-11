@@ -366,7 +366,11 @@ impl App {
     /// The AI chat card, or the translation's pill and cards (main mode's
     /// result cards; Snip's More shows them over the picked area too).
     fn cards(&self) -> Option<Element<'_, Message>> {
-        if self.o.ai_chat.is_some() && (!self.draws_chat() || self.chat_window() != self.overlay) {
+        // (Snip's More: Ask AI's quick question has no window of its own while
+        // Snip is up, `sync_chat_window`: the overlay draws it, as it did before)
+        let snip_asks = matches!(self.o.purpose, Purpose::Snip(_));
+        let draws = self.draws_chat() || snip_asks;
+        if self.o.ai_chat.is_some() && (!draws || self.chat_window() != self.overlay) {
             return Some(space().into()); // (its own window, or another screen's, draws the card)
         }
         if let Some((id, panel)) = &self.o.ai_chat {
