@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
+
+PackageIdentifier: AmerAlreyahi.OpenCircle
+PackageVersion: 0.1.6
+PackageLocale: en-US
+Publisher: OpenCircle
+PublisherUrl: https://github.com/AmerAlreyahi
+PublisherSupportUrl: https://github.com/AmerAlreyahi/OpenCircle/issues
+PrivacyUrl: https://github.com/AmerAlreyahi/OpenCircle/blob/main/docs/privacy.md
+Author: OpenCircle contributors
+PackageName: OpenCircle
+PackageUrl: https://github.com/AmerAlreyahi/OpenCircle
+License: MIT
+LicenseUrl: https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE.md
+Copyright: Copyright (c) OpenCircle contributors
+ShortDescription: Circle anything on screen to search, read, translate or ask about it
+Description: |-
+  OpenCircle brings Android's Circle to Search to the desktop. Press a shortcut, the screen
+  freezes, circle or drag over anything and search it (Google Lens), copy its text, translate it
+  or ask an AI about it. A second mode snips and annotates screenshots. Pure Rust, one small
+  program, no telemetry; nothing leaves the PC unless you choose an action that needs the network.
+Moniker: opencircle
+Tags:
+- screenshot
+- ocr
+- translate
+- circle-to-search
+- snip
+- lens
+ReleaseNotesUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.6
+Documentations:
+- DocumentLabel: Getting started
+  DocumentUrl: https://github.com/AmerAlreyahi/OpenCircle/blob/main/docs/getting-started.md
+ManifestType: defaultLocale
+ManifestVersion: 1.28.0

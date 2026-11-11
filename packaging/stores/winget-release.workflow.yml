@@ -1,0 +1,27 @@
+# DRAFT, not active: the owner copies this to .github/workflows/winget.yml when the
+# first winget version is merged (wingetcreate update needs the package to exist).
+# Runs only when a release is PUBLISHED (never for drafts), and opens one PR in
+# microsoft/winget-pkgs with the new URL and hash (wingetcreate update, Microsoft's tool).
+# Secret needed: WINGET_TOKEN = a classic personal access token with only `public_repo`
+# (the PR comes from the owner's fork AmerAlreyahi/winget-pkgs). Costs nothing. The CLA is
+# signed once; each PR then waits for the validation pipeline and a moderator.
+name: winget
+on:
+  release:
+    types: [released]   # fires when a release is published, not for drafts; excludes pre-releases
+permissions: {}
+jobs:
+  winget:
+    runs-on: windows-latest
+    steps:
+      - name: Open the winget-pkgs PR
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $ver = $env:TAG.TrimStart('v')
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') { throw "not a stable tag: $env:TAG" }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          $url = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/OpenCircle-Setup-$ver-x64.exe"
+          ./wingetcreate.exe update AmerAlreyahi.OpenCircle --version $ver --urls $url --submit --token $env:WINGET_TOKEN
