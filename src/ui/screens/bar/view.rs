@@ -227,7 +227,11 @@ impl App {
                 };
                 let model = download::Model {
                     name: download::SCRIPTS.name,
-                    does: &self.o.script_does,
+                    does: download::Does::Said(match rec.id {
+                        "arabic" => S::md_read_arabic,
+                        "cyrillic" => S::md_read_cyrillic,
+                        _ => S::md_read_cjk,
+                    }),
                     ..download::SCRIPTS
                 };
                 (bytes, model)

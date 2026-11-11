@@ -1904,4 +1904,10 @@ strings! {
         | "جارٍ قراءة النص · {} من {} سطرًا";
     no_text: "No text found on this screen"
         | "لم يُعثر على نص في هذه الشاشة";
+    md_read_arabic: "Read Arabic text"
+        | "قراءة النص العربي";
+    md_read_cyrillic: "Read Cyrillic text"
+        | "قراءة النص السيريلي";
+    md_read_cjk: "Read Chinese and Japanese text"
+        | "قراءة النص الصيني والياباني";
 }

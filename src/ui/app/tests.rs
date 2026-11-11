@@ -1908,7 +1908,6 @@ fn a_screen_read_as_noise_offers_the_readers_language() {
     let rec = app.o.script_reader.expect("the Arabic reader is offered");
     assert_eq!(rec.id, "arabic");
     assert!(matches!(app.o.reader, Reader::Missing(bytes) if bytes > 0));
-    assert_eq!(app.o.script_does, "Read Arabic text");
     let _ = app.update(Message::ReaderDismiss);
     let _ = app.update(Message::ScreenNoise(app.opening, 5));
     assert!(matches!(app.o.reader, Reader::Idle), "once per opening");

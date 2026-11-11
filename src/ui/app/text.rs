@@ -151,7 +151,6 @@ impl App {
         if let Some(rec) = ocr::models::missing_reader(&languages) {
             self.o.script_offered = true;
             self.o.script_reader = Some(rec);
-            self.o.script_does = format!("Read {} text", rec.script);
             let bytes = ocr::models::missing_bytes(&ocr::models::ocr_files(rec));
             crate::log!("[opencircle] the {} text reader is offered", rec.script);
             self.o.reader = Reader::Missing(bytes);
