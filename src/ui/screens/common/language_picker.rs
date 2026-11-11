@@ -8,13 +8,17 @@
 //! quiet ring; while such a row is hovered or ringed, a one-line hint takes
 //! the list's foot. Keys: type to filter, Up / Down / Home / End move the
 //! ring, Enter picks, Tab opens the other chip's list (Esc: the App closes
-//! the list first). `rtl`: mirrored. From kit parts only (`option_list`).
+//! the list first). Mirrored in a right-to-left view (`kit::dir`). From kit
+//! parts only (`option_list`).
 //! Picks last for the session and are remembered as recent (config).
 use iced::widget::{Space, column, container, mouse_area, row};
 use iced::{Center, Element, Fill, Size, Vector};
 
+use crate::app_language::{Lang, RLM, S, tr};
 use crate::mt;
+use crate::t;
 use crate::translate::lang::{self, AUTO, LANGUAGES};
+use crate::ui::kit::dir;
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::field;
 use crate::ui::kit::icon::{Icon, icon};
@@ -100,8 +104,8 @@ pub enum Msg {
 /// One line of the open list.
 #[derive(Debug, Clone, PartialEq)]
 enum Item {
-    /// A heading (English, Arabic).
-    Group(&'static str, &'static str),
+    /// A heading.
+    Group(S),
     /// A language (or "auto"), and whether it is the current one.
     Choice(String, bool),
     Empty,
@@ -132,8 +136,6 @@ pub struct Picker {
     top: usize,
     /// Recent picks per side, most recent first.
     recent: [Vec<String>; 2],
-    /// Mirrored (an Arabic UI).
-    pub rtl: bool,
     /// Picks are remembered as recent (config); onboarding writes nothing before Finish.
     pub saves_recent: bool,
     /// Each language in its own name, its name in the app's language beside
@@ -155,7 +157,6 @@ impl Picker {
             hover: None,
             top: 0,
             recent: [saved.recent_sources, saved.recent_targets],
-            rtl: false,
             saves_recent: true,
             endonyms: false,
         }
@@ -258,10 +259,6 @@ impl Picker {
         format!("{} → {}", code(&self.source), code(&self.target))
     }
 
-    fn tr(&self, en: &'static str, ar: &'static str) -> &'static str {
-        if self.rtl { ar } else { en }
-    }
-
     /// The open list's lines.
     fn items(&self) -> Vec<Item> {
         let Some(side) = self.open else {
@@ -275,14 +272,23 @@ impl Picker {
         let mut all: Vec<&'static lang::Language> = (LANGUAGES.iter())
             .filter(|l| side == Side::Target || l.ocr.is_some())
             .collect();
-        all.sort_by_key(|l| l.name);
+        all.sort_by_key(|l| crate::app_language::language_name(l.code));
         let choice = |code: &str, current: bool| Item::Choice(code.to_string(), current);
         let q = self.query.trim().to_lowercase();
         if !q.is_empty() {
-            let detect = side == Side::Source && "detect language".contains(&q);
+            let detect = side == Side::Source
+                && [
+                    "detect language",
+                    t!(pk_detect_long).trim_start_matches(RLM),
+                ]
+                .iter()
+                .any(|d| d.to_lowercase().contains(&q));
             let matches = all.iter().filter(|l| {
                 l.code.to_lowercase().starts_with(&q)
                     || l.name.to_lowercase().contains(&q)
+                    || crate::app_language::language_name(l.code)
+                        .to_lowercase()
+                        .contains(&q)
                     || l.native.to_lowercase().contains(&q)
             });
             let mut out: Vec<Item> = (detect.then_some(AUTO).into_iter())
@@ -313,12 +319,12 @@ impl Picker {
         }
         if !recent.is_empty() {
             out.push(match suggested {
-                true => Item::Group("Suggested", "مقترحة"),
-                false => Item::Group("Recent", "الأخيرة"),
+                true => Item::Group(S::pk_suggested),
+                false => Item::Group(S::pk_recent),
             });
             out.extend(recent.iter().map(|&code| choice(code, code == current)));
         }
-        out.push(Item::Group("All languages", "كل اللغات"));
+        out.push(Item::Group(S::pk_all));
         out.extend(all.iter().map(|l| choice(l.code, false)));
         out
     }
@@ -420,8 +426,8 @@ impl Picker {
     /// The name a row shows.
     fn name(&self, code: &str) -> &'static str {
         match code {
-            AUTO => self.tr("Detect language", "اكتشاف اللغة"),
-            c => lang::find(c).map_or("", |l| l.name),
+            AUTO => t!(pk_detect_long),
+            c => crate::app_language::language_name(c),
         }
     }
 
@@ -431,8 +437,11 @@ impl Picker {
         let chip = |side: Side, code: &str| {
             // "Chinese (Simplified)" -> "Chinese": one line in the chip
             let label = match code {
-                AUTO => self.tr("Detect", "اكتشاف"),
-                c => lang::name(c).split(" (").next().unwrap_or_default(),
+                AUTO => t!(pk_detect),
+                c => crate::app_language::language_name(c)
+                    .split(" (")
+                    .next()
+                    .unwrap_or_default(),
             };
             let open = self.open == Some(side);
             let size = (CHIP.width, CHIP.height);
@@ -440,22 +449,24 @@ impl Picker {
                 label.into(),
                 side == Side::Target,
                 open,
-                self.rtl,
                 size,
                 Msg::Open(side),
             )
         };
-        let glyph = if self.rtl { Icon::Back } else { Icon::Forward };
+        let glyph = if dir::rtl() {
+            Icon::Back
+        } else {
+            Icon::Forward
+        };
         let arrow = container(icon(glyph, size::ICON_SMALL).color(c().text_muted)).center_x(ARROW);
-        let mut parts = vec![
+        dir::row([
             chip(Side::Source, &self.source),
             arrow.into(),
             chip(Side::Target, &self.target),
-        ];
-        if self.rtl {
-            parts.reverse();
-        }
-        row(parts).spacing(SPACING).align_y(Center).into()
+        ])
+        .spacing(SPACING)
+        .align_y(Center)
+        .into()
     }
 
     /// The pill (`PILL`): the chips, then `tail` (the Snip button, `SLOT`
@@ -465,11 +476,9 @@ impl Picker {
         map: fn(Msg) -> M,
         tail: Element<'a, M>,
     ) -> Element<'a, M> {
-        let mut parts = vec![self.chips().map(map), tail];
-        if self.rtl {
-            parts.reverse();
-        }
-        let line = row(parts).spacing(SPACING).align_y(Center);
+        let line = dir::row([self.chips().map(map), tail])
+            .spacing(SPACING)
+            .align_y(Center);
         surface(Material::Widget, radius::DRAWER, line)
             .padding([PAD_Y, PAD])
             .into()
@@ -481,11 +490,12 @@ impl Picker {
     pub fn list_at(&self) -> Option<Vector> {
         let side = self.open?;
         // (mirrored: the Snip slot is at the start side)
-        let (start, end) = match self.rtl {
+        let rtl = dir::rtl();
+        let (start, end) = match rtl {
             true => (PAD + SLOT, PILL.width - PAD),
             false => (PAD, PILL.width - PAD - SLOT),
         };
-        let x = match (side == Side::Source) != self.rtl {
+        let x = match (side == Side::Source) != rtl {
             true => start,
             false => end - LIST.width,
         };
@@ -495,8 +505,8 @@ impl Picker {
     /// The open list, `LIST` big. Nothing when closed.
     pub fn list(&self) -> Option<Element<'_, Msg>> {
         self.open?;
-        let rtl = self.rtl;
-        let search = field::search(self.tr("Search languages", "ابحث عن لغة"), &self.query, rtl)
+        let rtl = dir::rtl();
+        let search = field::search(t!(pk_search), &self.query)
             .id(SEARCH)
             .on_input(Msg::Query)
             // Enter in the field (it takes the key before the list does): the ringed or first match
@@ -515,9 +525,9 @@ impl Picker {
             }
             used += item.height();
             let line: Element<'_, Msg> = match item {
-                Item::Group(en, ar) => group(self.tr(en, ar), GROUP_H, rtl),
+                Item::Group(key) => group(tr(*key), GROUP_H),
                 Item::Empty => {
-                    let none = muted(Role::CONTROL, self.tr("No language found", "لا توجد لغة"));
+                    let none = muted(Role::CONTROL, t!(pk_none));
                     let none = container(none).center_y(ROW_H).padding([0.0, ROW_PAD]);
                     match rtl {
                         true => none.align_right(Fill).into(),
@@ -541,13 +551,20 @@ impl Picker {
                                 (ours.trim_start_matches('\u{200F}') != l.native).then_some(ours);
                             (l.native, Look { aside, ..look })
                         }
+                        // another UI language: the name in it, the language's own beside it
+                        (false, Some(l)) if crate::app_language::current() != Lang::En => {
+                            let ours = self.name(code);
+                            let aside =
+                                (ours.trim_start_matches(RLM) != l.native).then_some(l.native);
+                            (ours, Look { aside, ..look })
+                        }
                         _ => (self.name(code), look),
                     };
 
                     let bold = (name.to_lowercase().len() == name.len() && !q.is_empty())
                         .then(|| name.to_lowercase().find(&q).map(|a| (a, a + q.len())))
                         .flatten();
-                    let row = choice(name, bold, look, ROWS_W, rtl, Msg::Pick(code.clone()));
+                    let row = choice(name, bold, look, ROWS_W, Msg::Pick(code.clone()));
                     let row = mouse_area(row)
                         .on_enter(Msg::Hover(Some(i)))
                         .on_exit(Msg::Hover(None));
@@ -579,20 +596,14 @@ impl Picker {
         }
         let mut list = column![search, Space::new().height(LIST_PAD), row(body)];
         if self.hint() {
-            let hint = sub(
-                Role::META,
-                self.tr(
-                    "Needs AI · no local model yet",
-                    "يحتاج الذكاء الاصطناعي · لا نموذج دون اتصال بعد",
-                ),
-            );
-            let mut line = vec![needs_ai(true), hint.into()];
-            if rtl {
-                line.reverse();
-            }
-            let line = container(row(line).spacing(HINT_GAP).align_y(Center))
-                .center_y(ROW_H)
-                .padding([0.0, ROW_PAD]);
+            let hint = sub(Role::META, t!(pk_needs_ai));
+            let line = container(
+                dir::row([needs_ai(true), hint.into()])
+                    .spacing(HINT_GAP)
+                    .align_y(Center),
+            )
+            .center_y(ROW_H)
+            .padding([0.0, ROW_PAD]);
             let line = match rtl {
                 true => line.align_right(Fill),
                 false => line.width(Fill),
@@ -637,7 +648,7 @@ mod tests {
         p.update(Msg::Open(Side::Target));
         // Suggested (no picks yet): the current one, English; then A–Z
         assert_eq!(p.picks()[..4], ["ar", "en", "ar", "zh"]);
-        assert_eq!(p.items()[0], Item::Group("Suggested", "مقترحة"));
+        assert_eq!(p.items()[0], Item::Group(S::pk_suggested));
         assert_eq!(
             p.items()[1],
             Item::Choice("ar".into(), true),
@@ -664,7 +675,7 @@ mod tests {
             assert!(p.update(Msg::Pick(code.into())));
         }
         p.update(Msg::Open(Side::Target));
-        assert_eq!(p.items()[0], Item::Group("Recent", "الأخيرة"));
+        assert_eq!(p.items()[0], Item::Group(S::pk_recent));
         assert_eq!(p.picks()[..RECENT], ["es", "fr", "ja"]);
         assert!(
             !p.update(Msg::Pick("es".into())),
@@ -760,7 +771,7 @@ mod tests {
         for rtl in [false, true] {
             for side in [Side::Source, Side::Target] {
                 let mut p = open(AUTO, "en", true, side);
-                p.rtl = rtl;
+                let _dir = dir::scope(rtl);
                 let at = p.list_at().unwrap();
                 assert_eq!(at.y, PILL.height + LIST_GAP);
                 match (side, rtl) {

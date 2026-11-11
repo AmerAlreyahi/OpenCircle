@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::sync::Mutex;
 
 use super::{Action, Crop, Key};
+use crate::app_language::{S, Said};
 
 pub const ACTION: Action = Action {
     id: "copy",
@@ -40,10 +41,10 @@ fn run(crop: Crop) -> Result<String, String> {
 
 /// What the user reads when the clipboard says no (its own error, e.g. "X11 server
 /// connection timed out", goes to the log only).
-pub const COPY_FAILED: &str = "Couldn't copy. Close what holds the clipboard and try again.";
+pub const COPY_FAILED: Said = Said(S::pill_copy_failed);
 
 /// The confirmation pill's text, for the image and for text alike.
-pub const COPIED_PILL: &str = "Copied";
+pub const COPIED_PILL: Said = Said(S::pill_copied);
 
 /// Puts `text` on the clipboard (Copy text); `Err` is `COPY_FAILED`.
 pub fn text(text: String) -> Result<(), String> {
@@ -95,7 +96,7 @@ fn a_clipboard_error_reads_plainly() {
     let e = arboard::Error::Unknown {
         description: raw.into(),
     };
-    assert_eq!(failed(e), COPY_FAILED);
+    assert_eq!(failed(e), COPY_FAILED.to_string());
 }
 
 /// Tests: what was put on the clipboard, per test (its thread's name; the

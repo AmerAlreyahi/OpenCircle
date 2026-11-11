@@ -952,4 +952,171 @@ strings! {
         | "رمز API";
     k_live_pin: "Live pin"
         | "التثبيت الحي";
+
+    // ---- added in part 2a (tray, update widgets, pills, model downloads,
+    // translate pill and picker, backend states): for the owner's native review ----
+    tray_circle: "Circle to Search"
+        | "البحث بالدائرة";
+    tray_translate: "Translate screen"
+        | "ترجمة الشاشة";
+    tray_click_pins: "Make pins clickable"
+        | "جعل المثبّتات قابلة للنقر";
+    tray_settings: "Settings…"
+        | "الإعدادات…";
+    tray_quit: "Quit"
+        | "خروج";
+    tray_update: "Restart to update"
+        | "أعد التشغيل للتحديث";
+    tray_update_v: "Restart to update ({})"
+        | "أعد التشغيل للتحديث ({})";
+    tray_get_v: "Get OpenCircle {}"
+        | "احصل على OpenCircle {}";
+    tray_tip: "OpenCircle · {}"
+        | "OpenCircle · {}";
+    tray_save: "Save…"
+        | "حفظ…";
+    up_out: "OpenCircle {} is out"
+        | "صدر OpenCircle {}";
+    up_ready: "OpenCircle {} is ready"
+        | "OpenCircle {} جاهز";
+    up_updating: "Updating OpenCircle…"
+        | "جارٍ تحديث OpenCircle…";
+    up_updated: "Updated to {}"
+        | "تم التحديث إلى {}";
+    up_line_restart: "Installs when you restart OpenCircle"
+        | "يُثبَّت عند إعادة تشغيل OpenCircle";
+    up_line_setup: "Windows asks once for permission to install"
+        | "سيطلب Windows إذنًا مرة واحدة للتثبيت";
+    up_line_getit: "Update it with your package manager or the release page"
+        | "حدّثه عبر مدير الحزم أو صفحة الإصدار";
+    up_line_back: "Back in a few seconds"
+        | "نعود خلال ثوانٍ";
+    up_later: "Later"
+        | "لاحقًا";
+    wn_title: "What's new in OpenCircle {}"
+        | "ما الجديد في OpenCircle {}";
+    wn_installed: "Updated just now"
+        | "تم التحديث للتو";
+    wn_highlights: "Highlights"
+        | "أبرز التغييرات";
+    wn_more: "{} more in the full release notes"
+        | "{} أخرى في ملاحظات الإصدار الكاملة";
+    wn_fixes: "Fixes"
+        | "الإصلاحات";
+    wn_upgrade: "Upgrade notes"
+        | "ملاحظات الترقية";
+    wn_done: "Done"
+        | "تم";
+    wn_full: "Full release notes"
+        | "ملاحظات الإصدار الكاملة";
+    pill_copied: "Copied"
+        | "تم النسخ";
+    pill_copy_failed: "Couldn't copy. Close what holds the clipboard and try again."
+        | "تعذّر النسخ. أغلق ما يستخدم الحافظة وحاول مرة أخرى.";
+    pill_cant_copy: "Couldn't copy"
+        | "تعذّر النسخ";
+    pill_saved: "Saved to {}"
+        | "تم الحفظ في {}";
+    pill_not_saved: "Couldn't save. Pick a folder you can write to in Settings."
+        | "تعذّر الحفظ. اختر في الإعدادات مجلدًا يمكنك الكتابة فيه.";
+    pill_no_browser: "Couldn't open your browser. Check that a default browser is set, then try again."
+        | "تعذّر فتح المتصفح. تأكد من تعيين متصفح افتراضي ثم حاول مرة أخرى.";
+    pill_diag: "Diagnostics copied"
+        | "تم نسخ بيانات التشخيص";
+    pill_pin_gone: "The pinned window closed"
+        | "أُغلقت النافذة المثبّتة";
+    pill_pin_still: "Can't follow this window: the pin stays still"
+        | "تعذّرت متابعة هذه النافذة: يبقى التثبيت ثابتًا";
+    pill_pins_max: "Up to 4 live pins: close one first"
+        | "حتى 4 تثبيتات حيّة: أغلق أحدها أولًا";
+    pill_pins_pick: "Pick a part of one window to pin it live"
+        | "اختر جزءًا من نافذة واحدة لتثبيته حيًّا";
+    pill_tray: "OpenCircle is running in the tray. Press {}."
+        | "يعمل OpenCircle في علبة النظام. اضغط {}.";
+    pill_taken_one: "{} is taken by another app: pick another key in Settings"
+        | "{} مستخدم في تطبيق آخر: اختر مفتاحًا آخر في الإعدادات";
+    pill_taken_many: "{} are taken by another app: pick another key in Settings"
+        | "{} مستخدمة في تطبيق آخر: اختر مفاتيح أخرى في الإعدادات";
+    md_header: "On-device models"
+        | "النماذج على الجهاز";
+    md_ocr_name: "Text recognition"
+        | "التعرّف على النص";
+    md_ocr_title: "Text recognition needs a small download"
+        | "يحتاج التعرّف على النص إلى تنزيل صغير";
+    md_ocr_does: "Read text in images"
+        | "قراءة النص في الصور";
+    md_scripts_name: "Text in other scripts"
+        | "النص بالخطوط الأخرى";
+    md_scripts_title: "This text needs another reader"
+        | "يحتاج هذا النص إلى قارئ آخر";
+    md_scripts_does: "Read Arabic, Cyrillic, Chinese and Japanese text"
+        | "قراءة النص العربي والسيريلي والصيني والياباني";
+    md_tr_name: "Local translation"
+        | "الترجمة على الجهاز";
+    md_tr_title: "Local translation needs a download"
+        | "تحتاج الترجمة على الجهاز إلى تنزيل";
+    md_tr_does: "Translate without internet"
+        | "الترجمة دون إنترنت";
+    md_meta: "{} · {} · from {}"
+        | "{} · {} · من {}";
+    md_downloading: "Downloading {}"
+        | "جارٍ تنزيل {}";
+    md_checking: "Checking your download"
+        | "جارٍ فحص التنزيل";
+    md_failed: "Download could not finish"
+        | "تعذّر إكمال التنزيل";
+    md_on_pc: "{} on this PC; none of your content is sent."
+        | "{} على هذا الجهاز؛ ولا يُرسل أي من محتواك.";
+    md_download: "Download"
+        | "تنزيل";
+    md_not_now: "Not now"
+        | "ليس الآن";
+    md_provider: "Use an AI provider instead"
+        | "استخدام مزوّد ذكاء اصطناعي بدلًا من ذلك";
+    md_retrying: "Retrying…"
+        | "جارٍ إعادة المحاولة…";
+    md_progress: "{}"
+        | "{}";
+    md_verifying: "Checking integrity and setting up on this PC…"
+        | "جارٍ فحص السلامة والإعداد على هذا الجهاز…";
+    md_try_again: "Try again"
+        | "حاول مرة أخرى";
+    md_err_server: "The download server had a problem. Try again in a minute."
+        | "واجه خادم التنزيل مشكلة. حاول مرة أخرى بعد دقيقة.";
+    md_err_offline: "Could not reach the download server. Check your internet connection, then try again in a minute."
+        | "تعذّر الوصول إلى خادم التنزيل. تحقق من اتصالك بالإنترنت ثم حاول مرة أخرى بعد دقيقة.";
+    md_err_damaged: "The download was damaged. Try again."
+        | "التنزيل تالف. حاول مرة أخرى.";
+    md_err_other: "The download could not finish. Try again."
+        | "تعذّر إكمال التنزيل. حاول مرة أخرى.";
+    md_read_names: "Read {} text"
+        | "قراءة نص {}";
+    tp_found: "{} text found"
+        | "عُثر على نص بلغة {}";
+    tp_get: "Get {} → {}"
+        | "تنزيل {} ← {}";
+    tp_translating: "Translating…"
+        | "جارٍ الترجمة…";
+    tp_set_up_ai: "Set up AI"
+        | "إعداد الذكاء الاصطناعي";
+    tp_thinking: "Thinking…"
+        | "جارٍ التفكير…";
+    tp_explain: "Explain"
+        | "اشرح";
+    pk_suggested: "Suggested"
+        | "مقترحة";
+    pk_recent: "Recent"
+        | "الأخيرة";
+    pk_all: "All languages"
+        | "كل اللغات";
+    pk_detect_long: "Detect language"
+        | "اكتشاف اللغة";
+    pk_detect: "Detect"
+        | "اكتشاف";
+    pk_search: "Search languages"
+        | "ابحث عن لغة";
+    pk_none: "No language found"
+        | "لا توجد لغة";
+    pk_needs_ai: "Needs AI · no local model yet"
+        | "يحتاج الذكاء الاصطناعي · لا نموذج دون اتصال بعد";
 }

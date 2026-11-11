@@ -508,7 +508,7 @@ pub fn fold<'a, Message: Clone + 'a>(
         true => Icon::ChevronUp,
         false => Icon::ChevronDown,
     };
-    let content = row![
+    let content = crate::dir_row![
         icon(chevron, size::ICON_SMALL).color(c().text_sub),
         super::text::text(Role::CTA, title),
         super::text::muted(Role::ROW_DESC, count.to_string()),

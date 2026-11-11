@@ -48,8 +48,7 @@ fn open_with(crop: &Crop, question: Option<&str>) -> Result<(), String> {
     let png = search_png(crop)?;
     page::open(&png, crop.width, crop.height, question).map_err(|e| {
         crate::log!("[lens] browser not opened: {e}");
-        "Couldn't open your browser. Check that a default browser is set, then try again."
-            .to_string()
+        crate::t!(pill_no_browser).to_string()
     })
 }
 

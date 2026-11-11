@@ -1,7 +1,7 @@
 //! The toast pill (`.oc-toast`, design 11.2): an elevated pill, a dot and
 //! one 12 px line, padding 14x8. Exactly `size(label)` big: its window is the
 //! pill (cut to its corners, so nothing shows around it).
-use iced::widget::{Space, container, row, stack};
+use iced::widget::{Space, container, stack};
 use iced::{Border, Center, Element, Fill, Size};
 
 use super::text::{font, width};
@@ -102,7 +102,13 @@ fn made<'a, Message: 'a>(
     let line = super::text::text(Role::NOTE, label)
         .line_height(iced::Pixels(LINE))
         .wrapping(iced::widget::text::Wrapping::None);
-    let content = row![dot, line].push(action).spacing(GAP).align_y(Center);
+    let content = super::dir::row(
+        [Some(dot.into()), Some(line.into()), action]
+            .into_iter()
+            .flatten(),
+    )
+    .spacing(GAP)
+    .align_y(Center);
     material(container(content).padding(PAD), radius, at)
 }
 
@@ -183,12 +189,16 @@ pub fn banner<'a, Message: 'a>(
         super::text::sub(Role::ROW_DESC, line).wrapping(none),
     ]
     .spacing(LINES_GAP)
+    .align_x(super::dir::start())
     .width(Fill);
-    let content = row![lead, lines]
-        .push(actions)
-        .spacing(BANNER_GAP)
-        .align_y(Center);
-    let pad = iced::Padding::ZERO.left(BANNER_PAD[0]).right(BANNER_PAD[1]);
+    let content = super::dir::row(
+        [Some(lead.into()), Some(lines.into()), actions]
+            .into_iter()
+            .flatten(),
+    )
+    .spacing(BANNER_GAP)
+    .align_y(Center);
+    let pad = super::dir::pad(iced::Padding::ZERO.left(BANNER_PAD[0]).right(BANNER_PAD[1]));
     material(container(content).padding(pad), radius, at)
 }
 

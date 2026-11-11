@@ -7,49 +7,62 @@
 use iced::widget::{Space, column, container, pin, row, text};
 use iced::{Center, Element, Fill, Padding, Rectangle, Size};
 
+use crate::app_language::{S, fmt, tr};
+use crate::dir_row;
+use crate::t;
 use crate::ui::kit::button::{Kind, button, regular};
 use crate::ui::kit::chip::emblem;
+use crate::ui::kit::dir;
 use crate::ui::kit::icon::Icon;
 use crate::ui::kit::progress;
 use crate::ui::kit::surface::{Material, surface};
+use crate::ui::kit::text::paragraph;
 use crate::ui::kit::text::{accent, sub};
 use crate::ui::kit::themes;
 use crate::ui::kit::tokens::{Role, radius};
 
 /// A model the card offers (the design's `models` catalog).
 pub struct Model<'s> {
-    pub name: &'static str,
+    pub name: S,
     pub icon: Icon,
     /// The question's title.
-    pub title: &'static str,
+    pub title: S,
     /// What it does, before "on this PC; none of your content is sent."
-    pub does: &'s str,
-    /// Where it comes from.
+    pub does: Does<'s>,
+    /// Where it comes from (a service's name: the same in every language).
     pub source: &'static str,
 }
 
+/// What a model does: a sentence of the table, or one made of its parts
+/// (the readers that are missing).
+#[derive(Clone, Copy)]
+pub enum Does<'s> {
+    Said(S),
+    Text(&'s str),
+}
+
 pub const OCR: Model<'static> = Model {
-    name: "Text recognition",
+    name: S::md_ocr_name,
     icon: Icon::Text,
-    title: "Text recognition needs a small download",
-    does: "Read text in images",
+    title: S::md_ocr_title,
+    does: Does::Said(S::md_ocr_does),
     source: "GitHub",
 };
 
 /// The readers for other scripts, for a page read as noise.
 pub const SCRIPTS: Model<'static> = Model {
-    name: "Text in other scripts",
+    name: S::md_scripts_name,
     icon: Icon::Text,
-    title: "This text needs another reader",
-    does: "Read Arabic, Cyrillic, Chinese and Japanese text",
+    title: S::md_scripts_title,
+    does: Does::Said(S::md_scripts_does),
     source: "GitHub",
 };
 
 pub const TRANSLATION: Model<'static> = Model {
-    name: "Local translation",
+    name: S::md_tr_name,
     icon: Icon::Translate,
-    title: "Local translation needs a download",
-    does: "Translate without internet",
+    title: S::md_tr_title,
+    does: Does::Said(S::md_tr_does),
     source: "Hugging Face",
 };
 
@@ -128,6 +141,20 @@ const BUTTON_GAP: f32 = 8.0;
 const TITLE_LINE: f32 = 1.4;
 const TEXT_LINE: f32 = 1.6;
 
+/// Why a download stopped, in the app's language: what the user can do about
+/// it (the detail goes to the log).
+pub fn why(e: &crate::ocr::OcrError) -> String {
+    use crate::ocr::OcrError;
+    crate::log!("[opencircle] model download failed: {e}");
+    match e {
+        OcrError::Unreachable { server: true } => t!(md_err_server),
+        OcrError::Unreachable { server: false } => t!(md_err_offline),
+        OcrError::Checksum(_) => t!(md_err_damaged),
+        _ => t!(md_err_other),
+    }
+    .into()
+}
+
 /// `bytes` as the design writes it: whole MB, at least 1.
 pub fn mb(bytes: u64) -> u64 {
     bytes.div_ceil(1_000_000).max(1)
@@ -142,16 +169,19 @@ pub fn card<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let c = &themes::current().c;
     let header = row![
-        text("On-device models")
-            .size(Role::META.size)
-            .color(c.text_muted)
-            .width(Fill),
+        container(
+            text(t!(md_header))
+                .size(crate::ui::kit::text::size(Role::META))
+                .color(c.text_muted)
+        )
+        .width(Fill)
+        .align_x(dir::start()),
     ]
-    .padding(HEADER)
+    .padding(dir::pad(HEADER))
     .align_y(Center);
     let content = column![heading(model, bytes, stage)]
         .push(body(model, bytes, stage, on))
-        .padding(CONTENT);
+        .padding(dir::pad(CONTENT));
     surface(Material::Widget, radius::WINDOW, column![header, content])
         .width(WIDTH)
         .into()
@@ -160,22 +190,26 @@ pub fn card<'a, M: Clone + 'a>(
 /// The emblem, the stage's title and the model's line.
 fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a, M> {
     let (icon, title) = match stage {
-        Stage::Ask => (model.icon, model.title.to_string()),
+        Stage::Ask => (model.icon, tr(model.title).to_string()),
         Stage::Downloading(_) | Stage::Retrying(_) => (
             model.icon,
-            format!("Downloading {}", model.name.to_lowercase()),
+            fmt(S::md_downloading, &[&tr(model.name).to_lowercase()]),
         ),
-        Stage::Verifying => (model.icon, "Checking your download".into()),
-        Stage::Failed(_) => (Icon::Close, "Download could not finish".into()),
+        Stage::Verifying => (model.icon, t!(md_checking).into()),
+        Stage::Failed(_) => (Icon::Close, t!(md_failed).into()),
     };
-    let meta = format!("{} · {} MB · from {}", model.name, mb(bytes), model.source);
+    let meta = fmt(
+        S::md_meta,
+        &[&tr(model.name), &format!("{} MB", mb(bytes)), &model.source],
+    );
     let words = column![
         crate::ui::kit::text::text(Role::CARD_HEADING, title).line_height(TITLE_LINE),
         sub(Role::META, meta).line_height(TEXT_LINE),
     ]
     .spacing(META_GAP)
+    .align_x(dir::start())
     .width(Fill);
-    row![emblem(icon), words]
+    dir_row![emblem(icon), words]
         .spacing(HEADING_GAP)
         .align_y(Center)
         .into()
@@ -191,30 +225,35 @@ fn body<'a, M: Clone + 'a>(
     let said = |s: String| {
         column![
             Space::new().height(ABOVE_TEXT),
-            sub(Role::NOTE, s).line_height(TEXT_LINE)
+            paragraph(sub(Role::NOTE, s).line_height(TEXT_LINE))
         ]
     };
     let buttons = |primary: &'a str, other: &'a str| {
-        let mut r = row![regular(primary, true, Some(on.download.clone()))].spacing(BUTTON_GAP);
+        let mut r = vec![regular(primary, true, Some(on.download.clone()))];
         if let Some(dismiss) = on.dismiss.clone() {
-            r = r.push(regular(other, false, Some(dismiss)));
+            r.push(regular(other, false, Some(dismiss)));
         }
-        column![Space::new().height(ABOVE_BUTTONS), r]
+        let r = dir::row(r).spacing(BUTTON_GAP);
+        column![
+            Space::new().height(ABOVE_BUTTONS),
+            container(r).width(Fill).align_x(dir::start())
+        ]
     };
     match stage {
         Stage::Ask => {
-            let mut c = said(format!(
-                "{} on this PC; none of your content is sent.",
-                model.does
-            ))
-            .push(buttons("Download", "Not now"));
+            let does = match model.does {
+                Does::Said(s) => tr(s).to_string(),
+                Does::Text(t) => t.to_string(),
+            };
+            let mut c =
+                said(fmt(S::md_on_pc, &[&does])).push(buttons(t!(md_download), t!(md_not_now)));
             if let Some(provider) = on.provider {
-                let link = text("Use an AI provider instead").size(Role::META.size);
-                c = c.push(Space::new().height(ABOVE_LINK)).push(button(
-                    link,
-                    Kind::Quiet,
-                    Some(provider),
-                ));
+                let link = text(t!(md_provider)).size(crate::ui::kit::text::size(Role::META));
+                c = c.push(Space::new().height(ABOVE_LINK)).push(
+                    container(button(link, Kind::Quiet, Some(provider)))
+                        .width(Fill)
+                        .align_x(dir::start()),
+                );
             }
             c.into()
         }
@@ -223,11 +262,16 @@ fn body<'a, M: Clone + 'a>(
             let done = total * share as f64;
             // quietly: the download goes on by itself after a server hiccup
             let state: Element<'a, M> = match stage {
-                Stage::Retrying(_) => sub(Role::META, "Retrying…").into(),
+                Stage::Retrying(_) => sub(Role::META, t!(md_retrying)).into(),
                 _ => accent(Role::META_STRONG, format!("{:.0}%", share * 100.0)).into(),
             };
-            let line = row![
-                sub(Role::META, format!("{done:.1} / {} MB", mb(bytes))).width(Fill),
+            let line = dir_row![
+                container(sub(
+                    Role::META,
+                    fmt(S::md_progress, &[&format!("{done:.1} / {} MB", mb(bytes))])
+                ))
+                .width(Fill)
+                .align_x(dir::start()),
                 state,
             ]
             .align_y(Center);
@@ -238,21 +282,21 @@ fn body<'a, M: Clone + 'a>(
                 progress::bar(share),
             ];
             if let Some(dismiss) = on.dismiss {
-                c = c.push(Space::new().height(ABOVE_CANCEL)).push(row![
+                c = c.push(Space::new().height(ABOVE_CANCEL)).push(dir_row![
                     Space::new().width(Fill),
-                    regular("Cancel", false, Some(dismiss))
+                    regular(t!(c_cancel), false, Some(dismiss))
                 ]);
             }
             c.into()
         }
         // ponytail: the design's sliding bar is drawn full and still (no
         // frame clock for a step that lasts a moment)
-        Stage::Verifying => said("Checking integrity and setting up on this PC…".into())
+        Stage::Verifying => said(t!(md_verifying).into())
             .push(Space::new().height(ABOVE_BAR))
             .push(progress::bar(1.0))
             .into(),
         Stage::Failed(why) => said(why.to_string())
-            .push(buttons("Try again", "Cancel"))
+            .push(buttons(t!(md_try_again), t!(c_cancel)))
             .into(),
     }
 }
@@ -321,6 +365,34 @@ mod tests {
                 let lost = shot::out_of_reach(view(model, stage, provider), SIZE);
                 assert!(lost.is_empty(), "{name}: {lost:?}");
                 let file = format!("model-download-{name}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                    view(model, stage, provider)
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// Arabic: every stage mirrored, from the table, the size isolated.
+    #[test]
+    fn every_arabic_stage_matches_its_golden_image() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let _ar = crate::ui::kit::testing::arabic();
+            let why = t!(md_err_offline);
+            let stages = [
+                ("ask-ocr", &OCR, Stage::Ask, false),
+                ("ask-translation", &TRANSLATION, Stage::Ask, true),
+                ("downloading", &OCR, Stage::Downloading(0.42), false),
+                ("verifying", &OCR, Stage::Verifying, false),
+                ("failed", &OCR, Stage::Failed(why), false),
+            ];
+            for (name, model, stage, provider) in stages {
+                let lost = shot::out_of_reach(view(model, stage, provider), SIZE);
+                assert!(lost.is_empty(), "{name}: {lost:?}");
+                let file = format!("model-download-{name}-ar-{}", theme.id);
                 failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
                     view(model, stage, provider)
                 }));

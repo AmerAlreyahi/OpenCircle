@@ -8,8 +8,11 @@ use super::{Card, Msg, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ai::Fix;
+use crate::app_language::{S, fmt};
+use crate::t;
 use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
 use crate::ui::kit::button::{Kind, button, label as button_label};
+use crate::ui::kit::dir;
 use crate::ui::kit::icon_button::{State, icon_button};
 use crate::ui::kit::markdown;
 use crate::ui::kit::panel_frame::{self as frame, Header};
@@ -18,7 +21,7 @@ use crate::ui::kit::text::text as label;
 use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::picker;
-use crate::ui::screens::model_download::{self, Model, OCR, SCRIPTS, Stage, TRANSLATION};
+use crate::ui::screens::model_download::{self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
 /// The pill's distance to the top of the screen, and the status tag's to
 /// the pill (PICKER_SPEC.md).
@@ -45,6 +48,9 @@ impl Session {
     /// floating result card (at `at`, like every result card) for prompts,
     /// errors and the word card. `hover`: on the card's resize edge.
     pub fn view<'a>(&'a self, screen: Size, at: Rectangle, hover: bool) -> Element<'a, Msg> {
+        // the pill and its lists speak the app's language (the word card's
+        // own text follows the translation's language: `Card::rtl`)
+        let _dir = dir::scope(crate::app_language::rtl());
         let card =
             |body: Element<'a, Msg>, footer: Option<Element<'a, Msg>>, title: Option<&'a str>| {
                 let title = title.unwrap_or(actions::translate::ACTION.label);
@@ -88,10 +94,10 @@ impl Session {
             None => match &self.readers {
                 // only the readers that aren't installed
                 Some((bytes, names)) => {
-                    let does = format!("Read {names} text");
+                    let does = fmt(S::md_read_names, &[names]);
                     download(
                         &Model {
-                            does: &does,
+                            does: Does::Text(&does),
                             ..SCRIPTS
                         },
                         *bytes,
@@ -109,7 +115,7 @@ impl Session {
             }
             Phase::Downloading(done) => fetched(Stage::at(*done)),
             Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
-            Phase::Translating => self.pill(whole, Some("Translating…"), None, None),
+            Phase::Translating => self.pill(whole, Some(t!(tp_translating)), None, None),
             // Already in the target, no offline model, an AI error: one soft line
             // under the pill, never a card, and the pill stays put (owner,
             // 2026-11-04). The picker stays: another pair may work offline.
@@ -118,7 +124,7 @@ impl Session {
                     .spacing(TAG_SPACING)
                     .align_y(Center);
                 if problem.setup {
-                    let set_up = button_label("Set up AI");
+                    let set_up = button_label(t!(tp_set_up_ai));
                     line = line.push(button(set_up, Kind::Quiet, Some(Msg::OpenSettings)));
                 }
                 let below = surface(Material::Widget, radius::FULL, line).padding(NOTE_PAD);
@@ -174,12 +180,12 @@ impl Session {
         then: Option<Element<'a, Msg>>,
         below: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
-        let rtl = self.picker.rtl;
+        let rtl = dir::rtl();
         let at = pill_at(region);
         let mut layer =
             stack![pin(opaque(self.picker.pill(Msg::Picker, self.snip_button()))).position(at)];
         if status.is_some() || then.is_some() {
-            let line = row![].push(status.map(note)).push(then);
+            let line = dir::row([status.map(|s| note(s).into()), then].into_iter().flatten());
             let tag = surface(
                 Material::Widget,
                 radius::FULL,
@@ -258,7 +264,7 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
     if let Some(turn) = card.chat.turns.last() {
         body = body.push(
             match turn.answer.is_empty() && card.chat.status == Status::Streaming {
-                true => note("Thinking…").width(Fill).into(),
+                true => note(t!(tp_thinking)).width(Fill).into(),
                 // Markdown, as the chat shows it (lines shape by their own direction)
                 false => markdown::markdown(card.answer.items()).map(Msg::Answer),
             },
@@ -280,6 +286,6 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
         ));
     }
     let ask = &actions::ask::ACTION;
-    let buttons = actions(("Explain", Msg::Explain), [(ask.label, Msg::Ask)]);
+    let buttons = actions((t!(tp_explain), Msg::Explain), [(ask.label, Msg::Ask)]);
     (body.into(), buttons)
 }

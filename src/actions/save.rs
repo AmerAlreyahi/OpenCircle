@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{Action, Crop, Key};
+use crate::app_language::{S, Said, fmt};
 use crate::config::{Format, SnipConfig};
 
 pub const ACTION: Action = Action {
@@ -20,7 +21,7 @@ pub const ACTION: Action = Action {
 fn run(crop: Crop) -> Result<String, String> {
     let config = crate::config::current();
     let (crop, format) = export(crop, &config.snip);
-    let folder = start_folder(&config.general.save_folder).ok_or(NOT_SAVED)?;
+    let folder = start_folder(&config.general.save_folder).ok_or_else(|| NOT_SAVED.to_string())?;
     write_into(&folder, &crop, format)
 }
 
@@ -36,7 +37,7 @@ fn write_into(folder: &Path, crop: &Crop, format: Format) -> Result<String, Stri
             crate::log!("save failed: {e}");
             NOT_SAVED.to_string()
         })?;
-    Ok(format!("Saved to {}", short_path(folder)))
+    Ok(fmt(S::pill_saved, &[&short_path(folder)]))
 }
 
 /// Writes `OpenCircle-<stamp>.<ext>`, or `-2`, `-3`, ... if that name is taken:
@@ -64,7 +65,7 @@ fn write_new(folder: &Path, stamp: &str, ext: &str, bytes: &[u8]) -> std::io::Re
 }
 
 /// The error pill's text (the cause goes to the log).
-const NOT_SAVED: &str = "Couldn't save. Pick a folder you can write to in Settings.";
+const NOT_SAVED: Said = Said(S::pill_not_saved);
 
 /// `folder` for a pill: all of it, or its tail after an ellipsis.
 fn short_path(folder: &Path) -> String {
@@ -180,11 +181,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("oc-save-into-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let said = super::write_into(&dir, &crop(), crate::config::Format::Png).unwrap();
-        assert!(said.starts_with("Saved to "), "{said}");
+        assert!(
+            said.starts_with(&crate::app_language::fmt(
+                crate::app_language::S::pill_saved,
+                &[&""]
+            )),
+            "{said}"
+        );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
         let said = super::write_into(&dir, &crop(), crate::config::Format::Png);
-        assert_eq!(said.unwrap_err(), super::NOT_SAVED, "folder is gone");
+        assert_eq!(
+            said.unwrap_err(),
+            super::NOT_SAVED.to_string(),
+            "folder is gone"
+        );
     }
 
     #[test]

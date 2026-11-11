@@ -57,4 +57,37 @@ mod tests {
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }
+
+    /// The table's words, mirrored: the dot at the right of the line.
+    #[test]
+    fn every_toast_mirrors_in_arabic() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let _ar = crate::ui::kit::testing::arabic();
+            for (tone, name, text) in [
+                (Tone::Ok, "ok", crate::t!(pill_copied).to_string()),
+                (Tone::Error, "error", crate::t!(pill_cant_copy).to_string()),
+                (
+                    Tone::Neutral,
+                    "neutral",
+                    crate::app_language::fmt(
+                        crate::app_language::S::pill_tray,
+                        &[&"Ctrl+Shift+Space"],
+                    ),
+                ),
+            ] {
+                let file = format!("toast-{name}-rtl-{}", theme.id);
+                failed.extend(golden::check(
+                    "screens",
+                    &file,
+                    size(&text),
+                    &[1.0, 2.0],
+                    || view::<()>(&text, tone, RADIUS),
+                ));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 }

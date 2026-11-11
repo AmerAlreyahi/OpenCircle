@@ -228,6 +228,23 @@ pub fn language_name(code: &str) -> &'static str {
     tr(key)
 }
 
+/// A string a backend names (a pill's text) and the UI says in its language
+/// when it shows it: `Said(S::pill_copied).to_string()` / `.into()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Said(pub S);
+
+impl std::fmt::Display for Said {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(tr(self.0))
+    }
+}
+
+impl From<Said> for String {
+    fn from(s: Said) -> String {
+        tr(s.0).to_string()
+    }
+}
+
 /// A key prints as its string in the current language.
 impl std::fmt::Display for S {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

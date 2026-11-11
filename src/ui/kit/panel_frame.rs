@@ -50,11 +50,20 @@ pub fn frame<'a, Message: Clone + 'a>(
     radius: f32,
     on_drag: Message,
 ) -> Element<'a, Message> {
-    let heading = row![
-        icon(glyph, ICON).color(c().accent),
-        text(Role::PAGE_TITLE, title).width(Fill),
-    ]
-    .push(aside.map(|a| super::text::muted(Role::ROW_DESC, a)))
+    let heading = super::dir::row(
+        [
+            Some(icon(glyph, ICON).color(c().accent).into()),
+            Some(
+                container(text(Role::PAGE_TITLE, title))
+                    .width(Fill)
+                    .align_x(super::dir::start())
+                    .into(),
+            ),
+            aside.map(|a| super::text::muted(Role::ROW_DESC, a).into()),
+        ]
+        .into_iter()
+        .flatten(),
+    )
     .spacing(ICON_GAP)
     .height(HEADING)
     .align_y(Center);

@@ -214,7 +214,7 @@ impl Live {
             let done = crate::actions::translate::download(&source, pair, |done, total| {
                 let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
             });
-            let _ = tx.unbounded_send(Msg::Downloaded(done));
+            let _ = tx.unbounded_send(Msg::Downloaded(done.map_err(|e| e.to_string())));
         })
         .abortable();
         self.download = Some(handle.abort_on_drop());

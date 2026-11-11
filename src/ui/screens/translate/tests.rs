@@ -824,8 +824,17 @@ fn every_translate_state_matches_its_golden_image() {
         for name in names {
             let s = make(name);
             let file = format!("translate-{name}-{}", theme.id);
-            failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
-                s.view(SCREEN, at, false)
+            // (a wide screen for the Arabic offer: its tag is longer than the room
+            // a 720 px screen leaves beside the pill)
+            let (size, at) = match name == "offer-ar" {
+                true => (
+                    Size::new(1100.0, 120.0),
+                    card::place(Size::new(1100.0, 120.0), None, None),
+                ),
+                false => (SCREEN, at),
+            };
+            failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                s.view(size, at, false)
             }));
         }
     }
@@ -898,7 +907,6 @@ fn every_picker_state_matches_its_golden_image() {
                 s.phase = Phase::Failed(problem(format!("T{}.", &why[1..]), true));
             }
             "p7-target-ar" => {
-                s.picker.rtl = true;
                 s.picker.target = "ar".into();
                 let _ = s.picker.update(P::Open(Side::Target));
                 let _ = s.picker.update(P::Key(Nav::Down));
@@ -928,11 +936,26 @@ fn every_picker_state_matches_its_golden_image() {
             "p6-ai-picked",
             "p7-target-ar",
             "offer",
+            "p1-closed-ar",
+            "offer-ar",
         ] {
-            let s = make(name);
+            let _ar = name.ends_with("-ar").then(crate::ui::kit::testing::arabic);
+            let s = make(if name == "p7-target-ar" {
+                name
+            } else {
+                name.trim_end_matches("-ar")
+            });
+
             let file = format!("picker-{name}-{}", theme.id);
-            failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
-                s.view(SCREEN, at, false)
+            // (a wide screen for the Arabic offer: its tag is longer than the room
+            // a 720 px screen leaves beside the pill)
+            let wide = Size::new(1100.0, 120.0);
+            let (size, at) = match name == "offer-ar" {
+                true => (wide, card::place(wide, None, None)),
+                false => (SCREEN, at),
+            };
+            failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                s.view(size, at, false)
             }));
         }
     }

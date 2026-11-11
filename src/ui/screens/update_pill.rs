@@ -8,6 +8,8 @@
 use iced::widget::row;
 use iced::{Center, Element, Size};
 
+use crate::app_language::{S, fmt};
+use crate::t;
 use crate::ui::kit::button::{Kind as Button, button, label, labelled, labelled_width};
 use crate::ui::kit::icon::{Icon, icon};
 use crate::ui::kit::logo::logo;
@@ -50,12 +52,10 @@ pub struct Pill {
 impl Pill {
     pub fn new(kind: Kind) -> Pill {
         let title = match &kind {
-            Kind::Ready { version, how } if *how == How::GetIt => {
-                format!("OpenCircle {version} is out")
-            }
-            Kind::Ready { version, .. } => format!("OpenCircle {version} is ready"),
-            Kind::Updating => "Updating OpenCircle…".into(),
-            Kind::Updated { version } => format!("Updated to {version}"),
+            Kind::Ready { version, how } if *how == How::GetIt => fmt(S::up_out, &[version]),
+            Kind::Ready { version, .. } => fmt(S::up_ready, &[version]),
+            Kind::Updating => t!(up_updating).into(),
+            Kind::Updated { version } => fmt(S::up_updated, &[version]),
         };
         Pill { kind, title }
     }
@@ -64,14 +64,14 @@ impl Pill {
         match self.kind {
             Kind::Ready {
                 how: How::Restart, ..
-            } => "Installs when you restart OpenCircle",
+            } => t!(up_line_restart),
             Kind::Ready {
                 how: How::Setup, ..
-            } => "Windows asks once for permission to install",
+            } => t!(up_line_setup),
             Kind::Ready {
                 how: How::GetIt, ..
-            } => "Update it with your package manager or the release page",
-            Kind::Updating => "Back in a few seconds",
+            } => t!(up_line_getit),
+            Kind::Updating => t!(up_line_back),
             Kind::Updated { .. } => "",
         }
     }
@@ -79,16 +79,20 @@ impl Pill {
     /// The main button: its glyph and words.
     fn main(how: How) -> (Icon, &'static str) {
         match how {
-            How::Restart => (Icon::Restart, "Restart now"),
-            How::Setup => (Icon::Shield, "Restart now"),
-            How::GetIt => (Icon::External, "Get it"),
+            How::Restart => (Icon::Restart, t!(g_restart_now)),
+            How::Setup => (Icon::Shield, t!(g_restart_now)),
+            How::GetIt => (Icon::External, t!(g_get_it)),
         }
     }
 
     fn actions_width(&self) -> f32 {
         match self.kind {
             Kind::Ready { how, .. } => {
-                let later = width("Later", Role::CONTROL.size, font(Role::CONTROL));
+                let later = width(
+                    t!(up_later),
+                    crate::ui::kit::text::size(Role::CONTROL),
+                    font(Role::CONTROL),
+                );
                 later + ACTION_GAP + labelled_width(Pill::main(how).1)
             }
             _ => 0.0,
@@ -98,7 +102,7 @@ impl Pill {
     /// The window's size (logical px, whole).
     pub fn size(&self) -> Size {
         match self.kind {
-            Kind::Updated { .. } => size_with_action(&self.title, "What's new"),
+            Kind::Updated { .. } => size_with_action(&self.title, t!(g_whats_new)),
             _ => banner_size(&self.title, self.line(), self.actions_width()),
         }
     }
@@ -115,7 +119,7 @@ pub fn view(p: &Pill, radius: f32, turn: f32, still: bool) -> Element<'_, Msg> {
     let at = p.size();
     match p.kind {
         Kind::Updated { .. } => {
-            with_action(&p.title, Tone::Ok, radius, "What's new", Msg::WhatsNew)
+            with_action(&p.title, Tone::Ok, radius, t!(g_whats_new), Msg::WhatsNew)
         }
         Kind::Updating => banner(
             spinner(logo(32), size::ICON, turn, still),
@@ -128,7 +132,7 @@ pub fn view(p: &Pill, radius: f32, turn: f32, still: bool) -> Element<'_, Msg> {
         Kind::Ready { how, .. } => {
             let (glyph, words) = Pill::main(how);
             let actions = row![
-                button(label("Later"), Button::Quiet, Some(Msg::Later)),
+                button(label(t!(up_later)), Button::Quiet, Some(Msg::Later)),
                 labelled(
                     glyph.glyph(),
                     words,
@@ -188,6 +192,34 @@ mod tests {
         }));
         assert!(t.iter().any(|s| s == "What's new"), "{t:?}");
         assert!(Pill::new(Kind::Updating).spins() && !ready(How::Restart).spins());
+    }
+
+    /// Arabic: each pill mirrored (mark and buttons swap sides), from the table.
+    #[test]
+    fn every_arabic_pill_matches_its_golden_image() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let _ar = crate::ui::kit::testing::arabic();
+            for (name, p) in [
+                ("ready", ready(How::Restart)),
+                ("setup", ready(How::Setup)),
+                ("updating", Pill::new(Kind::Updating)),
+                (
+                    "updated",
+                    Pill::new(Kind::Updated {
+                        version: "0.1.5".into(),
+                    }),
+                ),
+            ] {
+                let file = format!("update-pill-{name}-ar-{}", theme.id);
+                failed.extend(golden::check("screens", &file, p.size(), &[1.0], || {
+                    view(&p, RADIUS, 0.0, true)
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 
     /// Clicks: Later, the main button, What's new.

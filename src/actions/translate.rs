@@ -69,18 +69,17 @@ pub fn download(
     source: &str,
     pair: Option<&'static mt::Pair>,
     progress: impl FnMut(u64, u64),
-) -> Result<(), String> {
-    let done = match pair {
+) -> Result<(), crate::ocr::OcrError> {
+    match pair {
         Some(pair) => pair.ensure(progress),
         None => models::ensure(&models::ocr_files(models::recognizer_for(source)), progress),
-    };
-    done.map_err(|e| e.to_string())
+    }
 }
 
 /// The readers for other scripts (Arabic, Cyrillic, Chinese and Japanese)
 /// that aren't on disk, for a page read as noise.
-pub fn download_readers(progress: impl FnMut(u64, u64)) -> Result<(), String> {
-    models::ensure(&models::other_scripts_files(), progress).map_err(|e| e.to_string())
+pub fn download_readers(progress: impl FnMut(u64, u64)) -> Result<(), crate::ocr::OcrError> {
+    models::ensure(&models::other_scripts_files(), progress)
 }
 
 /// What `download_readers` fetches (bytes).

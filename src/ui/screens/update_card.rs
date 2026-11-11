@@ -8,7 +8,11 @@
 use iced::widget::{column, row};
 use iced::{Center, Element, Size};
 
+use crate::app_language::{S, fmt};
+use crate::dir_row;
+use crate::t;
 use crate::ui::kit::button::{FOLD_H, Kind, button, fold, label, regular};
+use crate::ui::kit::dir;
 use crate::ui::kit::icon::{Icon, icon};
 use crate::ui::kit::panel_frame::{PADDING, frame, height};
 use crate::ui::kit::text::{Ink, LINKED_LINE, font, lines, muted, styled, width};
@@ -68,7 +72,7 @@ impl Card {
 
     fn new(version: &str, notes: &str, url: &str, installed: bool) -> Card {
         Card {
-            title: format!("What's new in OpenCircle {version}"),
+            title: fmt(S::wn_title, &[&version]),
             installed,
             notes: parse_notes(notes),
             url: url.to_string(),
@@ -85,8 +89,8 @@ impl Card {
     /// The folded sections: title, lines, opened.
     fn folds(&self) -> impl Iterator<Item = (usize, &'static str, &[NoteLine], bool)> {
         [
-            ("Fixes", &self.notes.fixes),
-            ("Upgrade notes", &self.notes.upgrade),
+            (t!(wn_fixes), &self.notes.fixes),
+            (t!(wn_upgrade), &self.notes.upgrade),
         ]
         .into_iter()
         .enumerate()
@@ -144,47 +148,54 @@ fn bullet<'a>(line: &'a NoteLine, role: Role, mark: Ink) -> Element<'a, Msg> {
     .into()
 }
 
+/// The release's own words (English, as published) stay one left-to-right
+/// block inside a mirrored card: its headings, folds and buttons mirror, the
+/// quoted text and its bullets do not.
+fn quoted<'a>(build: impl FnOnce() -> Element<'a, Msg>) -> Element<'a, Msg> {
+    let _ltr = dir::scope(false);
+    build()
+}
+
 /// The card, corners of `radius` (`shape::radius(RADIUS)`: square where
 /// windows can't be cut).
 pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
     let n = &c.notes;
     let mut body = column![].spacing(GAP);
     if !n.summary.is_empty() {
-        body = body.push(styled(runs(&n.summary), TEXT, Msg::Link));
+        body = body.push(quoted(|| styled(runs(&n.summary), TEXT, Msg::Link)));
     }
     if !n.highlights.is_empty() {
-        body = body.push(muted(Role::SECTION, "HIGHLIGHTS"));
+        body = body.push(muted(Role::SECTION, t!(wn_highlights)));
     }
     for line in &n.highlights {
-        body = body.push(bullet(line, TEXT, Ink::Strong));
+        body = body.push(quoted(|| bullet(line, TEXT, Ink::Strong)));
     }
     if n.more > 0 {
-        let more = format!("{} more in the full release notes", n.more);
+        let more = fmt(S::wn_more, &[&n.more]);
         body = body.push(muted(SMALL, more));
     }
     for (i, title, items, open) in c.folds() {
         body = body.push(fold(title, items.len(), open, Msg::Fold(i)));
         if open {
-            let items = column(items.iter().map(|l| bullet(l, SMALL, Ink::Plain)))
-                .spacing(GAP)
-                .padding(iced::Padding::ZERO.left(18.0));
-            body = body.push(items);
+            body = body.push(quoted(|| {
+                column(items.iter().map(|l| bullet(l, SMALL, Ink::Plain)))
+                    .spacing(GAP)
+                    .padding(iced::Padding::ZERO.left(18.0))
+                    .into()
+            }));
         }
     }
-    let full = row![
-        label("Full release notes"),
-        icon(Icon::External, size::ICON_SMALL)
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    let actions = row![
-        regular("Done", true, Some(Msg::Close)),
+    let full = dir_row![label(t!(wn_full)), icon(Icon::External, size::ICON_SMALL)]
+        .spacing(space::GAP)
+        .align_y(Center);
+    let actions = dir_row![
+        regular(t!(wn_done), true, Some(Msg::Close)),
         button(full, Kind::Quiet, Some(Msg::Page)),
     ]
     .spacing(ACTION_GAP)
     .align_y(Center);
     let (glyph, aside) = match c.installed {
-        true => (Icon::Check, Some("Updated just now")),
+        true => (Icon::Check, Some(t!(wn_installed))),
         false => (Icon::Download, None),
     };
     frame(glyph, &c.title, aside, body, actions, radius, Msg::Drag)
@@ -282,6 +293,33 @@ mod tests {
         let c = Card::installed("9.9.9", "", "https://e.x/r");
         assert!(plain_note(&c.notes.summary).contains("release page"));
         assert!(c.size().height < 200.0, "{:?}", c.size());
+    }
+
+    /// Arabic: the card mirrored (title, folds, buttons), the release's own
+    /// English notes one left-to-right block inside it.
+    #[test]
+    fn the_arabic_whats_new_card_matches_its_golden_image() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let _ar = crate::ui::kit::testing::arabic();
+            let mut open = Card::installed("0.1.5", NOTES, "https://e.x/r");
+            open.fold(0);
+            for (name, c) in [
+                (
+                    "whats-new",
+                    Card::installed("0.1.5", NOTES, "https://e.x/r"),
+                ),
+                ("whats-new-fixes", open),
+            ] {
+                let file = format!("update-card-{name}-ar-{}", theme.id);
+                failed.extend(golden::check("screens", &file, c.size(), &[1.0], || {
+                    view(&c, RADIUS)
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 
     /// Short and long (a fold open), Sapphire and Daylight.

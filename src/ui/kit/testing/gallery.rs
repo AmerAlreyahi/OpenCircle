@@ -689,7 +689,8 @@ fn option_list_sheet() {
     let open = |accent, open| {
         move |ar| {
             let label = s(ar, "English", "العربية").into();
-            opener(label, accent, open, ar, (140.0, 32.0), ())
+            let _dir = super::super::dir::scope(ar);
+            opener(label, accent, open, (140.0, 32.0), ())
         }
     };
     let lang = |look: Look, bold| {
@@ -698,7 +699,8 @@ fn option_list_sheet() {
                 true => ("البرتغالية", None),
                 false => ("Portuguese", bold),
             };
-            choice(name, bold, look, 180.0, ar, ())
+            let _dir = super::super::dir::scope(ar);
+            choice(name, bold, look, 180.0, ())
         }
     };
     let (current, ringed, needs_ai) = (

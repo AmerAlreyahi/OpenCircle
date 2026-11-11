@@ -50,14 +50,15 @@ pub fn input<'a, Message: Clone + 'a>(
 }
 
 /// A list's search field: `input` with the search glyph (`text_muted`) at
-/// its start; `rtl`: the glyph and the text at the right.
+/// its start: in a right-to-left view (`kit::dir`) the glyph and the text are
+/// at the right.
 pub fn search<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &str,
-    rtl: bool,
 ) -> text_input::TextInput<'a, Message> {
     use super::icon::{FONT, Icon};
     use super::tokens::size;
+    let rtl = super::dir::rtl();
     let side = match rtl {
         true => text_input::Side::Right,
         false => text_input::Side::Left,

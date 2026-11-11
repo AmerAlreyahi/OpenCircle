@@ -10,11 +10,12 @@ use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem}
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
+use crate::app_language::{S, fmt};
 #[cfg(target_os = "linux")]
 use crate::capture::scroll::Finish;
 use crate::config::{Config, Target};
 use crate::labs::{Feature, Labs};
-use crate::{Trigger, Triggers};
+use crate::{Trigger, Triggers, t};
 
 /// The tray menu's entries, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,15 +50,15 @@ impl Entry {
     /// waiting version (`update_label`).
     pub fn label(self) -> &'static str {
         match self {
-            Entry::Update => "Restart to update",
-            Entry::Circle => "Circle to Search",
-            Entry::Translate => "Translate screen",
-            Entry::Snip => "Snip",
-            Entry::Live => "Live translate",
-            Entry::Song => "Song search",
-            Entry::ClickPins => "Make pins clickable",
-            Entry::Settings => "Settings…",
-            Entry::Quit => "Quit",
+            Entry::Update => t!(tray_update),
+            Entry::Circle => t!(tray_circle),
+            Entry::Translate => t!(tray_translate),
+            Entry::Snip => t!(nav_snip),
+            Entry::Live => t!(lb_live),
+            Entry::Song => t!(lb_song),
+            Entry::ClickPins => t!(tray_click_pins),
+            Entry::Settings => t!(tray_settings),
+            Entry::Quit => t!(tray_quit),
         }
     }
 
@@ -152,8 +153,8 @@ pub fn entries(labs: &Labs, update: bool) -> Vec<Entry> {
 pub fn update_label() -> Option<String> {
     let offer = crate::update::offer()?;
     Some(match offer.how {
-        crate::update::How::GetIt => format!("Get OpenCircle {}", offer.version),
-        _ => format!("Restart to update ({})", offer.version),
+        crate::update::How::GetIt => fmt(S::tray_get_v, &[&offer.version]),
+        _ => fmt(S::tray_update_v, &[&offer.version]),
     })
 }
 
@@ -263,12 +264,14 @@ thread_local! {
 /// The menu while a long capture runs (Wayland; owner, 2026-11-10): Finish
 /// (Snip opens with the page picked), Copy, Save, Cancel.
 #[cfg(target_os = "linux")]
-pub const LONG: [(Finish, &str); 4] = [
-    (Finish::Done, "Finish"),
-    (Finish::Copy, "Copy"),
-    (Finish::Save, "Save…"),
-    (Finish::Cancel, "Cancel"),
-];
+fn long_rows() -> [(Finish, &'static str); 4] {
+    [
+        (Finish::Done, t!(o_finish)),
+        (Finish::Copy, t!(g_default_copy)),
+        (Finish::Save, t!(tray_save)),
+        (Finish::Cancel, t!(c_cancel)),
+    ]
+}
 
 /// The record dot on the icon while a long capture runs.
 #[cfg(target_os = "linux")]
@@ -289,7 +292,9 @@ pub fn capturing(label: Option<String>) {
     #[cfg(test)]
     SHOWN.with_borrow_mut(|s| s.push(label.clone()));
     #[cfg(target_os = "linux")]
+    let lang = crate::app_language::current();
     gtk::glib::idle_add_once(move || {
+        crate::app_language::set(lang);
         let on = label.is_some();
         let was = CAPTURING.replace(on);
         HELD.with_borrow(|held| {
@@ -305,6 +310,9 @@ pub fn capturing(label: Option<String>) {
                 match on {
                     true => {
                         clear(built);
+                        for ((_, text), (_, item)) in long_rows().iter().zip(&built.long) {
+                            item.set_text(text);
+                        }
                         for (_, item) in &built.long {
                             let _ = built.menu.append(item as &dyn IsMenuItem);
                         }
@@ -356,9 +364,10 @@ fn fill(built: &Built, labs: &Labs, update: Option<&str>) {
             {
                 let _ = built.menu.append(s as &dyn IsMenuItem);
             }
-            if *entry == Entry::Update {
-                item.set_text(update.unwrap_or_default());
-            }
+            item.set_text(match (entry, update) {
+                (Entry::Update, Some(update)) => update,
+                _ => entry.label(),
+            });
             let _ = built.menu.append(item as &dyn IsMenuItem);
             first = false;
         }
@@ -372,8 +381,11 @@ pub fn refresh() {
     {
         let labs = crate::config::current().labs;
         let update = update_label();
+        let lang = crate::app_language::current();
         // (a long capture's menu stays until it ends: `capturing` fills it then)
         let apply = move || {
+            // the GTK thread speaks the UI's language (it has its own copy)
+            crate::app_language::set(lang);
             if !CAPTURING.get() {
                 BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
             }
@@ -396,7 +408,7 @@ pub fn show_update(dot: Option<[u8; 3]>) {
             if let Some(tray) = held {
                 let _ = tray.set_icon(Some(icon(dot)));
                 let tip = match update_label() {
-                    Some(label) if dot.is_some() => format!("OpenCircle · {label}"),
+                    Some(label) if dot.is_some() => fmt(S::tray_tip, &[&label]),
                     _ => "OpenCircle".into(),
                 };
                 let _ = tray.set_tooltip(Some(tip));
@@ -600,7 +612,7 @@ fn desktop_menu(tx: Triggers) -> Menu {
         .map(|e| (e, MenuItem::new(e.label(), true, None)))
         .collect();
     let ids: Vec<_> = (items.iter()).map(|(e, i)| (*e, i.id().clone())).collect();
-    let long: Vec<_> = (LONG.into_iter())
+    let long: Vec<_> = (long_rows().into_iter())
         .map(|(how, label)| (how, MenuItem::new(label, true, None)))
         .collect();
     let long_ids: Vec<_> = (long.iter()).map(|(h, i)| (*h, i.id().clone())).collect();

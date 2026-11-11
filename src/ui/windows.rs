@@ -32,9 +32,11 @@ pub use super::platform::windows::{
     reshape, screen, setup_window, show, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
+use crate::app_language::S;
 use crate::capture::live;
 use crate::config::{self, Config, Theme};
 use crate::snip::annotate::dragout::{self, DragFile};
+use crate::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -593,9 +595,10 @@ impl Windows {
     /// "Copied" (or why not) under the strip.
     fn steps_toast(&mut self, ok: bool) -> Task<Msg> {
         let text = match ok {
-            true => copy::COPIED_PILL,
-            false => "Couldn't copy",
+            true => copy::COPIED_PILL.to_string(),
+            false => t!(pill_cant_copy).to_string(),
         };
+        let text = text.as_str();
         let Some((_, strip)) = &self.steps else {
             return Task::none();
         };
@@ -763,15 +766,10 @@ impl Windows {
         scale: f32,
     ) -> Task<Msg> {
         if self.live_pins() >= MAX_LIVE {
-            return self.toast(
-                "Up to 4 live pins: close one first",
-                Tone::Neutral,
-                None,
-                TOAST_MS,
-            );
+            return self.toast(t!(pill_pins_max), Tone::Neutral, None, TOAST_MS);
         }
         let Some(pick) = (live::geom(source).ok()).and_then(|g| live::pick(region, &g)) else {
-            let text = "Pick a part of one window to pin it live";
+            let text = t!(pill_pins_pick);
             return self.toast(text, Tone::Neutral, None, TOAST_MS);
         };
         let (id, open) = self.open_pin(first, at, scale);
@@ -870,7 +868,7 @@ impl Windows {
 
     /// The update card (release notes) with `card`; replaces an open one's content.
     pub fn update_card(&mut self, card: update_card::Card) -> Task<Msg> {
-        let size = card.size();
+        let size = spoken(|| card.size());
         let old = self.update_card.take().map(|(id, _)| id);
         // Wayland can't resize it in place (`monitor::resize`): a new window replaces it
         let reuse = old.filter(|_| platform::monitor::can_hide_windows());
@@ -904,7 +902,7 @@ impl Windows {
         let Some(pill) = pill else {
             return old.unwrap_or_else(Task::none);
         };
-        let size = pill.size();
+        let size = spoken(|| pill.size());
         let place = platform::monitor::places()
             .into_iter()
             .min_by_key(|m| (m.origin.0 != 0 || m.origin.1 != 0, m.origin))
@@ -972,7 +970,7 @@ impl Windows {
         if self.pins_through() {
             menu = menu.with_click_pins();
         }
-        let size = menu.size();
+        let size = spoken(|| menu.size());
         let place = platform::tray::menu_place(icon, size);
         crate::log!(
             "[opencircle] tray menu at {:?} (icon {icon:?})",
@@ -1224,10 +1222,10 @@ impl Windows {
                         settings::Outcome::CopyDiagnostics => {
                             let report = crate::diagnostics::report(&crate::config::current());
                             let toast = match crate::actions::copy::text(report) {
-                                Ok(()) => self.toast("Diagnostics copied", true, None, TOAST_MS),
+                                Ok(()) => self.toast(t!(pill_diag), true, None, TOAST_MS),
                                 Err(e) => {
                                     crate::log!("[opencircle] copy diagnostics failed: {e}");
-                                    self.toast("Couldn't copy", false, None, TOAST_MS)
+                                    self.toast(t!(pill_cant_copy), false, None, TOAST_MS)
                                 }
                             };
                             return Task::batch([keys, toast]);
@@ -1567,13 +1565,13 @@ impl Windows {
                 platform::monitor::resize(id, pin.size())
             }
             PinMsg::Live(live::Event::Gone) => {
-                let gone = self.toast("The pinned window closed", Tone::Neutral, None, TOAST_MS);
+                let gone = self.toast(t!(pill_pin_gone), Tone::Neutral, None, TOAST_MS);
                 Task::batch([close(id), gone])
             }
             PinMsg::Live(live::Event::Failed(e)) => {
                 crate::log!("[opencircle] live pin: {e}");
                 pin.live = None; // a still pin from here
-                let text = "Can't follow this window: the pin stays still";
+                let text = t!(pill_pin_still);
                 self.toast(text, false, None, TOAST_MS)
             }
             PinMsg::Opacity => {
@@ -1604,20 +1602,20 @@ impl Windows {
         }
         if let Some((_, card)) = self.update_card.as_ref().filter(|(c, _)| *c == window) {
             let radius = shape::radius(update_card::RADIUS);
-            return Some(update_card::view(card, radius).map(Msg::UpdateCard));
+            return Some(spoken(|| update_card::view(card, radius)).map(Msg::UpdateCard));
         }
         if let Some((_, pill, _)) = self.update_pill.as_ref().filter(|(p, ..)| *p == window) {
             let radius = shape::radius(update_pill::RADIUS);
             let still = super::kit::motion::reduced();
-            return Some(
-                update_pill::view(pill, radius, self.pill_turn, still).map(Msg::UpdatePill),
-            );
+            let view = spoken(|| update_pill::view(pill, radius, self.pill_turn, still));
+            return Some(view.map(Msg::UpdatePill));
         }
         if let Some((_, menu)) = self.tray_menu.as_ref().filter(|(m, _)| *m == window) {
-            return Some(tray_menu::view(menu).map(Msg::TrayMenu));
+            return Some(spoken(|| tray_menu::view(menu)).map(Msg::TrayMenu));
         }
         if let Some((_, text, tone)) = self.toasts.iter().find(|(t, ..)| *t == window) {
-            return Some(toast::view(text, *tone, shape::radius(toast::RADIUS)));
+            let radius = shape::radius(toast::RADIUS);
+            return Some(spoken(|| toast::view(text, *tone, radius)));
         }
         if let Some((id, state)) = &self.settings
             && *id == window
@@ -1840,6 +1838,7 @@ fn apply_from(old: &Config, cfg: Config) {
     {
         crate::hotkey::reload(&cfg);
     }
+    let language_changed = old.general.app_language != cfg.general.app_language;
     crate::autostart::apply(&cfg);
     // Keep chat history turned off: what was kept goes now, nothing more is written
     if old.chat.keep_history && !cfg.chat.keep_history {
@@ -1851,7 +1850,7 @@ fn apply_from(old: &Config, cfg: Config) {
     }
     let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);
-    if labs_changed {
+    if labs_changed || language_changed {
         super::refresh_tray(); // reads the config just set
     }
 }
@@ -1930,7 +1929,7 @@ pub const NOTICE_MS: u64 = 6000;
 /// names the shortcut that is really configured.
 pub fn tray_notice(shortcut: &str) -> String {
     let keys = super::settings::key_labels(shortcut).join("+");
-    format!("OpenCircle is running in the tray. Press {keys}.")
+    crate::app_language::fmt(S::pill_tray, &[&keys])
 }
 
 /// The start notice for shortcuts another app holds (`taken`); none when
@@ -1942,11 +1941,11 @@ pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
     let keys: Vec<String> = (taken.iter())
         .map(|k| super::settings::key_labels(k).join("+"))
         .collect();
-    let verb = if keys.len() == 1 { "is" } else { "are" };
-    Some(format!(
-        "{} {verb} taken by another app: pick another key in Settings",
-        keys.join(", ")
-    ))
+    let key = match keys.len() {
+        1 => S::pill_taken_one,
+        _ => S::pill_taken_many,
+    };
+    Some(crate::app_language::fmt(key, &[&keys.join(", ")]))
 }
 
 /// The update pill's window on `monitor` (a taskbar `inset` logical px tall at
@@ -1978,7 +1977,14 @@ fn pill_place(
 
 /// A toast's window size (logical px): the pill's (`screens::toast::size`).
 pub fn toast_size(text: &str) -> Size {
-    toast::size(text)
+    spoken(|| toast::size(text))
+}
+
+/// `build` with the layout direction of the app's language (the floating
+/// widgets of part 2a: sizes are measured, and views built, in it).
+fn spoken<T>(build: impl FnOnce() -> T) -> T {
+    let _dir = super::kit::dir::scope(crate::app_language::rtl());
+    build()
 }
 
 /// One screenshot request on its own thread (Wayland), sent while the window asking

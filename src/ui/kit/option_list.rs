@@ -31,17 +31,18 @@ const OPENER_PAD: f32 = 10.0;
 /// The opener of a list (the translate pill's language chips): `label` and
 /// a chevron, `width` x `height`, radius 9, 12 px; `accent` = the target's
 /// look (600, `accent` on `accent_soft`), else 500 `text` on `hover`. `open`:
-/// its list shows (an up chevron, a 2 px focus ring, a stronger fill). `rtl`:
-/// mirrored (the label at the right, the chevron at the left).
+/// its list shows (an up chevron, a 2 px focus ring, a stronger fill). In a
+/// right-to-left view (`kit::dir`) it is mirrored (the label at the right,
+/// the chevron at the left).
 pub fn opener<'a, Message: Clone + 'a>(
     label: String,
     accent: bool,
     open: bool,
-    rtl: bool,
     (width, height): (f32, f32),
     on_press: Message,
 ) -> Element<'a, Message> {
     use button::Status;
+    let rtl = super::dir::rtl();
     let role = match accent {
         true => Role {
             weight: iced::font::Weight::Semibold,
@@ -131,15 +132,16 @@ pub struct Look {
 
 /// A row of a list with a search (the language lists): `label` (12 px /
 /// 500, the `bold` byte range of it in 700: what was typed), `width` x
-/// `CHOICE_H`, radius 8, 10 px in; `look` says the rest. `rtl`: mirrored.
+/// `CHOICE_H`, radius 8, 10 px in; `look` says the rest. Mirrored in a
+/// right-to-left view (`kit::dir`).
 pub fn choice<'a, Message: Clone + 'a>(
     label: &str,
     bold: Option<(usize, usize)>,
     look: Look,
     width: f32,
-    rtl: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
+    let rtl = super::dir::rtl();
     let role = Role::CONTROL;
     let strong = Role {
         weight: iced::font::Weight::Bold,
@@ -247,8 +249,10 @@ pub fn needs_ai<'a, Message: 'a>(loud: bool) -> Element<'a, Message> {
 }
 
 /// A list's group heading ("Recent", "All languages"): 10.5 px / 600
-/// `text_muted`, 10 px in, at the bottom of its `height`. `rtl`: at the right.
-pub fn group<'a, Message: 'a>(label: &'a str, height: f32, rtl: bool) -> Element<'a, Message> {
+/// `text_muted`, 10 px in, at the bottom of its `height`; at the right in a
+/// right-to-left view (`kit::dir`).
+pub fn group<'a, Message: 'a>(label: &'a str, height: f32) -> Element<'a, Message> {
+    let rtl = super::dir::rtl();
     let role = Role::SECTION;
     let line = text(label)
         .size(super::text::size(role))

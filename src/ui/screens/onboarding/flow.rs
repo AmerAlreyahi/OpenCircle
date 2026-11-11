@@ -202,7 +202,6 @@ impl State {
     }
 
     fn number(&mut self) {
-        self.picker.rtl = crate::app_language::rtl();
         self.labels = (self.steps().enumerate())
             .map(|(i, p)| (p.id, fmt(S::o_step, &[&(i + 1), &tr(p.label)])))
             .collect();

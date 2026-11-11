@@ -212,6 +212,26 @@ mod tests {
         assert_eq!(on.size().height, 10.0 + 7.0 * 32.0 + 9.0);
     }
 
+    /// Arabic: the same rows from the table, mirrored (✓ and hints at the left).
+    #[test]
+    fn the_arabic_tray_menu_matches_its_golden_image() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let _ar = crate::ui::kit::testing::arabic();
+            let cfg = Config::default();
+            let mut m = Menu::new(&all_on(), &cfg, true);
+            m.update(Msg::Key(Key::Down));
+            let m = m.with_update(crate::t!(tray_update).to_string());
+            let file = format!("tray-menu-ar-{}", theme.id);
+            failed.extend(golden::check("screens", &file, m.size(), &[1.0], || {
+                view(&m)
+            }));
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
     /// Labs off and on (live translate running: its ✓), Sapphire and Daylight, at 1x and 2x.
     #[test]
     fn the_tray_menu_matches_its_golden_image() {

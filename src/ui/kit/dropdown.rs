@@ -93,7 +93,7 @@ pub fn combo<'a, Message: Clone + 'a>(
     foot: Option<(&'a str, Option<Message>)>,
     on_open: Message,
 ) -> Element<'a, Message> {
-    let field = super::field::search(search.hint, search.query, super::dir::rtl())
+    let field = super::field::search(search.hint, search.query)
         .id(search.id)
         .on_input(search.on_query)
         .on_submit(search.on_submit)

@@ -11,12 +11,14 @@ use iced::{Point, Rectangle, Size, Task, task};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
+use crate::app_language::{S, fmt};
 use crate::mt::Pair;
 use crate::ocr::models;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
 use crate::ui::background;
 use crate::ui::kit::panel_frame as card;
 use crate::ui::picker::{self, Picker};
+use crate::ui::screens::model_download;
 
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;
@@ -98,12 +100,12 @@ pub struct Offer {
 
 impl Offer {
     fn new((pair, lines): (&'static Pair, Vec<String>), source: &str, target: &str) -> Offer {
-        use crate::translate::lang::name;
+        use crate::app_language::language_name as name;
         Offer {
             pair,
             lines,
-            found: format!("{} text found", name(source)),
-            get: format!("Get {} → {}", name(source), name(target)),
+            found: fmt(S::tp_found, &[&name(source)]),
+            get: fmt(S::tp_get, &[&name(source), &name(target)]),
         }
     }
 }
@@ -561,7 +563,7 @@ impl Session {
                     false => actions::translate::download(&source, agreed, progress),
                 };
                 if let Err(e) = got {
-                    let _ = tx.unbounded_send(Msg::DownloadFailed(e));
+                    let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
                     return;
                 }
                 let _ = tx.unbounded_send(Msg::Translating);
