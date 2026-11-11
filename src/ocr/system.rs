@@ -179,6 +179,33 @@ pub fn missing(installed: &[String], wanted: &[String]) -> Vec<String> {
     out
 }
 
+/// Which of one screen's `lines` Windows OCR read well, as words of its
+/// `language` (a tag): the second reader leaves them alone. A Latin-script
+/// language: real words (`lang::real_lines`: #169, English Windows OCR read
+/// Arabic as "awgall n", "oscluall", which passed `plain` on 47 % of an
+/// Arabic page's lines). Another script: `plain`, as before.
+pub fn read_well(lines: &[&str], language: Option<&str>) -> Vec<bool> {
+    use crate::translate::lang;
+    let base = language.and_then(|t| t.split(['-', '_']).next());
+    match base.and_then(lang::find).map(|l| l.script) {
+        Some(lang::Script::Latin) => lang::real_lines(lines),
+        _ => lines.iter().map(|t| plain(t)).collect(),
+    }
+}
+
+/// A line read cleanly: a run of two Latin letters or digits, and mostly
+/// letters, digits and everyday punctuation. Another script read as Latin
+/// comes out as noise ("i1J .l1").
+// ponytail: a character-share heuristic; Windows OCR gives no confidence.
+fn plain(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let fine = |c: &&char| c.is_alphanumeric() || ".,:;!?'\"()-/&%@#+".contains(**c);
+    let run = text
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| w.chars().count() >= 2);
+    run && chars.iter().filter(fine).count() * 10 >= chars.len() * 8
+}
+
 /// What Windows OCR can read (the recognizers installed in Windows) and the
 /// Windows display language (its first profile language). Empty / `None`
 /// elsewhere. Quick, but not free: ask when Settings opens, never while capturing.
@@ -402,6 +429,73 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn noise_is_not_plain() {
+        assert!(super::plain("Activate Windows"));
+        assert!(super::plain("Go to Settings, now!"));
+        assert!(!super::plain("i ^ ~|"));
+        assert!(!super::plain("» ¦ ¬ |"));
+    }
+
+    /// #169: English Windows OCR's reading of an Arabic page counts as
+    /// read only where it is real words; an English or French page stays
+    /// Windows OCR's whole (the second reader then has nothing to do).
+    #[test]
+    fn only_real_words_count_as_read() {
+        let well = |lines: &[&str]| super::read_well(lines, Some("en-US"));
+        let english = [
+            "The Free Encyclopedia",
+            "Main page",
+            "Recent changes",
+            "Talk",
+            "History",
+            "A lighthouse is a tower or other structure that sends out light",
+            "Up to 40 km",
+            "15 s",
+            "2026",
+        ];
+        assert!(well(&english).iter().all(|w| *w), "{:?}", well(&english));
+        let french = [
+            "Modifications récentes",
+            "Un phare est une tour ou une autre construction qui émet une lumière",
+            "Jusqu'à 40 km",
+            "Bateau-phare",
+        ];
+        assert!(well(&french).iter().all(|w| *w));
+        // the English stand-in's (and Windows OCR's) reading of Arabic lines
+        let arabic = [
+            "awgall n",
+            "l allo",
+            "oscluall",
+            "Jic l li lo",
+            "dall logleo",
+            "Kuli",
+            "la",
+            "acgugall",
+            "1",
+            "%",
+            "ais alog",
+            "gugall",
+            "uluall",
+            "Lis hay la",
+            "u Je Lals e",
+            "Talk",
+        ];
+        let got = well(&arabic);
+        let passed: Vec<&&str> = arabic
+            .iter()
+            .zip(&got)
+            .filter(|(_, w)| **w)
+            .map(|(t, _)| t)
+            .collect();
+        assert!(passed.len() <= 2, "noise read as words: {passed:?}");
+        // another script's Windows OCR: `plain`, as before
+        assert_eq!(
+            super::read_well(&["Новая игра", "i ^ ~|"], Some("ru-RU")),
+            [true, false]
+        );
+    }
+
     #[test]
     fn windows_ocr_is_never_tried_off_windows() {
         let want = if cfg!(windows) { None } else { Some(None) };

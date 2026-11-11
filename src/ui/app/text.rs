@@ -313,13 +313,10 @@ impl App {
         let (width, height, pixels) = (*width, *height, pixels.clone());
         self.o.other_read = true;
         let scale = self.o.scale;
-        // clean Latin lines are Windows OCR's; one that reads like noise may
-        // be another script it misread: the second reader looks there too
-        let known: Vec<[f32; 4]> = (self.o.screen_text.lines().iter())
-            .filter(|l| plain(&l.text))
+        let lines: Vec<(String, [f32; 4])> = (self.o.screen_text.lines().into_iter())
             .map(|l| {
                 let r = l.bounds * scale;
-                [r.x, r.y, r.width, r.height]
+                (l.text, [r.x, r.y, r.width, r.height])
             })
             .collect();
         let opening = self.opening;
@@ -330,6 +327,20 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return; // closed meanwhile
             };
+            // lines read as real words are Windows OCR's; one that reads
+            // like noise may be another script it misread: the second
+            // reader reads there
+            let texts: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
+            let well = ocr::system::read_well(&texts, ocr::system::language());
+            let known: Vec<[f32; 4]> = (lines.iter().zip(well))
+                .filter(|(_, well)| *well)
+                .map(|((_, b), _)| *b)
+                .collect();
+            crate::log!(
+                "[opencircle] Windows OCR: {} lines, {} read as words",
+                lines.len(),
+                known.len()
+            );
             let read = ocr::recognize_except(&pixels, width, height, &known, true).map(|blocks| {
                 let mut lines = word::lines(blocks, [0, 0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
@@ -684,29 +695,5 @@ impl App {
     pub(in crate::ui) fn picked_text(&self) -> Option<String> {
         let picked = (self.o.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
         picked.or(self.o.word.as_ref()).map(word::Picked::text)
-    }
-}
-
-/// A line Windows OCR read cleanly: a run of two Latin letters or digits,
-/// and mostly letters, digits and everyday punctuation. Another script read
-/// as Latin comes out as noise ("i1J .l1").
-// ponytail: a character-share heuristic; Windows OCR gives no confidence.
-fn plain(text: &str) -> bool {
-    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let fine = |c: &&char| c.is_alphanumeric() || ".,:;!?'\"()-/&%@#+".contains(**c);
-    let run = text
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|w| w.chars().count() >= 2);
-    run && chars.iter().filter(fine).count() * 10 >= chars.len() * 8
-}
-
-#[cfg(test)]
-mod plain_tests {
-    #[test]
-    fn noise_is_not_plain() {
-        assert!(super::plain("Activate Windows"));
-        assert!(super::plain("Go to Settings, now!"));
-        assert!(!super::plain("i ^ ~|"));
-        assert!(!super::plain("» ¦ ¬ |"));
     }
 }

@@ -487,6 +487,7 @@ fn run(
     p: &Page,
     en: &[TextBlock],
     known: &[[f32; 4]],
+    known3: &[[f32; 4]],
 ) -> Vec<TextBlock> {
     let (rgba, w, h) = (&p.rgba[..], p.w, p.h);
     match path {
@@ -498,10 +499,12 @@ fn run(
         "except" => e.recognize_except(rgba, w, h, &[]).unwrap(),
         "linux-main" => linux_main(e, p),
         "except-known" => e.recognize_except(rgba, w, h, known).unwrap(),
+        "except-known3" => e.recognize_except(rgba, w, h, known3).unwrap(),
         // what main mode shows: the stand-in's lines, each replaced by a
         // second-reader line over it (`Screen::iter`: either one's middle in
         // the other's box)
-        "main-today" => {
+        "main-today" | "main-r3" => {
+            let known = if path == "main-today" { known } else { known3 };
             let extra = e.recognize_except(rgba, w, h, known).unwrap();
             let inside = |a: &[f32; 4], b: &[f32; 4]| {
                 let (x, y) = (a[0] + a[2] / 2.0, a[1] + a[3] / 2.0);
@@ -520,7 +523,7 @@ fn run(
         // words on the VM); the English reader's noise here may pass as words,
         // so the stand-in always takes the misread branch
         "translate-win" => {
-            let (keep, known) = pipeline::words_read(en.to_vec());
+            let (keep, known) = pipeline::words_read(en.to_vec(), Some("en-US"));
             let other = e.recognize_except(rgba, w, h, &known).unwrap();
             if other.is_empty() {
                 e.auto = 0;
@@ -641,13 +644,21 @@ fn screen_text_corpus() {
         let p = load(&dir, name);
         // the stand-in for Windows OCR (not timed; skipped when no path needs
         // it, so a peak RSS is the path's own)
-        let standin = (paths.iter())
-            .any(|p| ["except-known", "main-today", "translate-win"].contains(&p.as_str()));
+        let standin = (paths.iter()).any(|p| {
+            p.starts_with("except-known") || p.starts_with("main-") || p == "translate-win"
+        });
         let en = match standin {
             true => e.recognize(&p.rgba, p.w, p.h, Read::One(0)).unwrap(),
             false => Vec::new(),
         };
         let known = plain_boxes(&en);
+        // #169 (R3): the lines Windows OCR (English) read as real words
+        let texts: Vec<&str> = en.iter().map(|b| b.text.as_str()).collect();
+        let well = system::read_well(&texts, Some("en-US"));
+        let known3: Vec<[f32; 4]> = (en.iter().zip(well))
+            .filter(|(_, w)| *w)
+            .map(|(b, _)| b.bounds)
+            .collect();
         emit(json!({"page": name, "w": p.w, "h": p.h, "known": known,
             "en": en.iter().map(|b| json!([b.text, b.bounds])).collect::<Vec<_>>()}));
         for path in &paths {
@@ -700,7 +711,7 @@ fn screen_text_corpus() {
             let mut got = Vec::new();
             for _ in 0..reps {
                 let t = Instant::now();
-                got = run(&mut e, path, &p, &en, &known);
+                got = run(&mut e, path, &p, &en, &known, &known3);
                 ms.push(t.elapsed().as_secs_f64() * 1e3);
             }
             let mut s = score(&p, &got);

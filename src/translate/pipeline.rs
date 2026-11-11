@@ -585,16 +585,20 @@ fn word_count(lines: &[TextBlock]) -> (usize, usize) {
     (tokens.len(), tokens.iter().filter(|t| word(t)).count())
 }
 
-/// Of a `misread` page, the lines read as words (most of their tokens) or
-/// an address (the browser's address bar: dropped, the tabs above it were
-/// not known as chrome on an Arabic page on Windows), and their boxes: the
-/// second reader leaves them alone.
-pub(crate) fn words_read(lines: Vec<TextBlock>) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
-    let keep: Vec<TextBlock> = (lines.into_iter())
-        .filter(|l| {
-            let (t, w) = word_count(std::slice::from_ref(l));
-            (t > 0 && w * 10 >= t * 8) || address(&l.text)
-        })
+/// Of a `misread` page, the lines Windows OCR (reading `language`) read
+/// well (`ocr::system::read_well`: real words; #169, "all" and "lal" passed
+/// as words) or an address (the browser's address bar: dropped, the tabs
+/// above it were not known as chrome on an Arabic page on Windows), and
+/// their boxes: the second reader leaves them alone.
+pub(crate) fn words_read(
+    lines: Vec<TextBlock>,
+    language: Option<&str>,
+) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
+    let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+    let well = ocr::system::read_well(&texts, language);
+    let keep: Vec<TextBlock> = (lines.into_iter().zip(well))
+        .filter(|(l, well)| *well || address(&l.text))
+        .map(|(l, _)| l)
         .collect();
     let known = keep.iter().map(|l| l.bounds).collect();
     (keep, known)
@@ -844,7 +848,7 @@ impl Real {
                     // address bar, Latin UI), the rest is read again in the
                     // script that suits it (main mode's second reader)
                     crate::log!("[opencircle] Windows OCR read no words: the second reader reads");
-                    let (keep, known) = words_read(lines);
+                    let (keep, known) = words_read(lines, ocr::system::language());
                     match ocr::recognize_except(rgba, width, height, &known, false) {
                         Ok(other) if !other.is_empty() => return Ok(merged(keep, other)),
                         Ok(_) => crate::log!("[opencircle] no other script read; PP-OCR reads"),
@@ -3224,11 +3228,14 @@ pub(super) mod tests {
         assert!(!misread(&french));
         assert!(!misread(&read(&["OK", "1:47 AM"])), "too little to judge");
         // the address bar stays (Edge, a local file): it anchors the tabs
-        let (keep, _) = words_read(read(&[
-            "File C:/oc/trn/ar.html",
-            "JjLi-AJl clio vol-LOJI",
-            "Translate page from Arabic?",
-        ]));
+        let (keep, _) = words_read(
+            read(&[
+                "File C:/oc/trn/ar.html",
+                "JjLi-AJl clio vol-LOJI",
+                "Translate page from Arabic?",
+            ]),
+            Some("en-US"),
+        );
         let keep: Vec<&str> = keep.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(
             keep,

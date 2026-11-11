@@ -1185,7 +1185,8 @@ fn real_matrix() {
                     }
                     Some(lines) if !super::pipeline::misread(&lines) => lines,
                     Some(lines) => {
-                        let (keep, known) = super::pipeline::words_read(lines);
+                        let (keep, known) =
+                            super::pipeline::words_read(lines, ocr::system::language());
                         let other = pp
                             .recognize_except(&f.rgba, f.width, f.height, &known)
                             .unwrap();
