@@ -9,7 +9,7 @@
 use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill, Padding};
 
-use super::state::{Message, State};
+use super::state::{Message, Section, State};
 use super::{pages, previews};
 use crate::app_language::{S, count, tr};
 use crate::t;
@@ -112,6 +112,8 @@ fn nav(state: &State) -> Element<'_, Message> {
         move |i| Message::Section(ids[i]),
         // (in RTL the footer mirrors: the version at the right)
         [VERSION, OS],
+        // the way to About's "Something not working?" card, from every page
+        Some((t!(ab_report), Message::Section(Section::About))),
     )
 }
 

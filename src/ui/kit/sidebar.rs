@@ -31,6 +31,8 @@ const END_GIVE: f32 = 2.0;
 /// The footer: 10.5 px at half strength, 8 px under its hairline and at its sides.
 const FOOTER: f32 = 10.5;
 const FOOTER_PAD: f32 = 8.0;
+/// Between the footer's link and the version line.
+pub const LINK_GAP: f32 = 4.0;
 
 /// Where item `i` starts, down the list.
 fn top(i: usize) -> f32 {
@@ -44,6 +46,7 @@ pub fn sidebar<'a, Message: Clone + 'a>(
     glide: f32,
     on: impl Fn(usize) -> Message,
     footer: [&'a str; 2],
+    link: Option<(&'a str, Message)>,
 ) -> Element<'a, Message> {
     let glide = glide.clamp(0.0, 1.0);
     let y = top(from) + (top(active) - top(from)) * glide;
@@ -72,11 +75,25 @@ pub fn sidebar<'a, Message: Clone + 'a>(
             .font(super::text::weight(Weight::Normal))
             .color(faded(c().text, 0.5))
     };
-    let foot = column![
-        divider(),
+    // under a link, the version line sits closer
+    let version_gap = if link.is_some() { LINK_GAP } else { FOOTER_PAD };
+    let mut foot = column![divider()];
+    // a quiet link line over the version (Settings: Report a problem)
+    if let Some((label, on_press)) = link {
+        let line = crate::dir_row![super::button::button(
+            text(label)
+                .size(FOOTER)
+                .font(super::text::weight(Weight::Normal)),
+            super::button::Kind::Quiet,
+            Some(on_press),
+        )]
+        .padding(Padding::from([0.0, FOOTER_PAD]).top(FOOTER_PAD));
+        foot = foot.push(line);
+    }
+    let foot = foot.push(
         crate::dir_row![small(footer[0]), Space::new().width(Fill), small(footer[1])]
-            .padding(Padding::from([0.0, FOOTER_PAD]).top(FOOTER_PAD)),
-    ];
+            .padding(Padding::from([0.0, FOOTER_PAD]).top(version_gap)),
+    );
     let body = container(column![nav, foot].spacing(GAP))
         .padding(space::SIDEBAR_PAD)
         .width(size::SIDEBAR - super::divider::WIDTH)

@@ -50,8 +50,11 @@ use super::previews;
 pub const WINDOW_SIZE: Size = Size::new(820.0, 560.0);
 
 /// The sidebar's footer under its list: a 2 px gap, the hairline, 8 px and a
-/// 10.5 px line (`kit::sidebar`).
-const SIDEBAR_FOOTER: f32 = 2.0 + 1.0 + 8.0 + 16.0;
+/// 10.5 px line (`kit::sidebar`), and the link line.
+const SIDEBAR_FOOTER: f32 = 2.0 + 1.0 + 8.0 + 16.0 + LINK_LINE;
+/// Its Report a problem link over the version line (`kit::sidebar::LINK_GAP`
+/// and a 10.5 px line).
+const LINK_LINE: f32 = crate::ui::kit::sidebar::LINK_GAP + 14.0;
 
 /// The sidebar's pages on this OS with every Labs switch on (Text reading is
 /// Windows only).
@@ -664,6 +667,10 @@ pub struct State {
     pub(super) reset_undo: Option<(String, Vec<String>)>,
     /// Ask AI's Model list.
     pub(super) model_list: super::model_list::ModelList,
+    /// About: the preview clip credits unfolded, "Made by others" in full
+    /// (for this window only, never saved).
+    pub(super) credits_open: bool,
+    pub(super) made_by_all: bool,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -712,6 +719,10 @@ pub enum Message {
     /// About: put the diagnostics on the clipboard / open the pre-filled issue.
     CopyDiagnostics,
     ReportProblem,
+    /// About: unfold / fold the preview clip credits; show all / fewer of
+    /// "Made by others".
+    Credits(bool),
+    MadeByAll(bool),
     /// The OS mode: System / Light / Dark.
     Theme(Theme),
     /// A theme card (a `kit::themes` id): its mode's pick, shown at once.
@@ -1053,6 +1064,8 @@ impl State {
             resetting: false,
             reset_undo: None,
             model_list: Default::default(),
+            credits_open: false,
+            made_by_all: false,
         };
         s.refresh_models();
         s.revalidate();
@@ -1726,6 +1739,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::OpenLink(url) => return Outcome::OpenLink(url),
         Message::CopyDiagnostics => return Outcome::CopyDiagnostics,
         Message::ReportProblem => return Outcome::OpenLink(crate::diagnostics::issue_url()),
+        Message::Credits(open) => state.credits_open = open,
+        Message::MadeByAll(all) => state.made_by_all = all,
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
         Message::CheckUpdate => {
             state.update_status = Some(UpdateLine::Checking);

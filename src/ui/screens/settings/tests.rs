@@ -344,7 +344,7 @@ fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
         Size::new(WINDOW_SIZE.width, WINDOW_SIZE.height.max(FIT_HEIGHT))
     );
     // The header and every sidebar page are what FIT_HEIGHT counts.
-    const { assert!(FIT_HEIGHT > 400.0 && FIT_HEIGHT <= WINDOW_SIZE.height + 20.0) };
+    const { assert!(FIT_HEIGHT > 400.0 && FIT_HEIGHT <= WINDOW_SIZE.height + 40.0) };
 }
 
 #[test]
@@ -1373,7 +1373,8 @@ fn about_shows_version_license_project_and_no_telemetry() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::About));
     let texts = shot::texts(view(&s));
-    for want in ["MIT licence", "Telemetry", "None", "Amer Alreyahi"] {
+    let no_telemetry = "No telemetry. Nothing leaves this PC unless you choose an action.";
+    for want in ["MIT licence", no_telemetry, "Amer Alreyahi"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
     let version = format!("v{}", env!("CARGO_PKG_VERSION"));
@@ -1961,7 +1962,8 @@ fn every_rows_control_shares_one_column(language: &'static str) {
     for page in shown {
         update(&mut s, Message::Section(page.id));
         let found = shot::containers(view(&s), WINDOW_SIZE, CONTROL);
-        if !matches!(page.id, Section::Privacy) {
+        // (Privacy is a list; About has cards and links, no setting rows)
+        if !matches!(page.id, Section::Privacy | Section::About) {
             assert!(
                 !found.is_empty(),
                 "{}: no rows",
@@ -3264,4 +3266,174 @@ fn every_page_keeps_its_content_width_on_a_wide_window() {
         }
     }
     app_language::set(Lang::En);
+}
+
+// ---- About, clean and minimal (planning #177) ----
+
+/// The About page in English and Arabic, Sapphire and Daylight: at the
+/// default size, on a wide window (1920), with the clip credits unfolded and
+/// with "Made by others" in full; no text past its box, nothing out of reach.
+#[test]
+fn about_matches_its_golden_images_in_every_state() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    type Setup = fn(&mut State);
+    let cases: [(&str, f32, f32, Setup); 4] = [
+        ("default", WINDOW_SIZE.width, WINDOW_SIZE.height, |_| {}),
+        ("wide", 1920.0, 1040.0, |_| {}),
+        ("credits", WINDOW_SIZE.width, 1500.0, |s| {
+            update(s, Message::Credits(true));
+        }),
+        ("all", WINDOW_SIZE.width, 1300.0, |s| {
+            update(s, Message::MadeByAll(true));
+        }),
+    ];
+    let mut failed = Vec::new();
+    for language in ["en", "ar"] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            for (name, w, h, setup) in cases {
+                let (mut s, _) = state(None);
+                update(&mut s, Message::AppLanguage(Choice(language)));
+                update(&mut s, Message::Section(Section::About));
+                setup(&mut s);
+                themes::set(theme);
+                let size = Size::new(w, h);
+                let file = format!("settings-about-{name}-{language}-{}", theme.id);
+                let lost = shot::out_of_reach(view(&s), size);
+                assert!(lost.is_empty(), "{file}: {lost:?}");
+                let past = shot::drawn_past_their_box(view(&s), Size::new(w, 3000.0));
+                assert!(past.is_empty(), "{file}: {past:?}");
+                failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// About at the four widths (smallest, usual, 1920, 3440): no text past its
+/// box, in English and Arabic, folded and unfolded.
+#[test]
+fn about_draws_no_text_past_its_box_at_any_width() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::screens::settings::state::MIN_WIDTH;
+    let mut past = Vec::new();
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        update(&mut s, Message::Section(Section::About));
+        for open in [false, true] {
+            update(&mut s, Message::Credits(open));
+            update(&mut s, Message::MadeByAll(open));
+            for width in [MIN_WIDTH, WINDOW_SIZE.width, 1920.0, 3440.0] {
+                let found = shot::drawn_past_their_box(view(&s), Size::new(width, 3000.0));
+                past.extend(
+                    found
+                        .into_iter()
+                        .map(|f| format!("{language} {width} {open}: {f}")),
+                );
+            }
+        }
+    }
+    app_language::set(Lang::En);
+    assert!(past.is_empty(), "{past:#?}");
+}
+
+/// The credits are folded when Settings opens (the heading, the count and the
+/// Google line show); unfolded, one line per bundled clip and the caveat; the
+/// fold is no setting. "Made by others" shows the first six, then all.
+#[test]
+fn about_folds_the_credits_and_shows_the_first_names() {
+    use super::pages::about::{CAVEAT, CLIP_CREDITS, MADE_BY_FIRST, NOT_AFFILIATED, made_by};
+    let (mut s, _) = state(None);
+    let texts = page(&mut s, Section::About);
+    let has = |t: &[String], w: &str| t.iter().any(|x| x == w);
+    assert!(has(&texts, "Preview clip credits"), "{texts:?}");
+    assert!(has(&texts, NOT_AFFILIATED), "the Google line, folded");
+    assert!(!has(&texts, CAVEAT) && !has(&texts, CLIP_CREDITS[0].line));
+    // every row of the old page is gone or moved: no Problems / Telemetry rows
+    for gone in ["Problems", "Telemetry", "None", "Pure Rust · iced"] {
+        assert!(!has(&texts, gone), "{gone}: {texts:?}");
+    }
+    for want in [
+        "Something not working?",
+        "Copy diagnostics",
+        "Report a problem",
+        "No telemetry. Nothing leaves this PC unless you choose an action.",
+    ] {
+        assert!(has(&texts, want), "{want}: {texts:?}");
+    }
+    let names = made_by();
+    assert!(has(&texts, names[MADE_BY_FIRST - 1].0));
+    assert!(!has(&texts, names[MADE_BY_FIRST].0), "{texts:?}");
+    assert!(has(&texts, "Show all (11)"));
+    update(&mut s, Message::Credits(true));
+    update(&mut s, Message::MadeByAll(true));
+    let texts = shot::texts(view(&s));
+    for c in &CLIP_CREDITS {
+        assert!(has(&texts, c.line), "{}", c.line);
+    }
+    assert!(has(&texts, CAVEAT) && has(&texts, NOT_AFFILIATED));
+    assert!(names.iter().all(|n| has(&texts, n.0)) && has(&texts, "Show fewer"));
+    assert!(!s.dirty(), "folding is no setting change");
+    // a credit's link opens its section of NOTICE
+    let url = super::pages::about::credit_url(&CLIP_CREDITS[4]);
+    assert_eq!(
+        update(&mut s, Message::OpenLink(url.clone())),
+        Outcome::OpenLink(url)
+    );
+    // a new window starts folded
+    let (s, _) = state(None);
+    assert!(!s.credits_open && !s.made_by_all);
+}
+
+/// Every page's sidebar has the quiet "Report a problem" link over the
+/// version line; it opens About, where the card is (in Arabic too).
+#[test]
+fn the_sidebar_footer_reports_a_problem_from_every_page() {
+    use crate::app_language::{self, Choice, Lang};
+    for (language, word) in [("en", "Report a problem"), ("ar", "\u{200F}الإبلاغ عن مشكلة")]
+    {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        for section in shown {
+            let texts = page(&mut s, section);
+            let n = texts.iter().filter(|t| *t == word).count();
+            // About has the card's button too
+            let want = if section == Section::About { 2 } else { 1 };
+            assert_eq!(n, want, "{language} {section:?}: {texts:?}");
+        }
+        update(&mut s, Message::Section(Section::General));
+        update(&mut s, Message::Section(Section::About));
+        assert_eq!(s.section, Section::About);
+    }
+    app_language::set(Lang::En);
+}
+
+/// The sidebar footer with its link, on another page, in both languages.
+#[test]
+fn the_sidebar_footer_link_matches_its_golden_images() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for language in ["en", "ar"] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice(language)));
+            update(&mut s, Message::Section(Section::Privacy));
+            themes::set(theme);
+            let file = format!("settings-sidebar-footer-{language}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

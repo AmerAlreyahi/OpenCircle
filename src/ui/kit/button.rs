@@ -203,7 +203,7 @@ pub fn cta_label<'a, Message: 'a>(label: &'a str, note: Option<String>) -> Eleme
 }
 
 /// `.oc-btn`'s label: 12 px / 500 (the button gives the colour).
-pub fn label<'a>(label: &'a str) -> iced::widget::Text<'a> {
+pub fn label<'a>(label: impl text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     use super::tokens::Role;
     text(label)
         .size(super::text::size(Role::CONTROL))
@@ -549,7 +549,12 @@ pub fn fold<'a, Message: Clone + 'a>(
     ]
     .spacing(8)
     .align_y(Center);
-    iced_button(container(content).center_y(Fill))
+    // at the start edge (right to left: the right)
+    let content = container(content)
+        .center_y(Fill)
+        .width(Fill)
+        .align_x(super::dir::start());
+    iced_button(content)
         .width(Fill)
         .height(FOLD_H)
         .padding([0.0, 10.0])

@@ -501,7 +501,15 @@ fn sidebar_sheet() {
                 },
             ];
             iced::widget::row![
-                sidebar(&items, active, from, glide, |_| (), ["v0.1.2", "Windows"]),
+                sidebar(
+                    &items,
+                    active,
+                    from,
+                    glide,
+                    |_| (),
+                    ["v0.1.2", "Windows"],
+                    None
+                ),
                 iced::widget::Space::new().width(Fill),
             ]
             .into()

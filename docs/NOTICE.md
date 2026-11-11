@@ -151,58 +151,89 @@ translation preview) apply only to the named clips. The credits identify sources
 search-result thumbnails, third-party interfaces or data-provider terms shown
 in the clips.
 
-- Succulent photograph (circle-1): José Gabriel Jara Porras, WordPress Photo
-  Directory, CC0 1.0. Cropped and shown in an edited OpenCircle screen
-  recording. https://wordpress.org/photos/photo/4569e13887/
-  https://creativecommons.org/publicdomain/zero/1.0/
-- Lotus photograph (circle-2): Shubham Patil, WordPress Photo Directory, CC0
-  1.0. Cropped and shown in an edited OpenCircle screen recording.
-  https://wordpress.org/photos/photo/4766ac73e9/
-- Kingfisher photograph (circle-3): sebascordero15, WordPress Photo Directory,
-  CC0 1.0. Cropped and shown in an edited OpenCircle screen recording.
-  https://wordpress.org/photos/photo/11669e53a4/
-- COFFEE photograph (text): Tim Mossholder on Unsplash, photo jozE5L60Aj4,
-  used under the Unsplash License. Shown in an edited OpenCircle screen
-  recording. No endorsement implied. MEDIA EXCEPTION: the photo in this clip
-  stays under the Unsplash License (not MIT, not CC0).
-  https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4
-  https://unsplash.com/license
-- Wikipedia translation (translate-page): Based on "Plante d'intérieur" by
-  Wikipedia contributors, CC BY-SA 4.0. Machine translation into English,
-  German, Arabic and Spanish shown by OpenCircle; framing, timing edits,
-  captions and active-state graphics added for the preview. MEDIA EXCEPTION:
-  this preview clip (translate-page.ivf) and its still
-  (assets/previews/stills/translate-page.webp) are licensed under CC BY-SA
-  4.0, including the adapter's contributions; this does not change the app
-  code's MIT licence. Underlying public-domain material remains public domain;
-  third-party names and trademarks keep their separate rights. The exact
-  recorded Wikipedia revision has not been established.
-  Article: https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur
-  History: https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history
-  Licence: https://creativecommons.org/licenses/by-sa/4.0/ (legal code:
-  LICENSES/CC-BY-SA-4.0.txt)
-  Embedded photograph "Her, IFA 2018, Berlin (P1070094).jpg" (c) Matti Blume,
+Each clip has its own section below (Settings > About > Preview clip credits
+links to it).
+
+### Succulent photograph (circle-1)
+
+José Gabriel Jara Porras, WordPress Photo Directory, CC0 1.0. Cropped and
+shown in an edited OpenCircle screen recording.
+https://wordpress.org/photos/photo/4569e13887/
+https://creativecommons.org/publicdomain/zero/1.0/
+
+### Lotus photograph (circle-2)
+
+Shubham Patil, WordPress Photo Directory, CC0 1.0. Cropped and shown in an
+edited OpenCircle screen recording.
+https://wordpress.org/photos/photo/4766ac73e9/
+https://creativecommons.org/publicdomain/zero/1.0/
+
+### Kingfisher photograph (circle-3)
+
+sebascordero15, WordPress Photo Directory, CC0 1.0. Cropped and shown in an
+edited OpenCircle screen recording.
+https://wordpress.org/photos/photo/11669e53a4/
+https://creativecommons.org/publicdomain/zero/1.0/
+
+### COFFEE photograph (text)
+
+Tim Mossholder on Unsplash, photo jozE5L60Aj4, used under the Unsplash
+License. Shown in an edited OpenCircle screen recording. No endorsement
+implied. MEDIA EXCEPTION: the photo in this clip stays under the Unsplash
+License (not MIT, not CC0).
+https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4
+https://unsplash.com/license
+
+### Wikipedia translation (translate-page)
+
+Based on "Plante d'intérieur" by Wikipedia contributors, CC BY-SA 4.0.
+Machine translation into English, German, Arabic and Spanish shown by
+OpenCircle; framing, timing edits, captions and active-state graphics added
+for the preview. MEDIA EXCEPTION: this preview clip (translate-page.ivf) and
+its still (assets/previews/stills/translate-page.webp) are licensed under CC
+BY-SA 4.0, including the adapter's contributions; this does not change the
+app code's MIT licence. Underlying public-domain material remains public
+domain; third-party names and trademarks keep their separate rights. The
+exact recorded Wikipedia revision has not been established.
+
+- Article: https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur
+- History: https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history
+- Licence: https://creativecommons.org/licenses/by-sa/4.0/ (legal code:
+  https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSES/CC-BY-SA-4.0.txt)
+- Embedded photograph "Her, IFA 2018, Berlin (P1070094).jpg" (c) Matti Blume,
   CC BY-SA 4.0:
   https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg
-  Embedded painting by Carl Larsson, "Flowers on the Windowsill", public
+- Embedded painting by Carl Larsson, "Flowers on the Windowsill", public
   domain:
   https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg
-- Game screens (translate-2, translate-3): original images made for
-  OpenCircle's previews (no real game).
-- Solar photovoltaic panel prices (ai-chat, ai-browser; the same chart): Our
-  World in Data; IRENA (2025) and other sources, processed by Our World in
-  Data, as credited in the recording. OWID visualization: CC BY 4.0. Cropped
-  and time-edited screen recordings with OpenCircle active-state graphics.
-  https://ourworldindata.org/grapher/solar-pv-prices
-  https://creativecommons.org/licenses/by/4.0/
-- Tourism (snip-long): Bastian Herre and Veronika Samborska (2023), "Tourism",
-  Our World in Data, CC BY 4.0 for OWID-produced article and visualizations.
-  Cropped, time-edited screen recording. The chart "Arrivals of tourists from
-  abroad" credits UN Tourism (2025); other chart and provider notices in the
-  recording are kept. https://ourworldindata.org/tourism
-  https://ourworldindata.org/grapher/international-tourist-trips
-  https://ourworldindata.org/faqs
-- OpenCircle is an independent project and is not affiliated with, sponsored
-  by, or endorsed by Google. Google and its product names and logos are
-  trademarks of their respective owners. Depicted third-party services and
-  content are shown for demonstration only.
+
+### Game screens (translate-2, translate-3)
+
+Original images made for OpenCircle's previews (no real game).
+
+### Solar photovoltaic panel prices (ai-chat, ai-browser)
+
+The same chart in both clips: Our World in Data; IRENA (2025) and other
+sources, processed by Our World in Data, as credited in the recording. OWID
+visualization: CC BY 4.0. Cropped and time-edited screen recordings with
+OpenCircle active-state graphics.
+https://ourworldindata.org/grapher/solar-pv-prices
+https://creativecommons.org/licenses/by/4.0/
+
+### Tourism (snip-long)
+
+Bastian Herre and Veronika Samborska (2023), "Tourism", Our World in Data, CC
+BY 4.0 for OWID-produced article and visualizations. Cropped, time-edited
+screen recording. The chart "Arrivals of tourists from abroad" credits UN
+Tourism (2025); other chart and provider notices in the recording are kept.
+https://ourworldindata.org/tourism
+https://ourworldindata.org/grapher/international-tourist-trips
+https://creativecommons.org/licenses/by/4.0/
+https://ourworldindata.org/faqs
+
+### Not affiliated with Google
+
+OpenCircle is an independent project and is not affiliated with, sponsored
+by, or endorsed by Google. Google and its product names and logos are
+trademarks of their respective owners. Depicted third-party services and
+content are shown for demonstration only.

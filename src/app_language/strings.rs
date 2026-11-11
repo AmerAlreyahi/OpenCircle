@@ -606,12 +606,11 @@ strings! {
         | "طلب أحدث إصدار فقط (عند التفعيل)";
     p_r7c: "GitHub Releases"
         | "GitHub Releases";
-    ab_stack: "Pure Rust · iced"
-        | "Pure Rust · iced";
     ab_mit: "MIT"
         | "MIT";
-    ab_what: "Open-source desktop Circle to Search for Windows & Linux: circle anything on screen to search in your browser, read text (OCR), translate in place, or ask AI."
-        | "«البحث بالدائرة» لسطح المكتب، مفتوح المصدر، على Windows وLinux: أحِط أي شيء على الشاشة بدائرة لتبحث عنه في متصفحك، أو تقرأ نصه (OCR)، أو تترجمه في مكانه، أو تسأل عنه الذكاء الاصطناعي.";
+    // About, one line under the name (owner, 2026-11-11: clean and minimal)
+    ab_what: "Open-source Circle to Search for Windows and Linux."
+        | "«البحث بالدائرة» مفتوح المصدر لـ Windows وLinux.";
     ab_github: "GitHub"
         | "GitHub";
     ab_website: "Website"
@@ -650,22 +649,25 @@ strings! {
         | "المساهمون في Lucide";
     ab_n9: "Inter font"
         | "خط Inter";
-    ab_clips: "Preview clips"
-        | "مقاطع المعاينة";
-    ab_problems: "Problems"
-        | "المشكلات";
-    ab_problems_desc: "Copy a report to paste into an issue. Nothing is sent"
-        | "انسخ تقريرًا لتلصقه في بلاغ. لا يُرسَل شيء";
     ab_diag: "Copy diagnostics"
         | "نسخ التشخيص";
     ab_report: "Report a problem"
         | "الإبلاغ عن مشكلة";
-    ab_telemetry: "Telemetry"
-        | "القياس عن بُعد";
-    ab_telemetry_desc: "A capture leaves this PC only when you choose an action"
-        | "لا تغادر اللقطة هذا الجهاز إلا حين تختار إجراءً";
-    ab_none: "None"
-        | "لا يوجد";
+    // added for About (owner, 2026-11-11, planning #177: clean and minimal)
+    ab_trouble: "Something not working?"
+        | "هل هناك ما لا يعمل؟";
+    ab_trouble_desc: "Copies your version, OS, screens, a settings summary and recent log lines (no keys or folders). Nothing is sent until you paste it."
+        | "ينسخ الإصدار والنظام والشاشات وملخص الإعدادات وآخر سطور السجل (دون مفاتيح أو مجلدات). لا يُرسَل شيء حتى تلصقه بنفسك.";
+    ab_show_all: "Show all ({})"
+        | "عرض الكل ({})";
+    ab_show_fewer: "Show fewer"
+        | "عرض أقل";
+    ab_clip_credits: "Preview clip credits"
+        | "حقوق مقاطع المعاينة";
+    ab_credit_open: "Full credit on GitHub"
+        | "الإشارة الكاملة على GitHub";
+    ab_no_telemetry: "No telemetry. Nothing leaves this PC unless you choose an action."
+        | "لا قياس عن بُعد. لا يغادر شيء هذا الجهاز إلا حين تختار إجراءً.";
     lb_note: "All off by default · Hidden when off"
         | "كلها متوقفة افتراضيًا · تختفي عند إيقافها";
     lb_tag: "Experimental"

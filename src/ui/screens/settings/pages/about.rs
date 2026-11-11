@@ -1,30 +1,34 @@
-//! About (`settings-window.js` "ABOUT"): the app card, the developer card,
-//! who made what we ship or download, problems and telemetry. A link opens
-//! only when its button is clicked (the page itself never touches the
-//! network: the avatar and the profile are bundled, refreshed at each release
-//! by `scripts/refresh-about.sh`).
+//! About (`settings-window.js` "ABOUT"), clean and minimal (owner, 2026-11-11,
+//! planning #177): the app card, "Something not working?" (Copy diagnostics,
+//! Report a problem), the developer card, who made what we ship or download,
+//! the preview clips' credits (folded) and one line on telemetry. Links are the
+//! kit's quiet links; a link opens only when it is clicked (the page itself
+//! never touches the network: the avatar and the profile are bundled,
+//! refreshed at each release by `scripts/refresh-about.sh`).
 use crate::app_language::{S, fmt};
 use crate::t;
 use std::sync::LazyLock;
 
 use iced::widget::image;
 use iced::widget::image::Handle;
-use iced::widget::{column, row};
+use iced::widget::tooltip::Position;
+use iced::widget::{Space, column};
 use iced::{Center, ContentFit, Element, Fill};
 use serde::Deserialize;
 
 use super::super::state::{Message, State};
-use crate::ui::kit::button::{Kind, button, fill, label};
+use crate::dir_row;
+use crate::ui::kit::button::{Kind, button, fold, label, regular};
 use crate::ui::kit::card::card;
 use crate::ui::kit::chip::{chip, pill};
-use crate::ui::kit::divider::divider;
+use crate::ui::kit::dir;
+use crate::ui::kit::icon::{Icon, icon};
 use crate::ui::kit::logo::logo;
 use crate::ui::kit::logo::try_decode;
-use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{accent, sub, text};
+use crate::ui::kit::text::{accent, paragraph, sub, text};
 use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::kit::{icon, themes};
+use crate::ui::kit::tooltip::{Why, hint};
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE.md";
@@ -51,165 +55,79 @@ pub fn made_by() -> [(&'static str, &'static str, &'static str); 11] {
     ]
 }
 
-/// One preview-clip credit: the clips it covers, its text, and its links
-/// (name, address). It shows only while one of its clips is bundled; the same
-/// credits, with full addresses, are in docs/NOTICE.md (owner's source list, 2026-11-03).
+/// "Made by others" shows this many until "Show all".
+pub const MADE_BY_FIRST: usize = 6;
+
+/// One preview clip's credit: the clips it covers, its one line (what, who,
+/// licence and the changes made) and its section in docs/NOTICE.md (the
+/// heading's GitHub anchor), which holds the full text and every source link.
+/// It shows only while one of its clips is bundled (owner's source list,
+/// 2026-11-03). English in every language: legal attribution.
 pub struct Credit {
     pub clips: &'static [&'static str],
-    pub text: &'static str,
-    pub links: &'static [(&'static str, &'static str)],
+    pub line: &'static str,
+    pub anchor: &'static str,
 }
 
-const CC0: (&str, &str) = (
-    "CC0 1.0",
-    "https://creativecommons.org/publicdomain/zero/1.0/",
-);
-const CC_BY: (&str, &str) = ("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/");
-const CC_BY_SA: (&str, &str) = (
-    "CC BY-SA 4.0",
-    "https://creativecommons.org/licenses/by-sa/4.0/",
-);
-/// The repository's copy of the CC BY-SA 4.0 legal code (LICENSES/).
-pub const LICENCE_TEXT: &str =
-    "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSES/CC-BY-SA-4.0.txt";
-
-pub const CLIP_CREDITS: [Credit; 10] = [
+pub const CLIP_CREDITS: [Credit; 8] = [
     Credit {
         clips: &["circle-1"],
-        text: "Succulent photograph: José Gabriel Jara Porras, WordPress Photo Directory, \
-               CC0 1.0. Cropped and shown in an edited OpenCircle screen recording.",
-        links: &[
-            ("Photo", "https://wordpress.org/photos/photo/4569e13887/"),
-            CC0,
-        ],
+        line: "Succulent photo \u{b7} Jos\u{e9} Gabriel Jara Porras, WordPress Photo Directory \
+               \u{b7} CC0 1.0",
+        anchor: "succulent-photograph-circle-1",
     },
     Credit {
         clips: &["circle-2"],
-        text: "Lotus photograph: Shubham Patil, WordPress Photo Directory, CC0 1.0. \
-               Cropped and shown in an edited OpenCircle screen recording.",
-        links: &[
-            ("Photo", "https://wordpress.org/photos/photo/4766ac73e9/"),
-            CC0,
-        ],
+        line: "Lotus photo \u{b7} Shubham Patil, WordPress Photo Directory \u{b7} CC0 1.0",
+        anchor: "lotus-photograph-circle-2",
     },
     Credit {
         clips: &["circle-3"],
-        text: "Kingfisher photograph: sebascordero15, WordPress Photo Directory, CC0 1.0. \
-               Cropped and shown in an edited OpenCircle screen recording.",
-        links: &[
-            ("Photo", "https://wordpress.org/photos/photo/11669e53a4/"),
-            CC0,
-        ],
+        line: "Kingfisher photo \u{b7} sebascordero15, WordPress Photo Directory \u{b7} CC0 1.0",
+        anchor: "kingfisher-photograph-circle-3",
     },
     Credit {
         clips: &["text"],
-        text: "COFFEE photograph: Tim Mossholder on Unsplash, photo jozE5L60Aj4, used under \
-               the Unsplash License (not CC0, not MIT). Shown in an edited OpenCircle screen \
-               recording. No endorsement implied.",
-        links: &[
-            (
-                "Photo",
-                "https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4",
-            ),
-            ("Unsplash License", "https://unsplash.com/license"),
-        ],
+        line: "COFFEE photo \u{b7} Tim Mossholder on Unsplash \u{b7} Unsplash License",
+        anchor: "coffee-photograph-text",
     },
     Credit {
         clips: &["translate-page"],
-        text: "Based on \u{201c}Plante d\u{2019}intérieur\u{201d} by Wikipedia contributors, \
-               CC BY-SA 4.0. Machine translation into English, German, Arabic and Spanish \
-               shown by OpenCircle; framing, timing edits, captions and active-state graphics \
-               added for the preview. This preview clip and its still are licensed under \
-               CC BY-SA 4.0, including the adapter\u{2019}s contributions, as a media \
-               exception to the app\u{2019}s MIT licence (the code stays MIT). Embedded \
-               photograph \u{201c}Her, IFA 2018, Berlin (P1070094).jpg\u{201d} \u{a9} Matti \
-               Blume, CC BY-SA 4.0; embedded painting by Carl Larsson, \
-               \u{201c}Flowers on the Windowsill\u{201d}, public domain. Third-party names \
-               and trademarks keep their separate rights.",
-        links: &[
-            (
-                "Article",
-                "https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur",
-            ),
-            (
-                "History",
-                "https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history",
-            ),
-            CC_BY_SA,
-            (
-                "Photograph",
-                "https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg",
-            ),
-            (
-                "Painting",
-                "https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg",
-            ),
-            ("Licence text", LICENCE_TEXT),
-        ],
+        line: "\u{201c}Plante d\u{2019}int\u{e9}rieur\u{201d} \u{b7} Wikipedia contributors; photo \
+               \u{201c}Her, IFA 2018, Berlin\u{201d} \u{a9} Matti Blume \u{b7} CC BY-SA 4.0 \u{b7} \
+               machine-translated and edited; this clip is CC BY-SA 4.0",
+        anchor: "wikipedia-translation-translate-page",
     },
     Credit {
         clips: &["translate-2", "translate-3"],
-        text: "The game screens are original images made for OpenCircle\u{2019}s previews \
-               (no real game).",
-        links: &[],
+        line: "Game screens \u{b7} original images made for OpenCircle (no real game)",
+        anchor: "game-screens-translate-2-translate-3",
     },
     Credit {
         clips: &["ai-chat", "ai-browser"],
-        text: "Solar photovoltaic panel prices: Our World in Data; IRENA (2025) and other \
-               sources, processed by Our World in Data, as credited in the recording. OWID \
-               visualization: CC BY 4.0. Cropped and time-edited screen recordings with \
-               OpenCircle active-state graphics.",
-        links: &[
-            (
-                "Chart",
-                "https://ourworldindata.org/grapher/solar-pv-prices",
-            ),
-            CC_BY,
-        ],
-    },
-    Credit {
-        clips: &["ai-browser"],
-        text: "OpenCircle is an independent project and is not affiliated with, sponsored \
-               by, or endorsed by Google. Google and its product names and logos are \
-               trademarks of their respective owners. Depicted third-party services and \
-               content are shown for demonstration only.",
-        links: &[],
+        line: "\u{201c}Solar photovoltaic panel prices\u{201d} \u{b7} Our World in Data, IRENA \
+               (2025) and other sources \u{b7} CC BY 4.0 \u{b7} cropped and edited",
+        anchor: "solar-photovoltaic-panel-prices-ai-chat-ai-browser",
     },
     Credit {
         clips: &["snip-long"],
-        text: "\u{201c}Tourism\u{201d}, Bastian Herre and Veronika Samborska (2023), Our \
-               World in Data, CC BY 4.0 for OWID-produced article and visualizations. \
-               Cropped, time-edited screen recording. The chart \u{201c}Arrivals of tourists \
-               from abroad\u{201d} credits UN Tourism (2025); other chart and provider notices \
-               in the recording are kept.",
-        links: &[
-            ("Article", "https://ourworldindata.org/tourism"),
-            (
-                "Chart",
-                "https://ourworldindata.org/grapher/international-tourist-trips",
-            ),
-            CC_BY,
-            ("Reuse FAQ", "https://ourworldindata.org/faqs"),
-        ],
-    },
-    Credit {
-        clips: &[
-            "circle-1",
-            "circle-2",
-            "circle-3",
-            "text",
-            "translate-page",
-            "translate-2",
-            "translate-3",
-            "ai-chat",
-            "ai-browser",
-            "snip-long",
-        ],
-        text: "Credits are for source identification; they do not clear unrelated search-result \
-               thumbnails, third-party interfaces or data-provider terms shown in the clips.",
-        links: &[],
+        line: "\u{201c}Tourism\u{201d} \u{b7} Bastian Herre and Veronika Samborska, Our World in \
+               Data \u{b7} CC BY 4.0 \u{b7} cropped and edited",
+        anchor: "tourism-snip-long",
     },
 ];
+
+/// Under the credits, folded or not, while the browser clip (Google AI Mode)
+/// is bundled: the non-affiliation line, verbatim.
+pub const NOT_AFFILIATED: &str = "OpenCircle is an independent project and is not affiliated \
+     with, sponsored by, or endorsed by Google. Google and its product names and logos are \
+     trademarks of their respective owners. Depicted third-party services and content are \
+     shown for demonstration only.";
+pub const NOT_AFFILIATED_CLIP: &str = "ai-browser";
+
+/// The last line of the unfolded credits.
+pub const CAVEAT: &str = "Credits are for source identification; they do not clear unrelated \
+     search-result thumbnails, third-party interfaces or data-provider terms shown in the clips.";
 
 /// The credits of the clips `bundled` says are in the app.
 pub fn clip_credits(bundled: impl Fn(&str) -> bool) -> Vec<&'static Credit> {
@@ -218,17 +136,27 @@ pub fn clip_credits(bundled: impl Fn(&str) -> bool) -> Vec<&'static Credit> {
         .collect()
 }
 
-/// Between the cards (`space-y-3.5`) and inside one; between a tile and its text (`gap-4`).
+/// A credit's section in docs/NOTICE.md on GitHub.
+pub fn credit_url(c: &Credit) -> String {
+    format!("{NOTICE}#{}", c.anchor)
+}
+
+/// Between the cards; inside a card; between a tile and its text.
 const CARD_GAP: f32 = 14.0;
-const TILE_GAP: f32 = 16.0;
-/// The grid of a card's buttons (`gap-2`), a credit row's height (`py-2.5`).
+const TILE_GAP: f32 = 14.0;
+/// Between two links, two buttons, a link's words and its icon.
+const LINK_GAP: f32 = 16.0;
 const BUTTON_GAP: f32 = 8.0;
-const CREDIT_PAD: f32 = 10.0;
-/// The logo tile (`w-16`, `p-1.5`), the avatar's (`w-[72px]`), a licence pill.
-const LOGO_TILE: f32 = 64.0;
-const AVATAR_TILE: f32 = 72.0;
-const TILE_PAD: f32 = 6.0;
-const LICENCE: f32 = 155.0;
+const ICON_GAP: f32 = 4.0;
+const LINK_ICON: f32 = 12.0;
+/// A "Made by others" row's padding (above and below).
+const LIST_PAD: f32 = 5.0;
+/// The logo and avatar tiles, and their inner pad.
+const TILE: f32 = 52.0;
+const TILE_PAD: f32 = 5.0;
+/// A licence chip's font size (`chip::pill`'s mono) and its side pads.
+const CHIP_FONT: f32 = 11.0;
+const CHIP_PADS: f32 = 2.0 * 8.0 + 4.0;
 
 /// The developer card's data: `assets/about/profile.toml`.
 #[derive(Debug, Deserialize)]
@@ -271,16 +199,16 @@ fn avatar() -> Handle {
         decode_avatar(include_bytes!("../../../../../assets/about/avatar.png")).unwrap_or_else(
             || {
                 crate::log!("[opencircle] about: the bundled avatar does not decode");
-                logo(AVATAR_TILE as u32)
+                logo(TILE as u32)
             },
         )
     });
     AVATAR.clone()
 }
 
-/// A picture in a rounded tile (`rounded-2xl`, divider edge).
-fn tile<'a>(handle: Handle, size: f32) -> Element<'a, Message> {
-    let inner = size - 2.0 * TILE_PAD;
+/// A picture in a rounded tile (divider edge).
+fn tile<'a>(handle: Handle) -> Element<'a, Message> {
+    let inner = TILE - 2.0 * TILE_PAD;
     let picture = image(handle)
         .width(inner)
         .height(inner)
@@ -291,163 +219,199 @@ fn tile<'a>(handle: Handle, size: f32) -> Element<'a, Message> {
         .into()
 }
 
-fn link<'a>(name: &'a str, url: &str) -> Element<'a, Message> {
-    fill(label(name), Some(Message::OpenLink(url.into())))
+/// A quiet link (the kit's link look: secondary text, brighter under the
+/// cursor) with the external-link icon after its words.
+fn link<'a>(name: &'a str, url: impl Into<String>) -> Element<'a, Message> {
+    let words = dir_row![label(name), icon(Icon::External, LINK_ICON)]
+        .spacing(ICON_GAP)
+        .align_y(Center);
+    button(words, Kind::Quiet, Some(Message::OpenLink(url.into())))
 }
 
-pub fn view(_: &State) -> Element<'_, Message> {
-    let mut page = column![app(), developer(), notices()];
-    if let Some(card) = clip_notice() {
-        page = page.push(card);
+/// A card's links in one row, `LINK_GAP` apart, at the start edge.
+fn links<'a>(all: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    dir::row(all).spacing(LINK_GAP).align_y(Center).into()
+}
+
+/// A tile, then its lines (start-aligned) beside it.
+fn headed<'a>(picture: Handle, lines: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
+    let lines = lines.spacing(space::GAP).align_x(dir::start()).width(Fill);
+    card(
+        dir_row![tile(picture), lines]
+            .spacing(TILE_GAP)
+            .align_y(Center),
+    )
+}
+
+pub fn view(state: &State) -> Element<'_, Message> {
+    let mut page = column![app(), trouble(), developer(), others(state)];
+    if let Some(credits) = clip_notice(state) {
+        page = page.push(credits);
     }
-    page.push(problems())
-        .push(telemetry())
+    page.push(paragraph(sub(Role::ROW_DESC, t!(ab_no_telemetry))))
         .spacing(CARD_GAP)
         .into()
 }
 
-/// "Preview clips": the credits of the bundled clips (none bundled, no card).
-fn clip_notice<'a>() -> Option<Element<'a, Message>> {
-    let lines = clip_credits(|c| super::super::previews::player::still(c).is_some());
-    if lines.is_empty() {
-        return None;
-    }
-    let mut list = column![text(Role::ROW_TITLE, t!(ab_clips))].spacing(space::GAP);
-    for (i, credit) in lines.into_iter().enumerate() {
-        if i > 0 {
-            list = list.push(divider());
-        }
-        list = list.push(sub(Role::ROW_DESC, credit.text));
-        if !credit.links.is_empty() {
-            let links = credit.links.iter().map(|(name, url)| link(name, url));
-            list = list.push(row(links).spacing(BUTTON_GAP).wrap());
-        }
-    }
-    Some(card(list))
-}
-
-/// Logo, name, version, what it is, and its links.
+/// Logo, name and version, one line of what it is, and its links.
 fn app<'a>() -> Element<'a, Message> {
-    let names = crate::dir_row![
+    let name = dir_row![
         text(Role::APP_NAME, "OpenCircle"),
         chip(concat!("v", env!("CARGO_PKG_VERSION")).into()),
-        pill(t!(ab_stack), false, None),
-        pill(t!(ab_mit), false, None),
     ]
     .spacing(BUTTON_GAP)
     .align_y(Center);
-    let what = sub(Role::NOTE, t!(ab_what));
-    let head = crate::dir_row![
-        tile(logo((LOGO_TILE - 2.0 * TILE_PAD) as u32), LOGO_TILE),
-        column![names, what].spacing(space::GAP).width(Fill),
-    ]
-    .spacing(TILE_GAP)
-    .align_y(Center);
-    let links = crate::dir_row![
+    let links = links(vec![
         link(t!(ab_github), PROJECT),
         link(t!(ab_website), WEBSITE),
         link(t!(ab_licence), LICENSE),
+    ]);
+    let tile = logo((TILE - 2.0 * TILE_PAD) as u32);
+    headed(
+        tile,
+        column![name, paragraph(sub(Role::NOTE, t!(ab_what))), links],
+    )
+}
+
+/// "Something not working?": copy the diagnostics (the accent: the report
+/// needs them), then report; nothing is sent.
+fn trouble<'a>() -> Element<'a, Message> {
+    let buttons = dir_row![
+        regular(t!(ab_diag), true, Some(Message::CopyDiagnostics)),
+        regular(t!(ab_report), false, Some(Message::ReportProblem)),
     ]
-    .spacing(BUTTON_GAP);
-    card(column![head, links].spacing(CARD_GAP))
+    .spacing(BUTTON_GAP)
+    .align_y(Center);
+    card(
+        column![
+            text(Role::ROW_TITLE, t!(ab_trouble)),
+            paragraph(sub(Role::ROW_DESC, t!(ab_trouble_desc))),
+            Space::new().height(space::GAP),
+            buttons,
+        ]
+        .spacing(space::GAP)
+        .align_x(dir::start()),
+    )
 }
 
 /// The developer: avatar, name, handle, bio, and their links.
 fn developer<'a>() -> Element<'a, Message> {
     let p = profile();
-    let head = crate::dir_row![
-        tile(avatar(), AVATAR_TILE),
-        column![
-            crate::dir_row![
-                text(Role::PAGE_TITLE, p.name.as_str()),
-                accent(Role::KEYCAP, format!("@{}", p.login)),
-            ]
-            .spacing(BUTTON_GAP)
-            .align_y(Center),
-            // the profile's bio in English; the table's Arabic draft in Arabic
-            sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])),
-        ]
-        .spacing(space::GAP)
-        .align_x(crate::ui::kit::dir::start())
-        .width(Fill),
+    let name = dir_row![
+        text(Role::ROW_TITLE, p.name.as_str()),
+        accent(Role::KEYCAP, format!("@{}", p.login)),
     ]
-    .spacing(TILE_GAP)
+    .spacing(BUTTON_GAP)
     .align_y(Center);
-    let star = fill(
-        crate::dir_row![
-            icon::icon(icon::Icon::Star, 12.0).color(themes::current().c.accent),
-            accent(Role::CONTROL, t!(ab_star)).line_height(1.5),
-        ]
-        .spacing(space::GAP)
-        .align_y(Center),
+    let star = button(
+        dir_row![icon(Icon::Star, LINK_ICON), label(t!(ab_star))]
+            .spacing(ICON_GAP)
+            .align_y(Center),
+        Kind::Quiet,
         Some(Message::OpenLink(PROJECT.into())),
     );
-    let links = crate::dir_row![
+    let links = links(vec![
         link(t!(ab_profile), PROFILE_URL),
         star,
-        fill(
-            label(t!(ab_website)),
-            Some(Message::OpenLink(p.website.clone()))
-        ),
-    ]
-    .spacing(BUTTON_GAP);
-    card(column![head, links].spacing(CARD_GAP))
+        link(t!(ab_website), p.website.clone()),
+    ]);
+    // the profile's bio in English; the table's Arabic draft in Arabic
+    let bio = paragraph(sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])));
+    headed(avatar(), column![name, bio, links])
 }
 
-/// Who made what we ship: one row each (name and maker, then licence), and
-/// the link to the full texts.
-fn notices<'a>() -> Element<'a, Message> {
-    let head = crate::dir_row![
-        column![
-            text(Role::ROW_TITLE, t!(ab_others)),
-            sub(Role::ROW_DESC, t!(ab_others_desc)),
-        ]
-        .width(Fill),
-        button(
-            label(t!(ab_all)),
-            Kind::Elevated,
-            Some(Message::OpenLink(NOTICE.into()))
-        ),
+/// Who made what we ship: one row each (what and its maker, the licence in
+/// an aligned column), the first few until "Show all", and the full texts.
+fn others(state: &State) -> Element<'_, Message> {
+    let all = made_by();
+    let chip_w = (all.iter())
+        .map(|n| crate::ui::kit::text::width(n.2, CHIP_FONT, crate::ui::kit::text::MONO))
+        .fold(0.0, f32::max)
+        .ceil()
+        + CHIP_PADS;
+    let head = dir_row![
+        iced::widget::container(text(Role::ROW_TITLE, t!(ab_others)))
+            .width(Fill)
+            .align_x(dir::start()),
+        link(t!(ab_all), NOTICE),
     ]
     .align_y(Center);
-    let mut list = column![];
-    for (i, (what, by, licence)) in made_by().into_iter().enumerate() {
-        if i > 0 {
-            list = list.push(divider());
-        }
+    let shown = match state.made_by_all {
+        true => all.len(),
+        false => MADE_BY_FIRST,
+    };
+    let mut list = column![head, paragraph(sub(Role::ROW_DESC, t!(ab_others_desc)))];
+    for (what, by, licence) in all.into_iter().take(shown) {
         list = list.push(
-            crate::dir_row![
+            dir_row![
                 column![text(Role::CONTROL, what), sub(Role::ROW_DESC, by)]
                     .width(Fill)
-                    .align_x(crate::ui::kit::dir::start()),
-                pill(licence, true, Some(LICENCE)),
+                    .align_x(dir::start()),
+                pill(licence, true, Some(chip_w)),
             ]
             .align_y(Center)
-            .padding([CREDIT_PAD, 0.0]),
+            .padding([LIST_PAD, 0.0]),
         );
     }
-    card(column![head, list].spacing(space::GAP))
+    let more = match state.made_by_all {
+        true => t!(ab_show_fewer).to_string(),
+        false => fmt(S::ab_show_all, &[&all.len()]),
+    };
+    let toggle = button(
+        label(more),
+        Kind::Quiet,
+        Some(Message::MadeByAll(!state.made_by_all)),
+    );
+    card(list.push(toggle).spacing(space::GAP).align_x(dir::start()))
 }
 
-fn problems<'a>() -> Element<'a, Message> {
-    let b = |s, m| setting_row::action(s, Kind::Elevated, Some(m));
-    setting_row::row(
-        title(t!(ab_problems)),
-        t!(ab_problems_desc),
-        crate::dir_row![
-            b(t!(ab_diag), Message::CopyDiagnostics),
-            b(t!(ab_report), Message::ReportProblem),
-        ]
-        .spacing(space::GAP),
-    )
-}
-
-fn telemetry<'a>() -> Element<'a, Message> {
-    setting_row::row(
-        title(t!(ab_telemetry)),
-        t!(ab_telemetry_desc),
-        pill(t!(ab_none), false, None),
-    )
+/// "Preview clip credits": one fold (closed when the window opens); open, one
+/// line per bundled clip with a link to its section in docs/NOTICE.md, as one
+/// left-to-right English block (legal attribution) in every language, the
+/// non-affiliation line at its end, shown folded or not. None bundled: nothing.
+fn clip_notice(state: &State) -> Option<Element<'_, Message>> {
+    let bundled = |c: &str| super::super::previews::player::still(c).is_some();
+    let lines = clip_credits(bundled);
+    if lines.is_empty() {
+        return None;
+    }
+    let open = state.credits_open;
+    let mut part = column![fold(
+        t!(ab_clip_credits),
+        lines.len(),
+        open,
+        Message::Credits(!open)
+    )]
+    .spacing(space::GAP);
+    let google = bundled(NOT_AFFILIATED_CLIP);
+    if open || google {
+        // one left-to-right block in every language (the words stay English)
+        let _ltr = dir::scope(false);
+        let mut block = column![].spacing(space::GAP).width(Fill);
+        if open {
+            for credit in clip_credits(bundled) {
+                let link = button(
+                    icon(Icon::External, LINK_ICON),
+                    Kind::Quiet,
+                    Some(Message::OpenLink(credit_url(credit))),
+                );
+                block = block.push(
+                    dir_row![
+                        sub(Role::ROW_DESC, credit.line).width(Fill),
+                        hint(link, t!(ab_credit_open), Why::Icon, Position::Top),
+                    ]
+                    .spacing(BUTTON_GAP)
+                    .align_y(Center),
+                );
+            }
+            block = block.push(sub(Role::ROW_DESC, CAVEAT));
+        }
+        if google {
+            block = block.push(sub(Role::ROW_DESC, NOT_AFFILIATED));
+        }
+        part = part.push(card(block));
+    }
+    Some(part.into())
 }
 
 #[cfg(test)]
@@ -466,6 +430,9 @@ mod tests {
         assert!(https(&p.website), "{}", p.website);
         for url in [PROJECT, WEBSITE, LICENSE, NOTICE, PROFILE_URL] {
             assert!(https(url), "{url}");
+        }
+        for c in &CLIP_CREDITS {
+            assert!(https(&credit_url(c)), "{}", credit_url(c));
         }
     }
 
@@ -502,5 +469,134 @@ mod tests {
         ] {
             assert!(all.contains(key), "{key} is credited on the page");
         }
+    }
+
+    /// GitHub's anchor of a Markdown heading: lower case, letters, digits,
+    /// `-` and `_` kept, spaces to `-`, the rest dropped.
+    fn anchor(heading: &str) -> String {
+        (heading.to_lowercase().chars())
+            .filter_map(|c| match c {
+                ' ' => Some('-'),
+                c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each clip's line links to its own section of docs/NOTICE.md, and that
+    /// section keeps the full credit with every source link the page showed
+    /// before the one-line credits (planning #177: nothing a licence asks
+    /// for is lost).
+    #[test]
+    fn every_clip_credit_links_to_its_full_section_in_notice() {
+        let notice = include_str!("../../../../../docs/NOTICE.md").replace("\r\n", "\n");
+        let sections: Vec<(String, &str)> = (notice.split("\n### ").skip(1))
+            .map(|s| {
+                let (head, body) = s.split_once('\n').unwrap();
+                (anchor(head), body.split("\n## ").next().unwrap())
+            })
+            .collect();
+        let section = |a: &str| {
+            (sections.iter().find(|(h, _)| h == a))
+                .unwrap_or_else(|| panic!("no NOTICE heading for #{a}"))
+                .1
+        };
+        let sources: [(&str, &[&str]); 8] = [
+            (
+                "succulent-photograph-circle-1",
+                &[
+                    "https://wordpress.org/photos/photo/4569e13887/",
+                    "https://creativecommons.org/publicdomain/zero/1.0/",
+                ],
+            ),
+            (
+                "lotus-photograph-circle-2",
+                &["https://wordpress.org/photos/photo/4766ac73e9/"],
+            ),
+            (
+                "kingfisher-photograph-circle-3",
+                &["https://wordpress.org/photos/photo/11669e53a4/"],
+            ),
+            (
+                "coffee-photograph-text",
+                &[
+                    "https://unsplash.com/photos/a-sign-on-a-brick-wall-that-says-coffee-jozE5L60Aj4",
+                    "https://unsplash.com/license",
+                    "No endorsement implied",
+                ],
+            ),
+            (
+                "wikipedia-translation-translate-page",
+                &[
+                    "https://fr.wikipedia.org/wiki/Plante_d%27int%C3%A9rieur",
+                    "https://fr.wikipedia.org/w/index.php?title=Plante_d%27int%C3%A9rieur&action=history",
+                    "https://creativecommons.org/licenses/by-sa/4.0/",
+                    "https://fr.wikipedia.org/wiki/Fichier:Her,_IFA_2018,_Berlin_(P1070094).jpg",
+                    "https://commons.wikimedia.org/wiki/File:Blomsterf%C3%B6nstret_av_Carl_Larsson_1894.jpg",
+                    "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSES/CC-BY-SA-4.0.txt",
+                ],
+            ),
+            ("game-screens-translate-2-translate-3", &["no real game"]),
+            (
+                "solar-photovoltaic-panel-prices-ai-chat-ai-browser",
+                &[
+                    "https://ourworldindata.org/grapher/solar-pv-prices",
+                    "https://creativecommons.org/licenses/by/4.0/",
+                ],
+            ),
+            (
+                "tourism-snip-long",
+                &[
+                    "https://ourworldindata.org/tourism",
+                    "https://ourworldindata.org/grapher/international-tourist-trips",
+                    "https://ourworldindata.org/faqs",
+                    "https://creativecommons.org/licenses/by/4.0/",
+                ],
+            ),
+        ];
+        assert_eq!(sources.len(), CLIP_CREDITS.len());
+        for (credit, (a, wants)) in CLIP_CREDITS.iter().zip(sources) {
+            assert_eq!(credit.anchor, a);
+            let body = section(a).replace('\n', " ");
+            for want in wants {
+                assert!(body.contains(want), "#{a}: {want}");
+            }
+            // the clips' names are in the heading the anchor is made of
+            assert!(credit.clips.iter().all(|c| a.contains(c)), "#{a}");
+        }
+        // the non-affiliation line, verbatim, and the caveat
+        let flat = notice.replace('\n', " ");
+        assert!(flat.contains(NOT_AFFILIATED), "{NOT_AFFILIATED}");
+        assert!(flat.contains("do not clear unrelated search-result thumbnails"));
+        assert!(section("not-affiliated-with-google").contains("not affiliated"));
+    }
+
+    /// A licence that asks for attribution gets it in the line itself: CC BY
+    /// and CC BY-SA name the work, its author, the licence and that it was
+    /// changed (the link icon opens the rest); the others name theirs.
+    #[test]
+    fn each_credit_line_names_what_its_licence_asks_for() {
+        for c in &CLIP_CREDITS {
+            let l = c.line;
+            assert!(!l.contains('\n') && !l.contains("  "), "{l}");
+            if l.contains("CC BY") {
+                assert!(l.contains('\u{201c}'), "a title: {l}");
+                assert!(l.contains("edited"), "the changes: {l}");
+            }
+        }
+        let line = |a: &str| CLIP_CREDITS.iter().find(|c| c.anchor == a).unwrap().line;
+        let page = line("wikipedia-translation-translate-page");
+        for want in [
+            "Plante d",
+            "Wikipedia contributors",
+            "Matti Blume",
+            "CC BY-SA 4.0",
+        ] {
+            assert!(page.contains(want), "{want}: {page}");
+        }
+        assert!(line("coffee-photograph-text").contains("Unsplash License"));
+        let tourism = line("tourism-snip-long");
+        assert!(tourism.contains("Bastian Herre") && tourism.contains("Veronika Samborska"));
+        assert!(line("solar-photovoltaic-panel-prices-ai-chat-ai-browser").contains("IRENA"));
     }
 }

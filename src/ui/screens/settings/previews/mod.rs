@@ -244,7 +244,9 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::screens::settings::pages::about::{CLIP_CREDITS, clip_credits};
+    use crate::ui::screens::settings::pages::about::{
+        CLIP_CREDITS, NOT_AFFILIATED_CLIP, clip_credits,
+    };
 
     fn hero(key: &str) -> &'static Hero {
         HEROES.iter().find(|h| h.key == key).unwrap()
@@ -337,39 +339,32 @@ mod tests {
         let demo_snips = clip_credits(|c| c == "snip-blur" || c == "snip-comment");
         assert!(demo_snips.is_empty(), "the demo snips need no credit");
         let ai = clip_credits(|c| c == "ai-chat");
-        assert!(ai.iter().any(|c| c.text.contains("IRENA (2025)")));
+        assert!(ai.iter().any(|c| c.line.contains("IRENA (2025)")));
+        // the Google line follows the browser clip alone
+        assert_eq!(NOT_AFFILIATED_CLIP, "ai-browser");
         assert!(
-            ai.iter().all(|c| !c.text.contains("Google")),
+            ai.iter().all(|c| !c.line.contains("Google")),
             "no Google note"
-        );
-        let browser = clip_credits(|c| c == "ai-browser");
-        assert!(
-            browser
-                .iter()
-                .any(|c| c.text.contains("not affiliated with"))
         );
         // COFFEE: bundled, credited under the Unsplash License
         assert!(player::still("text").is_some());
         assert!(
             CLIP_CREDITS
                 .iter()
-                .any(|c| c.text.contains("Unsplash License"))
+                .any(|c| c.line.contains("Unsplash License"))
         );
         // what ships: 3 photos, COFFEE, the Wikipedia page, the game screens,
-        // OWID solar, the Google note, OWID tourism, the caveat
+        // OWID solar, OWID tourism (the Google line and the caveat are their own)
         let shipped = clip_credits(|c| player::still(c).is_some());
-        assert_eq!(shipped.len(), 10);
+        assert_eq!(shipped.len(), 8);
+        assert!(player::still(NOT_AFFILIATED_CLIP).is_some());
         let page = clip_credits(|c| c == "translate-page");
         assert!(
             page.iter()
-                .any(|c| c.text.contains("Plante d")
-                    && c.links.iter().any(|l| l.0 == "CC BY-SA 4.0"))
+                .any(|c| c.line.contains("Plante d") && c.line.contains("CC BY-SA 4.0"))
         );
         let games = clip_credits(|c| c == "translate-3");
-        assert!(games.iter().any(|c| c.text.contains("no real game")));
-        assert!(games.iter().all(|c| !c.text.contains("YouTube")));
-        for (_, url) in shipped.iter().flat_map(|c| c.links) {
-            assert!(url.starts_with("https://"), "{url}");
-        }
+        assert!(games.iter().any(|c| c.line.contains("no real game")));
+        assert!(games.iter().all(|c| !c.line.contains("YouTube")));
     }
 }
