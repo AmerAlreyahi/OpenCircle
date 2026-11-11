@@ -99,12 +99,14 @@ struct Grid {
 impl Grid {
     /// For an image `width` wide whose lines found shrunk (at `shrunk` scale)
     /// are `line` px tall (median).
-    fn new(width: u32, line: f32, shrunk: f32) -> Grid {
+    /// `bands`: Linux main mode's bands (the shrunk scale is taken within
+    /// 30 % of it: at 150 % 0.5 instead of 0.64, +60 % time against main's
+    /// bands and CER 0.105 either way; the whole-screen paths keep 15 %: at
+    /// 0.5 the 150 % page read CER 0.038 -> 0.075 there).
+    fn new(width: u32, line: f32, shrunk: f32, bands: bool) -> Grid {
         let scale = (LINE_PX / line.max(1.0)).clamp(MIN_DETECT_SCALE, 1.0);
-        // within 30 % of the shrunk scale (150 %: 0.64 against 0.5): the
-        // shrunk scale itself (Linux bands at 150 % found 0.64 strips: +60 %
-        // time against main's shrunk bands, CER 0.135 -> 0.105 either way)
-        let shrunk_ok = scale <= shrunk * 1.3;
+        let near = if bands { 1.3 } else { 1.15 };
+        let shrunk_ok = scale <= shrunk * near;
         let scale = if shrunk_ok { shrunk } else { scale };
         let px = width as f32 * scale * scale;
         let rows = ((STRIP_PIXELS / px.max(1.0)) as u32).clamp(128, 384);
@@ -1138,7 +1140,8 @@ impl Engine {
             (None, false) => median_height(&self.shrunk(f)?),
         };
         let shrunk = detect_size(w, h).0 as f32 / w as f32;
-        let grid = Grid::new(w, if line > 0.0 { line } else { LINE_PX }, shrunk);
+        let bands = f.shrunk.is_none();
+        let grid = Grid::new(w, if line > 0.0 { line } else { LINE_PX }, shrunk, bands);
         f.grid = Some(grid);
         Ok(grid)
     }
@@ -1554,17 +1557,22 @@ mod tests {
             [(256, 512), (512, 768)]
         );
         // 15 px text at 1080p: full size, 256 rows (+64 seen) as before
-        let g = Grid::new(1920, 29.3, 1280.0 / 1920.0);
+        let g = Grid::new(1920, 29.3, 1280.0 / 1920.0, false);
         assert_eq!((g.scale, g.owned, g.see, g.shrunk), (1.0, 256, 64, false));
         // 3440 wide: no more pixels per strip than 1920 x 384
-        let g = Grid::new(3440, 29.3, 0.5);
+        let g = Grid::new(3440, 29.3, 0.5, false);
         assert!(
             (g.owned + 2 * g.see) as f32 * 3440.0 <= 1920.0 * 384.0,
             "{g:?}"
         );
         // 150 %: large text found shrunk
-        assert!(Grid::new(2880, 46.6, 0.5).scale < 0.7);
-        assert!(Grid::new(1920, 60.0, 0.667).shrunk);
+        assert!(Grid::new(2880, 46.6, 0.5, false).scale < 0.7);
+        assert_eq!(
+            Grid::new(2880, 46.6, 0.5, true).scale,
+            0.5,
+            "bands: the shrunk scale"
+        );
+        assert!(Grid::new(1920, 60.0, 0.667, false).shrunk);
     }
 
     #[test]
