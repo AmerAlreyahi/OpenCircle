@@ -219,12 +219,14 @@ pub(in crate::ui) fn dock_screen(area: Rectangle, screens: &[Rectangle]) -> usiz
 /// (logical px): centred under it, else above it, else inside its top edge,
 /// else inside its bottom edge; on the screen of `screens` (work areas) that
 /// holds the larger part of the area (`dock_screen`); never off that screen,
-/// and never over `avoid` (the handle being dragged) while another spot is free.
+/// and never over `avoid` (the handle being dragged) nor `keep_off` (the
+/// translate pill, which never moves) while another spot is free.
 pub(in crate::ui) fn dock(
     area: Rectangle,
     bar: Size,
     screens: &[Rectangle],
     avoid: Option<Point>,
+    keep_off: Option<Rectangle>,
 ) -> Point {
     let screen = (screens.get(dock_screen(area, screens)).copied()).unwrap_or(area);
     let part = area.intersection(&screen).unwrap_or(area);
@@ -241,10 +243,8 @@ pub(in crate::ui) fn dock(
     let fits = |y: f32| y >= top && y <= bottom;
     // The handle's own reach around it stays clear.
     let clear = |y: f32| {
-        avoid.is_none_or(|p| {
-            let r = Rectangle::new(Point::new(x, y), bar).expand(GAP);
-            !r.contains(p)
-        })
+        let r = Rectangle::new(Point::new(x, y), bar).expand(GAP);
+        avoid.is_none_or(|p| !r.contains(p)) && keep_off.is_none_or(|k| !r.intersects(&k))
     };
     let y = (spots.iter().copied())
         .find(|&y| fits(y) && clear(y))
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn snips_toolbar_docks_below_then_above_then_inside_never_off_screen() {
         let work = [Rectangle::with_size(SCREEN)];
-        let at = |a: Rectangle| dock(a, BAR, &work, None);
+        let at = |a: Rectangle| dock(a, BAR, &work, None, None);
         // Room below: centred under the area.
         let a = sel(800.0, 300.0, 200.0, 100.0);
         assert_eq!(at(a), Point::new(700.0, 416.0));
@@ -419,14 +419,36 @@ mod tests {
     fn snips_toolbar_keeps_off_the_handle_being_dragged() {
         let work = [Rectangle::with_size(SCREEN)];
         let a = sel(800.0, 300.0, 200.0, 100.0);
-        let below = dock(a, BAR, &work, None);
+        let below = dock(a, BAR, &work, None, None);
         // Dragging the bottom edge's handle down into where the toolbar sits.
         let handle = Point::new(900.0, 430.0);
-        let moved = dock(a, BAR, &work, Some(handle));
+        let moved = dock(a, BAR, &work, Some(handle), None);
         assert!(!Rectangle::new(moved, BAR).expand(GAP).contains(handle));
         assert_eq!(moved.y, 300.0 - GAP - BAR.height, "above instead");
         // A handle far away changes nothing.
-        assert_eq!(dock(a, BAR, &work, Some(Point::new(10.0, 10.0))), below);
+        assert_eq!(
+            dock(a, BAR, &work, Some(Point::new(10.0, 10.0)), None),
+            below
+        );
+    }
+
+    #[test]
+    fn snips_toolbar_keeps_off_the_translate_pill() {
+        // #172: a whole-screen area translated from More: the toolbar sat
+        // inside its top edge, under the pill (fixed at top centre)
+        let work = [Rectangle::with_size(SCREEN)];
+        let whole = sel(0.0, 0.0, SCREEN.width, SCREEN.height);
+        let pill = sel(SCREEN.width / 2.0 - 140.0, 14.0, 280.0, 36.0);
+        assert_eq!(dock(whole, BAR, &work, None, None).y, GAP, "inside the top");
+        let p = dock(whole, BAR, &work, None, Some(pill));
+        assert!(!Rectangle::new(p, BAR).intersects(&pill));
+        assert_eq!(p.y, SCREEN.height - GAP - BAR.height, "inside the bottom");
+        // an area lower down: under it as always
+        let a = sel(800.0, 300.0, 200.0, 100.0);
+        assert_eq!(
+            dock(a, BAR, &work, None, Some(pill)),
+            dock(a, BAR, &work, None, None)
+        );
     }
 
     /// Design state 8: the toolbar docks on the screen holding the larger
@@ -440,14 +462,14 @@ mod tests {
         // 420 px on the left, 380 on the right: the left one, above the area
         let a = sel(1500.0, 900.0, 800.0, 150.0);
         assert_eq!(dock_screen(a, &[left, right]), 0);
-        let p = dock(a, BAR, &[left, right], None);
+        let p = dock(a, BAR, &[left, right], None, None);
         let r = Rectangle::new(p, BAR);
         assert!(r.x >= left.x + GAP && r.x + r.width <= left.x + left.width - GAP);
         assert_eq!(p.y, 900.0 - GAP - BAR.height, "above it: no room below");
         // mostly on the right: under the area there
         let b = sel(1800.0, 900.0, 800.0, 150.0);
         assert_eq!(dock_screen(b, &[left, right]), 1);
-        let p = dock(b, BAR, &[left, right], None);
+        let p = dock(b, BAR, &[left, right], None, None);
         let r = Rectangle::new(p, BAR);
         assert!(r.x >= right.x + GAP && r.x + r.width <= right.x + right.width - GAP);
         assert_eq!(

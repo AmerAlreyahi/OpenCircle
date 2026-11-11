@@ -218,11 +218,16 @@ pub fn pill_at(region: Rectangle) -> Point {
     Point::new(x, region.y + PILL_TOP)
 }
 
+/// The pill's rect on a whole `screen` (where it always sits).
+pub fn pill_rect(screen: Size) -> Rectangle {
+    Rectangle::new(pill_at(Rectangle::with_size(screen)), picker::PILL)
+}
+
 /// `at` (a result card) kept off the pill: where it would reach the pill's
 /// rect (a side card on a screen too narrow to pass it), its top moves under
 /// the pill, its bottom staying; never shorter than `card::MIN`.
 pub fn clear_of_pill(at: Rectangle, screen: Size) -> Rectangle {
-    let pill = Rectangle::new(pill_at(Rectangle::with_size(screen)), picker::PILL);
+    let pill = pill_rect(screen);
     let below = pill.y + pill.height + STACK;
     if at.x >= pill.x + pill.width || at.x + at.width <= pill.x || at.y >= below {
         return at;

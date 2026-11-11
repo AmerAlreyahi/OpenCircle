@@ -101,7 +101,10 @@ impl App {
             let area = edit.canvas_rect();
             let avoid =
                 (edit.annotator.area_handle()).map(|p| p + (area.position() - Point::ORIGIN));
-            return bar::dock(area, size, &[work], avoid);
+            // a translation of the area (More > Translate): its pill stays at top centre
+            let pill = (self.o.translate.as_ref())
+                .map(|_| crate::ui::screens::translate::view::pill_rect(self.o.screen));
+            return bar::dock(area, size, &[work], avoid, pill);
         }
         let canvas = self.o.edit.as_ref().map(SnipToolbar::canvas_rect);
         let (room, size, inset, _) = self.bar_spot();
