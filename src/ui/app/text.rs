@@ -138,6 +138,53 @@ impl App {
             && self.o.translate.is_none()
     }
 
+    /// Main mode's screen text is being read now (#169): how many of the
+    /// lines found are read, of how many (`None` inside: none found yet).
+    /// Windows: Windows OCR's read, then the second reader's.
+    pub(in crate::ui) fn reading_text(&self) -> Option<Option<(usize, usize)>> {
+        let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
+        let other = self.o.other_reading.is_some();
+        (main && (self.o.reading.is_some() || other)).then(|| self.o.screen_text.progress(other))
+    }
+
+    /// Main mode read the whole screen and found no text (#169).
+    pub(in crate::ui) fn no_text(&self) -> bool {
+        let others_done = self.o.text_by != Some(ocr::Source::System)
+            || self.o.other_read
+            || !ocr::reads_other_scripts();
+        self.reads_text()
+            && self.reading_text().is_none()
+            && self.text_whole()
+            && others_done
+            && self.lines_iter().next().is_none()
+    }
+
+    /// The lines found but not read yet (image px): the pointer over them
+    /// is the system's working cursor (#169).
+    pub(in crate::ui) fn text_waiting(&self) -> Vec<Rectangle> {
+        match self.reading_text() {
+            Some(_) => (self.o.screen_text).waiting(self.o.other_reading.is_some()),
+            None => Vec::new(),
+        }
+    }
+
+    /// Copy text's spinner's turn (0..1).
+    pub(in crate::ui) fn text_turn(&self) -> f32 {
+        self.o.text_spin.map_or(0.0, |(_, turn)| turn)
+    }
+
+    /// A frame at `now`: the spinner turns while the text is read.
+    pub(in crate::ui) fn tick_text(&mut self, now: Instant) {
+        self.o.text_spin = match (self.reading_text().is_some(), self.o.text_spin) {
+            (false, _) => None,
+            (true, None) => Some((now, 0.0)),
+            (true, Some((start, _))) => Some((
+                start,
+                crate::ui::kit::spinner::turn(now.saturating_duration_since(start)),
+            )),
+        };
+    }
+
     /// Windows OCR reads this opening's text (#62): decided at its first read,
     /// until then what `ocr::route` says now.
     pub(in crate::ui) fn system_text(&self) -> bool {

@@ -689,6 +689,22 @@ impl Screen {
         self.found = found;
     }
 
+    /// The lines found but not read yet (`other`: by the second reader).
+    pub fn waiting(&self, other: bool) -> Vec<Rectangle> {
+        let rows = if other { &self.other_rows } else { &self.rows };
+        (self.found.iter())
+            .filter(|b| !rows.knows(b.center_y()))
+            .copied()
+            .collect()
+    }
+
+    /// How many of the lines found are read, and how many were found
+    /// (`other`: by the second reader); `None` before any was found.
+    pub fn progress(&self, other: bool) -> Option<(usize, usize)> {
+        let all = self.found.len();
+        (all > 0).then(|| (all - self.waiting(other).len(), all))
+    }
+
     /// The band to read first for row `y` (touched) on a `screen`-sized
     /// overlay: centred on it.
     #[cfg(test)]
@@ -766,6 +782,39 @@ mod tests {
             bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
             carets: Vec::new(),
         }
+    }
+
+    /// #169: lines found but not read yet wait (the working cursor), and
+    /// count in "N of M lines"; the second reader's rows count for its own.
+    #[test]
+    fn lines_found_wait_until_their_rows_are_read() {
+        let screen = Size::new(1920.0, 1080.0);
+        let mut text = Screen::default();
+        assert_eq!(text.progress(false), None, "nothing found yet");
+        let found: Vec<Rectangle> = (0..10)
+            .map(|i| {
+                Rectangle::new(
+                    Point::new(50.0, 100.0 * i as f32 + 10.0),
+                    Size::new(300.0, 20.0),
+                )
+            })
+            .collect();
+        text.set_found(found.clone());
+        assert_eq!(text.progress(false), Some((0, 10)));
+        assert_eq!(text.waiting(false), found);
+        // the band under the pointer (rows 452..548 known: the line at 510)
+        let band = Screen::band(500.0, screen);
+        text.add(band, Vec::new(), screen);
+        assert_eq!(text.progress(false), Some((1, 10)));
+        assert!(!text.waiting(false).contains(&found[5]));
+        assert_eq!(
+            text.progress(true),
+            Some((0, 10)),
+            "the second reader's own rows"
+        );
+        text.add_extra(Rectangle::with_size(screen), Vec::new(), screen);
+        assert_eq!(text.progress(true), Some((10, 10)));
+        assert!(text.waiting(true).is_empty());
     }
 
     /// The screen read band by band from the pointer out ends with every line

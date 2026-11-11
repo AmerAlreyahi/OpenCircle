@@ -504,6 +504,7 @@ impl App {
                 if let Some((_, panel)) = &mut self.o.ai_chat {
                     panel.tick(now);
                 }
+                self.tick_text(now);
                 self.step_zoom(now);
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);

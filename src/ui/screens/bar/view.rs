@@ -99,13 +99,41 @@ impl App {
         .zip(widths)
         .map(|((which, glyph, label, keys), width)| {
             let labelled = width > bar::ICON_PILL;
-            let pill = button::compact(
-                glyph,
-                labelled.then_some(label),
-                width,
-                (self.o.pill == which, kbd(Stop::Button(which))),
-                self.bar_message(which),
-            );
+            let state = (self.o.pill == which, kbd(Stop::Button(which)));
+            // Copy text while the screen's text is read: the spinner in its
+            // glyph's place, how far in its tooltip (#169, sheet b1-b6)
+            let reading = (which == BarButton::CopyText)
+                .then(|| self.reading_text())
+                .flatten();
+            let pill = match reading {
+                Some(_) => button::compact_spinning(
+                    (self.text_turn(), crate::ui::kit::motion::reduced()),
+                    labelled.then_some(label),
+                    width,
+                    state,
+                    self.bar_message(which),
+                ),
+                None => button::compact(
+                    glyph,
+                    labelled.then_some(label),
+                    width,
+                    state,
+                    self.bar_message(which),
+                ),
+            };
+            let status = match reading {
+                Some(Some((read, found))) => {
+                    Some(format!("Reading text · {read} of {found} lines"))
+                }
+                Some(None) => Some("Reading text…".to_string()),
+                None if which == BarButton::CopyText && self.no_text() => {
+                    Some("No text found on this screen".to_string())
+                }
+                None => None,
+            };
+            if let Some(status) = status {
+                return crate::ui::kit::tooltip::cut(pill, status);
+            }
             // Its label is written on it; an icon-only pill (narrow screens)
             // names itself and its shortcut in a tooltip.
             if labelled {

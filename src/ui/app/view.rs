@@ -140,6 +140,7 @@ impl App {
                 }
                 _ => Vec::new(),
             },
+            waiting: self.text_waiting(),
         };
         // (Snip's More pastes its translation into the picture: no frame of the session's)
         let own = matches!(self.o.purpose, Purpose::Snip(_));

@@ -925,6 +925,9 @@ pub struct Overlay<'a> {
     pub picked: Vec<Rectangle>,
     /// The text lines on the frame (image px): the pointer is an I-beam over them.
     pub text: Vec<Rectangle>,
+    /// Lines found but not read yet (image px, #169): the pointer over them
+    /// is the system's working cursor (`Progress`: the OS animates it).
+    pub waiting: Vec<Rectangle>,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -1314,8 +1317,11 @@ impl canvas::Program<Event> for Overlay<'_> {
         }
         // Over text: it is selected like in a document.
         let over = |p: Point| self.over_text(p);
+        let waits =
+            |p: Point| (self.waiting.iter()).any(|l| self.view.rect_to_screen(*l).contains(p));
         match cursor.position_in(bounds) {
             Some(p) if over(p) => mouse::Interaction::Text,
+            Some(p) if waits(p) => mouse::Interaction::Progress,
             _ => mouse::Interaction::Crosshair,
         }
     }
@@ -1553,6 +1559,46 @@ impl<M> canvas::Program<M> for Zoomed<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #169: over a line found but not read yet the pointer is the system's
+    /// working cursor; over a read line the I-beam; elsewhere the crosshair.
+    #[test]
+    fn the_pointer_works_over_lines_not_read_yet() {
+        use iced::widget::canvas::Program;
+        let first_draw = Cell::new(None);
+        let line = |y: f32| Rectangle::new(Point::new(100.0, y), Size::new(200.0, 20.0));
+        let overlay = Overlay {
+            stroke: &[],
+            selection: None,
+            others: &[],
+            view: View::new(960, 540, Size::new(960.0, 540.0)),
+            zooming: false,
+            handles: false,
+            opening: 0,
+            first_draw: &first_draw,
+            frame_times: &RefCell::default(),
+            hover: false,
+            dim: true,
+            live_drag: false,
+            look: crate::config::Config::default().look.active(),
+            morph: None,
+            words: &[],
+            picked: Vec::new(),
+            text: vec![line(100.0)],
+            waiting: vec![line(200.0)],
+        };
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(960.0, 540.0));
+        let at = |x: f32, y: f32| {
+            overlay.mouse_interaction(
+                &Pointer::default(),
+                bounds,
+                Cursor::Available(Point::new(x, y)),
+            )
+        };
+        assert_eq!(at(150.0, 110.0), mouse::Interaction::Text);
+        assert_eq!(at(150.0, 210.0), mouse::Interaction::Progress);
+        assert_eq!(at(150.0, 400.0), mouse::Interaction::Crosshair);
+    }
 
     #[test]
     fn stroke_fits_to_its_bounding_box() {
@@ -2343,6 +2389,7 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
+            waiting: Vec::new(),
         };
         let bounds = Rectangle::with_size(Size::new(960.0, 540.0));
         let mut state = Pointer::default();
@@ -2433,6 +2480,7 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
+            waiting: Vec::new(),
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
@@ -2474,6 +2522,7 @@ mod tests {
             words: &[],
             picked: Vec::new(),
             text: Vec::new(),
+            waiting: Vec::new(),
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)

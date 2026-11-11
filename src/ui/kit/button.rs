@@ -427,13 +427,39 @@ pub fn compact<'a, Message: Clone + 'a>(
     glyph: char,
     label: Option<&'a str>,
     width: f32,
+    state: (bool, bool),
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let glyph = text(glyph).font(super::icon::FONT).size(size::ICON_SMALL);
+    compact_with(glyph.into(), label, width, state, on_press)
+}
+
+/// `compact` with the kit spinner (`spinner::spinner`, `turn` of the way
+/// round; `still` = reduced motion) in its glyph's place: the pill's work
+/// goes on (main mode's Copy text while the screen's text is read, #169).
+pub fn compact_spinning<'a, Message: Clone + 'a>(
+    (turn, still): (f32, bool),
+    label: Option<&'a str>,
+    width: f32,
+    state: (bool, bool),
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let logo = super::logo::logo(size::ICON_SMALL as u32);
+    let glyph = super::spinner::spinner(logo, size::ICON_SMALL, turn, still);
+    compact_with(glyph, label, width, state, on_press)
+}
+
+fn compact_with<'a, Message: Clone + 'a>(
+    glyph: Element<'a, Message>,
+    label: Option<&'a str>,
+    width: f32,
     (active, focused): (bool, bool),
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     use super::tokens::{Role, space};
     use iced_button::Status;
     let live = on_press.is_some();
-    let content = row![text(glyph).font(super::icon::FONT).size(size::ICON_SMALL)]
+    let content = row![glyph]
         .push(label.map(|l| {
             text(l)
                 .size(super::text::size(Role::BAR_PILL))

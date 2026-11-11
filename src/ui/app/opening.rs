@@ -67,6 +67,9 @@ pub(in crate::ui) struct Opening {
     /// The frame went to the helper (`ocr::read_screen`): later parts send
     /// only its key.
     pub(in crate::ui) frame_sent: bool,
+    /// Copy text's spinner while the screen's text is read: since when, and
+    /// its turn (`kit::spinner`).
+    pub(in crate::ui) text_spin: Option<(Instant, f32)>,
     /// A tap or Shift+click waiting for the band under it.
     pub(in crate::ui) awaits: Option<(Point, Await)>,
     /// Ctrl+A waits for the whole screen to be read.
@@ -236,6 +239,7 @@ impl Default for Opening {
             other_reading: None,
             other_known: None,
             frame_sent: false,
+            text_spin: None,
             awaits: None,
             want_all: false,
             held: None,

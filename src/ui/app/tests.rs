@@ -1862,6 +1862,37 @@ fn answer(app: &mut App, band: Rectangle) -> Task<Message> {
     app.update(Message::ScreenText(app.opening, band, Ok(lines)))
 }
 
+/// #169: while the screen's text is read, Copy text says how far ("N of M
+/// lines", from the lines the helper found); lines found but not read yet
+/// wait (the working cursor); once all is read the pill is quiet again; a
+/// screen with no text says so.
+#[test]
+fn reading_the_screen_shows_how_far_it_is() {
+    let mut app = reader_app();
+    assert_eq!(app.reading_text(), None);
+    app.o.reading = Some(Rectangle::new(Point::ORIGIN, Size::new(960.0, 96.0)));
+    assert_eq!(
+        app.reading_text(),
+        Some(None),
+        "none found yet: \"Reading text…\""
+    );
+    let found: Vec<Rectangle> = (text_blocks().iter())
+        .map(|b| {
+            let [x, y, w, h] = b.bounds;
+            Rectangle::new(Point::new(x, y), Size::new(w, h))
+        })
+        .collect();
+    let _ = app.update(Message::ScreenFound(app.opening, found.clone()));
+    assert_eq!(app.reading_text(), Some(Some((0, found.len()))));
+    assert_eq!(app.text_waiting(), found);
+    let _ = answer(&mut app, page());
+    assert_eq!(app.reading_text(), None, "all read: quiet");
+    assert!(app.text_waiting().is_empty() && !app.no_text());
+    let mut empty = reader_app();
+    let _ = empty.update(Message::ScreenText(empty.opening, page(), Ok(Vec::new())));
+    assert!(empty.no_text(), "no text found on this screen");
+}
+
 /// `reader_app` with all its screen read.
 fn read_app() -> App {
     let mut app = reader_app();

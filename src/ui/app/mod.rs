@@ -366,6 +366,7 @@ impl App {
             || (self.o.edit.as_ref())
                 .is_some_and(crate::ui::screens::snip_toolbar::SnipToolbar::growing)
             || !self.o.waiting.is_empty() // other screens wait for a frame after the opening
+            || (self.reading_text().is_some() && !motion::reduced()) // Copy text's spinner (#169)
     }
 
     /// The gaps between the overlay's frames since the last log, as `what`
