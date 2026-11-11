@@ -5,18 +5,64 @@
 //! red.
 use crate::t;
 use iced::Element;
-use iced::widget::column;
+use iced::Fill;
 use iced::widget::tooltip::Position;
+use iced::widget::{Space, column};
 
 use super::super::state::{Message, Slot, State, key_labels};
-use crate::ui::kit::setting_row;
+use crate::ui::kit::button::{Kind as Button, button, label};
+use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::shortcut_field::{self, shortcut_field};
 use crate::ui::kit::text::{error, text};
-use crate::ui::kit::tokens::Role;
+use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    column(state.slots().map(|slot| row(state, slot))).into()
+    let rows = state.slots().map(|slot| row(state, slot));
+    column(rows.chain([reset(state)])).into()
+}
+
+/// The last row: Reset shortcuts. Always shown (like History's Clear all), dimmed with
+/// its reason while every key is at its default; pressed, it asks first; after a reset
+/// it offers Undo until another key changes or the page is left.
+fn reset(state: &State) -> Element<'_, Message> {
+    if state.resetting {
+        let buttons = crate::dir_row![
+            Space::new().width(Fill),
+            button(
+                label(t!(c_cancel)),
+                Button::Elevated,
+                Some(Message::KeepShortcuts)
+            ),
+            button(
+                label(t!(k_reset_do)),
+                Button::Elevated,
+                Some(Message::ResetShortcuts(true))
+            ),
+        ]
+        .spacing(space::GAP)
+        .align_y(iced::Center);
+        return setting_row::row(title(t!(k_reset)), t!(k_reset_ask), buttons);
+    }
+    let (desc, text, action) = match (state.shortcuts_differ(), state.reset_undo.is_some()) {
+        (true, _) => (
+            t!(k_reset_desc),
+            t!(k_reset_btn),
+            Some(Message::ResetShortcuts(false)),
+        ),
+        (false, true) => (
+            t!(k_reset_done),
+            t!(k_reset_undo),
+            Some(Message::UndoShortcuts),
+        ),
+        (false, false) => (t!(k_reset_same), t!(k_reset_btn), None),
+    };
+    let ask = button(label(text), Button::Elevated, action);
+    setting_row::row(
+        title(t!(k_reset)),
+        desc,
+        crate::dir_row![Space::new().width(Fill), ask],
+    )
 }
 
 /// One shortcut's row (also on the Snip page).

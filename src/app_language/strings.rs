@@ -519,6 +519,23 @@ strings! {
         | "مسح الكل…";
     k_note: "Click any box to record keys"
         | "انقر أي مربع لتسجيل المفاتيح";
+    // added for reset shortcuts
+    k_reset: "Reset shortcuts"
+        | "إعادة ضبط الاختصارات";
+    k_reset_desc: "Puts every shortcut back to its default"
+        | "تعيد كل اختصار إلى قيمته الافتراضية";
+    k_reset_same: "Every shortcut is already at its default"
+        | "كل الاختصارات على قيمتها الافتراضية";
+    k_reset_btn: "Reset to defaults"
+        | "إعادة إلى الافتراضي";
+    k_reset_ask: "Reset every shortcut to its default?"
+        | "هل تريد إعادة كل اختصار إلى قيمته الافتراضية؟";
+    k_reset_do: "Reset"
+        | "إعادة الضبط";
+    k_reset_done: "Shortcuts are back at their defaults"
+        | "عادت الاختصارات إلى قيمتها الافتراضية";
+    k_reset_undo: "Undo"
+        | "تراجع";
     k_open: "Open OpenCircle"
         | "فتح OpenCircle";
     k_open_desc: "Starts a capture"

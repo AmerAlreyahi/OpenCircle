@@ -796,6 +796,32 @@ mod tests {
         c
     }
 
+    /// "Reset shortcuts" only sets the draft's keys; every backend (the X grab, GNOME's
+    /// custom shortcuts, KDE's service, the portal) is fed by this one plan on `reload`,
+    /// so a reset config must plan exactly what the default config plans (the portal
+    /// then asks under the bare default ids again).
+    #[test]
+    fn a_reset_config_plans_the_default_bindings() {
+        let default = all_labs();
+        let mut changed = all_labs();
+        changed.shortcut = "Ctrl+Shift+K".into();
+        for (i, q) in changed.quick_actions.iter_mut().enumerate() {
+            q.shortcut = if i % 2 == 0 {
+                "Ctrl+Alt+F8".into()
+            } else {
+                String::new()
+            };
+        }
+        assert_ne!(plan(&changed).0, plan(&default).0);
+        changed.shortcut = default.shortcut.clone();
+        for (q, d) in changed.quick_actions.iter_mut().zip(&default.quick_actions) {
+            q.shortcut = crate::config::default_quick_shortcut(&d.action, d.live);
+        }
+        let (reset, default) = (plan(&changed), plan(&default));
+        assert_eq!(reset, default);
+        assert!(reset.0.iter().all(|b| b.portal_id() == b.id));
+    }
+
     #[test]
     fn a_hidden_feature_has_no_shortcut_and_turning_it_on_brings_it_back() {
         use crate::labs::Feature;

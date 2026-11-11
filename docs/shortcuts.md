@@ -24,6 +24,8 @@ window and full-screen rows (older entries in a config still work: see below).
 Older configs that had Snip on `Print Screen` move to `Alt+A` once, unless a key
 of your own stays.
 
+**Settings > Shortcuts > Reset shortcuts** puts every shown shortcut back to the default in the table above (it asks first, and offers Undo until you change something else). Where your desktop owns the keys (GNOME and KDE settings, the shortcut portal), it asks for the defaults again and the desktop has the last word: the row shows the key it actually uses.
+
 Snip also opens from the tray menu (**Snip**), the bar's Snip button, and with
 `opencircle run snip`. The colour picker and ruler have no default key, because
 no combination is free on every PC; give them one in **Settings > Shortcuts**.

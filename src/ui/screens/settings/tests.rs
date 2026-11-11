@@ -2041,7 +2041,7 @@ fn the_step_33_pages_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
-    let cases: [(&str, Section, f32, Setup); 15] = [
+    let cases: [(&str, Section, f32, Setup); 18] = [
         ("ai", Section::Ai, 0.0, |s| {
             update(s, Message::Provider(Provider::OpenaiCompatible));
             update(s, Message::Preset(preset("OpenRouter")));
@@ -2069,6 +2069,19 @@ fn the_step_33_pages_match_their_golden_images() {
             update(s, Message::Record(Slot::Quick(0)));
             press(s, chord(true, true, "Space"));
         }),
+        (
+            "shortcuts-reset-ready",
+            Section::Shortcuts,
+            0.0,
+            reset_ready,
+        ),
+        ("shortcuts-reset-ask", Section::Shortcuts, 900.0, reset_ask),
+        (
+            "shortcuts-reset-done",
+            Section::Shortcuts,
+            900.0,
+            reset_done,
+        ),
         ("snip", Section::Snip, 1180.0, |_| {}),
         ("snip-print-screen", Section::Snip, 1280.0, |s| {
             // a user whose Snip key is Print Screen (the note is theirs)
@@ -2994,4 +3007,172 @@ fn no_text_is_drawn_past_its_box_on_any_page() {
     }
     app_language::set(Lang::En);
     assert!(past.is_empty(), "{past:#?}");
+}
+
+/// Settings > Shortcuts > Reset shortcuts (#175): asks first, puts every shown key
+/// back to the config's own default through the draft (saved like a recorded key),
+/// keeps what the page doesn't show, offers Undo until something else changes.
+#[test]
+fn reset_shortcuts_asks_resets_saves_and_undoes() {
+    let path = tmp("reset-shortcuts");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "version = 11\n").unwrap();
+    let (mut s, _) = state(Some(path.clone()));
+    s.draft = Config::load_from(&path).0;
+    // Song search is off in Labs: its entry holds a key of the user's own
+    for q in &mut s.draft.quick_actions {
+        if q.action == "song_search" {
+            q.shortcut = "Ctrl+Shift+Y".into();
+        }
+    }
+    s.saved = s.draft.clone();
+    let default = Config::default();
+    update(&mut s, Message::Section(Section::Shortcuts));
+    assert!(!s.shortcuts_differ());
+    let has = |s: &State, want: &str| shot::texts(view(s)).iter().any(|t| t == want);
+    assert!(has(&s, "Every shortcut is already at its default"));
+    // change two, clear one
+    for (slot, keys) in [
+        (Slot::Capture, chord(true, true, "KeyK")),
+        (Slot::Quick(0), chord(true, true, "KeyJ")),
+    ] {
+        update(&mut s, Message::Record(slot));
+        press(&mut s, keys);
+    }
+    update(&mut s, Message::Record(Slot::Quick(2)));
+    press(&mut s, chord(false, false, "Delete"));
+    assert!(s.shortcuts_differ());
+    assert!(has(&s, "Puts every shortcut back to its default"));
+    // asks first; Cancel and Esc leave everything
+    let changed = s.draft.clone();
+    assert!(matches!(update(&mut s, Message::Save), Outcome::Saved(_)));
+    update(&mut s, Message::ResetShortcuts(false));
+    assert!(s.resetting);
+    assert!(has(&s, "Reset every shortcut to its default?"));
+    update(&mut s, Message::KeepShortcuts);
+    assert!(!s.resetting && s.draft == changed);
+    let esc = |code| {
+        cancel_reset(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            physical_key: iced::keyboard::key::Physical::Code(code),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        }))
+    };
+    assert!(matches!(
+        esc(iced::keyboard::key::Code::Escape),
+        Some(Message::KeepShortcuts)
+    ));
+    assert!(esc(iced::keyboard::key::Code::KeyA).is_none());
+    // reset: every shown key is the default again; a hidden entry keeps its key
+    update(&mut s, Message::ResetShortcuts(false));
+    update(&mut s, Message::ResetShortcuts(true));
+    assert_eq!(s.draft.shortcut, default.shortcut);
+    for (i, q) in default.quick_actions.iter().enumerate() {
+        let hidden = !s.slots().any(|x| x == Slot::Quick(i));
+        let got = &s.draft.quick_actions[i].shortcut;
+        assert_eq!(hidden, q.action == "song_search" || q.live, "Labs off");
+        match hidden {
+            true => assert_eq!(got, &changed.quick_actions[i].shortcut, "hidden: kept"),
+            false => assert_eq!(got, &q.shortcut, "{}", q.action),
+        }
+    }
+    assert!(!s.shortcuts_differ() && !s.resetting);
+    assert!(has(&s, "Shortcuts are back at their defaults") && has(&s, "Undo"));
+    // saved like a recorded key, through the one writer
+    let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+        panic!("not saved: {:?}", s.problems)
+    };
+    assert_eq!(cfg.shortcut, default.shortcut);
+    assert_eq!(Config::load_from(&path).0.shortcut, default.shortcut);
+    // Undo restores the replaced keys, once
+    update(&mut s, Message::UndoShortcuts);
+    assert_eq!(s.draft, changed);
+    assert!(s.reset_undo.is_none());
+    // another change ends Undo; so does leaving the page
+    update(&mut s, Message::ResetShortcuts(true));
+    update(&mut s, Message::Record(Slot::Capture));
+    press(&mut s, chord(true, false, "KeyM"));
+    assert!(s.reset_undo.is_none());
+    update(&mut s, Message::ResetShortcuts(true));
+    update(&mut s, Message::Section(Section::General));
+    assert!(s.reset_undo.is_none());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// Labs features on: their keys are reset too; one that is off keeps its key unless a
+/// default takes it (a key is never bound twice).
+#[test]
+fn reset_shortcuts_covers_labs_only_while_on_and_unbinds_a_taken_hidden_key() {
+    let (mut s, _) = state(None);
+    let song = (s.draft.quick_actions.iter())
+        .position(|q| q.action == "song_search")
+        .unwrap();
+    s.draft.quick_actions[song].shortcut = "Alt+A".into(); // hidden, holds Snip's default
+    update(&mut s, Message::ResetShortcuts(true));
+    assert_eq!(s.draft.quick_actions[song].shortcut, "", "gave up Alt+A");
+    s.draft.labs = Labs::all_on();
+    s.draft.quick_actions[song].shortcut = "Ctrl+Shift+K".into();
+    assert!(s.shortcuts_differ(), "a shown Labs key counts");
+    update(&mut s, Message::ResetShortcuts(true));
+    assert_eq!(
+        s.draft.quick_actions[song].shortcut, "",
+        "its default is none"
+    );
+    // the same key written another way is the same key
+    s.draft.shortcut = "ctrl+shift+space".into();
+    assert!(!s.shortcuts_differ());
+}
+
+/// Reset shortcuts as drawn: a key changed (the button ready), asking, and after the
+/// reset (saved, Undo offered; Snip's default key is held by another app).
+fn reset_ready(s: &mut State) {
+    update(s, Message::Record(Slot::Capture));
+    press(s, chord(true, true, "KeyK"));
+}
+
+fn reset_ask(s: &mut State) {
+    reset_ready(s);
+    update(s, Message::ResetShortcuts(false));
+}
+
+fn reset_done(s: &mut State) {
+    reset_ready(s);
+    update(s, Message::ResetShortcuts(true));
+    s.saved = s.draft.clone();
+    s.desktop = |keys| (keys == "Alt+A").then_some(DesktopKey::Taken);
+}
+
+/// The reset row in Arabic (mirrored), the four states, Sapphire and Daylight.
+#[test]
+fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    type Setup = fn(&mut State);
+    let states: [(&str, Setup); 4] = [
+        ("idle", |_| {}),
+        ("ready", reset_ready),
+        ("ask", reset_ask),
+        ("done", reset_done),
+    ];
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        for (name, setup) in states {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice("ar")));
+            update(&mut s, Message::Section(Section::Shortcuts));
+            setup(&mut s);
+            themes::set(theme);
+            let file = format!("settings-shortcuts-reset-{name}-ar-{}", theme.id);
+            let size = Size::new(WINDOW_SIZE.width, 900.0);
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

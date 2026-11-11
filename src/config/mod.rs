@@ -1004,6 +1004,16 @@ impl Default for Config {
     }
 }
 
+/// The key a quick action starts with ("" = none): read from `Config::default`'s list,
+/// the one place the defaults live (Settings' "Reset shortcuts").
+pub fn default_quick_shortcut(action: &QuickId, live: bool) -> String {
+    let all = Config::default().quick_actions;
+    let found = all
+        .into_iter()
+        .find(|q| q.action == *action && q.live == live);
+    found.map(|q| q.shortcut).unwrap_or_default()
+}
+
 /// Parse a shortcut string ("Ctrl+Shift+Space") with `global-hotkey`'s parser,
 /// plus one rule of ours: a bare typing key (letter, digit, Space, ...) cannot
 /// be global; only F-keys, PrintScreen, Pause and ScrollLock may stand alone.

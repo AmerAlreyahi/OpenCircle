@@ -658,6 +658,10 @@ pub struct State {
     /// is asking to be sure.
     pub(super) kept: Option<Counts>,
     pub(super) clearing_all: bool,
+    /// Shortcuts: "Reset shortcuts" is asking to be sure, and the keys it replaced
+    /// (capture, then each quick action) while Undo is offered.
+    pub(super) resetting: bool,
+    pub(super) reset_undo: Option<(String, Vec<String>)>,
     /// Ask AI's Model list.
     pub(super) model_list: super::model_list::ModelList,
 }
@@ -753,6 +757,11 @@ pub enum Message {
     ClearHistory(Kind),
     ClearAll(bool),
     KeepHistory,
+    /// Shortcuts: Reset asks first (`false`), then resets (`true`) or is
+    /// cancelled (`KeepShortcuts`); Undo puts the replaced keys back.
+    ResetShortcuts(bool),
+    KeepShortcuts,
+    UndoShortcuts,
     Kept(Counts),
     Look(LookTheme),
     /// The custom look's controls.
@@ -1041,6 +1050,8 @@ impl State {
             print_screen_taken: crate::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
+            resetting: false,
+            reset_undo: None,
             model_list: Default::default(),
         };
         s.refresh_models();
@@ -1170,9 +1181,73 @@ impl State {
     }
 
     pub(super) fn set_shortcut(&mut self, slot: Slot, value: String) {
+        self.reset_undo = None; // another change: Undo is over
         match slot {
             Slot::Capture => self.draft.shortcut = value,
             Slot::Quick(i) => self.draft.quick_actions[i].shortcut = value,
+        }
+    }
+
+    /// What `slot` starts with: the config's own defaults ("" = none).
+    pub(super) fn default_shortcut(&self, slot: Slot) -> String {
+        match slot {
+            Slot::Capture => Config::default().shortcut,
+            Slot::Quick(i) => {
+                let q = &self.draft.quick_actions[i];
+                config::default_quick_shortcut(&q.action, q.live)
+            }
+        }
+    }
+
+    /// Does any shown shortcut differ from its default (same key = same, however spelled)?
+    pub(super) fn shortcuts_differ(&self) -> bool {
+        self.slots().any(|slot| {
+            let (now, default) = (self.shortcut(slot), self.default_shortcut(slot));
+            match (parse_shortcut(now), parse_shortcut(&default)) {
+                (Ok(a), Ok(b)) => a != b,
+                _ => now != default,
+            }
+        })
+    }
+
+    /// Every shown shortcut back to its default, set in the draft like a recorded key
+    /// (the shell saves and re-binds as it does for one). An entry the page doesn't show
+    /// (its Labs switch is off) keeps its key, unless a default takes it: then it is
+    /// unbound, so the file never binds a key twice.
+    pub(super) fn reset_shortcuts(&mut self) {
+        let before = (
+            self.draft.shortcut.clone(),
+            (self.draft.quick_actions.iter())
+                .map(|q| q.shortcut.clone())
+                .collect(),
+        );
+        let shown: Vec<Slot> = self.slots().collect();
+        for &slot in &shown {
+            self.set_shortcut(slot, self.default_shortcut(slot));
+        }
+        let keys: Vec<_> = (shown.iter())
+            .filter_map(|&s| parse_shortcut(self.shortcut(s)).ok())
+            .collect();
+        for (i, q) in self.draft.quick_actions.iter_mut().enumerate() {
+            let hidden = !shown.contains(&Slot::Quick(i));
+            if hidden && parse_shortcut(&q.shortcut).is_ok_and(|h| keys.contains(&h)) {
+                q.shortcut.clear();
+            }
+        }
+        self.reset_undo = Some(before);
+        self.resetting = false;
+        self.recording = None;
+        self.shortcut_error = None;
+    }
+
+    /// Undo of the last reset: the replaced keys, through the same draft.
+    pub(super) fn undo_reset(&mut self) {
+        let Some((capture, quick)) = self.reset_undo.take() else {
+            return;
+        };
+        self.draft.shortcut = capture;
+        for (q, key) in self.draft.quick_actions.iter_mut().zip(quick) {
+            q.shortcut = key;
         }
     }
 
@@ -1439,6 +1514,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.key_jobs.push((true, job));
             }
             state.clearing_all = false;
+            state.resetting = false;
+            state.reset_undo = None;
             match s {
                 // the user may have changed it in Windows meanwhile
                 Section::Snip => {
@@ -1479,6 +1556,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ThemeCard(id) => pick_theme(state, id),
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
+            state.resetting = false;
+            state.reset_undo = None;
             state.shortcut_error = None;
             state.mods_held = false;
         }
@@ -1573,6 +1652,14 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             return Outcome::History(Kind::ALL.to_vec());
         }
         Message::KeepHistory => state.clearing_all = false,
+        Message::ResetShortcuts(false) => {
+            state.resetting = true;
+            state.recording = None;
+            state.shortcut_error = None;
+        }
+        Message::ResetShortcuts(true) => state.reset_shortcuts(),
+        Message::KeepShortcuts => state.resetting = false,
+        Message::UndoShortcuts => state.undo_reset(),
         Message::Kept(counts) => state.kept = Some(counts),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
@@ -1903,6 +1990,10 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         true => motion::frames().map(|_| Message::Tick),
         false => Subscription::none(),
     };
+    if state.resetting {
+        let esc = event::listen_with(|event, _status, _window| cancel_reset(event));
+        return Subscription::batch([esc, clock]);
+    }
     if state.recording.is_none() {
         return clock;
     }
@@ -1913,6 +2004,12 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         chord_of(event).map(Message::Key)
     });
     Subscription::batch([keys, clock])
+}
+
+/// Esc while "Reset shortcuts" asks: cancel it.
+pub(super) fn cancel_reset(event: iced::Event) -> Option<Message> {
+    let chord = chord_of(event)?;
+    (chord.bare() && chord.key == "Escape").then_some(Message::KeepShortcuts)
 }
 
 /// Ctrl+C on the page shown (nothing in it took the key, e.g. a field's
