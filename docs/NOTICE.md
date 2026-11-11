@@ -17,7 +17,9 @@ Every decoder (these and the five below) is changed by OpenCircle in one
 way: the output layer, built in both branches of the merged decoder, is
 built once before them (scripts/lighten-mt-decoders.py; same weights, same
 translations, less memory); the changed decoders are downloaded from the
-OpenCircle-models release (models-v2).
+OpenCircle-models release (models-v2). These lighter models are published as
+OptimaMT (https://huggingface.co/OptimaMT, https://github.com/AmerAlreyahi/OptimaMT),
+under each pair's original licence below.
 
 | Pair | Licence | Model | Xenova commit |
 |---|---|---|---|

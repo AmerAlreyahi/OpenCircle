@@ -258,6 +258,8 @@ The translation models come from Hugging Face (Xenova's ONNX exports of the
 Helsinki-NLP OPUS-MT models) and, for the five direct Arabic models we
 converted ourselves, from
 [AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models).
+Every decoder is the lighter OptimaMT build ([OptimaMT](https://huggingface.co/OptimaMT):
+OPUS-MT with the output layer built once; the same translations, less memory).
 
 ## Contributing
 

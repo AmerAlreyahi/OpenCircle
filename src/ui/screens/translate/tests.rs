@@ -20,6 +20,7 @@ fn shown(blocks: Vec<Translation>) -> Msg {
         image: frame(4, 4),
         blocks,
         offer: None,
+        outdated: Vec::new(),
     }))
 }
 
@@ -44,6 +45,7 @@ fn kept_lines_are_offered_without_holding_the_page() {
         image: frame(4, 4),
         blocks: vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])],
         offer: Some(Box::new(offer)),
+        outdated: Vec::new(),
     })));
     assert!(s.image().is_some(), "the page is shown at once");
     let _ = s.update(Msg::GetHeld);
@@ -91,6 +93,9 @@ fn session(models: bool) -> Session {
         partial: None,
         readers: None,
         snip_keys: String::new(),
+        updating: None,
+        update_work: None,
+        update_paused: false,
     }
 }
 
@@ -920,6 +925,9 @@ fn every_picker_state_matches_its_golden_image() {
                 s.phase = Phase::Translating;
                 let _ = s.update(shown);
             }
+            // the model update's quiet tag (its v1 decoder being replaced)
+            "update" => s.updating = Some((59_077_788, 0.42)),
+            "update-paused" => s.update_paused = true,
             _ => s.phase = Phase::Translating, // p1: closed, a status beside the pill
         }
         s
@@ -938,6 +946,9 @@ fn every_picker_state_matches_its_golden_image() {
             "offer",
             "p1-closed-ar",
             "offer-ar",
+            "update",
+            "update-paused",
+            "update-ar",
         ] {
             let _ar = name.ends_with("-ar").then(crate::ui::kit::testing::arabic);
             let s = make(if name == "p7-target-ar" {
@@ -950,7 +961,7 @@ fn every_picker_state_matches_its_golden_image() {
             // (a wide screen for the Arabic offer: its tag is longer than the room
             // a 720 px screen leaves beside the pill)
             let wide = Size::new(1100.0, 120.0);
-            let (size, at) = match name == "offer-ar" {
+            let (size, at) = match name == "offer-ar" || name.starts_with("update") {
                 true => (wide, card::place(wide, None, None)),
                 false => (SCREEN, at),
             };

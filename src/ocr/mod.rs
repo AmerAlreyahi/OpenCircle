@@ -11,7 +11,7 @@ pub mod system;
 pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};
-pub use session::{Hold, gently_here, hold, keep_warm};
+pub use session::{Hold, gently_here, hold, keep_warm, when_idle};
 pub use worker::{
     WORKER_ARG, reads_other_scripts, recognize_as, recognize_band, recognize_except,
     recognize_in_child, translate_in_child, warm, worker_main,
@@ -106,6 +106,9 @@ pub enum OcrError {
     Missing(String),
     /// ONNX Runtime failed to load a model or run it.
     Engine(String),
+    /// A download was stopped on request (`models::ensure_until`); its
+    /// `.part` file stays, to continue.
+    Stopped,
 }
 
 impl fmt::Display for OcrError {
@@ -126,6 +129,7 @@ impl fmt::Display for OcrError {
                 "{what} isn't downloaded yet. Translate once with Ctrl+Shift+T to download it"
             ),
             Self::Engine(m) => write!(f, "text recognition failed: {m}"),
+            Self::Stopped => f.write_str("the download was stopped"),
         }
     }
 }

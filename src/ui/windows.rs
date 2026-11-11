@@ -1281,6 +1281,25 @@ impl Windows {
                             });
                             return Task::batch([keys, done]);
                         }
+                        settings::Outcome::UpdateModels => {
+                            let update = super::background(move |tx| {
+                                let (pairs, _) = crate::mt::installed();
+                                let progress = |done: u64, total: u64| {
+                                    let _ = tx.unbounded_send(settings::Message::ModelsProgress(
+                                        done as f32 / total.max(1) as f32,
+                                    ));
+                                };
+                                let got = match crate::mt::update(&pairs, progress) {
+                                    // Cancel: the row is counted again already
+                                    Err(crate::ocr::OcrError::Stopped) => return,
+                                    got => {
+                                        got.map_err(|e| crate::ui::screens::model_download::why(&e))
+                                    }
+                                };
+                                let _ = tx.unbounded_send(settings::Message::ModelsUpdated(got));
+                            });
+                            return Task::batch([keys, update.map(Msg::Settings)]);
+                        }
                         settings::Outcome::None => {}
                     }
                     if leaving {

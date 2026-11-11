@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn notices_credit_the_models_we_download() {
         let notice = include_str!("../../../../../docs/NOTICE.md");
-        for key in ["Helsinki-NLP", "Xenova", "PaddleOCR", t!(ab_n3)] {
+        for key in ["Helsinki-NLP", "Xenova", "OptimaMT", "PaddleOCR", t!(ab_n3)] {
             assert!(notice.contains(key), "{key} is in docs/NOTICE.md");
         }
         let all: String = made_by()
@@ -463,6 +463,7 @@ mod tests {
         for key in [
             "Helsinki-NLP",
             "Xenova",
+            "OptimaMT",
             "CC BY 4.0",
             "PaddleOCR",
             "Microsoft",

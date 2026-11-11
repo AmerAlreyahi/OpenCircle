@@ -340,7 +340,17 @@ pub fn retrying() -> bool {
 /// translation's: one download, one progress).
 pub(crate) fn ensure(
     files: &[(PathBuf, &ModelFile)],
+    progress: impl FnMut(u64, u64),
+) -> Result<(), OcrError> {
+    ensure_until(files, progress, &AtomicBool::new(false))
+}
+
+/// `ensure` that stops soon after `stop` is set (`OcrError::Stopped`),
+/// keeping the `.part` file it was writing: the next call continues it.
+pub(crate) fn ensure_until(
+    files: &[(PathBuf, &ModelFile)],
     mut progress: impl FnMut(u64, u64),
+    stop: &AtomicBool,
 ) -> Result<(), OcrError> {
     let total = files.iter().map(|(_, f)| f.size).sum();
     let mut done = 0;
@@ -367,9 +377,9 @@ pub(crate) fn ensure(
                     ..crate::net::MODELS
                 })
             });
-            let got = fetch_retrying(agent, f, path, |n| progress(done + n, total));
+            let got = fetch_retrying(agent, f, path, stop, |n| progress(done + n, total));
             RETRYING.store(false, Ordering::Relaxed);
-            if got.is_err() {
+            if got.is_err() && !matches!(got, Err(OcrError::Stopped)) {
                 let _ = fs::remove_file(path.with_extension("part"));
             }
             got?;
@@ -406,11 +416,15 @@ fn fetch_retrying(
     agent: &ureq::Agent,
     f: &ModelFile,
     dest: &Path,
+    stop: &AtomicBool,
     mut progress: impl FnMut(u64),
 ) -> Result<(), OcrError> {
     let mut waits = BACKOFF.iter();
     loop {
-        let got = fetch(agent, f, dest, &mut |n| {
+        if stop.load(Ordering::Relaxed) {
+            return Err(OcrError::Stopped);
+        }
+        let got = fetch(agent, f, dest, stop, &mut |n| {
             RETRYING.store(false, Ordering::Relaxed);
             progress(n)
         });
@@ -461,6 +475,7 @@ fn fetch(
     agent: &ureq::Agent,
     f: &ModelFile,
     dest: &Path,
+    stop: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), Fail> {
     let tmp = dest.with_extension("part");
@@ -504,7 +519,7 @@ fn fetch(
             }
             let have = if partial { have } else { 0 }; // a 200 starts over
             let body = response.into_body().into_reader();
-            write_part(body, &tmp, dest, f, have, progress)
+            write_part(body, &tmp, dest, f, have, stop, progress)
         }
         #[cfg(not(windows))]
         Source::Tgz { url, offset } => {
@@ -512,7 +527,7 @@ fn fetch(
             let mut tar = flate2::read::GzDecoder::new(body.into_reader());
             io::copy(&mut (&mut tar).take(offset), &mut io::sink()).map_err(cut)?;
             // The rest of the tar follows the member: stop at its end.
-            write_part(tar.take(f.size), &tmp, dest, f, 0, progress)
+            write_part(tar.take(f.size), &tmp, dest, f, 0, stop, progress)
         }
         #[cfg(windows)]
         Source::ZipRange { url, start, end } => {
@@ -523,7 +538,7 @@ fn fetch(
                 return Err(Fail::Now(OcrError::Download(why)));
             }
             let body = flate2::read::DeflateDecoder::new(response.into_body().into_reader());
-            write_part(body, &tmp, dest, f, 0, progress)
+            write_part(body, &tmp, dest, f, 0, stop, progress)
         }
     }
 }
@@ -569,7 +584,15 @@ pub(crate) fn write_verified(
     mut progress: impl FnMut(u64),
 ) -> Result<(), OcrError> {
     let tmp = dest.with_extension("part");
-    let result = write_part(body, &tmp, dest, f, 0, &mut progress);
+    let result = write_part(
+        body,
+        &tmp,
+        dest,
+        f,
+        0,
+        &AtomicBool::new(false),
+        &mut progress,
+    );
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -589,6 +612,7 @@ fn write_part(
     dest: &Path,
     f: &ModelFile,
     have: u64,
+    stop: &AtomicBool,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), Fail> {
     let mut hash = hmac_sha256::Hash::new();
@@ -609,6 +633,9 @@ fn write_part(
     let mut body = body.take(f.size + 1 - have);
     let mut got = have;
     loop {
+        if stop.load(Ordering::Relaxed) {
+            return Err(Fail::Now(OcrError::Stopped)); // `tmp` stays, to continue
+        }
         let n = match body.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
@@ -662,7 +689,7 @@ fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const HELLO: ModelFile = ModelFile {
@@ -783,7 +810,7 @@ mod tests {
 
     /// What the fake server does with one request (given its Range start).
     #[derive(Clone, Copy)]
-    enum Answer {
+    pub(crate) enum Answer {
         /// The file (206 from the Range's start when asked for one).
         File,
         /// The status, no body.
@@ -794,12 +821,12 @@ mod tests {
         Wrong,
     }
 
-    type Seen = std::sync::Arc<std::sync::Mutex<Vec<Option<u64>>>>;
+    pub(crate) type Seen = std::sync::Arc<std::sync::Mutex<Vec<Option<u64>>>>;
 
     /// A local server answering request i with `answers[i]` (the last one for
     /// any after), `Connection: close`; returns the file's pin and the Range
     /// start of every request it got.
-    fn fake_server(
+    pub(crate) fn fake_server(
         name: &str,
         data: &'static [u8],
         answers: Vec<Answer>,
@@ -862,7 +889,7 @@ mod tests {
     }
 
     /// 300 kB of a pattern (several reads).
-    fn payload() -> &'static [u8] {
+    pub(crate) fn payload() -> &'static [u8] {
         Box::leak((0..300_000u32).map(|i| (i * 7 % 251) as u8).collect())
     }
 

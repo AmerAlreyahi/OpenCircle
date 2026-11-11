@@ -1274,6 +1274,126 @@ fn live_interval_is_checked_against_its_range() {
     assert_eq!(*crate::config::LIVE_INTERVAL_MS.start(), 500);
 }
 
+/// Translate's model row: hidden with no pair installed (OptimaMT's line
+/// only); "3 of 15" with Update now (its size from the pins) starting the
+/// update; its progress and Cancel; a failure's reason with Try again; up to
+/// date: no row, a calm line instead. A late answer after Cancel changes
+/// nothing.
+#[test]
+fn the_model_row_says_what_is_left_and_updates_it() {
+    use pages::translate::{Models, Now};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Translate));
+    let texts = |s: &State| shot::texts(view(s));
+    let row = "Translation models";
+    let optima = "Offline translation runs on OptimaMT models: OPUS-MT with a lighter decoder \
+                  (the same translations, less memory).";
+    let t = texts(&s);
+    assert!(!t.iter().any(|t| t == row), "nothing installed: {t:?}");
+    assert!(t.iter().any(|t| t == optima) && t.iter().any(|t| t == "OptimaMT on Hugging Face"));
+    s.models = Models::of(3, 15, 177_233_364, Now::Idle);
+    let t = texts(&s);
+    for want in [
+        row,
+        "3 of 15 still use the older, heavier decoder",
+        "Update now (about 178 MB)",
+    ] {
+        assert!(t.iter().any(|t| t == want), "{want}: {t:?}");
+    }
+    assert_eq!(update(&mut s, Message::UpdateModels), Outcome::UpdateModels);
+    assert_eq!(
+        update(&mut s, Message::UpdateModels),
+        Outcome::None,
+        "one at a time"
+    );
+    update(&mut s, Message::ModelsProgress(0.5));
+    let t = texts(&s);
+    assert!(t.iter().any(|t| t == "Updating · 50% of 178 MB"), "{t:?}");
+    assert!(t.iter().any(|t| t == "Cancel"), "{t:?}");
+    // Cancel: counted again from the disk (nothing installed here), the late answer ignored
+    update(&mut s, Message::StopModels);
+    assert_eq!(s.models.now, Now::Idle);
+    update(&mut s, Message::ModelsUpdated(Err("late".into())));
+    assert_eq!(s.models.now, Now::Idle);
+    // a failure while something is left: its reason, Try again
+    s.models = Models::of(
+        1,
+        2,
+        59_077_788,
+        Now::Failed(crate::t!(md_err_offline).into()),
+    );
+    let t = texts(&s);
+    assert!(t.iter().any(|t| t == "Try again") && t.iter().any(|t| t == crate::t!(md_err_offline)));
+    // all current: no row, the calm line
+    s.models = Models::of(0, 15, 0, Now::Idle);
+    let t = texts(&s);
+    assert!(!t.iter().any(|t| t == row), "{t:?}");
+    assert!(
+        t.iter()
+            .any(|t| t == "Your translation models are up to date."),
+        "{t:?}"
+    );
+    // the link opens OptimaMT's page
+    assert_eq!(
+        update(
+            &mut s,
+            Message::OpenLink(pages::translate::OPTIMA_MT.into())
+        ),
+        Outcome::OpenLink("https://huggingface.co/OptimaMT".into())
+    );
+}
+
+/// The model row's states in English and Arabic (mirrored), Sapphire and
+/// Daylight; nothing drawn past its box.
+#[test]
+fn the_model_row_matches_its_golden_images() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use pages::translate::{Models, Now};
+    let mut failed = Vec::new();
+    for ar in [false, true] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, _) = state(None);
+            if ar {
+                update(&mut s, Message::AppLanguage(Choice("ar")));
+            }
+            update(&mut s, Message::Section(Section::Translate));
+            themes::set(theme);
+            let cases = [
+                ("old", Models::of(3, 15, 177_233_364, Now::Idle)),
+                (
+                    "updating",
+                    Models::of(3, 15, 177_233_364, Now::Updating(0.42)),
+                ),
+                (
+                    "failed",
+                    Models::of(
+                        3,
+                        15,
+                        177_233_364,
+                        Now::Failed(crate::t!(md_err_offline).into()),
+                    ),
+                ),
+                ("current", Models::of(0, 15, 0, Now::Idle)),
+            ];
+            for (name, models) in cases {
+                s.models = models;
+                let lang = if ar { "-ar" } else { "" };
+                let file = format!("settings-translate-models-{name}{lang}-{}", theme.id);
+                // (tall: the rows sit under the page's preview)
+                let size = Size::new(WINDOW_SIZE.width, 1080.0);
+                let lost = shot::out_of_reach(view(&s), size);
+                assert!(lost.is_empty(), "{file}: {lost:?}");
+                failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 #[test]
 fn engine_choice_says_what_offline_means() {
     let (mut s, _) = state(None);

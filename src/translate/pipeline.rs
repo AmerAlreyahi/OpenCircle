@@ -62,6 +62,8 @@ pub struct Real {
     /// "auto": the page read as noise and readers for other scripts are
     /// missing: the UI offers them (`ocr::models::other_scripts_files`).
     readers: std::sync::atomic::AtomicBool,
+    /// Offline: the pairs this translation used (`outdated`).
+    used: Mutex<Vec<&'static mt::Pair>>,
 }
 
 /// The other scripts' readers are offered once per run (declined: the next
@@ -88,6 +90,7 @@ impl Real {
             guessed: Mutex::default(),
             held: Mutex::default(),
             readers: Default::default(),
+            used: Mutex::default(),
         }
     }
 
@@ -111,6 +114,13 @@ impl Real {
     /// translated again).
     pub fn held(&self) -> Option<(&'static mt::Pair, Vec<String>)> {
         self.held.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The pairs this translation used whose decoder is still the older v1
+    /// one: the Translate use updates them (`mt::update`).
+    pub fn outdated(&self) -> Vec<&'static mt::Pair> {
+        let used = self.used.lock().unwrap_or_else(|e| e.into_inner());
+        used.iter().copied().filter(|p| p.outdated()).collect()
     }
 
     /// The page read as noise; readers for other scripts would read it.
@@ -292,6 +302,14 @@ impl Real {
             )));
         }
         ocr::keep_warm();
+        {
+            let mut used = self.used.lock().unwrap_or_else(|e| e.into_inner());
+            for p in routes.iter().flat_map(|(r, _)| r) {
+                if !used.iter().any(|u| std::ptr::eq(*u, *p)) {
+                    used.push(p);
+                }
+            }
+        }
         // a text in no route is in the target already: echoed, not redrawn
         for (route, idx) in routes {
             let part: Vec<String> = idx.iter().map(|&i| texts[i].clone()).collect();

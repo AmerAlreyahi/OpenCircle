@@ -139,8 +139,27 @@ impl Session {
                     let (body, footer) = card_view(word, at.width - frame::PADDING * 2.0);
                     with_pill(card(body, Some(footer), Some(&word.title)))
                 }
-                None => self.pill(whole, None, None, None),
+                // (owned text: the tag's element slot)
+                None => {
+                    let update = self.update_line().map(|l| note(l).into());
+                    self.pill(whole, None, update, None)
+                }
             },
+        }
+    }
+
+    /// The model update's quiet tag (`update_models`): its size and share,
+    /// or once that it stopped; else nothing.
+    fn update_line(&self) -> Option<String> {
+        match self.updating {
+            Some((bytes, share)) => Some(fmt(
+                S::tp_updating,
+                &[
+                    &format!("{:.0}%", share * 100.0),
+                    &format!("{} MB", model_download::mb(bytes)),
+                ],
+            )),
+            None => self.update_paused.then(|| t!(tp_update_paused).to_string()),
         }
     }
 

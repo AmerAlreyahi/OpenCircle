@@ -299,6 +299,19 @@ impl Drop for Helper {
 
 static HOLDS: AtomicUsize = AtomicUsize::new(0);
 static SHARED: Mutex<Option<Session>> = Mutex::new(None);
+/// Unheld calls in flight (each its own child).
+static ALONE: AtomicUsize = AtomicUsize::new(0);
+
+/// Runs `f` while no helper runs (none held, none answering a call), so no
+/// process has a model loaded: a finished model update is swapped in then
+/// (`mt::swap_finished`). Else nothing: the helper swaps a pair itself
+/// before it loads it, and the last hold's end runs it again.
+pub fn when_idle(f: impl FnOnce()) {
+    let shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+    if shared.is_none() && HOLDS.load(Ordering::SeqCst) == 0 && ALONE.load(Ordering::SeqCst) == 0 {
+        f();
+    }
+}
 
 /// While any `Hold` lives, helper calls share one warm child (started by the
 /// first call, not by the hold). Dropping the last one ends that child.
@@ -318,6 +331,8 @@ impl Drop for Hold {
                 let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
                 if HOLDS.load(Ordering::SeqCst) == 0 {
                     *shared = None;
+                    drop(shared);
+                    when_idle(crate::mt::swap_finished); // the helper is gone
                 }
             });
         }
@@ -365,7 +380,10 @@ pub fn keep_warm() {
 pub(super) fn call(payload: &[&[u8]]) -> Result<Vec<u8>, OcrError> {
     let exe = std::env::current_exe()?;
     if HOLDS.load(Ordering::SeqCst) == 0 {
-        return Session::worker(&exe).call(payload);
+        ALONE.fetch_add(1, Ordering::SeqCst);
+        let reply = Session::worker(&exe).call(payload);
+        ALONE.fetch_sub(1, Ordering::SeqCst);
+        return reply;
     }
     let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
     let reply = (shared.get_or_insert_with(|| Session::worker(&exe))).call(payload);

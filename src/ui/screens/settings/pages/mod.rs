@@ -20,7 +20,7 @@ mod shortcuts;
 pub mod snip;
 mod song;
 pub mod text_reading;
-mod translate;
+pub mod translate;
 
 #[cfg(test)]
 pub use appearance::picks as look_picks;

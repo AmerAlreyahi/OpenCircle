@@ -1,22 +1,184 @@
 //! Translate (`settings-window.js` "TRANSLATE"): the engine, the source and
-//! target languages, and (Live translate on in Labs) the live refresh.
+//! target languages, (Live translate on in Labs) the live refresh, the
+//! offline models' update (while one still has the older v1 decoder) and
+//! the OptimaMT credit.
+use crate::app_language::{S, fmt};
 use crate::t;
-use iced::Element;
-use iced::widget::column;
 use iced::widget::tooltip::Position;
+use iced::widget::{Space, column, container};
+use iced::{Element, Fill};
 
 use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 
 use crate::config::Engine;
 use crate::labs::Feature;
 use crate::mt;
+use crate::ui::kit::button::{Kind, button, label, regular};
 use crate::ui::kit::dropdown::dropdown;
 use crate::ui::kit::field::input;
+use crate::ui::kit::progress;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::error;
+use crate::ui::kit::text::{error, paragraph, sub};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::kit::tooltip::tip;
+use crate::ui::screens::model_download::mb;
+
+/// The OptimaMT models (the lighter decoders) on Hugging Face.
+pub const OPTIMA_MT: &str = "https://huggingface.co/OptimaMT";
+
+/// The model row's state: the installed pairs and how many still have the
+/// v1 decoder (with the bytes their update fetches), and the update.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Models {
+    pub(in super::super) old: usize,
+    pub(in super::super) all: usize,
+    pub(in super::super) bytes: u64,
+    pub(in super::super) now: Now,
+    /// The row's description and button, made from the above.
+    desc: String,
+    button: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Now {
+    Idle,
+    /// Update now runs: 0..=1.
+    Updating(f32),
+    /// It stopped (why, in the app's language).
+    Failed(String),
+}
+
+impl Models {
+    /// Counted from the disk (sizes only).
+    pub fn count() -> Models {
+        let (old, all) = mt::installed();
+        let bytes = old.iter().map(|p| p.update_bytes()).sum();
+        Models::of(old.len(), all, bytes, Now::Idle)
+    }
+
+    pub(in super::super) fn of(old: usize, all: usize, bytes: u64, now: Now) -> Models {
+        let mut m = Models {
+            old,
+            all,
+            bytes,
+            now,
+            desc: String::new(),
+            button: String::new(),
+        };
+        m.words();
+        m
+    }
+
+    fn words(&mut self) {
+        let size = format!("{} MB", mb(self.bytes));
+        self.desc = match &self.now {
+            Now::Idle => fmt(S::tr_models_old, &[&self.old, &self.all]),
+            Now::Updating(share) => fmt(
+                S::tr_models_updating,
+                &[&format!("{:.0}%", share * 100.0), &size],
+            ),
+            Now::Failed(why) => why.clone(),
+        };
+        self.button = fmt(S::tr_models_update, &[&size]);
+    }
+
+    /// The page is visited: counted again, unless an update runs.
+    pub(in super::super) fn recount(&mut self) {
+        if !matches!(self.now, Now::Updating(_)) {
+            *self = Models::count();
+        }
+    }
+
+    /// Update now: `true` = start it (something to fetch, none running).
+    pub(in super::super) fn start(&mut self) -> bool {
+        if matches!(self.now, Now::Updating(_)) || self.bytes == 0 {
+            return false;
+        }
+        self.now = Now::Updating(0.0);
+        self.words();
+        true
+    }
+
+    pub(in super::super) fn progress(&mut self, share: f32) {
+        if let Now::Updating(at) = &mut self.now {
+            *at = share;
+            self.words();
+        }
+    }
+
+    /// The update ended (after a Cancel nothing changes: counted already).
+    pub(in super::super) fn finished(&mut self, done: Result<(), String>) {
+        if !matches!(self.now, Now::Updating(_)) {
+            return;
+        }
+        *self = Models::count();
+        if let Err(why) = done
+            && self.bytes > 0
+        {
+            self.now = Now::Failed(why);
+            self.words();
+        }
+    }
+
+    /// The installed pairs all have the lighter decoder.
+    fn current(&self) -> bool {
+        self.all > 0 && self.bytes == 0 && !matches!(self.now, Now::Updating(_))
+    }
+}
+
+/// The model row, while an installed pair still has the v1 decoder: how
+/// many, and Update now (its progress and Cancel; Try again after a stop).
+fn models_row(m: &Models) -> Option<Element<'_, Message>> {
+    if m.current() || (m.bytes == 0 && m.now == Now::Idle) {
+        return None;
+    }
+    let control: Element<'_, Message> = match m.now {
+        Now::Idle => button(
+            label(&m.button),
+            Kind::Elevated,
+            Some(Message::UpdateModels),
+        ),
+        Now::Updating(share) => column![
+            progress::bar(share),
+            crate::dir_row![
+                Space::new().width(Fill),
+                regular(t!(c_cancel), false, Some(Message::StopModels))
+            ],
+        ]
+        .spacing(space::GAP)
+        .into(),
+        Now::Failed(_) => button(
+            label(t!(md_try_again)),
+            Kind::Elevated,
+            Some(Message::UpdateModels),
+        ),
+    };
+    Some(setting_row::row(title(t!(tr_models)), &m.desc, control))
+}
+
+/// Under the rows: offline translation runs on OptimaMT models (and, when
+/// every installed one has the lighter decoder, that they are up to date),
+/// with the link.
+fn optima(m: &Models) -> Element<'_, Message> {
+    let mut note = column![paragraph(sub(Role::ROW_DESC, t!(tr_optima)))];
+    if m.current() {
+        note = note.push(paragraph(sub(Role::ROW_DESC, t!(tr_models_current))));
+    }
+    let link = button(
+        label(t!(tr_optima_link)),
+        Kind::Quiet,
+        Some(Message::OpenLink(OPTIMA_MT.into())),
+    );
+    container(
+        note.push(link)
+            .spacing(space::GAP)
+            .align_x(crate::ui::kit::dir::start()),
+    )
+    .width(Fill)
+    .padding([space::ROW_Y, 0.0])
+    .into()
+}
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let t = &state.draft.translate;
@@ -75,7 +237,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
             control,
         ));
     }
-    rows.into()
+    if let Some(row) = models_row(&state.models) {
+        rows = rows.push(row);
+    }
+    rows.push(optima(&state.models)).into()
 }
 
 fn language_row<'a>(

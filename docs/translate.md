@@ -76,10 +76,26 @@ Choose one in **Settings → Translate → Engine**.
   Arabic ones (below) come from
   [AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models)
   on GitHub. Licences and credits
-  are in [NOTICE](NOTICE.md). The decoders are the lighter build (about a third less memory
-  per pair); a pair you downloaded earlier keeps working and switches to the
-  lighter one at its next download. A download that hits a server error or a
+  are in [NOTICE](NOTICE.md). The decoders are the lighter build, the
+  [OptimaMT](https://huggingface.co/OptimaMT) models (OPUS-MT with the output
+  layer built once instead of twice: the same translations, less memory;
+  501 -> 256 MB in the helper, measured for one pair). A download that hits a server error or a
   dropped connection retries by itself and resumes where it stopped.
+
+  **Older, heavier decoders.** A pair downloaded before v0.1.4 still has the
+  first decoder. It keeps translating, and the next time you translate with
+  it, OpenCircle downloads the lighter decoder for that pair in the
+  background (about 57-60 MB; both pairs of a route through English), after
+  the translation is on screen. The pill shows a quiet line with its
+  progress. The new file is checked against its pinned checksum and takes the
+  old one's place when the pair is no longer loaded (when translation has been
+  idle for a minute, or at the next translation), so only one copy stays on
+  disk. If the download is interrupted (no internet, the app closed), the old
+  decoder keeps working and the next translation continues it.
+  **Settings → Translate → Translation models** shows how many pairs still
+  have the older decoder and updates them all at once (**Update now**, with
+  its size; Cancel keeps what was downloaded). Nothing is downloaded unless you
+  translate or press that button.
 
   | From | Into |
   |---|---|

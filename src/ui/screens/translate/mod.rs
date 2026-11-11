@@ -67,6 +67,10 @@ pub enum Msg {
     /// The card's frame (`kit::panel_frame`): the App moves, resizes and
     /// closes it, as for the other result cards.
     Card(card::Event),
+    /// The used pairs' model update (`mt::update`), 0..=1 ...
+    ModelUpdate(f32),
+    /// ... and whether it finished.
+    ModelUpdated(bool),
 }
 
 /// What is translated so far: just the translated area, drawn over the frozen
@@ -86,6 +90,9 @@ pub struct Shown {
     /// Lines certainly in another language whose pair isn't here, kept as
     /// they were: offered quietly in the pill, never waited for.
     offer: Option<Box<Offer>>,
+    /// The pairs it used whose decoder is still the older v1 one: updated
+    /// now, in the background (`Session::update_models`).
+    outdated: Vec<&'static Pair>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,7 +164,16 @@ pub struct Session {
     readers: Option<(u64, String)>,
     /// Snip's own shortcut, for its button's tooltip.
     snip_keys: String,
+    /// The used pairs' model update: its bytes and share so far; `None` =
+    /// none running. Its thread goes on when the overlay closes.
+    updating: Option<(u64, f32)>,
+    update_work: Option<task::Handle>,
+    /// The update stopped (offline): said once per run of the app.
+    update_paused: bool,
 }
+
+/// An update that stopped was said (`tp_update_paused`) in this run.
+static PAUSE_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The card of one clicked block.
 struct Card {
@@ -224,6 +240,9 @@ impl Session {
                 .find(|q| q.action == actions::snip::ACTION.id)
                 .map(|q| q.shortcut)
                 .unwrap_or_default(),
+            updating: None,
+            update_work: None,
+            update_paused: false,
         };
         let task = session.begin(models);
         (session, task)
@@ -306,6 +325,7 @@ impl Session {
             image,
             blocks,
             offer: None,
+            outdated: Vec::new(),
         });
     }
 
@@ -394,10 +414,26 @@ impl Session {
             Msg::Done(result) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
                 self.partial = None;
+                let update = (result.as_ref().ok()).map(|s| s.outdated.clone());
                 self.phase = match result {
                     Ok(shown) => Phase::Shown(shown),
                     Err(problem) => Phase::Failed(problem),
                 };
+                if let Some(pairs) = update {
+                    return self.update_models(pairs);
+                }
+            }
+            Msg::ModelUpdate(share) => {
+                if let Some((_, at)) = &mut self.updating {
+                    *at = share;
+                }
+            }
+            Msg::ModelUpdated(done) => {
+                self.updating = None;
+                self.update_work = None;
+                // quietly: once per run, then a later Translate just tries again
+                self.update_paused =
+                    !done && !PAUSE_SAID.swap(true, std::sync::atomic::Ordering::Relaxed);
             }
             Msg::Peek(down) => self.peek = down,
             Msg::Explain => return self.explain(),
@@ -540,6 +576,33 @@ impl Session {
         task
     }
 
+    /// The translation just shown used `pairs` with the older v1 decoder:
+    /// their v2 decoders download now, after it (never slowing it), shown
+    /// as a quiet tag beside the pill. One that is already here only waits
+    /// to be swapped in (no tag). The helper keeps the v1 file loaded; the
+    /// swap comes when it ends (`mt::update`).
+    fn update_models(&mut self, pairs: Vec<&'static Pair>) -> Task<Msg> {
+        let bytes: u64 = pairs.iter().map(|p| p.update_bytes()).sum();
+        if bytes == 0 || self.updating.is_some() {
+            return Task::none();
+        }
+        self.updating = Some((bytes, 0.0));
+        self.update_paused = false;
+        let (task, handle) = background(move |tx| {
+            let progress = |done: u64, total: u64| {
+                let _ = tx.unbounded_send(Msg::ModelUpdate(done as f32 / total.max(1) as f32));
+            };
+            let got = crate::mt::update(&pairs, progress);
+            if let Err(e) = &got {
+                crate::log!("[opencircle] translation model update stopped: {e}");
+            }
+            let _ = tx.unbounded_send(Msg::ModelUpdated(got.is_ok()));
+        })
+        .abortable();
+        self.update_work = Some(handle.abort_on_drop());
+        task
+    }
+
     /// The download (if `download`) and the translation, on a thread.
     /// Offline translation's models are fetched only if the user was asked
     /// for them (`self.offline`); otherwise the thread asks (`Msg::Offline`),
@@ -591,6 +654,7 @@ impl Session {
                         let source = h.0.source;
                         Box::new(Offer::new(h, source, target))
                     });
+                    shown.outdated = real.outdated();
                 }
                 shown
             });
@@ -676,6 +740,7 @@ fn translate(
             image: image::Handle::from_rgba(*width, *height, full),
             blocks,
             offer: None,
+            outdated: Vec::new(),
         }
     };
     let out = pipeline::translate_progressively(

@@ -639,8 +639,8 @@ strings! {
         | "ONNX Runtime";
     ab_n4: "Local translation"
         | "الترجمة المحلية";
-    ab_n4b: "OPUS-MT, Helsinki-NLP; ONNX by Xenova"
-        | "OPUS-MT من Helsinki-NLP؛ وONNX من Xenova";
+    ab_n4b: "OPUS-MT, Helsinki-NLP; ONNX by Xenova; lighter decoders: OptimaMT"
+        | "OPUS-MT من Helsinki-NLP؛ وONNX من Xenova؛ والمفكّكات الأخف: OptimaMT";
     ab_n5b: "The iced contributors"
         | "المساهمون في iced";
     ab_n8: "Lucide icons"
@@ -1828,4 +1828,23 @@ strings! {
         | "ذكاء OpenCircle";
     live_note: "Games must run borderless or windowed"
         | "يجب تشغيل الألعاب بلا إطار أو في نافذة";
+    // added for the model update (the lighter OptimaMT decoders, 2026-11-11)
+    tp_updating: "Updating the translation model · {} of {}"
+        | "جارٍ تحديث نموذج الترجمة · {} من {}";
+    tp_update_paused: "Model update paused · it continues next time"
+        | "توقّف تحديث النموذج مؤقتًا · يُستأنف في المرة القادمة";
+    tr_models: "Translation models"
+        | "نماذج الترجمة";
+    tr_models_old: "{} of {} still use the older, heavier decoder"
+        | "{} من أصل {} ما زالت تستخدم المفكّك الأقدم والأثقل";
+    tr_models_update: "Update now (about {})"
+        | "التحديث الآن (نحو {})";
+    tr_models_updating: "Updating · {} of {}"
+        | "جارٍ التحديث · {} من {}";
+    tr_models_current: "Your translation models are up to date."
+        | "نماذج الترجمة لديك محدّثة.";
+    tr_optima: "Offline translation runs on OptimaMT models: OPUS-MT with a lighter decoder (the same translations, less memory)."
+        | "تعمل الترجمة دون إنترنت بنماذج OptimaMT: نماذج OPUS-MT بمفكّك أخف (الترجمات نفسها بذاكرة أقل).";
+    tr_optima_link: "OptimaMT on Hugging Face"
+        | "OptimaMT على Hugging Face";
 }

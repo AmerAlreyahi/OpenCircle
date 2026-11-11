@@ -671,6 +671,9 @@ pub struct State {
     /// (for this window only, never saved).
     pub(super) credits_open: bool,
     pub(super) made_by_all: bool,
+    /// Translate's model row: the installed pairs still on the v1 decoder
+    /// (counted at open and at each visit), and the update of them.
+    pub(super) models: super::pages::translate::Models,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -774,6 +777,12 @@ pub enum Message {
     KeepShortcuts,
     UndoShortcuts,
     Kept(Counts),
+    /// Translate's Update now (every installed pair still on the v1
+    /// decoder), its progress (0..=1), its Cancel, and how it ended (why not).
+    UpdateModels,
+    ModelsProgress(f32),
+    StopModels,
+    ModelsUpdated(Result<(), String>),
     Look(LookTheme),
     /// The custom look's controls.
     Palette(PaletteChoice),
@@ -907,6 +916,10 @@ pub enum Outcome {
     /// Ask the provider for its models on a worker thread (`ModelsJob::run`)
     /// and answer `Message::ModelsLoaded`.
     LoadModels(super::model_list::ModelsJob),
+    /// Update the decoders of the installed pairs still on v1 on a worker
+    /// thread (`mt::update`), answering `Message::ModelsProgress`, then
+    /// `Message::ModelsUpdated`.
+    UpdateModels,
 }
 
 /// A config write for a worker thread.
@@ -1066,6 +1079,7 @@ impl State {
             model_list: Default::default(),
             credits_open: false,
             made_by_all: false,
+            models: super::pages::translate::Models::count(),
         };
         s.refresh_models();
         s.revalidate();
@@ -1535,6 +1549,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     state.print_screen_taken = crate::hotkey::windows_snips_print_screen()
                 }
                 Section::History => return Outcome::History(Vec::new()),
+                Section::Translate => state.models.recount(),
                 _ => {}
             }
         }
@@ -1674,6 +1689,17 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::KeepShortcuts => state.resetting = false,
         Message::UndoShortcuts => state.undo_reset(),
         Message::Kept(counts) => state.kept = Some(counts),
+        Message::UpdateModels => {
+            if state.models.start() {
+                return Outcome::UpdateModels;
+            }
+        }
+        Message::ModelsProgress(share) => state.models.progress(share),
+        Message::StopModels => {
+            crate::mt::stop_update();
+            state.models = super::pages::translate::Models::count();
+        }
+        Message::ModelsUpdated(done) => state.models.finished(done),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
             let look = &mut state.draft.look;

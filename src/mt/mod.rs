@@ -11,6 +11,8 @@
 mod unigram;
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ort::session::builder::SessionBuilder;
 use ort::session::{Session, SessionInputValue};
@@ -1385,10 +1387,10 @@ pub static PAIRS: [Pair; 49] = [
 ];
 
 /// models-v1's decoders (pair, size, sha256): the files the app downloaded
-/// before models-v2. One already on a user's PC keeps working (`Pair::needed`)
-/// until the pair's next download replaces it.
-// ponytail: drop with Live translation (with this check; a v1 decoder then counts as
-// missing and the download card offers the lighter one).
+/// before models-v2. One already on a user's PC keeps translating
+/// (`Pair::needed`) until its update (`update`, started by the pair's next
+/// Translate or Settings' Update now) puts the v2 one in its place: v1 is
+/// never a final state (owner, 2026-11-11, "installed 100 %").
 const V1_DECODERS: [(&str, u64, &str); 49] = [
     (
         "en-ar",
@@ -1742,17 +1744,42 @@ impl Pair {
         files
     }
 
+    /// Its models-v1 decoder's pin (`V1_DECODERS`).
+    fn v1(&self) -> Option<ModelFile> {
+        V1_DECODERS
+            .iter()
+            .find(|f| self.dir.strip_prefix("opus-mt-") == Some(f.0))
+            .map(|&(_, size, sha)| ModelFile::plain(self.decoder.name, size, sha, ""))
+    }
+
     /// `files` without the decoder while its v1 file (`V1_DECODERS`) is on
     /// disk, `v1_ok` with it and nothing else is missing (`without_v1`).
     fn needed(
         &'static self,
         v1_ok: impl Fn(&Path, &ModelFile) -> bool,
     ) -> Vec<(PathBuf, &'static ModelFile)> {
-        let v1 = V1_DECODERS
-            .iter()
-            .find(|f| self.dir.strip_prefix("opus-mt-") == Some(f.0))
-            .map(|&(_, size, sha)| ModelFile::plain(self.decoder.name, size, sha, ""));
-        without_v1(self.files(), &self.decoder, v1.as_ref(), v1_ok)
+        without_v1(self.files(), &self.decoder, self.v1().as_ref(), v1_ok)
+    }
+
+    /// Its decoder on disk, for the update to v2.
+    fn decoder(&'static self) -> Decoder {
+        Decoder {
+            path: self.dir().join(self.decoder.name),
+            v2: &self.decoder,
+            v1: self.v1().map(|f| f.size),
+        }
+    }
+
+    /// Its decoder on disk is still the older, heavier v1 one (it
+    /// translates; `update` replaces it). Sizes only.
+    pub fn outdated(&'static self) -> bool {
+        self.decoder().outdated()
+    }
+
+    /// Bytes `update` still downloads for it (0: current, or the v2 file
+    /// is here, waiting to be swapped in). Sizes only.
+    pub fn update_bytes(&'static self) -> u64 {
+        self.decoder().to_fetch()
     }
 
     /// Bytes still to download (0 = ready). Cheap: sizes only.
@@ -1794,6 +1821,167 @@ fn without_v1<'a>(
     files
 }
 
+/// One pair's decoder file: its pin (v2) and its older v1 file's size.
+/// States on disk: missing (the pair's download fetches v2) -> current; or
+/// v1 -> (`update`) v1 + `<name>.v2.part` (resumed after a stop, a crash or
+/// a restart) -> v1 + `<name>.v2.onnx` (verified) -> (`swap`, when no
+/// session has it loaded) current, the v1 file gone in the same rename.
+struct Decoder {
+    path: PathBuf,
+    v2: &'static ModelFile,
+    v1: Option<u64>,
+}
+
+impl Decoder {
+    /// Where its v2 file lands while the v1 one is in use (`.v2.part` while
+    /// it comes: the downloader's own temp file).
+    fn staged(&self) -> PathBuf {
+        self.path.with_extension("v2.onnx")
+    }
+
+    fn outdated(&self) -> bool {
+        self.v1.is_some_and(|size| has_size(&self.path, size))
+    }
+
+    fn to_fetch(&self) -> u64 {
+        match self.outdated() && !has_size(&self.staged(), self.v2.size) {
+            true => self.v2.size,
+            false => 0,
+        }
+    }
+
+    /// The downloaded v2 file takes the v1 one's place: ONE rename, so one
+    /// decoder at rest and never a half-written one. Not while a session of
+    /// this process has it loaded (`InUse`): Windows can't replace a file in
+    /// use, so the rule is the same everywhere. A current decoder's
+    /// leftovers (a stale `.v2.*` file) go. `true` = current now.
+    fn swap(&self) -> bool {
+        let staged = self.staged();
+        if has_size(&self.path, self.v2.size) {
+            for leftover in [staged.with_extension("part"), staged] {
+                if leftover.exists() {
+                    let _ = std::fs::remove_file(leftover);
+                }
+            }
+            return true;
+        }
+        if !self.outdated() || !has_size(&staged, self.v2.size) || InUse::has(&self.path) {
+            return false;
+        }
+        match std::fs::rename(&staged, &self.path) {
+            Ok(()) => {
+                crate::log!(
+                    "[opencircle] {} is the lighter decoder now",
+                    self.path.display()
+                );
+                true
+            }
+            // (Windows: another process has it open) the next swap tries again
+            Err(e) => {
+                crate::log!("[opencircle] {} not swapped yet: {e}", self.path.display());
+                false
+            }
+        }
+    }
+}
+
+/// The decoder files this process has loaded (while a `Translator` lives).
+static LOADED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// A decoder file loaded while this lives (`Decoder::swap` waits).
+struct InUse(PathBuf);
+
+impl InUse {
+    fn new(path: PathBuf) -> InUse {
+        LOADED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.clone());
+        InUse(path)
+    }
+
+    fn has(path: &Path) -> bool {
+        (LOADED.lock().unwrap_or_else(|e| e.into_inner()).iter()).any(|p| p == path)
+    }
+}
+
+impl Drop for InUse {
+    fn drop(&mut self) {
+        let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(i) = loaded.iter().position(|p| *p == self.0) {
+            loaded.remove(i);
+        }
+    }
+}
+
+/// One update at a time (two would write the same `.part` file).
+static UPDATING: Mutex<()> = Mutex::new(());
+/// Settings' Cancel: the running update stops, its `.part` kept.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// The installed pairs whose decoder is still v1, and how many pairs are
+/// installed (a v1 or v2 decoder): Settings > Translate's row. Sizes only.
+pub fn installed() -> (Vec<&'static Pair>, usize) {
+    let mut all = 0;
+    let mut old = Vec::new();
+    for p in &PAIRS {
+        let d = p.decoder();
+        if d.outdated() {
+            old.push(p);
+            all += 1;
+        } else if has_size(&d.path, d.v2.size) {
+            all += 1;
+        }
+    }
+    (old, all)
+}
+
+/// Replaces the v1 decoder of each of `pairs` that still has one by the v2
+/// file: downloaded beside it by the one downloader (retries, resumes,
+/// sha256 against `PAIRS`), then swapped in when no helper runs; else the
+/// helper swaps it before it next loads the pair, or the last hold's end
+/// does (`swap_finished`). Only after a Translate use or Update now. A
+/// failure changes nothing (v1 still translates); the next one continues.
+pub fn update(pairs: &[&'static Pair], progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
+    let decoders: Vec<Decoder> = pairs.iter().map(|p| p.decoder()).collect();
+    update_decoders(&decoders, progress, |swap| {
+        ocr::when_idle(|| swap.iter().for_each(|d| _ = d.swap()))
+    })
+}
+
+/// `update` of `decoders`; `when_idle` runs the swap when nothing has them
+/// loaded (tests: their own rule).
+fn update_decoders(
+    decoders: &[Decoder],
+    progress: impl FnMut(u64, u64),
+    when_idle: impl FnOnce(&[Decoder]),
+) -> Result<(), OcrError> {
+    let _one = UPDATING.lock().unwrap_or_else(|e| e.into_inner());
+    STOP.store(false, Ordering::Relaxed);
+    let mut files: Vec<(PathBuf, &ModelFile)> = Vec::new();
+    for d in decoders.iter().filter(|d| d.outdated()) {
+        if !files.iter().any(|(p, _)| *p == d.staged()) {
+            files.push((d.staged(), d.v2));
+        }
+    }
+    let got = models::ensure_until(&files, progress, &STOP);
+    when_idle(decoders);
+    got
+}
+
+/// Stops the running `update` (Settings' Cancel); the next one continues.
+pub fn stop_update() {
+    STOP.store(true, Ordering::Relaxed);
+}
+
+/// Swaps in every finished update (two file sizes per pair): app side when
+/// the helper ends (`ocr::when_idle`).
+pub fn swap_finished() {
+    for p in &PAIRS {
+        p.decoder().swap();
+    }
+}
+
 fn has_size(path: &Path, size: u64) -> bool {
     std::fs::metadata(path).is_ok_and(|m| m.len() == size)
 }
@@ -1828,6 +2016,8 @@ fn engine_err(e: impl std::fmt::Display) -> OcrError {
 /// ORT plus one pair's sessions and tokenizer. Helper process only.
 pub(crate) struct Translator {
     pair: &'static Pair,
+    /// Its decoder file stays in place while the sessions live.
+    _decoder: InUse,
     encoder: Session,
     decoder: Session,
     tokenizer: Unigram,
@@ -1840,6 +2030,10 @@ impl Translator {
         if pair.missing_bytes() > 0 {
             return Err(OcrError::Missing(pair.label()));
         }
+        // a finished update goes in now: nothing here has the pair loaded
+        let decoder = pair.decoder();
+        decoder.swap();
+        let in_use = InUse::new(decoder.path);
         ocr::init_ort(ort_dir)?;
         let dir = pair.dir();
         // Every batch has a new shape: memory patterns would only add RAM.
@@ -1876,6 +2070,7 @@ impl Translator {
         };
         Ok(Translator {
             pair,
+            _decoder: in_use,
             encoder: session(&pair.encoder)?,
             decoder: session(&pair.decoder)?,
             tokenizer,
@@ -2315,6 +2510,114 @@ mod tests {
         assert_eq!(std::fs::read(&dec_path).unwrap(), new);
         assert_eq!(names(list(verified)), ["decoder.onnx", "vocab.json"]);
         assert_eq!(models::missing_bytes(&list(sizes)), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A pair's decoder in a fresh folder: the v1 file on disk, v2 served
+    /// by a local server answering `answers` (`models::tests::fake_server`).
+    fn v1_install(
+        name: &str,
+        answers: Vec<models::tests::Answer>,
+    ) -> (Decoder, PathBuf, models::tests::Seen) {
+        models::LOCAL_FAKE.set(true);
+        let dir = std::env::temp_dir().join(format!("oc-mt-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let v1 = b"the v1 decoder, two output layers";
+        let (v2, seen) =
+            models::tests::fake_server("decoder.onnx", models::tests::payload(), answers);
+        let path = dir.join("decoder.onnx");
+        std::fs::write(&path, v1).unwrap();
+        let decoder = Decoder {
+            path,
+            v2,
+            v1: Some(v1.len() as u64),
+        };
+        (decoder, dir, seen)
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = (std::fs::read_dir(dir).unwrap().flatten())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Nothing has it loaded: swapped at once.
+    fn idle(decoders: &[Decoder]) {
+        decoders.iter().for_each(|d| _ = d.swap());
+    }
+
+    /// An install with a v1 decoder: the Translate use starts the update (a
+    /// server hiccup is retried), it is stopped part way (Cancel, or the app
+    /// killed: the same `.part` on disk) while v1 still translates, the next
+    /// one resumes from where it stopped (a Range), is verified and swapped
+    /// in by one rename: the v2 file in the v1 one's place, nothing else left;
+    /// the next Translate use downloads nothing.
+    #[test]
+    fn a_v1_install_is_updated_resumed_verified_and_swapped() {
+        use models::tests::Answer;
+        let data = models::tests::payload();
+        let answers = vec![Answer::Status(504), Answer::File, Answer::File];
+        let (d, dir, seen) = v1_install("update", answers);
+        assert!(d.outdated() && d.to_fetch() == data.len() as u64);
+        // stopped after the first bytes
+        let got = update_decoders(
+            std::slice::from_ref(&d),
+            |done, _| {
+                if done > 0 {
+                    stop_update();
+                }
+            },
+            idle,
+        );
+        assert!(matches!(got, Err(OcrError::Stopped)), "{got:?}");
+        assert!(d.outdated(), "v1 still in place, still translating");
+        let part = std::fs::metadata(dir.join("decoder.v2.part"))
+            .unwrap()
+            .len();
+        assert!(part > 0 && part < data.len() as u64, "{part}");
+        assert_eq!(files_in(&dir), ["decoder.onnx", "decoder.v2.part"]);
+        // the next use continues it
+        update_decoders(std::slice::from_ref(&d), |_, _| {}, idle).unwrap();
+        assert_eq!(*seen.lock().unwrap(), [None, None, Some(part)]);
+        assert_eq!(std::fs::read(&d.path).unwrap(), data, "v2 in v1's place");
+        assert_eq!(files_in(&dir), ["decoder.onnx"], "one copy, no temp");
+        assert!(!d.outdated() && d.to_fetch() == 0);
+        // the next Translate use: no download, no request
+        update_decoders(std::slice::from_ref(&d), |_, _| {}, idle).unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 3);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The decoder is loaded (a `Translator` lives): the finished download
+    /// waits beside it, the loaded file untouched (Windows' rule, enforced
+    /// here on every OS); once unloaded, the next swap puts it in place. A
+    /// failed update changes nothing. A stale `.v2.*` beside a current
+    /// decoder is cleaned.
+    #[test]
+    fn a_loaded_decoder_waits_for_its_swap() {
+        use models::tests::Answer;
+        let data = models::tests::payload();
+        let (d, dir, _) = v1_install("loaded", vec![Answer::Status(404), Answer::File]);
+        let v1 = std::fs::read(&d.path).unwrap();
+        // a 404: nothing changes
+        assert!(update_decoders(std::slice::from_ref(&d), |_, _| {}, idle).is_err());
+        assert_eq!(files_in(&dir), ["decoder.onnx"]);
+        let loaded = InUse::new(d.path.clone());
+        update_decoders(std::slice::from_ref(&d), |_, _| {}, idle).unwrap();
+        assert_eq!(std::fs::read(&d.path).unwrap(), v1, "the loaded file stays");
+        assert_eq!(files_in(&dir), ["decoder.onnx", "decoder.v2.onnx"]);
+        assert!(d.outdated() && d.to_fetch() == 0, "only the swap is left");
+        assert!(!d.swap());
+        drop(loaded);
+        assert!(d.swap());
+        assert_eq!(std::fs::read(&d.path).unwrap(), data);
+        assert_eq!(files_in(&dir), ["decoder.onnx"]);
+        std::fs::write(dir.join("decoder.v2.part"), b"x").unwrap();
+        assert!(d.swap());
+        assert_eq!(files_in(&dir), ["decoder.onnx"], "a crash's leftover goes");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
