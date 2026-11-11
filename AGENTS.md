@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.5 published (2026-11-10); next: v0.1.6 hotfix (About page crash), then 0.1.7 Languages + live border, then Game translation (0.2.0).**
+(both local only). Status: **v0.1.6 published (2026-11-11, hotfix); next: 0.1.7 Languages + live border, then Game translation (0.2.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -55,6 +55,10 @@ where they differ.
   capture, GST_PLUGIN_SYSTEM_PATH set into the image) -> fixed, draft rebuilt; run 2 PASS (assets + minisig; v0.1.4 Setup +
   portable -> 0.1.5; What's new; Windows smoke; Ubuntu AppImage asks once). Published assets re-downloaded: SHA256SUMS OK,
   minisig OK, trusted comment "OpenCircle v0.1.5", latest = v0.1.5.
+  v0.1.6 (hotfix: About page crash) published 2026-11-11 03:53 UTC on tag v0.1.6 (95618212), owner: "publish directly, it
+  is simple fix": CI + release workflow green, draft assets SHA256SUMS OK + minisig OK; the update gate, the About check on
+  the draft exe and the AppImage check were NOT run (both VMs off, owner's word). Published assets re-downloaded:
+  byte-identical to the draft, SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.1.6", latest = v0.1.6.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
