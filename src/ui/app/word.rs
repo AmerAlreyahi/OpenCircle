@@ -664,12 +664,14 @@ impl Screen {
         first.chain(&self.extra)
     }
 
-    /// The second reader read `band` (image px) and found `lines` there
-    /// (`extra`); only rows it hadn't read take its lines.
+    /// The second reader read `band` (image px) and found `lines` (`extra`;
+    /// a few lines left on a page are read at once, wherever they are).
     pub fn add_extra(&mut self, band: Rectangle, lines: Vec<Line>, screen: Size) {
-        for (a, b) in self.other_rows.mark(band_of(band), screen.height) {
-            let centre = |l: &&Line| (a..b).contains(&l.bounds.center_y());
-            self.extra.extend(lines.iter().filter(centre).cloned());
+        self.other_rows.mark(band_of(band), screen.height);
+        for l in lines {
+            if !self.extra.iter().any(|e| e.bounds == l.bounds) {
+                self.extra.push(l);
+            }
         }
     }
 

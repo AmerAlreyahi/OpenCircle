@@ -488,6 +488,8 @@ pub(crate) struct Frame {
     img: RgbImage,
     shrunk: Option<Vec<[f32; 4]>>,
     strips: Vec<(Strip, Vec<[f32; 4]>)>,
+    /// Lines already read whatever the rows (`few`).
+    read: Vec<[f32; 4]>,
 }
 
 impl Frame {
@@ -497,6 +499,7 @@ impl Frame {
             img,
             shrunk: None,
             strips: Vec::new(),
+            read: Vec::new(),
         }
     }
 }
@@ -703,9 +706,19 @@ impl Engine {
                 let boxes = self.shrunk(f)?;
                 let all = boxes.len();
                 let left: Vec<[f32; 4]> = boxes.into_iter().filter(|b| unknown(b)).collect();
-                // (judged on the whole screen, read in these rows)
-                let (full, direct) = few(strips(h, rows), left, all);
-                (full, direct.into_iter().filter(|b| inside(b)).collect())
+                // (judged on the whole screen: a few left are read all at
+                // once, in one run, whatever the rows; the English page's
+                // second reader read them band by band in 1641 ms, at once 963)
+                match few(strips(h, rows), left, all) {
+                    (full, direct) if full.is_empty() => {
+                        let direct: Vec<[f32; 4]> = (direct.into_iter())
+                            .filter(|b| !f.read.contains(b))
+                            .collect();
+                        f.read.extend_from_slice(&direct);
+                        (full, direct)
+                    }
+                    (full, _) => (full, Vec::new()),
+                }
             }
             (None, true) => (strips(h, rows), Vec::new()),
         };
@@ -714,8 +727,13 @@ impl Engine {
             true => Vec::new(),
             false => self.full(f, &full)?,
         };
+        let direct_any = !direct.is_empty();
         boxes.extend(direct);
-        boxes.retain(|b| inside(b) && unknown(b) && !kept.iter().any(|(_, k)| holds(&k.bounds, b)));
+        boxes.retain(|b| {
+            (direct_any || inside(b))
+                && unknown(b)
+                && !kept.iter().any(|(_, k)| holds(&k.bounds, b))
+        });
         let mut last: Vec<Option<TextBlock>> = vec![None; boxes.len()];
         for &o in &others {
             if boxes.is_empty() {
