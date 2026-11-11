@@ -844,6 +844,20 @@ production systems.
   pinned window from the beginning: when the overlay closes (Esc) it never flashes, moves or redraws. Owner's suggestion:
   when the follow-up (second question) is sent, the overlay closes by itself, no Esc. Design sheet and owner OK first (#171).
 
+- v0.1.7 design round approved (owner, 2026-11-11, "ok all": every recommended default; sheets and specs in
+  .claude/artifacts/design/: SNIP_MORE_SPEC.md, READING_TEXT_SPEC.md, CHAT_HANDOVER_SPEC.md, render/out/{more,reading,
+  chat-handover}/). Snip More: Copy text / Ask AI / Translate on the picked area; Ask AI gets the annotated picture, Copy
+  text and Translate read the clean capture and skip text under Blur / Redact; each row shows the user's quick-action key,
+  which also works while Snip is open; the area is read when More opens; in a long capture Copy text and Ask AI finish it
+  first and Translate is disabled. Reading text: the kit spinner replaces the Copy text pill's icon while text is read
+  (tooltip "Reading text · N of M lines"), lines become selectable as read, the system's working-in-background cursor over
+  unread text, a missing reader is offered for the script found only, one flat square highlight per line that splits
+  correctly in mixed right-to-left lines. Pinned chat: the overlay closes by itself when the follow-up is sent (never
+  mid-drag or while an action runs); the chat is its own window from its first frame, so it has NO soft outer shadow until
+  the GPU renderer; on Wayland it runs through XWayland (prove keyboard focus on GNOME first), else a plain window.
+- Bar beside the open chat (owner, 2026-11-11, lead's reading of "ok all"; SUPERSEDES "result card replaces the bar" for the
+  AI chat): while the AI chat is open on the overlay the bar stays beside it, so Translate and Copy text keep working.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
