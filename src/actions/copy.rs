@@ -36,16 +36,16 @@ fn run(crop: Crop) -> Result<String, String> {
         })
     })
     .map(|()| COPIED_PILL.into())
-    .map_err(|e| {
-        crate::log!("copy failed: {e}");
-        "Couldn't copy. Close what holds the clipboard and try again.".into()
-    })
 }
+
+/// What the user reads when the clipboard says no (its own error, e.g. "X11 server
+/// connection timed out", goes to the log only).
+pub const COPY_FAILED: &str = "Couldn't copy. Close what holds the clipboard and try again.";
 
 /// The confirmation pill's text, for the image and for text alike.
 pub const COPIED_PILL: &str = "Copied";
 
-/// Puts `text` on the clipboard (Copy text).
+/// Puts `text` on the clipboard (Copy text); `Err` is `COPY_FAILED`.
 pub fn text(text: String) -> Result<(), String> {
     #[cfg(test)]
     copied::set_text(text.clone());
@@ -75,11 +75,27 @@ fn with_clipboard(
         return Ok(());
     }
     let mut slot = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
-    let clipboard = match &mut *slot {
-        Some(clipboard) => clipboard,
-        None => slot.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+    let opened = match &mut *slot {
+        Some(clipboard) => Ok(clipboard),
+        None => arboard::Clipboard::new().map(|c| slot.insert(c)),
     };
-    set(clipboard).map_err(|e| e.to_string())
+    opened.and_then(set).map_err(failed)
+}
+
+/// The clipboard's error, logged; the user gets `COPY_FAILED`.
+fn failed(e: arboard::Error) -> String {
+    crate::log!("copy failed: {e}");
+    COPY_FAILED.to_string()
+}
+
+#[test]
+fn a_clipboard_error_reads_plainly() {
+    // #172: GNOME Wayland without XWayland showed arboard's own words
+    let raw = "X11 server connection timed out because it was unreachable";
+    let e = arboard::Error::Unknown {
+        description: raw.into(),
+    };
+    assert_eq!(failed(e), COPY_FAILED);
 }
 
 /// Tests: what was put on the clipboard, per test (its thread's name; the

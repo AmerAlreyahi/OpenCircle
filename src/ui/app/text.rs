@@ -667,14 +667,7 @@ impl App {
 
     /// Closes the overlay with `text` copied (the "Copied" pill).
     pub(in crate::ui) fn copy_text(&mut self, text: String) -> Task<Message> {
-        self.confirm_after(move || {
-            (copy::text(text))
-                .map(|()| copy::COPIED_PILL.to_string())
-                .map_err(|e| {
-                    crate::log!("copy text failed: {e}");
-                    "Couldn't copy. Close what holds the clipboard and try again.".to_string()
-                })
-        })
+        self.confirm_after(move || copy::text(text).map(|()| copy::COPIED_PILL.to_string()))
     }
 
     /// Select-text mode's box, read: all its text in reading order (`None`
