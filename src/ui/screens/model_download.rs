@@ -18,7 +18,6 @@ use crate::ui::kit::progress;
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::paragraph;
 use crate::ui::kit::text::{accent, sub};
-use crate::ui::kit::themes;
 use crate::ui::kit::tokens::{Role, radius};
 
 /// A model the card offers (the design's `models` catalog).
@@ -167,15 +166,10 @@ pub fn card<'a, M: Clone + 'a>(
     stage: Stage<'a>,
     on: On<M>,
 ) -> Element<'a, M> {
-    let c = &themes::current().c;
     let header = row![
-        container(
-            text(t!(md_header))
-                .size(crate::ui::kit::text::size(Role::META))
-                .color(c.text_muted)
-        )
-        .width(Fill)
-        .align_x(dir::start()),
+        container(crate::ui::kit::text::muted(Role::META, t!(md_header)))
+            .width(Fill)
+            .align_x(dir::start()),
     ]
     .padding(dir::pad(HEADER))
     .align_y(Center);
@@ -329,7 +323,7 @@ pub fn floating<'a, M: 'a>(card: Element<'a, M>, screen: Size, pill: Rectangle) 
 mod tests {
     use super::*;
     use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     const FAILED: &str = "No internet connection. Reconnect, then try again.";
 
