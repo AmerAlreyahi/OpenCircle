@@ -30,6 +30,9 @@ pub(in crate::ui) enum Message {
     Grabbed(u32),
     /// Capture number `.0` has waited `CAPTURE_TIMEOUT`.
     CaptureTimedOut(u32),
+    /// Capture number `.0` has waited `CAPTURE_SLOW`: the desktop asks (its dialog).
+    #[cfg(target_os = "linux")]
+    CaptureSlow(u32),
     /// Snip capture number `.0` will open on this monitor (its grab runs).
     Chosen(u32, snip::Place),
     Overlay(overlay::Event),

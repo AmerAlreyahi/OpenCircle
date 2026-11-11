@@ -51,6 +51,15 @@ impl App {
             let _ = tx.unbounded_send(());
         })
         .map(move |()| Message::CaptureTimedOut(n));
+        #[cfg(target_os = "linux")]
+        let timeout = Task::batch([
+            timeout,
+            background(|tx| {
+                std::thread::sleep(super::CAPTURE_SLOW);
+                let _ = tx.unbounded_send(());
+            })
+            .map(move |()| Message::CaptureSlow(n)),
+        ]);
         // Circle to Search freezes every monitor (`app::screens`).
         let all = snip.is_none() && matches!(self.next, Purpose::Search);
         // Snip picking an area at once: the overlay gets ready meanwhile (`pre_show`).

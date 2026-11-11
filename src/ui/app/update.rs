@@ -199,6 +199,13 @@ impl App {
                 self.windows.back_in_frame(Some(n)).map(Message::Windows)
             }
             Message::CaptureTimedOut(_) => Task::none(),
+            #[cfg(target_os = "linux")]
+            Message::CaptureSlow(n) => {
+                if self.capturing == Some(n) {
+                    crate::sys::shell::leave_overview();
+                }
+                Task::none()
+            }
             Message::Escape if self.capturing.is_some() => {
                 self.unshow();
                 crate::log!("[opencircle] capture cancelled");
@@ -786,6 +793,10 @@ impl App {
 /// capture's answer, the other windows, live translate, the hide steps, a
 /// Copy / Save pill, a snip timer's shot); every other one needs the opening.
 pub(in crate::ui) fn works_closed(message: &Message) -> bool {
+    #[cfg(target_os = "linux")]
+    if matches!(message, Message::CaptureSlow(_)) {
+        return true; // the overlay isn't open yet
+    }
     matches!(
         message,
         Message::Trigger(_)
@@ -812,4 +823,12 @@ pub(in crate::ui) fn works_closed(message: &Message) -> bool {
             | Message::TestShot(_)
             | Message::Snip(snip::Msg::Shoot(_) | snip::Msg::Done(_) | snip::Msg::Progress(_))
     )
+}
+
+/// The capture's "slow" mark comes while no overlay is open yet: it must not be
+/// dropped as a late answer, or the overview never leaves for the desktop's dialog.
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn a_slow_capture_is_handled_before_the_overlay_opens() {
+    assert!(works_closed(&Message::CaptureSlow(1)));
 }

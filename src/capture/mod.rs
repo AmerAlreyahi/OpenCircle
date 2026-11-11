@@ -207,7 +207,11 @@ fn whole_desktop() -> Option<Result<Frame, CaptureError>> {
     }
     #[cfg(target_os = "linux")]
     if wayland_session() {
-        return Some(portal::capture());
+        let frame = portal::capture();
+        // the overlay that shows it must be made outside GNOME's overview, or
+        // it opens behind it without the keyboard (#173, `sys::shell`)
+        crate::sys::shell::leave_overview_and_wait();
+        return Some(frame);
     }
     None
 }

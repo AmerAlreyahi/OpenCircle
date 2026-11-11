@@ -1147,6 +1147,11 @@ impl Windows {
             return window::minimize(id, false).chain(window::gain_focus(id));
         }
         crate::log!("[opencircle] opening the {kind:?} window");
+        // from a shortcut in the shell's overview (the permission window), or
+        // a second launch's token: in front, not behind the overview (#173)
+        #[cfg(target_os = "linux")]
+        crate::sys::shell::leave_overview();
+        activate_next();
         let (id, open) = normal(kind);
         match kind {
             Kind::Settings => {

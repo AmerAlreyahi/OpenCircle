@@ -94,6 +94,12 @@ pub(in crate::ui) const ASK_MARGIN: f32 = 24.0;
 /// on a dialog; its late answer is dropped).
 pub(in crate::ui) const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Linux: a capture still unanswered after this waits on the desktop's own dialog
+/// (the portal asks for permission): the shell's overview, if it shows, is left so
+/// the dialog can be seen (#173). A silent capture takes 50-150 ms (ScreenCast).
+#[cfg(target_os = "linux")]
+pub(in crate::ui) const CAPTURE_SLOW: Duration = Duration::from_millis(1500);
+
 /// Snip reads the controls (UI Automation) of this many topmost windows at
 /// once, of any other when the pointer first goes over it.
 pub(in crate::ui) const UIA_WINDOWS: usize = 4;
