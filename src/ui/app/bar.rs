@@ -20,11 +20,11 @@ use super::{ASK_INPUT, App};
 
 impl App {
     /// The bottom bar shows in main mode from the first frame, through drawing
-    /// and selecting; a result card, a translation, the song card or a toast
-    /// take its place.
+    /// and selecting; a translation, the song card or a toast take its place.
+    /// The AI chat sits beside it (`bar_room`): Translate and Copy text stay
+    /// reachable while it is open (#170).
     pub(in crate::ui) fn bottom_bar_shown(&self) -> bool {
         matches!(self.o.purpose, Purpose::Search)
-            && self.o.ai_chat.is_none()
             && self.o.translate.is_none()
             && self.o.song.is_none()
             && self.o.toast.is_none()
@@ -249,14 +249,18 @@ impl App {
         self.o.bar_anchor = bar::nearest(at, room.size(), size, inset);
     }
 
-    /// The part of the screen the bar's spots are in: beside the pinned AI
-    /// chat (it never covers the bar; centre = the middle of what it leaves),
+    /// The part of the screen the bar's spots are in: beside the AI chat (open
+    /// on the overlay or pinned) (it never covers the bar; centre = the middle of what it leaves),
     /// else the whole screen.
     // ponytail: a chat leaving no room for the shortest bar: the whole screen.
     pub(in crate::ui) fn bar_room(&self) -> Rectangle {
         let all = Rectangle::with_size(self.o.screen);
-        let Some(_) = &self.chat else { return all };
-        let room = card::free(self.o.screen, Some(self.chat_rect()));
+        let card = match (&self.o.ai_chat, &self.chat) {
+            (Some(_), _) => self.chat_card_at(),
+            (None, Some(_)) => self.chat_rect(),
+            (None, None) => return all,
+        };
+        let room = card::free(self.o.screen, Some(card));
         let (_, size) = self.bar_size_on(room.width);
         match room.width >= size.width + 2.0 * bar::GAP {
             true => room,

@@ -94,6 +94,13 @@ impl App {
             return (chat.panel.ask_about(crop, question, self.o.include))
                 .map(move |msg| Message::AiChat(id, msg));
         }
+        // the overlay's own chat, still open (the bar is beside it): the same chat
+        let include = self.o.include;
+        if let Some((id, panel)) = &mut self.o.ai_chat {
+            let id = *id;
+            return (panel.ask_about(crop, question, include))
+                .map(move |msg| Message::AiChat(id, msg));
+        }
         // No key (Google AI Mode): the browser opens, a pill says so, the
         // overlay closes; the chat is for an AI provider only.
         if hands_off() {
@@ -362,7 +369,10 @@ impl App {
                 // a question asked in the overlay's own chat, which is not pinned yet
                 let asks = matches!(
                     msg,
-                    ai_chat::Msg::Submit | ai_chat::Msg::Regenerate | ai_chat::Msg::Preset(_)
+                    ai_chat::Msg::Submit
+                        | ai_chat::Msg::Regenerate
+                        | ai_chat::Msg::Preset(_)
+                        | ai_chat::Msg::Ready(_)
                 ) && open
                     && !resident
                     && !panel.pinned();

@@ -2073,11 +2073,8 @@ fn the_bottom_bar_is_there_from_the_first_frame() {
     let _ = app.update(Message::AskInput("what is this?".into()));
     let _ = app.update(Message::AskSubmit);
     assert!(app.o.ai_chat.is_some());
-    let bottom = |t: &String| ASK_PLACEHOLDERS.contains(&t.as_str());
-    assert!(
-        !overlay_texts(&app).iter().any(bottom),
-        "the card's own field takes over"
-    );
+    // the bar (and its field) stays: Translate and Copy text stay reachable
+    assert!(app.bottom_bar_shown());
     // Translate translates the whole screen
     let mut app = open_app(800, 600, 1.0);
     let _ = app.update(Message::Pill(BarButton::Translate));
@@ -2915,10 +2912,18 @@ fn the_bottom_bar_never_changes_size() {
     let (selected, edits) = bar_box(&mut app);
     assert_eq!(selected, before);
     assert!(edits);
-    // Ask AI's card opens (the bar steps aside) and closes: the same again
+    // Ask AI's card opens (the bar fits beside it) and closes: the same again
     let _ = app.update(Message::AskButton);
     assert!(app.o.ai_chat.is_some(), "Ask AI opens");
-    assert!(!app.bottom_bar_shown());
+    assert!(
+        app.bottom_bar_shown(),
+        "Translate and Copy text stay reachable"
+    );
+    let bar = Rectangle::new(app.bar_target(), app.dock_size());
+    assert!(
+        !bar.intersects(&app.chat_card_at()),
+        "beside the chat, not under it"
+    );
     // a click on the frozen screen outside the card closes it
     event(
         &mut app,
