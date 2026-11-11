@@ -15,6 +15,7 @@ pub mod button;
 pub mod card;
 pub mod chip;
 pub mod colour;
+pub mod dir;
 pub mod divider;
 pub mod dropdown;
 pub mod error_card;

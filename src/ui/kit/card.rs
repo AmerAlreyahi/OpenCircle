@@ -80,10 +80,12 @@ fn dot<'a, Message: 'a>(colour: Color) -> Element<'a, Message> {
         .into()
 }
 
-/// `ThemeCard`: the name (`CARD_TITLE`) and the theme's three dots, its
-/// description (`CARD_DESC`, `text_sub`) under them.
+/// `ThemeCard`: the `name` (`CARD_TITLE`) and the theme's three dots, its
+/// `desc` (`CARD_DESC`, `text_sub`) under them (the words in the app's
+/// language: `theme.name` / `theme.desc` in English).
 pub fn theme_card<'a, Message: Clone + 'a>(
     theme: &'static Theme,
+    (name, desc): (&'a str, &'a str),
     selected: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
@@ -98,13 +100,17 @@ pub fn theme_card<'a, Message: Clone + 'a>(
     // (a stack is as big as its first layer: the three dots' span)
     .width(DOT_STEP * 2.0 + DOT)
     .height(DOT);
-    let top = row![
-        container(text(Role::CARD_TITLE, theme.name)).width(Fill),
+    let top = crate::dir_row![
+        container(text(Role::CARD_TITLE, name))
+            .width(Fill)
+            .align_x(super::dir::start()),
         dots
     ]
     .spacing(space::GAP)
     .align_y(Center);
-    let lines = column![top, sub(Role::CARD_DESC, theme.desc)].spacing(LINE_GAP);
+    let lines = column![top, sub(Role::CARD_DESC, desc)]
+        .spacing(LINE_GAP)
+        .align_x(super::dir::start());
     pick(lines, selected, Some(on_press))
 }
 
@@ -135,11 +141,14 @@ pub fn look_card<'a, Message: Clone + 'a>(
     if on_press.is_none() {
         title = title.color(c().text_muted);
     }
-    let top = row![container(title).width(Fill), badge(badge_label)]
+    // (the strip is never mirrored: it shows the screen's edge)
+    let title = container(title).width(Fill).align_x(super::dir::start());
+    let top = crate::dir_row![title, badge(badge_label)]
         .spacing(LINE_GAP)
         .align_y(Center);
-    let lines =
-        column![strip, top, sub(Role::CARD_DESC, desc).line_height(1.375)].spacing(space::GAP);
+    let lines = column![strip, top, sub(Role::CARD_DESC, desc).line_height(1.375)]
+        .spacing(space::GAP)
+        .align_x(super::dir::start());
     pick(lines, selected, on_press)
 }
 
@@ -156,7 +165,7 @@ pub fn grid<'a, Message: 'a>(
         while line.len() < columns {
             line.push(Space::new().width(Fill).into());
         }
-        rows = rows.push(row(line).spacing(space::GAP));
+        rows = rows.push(super::dir::row(line).spacing(space::GAP));
     }
     rows.into()
 }

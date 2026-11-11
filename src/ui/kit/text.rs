@@ -225,9 +225,18 @@ pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
         false => (s.into_fragment(), c.text),
     };
     iced::widget::text(line)
-        .size(role.size)
+        .size(size(role))
         .font(font(role))
         .color(colour)
+}
+
+/// The size `role` is drawn at: 1 px larger in Arabic (not the mono roles:
+/// paths, versions and key names stay Latin).
+pub fn size(role: Role) -> f32 {
+    match role.mono {
+        true => role.size,
+        false => super::dir::size(role.size),
+    }
 }
 
 /// `s` in `role`, in the secondary text colour (a description, a note).

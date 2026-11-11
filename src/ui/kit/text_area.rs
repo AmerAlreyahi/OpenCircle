@@ -24,7 +24,7 @@ const GAP: f32 = 8.0;
 
 /// Its text's height at most (`LINES` lines), logical px.
 pub fn max_height() -> f32 {
-    Role::CHAT.size * LINE_HEIGHT * LINES
+    super::text::size(Role::CHAT) * LINE_HEIGHT * LINES
 }
 
 /// What a key does in it: Enter (no Shift / Ctrl) = `on_enter`, Shift / Ctrl +
@@ -64,7 +64,7 @@ pub fn text_area<'a, M: Clone + 'a>(
         .on_action(on_action)
         .key_binding(move |press| binding(press, &on_enter))
         .font(super::text::font(Role::CHAT))
-        .size(Role::CHAT.size)
+        .size(super::text::size(Role::CHAT))
         .line_height(LINE_HEIGHT)
         .padding(PAD)
         .height(iced::Shrink)

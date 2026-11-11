@@ -32,7 +32,7 @@ const LINE: f32 = 16.0;
 
 /// The pill's size for `label` (logical px, whole): its window's size.
 pub fn size(label: &str) -> Size {
-    let text = width(label, Role::NOTE.size, font(Role::NOTE));
+    let text = width(label, super::text::size(Role::NOTE), font(Role::NOTE));
     Size::new(
         (2.0 * PAD[1] + size::TOAST_DOT + GAP + text + 2.0).ceil(),
         2.0 * PAD[0] + LINE + 2.0,
@@ -42,7 +42,7 @@ pub fn size(label: &str) -> Size {
 /// `with_action`'s size: the pill and its action after the label.
 pub fn size_with_action(label: &str, action: &str) -> Size {
     let pill = size(label);
-    let more = GAP + width(action, Role::NOTE.size, font(Role::CTA));
+    let more = GAP + width(action, super::text::size(Role::NOTE), font(Role::CTA));
     Size::new((pill.width + more).ceil(), pill.height)
 }
 
@@ -147,9 +147,9 @@ pub const LEAD: f32 = 26.0;
 
 /// `banner`'s size for `title`, `line` and buttons `actions` px wide (0: none).
 pub fn banner_size(title: &str, line: &str, actions: f32) -> Size {
-    let text = width(title, Role::CTA.size, font(Role::CTA)).max(width(
+    let text = width(title, super::text::size(Role::CTA), font(Role::CTA)).max(width(
         line,
-        Role::ROW_DESC.size,
+        super::text::size(Role::ROW_DESC),
         font(Role::ROW_DESC),
     ));
     let end = if actions > 0.0 {

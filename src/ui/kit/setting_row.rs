@@ -29,10 +29,13 @@ fn text_block<'a, Message: 'a>(
     title: Element<'a, Message>,
     desc: impl IntoFragment<'a>,
 ) -> iced::widget::Column<'a, Message> {
-    let mut block = column![title].spacing(DESC_GAP);
+    let mut block = column![title]
+        .spacing(DESC_GAP)
+        .align_x(super::dir::start());
     let desc = desc.into_fragment();
     if !desc.is_empty() {
-        block = block.push(super::text::sub(Role::ROW_DESC, desc).line_height(1.6));
+        block =
+            block.push(super::text::sub(Role::ROW_DESC, desc).line_height(super::dir::line(1.6)));
     }
     block
 }
@@ -49,13 +52,14 @@ pub fn row<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     let text = container(text_block(title, desc))
         .width(Fill)
-        .padding(Padding::ZERO.right(TEXT_PAD));
+        .align_x(super::dir::start())
+        .padding(super::dir::pad(Padding::ZERO.right(TEXT_PAD)));
     let control = container(control)
         .id(Id::new(CONTROL))
         .width(size::CONTROL_COLUMN);
     ruled(
         // (the strut keeps a short row at the least height)
-        iced::widget::row![
+        crate::dir_row![
             Space::new().height(size::ROW_MIN),
             text,
             Space::new().width(GAP),
@@ -73,8 +77,8 @@ pub fn field_with<'a, Message: 'a>(
     field: impl Into<Element<'a, Message>>,
     buttons: impl IntoIterator<Item = Element<'a, Message>>,
 ) -> iced::widget::Row<'a, Message> {
-    iced::widget::row![container(field).width(Fill)]
-        .extend(buttons)
+    let field: Element<'a, Message> = container(field).width(Fill).into();
+    super::dir::row(std::iter::once(field).chain(buttons))
         .spacing(super::tokens::space::GAP)
         .align_y(iced::Center)
 }
@@ -86,5 +90,9 @@ pub fn block<'a, Message: 'a>(
     desc: &'a str,
     content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    ruled(column![text_block(title, desc), content.into()].spacing(BLOCK_GAP))
+    ruled(
+        column![text_block(title, desc), content.into()]
+            .spacing(BLOCK_GAP)
+            .align_x(super::dir::start()),
+    )
 }

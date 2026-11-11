@@ -38,7 +38,7 @@ const INLINE_X: f32 = 3.0;
 const INLINE_RADIUS: f32 = 4.0;
 
 fn settings() -> Settings {
-    let size = Pixels(Role::CHAT.size);
+    let size = Pixels(super::text::size(Role::CHAT));
     Settings {
         text_size: size,
         h1_size: Pixels(HEADINGS[0]),

@@ -31,17 +31,23 @@ pub fn shortcut_field<'a, Message: Clone + 'a>(
     keys: Vec<String>,
     state: State,
     recording_hint: &'a str,
+    not_set: &'a str,
     on_press: Message,
 ) -> Element<'a, Message> {
     let line = |s: &'a str, colour| -> Element<'a, Message> {
         let role = Role::ROW_DESC;
-        container(text(s).size(role.size).font(font(role)).color(colour))
-            .center(Fill)
-            .into()
+        container(
+            text(s)
+                .size(super::text::size(role))
+                .font(font(role))
+                .color(colour),
+        )
+        .center(Fill)
+        .into()
     };
     let inner = match state {
         State::Recording => line(recording_hint, c().accent),
-        _ if keys.is_empty() => line("Not set", c().text_muted),
+        _ if keys.is_empty() => line(not_set, c().text_muted),
         _ => row(keys.into_iter().map(keycap)).spacing(GAP).into(),
     };
     button(container(inner).center_y(Fill))

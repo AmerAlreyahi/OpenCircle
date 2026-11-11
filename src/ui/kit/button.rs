@@ -172,7 +172,7 @@ pub fn cta_label<'a, Message: 'a>(label: &'a str, note: Option<String>) -> Eleme
 pub fn label<'a>(label: &'a str) -> iced::widget::Text<'a> {
     use super::tokens::Role;
     text(label)
-        .size(Role::CONTROL.size)
+        .size(super::text::size(Role::CONTROL))
         .font(super::text::font(Role::CONTROL))
         .line_height(1.5)
 }
@@ -194,36 +194,40 @@ pub fn regular<'a, Message: Clone + 'a>(
         true => weight(Weight::Semibold),
         false => super::text::font(Role::CONTROL),
     };
-    iced_button(text(label).size(Role::CONTROL.size).font(font))
-        .padding([6.0, 13.0])
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-            let (fill, ink, edge) = match accent {
-                true => (c().accent, c().bg, c().accent),
-                false => (c().elevated, c().text, c().elevated_border),
-            };
-            let fill = match () {
-                _ if hot && accent => brighter(fill),
-                _ if hot => c().elevated_hover,
-                _ => fill,
-            };
-            let dim = |v: Color| if live { v } else { faded(v, 0.45) };
-            let (width, edge) = match () {
-                _ if live && status == Status::Pressed => (2.0, c().widget),
-                _ => (1.0, edge),
-            };
-            iced_button::Style {
-                background: Some(dim(fill).into()),
-                text_color: dim(ink),
-                border: Border::default()
-                    .rounded(radius::CONTROL)
-                    .width(width)
-                    .color(dim(edge)),
-                ..iced_button::Style::default()
-            }
-        })
-        .into()
+    iced_button(
+        text(label)
+            .size(super::text::size(Role::CONTROL))
+            .font(font),
+    )
+    .padding([6.0, 13.0])
+    .on_press_maybe(on_press)
+    .style(move |_, status| {
+        let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+        let (fill, ink, edge) = match accent {
+            true => (c().accent, c().bg, c().accent),
+            false => (c().elevated, c().text, c().elevated_border),
+        };
+        let fill = match () {
+            _ if hot && accent => brighter(fill),
+            _ if hot => c().elevated_hover,
+            _ => fill,
+        };
+        let dim = |v: Color| if live { v } else { faded(v, 0.45) };
+        let (width, edge) = match () {
+            _ if live && status == Status::Pressed => (2.0, c().widget),
+            _ => (1.0, edge),
+        };
+        iced_button::Style {
+            background: Some(dim(fill).into()),
+            text_color: dim(ink),
+            border: Border::default()
+                .rounded(radius::CONTROL)
+                .width(width)
+                .color(dim(edge)),
+            ..iced_button::Style::default()
+        }
+    })
+    .into()
 }
 
 /// An on / off pill (the composer's Include screen, `#aiIncludeScreenToggle`):
@@ -238,10 +242,10 @@ pub fn switch<'a, Message: Clone + 'a>(
     use super::tokens::{Role, space};
     use iced_button::Status;
     let dot = super::chip::dot(if on { c().accent } else { c().text_muted });
-    let line = row![
+    let line = crate::dir_row![
         dot,
         text(label)
-            .size(Role::META.size)
+            .size(super::text::size(Role::META))
             .font(super::text::font(Role::META))
     ]
     .spacing(space::GAP)
@@ -294,7 +298,8 @@ pub fn toggle<'a, Message: Clone + 'a>(
             border: Border::default().rounded(radius::FULL),
             ..container::Style::default()
         });
-    let side = if on {
+    // right to left: "on" is the knob at the left
+    let side = if on != super::dir::rtl() {
         Horizontal::Right
     } else {
         Horizontal::Left
@@ -397,7 +402,7 @@ pub fn compact<'a, Message: Clone + 'a>(
     let content = row![text(glyph).font(super::icon::FONT).size(size::ICON_SMALL)]
         .push(label.map(|l| {
             text(l)
-                .size(Role::BAR_PILL.size)
+                .size(super::text::size(Role::BAR_PILL))
                 .font(super::text::font(Role::BAR_PILL))
         }))
         .spacing(space::GAP)
@@ -466,7 +471,7 @@ pub fn labelled<'a, Message: Clone + 'a>(
     let content = row![
         text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
         text(label)
-            .size(Role::CONTROL.size)
+            .size(super::text::size(Role::CONTROL))
             .font(super::text::font(Role::CTA))
             .wrapping(text::Wrapping::None),
     ]
@@ -479,7 +484,11 @@ pub fn labelled<'a, Message: Clone + 'a>(
 pub fn labelled_width(label: &str) -> f32 {
     use super::tokens::{Role, space};
     const SIDE: f32 = 14.0;
-    let words = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CTA));
+    let words = super::text::width(
+        label,
+        super::text::size(Role::CONTROL),
+        super::text::font(Role::CTA),
+    );
     (2.0 * SIDE + size::ICON_SMALL + space::GAP + words).ceil()
 }
 

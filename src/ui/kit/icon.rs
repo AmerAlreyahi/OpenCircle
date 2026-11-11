@@ -91,6 +91,16 @@ impl Icon {
         Icon::Alert,
     ];
 
+    /// A directional icon as the layout direction reads it: Back and Forward
+    /// swap in RTL; icons that don't point stay as they are.
+    pub fn directed(self) -> Icon {
+        match (self, super::dir::rtl()) {
+            (Icon::Back, true) => Icon::Forward,
+            (Icon::Forward, true) => Icon::Back,
+            (icon, _) => icon,
+        }
+    }
+
     pub const fn glyph(self) -> char {
         match self {
             Icon::Close => '\u{e1b1}',

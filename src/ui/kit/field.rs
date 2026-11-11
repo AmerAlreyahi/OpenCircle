@@ -29,7 +29,7 @@ pub fn input<'a, Message: Clone + 'a>(
     };
     text_input(placeholder, value)
         .font(font)
-        .size(role.size)
+        .size(super::text::size(role))
         .line_height(1.5)
         .padding([6, 11])
         .style(move |_, status| text_input::Style {

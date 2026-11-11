@@ -49,7 +49,7 @@ pub fn opener<'a, Message: Clone + 'a>(
         },
         false => Role::CONTROL,
     };
-    let name = text(label).size(role.size).font(font(role));
+    let name = text(label).size(super::text::size(role)).font(font(role));
     let name = match rtl {
         true => container(name).align_right(Fill),
         false => container(name).width(Fill),
@@ -124,6 +124,9 @@ pub struct Look {
     pub hovered: bool,
     /// Needs AI: the quiet `needs_ai` ring at its end.
     pub needs_ai: bool,
+    /// A second, muted name after the label (a language in its own name,
+    /// then its name in the app's language).
+    pub aside: Option<&'static str>,
 }
 
 /// A row of a list with a search (the language lists): `label` (12 px /
@@ -159,15 +162,30 @@ pub fn choice<'a, Message: Clone + 'a>(
             .into()
         }
         None => text(label.to_string())
-            .size(role.size)
+            .size(super::text::size(role))
             .font(font(role))
             .color(c().text)
             .into(),
+    };
+    let name: Element<'a, Message> = match look.aside {
+        None => name,
+        Some(aside) => {
+            let aside = text(aside)
+                .size(super::text::size(role))
+                .font(font(role))
+                .color(c().text_muted);
+            let mut parts = vec![name, aside.into()];
+            if rtl {
+                parts.reverse();
+            }
+            row(parts).spacing(space::GAP + 2.0).into()
+        }
     };
     let name: Element<'a, Message> = match rtl {
         true => container(name).align_right(Fill).into(),
         false => container(name).width(Fill).into(),
     };
+
     let mut ends: Vec<Element<'a, Message>> = Vec::new();
     if look.needs_ai {
         ends.push(needs_ai(look.hovered || look.ringed));
@@ -233,7 +251,7 @@ pub fn needs_ai<'a, Message: 'a>(loud: bool) -> Element<'a, Message> {
 pub fn group<'a, Message: 'a>(label: &'a str, height: f32, rtl: bool) -> Element<'a, Message> {
     let role = Role::SECTION;
     let line = text(label)
-        .size(role.size)
+        .size(super::text::size(role))
         .font(font(role))
         .color(c().text_muted);
     let line = container(line).padding(Padding {
@@ -314,7 +332,7 @@ pub fn item<'a, Message: Clone + 'a>(
             ..Padding::ZERO
         })
     });
-    let content = row![text(label).size(role.size).font(font(role))]
+    let content = row![text(label).size(super::text::size(role)).font(font(role))]
         .push(check)
         .push(Space::new().width(Fill))
         .push(hint)
@@ -390,7 +408,7 @@ const EXTERNAL: f32 = 12.0;
 /// How wide a key's cap is: its text and 6 px each side, at least a square.
 pub fn cap_width(label: &str) -> f32 {
     let role = Role::KEYCAP;
-    (super::text::width(label, role.size, font(role)) + 12.0).max(size::KEYCAP_H)
+    (super::text::width(label, super::text::size(role), font(role)) + 12.0).max(size::KEYCAP_H)
 }
 
 /// A row's caps, one cell per key.
@@ -412,7 +430,7 @@ pub fn action<'a, Message: Clone + 'a>(r: ActionRow<'a, Message>) -> Element<'a,
     let live = r.press.is_some();
     let ink = move |colour: iced::Color| if live { colour } else { faded(colour, 0.38) };
     let label = text(r.label)
-        .size(role.size)
+        .size(super::text::size(role))
         .font(font(role))
         .color(ink(c().text));
     let external = r
@@ -461,7 +479,7 @@ pub fn foot<'a, Message: 'a>(words: &'a str, rtl: bool) -> Element<'a, Message> 
     let role = Role::ROW_DESC;
     let line = container(
         text(words)
-            .size(role.size)
+            .size(super::text::size(role))
             .font(font(role))
             .color(c().text_sub),
     )
@@ -517,9 +535,9 @@ pub fn option<'a, Message: Clone + 'a>(
             + space::GAP
     });
     let room = width - 2.0 * ROW_PAD[1] - 2.0 - tag_w;
-    let shown = super::text::cut_middle(&label, role.size, font(role), room);
+    let shown = super::text::cut_middle(&label, super::text::size(role), font(role), room);
     let line: Element<'a, Message> = text(shown.clone())
-        .size(role.size)
+        .size(super::text::size(role))
         .font(font(role))
         .wrapping(text::Wrapping::None)
         .into();
@@ -527,10 +545,15 @@ pub fn option<'a, Message: Clone + 'a>(
         true => line,
         false => super::tooltip::cut(line, label),
     };
-    let content = row![container(line).width(Fill).clip(true)]
-        .push(badge.map(tag))
-        .spacing(space::GAP)
-        .align_y(Center);
+    let mut content = vec![
+        container(line)
+            .width(Fill)
+            .align_x(super::dir::start())
+            .clip(true)
+            .into(),
+    ];
+    content.extend(badge.map(tag));
+    let content = super::dir::row(content).spacing(space::GAP).align_y(Center);
     button(container(content).center_y(Fill))
         .width(width)
         .height(height)

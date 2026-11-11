@@ -62,46 +62,85 @@ pub struct Hero<'a, Message> {
     /// Several clips: (the one showing, how many, previous, next); the stage
     /// gets arrows and dots. `None` = one clip: nothing.
     pub pager: Option<(usize, usize, Message, Message)>,
+    /// The hero's own words, in the app's language.
+    pub words: Words<'a>,
+}
+
+/// What the hero writes itself: after a Labs feature's name, no shortcut,
+/// the preview button, the stage's chip and the pager's labels.
+#[derive(Debug, Clone, Copy)]
+pub struct Words<'a> {
+    pub labs: &'a str,
+    pub no_shortcut: &'a str,
+    pub hide: &'a str,
+    pub show: &'a str,
+    pub preview: &'a str,
+    pub previous: &'a str,
+    pub next: &'a str,
+}
+
+impl Default for Words<'_> {
+    fn default() -> Self {
+        Words {
+            labs: "Labs",
+            no_shortcut: "Shortcut not set",
+            hide: "Hide preview",
+            show: "Show preview",
+            preview: "Preview",
+            previous: "Previous preview",
+            next: "Next preview",
+        }
+    }
 }
 
 pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Message> {
-    let mut name = row![super::text::text(Role::PAGE_TITLE, h.title)]
+    let w = h.words;
+    let mut name = vec![super::text::text(Role::PAGE_TITLE, h.title).into()];
+    if h.lab {
+        name.push(sub(Role::CARD_DESC, w.labs).into());
+    }
+    let name = super::dir::row(name)
         .spacing(space::GAP)
         .align_y(iced::Bottom);
-    if h.lab {
-        name = name.push(sub(Role::CARD_DESC, "Labs"));
-    }
+    // (the key caps keep their order: a shortcut reads left to right)
     let keys: Element<'a, Message> = match h.keys.is_empty() {
-        true => sub(Role::CARD_DESC, "Shortcut not set").into(),
+        true => sub(Role::CARD_DESC, w.no_shortcut).into(),
         false => row(h.keys.into_iter().map(|k| {
-            let w = super::text::width(&k, Role::KEYCAP.size, super::text::font(Role::KEYCAP));
+            let w = super::text::width(
+                &k,
+                super::text::size(Role::KEYCAP),
+                super::text::font(Role::KEYCAP),
+            );
             container(keycap(k)).width(w + CAP_PAD).into()
         }))
         .spacing(space::TRACK_PAD)
         .into(),
     };
     let collapse = match h.shown {
-        true => "Hide preview",
-        false => "Show preview",
+        true => w.hide,
+        false => w.show,
     };
     // one compact line, shown or hidden: the name and line left; Hide / Show
     // preview, then the keycaps, right
     let has_clip = h.toggle.is_some();
-    let heading = row![
+    let mut heading = vec![
         column![name, sub(Role::CARD_DESC, h.desc)]
             .spacing(space::TRACK_GAP)
-            .width(Fill),
-    ]
-    .push(
+            .align_x(super::dir::start())
+            .width(Fill)
+            .into(),
+    ];
+    heading.extend(
         h.toggle
             .map(|m| button(label(collapse), Kind::Elevated, Some(m))),
-    )
-    .push(keys)
-    .spacing(space::GAP * 2.0)
-    .align_y(Center);
+    );
+    heading.push(keys);
+    let heading = super::dir::row(heading)
+        .spacing(space::GAP * 2.0)
+        .align_y(Center);
     let mut body = column![heading].spacing(STAGE_PAD);
     if has_clip && h.shown {
-        body = body.push(stage(h.frame, h.play, h.width, h.pager));
+        body = body.push(stage(h.frame, h.play, h.width, h.pager, w));
         if let Some(note) = h.note {
             body = body.push(sub(Role::CARD_DESC, note));
         }
@@ -125,9 +164,10 @@ fn stage<'a, Message: Clone + 'a>(
     play: Option<(&'a str, Option<Message>)>,
     (width, scale, win_h): (Arc<AtomicU32>, f32, f32),
     pager: Option<(usize, usize, Message, Message)>,
+    w: Words<'a>,
 ) -> Element<'a, Message> {
     let chip = container(
-        text("Preview")
+        text(w.preview)
             .size(SMALL)
             .font(super::text::font(Role::CARD_DESC))
             .color(c().accent),
@@ -139,10 +179,9 @@ fn stage<'a, Message: Clone + 'a>(
         ..container::Style::default()
     });
     let play = play.map(|(l, m)| button(label(l), Kind::Elevated, m));
-    let top = row![chip, Space::new().width(Fill)]
-        .push(play)
-        .width(Fill)
-        .align_y(Center);
+    let mut top = vec![chip.into(), Space::new().width(Fill).into()];
+    top.extend(play);
+    let top = super::dir::row(top).width(Fill).align_y(Center);
     let media = Element::new(Media {
         frame,
         width,
@@ -153,7 +192,7 @@ fn stage<'a, Message: Clone + 'a>(
         .spacing(space::TRACK_PAD)
         .align_x(Center);
     if let Some((at, n, prev, next)) = pager {
-        inside = inside.push(pager_row(at, n, prev, next));
+        inside = inside.push(pager_row(at, n, prev, next, w));
     }
     container(inside)
         .padding(STAGE_PAD)
@@ -179,9 +218,14 @@ fn pager_row<'a, Message: Clone + 'a>(
     n: usize,
     prev: Message,
     next: Message,
+    w: Words<'a>,
 ) -> Element<'a, Message> {
     let arrow = |glyph: Icon, label: &'a str, m: Message| {
-        let b = icon_button(glyph.glyph(), icon_button::State::default(), Some(m));
+        let b = icon_button(
+            glyph.directed().glyph(),
+            icon_button::State::default(),
+            Some(m),
+        );
         hint(b, label, Why::Icon, Position::Top)
     };
     let dots = row((0..n).map(|i| {
@@ -196,10 +240,10 @@ fn pager_row<'a, Message: Clone + 'a>(
             .into()
     }))
     .spacing(space::GAP);
-    row![
-        arrow(Icon::Back, "Previous preview", prev),
+    crate::dir_row![
+        arrow(Icon::Back, w.previous, prev),
         dots,
-        arrow(Icon::Forward, "Next preview", next)
+        arrow(Icon::Forward, w.next, next)
     ]
     .spacing(space::GAP * 2.0)
     .align_y(Center)

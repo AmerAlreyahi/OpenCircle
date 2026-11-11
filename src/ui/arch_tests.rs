@@ -144,9 +144,11 @@ fn kit_depends_only_on_tokens() {
             continue;
         }
         for line in code(&src) {
-            let outside = line
-                .match_indices("crate::")
-                .any(|(i, _)| !line[i..].starts_with("crate::ui::kit"));
+            let outside = line.match_indices("crate::").any(|(i, _)| {
+                // (`dir_row!` is the kit's own macro, exported at the crate root)
+                !line[i..].starts_with("crate::ui::kit")
+                    && !line[i..].starts_with("crate::dir_row!")
+            });
             assert!(!outside, "{name} reaches outside the kit: {}", line.trim());
         }
     }
@@ -172,7 +174,7 @@ fn platform_is_isolated() {
 }
 
 /// Not components: the kit's data and clock.
-const KIT_DATA: [&str; 5] = ["looks", "mod", "motion", "themes", "tokens"];
+const KIT_DATA: [&str; 6] = ["dir", "looks", "mod", "motion", "themes", "tokens"];
 
 /// Each kit component has its gallery sheet (`kit/testing/gallery.rs`) and
 /// its golden images in both themes (`tests/fixtures/kit/`).

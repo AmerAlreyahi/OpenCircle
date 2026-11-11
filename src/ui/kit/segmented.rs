@@ -10,7 +10,11 @@ use super::tokens::{Role, radius, size, space};
 /// (the design's Off / On are 45 / 42 px) and 7 px a letter (the design's
 /// pills, measured for Latin), never narrower than the label as drawn.
 fn pill_width(label: &str) -> f32 {
-    let drawn = super::text::width(label, Role::CONTROL.size, super::text::font(Role::CONTROL));
+    let drawn = super::text::width(
+        label,
+        super::text::size(Role::CONTROL),
+        super::text::font(Role::CONTROL),
+    );
     (24.0 + (7.0 * label.chars().count() as f32).max(drawn.ceil())).max(42.0)
 }
 
@@ -77,6 +81,9 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
 ) -> Element<'a, Message> {
     const GAP: f32 = space::TRACK_GAP;
     const PILL: f32 = 27.0; // 12 px x 1.25 and 6 px above and below
+    // right to left: the first option at the right (Off right, On left)
+    let options = &super::dir::order(options.to_vec())[..];
+    let widths = &super::dir::order(widths.to_vec())[..];
     let at = |value: T| {
         let mut x = 0.0;
         for (&(v, _), &w) in options.iter().zip(widths) {
@@ -108,11 +115,11 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
         // centred by its box, the text exactly as wide as drawn: a wider box
         // lays a right-to-left line out from its right edge (Arabic sat right
         // of the thumb on Windows), and the text's own centring shifts it too
-        let drawn = super::text::width(label, role.size, super::text::font(role));
+        let drawn = super::text::width(label, super::text::size(role), super::text::font(role));
         button(
             container(
                 text(label)
-                    .size(role.size)
+                    .size(super::text::size(role))
                     .font(super::text::font(role))
                     .line_height(1.25)
                     .width(drawn.ceil()),

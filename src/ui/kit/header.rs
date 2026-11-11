@@ -41,7 +41,7 @@ pub fn regular<'a, Message: Clone + 'a>(
     const LOGO_GAP: f32 = 10.0;
     const STATUS_GAP: f32 = 8.0;
     const GLYPH: f32 = 12.0;
-    let name = row![
+    let name = crate::dir_row![
         image(logo).width(size::ICON).height(size::ICON),
         text(title)
             .size(12)
@@ -55,18 +55,22 @@ pub fn regular<'a, Message: Clone + 'a>(
         false => Icon::Maximise,
     });
     let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
-    row![
-        mouse_area(container(name).padding([0.0, PAD]).center_y(H).width(Fill))
-            .on_press(on(Caption::Drag)),
+    // right to left: the whole header mirrored, the caption buttons at the
+    // top left with close outermost (Win32 mirroring, GTK, KWin)
+    let name = container(name)
+        .padding([0.0, PAD])
+        .center_y(H)
+        .width(Fill)
+        .align_x(super::dir::start());
+    let mut parts = vec![
+        mouse_area(name).on_press(on(Caption::Drag)).into(),
         status.into(),
-        Space::new().width(STATUS_GAP),
+        Space::new().width(STATUS_GAP).into(),
         caption(Icon::Minimise, GLYPH, H, false, on(Caption::Minimise)),
-    ]
-    .push(restore)
-    .push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)))
-    .height(H)
-    .align_y(Center)
-    .into()
+    ];
+    parts.extend(restore);
+    parts.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
+    super::dir::row(parts).height(H).align_y(Center).into()
 }
 
 /// `title` (mono, muted) that drags the window (`on_drag` on press), and the

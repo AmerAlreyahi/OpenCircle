@@ -1,5 +1,5 @@
 //! A progress bar.
-use iced::widget::{Space, container, row, stack};
+use iced::widget::{Space, container, stack};
 use iced::{Border, Element, Fill, Length};
 
 use super::button::faded;
@@ -24,14 +24,16 @@ pub fn bar<'a, Message: 'a>(share: f32) -> Element<'a, Message> {
                 ..container::Style::default()
             });
         let pad = GLOW - grow;
-        row![
+        // right to left: filled from the right
+        let mut parts = vec![
             container(ring)
                 .padding(pad)
                 .width(portion(share))
                 .height(Fill)
-        ]
-        .push(rest())
-        .height(Fill)
+                .into(),
+        ];
+        parts.extend(rest().map(Element::from));
+        super::dir::row(parts).height(Fill)
     };
     let fill = container(Space::new().width(Fill).height(6))
         .width(portion(share))
@@ -40,18 +42,18 @@ pub fn bar<'a, Message: 'a>(share: f32) -> Element<'a, Message> {
             border: Border::default().rounded(radius::FULL),
             ..container::Style::default()
         });
-    let track = container(
-        row![]
-            .push((share > 0.0).then_some(fill))
-            .push(rest().map(|r| r.height(6))),
-    )
-    .width(Fill)
-    .height(6)
-    .style(|_| container::Style {
-        background: Some(c().hover.into()),
-        border: Border::default().rounded(radius::FULL),
-        ..container::Style::default()
-    });
+    let parts = [
+        (share > 0.0).then(|| fill.into()),
+        rest().map(|r| r.height(6).into()),
+    ];
+    let track = container(super::dir::row(parts.into_iter().flatten()))
+        .width(Fill)
+        .height(6)
+        .style(|_| container::Style {
+            background: Some(c().hover.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        });
     let bar = container(track).padding([GLOW, 0.0]).width(Fill);
     let glows = (share > 0.0).then(|| stack![glow(GLOW, 0.10), glow(GLOW / 2.0, 0.18)]);
     let mut layers = stack![].width(Fill).height(6.0 + 2.0 * GLOW);

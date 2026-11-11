@@ -349,7 +349,16 @@ fn card_sheet() {
             s(ar, "Made by others", "صنعه آخرون"),
         ))
     })];
-    let theme = |selected| move |_| card::theme_card(&super::super::themes::EMERALD, selected, ());
+    let theme = |selected| {
+        move |_| {
+            card::theme_card(
+                &super::super::themes::EMERALD,
+                ("Emerald", "Deep forest jade"),
+                selected,
+                (),
+            )
+        }
+    };
     let look = |selected, on: Option<()>| {
         move |ar| {
             let l = &super::super::looks::SPECTRUM;
@@ -1021,7 +1030,7 @@ fn shortcut_field_sheet() {
         move |ar| {
             let hint = s(ar, "Press keys…", "اضغط المفاتيح…");
             let keys = k.iter().map(|k| k.to_string()).collect();
-            shortcut_field(keys, state, hint, ())
+            shortcut_field(keys, state, hint, "Not set", ())
         }
     };
     let rows = vec![
@@ -1167,6 +1176,7 @@ fn hero_sheet() {
                 frame: clip.then(frame),
                 width: (Default::default(), 1.0, 720.0),
                 pager: None,
+                words: Default::default(),
             })
         };
     let rows = vec![

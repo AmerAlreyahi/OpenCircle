@@ -23,7 +23,7 @@ fn cap<'a, Message: 'a>(label: String, alpha: f32) -> Element<'a, Message> {
     // the edge is the outer box showing round the face: 1 px, 2 px below
     let face = container(
         text(label)
-            .size(Role::KEYCAP.size)
+            .size(super::text::size(Role::KEYCAP))
             .font(font(Role::KEYCAP))
             .color(fade(c().text)),
     )

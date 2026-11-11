@@ -421,10 +421,14 @@ pub fn info<'a, Message: 'a>(
     at: usize,
 ) -> Element<'a, Message> {
     use super::tokens::Role;
-    let sub = |s: String| text(s).size(Role::CONTROL.size).color(c().text_sub);
+    let sub = |s: String| {
+        text(s)
+            .size(super::text::size(Role::CONTROL))
+            .color(c().text_sub)
+    };
     let mut line = row![
         text(kind)
-            .size(Role::CONTROL.size)
+            .size(super::text::size(Role::CONTROL))
             .font(weight(Weight::Semibold))
     ]
     .spacing(8)
@@ -433,7 +437,7 @@ pub fn info<'a, Message: 'a>(
         let font = weight(Weight::Normal);
         line = line.push(sub(super::text::cut(
             &title,
-            Role::CONTROL.size,
+            super::text::size(Role::CONTROL),
             font,
             190.0,
         )));
@@ -450,7 +454,7 @@ pub fn info<'a, Message: 'a>(
         let on = i == at;
         container(
             text(*step)
-                .size(Role::LABEL.size)
+                .size(super::text::size(Role::LABEL))
                 .font(weight(Weight::Medium))
                 .color(if on { c().text } else { c().text_muted }),
         )

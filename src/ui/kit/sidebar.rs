@@ -5,7 +5,7 @@
 //! glides from item `from` to `active` as `glide` goes 0 → 1 (the caller's
 //! clock: `motion::GLIDE`, standard). A footer line under a hairline.
 use iced::font::Weight;
-use iced::widget::{Space, button, column, container, row, stack, text};
+use iced::widget::{Space, button, column, container, stack, text};
 use iced::{Border, Center, Element, Fill, Padding};
 
 use super::button::faded;
@@ -72,7 +72,7 @@ pub fn sidebar<'a, Message: Clone + 'a>(
     };
     let foot = column![
         divider(),
-        row![small(footer[0]), Space::new().width(Fill), small(footer[1])]
+        crate::dir_row![small(footer[0]), Space::new().width(Fill), small(footer[1])]
             .padding(Padding::from([0.0, FOOTER_PAD]).top(FOOTER_PAD)),
     ];
     let body = container(column![nav, foot].spacing(GAP))
@@ -80,7 +80,7 @@ pub fn sidebar<'a, Message: Clone + 'a>(
         .width(size::SIDEBAR - super::divider::WIDTH)
         .height(Fill)
         .style(|_| container::Style::default().background(c().sidebar));
-    row![body, super::divider::vertical(Fill)]
+    crate::dir_row![body, super::divider::vertical(Fill)]
         .height(Fill)
         .into()
 }
@@ -91,15 +91,16 @@ fn nav_item<'a, Message: Clone + 'a>(
     on_press: Message,
 ) -> Element<'a, Message> {
     let label = text(item.label)
-        .size(Role::NAV.size)
-        .font(super::text::font(Role::NAV));
-    // the label left, a badge after it
-    let mut line = row![label, Space::new().width(Fill)]
-        .height(Fill)
-        .align_y(Center);
+        .size(super::text::size(Role::NAV))
+        .font(super::text::font(Role::NAV))
+        .wrapping(iced::widget::text::Wrapping::None);
+    // the label at the start, a badge after it
+    let mut parts: Vec<Element<'a, Message>> = vec![label.into(), Space::new().width(Fill).into()];
     if let Some(b) = item.badge {
-        line = line.push(badge(b)).push(Space::new().width(Fill));
+        parts.extend([badge(b), Space::new().width(Fill).into()]);
     }
+    let line = super::dir::row(parts).height(Fill).align_y(Center);
+
     button(line)
         .width(Fill)
         .height(size::NAV_ITEM)

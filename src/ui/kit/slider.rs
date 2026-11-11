@@ -5,8 +5,8 @@
 use std::ops::RangeInclusive;
 
 use iced::widget::slider::{self as rail, Handle, HandleShape, Rail};
-use iced::widget::{container, row, text};
-use iced::{Border, Center, Color, Element, alignment};
+use iced::widget::{container, text};
+use iced::{Border, Center, Color, Element};
 
 use super::text::font;
 use super::themes::c;
@@ -24,14 +24,14 @@ pub fn slider<'a, Message: Clone + 'a>(
     on_change: impl Fn(u8) -> Message + 'a,
 ) -> Element<'a, Message> {
     let role = Role::KEYCAP;
-    row![
+    crate::dir_row![
         line(range, value, false, on_change),
         text(format!("{value}{unit}"))
-            .size(role.size)
+            .size(super::text::size(role))
             .font(font(role))
             .color(c().text_sub)
             .width(VALUE)
-            .align_x(alignment::Horizontal::Right),
+            .align_x(super::dir::end()),
     ]
     .spacing(space::GAP)
     .width(size::CONTROL_COLUMN)
@@ -61,21 +61,37 @@ fn line<'a, Message: Clone + 'a>(
 ) -> rail::Slider<'a, u8, Message> {
     let alpha = if dim { 0.45 } else { 1.0 };
     let fade = move |colour: Color| super::button::faded(colour, alpha);
-    rail::Slider::new(range, value, on_change).style(move |_, status| rail::Style {
-        rail: Rail {
-            backgrounds: (fade(c().accent).into(), c().track.into()),
-            width: RAIL,
-            border: Border::default().rounded(radius::FULL),
-        },
-        handle: Handle {
-            shape: HandleShape::Circle { radius: HANDLE },
-            background: fade(match status {
-                rail::Status::Active => c().text,
-                _ => c().accent,
-            })
-            .into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-        },
+    // right to left: the least at the right, filled from the right (the
+    // rail runs mirrored: its value is the distance from the other end)
+    let rtl = super::dir::rtl();
+    let (lo, hi) = (*range.start(), *range.end());
+    let flip = move |v: u8| match rtl {
+        true => hi - (v - lo),
+        false => v,
+    };
+    let filled = (fade(c().accent).into(), c().track.into());
+    let backgrounds = match rtl {
+        true => (filled.1, filled.0),
+        false => filled,
+    };
+    rail::Slider::new(range, flip(value), move |v| on_change(flip(v))).style(move |_, status| {
+        rail::Style {
+            rail: Rail {
+                backgrounds,
+
+                width: RAIL,
+                border: Border::default().rounded(radius::FULL),
+            },
+            handle: Handle {
+                shape: HandleShape::Circle { radius: HANDLE },
+                background: fade(match status {
+                    rail::Status::Active => c().text,
+                    _ => c().accent,
+                })
+                .into(),
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            },
+        }
     })
 }

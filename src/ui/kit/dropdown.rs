@@ -12,7 +12,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget, mouse, overlay, renderer};
 use iced::keyboard::{self, key::Named};
-use iced::widget::{Space, column, container, row, text};
+use iced::widget::{Space, column, container, text};
 use iced::{Border, Center, Element, Event, Fill, Length, Point, Rectangle, Size, Vector};
 
 use super::option_list::option;
@@ -93,7 +93,7 @@ pub fn combo<'a, Message: Clone + 'a>(
     foot: Option<(&'a str, Option<Message>)>,
     on_open: Message,
 ) -> Element<'a, Message> {
-    let field = super::field::search(search.hint, search.query, false)
+    let field = super::field::search(search.hint, search.query, super::dir::rtl())
         .id(search.id)
         .on_input(search.on_query)
         .on_submit(search.on_submit)
@@ -102,6 +102,8 @@ pub fn combo<'a, Message: Clone + 'a>(
         container(super::text::muted(Role::NOTE, s))
             .padding([0.0, PAD[1]])
             .center_y(h)
+            .width(Fill)
+            .align_x(super::dir::start())
     };
     let room = COMBO_MAX
         - SEARCH_H
@@ -158,12 +160,15 @@ fn opener<'a, Message: 'a>(
     };
     let full = shown.clone().unwrap_or_else(|| placeholder.to_string());
     // one line that stops before the arrow: cut in the middle, whole in a tooltip
-    let room =
-        size::CONTROL_COLUMN - 2.0 * PAD[1] - 2.0 - super::text::width("▾", role.size, MONO) - 4.0;
-    let line = super::text::cut_middle(&full, role.size, face, room);
+    let room = size::CONTROL_COLUMN
+        - 2.0 * PAD[1]
+        - 2.0
+        - super::text::width("▾", super::text::size(role), MONO)
+        - 4.0;
+    let line = super::text::cut_middle(&full, super::text::size(role), face, room);
     let cut = line != full;
     let value = text(line)
-        .size(role.size)
+        .size(super::text::size(role))
         .font(face)
         .line_height(LINE)
         .wrapping(text::Wrapping::None)
@@ -172,7 +177,7 @@ fn opener<'a, Message: 'a>(
             None => c().text_muted,
         });
     let handle = text("▾")
-        .size(role.size)
+        .size(super::text::size(role))
         .font(MONO)
         .line_height(LINE)
         .color(c().text);
@@ -180,7 +185,12 @@ fn opener<'a, Message: 'a>(
         true => super::tooltip::cut(value, full),
         false => value.into(),
     };
-    container(row![container(value).width(Fill).clip(true), handle].align_y(Center))
+    // right to left: the value at the right, ▾ at the left
+    let value = container(value)
+        .width(Fill)
+        .align_x(super::dir::start())
+        .clip(true);
+    container(crate::dir_row![value, handle].align_y(Center))
         .padding(PAD)
         .width(size::CONTROL_COLUMN)
         .style(|_| container::Style {

@@ -40,7 +40,7 @@ pub struct ErrorCard<M> {
 
 /// The detail cut to `LINES` lines with "…" at `width` px, or `None` when it fits.
 pub fn clamp(detail: &str, width: f32) -> Option<String> {
-    let (size, font) = (Role::NOTE.size, text::font(Role::NOTE));
+    let (size, font) = (super::text::size(Role::NOTE), text::font(Role::NOTE));
     let fits = |s: &str| text::lines(s, size, font, width) <= LINES;
     if fits(detail) {
         return None;
@@ -119,7 +119,7 @@ mod tests {
                     your code to use a newer model for the latest features and improvements.";
         let short = clamp(long, 300.0).expect("longer than two lines at 300 px");
         assert!(short.ends_with('…') && short.len() < long.len(), "{short}");
-        let (size, font) = (Role::NOTE.size, text::font(Role::NOTE));
+        let (size, font) = (super::text::size(Role::NOTE), text::font(Role::NOTE));
         assert_eq!(text::lines(&short, size, font, 300.0), LINES);
         assert_eq!(clamp("HTTP 503", 300.0), None, "fits: shown whole");
         // its card: the cut detail and Show details, then (opened) the whole one
