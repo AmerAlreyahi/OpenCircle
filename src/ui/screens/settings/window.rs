@@ -21,7 +21,7 @@ use crate::ui::kit::scroll::scroll;
 use crate::ui::kit::sidebar::{Item, sidebar};
 use crate::ui::kit::surface::{Material, surface};
 use crate::ui::kit::text::{sub, text};
-use crate::ui::kit::tokens::{Role, space};
+use crate::ui::kit::tokens::{Role, size, space};
 
 /// The window's 1 px rim (none when maximised: the screen's edge is the edge).
 const RIM: f32 = 1.0;
@@ -29,6 +29,9 @@ const RIM: f32 = 1.0;
 const TITLE_GAP: f32 = 6.0;
 /// The longest the header pill's line gets (characters), before "…".
 const PILL_MAX: usize = 48;
+
+/// The page's content box (the tests find its width by this id).
+pub(super) const PAGE_ID: &str = "settings-page";
 
 /// The sidebar's footer: this version and this OS.
 const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
@@ -125,10 +128,15 @@ fn page(state: &State) -> Element<'_, Message> {
     let body = column![title, Space::new().height(TITLE_GAP),]
         .push(previews::view(state))
         .push((page.view)(state));
-    scroll(container(body).padding(space::PAGE).width(Fill))
+    // at most `PAGE_MAX` wide, at the start edge (a maximised window)
+    let body = (container(body).id(PAGE_ID))
         .width(Fill)
-        .height(Fill)
-        .into()
+        .max_width(size::PAGE_MAX);
+    let body = container(body)
+        .padding(space::PAGE)
+        .width(Fill)
+        .align_x(crate::ui::kit::dir::start());
+    scroll(body).width(Fill).height(Fill).into()
 }
 
 /// Closing with changes that can't be saved yet: Save / Discard / Keep editing.

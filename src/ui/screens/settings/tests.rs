@@ -3224,3 +3224,44 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// A wide window never stretches a page edge to edge: every page's content
+/// is at most `PAGE_MAX` wide, at the start edge (left in English, right in
+/// Arabic), at the smallest, the usual, a 1920 and a 3440 px window.
+#[test]
+fn every_page_keeps_its_content_width_on_a_wide_window() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::tokens::{size, space};
+    use crate::ui::screens::settings::state::MIN_WIDTH;
+    use crate::ui::screens::settings::window::PAGE_ID;
+    // the window's rim, the sidebar (its divider included), the page's side pad
+    let start = 1.0 + size::SIDEBAR + space::PAGE[1];
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        for section in shown {
+            update(&mut s, Message::Section(section));
+            for width in [MIN_WIDTH, WINDOW_SIZE.width, 1920.0, 3440.0] {
+                let size = Size::new(width, 1000.0);
+                let found = shot::containers(view(&s), size, PAGE_ID);
+                let [b] = found[..] else {
+                    panic!("{language} {section:?} {width}: {found:?}")
+                };
+                let room = width - start - space::PAGE[1] - 1.0;
+                let at = |v: f32, want: f32| (v - want).abs() < 0.5;
+                assert!(
+                    at(b.width, room.min(size::PAGE_MAX)),
+                    "{language} {section:?} {width}: {b:?}"
+                );
+                let edge = match language {
+                    "en" => at(b.x, start),
+                    _ => at(b.x + b.width, width - start),
+                };
+                assert!(edge, "{language} {section:?} {width}: {b:?}");
+            }
+        }
+    }
+    app_language::set(Lang::En);
+}

@@ -51,6 +51,9 @@ pub mod size {
     /// A settings page's control column (owner, 2026-10-28: every row's
     /// control has this one left edge and width; `setting_row`).
     pub const CONTROL_COLUMN: f32 = 300.0;
+    /// The widest a settings page's content gets (a maximised window keeps a
+    /// readable column at the start edge; the preview stage's own largest width).
+    pub const PAGE_MAX: f32 = 820.0;
     /// A settings row's least height inside its padding (a one-line
     /// description beside a 36 px control).
     pub const ROW_MIN: f32 = 38.0;
