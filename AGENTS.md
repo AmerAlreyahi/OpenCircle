@@ -898,6 +898,16 @@ production systems.
   target platform has a result in the report before merge. GNOME's and KDE's own capture effects are fine as they are
   (owner, 2026-11-11: "I don't mind both").
 
+- Lighter models for everyone (owner, 2026-11-11, "we must ensure the new model is installed 100 %"; SUPERSEDES "replaced
+  at the next download" in "Lighter translation models"): an install that still has a v1 decoder gets the v2 one for sure.
+  Lead's design (owner asked for the recommendation): the user's next Translate works at once with what is on disk and
+  starts the replacement of that pair's decoder in the background, shown plainly (size, progress), resumable, verified by
+  sha256, swapped in place when complete (never two copies kept); Settings > Translate also shows the state and one
+  "Update now" for every installed pair. No download happens without a Translate use or that button. The Translate page
+  says offline translation uses OptimaMT models (the owner's optimised OPUS-MT decoders), with the credit to OPUS-MT kept.
+- Start menu (owner, 2026-11-11): on Windows the overlay opening under an open Start menu is fixed LATER, in v0.1.8.
+- Reset shortcuts (owner, 2026-11-11): Settings > Shortcuts gets "Reset shortcuts to default".
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
