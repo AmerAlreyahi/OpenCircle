@@ -525,7 +525,7 @@ pub fn action_menu<'a, Message: 'a>(
 /// its own, `width` x `height`.
 pub fn option<'a, Message: Clone + 'a>(
     label: String,
-    badge: Option<&'a str>,
+    badge: Option<String>,
     active: bool,
     (width, height): (f32, f32),
     on_press: Message,
@@ -533,7 +533,7 @@ pub fn option<'a, Message: Clone + 'a>(
     use button::Status;
     let role = Role::CONTROL;
     // the badge's text, its 2x6 px room, the gap, and the row's own room
-    let tag_w = badge.map_or(0.0, |b| {
+    let tag_w = badge.as_deref().map_or(0.0, |b| {
         super::text::width(b, 9.5, super::text::weight(iced::font::Weight::Normal))
             + 12.0
             + space::GAP
@@ -738,7 +738,7 @@ mod tests {
         let width = size::CONTROL_COLUMN - 2.0 * 4.0 - 6.0 - 2.0;
         let row = option(
             id.to_string(),
-            Some("Free at OpenRouter"),
+            Some("Free at OpenRouter".to_string()),
             false,
             (width, 30.0),
             (),

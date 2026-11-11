@@ -11,8 +11,10 @@ use iced::widget::column;
 
 use crate::ai::models::{self, Model};
 use crate::ai::providers::Preset;
+use crate::app_language::{S, fmt};
 use crate::config::AiConfig;
 use crate::secrets::{AiKey, KeyStore};
+use crate::t;
 use crate::ui::kit::dropdown::{Search, combo};
 use crate::ui::kit::text::{error, sub};
 use crate::ui::kit::tokens::{Role, space};
@@ -26,17 +28,17 @@ pub const SEARCH: &str = "model-search";
 pub struct ModelList {
     pub models: Vec<Model>,
     pub query: String,
-    /// "Load models from Google"; "Pricing is set by Google" when a row has
-    /// a price tag.
-    pub load: String,
-    pub pricing: Option<String>,
+    /// The provider shown ("Load models from Google"; "Pricing is set by
+    /// Google" when a row has a price tag): worded when the list is drawn.
+    pub preset: Option<Preset>,
+    pub priced: bool,
     pub loading: bool,
     /// What the last "Load models" said: how many came, or why none did.
     pub said: Option<Result<String, String>>,
 }
 
 /// A row: its id, its price tag, and whether it is the typed id itself.
-pub type Choice<'a> = (&'a str, Option<&'a str>, bool);
+pub type Choice<'a> = (&'a str, Option<String>, bool);
 
 /// What the list sends: the menu opened, the search changed, Enter in it, a
 /// row picked, "Load models".
@@ -63,9 +65,8 @@ impl ModelList {
             return;
         };
         self.models = models::known(&preset, ai);
-        self.load = format!("Load models from {}", preset.name);
-        self.pricing =
-            (self.models.iter().any(|m| m.tag.is_some())).then(|| models::pricing_note(&preset));
+        self.preset = Some(preset);
+        self.priced = self.models.iter().any(|m| m.tag.is_some());
     }
 
     /// The rows for the search typed: the models that contain it (any case),
@@ -75,7 +76,7 @@ impl ModelList {
         let low = q.to_lowercase();
         let mut out: Vec<Choice<'_>> = (self.models.iter())
             .filter(|m| m.id.to_lowercase().contains(&low))
-            .map(|m| (m.id.as_str(), m.tag.as_deref(), false))
+            .map(|m| (m.id.as_str(), m.tag.as_ref().map(tag_words), false))
             .collect();
         if !q.is_empty() && self.models.iter().all(|m| m.id != q) {
             out.push((q, None, true));
@@ -121,9 +122,10 @@ impl ModelList {
         if asked.provider != now.provider || asked.base_url != now.base_url {
             return;
         }
-        let name = Preset::of(asked).map_or("the provider", |p| p.name);
+        let name =
+            Preset::of(asked).map_or_else(|| t!(ml_the_provider).to_string(), |p| p.to_string());
         self.loading = false;
-        self.said = Some(n.map(|n| format!("{n} models from {name}")));
+        self.said = Some(n.map(|n| fmt(S::ml_count, &[&n, &name])));
         self.refresh(now);
     }
 
@@ -138,34 +140,33 @@ impl ModelList {
         let rows = (self.choices().into_iter())
             .map(|(id, tag, typed)| {
                 let label = match typed {
-                    true => format!("Use \u{201c}{id}\u{201d}"),
+                    true => fmt(S::ml_use, &[&id]),
                     false => id.to_string(),
                 };
                 let picked = !typed && id == current;
                 (label, tag, picked, (on.pick)(id.to_string()))
             })
             .collect();
+        let load = self
+            .preset
+            .map_or_else(String::new, |p| fmt(S::ml_load, &[&p]));
         let foot = match self.loading {
-            true => ("Loading models\u{2026}", None),
-            false => (self.load.as_str(), Some(on.load)),
+            true => (t!(ml_loading).to_string(), None),
+            false => (load, Some(on.load)),
         };
+        let pricing = self
+            .preset
+            .filter(|_| self.priced)
+            .map(|p| fmt(S::ml_pricing, &[&models::owner(&p)]));
         let search = Search {
             id: SEARCH,
-            hint: "Search or type a model id",
+            hint: t!(ml_search),
             query: &self.query,
             on_query: Box::new(on.query),
             on_submit: on.first,
         };
         let value = (!current.is_empty()).then_some(current);
-        let list = combo(
-            value,
-            example,
-            search,
-            self.pricing.as_deref(),
-            rows,
-            Some(foot),
-            on.opened,
-        );
+        let list = combo(value, example, search, pricing, rows, Some(foot), on.opened);
         let mut part = column![list].spacing(space::GAP);
         match &self.said {
             Some(Ok(n)) => part = part.push(sub(Role::ROW_DESC, n.as_str())),
@@ -174,6 +175,32 @@ impl ModelList {
         }
         part.into()
     }
+}
+
+/// A price tag in the app's language.
+fn tag_words(t: &models::Tag) -> String {
+    use models::Tag;
+    match t {
+        Tag::FreeAt(who) => fmt(S::ml_free_at, &[who]),
+        Tag::FreeTier(who) => fmt(S::ml_free_tier, &[who]),
+        Tag::PaidAt(who) => fmt(S::ml_paid, &[who]),
+    }
+}
+
+/// Why the model list could not load: a plain sentence in the app's language
+/// (the provider's own detail goes to the log, never to the screen).
+fn ai_words(e: &crate::ai::AiError) -> String {
+    use crate::ai::AiError;
+    crate::log!("[opencircle] model list: {e}");
+    match e {
+        AiError::NotConfigured(_) => t!(ml_err_set_up),
+        AiError::Auth(..) => t!(ml_err_auth),
+        AiError::RateLimited(_) => t!(ml_err_limit),
+        AiError::Server(..) => t!(ml_err_server),
+        AiError::Network(_) | AiError::Dropped(_) => t!(ml_err_network),
+        _ => t!(ml_err_other),
+    }
+    .to_string()
 }
 
 /// "Load models" for a worker thread: the provider's list, asked with its
@@ -202,11 +229,14 @@ impl ModelsJob {
     /// The provider it asked, and how many models came (or why none did).
     pub fn run(self) -> (AiConfig, Result<usize, String>) {
         let key = match self.owner.map(|o| self.store.read(o)) {
-            Some(Err(e)) => return (self.ai, Err(e.to_string())),
+            Some(Err(e)) => {
+                crate::log!("[opencircle] model list: keyring: {e}");
+                return (self.ai, Err(t!(ml_err_set_up).to_string()));
+            }
             Some(Ok(key)) => key,
             None => None,
         };
-        let n = models::load(&self.ai, key.as_ref()).map_err(|e| e.to_string());
+        let n = models::load(&self.ai, key.as_ref()).map_err(|e| ai_words(&e));
         (self.ai, n)
     }
 }

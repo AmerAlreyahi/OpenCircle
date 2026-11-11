@@ -284,15 +284,42 @@ pub fn desktop_key(shortcut: &str) -> Option<DesktopKey> {
     desktop_key_in(&bindings(), &desktop_keys(), shortcut)
 }
 
+/// Why a key is not ours to record: the UI words it in its language
+/// (`Display` is the English of the tests and logs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // only GNOME names reserved keys
+pub enum Reserved {
+    /// GNOME's Unicode input (Ctrl+Shift+U).
+    Unicode,
+    /// The same, seen as a swallowed Ctrl+Shift.
+    UnicodeKeys,
+    Screenshots,
+    Super,
+    /// One of the user's own desktop shortcuts: its name.
+    UsedBy(String),
+}
+
+impl std::fmt::Display for Reserved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Reserved::Unicode => f.write_str("Used by GNOME for Unicode input"),
+            Reserved::UnicodeKeys => f.write_str("Used by GNOME for Unicode input (Ctrl+Shift+U)"),
+            Reserved::Screenshots => f.write_str("Used by GNOME for screenshots"),
+            Reserved::Super => f.write_str("Super shortcuts are reserved by GNOME"),
+            Reserved::UsedBy(n) => write!(f, "Used by {n}"),
+        }
+    }
+}
+
 /// Why `shortcut` cannot be recorded here, when the desktop keeps it for itself or one
 /// of the user's own shortcuts has it (GNOME: Ctrl+Shift+U, Print, Super+...). Tests
 /// never read the machine's desktop.
-pub fn unusable_reason(shortcut: &str) -> Option<String> {
+pub fn unusable_reason(shortcut: &str) -> Option<Reserved> {
     #[cfg(target_os = "linux")]
     if !cfg!(test) {
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
         return gnome::reserved_on(&desktop, shortcut)
-            .or_else(|| gnome::used_by(shortcut).map(|n| format!("Used by {n}")));
+            .or_else(|| gnome::used_by(shortcut).map(Reserved::UsedBy));
     }
     let _ = shortcut;
     None
@@ -300,7 +327,7 @@ pub fn unusable_reason(shortcut: &str) -> Option<String> {
 
 /// A shortcut field on Wayland saw only modifiers (the desktop ate the key): which of its
 /// own keys that was, when we know. Ctrl+Shift on GNOME = its Unicode input (Ctrl+Shift+U).
-pub fn eaten_key_reason(ctrl: bool, alt: bool, shift: bool, logo: bool) -> Option<String> {
+pub fn eaten_key_reason(ctrl: bool, alt: bool, shift: bool, logo: bool) -> Option<Reserved> {
     #[cfg(target_os = "linux")]
     if !cfg!(test) {
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();

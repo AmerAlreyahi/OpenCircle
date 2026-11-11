@@ -121,7 +121,7 @@ fn the_ui_language_comes_from_the_config() {
     assert_eq!(Lang::of("ar-SA"), Some(Lang::Ar));
 }
 
-/// The two screens that speak the table write no words of their own: every
+/// The screens that speak the table write no words of their own: every
 /// user-visible literal is in `strings.rs`. What remains is not UI text
 /// (ids, URLs, key names, product names) or stays English on purpose
 /// (About's legal credits).
@@ -143,7 +143,36 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
         std::path::Path::new("src/ui/screens/onboarding"),
         &mut files,
     );
-    // a literal of two words or more, or one capitalised word
+    let found = words_outside_the_table(&files);
+    assert!(found.is_empty(), "words outside the table: {found:#?}");
+}
+
+/// Part 2a's surfaces too: the tray menu, the update widgets, the pills and
+/// toasts, the model download card and list, the translate pill and the
+/// language picker. (The Linux-only AppIndicator labels come from the same
+/// `Entry::label`; backend sentences are typed and worded in the UI.)
+#[test]
+fn the_part_2a_surfaces_write_no_words_of_their_own() {
+    let files: Vec<std::path::PathBuf> = [
+        "src/ui/screens/tray_menu.rs",
+        "src/ui/screens/update_pill.rs",
+        "src/ui/screens/update_card.rs",
+        "src/ui/screens/toast.rs",
+        "src/ui/screens/model_download.rs",
+        "src/ui/screens/model_list.rs",
+        "src/ui/screens/translate/view.rs",
+        "src/ui/screens/common/language_picker.rs",
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    let found = words_outside_the_table(&files);
+    assert!(found.is_empty(), "words outside the table: {found:#?}");
+}
+
+/// The user-visible-looking literals of `files` (production code) that are
+/// not in `NOT_UI`: two words or more, or one capitalised word.
+fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
     let words = |s: &str| {
         let letters = s.chars().filter(|c| c.is_alphabetic()).count();
         letters >= 2
@@ -161,7 +190,7 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
             continue; // the credits stay English (legal attribution)
         }
         // (a Windows checkout has CRLF line ends: the split below must still find the test module)
-        let src = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
+        let src = std::fs::read_to_string(f).unwrap().replace("\r\n", "\n");
         // production code only: up to an inline test module
         let src = src.split("#[cfg(test)]\nmod tests {").next().unwrap();
         for line in src.lines() {
@@ -176,7 +205,7 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
             }
         }
     }
-    assert!(found.is_empty(), "words outside the table: {found:#?}");
+    found
 }
 
 /// The string literals of a line.
@@ -243,4 +272,46 @@ const NOT_UI: &[&str] = &[
     "ai.model: choose a model",
     "ai.base_url: enter your server's URL",
     "ai.base_url: {why}",
+    // part 2a: service names, the file's formats and the window titles' ids
+    "GitHub",
+    "Hugging Face",
+    "OpenRouter",
+    "OpenCircle",
+    "Ollama",
+    "LM Studio",
+    "Google",
+    "language-search",
+    "model-search",
+    "auto",
+    "detect language",
+    "png",
+    "jpg",
+    "OpenCircle-{stamp}{suffix}.{ext}",
+    "OpenCircle-{stamp}.{ext}",
+    // numbers with their unit; a panic message; a test-only label
+    "{done:.1} / {} MB",
+    "ModelsJob({:?})",
+    "just checked",
+    "Auto",
 ];
+
+/// Every character the Arabic strings use has a glyph in the bundled fonts
+/// (Noto Sans Arabic for the Arabic, Inter for the Latin and signs): a
+/// missing one would fall to whatever face the OS has, unjoined or boxed.
+#[test]
+fn every_character_of_the_arabic_table_has_a_bundled_glyph() {
+    let noto = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/NotoSansArabic.ttf"), 0)
+        .unwrap();
+    let inter = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/Inter.ttf"), 0).unwrap();
+    let mut missing = std::collections::BTreeSet::new();
+    for [_, ar] in TABLE {
+        for c in ar.chars() {
+            let control = matches!(c, '\u{200F}' | '\u{2066}'..='\u{2069}') || c == '\n';
+            let has = |f: &ttf_parser::Face| f.glyph_index(c).is_some();
+            if !control && !has(&noto) && !has(&inter) {
+                missing.insert(c);
+            }
+        }
+    }
+    assert!(missing.is_empty(), "no glyph for {missing:?}");
+}

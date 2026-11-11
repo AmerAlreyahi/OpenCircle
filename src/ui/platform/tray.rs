@@ -293,6 +293,7 @@ pub fn capturing(label: Option<String>) {
     SHOWN.with_borrow_mut(|s| s.push(label.clone()));
     #[cfg(target_os = "linux")]
     let lang = crate::app_language::current();
+    #[cfg(target_os = "linux")]
     gtk::glib::idle_add_once(move || {
         crate::app_language::set(lang);
         let on = label.is_some();

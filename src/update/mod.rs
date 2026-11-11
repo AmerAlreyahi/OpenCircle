@@ -28,7 +28,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime};
 
-pub use flow::{How, Lock, Moment, Pill, Step, away, installs_at, status};
+pub use flow::{Head, How, Lock, Moment, Pill, Say, Step, When, away, installs_at, status};
 pub use notes::{
     Line as NoteLine, Notes, Style as NoteStyle, parse as parse_notes, plain as plain_note,
 };
@@ -58,11 +58,54 @@ pub fn test_url() -> Option<String> {
         .filter(|u| !u.is_empty())
 }
 
+/// What a check found: the UI words it in its language, `Display` is the
+/// English of the log (and the tests).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    /// GitHub asks to wait this many seconds.
+    Wait(u64),
+    Unreachable,
+    /// A newer version the user installs from the release page.
+    Out(String),
+    /// A newer version, ready to install on restart.
+    Ready(String),
+    UpToDate(String),
+    DevBuild,
+    NoFolder,
+    Unverified(String),
+}
+
+impl std::fmt::Display for Answer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Answer::Wait(s) => write!(
+                f,
+                "GitHub asks to wait: try again in {} min",
+                s.div_ceil(60)
+            ),
+            Answer::Unreachable => f.write_str("could not reach GitHub: try again later"),
+            Answer::Out(v) => write!(f, "OpenCircle {v} is out: get it from the release page"),
+            Answer::Ready(v) => write!(
+                f,
+                "OpenCircle {v} is ready: restart OpenCircle to install it"
+            ),
+            Answer::UpToDate(v) => write!(f, "OpenCircle {v} is up to date"),
+            Answer::DevBuild => {
+                f.write_str("this is a development build: it does not update itself")
+            }
+            Answer::NoFolder => f.write_str("no data folder: not installed"),
+            Answer::Unverified(v) => {
+                write!(f, "OpenCircle {v} could not be verified: not installed")
+            }
+        }
+    }
+}
+
 /// What the update thread tells the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The result of a check the user asked for (Settings shows it).
-    Status(String),
+    Status(Answer),
     /// Downloaded and verified (a swap install: already in place for the next
     /// start): the user is told, it installs at a `flow::Moment`.
     Ready(Staged),
@@ -134,7 +177,7 @@ fn run(now: &mpsc::Receiver<()>, tx: &Triggers) {
         if asked || crate::config::current().update.auto == Some(true) {
             let status = match Setup::this() {
                 Some(setup) => check(&release::Net, &setup, &mut memo, &mut handled, tx, &prepare),
-                None => "this is a development build: it does not update itself".into(),
+                None => Answer::DevBuild,
             };
             crate::log!("[opencircle] update: {status}");
             if asked {
@@ -196,16 +239,16 @@ fn check(
     handled: &mut Option<String>,
     tx: &Triggers,
     prepare: &dyn Fn(&Staged) -> Result<(), String>,
-) -> String {
+) -> Answer {
     let current = setup.current;
     let release = match release::latest(http, &setup.url, memo) {
         Ok(r) => r,
         Err(CheckError::Wait(s)) => {
-            return format!("GitHub asks to wait: try again in {} min", s.div_ceil(60));
+            return Answer::Wait(s);
         }
         Err(CheckError::Failed(e)) => {
             crate::log!("[opencircle] update check failed: {}", release::scrub(&e));
-            return "could not reach GitHub: try again later".into();
+            return Answer::Unreachable;
         }
     };
     *CHECKED.lock().unwrap() = Some(SystemTime::now());
@@ -213,12 +256,12 @@ fn check(
     if let Some(version) = handled.as_deref() {
         // kept (never downloaded again): the UI holds it
         return match How::of(install) {
-            How::GetIt => format!("OpenCircle {version} is out: get it from the release page"),
-            _ => format!("OpenCircle {version} is ready: restart OpenCircle to install it"),
+            How::GetIt => Answer::Out(version.into()),
+            _ => Answer::Ready(version.into()),
         };
     }
     if !release::is_newer(&release, current) {
-        return format!("OpenCircle {current} is up to date");
+        return Answer::UpToDate(current.into());
     }
     let version = release.tag_name.trim_start_matches('v').to_string();
     let offer = |handled: &mut Option<String>, how: How| {
@@ -237,13 +280,13 @@ fn check(
             notes: release.body.clone().unwrap_or_default(),
             url: release.html_url.clone(),
         }));
-        format!("OpenCircle {version} is out: get it from the release page")
+        Answer::Out(version.clone())
     };
     if *install == Install::Manual {
         return manual(handled);
     }
     let Some(dir) = stage_dir() else {
-        return "no data folder: not installed".into();
+        return Answer::NoFolder;
     };
     let staged = match release::stage(
         http,
@@ -260,7 +303,7 @@ fn check(
                 "[opencircle] update {version} refused: {}",
                 release::scrub(&e)
             );
-            return format!("OpenCircle {version} could not be verified: not installed");
+            return Answer::Unverified(version);
         }
     };
     if let Err(e) = prepare(&staged) {
@@ -270,7 +313,7 @@ fn check(
     }
     offer(handled, How::of(install));
     let _ = tx.unbounded_send(Trigger::Update(Event::Ready(staged)));
-    format!("OpenCircle {version} is ready: restart OpenCircle to install it")
+    Answer::Ready(version)
 }
 
 /// Where downloads are staged: `<local data dir>/opencircle/update`, this user's
@@ -659,7 +702,7 @@ mod tests {
             Ok(())
         };
         let status = check(&fake, &exe, &mut memo, &mut handled, &tx, &prepare);
-        assert!(status.contains("ready: restart"), "{status}");
+        assert!(status.to_string().contains("ready: restart"), "{status}");
         assert_eq!(prepared.get(), 1, "put in place before it is offered");
         let [Event::Ready(staged)] = &events(&mut rx)[..] else {
             panic!("one Ready");
@@ -672,7 +715,7 @@ mod tests {
         assert!(checked().is_some());
         let _ = std::fs::remove_dir_all(&staged.dir);
         let again = check(&fake, &exe, &mut memo, &mut handled, &tx, &prepare);
-        assert!(again.contains("9.9.9 is ready"), "{again}");
+        assert!(again.to_string().contains("9.9.9 is ready"), "{again}");
         // a newer one in the same run: the first stays the one offered
         let newer = server(&release("v9.9.10"), SIG);
         let later = check(
@@ -683,7 +726,7 @@ mod tests {
             &tx,
             &prepare,
         );
-        assert!(later.contains("9.9.9 is ready"), "{later}");
+        assert!(later.to_string().contains("9.9.9 is ready"), "{later}");
         assert!(events(&mut rx).is_empty(), "no second download");
         assert_eq!(prepared.get(), 1);
 
@@ -693,7 +736,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&s.dir);
             Err("cannot replace".into())
         });
-        assert!(status.contains("release page"), "{status}");
+        assert!(status.to_string().contains("release page"), "{status}");
         assert!(matches!(&events(&mut rx)[..], [Event::Manual { .. }]));
 
         // deb / rpm: a notice with the page, nothing downloaded
@@ -706,7 +749,7 @@ mod tests {
             &tx,
             &|_| panic!("nothing to put in place"),
         );
-        assert!(status.contains("release page"), "{status}");
+        assert!(status.to_string().contains("release page"), "{status}");
         assert!(
             matches!(&events(&mut rx)[..], [Event::Manual { version, .. }] if version == "9.9.9")
         );
@@ -718,7 +761,7 @@ mod tests {
         let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx, &|_| {
             Ok(())
         });
-        assert!(status.contains("not installed"), "{status}");
+        assert!(status.to_string().contains("not installed"), "{status}");
         assert!(events(&mut rx).is_empty());
 
         // up to date
@@ -726,7 +769,7 @@ mod tests {
         let status = check(&fake, &exe, &mut Memo::default(), &mut None, &tx, &|_| {
             Ok(())
         });
-        assert_eq!(status, "OpenCircle 1.0.0 is up to date");
+        assert_eq!(status, Answer::UpToDate("1.0.0".into()));
     }
 
     #[test]
@@ -873,7 +916,10 @@ mod tests {
             &tx,
             &|_| Ok(()),
         );
-        assert!(status.contains("could not be verified"), "{status}");
+        assert!(
+            status.to_string().contains("could not be verified"),
+            "{status}"
+        );
         assert!(events(&mut rx).is_empty());
         // a wrong key: the same
         let wrong = setup(
@@ -883,7 +929,10 @@ mod tests {
         let status = check(&fake, &wrong, &mut Memo::default(), &mut None, &tx, &|_| {
             Ok(())
         });
-        assert!(status.contains("could not be verified"), "{status}");
+        assert!(
+            status.to_string().contains("could not be verified"),
+            "{status}"
+        );
         assert!(events(&mut rx).is_empty());
     }
 

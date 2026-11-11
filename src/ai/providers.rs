@@ -66,9 +66,16 @@ impl Preset {
     }
 }
 
+/// Its name as the lists show it, in the app's language: a service's name
+/// stays as it is ("Ollama (local)" adds the word), Custom server is words.
 impl fmt::Display for Preset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name)
+        use crate::app_language::{S, fmt, tr};
+        match (self.custom(), self.local) {
+            (true, _) => f.write_str(tr(S::prov_custom)),
+            (false, true) => f.write_str(&fmt(S::prov_local, &[&self.name])),
+            _ => f.write_str(self.name),
+        }
     }
 }
 
@@ -156,13 +163,13 @@ pub const PRESETS: &[Preset] = &[
     openai("xai", "xAI", "https://api.x.ai/v1", "grok-4.3"),
     local(
         "ollama",
-        "Ollama (local)",
+        "Ollama",
         "http://localhost:11434/v1",
         "llama3.2-vision",
     ),
     local(
         "lmstudio",
-        "LM Studio (local)",
+        "LM Studio",
         "http://localhost:1234/v1",
         "local-model",
     ),

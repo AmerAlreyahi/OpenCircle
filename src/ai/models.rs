@@ -25,7 +25,7 @@ pub enum Price {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Model {
     pub id: String,
-    pub tag: Option<String>,
+    pub tag: Option<Tag>,
 }
 
 use Price::{Free, Paid};
@@ -112,24 +112,38 @@ fn builtin(preset: &str) -> &'static [(&'static str, Option<Price>)] {
 }
 
 /// Who sets the prices, as the tags say it.
-fn owner(preset: &Preset) -> &'static str {
+pub fn owner(preset: &Preset) -> &'static str {
     match preset.id {
         "gemini" => "Google",
         _ => preset.name,
     }
 }
 
-fn tag(preset: &Preset, price: Price) -> String {
-    match (price, preset.id) {
-        (Free, "openrouter") => "Free at OpenRouter".into(),
-        (Free, _) => format!("Free tier at {}", owner(preset)),
-        (Paid, _) => format!("Paid at {}", owner(preset)),
+/// A row's price tag: the UI words it in its language (`Display` is the
+/// English of the tests).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tag {
+    FreeAt(&'static str),
+    FreeTier(&'static str),
+    PaidAt(&'static str),
+}
+
+impl std::fmt::Display for Tag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Tag::FreeAt(who) => write!(f, "Free at {who}"),
+            Tag::FreeTier(who) => write!(f, "Free tier at {who}"),
+            Tag::PaidAt(who) => write!(f, "Paid at {who}"),
+        }
     }
 }
 
-/// The list's first line, when any row has a tag.
-pub fn pricing_note(preset: &Preset) -> String {
-    format!("Pricing is set by {}", owner(preset))
+fn tag(preset: &Preset, price: Price) -> Tag {
+    match (price, preset.id) {
+        (Free, "openrouter") => Tag::FreeAt("OpenRouter"),
+        (Free, _) => Tag::FreeTier(owner(preset)),
+        (Paid, _) => Tag::PaidAt(owner(preset)),
+    }
 }
 
 /// What "Load models" brought, per provider (and a Custom server's URL).
@@ -344,7 +358,11 @@ mod tests {
         assert_eq!(ids[0], or.model);
         assert_eq!(ids[0], "openrouter/free");
         assert_eq!(
-            merge(&or, &[])[0].tag.as_deref(),
+            merge(&or, &[])[0]
+                .tag
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
             Some("Free at OpenRouter")
         );
         assert!(ids.contains(&"openrouter/auto"));
@@ -353,7 +371,10 @@ mod tests {
             .iter()
             .find(|m| m.id == "anthropic/claude-haiku-5.5")
             .unwrap();
-        assert_eq!(haiku.tag.as_deref(), Some("Free at OpenRouter"));
+        assert_eq!(
+            haiku.tag.as_ref().map(ToString::to_string).as_deref(),
+            Some("Free at OpenRouter")
+        );
         assert_eq!(merge(&or, &[]).len(), n);
     }
 
@@ -364,15 +385,26 @@ mod tests {
         let gemini = merge(&preset("gemini"), &[]);
         assert_eq!(gemini[0].tag, None); // the alias: not on Google's pricing page
         let flash = gemini.iter().find(|m| m.id == "gemini-3.8-flash").unwrap();
-        assert_eq!(flash.tag.as_deref(), Some("Free tier at Google"));
-        assert_eq!(pricing_note(&preset("gemini")), "Pricing is set by Google");
         assert_eq!(
-            merge(&preset("openai"), &[])[0].tag.as_deref(),
+            flash.tag.as_ref().map(ToString::to_string).as_deref(),
+            Some("Free tier at Google")
+        );
+        assert_eq!(owner(&preset("gemini")), "Google");
+        assert_eq!(
+            merge(&preset("openai"), &[])[0]
+                .tag
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
             Some("Paid at OpenAI")
         );
         for p in PRESETS {
             for m in merge(p, &[]) {
-                let t = m.tag.unwrap_or_default().to_lowercase();
+                let t = m
+                    .tag
+                    .map(|t| t.to_string())
+                    .unwrap_or_default()
+                    .to_lowercase();
                 assert!(!t.contains("pro") && !t.contains("premium") && !t.contains("opencircle"));
             }
         }
@@ -393,8 +425,14 @@ mod tests {
         let got = parse(&or, body).unwrap();
         let ids: Vec<_> = got.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["a/free:free", "b/paid", "gemini-x"]);
-        assert_eq!(got[0].tag.as_deref(), Some("Free at OpenRouter"));
-        assert_eq!(got[1].tag.as_deref(), Some("Paid at OpenRouter"));
+        assert_eq!(
+            got[0].tag.as_ref().map(ToString::to_string).as_deref(),
+            Some("Free at OpenRouter")
+        );
+        assert_eq!(
+            got[1].tag.as_ref().map(ToString::to_string).as_deref(),
+            Some("Paid at OpenRouter")
+        );
         assert_eq!(got[2].tag, None);
         assert!(parse(&or, "<html>").is_err());
     }

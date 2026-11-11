@@ -1008,12 +1008,40 @@ impl Default for Config {
 /// plus one rule of ours: a bare typing key (letter, digit, Space, ...) cannot
 /// be global; only F-keys, PrintScreen, Pause and ScrollLock may stand alone.
 pub fn parse_shortcut(s: &str) -> Result<HotKey, String> {
+    parse_shortcut_typed(s).map_err(|e| e.to_string())
+}
+
+/// Why a shortcut string is refused: the UI words it in its language
+/// (`Display` is the English of the settings file's messages).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShortcutFault {
+    UnknownKey(String),
+    Shape,
+    NeedsModifier,
+}
+
+impl std::fmt::Display for ShortcutFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShortcutFault::UnknownKey(k) => write!(f, "unknown key \"{k}\""),
+            ShortcutFault::Shape => {
+                f.write_str("expected modifiers then one key, like Ctrl+Shift+Space")
+            }
+            ShortcutFault::NeedsModifier => {
+                f.write_str("needs at least one modifier (Ctrl, Alt, Shift, Super)")
+            }
+        }
+    }
+}
+
+/// `parse_shortcut` with a typed refusal.
+pub fn parse_shortcut_typed(s: &str) -> Result<HotKey, ShortcutFault> {
     let hk: HotKey = s.trim().parse().map_err(|e: HotKeyParseError| match e {
-        HotKeyParseError::UnsupportedKey(k) => format!("unknown key \"{k}\""),
-        _ => "expected modifiers then one key, like Ctrl+Shift+Space".to_string(),
+        HotKeyParseError::UnsupportedKey(k) => ShortcutFault::UnknownKey(k.to_string()),
+        _ => ShortcutFault::Shape,
     })?;
     if hk.mods == Modifiers::empty() && !may_stand_alone(hk.key) {
-        return Err("needs at least one modifier (Ctrl, Alt, Shift, Super)".to_string());
+        return Err(ShortcutFault::NeedsModifier);
     }
     Ok(hk)
 }

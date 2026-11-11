@@ -589,7 +589,7 @@ pub struct State {
     /// What the live-interval field shows (kept as typed).
     pub(super) interval: String,
     /// "key: reason" lines from `Config`'s own validation of the draft.
-    pub(super) problems: Vec<String>,
+    pub(super) problems: Vec<Problem>,
     pub(super) notice: Option<String>,
     /// The desktop's own say on a running key (`hotkey::desktop_key`; tests swap it).
     pub(super) desktop: fn(&str) -> Option<DesktopKey>,
@@ -605,7 +605,7 @@ pub struct State {
     pub(super) picker: Option<usize>,
     pub(super) hex: String,
     /// The last Check now's result (`None` = not checked in this window).
-    pub(super) update_status: Option<String>,
+    pub(super) update_status: Option<UpdateLine>,
     /// The update waiting (its version, how it installs) and when GitHub last
     /// answered (`set_update`, from `update::offer` / `update::checked`).
     pub(super) update_waiting: Option<(String, crate::update::How)>,
@@ -773,7 +773,7 @@ pub enum Message {
     /// About: keep OpenCircle up to date, Check now, and that check's result.
     AutoUpdate(bool),
     CheckUpdate,
-    UpdateStatus(String),
+    UpdateStatus(crate::update::Answer),
     /// The waiting update's Restart now, and its What's new.
     RestartToUpdate,
     WhatsNew,
@@ -1075,7 +1075,7 @@ impl State {
     }
 
     /// What is wrong with the draft, as "key: reason" lines.
-    pub fn problems(&self) -> &[String] {
+    pub fn problems(&self) -> &[Problem] {
         &self.problems
     }
 
@@ -1192,9 +1192,16 @@ impl State {
         let Some(shortcut) = chord.shortcut() else {
             return Err(String::new()); // lone modifier: keep waiting
         };
-        let hotkey = parse_shortcut(&shortcut)?;
+        let hotkey = crate::config::parse_shortcut_typed(&shortcut).map_err(|e| {
+            use crate::config::ShortcutFault;
+            match e {
+                ShortcutFault::UnknownKey(k) => crate::app_language::fmt(S::sc_unknown, &[&k]),
+                ShortcutFault::Shape => t!(sc_shape).to_string(),
+                ShortcutFault::NeedsModifier => t!(sc_modifier).to_string(),
+            }
+        })?;
         if let Some(why) = crate::hotkey::unusable_reason(&shortcut) {
-            return Err(why);
+            return Err(reserved_words(&why));
         }
         for other in self.slots().filter(|&o| o != slot) {
             if parse_shortcut(self.shortcut(other)).is_ok_and(|h| h == hotkey) {
@@ -1245,59 +1252,119 @@ impl State {
     }
 }
 
+/// Why a key is not ours, in the app's language.
+fn reserved_words(r: &crate::hotkey::Reserved) -> String {
+    use crate::hotkey::Reserved;
+    match r {
+        Reserved::Unicode => t!(rv_unicode).into(),
+        Reserved::UnicodeKeys => t!(rv_unicode_keys).into(),
+        Reserved::Screenshots => t!(rv_screens).into(),
+        Reserved::Super => t!(rv_super).into(),
+        Reserved::UsedBy(n) => crate::app_language::fmt(S::k_used_by, &[n]),
+    }
+}
+
+/// What the Updates row's line says after Check now was pressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateLine {
+    Checking,
+    Answer(crate::update::Answer),
+}
+
 /// Print Screen alone: the key Windows' own screen capture can keep.
 pub(super) fn print_screen() -> Option<global_hotkey::hotkey::HotKey> {
     parse_shortcut("PrintScreen").ok()
 }
 
-/// Everything wrong with `cfg`, as "key: reason" lines. The shared validator is
-/// `Config::parse`, run over exactly what `save` would write.
-pub(super) fn problems(cfg: &Config, key_saved: bool) -> Vec<String> {
+/// What is wrong with a setting: typed, the UI words it in its language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Why {
+    ProviderUnreadable,
+    ModelMissing,
+    UrlMissing,
+    /// The URL the provider check refused (its English reason goes to the log).
+    UrlBad,
+    /// The config check's own reason (English: shown as it is in English,
+    /// as "This value isn't valid" in another language).
+    Config(String),
+}
+
+/// One thing wrong with the draft: the setting's key and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    pub key: String,
+    pub why: Why,
+}
+
+impl Problem {
+    fn new(key: &str, why: Why) -> Problem {
+        Problem {
+            key: key.into(),
+            why,
+        }
+    }
+
+    /// The reason in the app's language, first letter upper case.
+    pub fn words(&self) -> String {
+        let said = match &self.why {
+            Why::ProviderUnreadable => t!(pr_provider).to_string(),
+            Why::ModelMissing => t!(pr_model).to_string(),
+            Why::UrlMissing => t!(pr_url).to_string(),
+            Why::UrlBad => t!(pr_url_bad).to_string(),
+            Why::Config(e) if crate::app_language::current() == crate::app_language::Lang::En => {
+                e.clone()
+            }
+            Why::Config(_) => t!(pr_invalid).to_string(),
+        };
+        let mut c = said.chars();
+        c.next()
+            .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+    }
+}
+
+/// Everything wrong with `cfg`. The shared validator is `Config::parse`,
+/// run over exactly what `save` would write.
+pub(super) fn problems(cfg: &Config, key_saved: bool) -> Vec<Problem> {
     if cfg.ai.provider == Provider::Unreadable {
         // It cannot be written: report it, and check the rest as if one were picked.
         let mut rest = cfg.clone();
         rest.ai.provider = Provider::Browser;
         let mut out = problems(&rest, key_saved);
-        out.insert(
-            0,
-            "ai.provider: Choose a provider (the settings file couldn't be read)".into(),
-        );
+        out.insert(0, Problem::new("ai.provider", Why::ProviderUnreadable));
         return out;
     }
-    let mut out = match toml::to_string_pretty(cfg) {
+    let mut out: Vec<Problem> = match toml::to_string_pretty(cfg) {
         Ok(text) => Config::parse(&text)
             .1
             .into_iter()
-            .map(|w| w.split("; ").next().unwrap_or_default().to_string())
+            .map(|w| {
+                let line = w.split("; ").next().unwrap_or_default();
+                let (key, why) = line.split_once(": ").unwrap_or(("config", line));
+                Problem::new(key, Why::Config(why.to_string()))
+            })
             .collect(),
-        Err(e) => vec![format!("config: {e}")],
+        Err(e) => vec![Problem::new("config", Why::Config(e.to_string()))],
     };
     if cfg.ai.model.is_empty() {
-        out.push("ai.model: choose a model".into());
+        out.push(Problem::new("ai.model", Why::ModelMissing));
     }
     if cfg.ai.provider == Provider::OpenaiCompatible {
         if cfg.ai.base_url.is_empty() {
-            out.push("ai.base_url: enter your server's URL".into());
+            out.push(Problem::new("ai.base_url", Why::UrlMissing));
         } else if let Err(crate::ai::AiError::NotConfigured(why)) =
             crate::ai::check_endpoint(&cfg.ai.base_url, key_saved)
-            && !out.iter().any(|p| p.starts_with("ai.base_url"))
+            && !out.iter().any(|p| p.key == "ai.base_url")
         {
-            out.push(format!("ai.base_url: {why}"));
+            crate::log!("[opencircle] ai.base_url refused: {why}");
+            out.push(Problem::new("ai.base_url", Why::UrlBad));
         }
     }
     out
 }
 
-/// The reason for `key` from a list of "key: reason" problems.
-pub(super) fn issue(problems: &[String], key: &str) -> Option<String> {
-    problems
-        .iter()
-        .find_map(|p| p.strip_prefix(key)?.strip_prefix(": "))
-        .map(|s| {
-            let mut c = s.chars();
-            c.next()
-                .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
-        })
+/// The reason for `key` from the problems, in the app's language.
+pub(super) fn issue(problems: &[Problem], key: &str) -> Option<String> {
+    problems.iter().find(|p| p.key == key).map(Problem::words)
 }
 
 /// Applies `message`; in the real window (`auto`) a change that leaves the draft
@@ -1439,7 +1506,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     .as_ref()
                     .is_some_and(|(s, _)| *s == slot);
                 if why.is_some() || !noted {
-                    state.shortcut_error = Some((slot, why.unwrap_or_else(|| t!(k_taken).into())));
+                    let said = why.map_or_else(|| t!(k_taken).to_string(), |r| reserved_words(&r));
+                    state.shortcut_error = Some((slot, said));
                 }
             }
         }
@@ -1573,10 +1641,10 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ReportProblem => return Outcome::OpenLink(crate::diagnostics::issue_url()),
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
         Message::CheckUpdate => {
-            state.update_status = Some(t!(key_checking).into());
+            state.update_status = Some(UpdateLine::Checking);
             return Outcome::CheckUpdate;
         }
-        Message::UpdateStatus(status) => state.update_status = Some(status),
+        Message::UpdateStatus(status) => state.update_status = Some(UpdateLine::Answer(status)),
         Message::RestartToUpdate => return Outcome::RestartToUpdate,
         Message::WhatsNew => return Outcome::WhatsNew,
         Message::Save => return save(state),

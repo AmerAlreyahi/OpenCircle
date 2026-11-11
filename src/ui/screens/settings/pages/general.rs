@@ -1,12 +1,12 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
 //! OS, the save folder, updates.
-use crate::app_language::{S, tr};
+use crate::app_language::{S, count, fmt, tr};
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container};
 use iced::{Center, Element, Fill};
 
-use super::super::state::{Message, Pick, State, issue};
+use super::super::state::{Message, Pick, State, UpdateLine, issue};
 use crate::config::DefaultAction;
 use crate::ui::kit::button::{Kind, button, label, labelled, labelled_width};
 use crate::ui::kit::field::field;
@@ -76,13 +76,29 @@ fn language_row(state: &State) -> Element<'_, Message> {
 fn updates_row(state: &State) -> Element<'_, Message> {
     use crate::update::How;
     let waiting = (state.update_waiting.as_ref()).map(|(v, how)| (v.as_str(), *how));
+    use crate::update::{Head, Say};
+    let last = match &state.update_status {
+        Some(UpdateLine::Answer(a)) => Some(a),
+        _ => None,
+    };
     let (head, line) = crate::update::status(
         waiting,
         env!("CARGO_PKG_VERSION"),
         state.update_checked,
-        state.update_status.as_deref(),
+        last,
         std::time::SystemTime::now(),
     );
+    let head = match head {
+        Head::Out(v) => fmt(S::up_out, &[&v]),
+        Head::Ready(v) => fmt(S::up_ready, &[&v]),
+        Head::Updates => t!(us_updates).to_string(),
+    };
+    let line = match (&state.update_status, line) {
+        (Some(UpdateLine::Checking), _) => t!(key_checking).to_string(),
+        (_, Say::GetIt) => t!(up_line_getit).to_string(),
+        (_, Say::Have(v, when)) => fmt(S::us_have, &[&v, &when_words(when)]),
+        (_, Say::Answer(a)) => answer_words(&a),
+    };
     let control: Element<'_, Message> = match waiting {
         None => button(
             label(t!(g_updates_check)),
@@ -114,6 +130,42 @@ fn updates_row(state: &State) -> Element<'_, Message> {
         }
     };
     setting_row::row(title(head), line, control)
+}
+
+/// When the last check was, in the app's language.
+fn when_words(when: crate::update::When) -> String {
+    use crate::update::When;
+    match when {
+        When::Never => t!(us_never).into(),
+        When::JustNow => t!(us_just).into(),
+        When::Minutes(n) => fmt(S::us_min, &[&n]),
+        When::Hours(n) => fmt(S::us_hours, &[&n]),
+        When::Yesterday => t!(us_yesterday).into(),
+        When::Days(n) => count(
+            n as usize,
+            [
+                S::us_days_one,
+                S::us_days_two,
+                S::us_days_few,
+                S::us_days_many,
+            ],
+        ),
+    }
+}
+
+/// What a check found, in the app's language.
+fn answer_words(a: &crate::update::Answer) -> String {
+    use crate::update::Answer;
+    match a {
+        Answer::Wait(s) => fmt(S::ua_wait, &[&s.div_ceil(60)]),
+        Answer::Unreachable => t!(ua_unreachable).into(),
+        Answer::Out(v) => fmt(S::ua_out, &[v]),
+        Answer::Ready(v) => fmt(S::ua_ready, &[v]),
+        Answer::UpToDate(v) => fmt(S::ua_current, &[v]),
+        Answer::DevBuild => t!(ua_dev).into(),
+        Answer::NoFolder => t!(ua_nofolder).into(),
+        Answer::Unverified(v) => fmt(S::ua_unverified, &[v]),
+    }
 }
 
 fn switch<'a>(

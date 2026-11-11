@@ -257,7 +257,7 @@ fn invalid_keys_are_rejected_inline_and_escape_cancels() {
     // A key the parser does not know.
     update(&mut s, Message::Record(Slot::Capture));
     press(&mut s, chord(true, false, "NotARealKey"));
-    assert!(s.shortcut_error.as_ref().unwrap().1.contains("unknown key"));
+    assert!(s.shortcut_error.as_ref().unwrap().1.contains("nknown key"));
 }
 
 #[test]
@@ -755,7 +755,10 @@ fn each_provider_shows_only_its_own_key() {
 
 /// The Provider dropdown's entry called `name`.
 fn preset(name: &str) -> Preset {
-    *PRESETS.iter().find(|p| p.name == name).expect("a preset")
+    *PRESETS
+        .iter()
+        .find(|p| p.to_string() == name)
+        .expect("a preset")
 }
 
 /// Each provider in the dropdown writes the API it speaks and its server:
@@ -808,7 +811,7 @@ fn each_provider_writes_its_api_and_server() {
         ),
         ("Custom server", Provider::OpenaiCompatible, ""),
     ];
-    let names: Vec<_> = PRESETS.iter().map(|p| p.name).collect();
+    let names: Vec<String> = PRESETS.iter().map(|p| p.to_string()).collect();
     assert_eq!(
         names,
         want.clone().map(|w| w.0),
@@ -1350,7 +1353,7 @@ fn general_switches_updates_and_checks_now() {
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Checking…"));
     update(
         &mut s,
-        Message::UpdateStatus("OpenCircle 1.0.0 is up to date".into()),
+        Message::UpdateStatus(crate::update::Answer::UpToDate("1.0.0".into())),
     );
     assert!(
         shot::texts(view(&s))
@@ -2914,6 +2917,10 @@ fn every_page_in_arabic_matches_its_golden_image() {
             let slug = format!("{section:?}").to_lowercase();
             let file = format!("settings-{slug}-ar-{}", theme.id);
             let size = Size::new(WINDOW_SIZE.width, 900.0);
+            // nothing laid out beyond the window's edge (a wrapped Arabic
+            // description stays in its column)
+            let lost = shot::out_of_reach(view(&s), size);
+            assert!(lost.is_empty(), "{file}: {lost:?}");
             failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
             let _ = shot::save(&file, view(&s), size);
         }

@@ -4,12 +4,12 @@
 //! Linux); where the UI font is Segoe UI (Windows) nothing is compared.
 use std::path::{Path, PathBuf};
 
-use iced::{Element, Font, Size};
+use iced::{Element, Size};
 
 use super::shot;
 
 pub fn enabled() -> bool {
-    super::super::text::ui_font() == Font::with_name("Inter")
+    super::super::text::ui_font_name() == "Inter"
 }
 
 fn file(dir: &str, name: &str) -> PathBuf {

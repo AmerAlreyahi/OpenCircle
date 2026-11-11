@@ -195,6 +195,9 @@ iced_runtime = "0.14"
 # The window compositor's damage (frame-time tests): the version iced already builds.
 iced_tiny_skia = "0.14"
 qrcode = { version = "0.14.1", default-features = false }
+# Reads the bundled fonts' glyph tables (a test: every Arabic character of the
+# string table has a glyph); already built by iced's text engine (same version).
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 
 [patch.crates-io]

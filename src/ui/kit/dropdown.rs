@@ -67,7 +67,7 @@ const INNER: f32 = size::CONTROL_COLUMN - 2.0 * MENU_PAD - super::scroll::WIDTH 
 
 /// A `combo` row: its label, its tag (a quiet `badge`), whether it is the
 /// current choice, and what a press sends.
-pub type Row<'a, Message> = (String, Option<&'a str>, bool, Message);
+pub type Row<'a, Message> = (String, Option<String>, bool, Message);
 
 /// A `combo`'s search field: its widget id (the caller focuses it on
 /// `on_open`), hint, text, and what typing and Enter send.
@@ -88,9 +88,9 @@ pub fn combo<'a, Message: Clone + 'a>(
     value: Option<&str>,
     placeholder: &str,
     search: Search<'a, Message>,
-    note: Option<&'a str>,
+    note: Option<String>,
     rows: Vec<Row<'a, Message>>,
-    foot: Option<(&'a str, Option<Message>)>,
+    foot: Option<(String, Option<Message>)>,
     on_open: Message,
 ) -> Element<'a, Message> {
     let field = super::field::search(search.hint, search.query)
@@ -98,7 +98,7 @@ pub fn combo<'a, Message: Clone + 'a>(
         .on_input(search.on_query)
         .on_submit(search.on_submit)
         .width(Fill);
-    let line = |s: &'a str, h: f32| {
+    let line = |s: String, h: f32| {
         container(super::text::muted(Role::NOTE, s))
             .padding([0.0, PAD[1]])
             .center_y(h)
@@ -123,7 +123,7 @@ pub fn combo<'a, Message: Clone + 'a>(
     if let Some((label, message)) = foot {
         let rule = container(super::divider::divider()).padding([FOOT_RULE / 2.0, PAD[1]]);
         menu = menu.push(rule).push(match message {
-            Some(m) => option(label.to_string(), None, false, (INNER, ROW_H), m),
+            Some(m) => option(label, None, false, (INNER, ROW_H), m),
             None => line(label, ROW_H).into(),
         });
     }
@@ -578,11 +578,16 @@ mod tests {
             ("gemini-flash-lite-latest".into(), None, true, "a"),
             (
                 "gemini-3.8-flash".into(),
-                Some("Free tier at Google"),
+                Some("Free tier at Google".to_string()),
                 false,
                 "b",
             ),
-            ("gemini-4-argon".into(), Some("Paid at Google"), false, "c"),
+            (
+                "gemini-4-argon".into(),
+                Some("Paid at Google".to_string()),
+                false,
+                "c",
+            ),
         ];
         rows.extend((0..more).map(|i| (format!("model-{i}"), None, false, "m")));
         let search = super::Search {
@@ -596,9 +601,9 @@ mod tests {
             Some("gemini-flash-lite-latest"),
             "",
             search,
-            Some("Pricing is set by Google"),
+            Some("Pricing is set by Google".to_string()),
             rows,
-            Some(("Load models from Google Gemini", Some("load"))),
+            Some(("Load models from Google Gemini".to_string(), Some("load"))),
             "open",
         );
         iced::widget::container(field)
@@ -625,14 +630,19 @@ mod tests {
                 let rows = vec![
                     (
                         "openrouter/free".into(),
-                        Some("Free at OpenRouter"),
+                        Some("Free at OpenRouter".to_string()),
                         false,
                         "a",
                     ),
-                    (long.into(), Some("Free at OpenRouter"), true, "b"),
+                    (
+                        long.into(),
+                        Some("Free at OpenRouter".to_string()),
+                        true,
+                        "b",
+                    ),
                     (
                         "anthropic/claude-sonnet-5.5".into(),
-                        Some("Paid at OpenRouter"),
+                        Some("Paid at OpenRouter".to_string()),
                         false,
                         "c",
                     ),

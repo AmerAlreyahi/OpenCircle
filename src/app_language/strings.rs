@@ -1119,4 +1119,103 @@ strings! {
         | "لا توجد لغة";
     pk_needs_ai: "Needs AI · no local model yet"
         | "يحتاج الذكاء الاصطناعي · لا نموذج دون اتصال بعد";
+    // update status line (Settings > General) and the answers to Check now
+    us_updates: "Updates"
+        | "التحديثات";
+    us_have: "You have {} · {}"
+        | "لديك {} · {}";
+    us_never: "not checked yet"
+        | "لم يُفحص بعد";
+    us_just: "checked just now"
+        | "تم الفحص للتو";
+    us_min: "checked {} min ago"
+        | "تم الفحص قبل {} د";
+    us_hours: "checked {} h ago"
+        | "تم الفحص قبل {} س";
+    us_yesterday: "checked yesterday"
+        | "تم الفحص أمس";
+    us_days_one: "checked 1 day ago"
+        | "تم الفحص قبل يوم واحد";
+    us_days_two: "checked 2 days ago"
+        | "تم الفحص قبل يومين";
+    us_days_few: "checked {} days ago"
+        | "تم الفحص قبل {} أيام";
+    us_days_many: "checked {} days ago"
+        | "تم الفحص قبل {} يومًا";
+    ua_wait: "GitHub asks to wait: try again in {} min"
+        | "يطلب GitHub الانتظار: حاول مرة أخرى بعد {} د";
+    ua_unreachable: "could not reach GitHub: try again later"
+        | "تعذّر الوصول إلى GitHub: حاول لاحقًا";
+    ua_out: "OpenCircle {} is out: get it from the release page"
+        | "صدر OpenCircle {}: احصل عليه من صفحة الإصدار";
+    ua_ready: "OpenCircle {} is ready: restart OpenCircle to install it"
+        | "OpenCircle {} جاهز: أعد تشغيل OpenCircle لتثبيته";
+    ua_current: "OpenCircle {} is up to date"
+        | "OpenCircle {} محدّث";
+    ua_dev: "this is a development build: it does not update itself"
+        | "هذه نسخة تطوير: لا تحدّث نفسها";
+    ua_nofolder: "no data folder: not installed"
+        | "لا يوجد مجلد بيانات: لم يُثبَّت";
+    ua_unverified: "OpenCircle {} could not be verified: not installed"
+        | "تعذّر التحقق من OpenCircle {}: لم يُثبَّت";
+    rv_unicode: "Used by GNOME for Unicode input"
+        | "يستخدمه GNOME لإدخال Unicode";
+    rv_unicode_keys: "Used by GNOME for Unicode input (Ctrl+Shift+U)"
+        | "يستخدمه GNOME لإدخال Unicode (Ctrl+Shift+U)";
+    rv_screens: "Used by GNOME for screenshots"
+        | "يستخدمه GNOME للقطات الشاشة";
+    rv_super: "Super shortcuts are reserved by GNOME"
+        | "اختصارات مفتاح Super محجوزة لدى GNOME";
+    pr_provider: "Choose a provider (the settings file couldn't be read)"
+        | "اختر مزوّدًا (تعذّرت قراءة ملف الإعدادات)";
+    pr_model: "Choose a model"
+        | "اختر نموذجًا";
+    pr_url: "Enter your server's URL"
+        | "أدخل عنوان خادمك";
+    pr_url_bad: "Enter a valid server URL (https://…)"
+        | "أدخل عنوان خادم صالحًا (https://…)";
+    pr_invalid: "This value isn't valid"
+        | "هذه القيمة غير صالحة";
+    ml_free_at: "Free at {}"
+        | "مجاني لدى {}";
+    ml_free_tier: "Free tier at {}"
+        | "باقة مجانية لدى {}";
+    ml_paid: "Paid at {}"
+        | "مدفوع لدى {}";
+    ml_pricing: "Pricing is set by {}"
+        | "الأسعار يحددها {}";
+    ml_load: "Load models from {}"
+        | "تحميل النماذج من {}";
+    ml_loading: "Loading models…"
+        | "جارٍ تحميل النماذج…";
+    ml_search: "Search or type a model id"
+        | "ابحث أو اكتب معرّف نموذج";
+    ml_use: "Use “{}”"
+        | "استخدام «{}»";
+    ml_count: "{} models from {}"
+        | "{} نموذجًا من {}";
+    ml_the_provider: "the provider"
+        | "المزوّد";
+    ml_err_set_up: "Set up this provider first (key, model or server)."
+        | "أعدّ هذا المزوّد أولًا (المفتاح أو النموذج أو الخادم).";
+    ml_err_auth: "The provider refused the key. Check it in Settings."
+        | "رفض المزوّد المفتاح. تحقق منه في الإعدادات.";
+    ml_err_limit: "Too many requests. Try again in a minute."
+        | "طلبات كثيرة جدًا. حاول مرة أخرى بعد دقيقة.";
+    ml_err_server: "The provider had a problem. Try again later."
+        | "واجه المزوّد مشكلة. حاول لاحقًا.";
+    ml_err_network: "Could not reach the provider. Check your connection."
+        | "تعذّر الوصول إلى المزوّد. تحقق من اتصالك.";
+    ml_err_other: "The provider's answer could not be used."
+        | "تعذّر استخدام إجابة المزوّد.";
+    prov_local: "{} (local)"
+        | "{} (محلي)";
+    prov_custom: "Custom server"
+        | "خادم مخصّص";
+    sc_unknown: "Unknown key “{}”"
+        | "مفتاح غير معروف «{}»";
+    sc_shape: "Use modifiers, then one key, like Ctrl+Shift+Space"
+        | "استخدم مفاتيح التعديل ثم مفتاحًا واحدًا، مثل Ctrl+Shift+Space";
+    sc_modifier: "Needs at least one modifier (Ctrl, Alt, Shift, Super)"
+        | "يلزم مفتاح تعديل واحد على الأقل (Ctrl أو Alt أو Shift أو Super)";
 }

@@ -306,8 +306,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
 
 fn finish(state: &mut State) -> Outcome {
     if let Some(p) = state.settings.problems().first() {
-        let why = p.split_once(": ").map_or(p.as_str(), |(_, why)| why);
-        state.error = Some(fmt(S::o_fix_first, &[&why]));
+        state.error = Some(fmt(S::o_fix_first, &[&p.words()]));
         return Outcome::None;
     }
     let config = state.config().clone();

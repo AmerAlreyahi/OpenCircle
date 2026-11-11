@@ -110,15 +110,40 @@ impl Lock {
     }
 }
 
+/// When the last check was: the UI says it in its language (`Display` is
+/// the English of the logs and tests).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum When {
+    Never,
+    JustNow,
+    Minutes(u64),
+    Hours(u64),
+    Yesterday,
+    Days(u64),
+}
+
+impl std::fmt::Display for When {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            When::Never => f.write_str("not checked yet"),
+            When::JustNow => f.write_str("checked just now"),
+            When::Minutes(n) => write!(f, "checked {n} min ago"),
+            When::Hours(n) => write!(f, "checked {n} h ago"),
+            When::Yesterday => f.write_str("checked yesterday"),
+            When::Days(n) => write!(f, "checked {n} days ago"),
+        }
+    }
+}
+
 /// "checked just now / 5 min ago / 2 h ago / 3 days ago".
-pub fn checked_ago(at: SystemTime, now: SystemTime) -> String {
+pub fn checked_ago(at: SystemTime, now: SystemTime) -> When {
     let s = now.duration_since(at).unwrap_or_default().as_secs();
     match s {
-        0..60 => "checked just now".into(),
-        60..3600 => format!("checked {} min ago", s / 60),
-        3600..86_400 => format!("checked {} h ago", s / 3600),
-        _ if s < 2 * 86_400 => "checked yesterday".into(),
-        _ => format!("checked {} days ago", s / 86_400),
+        0..60 => When::JustNow,
+        60..3600 => When::Minutes(s / 60),
+        3600..86_400 => When::Hours(s / 3600),
+        _ if s < 2 * 86_400 => When::Yesterday,
+        _ => When::Days(s / 86_400),
     }
 }
 
@@ -143,29 +168,43 @@ impl How {
     }
 }
 
-/// Settings > General's Updates row: its title and line, for an update
-/// `waiting` (its version and how it installs), this version `current`, the
-/// last check `checked`, and the last answer to Check now `last`.
+/// The Updates row's title (the UI words it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Head {
+    Out(String),
+    Ready(String),
+    Updates,
+}
+
+/// The Updates row's line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Say {
+    /// "Update it with your package manager or the release page".
+    GetIt,
+    /// "You have <current> · checked …".
+    Have(String, When),
+    /// The last answer to Check now.
+    Answer(super::Answer),
+}
+
+/// Settings > General's Updates row, for an update `waiting` (its version
+/// and how it installs), this version `current`, the last check `checked`,
+/// and the last answer to Check now `last`: typed, the UI words it.
 pub fn status(
     waiting: Option<(&str, How)>,
     current: &str,
     checked: Option<SystemTime>,
-    last: Option<&str>,
+    last: Option<&super::Answer>,
     now: SystemTime,
-) -> (String, String) {
-    let when = checked.map_or_else(|| "not checked yet".into(), |at| checked_ago(at, now));
+) -> (Head, Say) {
+    let when = checked.map_or(When::Never, |at| checked_ago(at, now));
+    let have = || Say::Have(current.to_string(), when);
     match waiting {
-        Some((v, How::GetIt)) => (
-            format!("OpenCircle {v} is out"),
-            "Update it with your package manager or the release page".into(),
-        ),
-        Some((v, _)) => (
-            format!("OpenCircle {v} is ready"),
-            format!("You have {current} · {when}"),
-        ),
+        Some((v, How::GetIt)) => (Head::Out(v.into()), Say::GetIt),
+        Some((v, _)) => (Head::Ready(v.into()), have()),
         None => (
-            "Updates".into(),
-            last.map_or_else(|| format!("You have {current} · {when}"), str::to_string),
+            Head::Updates,
+            last.map_or_else(have, |a| Say::Answer(a.clone())),
         ),
     }
 }
@@ -173,6 +212,7 @@ pub fn status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::update::Answer;
 
     /// A portable / AppImage update installs at the button, at quit and when
     /// locked; a setup's only at the button (never a prompt from nowhere);
@@ -238,42 +278,38 @@ mod tests {
     fn the_settings_status_says_what_waits_and_when_it_looked() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let ago = |s| Some(now - Duration::from_secs(s));
+        let have = |v: &str, w| Say::Have(v.into(), w);
         assert_eq!(
             status(Some(("0.1.5", How::Restart)), "0.1.4", ago(7200), None, now),
-            (
-                "OpenCircle 0.1.5 is ready".into(),
-                "You have 0.1.4 · checked 2 h ago".into()
-            )
+            (Head::Ready("0.1.5".into()), have("0.1.4", When::Hours(2)))
         );
         assert_eq!(
             status(Some(("0.1.5", How::Setup)), "0.1.4", ago(30), None, now).1,
-            "You have 0.1.4 · checked just now"
+            have("0.1.4", When::JustNow)
         );
         assert_eq!(
-            status(Some(("0.1.5", How::GetIt)), "0.1.4", None, None, now).0,
-            "OpenCircle 0.1.5 is out"
+            status(Some(("0.1.5", How::GetIt)), "0.1.4", None, None, now),
+            (Head::Out("0.1.5".into()), Say::GetIt)
         );
         assert_eq!(
             status(None, "0.1.4", ago(300), None, now),
-            (
-                "Updates".into(),
-                "You have 0.1.4 · checked 5 min ago".into()
-            )
+            (Head::Updates, have("0.1.4", When::Minutes(5)))
         );
         assert_eq!(
             status(None, "0.1.4", None, None, now).1,
-            "You have 0.1.4 · not checked yet"
+            have("0.1.4", When::Never)
         );
+        let said = Answer::UpToDate("0.1.4".into());
         assert_eq!(
-            status(None, "0.1.4", ago(300), Some("Checking…"), now).1,
-            "Checking…"
+            status(None, "0.1.4", ago(300), Some(&said), now).1,
+            Say::Answer(said)
         );
         assert_eq!(
             checked_ago(now - Duration::from_secs(90_000), now),
-            "checked yesterday"
+            When::Yesterday
         );
         assert_eq!(
-            checked_ago(now - Duration::from_secs(300_000), now),
+            checked_ago(now - Duration::from_secs(300_000), now).to_string(),
             "checked 3 days ago"
         );
     }

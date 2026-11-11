@@ -717,11 +717,11 @@ fn option_list_sheet() {
             ..Look::default()
         },
     );
-    let pick = |active, badge| {
+    let pick = |active, badge: Option<&'static str>| {
         move |ar| {
             option(
                 s(ar, "Japanese", "اليابانية").into(),
-                badge,
+                badge.map(str::to_string),
                 active,
                 (160.0, 32.0),
                 (),

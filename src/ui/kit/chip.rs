@@ -47,7 +47,9 @@ pub fn tag<'a, Message: 'a>(label: &'a str) -> Element<'a, Message> {
 }
 
 /// 9.5 px `text_muted` on `hover`, 2x6 px, no edge (a sidebar item's "Exp").
-pub fn badge<'a, Message: 'a>(label: &'a str) -> Element<'a, Message> {
+pub fn badge<'a, Message: 'a>(
+    label: impl iced::widget::text::IntoFragment<'a>,
+) -> Element<'a, Message> {
     container(text(label).size(9.5).font(weight(Weight::Normal)))
         .padding([2, 6])
         .style(|_| container::Style {

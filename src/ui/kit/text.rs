@@ -25,9 +25,20 @@ pub const MONO: Font = Font::with_name("JetBrains Mono");
 
 /// The UI font, the design's stack: Segoe UI Variable Text, else Segoe UI
 /// (Windows), else the bundled Inter. Picked once, from the fonts on this PC.
+///
+/// In a right-to-left view (`kit::dir`) it is always the bundled Inter: Arabic
+/// then comes from the bundled Noto Sans Arabic on every OS, so Windows 10
+/// (Segoe UI has Arabic of its own) looks as Windows 11 (Segoe UI Variable
+/// has none) and as the goldens do (ARABIC_UI_SPEC.md decision 6).
 pub fn ui_font() -> Font {
-    Font::with_name(ui_font_name())
+    Font::with_name(match super::dir::rtl() {
+        true => BUNDLED,
+        false => ui_font_name(),
+    })
 }
+
+/// The bundled UI face (`FONTS`).
+const BUNDLED: &str = "Inter";
 
 /// The bundled Arabic face (`FONTS`), the fallback for Arabic in every font.
 const ARABIC: &str = "Noto Sans Arabic";
@@ -84,7 +95,7 @@ pub fn ui_font_name() -> &'static str {
         ["Segoe UI Variable Text", "Segoe UI"]
             .into_iter()
             .find(found)
-            .unwrap_or("Inter")
+            .unwrap_or(BUNDLED)
     })
 }
 

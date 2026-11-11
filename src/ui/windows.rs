@@ -80,7 +80,7 @@ pub enum Msg {
     /// What's new after Restart now: the Updating pill goes, the card opens.
     ShowCard(Box<update_card::Card>),
     /// The result of Settings > Check now.
-    UpdateStatus(String),
+    UpdateStatus(crate::update::Answer),
     /// From the tray menu's window.
     TrayMenu(tray_menu::Msg),
     /// A window lost the keyboard focus (the tray menu closes then).

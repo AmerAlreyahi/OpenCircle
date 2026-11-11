@@ -12,6 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use gtk::gio::{self, prelude::*};
 
+use super::Reserved;
 use super::{Binding, What, desktop_spelling, target_name};
 use crate::config::parse_shortcut;
 
@@ -284,20 +285,20 @@ fn accelerator(hotkey: HotKey) -> String {
 
 /// Keys GNOME (or IBus under it) keeps for itself, with the reason. Refused when a
 /// shortcut is recorded: it would fire there instead of here, or do both.
-pub fn reserved_on(desktop: &str, shortcut: &str) -> Option<String> {
+pub fn reserved_on(desktop: &str, shortcut: &str) -> Option<Reserved> {
     if !is_gnome(desktop) {
         return None;
     }
     let hotkey = parse_shortcut(shortcut).ok()?;
     let mods = hotkey.mods;
     if hotkey.key == Code::KeyU && mods == Modifiers::CONTROL | Modifiers::SHIFT {
-        return Some("Used by GNOME for Unicode input".into());
+        return Some(Reserved::Unicode);
     }
     if hotkey.key == Code::PrintScreen {
-        return Some("Used by GNOME for screenshots".into());
+        return Some(Reserved::Screenshots);
     }
     if mods.contains(Modifiers::META) {
-        return Some("Super shortcuts are reserved by GNOME".into());
+        return Some(Reserved::Super);
     }
     None
 }
@@ -310,9 +311,8 @@ pub fn eaten_reason(
     alt: bool,
     shift: bool,
     logo: bool,
-) -> Option<String> {
-    (is_gnome(desktop) && ctrl && shift && !alt && !logo)
-        .then(|| "Used by GNOME for Unicode input (Ctrl+Shift+U)".into())
+) -> Option<Reserved> {
+    (is_gnome(desktop) && ctrl && shift && !alt && !logo).then_some(Reserved::UnicodeKeys)
 }
 
 #[cfg(test)]
@@ -468,10 +468,7 @@ mod tests {
     #[test]
     fn a_swallowed_ctrl_shift_key_on_gnome_is_named() {
         let on = |c, a, s, l| eaten_reason("ubuntu:GNOME", c, a, s, l);
-        assert_eq!(
-            on(true, false, true, false).as_deref(),
-            Some("Used by GNOME for Unicode input (Ctrl+Shift+U)")
-        );
+        assert_eq!(on(true, false, true, false), Some(Reserved::UnicodeKeys));
         assert_eq!(on(true, false, false, false), None);
         assert_eq!(on(true, true, true, false), None);
         assert_eq!(eaten_reason("KDE", true, false, true, false), None);
@@ -480,18 +477,9 @@ mod tests {
     #[test]
     fn gnome_reserved_keys_are_refused_with_their_reason() {
         let on = |k| reserved_on("ubuntu:GNOME", k);
-        assert_eq!(
-            on("Ctrl+Shift+U").as_deref(),
-            Some("Used by GNOME for Unicode input")
-        );
-        assert_eq!(
-            on("PrintScreen").as_deref(),
-            Some("Used by GNOME for screenshots")
-        );
-        assert_eq!(
-            on("Alt+PrintScreen").as_deref(),
-            Some("Used by GNOME for screenshots")
-        );
+        assert_eq!(on("Ctrl+Shift+U"), Some(Reserved::Unicode));
+        assert_eq!(on("PrintScreen"), Some(Reserved::Screenshots));
+        assert_eq!(on("Alt+PrintScreen"), Some(Reserved::Screenshots));
         assert!(on("Super+T").is_some());
         // our defaults are free
         for k in [
