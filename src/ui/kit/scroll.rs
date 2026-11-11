@@ -68,6 +68,12 @@ mod left_bar {
     type R = iced::Renderer;
     type T = iced::Theme;
 
+    /// How far in from the area's left edge the scroller is: a page that
+    /// starts at the window's left edge (Settings in Arabic) has the window's
+    /// resize strip there (`header::EDGE`), on top of everything: a press on a
+    /// scroller under it resized the window (seen on the Windows VM).
+    const INSET: f32 = super::super::header::EDGE;
+
     /// How tall the content is and how far it is scrolled (from the last
     /// layout or event; the area's place comes from the layout drawn); the grab.
     #[derive(Default)]
@@ -79,11 +85,12 @@ mod left_bar {
     }
 
     impl State {
-        /// The scroller (as iced places it on the right, here on the left).
+        /// The scroller (as iced places it on the right, here on the left,
+        /// `INSET` in).
         fn scroller(&self, area: Rectangle) -> Option<Rectangle> {
             let ratio = area.height / self.content;
             (ratio < 1.0).then(|| Rectangle {
-                x: area.x,
+                x: area.x + INSET,
                 y: (area.y + self.down * ratio).max(0.0),
                 width: super::WIDTH,
                 height: (area.height * ratio).max(2.0),
@@ -225,6 +232,7 @@ mod left_bar {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     // the bar's column, as iced's: a press on it never reaches the page
                     let column = Rectangle {
+                        x: area.x + INSET,
                         width: super::WIDTH,
                         ..area
                     };
@@ -412,22 +420,22 @@ mod tests {
     #[test]
     fn right_to_left_the_scroller_is_on_the_left_and_drags_and_wheels() {
         let still = shot::render(area(true), 200, 200);
-        let (top, bottom) = scroller(&still, 2).expect("a scroller on the left");
+        let (top, bottom) = scroller(&still, 8).expect("a scroller on the left");
         assert_eq!(top, 0);
         assert!(scroller(&still, 197).is_none(), "and none on the right");
         let ltr = shot::render(area(false), 200, 200);
-        assert!(scroller(&ltr, 197).is_some() && scroller(&ltr, 2).is_none());
+        assert!(scroller(&ltr, 197).is_some() && scroller(&ltr, 8).is_none());
         // grab it in its middle and drag 60 px down
-        let grab = Point::new(2.0, (bottom / 2) as f32);
+        let grab = Point::new(8.0, (bottom / 2) as f32);
         let events = [
             Event::Mouse(M::ButtonPressed(Button::Left)),
             Event::Mouse(M::CursorMoved {
-                position: Point::new(2.0, grab.y + 60.0),
+                position: Point::new(8.0, grab.y + 60.0),
             }),
             Event::Mouse(M::ButtonReleased(Button::Left)),
         ];
         let dragged = shot::render_with(area(true), SIZE, Some(grab), &events);
-        let (moved, _) = scroller(&dragged, 2).unwrap();
+        let (moved, _) = scroller(&dragged, 8).unwrap();
         assert!((58..=62).contains(&moved), "dragged to {moved}");
         assert_ne!(dragged, still, "the page moved");
         // the wheel
@@ -435,6 +443,6 @@ mod tests {
             delta: ScrollDelta::Pixels { x: 0.0, y: -100.0 },
         })];
         let wheeled = shot::render_with(area(true), SIZE, Some(Point::new(100.0, 100.0)), &wheel);
-        assert!(scroller(&wheeled, 2).unwrap().0 > 0, "the wheel moved it");
+        assert!(scroller(&wheeled, 8).unwrap().0 > 0, "the wheel moved it");
     }
 }
