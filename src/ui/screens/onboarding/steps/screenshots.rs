@@ -1,6 +1,7 @@
 //! Wayland's screenshot permission: onboarding's Screenshots step, and the
 //! small window after a capture the desktop refused (`prompt_view`). Both
 //! share the Allow button and its status line.
+use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container};
 use iced::{Element, Fill, Size};
@@ -50,13 +51,8 @@ pub fn ask(access: &mut Access, message: Message) -> Outcome {
 
 pub fn view(state: &State) -> Element<'_, Message> {
     column![
-        text(Role::PAGE_TITLE, "Allow screenshots"),
-        sub(
-            Role::ROW_DESC,
-            "Your desktop asks once whether OpenCircle may capture the screen, and only \
-             while an OpenCircle window is in front. Click Allow, then Share (or Allow) in \
-             its dialog."
-        ),
+        text(Role::PAGE_TITLE, t!(o_shots)),
+        sub(Role::ROW_DESC, t!(o_shots_desc)),
         control(&state.access),
     ]
     .spacing(GAP)
@@ -66,27 +62,23 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// The Allow button and what came of the request.
 fn control(access: &Access) -> Element<'_, Message> {
     let (name, press) = match access {
-        Access::Asking => ("Waiting…", None),
-        Access::Allowed => ("Allowed", None),
-        Access::Unasked | Access::Failed(_) => ("Allow", Some(Message::Allow)),
+        Access::Asking => (t!(o_waiting), None),
+        Access::Allowed => (t!(o_allowed), None),
+        Access::Unasked | Access::Failed(_) => (t!(o_allow), Some(Message::Allow)),
     };
     let allow = tip(
         button(label(name), Kind::Elevated, press),
-        "Ask the desktop for screenshot permission",
+        t!(o_allow_tip),
         Position::Top,
     );
     let status: Element<'_, Message> = match access {
-        Access::Unasked => sub(Role::ROW_DESC, "You are asked once; nothing is saved.").into(),
-        Access::Asking => sub(Role::ROW_DESC, "Answer the dialog your desktop shows.").into(),
-        Access::Allowed => sub(Role::ROW_DESC, "OpenCircle can capture your screen now.").into(),
-        Access::Failed(e) if e.is_refused() => error(
-            Role::ROW_DESC,
-            "Your desktop said no. Try again, or allow it later.",
-        )
-        .into(),
+        Access::Unasked => sub(Role::ROW_DESC, t!(o_once)).into(),
+        Access::Asking => sub(Role::ROW_DESC, t!(o_answer)).into(),
+        Access::Allowed => sub(Role::ROW_DESC, t!(o_can_capture)).into(),
+        Access::Failed(e) if e.is_refused() => error(Role::ROW_DESC, t!(o_said_no)).into(),
         Access::Failed(e) => error(
             Role::ROW_DESC,
-            format!("Not allowed ({e}). Try again, or allow it later."),
+            crate::app_language::fmt(crate::app_language::S::o_not_allowed, &[&e]),
         )
         .into(),
     };
@@ -96,12 +88,8 @@ fn control(access: &Access) -> Element<'_, Message> {
 /// The small window shown after a capture the desktop refused.
 pub fn prompt_view(access: &Access) -> Element<'_, Message> {
     let content = column![
-        text(Role::PAGE_TITLE, "OpenCircle needs screenshot permission"),
-        sub(
-            Role::ROW_DESC,
-            "Your desktop asks only while an OpenCircle window is in front. Click Allow, \
-             then Share (or Allow) in its dialog, and press your shortcut again."
-        ),
+        text(Role::PAGE_TITLE, t!(o_needs_shots)),
+        sub(Role::ROW_DESC, t!(o_shots_again)),
         control(access),
     ]
     .spacing(GAP);

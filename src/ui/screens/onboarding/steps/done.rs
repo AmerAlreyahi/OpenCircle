@@ -2,6 +2,7 @@
 //! really set), and Settings' Start with the OS row. The design's feature
 //! cards are left out (owner: no showcase in onboarding; the previews live on
 //! each feature's Settings page).
+use crate::t;
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
@@ -27,8 +28,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         super::logo_card(
             LOGO,
-            format!("OpenCircle runs in the tray. Press {}.", keys.join("+")),
-            "Ready whenever you need to search, read, translate or ask about your screen",
+            crate::app_language::fmt(crate::app_language::S::o_done_press, &[&keys.join("+")]),
+            t!(o_done_desc),
             Some(caps.into()),
         ),
         Space::new().height(Fill),

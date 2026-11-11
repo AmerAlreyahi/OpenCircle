@@ -7,7 +7,7 @@ pub mod screenshots;
 pub mod welcome;
 
 use iced::Element;
-use iced::widget::{column, image, row};
+use iced::widget::{column, image};
 
 use super::flow::Message;
 use crate::ui::kit::card::card;
@@ -33,7 +33,7 @@ fn logo_card<'a>(
     .spacing(space::GAP / 2.0)
     .width(iced::Fill);
     card(
-        row![image(handle).width(logo).height(logo), words]
+        crate::dir_row![image(handle).width(logo).height(logo), words]
             .push(trailing)
             .spacing(LOGO_GAP)
             .align_y(iced::Center),

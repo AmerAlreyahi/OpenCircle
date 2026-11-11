@@ -8,11 +8,13 @@
 //! // update: if let onboarding::Outcome::Finished(cfg) = onboarding::update(&mut state, msg) { ...close, start... }
 //! // view: onboarding::view(&state)
 //! ```
+use crate::app_language::{S, fmt, tr};
+use crate::t;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use iced::widget::{Space, column, container, row};
+use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill, Padding, Size, Subscription};
 
 use super::steps;
@@ -61,16 +63,12 @@ pub enum Step {
 /// One step: its track label, its view, and whether only Wayland shows it.
 pub struct Page {
     pub id: Step,
-    pub label: &'static str,
+    pub label: S,
     pub wayland: bool,
     pub view: for<'a> fn(&'a State) -> Element<'a, Message>,
 }
 
-const fn page(
-    id: Step,
-    label: &'static str,
-    view: for<'a> fn(&'a State) -> Element<'a, Message>,
-) -> Page {
+const fn page(id: Step, label: S, view: for<'a> fn(&'a State) -> Element<'a, Message>) -> Page {
     Page {
         id,
         label,
@@ -81,15 +79,15 @@ const fn page(
 
 /// In the design's order. A new step = one entry here + one view file.
 pub const STEPS: [Page; 6] = [
-    page(Step::Language, "Language", steps::language::view),
-    page(Step::Welcome, "Welcome", steps::welcome::view),
+    page(Step::Language, S::o_s_language, steps::language::view),
+    page(Step::Welcome, S::o_s_welcome, steps::welcome::view),
     Page {
         wayland: true,
-        ..page(Step::Screenshots, "Screenshots", steps::screenshots::view)
+        ..page(Step::Screenshots, S::o_s_shots, steps::screenshots::view)
     },
-    page(Step::Ai, "Connect AI", steps::ai::view),
-    page(Step::Look, "Look", steps::look::view),
-    page(Step::Done, "Done", steps::done::view),
+    page(Step::Ai, S::o_s_ai, steps::ai::view),
+    page(Step::Look, S::o_s_look, steps::look::view),
+    page(Step::Done, S::o_s_done, steps::done::view),
 ];
 
 pub struct State {
@@ -108,7 +106,7 @@ pub struct State {
     pub(super) error: Option<String>,
     /// The last step change (the step it left, and when): the thumb glides.
     moved: Option<(Step, Instant)>,
-    /// The track's labels, numbered ("1. Welcome").
+    /// The track's labels, numbered ("1. Welcome"), in the app's language.
     labels: Vec<(Step, String)>,
 }
 
@@ -179,6 +177,7 @@ impl State {
         let offline = base.translate.engine == Engine::Offline;
         let mut picker = Picker::new(&base.translate.source, &base.translate.target, offline);
         picker.saves_recent = false;
+        picker.endonyms = true;
         picker.update(picker::Msg::Open(Side::Target));
         let mut s = State {
             settings: settings::State::new(base, Vec::new(), path.clone(), store),
@@ -203,8 +202,9 @@ impl State {
     }
 
     fn number(&mut self) {
+        self.picker.rtl = crate::app_language::rtl();
         self.labels = (self.steps().enumerate())
-            .map(|(i, p)| (p.id, format!("{}. {}", i + 1, p.label)))
+            .map(|(i, p)| (p.id, fmt(S::o_step, &[&(i + 1), &tr(p.label)])))
             .collect();
     }
 
@@ -282,6 +282,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         Message::Language(m) => {
             if state.picker.update(m) {
                 state.settings.set_language(&state.picker.target);
+                // the pick may be the app's language: the track speaks it
+                state.number();
             }
             // a pick closes the list: this step always shows it
             if !state.picker.is_open() {
@@ -306,14 +308,15 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
 fn finish(state: &mut State) -> Outcome {
     if let Some(p) = state.settings.problems().first() {
         let why = p.split_once(": ").map_or(p.as_str(), |(_, why)| why);
-        state.error = Some(format!("Fix this first: {why}"));
+        state.error = Some(fmt(S::o_fix_first, &[&why]));
         return Outcome::None;
     }
     let config = state.config().clone();
     match crate::config::update_at(state.path.as_deref(), |c| *c = config.clone()) {
         Ok(_) => Outcome::Finished(config),
         Err(e) => {
-            state.error = Some(format!("Could not save your settings: {e}"));
+            state.error = Some(fmt(S::o_save_failed, &[&e]));
+
             Outcome::None
         }
     }
@@ -332,14 +335,10 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    // the whole window in the app's language and direction
+    let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
     let logo = crate::ui::kit::logo::logo(16);
-    let header = regular(
-        logo,
-        "Welcome to OpenCircle",
-        Space::new(),
-        None,
-        Message::Caption,
-    );
+    let header = regular(logo, t!(o_title), Space::new(), None, Message::Caption);
     let (from, glide) = match state.moving() {
         Some((from, glide)) => (from, glide),
         None => (state.step, 1.0),
@@ -374,21 +373,26 @@ fn footer(state: &State) -> Element<'_, Message> {
     let first = state.at() == 0;
     let last = state.at() + 1 == state.steps().count();
     let back = button(
-        label("← Back"),
+        label(t!(o_back_arrow)),
         Kind::Elevated,
         (!first).then_some(Message::Back),
     );
-    let mut line = row![back].spacing(space::GAP).align_y(Center);
+    // in reading order (Back at the right in Arabic, Next at the left)
+    let mut line = vec![back];
     if let Some(e) = &state.error {
-        line = line.push(error(Role::ROW_DESC, e.as_str()));
+        line.push(error(Role::ROW_DESC, e.as_str()).into());
     }
-    line = line.push(Space::new().width(Fill));
+    line.push(Space::new().width(Fill).into());
     if state.step == Step::Ai {
-        line = line.push(button(label("Skip"), Kind::Quiet, Some(Message::Skip)));
+        line.push(button(label(t!(o_skip)), Kind::Quiet, Some(Message::Skip)));
     }
-    line = line.push(match last {
-        true => button(label("Finish"), Kind::Elevated, Some(Message::Finish)),
-        false => button(label("Next →"), Kind::Elevated, Some(Message::Next)),
+    line.push(match last {
+        true => button(label(t!(o_finish)), Kind::Elevated, Some(Message::Finish)),
+        false => button(label(t!(o_next_arrow)), Kind::Elevated, Some(Message::Next)),
     });
+    let line = crate::ui::kit::dir::row(line)
+        .spacing(space::GAP)
+        .align_y(Center);
+
     column![divider(), Space::new().height(FOOTER_TOP), line].into()
 }

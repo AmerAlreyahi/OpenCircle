@@ -268,7 +268,11 @@ fn the_switches_are_settings_rows_and_kept() {
     next(&mut s, 3);
     assert_eq!(s.step(), Step::Done);
     let t = texts(&s);
-    assert!(t.iter().any(|t| t == settings::START_LABEL), "{t:?}");
+    assert!(
+        t.iter()
+            .any(|t| t == crate::app_language::tr(settings::START_LABEL)),
+        "{t:?}"
+    );
     let keys = settings::key_labels(&s.config().shortcut).join("+");
     assert!(t.iter().any(|t| t.contains(&keys)), "{keys}: {t:?}");
     row(&mut s, settings::Message::Autostart(false));
@@ -415,7 +419,9 @@ fn every_step_matches_its_golden_image() {
             themes::set(t);
             let name = format!(
                 "onboarding-{}-{}",
-                page.label.to_lowercase().replace(' ', "-"),
+                crate::app_language::bare(page.label)
+                    .to_lowercase()
+                    .replace(' ', "-"),
                 t.id
             );
             failed.extend(golden::check("screens", &name, WINDOW_SIZE, &[1.0], || {
@@ -426,6 +432,41 @@ fn every_step_matches_its_golden_image() {
         }
     }
     themes::set(&SAPPHIRE);
+    theme::apply(Theme::Dark);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Picking Arabic in the Language step turns onboarding Arabic at once
+/// (right to left), and every step as drawn in Arabic, in Sapphire and
+/// Daylight (ARABIC_UI_SPEC.md; the English goldens above stay as they were).
+#[test]
+fn every_step_in_arabic_matches_its_golden_image() {
+    use crate::app_language::{self, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for t in [&SAPPHIRE, &DAYLIGHT] {
+        for page in STEPS {
+            let mut s = state(None).on_wayland(page.id == Step::Screenshots);
+            app_language::set(Lang::En);
+            update(&mut s, Message::Language(picker::Msg::Pick("ar".into())));
+            assert_eq!(app_language::current(), Lang::Ar, "the pick speaks at once");
+            assert_eq!(s.config().general.language, "ar");
+            s.step = page.id;
+            if page.id == Step::Ai {
+                row(&mut s, settings::Message::Provider(Provider::Anthropic));
+            }
+            themes::set(t);
+            let slug = (STEPS.iter().position(|p| p.id == page.id)).unwrap();
+            let name = format!("onboarding-{slug}-ar-{}", t.id);
+            failed.extend(golden::check("screens", &name, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+            let _ = shot::save(&name, view(&s), WINDOW_SIZE);
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
     theme::apply(Theme::Dark);
     assert!(failed.is_empty(), "{failed:#?}");
 }
