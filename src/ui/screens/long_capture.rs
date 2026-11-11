@@ -589,7 +589,7 @@ pub fn popup_view<'a>(
         None => count(height, full, lost),
     };
     let tool = |glyph, kind, how| button::tool(glyph, kind, false, Some(how));
-    let buttons = row![
+    let buttons = crate::dir_row![
         tool(COPY, Kind::Accent, Finish::Copy),
         tool(SAVE, Kind::Elevated, Finish::Save),
         tool(Icon::Check.glyph(), Kind::Elevated, Finish::Done),
@@ -600,6 +600,8 @@ pub fn popup_view<'a>(
         muted(Role::META, t!(sn_scroll_hint)),
         muted(Role::META, t!(sn_keys_after_done))
     ]
+    .width(Fill)
+    .align_x(dir::start())
     .height(HINT_H);
     let panel = column![top, buttons, hint].spacing(PANEL_GAP);
     let panel = surface(Material::Widget, radius::DROPDOWN, panel)
@@ -755,6 +757,29 @@ impl canvas::Program<Msg> for Outline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Wayland's pop-up corner (Copy / Save / Done / Cancel, the count, the
+    /// hints, the whole-screen tip) in English and Arabic, both themes.
+    #[test]
+    fn the_popup_matches_its_golden_images() {
+        use crate::ui::kit::testing::golden;
+        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        let mut failed = Vec::new();
+        for ar in [false, true] {
+            let _ar = ar.then(crate::ui::kit::testing::arabic);
+            for theme in [&SAPPHIRE, &DAYLIGHT] {
+                themes::set(theme);
+                let file = format!("long-popup{}-{}", if ar { "-ar" } else { "" }, theme.id);
+                let size = Size::new(520.0, 190.0);
+                failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                    popup_view(None, (3240, false, false), None, false, true, true)
+                        .map(|_| Msg::Cancel)
+                }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
 
     const SCREEN: Size = Size::new(1280.0, 720.0);
 
