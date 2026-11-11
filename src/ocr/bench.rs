@@ -246,6 +246,40 @@ fn score(p: &Page, blocks: &[TextBlock]) -> Value {
     })
 }
 
+/// How well a recognizer for `script` read `boxes` lines: the share of
+/// lines it read at all, times their mean confidence (weighted by length),
+/// times the share of its letters in its own script. A model shown a script
+/// it doesn't know reads few lines, or reads them unsure; one whose list
+/// also has Latin letters (all of them) reads Latin text well, but then it
+/// is Latin. Measured (`translate::tests::languages_end_to_end`): the
+/// English model on Arabic lines read none (0.0), on Russian 1 of 2 at 0.88
+/// (0.44); the Arabic model on French at 0.98, but in Latin letters (0.0);
+/// each model on its own script 0.97-1.0.
+// ponytail: a threshold on the model's own confidence; a script classifier
+// if it misfires.
+fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
+    if boxes == 0 {
+        return 1.0; // no text: nothing to read better
+    }
+    let letters = blocks
+        .iter()
+        .flat_map(|b| b.text.chars())
+        .filter(|c| c.is_alphabetic());
+    let (mine, all) = letters.fold((0, 0), |(m, a), c| (m + script.has(c) as usize, a + 1));
+    let own = if all == 0 {
+        1.0
+    } else {
+        mine as f32 / all as f32
+    };
+    let chars = |b: &TextBlock| b.text.chars().count().max(1) as f32;
+    let n: f32 = blocks.iter().map(chars).sum();
+    let mean = blocks.iter().map(|b| b.confidence * chars(b)).sum::<f32>() / n.max(1.0);
+    mean * own * blocks.len() as f32 / boxes as f32
+}
+
+/// The second reader kept a line read at least this well (before #169).
+const OTHER_QUALITY: f32 = 0.6;
+
 fn index(id: &str) -> usize {
     models::RECOGNIZERS.iter().position(|r| r.id == id).unwrap()
 }
@@ -594,7 +628,7 @@ fn screen_text_corpus() {
     let load_ms = t.elapsed().as_secs_f64() * 1e3;
     let mut rec_ms = Vec::new();
     for id in ["en", "latin", "arabic"] {
-        e.rec = None;
+        e.recs.clear();
         let t = Instant::now();
         e.recognizer(index(id)).unwrap();
         rec_ms.push((id, t.elapsed().as_secs_f64() * 1e3));

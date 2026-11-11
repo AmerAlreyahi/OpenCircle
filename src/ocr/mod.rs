@@ -23,7 +23,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::config::TextReader;
-use crate::translate::lang::Script;
+use crate::translate::lang::{self, Script};
 
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
@@ -386,47 +386,29 @@ fn index(rec: &models::Recognizer) -> usize {
         .unwrap_or(0)
 }
 
-/// How well a recognizer for `script` read `boxes` lines: the share of
-/// lines it read at all, times their mean confidence (weighted by length),
-/// times the share of its letters in its own script. A model shown a script
-/// it doesn't know reads few lines, or reads them unsure; one whose list
-/// also has Latin letters (all of them) reads Latin text well, but then it
-/// is Latin. Measured (`translate::tests::languages_end_to_end`): the
-/// English model on Arabic lines read none (0.0), on Russian 1 of 2 at 0.88
-/// (0.44); the Arabic model on French at 0.98, but in Latin letters (0.0);
-/// each model on its own script 0.97-1.0.
-// ponytail: a threshold on the model's own confidence; a script classifier
-// if it misfires.
-fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
-    if boxes == 0 {
-        return 1.0; // no text: nothing to read better
-    }
-    let letters = blocks
-        .iter()
-        .flat_map(|b| b.text.chars())
-        .filter(|c| c.is_alphabetic());
+/// The share of `text`'s letters in `script` (0 without letters).
+fn share(text: &str, script: Script) -> f32 {
+    let letters = text.chars().filter(|c| c.is_alphabetic());
     let (mine, all) = letters.fold((0, 0), |(m, a), c| (m + script.has(c) as usize, a + 1));
-    let own = if all == 0 {
-        1.0
-    } else {
-        mine as f32 / all as f32
+    mine as f32 / all.max(1) as f32
+}
+
+/// `b`'s middle is in `k` (boxes: x, y, w, h).
+fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
+    let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+    (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
+}
+
+/// Of `strips`, those that own the middle of one of `lines`.
+fn owning(strips: Vec<(u32, u32)>, lines: &[[f32; 4]]) -> Vec<(u32, u32)> {
+    let owns = |&(a, b): &(u32, u32)| {
+        (lines.iter()).any(|l| (a as f32..b as f32).contains(&(l[1] + l[3] / 2.0)))
     };
-    let chars = |b: &TextBlock| b.text.chars().count().max(1) as f32;
-    let n: f32 = blocks.iter().map(chars).sum();
-    let mean = blocks.iter().map(|b| b.confidence * chars(b)).sum::<f32>() / n.max(1.0);
-    mean * own * blocks.len() as f32 / boxes as f32
+    strips.into_iter().filter(owns).collect()
 }
 
 /// Text lines' boxes (x, y, w, h; image px) and the size detection ran at.
 type Detected = (Vec<[f32; 4]>, (u32, u32));
-
-/// The second reader keeps a line read at least this well: lower than
-/// `AUTO_QUALITY` (Arabic with harakat reads at ~0.77), safe since a line
-/// in another script scores ~0 (its letters aren't the recognizer's).
-const OTHER_QUALITY: f32 = 0.6;
-
-/// Below this `quality`, `Auto` tries the other recognizers.
-const AUTO_QUALITY: f32 = 0.8;
 
 /// The Arabic model reads glyphs left to right; PaddleOCR reverses its
 /// output (`pred_reverse`): runs of Latin letters, digits, `:*./%+-` and
@@ -461,10 +443,15 @@ pub struct Engine {
     dir: PathBuf,
     det: TextDetectionPredictor,
     ort: OrtSessionConfig,
-    /// The loaded recognizer (one at a time: another script replaces it).
-    rec: Option<(usize, TextRecognitionPredictor)>,
-    /// `Auto`'s first try: the last recognizer that read well.
+    /// The loaded recognizers, the last used last: two at most (a page read
+    /// line by line takes a Latin and a non-Latin one; a third replaces the
+    /// one used longest ago).
+    recs: Vec<(usize, TextRecognitionPredictor)>,
+    /// `Auto`'s first try: the recognizer that read most lines last time.
     auto: usize,
+    /// The last Latin and non-Latin recognizers that read most lines.
+    latin: usize,
+    other: Option<usize>,
 }
 
 impl Engine {
@@ -506,15 +493,22 @@ impl Engine {
             dir: models.into(),
             det,
             ort,
-            rec: None,
+            recs: Vec::new(),
             auto: 0,
+            latin: 0,
+            other: None,
         })
     }
 
-    /// Recognizer `i`, loaded (the previous one is freed first).
+    /// Recognizer `i`, loaded (`recs`).
     fn recognizer(&mut self, i: usize) -> Result<&TextRecognitionPredictor, OcrError> {
-        if self.rec.as_ref().is_none_or(|(n, _)| *n != i) {
-            self.rec = None;
+        if let Some(k) = self.recs.iter().position(|(n, _)| *n == i) {
+            let rec = self.recs.remove(k);
+            self.recs.push(rec);
+        } else {
+            if self.recs.len() >= 2 {
+                self.recs.remove(0); // freed before the next one loads
+            }
             let files = models::RECOGNIZERS[i];
             if !models::installed(files) {
                 let what = format!("the {} text-recognition model", files.script);
@@ -525,9 +519,9 @@ impl Engine {
                 .with_ort_config(self.ort.clone())
                 .build(self.dir.join(files.model.name))
                 .map_err(engine_err)?;
-            self.rec = Some((i, rec));
+            self.recs.push((i, rec));
         }
-        Ok(&self.rec.as_ref().expect("just loaded").1)
+        Ok(&self.recs.last().expect("just loaded").1)
     }
 
     /// Loads the recognizer `read` starts with (the engine is loaded): the
@@ -563,35 +557,172 @@ impl Engine {
     ) -> Result<Vec<TextBlock>, OcrError> {
         let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
-        let first = match read {
-            Read::One(i) => i,
-            Read::Auto => self.auto,
-        };
         let rows = rows.map(|(top, bottom)| (top as f32, bottom as f32));
-        let (boxes, (dw, dh)) = self.lines_for(first, &img, rows)?;
-        let n = boxes.len();
-        let q =
-            |i: usize, blocks: &[TextBlock]| quality(blocks, n, models::RECOGNIZERS[i].script());
+        let Read::One(i) = read else {
+            return self.per_line(&img, rows, &[], true);
+        };
+        let (boxes, (dw, dh)) = self.lines_for(i, &img, rows)?;
         let detected = start.elapsed();
-        let mut best = (first, self.read_lines(first, &img, &boxes)?);
-        if read == Read::Auto && q(first, &best.1) < AUTO_QUALITY {
-            for i in 0..models::RECOGNIZERS.len() {
-                if i == first || !models::installed(models::RECOGNIZERS[i]) {
-                    continue;
-                }
-                let other = self.read_lines(i, &img, &boxes)?;
-                if q(i, &other) > q(best.0, &best.1) {
-                    best = (i, other);
-                }
-            }
-            self.auto = best.0;
-        }
+        let lines = self.read_lines(i, &img, &boxes)?;
         crate::log!(
-            "[opencircle] ocr {width}x{height}: detect at {dw}x{dh} {} ms, {n} lines read in {} ms",
+            "[opencircle] ocr {width}x{height}: detect at {dw}x{dh} {} ms, {} lines read in {} ms",
             detected.as_millis(),
+            boxes.len(),
             (start.elapsed() - detected).as_millis()
         );
-        Ok(reading_order(best.1, models::RECOGNIZERS[best.0].rtl()))
+        Ok(reading_order(lines, models::RECOGNIZERS[i].rtl()))
+    }
+
+    /// The lines of `img` whose middle is in `rows` (all for `None`) and not
+    /// in a `known` box, each read by the reader that suits it (#169; `Auto`
+    /// read the whole page with one, then with every other below 0.8
+    /// `quality`). The reader that read most lines last time reads first. A
+    /// Latin reading that isn't real words (`lang::real_lines`), and every
+    /// line a Latin reader didn't read, go to the non-Latin readers (their
+    /// lines found again at full size), each reading only what the one
+    /// before left; one that reads a line in its own script (3 letters in
+    /// 10: a mixed Arabic line stays Arabic) keeps it. What none keeps is a
+    /// Latin line: the Latin reader's if `latin`, else dropped (Windows OCR
+    /// read it: main mode's and translate's second reader).
+    fn per_line(
+        &mut self,
+        img: &RgbImage,
+        rows: Option<(f32, f32)>,
+        known: &[[f32; 4]],
+        latin: bool,
+    ) -> Result<Vec<TextBlock>, OcrError> {
+        let start = std::time::Instant::now();
+        let h = img.height();
+        let installed = |i: usize| models::installed(models::RECOGNIZERS[i]);
+        let script = |i: usize| models::RECOGNIZERS[i].script();
+        let mut others: Vec<usize> = (0..models::RECOGNIZERS.len())
+            .filter(|&i| script(i) != Script::Latin && installed(i))
+            .collect();
+        others.sort_by_key(|&i| Some(i) != self.other); // the last winner first
+        let latin_reader = [self.latin, 0]
+            .into_iter()
+            .find(|&i| installed(i) && script(i) == Script::Latin)
+            .filter(|_| latin);
+        let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
+        let mut kept: Vec<(usize, TextBlock)> = Vec::new();
+        // Latin readings not kept: a line no other reader keeps keeps it
+        let mut fallback: Vec<TextBlock> = Vec::new();
+        let latin_first =
+            latin_reader.filter(|_| script(self.auto) == Script::Latin || others.is_empty());
+        let full: Vec<(u32, u32)> = match (latin_first, known.is_empty()) {
+            (Some(l), _) => {
+                let (boxes, _) = self.lines_for(l, img, rows)?;
+                let boxes: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
+                let read = self.read_each(l, img, &boxes)?;
+                let texts: Vec<&str> = (read.iter())
+                    .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
+                    .collect();
+                let real = lang::real_lines(&texts);
+                let mut left = Vec::new();
+                for ((b, r), real) in boxes.iter().zip(read).zip(real) {
+                    match r {
+                        Some(r) if real => kept.push((l, r)),
+                        r => {
+                            left.push(*b);
+                            fallback.extend(r);
+                        }
+                    }
+                }
+                owning(strips(h, rows), &left)
+            }
+            // found shrunk first (cheap): only the strips with lines left
+            // are found again at full size
+            (None, false) => {
+                let (boxes, _) = self.detect(img, img.width(), h)?;
+                let left: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
+                owning(strips(h, rows), &left)
+            }
+            (None, true) => strips(h, rows),
+        };
+        let first = kept.len();
+        let inside = |b: &[f32; 4]| {
+            let middle = b[1] + b[3] / 2.0;
+            rows.is_none_or(|(top, bottom)| (top..bottom).contains(&middle))
+        };
+        let mut boxes: Vec<[f32; 4]> = match others.is_empty() || full.is_empty() {
+            true => Vec::new(),
+            false => self.detect_strips(img, &full)?,
+        };
+        boxes.retain(|b| inside(b) && unknown(b) && !kept.iter().any(|(_, k)| holds(&k.bounds, b)));
+        let mut last: Vec<Option<TextBlock>> = vec![None; boxes.len()];
+        for &o in &others {
+            if boxes.is_empty() {
+                break;
+            }
+            let read = self.read_each(o, img, &boxes)?;
+            let (mut rest, mut rest_last) = (Vec::new(), Vec::new());
+            for ((b, r), before) in boxes.into_iter().zip(read).zip(last) {
+                match r {
+                    Some(r) if share(&r.text, script(o)) >= 0.3 => kept.push((o, r)),
+                    r => {
+                        rest.push(b);
+                        rest_last.push(r.or(before));
+                    }
+                }
+            }
+            (boxes, last) = (rest, rest_last);
+        }
+        let other = kept.len() - first;
+        // Latin lines: the Latin reader's reading from before (its own
+        // box), else read now; no letters: the other script's reading
+        if let Some(l) = latin_reader {
+            let mut need = Vec::new();
+            for (b, before) in boxes.into_iter().zip(last) {
+                let over = |f: &TextBlock| holds(&f.bounds, &b) || holds(&b, &f.bounds);
+                match fallback.iter().position(over) {
+                    Some(k) => {
+                        let f = fallback.swap_remove(k);
+                        kept.push((l, TextBlock { bounds: b, ..f }));
+                    }
+                    None => need.push((b, before)),
+                }
+            }
+            let boxes: Vec<[f32; 4]> = need.iter().map(|(b, _)| *b).collect();
+            let read = self.read_each(l, img, &boxes)?;
+            let letters = |t: &TextBlock| t.text.chars().any(char::is_alphabetic);
+            for ((_, before), r) in need.into_iter().zip(read) {
+                match (r.filter(letters), before) {
+                    (Some(r), _) => kept.push((l, r)),
+                    (None, Some(b)) => kept.push((others[0], b)),
+                    (None, None) => {}
+                }
+            }
+            // a line no reader found again keeps its Latin reading
+            for f in fallback {
+                if !kept.iter().any(|(_, k)| holds(&k.bounds, &f.bounds)) {
+                    kept.push((l, f));
+                }
+            }
+        }
+        let mut count = vec![0usize; models::RECOGNIZERS.len()];
+        kept.iter().for_each(|(i, _)| count[*i] += 1);
+        let most = (0..count.len()).filter(|&i| count[i] > 0);
+        if let Some(best) = most.max_by_key(|&i| count[i]) {
+            self.auto = best;
+            match script(best) {
+                Script::Latin => self.latin = best,
+                _ => self.other = Some(best),
+            }
+        }
+        crate::log!(
+            "[opencircle] ocr per line {}x{h}: {} lines kept ({first} Latin first, {other} another script, {} Latin after), {} strips at full size, {} known, {} ms",
+            img.width(),
+            kept.len(),
+            kept.len() - first - other,
+            full.len(),
+            known.len(),
+            start.elapsed().as_millis()
+        );
+        let rtl = models::RECOGNIZERS[self.auto].rtl();
+        Ok(reading_order(
+            kept.into_iter().map(|(_, b)| b).collect(),
+            rtl,
+        ))
     }
 
     /// The text lines' boxes in `img` (`width` x `height`; image px), and
@@ -686,13 +817,9 @@ impl Engine {
     }
 
     /// Main mode's second reader: the lines Windows OCR didn't read (#62),
-    /// each in the script that reads it best. Detection finds the lines; one
-    /// whose middle is in a `known` box (Windows OCR's lines; image px) is
-    /// skipped; the rest are read by every installed non-Latin recognizer
-    /// (Windows OCR reads Latin) and kept where one reads it well
-    /// (`quality` >= `OTHER_QUALITY` for that line alone).
-    // ponytail: each leftover line read by each installed script; a script
-    // classifier if many scripts are installed.
+    /// in their own scripts (`per_line`): one whose middle is in a `known`
+    /// box (Windows OCR's lines; image px) is skipped; a line no non-Latin
+    /// reader reads in its script is left to Windows OCR.
     pub fn recognize_except(
         &mut self,
         rgba: &[u8],
@@ -700,62 +827,31 @@ impl Engine {
         height: u32,
         known: &[[f32; 4]],
     ) -> Result<Vec<TextBlock>, OcrError> {
-        let start = std::time::Instant::now();
         let img = to_rgb(rgba, width, height)?;
-        let inside = |b: &[f32; 4], k: &[f32; 4]| {
-            let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
-            (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
-        };
-        let unknown = |b: &[f32; 4]| !known.iter().any(|k| inside(b, k));
-        // found shrunk (cheap); the rows with lines left are found again at
-        // full size (the non-Latin readers' size, `lines_for`)
-        let (boxes, _) = self.detect(&img, width, height)?;
-        let left: Vec<[f32; 4]> = boxes.into_iter().filter(unknown).collect();
-        let owning = |&(a, b): &(u32, u32)| {
-            (left.iter()).any(|l| (a as f32..b as f32).contains(&(l[1] + l[3] / 2.0)))
-        };
-        let full: Vec<(u32, u32)> = strips(height, None).into_iter().filter(owning).collect();
-        let left: Vec<[f32; 4]> = (self.detect_strips(&img, &full)?.into_iter())
-            .filter(unknown)
-            .collect();
-        let mut best: Vec<(f32, TextBlock)> = Vec::new();
-        for i in 0..models::RECOGNIZERS.len() {
-            let rec = models::RECOGNIZERS[i];
-            if left.is_empty() || rec.script() == Script::Latin || !models::installed(rec) {
-                continue;
-            }
-            for block in self.read_lines(i, &img, &left)? {
-                let q = quality(std::slice::from_ref(&block), 1, rec.script());
-                if q < OTHER_QUALITY {
-                    continue;
-                }
-                match best.iter_mut().find(|(_, b)| b.bounds == block.bounds) {
-                    Some(old) if old.0 >= q => {}
-                    Some(old) => *old = (q, block),
-                    None => best.push((q, block)),
-                }
-            }
-        }
-        crate::log!(
-            "[opencircle] ocr second reader: {} of {} lines left, {} read, {} ms",
-            left.len(),
-            known.len() + left.len(),
-            best.len(),
-            start.elapsed().as_millis()
-        );
-        Ok(reading_order(
-            best.into_iter().map(|(_, b)| b).collect(),
-            false,
-        ))
+        self.per_line(&img, None, known, false)
     }
 
-    /// Recognizer `i` on the `boxes` of `img`.
+    /// Recognizer `i` on the `boxes` of `img`: the lines it read.
     fn read_lines(
         &mut self,
         i: usize,
         img: &RgbImage,
         boxes: &[[f32; 4]],
     ) -> Result<Vec<TextBlock>, OcrError> {
+        Ok(self
+            .read_each(i, img, boxes)?
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    /// Recognizer `i` on each of the `boxes` of `img` (`None`: nothing read).
+    fn read_each(
+        &mut self,
+        i: usize,
+        img: &RgbImage,
+        boxes: &[[f32; 4]],
+    ) -> Result<Vec<Option<TextBlock>>, OcrError> {
         let rtl = models::RECOGNIZERS[i].rtl();
         // long lines are read in pieces (`cut`), each piece's line noted
         let (mut pieces, mut owner) = (Vec::new(), Vec::new());
@@ -786,7 +882,7 @@ impl Engine {
             }
         }
         let joined = (read.into_iter().zip(boxes))
-            .filter_map(|(parts, b)| joined(parts, *b, rtl))
+            .map(|(parts, b)| joined(parts, *b, rtl))
             .collect();
         Ok(joined)
     }
@@ -920,24 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_quality_counts_unread_lines() {
-        let b = |t: &str, c: f32| TextBlock {
-            text: t.into(),
-            bounds: [0.0; 4],
-            confidence: c,
-        };
-        let latin = Script::Latin;
-        assert_eq!(quality(&[], 0, latin), 1.0, "no text: nothing to improve");
-        assert_eq!(quality(&[], 3, latin), 0.0, "nothing read");
-        assert!(quality(&[b("Hacpoκ", 0.88)], 2, latin) < AUTO_QUALITY);
-        assert!(quality(&[b("Quit", 0.99), b("New game", 0.97)], 2, latin) > AUTO_QUALITY);
-        assert!(
-            quality(&[b("xq", 0.5), b("zz", 0.6)], 2, latin) < AUTO_QUALITY,
-            "unsure"
-        );
-        // the Arabic model reading Latin text: sure, but not Arabic
-        assert!(quality(&[b("Nouvelle partie", 0.98)], 1, Script::Arabic) < AUTO_QUALITY);
-        assert!(quality(&[b("القائمة 2", 0.97)], 1, Script::Arabic) > AUTO_QUALITY);
+    fn readers_round_trip_on_the_wire() {
         // the wire byte round-trips
         for r in [
             Read::Auto,
@@ -1065,6 +1144,33 @@ mod tests {
             "right to left"
         );
         assert_eq!(joined(vec![], line, false), None);
+    }
+
+    /// #169: a line read in its own script stays with that reader, a mixed
+    /// Arabic line too; one in Latin letters goes on to the Latin reader.
+    #[test]
+    fn lines_are_classified_by_the_letters_read() {
+        let arabic = |t: &str| share(t, Script::Arabic) >= 0.3;
+        assert!(arabic("القائمة الرئيسية"));
+        assert!(arabic(
+            "يعمل نظام التشغيل Windows 11 على أجهزة الحاسوب الحديثة"
+        ));
+        assert!(
+            !arabic("Windows 11 Office Teams"),
+            "Latin read by the Arabic reader"
+        );
+        assert!(!arabic("٢٠٢٤ 12,450"), "digits only: no letters");
+        assert!(!arabic(""));
+        assert_eq!(share("Новая game", Script::Cyrillic), 5.0 / 9.0);
+        // the strips to read again at full size: those owning a line left
+        let lines = [[0.0, 300.0, 50.0, 20.0], [0.0, 900.0, 50.0, 20.0]];
+        assert_eq!(
+            owning(strips(1080, None), &lines),
+            [(256, 512), (768, 1024)]
+        );
+        assert!(owning(strips(1080, None), &[]).is_empty());
+        assert!(holds(&[0.0, 0.0, 100.0, 20.0], &[40.0, 5.0, 10.0, 10.0]));
+        assert!(!holds(&[0.0, 0.0, 100.0, 20.0], &[95.0, 5.0, 20.0, 10.0]));
     }
 
     /// #169: full-size detection runs in strips of `STRIP` rows; only those

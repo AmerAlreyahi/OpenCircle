@@ -265,6 +265,109 @@ pub fn common<'a>(texts: impl IntoIterator<Item = &'a str>) -> (usize, usize) {
     n
 }
 
+/// `w` (lower case) is a common word of a `WORDS` language.
+fn common_word(w: &str) -> bool {
+    WORDS.iter().any(|(_, list, _, _)| list.contains(&w))
+}
+
+/// Short words besides the common ones (#169): a token of one or two
+/// letters is otherwise taken for noise ("l", "Jl").
+const SHORT_WORDS: &[&str] = &[
+    "a", "i", "o", "e", "à", "ô", "on", "an", "at", "as", "if", "no", "so", "up", "we", "my", "me",
+    "he", "us", "do", "go", "am", "ok", "ou", "si", "ne", "ni",
+];
+
+/// Words ending in "ll" (the Arabic article "ال" read as Latin letters
+/// ends in it: "acgugall", "oscluall").
+const LL_WORDS: &[&str] = &[
+    "all", "small", "hall", "wall", "call", "ball", "fall", "well", "will", "still", "full",
+    "shell", "install",
+];
+
+/// A token reads as a real word: letters only (an apostrophe or hyphen
+/// inside), lower case, Title or CAPS, a vowel, two letters at most only
+/// for a short word, no "ll" ending outside `LL_WORDS`.
+fn real_token(t: &str) -> bool {
+    let parts: Vec<&str> = t.split(['\'', '’', '-']).collect();
+    if !(parts.iter()).all(|p| !p.is_empty() && p.chars().all(char::is_alphabetic)) {
+        return false;
+    }
+    let letters: String = parts.concat();
+    let cased = letters.chars().all(char::is_lowercase)
+        || letters.chars().all(char::is_uppercase)
+        || letters.chars().skip(1).all(char::is_lowercase);
+    let w = letters.to_lowercase();
+    let vowel = w.chars().any(|c| "aeiouyàâäéèêëîïôöûùüœæáíóúñ".contains(c));
+    let short = w.chars().count() <= 2 && !SHORT_WORDS.contains(&w.as_str()) && !common_word(&w);
+    let ll = w.ends_with("ll") && !common_word(&w) && !LL_WORDS.contains(&w.as_str());
+    cased && vowel && !short && !ll
+}
+
+/// Whether a line reads as real words (`None`: no letters, digits and
+/// signs only): 8 in 10 of its tokens `real_token`, and one of them a common
+/// word or 4 letters long. `strict` (a screen that is mostly noise): it
+/// also needs a common word of 3 letters or more, or a real word of 6.
+fn real_line(text: &str, strict: bool) -> Option<bool> {
+    let tokens: Vec<&str> = (text.split_whitespace())
+        .map(|t| t.trim_matches(|c: char| ".,:;!?()[]{}\"'«»".contains(c)))
+        .collect();
+    let digits = |t: &str| t.chars().any(|c| c.is_ascii_digit());
+    let letters = |t: &str| t.chars().filter(|c| c.is_alphabetic()).count();
+    // a unit with a number ("15s", "40 km") is neither word nor noise
+    let unit = |i: usize| {
+        let t = tokens[i];
+        letters(t) <= 3 && (digits(t) || (i > 0 && digits(tokens[i - 1]) && letters(t) <= 2))
+    };
+    let words: Vec<&str> = (0..tokens.len())
+        .filter(|&i| letters(tokens[i]) > 0 && !unit(i))
+        .map(|i| tokens[i])
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let len = |t: &str| t.chars().count();
+    let common = |t: &str| common_word(&t.to_lowercase());
+    let real: Vec<bool> = words.iter().map(|t| real_token(t)).collect();
+    let good = real.iter().filter(|r| **r).count();
+    let pairs = || {
+        words
+            .iter()
+            .zip(&real)
+            .filter(|(_, r)| **r)
+            .map(|(t, _)| *t)
+    };
+    let mut ok = good * 10 >= words.len() * 8 && pairs().any(|t| len(t) >= 4 || common(t));
+    if ok && strict {
+        ok = words.iter().any(|t| common(t) && len(t) >= 3) || pairs().any(|t| len(t) >= 6);
+    }
+    Some(ok)
+}
+
+/// Which of one screen's `lines`, as an OCR read them in Latin letters, are
+/// real words, not another script read as Latin noise (#169: English
+/// Windows OCR read "ابحث في الموسوعة" as "awgall n"). No dictionary: word
+/// shapes (`real_line`), and where three lines in ten with letters aren't
+/// real (an Arabic page), only lines with a common word or a long real word
+/// count, and digits alone don't. Measured on the corpus' English stand-in
+/// (Arabic pages: 1116 noise lines; English and French pages: 285 lines):
+/// 70 noise lines pass, 28 real lines don't (`plain` let 57 % of the noise
+/// pass).
+// ponytail: word shapes and four languages' common words; a letter-trigram
+// model if noise from another Windows language gets through.
+pub fn real_lines(lines: &[&str]) -> Vec<bool> {
+    let first: Vec<Option<bool>> = lines.iter().map(|t| real_line(t, false)).collect();
+    let judged = first.iter().flatten().count();
+    let noise = first.iter().flatten().filter(|r| !**r).count();
+    let strict = judged > 0 && noise * 10 > judged * 3;
+    (lines.iter().zip(first))
+        .map(|(t, r)| match r {
+            None => !strict,
+            Some(true) if strict => real_line(t, true) == Some(true),
+            Some(r) => r,
+        })
+        .collect()
+}
+
 /// Which Latin-script language `texts` are in (`votes`); English when none
 /// stands out.
 fn latin(texts: &[&str]) -> &'static str {
@@ -423,6 +526,50 @@ fn spelled(text: &str, code: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #169: real words pass, another script read as Latin letters doesn't;
+    /// on a screen that is mostly noise only clear words count.
+    #[test]
+    fn real_lines_tell_words_from_noise() {
+        let page = [
+            "Lighthouse",
+            "Main page",
+            "Up to 40 km",
+            "15s",
+            "A lighthouse is a tower or other structure",
+            "Article Talk Read Edit History",
+            "2026",
+        ];
+        assert!(
+            real_lines(&page).iter().all(|r| *r),
+            "{:?}",
+            real_lines(&page)
+        );
+        let noise = [
+            "awgall n", "oscluall", "Jl", "lal", "2ly1", "(", "aàn", "KJI",
+        ];
+        assert!(
+            real_lines(&noise).iter().all(|r| !*r),
+            "{:?}",
+            real_lines(&noise)
+        );
+        // mostly noise: a plausible short word or digits don't pass, a
+        // common word or a long word does
+        let mixed = [
+            "l allo",
+            "gugall",
+            "Kuli",
+            "1",
+            "Talk",
+            "Translate page from Arabic?",
+            "Encyclopedia",
+        ];
+        assert_eq!(
+            real_lines(&mixed),
+            [false, false, false, false, false, true, true]
+        );
+        assert!(real_lines(&[]).is_empty());
+    }
 
     #[test]
     fn the_table_is_consistent() {
