@@ -76,7 +76,7 @@ pub fn row<'a, Message: 'a>(
 pub fn field_with<'a, Message: 'a>(
     field: impl Into<Element<'a, Message>>,
     buttons: impl IntoIterator<Item = Element<'a, Message>>,
-) -> iced::widget::Row<'a, Message> {
+) -> super::dir::DirRow<'a, Message> {
     let field: Element<'a, Message> = container(field).width(Fill).into();
     super::dir::row(std::iter::once(field).chain(buttons))
         .spacing(super::tokens::space::GAP)

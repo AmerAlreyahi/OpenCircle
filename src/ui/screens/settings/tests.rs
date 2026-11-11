@@ -2929,3 +2929,69 @@ fn every_page_in_arabic_matches_its_golden_image() {
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The Arabic pages with the longest row descriptions (Labs, General) at the
+/// smallest, the usual and a wide window, in Sapphire and Daylight: every
+/// wrapped line inside its column (with `no_text_is_drawn_past_its_box_on_any_page`).
+#[test]
+fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::kit::testing::golden;
+    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::screens::settings::state::MIN_WIDTH;
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        update(&mut s, Message::AppLanguage(Choice("ar")));
+        for section in [Section::Labs, Section::General] {
+            update(&mut s, Message::Section(section));
+            themes::set(theme);
+            for width in [MIN_WIDTH, WINDOW_SIZE.width, 1400.0] {
+                let slug = format!("{section:?}").to_lowercase();
+                let file = format!("settings-{slug}-ar-{width}-{}", theme.id);
+                let size = Size::new(width, WINDOW_SIZE.height);
+                failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// No text of any page is drawn past its own box, in English and in Arabic,
+/// at the smallest, the usual and a wide window (a wrapped Arabic line with a
+/// Latin name in it was wider than its column: its first words were cut off
+/// at the row's right edge, #37). Tall: every row on screen, none scrolled.
+#[test]
+fn no_text_is_drawn_past_its_box_on_any_page() {
+    use crate::app_language::{self, Choice, Lang};
+    use crate::ui::screens::settings::state::MIN_WIDTH;
+    let mut past = Vec::new();
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        s.draft.look.theme = LookTheme::Custom;
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        for section in shown {
+            update(&mut s, Message::Section(section));
+            for width in [MIN_WIDTH, WINDOW_SIZE.width, 1400.0] {
+                let size = Size::new(width, 3000.0);
+                let found = shot::drawn_past_their_box(view(&s), size);
+                if std::env::var_os("OPENCIRCLE_RENDER_DIR").is_some() {
+                    let name = format!("widths-{language}-{section:?}-{width}");
+                    let _ = shot::save(&name, view(&s), Size::new(width, 900.0));
+                }
+                past.extend(
+                    found
+                        .into_iter()
+                        .map(|f| format!("{language} {section:?} {width}: {f}")),
+                );
+            }
+        }
+    }
+    app_language::set(Lang::En);
+    assert!(past.is_empty(), "{past:#?}");
+}

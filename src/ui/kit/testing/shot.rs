@@ -538,6 +538,88 @@ pub fn out_of_reach<Message>(view: Element<'_, Message>, size: Size) -> Vec<Stri
     reach.lost
 }
 
+/// The texts of `view` laid out in `size` whose glyphs are drawn outside their
+/// own box, left or right (a wrapped line wider than its column: Arabic
+/// descriptions ran past their row's edge), with where.
+pub fn drawn_past_their_box<Message>(view: Element<'_, Message>, size: Size) -> Vec<String> {
+    use iced::advanced::widget::{Id, Operation};
+    struct Boxes(Vec<(Rectangle, String)>);
+    impl Operation for Boxes {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn text(&mut self, _: Option<&Id>, bounds: Rectangle, text: &str) {
+            self.0.push((bounds, text.to_string()));
+        }
+    }
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut boxes = Boxes(Vec::new());
+    ui.operate(&renderer, &mut boxes);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    ui.draw(
+        &mut renderer,
+        &Theme::Dark,
+        &style,
+        mouse::Cursor::Unavailable,
+    );
+    let mut past = Vec::new();
+    for layer in renderer.layers() {
+        let texts = (layer.text.iter())
+            .flat_map(|item| item.as_slice().iter().map(|t| (item.transformation(), t)));
+        for (moved, text) in texts {
+            let iced_tiny_skia::graphics::text::Text::Paragraph {
+                paragraph,
+                position,
+                transformation,
+                ..
+            } = text
+            else {
+                continue;
+            };
+            // where it lands on the window (a group's or a scroll's offset)
+            let position = *position * (moved * *transformation);
+            let Some(paragraph) = paragraph.upgrade() else {
+                continue;
+            };
+            let buffer = paragraph.buffer();
+            let content: Vec<&str> = buffer.lines.iter().map(|l| l.text()).collect();
+            let content = content.join("\n");
+            let glyphs = buffer.layout_runs().flat_map(|r| r.glyphs.iter());
+            let (lo, hi) = glyphs.fold((f32::MAX, f32::MIN), |(lo, hi), g| {
+                (lo.min(g.x), hi.max(g.x + g.w))
+            });
+            if lo > hi {
+                continue;
+            }
+            let (left, right) = (position.x + lo, position.x + hi);
+            // its own box: the text widget of that content whose top is nearest
+            // (a text is drawn from its box's top; a centred one within it)
+            let near = |b: &Rectangle| {
+                let off_y = (position.y - b.y).max(b.y - position.y - b.height).max(0.0);
+                off_y * 1000.0 + (b.center_x() - (left + right) / 2.0).abs()
+            };
+            // (none: drawn by another widget, e.g. a dropdown's value)
+            let Some((b, _)) = (boxes.0.iter())
+                .filter(|(b, t)| *t == content && near(b) < 1000.0)
+                .min_by(|a, b| near(&a.0).total_cmp(&near(&b.0)))
+            else {
+                continue;
+            };
+            if left < b.x - 0.5 || right > b.x + b.width + 0.5 {
+                past.push(format!(
+                    "{content:?}: drawn {left:.1}..{right:.1}, its box {:.1}..{:.1}",
+                    b.x,
+                    b.x + b.width
+                ));
+            }
+        }
+    }
+    past
+}
+
 /// Render and, when `OPENCIRCLE_RENDER_DIR` is set, save `<dir>/<name>.png`.
 /// Returns the pixels either way.
 pub fn save<Message>(name: &str, view: Element<'_, Message>, size: Size) -> Vec<u8> {

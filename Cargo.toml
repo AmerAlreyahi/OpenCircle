@@ -218,6 +218,11 @@ iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 # coming: a box drawn across two screens moved on the other screen only after
 # the drag (2 frames in a second's drag). "OpenCircle patch" in its src/lib.rs.
 iced_winit = { path = "vendor/iced_winit" }
+# cosmic-text 0.15.0 (iced's text engine) with one fix: a wrapped line broke only inside a run of
+# one direction, so the first word of the next run (a Latin name in an Arabic line, and back)
+# stayed on a full line, past the width: Arabic descriptions drawn past their column. "OpenCircle
+# patch" in its src/shape.rs. Still in 0.19; drop once upstream wraps at run boundaries.
+cosmic-text = { path = "vendor/cosmic-text" }
 # oar-ocr 0.10.1 with its zip dependency ^9.2 instead of ^8.6 (RUSTSEC-2026-0429, fixed in
 # zip 9). It only calls ZipArchive::new / by_name, unchanged in 9. "OpenCircle patch" in its
 # Cargo.toml. Drop when oar-ocr moves to zip 9.

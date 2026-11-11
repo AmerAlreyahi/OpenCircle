@@ -26,6 +26,8 @@ pub struct Item<'a> {
 const GAP: f32 = 2.0;
 /// An item's side padding.
 const ITEM_PAD: f32 = 12.0;
+/// What an Arabic item's end pad gives its label.
+const END_GIVE: f32 = 2.0;
 /// The footer: 10.5 px at half strength, 8 px under its hairline and at its sides.
 const FOOTER: f32 = 10.5;
 const FOOTER_PAD: f32 = 8.0;
@@ -104,7 +106,13 @@ fn nav_item<'a, Message: Clone + 'a>(
     button(line)
         .width(Fill)
         .height(size::NAV_ITEM)
-        .padding([0.0, ITEM_PAD])
+        // Arabic labels are 1 px larger: the longest ("Ask AI") needs 2 px of the
+        // end pad (it was drawn 2 px past its room); the start edge stays.
+        .padding(super::dir::pad(Padding {
+            left: ITEM_PAD,
+            right: ITEM_PAD - if super::dir::rtl() { END_GIVE } else { 0.0 },
+            ..Padding::ZERO
+        }))
         .on_press(on_press)
         .style(move |_, status| {
             let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
