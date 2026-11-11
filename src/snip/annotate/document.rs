@@ -424,6 +424,47 @@ pub fn render(doc: &Document) -> Crop {
     }
 }
 
+/// The capture under the drawing: the view's pixels with no annotation on them
+/// (what Copy text and Translate read, `actions::snip_more`).
+pub fn clean(doc: &Document) -> Crop {
+    let view = doc.view();
+    let pm = doc.paint(&[], int_rect(view, view), None);
+    let rgba = pm
+        .pixels()
+        .iter()
+        .flat_map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        })
+        .collect();
+    Crop {
+        width: pm.width(),
+        height: pm.height(),
+        rgba,
+    }
+}
+
+/// What the user hid (Blur, Redact, and what Spotlight dims), in image px:
+/// text there must never leave the app.
+pub fn hidden(doc: &Document) -> crate::actions::snip_more::Hidden {
+    let mut out = crate::actions::snip_more::Hidden::default();
+    for item in &doc.items {
+        match item.shape {
+            Shape::Blur { .. } | Shape::Redact { .. } => out.boxes.push(item.bounds()),
+            Shape::Spotlight { .. } => out.lit.push(item.bounds()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `hidden` in `clean`'s own px (its top-left pixel is the view's).
+pub fn hidden_in_clean(doc: &Document) -> crate::actions::snip_more::Hidden {
+    let view = doc.view();
+    let origin = Point::new(view.x.floor(), view.y.floor());
+    hidden(doc).shifted(Point::ORIGIN - origin)
+}
+
 /// `r` in whole pixels (rounded outwards), inside `within`, at least 1x1.
 pub fn int_rect(r: Rectangle, within: Rectangle) -> IntRect {
     let x0 = r.x.max(within.x).floor();

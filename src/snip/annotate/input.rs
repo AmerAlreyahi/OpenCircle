@@ -154,6 +154,8 @@ impl Annotator {
             match key {
                 Key::Named(Named::ArrowUp) => return Some(Message::MenuStep(true)),
                 Key::Named(Named::ArrowDown) => return Some(Message::MenuStep(false)),
+                Key::Named(Named::Home) => return Some(Message::MenuEdge(false)),
+                Key::Named(Named::End) => return Some(Message::MenuEdge(true)),
                 Key::Named(Named::Enter | Named::Space) => return Some(Message::Activate),
                 _ => {}
             }

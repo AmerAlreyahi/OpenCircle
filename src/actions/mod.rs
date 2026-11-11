@@ -10,6 +10,7 @@ pub mod save;
 pub mod search_in_browser;
 pub mod share;
 pub mod snip;
+pub mod snip_more;
 pub mod text;
 pub mod translate;
 

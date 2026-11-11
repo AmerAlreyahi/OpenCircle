@@ -46,7 +46,9 @@ mod tests;
 mod text;
 
 pub use document::rounded as rounded_path;
-pub use document::{Document, Edit, Image, Item, Shape, render, span};
+pub use document::{
+    Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
+};
 pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
@@ -389,6 +391,10 @@ pub enum Message {
     UndoClick,
     Delete,
     Copy,
+    /// More: Copy text, Ask AI, Translate on the area (`actions::snip_more`).
+    CopyText,
+    AskAi,
+    Translate,
     /// The toolbar's Scrolling capture button.
     Scroll,
     /// Snip's toolbar: the colour picker or the ruler on the frozen screen.
@@ -415,6 +421,8 @@ pub enum Message {
     Focus(bool),
     /// The More menu's arrow keys: the next row (`true`: the one before).
     MenuStep(bool),
+    /// Home / End in More: the first (`false`) or last (`true`) live row.
+    MenuEdge(bool),
     Activate,
 }
 
@@ -435,6 +443,11 @@ pub enum Output {
     /// The flattened image, for the Copy / Save actions.
     Copy(Crop),
     Save(Crop),
+    /// More's rows: read the clean capture's text and copy it; ask the AI
+    /// about the annotated picture (this one); translate the clean capture.
+    CopyText,
+    AskAi(Crop),
+    Translate,
     /// Scroll and stitch the area under the editor (Snip, in place only).
     Scroll,
     /// Leave for a screen tool (Snip; Esc there comes back to the area).
@@ -506,6 +519,8 @@ pub struct Annotator {
     pub(crate) undid: bool,
     /// The More menu's row the arrow keys are on.
     pub row: Option<usize>,
+    /// What More's text rows show (the host keeps it current).
+    pub more: crate::actions::snip_more::Info,
     /// New shapes, arrows and callouts get an outline / rectangles and
     /// ellipses a tint (both off by default, owner 2026-10-31).
     pub(crate) outline: bool,
@@ -610,6 +625,7 @@ impl Annotator {
             last,
             undid: false,
             row: None,
+            more: Default::default(),
             outline: saved.outline.unwrap_or(false),
             fill: saved.fill.unwrap_or(false),
             text_size: saved.text_size.map_or(width.font(), f32::from),
@@ -715,6 +731,7 @@ impl Annotator {
                 | Message::Shift(_)
                 | Message::Focus(_)
                 | Message::MenuStep(_)
+                | Message::MenuEdge(_)
                 | Message::Activate
         ) {
             self.undid = false;
@@ -926,11 +943,27 @@ impl Annotator {
                     _ => Output::Pin(flat),
                 });
             }
+            Message::CopyText => {
+                self.commit();
+                return Some(Output::CopyText);
+            }
+            Message::Translate => {
+                self.commit();
+                return Some(Output::Translate);
+            }
+            Message::AskAi => {
+                self.commit();
+                return Some(Output::AskAi(render(&self.doc)));
+            }
             Message::Back => {
                 self.commit();
                 return Some(Output::Back);
             }
-            Message::Grab | Message::Focus(_) | Message::MenuStep(_) | Message::Activate => {}
+            Message::Grab
+            | Message::Focus(_)
+            | Message::MenuStep(_)
+            | Message::MenuEdge(_)
+            | Message::Activate => {}
             Message::Nudge(arrow, keys) if self.movable => {
                 self.commit();
                 self.nudged = true;

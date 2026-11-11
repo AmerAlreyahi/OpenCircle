@@ -3278,3 +3278,66 @@ fn the_live_area_snaps_to_a_window_the_pointer_is_level_with() {
     let r = e.doc.crop.unwrap();
     assert_eq!(r.x + r.width, 130.0);
 }
+
+// ---- More: which picture each row gets ------------------------------------------
+
+/// Ask AI gets the annotated picture (what Copy would copy); Copy text and
+/// Translate get the capture under the drawing, with Blur / Redact painted out
+/// (so a hidden secret has nothing left to read), in the cropped view's own px.
+#[test]
+fn more_rows_get_the_picture_decided_for_them() {
+    use crate::actions::snip_more;
+    let redact = item(Shape::Redact {
+        a: pt(30.0, 20.0),
+        b: pt(60.0, 40.0),
+    });
+    let arrow = item(Shape::Rect {
+        a: pt(5.0, 5.0),
+        b: pt(25.0, 15.0),
+    });
+    let mut e = Annotator::new(checker(100, 80), 1.0);
+    for i in [redact, arrow] {
+        let n = e.doc.items.len();
+        e.doc.exec(Edit::Insert(n, i));
+    }
+    // Ask AI: the flattened picture, drawing and redaction on it
+    let Some(Output::AskAi(asked)) = e.update(Message::AskAi) else {
+        panic!("Ask AI answers with the annotated picture");
+    };
+    let flat = render(&e.doc);
+    assert_eq!(asked.rgba, flat.rgba);
+    // Copy text / Translate: the clean capture
+    let plain = render(&doc_with(checker(100, 80), vec![]));
+    let clean = super::clean(&e.doc);
+    assert_eq!(clean.rgba, plain.rgba, "nothing drawn on it");
+    assert_ne!(clean.rgba, flat.rgba);
+    assert!(matches!(
+        e.update(Message::CopyText),
+        Some(Output::CopyText)
+    ));
+    assert!(matches!(
+        e.update(Message::Translate),
+        Some(Output::Translate)
+    ));
+    // the redacted part is hidden (the rectangle's own box, in image px)...
+    let hidden = super::hidden(&e.doc);
+    assert!(hidden.boxes.len() == 1 && hidden.covers(45.0, 30.0) && !hidden.covers(10.0, 10.0));
+    // ...and painted out of what is read
+    let mut read = clean.clone();
+    snip_more::mask(&mut read, &super::hidden_in_clean(&e.doc));
+    assert_eq!(px(&read, 45, 30), [255, 255, 255, 255]);
+    assert_eq!(
+        px(&read, 10, 10),
+        px(&plain, 10, 10),
+        "the rest is as captured"
+    );
+    // a cropped view: the hidden part moves with the crop's origin
+    e.doc.crop = Some(Rectangle::new(pt(20.0, 10.0), Size::new(60.0, 50.0)));
+    let (clean, hidden) = (super::clean(&e.doc), super::hidden_in_clean(&e.doc));
+    assert_eq!((clean.width, clean.height), (60, 50));
+    assert!(
+        hidden.covers(25.0, 20.0),
+        "(45, 30) in the image is (25, 20) here"
+    );
+    assert!(!hidden.covers(5.0, 5.0));
+}
