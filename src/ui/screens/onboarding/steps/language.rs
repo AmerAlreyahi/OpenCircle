@@ -15,7 +15,7 @@ use crate::t;
 use crate::translate::lang::{self, AUTO};
 use crate::ui::kit::card::card;
 use crate::ui::kit::dir;
-use crate::ui::kit::text::{sub, text};
+use crate::ui::kit::text::{paragraph, sub, text};
 use crate::ui::kit::tokens::{Role, space};
 use crate::ui::screens::model_download::mb;
 
@@ -25,17 +25,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         card(
             column![
                 text(Role::ROW_TITLE, t!(o_lang)),
-                sub(Role::ROW_DESC, t!(o_lang_desc)).line_height(dir::line(1.5)),
+                paragraph(sub(Role::ROW_DESC, t!(o_lang_desc)).line_height(dir::line(1.5))),
             ]
             .spacing(space::GAP / 2.0)
             .align_x(dir::start())
         ),
-        // (in a column: a wrapped right-to-left paragraph straight in a
-        // container was drawn past its left edge)
-        card(
-            column![sub(Role::ROW_DESC, model_note(target)).line_height(dir::line(1.5))]
-                .align_x(dir::start())
-        ),
+        card(paragraph(
+            sub(Role::ROW_DESC, model_note(target)).line_height(dir::line(1.5))
+        )),
     ]
     .spacing(space::GAP)
     .width(iced::Fill);

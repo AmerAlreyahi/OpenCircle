@@ -28,7 +28,9 @@ fn logo_card<'a>(
     let handle = crate::ui::kit::logo::logo(logo as u32);
     let words = column![
         text(Role::ROW_TITLE, title.into()),
-        sub(Role::ROW_DESC, line).line_height(1.5)
+        crate::ui::kit::text::paragraph(
+            sub(Role::ROW_DESC, line).line_height(crate::ui::kit::dir::line(1.5))
+        )
     ]
     .spacing(space::GAP / 2.0)
     .width(iced::Fill);

@@ -244,6 +244,20 @@ pub fn sub<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
     text(role, s).color(themes::current().c.text_sub)
 }
 
+/// A wrapped paragraph in a box as wide as its room (a row's description, a
+/// card's lines): right to left it fills the room and ends at its right
+/// edge. (Shrunk to its widest line, iced lays a right-to-left paragraph out
+/// again at that width and a long one was drawn past the box's edge.) Left
+/// to right it is as it was.
+pub fn paragraph(line: Text<'_>) -> Text<'_> {
+    match super::dir::rtl() {
+        true => line
+            .width(iced::Fill)
+            .align_x(iced::widget::text::Alignment::Right),
+        false => line,
+    }
+}
+
 /// `s` in `role`, in the muted text colour (a footer's aside).
 pub fn muted<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
     text(role, s).color(themes::current().c.text_muted)
