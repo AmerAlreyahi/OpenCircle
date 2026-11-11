@@ -688,17 +688,41 @@ impl Engine {
                     .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
                     .collect();
                 let real = lang::real_lines(&texts);
-                let mut left = Vec::new();
+                let mut left: Vec<([f32; 4], Option<TextBlock>)> = Vec::new();
                 for ((b, r), real) in boxes.iter().zip(read).zip(real) {
                     match r {
                         Some(r) if real => kept.push((l, r)),
-                        r => {
-                            left.push(*b);
-                            fallback.extend(r);
-                        }
+                        r => left.push((*b, r)),
                     }
                 }
-                few(strips(h, rows), left, boxes.len())
+                // the other Latin readers next (as `Auto` did: on a 3440
+                // English page shrunk 2x the Latin reader read lines the
+                // English one garbled, CER-all 0.413 against 0.540)
+                for o in (0..models::RECOGNIZERS.len())
+                    .filter(|&o| o != l && script(o) == Script::Latin && installed(o))
+                {
+                    if left.is_empty() {
+                        break;
+                    }
+                    let these: Vec<[f32; 4]> = left.iter().map(|(b, _)| *b).collect();
+                    let read = self.read_each(o, &f.img, &these)?;
+                    let texts: Vec<&str> = (read.iter())
+                        .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
+                        .collect();
+                    let real = lang::real_lines(&texts);
+                    let mut rest = Vec::new();
+                    for ((b, before), (r, real)) in left.into_iter().zip(read.into_iter().zip(real))
+                    {
+                        match r {
+                            Some(r) if real => kept.push((o, r)),
+                            r => rest.push((b, before.or(r))),
+                        }
+                    }
+                    left = rest;
+                }
+                let lines: Vec<[f32; 4]> = left.iter().map(|(b, _)| *b).collect();
+                fallback.extend(left.into_iter().filter_map(|(_, r)| r));
+                few(strips(h, rows), lines, boxes.len())
             }
             // found shrunk first (cheap): only the strips with lines left
             // are found again at full size
