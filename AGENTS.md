@@ -872,6 +872,11 @@ production systems.
   state. Each must show before -> after on the measurement set and may not slow English pages. Latin words and digits
   inside Arabic lines: a later measured step.
 
+- Snip Studio design (owner, 2026-11-11, on the design page newdesing/studio.html, STUDIO_SPEC.md): "looks clean", with one
+  change: BOTH side panels (Recent / Steps on one side, the options + Picture inspector on the other) must be collapsible
+  (each on its own, remembered, with a key and a visible toggle; the canvas takes the freed room). The other Studio
+  decisions (layout A, name, Recent off by default, ...) are still open. Design only; the Studio stays 0.5.0.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
