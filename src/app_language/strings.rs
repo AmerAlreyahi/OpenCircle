@@ -1900,4 +1900,8 @@ strings! {
         | "يدير سطح المكتب لديك هذا الاختصار: غيّره من إعدادات النظام ← الاختصارات ← OpenCircle";
     k_managed_other: "Your desktop manages this shortcut: change it in its keyboard shortcut settings"
         | "يدير سطح المكتب لديك هذا الاختصار: غيّره من إعدادات اختصارات لوحة المفاتيح فيه";
+    reading_count: "Reading text · {} of {} lines"
+        | "جارٍ قراءة النص · {} من {} سطرًا";
+    no_text: "No text found on this screen"
+        | "لم يُعثر على نص في هذه الشاشة";
 }

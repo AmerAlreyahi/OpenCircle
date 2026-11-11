@@ -122,12 +122,10 @@ impl App {
                 ),
             };
             let status = match reading {
-                Some(Some((read, found))) => {
-                    Some(format!("Reading text · {read} of {found} lines"))
-                }
-                Some(None) => Some("Reading text…".to_string()),
+                Some(Some((read, found))) => Some(fmt(S::reading_count, &[&read, &found])),
+                Some(None) => Some(tr(S::bar_reading).to_string()),
                 None if which == BarButton::CopyText && self.no_text() => {
-                    Some("No text found on this screen".to_string())
+                    Some(tr(S::no_text).to_string())
                 }
                 None => None,
             };
