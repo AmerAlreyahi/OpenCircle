@@ -420,6 +420,27 @@ pub fn hide_from_capture<T: Send + 'static>(id: window::Id, on: bool) -> Task<T>
     .discard()
 }
 
+/// The window `id` always stacked above the window `owner` (the AI chat over
+/// the overlay, #170), whichever of them comes to the front, while `owner`
+/// still gets every click outside it (`super::shape::keep_above`).
+pub fn keep_above<T: Send + 'static>(id: window::Id, owner: window::Id) -> Task<T> {
+    window::run(owner, |w| {
+        w.window_handle()
+            .ok()
+            .and_then(|h| super::shape::raw_id(h.as_raw()))
+    })
+    .then(move |owner| {
+        window::run(id, move |w| {
+            if let (Some(owner), Ok(handle)) = (owner, w.window_handle())
+                && let Err(e) = super::shape::keep_above(handle.as_raw(), owner)
+            {
+                crate::log!("[opencircle] window stacking: {e}");
+            }
+        })
+    })
+    .discard()
+}
+
 /// The full-screen overlay with `hole` (logical px, `scale` physical px per
 /// logical) cut out of it but for `keep` (its bars there): clicks and the
 /// wheel in the hole reach the app under it (Snip's long capture). `uncut`

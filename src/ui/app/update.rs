@@ -31,7 +31,14 @@ const RISE: f32 = 8.0;
 const STEP_ASIDE: f32 = 12.0;
 
 impl App {
+    /// Every message, then the chat's own window brought in line with it
+    /// (`sync_chat_window`).
     pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        Task::batch([task, self.sync_chat_window()])
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         // Late answers for an overlay closed meanwhile (a panel, translate, OCR,
         // song, a frame...) are dropped: nothing of a closed opening comes back.
         if self.o.is_none() && !works_closed(&message) {

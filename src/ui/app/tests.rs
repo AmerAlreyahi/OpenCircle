@@ -580,6 +580,7 @@ pub(in crate::ui) fn reopen(app: &mut App, w: u32, h: u32, scale: f32) {
     app.o.view = overlay::View::new(w, h, app.o.screen);
     app.o.bar_keys = BarKeys::of(&config::Config::default());
     app.o.appear = Some((Instant::now(), 1.0)); // opened
+    app.find_chat(Point::ORIGIN);
 }
 
 fn event(app: &mut App, e: overlay::Event) {
@@ -662,38 +663,6 @@ pub(in crate::ui) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
     app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
     event(&mut app, overlay::Event::Hover(area.center()));
     app
-}
-
-/// Snip over a pinned chat: the overlay draws no live chat over the frozen
-/// screen (the chat's window is in Snip's grab, a pick like any window, and
-/// nothing of ours covers the outline); main mode still draws it.
-#[test]
-fn snip_draws_no_live_chat_over_its_outline() {
-    let mut app = open_app(800, 600, 1.0);
-    drag(
-        &mut app,
-        Point::new(50.0, 50.0),
-        Point::new(150.0, 120.0),
-        false,
-    );
-    let crop = app.crop().unwrap();
-    drop(app.open_chat(crop, None));
-    let id = app.o.ai_chat.as_ref().unwrap().0;
-    api_ready(&mut app, id, b"first");
-    chat_turn(&mut app, id, "What is this?", "A chart.");
-    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
-    assert!(app.chat.is_some() && app.o.ai_chat.is_none(), "pinned");
-    let drawn = |app: &App| {
-        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
-        texts.iter().any(|t| t == "What is this?")
-    };
-    assert!(drawn(&app), "main mode draws the pinned chat");
-    let window = snip::Pick::window(app.chat_rect(), "OpenCircle chat", 1);
-    app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
-    let over = app.chat_rect().center();
-    event(&mut app, overlay::Event::Hover(over));
-    assert!(!drawn(&app), "Snip: only the frozen picture of it");
-    assert!(app.chat.is_some(), "kept: its window comes back after Snip");
 }
 
 /// A snip drag is always the box between the press and the pointer: dragging
@@ -3401,6 +3370,16 @@ fn feed(
     )
 }
 
+/// `feed`, to the AI chat's own window.
+fn feed_chat(
+    app: &App,
+    focus: Focus,
+    events: &[iced::Event],
+) -> (Vec<Message>, Vec<iced::event::Status>) {
+    let w = app.chat_win.as_ref().expect("the chat's window");
+    shot::feed(app.view(w.id), w.size, focus, events, &mut Clip::default())
+}
+
 #[test]
 fn typing_in_the_bars_field_runs_no_shortcut() {
     let app = open_app(800, 600, 1.0);
@@ -3420,7 +3399,7 @@ fn typing_in_the_bars_field_runs_no_shortcut() {
 #[test]
 fn typing_in_the_ask_panels_input_runs_no_shortcut() {
     let (app, _) = app_with_ask_panel();
-    let (messages, _) = feed(
+    let (messages, _) = feed_chat(
         &app,
         Focus::Id(ai_chat::INPUT),
         &shot::typing("real estate"),
@@ -3433,7 +3412,7 @@ fn typing_in_the_ask_panels_input_runs_no_shortcut() {
     assert_eq!(
         shortcuts(&messages),
         "aterl",
-        "the panel doesn't take keys by itself"
+        "the panel doesn't take keys by itself (they stay the overlay's)"
     );
 }
 
@@ -3481,7 +3460,7 @@ fn esc_leaves_a_focused_field_and_the_second_closes() {
     assert!(app.o.frame.is_none());
     // the Ask panel's input
     let (app, _) = app_with_ask_panel();
-    let (messages, status) = feed(&app, Focus::Id(ai_chat::INPUT), &esc);
+    let (messages, status) = feed_chat(&app, Focus::Id(ai_chat::INPUT), &esc);
     assert!(
         messages
             .iter()
@@ -4461,29 +4440,20 @@ fn a_pinned_chat_window_glides_to_its_dock() {
     chat_turn(&mut app, id, "What is this?", "A chart.");
     chat_turn(&mut app, id, "And the trend?", "Up.");
     let _ = app.update(Message::Escape);
-    let window = app
-        .chat
-        .as_ref()
-        .and_then(|c| c.window)
-        .expect("its own window");
+    let window = app.chat_win.as_ref().map(|w| w.id).expect("its own window");
     // the OS dragged it to the middle-left, then it stopped
     let _ = app.update(Message::ChatMoved(window, Point::new(150.0, 100.0)));
-    let moves = app.chat.as_ref().unwrap().moves;
+    let moves = app.chat_win.as_ref().unwrap().moves;
     let _ = app.update(Message::ChatDocked(moves, 1.0));
-    let (began, from, to) = app
-        .chat
-        .as_ref()
-        .unwrap()
-        .glide
-        .expect("a glide, not a jump");
-    let (origin, screen, inset) = app.chat.as_ref().unwrap().home;
+    let (began, from, to) = (app.chat_win.as_ref().unwrap().glide).expect("a glide, not a jump");
+    let (origin, screen, inset) = app.chat_win.as_ref().unwrap().home;
     let dock = app.chat_dock(screen, card::Side::Left, inset);
     assert_eq!(to, origin + Vector::new(dock.x, dock.y));
     let _ = app.update(Message::ChatFrame(began + motion::DOCK / 3));
-    let mid = app.chat.as_ref().unwrap().at;
+    let mid = app.chat_win.as_ref().unwrap().at;
     assert!(mid.x < from.x && mid.x > to.x, "on its way: {mid:?}");
     let _ = app.update(Message::ChatFrame(began + motion::DOCK));
-    let chat = app.chat.as_ref().unwrap();
+    let chat = app.chat_win.as_ref().unwrap();
     assert_eq!(chat.at, to, "exactly on the dock");
     assert!(chat.glide.is_none(), "the frames stop");
 }
@@ -4507,7 +4477,7 @@ fn a_pinned_chat_dragged_to_another_screen_docks_there() {
     chat_turn(&mut app, id, "What is this?", "A chart.");
     chat_turn(&mut app, id, "And the trend?", "Up.");
     let _ = app.update(Message::Escape);
-    let window = app.chat.as_ref().and_then(|c| c.window).expect("window");
+    let window = app.chat_win.as_ref().map(|w| w.id).expect("window");
     let here = Place {
         origin: (0, 0),
         px: (800, 600),
@@ -4520,9 +4490,9 @@ fn a_pinned_chat_dragged_to_another_screen_docks_there() {
     };
     // the OS dragged it onto the 200 % screen (logical px at that scale) and it stopped
     let _ = app.update(Message::ChatMoved(window, Point::new(500.0, 100.0)));
-    let moves = app.chat.as_ref().unwrap().moves;
+    let moves = app.chat_win.as_ref().unwrap().moves;
     let _ = app.chat_docked(moves, 2.0, &[here, there]);
-    let chat = app.chat.as_ref().unwrap();
+    let chat = app.chat_win.as_ref().unwrap();
     let (origin, screen, _) = chat.home;
     assert_eq!(
         (origin, screen),
@@ -4657,7 +4627,7 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
 fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     let close = crate::ui::kit::icon::Icon::Close.glyph().to_string();
     let (app, _) = app_with_ask_panel();
-    let texts = overlay_texts(&app);
+    let texts = texts_of(&app, chat_window(&app).unwrap());
     assert!(texts.contains(&"+ New".to_string()), "{texts:?}");
     assert!(!texts.contains(&close), "a close button: {texts:?}");
     // Esc
@@ -4681,7 +4651,8 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     );
     let crop = lens.crop().unwrap();
     let _ = lens.open_chat(crop, None);
-    assert!(!overlay_texts(&lens).contains(&close));
+    let _ = lens.sync_chat_window();
+    assert!(!texts_of(&lens, chat_window(&lens).unwrap()).contains(&close));
 }
 
 /// #149: the Copy / Save pill goes beside the selection (below it, else above
@@ -4936,58 +4907,8 @@ fn api_ready(app: &mut App, id: u32, png: &[u8]) {
     ));
 }
 
-/// The follow-up that pins the chat ends the tool by itself (no Esc): the
-/// pinned chat goes on in its own window. The first question, the header's pin
-/// and a drag in progress do not close it (#170).
-#[test]
-fn the_follow_up_that_pins_the_chat_closes_the_overlay() {
-    let start = || {
-        let mut app = open_app(800, 600, 1.0);
-        drag(
-            &mut app,
-            Point::new(50.0, 50.0),
-            Point::new(150.0, 120.0),
-            false,
-        );
-        let crop = app.crop().unwrap();
-        drop(app.open_chat(crop, None));
-        let id = app.o.ai_chat.as_ref().unwrap().0;
-        api_ready(&mut app, id, b"first");
-        chat_turn(&mut app, id, "What is this?", "A chart.");
-        (app, id)
-    };
-    let (mut app, id) = start();
-    assert!(app.o.is_some() && app.chat.is_none(), "one question: open");
-    chat_turn(&mut app, id, "And the trend?", "Up.");
-    // its own window comes up over the overlay first (no blank beat) ...
-    let chat = app.chat.as_ref().expect("the chat stays");
-    assert!(chat.window.is_some(), "in its own window");
-    assert!(app.o.is_some(), "the overlay stays until it is up");
-    // ... then the overlay goes
-    let _ = app.update(Message::ChatHandedOver);
-    assert!(app.o.is_none(), "the follow-up closed the overlay");
-    let chat = app.chat.as_ref().unwrap();
-    assert_eq!(chat.panel.chat().unwrap().turns.len(), 2, "both answers");
-
-    // the header's pin pins by hand: the overlay stays, a later question too
-    let (mut app, id) = start();
-    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
-    chat_turn(&mut app, id, "And the trend?", "Up.");
-    assert!(app.o.is_some() && app.chat.is_some(), "pinned by hand");
-
-    // a drag in progress is never cut short
-    let (mut app, id) = start();
-    app.o.drawing = true;
-    chat_turn(&mut app, id, "And the trend?", "Up.");
-    assert!(app.o.is_some() && app.chat.is_some(), "mid-drag: open");
-}
-
-/// A quick question closes on a click outside; a follow-up pins the chat: it
-/// survives clicks, the overlay closing (its own window) and the next capture,
-/// whose question goes into the SAME chat with its crop. One chat only; its
-/// pin closes it.
-#[test]
-fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
+/// The overlay opened, a selection made, a chat opened and asked once (not pinned).
+fn chat_asked() -> (App, u32) {
     let mut app = open_app(800, 600, 1.0);
     drag(
         &mut app,
@@ -5000,29 +4921,102 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let id = app.o.ai_chat.as_ref().unwrap().0;
     api_ready(&mut app, id, b"first");
     chat_turn(&mut app, id, "What is this?", "A chart.");
-    assert!(app.chat.is_none(), "one answer: not pinned");
-    // quick: a click outside closes it
-    event(
-        &mut app,
-        overlay::Event::Press {
-            at: Point::new(600.0, 500.0),
-            shift: false,
-        },
-    );
-    event(&mut app, overlay::Event::Release);
-    assert!(app.o.ai_chat.is_none(), "the click outside closed it");
+    (app, id)
+}
 
-    drag(
-        &mut app,
-        Point::new(50.0, 50.0),
-        Point::new(150.0, 120.0),
-        false,
+/// The chat's own window, if it is open.
+fn chat_window(app: &App) -> Option<window::Id> {
+    app.chat_win.as_ref().map(|w| w.id)
+}
+
+/// What the window `id` draws, as text.
+fn texts_of(app: &App, id: window::Id) -> Vec<String> {
+    crate::ui::kit::testing::shot::texts(app.view(id))
+}
+
+/// The follow-up that pins the chat ends the tool by itself (no Esc): the
+/// pinned chat goes on in the SAME window it had from its first frame. The
+/// first question, the header's pin and a drag in progress do not close it (#170).
+#[test]
+fn the_follow_up_that_pins_the_chat_closes_the_overlay() {
+    let (mut app, id) = chat_asked();
+    assert!(app.o.is_some() && app.chat.is_none(), "one question: open");
+    let window = chat_window(&app).expect("its own window from its first frame");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_none(), "the follow-up closed the overlay, at once");
+    assert_eq!(chat_window(&app), Some(window), "the same window");
+    let chat = app.chat.as_ref().expect("the chat stays");
+    assert_eq!(chat.panel.chat().unwrap().turns.len(), 2, "both answers");
+
+    // the header's pin pins by hand: the overlay stays, a later question too
+    let (mut app, id) = chat_asked();
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_some() && app.chat.is_some(), "pinned by hand");
+
+    // a drag in progress is never cut short
+    let (mut app, id) = chat_asked();
+    app.o.drawing = true;
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    assert!(app.o.is_some() && app.chat.is_some(), "mid-drag: open");
+}
+
+/// The chat is never drawn on the overlay where it has its own window: the
+/// overlay leaves it out and the chat's window draws it, quick or pinned; the
+/// overlay still lays its bar out beside it. A chat closed (a click outside,
+/// Esc) takes its window with it.
+#[test]
+fn the_chat_is_drawn_by_its_own_window_only() {
+    let (mut app, id) = chat_asked();
+    let window = chat_window(&app).unwrap();
+    assert!(
+        windows::is_floating(window),
+        "a floating window (cut, on top)"
     );
-    let crop = app.crop().unwrap();
-    drop(app.open_chat(crop, None));
-    let id = app.o.ai_chat.as_ref().unwrap().0;
-    api_ready(&mut app, id, b"first");
-    chat_turn(&mut app, id, "What is this?", "A chart.");
+    let asked = |texts: Vec<String>| texts.iter().any(|t| t == "What is this?");
+    assert!(asked(texts_of(&app, window)), "its window draws it");
+    assert!(!asked(texts_of(&app, app.overlay)), "the overlay does not");
+    let chat = app.chat_rect();
+    // its window sits where the overlay docks it (physical px)
+    let placed = app.chat_win.as_ref().unwrap().placed.unwrap();
+    assert_eq!(placed.origin, (chat.x as i32, chat.y as i32));
+    assert_eq!(placed.px, (chat.width as u32, chat.height as u32));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    assert!(
+        !asked(texts_of(&app, app.overlay)),
+        "pinned: not drawn either"
+    );
+    assert!(asked(texts_of(&app, window)));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin)); // unpin = close
+    assert!(
+        app.chat.is_none() && chat_window(&app).is_none(),
+        "gone with it"
+    );
+
+    // a quick chat closed by a click outside: its window goes too
+    let (mut app, _) = chat_asked();
+    let press = overlay::Event::Press {
+        at: Point::new(600.0, 500.0),
+        shift: false,
+    };
+    let _ = app.update(Message::Overlay(press));
+    let _ = app.update(Message::Overlay(overlay::Event::Release));
+    assert!(app.o.ai_chat.is_none() && chat_window(&app).is_none());
+    // and by Esc
+    let (mut app, _) = chat_asked();
+    let _ = app.update(Message::Escape);
+    assert!(app.o.is_none() && chat_window(&app).is_none());
+}
+
+/// A quick question closes on a click outside; a follow-up pins the chat: it
+/// survives clicks, the overlay closing (the same window, never re-created)
+/// and the next capture: the chat stays put above the new overlay, and the
+/// bar's question goes into the SAME chat with its crop, closing the overlay
+/// (C4c). One chat only; its pin closes it.
+#[test]
+fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
+    let (mut app, id) = chat_asked();
+    let window = chat_window(&app).unwrap();
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin)); // (a follow-up would close the overlay)
     chat_turn(&mut app, id, "And the trend?", "Up.");
     assert!(
@@ -5037,32 +5031,28 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
         false,
     );
     assert!(app.chat.is_some());
-    // the overlay closes: the chat goes on in its own window
+    let placed = app.chat_win.as_ref().unwrap().placed;
+    // the overlay closes: nothing about the chat changes
     let _ = app.update(Message::Escape);
-    assert!(app.o.is_some(), "its window comes up over it first");
-    let _ = app.update(Message::ChatHandedOver);
-    assert!(app.o.is_none());
-    let window = app
-        .chat
-        .as_ref()
-        .and_then(|c| c.window)
-        .expect("its own window");
-    assert!(
-        windows::is_floating(window),
-        "a floating window (cut, on top)"
-    );
-    let shown = app.view(window);
-    let texts = crate::ui::kit::testing::shot::texts(shown);
-    assert!(texts.iter().any(|t| t == "And the trend?"), "{texts:?}");
+    assert!(app.o.is_none(), "Esc closed the overlay at once");
+    let chat = app.chat_win.as_ref().expect("its window");
+    assert_eq!(chat.id, window, "the same window");
+    assert!(!chat.hidden && chat.placed == placed, "where it was, shown");
+    assert!(texts_of(&app, window).iter().any(|t| t == "And the trend?"));
     // its composer works while the overlay is closed (messages reach it)
     let _ = app.update(Message::AiChat(
         id,
         ai_chat::Msg::Edit(iced::widget::text_editor::Action::SelectAll),
     ));
 
-    // the next capture: the overlay opens, the chat on it, and the bar's
-    // question goes into the same chat with the new crop
+    // the next capture: the overlay opens round it; it stays put (not moved,
+    // not drawn on the overlay, out of the frame)
     reopen(&mut app, 800, 600, 1.0);
+    let _ = app.update(Message::Frame(Instant::now()));
+    let chat = app.chat_win.as_ref().unwrap();
+    assert_eq!((chat.id, chat.placed), (window, placed), "stays put");
+    assert_eq!(app.o.chat_fixed, Some(app.chat_rect()));
+    assert_eq!(app.o.chat_hole, Some(app.chat_rect()), "out of the frame");
     drag(
         &mut app,
         Point::new(400.0, 300.0),
@@ -5073,21 +5063,66 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let size = (new_crop.width, new_crop.height);
     app.o.ask = "Is this the same?".into();
     drop(app.update(Message::AskSubmit));
-    assert!(app.o.ai_chat.is_none(), "never a second chat");
+    assert!(app.o.is_none(), "the question closed the overlay (C4c)");
+    assert_eq!(chat_window(&app), Some(window), "the same window");
     api_ready(&mut app, id, b"second");
     let turns = &app.chat.as_ref().unwrap().panel.chat().unwrap().turns;
     assert_eq!(turns.len(), 3, "the same chat");
     assert_eq!(turns[2].shot, Some(size), "with the new crop");
     assert_eq!(turns[2].image.as_deref(), Some(&b"second"[..]));
-    let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
-    assert!(
-        texts.iter().any(|t| t == "Is this the same?"),
-        "drawn on the overlay: {texts:?}"
-    );
+    let texts = texts_of(&app, window);
+    assert!(texts.iter().any(|t| t == "Is this the same?"), "{texts:?}");
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Answered(Ok(()))));
-    // the pin closes it
+    // the pin closes it, and its window
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
-    assert!(app.chat.is_none());
+    assert!(app.chat.is_none() && chat_window(&app).is_none());
+}
+
+/// A pinned chat found on the overlay, picked up by its grip, is docked by the
+/// overlay from the very spot it was (no jump), then follows the drag.
+#[test]
+fn a_pinned_chat_picked_up_on_the_overlay_starts_where_it_is() {
+    let (mut app, id) = chat_asked();
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    let _ = app.update(Message::Escape);
+    // the OS dragged its window somewhere else, then the next capture
+    let window = chat_window(&app).unwrap();
+    let w = app.chat_win.as_mut().unwrap();
+    w.at.x = 300.0;
+    reopen(&mut app, 800, 600, 1.0);
+    let found = app.chat_rect();
+    assert_eq!(found.x, 300.0);
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Move));
+    let _ = app.update(Message::AiChat(id, grab));
+    assert!(app.o.chat_fixed.is_none(), "the overlay docks it now");
+    assert_eq!(app.chat_rect(), found, "from where it was");
+    let _ = app.update(Message::CardMovedOn(window, Point::new(10.0, 10.0)));
+    let _ = app.update(Message::CardMovedOn(window, Point::new(-40.0, 10.0)));
+    assert_eq!(app.chat_rect().x, found.x - 50.0, "it follows the pointer");
+    let placed = app.chat_win.as_ref().unwrap().placed.unwrap();
+    assert_eq!(placed.origin.0, (found.x - 50.0) as i32, "its window too");
+}
+
+/// Snip over a chat: its window hides (Snip's frozen screen holds its picture,
+/// a pick like any window; nothing of ours covers the outline) and shows again,
+/// the same window, when Snip is over.
+#[test]
+fn snip_hides_the_chats_window_until_it_is_over() {
+    let (mut app, id) = chat_asked();
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    let window = chat_window(&app).unwrap();
+    let pick = snip::Pick::window(app.chat_rect(), "OpenCircle chat", 1);
+    app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![pick], app.place(), true, None)));
+    let _ = app.update(Message::Frame(Instant::now()));
+    assert!(app.chat_win.as_ref().unwrap().hidden, "hidden in Snip");
+    let texts = texts_of(&app, app.overlay);
+    assert!(
+        !texts.iter().any(|t| t == "What is this?"),
+        "not drawn on Snip"
+    );
+    let _ = app.update(Message::Escape);
+    let chat = app.chat_win.as_ref().unwrap();
+    assert!(chat.id == window && !chat.hidden, "back, the same window");
 }
 
 /// The pinned chat's window is kept out of captures: where it was, the frame

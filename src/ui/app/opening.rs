@@ -167,6 +167,12 @@ pub(in crate::ui) struct Opening {
     /// Where the pinned chat's own window was when this frame was captured
     /// (logical px): it is kept out of captures, so the frame may be black there.
     pub(in crate::ui) chat_hole: Option<Rectangle>,
+    /// The pinned chat's own window where this overlay found it (logical px):
+    /// it stays put (#170 C4) until it is picked up (`App::adopt_chat`).
+    pub(in crate::ui) chat_fixed: Option<Rectangle>,
+    /// The chat was pinned before this overlay opened: a question sent into
+    /// it closes the overlay (#170 C4c).
+    pub(in crate::ui) chat_came_pinned: bool,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
     pub(in crate::ui) chat_open: Option<(u32, motion::Shown, f32)>,
@@ -268,6 +274,8 @@ impl Default for Opening {
             chat_drag: None,
             chat_docks: false,
             chat_hole: None,
+            chat_fixed: None,
+            chat_came_pinned: false,
             chat_open: None,
             chat_hover: false,
             chat_off: Vector::ZERO,

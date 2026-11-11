@@ -28,8 +28,8 @@ use super::{settings, shape, theme, update_card, update_pill};
 pub use super::platform::windows::CLEARED;
 pub use super::platform::windows::{
     POPUP, TOAST, appear, clear_now, clear_theme, close, cut, fade, floating, floating_in_captures,
-    foreground, forget, hide_from_capture, hole, is_floating, no_backdrop, opacity, reshape,
-    screen, setup_window, uncut,
+    foreground, forget, hide_from_capture, hole, is_floating, keep_above, no_backdrop, opacity,
+    reshape, screen, setup_window, uncut,
 };
 use crate::actions::{Action, Crop, Run, copy, save};
 use crate::capture::live;
@@ -1030,26 +1030,21 @@ impl Windows {
         }))
     }
 
-    /// Linux: our floating windows (Steps strip, pins, pills, the tray menu, and
-    /// `chat`: the pinned chat's; not the update's, which show in captures) out of capture number `capture`'s
+    /// Linux: our floating windows (Steps strip, pins, pills, the tray menu; not
+    /// the update's, which show in captures, nor the AI chat's: `App::leave_frame`) out of capture number `capture`'s
     /// grab: no OS call keeps a window out of an X11 grab or the Wayland portal's
     /// shot (Windows: every floating window is out of every capture,
     /// `windows::floating`, so `None` there). Hidden where windows hide, else
     /// closed (pills for good; the others open again in `back_in_frame`).
     /// `None`: nothing to take out (the grab needn't wait).
-    pub fn leave_frame(&mut self, capture: u32, chat: Option<window::Id>) -> Option<Task<Msg>> {
+    pub fn leave_frame(&mut self, capture: u32) -> Option<Task<Msg>> {
         if cfg!(windows) {
             return None;
         }
-        self.leave_frame_as(capture, chat, platform::monitor::can_hide_windows())
+        self.leave_frame_as(capture, platform::monitor::can_hide_windows())
     }
 
-    fn leave_frame_as(
-        &mut self,
-        capture: u32,
-        chat: Option<window::Id>,
-        can_hide: bool,
-    ) -> Option<Task<Msg>> {
+    fn leave_frame_as(&mut self, capture: u32, can_hide: bool) -> Option<Task<Msg>> {
         if let Some(out) = &mut self.out {
             out.capture = capture; // still out: this grab's now
             return None;
@@ -1068,10 +1063,7 @@ impl Windows {
             false => id.take(), // its strip stays
         });
         if can_hide {
-            out.hidden = (self.pins.iter().map(|p| p.id))
-                .chain(steps)
-                .chain(chat)
-                .collect();
+            out.hidden = (self.pins.iter().map(|p| p.id)).chain(steps).collect();
         } else {
             out.steps = steps.is_some();
             out.pins = std::mem::take(&mut self.pins);
@@ -2259,17 +2251,14 @@ mod tests {
     #[test]
     fn where_windows_cant_hide_a_grab_closes_our_floating_ones_and_opens_them_again() {
         let (mut windows, pin, strip) = floating_windows();
-        assert!(windows.leave_frame_as(7, None, false).is_some());
+        assert!(windows.leave_frame_as(7, false).is_some());
         assert!(windows.pins.is_empty() && windows.toasts.is_empty());
         assert!(windows.steps_window().is_none());
         assert!(windows.update_card.is_some() && windows.update_pill.is_some());
         let _ = windows.update(Msg::Closed(pin));
         let _ = windows.update(Msg::Closed(strip));
         assert!(windows.steps.is_some(), "the strip's steps stay");
-        assert!(
-            windows.leave_frame_as(8, None, false).is_none(),
-            "out already"
-        );
+        assert!(windows.leave_frame_as(8, false).is_none(), "out already");
         let _ = windows.back_in_frame(Some(7));
         assert!(windows.out.is_some(), "capture 8's now");
         let _ = windows.back_in_frame(Some(8));
@@ -2283,20 +2272,19 @@ mod tests {
         assert!(windows.steps_window().is_some_and(|id| id != strip));
         assert!(windows.update_card.is_some());
         assert!(windows.toasts.is_empty(), "a pill doesn't come back");
-        assert!(windows.leave_frame_as(9, None, false).is_some(), "again");
+        assert!(windows.leave_frame_as(9, false).is_some(), "again");
         let _ = windows.back_in_frame(None);
         assert_eq!(pin_ids(&windows).len(), 1);
     }
 
-    /// Where windows hide (X11) they hide for the grab, the pinned chat's too, and
-    /// show again as they are; with none open the grab doesn't wait.
+    /// Where windows hide (X11) they hide for the grab, and show again as they
+    /// are; with none open the grab doesn't wait.
     #[test]
     fn where_windows_hide_a_grab_hides_our_floating_ones() {
         let (mut windows, pin, strip) = floating_windows();
-        let chat = window::Id::unique();
-        assert!(windows.leave_frame_as(1, Some(chat), true).is_some());
+        assert!(windows.leave_frame_as(1, true).is_some());
         let hidden = &windows.out.as_ref().unwrap().hidden;
-        for id in [pin, strip, chat] {
+        for id in [pin, strip] {
             assert!(hidden.contains(&id));
         }
         assert_eq!(pin_ids(&windows), [pin], "kept as it is");
@@ -2304,8 +2292,8 @@ mod tests {
         let _ = windows.back_in_frame(Some(1));
         assert!(windows.out.is_none());
         assert_eq!(windows.steps_window(), Some(strip));
-        assert!(Windows::default().leave_frame_as(2, None, true).is_none());
-        assert!(Windows::default().leave_frame_as(2, None, false).is_none());
+        assert!(Windows::default().leave_frame_as(2, true).is_none());
+        assert!(Windows::default().leave_frame_as(2, false).is_none());
     }
 
     /// The update pill sits above the tray: the main screen's bottom-right

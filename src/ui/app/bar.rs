@@ -234,6 +234,25 @@ impl App {
 
     /// A pointer position in `window`'s own px as the starting screen's px.
     pub(in crate::ui) fn start_px(&self, window: iced::window::Id, p: Point) -> Point {
+        // the chat's own window, moved under the pointer as it drags it: the
+        // pointer on the desktop, never its px in a window still moving
+        if let Some(placed) = (self.chat_win.as_ref())
+            .filter(|w| w.id == window)
+            .and_then(|w| w.placed)
+        {
+            #[cfg(not(test))]
+            let pointer = crate::capture::pointer();
+            #[cfg(test)]
+            let pointer = None::<(i32, i32)>; // (not the test machine's)
+            let desk = pointer.map_or_else(
+                || {
+                    let (x, y) = placed.origin;
+                    Point::new(x as f32 + p.x * placed.scale, y as f32 + p.y * placed.scale)
+                },
+                |(x, y)| Point::new(x as f32, y as f32),
+            );
+            return (self.o.view).to_screen(super::screens::from_desktop(self.o.place(), desk));
+        }
         match self.o.screens.iter().find(|s| s.window == window) {
             Some(s) => self.o.view.to_screen(s.view.to_image(p)),
             None => p,

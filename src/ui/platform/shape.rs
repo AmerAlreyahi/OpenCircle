@@ -241,6 +241,48 @@ pub fn no_taskbar(handle: RawWindowHandle) {
     let _ = handle;
 }
 
+/// The window behind `handle` as a plain number (`keep_above` takes it): its
+/// HWND (Windows) or X11 window id; `None` elsewhere.
+pub fn raw_id(handle: RawWindowHandle) -> Option<isize> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => Some(h.window as isize),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => Some(h.window.get() as isize),
+        _ => None,
+    }
+}
+
+/// The window behind `handle` always above the window `owner` (`raw_id`) in
+/// z-order: Windows makes `owner` its owner (an owned window is always above
+/// its owner and is not hidden with it: the chat outlives the overlay's hide),
+/// X11 its transient (`WM_TRANSIENT_FOR`: window managers stack a transient
+/// over its parent, a full-screen one too). Clicks outside it still reach
+/// `owner`: two windows. `Ok` where nothing can be done (Wayland).
+pub fn keep_above(handle: RawWindowHandle, owner: isize) -> Result<(), String> {
+    match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{GWLP_HWNDPARENT, SetWindowLongPtrW};
+            // SAFETY: both are live windows of this process (the UI's raw handles);
+            // GWLP_HWNDPARENT on a top-level window sets its owner.
+            unsafe { SetWindowLongPtrW(HWND(h.hwnd.get() as *mut _), GWLP_HWNDPARENT, owner) };
+            Ok(())
+        }
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => x11::transient(h.window as u32, owner as u32),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => x11::transient(h.window.get(), owner as u32),
+        _ => {
+            let _ = owner;
+            Ok(())
+        }
+    }
+}
+
 /// Windows: no system backdrop (blur, acrylic, mica) behind the window behind
 /// `handle`, whatever put it there. A theming mod (Windhawk "Translucent Windows",
 /// owner 2026-11-03) gives every new top-level window of every process an
@@ -696,6 +738,19 @@ mod x11 {
         .map_err(|e| format!("X11: {e:?}"))
     }
 
+    /// `window` is `parent`'s transient (`WM_TRANSIENT_FOR`).
+    pub fn transient(window: u32, parent: u32) -> Result<(), String> {
+        let (conn, _) = xcb::Connection::connect(None).map_err(|e| format!("X11: {e:?}"))?;
+        conn.send_and_check_request(&x::ChangeProperty {
+            mode: x::PropMode::Replace,
+            window: x::Window::new(window),
+            property: x::ATOM_WM_TRANSIENT_FOR,
+            r#type: x::ATOM_WINDOW,
+            data: &[x::Window::new(parent)],
+        })
+        .map_err(|e| format!("X11: {e:?}"))
+    }
+
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
         rects(window, |w, h| {
             let r = corner(max_radius, w as f32, h as f32).round() as u32;
@@ -1139,5 +1194,50 @@ mod tests {
         // Cleared: the whole window again.
         x11::clear(window.resource_id()).unwrap();
         assert_eq!(area(&x11::bounding(window.resource_id())), 120 * 40);
+    }
+
+    /// X11: the AI chat's window is the overlay's transient, so the window
+    /// manager keeps it above the overlay (#170). Unmapped windows: nothing shows.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn x11_keep_above_makes_a_transient() {
+        use xcb::{Xid, x};
+        if std::env::var_os("DISPLAY").is_none() {
+            crate::log!("no X11 display: skipped");
+            return;
+        }
+        let (conn, screen) = xcb::Connection::connect(None).unwrap();
+        let root = conn.get_setup().roots().nth(screen as usize).unwrap();
+        let make = || {
+            let window: x::Window = conn.generate_id();
+            conn.send_and_check_request(&x::CreateWindow {
+                depth: x::COPY_FROM_PARENT as u8,
+                wid: window,
+                parent: root.root(),
+                x: 0,
+                y: 0,
+                width: 40,
+                height: 40,
+                border_width: 0,
+                class: x::WindowClass::InputOutput,
+                visual: root.root_visual(),
+                value_list: &[],
+            })
+            .unwrap();
+            window
+        };
+        let (overlay, chat) = (make(), make());
+        x11::transient(chat.resource_id(), overlay.resource_id()).unwrap();
+        let reply = conn
+            .wait_for_reply(conn.send_request(&x::GetProperty {
+                delete: false,
+                window: chat,
+                property: x::ATOM_WM_TRANSIENT_FOR,
+                r#type: x::ATOM_WINDOW,
+                long_offset: 0,
+                long_length: 1,
+            }))
+            .unwrap();
+        assert_eq!(reply.value::<x::Window>(), &[overlay]);
     }
 }

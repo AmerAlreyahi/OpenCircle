@@ -629,9 +629,9 @@ fn breath_frame_times() {
     }
 }
 
-/// Every open goes by `motion`: the opening's clock, a result card growing
-/// from `OPEN_SCALE` in `OPEN` eased out; with the OS's animations off, all
-/// of it there at once.
+/// Every open goes by `motion`: the opening's clock in `OPEN` eased out, the
+/// AI chat's own window fading in by the same widget motion; with the OS's
+/// animations off, all of it there at once.
 #[test]
 fn widgets_open_by_the_design_motion_or_at_once() {
     let opened = |reduced: bool| {
@@ -656,10 +656,13 @@ fn widgets_open_by_the_design_motion_or_at_once() {
     let ease = |ms: f32| motion::Curve::Out.ease(ms / motion::OPEN.as_millis() as f32);
     for ((appeared, grown), ms) in steps.iter().zip([0.0, 50.0, 100.0, 209.0, 210.0]) {
         assert!((appeared - ease(ms)).abs() < 1e-4, "{steps:?}");
-        assert!((grown - ease(ms)).abs() < 1e-4, "{steps:?}");
+        // the AI chat is not drawn growing: its own window fades in (below)
+        assert_eq!(*grown, 1.0, "{steps:?}");
     }
     assert_eq!(steps[4], (1.0, 1.0));
     assert!(opened(true).iter().all(|&s| s == (1.0, 1.0)), "at once");
+    // the AI chat has its own window: it fades in by the same motion
+    assert_eq!(crate::ui::windows::POPUP.pace, motion::WIDGET);
 }
 
 /// An image that lands pixel for pixel is drawn by the renderer's own copy

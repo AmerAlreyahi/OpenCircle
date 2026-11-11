@@ -145,16 +145,23 @@ impl App {
     }
 
     /// Linux: our floating windows out of capture `n`'s grab (`Windows::leave_frame`;
-    /// Windows keeps them out of every capture). The pinned chat's window hides
-    /// with them, or goes where windows can't hide (the overlay draws the chat).
+    /// Windows keeps them out of every capture). The chat's own window hides
+    /// till the grab is over (X11, `grabbed`: then it is live above the
+    /// overlay), or goes where windows can't hide (the overlay draws the chat).
     /// `None`: none was there.
     pub(in crate::ui) fn leave_frame(&mut self, n: u32) -> Option<Task<Message>> {
-        let chat = (self.chat.as_ref()).and_then(|c| c.window);
-        let hides = can_hide_windows();
-        let out = (self.windows.leave_frame(n, chat.filter(|_| hides)))
-            .map(|out| out.map(Message::Windows));
-        // ponytail: a capture that then fails leaves the chat for the next overlay.
-        let gone = (chat.is_some() && !hides && !cfg!(windows)).then(|| self.unfloat_chat());
+        let out = (self.windows.leave_frame(n)).map(|out| out.map(Message::Windows));
+        let own = self.own_window();
+        let gone = match self.chat_win.as_mut() {
+            _ if cfg!(windows) => None,
+            Some(w) if own && !w.hidden => {
+                (w.out, w.hidden) = (true, true);
+                Some(window::set_mode(w.id, Mode::Hidden))
+            }
+            // ponytail: a capture that then fails leaves the chat for the next overlay.
+            Some(_) if !own && !can_hide_windows() => Some(self.unfloat_chat()),
+            _ => None,
+        };
         match (out, gone) {
             (None, None) => None,
             (out, gone) => Some(Task::batch([
@@ -167,6 +174,9 @@ impl App {
     /// Capture `n`'s grab is done: what left its frame comes back unless the
     /// overlay is up (then when it closes, `close`: no window over it).
     pub(in crate::ui) fn grabbed(&mut self, n: u32) -> Task<Message> {
+        if let Some(w) = &mut self.chat_win {
+            w.out = false; // (shown again by `sync_chat_window`)
+        }
         match self.o.is_some() {
             true => Task::none(),
             false => self.windows.back_in_frame(Some(n)).map(Message::Windows),
@@ -237,9 +247,7 @@ impl App {
             ..Opening::default()
         });
         self.set_frame(shot.image, shot.scale, shot.origin, size);
-        self.o.chat_hole = (self.chat.as_ref())
-            .filter(|c| c.window.is_some())
-            .map(|c| iced::Rectangle::new(c.at - (shot.origin - Point::ORIGIN), c.size));
+        self.find_chat(shot.origin);
         self.o.helper = Some(Arc::new(ocr::hold()));
         self.o.ocr_ready = text::models_present();
         self.frame_times.borrow_mut().clear();
@@ -505,9 +513,11 @@ impl App {
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
     /// once old enough. The window is shrunk and hidden in steps (see `Hiding`).
     pub(in crate::ui) fn close(&mut self) -> Task<Message> {
-        // A pinned chat drawn on the overlay: its own window comes up over the
-        // same spot first (no blank beat); the overlay goes when it is up.
-        if self.o.is_some() && self.chat.as_ref().is_some_and(|c| c.window.is_none()) {
+        // Wayland: a pinned chat drawn on the overlay: its own window comes up
+        // over the same spot first (no blank beat); the overlay goes when it is
+        // up. Elsewhere the chat has its window already: nothing changes for it.
+        if self.o.is_some() && self.chat.is_some() && self.chat_win.is_none() && !self.own_window()
+        {
             return self.float_chat().chain(Task::done(Message::ChatHandedOver));
         }
         // a long capture ends with it; the window shows in screenshots again

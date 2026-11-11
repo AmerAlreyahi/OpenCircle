@@ -28,18 +28,34 @@ pub(in crate::ui) struct Resident {
     /// Its panel number (`Message::AiChat`).
     pub id: u32,
     pub panel: ai_chat::AiChat,
-    /// Its own window while the overlay is closed.
-    pub window: Option<window::Id>,
+}
+
+/// The AI chat's own window (`App::chat_win`): a floating one (cut to its
+/// corners, on top, out of captures). Where windows hide (Windows, X11:
+/// `App::own_window`) it is THE chat's window from its first frame to its
+/// close: above the overlay while that is open (`windows::keep_above`), never
+/// re-created when the overlay opens or closes (#170). Wayland: only while the
+/// overlay is closed (the overlay draws the chat while it is open).
+pub(in crate::ui) struct ChatWindow {
+    pub id: window::Id,
     /// The monitor it docks on: origin and size (logical px), taskbar inset.
     pub home: (Point, Size, f32),
-    /// Where its window is (logical desktop px) and how often it moved: a drag
+    /// Where it is (logical desktop px) and how often it moved: a drag
     /// ends when it stops moving (`ChatSettle`).
     pub at: Point,
     pub moves: u32,
-    /// Its window's size (logical px).
+    /// Its size (logical px).
     pub size: Size,
-    /// Its window gliding to its dock: since when, from and to (desktop px).
+    /// Gliding to its dock: since when, from and to (desktop px).
     pub glide: Option<(std::time::Instant, Point, Point)>,
+    /// Where the overlay last put it (physical px): it moves only when that
+    /// changes (`sync_chat_window`).
+    pub placed: Option<Place>,
+    /// Hidden for now: Snip is open (its frozen screen holds the chat's
+    /// picture, and nothing of ours covers Snip's outline), or `out`.
+    pub hidden: bool,
+    /// X11: out of a capture's grab, until it is over (`App::grabbed`).
+    pub out: bool,
 }
 
 /// `t` (0..1, eased) of the way from `from` to `to`, on whole px; exactly
@@ -91,8 +107,15 @@ impl App {
         // one chat: a question while one stays open goes into it, with this crop
         if let Some(chat) = &mut self.chat {
             let id = chat.id;
-            return (chat.panel.ask_about(crop, question, self.o.include))
+            let asks = question.is_some();
+            let task = (chat.panel.ask_about(crop, question, self.o.include))
                 .map(move |msg| Message::AiChat(id, msg));
+            // a question sent into a chat pinned before this overlay: the
+            // overlay closes by itself, as after the follow-up (C4c, #170)
+            if asks && self.o.chat_came_pinned && self.ends_tool() {
+                return Task::batch([task, self.close()]);
+            }
+            return task;
         }
         // the overlay's own chat, still open (the bar is beside it): the same chat
         let include = self.o.include;
@@ -124,38 +147,38 @@ impl App {
             return;
         };
         crate::log!("[opencircle] AI chat pinned");
-        self.chat = Some(Resident {
-            id,
-            panel,
-            window: None,
-            home: (self.o.origin, self.o.screen, self.o.work_inset),
-            at: Point::ORIGIN,
-            moves: 0,
-            size: Size::ZERO,
-            glide: None,
-        });
+        self.chat = Some(Resident { id, panel });
     }
 
-    /// The pinned chat's pin: it closes (with its window, if any).
+    /// The pinned chat's pin: it closes (its window with it, `sync_chat_window`).
     pub(in crate::ui) fn drop_chat(&mut self) -> Task<Message> {
-        let Some(chat) = self.chat.take() else {
-            return Task::none();
-        };
-        crate::log!("[opencircle] AI chat unpinned and closed");
-        match chat.window {
-            Some(id) => {
-                windows::forget(id);
-                windows::close(id)
-            }
-            None => Task::none(),
+        if self.chat.take().is_some() {
+            crate::log!("[opencircle] AI chat unpinned and closed");
         }
+        Task::none()
     }
 
-    /// The overlay closes with a pinned chat: it goes on in its own window, at
-    /// its dock (solid, always on top, cut to its corners, out of captures).
-    pub(in crate::ui) fn float_chat(&mut self) -> Task<Message> {
+    /// The chat has its own window from its first frame, above the overlay
+    /// (#170): where windows hide (Windows, X11). On Wayland a window can't be
+    /// placed or kept above the overlay, so the overlay draws the chat while
+    /// it is open and the chat's window comes only when it closes (C6).
+    // ponytail: Wayland keeps the old path; an XWayland chat needs a helper
+    // process (winit runs one backend) and its keyboard focus is unproven.
+    pub(in crate::ui) fn own_window(&self) -> bool {
+        self.can_hide
+    }
+
+    /// The chat shown: the pinned one, else the overlay's.
+    pub(in crate::ui) fn chat_shown(&self) -> Option<(u32, &ai_chat::AiChat)> {
+        (self.chat.as_ref().map(|c| (c.id, &c.panel)))
+            .or_else(|| self.o.ai_chat.as_ref().map(|(id, p)| (*id, p)))
+    }
+
+    /// Where the overlay docks the chat (`chat_rect`), on the screen it is on:
+    /// that monitor (`ChatWindow::home`), its top-left (logical desktop px),
+    /// its size (that monitor's logical px), and both in physical px.
+    fn chat_place(&self) -> ((Point, Size, f32), Point, Size, Place) {
         let at = self.chat_rect();
-        // on the screen it was docked on (its px, its scale)
         let (origin, screen, inset, scale, at) =
             match self.o.chat_on.and_then(|i| self.o.screens.get(i)) {
                 Some(s) => {
@@ -178,60 +201,150 @@ impl App {
                     at,
                 ),
             };
-        let Some(chat) = self.chat.as_mut().filter(|c| c.window.is_none()) else {
-            return Task::none();
-        };
-        chat.home = (origin, screen, inset);
-        chat.size = at.size();
-        chat.at = origin + iced::Vector::new(at.x, at.y);
+        let desk = origin + iced::Vector::new(at.x, at.y);
         let px = |v: f32| (v * scale).round();
         let place = Place {
-            origin: (px(chat.at.x) as i32, px(chat.at.y) as i32),
+            origin: (px(desk.x) as i32, px(desk.y) as i32),
             px: (px(at.width) as u32, px(at.height) as u32),
             scale,
         };
+        ((origin, screen, inset), desk, at.size(), place)
+    }
+
+    /// The chat's own window, opened where the overlay docks the chat. Where
+    /// windows hide: kept above the overlay and faded in by the design's
+    /// widget open (`POPUP`), the keyboard left with the overlay (a click on
+    /// the chat's input takes it, as on the overlay: until then letters are
+    /// the overlay's shortcuts). Wayland (`handover`, the overlay closing with
+    /// a pinned chat): shown fully clear over the overlay's own drawing of the
+    /// same card, given a beat to paint, then solid at once, so the overlay
+    /// can go with no blank beat.
+    fn open_chat_window(&mut self, handover: bool) -> Task<Message> {
+        let (home, at, size, place) = self.chat_place();
         let (id, open) = windows::floating(
             window::Settings {
-                size: at.size(),
-                position: window::Position::Specific(chat.at),
-                visible: false, // placed, then faded in
+                size,
+                position: window::Position::Specific(at),
+                visible: false, // placed, then shown
                 resizable: false,
                 ..window::Settings::default()
             },
             card::CARD_RADIUS,
             windows::POPUP,
         );
-        chat.window = Some(id);
-        // Shown fully clear over the overlay's own drawing of the same card,
-        // given a beat to paint, then solid at once: the overlay can go with
-        // no blank beat (the owner's flash, #170); a fade would show it.
-        open.then(move |id| {
-            place_window::<()>(id, place)
-                .chain(windows::opacity(id, 0.0))
+        self.chat_win = Some(ChatWindow {
+            id,
+            home,
+            at,
+            moves: 0,
+            size,
+            glide: None,
+            placed: Some(place),
+            hidden: false,
+            out: false,
+        });
+        let overlay = self.overlay;
+        let shown = move |id| match handover {
+            true => windows::opacity(id, 0.0)
                 .chain(window::set_mode(id, window::Mode::Windowed))
                 .chain(background(|tx| {
                     std::thread::sleep(HANDOVER_BEAT);
                     let _ = tx.unbounded_send(());
                 }))
-                .chain(windows::opacity(id, 1.0))
-        })
-        .discard()
+                .chain(windows::opacity(id, 1.0)),
+            // (winit shows a window activated: the overlay takes the keys back)
+            false => windows::keep_above(id, overlay)
+                .chain(windows::opacity(id, 0.0))
+                .chain(window::set_mode(id, window::Mode::Windowed))
+                .chain(windows::foreground(overlay))
+                .chain(windows::fade(id, true, windows::POPUP, false)),
+        };
+        open.then(move |id| place_window::<()>(id, place).chain(shown(id)))
+            .discard()
     }
 
-    /// The overlay is up again: the chat is drawn on it, its window goes.
+    /// Wayland: the overlay closes with a pinned chat: it goes on in its own
+    /// window, at its dock.
+    pub(in crate::ui) fn float_chat(&mut self) -> Task<Message> {
+        match self.chat.is_some() && self.chat_win.is_none() && !self.own_window() {
+            true => self.open_chat_window(true),
+            false => Task::none(),
+        }
+    }
+
+    /// Wayland: the overlay is up again: it draws the chat, its window goes.
     pub(in crate::ui) fn unfloat_chat(&mut self) -> Task<Message> {
-        match self.chat.as_mut().and_then(|c| c.window.take()) {
-            Some(id) => {
-                windows::forget(id);
-                window::close(id)
-            }
+        if self.own_window() {
+            return Task::none();
+        }
+        match self.chat_win.take() {
+            Some(w) => window::close(w.id),
             None => Task::none(),
         }
     }
 
-    /// The chat's window moved (dragged by the OS): it docks once it stops.
+    /// The chat's window follows the chat, after every message (`update`), so
+    /// no path leaves a chat without its window or a window without its chat:
+    /// closed (faded out) with it; and where windows hide, opened with it,
+    /// hidden while Snip is open or a grab runs (X11), and put where the
+    /// overlay docks it while the overlay holds it (not one it found pinned
+    /// there, `Opening::chat_fixed`, until it is picked up).
+    pub(in crate::ui) fn sync_chat_window(&mut self) -> Task<Message> {
+        if self.chat_shown().is_none() {
+            return match self.chat_win.take() {
+                Some(w) => windows::close(w.id),
+                None => Task::none(),
+            };
+        }
+        if !self.own_window() {
+            return Task::none();
+        }
+        let open = self.o.is_some();
+        let snip = open && matches!(self.o.purpose, Purpose::Snip(_));
+        if self.chat_win.is_none() {
+            return match open && !snip {
+                true => self.open_chat_window(false),
+                false => Task::none(),
+            };
+        }
+        let place = (open && self.o.chat_fixed.is_none()).then(|| self.chat_place());
+        let (overlay, capturing) = (self.overlay, self.capturing.is_some());
+        let Some(w) = self.chat_win.as_mut() else {
+            return Task::none();
+        };
+        // a grab that never came (cancelled, failed): back
+        if w.out && !capturing && !open {
+            w.out = false;
+        }
+        let mut tasks = Vec::new();
+        let hide = snip || w.out;
+        if hide != w.hidden {
+            w.hidden = hide;
+            let mode = match hide {
+                true => window::Mode::Hidden,
+                false => window::Mode::Windowed,
+            };
+            tasks.push(window::set_mode(w.id, mode));
+            if !hide && open {
+                tasks.push(windows::foreground(overlay));
+            }
+        }
+        if let Some((home, at, size, place)) = place.filter(|_| !hide)
+            && w.placed != Some(place)
+        {
+            (w.home, w.at, w.size, w.placed, w.glide) = (home, at, size, Some(place), None);
+            tasks.push(place_window(w.id, place));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The chat's window moved (dragged by the OS, the overlay closed): it
+    /// docks once it stops.
     pub(in crate::ui) fn chat_moved(&mut self, window: window::Id, at: Point) -> Task<Message> {
-        let Some(chat) = self.chat.as_mut().filter(|c| c.window == Some(window)) else {
+        if self.o.is_some() {
+            return Task::none(); // the overlay put it there (`sync_chat_window`)
+        }
+        let Some(chat) = self.chat_win.as_mut().filter(|c| c.id == window) else {
             return Task::none();
         };
         chat.at = at;
@@ -245,10 +358,10 @@ impl App {
 
     /// The drag is over: its window's scale now says which monitor it is on.
     pub(in crate::ui) fn chat_settle(&mut self, moves: u32) -> Task<Message> {
-        match self.chat.as_ref().filter(|c| c.moves == moves) {
-            Some(Resident {
-                window: Some(id), ..
-            }) => window::scale_factor(*id).map(move |k| Message::ChatDocked(moves, k)),
+        match self.chat_win.as_ref().filter(|c| c.moves == moves) {
+            Some(w) if self.o.is_none() => {
+                window::scale_factor(w.id).map(move |k| Message::ChatDocked(moves, k))
+            }
             _ => Task::none(),
         }
     }
@@ -261,12 +374,13 @@ impl App {
         scale: f32,
         monitors: &[Place],
     ) -> Task<Message> {
-        let Some(chat) = self.chat.as_mut().filter(|c| c.moves == moves) else {
+        if self.o.is_some() {
+            return Task::none(); // (the overlay docks it while open)
+        }
+        let Some(chat) = self.chat_win.as_mut().filter(|c| c.moves == moves) else {
             return Task::none();
         };
-        let Some(id) = chat.window else {
-            return Task::none();
-        };
+        let id = chat.id;
         if let Some(m) = monitor::holding(monitors, chat.at, chat.size, scale) {
             let (origin, size) = (m.logical_origin(), m.size());
             chat.home = (origin, size, monitor::taskbar_inset(origin, size, m.scale));
@@ -276,7 +390,7 @@ impl App {
         let side = card::dock_side(here, screen);
         self.chat_side = Some(side);
         let dock = self.chat_dock(screen, side, inset);
-        let Some(chat) = self.chat.as_mut() else {
+        let Some(chat) = self.chat_win.as_mut() else {
             return Task::none();
         };
         let to = origin + iced::Vector::new(dock.x.round(), dock.y.round());
@@ -292,18 +406,19 @@ impl App {
         Task::none()
     }
 
-    /// A frame of the pinned chat window's glide to its dock: where it is now.
+    /// A frame of the chat window's glide to its dock: where it is now.
     pub(in crate::ui) fn chat_glide(&mut self, now: std::time::Instant) -> Task<Message> {
-        let Some(chat) = self.chat.as_mut() else {
+        let Some(chat) = self.chat_win.as_mut() else {
             return Task::none();
         };
-        let (Some((began, from, to)), Some(id)) = (chat.glide, chat.window) else {
+        let Some((began, from, to)) = chat.glide else {
             return Task::none();
         };
         let t = motion::progress(began, now, motion::DOCK, motion::Curve::Standard);
         let at = glided(from, to, t);
         chat.glide = (t < 1.0).then_some((began, from, to));
         chat.at = at;
+        let id = chat.id;
         // when each step ran (the overlay is closed: its frame log is the glide's)
         self.frame_times
             .borrow_mut()
@@ -314,17 +429,51 @@ impl App {
         window::move_to(id, at)
     }
 
+    /// The overlay opening on a screen at `origin` (logical px) finds the
+    /// pinned chat: its window's spot is out of the frame (`chat_hole`), and
+    /// it stays where it is, live above the overlay (#170 C4).
+    pub(in crate::ui) fn find_chat(&mut self, origin: Point) {
+        let found = (self.chat_win.as_ref())
+            .filter(|_| self.chat.is_some())
+            .map(|c| Rectangle::new(c.at - (origin - Point::ORIGIN), c.size));
+        self.o.chat_hole = found;
+        self.o.chat_fixed = found.filter(|_| self.own_window());
+        self.o.chat_came_pinned = self.chat.is_some();
+    }
+
+    /// A chat the overlay found pinned where it is (`Opening::chat_fixed`) is
+    /// picked up: from now on the overlay docks it, from that very spot (its
+    /// screen, side, width and offset off its dock).
+    fn adopt_chat(&mut self) {
+        let Some(r) = self.o.chat_fixed.take() else {
+            return;
+        };
+        self.o.chat_on = self.screen_holding(r);
+        let (screen, inset, origin, k) = self.chat_room();
+        let local = Rectangle::new(Point::ORIGIN + (r.position() - origin) * k, r.size() * k);
+        let side = card::dock_side(local, screen);
+        self.chat_side = Some(side);
+        self.chat_width = Some(local.width);
+        let dock = self.chat_dock(screen, side, inset);
+        let dock = origin + (dock.position() - Point::ORIGIN) * (1.0 / k);
+        self.o.chat_off = r.position() - dock;
+    }
+
     pub(in crate::ui) fn on_ai_chat(&mut self, id: u32, msg: ai_chat::Msg) -> Task<Message> {
         let resident = self.chat.as_ref().is_some_and(|c| c.id == id);
         let open = self.o.is_some();
         if !resident && !open {
             return Task::none(); // a late answer for a closed overlay's panel
         }
-        let floating = self
-            .chat
-            .as_ref()
-            .and_then(|c| c.window)
-            .filter(|_| resident);
+        // the overlay closed: the OS moves the chat's own window
+        let floating = (self.chat_win.as_ref())
+            .map(|w| w.id)
+            .filter(|_| resident && !open);
+        if open && matches!(msg, ai_chat::Msg::Card(card::Event::Grab(_))) {
+            self.adopt_chat(); // a chat found pinned there: the overlay docks it from now on
+        }
+        let ends = self.ends_tool();
+        let came_pinned = self.o.chat_came_pinned;
         let Some(panel) = (match resident {
             true => self.chat.as_mut().map(|c| &mut c.panel),
             false => (self.o.ai_chat.as_mut())
@@ -334,7 +483,6 @@ impl App {
             return Task::none();
         };
         match msg {
-            // its own window: the OS moves it
             ai_chat::Msg::Card(card::Event::Grab(card::Drag::Move)) if floating.is_some() => {
                 return floating.map_or_else(Task::none, window::drag);
             }
@@ -345,7 +493,10 @@ impl App {
                 self.frame_times.borrow_mut().clear();
             }
             ai_chat::Msg::Card(card::Event::Hover(on)) if open => self.o.chat_hover = on,
-            ai_chat::Msg::Card(card::Event::Reset) => (self.card, self.chat_width) = (None, None),
+            ai_chat::Msg::Card(card::Event::Reset) => {
+                (self.card, self.chat_width) = (None, None);
+                self.o.chat_fixed = None; // (to its dock, at the design's width)
+            }
             ai_chat::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}
             ai_chat::Msg::Search if open => return self.run(&search_in_browser::ACTION),
             ai_chat::Msg::Search => {}
@@ -366,16 +517,18 @@ impl App {
                 return settings.chain(section).map(Message::Windows);
             }
             msg => {
-                // a question asked in the overlay's own chat, which is not pinned yet
-                let asks = matches!(
-                    msg,
-                    ai_chat::Msg::Submit
-                        | ai_chat::Msg::Regenerate
-                        | ai_chat::Msg::Preset(_)
-                        | ai_chat::Msg::Ready(_)
-                ) && open
-                    && !resident
-                    && !panel.pinned();
+                let asks = open
+                    && matches!(
+                        msg,
+                        ai_chat::Msg::Submit
+                            | ai_chat::Msg::Regenerate
+                            | ai_chat::Msg::Preset(_)
+                            | ai_chat::Msg::Ready(_)
+                    );
+                // the overlay's own chat, not pinned yet: this question may pin it
+                let pins = asks && !resident && !panel.pinned();
+                // a chat pinned before this overlay opened (C4c)
+                let into_pinned = asks && resident && came_pinned;
                 let task = panel.update(msg);
                 // the chat's Include screen is the AI field's (one state)
                 if let (Some(on), true) = (panel.include(), open) {
@@ -384,20 +537,22 @@ impl App {
                 self.keep_chat();
                 let task = task.map(move |msg| Message::AiChat(id, msg));
                 // The follow-up that pinned the chat ends the tool: the pinned
-                // chat goes on alone (owner suggestion, #170). Not in Snip, not
-                // mid-drag; "Always" pinned it from the first question, no close.
-                let free = !self.o.drawing && self.o.chat_drag.is_none();
-                if asks
-                    && self.chat.is_some()
-                    && free
-                    && !matches!(self.o.purpose, Purpose::Snip(_))
-                {
+                // chat goes on alone (owner suggestion, #170), and so does a
+                // question asked into a chat pinned before (C4c). Not in Snip,
+                // not mid-drag; "Always" pinned it from the first question, no close.
+                if ((pins && self.chat.is_some()) || into_pinned) && ends {
                     return Task::batch([task, self.close()]);
                 }
                 return task;
             }
         }
         Task::none()
+    }
+
+    /// A question sent now may end the tool (#170): not in Snip, never while
+    /// the user draws or drags the chat.
+    pub(in crate::ui) fn ends_tool(&self) -> bool {
+        !self.o.drawing && self.o.chat_drag.is_none() && !matches!(self.o.purpose, Purpose::Snip(_))
     }
 
     /// The selection cut out of the frozen frame, in physical pixels; with the
@@ -471,14 +626,20 @@ impl App {
         at
     }
 
-    /// The pinned chat as the overlay draws it, live: not in Snip. Snip's
-    /// frozen screen shows it already (its window is in the grab, a pick like
-    /// any window, `widgets_in_grab`), and nothing of ours covers Snip's
-    /// outline; its own window comes back when Snip closes (`float_chat`).
+    /// The pinned chat as the overlay lays out round it (the bar, the chips
+    /// keep off it): not in Snip. Snip's frozen screen shows it already (its
+    /// window is in the grab, a pick like any window, `widgets_in_grab`), and
+    /// nothing of ours covers Snip's outline (its window hides meanwhile).
     pub(in crate::ui) fn pinned_drawn(&self) -> Option<&Resident> {
         self.chat
             .as_ref()
             .filter(|_| !matches!(self.o.purpose, Purpose::Snip(_)))
+    }
+
+    /// The overlay draws the AI chat's card itself: only where the chat has no
+    /// window of its own while the overlay is open (Wayland, `own_window`).
+    pub(in crate::ui) fn draws_chat(&self) -> bool {
+        !self.own_window()
     }
 
     /// The AI chat is the card shown.
@@ -490,6 +651,9 @@ impl App {
     /// else the side `card::place` picks (away from the `selection`); held
     /// off it while dragged, gliding back once let go (`motion::DOCK`).
     fn chat_at(&self, selection: Option<Rectangle>) -> Rectangle {
+        if let Some(found) = self.o.chat_fixed {
+            return found; // a pinned chat's window, where the overlay found it
+        }
         let (screen, inset, origin, k) = self.chat_room();
         let selection = selection.filter(|_| self.o.chat_on.is_none());
         let side = self
@@ -589,7 +753,7 @@ impl App {
     /// when the OS asks for no animations).
     pub(in crate::ui) fn chat_grown(&self) -> f32 {
         match (&self.o.ai_chat, self.o.chat_open) {
-            _ if motion::reduced() => 1.0,
+            _ if motion::reduced() || self.own_window() => 1.0, // (its window fades in)
             (Some((id, _)), Some((was, _, grown))) if *id == was => grown,
             _ => 0.0,
         }

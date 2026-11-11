@@ -77,11 +77,17 @@ impl App {
                 return live.controller_view().map(Message::Live);
             }
         }
-        // the pinned chat in its own window (the overlay is closed)
-        if let Some(chat) = self.chat.as_ref().filter(|c| c.window == Some(window)) {
-            let (id, size) = (chat.id, chat.size);
-            return (chat.panel.view(Rectangle::with_size(size), size, false))
-                .map(move |msg| Message::AiChat(id, msg));
+        // the AI chat in its own window (`ai_chat::ChatWindow`)
+        if let Some(size) = (self.chat_win.as_ref())
+            .filter(|w| w.id == window)
+            .map(|w| w.size)
+        {
+            let hover = self.o.is_some() && self.o.chat_hover;
+            return match self.chat_shown() {
+                Some((id, panel)) => (panel.view(Rectangle::with_size(size), size, hover))
+                    .map(move |msg| Message::AiChat(id, msg)),
+                None => space().into(), // (closing)
+            };
         }
         if let Some(screen) = self.o.screens.iter().find(|s| s.window == window) {
             return self.screen_view(screen);
@@ -258,9 +264,9 @@ impl App {
             .o
             .ai_chat
             .as_ref()
-            .filter(|_| self.chat_window() != self.overlay)
+            .filter(|_| !self.draws_chat() || self.chat_window() != self.overlay)
         {
-            space().into() // (another screen's window draws the card)
+            space().into() // (its own window, or another screen's, draws the card)
         } else if let Some((id, panel)) = &self.o.ai_chat {
             let id = *id;
             let at = self.chat_card_at();
@@ -338,10 +344,10 @@ impl App {
         ) {
             layers = layers.push(self.selection_ui(selection, self.overlay));
         }
-        // The pinned chat over everything on its side.
+        // The pinned chat over everything on its side (Wayland: else its own window).
         if let Some(chat) = self
             .pinned_drawn()
-            .filter(|_| self.chat_window() == self.overlay)
+            .filter(|_| self.draws_chat() && self.chat_window() == self.overlay)
         {
             let id = chat.id;
             let at = self.chat_rect();

@@ -861,6 +861,7 @@ impl App {
         }
         // the AI chat's card docked on (or dragged onto) this screen
         if (self.o.ai_chat.is_some() || self.pinned_drawn().is_some())
+            && self.draws_chat()
             && self.chat_window() == window
         {
             // (the quick chat's card and the pinned chat: both where `chat_rect` holds them)
@@ -1200,16 +1201,19 @@ mod tests {
         let _ = app.update(Message::CardMoved(from + Vector::new(1000.0, 0.0)));
         let _ = app.update(Message::CardReleased);
         assert_eq!(app.chat_window(), right);
-        // drawn where it is: its middle row is lit, not the dim
-        let local = app.o.screens[0].view.rect_to_screen(app.chat_rect());
-        let rgba = shot::render(app.view(right), 1280, 720);
-        let (pixels, _) = rgba.as_chunks::<4>();
-        let (x, y) = (local.center_x() as usize, local.center_y() as usize);
+        // its own window is on the screen it is on, whole
+        let screen = app.o.screens[0].place;
+        let placed = app.chat_win.as_ref().unwrap().placed.unwrap();
+        let (x, y) = placed.origin;
+        let (sx, sy) = screen.origin;
         assert!(
-            pixels[y * 1280 + x] != pixels[y * 1280 + 2],
-            "drawn on the screen it is on: {local:?} {:?}",
-            app.chat_card_at()
+            x >= sx
+                && y >= sy
+                && x + placed.px.0 as i32 <= sx + screen.px.0 as i32
+                && y + placed.px.1 as i32 <= sy + screen.px.1 as i32,
+            "{placed:?} on {screen:?}"
         );
+        assert_eq!(placed.scale, screen.scale, "at that screen's scale");
     }
 
     /// The reader note and the Copied pill go with the bar onto its screen, and

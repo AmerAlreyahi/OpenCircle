@@ -214,6 +214,8 @@ pub(in crate::ui) struct App {
     pub(in crate::ui) chat_width: Option<f32>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
     pub(in crate::ui) chat: Option<ai_chat::Resident>,
+    /// The AI chat's own window (`ai_chat::ChatWindow`).
+    pub(in crate::ui) chat_win: Option<ai_chat::ChatWindow>,
     /// Song searches started (numbers them).
     pub(in crate::ui) songs: u32,
     /// The update waiting for a moment to install (`update::flow`), with its pill.
@@ -304,6 +306,7 @@ impl App {
             chat_side: None,
             chat_width: None,
             chat: None,
+            chat_win: None,
             songs: 0,
             update: None,
             updated: None,
@@ -318,7 +321,7 @@ impl App {
         if self.live.as_ref().and_then(live_layer::Live::controller) == Some(window) {
             return "OpenCircle live translate controls".into();
         }
-        if self.chat.as_ref().and_then(|c| c.window) == Some(window) {
+        if self.chat_win.as_ref().is_some_and(|w| w.id == window) {
             return "OpenCircle AI".into();
         }
         self.windows.title(window).to_string()
@@ -411,17 +414,17 @@ impl App {
             }),
             None => Subscription::none(),
         };
-        // The pinned chat in its own window: where it was dragged, and its
-        // spinner's frames while the AI thinks.
-        let chat = match self.chat.as_ref().filter(|c| c.window.is_some()) {
-            Some(chat) => Subscription::batch([
+        // The chat in its own window: where it was dragged, and its
+        // spinner's frames while the AI thinks (the overlay's frames while open).
+        let chat = match (self.chat_win.as_ref()).zip(self.chat_shown()) {
+            Some((window, (_, panel))) => Subscription::batch([
                 iced::event::listen_with(|event, _, id| match event {
                     iced::Event::Window(window::Event::Moved(at)) => {
                         Some(Message::ChatMoved(id, at))
                     }
                     _ => None,
                 }),
-                match chat.panel.spinning() || chat.glide.is_some() {
+                match panel.spinning() || window.glide.is_some() {
                     true => motion::frames().map(Message::ChatFrame),
                     false => Subscription::none(),
                 },
