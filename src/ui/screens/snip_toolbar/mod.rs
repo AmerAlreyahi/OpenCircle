@@ -126,8 +126,9 @@ impl SnipToolbar {
                 // More's rows: the arrow keys walk the live ones
                 Message::MenuStep(back) => {
                     let rows = toolbar::more_rows(&self.annotator);
-                    let live: Vec<usize> =
-                        (0..rows.len()).filter(|&i| rows[i].3.is_some()).collect();
+                    let live: Vec<usize> = (0..rows.len())
+                        .filter(|&i| rows[i].message.is_some())
+                        .collect();
                     let n = live.len();
                     if n > 0 {
                         let at = self
@@ -144,11 +145,14 @@ impl SnipToolbar {
                     }
                     return None;
                 }
-                Message::Activate if self.annotator.menu == Some(annotate::Menu::More) => {
+                Message::MenuEdge(last) => {
                     let rows = toolbar::more_rows(&self.annotator);
-                    let row = self.annotator.row.and_then(|i| rows.into_iter().nth(i));
-                    self.annotator.menu = None;
-                    row?.3?
+                    let mut live = (0..rows.len()).filter(|&i| rows[i].message.is_some());
+                    self.annotator.row = if last { live.next_back() } else { live.next() };
+                    return None;
+                }
+                Message::Activate if self.annotator.menu == Some(annotate::Menu::More) => {
+                    self.take_row()?
                 }
                 Message::Activate => {
                     let stops = toolbar::stops(&self.annotator);
@@ -158,6 +162,15 @@ impl SnipToolbar {
             };
             self.annotator.update(message)
         }
+    }
+
+    /// Enter in More: closes the menu and gives the keyboard's row's message
+    /// (`None`: no row, or a dimmed one).
+    pub fn take_row(&mut self) -> Option<Message> {
+        let rows = toolbar::more_rows(&self.annotator);
+        let row = self.annotator.row.and_then(|i| rows.into_iter().nth(i));
+        self.annotator.menu = None;
+        row?.message
     }
 
     /// The toolbar is showing (not back at the action bar).

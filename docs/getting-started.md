@@ -158,8 +158,9 @@ area (`Enter` takes the full screen). A toolbar opens beside it to mark it up;
 `Ctrl+C` or **Copy** puts it on the clipboard (original size, picture only),
 ready to paste into an AI chat.
 
-- More has Long capture (scroll the page yourself), Add to steps (several snips
-  as one numbered image), Pin, Colour picker and Screen ruler.
+- More has Copy text, Ask AI and Translate for the area, Long capture (scroll
+  the page yourself), Add to steps (several snips as one numbered image), Pin,
+  Colour picker and Screen ruler.
 - Blur is a soft pixel mosaic that hides text so it can't be recovered; Redact is
   a solid box, for when you want no trace at all.
 - Song search, pins and live translate are unfinished and in

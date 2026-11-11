@@ -10,6 +10,7 @@ use iced::widget::{Space as Gap, row};
 use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 
 use crate::actions::share;
+use crate::actions::snip_more::{self, Read, Row};
 use crate::snip::annotate::{
     Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, Width, dragout, info,
 };
@@ -123,37 +124,79 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
     stops
 }
 
-/// A row of More: glyph, name (Latin, Arabic), key, what it sends (`None`:
-/// dimmed).
-pub type MoreRow = (
-    char,
-    (&'static str, &'static str),
-    Option<&'static str>,
-    Option<Message>,
-);
+/// A row of More: glyph, name (Latin, Arabic), its static key, its key caps,
+/// what it sends (`None`: dimmed), and which of the three text rows it is.
+pub struct MoreRow {
+    pub glyph: char,
+    pub name: (&'static str, &'static str),
+    pub caps: Vec<String>,
+    pub message: Option<Message>,
+    pub of: Option<Row>,
+}
 
-/// More's rows (Labs and platform rows only where they work).
+impl MoreRow {
+    fn plain(
+        glyph: char,
+        name: (&'static str, &'static str),
+        key: Option<&'static str>,
+        message: Option<Message>,
+    ) -> Self {
+        MoreRow {
+            glyph,
+            name,
+            caps: key.map(snip_more::caps).unwrap_or_default(),
+            message,
+            of: None,
+        }
+    }
+}
+
+/// The rows before the hairline: Copy text, Ask AI, Translate.
+pub const TEXT_ROWS: usize = 3;
+
+/// More's rows (Labs and platform rows only where they work): the three
+/// picture actions first (each shows the user's own shortcut), then today's.
 pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     // a long capture running: only what finishes it stays live
     let idle = !e.capturing;
     let live = |m: Message| idle.then_some(m);
-    let mut rows = vec![(
+    let info = &e.more;
+    let mut rows: Vec<MoreRow> = Row::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let message = match (snip_more::why(row, info, e.capturing), row) {
+                (Some(_), _) => None,
+                (None, Row::CopyText) => Some(Message::CopyText),
+                (None, Row::AskAi) => Some(Message::AskAi),
+                (None, Row::Translate) => Some(Message::Translate),
+            };
+            MoreRow {
+                glyph: row.glyph(),
+                name: row.label(info.translated),
+                caps: info.caps[i].clone(),
+                message,
+                of: Some(row),
+            }
+        })
+        .collect();
+    rows.push(MoreRow::plain(
         SCROLL,
         ("Long capture", "لقطة طويلة"),
         None,
         (e.scroll && idle).then_some(Message::Scroll),
-    )];
+    ));
     // while the strip is open Copy's place adds the step: Copy moves here
     rows.push(match steps_on(e) {
-        false => (
+        false => MoreRow::plain(
             LIST_PLUS,
             ("Add to steps", "أضف إلى الخطوات"),
             Some("Ctrl+Enter"),
             live(Message::AddStep),
         ),
-        true => (COPY, ("Copy", "نسخ"), Some("Ctrl+C"), Some(Message::Copy)),
+        true => MoreRow::plain(COPY, ("Copy", "نسخ"), Some("Ctrl+C"), Some(Message::Copy)),
     });
-    rows.push((
+    rows.push(MoreRow::plain(
         PIN,
         ("Pin to screen", "تثبيت على الشاشة"),
         Some("Ctrl+P"),
@@ -161,18 +204,28 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     ));
     if live_pin() {
         let m = (e.scroll && idle).then_some(Message::LivePin);
-        rows.push((LIVE_PIN, ("Live pin", "تثبيت مباشر"), None, m));
+        rows.push(MoreRow::plain(
+            LIVE_PIN,
+            ("Live pin", "تثبيت مباشر"),
+            None,
+            m,
+        ));
     }
     if share::SUPPORTED {
-        rows.push((SHARE, ("Share", "مشاركة"), None, Some(Message::Share)));
+        rows.push(MoreRow::plain(
+            SHARE,
+            ("Share", "مشاركة"),
+            None,
+            Some(Message::Share),
+        ));
     }
-    rows.push((
+    rows.push(MoreRow::plain(
         PIPETTE,
         ("Colour picker", "منتقي الألوان"),
         None,
         live(Message::ScreenTool(ScreenTool::Picker)),
     ));
-    rows.push((
+    rows.push(MoreRow::plain(
         crate::ui::screens::tools::ruler::ICON,
         ("Screen ruler", "مسطرة الشاشة"),
         None,
@@ -699,17 +752,42 @@ fn step_label(words: (&'static str, &'static str), n: usize) -> String {
     format!("{} {n}", ar(words.0, words.1))
 }
 
-/// More: long capture, pin, share, the screen tools (arrow keys walk it).
+/// More's width: 268 px, 304 in Arabic (the longest label grows it).
+pub const MORE_W: f32 = 268.0;
+pub const MORE_W_AR: f32 = 304.0;
+
+/// More: the three picture actions, a hairline, then long capture, pin,
+/// share, the screen tools (arrow keys walk it); its foot says why a row is
+/// off (arrow keys skip those) or where Ask AI goes.
 fn more_panel(e: &Annotator) -> Element<'_, Message> {
-    let rows = more_rows(e)
-        .into_iter()
-        .enumerate()
-        .map(|(i, (glyph, (latin, arabic), key, m))| {
-            let label = if RTL.get() { arabic } else { latin };
-            option_list::action(glyph, label, key, e.row == Some(i), m)
-        })
-        .collect();
-    option_list::menu(rows)
+    let rtl = RTL.get();
+    let mut items: Vec<Element<'_, Message>> = Vec::new();
+    for (i, r) in more_rows(e).into_iter().enumerate() {
+        if i == TEXT_ROWS {
+            items.push(option_list::separator());
+        }
+        let label = if rtl { r.name.1 } else { r.name.0 };
+        let lead = match r.of {
+            Some(Row::AskAi) => option_list::logo_mark(16),
+            _ => option_list::glyph(r.glyph, false),
+        };
+        let reading = r.of.is_some_and(|row| {
+            e.more.read == Read::Reading && matches!(row, Row::CopyText | Row::Translate)
+        });
+        items.push(option_list::action(option_list::ActionRow {
+            lead,
+            label,
+            external: r.of == Some(Row::AskAi) && e.more.browser,
+            caps: r.caps,
+            reading,
+            focused: e.row == Some(i),
+            press: r.message,
+            rtl,
+        }));
+    }
+    let foot = snip_more::foot(&e.more, e.capturing)
+        .map(|(latin, arabic)| option_list::foot(if rtl { arabic } else { latin }, rtl));
+    option_list::action_menu(if rtl { MORE_W_AR } else { MORE_W }, items, foot)
 }
 
 /// Between the toolbar and its panel.
@@ -781,6 +859,7 @@ fn colour_panel(e: &Annotator) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::snip_more::Info;
     use crate::snip::annotate::Image;
     use crate::ui::kit::testing::golden;
     use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
@@ -817,8 +896,31 @@ mod tests {
                 let mut undo = editor();
                 undo.update(Message::UndoClick);
                 undo.update(Message::UndoClick);
-                let mut more = editor();
-                more.update(Message::Menu(Menu::More));
+                // More: the three picture actions with the user's own keys, and
+                // each state of the design (reading, no text, the browser, a
+                // long capture, the translation on)
+                let more_with = |info: Info, capturing: bool| {
+                    let mut e = editor();
+                    e.more = Info {
+                        caps: snip_more::caps_from(&crate::config::Config::default()),
+                        ..info
+                    };
+                    e.capturing = capturing;
+                    e.update(Message::Menu(Menu::More));
+                    e
+                };
+                let state = |read, browser, translated| Info {
+                    read,
+                    browser,
+                    translated,
+                    ..Info::default()
+                };
+                let more = more_with(state(Read::Text, false, false), false);
+                let more_reading = more_with(state(Read::Reading, false, false), false);
+                let more_notext = more_with(state(Read::NoText, false, false), false);
+                let more_browser = more_with(state(Read::Text, true, false), false);
+                let more_long = more_with(state(Read::Text, false, false), true);
+                let more_original = more_with(state(Read::Text, false, true), false);
                 let mut held = editor();
                 held.held = true;
                 // the Steps strip open: Add step 2, full, a step edited, More
@@ -833,7 +935,7 @@ mod tests {
                     ("add-step", with(Some(1), None), 60.0),
                     ("steps-full", with(Some(12), None), 60.0),
                     ("update-step", with(Some(3), Some(1)), 60.0),
-                    ("add-step-more", add_more, 330.0),
+                    ("add-step-more", add_more, 430.0),
                     ("bar", editor(), 60.0),
                     ("held", held, 60.0),
                     ("shapes", panel(Tool::Arrow), 330.0),
@@ -844,7 +946,12 @@ mod tests {
                     ("hide", panel(Tool::Blur), 360.0),
                     ("colour", colour, 440.0),
                     ("undo", undo, 130.0),
-                    ("more", more, 300.0),
+                    ("more", more, 430.0),
+                    ("more-reading", more_reading, 430.0),
+                    ("more-notext", more_notext, 430.0),
+                    ("more-browser", more_browser, 430.0),
+                    ("more-long", more_long, 430.0),
+                    ("more-original", more_original, 430.0),
                 ];
                 let dir = if rtl { "-ar" } else { "" };
                 for (name, e, height) in cases {

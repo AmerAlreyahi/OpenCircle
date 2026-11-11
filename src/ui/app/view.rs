@@ -142,7 +142,11 @@ impl App {
                 _ => Vec::new(),
             },
         };
-        let translation = self.o.translate.as_ref().and_then(|(_, s)| s.image());
+        // (Snip's More pastes its translation into the picture: no frame of the session's)
+        let own = matches!(self.o.purpose, Purpose::Snip(_));
+        let translation = (self.o.translate.as_ref())
+            .filter(|_| !own)
+            .and_then(|(_, s)| s.image());
         // The frame is its own layer: iced draws a canvas's images above its shapes.
         let mut shown = image(translation.unwrap_or(frame).clone())
             .width(Fill)
@@ -176,6 +180,7 @@ impl App {
         // What is translated so far: only its area, over the frame (no copy of the
         // whole frame per partial).
         let part = (self.o.translate.as_ref())
+            .filter(|_| !own)
             .and_then(|(_, s)| s.part())
             .and_then(|(handle, area)| {
                 let (crop, at) = self.o.view.patch_in_view(area)?;
@@ -228,6 +233,15 @@ impl App {
                 if toolbar.is_none() {
                     layers = layers.push(self.morphing_bar(at));
                 }
+                // More's results over the picture: the AI chat, the translation's
+                // pill and cards, the text reader's download card by the toolbar
+                if let Some(cards) = self.cards() {
+                    layers = layers.push(cards);
+                }
+                if let Some(note) = self.reader_note() {
+                    let bar = Rectangle::new(at, edit.bar_size());
+                    layers = layers.push(self.beside_bar(note, bar, self.o.screen.height));
+                }
                 return layers.extend(self.pill_view()).into();
             }
             layers = layers.extend(edit.flat_view());
@@ -260,25 +274,8 @@ impl App {
             let id = *id;
             song.view(self.o.screen)
                 .map(move |msg| Message::Song(id, msg))
-        } else if let Some((_, _)) = self
-            .o
-            .ai_chat
-            .as_ref()
-            .filter(|_| !self.draws_chat() || self.chat_window() != self.overlay)
-        {
-            space().into() // (its own window, or another screen's, draws the card)
-        } else if let Some((id, panel)) = &self.o.ai_chat {
-            let id = *id;
-            let at = self.chat_card_at();
-            let card = panel
-                .view(at, self.o.screen, self.o.chat_hover)
-                .map(move |msg| Message::AiChat(id, msg));
-            lifted(grow(card, at, self.chat_grown()), at, panel.held)
-        } else if let Some((id, session)) = &self.o.translate {
-            let id = *id;
-            session
-                .view(self.o.screen, self.chat_card_at(), self.o.chat_hover)
-                .map(move |msg| Message::Translate(id, msg))
+        } else if let Some(cards) = self.cards() {
+            cards
         } else if let Some(snip) = snip {
             let look = crate::ui::theme::accent_of(&config::look());
             match (&snip.scroll, &snip.tool) {
@@ -364,6 +361,29 @@ impl App {
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
         }
         layers.extend(self.pill_view()).into()
+    }
+
+    /// The AI chat card, or the translation's pill and cards (main mode's
+    /// result cards; Snip's More shows them over the picked area too).
+    fn cards(&self) -> Option<Element<'_, Message>> {
+        if self.o.ai_chat.is_some() && (!self.draws_chat() || self.chat_window() != self.overlay) {
+            return Some(space().into()); // (its own window, or another screen's, draws the card)
+        }
+        if let Some((id, panel)) = &self.o.ai_chat {
+            let id = *id;
+            let at = self.chat_card_at();
+            let card = panel
+                .view(at, self.o.screen, self.o.chat_hover)
+                .map(move |msg| Message::AiChat(id, msg));
+            return Some(lifted(grow(card, at, self.chat_grown()), at, panel.held));
+        }
+        let (id, session) = self.o.translate.as_ref()?;
+        let id = *id;
+        Some(
+            session
+                .view(self.o.screen, self.chat_card_at(), self.o.chat_hover)
+                .map(move |msg| Message::Translate(id, msg)),
+        )
     }
 
     /// Wayland: the Copy / Save pill drawn over the frame at its place, with its

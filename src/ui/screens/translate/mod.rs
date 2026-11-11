@@ -307,6 +307,18 @@ impl Session {
         });
     }
 
+    /// What is translated now and where it goes (frame px: x0, y0, x1, y1);
+    /// `true`: the image is the whole frame (the finished translation), else
+    /// only the area (what is ready so far). Snip's More pastes it into its
+    /// picture. Alt (the peek) doesn't count.
+    pub fn translated(&self) -> Option<(&image::Handle, [u32; 4], bool)> {
+        match &self.phase {
+            Phase::Shown(shown) => Some((&shown.image, self.area, true)),
+            Phase::Translating => self.partial.as_ref().map(|p| (&p.image, p.area, false)),
+            _ => None,
+        }
+    }
+
     /// While translating: the area translated so far and where it goes in the
     /// frame (px), to draw over the original frame, unless Alt is held.
     pub fn part(&self) -> Option<(&image::Handle, [u32; 4])> {

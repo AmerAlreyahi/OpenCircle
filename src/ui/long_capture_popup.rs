@@ -147,6 +147,8 @@ fn word(how: Finish) -> &'static str {
         Finish::Cancel => "cancel",
         Finish::Pin => "pin",
         Finish::Share => "share",
+        Finish::CopyText => "copy_text",
+        Finish::AskAi => "ask_ai",
     }
 }
 

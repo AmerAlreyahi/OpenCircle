@@ -119,6 +119,14 @@ impl App {
             {
                 self.snip_here(None)
             }
+            // Snip has an area: Copy text / Ask AI / Translate's own keys act on it
+            // instead of starting a capture (the keys More shows)
+            Message::Trigger(Trigger::Quick(_, qa)) if self.more_row_of(&qa).is_some() => {
+                match self.more_row_of(&qa) {
+                    Some(row) => self.run_more(row),
+                    None => Task::none(),
+                }
+            }
             // Open but maybe behind another app (Alt+Tab, a click elsewhere): its
             // keys (Esc) went there. The shortcut brings it back in front, with
             // the keyboard, instead of nothing happening.
@@ -276,6 +284,7 @@ impl App {
                 Self::hold_then_close()
             }
             Message::TextRead(_) => Task::none(), // closed meanwhile
+            Message::MoreRead(opening, id, read) => self.on_more_read(opening, id, read),
             Message::Scanned(area, scan) => {
                 if self.o.selection.map(|s| s.area) == Some(area) {
                     self.o.scan = Some(scan);
@@ -713,6 +722,9 @@ impl App {
                         self.note_reader();
                         // Copy text was waiting for the models: now copy.
                         if std::mem::take(&mut self.o.copy_after) {
+                            if self.more_editing() {
+                                return self.more_after_download();
+                            }
                             return self.run_quick(Quick::CopyText);
                         }
                         return self.warm();

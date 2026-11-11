@@ -84,7 +84,7 @@ const SETTLE: Duration = Duration::from_millis(250);
 const HANDOVER_BEAT: Duration = Duration::from_millis(60);
 
 /// Ask AI only opens the browser: the provider is Google AI Mode (no key).
-fn hands_off() -> bool {
+pub(in crate::ui) fn hands_off() -> bool {
     #[cfg(test)]
     if !HAND_OFF.get() {
         return false; // most tests drive the chat with the browser provider's setup

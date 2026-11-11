@@ -8,7 +8,7 @@ use iced::widget::image;
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
-use crate::actions::{self, Crop, Run, copy, save};
+use crate::actions::{self, Crop, Run, copy, save, text};
 use crate::capture;
 use crate::config::{self};
 
@@ -81,6 +81,9 @@ impl App {
                     }
                     Finish::Save => self.finish(&save::ACTION, crop),
                     Finish::Pin => self.pin(crop),
+                    // More's rows act on the stitched page, as Copy / Save do
+                    Finish::CopyText => self.finish(&text::ACTION, crop),
+                    Finish::AskAi => self.open_chat(crop, None),
                     // the share sheet comes from the editor: on the image, picked
                     Finish::Share => {
                         self.o.selection = None;

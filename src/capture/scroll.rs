@@ -52,6 +52,10 @@ pub enum Finish {
     Save,
     Pin,
     Share,
+    /// More's Copy text / Ask AI: finish, then read the page's text and copy
+    /// it / ask the AI about the stitched page.
+    CopyText,
+    AskAi,
     /// Wayland (the pop-up's or the tray's Done, any shortcut): Snip opens
     /// with the stitched page picked.
     Done,

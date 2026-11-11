@@ -34,6 +34,7 @@ pub(in crate::ui) mod capture;
 pub(in crate::ui) mod screens;
 pub(in crate::ui) mod selection;
 pub(in crate::ui) mod snip;
+pub(in crate::ui) mod snip_more;
 pub(in crate::ui) mod snip_toolbar;
 #[cfg(test)]
 pub(in crate::ui) mod tests;

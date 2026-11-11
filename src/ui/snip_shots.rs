@@ -188,6 +188,78 @@ fn states() -> Vec<(&'static str, App)> {
     let _ = app.on_overlay(Event::Move(Point::new(750.0, 420.0)));
     let _ = app.on_overlay(Event::Release);
     out.push(("9c-ruler-box", app));
+    // 10: Snip's More (SNIP_MORE_SPEC): open with the area read; still reading;
+    // no text; Ask AI to the browser; during a long capture; the AI chat; the
+    // translation running, shown, and with no model yet
+    out.extend(more_states());
+    out
+}
+
+/// More open on the picked area, the text read as `read` says.
+fn more(read: Option<Result<Vec<crate::ocr::TextBlock>, String>>) -> App {
+    crate::actions::text::MODELS_HERE.set(Some(true));
+    let mut app = picked();
+    let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
+    if let Some(read) = read {
+        let _ = app.on_more_read(app.opening, app.more_reads(), read);
+    }
+    settle(&mut app);
+    app
+}
+
+fn line(text: &str) -> crate::ocr::TextBlock {
+    crate::ocr::TextBlock {
+        text: text.into(),
+        bounds: [20.0, 20.0, 200.0, 14.0],
+        confidence: 1.0,
+    }
+}
+
+fn more_states() -> Vec<(&'static str, App)> {
+    use crate::snip::annotate::Menu;
+    let mut out = Vec::new();
+    out.push(("10a-more", more(Some(Ok(vec![line("hello")])))));
+    out.push(("10b-more-reading", more(None)));
+    out.push(("10c-more-notext", more(Some(Ok(vec![])))));
+    // Ask AI to the browser (no key): the external mark and the foot
+    let mut app = more(Some(Ok(vec![line("hello")])));
+    if let Some(edit) = app.o.edit.as_mut() {
+        edit.annotator.more.browser = true;
+    }
+    out.push(("10d-more-browser", app));
+    // a long capture running: Translate off
+    let mut app = more(Some(Ok(vec![line("hello")])));
+    if let Some(edit) = app.o.edit.as_mut() {
+        edit.annotator.capturing = true;
+    }
+    out.push(("10e-more-long", app));
+    // Ask AI: the chat docks on the side away from the area, the picture attached
+    let mut app = picked();
+    let task = app.on_snip_toolbar(E::AskAi);
+    super::app::tests::run_task(&mut app, task);
+    settle(&mut app);
+    out.push(("10f-ai", app));
+    // Translate: the session starts (the pill and "Translating…")
+    let mut app = more(Some(Ok(vec![line("hola")])));
+    let _ = app.on_snip_toolbar(E::Menu(Menu::More));
+    let _ = app.on_snip_toolbar(E::Translate);
+    settle(&mut app);
+    out.push(("10g-translating", app));
+    // ...its result in the picture, the row now Show original
+    let mut app = more(Some(Ok(vec![line("hola")])));
+    let _ = app.on_snip_toolbar(E::Menu(Menu::More));
+    let _ = app.on_snip_toolbar(E::Translate);
+    app.show_translated_for_test();
+    let _ = app.on_snip_toolbar(E::Menu(Menu::More));
+    settle(&mut app);
+    out.push(("10h-translated", app));
+    // no offline model for the pair yet: the existing download card
+    crate::actions::text::MODELS_HERE.set(Some(false));
+    let mut app = picked();
+    let _ = app.on_snip_toolbar(E::Translate);
+    settle(&mut app);
+    out.push(("10i-nomodel", app));
+    crate::actions::text::MODELS_HERE.set(Some(true));
     out
 }
 

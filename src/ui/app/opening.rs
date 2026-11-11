@@ -199,6 +199,8 @@ pub(in crate::ui) struct Opening {
     /// Main mode: the desktop's windows at the freeze (`Shot::windows`), for
     /// the bar's Snip (a late list drifts from the frozen frames).
     pub(in crate::ui) windows: Vec<crate::ui::snip::Pick>,
+    /// Snip's More menu: the area's text read, the translation on it.
+    pub(in crate::ui) more: crate::ui::app::snip_more::More,
 }
 
 impl Default for Opening {
@@ -229,6 +231,7 @@ impl Default for Opening {
             pointer: Point::ORIGIN,
             ocr_ready: false,
             reader: Reader::Idle,
+            more: Default::default(),
             copy_after: false,
             text_by: None,
             text_press: None,

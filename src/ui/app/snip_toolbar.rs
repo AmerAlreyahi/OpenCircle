@@ -86,6 +86,7 @@ impl App {
                 })
                 .collect();
         }
+        self.more_reset();
         self.o.edit = Some(edit);
         Task::none()
     }
@@ -112,6 +113,10 @@ impl App {
             }
             return Task::none();
         }
+        // The AI chat asked from More is a quick question: Esc closes both.
+        if matches!(msg, annotate::Message::Back) && self.o.ai_chat.is_some() {
+            return self.close();
+        }
         // Snip's live area: the frame times of each drag on it (the log).
         let live = self.o.edit.as_ref().is_some_and(|e| e.annotator.movable);
         match &msg {
@@ -132,11 +137,34 @@ impl App {
         // the stitched image; nothing else reaches the editor meanwhile.
         if self.scroll().is_some() {
             use crate::ui::screens::long_capture::Finish;
+            // More stays usable meanwhile (Copy text and Ask AI finish the
+            // capture, Pin and Share as their buttons do; the rest is dimmed)
+            let edit = self.o.edit.as_mut();
+            match (msg.clone(), edit) {
+                (
+                    annotate::Message::Menu(annotate::Menu::More)
+                    | annotate::Message::MenuStep(_)
+                    | annotate::Message::MenuEdge(_),
+                    Some(edit),
+                ) => {
+                    let _ = edit.update(msg);
+                    return Task::none();
+                }
+                (annotate::Message::Activate, Some(edit)) => {
+                    return match edit.take_row() {
+                        Some(row) => self.on_snip_toolbar_here(row),
+                        None => Task::none(),
+                    };
+                }
+                _ => {}
+            }
             let how = match msg {
                 annotate::Message::Copy => Finish::Copy,
                 annotate::Message::Save => Finish::Save,
                 annotate::Message::Pin => Finish::Pin,
                 annotate::Message::Share => Finish::Share,
+                annotate::Message::CopyText => Finish::CopyText,
+                annotate::Message::AskAi => Finish::AskAi,
                 _ => return Task::none(),
             };
             return self.on_snip(crate::ui::snip::Msg::Finish(how));
@@ -145,7 +173,9 @@ impl App {
         let Some(edit) = &mut o.edit else {
             return Task::none();
         };
+        let opened_more = matches!(msg, annotate::Message::Menu(annotate::Menu::More));
         let out = edit.update(msg);
+        let opened_more = opened_more && edit.annotator.menu == Some(annotate::Menu::More);
         // Snip's live area moved or resized: the selection (the overlay's dim,
         // scrolling capture, pin) follows it.
         let live = edit.annotator.movable.then(|| edit.canvas_rect());
@@ -157,11 +187,13 @@ impl App {
             return Task::none();
         };
         match out {
+            None if opened_more => self.more_opened(),
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
             Some(Output::Back) if edit.annotator.updating.is_some() => self.close(),
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
+                self.more_reset();
                 self.o.edit = None;
                 self.o.selection = None;
                 self.o.stroke.clear();
@@ -172,6 +204,9 @@ impl App {
                 self.o.esc_back = true;
                 Task::none()
             }
+            Some(Output::CopyText) => self.more_copy_text(),
+            Some(Output::AskAi(crop)) => self.open_chat(crop, None),
+            Some(Output::Translate) => self.more_translate(),
             Some(Output::Copy(crop)) => self.finish(&copy::ACTION, crop),
             Some(Output::Save(crop)) => self.finish(&save::ACTION, crop),
             Some(Output::Pin(crop)) => self.pin(crop),
@@ -426,7 +461,7 @@ mod tests {
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         toolbar::more_rows(editor)
             .into_iter()
-            .map(|r| r.3)
+            .map(|r| r.message)
             .collect()
     }
 
@@ -534,13 +569,14 @@ mod tests {
             assert!(texts.iter().any(|t| t == row), "{row}: {texts:?}");
         }
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
-        // Down x3: the third live row (Pin); Enter pins (the overlay closes)
-        let _ = app.on_snip_toolbar(E::MenuStep(false));
-        let _ = app.on_snip_toolbar(E::MenuStep(false));
-        let _ = app.on_snip_toolbar(E::MenuStep(false));
+        // Down x6: the sixth live row (Copy text, Ask AI, Translate, Long
+        // capture, Add to steps, Pin); Enter pins (the overlay closes)
+        for _ in 0..6 {
+            let _ = app.on_snip_toolbar(E::MenuStep(false));
+        }
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let rows = toolbar::more_rows(editor);
-        assert_eq!(rows[editor.row.unwrap()].3, Some(E::Pin));
+        assert_eq!(rows[editor.row.unwrap()].message, Some(E::Pin));
         let _ = app.on_snip_toolbar(E::Activate);
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }

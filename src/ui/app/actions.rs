@@ -504,9 +504,14 @@ impl App {
                 }
                 None => Task::none(),
             },
-            msg => session
-                .update(msg)
-                .map(move |msg| Message::Translate(id, msg)),
+            msg => {
+                let task = session
+                    .update(msg)
+                    .map(move |msg| Message::Translate(id, msg));
+                // Snip's More: the translation goes into the picture under the drawing
+                self.sync_translation();
+                task
+            }
         }
     }
 

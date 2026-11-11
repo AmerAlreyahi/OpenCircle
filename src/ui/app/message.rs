@@ -71,6 +71,8 @@ pub(in crate::ui) enum Message {
     Snip(snip::Msg),
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),
+    /// Snip's More read the area's text (opening, which read; its lines).
+    MoreRead(u32, u32, Result<Vec<crate::ocr::TextBlock>, String>),
     /// A Copy / Save run off the UI thread is done: its pill, where the
     /// overlay was (`PillPlace`).
     Confirm(PillPlace, Result<String, String>),

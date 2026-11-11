@@ -66,8 +66,21 @@ One bar, in groups: a grip to move it, the size chip, **Select**, **Shapes**,
 **Copy** and **Save**. Click a tool to turn it on; click the active tool again
 to open its options (outline, fill, size, and so on). `Esc` closes the toolbar.
 
-**More** holds Long capture, Add to steps, Pin, Live pin, Share (Windows),
-Colour picker and Screen ruler.
+**More** holds three actions on the picked area, then Long capture, Add to
+steps, Pin, Live pin, Share (Windows), Colour picker and Screen ruler:
+
+- **Copy text** puts the text of the area on the clipboard.
+- **Ask AI** opens the AI chat with the picture, drawings included (with no AI
+  key it opens Google AI Mode in your browser).
+- **Translate** translates the text in place inside the area; the row then says
+  **Show original**. Copy, Save and drag-out give the translated picture.
+
+Each of the three shows your own shortcut for the same action (Settings >
+Shortcuts; by default `Ctrl+Shift+X`, `Ctrl+Shift+E`, `Ctrl+Shift+T`), and that
+key acts on the area while Snip is open. The area is read once, when More opens.
+Copy text and Translate read the capture under your drawing and never the parts
+you hid with Blur or Redact (or that a Spotlight dims). During a long capture,
+Copy text and Ask AI finish the capture first; Translate is off.
 
 <p align="center">
   <img src="images/snip-more.png" alt="The More menu on the Snip toolbar." width="800">
