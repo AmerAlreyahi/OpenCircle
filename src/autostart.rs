@@ -17,8 +17,7 @@ pub fn apply(config: &Config) {
     }
     // No config file = onboarding is not finished (it saves the file): no entry yet.
     let onboarded = Config::path().is_some_and(|p| p.exists());
-    let result = std::env::current_exe().and_then(|exe| {
-        let exe = std::env::var_os("APPIMAGE").map_or(exe, Into::into); // not the mount
+    let result = crate::sys::launcher().and_then(|exe| {
         sync_when_onboarded(&Store::real(), &exe, config.general.autostart, onboarded)
     });
     if let Err(e) = result {

@@ -135,11 +135,9 @@ pub fn adopt(bindings: &[Binding]) -> bool {
 /// Brings our GNOME entries in line with `bindings` (`held_off`: all keys cleared while a
 /// shortcut field records, so the recorder gets every key).
 pub fn sync(bindings: &[Binding], held_off: bool) {
-    let exe = std::env::var_os("APPIMAGE")
-        .map(Into::into)
-        .or_else(|| std::env::current_exe().ok())
+    let exe = crate::sys::launcher()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "opencircle".into());
+        .unwrap_or_else(|_| "opencircle".into());
     let want = entries(bindings, &exe, held_off);
     *foreign() = foreign_keys(&Dconf);
     apply(&Dconf, &want);

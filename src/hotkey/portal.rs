@@ -308,7 +308,7 @@ fn trigger_of(list: &Variant, id: &str) -> Option<String> {
 }
 
 fn manual_hint(why: &str) -> String {
-    let exe = std::env::current_exe()
+    let exe = crate::sys::launcher()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "opencircle".into());
     format!(

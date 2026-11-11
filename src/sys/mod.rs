@@ -66,6 +66,15 @@ fn only_inside(value: &str, appdir: &str) -> bool {
             .all(|p| p == appdir || p.starts_with(&format!("{appdir}/")))
 }
 
+/// The program a desktop entry, shortcut or autostart line should start: the
+/// AppImage itself (its mount, `current_exe`, is new on every start), else this exe.
+pub fn launcher() -> std::io::Result<std::path::PathBuf> {
+    match std::env::var_os("APPIMAGE") {
+        Some(image) => Ok(image.into()),
+        None => std::env::current_exe(),
+    }
+}
+
 /// Makes libX11 thread-safe: run first thing in `main`, before any thread starts.
 /// The tray's GTK thread (AppIndicator) and winit both talk Xlib; without
 /// `XInitThreads()` before the first Xlib call of the process they race and

@@ -194,11 +194,7 @@ fn register(conn: &DBusConnection) {
 /// wrote names another path). Returns the path written.
 fn ensure_desktop_file() -> std::io::Result<Option<PathBuf>> {
     let (data_home, system) = desktop_dirs()?;
-    // An AppImage runs from a new mount each time: name the image itself.
-    let exe = match std::env::var_os("APPIMAGE") {
-        Some(image) => PathBuf::from(image),
-        None => std::env::current_exe()?,
-    };
+    let exe = crate::sys::launcher()?;
     write_desktop_file(&data_home, &system, &exe)
 }
 

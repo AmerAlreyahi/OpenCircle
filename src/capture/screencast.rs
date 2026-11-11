@@ -54,8 +54,10 @@ pub fn wanted(conn: &DBusConnection) -> bool {
 
 /// GNOME's Screenshot portal asks on every capture before GNOME 46 (from 46 on it
 /// remembers the permission); a ScreenCast portal from version 4 can remember instead.
+/// No `XDG_CURRENT_DESKTOP` (started from ssh, a service, a bare terminal) with GNOME
+/// Shell answering on the bus is GNOME too: else such a start asked on every capture.
 fn asks_every_time(desktop: &str, shell: Option<&str>, screencast: u32) -> bool {
-    let gnome = desktop.split(':').any(|d| d.eq_ignore_ascii_case("GNOME"));
+    let gnome = desktop.is_empty() || desktop.split(':').any(|d| d.eq_ignore_ascii_case("GNOME"));
     let major = shell.and_then(|v| v.split('.').next()?.parse::<u32>().ok());
     gnome && major.is_some_and(|m| m < 46) && screencast >= 4
 }
@@ -834,7 +836,9 @@ mod tests {
         // KDE, others, unknown shell: unchanged.
         assert!(!asks_every_time("KDE", Some("42.9"), 5));
         assert!(!asks_every_time("ubuntu:GNOME", None, 4));
-        assert!(!asks_every_time("", Some("42.9"), 4));
+        // #172: no XDG_CURRENT_DESKTOP, GNOME Shell answering: GNOME
+        assert!(asks_every_time("", Some("42.9"), 4));
+        assert!(!asks_every_time("", None, 4));
     }
 
     #[test]
