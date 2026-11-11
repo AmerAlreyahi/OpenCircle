@@ -19,6 +19,8 @@ const TEXT_PAD: f32 = 8.0;
 const BLOCK_GAP: f32 = 8.0;
 /// The control column's container (the layout test finds every row's).
 pub const CONTROL: &str = "setting-row-control";
+/// A row's single button (`action`), for the harmony test.
+pub const ACTION: &str = "setting-row-action";
 
 /// A row's title: `ROW_TITLE` text.
 pub fn title<'a, Message: 'a>(s: impl IntoFragment<'a>) -> Element<'a, Message> {
@@ -67,6 +69,37 @@ pub fn row<'a, Message: 'a>(
         ]
         .align_y(iced::Center),
     )
+}
+
+/// A row whose control is one button (owner, 2026-11-11): it fills the control
+/// column, as tall as the segmented control beside it, its label centred. The
+/// secondary look (`Elevated`); a quiet or removing kind keeps its own look, centred.
+/// Two buttons in one row: `dir_row![action(..), action(..)].spacing(space::GAP)`
+/// (each takes half the column).
+pub fn action<'a, Message: Clone + 'a>(
+    label: &'a str,
+    kind: super::button::Kind,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    action_with(super::button::label(label), kind, on_press)
+}
+
+/// `action` with its own content (a label in another colour, a glyph).
+pub fn action_with<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    kind: super::button::Kind,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::button::{Kind, button, control};
+    let h = super::segmented::TRACK_H;
+    let one = match kind {
+        Kind::Elevated => control(content, h, on_press),
+        _ => container(button(content, kind, on_press))
+            .center(Fill)
+            .height(h)
+            .into(),
+    };
+    container(one).id(Id::new(ACTION)).width(Fill).into()
 }
 
 /// A row control of a field and its buttons on one line, within the

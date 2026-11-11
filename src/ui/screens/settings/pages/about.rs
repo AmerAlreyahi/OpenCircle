@@ -430,7 +430,7 @@ fn notices<'a>() -> Element<'a, Message> {
 }
 
 fn problems<'a>() -> Element<'a, Message> {
-    let b = |s, m| button(label(s), Kind::Elevated, Some(m));
+    let b = |s, m| setting_row::action(s, Kind::Elevated, Some(m));
     setting_row::row(
         title(t!(ab_problems)),
         t!(ab_problems_desc),

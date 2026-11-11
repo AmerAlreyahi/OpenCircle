@@ -146,6 +146,40 @@ pub fn fill<'a, Message: Clone + 'a>(
         .into()
 }
 
+/// A setting row's one button (`setting_row::action`): `Elevated` fills its
+/// share of the control column, `height` tall, its content centred. The same
+/// look as the small `Elevated`, only wider.
+pub fn control<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    height: f32,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let enabled = on_press.is_some();
+    iced_button(container(content).center(Fill))
+        .width(Fill)
+        .height(height)
+        .padding([0.0, 8.0])
+        .on_press_maybe(on_press)
+        .style(move |_, status| iced_button::Style {
+            background: Some(
+                match status {
+                    iced_button::Status::Hovered | iced_button::Status::Pressed => {
+                        c().elevated_hover
+                    }
+                    _ => c().elevated,
+                }
+                .into(),
+            ),
+            text_color: match enabled {
+                false => c().text_muted,
+                true => c().text,
+            },
+            border: Border::default().rounded(radius::CONTROL),
+            ..iced_button::Style::default()
+        })
+        .into()
+}
+
 /// A call to action's label: 13 px / 600, and an optional mono note at 75 %
 /// (" · 19 MB").
 pub fn cta_label<'a, Message: 'a>(label: &'a str, note: Option<String>) -> Element<'a, Message> {

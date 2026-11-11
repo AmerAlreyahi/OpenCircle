@@ -6,13 +6,13 @@
 //! tall a long capture may grow, and Recent captures (its switch is on
 //! History).
 use crate::t;
-use iced::widget::{Space, column};
-use iced::{Element, Fill};
+use iced::Element;
+use iced::widget::column;
 
 use super::super::state::{Message, Slot, State};
 use super::{general, history, shortcuts};
 use crate::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
-use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::button::Kind;
 use crate::ui::kit::segmented::{boolean, segmented};
 use crate::ui::kit::setting_row::{self, title};
 
@@ -45,15 +45,11 @@ pub fn view(state: &State) -> Element<'_, Message> {
         rows = rows.push(pick(
             t!(s_prtsc),
             t!(s_prtsc_desc),
-            crate::dir_row![
-                Space::new().width(Fill),
-                button(
-                    label(t!(s_prtsc_settings)),
-                    Kind::Elevated,
-                    Some(Message::OpenKeyboardSettings),
-                )
-            ]
-            .into(),
+            crate::ui::kit::setting_row::action(
+                t!(s_prtsc_settings),
+                Kind::Elevated,
+                Some(Message::OpenKeyboardSettings),
+            ),
         ));
     }
     let recent = match d.history {

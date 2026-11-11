@@ -70,6 +70,11 @@ pub fn spread<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     track(options, &widths, Role::STEP, chosen, from, glide, on)
 }
 
+/// A pill's height: 12 px x 1.25 and 6 px above and below.
+const PILL: f32 = 27.0;
+/// The whole track's height: a setting row's single button is this tall too.
+pub const TRACK_H: f32 = PILL + 2.0 * space::TRACK_PAD;
+
 fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     options: &[(T, &'a str)],
     widths: &[f32],
@@ -80,7 +85,6 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
     const GAP: f32 = space::TRACK_GAP;
-    const PILL: f32 = 27.0; // 12 px x 1.25 and 6 px above and below
     // right to left: the first option at the right (Off right, On left)
     let options = &super::dir::order(options.to_vec())[..];
     let widths = &super::dir::order(widths.to_vec())[..];

@@ -5,12 +5,12 @@
 //! settings OpenCircle has.
 use crate::t;
 use iced::Element;
-use iced::widget::{Space, column};
+use iced::widget::column;
 
 use super::super::state::{Message, Pick, State};
 use crate::config::TextReader;
 use crate::translate::lang;
-use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::button::Kind;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::text::sub;
@@ -35,14 +35,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
     )]
     .spacing(space::GAP);
     if let Some(note) = state.reader_note() {
-        let add = button(
-            label(t!(t_add)),
+        let add = setting_row::action(
+            t!(t_add),
             Kind::Elevated,
             Some(Message::OpenLanguageSettings),
         );
-        control = control
-            .push(sub(Role::ROW_DESC, note))
-            .push(crate::dir_row![Space::new().width(iced::Fill), add]);
+        control = control.push(sub(Role::ROW_DESC, note)).push(add);
     }
     setting_row::row(title(t!(t_engine)), t!(t_engine_desc_src), control)
 }

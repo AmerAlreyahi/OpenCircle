@@ -1929,17 +1929,34 @@ fn the_header_line_and_the_sidebar_edge_are_the_same_hairline() {
 /// Labs feature on, the AI page with a server of your own and its key rows).
 #[test]
 fn every_rows_control_shares_one_column_on_every_page() {
-    use crate::ui::kit::setting_row::CONTROL;
+    every_rows_control_shares_one_column("en");
+}
+
+/// The same, mirrored: the control column is on the left.
+#[test]
+fn every_rows_control_shares_one_column_on_every_page_in_arabic() {
+    every_rows_control_shares_one_column("ar");
+    crate::app_language::set(crate::app_language::Lang::En);
+}
+
+fn every_rows_control_shares_one_column(language: &'static str) {
+    use crate::ui::kit::segmented::TRACK_H;
+    use crate::ui::kit::setting_row::{ACTION, CONTROL};
     use crate::ui::kit::tokens::size;
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
     s.draft.look.theme = LookTheme::Custom;
+    update(
+        &mut s,
+        Message::AppLanguage(crate::app_language::Choice(language)),
+    );
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
     update(
         &mut s,
         Message::BaseUrl("http://192.168.1.2:8080/v1".into()),
     );
     let mut columns = Vec::new();
+    let mut single_buttons = 0;
     let shown: Vec<_> = pages::visible(&s.draft.labs).collect();
     for page in shown {
         update(&mut s, Message::Section(page.id));
@@ -1951,8 +1968,39 @@ fn every_rows_control_shares_one_column_on_every_page() {
                 crate::app_language::tr(page.title)
             );
         }
+        // a row's single button (or two) fills the column exactly, as tall as the
+        // segmented control; English and Arabic alike (see the Arabic test below)
+        let actions = shot::containers(view(&s), WINDOW_SIZE, ACTION);
+        for column in &found {
+            let inside: Vec<_> = (actions.iter())
+                .filter(|a| a.x >= column.x - 0.5 && a.x + a.width <= column.x + column.width + 0.5)
+                .filter(|a| (a.y - column.y).abs() < column.height)
+                .collect();
+            if inside.is_empty() {
+                continue;
+            }
+            single_buttons += 1;
+            let left = inside.iter().map(|a| a.x).fold(f32::MAX, f32::min);
+            let right = inside.iter().map(|a| a.x + a.width).fold(0.0, f32::max);
+            assert!(
+                (left - column.x).abs() < 0.5 && (right - column.x - column.width).abs() < 0.5,
+                "{}: buttons span {left}..{right}, the column {}..{}",
+                crate::app_language::tr(page.title),
+                column.x,
+                column.x + column.width
+            );
+            assert!(
+                inside.iter().all(|a| (a.height - TRACK_H).abs() < 0.5),
+                "{}: a button is not {TRACK_H} tall: {inside:?}",
+                crate::app_language::tr(page.title)
+            );
+        }
         columns.extend(found.into_iter().map(|b| (page.title, b.x, b.width)));
     }
+    assert!(
+        single_buttons >= 4,
+        "only {single_buttons} button rows seen"
+    );
     let (_, x, width) = columns[0];
     assert_eq!(width, size::CONTROL_COLUMN);
     for (page, at, w) in columns {

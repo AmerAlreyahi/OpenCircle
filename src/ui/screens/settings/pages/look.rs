@@ -6,7 +6,7 @@ use iced::widget::column;
 
 use super::super::state::{Message, Pick, Section, State};
 use crate::config::SelectStyle;
-use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::button::Kind;
 use crate::ui::kit::segmented::segmented;
 use crate::ui::kit::setting_row::{self, title};
 
@@ -16,8 +16,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
     rows = rows.push(setting_row::row(
         title(t!(l_themes)),
         t!(l_themes_desc),
-        button(
-            label(t!(l_themes_open_arrow)),
+        setting_row::action(
+            t!(l_themes_open_arrow),
             Kind::Elevated,
             Some(Message::Section(Section::Appearance)),
         ),

@@ -5,12 +5,11 @@
 //! red.
 use crate::t;
 use iced::Element;
-use iced::Fill;
+use iced::widget::column;
 use iced::widget::tooltip::Position;
-use iced::widget::{Space, column};
 
 use super::super::state::{Message, Slot, State, key_labels};
-use crate::ui::kit::button::{Kind as Button, button, label};
+use crate::ui::kit::button::Kind as Button;
 use crate::ui::kit::setting_row::{self, title};
 use crate::ui::kit::shortcut_field::{self, shortcut_field};
 use crate::ui::kit::text::{error, text};
@@ -28,20 +27,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
 fn reset(state: &State) -> Element<'_, Message> {
     if state.resetting {
         let buttons = crate::dir_row![
-            Space::new().width(Fill),
-            button(
-                label(t!(c_cancel)),
-                Button::Elevated,
-                Some(Message::KeepShortcuts)
-            ),
-            button(
-                label(t!(k_reset_do)),
+            setting_row::action(t!(c_cancel), Button::Elevated, Some(Message::KeepShortcuts)),
+            setting_row::action(
+                t!(k_reset_do),
                 Button::Elevated,
                 Some(Message::ResetShortcuts(true))
             ),
         ]
-        .spacing(space::GAP)
-        .align_y(iced::Center);
+        .spacing(space::GAP);
         return setting_row::row(title(t!(k_reset)), t!(k_reset_ask), buttons);
     }
     let (desc, text, action) = match (state.shortcuts_differ(), state.reset_undo.is_some()) {
@@ -57,12 +50,8 @@ fn reset(state: &State) -> Element<'_, Message> {
         ),
         (false, false) => (t!(k_reset_same), t!(k_reset_btn), None),
     };
-    let ask = button(label(text), Button::Elevated, action);
-    setting_row::row(
-        title(t!(k_reset)),
-        desc,
-        crate::dir_row![Space::new().width(Fill), ask],
-    )
+    let ask = setting_row::action(text, Button::Elevated, action);
+    setting_row::row(title(t!(k_reset)), desc, ask)
 }
 
 /// One shortcut's row (also on the Snip page).

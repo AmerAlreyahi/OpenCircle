@@ -100,8 +100,8 @@ fn updates_row(state: &State) -> Element<'_, Message> {
         (_, Say::Answer(a)) => answer_words(&a),
     };
     let control: Element<'_, Message> = match waiting {
-        None => button(
-            label(t!(g_updates_check)),
+        None => setting_row::action(
+            t!(g_updates_check),
             Kind::Elevated,
             Some(Message::CheckUpdate),
         ),

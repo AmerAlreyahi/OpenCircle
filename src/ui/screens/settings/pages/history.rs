@@ -79,49 +79,35 @@ fn row_of<'a>(
 fn clear_all(state: &State) -> Element<'_, Message> {
     if state.clearing_all {
         let buttons = crate::dir_row![
-            Space::new().width(Fill),
-            button(
-                label(t!(c_cancel)),
-                Button::Elevated,
-                Some(Message::KeepHistory)
-            ),
+            setting_row::action(t!(c_cancel), Button::Elevated, Some(Message::KeepHistory)),
             // the elevated button, its words in the danger colour
-            button(
+            setting_row::action_with(
                 error(Role::CONTROL, t!(h_delete_all)).line_height(1.5),
                 Button::Elevated,
                 Some(Message::ClearAll(true)),
             ),
         ]
-        .spacing(space::GAP)
-        .align_y(iced::Center);
+        .spacing(space::GAP);
         return setting_row::row(title(t!(h_all)), t!(h_delete_ask), buttons);
     }
     let any = state
         .kept
         .is_some_and(|k| Kind::ALL.iter().any(|&x| k.of(x) > 0));
-    let ask = button(
-        label(t!(h_all_btn)),
+    let ask = setting_row::action(
+        t!(h_all_btn),
         Button::Remove,
         any.then_some(Message::ClearAll(false)),
     );
-    setting_row::row(
-        title(t!(h_all)),
-        t!(h_all_desc),
-        crate::dir_row![Space::new().width(Fill), ask],
-    )
+    setting_row::row(title(t!(h_all)), t!(h_all_desc), ask)
 }
 
 /// A row on another page for a switch that lives here: what it is, and a
 /// button that opens History (Snip's Recent captures, AI's Chat history).
 pub fn link<'a>(name: &'a str, desc: &'a str) -> Element<'a, Message> {
-    let open = button(
-        label(t!(c_open_history)),
+    let open = setting_row::action(
+        t!(c_open_history),
         Button::Elevated,
         Some(Message::Section(Section::History)),
     );
-    setting_row::row(
-        title(name),
-        desc,
-        crate::dir_row![Space::new().width(Fill), open],
-    )
+    setting_row::row(title(name), desc, open)
 }
