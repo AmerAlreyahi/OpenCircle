@@ -147,6 +147,8 @@ pub fn read_screen(
             return Ok(ScreenRead {
                 lines: Vec::new(),
                 found: Vec::new(),
+                done: true,
+                noise: 0,
             });
         }
         false => {}

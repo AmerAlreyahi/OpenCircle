@@ -569,6 +569,9 @@ fn main_bands(
                 .read_screen(key, img.take(), (top, bottom), known, latin)
                 .unwrap();
             out.extend(read.lines);
+            if read.done {
+                break; // (the app marks every row read)
+            }
         }
         rows.mark(b, h);
         if first {
