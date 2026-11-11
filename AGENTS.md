@@ -877,6 +877,9 @@ production systems.
   (each on its own, remembered, with a key and a visible toggle; the canvas takes the freed room). The other Studio
   decisions (layout A, name, Recent off by default, ...) are still open. Design only; the Studio stays 0.5.0.
 
+- No second hotfix (owner, 2026-11-11, "language"): the KDE X11 start crash fix (and the other Linux fixes, #172) ships with
+  the Languages release, not as its own release. That release stays numbered v0.1.7 and is the last 0.1.x.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
