@@ -840,6 +840,10 @@ production systems.
   read each block in its own language. No fix may cost performance: the best balance of reliability and speed, proved
   before -> after on a fixed measurement set (Arabic, mixed, English control). Measure and diagnose first, then fix.
 
+- Pinned AI chat hand-over (owner, 2026-11-11, planning #170; refines "Pinned AI chat"): a pinned chat must look like a native
+  pinned window from the beginning: when the overlay closes (Esc) it never flashes, moves or redraws. Owner's suggestion:
+  when the follow-up (second question) is sent, the overlay closes by itself, no Esc. Design sheet and owner OK first (#171).
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
