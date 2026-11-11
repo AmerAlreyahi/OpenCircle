@@ -890,6 +890,14 @@ production systems.
   OPTIONS UNFOLDED (visible without a second click); panels collapsible. A new design round before the Studio is built
   (0.5.0); the eleven open Studio questions are answered in that round, not now.
 
+- Strictest platform first (owner, 2026-11-11; strengthens "Both OSes from the first design"; the how is in the owner's
+  engineering rules): every feature brief opens with a capability table (what the feature needs x Windows 10/11, X11,
+  GNOME Wayland, KDE Wayland, wlroots = yes / asks the user / no); a "no" or "asks" goes to the owner with the
+  alternatives that work everywhere BEFORE the build; the behaviour is designed for the platform that allows the least
+  (usually Wayland); one feature = one code path, with only the OS call behind one small interface per capability; every
+  target platform has a result in the report before merge. GNOME's and KDE's own capture effects are fine as they are
+  (owner, 2026-11-11: "I don't mind both").
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
