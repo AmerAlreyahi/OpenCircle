@@ -141,6 +141,11 @@ fn read_command(peer: impl Read) -> Result<(Command, Option<String>), String> {
         .read_line(&mut line)
         .map_err(|e| e.to_string())?;
     let command = parse_command(&line)?;
+    // `version` is a question, not a launch: it has no token, and its asker keeps the
+    // connection open for the answer, so a second read here would wait for nothing.
+    if command == Command::Version {
+        return Ok((command, None));
+    }
     let mut next = String::new();
     let _ = peer.read_line(&mut next);
     Ok((command, parse_token_line(&next)))
@@ -598,6 +603,92 @@ mod tests {
         );
         assert!(!is_older(Some("garbage"), "0.2.0"));
         assert_eq!(parse_command("version\n"), Ok(Command::Version));
+    }
+
+    /// A peer that sends its bytes once, then never closes nor writes again: reading
+    /// past them would hang a real connection.
+    struct SendsOnceThenHangs(Option<Vec<u8>>);
+    impl Read for SendsOnceThenHangs {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let bytes = self
+                .0
+                .take()
+                .expect("read again: would wait for the peer forever");
+            buf[..bytes.len()].copy_from_slice(&bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    /// Regression (w20): the `version` question must be answered without waiting for a
+    /// token line, or an equal-version copy looks silent and gets taken over.
+    #[test]
+    fn the_version_query_never_waits_for_a_second_line() {
+        let started = Instant::now();
+        let got = read_command(SendsOnceThenHangs(Some(b"version\n".to_vec())));
+        assert_eq!(got, Ok((Command::Version, None)));
+        assert!(started.elapsed() < Duration::from_millis(50));
+        // a new asker -> an old (one-line) receiver: its first line is the whole message
+        assert_eq!(parse_command("version\n"), Ok(Command::Version));
+        // an old sender (one line, then closes) -> ours: no token, no wait
+        let old = read_command(io::Cursor::new(b"capture\n".to_vec()));
+        assert_eq!(old, Ok((Command::Capture, None)));
+        // the same-version answer is not "older": no takeover
+        assert!(!is_older(
+            Some(env!("CARGO_PKG_VERSION")),
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_live_listener_answers_version_at_once_and_forwards_with_a_token() {
+        use interprocess::local_socket::{ListenerOptions, Stream};
+        let dir = std::env::temp_dir().join(format!("oc-w20-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let name = path
+            .clone()
+            .to_fs_name::<interprocess::local_socket::GenericFilePath>()
+            .unwrap();
+        let listener = ListenerOptions::new()
+            .name(name.clone())
+            .create_sync()
+            .unwrap();
+        let server = std::thread::spawn(move || {
+            let mut seen = vec![];
+            for conn in listener.incoming().take(2) {
+                let mut conn = conn.unwrap();
+                match read_command(&mut conn) {
+                    Ok((Command::Version, _)) => {
+                        writeln!(conn, "version {}", env!("CARGO_PKG_VERSION")).unwrap()
+                    }
+                    Ok(other) => seen.push(other),
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            seen
+        });
+        // the asker keeps its connection open, as `running_version` does
+        let t = Instant::now();
+        let mut c = Stream::connect(name.clone()).unwrap();
+        c.write_all(b"version\n").unwrap();
+        let mut line = String::new();
+        BufReader::new(&mut c).read_line(&mut line).unwrap();
+        assert_eq!(line, format!("version {}\n", env!("CARGO_PKG_VERSION")));
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "{:?}",
+            t.elapsed()
+        );
+        let mut c = Stream::connect(name).unwrap();
+        c.write_all(wire("capture", Some("tok1")).as_bytes())
+            .unwrap();
+        drop(c);
+        assert_eq!(
+            server.join().unwrap(),
+            vec![(Command::Capture, Some("tok1".into()))]
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
