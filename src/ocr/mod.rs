@@ -100,6 +100,110 @@ fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
     out
 }
 
+/// The longest line, in heights, recognizer `i` reads in one piece (#169).
+/// The Arabic reader misreads long lines inside the model (CER 0.12 under 10
+/// heights, 0.42-0.58 at 10-45): cut at 15, CER-all on the Arabic pages
+/// went 0.413 -> 0.301 and the 3440 article 2496 -> 1467 ms. The others read
+/// a line well up to their input cap (3200 columns at 48 px high: 66.7
+/// heights; past it the line is squeezed and lost) and cut pieces worse
+/// (the English reader read "n s.al and waves"), so only past that.
+// ponytail: measured for Arabic and English; Cyrillic and CJK keep the cap.
+fn longest(i: usize) -> f32 {
+    match models::RECOGNIZERS[i].rtl() {
+        true => 15.0,
+        false => 60.0,
+    }
+}
+
+/// Line `b` of `img` in pieces of at most `most` heights: each cut in the
+/// widest empty gap (a word space is wider than the gap between letters)
+/// within 3 heights of its even place, else in the emptiest column there.
+/// A line no longer than that is one piece.
+fn cut(img: &RgbImage, b: &[f32; 4], most: f32) -> Vec<[f32; 4]> {
+    let ratio = b[2] / b[3].max(1.0);
+    let [x0, y0, w, h] = b.map(|v| v as u32);
+    if ratio <= most || w == 0 || h == 0 {
+        return vec![*b];
+    }
+    let k = (ratio / (most * 0.8)).ceil() as u32;
+    let luma = |x: u32, y: u32| {
+        let p = img.get_pixel(x.min(img.width() - 1), y.min(img.height() - 1));
+        (p[0] as i32 * 3 + p[1] as i32 * 6 + p[2] as i32) / 10
+    };
+    // the background: the box's most common brightness on its top and bottom rows
+    let mut edge: Vec<i32> = (x0..x0 + w)
+        .flat_map(|x| [luma(x, y0), luma(x, y0 + h - 1)])
+        .collect();
+    edge.sort_unstable();
+    let bg = edge[edge.len() / 2];
+    let ink = |x: u32| {
+        (y0..y0 + h)
+            .filter(|&y| (luma(x, y) - bg).abs() > 40)
+            .count()
+    };
+    let mut cuts = vec![x0];
+    for i in 1..k {
+        let ideal = x0 + w * i / k;
+        let lo = ideal.saturating_sub(h * 3).max(cuts[cuts.len() - 1] + h);
+        let hi = (ideal + h * 3).min(x0 + w - h);
+        if lo >= hi {
+            continue;
+        }
+        let empty: Vec<bool> = (lo..hi).map(|x| ink(x) == 0).collect();
+        let mut best: Option<(usize, u32)> = None; // (gap width, its middle)
+        let mut j = 0;
+        while j < empty.len() {
+            if !empty[j] {
+                j += 1;
+                continue;
+            }
+            let start = j;
+            while j < empty.len() && empty[j] {
+                j += 1;
+            }
+            let mid = lo + ((start + j - 1) / 2) as u32;
+            let width = j - start;
+            if best.is_none_or(|(w, m)| {
+                width > w || (width == w && mid.abs_diff(ideal) < m.abs_diff(ideal))
+            }) {
+                best = Some((width, mid));
+            }
+        }
+        let at = best.map(|(_, m)| m).unwrap_or_else(|| {
+            (lo..hi)
+                .min_by_key(|&x| (ink(x), x.abs_diff(ideal)))
+                .unwrap_or(ideal)
+        });
+        cuts.push(at);
+    }
+    cuts.push(x0 + w);
+    (cuts.windows(2))
+        .filter(|c| c[1] > c[0] + 2)
+        .map(|c| [c[0] as f32, b[1], (c[1] - c[0]) as f32, b[3]])
+        .collect()
+}
+
+/// A line's pieces as one block over its whole box `b`, in reading order
+/// (right to left for `rtl`), joined by a space; `None` if none was read.
+fn joined(mut parts: Vec<TextBlock>, b: [f32; 4], rtl: bool) -> Option<TextBlock> {
+    if parts.len() <= 1 {
+        return parts.pop().map(|p| TextBlock { bounds: b, ..p });
+    }
+    parts.sort_by(|p, q| p.bounds[0].total_cmp(&q.bounds[0]));
+    if rtl {
+        parts.reverse();
+    }
+    let chars = |p: &TextBlock| p.text.chars().count() as f32;
+    let n: f32 = parts.iter().map(chars).sum();
+    let confidence = parts.iter().map(|p| p.confidence * chars(p)).sum::<f32>() / n.max(1.0);
+    let text = (parts.iter().map(|p| p.text.as_str())).collect::<Vec<_>>();
+    Some(TextBlock {
+        text: text.join(" "),
+        bounds: b,
+        confidence,
+    })
+}
+
 /// One line of text found in the image.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextBlock {
@@ -580,29 +684,38 @@ impl Engine {
         boxes: &[[f32; 4]],
     ) -> Result<Vec<TextBlock>, OcrError> {
         let rtl = models::RECOGNIZERS[i].rtl();
+        // long lines are read in pieces (`cut`), each piece's line noted
+        let (mut pieces, mut owner) = (Vec::new(), Vec::new());
+        for (k, b) in boxes.iter().enumerate() {
+            let parts = cut(img, b, longest(i));
+            owner.extend(std::iter::repeat_n(k, parts.len()));
+            pieces.extend(parts);
+        }
         let rec = self.recognizer(i)?;
-        let mut blocks = Vec::with_capacity(boxes.len());
-        for run in runs(boxes) {
-            let chunk: Vec<&[f32; 4]> = run.iter().map(|&j| &boxes[j]).collect();
-            let crops = (chunk.iter())
-                .map(|b| {
-                    let [x, y, w, h] = b.map(|v| v as u32);
+        let mut read: Vec<Vec<TextBlock>> = vec![Vec::new(); boxes.len()];
+        for run in runs(&pieces) {
+            let crops = (run.iter())
+                .map(|&j| {
+                    let [x, y, w, h] = pieces[j].map(|v| v as u32);
                     image::imageops::crop_imm(img, x, y, w, h).to_image()
                 })
                 .collect();
             let rec = rec.predict(crops).map_err(engine_err)?;
-            for (bounds, (text, confidence)) in chunk.iter().zip(rec.texts.iter().zip(rec.scores)) {
+            for (&j, (text, confidence)) in run.iter().zip(rec.texts.iter().zip(rec.scores)) {
                 if !text.trim().is_empty() {
                     let text = text.trim();
-                    blocks.push(TextBlock {
+                    read[owner[j]].push(TextBlock {
                         text: if rtl { reverse_rtl(text) } else { text.into() },
-                        bounds: **bounds,
+                        bounds: pieces[j],
                         confidence,
                     });
                 }
             }
         }
-        Ok(blocks)
+        let joined = (read.into_iter().zip(boxes))
+            .filter_map(|(parts, b)| joined(parts, *b, rtl))
+            .collect();
+        Ok(joined)
     }
 }
 
@@ -832,6 +945,53 @@ mod tests {
             got,
             [vec![5.0, 5.0, 5.0, 6.0], vec![94.0, 94.0], vec![94.0, 94.0]]
         );
+    }
+
+    /// #169: a line longer than the reader's limit is read in pieces, each
+    /// cut in a word space; the pieces read back as one line in reading order.
+    #[test]
+    fn long_lines_are_cut_in_word_spaces_and_joined() {
+        // a 20 px tall line, 1000 px long (50 heights): "words" of 90 px ink
+        // with 10 px spaces, white page
+        let mut img = RgbImage::from_pixel(1000, 20, image::Rgb([255, 255, 255]));
+        for x in 0..1000 {
+            if x % 100 < 90 {
+                for y in 4..16 {
+                    img.put_pixel(x, y, image::Rgb([0, 0, 0]));
+                }
+            }
+        }
+        let line = [0.0, 0.0, 1000.0, 20.0];
+        let parts = cut(&img, &line, 15.0);
+        assert_eq!(parts.len(), 5, "{parts:?}"); // 50 / (15 * 0.8) -> 5 pieces
+        for p in &parts {
+            assert!(p[2] / p[3] <= 15.0, "{p:?}");
+        }
+        // every cut is in a space, the pieces cover the line
+        for w in parts.windows(2) {
+            let at = w[1][0] as u32;
+            assert!(at % 100 >= 90, "cut at {at}, inside a word");
+            assert_eq!(w[0][0] + w[0][2], w[1][0]);
+        }
+        assert_eq!((parts[0][0], parts[4][0] + parts[4][2]), (0.0, 1000.0));
+        // short enough: one piece; the English limit cuts only past its cap
+        assert_eq!(cut(&img, &[0.0, 0.0, 280.0, 20.0], 15.0).len(), 1);
+        assert_eq!(cut(&img, &line, 60.0).len(), 1);
+
+        let piece = |text: &str, x: f32| TextBlock {
+            text: text.into(),
+            bounds: [x, 0.0, 100.0, 20.0],
+            confidence: 0.5 + x / 1000.0,
+        };
+        let parts = vec![piece("b", 100.0), piece("a", 0.0)];
+        let ltr = joined(parts.clone(), line, false).unwrap();
+        assert_eq!((ltr.text.as_str(), ltr.bounds), ("a b", line));
+        assert_eq!(
+            joined(parts, line, true).unwrap().text,
+            "b a",
+            "right to left"
+        );
+        assert_eq!(joined(vec![], line, false), None);
     }
 
     #[test]
