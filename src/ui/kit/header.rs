@@ -81,7 +81,8 @@ pub fn compact<'a, Message: Clone + 'a>(
     on_close: Message,
 ) -> Element<'a, Message> {
     const H: f32 = size::HEADER_COMPACT;
-    row![
+    // right to left: the close button at the left, the title at the right
+    crate::dir_row![
         mouse_area(
             container(
                 text(title)
@@ -92,6 +93,7 @@ pub fn compact<'a, Message: Clone + 'a>(
             .padding([0, 14])
             .center_y(H)
             .width(Fill)
+            .align_x(super::dir::start())
         )
         .on_press(on_drag),
         caption(Icon::Close, 14.0, H, true, on_close),
