@@ -183,6 +183,9 @@ pub struct State {
     package: Option<Arc<Package>>,
     /// Launch or close was chosen on the last step: on its way out.
     leaving: bool,
+    /// The X (or Esc / Alt+F4) was pressed while Windows Installer works: the window
+    /// says so and closes at once when it is done (never a dead button).
+    close_when_done: bool,
     /// Why Launch did not start the app (shown in place of the finish text).
     launch_error: Option<String>,
     /// The last step's work (`finish`; tests put a stand-in here).
@@ -357,6 +360,7 @@ impl State {
             now,
             package,
             leaving: false,
+            close_when_done: false,
             launch_error: None,
             finish,
             uninstall: None,
@@ -518,6 +522,7 @@ impl State {
                 self.bar = (self.bar_at(), share, self.now);
                 Task::none()
             }
+            Message::Msi(msi::Event::Done(Ok(()))) if self.close_when_done => self.close(),
             Message::Msi(msi::Event::Done(Ok(()))) => self.go(Step::Finish),
             Message::Msi(msi::Event::Done(Err(why))) => {
                 crate::log!("[opencircle] setup: did not finish: {why}");
@@ -534,7 +539,12 @@ impl State {
             }
             Message::Launch => self.leave(true),
             Message::Close => match self.step {
-                Step::Installing => Task::none(), // Windows Installer is working: wait
+                Step::Installing => {
+                    // Windows Installer is working: it cannot be cut off half way.
+                    // Say so on the window and close the moment it is done.
+                    self.close_when_done = true;
+                    Task::none()
+                }
                 Step::Finish if self.uninstall.is_some() => self.close(),
                 Step::Finish => self.leave(false),
                 _ => self.close(),
@@ -813,6 +823,7 @@ impl State {
             Step::Installing => {
                 let share = self.bar_at();
                 let stage = match self.bar.1 {
+                    _ if self.close_when_done => tr(S::su_closing_when_done),
                     _ if self.uninstall.is_some() => tr(S::su_removing),
                     s if s < 0.38 => tr(S::su_preparing),
                     s if s < 0.78 => tr(S::su_copying),
@@ -1265,6 +1276,11 @@ mod tests {
         s.step = Step::Installing;
         let _ = s.update(Message::Close);
         assert_eq!(s.step, Step::Installing, "no closing while it removes");
+        assert!(s.close_when_done, "but the window says it will close");
+        // done after the X: closes at once, no Finish step in between
+        let _ = s.update(Message::Msi(msi::Event::Done(Ok(()))));
+        assert_eq!(s.step, Step::Installing, "closing, not showing Finish");
+        s.close_when_done = false;
         let _ = s.update(Message::Msi(msi::Event::Done(Ok(()))));
         assert_eq!(s.step, Step::Finish);
         let _ = s.update(Message::Close);

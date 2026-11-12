@@ -1304,6 +1304,8 @@ strings! {
         | "إزالة";
     su_removing: "Removing OpenCircle…"
         | "جارٍ إزالة OpenCircle…";
+    su_closing_when_done: "Closing when it is done…"
+        | "سيُغلق عند الانتهاء…";
     su_removed: "OpenCircle was removed"
         | "أُزيل OpenCircle";
     su_removed_kept: "Your settings, models and keys are kept for a later install."
