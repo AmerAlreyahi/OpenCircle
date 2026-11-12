@@ -1008,6 +1008,13 @@ strings! {
         | "سيطلب Windows إذنًا مرة واحدة للتثبيت";
     up_line_getit: "Update it with your package manager or the release page"
         | "حدّثه عبر مدير الحزم أو صفحة الإصدار";
+    // added for stores: a package manager owns this copy (opencircle.managed)
+    up_managed_winget: "Updates are managed by winget: run winget upgrade OpenCircle"
+        | "تُدار التحديثات بواسطة winget: شغّل winget upgrade OpenCircle";
+    up_managed_scoop: "Updates are managed by Scoop: run scoop update opencircle"
+        | "تُدار التحديثات بواسطة Scoop: شغّل scoop update opencircle";
+    up_managed_other: "Updates are managed by your package manager"
+        | "تُدار التحديثات بواسطة مدير الحزم لديك";
     up_line_back: "Back in a few seconds"
         | "نعود خلال ثوانٍ";
     up_later: "Later"

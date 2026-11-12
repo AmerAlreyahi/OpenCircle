@@ -95,6 +95,10 @@ fn updates_row(state: &State) -> Element<'_, Message> {
     };
     let line = match (&state.update_status, line) {
         (Some(UpdateLine::Checking), _) => t!(key_checking).to_string(),
+        // a package manager owns this copy: say who updates it (added for stores)
+        (_, Say::GetIt | Say::Have(..)) if crate::update::managed_by().is_some() => {
+            managed_words(crate::update::managed_by()).to_string()
+        }
         (_, Say::GetIt) => t!(up_line_getit).to_string(),
         (_, Say::Have(v, when)) => fmt(S::us_have, &[&v, &when_words(when)]),
         (_, Say::Answer(a)) => answer_words(&a),
@@ -130,6 +134,16 @@ fn updates_row(state: &State) -> Element<'_, Message> {
         }
     };
     setting_row::row(title(head), line, control)
+}
+
+/// "Updates are managed by <who>" (added for stores).
+fn managed_words(by: Option<crate::update::Manager>) -> &'static str {
+    use crate::update::Manager;
+    match by {
+        Some(Manager::Winget) => t!(up_managed_winget),
+        Some(Manager::Scoop) => t!(up_managed_scoop),
+        _ => t!(up_managed_other),
+    }
 }
 
 /// When the last check was, in the app's language.

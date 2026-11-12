@@ -87,9 +87,60 @@ pub enum Install {
     Manual,
 }
 
+/// The file beside the exe that says a package manager owns this copy; its text
+/// is the manager's name (`winget`, `scoop`; anything else = "your package
+/// manager"). Scoop's manifest creates it, our setup's `/managed=<name>` writes
+/// it, a Linux package may ship it; the MSI removes it on uninstall.
+pub const MANAGED_FILE: &str = "opencircle.managed";
+
+/// Who updates a copy that does not update itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Manager {
+    Winget,
+    Scoop,
+    Other,
+}
+
+impl Manager {
+    /// The marker file's text.
+    pub fn parse(text: &str) -> Manager {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "winget" => Manager::Winget,
+            "scoop" => Manager::Scoop,
+            _ => Manager::Other,
+        }
+    }
+}
+
+/// The package manager that owns this copy (`MANAGED_FILE` beside the exe).
+pub fn managed_by() -> Option<Manager> {
+    // read once: the marker never changes while the app runs
+    static MANAGED: std::sync::OnceLock<Option<Manager>> = std::sync::OnceLock::new();
+    *MANAGED.get_or_init(|| {
+        let marker = std::env::current_exe().ok()?.with_file_name(MANAGED_FILE);
+        marker.exists().then(|| {
+            std::fs::read_to_string(&marker).map_or(Manager::Other, |t| Manager::parse(&t))
+        })
+    })
+}
+
 impl Install {
-    /// This process's install kind.
+    /// This process's install kind: THE answer to "can this copy replace itself?"
+    /// (the updater, the Settings row and the tray all go through it).
     pub fn detect() -> Install {
+        Self::resolve(managed_by(), Self::by_platform())
+    }
+
+    /// A copy a package manager owns never replaces itself: it only says a newer
+    /// version exists (`Manual`), like deb / rpm.
+    fn resolve(managed: Option<Manager>, platform: Install) -> Install {
+        match managed {
+            Some(_) => Install::Manual,
+            None => platform,
+        }
+    }
+
+    fn by_platform() -> Install {
         if cfg!(windows) {
             return match std::env::current_exe() {
                 Ok(exe) if by_setup(&exe, setup_folder().as_deref()) => Install::Setup(exe),
@@ -693,6 +744,28 @@ pub(crate) mod tests {
             picked(&r, &exe, "x86_64").as_deref(),
             Some("OpenCircle-9.9.9-x64-portable.exe")
         );
+    }
+
+    /// The one decision "can this copy replace itself?": a package manager's marker
+    /// turns every kind of copy into "notify only"; no marker changes nothing.
+    #[test]
+    fn a_managed_copy_never_replaces_itself() {
+        let kinds = [
+            Install::Exe("C:/a/opencircle.exe".into()),
+            Install::Setup("C:/Program Files/OpenCircle/opencircle.exe".into()),
+            Install::AppImage("/a/OpenCircle.AppImage".into()),
+            Install::Manual,
+        ];
+        for kind in kinds {
+            for m in [Manager::Winget, Manager::Scoop, Manager::Other] {
+                assert_eq!(Install::resolve(Some(m), kind.clone()), Install::Manual);
+            }
+            assert_eq!(Install::resolve(None, kind.clone()), kind);
+        }
+        assert_eq!(Manager::parse("scoop\r\n"), Manager::Scoop);
+        assert_eq!(Manager::parse(" WinGet "), Manager::Winget);
+        assert_eq!(Manager::parse(""), Manager::Other);
+        assert_eq!(Manager::parse("apt"), Manager::Other);
     }
 
     /// Installed by our setup = this exe is in the folder its Apps & features entry names.
