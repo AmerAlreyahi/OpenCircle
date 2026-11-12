@@ -953,6 +953,12 @@ production systems.
   words "with its soft breathing back" in "Next releases (owner, 2026-11-10)" and the breathing in planning #156 were a
   lead's misreading. Nothing is owed for it; breathing is not planned unless the owner asks.
 
+- No full security scan (owner, 2026-11-12, SUPERSEDES "Security review timing" and the security step of the release
+  rules, incl. for v0.1.7): the app is local and the full security review/scan costs too many tokens: it is NOT run for
+  v0.1.7 or later releases unless the owner asks for one. What stays, because it is free or already there: `cargo audit`
+  in CI, the automatic per-commit security check (its findings are fixed or answered), the signed update channel and the
+  update gate. The QA gates and the clean-up pass stay as release steps.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
