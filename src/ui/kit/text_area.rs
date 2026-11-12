@@ -179,7 +179,16 @@ mod tests {
             crate::app_language::set(lang);
             let content = Content::new();
             let controls = iced::widget::space::horizontal().height(28).into();
-            let v = text_area("t", "اسأل الذكاء", &content, |_| "e", "s", None, controls, "f");
+            let v = text_area(
+                "t",
+                "اسأل الذكاء",
+                &content,
+                |_| "e",
+                "s",
+                None,
+                controls,
+                "f",
+            );
             let px = crate::ui::kit::testing::shot::render(v, 400, 120);
             let bg = px[(60 * 400 + 2) * 4];
             let xs: Vec<usize> = (12..40)
@@ -187,7 +196,10 @@ mod tests {
                 .filter(|&(x, y)| (px[(y * 400 + x) * 4] as i32 - bg as i32).abs() > 40)
                 .map(|(x, _)| x)
                 .collect();
-            (xs.iter().min().copied().unwrap(), xs.iter().max().copied().unwrap())
+            (
+                xs.iter().min().copied().unwrap(),
+                xs.iter().max().copied().unwrap(),
+            )
         };
         let (lo, hi) = ink(crate::app_language::Lang::Ar);
         assert!(lo > 200 && hi > 360, "at the right: {lo}..{hi}");

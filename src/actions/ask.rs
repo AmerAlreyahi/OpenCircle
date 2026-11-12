@@ -148,9 +148,7 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
     };
     let missing = match cfg.provider {
         Provider::Anthropic if key.is_none() => Some(S::ai_no_key),
-        Provider::OpenaiCompatible if cfg.base_url.trim().is_empty() => {
-            Some(S::ai_no_endpoint)
-        }
+        Provider::OpenaiCompatible if cfg.base_url.trim().is_empty() => Some(S::ai_no_endpoint),
         _ if cfg.model.trim().is_empty() => Some(S::ai_no_model),
         _ => None,
     };

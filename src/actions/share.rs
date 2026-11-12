@@ -83,7 +83,6 @@ mod sheet {
     use windows::core::{AgileReference, HSTRING, Interface, Ref};
     use windows_collections::IIterable;
 
-
     /// The handlers on our window's DataTransferManager (one share at a time).
     pub struct Sheet {
         manager: DataTransferManager,
