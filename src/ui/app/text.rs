@@ -330,11 +330,20 @@ impl App {
         let scale = self.o.scale;
         // the helper: the whole frame's rows (frame px), the frame sent once
         let rows = (top * scale, bottom * scale);
+        // Linux main mode: the band's crop and its rows in it, as before #169
+        let at = |y: f32| ((y * scale) as u32).saturating_sub(y0);
+        let band_rows = (at(top), at(bottom));
         self.o.reading = Some(band);
         let opening = self.opening;
         let system =
             (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
-        let send_frame = system.is_none() && !std::mem::replace(&mut self.o.frame_sent, true);
+        // Linux main mode keeps the band-by-band read (owner, 2026-11-12) until
+        // its follow-up plugs in HERE: the whole-screen read below
+        // (`ocr::read_screen`) once the helper keeps the lines it found, not
+        // the picture, and loads one reader at a time.
+        let whole_screen = cfg!(windows);
+        let send_frame =
+            system.is_none() && whole_screen && !std::mem::replace(&mut self.o.frame_sent, true);
         let held = self
             .o
             .helper
@@ -355,6 +364,14 @@ impl App {
                 let _ = tx.unbounded_send(Part::Read(lines.map_err(|e| e.to_string())));
             };
             let Some(setting) = system else {
+                if !whole_screen {
+                    let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
+                        let empty = ocr::OcrError::BadImage("an empty band".into());
+                        return send(Err(empty), [x0, y0]);
+                    };
+                    let read = ocr::recognize_band(&c.rgba, c.width, c.height, band_rows, gently);
+                    return send(read, [x0, y0]);
+                }
                 let key = u64::from(opening);
                 let read = ocr::read_screen(
                     key,

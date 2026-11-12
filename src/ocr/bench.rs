@@ -20,19 +20,20 @@ const PATHS: &[&str] = &[
     "arabic",
     "auto",           // Read::Auto = one-shot translate's read on Linux (source "auto")
     "linux-main", // Linux main mode: the whole screen band by band (`ocr::screen`), a fresh helper
-    "except",     // second reader, nothing known
+    "linux-frame", // the Linux follow-up: the screen held, read band by band (`Engine::read_screen`)
+    "except",      // second reader, nothing known
     "except-known", // second reader, EN PP-OCR's plain lines as Windows OCR's stand-in
-    "main-today", // what main mode shows: the stand-in's lines + the second reader's
+    "main-today",  // what main mode shows: the stand-in's lines + the second reader's
     "translate-win", // translate on Windows, source auto: misread -> words_read -> second reader
-    "x-det-full", // experiment: detector at full size
-    "x-sorted",   // experiment: second reader with its lines sorted by shape
-    "x-split",    // experiment: ... and long lines cut into pieces
-    "x-route",    // experiment: per-line reader choice
+    "x-det-full",  // experiment: detector at full size
+    "x-sorted",    // experiment: second reader with its lines sorted by shape
+    "x-split",     // experiment: ... and long lines cut into pieces
+    "x-route",     // experiment: per-line reader choice
     "x-route-split", // per-line choice + long lines cut
     "x-route-full", // per-line choice + long lines cut + detector at full size
     "x-route-s75", // ... detector at 3/4 size
     "x-route-strips", // ... detector at full size in strips (less memory)
-    "x-q",        // per-line `quality` vs correctness (the second reader's filter)
+    "x-q",         // per-line `quality` vs correctness (the second reader's filter)
 ];
 
 struct Line {
@@ -244,37 +245,6 @@ fn score(p: &Page, blocks: &[TextBlock]) -> Value {
         "cer": [rate(0), rate(1), rate(2)], "cer_all": all_edits as f32 / all_len.max(1) as f32,
         "lines": lines,
     })
-}
-
-/// How well a recognizer for `script` read `boxes` lines: the share of
-/// lines it read at all, times their mean confidence (weighted by length),
-/// times the share of its letters in its own script. A model shown a script
-/// it doesn't know reads few lines, or reads them unsure; one whose list
-/// also has Latin letters (all of them) reads Latin text well, but then it
-/// is Latin. Measured (`translate::tests::languages_end_to_end`): the
-/// English model on Arabic lines read none (0.0), on Russian 1 of 2 at 0.88
-/// (0.44); the Arabic model on French at 0.98, but in Latin letters (0.0);
-/// each model on its own script 0.97-1.0.
-// ponytail: a threshold on the model's own confidence; a script classifier
-// if it misfires.
-fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
-    if boxes == 0 {
-        return 1.0; // no text: nothing to read better
-    }
-    let letters = blocks
-        .iter()
-        .flat_map(|b| b.text.chars())
-        .filter(|c| c.is_alphabetic());
-    let (mine, all) = letters.fold((0, 0), |(m, a), c| (m + script.has(c) as usize, a + 1));
-    let own = if all == 0 {
-        1.0
-    } else {
-        mine as f32 / all as f32
-    };
-    let chars = |b: &TextBlock| b.text.chars().count().max(1) as f32;
-    let n: f32 = blocks.iter().map(chars).sum();
-    let mean = blocks.iter().map(|b| b.confidence * chars(b)).sum::<f32>() / n.max(1.0);
-    mean * own * blocks.len() as f32 / boxes as f32
 }
 
 /// The second reader kept a line read at least this well (before #169).
@@ -497,7 +467,8 @@ fn run(
             e.recognize(rgba, w, h, Read::Auto).unwrap()
         }
         "except" => e.recognize_except(rgba, w, h, &[]).unwrap(),
-        "linux-main" => main_bands(e, p, &[], true, false),
+        "linux-main" => linux_main(e, p),
+        "linux-frame" => main_bands(e, p, &[], true, false),
         "linux-first" => main_bands(e, p, &[], true, true),
         "main-new" => {
             let extra = main_bands(e, p, known3, false, false);
@@ -535,6 +506,43 @@ fn run(
         "x-route-strips" => route(e, p, Det::Strips, true),
         _ => unreachable!("{path}"),
     }
+}
+
+/// Linux main mode as the app reads a screen once text is used (as before
+/// #169): bands from the pointer (mid-screen) out (`ocr::screen`), each
+/// band's crop sent to the helper with the rows it is read for
+/// (`ui::app::text::read_band`, `Engine::recognize_band`).
+fn linux_main(e: &mut Engine, p: &Page) -> Vec<TextBlock> {
+    use super::screen::{Next, Rows, Wants, next};
+    e.band_auto = 0; // a fresh helper: English first
+    let (w, h) = (p.w, p.h);
+    let mut rows = Rows::default();
+    let mut out = Vec::new();
+    let wants = Wants {
+        source: Source::Helper,
+        started: true,
+        touches: &[],
+        waits: false,
+        text_used: true,
+        pointer: h as f32 / 2.0,
+    };
+    while let Next::Band { band, .. } = next(&rows, h as f32, &wants) {
+        let Some((top, bottom)) = rows.unread(band, h as f32) else {
+            rows.mark(band, h as f32);
+            continue;
+        };
+        let y0 = band.top as u32;
+        let bh = (band.height as u32).min(h - y0);
+        let crop = &p.rgba[(y0 * w * 4) as usize..((y0 + bh) * w * 4) as usize];
+        let r = (top as u32 - y0, bottom as u32 - y0);
+        let got = e.recognize_band(crop, w, bh, Read::Auto, r).unwrap();
+        out.extend(got.into_iter().map(|mut b| {
+            b.bounds[1] += y0 as f32;
+            b
+        }));
+        rows.mark(band, h as f32);
+    }
+    out
 }
 
 /// Main mode as the app reads a screen (#169): bands from the pointer

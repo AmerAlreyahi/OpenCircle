@@ -15,7 +15,7 @@ pub(crate) mod worker;
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub use session::{Hold, gently_here, hold, keep_warm, when_idle};
 pub use worker::{
-    WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_except,
+    WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_band, recognize_except,
     recognize_in_child, translate_in_child, warm, worker_main,
 };
 
@@ -482,6 +482,41 @@ fn owning(strips: Vec<(u32, u32)>, lines: &[[f32; 4]]) -> Vec<(u32, u32)> {
 /// Text lines' boxes (x, y, w, h; image px) and the size detection ran at.
 type Detected = (Vec<[f32; 4]>, (u32, u32));
 
+/// How well a recognizer for `script` read `boxes` lines: the share of
+/// lines it read at all, times their mean confidence (weighted by length),
+/// times the share of its letters in its own script. A model shown a script
+/// it doesn't know reads few lines, or reads them unsure; one whose list
+/// also has Latin letters (all of them) reads Latin text well, but then it
+/// is Latin. Measured (`translate::tests::languages_end_to_end`): the
+/// English model on Arabic lines read none (0.0), on Russian 1 of 2 at 0.88
+/// (0.44); the Arabic model on French at 0.98, but in Latin letters (0.0);
+/// each model on its own script 0.97-1.0.
+// ponytail: a threshold on the model's own confidence; a script classifier
+// if it misfires.
+fn quality(blocks: &[TextBlock], boxes: usize, script: Script) -> f32 {
+    if boxes == 0 {
+        return 1.0; // no text: nothing to read better
+    }
+    let letters = blocks
+        .iter()
+        .flat_map(|b| b.text.chars())
+        .filter(|c| c.is_alphabetic());
+    let (mine, all) = letters.fold((0, 0), |(m, a), c| (m + script.has(c) as usize, a + 1));
+    let own = if all == 0 {
+        1.0
+    } else {
+        mine as f32 / all as f32
+    };
+    let chars = |b: &TextBlock| b.text.chars().count().max(1) as f32;
+    let n: f32 = blocks.iter().map(chars).sum();
+    let mean = blocks.iter().map(|b| b.confidence * chars(b)).sum::<f32>() / n.max(1.0);
+    mean * own * blocks.len() as f32 / boxes as f32
+}
+
+/// Below this `quality`, Linux main mode's `Auto` (`Engine::recognize_band`)
+/// tries the other recognizers.
+const AUTO_QUALITY: f32 = 0.8;
+
 /// The Arabic model reads glyphs left to right; PaddleOCR reverses its
 /// output (`pred_reverse`): runs of Latin letters, digits, `:*./%+-` and
 /// spaces keep their order, the sequence of runs and other characters is
@@ -524,6 +559,8 @@ pub struct Engine {
     /// The last Latin and non-Latin recognizers that read most lines.
     latin: usize,
     other: Option<usize>,
+    /// `recognize_band`'s first try: the last recognizer that read well.
+    band_auto: usize,
     /// The screen `read_screen` reads a part at a time.
     frame: Option<Frame>,
 }
@@ -632,6 +669,7 @@ impl Engine {
             auto: 0,
             latin: 0,
             other: None,
+            band_auto: 0,
             frame: None,
         })
     }
@@ -707,6 +745,95 @@ impl Engine {
             (start.elapsed() - detected).as_millis()
         );
         Ok(reading_order(lines, models::RECOGNIZERS[i].rtl()))
+    }
+
+    /// Linux main mode's band of the screen text, read as before #169 (owner,
+    /// 2026-11-12: Linux main mode keeps this path until its follow-up; the
+    /// app's plug-in point is `App::read_band`): the band's crop detected
+    /// shrunk, only the lines whose middle is in `rows` (top, bottom) read,
+    /// batched by shape; `Auto` reads them with the last recognizer that read
+    /// well, then with every other below `AUTO_QUALITY`. One recognizer
+    /// loaded at a time.
+    pub fn recognize_band(
+        &mut self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+        read: Read,
+        rows: (u32, u32),
+    ) -> Result<Vec<TextBlock>, OcrError> {
+        let start = std::time::Instant::now();
+        let img = to_rgb(rgba, width, height)?;
+        let (boxes, (dw, dh)) = self.detect(&img, width, height)?;
+        let (top, bottom) = (rows.0 as f32, rows.1 as f32);
+        let mut boxes: Vec<[f32; 4]> = (boxes.into_iter())
+            .filter(|b| (top..bottom).contains(&(b[1] + b[3] / 2.0)))
+            .collect();
+        boxes.sort_by(|a, b| (a[2] / a[3]).total_cmp(&(b[2] / b[3])));
+        let first = match read {
+            Read::One(i) => i,
+            Read::Auto => self.band_auto,
+        };
+        let n = boxes.len();
+        let q =
+            |i: usize, blocks: &[TextBlock]| quality(blocks, n, models::RECOGNIZERS[i].script());
+        let detected = start.elapsed();
+        let mut best = (first, self.read_band_lines(first, &img, &boxes)?);
+        if read == Read::Auto && q(first, &best.1) < AUTO_QUALITY {
+            for i in 0..models::RECOGNIZERS.len() {
+                if i == first || !models::installed(models::RECOGNIZERS[i]) {
+                    continue;
+                }
+                let other = self.read_band_lines(i, &img, &boxes)?;
+                if q(i, &other) > q(best.0, &best.1) {
+                    best = (i, other);
+                }
+            }
+            self.band_auto = best.0;
+        }
+        crate::log!(
+            "[opencircle] ocr {width}x{height}: detect at {dw}x{dh} {} ms, {n} lines read in {} ms",
+            detected.as_millis(),
+            (start.elapsed() - detected).as_millis()
+        );
+        Ok(reading_order(best.1, models::RECOGNIZERS[best.0].rtl()))
+    }
+
+    /// `recognize_band`'s reading: recognizer `i` alone (any other freed
+    /// first) on `boxes` (sorted by shape), whole, in runs of `rec_batch_len`.
+    fn read_band_lines(
+        &mut self,
+        i: usize,
+        img: &RgbImage,
+        boxes: &[[f32; 4]],
+    ) -> Result<Vec<TextBlock>, OcrError> {
+        self.recs.retain(|(n, _)| *n == i);
+        let rtl = models::RECOGNIZERS[i].rtl();
+        let rec = self.recognizer(i)?;
+        let mut blocks = Vec::with_capacity(boxes.len());
+        let mut rest = boxes;
+        while !rest.is_empty() {
+            let (chunk, tail) = rest.split_at(rec_batch_len(rest));
+            rest = tail;
+            let crops = (chunk.iter())
+                .map(|b| {
+                    let [x, y, w, h] = b.map(|v| v as u32);
+                    image::imageops::crop_imm(img, x, y, w, h).to_image()
+                })
+                .collect();
+            let rec = rec.predict(crops).map_err(engine_err)?;
+            for (bounds, (text, confidence)) in chunk.iter().zip(rec.texts.iter().zip(rec.scores)) {
+                let text = text.trim();
+                if !text.is_empty() {
+                    blocks.push(TextBlock {
+                        text: if rtl { reverse_rtl(text) } else { text.into() },
+                        bounds: *bounds,
+                        confidence,
+                    });
+                }
+            }
+        }
+        Ok(blocks)
     }
 
     /// The lines of `img` whose middle is in `rows` (all for `None`) and not
