@@ -7,7 +7,7 @@
 //! nothing round the box (the caret shows it).
 use iced::keyboard::{self, key::Named};
 use iced::widget::text_editor::{self, Action, Binding, Content, KeyPress, Status};
-use iced::widget::{column, container, mouse_area};
+use iced::widget::{column, container, mouse_area, stack};
 use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
@@ -60,7 +60,9 @@ pub fn text_area<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     let field = text_editor::TextEditor::new(content)
         .id(id)
-        .placeholder(placeholder)
+        // (right to left the editor's own placeholder would sit at the left:
+        // an overlay below draws it from the start edge)
+        .placeholder(if super::dir::rtl() { "" } else { placeholder })
         .on_action(on_action)
         .key_binding(move |press| binding(press, &on_enter))
         .font(super::text::font(Role::CHAT))
@@ -76,6 +78,21 @@ pub fn text_area<'a, M: Clone + 'a>(
             value: c().text,
             selection: c().accent_soft,
         });
+    // the field, with the placeholder over it from the start edge while it is empty (right to left)
+    let field: Element<'a, M> = match super::dir::rtl() && content.is_empty() {
+        true => stack![
+            field,
+            container(
+                super::text::paragraph(
+                    super::text::muted(Role::CHAT, placeholder).line_height(LINE_HEIGHT)
+                )
+                .width(Fill)
+            )
+            .padding(PAD)
+        ]
+        .into(),
+        false => field.into(),
+    };
     let parts = column![]
         .push(top)
         .push(field)
@@ -152,6 +169,29 @@ mod tests {
         let right =
             crate::ui::kit::testing::shot::click(view(), size, iced::Point::new(390.0, 40.0));
         assert_eq!(right, ["focus"], "beside the controls too");
+    }
+
+    /// Right to left (the Arabic UI) the empty field's placeholder starts at the
+    /// right edge, like the text typed in it (iced's editor has no alignment of its own).
+    #[test]
+    fn the_placeholder_starts_at_the_right_edge_in_arabic() {
+        let ink = |lang| {
+            crate::app_language::set(lang);
+            let content = Content::new();
+            let controls = iced::widget::space::horizontal().height(28).into();
+            let v = text_area("t", "اسأل الذكاء", &content, |_| "e", "s", None, controls, "f");
+            let px = crate::ui::kit::testing::shot::render(v, 400, 120);
+            let bg = px[(60 * 400 + 2) * 4];
+            let xs: Vec<usize> = (12..40)
+                .flat_map(|y| (14..386).map(move |x| (x, y)))
+                .filter(|&(x, y)| (px[(y * 400 + x) * 4] as i32 - bg as i32).abs() > 40)
+                .map(|(x, _)| x)
+                .collect();
+            (xs.iter().min().copied().unwrap(), xs.iter().max().copied().unwrap())
+        };
+        let (lo, hi) = ink(crate::app_language::Lang::Ar);
+        assert!(lo > 200 && hi > 360, "at the right: {lo}..{hi}");
+        crate::app_language::set(crate::app_language::Lang::En);
     }
 
     #[test]
