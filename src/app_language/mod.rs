@@ -146,6 +146,11 @@ pub fn tr(s: S) -> &'static str {
     TABLE[s as usize][current() as usize]
 }
 
+/// `s` in English whatever the app speaks (the log and diagnostics stay English).
+pub fn english(s: S) -> &'static str {
+    TABLE[s as usize][Lang::En as usize]
+}
+
 /// `tr(s)` without its leading direction mark (tests compare names with it).
 #[cfg(test)]
 pub fn bare(s: S) -> &'static str {

@@ -215,17 +215,23 @@ fn desktop_keys() -> MutexGuard<'static, Vec<(String, Option<String>)>> {
 }
 
 /// Where the user changes a key the desktop keeps (logged, and shown in Settings).
-pub fn managed() -> &'static str {
+pub fn managed() -> crate::app_language::S {
     managed_on(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default())
 }
 
-fn managed_on(desktop: &str) -> &'static str {
+/// `managed()` in English, for the log.
+pub fn managed_log() -> &'static str {
+    crate::app_language::english(managed())
+}
+
+fn managed_on(desktop: &str) -> crate::app_language::S {
+    use crate::app_language::S;
     if desktop.split(':').any(|d| d.eq_ignore_ascii_case("gnome")) {
-        "Your desktop manages this shortcut: change it in Settings → Apps → OpenCircle → Global Shortcuts"
+        S::k_managed_gnome
     } else if desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")) {
-        "Your desktop manages this shortcut: change it in System Settings → Shortcuts → OpenCircle"
+        S::k_managed_kde
     } else {
-        "Your desktop manages this shortcut: change it in its keyboard shortcut settings"
+        S::k_managed_other
     }
 }
 
@@ -1186,11 +1192,14 @@ mod tests {
 
     #[test]
     fn names_where_each_desktop_changes_its_keys() {
+        use crate::app_language::{S, english};
         assert!(
-            managed_on("ubuntu:GNOME").ends_with("Settings → Apps → OpenCircle → Global Shortcuts")
+            english(managed_on("ubuntu:GNOME"))
+                .ends_with("Settings → Apps → OpenCircle → Global Shortcuts")
         );
-        assert!(managed_on("KDE").contains("System Settings → Shortcuts → OpenCircle"));
-        assert!(managed_on("Hyprland").starts_with("Your desktop manages this shortcut"));
+        assert_eq!(managed_on("KDE"), S::k_managed_kde);
+        assert!(english(managed_on("KDE")).contains("System Settings → Shortcuts → OpenCircle"));
+        assert!(english(managed_on("Hyprland")).starts_with("Your desktop manages this shortcut"));
     }
 
     #[test]

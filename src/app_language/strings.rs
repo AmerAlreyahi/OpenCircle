@@ -1894,4 +1894,10 @@ strings! {
         | "مدير بيانات الاعتماد > بيانات اعتماد Windows > إضافة بيانات اعتماد عامة:\nالعنوان {}.opencircle، اسم المستخدم {}، كلمة المرور = المفتاح.";
     ai_keyring_other: "Service \"opencircle\", account \"{}\"."
         | "الخدمة «opencircle»، الحساب «{}».";
+    k_managed_gnome: "Your desktop manages this shortcut: change it in Settings → Apps → OpenCircle → Global Shortcuts"
+        | "يدير سطح المكتب لديك هذا الاختصار: غيّره من الإعدادات ← التطبيقات ← OpenCircle ← الاختصارات العامة";
+    k_managed_kde: "Your desktop manages this shortcut: change it in System Settings → Shortcuts → OpenCircle"
+        | "يدير سطح المكتب لديك هذا الاختصار: غيّره من إعدادات النظام ← الاختصارات ← OpenCircle";
+    k_managed_other: "Your desktop manages this shortcut: change it in its keyboard shortcut settings"
+        | "يدير سطح المكتب لديك هذا الاختصار: غيّره من إعدادات اختصارات لوحة المفاتيح فيه";
 }

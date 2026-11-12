@@ -1546,7 +1546,7 @@ fn shortcuts_show_the_key_the_desktop_actually_uses() {
         let texts = shot::texts(view(s));
         texts
             .into_iter()
-            .filter(|t| t.ends_with(managed()) || t.starts_with("Taken by"))
+            .filter(|t| t.ends_with(&managed().to_string()) || t.starts_with("Taken by"))
             .collect()
     };
     assert_eq!(

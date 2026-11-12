@@ -11,7 +11,7 @@ use gtk::gio::{Cancellable, DBusCallFlags, DBusConnection, DBusSignalFlags};
 use gtk::glib::{self, ToVariant, Variant, VariantDict, variant::ObjectPath};
 
 use super::{
-    Binding, bindings, desktop_spelling, gnome_print_key, managed, route_id, set_desktop_keys,
+    Binding, bindings, desktop_spelling, gnome_print_key, managed_log, route_id, set_desktop_keys,
     set_portal_failed,
 };
 use crate::Triggers;
@@ -222,7 +222,7 @@ fn record_keys(planned: &[Binding], list: &Variant) {
             None => format!(
                 "\"{}\" has no key: the desktop assigned none. {}",
                 b.description,
-                managed()
+                managed_log()
             ),
             Some(keys) if parse_shortcut(&keys).ok() == Some(b.hotkey) => {
                 format!("global shortcut {keys}: {} (desktop portal)", b.description)
@@ -231,7 +231,7 @@ fn record_keys(planned: &[Binding], list: &Variant) {
                 "\"{}\" stays on {keys}, not {} as set in OpenCircle. {}",
                 b.description,
                 b.shortcut,
-                managed()
+                managed_log()
             ),
         };
         crate::log!("[opencircle] {line}");
