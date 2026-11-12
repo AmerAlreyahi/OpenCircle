@@ -944,6 +944,9 @@ production systems.
   The owner doubts the size: the release clean-up includes a real size audit (duplication, dead code, things written
   twice), with a list for the owner and before -> after line counts; the feature-folder restructure comes after v0.1.7.
 
+- Owner checks (2026-11-12): the rebuilt About page is approved (dev build D067); the Arabic wording is approved as it is
+  (he may still correct single strings later); cosmetics such as the edge breathing are not a priority for now.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
