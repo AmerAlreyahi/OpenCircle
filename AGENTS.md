@@ -974,6 +974,9 @@ production systems.
 - winget hang cause (2026-11-12, measured on the owner's PC with his OK): `winget install --manifest` blocks behind a
   dialog winget owns for the unsigned, internet-marked Setup exe (no Setup process ever starts); not a bug in the Setup.
 
+- Two workers at most (owner, 2026-11-12, "I want to save tokens"; SUPERSEDES "at most 3 workers at once" in "Credits"):
+  never more than 2 workers running at the same time, a resumed worker counts as one; queue the rest.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
