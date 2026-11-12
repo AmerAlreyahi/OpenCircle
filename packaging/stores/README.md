@@ -5,7 +5,7 @@ Rules read on 2026-11-11 (links in the w22 report). Regenerate for any published
 
     scripts/store-manifests.sh 0.1.7 2026-12-01     # needs gh; reads that release's SHA256SUMS.txt
     python3 -I packaging/stores/validate.py          # schema check (python3-jsonschema, PyYAML)
-    scripts/test-store-manifests.sh                  # v0.1.6 regenerates identically, the next release's form is right, a bad hash is rejected
+    scripts/test-store-manifests.sh                  # v0.1.7 regenerates identically, the next release's form is right, a bad hash is rejected
 
 | Store | What | Files | Who reviews |
 |---|---|---|---|
@@ -26,24 +26,24 @@ One-time, on the owner's PC:
 2. Fork <https://github.com/microsoft/winget-pkgs> to AmerAlreyahi/winget-pkgs; clone it.
 3. `winget install wingetcreate` (also useful later).
 
-Test (Windows 10/11, elevated PowerShell, folder = `packaging/stores/winget/0.1.6`):
+Test (Windows 10/11, elevated PowerShell, folder = `packaging/stores/winget/0.1.7`):
 
     winget validate --manifest <folder>
     winget settings --enable LocalManifestFiles
     winget install --manifest <folder>          # an unsigned exe from a local manifest shows SmartScreen: click More info > Run anyway (see "Why ... waits" below)
-    winget list OpenCircle                       # must show Id ARP\Machine\X64\OpenCircle, version 0.1.6
+    winget list OpenCircle                       # must show Id ARP\Machine\X64\OpenCircle, version 0.1.7
     winget uninstall --id "ARP\Machine\X64\OpenCircle"
     # optional, isolated: Tools\SandboxTest.ps1 <folder> in the clone (Windows Sandbox, Pro/Enterprise)
 
 Submit:
 
-    git checkout -b AmerAlreyahi.OpenCircle-0.1.6 master
-    mkdir -p manifests/a/AmerAlreyahi/OpenCircle/0.1.6
-    cp <repo>/packaging/stores/winget/0.1.6/* manifests/a/AmerAlreyahi/OpenCircle/0.1.6/
-    git add manifests && git commit -m "New package: AmerAlreyahi.OpenCircle version 0.1.6"
-    git push -u origin AmerAlreyahi.OpenCircle-0.1.6        # then open the PR against microsoft/winget-pkgs master
+    git checkout -b AmerAlreyahi.OpenCircle-0.1.7 master
+    mkdir -p manifests/a/AmerAlreyahi/OpenCircle/0.1.7
+    cp <repo>/packaging/stores/winget/0.1.7/* manifests/a/AmerAlreyahi/OpenCircle/0.1.7/
+    git add manifests && git commit -m "New package: AmerAlreyahi.OpenCircle version 0.1.7"
+    git push -u origin AmerAlreyahi.OpenCircle-0.1.7        # then open the PR against microsoft/winget-pkgs master
 
-PR title: `New package: AmerAlreyahi.OpenCircle version 0.1.6`. The PR template body has the
+PR title: `New package: AmerAlreyahi.OpenCircle version 0.1.7`. The PR template body has the
 checklist: tick CLA signed, one manifest only, `winget validate` run, tested with
 `winget install --manifest`, conforms to schema 1.28. (`wingetcreate new <url>` can do the whole
 thing interactively instead, but it would overwrite our hand-tuned switches: use `update` later.)
@@ -67,7 +67,7 @@ Known risks:
   winget reports "no upgrade". A moderator may ask about it: answer that the updater is opt-in, signed and
   user-initiated for Setup installs.
 - ARP entry: the MSI hides its own Apps & features entry and writes one named `OpenCircle`
-  (Publisher `opencircle` up to 0.1.6, `Amer Alreyahi` from 0.1.7): the manifest carries `AppsAndFeaturesEntries` for it.
+  (Publisher `opencircle` up to 0.1.7, `Amer Alreyahi` from 0.1.7): the manifest carries `AppsAndFeaturesEntries` for it.
 
 Later releases (by hand): `scripts/store-manifests.sh <ver> <date>`, copy the folder to
 `manifests/a/AmerAlreyahi/OpenCircle/<ver>/`, title `Update: AmerAlreyahi.OpenCircle version <ver>`;
@@ -91,7 +91,7 @@ Now (option B, recommended): your own bucket, no review.
 Later (Extras): <https://github.com/ScoopInstaller/Extras>. Required order: open a "Package Request" issue first
 (the form asks for: reasonably well known, at least 100 stars and/or 50 forks, English interface/docs, latest stable,
 standard install, some indication of popularity); wait for a maintainer to approve; fork, branch from `master`,
-add `bucket/opencircle.json`; PR title `opencircle: Add version 0.1.6`; comment `/verify` on the PR. Version-only
+add `bucket/opencircle.json`; PR title `opencircle: Add version 0.1.7`; comment `/verify` on the PR. Version-only
 bump PRs are refused: Excavator does bumps, so `checkver` + `autoupdate` must work. Prefer this only after the stars threshold;
 until then option B.
 
@@ -106,8 +106,8 @@ Notes on the manifest:
   the app would then be newer than Scoop thinks and the swap leaves marker files in the old version folder. Therefore the
   manifest's `notes` tell users to switch off "Keep OpenCircle up to date" (Settings > General; config `[update] auto = false`).
   From 0.1.7 the manifest's `post_install` writes `opencircle.managed` (beside the exe) and the app's updater is off for that
-  copy (the notes no longer ask the user to switch it off). The 0.1.6 manifest keeps the old note: that exe does not read the file.
-- `checkver: github` uses the latest non-prerelease release tag `v0.1.6`; `autoupdate.hash.url` points at the release's
+  copy (the notes no longer ask the user to switch it off). The 0.1.7 manifest keeps the old note: that exe does not read the file.
+- `checkver: github` uses the latest non-prerelease release tag `v0.1.7`; `autoupdate.hash.url` points at the release's
   `SHA256SUMS.txt` (Scoop finds the line by file name).
 
 ## Other free channels (not prepared)
@@ -120,7 +120,7 @@ Notes on the manifest:
 | Snap | free | store review for classic confinement; strict is automatic | snapcraft.yaml; screen capture and global shortcuts are hard under strict confinement, so likely classic (needs a manual request) |
 | Homebrew cask | free | macOS only | not applicable until the macOS item starts |
 
-## What the app does for stores (v0.1.7 and later; v0.1.6 predates all of it)
+## What the app does for stores (v0.1.7 and later; v0.1.7 predates all of it)
 
 1. Per-machine only: a standard user cannot install the Setup silently (exit 1925 without elevation).
    winget elevates for `ElevationRequirement: elevationRequired`. A per-user install is a bigger change: only if the pipeline rejects.
@@ -135,7 +135,7 @@ Notes on the manifest:
    cost is that the user may be offered the same version twice (the app's pill, then `winget upgrade` says nothing to do).
    If a winget moderator asks for it off, add `Custom: /managed=winget` to `InstallerSwitches` (one line in the script).
 3. Publisher: the MSI's Manufacturer = Apps & features' Publisher = `Amer Alreyahi` (`publisher` in `[package.metadata.packager]`).
-   The UpgradeCode comes from the binary name, not the publisher, so 0.1.6 upgrades in place; the HKCU keys keep their old name.
+   The UpgradeCode comes from the binary name, not the publisher, so 0.1.7 upgrades in place; the HKCU keys keep their old name.
 4. The exe's version resource carries FileVersion, ProductVersion (the release version), CompanyName, ProductName, FileDescription, LegalCopyright.
 5. Silent switches and exit codes: README "Silent install"; `/managed=` is new, the codes were mapped (1223 -> 1602).
 6. The two portable asset names (`OpenCircle-<v>-x64-portable.exe` and `OpenCircle_<v>_x64-portable.exe`, identical hashes):

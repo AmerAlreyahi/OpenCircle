@@ -1,20 +1,21 @@
 {
-    "version": "0.1.6",
+    "version": "0.1.7",
     "description": "Circle anything on screen to search, read, translate or ask about it",
     "homepage": "https://github.com/AmerAlreyahi/OpenCircle",
     "license": "MIT",
     "notes": [
         "OpenCircle keeps its settings in %APPDATA%\\opencircle and its models in %LOCALAPPDATA%\\opencircle (not in Scoop's folders).",
-        "Scoop manages updates for this install: switch off 'Keep OpenCircle up to date' in Settings > General, or put '[update]' and 'auto = false' in %APPDATA%\\opencircle\\config.toml.",
+        "Scoop updates this install (OpenCircle's own updater is off for it): run 'scoop update opencircle'.",
         "Quit OpenCircle (tray icon > Quit) before 'scoop update opencircle'."
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.1.6/OpenCircle-0.1.6-x64-portable.exe#/opencircle.exe",
-            "hash": "27f90a0c1bb4d25d9cac1b42a7f13efd0717fe01fed7894a8c101478865374ac"
+            "url": "https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.1.7/OpenCircle-0.1.7-x64-portable.exe#/opencircle.exe",
+            "hash": "8f8075fea2e24a3e9bf8be528298e404c297dc5c1eaeb0803a7e941419a8f6a5"
         }
     },
     "bin": "opencircle.exe",
+    "post_install": "Set-Content -Path \"$dir\\opencircle.managed\" -Value scoop -NoNewline",
     "shortcuts": [
         [
             "opencircle.exe",

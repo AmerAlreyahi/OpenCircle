@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.28.0.schema.json
 
 PackageIdentifier: AmerAlreyahi.OpenCircle
-PackageVersion: 0.1.6
+PackageVersion: 0.1.7
 PackageLocale: en-US
-Publisher: OpenCircle
+Publisher: Amer Alreyahi
 PublisherUrl: https://github.com/AmerAlreyahi
 PublisherSupportUrl: https://github.com/AmerAlreyahi/OpenCircle/issues
 PrivacyUrl: https://github.com/AmerAlreyahi/OpenCircle/blob/main/docs/privacy.md
@@ -27,7 +27,7 @@ Tags:
 - circle-to-search
 - snip
 - lens
-ReleaseNotesUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.6
+ReleaseNotesUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/tag/v0.1.7
 Documentations:
 - DocumentLabel: Getting started
   DocumentUrl: https://github.com/AmerAlreyahi/OpenCircle/blob/main/docs/getting-started.md
