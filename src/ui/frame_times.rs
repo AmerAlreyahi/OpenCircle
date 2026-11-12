@@ -535,8 +535,8 @@ fn the_first_frame_sets_the_clip_mask_about_once() {
 /// rest), and a frame drawn anyway redraws nothing.
 #[test]
 fn a_still_overlay_asks_for_no_frames() {
-    // The edge glow doesn't breathe in 0.1.2 (`edge::breathes`), so motion
-    // stays on everywhere: the still overlay must cost nothing.
+    // The edge glow is static (it never breathes), so with motion
+    // on the still overlay must cost nothing.
     motion::set_reduced(false);
     let mut app = open_app(1280, 720, 1.0);
     app.o.appear = None;
@@ -559,74 +559,6 @@ fn a_still_overlay_asks_for_no_frames() {
         "no widget wants one"
     );
     assert!(last.damage.is_empty(), "{:?}", last.damage);
-}
-
-/// The edge glow's breath (owner, 2026-10-27) redraws only the edge's strips,
-/// when its level changes (`edge::LEVELS`), only after the opening: never the middle of the
-/// screen, and a few percent of the screen per frame at most. (Windows only:
-/// Linux's glow stays still, #142.)
-#[test]
-#[cfg(windows)]
-#[ignore = "the breath is off in 0.1.2 (edge::breathes); it returns with the GPU renderer"]
-fn the_breath_redraws_only_the_edge() {
-    let (w, h) = (1920, 1080);
-    motion::set_reduced(false);
-    let mut app = open_app(w, h, 1.0);
-    app.o.appear = None;
-    let drawn = frames(&mut app, 80, false, |app, _, now| {
-        let _ = app.update(Message::Frame(now));
-    });
-    // the breath starts at the opening's end (frame 13); before it, no edge work
-    let middle = Rectangle::new(Point::new(260.0, 260.0), Size::new(1400.0, 540.0));
-    let mut steps = 0;
-    for (i, frame) in drawn.iter().enumerate().skip(16) {
-        assert!(
-            frame
-                .damage
-                .iter()
-                .all(|r| r.intersection(&middle).is_none()),
-            "frame {}: redrew the middle: {:?}",
-            i + 1,
-            frame.damage
-        );
-        steps += usize::from(!frame.damage.is_empty());
-    }
-    assert!(
-        (4..=8).contains(&steps), // levels 1..=6 of the rise (`edge::LEVELS`)
-        "{steps} breath steps in 64 frames"
-    );
-    let area: f32 = (drawn.iter().skip(16))
-        .flat_map(|d| d.damage.iter().map(|r| r.width * r.height))
-        .sum();
-    let share = area / (64.0 * (w * h) as f32);
-    println!(
-        "breath: {steps} steps, {:.1} % of the screen a frame",
-        share * 100.0
-    );
-    assert!(share < 0.08, "{:.1} %", share * 100.0);
-}
-
-/// The breath's steps timed (run in release:
-/// `cargo test --release breath_frame_times -- --ignored --nocapture`).
-#[test]
-#[cfg(windows)] // (Linux: no breath, #142)
-#[ignore = "timing: run by hand, in release"]
-fn breath_frame_times() {
-    for (w, h, k) in [(1920, 1080, 1.0), (1920, 1080, 1.5), (3840, 2160, 2.5)] {
-        motion::set_reduced(false);
-        let mut app = open_app(w, h, k);
-        app.o.appear = None;
-        let drawn = frames(&mut app, 120, false, |app, _, now| {
-            let _ = app.update(Message::Frame(now));
-        });
-        let before = iced_tiny_skia::PIPELINE_PIXELS.get();
-        let steps: Vec<Drawn> = (drawn.into_iter().skip(20))
-            .filter(|d| !d.damage.is_empty())
-            .collect();
-        let piped = iced_tiny_skia::PIPELINE_PIXELS.get() - before;
-        report("breath step", app.o.screen, k, &steps);
-        println!("  {} steps, {piped} pipeline px", steps.len());
-    }
 }
 
 /// Every open goes by `motion`: the opening's clock in `OPEN` eased out, the

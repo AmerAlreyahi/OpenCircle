@@ -753,8 +753,8 @@ impl App {
     }
 
     /// Another monitor's window: its frozen frame, dimmed, whatever of the
-    /// selection is on it, and the edge glow while the mouse is there (still:
-    /// the breath is the starting screen's). No bar, card, toast or hint:
+    /// selection is on it, and the edge glow while the mouse is there (still,
+    /// like every edge). No bar, card, toast or hint:
     /// those stay on the starting screen.
     pub(in crate::ui) fn screen_view<'a>(&'a self, screen: &'a Screen) -> Element<'a, Message> {
         let snip = match &self.o.purpose {
@@ -807,7 +807,7 @@ impl App {
         // (its coming and going leaves the layers under it as they are)
         .push((glow > 0.0).then(|| {
             let scale = screen.place.scale;
-            border::view(mode, scale, false, border::Breathe::Off, glow)
+            border::view(mode, scale, false, glow)
         }));
         // Snip: the live area's part here (and the toolbar when it docks
         // here), or the loupe and outline while the pointer is here.

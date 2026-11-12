@@ -5234,50 +5234,6 @@ fn the_pinned_chats_black_spot_is_no_protected_app() {
     assert!(overlay_texts(&app).contains(&protected().to_string()));
 }
 
-/// The glow's breath rests while a selection is drawn, moved or resized (each
-/// step redraws ~30 % of the screen, in the frames the pointer's on every
-/// screen wait for), and breathes again once it is let go.
-#[test]
-fn the_breath_rests_while_the_pointer_draws_or_drags() {
-    let mut app = open_app(1280, 720, 1.0);
-    settle_bar(&mut app);
-    assert_eq!(app.breathing(), border::Breathe::On, "still");
-    let (a, b) = (Point::new(300.0, 200.0), Point::new(600.0, 400.0));
-    event(
-        &mut app,
-        overlay::Event::Press {
-            at: a,
-            shift: false,
-        },
-    );
-    event(&mut app, overlay::Event::Move(b));
-    assert_eq!(app.breathing(), border::Breathe::Paused, "drawing");
-    event(&mut app, overlay::Event::Release);
-    settle_bar(&mut app);
-    app.o.morph = None;
-    assert_eq!(app.breathing(), border::Breathe::On, "let go");
-    // a box resized by its corner
-    let r = app
-        .o
-        .view
-        .rect_to_screen(app.o.selection.expect("a box").area);
-    event(
-        &mut app,
-        overlay::Event::Press {
-            at: overlay::corner(r, 2),
-            shift: false,
-        },
-    );
-    event(
-        &mut app,
-        overlay::Event::Move(overlay::corner(r, 2) + Vector::new(30.0, 20.0)),
-    );
-    assert!(app.o.grab.is_some(), "the corner is held");
-    assert_eq!(app.breathing(), border::Breathe::Paused, "resizing");
-    event(&mut app, overlay::Event::Release);
-    assert!(app.o.grab.is_none());
-}
-
 /// What a real key press (Ctrl held) produces on the open Snip editor's view.
 fn ctrl_key_after(app: &App, c: char, physical: iced::keyboard::key::Code) -> Vec<Message> {
     use iced::advanced::clipboard;

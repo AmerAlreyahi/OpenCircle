@@ -629,7 +629,6 @@ impl Live {
             border::Mode::Live,
             monitor.scale,
             cfg!(windows),
-            border::Breathe::Off,
             1.0,
         )];
         // (Paused: `patches` is empty.)

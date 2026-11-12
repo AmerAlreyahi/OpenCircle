@@ -22,24 +22,6 @@ use crate::ui::snip;
 use super::{App, CHIP_SPACE, LINK_WIDTH, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode};
 
 impl App {
-    /// The starting screen's glow breathes once the opening is over, and rests
-    /// while anything else moves or the pointer draws, moves or resizes a
-    /// selection (a breath step redraws ~30 % of the screen: those frames, on
-    /// every screen, come first; gate 0.1.2, the box across two screens); gone
-    /// to another screen (the mouse's), it rests, so the hidden strips are
-    /// never made again.
-    pub(in crate::ui) fn breathing(&self) -> border::Breathe {
-        let pressed = self.o.drawing || self.o.grab.is_some() || self.o.text_press.is_some();
-        match self.o.appear {
-            _ if self.o.glow.here().is_some() => border::Breathe::Paused,
-            Some((_, t)) if t >= 1.0 => match self.animating() || pressed {
-                true => border::Breathe::Paused,
-                false => border::Breathe::On,
-            },
-            _ => border::Breathe::Off,
-        }
-    }
-
     /// How much of the screen edge's glow shows on `window` (`None`: the
     /// starting screen's): the mouse's screen (`screens::Glow`), and in Snip
     /// only while nothing is picked: it says "the screen is frozen"; over a
@@ -207,7 +189,6 @@ impl App {
                 },
                 self.o.scale,
                 false,
-                self.breathing(),
                 self.edge_glow(None),
             ),
         ]);

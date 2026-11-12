@@ -9,28 +9,17 @@
 //! - Hud: the glow plus four viewfinder corner brackets 12 px in (30 px, a
 //!   2.5 px line in c1, outer radius 8, an 8 px shadow in c2);
 //! - Bezel: a 1.5 px line in c1 over an 8 px band of c2 and a 28 px inset
-//!   glow of c1 (`.effect-bezel-frame`); it never breathes.
+//!   glow of c1 (`.effect-bezel-frame`).
 //!
 //! The user's own two colours draw a Glow.
 //!
 //! Static (owner, 2026-10-27): no moving colours, no draw-back, no travel. The
 //! edge is a few strip images made once per size and look, on the first frame;
 //! every later frame draws the same images and so redraws nothing. The
-//! overlay's own fade-in (`windows::fade`) moves it as a whole.
-//! The one motion is the design's `ripplePulse`, a barely-there breath of the
-//! overlay's glow once its opening is over (owner, 2026-10-27): 4 s, the
-//! blurs going 22/54 px -> 38/85 px -> 22/54 px, redrawn as the edge strips
-//! ONLY (never the screen), from a cached depth map so a step is a table
-//! lookup per pixel, and only when it shows: the breath moves no pixel by
-//! more than 2 of 255 a step (`LEVELS`), so it is redrawn when its level
-//! changes, 24 times in 4 s (it was every `STEP`, 50: each redraws about 30 %
-//! of the screen, ~11 ms of the VM's CPU, 14 % of a core while still). Live
-//! translate and snip stay still, and so does the overlay when the OS asks for
-//! reduced motion, and on Linux (`breathes`).
+//! overlay's own fade-in (`windows::fade`) moves it as a whole; nothing else
+//! does (owner, 2026-11-12: no breathing).
 //! On the colour-keyed live layer (Windows) there is no partial alpha: a thin
 //! solid line in c1 stands in for any look.
-use std::time::{Duration, Instant};
-
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Action, Geometry};
 use iced::widget::image::{FilterMethod, Handle};
@@ -46,60 +35,24 @@ const RADIUS: f32 = 14.0;
 /// The design's two blurs (c1's layer, c2's), logical px; a CSS blur of `b`
 /// is a Gaussian of sigma `b / 2`.
 const BLUR: [f32; 2] = [22.0, 54.0];
-/// The blurs at the breath's peak (the design's 50 % keyframe).
-const BLUR_PEAK: [f32; 2] = [38.0, 85.0];
 /// The bezel: its line, its band and its glow's blur, logical px.
 const BEZEL: [f32; 3] = [1.5, 8.0, 28.0];
 /// The HUD brackets: inset, size, line, outer radius, shadow blur; logical px.
 const HUD: [f32; 5] = [12.0, 30.0, 2.5, 8.0, 8.0];
-/// The breath: its length and the gap between redraws.
-const BREATH: Duration = Duration::from_secs(4);
-const STEP: Duration = Duration::from_millis(80);
-/// The breath's levels from rest to peak: the whole breath changes a pixel by
-/// 17-18 of 255 at most (premultiplied), so a level is at most 2 of them.
-const LEVELS: f32 = 12.0;
-/// How far inward the glow reaches at its peak, logical px: past this the
-/// outer layer at full strength is under half a level of alpha.
+/// How far inward the glow's strips reach, logical px (the depth the design's
+/// 85 px blur fades out at; the glow itself is gone well before it).
 const REACH: f32 = 102.0;
-
-/// Whether the overlay's glow breathes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Breathe {
-    /// Not (yet): the opening is on, or the edge is not the overlay's.
-    Off,
-    /// It does, but another motion is on (the bar gliding, a card opening):
-    /// the edge keeps what it shows and draws nothing meanwhile.
-    Paused,
-    On,
-}
-
-/// Whether the overlay's glow may breathe at all. Not in 0.1.2 (owner rule:
-/// near 0 % CPU while the overlay is still): on the CPU renderer each breath
-/// step costs ~11 ms, so even the trimmed breath measured 7-9 % of a core on
-/// the Windows VM (perf-2, exact cycle counts). The glow stays static; the
-/// breath returns with the GPU renderer (then: `cfg!(windows) &&
-/// !motion::reduced()`).
-fn breathes() -> bool {
-    false
-}
 
 /// The edge over a window that shows a whole monitor at `scale` (physical px
 /// per logical px), in the active look. `keyed`: the window's background is a
 /// colour key (no partial alpha). `opacity`: how much of it shows (the glow
 /// fading between screens, `app::screens::Glow`): the same strips drawn
 /// fainter, never made again; none at 0.
-pub fn view<'a, M: 'a>(
-    mode: Mode,
-    scale: f32,
-    keyed: bool,
-    breathing: Breathe,
-    opacity: f32,
-) -> Element<'a, M> {
+pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, opacity: f32) -> Element<'a, M> {
     canvas::Canvas::new(EdgeCanvas {
         mode,
         scale,
         keyed,
-        breathing,
         opacity,
         look: None,
     })
@@ -114,7 +67,7 @@ pub fn view<'a, M: 'a>(
 /// Returns the strips (x, y, w, h) it may have blanked.
 pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
     let cfg = config::look_config();
-    let Some((geo, paint)) = edge(&cfg, Mode::Live, w, h, scale, false, 0.0) else {
+    let Some((geo, paint)) = edge(&cfg, Mode::Live, w, h, scale, false) else {
         return Vec::new();
     };
     let strips = geo.strips();
@@ -137,7 +90,7 @@ pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
 /// the screen were `w / scale` logical px wide (the tests' pictures).
 #[cfg(test)]
 pub fn paint(rgba: &mut [u8], w: u32, h: u32, scale: f32, look: &LookConfig, mode: Mode) {
-    let Some((geo, paint)) = edge(look, mode, w, h, scale, false, 0.0) else {
+    let Some((geo, paint)) = edge(look, mode, w, h, scale, false) else {
         return;
     };
     for ([x0, y0, sw, _], px) in render(&depths(geo), &paint) {
@@ -157,7 +110,6 @@ struct EdgeCanvas {
     mode: Mode,
     scale: f32,
     keyed: bool,
-    breathing: Breathe,
     opacity: f32,
     /// Tests: this look instead of the config's.
     look: Option<LookConfig>,
@@ -169,8 +121,6 @@ pub struct State {
     drawn: Option<(Geo, Paint)>,
     /// Each strip's depth map (`depths`), kept while the geometry is.
     depths: Option<(Geo, Vec<Strip>)>,
-    /// When the breath began (the first frame that was allowed to).
-    since: Option<Instant>,
     /// Logical bounds and pixels of each strip.
     strips: Vec<(Rectangle, Handle)>,
 }
@@ -178,9 +128,8 @@ pub struct State {
 impl<M> canvas::Program<M> for EdgeCanvas {
     type State = State;
 
-    /// On each frame: the edge, rebuilt only if its size, look or breath step
-    /// changed (the first frame, in practice), and the next step's time while
-    /// it breathes.
+    /// On each frame: the edge, rebuilt only if its size or look changed (the
+    /// first frame, in practice).
     fn update(
         &self,
         state: &mut State,
@@ -188,24 +137,10 @@ impl<M> canvas::Program<M> for EdgeCanvas {
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Option<Action<M>> {
-        let canvas::Event::Window(window::Event::RedrawRequested(now)) = event else {
+        let canvas::Event::Window(window::Event::RedrawRequested(_)) = event else {
             return None;
         };
         let look = self.look.unwrap_or_else(config::look_config);
-        let mut breathing = self.breathing != Breathe::Off
-            && self.mode == Mode::Overlay
-            && design(&look).0 != Kind::Bezel
-            && breathes();
-        if breathing && self.breathing == Breathe::Paused && state.drawn.is_some() {
-            return None;
-        }
-        breathing &= self.breathing == Breathe::On;
-        let since = *state.since.get_or_insert(*now);
-        if !breathing {
-            state.since = None;
-        }
-        let step = (now.saturating_duration_since(since).as_millis() / STEP.as_millis()) as u32;
-        let breath = if breathing { level(step) } else { 0.0 };
         let px = |v: f32| (v * self.scale).round() as u32;
         let want = edge(
             &look,
@@ -214,12 +149,9 @@ impl<M> canvas::Program<M> for EdgeCanvas {
             px(bounds.height),
             self.scale,
             self.keyed,
-            breath,
         );
-        let next = (breathing && want.is_some())
-            .then(|| Action::request_redraw_at(since + STEP * next_step(step)));
         if state.drawn == want {
-            return next;
+            return None;
         }
         if let Some((geo, paint)) = &want {
             if state.depths.as_ref().is_none_or(|(g, _)| g != geo) {
@@ -240,7 +172,7 @@ impl<M> canvas::Program<M> for EdgeCanvas {
             state.strips.clear();
         }
         state.drawn = want;
-        next
+        None
     }
 
     fn draw(
@@ -286,27 +218,6 @@ struct Paint {
     marks: [[u8; 4]; 2],
 }
 
-/// How far into the breath (0..1: 0 = the design's 22/54 px blurs, 1 = 38/85)
-/// step `step` of the 4 s cycle is: eased, there and back.
-fn breath(step: u32) -> f32 {
-    let t = STEP.as_secs_f32() * step as f32 / BREATH.as_secs_f32();
-    0.5 - 0.5 * (std::f32::consts::TAU * t).cos()
-}
-
-/// `breath(step)` rounded to one of the `LEVELS`: what step `step` draws.
-fn level(step: u32) -> f32 {
-    (breath(step) * LEVELS).round() / LEVELS
-}
-
-/// The first step after `step` that draws another level (the next redraw).
-fn next_step(step: u32) -> u32 {
-    let cycle = (BREATH.as_millis() / STEP.as_millis()) as u32;
-    let now = level(step);
-    (step + 1..=step + cycle)
-        .find(|&s| level(s) != now)
-        .unwrap_or(step + 1)
-}
-
 /// The stored look's kind and edge colours c1, c2 (alpha included): a design
 /// look's own; the user's own two as a glow.
 fn design(look: &LookConfig) -> (Kind, [Color; 2]) {
@@ -344,7 +255,6 @@ fn over(layers: &[([f32; 3], f32)]) -> [u8; 4] {
 
 /// The edge `mode` shows in `look` on a `w` x `h` screen at `scale`: its shape
 /// and paint (`None`: no edge). `keyed`: a solid line, no blending.
-/// `breath`: see `breath()`.
 fn edge(
     look: &LookConfig,
     mode: Mode,
@@ -352,7 +262,6 @@ fn edge(
     h: u32,
     scale: f32,
     keyed: bool,
-    breath: f32,
 ) -> Option<(Geo, Paint)> {
     let active = look.active();
     let e = active.edge(mode);
@@ -394,11 +303,10 @@ fn edge(
                         (rgb(c1), a1 * cover(0.0, line)),
                     ]);
                 }
-                let blur = |n: usize| BLUR[n] + (BLUR_PEAK[n] - BLUR[n]) * breath;
                 // c1's layer over c2's
                 over(&[
-                    (rgb(c2), a2 * tail(d, blur(1))),
-                    (rgb(c1), a1 * tail(d, blur(0))),
+                    (rgb(c2), a2 * tail(d, BLUR[1])),
+                    (rgb(c1), a1 * tail(d, BLUR[0])),
                 ])
             })
             .collect();
@@ -570,8 +478,8 @@ struct Strip {
     marks: Vec<(u32, u8, u8)>,
 }
 
-/// Every strip's depth map: made once per geometry, so that a breath step is
-/// a lookup per pixel and not a distance per pixel.
+/// Every strip's depth map: made once per geometry, so that another look on
+/// the same screen is a lookup per pixel and not a distance per pixel.
 fn depths(geo: Geo) -> Vec<Strip> {
     let mut strips: Vec<Strip> = (geo.strips().into_iter())
         .map(|rect @ [x0, y0, w, h]| {
@@ -636,7 +544,6 @@ fn render(strips: &[Strip], paint: &Paint) -> Vec<([u32; 4], Vec<u8>)> {
 mod tests {
     use super::*;
     use crate::config::{ColourSet, Look, LookTheme, PRESETS};
-    use crate::ui::kit::motion;
     use std::time::{Duration, Instant};
 
     fn spectrum() -> LookConfig {
@@ -659,8 +566,8 @@ mod tests {
         }
     }
 
-    fn table(look: &LookConfig, breath: f32) -> Vec<[u8; 4]> {
-        edge(look, Mode::Overlay, 1920, 1080, 1.0, false, breath)
+    fn table(look: &LookConfig) -> Vec<[u8; 4]> {
+        edge(look, Mode::Overlay, 1920, 1080, 1.0, false)
             .unwrap()
             .1
             .table
@@ -680,7 +587,7 @@ mod tests {
     }
 
     fn image(look: &LookConfig) -> Vec<u8> {
-        let (geo, paint) = edge(look, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).unwrap();
+        let (geo, paint) = edge(look, Mode::Overlay, 1920, 1080, 1.0, false).unwrap();
         full(geo, &paint)
     }
 
@@ -693,7 +600,7 @@ mod tests {
     fn the_glow_is_the_designs_inset_shadow_in_the_looks_two_colours() {
         // c1 (22 px blur) over c2 (54 px): strongest at the screen edge, about
         // half a layer's alpha there (a CSS blur), gone past the reach
-        let table = table(&spectrum(), 0.0);
+        let table = table(&spectrum());
         let alpha: Vec<u8> = table.iter().map(|p| p[3]).collect();
         assert!(alpha.windows(2).all(|p| p[0] >= p[1]), "{alpha:?}");
         // 0.5 * 0.42 over 0.5 * 0.26: 0.21 + 0.13 * 0.79 = 0.31
@@ -729,7 +636,7 @@ mod tests {
                 ..spectrum().active()
             });
             let [c1, c2] = theme::edge_glow(&look.active());
-            let t = table(&look, 0.0);
+            let t = table(&look);
             let (e, d) = (t[0], t[50]);
             assert!(apart(e, c1) < apart(e, c2), "{palette:?}: {e:?}");
             assert!(apart(d, c2) < 12, "{palette:?} further in: {d:?}");
@@ -739,11 +646,11 @@ mod tests {
             let kit = theme::kit_look(*stored).unwrap();
             let look = theme(*stored);
             assert_eq!(design(&look), (kit.kind, kit.glow), "{stored:?}");
-            let (geo, _) = edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).unwrap();
+            let (geo, _) = edge(&look, Mode::Overlay, 1920, 1080, 1.0, false).unwrap();
             assert_eq!(geo.kind, kit.kind, "{stored:?}");
             if kit.kind != Kind::Bezel {
                 let [c1, c2] = kit.glow;
-                let t = table(&look, 0.0);
+                let t = table(&look);
                 assert!(apart(t[0], c1) <= apart(t[0], c2), "{stored:?}");
             }
         }
@@ -761,10 +668,10 @@ mod tests {
         let mut look = spectrum().active();
         look.overlay.style = EdgeStyle::None;
         let look = own(look);
-        assert!(edge(&look, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).is_none());
-        assert!(edge(&look, Mode::Live, 1920, 1080, 1.0, false, 0.0).is_some());
+        assert!(edge(&look, Mode::Overlay, 1920, 1080, 1.0, false).is_none());
+        assert!(edge(&look, Mode::Live, 1920, 1080, 1.0, false).is_some());
         let calm = theme(LookTheme::Calm);
-        assert!(edge(&calm, Mode::Overlay, 1920, 1080, 1.0, false, 0.0).is_none());
+        assert!(edge(&calm, Mode::Overlay, 1920, 1080, 1.0, false).is_none());
         let grey = vec![60u8; 192 * 108 * 4];
         let mut b = grey.clone();
         paint(&mut b, 192, 108, 0.1, &look, Mode::Overlay);
@@ -793,123 +700,29 @@ mod tests {
             .collect()
     }
 
-    fn border(mode: Mode, look: LookConfig, breathing: Breathe) -> EdgeCanvas {
+    fn border(mode: Mode, look: LookConfig) -> EdgeCanvas {
         EdgeCanvas {
             opacity: 1.0,
             mode,
             scale: 1.0,
             keyed: false,
-            breathing,
             look: Some(look),
         }
     }
 
-    /// The owner's rule: no moving colours, no draw-back, no travel. Everywhere
-    /// but the overlay after its opening (and never the still Bezel), frames
-    /// 0.2 s and 60 s after the first hold the very same images, and none asks
-    /// for another frame.
+    /// The owner's rule: no moving colours, no draw-back, no travel. In every
+    /// look and mode, frames 0.2 s and 60 s after the first hold the very same
+    /// images, and none asks for another frame.
     #[test]
-    fn the_edge_is_still_but_for_the_overlays_breath() {
+    fn the_edge_is_still() {
         for look in PRESETS.iter().map(|(t, _)| theme(*t)) {
-            let still = design(&look).0 == Kind::Bezel;
             for mode in [Mode::Overlay, Mode::Live, Mode::Snip] {
-                // the opening (not breathing yet), live, snip, reduced motion
-                let mut cases = vec![(border(mode, look, Breathe::Off), false)];
-                cases.push((border(mode, look, Breathe::On), mode == Mode::Overlay));
-                for (case, breathes) in cases {
-                    for reduced in [false, true] {
-                        motion::set_reduced(reduced);
-                        let seen = frames(&case, &[0, 16, 200, 2000, 60_000]);
-                        let moves = breathes && !reduced && !still && super::breathes();
-                        let same = seen.windows(2).all(|p| p[0].0 == p[1].0);
-                        let asks = seen.iter().any(|f| f.1);
-                        let has = edge(&look, mode, 1920, 1080, 1.0, false, 0.0).is_some();
-                        assert_eq!(asks, moves && has, "{mode:?} asks");
-                        assert_eq!(!same, moves && has, "{mode:?} moves");
-                        assert_eq!(!seen[0].0.is_empty(), has, "{mode:?}");
-                    }
-                }
+                let seen = frames(&border(mode, look), &[0, 16, 200, 2000, 60_000]);
+                let has = edge(&look, mode, 1920, 1080, 1.0, false).is_some();
+                assert!(seen.windows(2).all(|p| p[0].0 == p[1].0), "{mode:?} moves");
+                assert!(seen.iter().all(|f| !f.1), "{mode:?} asks");
+                assert_eq!(!seen[0].0.is_empty(), has, "{mode:?}");
             }
-        }
-        motion::set_reduced(false);
-    }
-
-    /// The overlay's breath is the design's `ripplePulse`: 4 s, the blurs
-    /// 22/54 px -> 38/85 px at 2 s -> back, in steps of `STEP`; only the edge's
-    /// strips (never the screen), and it asks for the next step, not every frame.
-    #[test]
-    fn the_overlay_breathes_slowly_in_its_strips_only() {
-        motion::set_reduced(false);
-        for look in [spectrum(), theme(LookTheme::Hud), theme(LookTheme::Horizon)] {
-            let b = border(Mode::Overlay, look, Breathe::On);
-            let seen = frames(&b, &[0, 1000, 2000, 3000, 4000, 4010]);
-            if !super::breathes() {
-                // #142 + 0.1.2: the glow stays still (near 0 % CPU while untouched)
-                assert!(seen.iter().all(|f| !f.1 && f.0 == seen[0].0));
-                continue;
-            }
-            let alpha_at = |p: f32, d: usize| table(&look, p)[d][3];
-            // peak: deeper than at rest, the same at 4 s as at 0
-            assert!(alpha_at(1.0, 40) > alpha_at(0.0, 40) + 2);
-            assert!(seen[2].0 != seen[0].0 && seen[1].0 != seen[0].0);
-            assert!(seen.iter().all(|f| f.1), "asks for the next step");
-            assert!(seen[5].0 == seen[4].0, "10 ms later: the same step");
-            // never more than the four strips, all inside the edge's band
-            let strips = &seen[0].0;
-            assert!(strips.len() <= 4);
-            let area: f32 = strips.iter().map(|(r, _)| r.width * r.height).sum();
-            assert!(area < 0.3 * 1920.0 * 1080.0, "{area}");
-        }
-        assert!((breath(0) - 0.0).abs() < 1e-6 && (breath(25) - 1.0).abs() < 1e-5);
-        assert!((breath(50) - 0.0).abs() < 1e-5);
-        // reduced motion: still
-        motion::set_reduced(true);
-        let seen = frames(&border(Mode::Overlay, spectrum(), Breathe::On), &[0, 2000]);
-        assert!(seen[0].0 == seen[1].0 && !seen[1].1);
-        motion::set_reduced(false);
-    }
-
-    /// Bug A (gate 0.1.2): the still overlay's breath asked for a redraw every
-    /// `STEP`, 50 in 4 s, each about 30 % of the screen (14 % of a VM core,
-    /// hidden from Task Manager's tick count). It asks only when its level
-    /// changes, 24 times a cycle, and a redraw still moves no pixel by more
-    /// than 2 of 255: as smooth as before, half the redraws.
-    #[test]
-    fn the_breath_asks_for_a_frame_only_when_it_shows() {
-        let cycle = (BREATH.as_millis() / STEP.as_millis()) as u32;
-        let mut drawn = vec![0];
-        while *drawn.last().unwrap() < cycle {
-            drawn.push(next_step(*drawn.last().unwrap()));
-        }
-        let redraws = drawn.iter().filter(|&&s| s > 0 && s <= cycle).count();
-        assert!((20..=24).contains(&redraws), "{redraws} redraws in 4 s");
-        let pm =
-            |p: [u8; 4]| [p[0], p[1], p[2]].map(|c| (u32::from(c) * u32::from(p[3]) + 127) / 255);
-        for scale in [1.0, 1.5, 2.5] {
-            let t = |b: f32| {
-                edge(&spectrum(), Mode::Overlay, 1920, 1080, scale, false, b)
-                    .unwrap()
-                    .1
-                    .table
-            };
-            for pair in drawn.windows(2) {
-                let (a, b) = (t(level(pair[0])), t(level(pair[1])));
-                let most = (a.iter().zip(&b))
-                    .flat_map(|(x, y)| {
-                        let alpha = x[3].abs_diff(y[3]);
-                        pm(*x)
-                            .into_iter()
-                            .zip(pm(*y))
-                            .map(move |(p, q)| p.abs_diff(q).max(alpha.into()))
-                    })
-                    .max()
-                    .unwrap();
-                assert!(most <= 2, "steps {pair:?} at {scale}: {most} of 255");
-            }
-        }
-        // the level of a step drawn is what it shows until the next one
-        for pair in drawn.windows(2) {
-            assert!((pair[0]..pair[1]).all(|s| level(s) == level(pair[0])));
         }
     }
 
@@ -927,7 +740,7 @@ mod tests {
                 (2560, 1440, 1.25, 128, 18),
                 (3840, 2160, 2.0, 204, 28),
             ] {
-                let (geo, paint) = edge(&look, Mode::Overlay, w, h, scale, false, 0.0).unwrap();
+                let (geo, paint) = edge(&look, Mode::Overlay, w, h, scale, false).unwrap();
                 assert_eq!((geo.t, geo.r), (t, r), "{w}x{h} @ {scale}");
                 assert_eq!(paint.table.len(), t as usize + 1);
                 let strips = geo.strips();
@@ -955,7 +768,7 @@ mod tests {
             }
         }
         // too small for an edge: nothing (no zero-sized images)
-        let (small, _) = edge(&spectrum(), Mode::Overlay, 30, 30, 1.0, false, 0.0).unwrap();
+        let (small, _) = edge(&spectrum(), Mode::Overlay, 30, 30, 1.0, false).unwrap();
         assert!(small.strips().is_empty());
     }
 
@@ -996,15 +809,14 @@ mod tests {
     }
 
     /// Stealth Frost: a crisp line in c1 at the edge, a faint band behind it,
-    /// a soft glow inward; and it never breathes.
+    /// a soft glow inward.
     #[test]
     fn the_bezel_is_a_line_over_a_band_and_a_soft_glow() {
-        let t = table(&theme(LookTheme::Mono), 0.0);
+        let t = table(&theme(LookTheme::Mono));
         assert!(t[0][3] > 100, "{:?}", t[0]);
         assert!(t[1][3] < t[0][3] && t[4][3] > 20, "{t:?}");
         assert!(t[12][3] < t[4][3] && t[12][3] > 0, "{t:?}");
         assert_eq!(t[90][3], 0);
-        assert_eq!(table(&theme(LookTheme::Mono), 1.0), t, "no breath");
     }
 
     /// The live layer (colour-keyed on Windows) shows a thin solid line at the
@@ -1018,7 +830,7 @@ mod tests {
         magenta.colours = [config::Rgb(key), config::Rgb([250, 10, 240])];
         let looks = PRESETS.iter().map(|(t, _)| theme(*t)).chain([own(magenta)]);
         for look in looks.filter(|l| l.active().glow > 0) {
-            let (geo, paint) = edge(&look, Mode::Live, 1366, 768, 1.25, true, 0.0).unwrap();
+            let (geo, paint) = edge(&look, Mode::Live, 1366, 768, 1.25, true).unwrap();
             let want = (f32::from(look.active().live.thickness) * 1.25).round() as u32;
             assert_eq!(geo.t, want);
             let img = full(geo, &paint);
@@ -1067,11 +879,9 @@ mod tests {
         ];
         let own = own(custom);
         for mode in [Mode::Overlay, Mode::Live, Mode::Snip] {
-            for breath in [0.0, 0.5, 1.0] {
-                let a = edge(&sapphire, mode, 1920, 1080, 1.0, false, breath);
-                let b = edge(&own, mode, 1920, 1080, 1.0, false, breath);
-                assert_eq!(a.map(|e| e.1), b.map(|e| e.1), "{mode:?} {breath}");
-            }
+            let a = edge(&sapphire, mode, 1920, 1080, 1.0, false);
+            let b = edge(&own, mode, 1920, 1080, 1.0, false);
+            assert_eq!(a.map(|e| e.1), b.map(|e| e.1), "{mode:?}");
         }
         let l = sapphire.active();
         assert_eq!((l.glow, l.dim), (100, 12));
