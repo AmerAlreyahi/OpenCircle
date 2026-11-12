@@ -947,6 +947,12 @@ production systems.
 - Owner checks (2026-11-12): the rebuilt About page is approved (dev build D067); the Arabic wording is approved as it is
   (he may still correct single strings later); cosmetics such as the edge breathing are not a priority for now.
 
+- "Live border" corrected (owner, 2026-11-12: "you misunderstood me, here live meant that the app is active, not the
+  border is breathing"): the "live border effect" of the 2026-11-10 plan is the Active Look edge that shows the app is
+  ACTIVE. It exists and ships as it is (static glow, on the screen of the last input). NO breathing was asked for: the
+  words "with its soft breathing back" in "Next releases (owner, 2026-11-10)" and the breathing in planning #156 were a
+  lead's misreading. Nothing is owed for it; breathing is not planned unless the owner asks.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
