@@ -3198,7 +3198,7 @@ fn every_settings_text_has_the_uis_base_direction() {
     let declared = |t: &str| {
         (t.contains("Google") && t.contains("affiliat"))
             // Latin names shown alone: the sidebar footer's version and OS, a service's name
-            || ["v0.0.0", "Linux", "AudD"].contains(&t)
+            || ["v0.0.0", "Linux", "Windows", "AudD"].contains(&t)
     };
     let mut off = Vec::new();
     for language in ["en", "ar"] {
