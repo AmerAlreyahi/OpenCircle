@@ -8,9 +8,10 @@
 //! (`FORGET_ARG`): the question whether the user's data goes too.
 //!
 //! Silent mode (`silent`: IT, winget): `/quiet` installs or updates with no UI,
-//! `/dir="C:\path"` for a fresh install, `/uninstall /quiet` removes, `/log=<file>`
-//! keeps Windows Installer's log, `/managed=<name>` leaves the updater off (README:
-//! Silent install); the exit code is Windows Installer's (`exit_code`). The MSI is no release asset: this exe is the one
+//! `/dir="C:\path"` for a fresh install, `/uninstall /quiet` removes, `/managed=<name>`
+//! leaves the updater off (README: Silent install); the exit code is Windows
+//! Installer's (`exit_code`). Security: this process runs elevated, so it writes or
+//! deletes nothing at a path the user chose or can change (see "Elevated" below). The MSI is no release asset: this exe is the one
 //! installer. Why embedded and not beside it: one file to download and run.
 //! Why this program and not a second one: the
 //! setup's window reuses the app's renderer, fonts and theme (no new toolkit);
@@ -282,8 +283,9 @@ pub enum Silent {
         /// installed app afterwards (the new one, or the old one if it failed).
         launch: bool,
         /// `/managed=<name>`: a package manager owns this install (`winget`,
-        /// `scoop`, ...): the setup writes `update::MANAGED_FILE` beside the exe and
-        /// the app stops updating itself. Without it a copy keeps updating itself.
+        /// `scoop`, ...): passed to the MSI as `MANAGEDBY`, which writes it to its HKLM
+        /// entry (not this elevated process), and the app stops updating itself.
+        /// Without it a copy keeps updating itself.
         managed: Option<String>,
     },
     Uninstall,
@@ -339,17 +341,6 @@ fn managed_name(value: &str) -> String {
     if ok { name } else { "other".into() }
 }
 
-/// `/log=<file>`: where the silent setup keeps Windows Installer's verbose log
-/// (for IT and winget's `--log`). `None` = no log asked for.
-pub fn log_path(args: &[String]) -> Option<String> {
-    args.iter().find_map(|a| {
-        let flag = a.trim_start_matches(['/', '-']);
-        let (name, value) = flag.split_once('=')?;
-        let value = value.trim_matches('"');
-        (name.eq_ignore_ascii_case("log") && !value.is_empty()).then(|| value.to_string())
-    })
-}
-
 /// The exit code a silent setup ends with, in the conventional numbers installer
 /// managers (winget, IT tools) know: 0 done, 1602 cancelled, 1603 fatal error,
 /// 1618 another install is running, 1925 needs an administrator, 3010 done but a
@@ -365,11 +356,6 @@ pub fn exit_code(result: u32) -> u32 {
     }
 }
 
-/// A result the silent setup counts as installed (the app is there).
-fn installed_ok(result: u32) -> bool {
-    matches!(result, 0 | 1641 | 3010)
-}
-
 /// Where a silent install goes: an update or repair stays where the app is
 /// (like the window's), a fresh install takes `/dir`, else the default.
 fn silent_folder(installed: Option<&Installed>, dir: Option<String>) -> String {
@@ -382,11 +368,7 @@ fn silent_folder(installed: Option<&Installed>, dir: Option<String>) -> String {
 
 /// Runs a silent request against the embedded MSI; returns the process exit
 /// code: 0 = done, else Windows Installer's error code (3010 = done, restart wanted).
-pub fn silent(msi_bytes: &'static [u8], what: Silent, log: Option<&str>) -> u32 {
-    if let Some(file) = log {
-        msi::enable_log(file);
-        crate::log!("[opencircle] setup: Windows Installer's log: {file}");
-    }
+pub fn silent(msi_bytes: &'static [u8], what: Silent) -> u32 {
     let package = match msi::Package::write(msi_bytes) {
         Ok(p) => p,
         Err(e) => {
@@ -405,13 +387,12 @@ pub fn silent(msi_bytes: &'static [u8], what: Silent, log: Option<&str>) -> u32 
             let installed = msi::installed(&package);
             let folder = silent_folder(installed.as_ref(), dir);
             let repair = installed.as_ref().is_some_and(|i| i.same);
-            let code = exit_code(msi::install_quiet(&package, &folder, repair));
-            if let Some(by) = managed.filter(|_| installed_ok(code)) {
-                let marker = app_in(&folder).with_file_name(crate::update::MANAGED_FILE);
-                if let Err(e) = std::fs::write(&marker, by) {
-                    crate::log!("[opencircle] setup: {}: {e}", marker.display());
-                }
-            }
+            let code = exit_code(msi::install_quiet(
+                &package,
+                &folder,
+                repair,
+                managed.as_deref(),
+            ));
             if launch && let Err(e) = self::launch(&app_in(&folder), false) {
                 crate::log!("[opencircle] setup: {e}");
             }
@@ -922,8 +903,7 @@ mod tests {
         );
     }
 
-    /// `/managed=` and `/log=` (winget, other managers, IT), and the codes a
-    /// silent run ends with.
+    /// `/managed=` (other managers, IT), and the codes a silent run ends with.
     #[test]
     fn managed_log_and_exit_codes() {
         assert_eq!(
@@ -938,20 +918,11 @@ mod tests {
         assert_eq!(managed_name(""), "other");
         assert_eq!(managed_name("../x"), "other");
         assert_eq!(managed_name(&"a".repeat(33)), "other");
-        let spaced = vec![
-            "/quiet".to_string(),
-            r"/LOG=C:\Temp\oc setup.log".to_string(),
-        ];
-        assert_eq!(log_path(&spaced).as_deref(), Some(r"C:\Temp\oc setup.log"));
-        assert_eq!(log_path(&args("/quiet /log=")), None);
-        assert_eq!(log_path(&args("/quiet")), None);
         // the conventional results stay what they are
         for same in [0, 1602, 1603, 1618, 1639, 1641, 1925, 3010] {
             assert_eq!(exit_code(same), same);
         }
         assert_eq!(exit_code(1223), 1602, "a declined prompt = cancelled");
-        assert!(installed_ok(0) && installed_ok(3010) && installed_ok(1641));
-        assert!(!installed_ok(1603) && !installed_ok(1602) && !installed_ok(1925));
     }
 
     #[test]

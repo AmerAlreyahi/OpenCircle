@@ -124,11 +124,12 @@ Notes on the manifest:
 
 1. Per-machine only: a standard user cannot install the Setup silently (exit 1925 without elevation).
    winget elevates for `ElevationRequirement: elevationRequired`. A per-user install is a bigger change: only if the pipeline rejects.
-2. One answer to "may this copy replace itself?": `update::Install::detect`. A file `opencircle.managed` beside the exe
-   (text: `winget`, `scoop` or anything else) makes it "notify only", like deb / rpm: no download, no swap; the check still
+2. One answer to "may this copy replace itself?": `update::Install::detect`. The HKLM value `ManagedBy` of the Setup install's Apps & features key (the MSI writes it from `MANAGEDBY=<name>`; admin-only, so no
+   link-following write) or, for portable / Scoop copies, a file `opencircle.managed` beside the exe (text: `winget`, `scoop` or anything else) makes it "notify only", like deb / rpm: no download, no swap; the check still
    runs when the user's "Keep OpenCircle up to date" is on or on "Check now", and Settings > General says "Updates are managed
    by winget / Scoop / your package manager" and whether a newer version exists. The user's setting is not rewritten.
-   Who writes it: Scoop's `post_install` (the manifest, 0.1.7 form); the Setup's `/managed=<name>`; a Linux package may ship it.
+   Who writes it: Scoop's `post_install` (the manifest, 0.1.7 form: the user's own process); the Setup's `/managed=<name>` (through the MSI); a Linux package may ship the file.
+   A marker that cannot be read counts as managed (a read failure never turns self-update on).
    winget installs keep the updater ON (no `/managed` in the manifest): winget accepts self-updating apps and re-reads the ARP
    DisplayVersion, the in-app update runs the same Setup winget would, and winget's pipeline test runs only the install. The
    cost is that the user may be offered the same version twice (the app's pill, then `winget upgrade` says nothing to do).
@@ -136,7 +137,7 @@ Notes on the manifest:
 3. Publisher: the MSI's Manufacturer = Apps & features' Publisher = `Amer Alreyahi` (`publisher` in `[package.metadata.packager]`).
    The UpgradeCode comes from the binary name, not the publisher, so 0.1.6 upgrades in place; the HKCU keys keep their old name.
 4. The exe's version resource carries FileVersion, ProductVersion (the release version), CompanyName, ProductName, FileDescription, LegalCopyright.
-5. Silent switches and exit codes: README "Silent install"; `/log=` and `/managed=` are new, the codes were mapped (1223 -> 1602).
+5. Silent switches and exit codes: README "Silent install"; `/managed=` is new, the codes were mapped (1223 -> 1602).
 6. The two portable asset names (`OpenCircle-<v>-x64-portable.exe` and `OpenCircle_<v>_x64-portable.exe`, identical hashes):
    stores use the hyphen one; nothing to change (frozen channel).
 7. Silent install time under winget's pipeline timeouts: not measured.
@@ -144,4 +145,5 @@ Notes on the manifest:
 If `winget install` waits at "Starting package install": run it with `--verbose-logs` (logs under
 `%LOCALAPPDATA%\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir`), look for a
 `Zone.Identifier` stream on the downloaded Setup in `%TEMP%\WinGet\...` (a Mark of the Web on an unsigned exe can raise a
-security prompt that nothing shows), and pass `--log <file>` (the Setup writes Windows Installer's log there).
+security prompt that nothing shows), and run the same Setup by hand from an elevated prompt (`/quiet`, then `echo %errorlevel%`). There is no `/log` switch: a setup that runs as
+administrator must not write to a path the caller chose (planted-link risk).

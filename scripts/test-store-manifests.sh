@@ -18,7 +18,7 @@ printf '%s  OpenCircle-Setup-9.9.9-x64.exe\n%s  OpenCircle-9.9.9-x64-portable.ex
 SUMS="$new/sums" STORES_OUT="$new/out" scripts/store-manifests.sh 9.9.9 2030-01-01 >/dev/null
 SCOOP_JSON="$new/out/scoop/opencircle.json" python3 -I packaging/stores/validate.py "$new/out/winget/9.9.9" >/dev/null
 i="$new/out/winget/9.9.9/AmerAlreyahi.OpenCircle.installer.yaml"
-for want in 'Publisher: Amer Alreyahi' 'InstallLocation: /dir="<INSTALLPATH>"' 'Log: /log="<LOGPATH>"' 'InstallerReturnCode: 1641'; do
+for want in 'Publisher: Amer Alreyahi' 'InstallLocation: /dir="<INSTALLPATH>"' 'InstallerReturnCode: 1641'; do
   grep -qF -- "$want" "$i" || { echo "missing in the new installer manifest: $want"; exit 1; }
 done
 grep -qF 'opencircle.managed' "$new/out/scoop/opencircle.json" || { echo "the Scoop manifest lacks the updater marker"; exit 1; }

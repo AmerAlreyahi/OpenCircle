@@ -36,10 +36,20 @@ impl Package {
             // an admin never deletes in a folder the user controls (a planted link)
             remove_left_behind(&std::env::temp_dir(), STALE);
         }
-        let dir = std::env::temp_dir().join(format!("OpenCircle-Setup-{}", std::process::id()));
-        std::fs::create_dir(&dir)?; // fails if it exists: never someone else's folder
+        let name = format!("OpenCircle-Setup-{}", std::process::id());
+        let dir = if super::elevated() {
+            // an admin writes only in a folder only admins can change (a user's temp
+            // folder could get a planted link between the folder and the file)
+            let dir = super::admin_root().join(name);
+            super::admin_only_dir(&dir)?;
+            dir
+        } else {
+            let dir = std::env::temp_dir().join(name);
+            std::fs::create_dir(&dir)?; // fails if it exists: never someone else's folder
+            dir
+        };
         let path = dir.join(format!("OpenCircle-{}-x64.msi", env!("CARGO_PKG_VERSION")));
-        std::fs::write(&path, bytes)?;
+        write_new(&path, bytes)?;
         let mut open = std::fs::OpenOptions::new();
         open.read(true);
         #[cfg(windows)]
@@ -51,6 +61,17 @@ impl Package {
             lock: Some(lock),
         })
     }
+}
+
+/// Creates `path` (it must not exist: a planted file or link of that name is an error,
+/// never followed) and writes `bytes`.
+fn write_new(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?
+        .write_all(bytes)
 }
 
 /// A setup's folder older than this is no running setup's.
@@ -202,12 +223,8 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), Fault> {
 
 #[cfg(windows)]
 pub use win::{
-    ask_yes_no, enable_log, install, install_quiet, installed, installed_size, uninstall,
-    uninstall_quiet,
+    ask_yes_no, install, install_quiet, installed, installed_size, uninstall, uninstall_quiet,
 };
-
-#[cfg(not(windows))]
-pub fn enable_log(_: &str) {}
 
 #[cfg(not(windows))]
 pub fn installed_size(_: &Package) -> Option<u64> {
@@ -230,7 +247,7 @@ pub fn uninstall(_: &str, report: &dyn Fn(Event)) {
 }
 
 #[cfg(not(windows))]
-pub fn install_quiet(_: &Package, _: &str, _: bool) -> u32 {
+pub fn install_quiet(_: &Package, _: &str, _: bool, _: Option<&str>) -> u32 {
     ERROR_CALL_NOT_IMPLEMENTED
 }
 
@@ -248,10 +265,15 @@ pub fn ask_yes_no(_: &str, _: &str) -> bool {
     false
 }
 
-/// The install's command line: the folder (quoted), and for the very same
-/// package a full repair (every file and registry entry rewritten).
-pub fn command_line(folder: &str, repair: bool) -> String {
+/// The install's command line: the folder (quoted), for the very same package a full
+/// repair (every file and registry entry rewritten), and `MANAGEDBY=<name>` (the setup's
+/// `/managed=`, already a safe name: `setup::managed_name`), which the MSI itself writes
+/// to its HKLM entry: the installer service owns that write, not this process.
+pub fn command_line(folder: &str, repair: bool, managed: Option<&str>) -> String {
     let mut line = format!("INSTALLDIR=\"{folder}\"");
+    if let Some(by) = managed {
+        line.push_str(&format!(" MANAGEDBY=\"{by}\""));
+    }
     if repair {
         line.push_str(" REINSTALL=ALL REINSTALLMODE=amus");
     }
@@ -409,22 +431,9 @@ mod win {
         0
     }
 
-    /// Windows Installer's verbose log of the next install / uninstall in this
-    /// process goes (appended) to `file` (`/log=`).
-    pub fn enable_log(file: &str) {
-        // SAFETY: a NUL-terminated wide string that outlives the call.
-        let _ = unsafe {
-            MsiEnableLogW(
-                INSTALLLOGMODE_VERBOSE,
-                &HSTRING::from(file),
-                INSTALLLOGATTRIBUTES_APPEND.0 as u32,
-            )
-        };
-    }
-
     pub fn install(package: &Package, folder: &str, repair: bool, report: &dyn Fn(Event)) {
         let path = HSTRING::from(package.path.as_os_str());
-        let line = HSTRING::from(command_line(folder, repair));
+        let line = HSTRING::from(command_line(folder, repair, None));
         // SAFETY: two NUL-terminated wide strings that outlive the call.
         with_our_ui(report, || unsafe { MsiInstallProductW(&path, &line) });
     }
@@ -432,9 +441,14 @@ mod win {
     /// The silent setup (`/quiet`): the same install with Windows Installer's UI
     /// level NONE (no window, no UAC prompt: needs an elevated caller, else 1925).
     /// Windows Installer's own result code.
-    pub fn install_quiet(package: &Package, folder: &str, repair: bool) -> u32 {
+    pub fn install_quiet(
+        package: &Package,
+        folder: &str,
+        repair: bool,
+        managed: Option<&str>,
+    ) -> u32 {
         let path = HSTRING::from(package.path.as_os_str());
-        let line = HSTRING::from(command_line(folder, repair));
+        let line = HSTRING::from(command_line(folder, repair, managed));
         // SAFETY: two NUL-terminated wide strings that outlive the call.
         unsafe {
             MsiSetInternalUI(INSTALLUILEVEL_NONE, None);
@@ -622,13 +636,36 @@ mod tests {
         assert_eq!(outcome(1603, None), Err(Fault::Code(1603)));
     }
 
+    /// A file or link planted at the MSI's path is refused, and what it points at is untouched.
+    #[test]
+    fn the_msi_is_never_written_through_a_planted_link() {
+        let dir = std::env::temp_dir().join(format!("oc-write-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let victim = dir.join("victim.txt");
+        std::fs::write(&victim, b"precious").unwrap();
+        let path = dir.join("planted.msi");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+        #[cfg(not(unix))]
+        std::fs::write(&path, b"planted").unwrap(); // no symlink right needed: any existing name
+        assert!(write_new(&path, b"msi").is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"precious");
+        let fresh = dir.join("fresh.msi");
+        write_new(&fresh, b"msi").unwrap();
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"msi");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_command_line_quotes_the_folder_and_repairs_the_same_package() {
         assert_eq!(
-            command_line(r"C:\Program Files\OpenCircle\", false),
+            command_line(r"C:\Program Files\OpenCircle\", false, None),
             r#"INSTALLDIR="C:\Program Files\OpenCircle\""#
         );
-        assert!(command_line(r"C:\x\", true).ends_with(" REINSTALL=ALL REINSTALLMODE=amus"));
+        assert!(command_line(r"C:\x\", true, None).ends_with(" REINSTALL=ALL REINSTALLMODE=amus"));
+        // the marker goes in as an MSI property: the installer service writes it
+        assert!(command_line(r"C:\x\", false, Some("winget")).ends_with(r#" MANAGEDBY="winget""#));
     }
 
     /// A killed setup's folder (seen on the VM: two from 2026-10-27) goes at the next

@@ -13,7 +13,7 @@ date=${2:-}
 repo=AmerAlreyahi/OpenCircle
 id=AmerAlreyahi.OpenCircle
 # Up to 0.1.6 the MSI wrote Publisher "opencircle" (measured on the Windows VM) and the exe knew
-# neither /log, /managed nor the opencircle.managed marker: those manifests describe THAT exe.
+# neither /managed nor the opencircle.managed marker: those manifests describe THAT exe.
 # Later releases (publisher "Amer Alreyahi", the marker, the documented switches) use the new form.
 if [ "$(printf '%s\n0.1.6\n' "$ver" | sort -V | tail -1)" = 0.1.6 ]; then legacy=1; else legacy=; fi
 if [ -n "$legacy" ]; then arp_publisher=opencircle publisher=OpenCircle
@@ -40,7 +40,7 @@ w=$out/winget/$ver
 mkdir -p "$w" "$out/scoop"
 schema=1.28.0
 # What the Setup's silent switches are (README: Silent install). winget fills <INSTALLPATH> and
-# <LOGPATH> itself. The return codes are Windows Installer's, as the Setup ends with them.
+# itself. The return codes are Windows Installer's, as the Setup ends with them.
 if [ -n "$legacy" ]; then
   switches='  Silent: /quiet
   SilentWithProgress: /quiet'
@@ -55,8 +55,7 @@ if [ -n "$legacy" ]; then
 else
   switches='  Silent: /quiet
   SilentWithProgress: /quiet
-  InstallLocation: /dir="<INSTALLPATH>"
-  Log: /log="<LOGPATH>"'
+  InstallLocation: /dir="<INSTALLPATH>"'
   codes='- InstallerReturnCode: 1618
   ReturnResponse: installInProgress
 - InstallerReturnCode: 1602

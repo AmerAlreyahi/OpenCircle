@@ -161,8 +161,7 @@ when the install is done.
 | `/quiet` (also `/qn`, `/silent`) | no window; install or update in place |
 | `/dir="C:\Apps\OpenCircle"` | folder of a fresh install (an update stays where it is) |
 | `/uninstall /quiet` | remove OpenCircle (your settings and models stay) |
-| `/log="C:\Temp\opencircle-setup.log"` | Windows Installer's verbose log of the run |
-| `/managed=<name>` | a package manager or IT tool updates this copy: OpenCircle's own updater stays off (it still says when a newer version exists). Writes `opencircle.managed` beside the exe; delete the file to switch it back on |
+| `/managed=<name>` | a package manager or IT tool updates this copy: OpenCircle's own updater stays off (it still says when a newer version exists). Passed to the MSI, which records it in OpenCircle's entry in Apps & features (HKLM, admin-only); pass it on every install or update, or the updater is on again. A portable copy uses a file `opencircle.managed` beside the exe instead (delete it to switch the updater back on) |
 | `/norestart` | accepted, nothing restarts the PC |
 
 Exit codes (Windows Installer's): `0` done, `3010` done, restart wanted, `1641` done,

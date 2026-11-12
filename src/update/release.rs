@@ -112,16 +112,31 @@ impl Manager {
     }
 }
 
-/// The package manager that owns this copy (`MANAGED_FILE` beside the exe).
+/// The package manager that owns this copy: the `ManagedBy` value of our Apps &
+/// features entry (HKLM, admin-only; the MSI writes it from `MANAGEDBY=<name>`, which
+/// the setup's `/managed=<name>` passes) for a setup install, or `MANAGED_FILE` beside
+/// the exe (portable / Scoop: the writer is the user's own process).
+/// An unreadable marker counts as managed: a store-managed copy must never start
+/// updating itself because a read failed (the worst case is a missed self-update).
 pub fn managed_by() -> Option<Manager> {
     // read once: the marker never changes while the app runs
     static MANAGED: std::sync::OnceLock<Option<Manager>> = std::sync::OnceLock::new();
     *MANAGED.get_or_init(|| {
-        let marker = std::env::current_exe().ok()?.with_file_name(MANAGED_FILE);
-        marker.exists().then(|| {
-            std::fs::read_to_string(&marker).map_or(Manager::Other, |t| Manager::parse(&t))
-        })
+        let exe = std::env::current_exe().ok()?;
+        if by_setup(&exe, setup_folder().as_deref())
+            && let Some(by) = arp_managed()
+        {
+            return Some(by);
+        }
+        marker_at(&exe.with_file_name(MANAGED_FILE))
     })
+}
+
+/// `MANAGED_FILE` at `marker`: absent = `None`; present = its manager, or `Other`
+/// when it cannot be read (a directory, no permission, not text).
+fn marker_at(marker: &Path) -> Option<Manager> {
+    std::fs::symlink_metadata(marker).ok()?;
+    Some(std::fs::read_to_string(marker).map_or(Manager::Other, |t| Manager::parse(&t)))
 }
 
 impl Install {
@@ -178,6 +193,37 @@ pub fn by_setup(exe: &Path, folder: Option<&str>) -> bool {
 /// (`HKLM\...\Uninstall\OpenCircle`, assets/installer/main.wxs).
 #[cfg(windows)]
 fn setup_folder() -> Option<String> {
+    use windows::core::w;
+    arp_value(w!("InstallLocation")).ok()
+}
+
+#[cfg(not(windows))]
+fn setup_folder() -> Option<String> {
+    None
+}
+
+/// The setup install's `ManagedBy` (see `managed_by`): not there = `None`; there, or
+/// unreadable for any reason but "not there" = a manager (`Other` if unreadable).
+#[cfg(windows)]
+fn arp_managed() -> Option<Manager> {
+    use windows::core::w;
+    const NOT_FOUND: u32 = 2; // ERROR_FILE_NOT_FOUND
+    match arp_value(w!("ManagedBy")) {
+        Ok(text) => Some(Manager::parse(&text)),
+        Err(NOT_FOUND) => None,
+        Err(_) => Some(Manager::Other),
+    }
+}
+
+#[cfg(not(windows))]
+fn arp_managed() -> Option<Manager> {
+    None
+}
+
+/// A string value of the Apps & features entry our MSI writes
+/// (`HKLM\...\Uninstall\OpenCircle`, assets/installer/main.wxs); `Err` = the Win32 error.
+#[cfg(windows)]
+fn arp_value(name: windows::core::PCWSTR) -> Result<String, u32> {
     use windows::Win32::System::Registry::{
         HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
     };
@@ -189,7 +235,7 @@ fn setup_folder() -> Option<String> {
         RegGetValueW(
             HKEY_LOCAL_MACHINE,
             w!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\OpenCircle"),
-            w!("InstallLocation"),
+            name,
             RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
             None,
             Some(buf.as_mut_ptr().cast()),
@@ -197,16 +243,12 @@ fn setup_folder() -> Option<String> {
         )
     };
     let len = (bytes as usize / 2).min(buf.len());
-    (e.0 == 0).then(|| {
-        String::from_utf16_lossy(&buf[..len])
-            .trim_end_matches('\0')
-            .into()
-    })
-}
-
-#[cfg(not(windows))]
-fn setup_folder() -> Option<String> {
-    None
+    if e.0 != 0 {
+        return Err(e.0);
+    }
+    Ok(String::from_utf16_lossy(&buf[..len])
+        .trim_end_matches('\0')
+        .into())
 }
 
 /// The asset that updates `install` on `arch` (`std::env::consts::ARCH`), named as
@@ -744,6 +786,23 @@ pub(crate) mod tests {
             picked(&r, &exe, "x86_64").as_deref(),
             Some("OpenCircle-9.9.9-x64-portable.exe")
         );
+    }
+
+    /// A marker that cannot be read still counts: a managed copy must not start
+    /// updating itself because a read failed. Absent = no marker.
+    #[test]
+    fn an_unreadable_marker_still_means_managed() {
+        let dir = std::env::temp_dir().join(format!("oc-marker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(marker_at(&dir.join(MANAGED_FILE)), None);
+        std::fs::write(dir.join(MANAGED_FILE), "scoop").unwrap();
+        assert_eq!(marker_at(&dir.join(MANAGED_FILE)), Some(Manager::Scoop));
+        // a directory of that name cannot be read as text
+        let odd = dir.join("sub");
+        std::fs::create_dir_all(odd.join(MANAGED_FILE)).unwrap();
+        assert_eq!(marker_at(&odd.join(MANAGED_FILE)), Some(Manager::Other));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The one decision "can this copy replace itself?": a package manager's marker

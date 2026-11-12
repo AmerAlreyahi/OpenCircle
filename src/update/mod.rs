@@ -33,7 +33,7 @@ pub use notes::{
     Line as NoteLine, Notes, Style as NoteStyle, parse as parse_notes, plain as plain_note,
 };
 use release::{CheckError, Http, Memo};
-pub use release::{Install, MANAGED_FILE, Manager, Staged, managed_by};
+pub use release::{Install, Manager, Staged, managed_by};
 
 use crate::{Trigger, Triggers};
 

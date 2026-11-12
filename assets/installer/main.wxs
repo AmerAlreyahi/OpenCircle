@@ -139,6 +139,15 @@
                 </RegistryKey>
                 {{/each~}}
             </Component>
+            <!-- The setup's /managed=<name> arrives as MANAGEDBY (a public property): the installer
+                 service writes it into our Apps & features key (admin-only), the app reads it
+                 (src/update: managed_by) and stops updating itself; uninstall removes it. -->
+            <Component Id="ManagedBy" Guid="*" Win64="$(var.Win64)">
+                <Condition>MANAGEDBY</Condition>
+                <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}">
+                    <RegistryValue Name="ManagedBy" Type="string" Value="[MANAGEDBY]" KeyPath="yes" />
+                </RegistryKey>
+            </Component>
             <Component Id="ArpEntry" Guid="*" Win64="$(var.Win64)">
                 <RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}">
                     <RegistryValue Name="DisplayName" Type="string" Value="{{product_name}}" KeyPath="yes" />
@@ -174,8 +183,6 @@
 
 				<RemoveFolder Id="INSTALLDIR"
 							  On="uninstall" />
-				<!-- the file the setup's /managed=<name> writes (src/update: MANAGED_FILE) -->
-				<RemoveFile Id="ManagedMarker" Name="opencircle.managed" On="uninstall" />
 
 				<RegistryValue Root="HKCU"
 							   Key="Software\\opencircle\\{{product_name}}"
@@ -225,6 +232,7 @@
 
             <ComponentRef Id="RegistryEntries"/>
             <ComponentRef Id="ArpEntry"/>
+            <ComponentRef Id="ManagedBy"/>
 
             {{#each resource_file_ids as |resource_file_id| ~}}
                 <ComponentRef Id="{{ resource_file_id }}"/>

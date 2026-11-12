@@ -115,19 +115,17 @@ fn main() -> ExitCode {
             )
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
-        if args.iter().any(|a| a.starts_with(setup::SHA256_ARG)) {
-            // the app's update, run elevated: no file of the user's is written as
-            // admin (the app logs the outcome in the user's own log)
+        if setup::elevated() || args.iter().any(|a| a.starts_with(setup::SHA256_ARG)) {
+            // run elevated (the app's update, winget, IT): no file of the user's is
+            // written as admin (a planted link in the log folder); the app logs the
+            // outcome of its update in the user's own log
             log::memory_only();
         }
         if let Some(code) = setup::relocate(&args) {
             std::process::exit(code as i32);
         }
         match setup::parse_silent(&args) {
-            Ok(Some(what)) => {
-                let log = setup::log_path(&args);
-                std::process::exit(setup::silent(msi, what, log.as_deref()) as i32)
-            }
+            Ok(Some(what)) => std::process::exit(setup::silent(msi, what) as i32),
             Err(code) => std::process::exit(code as i32),
             Ok(None) => {}
         }
