@@ -1847,4 +1847,51 @@ strings! {
         | "تعمل الترجمة دون إنترنت بنماذج OptimaMT: نماذج OPUS-MT بمفكّك أخف (الترجمات نفسها بذاكرة أقل).";
     tr_optima_link: "OptimaMT on Hugging Face"
         | "OptimaMT على Hugging Face";
+    // added in the Arabic finish (the backend sentences the UI shows, 2026-11-12)
+    tx_not_rgba: "The captured picture could not be read."
+        | "تعذّرت قراءة الصورة الملتقطة.";
+    tx_nothing_there: "Nothing to translate there."
+        | "لا يوجد ما يُترجم هناك.";
+    lv_capture_failed: "Couldn't capture the screen: {}"
+        | "تعذّر التقاط الشاشة: {}";
+    sh_title: "OpenCircle capture"
+        | "لقطة OpenCircle";
+    lc_what_ocr: "the {} text-recognition model"
+        | "نموذج التعرّف على النص ({})";
+    lc_what_pair: "the {} → {} offline translation model"
+        | "نموذج الترجمة دون إنترنت {} ← {}";
+    sc_latin: "Latin"
+        | "اللاتينية";
+    sc_arabic: "Arabic"
+        | "العربية";
+    sc_cyrillic: "Cyrillic"
+        | "السيريلية";
+    sc_cjk: "Chinese and Japanese"
+        | "الصينية واليابانية";
+    ai_bad_provider: "Your AI provider setting \"{}\" isn't recognised. Fix it in Settings > Ask AI."
+        | "إعداد مزوّد الذكاء الاصطناعي «{}» غير معروف. أصلحه في الإعدادات > اسأل الذكاء الاصطناعي.";
+    ai_unreadable: "Your settings file couldn't be read; AI is off until you fix it in Settings > Ask AI."
+        | "تعذّرت قراءة ملف الإعدادات؛ الذكاء الاصطناعي متوقف حتى تصلحه في الإعدادات > اسأل الذكاء الاصطناعي.";
+    ai_nothing_sent: "Nothing was sent anywhere."
+        | "لم يُرسَل شيء إلى أي مكان.";
+    ai_needs_key: "This needs an AI provider with an API key: Google AI Mode in your browser cannot send text back.\n\nIn Settings > Ask AI choose AI provider, pick yours and add your key."
+        | "يتطلب هذا مزوّد ذكاء اصطناعي بمفتاح API: لا يستطيع وضع Google AI في متصفحك إرسال النص عائدًا.\n\nفي الإعدادات > اسأل الذكاء الاصطناعي اختر مزوّد الذكاء الاصطناعي ثم أضف مفتاحك.";
+    ai_not_set_up: "AI is not set up yet: {}."
+        | "لم يُعدّ الذكاء الاصطناعي بعد: {}.";
+    ai_no_key: "no API key is saved"
+        | "لا يوجد مفتاح API محفوظ";
+    ai_no_endpoint: "no endpoint (base_url) is set"
+        | "لم يُحدَّد عنوان الخادم (base_url)";
+    ai_no_model: "no model is set"
+        | "لم يُحدَّد نموذج";
+    ai_steps: "1. In {} add:\n{}\n\n2. Save the API key in the system keyring, never in that file.\n{}\n\nThen restart OpenCircle and press A again.\n\nEasier: tray icon > Settings > Ask AI does all of this and needs no restart."
+        | "1. في {} أضف:\n{}\n\n2. احفظ مفتاح API في سلسلة مفاتيح النظام، وليس في ذلك الملف.\n{}\n\nثم أعد تشغيل OpenCircle واضغط A مجددًا.\n\nالأسهل: أيقونة الشريط > الإعدادات > اسأل الذكاء الاصطناعي تفعل كل هذا دون إعادة تشغيل.";
+    ai_config_file: "the OpenCircle config file"
+        | "ملف إعدادات OpenCircle";
+    ai_keyring_linux: "In a terminal: {}\nthen paste the key."
+        | "في الطرفية: {}\nثم الصق المفتاح.";
+    ai_keyring_windows: "Credential Manager > Windows Credentials > Add a generic credential:\naddress {}.opencircle, user name {}, password = the key."
+        | "مدير بيانات الاعتماد > بيانات اعتماد Windows > إضافة بيانات اعتماد عامة:\nالعنوان {}.opencircle، اسم المستخدم {}، كلمة المرور = المفتاح.";
+    ai_keyring_other: "Service \"opencircle\", account \"{}\"."
+        | "الخدمة «opencircle»، الحساب «{}».";
 }

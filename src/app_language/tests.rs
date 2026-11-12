@@ -307,6 +307,10 @@ fn literals(line: &str) -> Vec<String> {
 
 /// Literals in the two screens that are not words for the user.
 const NOT_UI: &[&str] = &[
+    // the OCR recognizers' ids (`ocr::models`), mapped to table keys
+    "Arabic",
+    "Cyrillic",
+    "Chinese and Japanese",
     // build values, OS names, file magic, panics
     "CARGO_PKG_VERSION",
     "OUT_DIR",
@@ -468,21 +472,15 @@ const UI_NOT_WORDS: &[&str] = &[
     "{target}: the meaning of the words, then ONE line on what they ",
 ];
 
-/// User-visible English that is NOT in the table yet (listed so the test
-/// stays honest: a new word outside the table fails, these do not):
-/// the translate / live backend's sentences (`translate::Problem`, "nothing
-/// to translate there"), the share sheet's title and errors, the name of the
-/// text-recognition model in a download question, a live capture's failure
-/// note, and the AI setup steps (`actions/ask.rs`, exempt above).
+/// Text in the UI's files that looks like words but is not for the user (it
+/// is only logged, or is the settings file's own lines). The translate and
+/// live backend's sentences, the share sheet's title, the model names in a
+/// download question and the AI setup steps are all in the table now.
 const UNCONVERTED: &[&str] = &[
-    "nothing to translate there",
-    "the captured frame is not RGBA",
-    "capture failed: {e}",
-    "OpenCircle capture",
+    // logged only (`share::start`'s errors go to the log)
     "share: no share sheet on this platform yet",
     "share: no window",
     "share: {what}: {err}",
-    "the {} text-recognition model",
 ];
 
 /// Every character the Arabic strings use has a glyph in the bundled fonts

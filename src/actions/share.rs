@@ -83,8 +83,6 @@ mod sheet {
     use windows::core::{AgileReference, HSTRING, Interface, Ref};
     use windows_collections::IIterable;
 
-    /// The sheet's title (Windows requires one).
-    const TITLE: &str = "OpenCircle capture";
 
     /// The handlers on our window's DataTransferManager (one share at a time).
     pub struct Sheet {
@@ -101,6 +99,8 @@ mod sheet {
     }
 
     pub fn show(path: &Path, tx: oneshot::Sender<()>) -> Result<Sheet, String> {
+        // the sheet's title (Windows requires one), in the app's language, read on this thread
+        let title = HSTRING::from(crate::t!(sh_title));
         let e =
             |what: &'static str| move |err: windows::core::Error| format!("share: {what}: {err}");
         // SAFETY: plain query of this thread's active window.
@@ -124,7 +124,7 @@ mod sheet {
                 move |_, args: Ref<DataRequestedEventArgs>| {
                     if let Some(args) = args.as_ref() {
                         let data = args.Request()?.Data()?;
-                        data.Properties()?.SetTitle(&HSTRING::from(TITLE))?;
+                        data.Properties()?.SetTitle(&title)?;
                         // the capture alone, read-only
                         let item: IStorageItem = file.resolve()?.cast()?;
                         let items = IIterable::<IStorageItem>::from(vec![Some(item)]);

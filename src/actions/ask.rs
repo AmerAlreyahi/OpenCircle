@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Run};
 use crate::ai::{self, Role};
-use crate::app_language::S;
+use crate::app_language::{S, fmt as say, tr};
 use crate::config::{AiConfig, Config, Provider};
 use crate::secrets::{self, Secret};
 use crate::store::chats as history;
@@ -127,26 +127,15 @@ pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
 /// provider stops here, before the keyring, the network or the browser.
 fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> {
     let why = match &cfg.provider {
-        Provider::Invalid(raw) => {
-            format!(
-                "Your AI provider setting \"{raw}\" isn't recognised. Fix it in Settings > Ask AI."
-            )
-        }
-        Provider::Unreadable => "Your settings file couldn't be read; AI is off until you \
-            fix it in Settings > Ask AI."
-            .into(),
+        Provider::Invalid(raw) => say(S::ai_bad_provider, &[raw]),
+        Provider::Unreadable => tr(S::ai_unreadable).into(),
         _ => String::new(),
     };
     if !why.is_empty() {
-        return Err(format!("{why}\n\nNothing was sent anywhere."));
+        return Err(format!("{why}\n\n{}", tr(S::ai_nothing_sent)));
     }
     if cfg.provider == Provider::Browser {
-        return Err(
-            "This needs an AI provider with an API key: Google AI Mode in your \
-            browser cannot send text back.\n\nIn Settings > Ask AI choose AI provider, \
-            pick yours and add your key."
-                .into(),
-        );
+        return Err(tr(S::ai_needs_key).into());
     }
     let key = match key_for(&secrets::Keyring, &cfg) {
         Ok(key) => key,
@@ -158,16 +147,17 @@ fn credentials_for(cfg: AiConfig) -> Result<(AiConfig, Option<Secret>), String> 
         Err(e) => return Err(format!("{e}\n\n{}", steps(&cfg))),
     };
     let missing = match cfg.provider {
-        Provider::Anthropic if key.is_none() => Some("no API key is saved"),
+        Provider::Anthropic if key.is_none() => Some(S::ai_no_key),
         Provider::OpenaiCompatible if cfg.base_url.trim().is_empty() => {
-            Some("no endpoint (base_url) is set")
+            Some(S::ai_no_endpoint)
         }
-        _ if cfg.model.trim().is_empty() => Some("no model is set"),
+        _ if cfg.model.trim().is_empty() => Some(S::ai_no_model),
         _ => None,
     };
     if let Some(missing) = missing {
         return Err(format!(
-            "AI is not set up yet: {missing}.\n\n{}",
+            "{}\n\n{}",
+            say(S::ai_not_set_up, &[&tr(missing)]),
             steps(&cfg)
         ));
     }
@@ -188,33 +178,26 @@ fn key_for(
 
 /// The exact steps to set the AI up by hand (until the Settings window does it).
 fn steps(cfg: &AiConfig) -> String {
-    let path = Config::path().map_or("the OpenCircle config file".into(), |p| {
-        p.display().to_string()
-    });
+    let path = Config::path().map_or(tr(S::ai_config_file).into(), |p| p.display().to_string());
     let account = crate::ai::providers::key_of(cfg).map_or_else(String::new, |k| k.entry());
     #[cfg(target_os = "linux")]
-    let keyring = format!(
-        "In a terminal: secret-tool store --label=OpenCircle service opencircle username {account}\n\
-         then paste the key."
+    let keyring = say(
+        S::ai_keyring_linux,
+        &[&format!(
+            "secret-tool store --label=OpenCircle service opencircle username {account}"
+        )],
     );
     #[cfg(windows)]
-    let keyring = format!(
-        "Credential Manager > Windows Credentials > Add a generic credential:\n\
-         address {account}.opencircle, user name {account}, password = the key."
-    );
+    let keyring = say(S::ai_keyring_windows, &[&account, &account]);
     #[cfg(not(any(target_os = "linux", windows)))]
-    let keyring = format!("Service \"opencircle\", account \"{account}\".");
-    format!(
-        "1. In {path} add:\n\
-         [ai]\n\
-         provider = \"anthropic\"  (or \"openai_compatible\")\n\
-         model = \"{}\"\n\
-         base_url = \"\"  (openai_compatible: e.g. http://localhost:11434/v1)\n\n\
-         2. Save the API key in the system keyring, never in that file.\n{keyring}\n\n\
-         Then restart OpenCircle and press A again.\n\n\
-         Easier: tray icon > Settings > Ask AI does all of this and needs no restart.",
+    let keyring = say(S::ai_keyring_other, &[&account]);
+    // the settings file's own lines: not words, never translated
+    let toml = format!(
+        "[ai]\nprovider = \"anthropic\"  (or \"openai_compatible\")\nmodel = \"{}\"\n\
+         base_url = \"\"  (openai_compatible: e.g. http://localhost:11434/v1)",
         ai::DEFAULT_ANTHROPIC_MODEL
-    )
+    );
+    say(S::ai_steps, &[&path, &toml, &keyring])
 }
 
 /// One question and its answer so far.

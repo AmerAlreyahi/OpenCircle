@@ -2,7 +2,7 @@
 //! replaced by its translation in place. `crate::translate` does the work,
 //! `ui/translate.rs` shows it, `ui/live_layer.rs` repeats it (live mode).
 use super::{Action, Key, Run, ask};
-use crate::app_language::S;
+use crate::app_language::{S, fmt, language_name, tr};
 use crate::config::{self, AiConfig, Engine, Provider};
 use crate::mt;
 use crate::ocr::models;
@@ -56,12 +56,22 @@ pub fn missing(source: &str, target: &str) -> Option<(u64, String, Option<&'stat
     if let Some(pair) = surely_offline(source, target) {
         let bytes = pair.missing_bytes();
         if bytes > 0 {
-            return Some((bytes, pair.label(), Some(pair)));
+            let what = fmt(
+                S::lc_what_pair,
+                &[&language_name(pair.source), &language_name(pair.target)],
+            );
+            return Some((bytes, what, Some(pair)));
         }
     }
     let rec = models::recognizer_for(source);
     let bytes = models::missing_bytes(&models::ocr_files(rec));
-    let what = format!("the {} text-recognition model", rec.script);
+    let script = match rec.script {
+        "Arabic" => S::sc_arabic,
+        "Cyrillic" => S::sc_cyrillic,
+        "Chinese and Japanese" => S::sc_cjk,
+        _ => S::sc_latin,
+    };
+    let what = fmt(S::lc_what_ocr, &[&tr(script)]);
     (bytes > 0).then_some((bytes, what, None))
 }
 

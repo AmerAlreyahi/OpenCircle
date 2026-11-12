@@ -12,6 +12,7 @@ use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
 use crate::app_language::{S, fmt};
+use crate::t;
 use crate::mt::Pair;
 use crate::ocr::models;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
@@ -709,7 +710,7 @@ fn translate(
         ..
     } = frame
     else {
-        return Err(problem("the captured frame is not RGBA".into(), false));
+        return Err(problem(t!(tx_not_rgba).into(), false));
     };
     let (deps, target) = deps.as_ref().map_err(|e| {
         let first = e.lines().next().unwrap_or_default().to_string();
@@ -721,7 +722,7 @@ fn translate(
         Size::new((x1 - x0) as f32, (y1 - y0) as f32),
     );
     let crop = actions::crop(pixels, *width, *height, 1.0, rect)
-        .ok_or_else(|| problem("nothing to translate there".into(), false))?;
+        .ok_or_else(|| problem(t!(tx_nothing_there).into(), false))?;
     // the area's result pasted into a copy of the whole frame
     let mut swap = std::time::Duration::ZERO;
     let mut shown = |out: &pipeline::Translated| {

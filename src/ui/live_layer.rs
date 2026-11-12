@@ -542,7 +542,7 @@ impl Live {
                 let target = &langs.1;
                 let mut frame = match capture::monitor_under_cursor() {
                     Ok(f) => f,
-                    Err(e) => return report(&mut last_error, format!("capture failed: {e}")),
+                    Err(e) => return report(&mut last_error, crate::app_language::fmt(crate::app_language::S::lv_capture_failed, &[&e])),
                 };
                 // ponytail: the cursor on another monitor pauses live mode;
                 // capture that monitor by its origin if people use two screens.
