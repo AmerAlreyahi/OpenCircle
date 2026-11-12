@@ -46,8 +46,8 @@ for d in dirs:
         fail(f"{d}: DefaultLocale mismatch")
 
 # Scoop: schema.json (draft-07) of ScoopInstaller/Scoop, plus the rules the bucket CI adds
-sj = os.path.join(here, "scoop", "opencircle.json")
-if not sys.argv[1:] and os.path.exists(sj):
+sj = os.environ.get("SCOOP_JSON") or os.path.join(here, "scoop", "opencircle.json")
+if (os.environ.get("SCOOP_JSON") or not sys.argv[1:]) and os.path.exists(sj):
     doc = json.load(open(sj))
     check(doc, "scoop-schema.json", "scoop/opencircle.json")
     u = doc["architecture"]["64bit"]["url"]

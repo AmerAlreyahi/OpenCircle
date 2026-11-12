@@ -5,7 +5,7 @@ Rules read on 2026-11-11 (links in the w22 report). Regenerate for any published
 
     scripts/store-manifests.sh 0.1.7 2026-12-01     # needs gh; reads that release's SHA256SUMS.txt
     python3 -I packaging/stores/validate.py          # schema check (python3-jsonschema, PyYAML)
-    scripts/test-store-manifests.sh                  # v0.1.6 regenerates identically + a bad hash is rejected
+    scripts/test-store-manifests.sh                  # v0.1.6 regenerates identically, the next release's form is right, a bad hash is rejected
 
 | Store | What | Files | Who reviews |
 |---|---|---|---|
@@ -60,14 +60,14 @@ Known risks:
   The 22 MB exe embeds an MSI and unpacks it to temp: the kind of behaviour heuristics dislike.
 - The test runs as a standard user; our Setup needs admin (per-machine). The manifest says
   `ElevationRequirement: elevationRequired`, which is the documented answer. If the pipeline still
-  rejects it: ask in the PR what it expects (we cannot install per user without a bigger change, gap 1 below).
+  rejects it: ask in the PR what it expects (we cannot install per user without a bigger change, item 1 below).
 - Own updater: after install, the app's updater (when the user switched it on) downloads the next
   Setup and runs it elevated on "Restart now". winget later sees a newer DisplayVersion; nothing conflicts
   (`winget upgrade` runs the same Setup `/quiet`, which updates in place). If the in-app update ran first,
   winget reports "no upgrade". A moderator may ask about it: answer that the updater is opt-in, signed and
   user-initiated for Setup installs.
 - ARP entry: the MSI hides its own Apps & features entry and writes one named `OpenCircle`
-  (Publisher `opencircle`, lower case): the manifest carries `AppsAndFeaturesEntries` for it.
+  (Publisher `opencircle` up to 0.1.6, `Amer Alreyahi` from 0.1.7): the manifest carries `AppsAndFeaturesEntries` for it.
 
 Later releases (by hand): `scripts/store-manifests.sh <ver> <date>`, copy the folder to
 `manifests/a/AmerAlreyahi/OpenCircle/<ver>/`, title `Update: AmerAlreyahi.OpenCircle version <ver>`;
@@ -105,7 +105,8 @@ Notes on the manifest:
   junction). That does not break `scoop update` (it downloads the new version into its own folder and re-points `current`), but
   the app would then be newer than Scoop thinks and the swap leaves marker files in the old version folder. Therefore the
   manifest's `notes` tell users to switch off "Keep OpenCircle up to date" (Settings > General; config `[update] auto = false`).
-  There is no environment variable or marker file that turns the updater off for one install (gap 2). Not tested with Scoop here.
+  From 0.1.7 the manifest's `post_install` writes `opencircle.managed` (beside the exe) and the app's updater is off for that
+  copy (the notes no longer ask the user to switch it off). The 0.1.6 manifest keeps the old note: that exe does not read the file.
 - `checkver: github` uses the latest non-prerelease release tag `v0.1.6`; `autoupdate.hash.url` points at the release's
   `SHA256SUMS.txt` (Scoop finds the line by file name).
 
@@ -119,21 +120,28 @@ Notes on the manifest:
 | Snap | free | store review for classic confinement; strict is automatic | snapcraft.yaml; screen capture and global shortcuts are hard under strict confinement, so likely classic (needs a manual request) |
 | Homebrew cask | free | macOS only | not applicable until the macOS item starts |
 
-## Gaps in the app for stores (proposals only, nothing changed)
+## What the app does for stores (v0.1.7 and later; v0.1.6 predates all of it)
 
-1. Setup is per-machine only: a standard user cannot install it silently (error 1925 without elevation). winget's pipeline
-   handles `elevationRequired`, but a per-user install would be friendlier for the pipeline and for winget users without admin.
-   Smallest fix: none needed now; revisit only if the pipeline rejects.
-2. No per-install switch for the updater (env var or marker file). Smallest fix: honour `OPENCIRCLE_NO_UPDATE=1` or a file
-   `opencircle.noupdate` beside the exe in `update::Setup::this()` (a few lines), so a Scoop manifest could set it in `post_install`.
-3. The MSI's Publisher is `opencircle` (lower case, from the package metadata). Smallest fix: set `publisher = "OpenCircle"`
-   (or the owner's chosen name) in `[package.metadata.packager]`, so Apps & features and winget show a proper name. Changing it
-   changes the ARP Publisher, so the next manifest's `AppsAndFeaturesEntries` must list both old and new.
-4. The Setup exe's version resource has no `FileVersion`/`ProductVersion` stamped from the tag and no `CompanyName` (build.rs
-   sets ProductName, FileDescription, OriginalFilename, LegalCopyright only). Store scanners and SmartScreen reputation use them;
-   smallest fix: add `FileVersion`, `ProductVersion`, `CompanyName` in build.rs from `CARGO_PKG_VERSION`.
-5. Silent exit codes: documented in `src/setup/mod.rs` (0 done, 3010/1641 restart, 1602 cancelled, 1618 busy, 1639 bad `/dir`,
-   1925 not elevated); the README documents `/quiet` but not these. Smallest fix: one README sentence.
+1. Per-machine only: a standard user cannot install the Setup silently (exit 1925 without elevation).
+   winget elevates for `ElevationRequirement: elevationRequired`. A per-user install is a bigger change: only if the pipeline rejects.
+2. One answer to "may this copy replace itself?": `update::Install::detect`. A file `opencircle.managed` beside the exe
+   (text: `winget`, `scoop` or anything else) makes it "notify only", like deb / rpm: no download, no swap; the check still
+   runs when the user's "Keep OpenCircle up to date" is on or on "Check now", and Settings > General says "Updates are managed
+   by winget / Scoop / your package manager" and whether a newer version exists. The user's setting is not rewritten.
+   Who writes it: Scoop's `post_install` (the manifest, 0.1.7 form); the Setup's `/managed=<name>`; a Linux package may ship it.
+   winget installs keep the updater ON (no `/managed` in the manifest): winget accepts self-updating apps and re-reads the ARP
+   DisplayVersion, the in-app update runs the same Setup winget would, and winget's pipeline test runs only the install. The
+   cost is that the user may be offered the same version twice (the app's pill, then `winget upgrade` says nothing to do).
+   If a winget moderator asks for it off, add `Custom: /managed=winget` to `InstallerSwitches` (one line in the script).
+3. Publisher: the MSI's Manufacturer = Apps & features' Publisher = `Amer Alreyahi` (`publisher` in `[package.metadata.packager]`).
+   The UpgradeCode comes from the binary name, not the publisher, so 0.1.6 upgrades in place; the HKCU keys keep their old name.
+4. The exe's version resource carries FileVersion, ProductVersion (the release version), CompanyName, ProductName, FileDescription, LegalCopyright.
+5. Silent switches and exit codes: README "Silent install"; `/log=` and `/managed=` are new, the codes were mapped (1223 -> 1602).
 6. The two portable asset names (`OpenCircle-<v>-x64-portable.exe` and `OpenCircle_<v>_x64-portable.exe`, identical hashes):
-   stores should use the hyphen one; nothing to change (frozen channel).
-7. The silent Setup takes about 2 minutes on the 4-core Windows 10 VM (Defender scanning); the winget pipeline has install timeouts. If it times out, a lighter silent path is the fix.
+   stores use the hyphen one; nothing to change (frozen channel).
+7. Silent install time under winget's pipeline timeouts: not measured.
+
+If `winget install` waits at "Starting package install": run it with `--verbose-logs` (logs under
+`%LOCALAPPDATA%\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir`), look for a
+`Zone.Identifier` stream on the downloaded Setup in `%TEMP%\WinGet\...` (a Mark of the Web on an unsigned exe can raise a
+security prompt that nothing shows), and pass `--log <file>` (the Setup writes Windows Installer's log there).

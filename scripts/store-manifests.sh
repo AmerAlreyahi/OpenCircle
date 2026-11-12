@@ -12,8 +12,13 @@ date=${2:-}
 [[ $ver =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must be X.Y.Z" >&2; exit 2; }
 repo=AmerAlreyahi/OpenCircle
 id=AmerAlreyahi.OpenCircle
-arp_publisher=opencircle # what the MSI writes as Publisher (measured on the Windows VM, 0.1.6)
-publisher=OpenCircle
+# Up to 0.1.6 the MSI wrote Publisher "opencircle" (measured on the Windows VM) and the exe knew
+# neither /log, /managed nor the opencircle.managed marker: those manifests describe THAT exe.
+# Later releases (publisher "Amer Alreyahi", the marker, the documented switches) use the new form.
+if [ "$(printf '%s\n0.1.6\n' "$ver" | sort -V | tail -1)" = 0.1.6 ]; then legacy=1; else legacy=; fi
+if [ -n "$legacy" ]; then arp_publisher=opencircle publisher=OpenCircle
+else arp_publisher="Amer Alreyahi" publisher="Amer Alreyahi"; fi
+out=${STORES_OUT:-packaging/stores} # a test writes elsewhere
 base=https://github.com/$repo/releases/download/v$ver
 setup=OpenCircle-Setup-$ver-x64.exe
 portable=OpenCircle-$ver-x64-portable.exe
@@ -31,9 +36,42 @@ hash_of() { # file name -> lowercase hash, exactly one line
 }
 setup_hash=$(hash_of "$setup"); portable_hash=$(hash_of "$portable")
 
-w=packaging/stores/winget/$ver
-mkdir -p "$w" packaging/stores/scoop
+w=$out/winget/$ver
+mkdir -p "$w" "$out/scoop"
 schema=1.28.0
+# What the Setup's silent switches are (README: Silent install). winget fills <INSTALLPATH> and
+# <LOGPATH> itself. The return codes are Windows Installer's, as the Setup ends with them.
+if [ -n "$legacy" ]; then
+  switches='  Silent: /quiet
+  SilentWithProgress: /quiet'
+  codes='- InstallerReturnCode: 1618
+  ReturnResponse: installInProgress
+- InstallerReturnCode: 1602
+  ReturnResponse: cancelledByUser
+- InstallerReturnCode: 1639
+  ReturnResponse: invalidParameter
+- InstallerReturnCode: 3010
+  ReturnResponse: rebootRequiredToFinish'
+else
+  switches='  Silent: /quiet
+  SilentWithProgress: /quiet
+  InstallLocation: /dir="<INSTALLPATH>"
+  Log: /log="<LOGPATH>"'
+  codes='- InstallerReturnCode: 1618
+  ReturnResponse: installInProgress
+- InstallerReturnCode: 1602
+  ReturnResponse: cancelledByUser
+- InstallerReturnCode: 1603
+  ReturnResponse: contactSupport
+- InstallerReturnCode: 1638
+  ReturnResponse: downgrade
+- InstallerReturnCode: 1639
+  ReturnResponse: invalidParameter
+- InstallerReturnCode: 1641
+  ReturnResponse: rebootInitiated
+- InstallerReturnCode: 3010
+  ReturnResponse: rebootRequiredToFinish'
+fi
 rd=${date:+"
   ReleaseDate: $date"}
 cat > "$w/$id.yaml" <<Y
@@ -56,17 +94,9 @@ InstallModes:
 - silent
 - silentWithProgress
 InstallerSwitches:
-  Silent: /quiet
-  SilentWithProgress: /quiet
+$switches
 ExpectedReturnCodes:
-- InstallerReturnCode: 1618
-  ReturnResponse: installInProgress
-- InstallerReturnCode: 1602
-  ReturnResponse: cancelledByUser
-- InstallerReturnCode: 1639
-  ReturnResponse: invalidParameter
-- InstallerReturnCode: 3010
-  ReturnResponse: rebootRequiredToFinish
+$codes
 UpgradeBehavior: install
 AppsAndFeaturesEntries:
 - DisplayName: OpenCircle
@@ -119,16 +149,27 @@ ManifestType: defaultLocale
 ManifestVersion: $schema
 Y
 
-cat > packaging/stores/scoop/opencircle.json <<J
+if [ -n "$legacy" ]; then
+  notes='        "OpenCircle keeps its settings in %APPDATA%\\opencircle and its models in %LOCALAPPDATA%\\opencircle (not in Scoop'"'"'s folders).",
+        "Scoop manages updates for this install: switch off '"'"'Keep OpenCircle up to date'"'"' in Settings > General, or put '"'"'[update]'"'"' and '"'"'auto = false'"'"' in %APPDATA%\\opencircle\\config.toml.",
+        "Quit OpenCircle (tray icon > Quit) before '"'"'scoop update opencircle'"'"'."'
+  post=
+else
+  # the marker file turns the app's own updater off for this copy (src/update: MANAGED_FILE)
+  notes='        "OpenCircle keeps its settings in %APPDATA%\\opencircle and its models in %LOCALAPPDATA%\\opencircle (not in Scoop'"'"'s folders).",
+        "Scoop updates this install (OpenCircle'"'"'s own updater is off for it): run '"'"'scoop update opencircle'"'"'.",
+        "Quit OpenCircle (tray icon > Quit) before '"'"'scoop update opencircle'"'"'."'
+  post='    "post_install": "Set-Content -Path \"$dir\\opencircle.managed\" -Value scoop -NoNewline",
+'
+fi
+cat > "$out/scoop/opencircle.json" <<J
 {
     "version": "$ver",
     "description": "Circle anything on screen to search, read, translate or ask about it",
     "homepage": "https://github.com/$repo",
     "license": "MIT",
     "notes": [
-        "OpenCircle keeps its settings in %APPDATA%\\\\opencircle and its models in %LOCALAPPDATA%\\\\opencircle (not in Scoop's folders).",
-        "Scoop manages updates for this install: switch off 'Keep OpenCircle up to date' in Settings > General, or put '[update]' and 'auto = false' in %APPDATA%\\\\opencircle\\\\config.toml.",
-        "Quit OpenCircle (tray icon > Quit) before 'scoop update opencircle'."
+$notes
     ],
     "architecture": {
         "64bit": {
@@ -137,7 +178,7 @@ cat > packaging/stores/scoop/opencircle.json <<J
         }
     },
     "bin": "opencircle.exe",
-    "shortcuts": [
+${post}    "shortcuts": [
         [
             "opencircle.exe",
             "OpenCircle"
@@ -156,4 +197,4 @@ cat > packaging/stores/scoop/opencircle.json <<J
     }
 }
 J
-echo "wrote $w and packaging/stores/scoop/opencircle.json"
+echo "wrote $w and $out/scoop/opencircle.json"
