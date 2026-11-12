@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.6 published (2026-11-11, hotfix); next: 0.1.7 Languages (the live border waits for the GPU renderer), then Game translation (0.2.0).**
+(both local only). Status: **v0.1.7 published (2026-11-12, Languages); next: 0.1.8 (Start menu fix, Arabic reading in Linux main mode, Settings keyboard navigation, code restructure), then Game translation (0.2.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -59,6 +59,15 @@ where they differ.
   is simple fix": CI + release workflow green, draft assets SHA256SUMS OK + minisig OK; the update gate, the About check on
   the draft exe and the AppImage check were NOT run (both VMs off, owner's word). Published assets re-downloaded:
   byte-identical to the draft, SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.1.6", latest = v0.1.6.
+  v0.1.7 "Languages" published 2026-11-12 10:02 UTC on tag v0.1.7 (e36e2bb5), owner: "you can publish directly": clean-up, docs and notes, CI green; gate on the
+  draft PASS on the Windows 10 VM (minisig verified with rsign; v0.1.6 Setup + portable -> 0.1.7 through Restart now; What's
+  new; About on the draft exe; one Apps & features entry, publisher; model folders renamed; silent switches; overlay + Snip)
+  and on the Ubuntu VM (AppImage on GNOME Wayland: capture asks once, Settings, Arabic, Translate, Search in browser; deb;
+  KDE X11 start + shortcuts). No security scan, no QA gates #84 (owner; they go with the last 0.1.x). NOT verified: Windows 11,
+  the tray menu's look, winget/Scoop from the live repositories. Published assets re-downloaded: byte-identical to the gated
+  draft, SHA256SUMS OK, trusted comment "OpenCircle v0.1.7", latest = v0.1.7. Found by the gate, for 0.1.8: a plain Setup
+  over a `/managed` install leaves ManagedBy empty (read as managed); Translate leaves a long paragraph's first line
+  untranslated on the cropped test page (same in v0.1.6); the second reader re-reads English pages for nothing.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
