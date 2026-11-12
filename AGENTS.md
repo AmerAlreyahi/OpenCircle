@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.6 published (2026-11-11, hotfix); next: 0.1.7 Languages + live border, then Game translation (0.2.0).**
+(both local only). Status: **v0.1.6 published (2026-11-11, hotfix); next: 0.1.7 Languages (the live border waits for the GPU renderer), then Game translation (0.2.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -920,6 +920,17 @@ production systems.
   non-affiliation line stays verbatim); English legal text as one left-to-right block under its Arabic heading; a clear
   "Something not working?" card near the top (Copy diagnostics, Report a problem; nothing is sent) and a quiet "Report a
   problem" link in the Settings sidebar footer; not in the tray menu. When in doubt: fewer elements.
+
+- v0.1.7 decisions (owner, 2026-11-12, "approved": the lead's recommendations): (1) Arabic text reading ships for Windows
+  main mode and Translate now; Linux main mode keeps today's reading path until its two engineering pieces (the helper not
+  holding the screen picture; one reader loaded at a time) are built and measured at or below today's numbers; accepted
+  costs on Windows: a mixed English + Arabic page takes longer because more lines are read, and +6..11 % helper memory on
+  a 3440-wide Arabic page. (2) Live border: the glow stays static until the GPU renderer (0.9.0); no breath on the CPU
+  renderer (measured 2-10x over the near-0 % line on every platform). So v0.1.7 is "Languages" without the live border.
+  (3) winget and Scoop: fix the `winget install` hang and the four gaps (a per-install switch for the in-app updater, the
+  Setup's publisher name, version/company info in the Setup exe, documented silent exit codes) in v0.1.7 and submit with
+  that release; the owner opens the PRs. (4) Old worktrees: their unsaved reports/proof are archived outside the repo,
+  then the worktrees are removed.
 
 ## Domain quirks
 
