@@ -100,8 +100,11 @@ server with a key must use `https://`.
 Circle something and type in the bar's AI field, or press `A` (or use the
 **Explain with AI** quick action, `Ctrl+Shift+E`). With a provider and key, the
 answer streams into a chat with markdown, and you can ask follow-up questions: a
-follow-up pins the chat, so it stays open above other apps and a new capture asks
-into the same chat (**Settings → Ask AI → AI chat stays open** changes this). Only
+follow-up pins the chat: it becomes its own window, the overlay closes by itself,
+the chat stays open above other apps and a new capture asks into the same chat
+(**Settings → Ask AI → AI chat stays open** changes this). While the chat is open
+on the overlay, the bar stays beside it. Snip's **More → Ask AI** sends the picked
+area with your marks on it. Only
 the selected area (while **Include screen** is on) and your questions are sent,
 with the last 20 messages and one short summary of older ones. Chats are saved on
 this PC as text only (**Keep chat history** turns that off). With **Browser**,

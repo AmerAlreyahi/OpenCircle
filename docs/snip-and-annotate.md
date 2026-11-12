@@ -71,7 +71,7 @@ steps, Pin, Live pin, Share (Windows), Colour picker and Screen ruler:
 
 - **Copy text** puts the text of the area on the clipboard.
 - **Ask AI** opens the AI chat with the picture, drawings included (with no AI
-  key it opens Google AI Mode in your browser).
+  key the picture opens in Google in your browser, as Ask AI does from the bar).
 - **Translate** translates the text in place inside the area; the row then says
   **Show original**. Copy, Save and drag-out give the translated picture.
 

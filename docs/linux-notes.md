@@ -111,7 +111,10 @@ does nothing until you free it with `gsettings`: see
   Steps strip, pins, the update pills) are square: Wayland cannot cut a window to
   a rounded shape.
 - GNOME places new windows itself, so a pin and the Steps strip may open on top
-  of each other; drag one aside.
+  of each other; drag one aside. The pinned AI chat is placed by GNOME too, and
+  GNOME decides whether it stays above other windows.
+- A shortcut pressed in GNOME's Activities overview first closes the overview,
+  then opens the overlay with the keyboard (about a quarter of a second later).
 - The Snip timer (Settings > Snip) shows no countdown on Wayland: the frozen
   screen closes, and the capture comes when the time is up.
 - Circle to Search takes about half a second to appear (the portal screenshot),

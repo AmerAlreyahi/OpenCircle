@@ -12,7 +12,7 @@ Select text from what you can see, even when the original app will not let you c
 2. On Windows, Windows OCR reads the screen as the overlay opens. On Linux, accept the text reader download if asked, then allow it time to read.
 3. Drag across characters. Double-click for a word or triple-click for a line.
 4. Press `Ctrl+C`, then paste into another app. Use `Ctrl+A` to select all recognised text on the screen.
-5. On Windows, choose **Auto**, **Windows**, or **Downloaded** under **Settings › Text reading › Engine**.
+5. On Windows, choose **Auto**, **Fast** (Windows' own reader) or **Accurate** (the downloaded reader) under **Settings › Text reading › Engine**.
 
 ## Shortcuts
 
@@ -29,13 +29,16 @@ Select text from what you can see, even when the original app will not let you c
 ## Tips
 
 - Windows OCR makes text selectable as soon as it is read, without a model download when Windows has the language installed.
-- **Auto** uses Windows OCR where suitable and falls back to the downloaded reader when needed. Try **Downloaded** for Arabic or text Windows misses.
+- **Auto** uses Windows OCR where suitable and falls back to the downloaded reader when needed. Try **Accurate** for text Windows misses.
+- On Windows, Arabic and pages that mix two languages are read line by line, each line by the reader that suits it. While the screen is still being read, the **Copy text** button spins (its tooltip counts the lines) and unread lines show the busy cursor.
 - To copy a picture instead, draw a box around it. See [Save and copy](save-and-copy.md).
 
 ## Limits
 
 - Recognition can miss small, stylised, or low-contrast text. Check the result before pasting it somewhere important.
 - Windows OCR depends on the recognition languages installed in Windows.
+- Latin words and digits inside an Arabic line are often missed, and a page that mixes English and Arabic takes longer to read.
+- On Linux, Arabic in the overlay is read the way it was before 0.1.7 (the line-by-line reading comes to Linux later).
 - Linux is a preview. It uses the downloaded reader and is slower; the **Text reading** page is Windows-only.
 - `Ctrl+A` may wait while the rest of the screen is read.
 

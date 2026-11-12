@@ -53,7 +53,10 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 - **Select text like on a desktop.** Drag over words to copy, translate or
   search them. On Windows the text is readable at once with Windows' own text
   recognition; otherwise (and for Arabic or games) OpenCircle offers a one-time
-  download of about 30 MB. Settings > Text reading > Engine chooses.
+  download of about 30 MB. On Windows, Arabic and pages that mix two languages
+  are read line by line, each line by the reader that suits it; the Copy text
+  button spins while the screen is still being read. Settings > Text reading >
+  Engine chooses.
 - **Translate in place.** Press `Ctrl+Shift+T` to translate the whole screen. The
   original text is erased and the translation is drawn in its place, with
   matching colour and size; browser address bars and file names are left alone,
@@ -68,7 +71,8 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   fine pixel mosaic that hides text for good) and a solid Redact. **Long
   capture**: scroll the page yourself and OpenCircle stitches it. **Steps** keeps
   several snips on a slim strip and copies them as one numbered image. Also a
-  colour picker, a screen ruler, Pin and Share. Snip also takes a translated
+  colour picker, a screen ruler, Pin and Share. **More** also has Copy text, Ask
+  AI and Translate for the picked area. Snip also takes a translated
   page as you see it (the translate pill's Snip button). Details:
   [Snip and annotate](docs/snip-and-annotate.md).
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
@@ -80,9 +84,15 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   with markdown and follow-ups: OpenRouter, OpenAI, Anthropic, Gemini, Groq,
   Mistral, DeepSeek, xAI, a local Ollama or LM Studio, or your own server, each
   with a list of its current models (OpenRouter's free router is the default).
-  A follow-up pins the chat so it stays above other apps. Errors say plainly
+  A follow-up pins the chat: it becomes its own window above other apps, the
+  overlay closes by itself, and the chat stays. While the chat is open on the
+  overlay, the bar stays beside it. Errors say plainly
   what went wrong and offer one fix. History is text only and stays on this PC.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
+  Settings > Shortcuts can put them all back to the defaults.
+- **In English or Arabic.** The whole app, its setup and Settings speak Arabic
+  right to left when you pick it (Settings > General > App language; picking
+  Arabic as your language at the first start does it too).
 - **12 themes and Active Look.** Pick a card in Settings > Appearance (light and
   dark; until you do, it follows the system). Sapphire Glow, a soft glow round
   the screen edge, is the default look; its colours also outline the snip area.
@@ -224,8 +234,8 @@ Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
 
 - **Windows 10 and 11:** the full feature set.
 - **Linux:** X11 and Wayland. On Wayland the desktop owns the keys and the
-  screen capture (GNOME asks once); shortcuts work on GNOME with or without the
-  shortcut portal, long capture shows its progress in a small pop-up, picking a
+  screen capture (GNOME asks once); shortcuts work on GNOME and KDE Plasma with
+  or without the shortcut portal, long capture shows its progress in a small pop-up, picking a
   window is not offered (a click takes the screen), and Share is Windows only.
   See [Linux notes](docs/linux-notes.md).
 

@@ -8,7 +8,8 @@ page (see the [README](../README.md#install)).
 - **Windows:** run `OpenCircle-Setup-<version>-x64.exe` and click **Install
   OpenCircle** (Windows asks for permission once). **Customize install** picks
   another folder. At the end choose whether OpenCircle starts with Windows, then
-  **Launch OpenCircle**. Running a newer setup updates OpenCircle in place and
+  **Launch OpenCircle**. The setup window speaks Windows' display language
+  (English, or Arabic right to left). Running a newer setup updates OpenCircle in place and
   keeps your settings and downloaded models; running the same one again repairs it.
   Uninstall it in **Settings > Apps**: it asks whether your settings, downloaded
   models and saved keys go too.
@@ -29,7 +30,8 @@ in **Settings > General**.
 ## First run
 
 A short setup asks your language first (it becomes the translate target, and
-the step names the offline model your first translation downloads), then shows
+the step names the offline model your first translation downloads; pick
+Arabic and the rest of the setup, and the app, turn Arabic at once), then shows
 your shortcut, an optional AI provider, a theme (12 to pick from) and whether
 OpenCircle starts with Windows. On Linux under Wayland it also asks the desktop
 for screenshot permission once. Skip any of it; everything can change
@@ -39,6 +41,15 @@ it opens Settings.
 Auto-update is asked about once, on first run, where the switch starts on; you
 can turn it off there or later in Settings. See
 [Updates](#updates).
+
+## App language
+
+OpenCircle's windows, menus, tray, pills and setup are in English or Arabic.
+**Settings > General > App language** chooses: *Your language* follows the
+language you picked at the first start (when the app has it, else English), or
+pick English or العربية yourself. In Arabic the whole layout is mirrored, right
+to left. Other languages you pick at the first start set the translate target
+only.
 
 ## Circle something
 
@@ -107,7 +118,11 @@ your PC:
 - Windows: `%LOCALAPPDATA%\OpenCircle\ocr`
 - Linux: `~/.local/share/OpenCircle/ocr`
 
-After that, reading text works offline. On a fresh Windows install the
+After that, reading text works offline. On Windows, Arabic and pages that mix
+two languages are read line by line, each line by the reader that suits it:
+Copy text spins while the screen is still being read (its tooltip counts the
+lines), unread lines show the busy cursor, and a reader you need but don't have
+is offered for the script it found. On a fresh Windows install the
 [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)
 may be needed; OpenCircle tells you if it is.
 
@@ -124,9 +139,11 @@ on (the default) the selected area goes with it; off sends only your question.
 - With no key, the question opens in your browser: with the circled picture
   through Google Lens (Include screen on), or in Google AI Mode (off).
 - With a provider set up (Settings > Ask AI), the answer streams into a chat card
-  with markdown. Ask a follow-up and the chat pins: it stays open above other
-  apps, and a new capture asks into the same chat. The pin button in the header
-  unpins and closes it. **Settings > Ask AI > AI chat stays open** changes this.
+  with markdown. The bar stays beside the open chat, so Translate and Copy text
+  still work. Ask a follow-up and the chat pins: it is its own window, the
+  overlay closes by itself, and the chat stays open above other apps; a new
+  capture asks into the same chat. The pin button in the header unpins and
+  closes it. **Settings > Ask AI > AI chat stays open** changes this.
 - **Model** in Settings > Ask AI lists each provider's current models, with the
   provider's own Free or Paid tag where it publishes one; **Load models** asks
   the provider for its full list (with your key, only on that click).
@@ -235,6 +252,8 @@ crashes the app. API keys are never in this file.
   `libayatana-appindicator3-1`, Fedora: `libayatana-appindicator-gtk3`). The
   shortcuts and `opencircle capture` still work.
 - **Something broke.** OpenCircle keeps a small log on your PC (see
-  [Privacy](privacy.md)). **Settings > About > Copy diagnostics** puts a report
+  [Privacy](privacy.md)). The **Something not working?** card near the top of
+  **Settings > About** has **Copy diagnostics**, which puts a report
   (no keys, no folders) on your clipboard, and **Report a problem** opens a
-  pre-filled GitHub issue in your browser. Nothing is sent by OpenCircle.
+  pre-filled GitHub issue in your browser (also at the foot of the Settings
+  sidebar). Nothing is sent by OpenCircle.
