@@ -977,6 +977,11 @@ production systems.
 - Two workers at most (owner, 2026-11-12, "I want to save tokens"; SUPERSEDES "at most 3 workers at once" in "Credits"):
   never more than 2 workers running at the same time, a resumed worker counts as one; queue the rest.
 
+- Snip Studio, a better design (owner, 2026-11-12): "create a better and more advanced Snip Studio design"; he expects the
+  Studio to come earlier than 0.5.0 (his words: "v013 or v014": the lead asked which he means). A new design round (one
+  clickable HTML file; tool options unfolded; both side panels collapsible; more advanced than the 2026-11-11 design) is
+  queued for the next free worker slot; nothing is built before his OK.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
