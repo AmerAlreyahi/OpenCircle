@@ -642,11 +642,11 @@ impl App {
                         // last band is the end, if one reads)
                         let whole = self.o.screen_text.is_whole(self.o.screen.height);
                         if first {
-                            self.log_mark("first lines under the pointer");
+                            self.log_mark("[opencircle] first lines under the pointer");
                         }
                         let other = system && ocr::reads_other_scripts();
                         if whole && !other && (first || !system) {
-                            self.log_mark("screen text ready");
+                            self.log_mark("[opencircle] screen text ready");
                         }
                         let done = self.more_text();
                         let released = self.release_held();

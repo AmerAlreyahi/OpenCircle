@@ -467,7 +467,7 @@ impl App {
         let (scale, screen) = (self.o.scale, self.o.screen);
         let Some(band) = self.o.screen_text.next_other(self.o.pointer.y, screen) else {
             self.o.other_read = true; // all read
-            self.log_mark("screen text ready (the second reader's last line)");
+            self.log_mark("[opencircle] screen text ready (the second reader's last line)");
             return Task::none();
         };
         let Some((top, bottom)) = self.o.screen_text.other_unread(band, screen) else {

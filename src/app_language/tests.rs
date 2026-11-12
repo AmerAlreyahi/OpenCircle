@@ -313,6 +313,7 @@ const NOT_UI: &[&str] = &[
     "Chinese and Japanese",
     // build values, OS names, file magic, panics
     "CARGO_PKG_VERSION",
+    "LANG",
     "OUT_DIR",
     "Windows",
     "Linux",
