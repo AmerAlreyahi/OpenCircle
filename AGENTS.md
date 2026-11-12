@@ -959,6 +959,21 @@ production systems.
   in CI, the automatic per-commit security check (its findings are fixed or answered), the signed update channel and the
   update gate. The QA gates and the clean-up pass stay as release steps.
 
+- v0.1.8 (owner, 2026-11-12, "yes"): a small release after v0.1.7 and before Game translation (0.2.0): the Start menu fix
+  on Windows, Arabic text reading in Linux main mode (the two engineering pieces), Latin words and digits inside Arabic
+  lines, the right-to-left selection highlight if it misses v0.1.7, keyboard navigation in Settings (Tab / Enter), the
+  feature-folder restructure of the code (plan and owner OK first), the size clean-up left from the audit, hardening the
+  database open. v0.1.7 is therefore no longer "the last 0.1.x".
+- Cheaper testing (owner, 2026-11-12: "testing takes a lot of credits, agents' testing isn't optimised"): VM checks are
+  SCRIPTED: one script per area runs every step and writes one result file + screenshots; an agent runs it once, reads the
+  result, fixes, runs it once more. No exploratory clicking by agents, no VM pass per worker: ONE consolidated VM pass per
+  merge batch (and the release gate). Look-and-feel is judged by the owner on the dev build; goldens cover layout. The
+  scripts are kept in the repo's internal test folder and reused every release.
+- "Company" in the exe (2026-11-12): Windows' file-properties field is named CompanyName; it holds the owner's name
+  ("Amer Alreyahi"), there is no company.
+- winget hang cause (2026-11-12, measured on the owner's PC with his OK): `winget install --manifest` blocks behind a
+  dialog winget owns for the unsigned, internet-marked Setup exe (no Setup process ever starts); not a bug in the Setup.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
