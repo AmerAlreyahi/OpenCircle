@@ -147,6 +147,7 @@ pub fn tr(s: S) -> &'static str {
 }
 
 /// `s` in English whatever the app speaks (the log and diagnostics stay English).
+#[cfg(any(target_os = "linux", test))]
 pub fn english(s: S) -> &'static str {
     TABLE[s as usize][Lang::En as usize]
 }

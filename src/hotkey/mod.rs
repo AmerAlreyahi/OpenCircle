@@ -220,6 +220,7 @@ pub fn managed() -> crate::app_language::S {
 }
 
 /// `managed()` in English, for the log.
+#[cfg(target_os = "linux")]
 pub fn managed_log() -> &'static str {
     crate::app_language::english(managed())
 }

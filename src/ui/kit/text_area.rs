@@ -175,8 +175,8 @@ mod tests {
     /// right edge, like the text typed in it (iced's editor has no alignment of its own).
     #[test]
     fn the_placeholder_starts_at_the_right_edge_in_arabic() {
-        let ink = |lang| {
-            crate::app_language::set(lang);
+        let _ar = crate::ui::kit::testing::arabic();
+        let ink = || {
             let content = Content::new();
             let controls = iced::widget::space::horizontal().height(28).into();
             let v = text_area(
@@ -201,9 +201,8 @@ mod tests {
                 xs.iter().max().copied().unwrap(),
             )
         };
-        let (lo, hi) = ink(crate::app_language::Lang::Ar);
+        let (lo, hi) = ink();
         assert!(lo > 200 && hi > 360, "at the right: {lo}..{hi}");
-        crate::app_language::set(crate::app_language::Lang::En);
     }
 
     #[test]
