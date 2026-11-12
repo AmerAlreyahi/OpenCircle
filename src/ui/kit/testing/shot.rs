@@ -640,6 +640,53 @@ pub fn drawn_past_their_box<Message>(view: Element<'_, Message>, size: Size) -> 
     past
 }
 
+/// Every drawn text paragraph of `view` (laid out in `size`) that is NOT in
+/// the base direction of the UI (`rtl`: right-to-left or left-to-right) and
+/// is not in the mono font (key caps, paths, versions stay Latin): its content.
+/// Text with a direction of its own is listed too (the caller declares it).
+pub fn off_base_direction<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    rtl: bool,
+) -> Vec<String> {
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    ui.draw(
+        &mut renderer,
+        &Theme::Dark,
+        &style,
+        mouse::Cursor::Unavailable,
+    );
+    let mono = super::super::text::MONO.family;
+    let mut off = Vec::new();
+    for layer in renderer.layers() {
+        let texts = (layer.text.iter()).flat_map(|item| item.as_slice().iter());
+        for text in texts {
+            let iced_tiny_skia::graphics::text::Text::Paragraph { paragraph, .. } = text else {
+                continue;
+            };
+            let Some(paragraph) = paragraph.upgrade() else {
+                continue;
+            };
+            let buffer = paragraph.buffer();
+            let Some(line) = buffer.lines.first() else {
+                continue;
+            };
+            let content = line.text().trim_start_matches('\u{200F}').to_string();
+            let letters = content.chars().any(char::is_alphabetic);
+            let got = line.shape_opt().map(|shape| shape.rtl);
+            let is_mono = iced::advanced::text::Paragraph::font(&paragraph).family == mono;
+            if letters && !is_mono && got.is_some_and(|got| got != rtl) {
+                off.push(content);
+            }
+        }
+    }
+    off
+}
+
 /// Render and, when `OPENCIRCLE_RENDER_DIR` is set, save `<dir>/<name>.png`.
 /// Returns the pixels either way.
 pub fn save<Message>(name: &str, view: Element<'_, Message>, size: Size) -> Vec<u8> {

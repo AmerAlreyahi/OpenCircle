@@ -7,7 +7,7 @@ use iced::{Border, Center, Element, Fill};
 
 use super::button::{Kind, button, label, regular};
 use super::icon::{Icon, icon};
-use super::text::{self, muted};
+use super::text;
 use super::themes::c;
 use super::tokens::{Role, fixed, radius, size};
 
@@ -78,7 +78,8 @@ fn detail_width(width: f32) -> f32 {
 /// content does (an English message stays left to right in an Arabic card).
 fn detail_text<'a, M: 'a>(detail: String) -> Element<'a, M> {
     let start = super::dir::content_start(&detail);
-    muted(Role::NOTE, detail)
+    text::own(Role::NOTE, detail)
+        .color(c().text_muted)
         .line_height(LINE)
         .width(Fill)
         .align_x(start)

@@ -8,7 +8,7 @@ use iced::widget::container;
 use iced::{Border, Element, Fill};
 
 use super::dir;
-use super::text::text;
+use super::text::own;
 use super::themes::c;
 use super::tokens::Role;
 
@@ -20,7 +20,7 @@ pub fn bubble<'a, Message: 'a>(line: &'a str) -> Element<'a, Message> {
         true => Radius::new(RADIUS).bottom_left(TAIL),
         false => Radius::new(RADIUS).bottom_right(TAIL),
     };
-    let line = text(Role::CHAT, line)
+    let line = own(Role::CHAT, line)
         .line_height(1.45)
         .align_x(dir::content_start(line));
     let bubble = container(line)

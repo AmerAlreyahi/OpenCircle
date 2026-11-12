@@ -234,6 +234,10 @@ fn laid_out(s: &str, size: f32, font: Font, wrap: Option<f32>) -> (usize, f32) {
         Weight::ExtraBold => 800,
         Weight::Black => 900,
     };
+    // measured as drawn (`text`): with the UI's base direction mark
+    let mono = font.family == MONO.family;
+    let based = based(s.into(), mono);
+    let s = based.as_ref();
     let mut fonts = iced::advanced::graphics::text::font_system()
         .write()
         .expect("font system");
@@ -261,13 +265,46 @@ pub fn font(role: Role) -> Font {
     }
 }
 
+/// A RIGHT-TO-LEFT MARK: the first strong character of a run, so the text
+/// engine gives it the right-to-left base direction (a paragraph takes the
+/// direction of its first strong letter: a Latin-first Arabic sentence was an
+/// LTR paragraph, laid out and aligned from the left). Zero width.
+const RLM: char = '\u{200F}';
+
+/// `s` with the UI's base direction when the view is right to left (`RLM`);
+/// as it is left to right, in the mono font (key caps, paths, versions stay
+/// Latin), when empty and when it starts with a direction mark already (every
+/// string-table Arabic string does).
+fn based<'a>(s: std::borrow::Cow<'a, str>, mono: bool) -> std::borrow::Cow<'a, str> {
+    match super::dir::rtl() && !mono && !s.is_empty() && !s.starts_with(RLM) {
+        true => format!("{RLM}{s}").into(),
+        false => s,
+    }
+}
+
 /// `s` in `role`: its size and font, in the theme's text colour (a section
-/// head upper case and muted).
+/// head upper case and muted). In a right-to-left UI the run's base
+/// direction is the UI's, whatever its first letter is (`based`); text with
+/// a direction of its own is `own`.
 pub fn text<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    run(role, s, true)
+}
+
+/// `s` in `role` with the direction of its OWN content (the first strong
+/// letter): a chat message, a provider's message as received.
+pub fn own<'a>(role: Role, s: impl IntoFragment<'a>) -> Text<'a> {
+    run(role, s, false)
+}
+
+fn run<'a>(role: Role, s: impl IntoFragment<'a>, base: bool) -> Text<'a> {
     let c = &themes::current().c;
     let (line, colour) = match role == Role::SECTION {
         true => (s.into_fragment().to_uppercase().into(), c.text_muted),
         false => (s.into_fragment(), c.text),
+    };
+    let line = match base {
+        true => based(line, role.mono),
+        false => line,
     };
     iced::widget::text(line)
         .size(size(role))
@@ -542,5 +579,42 @@ mod tests {
         }
         wrong.dedup();
         assert!(wrong.is_empty(), "{wrong:?}");
+    }
+
+    /// In a right-to-left UI a run takes the UI's base direction whatever its
+    /// first letter is (a Latin-first Arabic sentence, a Latin-only label), the
+    /// Latin words inside stay in order; the exceptions stay as they are.
+    #[test]
+    fn a_right_to_left_ui_gives_every_run_its_base_direction() {
+        use super::{RLM, based, own, text, width};
+        use crate::ui::kit::testing::shot;
+        use crate::ui::kit::tokens::Role;
+        use crate::ui::kit::{dir, text::ui_font};
+        let size = iced::Size::new(400.0, 200.0);
+        let sentence = "Google Lens \u{623}\u{648} \u{628}\u{62d}\u{62b} Google";
+        let off = |view: iced::Element<'static, ()>, rtl| shot::off_base_direction(view, size, rtl);
+        {
+            let _ar = dir::scope(true);
+            // Latin-first sentence, a Latin-only label: right-to-left paragraphs
+            assert!(off(text(Role::NOTE, sentence).into(), true).is_empty());
+            assert!(off(text(Role::CONTROL, "Latin Label").into(), true).is_empty());
+            // the Latin run keeps its order: its words are not reversed
+            let marked = based(sentence.into(), false);
+            assert!(marked.trim_start_matches(RLM).starts_with("Google Lens"));
+            // exceptions: mono (key caps, paths), a mark already there, own direction, empty
+            assert_eq!(based("Ctrl+C".into(), true), "Ctrl+C");
+            assert_eq!(based("\u{200F}abc".into(), false), "\u{200F}abc");
+            assert_eq!(based("".into(), false), "");
+            assert!(off(text(Role::KEYCAP, "Ctrl+C").into(), true).is_empty());
+            assert_eq!(
+                off(own(Role::NOTE, "Hello world").into(), true),
+                ["Hello world"]
+            );
+            // measured as drawn
+            assert!(width("Latin Label", 13.0, ui_font()) > 0.0);
+        }
+        // left to right: untouched
+        assert_eq!(based("Latin".into(), false), "Latin");
+        assert!(off(text(Role::NOTE, sentence).into(), false).is_empty());
     }
 }

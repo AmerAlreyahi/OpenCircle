@@ -9,6 +9,7 @@ use crate::app_language::{S, tr};
 use crate::labs::Feature;
 use crate::t;
 use crate::ui::kit::card::card;
+use crate::ui::kit::dir;
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::text::{sub, text};
 use crate::ui::kit::tokens::{Role, space};
@@ -35,9 +36,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let cells = |a: Element<'static, Message>, b, c| {
         container(
             crate::dir_row![
-                container(a).width(Length::FillPortion(3)),
-                container(b).width(Length::FillPortion(4)),
-                container(c).width(Length::FillPortion(4)),
+                container(a)
+                    .width(Length::FillPortion(3))
+                    .align_x(dir::start()),
+                container(b)
+                    .width(Length::FillPortion(4))
+                    .align_x(dir::start()),
+                container(c)
+                    .width(Length::FillPortion(4))
+                    .align_x(dir::start()),
             ]
             .spacing(space::GAP),
         )

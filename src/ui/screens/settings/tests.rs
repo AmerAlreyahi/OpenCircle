@@ -3187,6 +3187,63 @@ fn no_text_is_drawn_past_its_box_on_any_page() {
     assert!(past.is_empty(), "{past:#?}");
 }
 
+/// Every text of every Settings page is in the UI's base direction (right to
+/// left in Arabic, whatever its first letter; left to right in English), but
+/// the declared exceptions (mono text, the English legal block on About).
+#[test]
+fn every_settings_text_has_the_uis_base_direction() {
+    use crate::app_language::{self, Choice, Lang};
+    // declared: About's English legal block (a left-to-right island in Arabic),
+    // and Latin names shown alone
+    let declared = |t: &str| {
+        (t.contains("Google") && t.contains("affiliat"))
+            // Latin names shown alone: the sidebar footer's version and OS, a service's name
+            || ["v0.0.0", "Linux", "AudD"].contains(&t)
+    };
+    let mut off = Vec::new();
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        s.draft.labs = Labs::all_on();
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        for section in shown {
+            update(&mut s, Message::Section(section));
+            let size = Size::new(WINDOW_SIZE.width, 3000.0);
+            let found = shot::off_base_direction(view(&s), size, language == "ar");
+            off.extend(
+                (found.into_iter().filter(|t| !declared(t)))
+                    .map(|t| format!("{language} {section:?}: {t:?}")),
+            );
+        }
+    }
+    app_language::set(Lang::En);
+    assert!(off.is_empty(), "{off:#?}");
+}
+
+/// Privacy in Arabic: every cell of a column starts at the column's right
+/// edge, the Latin-first and the Latin-only ones too (they sat at the left).
+#[test]
+fn privacy_cells_in_arabic_start_at_the_columns_right_edge() {
+    use crate::app_language::{self, Choice, Lang};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::AppLanguage(Choice("ar")));
+    update(&mut s, Message::Section(Section::Privacy));
+    let at = shot::texts_at(view(&s), Size::new(WINDOW_SIZE.width, 900.0));
+    use crate::app_language::{S, tr};
+    let rights = |key: S| -> Vec<f32> {
+        let want = tr(key);
+        (at.iter().filter(|(_, t)| *t == want))
+            .map(|(b, _)| b.x + b.width)
+            .collect()
+    };
+    let (latin, arabic) = (rights(S::p_r7c), rights(S::p_here));
+    app_language::set(Lang::En);
+    assert!(!latin.is_empty() && !arabic.is_empty());
+    for edge in latin.iter().chain(&arabic) {
+        assert!((edge - arabic[0]).abs() < 1.0, "{latin:?} vs {arabic:?}");
+    }
+}
+
 /// Settings > Shortcuts > Reset shortcuts (#175): asks first, puts every shown key
 /// back to the config's own default through the draft (saved like a recorded key),
 /// keeps what the page doesn't show, offers Undo until something else changes.
