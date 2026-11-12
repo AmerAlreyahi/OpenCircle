@@ -395,7 +395,6 @@ mod tests {
     #[test]
     fn every_song_state_matches_its_golden_image() {
         use crate::ui::kit::testing::golden;
-        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
         let recent = || {
             vec![history::Entry {
                 title: "Carefree".into(),
@@ -420,17 +419,13 @@ mod tests {
                 session(State::Failed(music::Error::Silent.to_string())),
             ),
         ];
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, s) in &states {
                 let file = format!("song-{name}-{}", theme.id);
                 failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
                     s.view(SCREEN)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

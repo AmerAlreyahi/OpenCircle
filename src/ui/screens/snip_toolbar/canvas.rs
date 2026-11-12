@@ -322,7 +322,6 @@ mod tests {
     use super::{ScreenMap, canvas};
     use crate::snip::annotate::{Annotator, Image, Message, TOOLS, Tool};
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     const W: u32 = 280;
     const H: u32 = 150;
@@ -481,9 +480,7 @@ mod tests {
                 cases.push((format!("{name}-arabic"), info.tool, "افتح القائمة"));
             }
         }
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, tool, text) in &cases {
                 let (plain, chosen) = if *tool == Tool::Crop {
                     (drawn(*tool, text, true), drawn(*tool, text, false))
@@ -507,8 +504,6 @@ mod tests {
                     .into()
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

@@ -128,13 +128,8 @@ impl Config {
         if let Some(t) = section(&root, "selection", &mut w) {
             let (p, d) = ("selection.", d.selection);
             c.selection.style = get(t, p, "style", d.style, &mut w);
-            c.selection.after = get(t, p, "after", d.after, &mut w);
-            // Schema 3: nothing is sent before the user picks (owner, 2026-10-26).
-            // An older file's "search" becomes "wait"; Settings opts back in.
-            if file_version < Some(3) {
-                c.selection.after = After::Wait;
-            }
-            c.selection.search_with = get(t, p, "search_with", d.search_with, &mut w);
+            // `after` / `search_with` (schemas 1-10; nothing reads them) are
+            // ignored like unknown keys: an old file loads without a warning.
             c.selection.text_reader = get(t, p, "text_reader", d.text_reader, &mut w);
         }
         if let Some(t) = section(&root, "look", &mut w) {

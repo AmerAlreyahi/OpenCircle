@@ -541,7 +541,6 @@ mod tests {
     #[test]
     fn the_open_menu_matches_its_golden_image() {
         use super::super::testing::golden;
-        use super::super::themes::{self, DAYLIGHT, SAPPHIRE};
         const MANY: [&str; 14] = [
             "Arabic", "Chinese", "Dutch", "English", "French", "German", "Hindi", "Italian",
             "Japanese", "Korean", "Polish", "Russian", "Spanish", "Turkish",
@@ -551,9 +550,7 @@ mod tests {
         }
         let size = Size::new(340.0, 360.0);
         let at = Point::new(60.0, 36.0);
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let view = || {
                 iced::widget::container(super::dropdown(&MANY[..], Some("English"), "", |_| ()))
                     .padding(20)
@@ -566,9 +563,7 @@ mod tests {
             if let Err(e) = golden::compare("kit", &name, 340, 360, &px) {
                 failed.push(e);
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// A combo as the Model row shows it: a value, a note, rows with the
@@ -618,14 +613,11 @@ mod tests {
     #[test]
     fn the_open_combo_with_long_ids_matches_its_golden_image() {
         use super::super::testing::golden;
-        use super::super::themes::{self, DAYLIGHT, SAPPHIRE};
         if !golden::enabled() {
             return;
         }
         let long = "nvidia/nemotron-3-ultra-550b-a55b-instruct-extra-long-id:free";
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let view = || {
                 let rows = vec![
                     (
@@ -672,22 +664,17 @@ mod tests {
             if let Err(e) = golden::compare("kit", &name, 400, 260, &px) {
                 failed.push(e);
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// The open combo in both themes.
     #[test]
     fn the_open_combo_matches_its_golden_image() {
         use super::super::testing::golden;
-        use super::super::themes::{self, DAYLIGHT, SAPPHIRE};
         if !golden::enabled() {
             return;
         }
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let px = shot::after_clicks(
                 || combo_view(0),
                 Size::new(400.0, 300.0),
@@ -697,9 +684,7 @@ mod tests {
             if let Err(e) = golden::compare("kit", &name, 400, 300, &px) {
                 failed.push(e);
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Opening says so (the caller focuses the search); the foot's action

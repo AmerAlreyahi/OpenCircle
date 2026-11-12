@@ -9,6 +9,8 @@ use std::io::{self, Cursor};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
+use crate::ai::png_b64 as base64;
+
 /// Lens pages older versions wrote to the temp folder (still swept).
 const PREFIX: &str = "opencircle-lens-";
 /// Long edge cap for what we send. Lens does not need more, and the page stays small.
@@ -188,11 +190,6 @@ fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128, question: Option<&s
         .replace("{{LOGO}}", LOGO)
 }
 
-fn base64(data: &[u8]) -> String {
-    use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.encode(data)
-}
-
 // ---- downscale ----------------------------------------------------------
 
 /// Size with the long edge capped at `MAX_EDGE`, aspect ratio kept.
@@ -279,34 +276,6 @@ fn fit(png: &[u8], w: u32, h: u32) -> io::Result<(Vec<u8>, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The hand-written encoder this replaced: RFC 4648 vectors plus every
-    /// padding length of binary bytes (generated, then checked against the old function).
-    #[test]
-    fn base64_matches_the_standard_encoding() {
-        for (raw, want) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(base64(raw.as_bytes()), want);
-        }
-        assert_eq!(
-            base64(&[0x89, b'P', b'N', b'G', 0, 255, 254]),
-            "iVBORwD//g=="
-        );
-    }
-
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("oc-lens-test-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        d
-    }
 
     fn make_png(w: u32, h: u32) -> Vec<u8> {
         let mut out = Vec::new();
@@ -439,7 +408,7 @@ mod tests {
 
     #[test]
     fn sweep_removes_only_old_pages_with_our_prefix() {
-        let dir = scratch("sweep");
+        let dir = crate::paths::test_dir("lens-test-sweep");
         let old = SystemTime::now() - Duration::from_secs(3600);
         let mk = |name: &str, aged: bool| {
             let p = dir.join(name);

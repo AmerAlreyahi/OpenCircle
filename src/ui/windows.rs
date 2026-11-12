@@ -2667,13 +2667,10 @@ mod tests {
     #[test]
     fn the_live_pin_matches_its_golden_images() {
         use crate::ui::kit::testing::golden;
-        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
         let mut windows = Windows::default();
         let id = live(&mut windows, 420, 260, 1.0);
         let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let name = format!("live-pin-hover-{}", theme.id);
             failed.extend(golden::check(
                 "screens",
@@ -2682,9 +2679,7 @@ mod tests {
                 &[1.0],
                 || windows.view(id).unwrap(),
             ));
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     #[test]

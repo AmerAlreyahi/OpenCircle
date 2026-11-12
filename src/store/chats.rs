@@ -336,9 +336,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("oc-chats-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d.join("opencircle.db")
+        crate::paths::test_dir(&format!("chats-{name}")).join("opencircle.db")
     }
 
     fn chat(id: &str, updated: u64) -> Saved {

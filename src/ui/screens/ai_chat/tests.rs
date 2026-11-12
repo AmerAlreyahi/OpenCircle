@@ -158,7 +158,6 @@ fn ask_panel_offers_the_six_presets() {
 #[test]
 fn every_result_card_matches_its_golden_image() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const CARD: Size = Size::new(420.0, 560.0);
     let at = Rectangle::with_size(CARD);
     type Make = Box<dyn Fn() -> AiChat>;
@@ -170,9 +169,7 @@ fn every_result_card_matches_its_golden_image() {
             p
         }),
     )];
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         for (name, panel) in &states {
             let panel = panel();
             let file = format!("result-card-{name}-{}", theme.id);
@@ -180,9 +177,7 @@ fn every_result_card_matches_its_golden_image() {
                 panel.view(at, Size::new(1920.0, 1080.0), false)
             }));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// A chat with an API provider, ready (a local server that is never called:

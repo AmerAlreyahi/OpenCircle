@@ -590,9 +590,7 @@ mod tests {
     #[test]
     fn link_chips_match_their_golden_images() {
         use crate::actions::entities::{Entity, Kind};
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, kind, text) in [
                 ("link", Kind::Link, "https://shop.example/track/4412"),
                 ("email", Kind::Email, "help@shop.example"),
@@ -610,8 +608,6 @@ mod tests {
                     || link_chip(&entity, ()),
                 ));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

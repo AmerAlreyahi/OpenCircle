@@ -92,6 +92,16 @@ pub fn user_data_in(data: Option<&Path>, config: Option<&Path>) -> Vec<PathBuf> 
     v
 }
 
+/// A test's own empty folder, `<temp>/oc-<tag>-<pid>` (anything a run before left
+/// there removed).
+#[cfg(test)]
+pub fn test_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("oc-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

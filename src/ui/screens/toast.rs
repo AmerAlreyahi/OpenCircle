@@ -19,14 +19,11 @@ pub fn view<'a, Message: 'a>(text: &'a str, tone: Tone, radius: f32) -> Element<
 mod tests {
     use super::*;
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     /// Each tone, Latin and Arabic, Sapphire and Daylight, at 1x and 2x.
     #[test]
     fn every_toast_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (tone, name, latin, arabic) in [
                 (Tone::Ok, "ok", "Copied", "تم النسخ"),
                 (
@@ -53,17 +50,13 @@ mod tests {
                     ));
                 }
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// The table's words, mirrored: the dot at the right of the line.
     #[test]
     fn every_toast_mirrors_in_arabic() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let _ar = crate::ui::kit::testing::arabic();
             for (tone, name, text) in [
                 (Tone::Ok, "ok", crate::t!(pill_copied).to_string()),
@@ -86,8 +79,6 @@ mod tests {
                     || view::<()>(&text, tone, RADIUS),
                 ));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

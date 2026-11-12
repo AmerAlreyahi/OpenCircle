@@ -154,7 +154,6 @@ pub fn view(p: &Pill, radius: f32, turn: f32, still: bool) -> Element<'_, Msg> {
 mod tests {
     use super::*;
     use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     fn ready(how: How) -> Pill {
         Pill::new(Kind::Ready {
@@ -197,9 +196,7 @@ mod tests {
     /// Arabic: each pill mirrored (mark and buttons swap sides), from the table.
     #[test]
     fn every_arabic_pill_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let _ar = crate::ui::kit::testing::arabic();
             for (name, p) in [
                 ("ready", ready(How::Restart)),
@@ -217,9 +214,7 @@ mod tests {
                     view(&p, RADIUS, 0.0, true)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Clicks: Later, the main button, What's new.
@@ -252,9 +247,7 @@ mod tests {
     /// Every pill in Sapphire and Daylight, at 1x and 2x.
     #[test]
     fn every_update_pill_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, p) in [
                 ("ready", ready(How::Restart)),
                 ("setup", ready(How::Setup)),
@@ -276,8 +269,6 @@ mod tests {
                     || view(&p, RADIUS, 0.0, true),
                 ));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

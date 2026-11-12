@@ -187,9 +187,7 @@ impl KeyStore for Shared {
 }
 
 pub fn tmp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("oc-settings-test-{}-{tag}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    d.join("config.toml")
+    crate::paths::test_dir(&format!("settings-test-{tag}")).join("config.toml")
 }
 
 fn state(path: Option<PathBuf>) -> (State, Arc<MemoryStore>) {
@@ -2146,9 +2144,8 @@ fn every_rows_control_shares_one_column(language: &'static str) {
 #[test]
 fn the_ported_pages_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    use crate::ui::kit::themes::{self};
+    golden::each_theme(|theme, failed| {
         let cases: [(&str, Section, &str); 4] = [
             ("general", Section::General, "/home/me/Pictures/OpenCircle"),
             ("general-arabic", Section::General, "/home/me/صور/لقطات"),
@@ -2168,9 +2165,7 @@ fn the_ported_pages_match_their_golden_images() {
                 view(&s)
             }));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// An update waits: General's Updates row says so ("OpenCircle 0.1.5 is
@@ -2180,10 +2175,9 @@ fn the_ported_pages_match_their_golden_images() {
 #[test]
 fn general_shows_the_waiting_update_with_restart_now() {
     use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::themes::{self};
     use crate::update::How;
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    golden::each_theme(|theme, failed| {
         for (name, how) in [("restart", How::Restart), ("setup", How::Setup)] {
             let (mut s, _) = state(None);
             s.set_update(Some(("0.1.5".into(), how)), None);
@@ -2199,9 +2193,7 @@ fn general_shows_the_waiting_update_with_restart_now() {
                 view(&s)
             }));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
     let (mut s, _) = state(None);
     assert_eq!(
         update(&mut s, Message::RestartToUpdate),
@@ -2217,7 +2209,7 @@ fn general_shows_the_waiting_update_with_restart_now() {
 #[test]
 fn the_step_33_pages_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::themes::{self};
     type Setup = fn(&mut State);
     let cases: [(&str, Section, f32, Setup); 18] = [
         ("ai", Section::Ai, 0.0, |s| {
@@ -2299,8 +2291,7 @@ fn the_step_33_pages_match_their_golden_images() {
             update(s, Message::Picker(0));
         }),
     ];
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    golden::each_theme(|theme, failed| {
         for (name, section, height, setup) in cases {
             let (mut s, _) = state(None);
             s.draft.labs = Labs::all_on();
@@ -2312,9 +2303,7 @@ fn the_step_33_pages_match_their_golden_images() {
             let file = format!("settings-{name}-{}", theme.id);
             failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// A theme card is its own mode's pick. When the other mode is showing, the OS
@@ -2426,9 +2415,8 @@ fn every_theme_card_renders_its_swatches() {
 #[test]
 fn appearance_and_look_match_their_golden_images() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    use crate::ui::kit::themes::{self};
+    golden::each_theme(|theme, failed| {
         for (name, section) in [("appearance", Section::Appearance), ("look", Section::Look)] {
             let (mut s, _) = state(None);
             update(&mut s, Message::Section(section));
@@ -2437,9 +2425,7 @@ fn appearance_and_look_match_their_golden_images() {
             let size = Size::new(WINDOW_SIZE.width, 900.0);
             failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 // ---- feature previews (`previews`, `kit::hero`) ----
@@ -2673,9 +2659,8 @@ fn with_labs(labs: Labs) -> State {
 fn previews_stills_match_their_golden_images() {
     use crate::ui::kit::surface::{Material, surface};
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    use crate::ui::kit::themes::{self};
+    golden::each_theme(|theme, failed| {
         for (name, section, height) in [
             ("look", Section::Look, 470.0),
             ("text-reading", Section::TextReading, 470.0),
@@ -2702,9 +2687,7 @@ fn previews_stills_match_their_golden_images() {
             update(&mut s, Message::Preview("look", true));
             failed.extend(golden::check("screens", &file, size, &[1.0], || page(&s)));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// A preview with several clips has previous / next arrows and a dot per clip;
@@ -3094,9 +3077,8 @@ fn the_app_language_switches_live_both_ways() {
 fn every_page_in_arabic_matches_its_golden_image() {
     use crate::app_language::{self, Choice, Lang};
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    use crate::ui::kit::themes::{self};
+    golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
         s.draft.labs = Labs::all_on();
         s.draft.look.theme = LookTheme::Custom;
@@ -3115,10 +3097,8 @@ fn every_page_in_arabic_matches_its_golden_image() {
             failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
             let _ = shot::save(&file, view(&s), size);
         }
-    }
-    themes::set(&SAPPHIRE);
+    });
     app_language::set(Lang::En);
-    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// The Arabic pages with the longest row descriptions (Labs, General) at the
@@ -3128,10 +3108,9 @@ fn every_page_in_arabic_matches_its_golden_image() {
 fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
     use crate::app_language::{self, Choice, Lang};
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::themes::{self};
     use crate::ui::screens::settings::state::MIN_WIDTH;
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
         s.draft.labs = Labs::all_on();
         update(&mut s, Message::AppLanguage(Choice("ar")));
@@ -3145,10 +3124,8 @@ fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
                 failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
             }
         }
-    }
-    themes::set(&SAPPHIRE);
+    });
     app_language::set(Lang::En);
-    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// No text of any page is drawn past its own box, in English and in Arabic,
@@ -3386,7 +3363,7 @@ fn reset_done(s: &mut State) {
 fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
     use crate::app_language::{self, Choice, Lang};
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::ui::kit::themes::{self};
     type Setup = fn(&mut State);
     let states: [(&str, Setup); 4] = [
         ("idle", |_| {}),
@@ -3394,8 +3371,7 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
         ("ask", reset_ask),
         ("done", reset_done),
     ];
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
+    golden::each_theme(|theme, failed| {
         for (name, setup) in states {
             let (mut s, _) = state(None);
             update(&mut s, Message::AppLanguage(Choice("ar")));
@@ -3406,10 +3382,8 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
             let size = Size::new(WINDOW_SIZE.width, 900.0);
             failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
-    }
-    themes::set(&SAPPHIRE);
+    });
     app_language::set(Lang::En);
-    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// A wide window never stretches a page edge to edge: every page's content

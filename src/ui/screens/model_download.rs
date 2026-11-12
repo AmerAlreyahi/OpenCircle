@@ -330,7 +330,6 @@ pub fn floating<'a, M: 'a>(card: Element<'a, M>, screen: Size, pill: Rectangle) 
 mod tests {
     use super::*;
     use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     const FAILED: &str = "No internet connection. Reconnect, then try again.";
 
@@ -359,9 +358,7 @@ mod tests {
     /// text is cut off.
     #[test]
     fn every_stage_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, model, stage, provider) in stages() {
                 let lost = shot::out_of_reach(view(model, stage, provider), SIZE);
                 assert!(lost.is_empty(), "{name}: {lost:?}");
@@ -370,17 +367,13 @@ mod tests {
                     view(model, stage, provider)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Arabic: every stage mirrored, from the table, the size isolated.
     #[test]
     fn every_arabic_stage_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let _ar = crate::ui::kit::testing::arabic();
             let why = t!(md_err_offline);
             let stages = [
@@ -398,9 +391,7 @@ mod tests {
                     view(model, stage, provider)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Download is the one way to start it; Not now / Cancel dismiss;

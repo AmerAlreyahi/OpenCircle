@@ -531,35 +531,9 @@ pub enum SelectStyle {
     Shape,
 }
 
-/// What happens when a selection is made (`[selection] after`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum After {
-    /// Run `search_with` at once (the user opted in: "Auto action").
-    Search,
-    /// Show the action bar and wait: nothing is sent until the user picks.
-    #[default]
-    Wait,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchWith {
-    #[default]
-    Lens,
-    Ai,
-    Both,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct SelectionConfig {
     pub style: SelectStyle,
-    /// Read, ignored, not written (schema 11).
-    #[serde(skip_serializing)]
-    pub after: After,
-    /// Read, ignored, not written (schema 11).
-    #[serde(skip_serializing)]
-    pub search_with: SearchWith,
     pub text_reader: TextReader,
 }
 
@@ -1175,9 +1149,7 @@ mod tests {
     use super::*;
 
     fn tmp_dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("oc-config-test-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d
+        crate::paths::test_dir(&format!("config-test-{tag}"))
     }
 
     const V010_DEFAULT: &str = include_str!("../../tests/fixtures/config/v0.1.0-default.toml");
@@ -1518,12 +1490,6 @@ mod tests {
     fn look_and_selection_defaults_round_trip_and_old_files_keep_working() {
         let d = Config::default();
         assert_eq!(d.selection.style, SelectStyle::Snap);
-        assert_eq!(
-            d.selection.after,
-            After::Wait,
-            "nothing is sent before a choice"
-        );
-        assert_eq!(d.selection.search_with, SearchWith::Lens);
         assert_eq!(d.look.theme, LookTheme::SapphireGlow);
         let look = d.look.active();
         assert_eq!(look.overlay, edge(EdgeStyle::Glow, 6, true));
@@ -1543,8 +1509,6 @@ mod tests {
         let mut c = Config {
             selection: SelectionConfig {
                 style: SelectStyle::Shape,
-                after: After::Wait,
-                search_with: SearchWith::Lens,
                 text_reader: TextReader::PpOcr,
             },
             ..Config::default()
@@ -1581,7 +1545,7 @@ mod tests {
         );
         let d = Config::default();
         assert_eq!(c.selection.style, SelectStyle::Snap);
-        assert_eq!(c.selection.after, After::Wait, "good survives");
+        assert_eq!(c.selection.text_reader, TextReader::Auto, "good survives");
         let look = c.look.active();
         assert_eq!((look.glow, look.dim), (100, 12));
         assert_eq!(look.colours, d.look.custom.colours);
@@ -1888,9 +1852,8 @@ mod tests {
         ] {
             assert!(old.contains("after = \"search\""), "the fixture searched");
             let (dir, path) = config_with(&format!("wait-{tag}"), &old);
-            let (c, w) = Config::load_from(&path);
+            let (_, w) = Config::load_from(&path);
             assert!(w.is_empty(), "{w:?}");
-            assert_eq!(c.selection.after, After::Wait, "{tag}");
             let v = if tag == "v1" { 1 } else { 2 };
             let backup = dir.join(format!("config.toml.bak-v{v}"));
             assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
@@ -1902,8 +1865,8 @@ mod tests {
             assert!(!text.contains("[results]"), "{text}");
             let _ = std::fs::remove_dir_all(dir);
         }
-        let (c, w) = Config::parse("version = 3\n[selection]\nafter = \"search\"\n");
-        assert!(w.is_empty() && c.selection.after == After::Search, "{w:?}");
+        let (_, w) = Config::parse("version = 3\n[selection]\nafter = \"search\"\n");
+        assert!(w.is_empty(), "{w:?}");
     }
 
     #[test]
@@ -2231,8 +2194,6 @@ mod tests {
     fn kept(c: &Config) -> Config {
         let d = Config::default();
         let mut c = c.clone();
-        c.selection.after = d.selection.after;
-        c.selection.search_with = d.selection.search_with;
         let look = |l: &mut Look| {
             l.activation_glow = d.look.custom.activation_glow;
             for m in EdgeMode::ALL {
@@ -2572,9 +2533,8 @@ mod tests {
         }
         v10 = v10.replace("search_with = \"lens\"", "search_with = \"both\"");
         let (dir, path) = config_with("v11-drop", &v10);
-        let (c, w) = Config::load_from(&path);
+        let (_, w) = Config::load_from(&path);
         assert!(w.is_empty(), "{w:?}");
-        assert_eq!(c.selection.search_with, SearchWith::Both, "still read");
         assert_eq!(fs_text(&dir.join("config.toml.bak-v10")), v10);
         let text = fs_text(&path);
         for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {

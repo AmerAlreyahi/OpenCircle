@@ -147,7 +147,6 @@ mod tests {
     use super::*;
     use crate::labs::Feature;
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     fn all_on() -> Labs {
         let mut labs = Labs::default();
@@ -215,9 +214,7 @@ mod tests {
     /// Arabic: the same rows from the table, mirrored (✓ and hints at the left).
     #[test]
     fn the_arabic_tray_menu_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let _ar = crate::ui::kit::testing::arabic();
             let cfg = Config::default();
             let mut m = Menu::new(&all_on(), &cfg, true);
@@ -227,17 +224,13 @@ mod tests {
             failed.extend(golden::check("screens", &file, m.size(), &[1.0], || {
                 view(&m)
             }));
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Labs off and on (live translate running: its ✓), Sapphire and Daylight, at 1x and 2x.
     #[test]
     fn the_tray_menu_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, labs, live) in [("off", Labs::default(), false), ("on", all_on(), true)] {
                 let mut m = Menu::new(&labs, &Config::default(), live);
                 m.update(Msg::Key(Key::Down)); // the first row focused
@@ -262,8 +255,6 @@ mod tests {
                 &[1.0, 2.0],
                 || view(&m),
             ));
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

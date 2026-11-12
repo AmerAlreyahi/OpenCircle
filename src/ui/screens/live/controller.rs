@@ -372,7 +372,6 @@ mod tests {
     #[test]
     fn every_controller_state_matches_its_golden_image() {
         use crate::ui::kit::testing::golden;
-        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
         let mut c = Controller::new("auto", "ar", true);
         let mut states = vec![("closed", c.clone())];
         open(&mut c, Side::Target);
@@ -383,17 +382,13 @@ mod tests {
         c.notice = None;
         c.ask("English → Arabic local translation", 117_600_822);
         states.push(("ask", c.clone()));
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for (name, c) in &states {
                 let file = format!("live-controller-{name}-{}", theme.id);
                 failed.extend(golden::check("screens", &file, c.size(), &[1.0], || {
                     c.view()
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

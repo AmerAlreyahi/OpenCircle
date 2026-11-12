@@ -321,15 +321,12 @@ mod tests {
         assert_eq!(id(T::Calm), Some("prism"));
         assert_eq!(id(T::Hud), Some("hud"));
         assert_eq!(id(T::Custom), None);
-        // Every preset shows its design look's colours.
+        // Every preset with a colour set shows its design look's glow (a
+        // two-colour preset's pair is kept once, in `config::PRESETS`).
         for (t, look) in config::PRESETS {
             let kit = kit_look(t).unwrap();
-            match look.palette {
-                ColourSet::TwoColour => {
-                    let rgb = |c: Color| Rgb([c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8));
-                    assert_eq!(look.colours, kit.solid.map(rgb), "{}", kit.id);
-                }
-                p => assert_eq!(colours(p).glow, kit.glow, "{}", kit.id),
+            if look.palette != ColourSet::TwoColour {
+                assert_eq!(colours(look.palette).glow, kit.glow, "{}", kit.id);
             }
         }
     }

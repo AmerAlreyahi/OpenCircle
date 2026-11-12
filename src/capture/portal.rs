@@ -516,13 +516,6 @@ mod tests {
         );
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("oc-portal-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn the_desktop_entry_names_our_id_and_the_exe() {
         let entry = desktop_entry(Path::new("/opt/oc/opencircle"));
@@ -547,7 +540,7 @@ mod tests {
 
     #[test]
     fn writes_the_desktop_file_only_if_missing() {
-        let dir = scratch("desktop");
+        let dir = crate::paths::test_dir("portal-desktop");
         let (home, sys) = (dir.join("home"), dir.join("sys"));
         let file = home.join("applications/com.opencircle.app.desktop");
         let exe = Path::new("/opt/oc/opencircle");
@@ -598,7 +591,7 @@ mod tests {
     /// shadows the system one in the app menu.
     #[test]
     fn a_stale_user_launcher_is_removed_when_run_from_a_package() {
-        let dir = scratch("stale");
+        let dir = crate::paths::test_dir("portal-stale");
         let (home, sys) = (dir.join("home"), dir.join("sys"));
         let user = home.join("applications/com.opencircle.app.desktop");
         let system = sys.join("applications/com.opencircle.app.desktop");
@@ -645,7 +638,7 @@ mod tests {
 
     #[test]
     fn a_screenshot_file_is_deleted_even_when_it_does_not_decode() {
-        let dir = scratch("shot");
+        let dir = crate::paths::test_dir("portal-shot");
         let bad = dir.join("Screenshot.png");
         std::fs::write(&bad, b"not a png").unwrap();
         assert!(read_and_delete(&bad).is_err());

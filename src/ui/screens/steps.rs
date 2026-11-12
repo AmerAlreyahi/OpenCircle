@@ -714,7 +714,6 @@ pub fn stack_numbered(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Optio
 mod tests {
     use super::*;
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     /// A 1080p monitor at 100 %, 40 px taskbar.
     const MONITOR: Place = Place {
@@ -996,9 +995,7 @@ mod tests {
     /// Arabic.
     #[test]
     fn the_strip_matches_its_golden_images() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             for rtl in [false, true] {
                 let make = |n: usize| {
                     let mut s = strip(n);
@@ -1030,8 +1027,6 @@ mod tests {
                     }));
                 }
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

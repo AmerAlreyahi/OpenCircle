@@ -402,14 +402,10 @@ fn the_screen_tool_toolbars_mirror() {
 /// States 1-9 in Sapphire and Daylight.
 #[test]
 fn the_snip_screens_match_their_golden_images() {
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         for (state, mut app) in states() {
             let name = format!("snip-{state}-{}", theme.id);
             failed.extend(shoot(&name, &mut app).err());
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }

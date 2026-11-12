@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use iced::{Element, Size};
 
+use super::super::themes::{self, DAYLIGHT, SAPPHIRE, Theme};
 use super::shot;
 
 pub fn enabled() -> bool {
@@ -40,6 +41,18 @@ pub fn check<'a, Message: 'a>(
         }
     }
     failed
+}
+
+/// `each` once per theme (Sapphire, then Daylight), that theme set; it adds
+/// what differs to `failed`. Then Sapphire again, and nothing may differ.
+pub fn each_theme(mut each: impl FnMut(&'static Theme, &mut Vec<String>)) {
+    let mut failed = Vec::new();
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        each(theme, &mut failed);
+    }
+    themes::set(&SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// RGBA `pixels` (`w` x `h`) against `<dir>/<name>.png`. Tiny differences in

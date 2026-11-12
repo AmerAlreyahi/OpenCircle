@@ -11,7 +11,7 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
-use crate::config::{After, BarAnchor, SearchWith, SelectStyle, SelectionConfig, TextReader};
+use crate::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::labs::{BarButton, Labs};
 use crate::ocr;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
@@ -280,8 +280,6 @@ impl Default for Opening {
             // As before the setting existed; `open` reads the config.
             behaviour: SelectionConfig {
                 style: SelectStyle::Shape,
-                after: After::Wait,
-                search_with: SearchWith::Lens,
                 text_reader: TextReader::Auto,
             },
             morph: None,

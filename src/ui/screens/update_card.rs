@@ -221,7 +221,6 @@ pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
 mod tests {
     use super::*;
     use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     /// v0.1.4's shape: a bold summary, more highlights than shown, Fixes,
     /// Install, Upgrade notes, Known issues.
@@ -319,9 +318,7 @@ mod tests {
     /// English notes one left-to-right block inside it.
     #[test]
     fn the_arabic_whats_new_card_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let _ar = crate::ui::kit::testing::arabic();
             let mut open = Card::installed("0.1.5", NOTES, "https://e.x/r");
             open.fold(0);
@@ -337,17 +334,13 @@ mod tests {
                     view(&c, RADIUS)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 
     /// Short and long (a fold open), Sapphire and Daylight.
     #[test]
     fn every_whats_new_card_matches_its_golden_image() {
-        let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
+        golden::each_theme(|theme, failed| {
             let mut open = Card::installed("0.1.5", NOTES, "https://e.x/r");
             open.fold(0);
             for (name, c) in [
@@ -362,8 +355,6 @@ mod tests {
                     view(&c, RADIUS)
                 }));
             }
-        }
-        themes::set(&SAPPHIRE);
-        assert!(failed.is_empty(), "{failed:#?}");
+        });
     }
 }

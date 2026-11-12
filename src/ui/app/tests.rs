@@ -10,7 +10,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 use crate::Trigger;
 use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
 use crate::capture::CaptureError;
-use crate::config::{self, After, QuickAction, SearchWith, SelectStyle, SelectionConfig, Target};
+use crate::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
 use crate::snip::annotate::{self};
@@ -2860,10 +2860,10 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
     let _ = app.update(Message::AskInput("  ".into()));
     let _ = app.update(Message::AskSubmit);
     assert!(app.o.ai_chat.is_some());
-    // a file that still says "Run at once" (selection.after = "search", both):
+    // a file that still says "Run at once" (selection.after = "search": no longer read):
     // nothing runs by itself either (owner, 2026-10-26: no auto search)
     let mut app = open_app(1280, 800, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Search, SearchWith::Both);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     drag(
         &mut app,
         Point::new(200.0, 150.0),
@@ -3657,11 +3657,9 @@ fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
     assert_eq!(app.o.bar_focus, None);
 }
 
-fn behaviour(style: SelectStyle, after: After, search_with: SearchWith) -> SelectionConfig {
+fn behaviour(style: SelectStyle) -> SelectionConfig {
     SelectionConfig {
         style,
-        after,
-        search_with,
         text_reader: TextReader::Auto,
     }
 }
@@ -3669,7 +3667,7 @@ fn behaviour(style: SelectStyle, after: After, search_with: SearchWith) -> Selec
 #[test]
 fn a_circle_snaps_to_a_box_that_morphs_and_resizes_by_its_brackets() {
     let mut app = open_app(800, 600, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     circle(&mut app, Point::new(300.0, 250.0), 80.0, false);
     let sel = app.o.selection.unwrap();
     assert_eq!(sel.kind, overlay::Kind::Snap);
@@ -3708,7 +3706,7 @@ fn a_circle_snaps_to_a_box_that_morphs_and_resizes_by_its_brackets() {
 /// A snapped box on `text_app`'s page, the screen's text read.
 fn boxed_text(area: Rectangle) -> App {
     let mut app = read_app();
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     let (sel, stroke) = overlay::snap(area);
     (app.o.selection, app.o.stroke) = (Some(sel), stroke);
     app
@@ -3888,7 +3886,7 @@ fn arrows_do_nothing_while_a_text_field_has_the_focus() {
 #[test]
 fn the_selections_actions_wait_for_the_snap_to_finish() {
     let mut app = open_app(1280, 800, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     let pill = |app: &App| {
         let got = crate::ui::kit::testing::shot::click(
             app.view(app.overlay),
@@ -3923,7 +3921,7 @@ fn the_selections_actions_wait_for_the_snap_to_finish() {
 #[test]
 fn a_circle_snaps_only_on_release() {
     let mut app = open_app(800, 600, 1.0);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     let ring = ring(300.0, 250.0, 80.0);
     let press = overlay::Event::Press {
         at: ring[0],
@@ -3949,7 +3947,7 @@ fn a_circle_snaps_only_on_release() {
 /// A snapped box over `text_app`'s lines 1-3, in select-text mode with its words read.
 fn select_text_app() -> App {
     let mut app = text_app();
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     let (sel, stroke) = overlay::snap(Rectangle::new(
         Point::new(40.0, 66.0),
         Size::new(480.0, 112.0),
@@ -4201,7 +4199,7 @@ fn look_shots() {
     };
     let mut app = text_app();
     glowing(&mut app);
-    app.o.behaviour = behaviour(SelectStyle::Snap, After::Wait, SearchWith::Lens);
+    app.o.behaviour = behaviour(SelectStyle::Snap);
     let ring = ring(280.0, 122.0, 110.0)
         .into_iter()
         .map(|p| Point::new(p.x * 1.9 - 250.0, p.y * 0.9 + 12.0))
@@ -4919,10 +4917,7 @@ fn the_wheel_zoom_eases_to_its_target_and_stops() {
 #[test]
 fn the_overlay_hint_matches_the_bar_in_every_theme() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         let mut app = open_app(720, 260, 1.0);
         settle_bar(&mut app);
         let file = format!("overlay-hint-{}", theme.id);
@@ -4933,9 +4928,7 @@ fn the_overlay_hint_matches_the_bar_in_every_theme() {
             &[1.0],
             || app.view(app.overlay),
         ));
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 // --- The pinned AI chat (owner, 2026-10-28) ---

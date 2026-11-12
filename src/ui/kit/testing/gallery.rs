@@ -6,7 +6,7 @@
 use iced::widget::{container, text};
 use iced::{Element, Event, Fill, Point, Size, mouse};
 
-use super::super::themes::{self, DAYLIGHT, SAPPHIRE, c};
+use super::super::themes::{self, c};
 use super::super::tokens::{Role, radius};
 use super::super::{
     button, card, chip, divider, error_card, field, header, panel_frame, progress, scroll,
@@ -92,9 +92,7 @@ fn sheet(component: &str, size: Size, rows: &[Row]) {
     }
     let (cw, ch, lw) = (size.width as usize, size.height as usize, LABEL as usize);
     let w = lw + 2 * cw;
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         let mut pixels = vec![0; w * ch * rows.len() * 4];
         for (i, r) in rows.iter().enumerate() {
             let parts = [
@@ -114,9 +112,7 @@ fn sheet(component: &str, size: Size, rows: &[Row]) {
         if let Err(e) = golden::compare("kit", &name, w, h, &pixels) {
             failed.push(e);
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 #[test]

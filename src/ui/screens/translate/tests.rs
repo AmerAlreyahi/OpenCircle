@@ -774,7 +774,6 @@ fn paste_puts_the_area_back_in_place() {
 #[test]
 fn every_translate_state_matches_its_golden_image() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const SCREEN: Size = Size::new(960.0, 600.0);
     let at = card::place(SCREEN, None, None);
     let make = |name: &str| {
@@ -823,9 +822,7 @@ fn every_translate_state_matches_its_golden_image() {
         "word",
         "word-explained",
     ];
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         for name in names {
             let s = make(name);
             let file = format!("translate-{name}-{}", theme.id);
@@ -842,9 +839,7 @@ fn every_translate_state_matches_its_golden_image() {
                 s.view(size, at, false)
             }));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// Picking another language leaves no part of the old name on screen: each
@@ -879,7 +874,7 @@ fn a_changed_language_leaves_no_ghost_text() {
 #[test]
 fn every_picker_state_matches_its_golden_image() {
     use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+
     use crate::ui::picker::{Msg as P, Nav, Side};
     const SCREEN: Size = Size::new(720.0, 440.0);
     let at = card::place(SCREEN, None, None);
@@ -932,9 +927,7 @@ fn every_picker_state_matches_its_golden_image() {
         }
         s
     };
-    let mut failed = Vec::new();
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
+    golden::each_theme(|theme, failed| {
         for name in [
             "p1-closed",
             "p2-source",
@@ -969,9 +962,7 @@ fn every_picker_state_matches_its_golden_image() {
                 s.view(size, at, false)
             }));
         }
-    }
-    themes::set(&SAPPHIRE);
-    assert!(failed.is_empty(), "{failed:#?}");
+    });
 }
 
 /// On narrow screens the word card's side slot reaches the pill: it moves

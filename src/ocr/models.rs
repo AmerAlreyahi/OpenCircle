@@ -717,12 +717,6 @@ pub(crate) mod tests {
         source: Source::Plain(""),
     };
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("oc-ocr-{name}-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     /// Every language's recognizer exists; ids and files are unique and pinned.
     #[test]
     fn recognizer_table_and_choice() {
@@ -768,7 +762,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checksum_rejects_corrupt_download_and_keeps_nothing() {
-        let dir = temp_dir("corrupt");
+        let dir = crate::paths::test_dir("ocr-corrupt");
         let dest = dir.join(HELLO.name);
         for bad in [&b"hellO"[..], b"hell", b"hello!"] {
             let r = write_verified(bad, &dest, &HELLO, |_| {});
@@ -800,7 +794,7 @@ pub(crate) mod tests {
     #[test]
     fn ensure_spans_folders_and_fetches_only_what_is_missing() {
         LOCAL_FAKE.set(true); // its files come from a local fake server
-        let dir = temp_dir("ensure");
+        let dir = crate::paths::test_dir("ocr-ensure");
         let files = [
             (dir.join("a/hello.bin"), &HELLO),
             (dir.join("b/hello.bin"), &HELLO),
@@ -914,8 +908,7 @@ pub(crate) mod tests {
     /// Downloads `f` into a fresh folder: the result and the folder.
     fn download(f: &'static ModelFile, name: &str) -> (Result<(), OcrError>, PathBuf) {
         LOCAL_FAKE.set(true);
-        let dir = temp_dir(name);
-        let _ = fs::remove_file(dir.join(f.name));
+        let dir = crate::paths::test_dir(&format!("ocr-{name}"));
         let got = ensure(&[(dir.join(f.name), f)], |_, _| {});
         (got, dir)
     }
@@ -977,7 +970,7 @@ pub(crate) mod tests {
         let data = payload();
         let (f, seen) = fake_server("stale.bin", data, vec![Answer::File]);
         LOCAL_FAKE.set(true);
-        let dir = temp_dir("stale");
+        let dir = crate::paths::test_dir("ocr-stale");
         let _ = fs::remove_file(dir.join(f.name));
         fs::write(dir.join("stale.part"), vec![b'x'; data.len() / 2]).unwrap();
         ensure(&[(dir.join(f.name), f)], |_, _| {}).unwrap();
