@@ -23,7 +23,6 @@ autotests = false
 autobenches = false
 description = "An Optical Character Recognition (OCR) and Document Layout Analysis library written in Rust."
 homepage = "https://github.com/greatv/oar-ocr"
-readme = "README.md"
 keywords = [
     "ocr",
     "onnx",
@@ -57,66 +56,6 @@ webgpu = ["oar-ocr-core/webgpu"]
 [lib]
 name = "oar_ocr"
 path = "src/lib.rs"
-
-[[example]]
-name = "auto_download"
-path = "examples/auto_download.rs"
-
-[[example]]
-name = "document_orientation"
-path = "examples/document_orientation.rs"
-
-[[example]]
-name = "document_rectification"
-path = "examples/document_rectification.rs"
-
-[[example]]
-name = "formula_recognition"
-path = "examples/formula_recognition.rs"
-
-[[example]]
-name = "indra"
-path = "examples/indra.rs"
-
-[[example]]
-name = "layout_detection"
-path = "examples/layout_detection.rs"
-
-[[example]]
-name = "ocr"
-path = "examples/ocr.rs"
-
-[[example]]
-name = "seal_text_detection"
-path = "examples/seal_text_detection.rs"
-
-[[example]]
-name = "structure"
-path = "examples/structure.rs"
-
-[[example]]
-name = "table_cell_detection"
-path = "examples/table_cell_detection.rs"
-
-[[example]]
-name = "table_classification"
-path = "examples/table_classification.rs"
-
-[[example]]
-name = "table_structure_recognition"
-path = "examples/table_structure_recognition.rs"
-
-[[example]]
-name = "text_detection"
-path = "examples/text_detection.rs"
-
-[[example]]
-name = "text_line_orientation"
-path = "examples/text_line_orientation.rs"
-
-[[example]]
-name = "text_recognition"
-path = "examples/text_recognition.rs"
 
 [dependencies.image]
 version = "0.25.6"
