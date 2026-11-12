@@ -66,7 +66,7 @@ macro_rules! pair {
         Pair {
             source: $src,
             target: $tgt,
-            dir: concat!("opus-mt-", $pair),
+            dir: concat!("OptimaMT-", $pair),
             encoder: $url!(
                 $pair,
                 $rev,
@@ -1713,15 +1713,103 @@ pub fn unavailable(source: &str, target: &str) -> String {
     )
 }
 
+/// Moves every pair's old-named folder (`opus-mt-<pair>`) to its OptimaMT
+/// name, once per start, before any helper runs (the app's start path): the
+/// models are the same files, nothing is downloaded. One directory listing
+/// when there is nothing to move.
+pub fn adopt_old_folders() {
+    adopt_old_folders_in(&models_root(), |old, new| std::fs::rename(old, new));
+}
+
+/// `adopt_old_folders` in `root`, moving with `mv` (a test locks one).
+/// Only the old folder: it is moved when the new name is free (one atomic
+/// rename, a `.part` of the lighter-model update goes with it). Both there (a
+/// crash, or a downgrade and an upgrade): the one with more files at their
+/// pinned size stays (the new one on a tie), the other is removed; never both.
+/// A move that fails (a file open on Windows) leaves the old folder in use
+/// (`Pair::dir`) and is tried again at the next start.
+fn adopt_old_folders_in(root: &Path, mv: impl Fn(&Path, &Path) -> std::io::Result<()>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let pair = (name.strip_prefix(OLD_DIR_PREFIX))
+            .and_then(|rest| (PAIRS.iter()).find(|p| p.dir.strip_prefix(DIR_PREFIX) == Some(rest)));
+        let Some(pair) = pair else {
+            continue;
+        };
+        let (old, new) = (entry.path(), root.join(pair.dir));
+        if new.exists() {
+            let old_wins = pair.intact(&old) > pair.intact(&new);
+            let loser = if old_wins { &new } else { &old };
+            if let Err(e) = std::fs::remove_dir_all(loser) {
+                crate::log!(
+                    "[opencircle] models: cannot remove {}: {e}",
+                    loser.display()
+                );
+                continue;
+            }
+            if !old_wins {
+                crate::log!("[opencircle] models: removed the old copy {name}");
+                continue;
+            }
+        }
+        match mv(&old, &new) {
+            Ok(()) => crate::log!("[opencircle] models: {name} is now {}", pair.dir),
+            Err(e) => crate::log!("[opencircle] models: {name} stays for now: {e}"),
+        }
+    }
+}
+
 /// Per-user folder (Linux `~/.local/share/OpenCircle/mt`, Windows
 /// `%LOCALAPPDATA%\OpenCircle\mt`), beside OCR's.
 fn models_root() -> PathBuf {
     crate::paths::mt()
 }
 
+/// A pair's folder name starts with this, then `<source>-<target>`: the
+/// OptimaMT name (the Hugging Face repos are `OptimaMT/<source>-<target>`).
+/// (`pair!` spells it as a literal.)
+const DIR_PREFIX: &str = "OptimaMT-";
+
+/// What the folders were called before v0.1.7 (the models are Helsinki-NLP's
+/// OPUS-MT, which About and NOTICE credit).
+const OLD_DIR_PREFIX: &str = "opus-mt-";
+
 impl Pair {
+    /// Its folder: the OptimaMT-named one, or, until `adopt_old_folders` could
+    /// move it (a locked folder on Windows: tried again at the next start),
+    /// the old-named one that is still there, so translation never breaks.
     fn dir(&self) -> PathBuf {
-        models_root().join(self.dir)
+        let new = models_root().join(self.dir);
+        match new.exists() {
+            true => new,
+            false => {
+                let old = models_root().join(self.old_dir());
+                if old.exists() { old } else { new }
+            }
+        }
+    }
+
+    /// Its folder's name before v0.1.7.
+    fn old_dir(&self) -> String {
+        format!(
+            "{OLD_DIR_PREFIX}{}",
+            self.dir.strip_prefix(DIR_PREFIX).unwrap_or(self.dir)
+        )
+    }
+
+    /// How many of its files are here at the pinned size (the decoder: v2 or
+    /// v1) in `folder`: which of two copies of a pair is the whole one.
+    fn intact(&self, folder: &Path) -> usize {
+        let v1 = self.v1().map(|f| f.size);
+        let decoder = |size: u64| has_size(&folder.join(self.decoder.name), size);
+        let files = [&self.encoder, &self.spm, &self.vocab]
+            .iter()
+            .filter(|f| has_size(&folder.join(f.name), f.size))
+            .count();
+        files + usize::from(decoder(self.decoder.size) || v1.is_some_and(decoder))
     }
 
     /// "English → French local translation".
@@ -1748,7 +1836,7 @@ impl Pair {
     fn v1(&self) -> Option<ModelFile> {
         V1_DECODERS
             .iter()
-            .find(|f| self.dir.strip_prefix("opus-mt-") == Some(f.0))
+            .find(|f| self.dir.strip_prefix(DIR_PREFIX) == Some(f.0))
             .map(|&(_, size, sha)| ModelFile::plain(self.decoder.name, size, sha, ""))
     }
 
@@ -2405,7 +2493,7 @@ mod tests {
                     .all(|o| (o.source, o.target) != (p.source, p.target))
             );
             assert!(PAIRS[..i].iter().all(|o| o.dir != p.dir));
-            assert_eq!(p.dir, format!("opus-mt-{}-{}", p.source, p.target));
+            assert_eq!(p.dir, format!("{DIR_PREFIX}{}-{}", p.source, p.target));
             for f in [&p.encoder, &p.decoder, &p.spm, &p.vocab] {
                 assert!(f.size > 0 && f.sha256.len() == 64, "{}/{}", p.dir, f.name);
                 assert!(f.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -2435,7 +2523,7 @@ mod tests {
             assert!(format!("{:?}", p.decoder).contains(&url), "{}", p.dir);
             let v1 = V1_DECODERS
                 .iter()
-                .find(|f| p.dir == format!("opus-mt-{}", f.0));
+                .find(|f| p.dir == format!("{DIR_PREFIX}{}", f.0));
             assert_ne!(p.decoder.size, v1.unwrap().1, "{}", p.dir);
             assert!(
                 !format!("{:?}", p.encoder).contains("models-v2"),
@@ -2621,9 +2709,125 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A pair's folder in `root` named `name`, its files sparse at the pinned
+    /// sizes (`whole`) or only its encoder.
+    fn model_folder(root: &Path, name: &str, p: &Pair, whole: bool) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut files = vec![&p.encoder];
+        if whole {
+            files.extend([&p.decoder, &p.spm, &p.vocab]);
+        }
+        for f in files {
+            std::fs::File::create(dir.join(f.name))
+                .and_then(|file| file.set_len(f.size))
+                .unwrap();
+        }
+        dir
+    }
+
+    fn mt_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("oc-mt-fold-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn rename(old: &Path, new: &Path) -> std::io::Result<()> {
+        std::fs::rename(old, new)
+    }
+
+    /// An old-named folder becomes the OptimaMT-named one: the same files
+    /// (a lighter-model update's `.part` too), still whole by the pins (so
+    /// the next Translate use downloads nothing), and a route through English
+    /// moves both of its pairs; the spelling is the Hugging Face repo's.
+    #[test]
+    fn old_model_folders_are_renamed_with_their_files() {
+        let root = mt_root("rename");
+        let (en_fr, fr_en) = (pair("en", "fr").unwrap(), pair("fr", "en").unwrap());
+        assert_eq!(en_fr.dir, "OptimaMT-en-fr");
+        for p in [en_fr, fr_en] {
+            let old = model_folder(&root, &p.old_dir(), p, true);
+            std::fs::write(old.join("decoder.onnx.v2.part"), b"x").unwrap();
+        }
+        assert_eq!(en_fr.old_dir(), "opus-mt-en-fr");
+        let other = root.join("somebody-else");
+        std::fs::create_dir_all(&other).unwrap();
+        adopt_old_folders_in(&root, rename);
+        for p in [en_fr, fr_en] {
+            let new = root.join(p.dir);
+            assert!(!root.join(p.old_dir()).exists());
+            assert_eq!(p.intact(&new), 4, "whole: nothing to download");
+            assert!(new.join("decoder.onnx.v2.part").exists(), "moves with it");
+        }
+        assert!(other.exists(), "nothing else is touched");
+        // nothing to do: the same again changes nothing
+        adopt_old_folders_in(&root, rename);
+        assert!(root.join(en_fr.dir).is_dir() && !root.join(en_fr.old_dir()).exists());
+        // an empty or missing root is fine
+        adopt_old_folders_in(&root.join("nowhere"), rename);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Both there (a crash, or a downgrade then an upgrade): the whole one
+    /// stays whichever name it has, the other is removed, never both.
+    #[test]
+    fn two_copies_leave_the_whole_one() {
+        let p = pair("en", "fr").unwrap();
+        for (old_whole, new_whole, tie) in [
+            (true, false, false),
+            (false, true, false),
+            (true, true, true),
+        ] {
+            let root = mt_root("both");
+            let old = model_folder(&root, &p.old_dir(), p, old_whole);
+            let new = model_folder(&root, p.dir, p, new_whole);
+            std::fs::write(old.join("only-old"), b"o").unwrap();
+            std::fs::write(new.join("only-new"), b"n").unwrap();
+            adopt_old_folders_in(&root, rename);
+            assert!(!old.exists(), "one folder is left: {old_whole} {new_whole}");
+            assert_eq!(p.intact(&new), if old_whole || new_whole { 4 } else { 1 });
+            // the old one's files came over, or the new one stayed (a tie)
+            assert_eq!(new.join("only-old").exists(), old_whole && !tie);
+            assert_eq!(new.join("only-new").exists(), !old_whole || tie);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// A folder that can't be renamed now (a file open on Windows) stays where
+    /// it is, still used (`Pair::dir` falls back to it) and not removed; the
+    /// next start moves it.
+    #[test]
+    fn a_locked_folder_is_left_and_moved_at_the_next_start() {
+        let root = mt_root("locked");
+        let p = pair("en", "fr").unwrap();
+        let old = model_folder(&root, &p.old_dir(), p, true);
+        let locked = |_: &Path, _: &Path| Err(std::io::Error::other("in use"));
+        adopt_old_folders_in(&root, locked);
+        assert!(old.is_dir() && !root.join(p.dir).exists());
+        assert_eq!(p.intact(&old), 4, "nothing lost");
+        adopt_old_folders_in(&root, rename);
+        assert!(!old.exists() && root.join(p.dir).is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The folders are under the data folder uninstall removes whole, and the
+    /// OptimaMT spelling is the one of the repos on Hugging Face.
+    #[test]
+    fn the_model_folders_sit_under_the_data_folder_uninstall_removes() {
+        let (data, config) = (PathBuf::from("/d"), PathBuf::from("/c"));
+        let removed = crate::paths::user_data_in(Some(&data), Some(&config));
+        let folder = data.join("OpenCircle").join("mt").join(PAIRS[0].dir);
+        assert!(removed.iter().any(|r| folder.starts_with(r)), "{removed:?}");
+        for p in &PAIRS {
+            let hf = format!("OptimaMT/{}-{}", p.source, p.target);
+            assert_eq!(p.dir.replacen('-', "/", 1), hf);
+        }
+    }
+
     /// The real en-ar pair with its v1 decoder (the file 0.1.3 downloaded)
     /// translates without a download. XDG_DATA_HOME must hold v0.1.3's
-    /// OpenCircle/ocr and OpenCircle/mt/opus-mt-en-ar:
+    /// OpenCircle/ocr and OpenCircle/mt/OptimaMT-en-ar:
     /// `cargo test --release mt::tests::real_v1 -- --ignored --nocapture`
     #[test]
     #[ignore]

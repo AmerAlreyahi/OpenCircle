@@ -242,6 +242,8 @@ fn main() -> ExitCode {
     autostart::apply(&config);
     #[cfg(target_os = "linux")]
     capture::portal::repair_user_launcher();
+    // before any helper can have a model file open: old-named model folders get the OptimaMT name
+    mt::adopt_old_folders();
     std::thread::spawn(|| remove_old_webview(&paths::app_data()));
     std::thread::spawn(|| remove_search_history(paths::search_history().as_deref()));
     // once: the key all OpenAI-compatible providers shared goes to the one chosen

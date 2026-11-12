@@ -43,6 +43,10 @@ only to the server of the provider it belongs to. A remote server must use `http
   (shown as `~`) are removed from every line before it is written. Your
   captures, clipboard, recognised text, translations and prompts are not
   logged. **Nothing is sent**: the files stay on your PC until you delete them.
+- **Translation and text-reading models.** The models you downloaded stay in
+  `OpenCircle/mt` (one `OptimaMT-<from>-<into>` folder per translation pair)
+  and `OpenCircle/ocr` in your local data folder, until you delete them or
+  you uninstall and remove your data.
 - **Copy diagnostics / Report a problem** (Settings > About). *Copy
   diagnostics* puts a report on your clipboard (version, Windows build,
   screens, a settings summary without keys or folders, which experiments are

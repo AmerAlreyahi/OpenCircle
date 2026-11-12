@@ -82,6 +82,13 @@ Choose one in **Settings → Translate → Engine**.
   501 -> 256 MB in the helper, measured for one pair). A download that hits a server error or a
   dropped connection retries by itself and resumes where it stopped.
 
+  **Where they are kept.** Each pair has its own folder in your local data
+  folder, `OpenCircle/mt/OptimaMT-<from>-<into>` (for example `OptimaMT-en-ar`,
+  the name of its OptimaMT repository). Folders an older version named
+  `opus-mt-<from>-<into>` are renamed to this once, when OpenCircle starts:
+  the same files, nothing is downloaded again. (An older version of OpenCircle
+  does not know the new names and downloads its models again.)
+
   **Older, heavier decoders.** A pair downloaded before v0.1.4 still has the
   first decoder. It keeps translating, and the next time you translate with
   it, OpenCircle downloads the lighter decoder for that pair in the
