@@ -124,7 +124,10 @@ fn main() -> ExitCode {
             std::process::exit(code as i32);
         }
         match setup::parse_silent(&args) {
-            Ok(Some(what)) => std::process::exit(setup::silent(msi, what) as i32),
+            Ok(Some(what)) => {
+                let log = setup::log_path(&args);
+                std::process::exit(setup::silent(msi, what, log.as_deref()) as i32)
+            }
             Err(code) => std::process::exit(code as i32),
             Ok(None) => {}
         }

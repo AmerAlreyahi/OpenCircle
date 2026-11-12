@@ -68,7 +68,14 @@ fn main() {
                 None => "opencircle.exe",
             },
         )
-        .set("LegalCopyright", "MIT License")
+        // FileVersion / ProductVersion (winresource: Cargo's version, which release.yml
+        // stamps from the tag), CompanyName and the copyright: what Explorer's Details
+        // tab, SmartScreen and winget show. The owner's public name, as in LICENSE.md.
+        .set("CompanyName", "Amer Alreyahi")
+        .set(
+            "LegalCopyright",
+            "Copyright (c) 2026 Amer Zuher Alreyahi. MIT License.",
+        )
         .compile()
         .expect("embed the Windows icon and version info");
 }

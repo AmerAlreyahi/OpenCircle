@@ -100,6 +100,9 @@ product-name = "OpenCircle"
 identifier = "com.opencircle.app"
 category = "Utility"
 authors = ["OpenCircle contributors"]
+# The MSI's Manufacturer = Apps & features' Publisher (else cargo-packager derives
+# "opencircle" from the identifier). The owner's public name, as in LICENSE.md.
+publisher = "Amer Alreyahi"
 homepage = "https://github.com/AmerAlreyahi/OpenCircle"
 before-packaging-command = "cargo build --release"
 binaries = [{ path = "opencircle", main = true }]

@@ -150,6 +150,30 @@ Check a download with `SHA256SUMS.txt` from the same release:
 sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
+### Silent install (IT, winget, Scoop)
+
+The setup installs for all users (it needs an administrator: from a normal prompt it
+stops with exit code 1925; winget and IT tools elevate it). It starts nothing and returns
+when the install is done.
+
+| Switch | Does |
+|---|---|
+| `/quiet` (also `/qn`, `/silent`) | no window; install or update in place |
+| `/dir="C:\Apps\OpenCircle"` | folder of a fresh install (an update stays where it is) |
+| `/uninstall /quiet` | remove OpenCircle (your settings and models stay) |
+| `/log="C:\Temp\opencircle-setup.log"` | Windows Installer's verbose log of the run |
+| `/managed=<name>` | a package manager or IT tool updates this copy: OpenCircle's own updater stays off (it still says when a newer version exists). Writes `opencircle.managed` beside the exe; delete the file to switch it back on |
+| `/norestart` | accepted, nothing restarts the PC |
+
+Exit codes (Windows Installer's): `0` done, `3010` done, restart wanted, `1641` done,
+restart started, `1602` cancelled, `1603` fatal error, `1618` another install is running,
+`1638` a newer version is installed, `1639` bad `/dir`, `1925` not run as administrator.
+
+Once the store packages are published, with winget: `winget install AmerAlreyahi.OpenCircle`. A copy installed through winget keeps its own
+updater (it updates through the same setup and winget sees the new version in Apps & features);
+`winget upgrade` works too. With Scoop (portable exe): `scoop bucket add opencircle https://github.com/AmerAlreyahi/scoop-bucket`,
+then `scoop install opencircle`; Scoop owns the updates there (the updater is off, Settings > General says so).
+
 **Windows SmartScreen** may say "Windows protected your PC" because the
 installers are not code-signed yet (the project is free). Click **More info**,
 then **Run anyway**. See [Signing](docs/signing.md) to sign your own build.

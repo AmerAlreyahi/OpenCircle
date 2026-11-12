@@ -9,6 +9,9 @@
 <?endif?>
 
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <!-- {{manufacturer}} is the packager's `publisher` (Cargo.toml): Apps & features'
+         Publisher. The HKCU keys below keep the literal name they always had
+         ("opencircle"), so an upgrade finds the folder and components it knew. -->
     <Product
             Id="*"
             Name="{{product_name}}"
@@ -76,7 +79,7 @@
 
         <!-- initialize with previous InstallDir -->
         <Property Id="INSTALLDIR">
-            <RegistrySearch Id="PrevInstallDirReg" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstallDir" Type="raw"/>
+            <RegistrySearch Id="PrevInstallDirReg" Root="HKCU" Key="Software\\opencircle\\{{product_name}}" Name="InstallDir" Type="raw"/>
         </Property>
 
         <!-- launch app checkbox -->
@@ -119,7 +122,7 @@
 
         <DirectoryRef Id="INSTALLDIR">
             <Component Id="RegistryEntries" Guid="*">
-                <RegistryKey Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}">
+                <RegistryKey Root="HKCU" Key="Software\\opencircle\\{{product_name}}">
                     <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
                 </RegistryKey>
                 <!-- Change the Root to HKCU for perUser installations -->
@@ -171,9 +174,11 @@
 
 				<RemoveFolder Id="INSTALLDIR"
 							  On="uninstall" />
+				<!-- the file the setup's /managed=<name> writes (src/update: MANAGED_FILE) -->
+				<RemoveFile Id="ManagedMarker" Name="opencircle.managed" On="uninstall" />
 
 				<RegistryValue Root="HKCU"
-							   Key="Software\\{{manufacturer}}\\{{product_name}}"
+							   Key="Software\\opencircle\\{{product_name}}"
 							   Name="Uninstaller Shortcut"
 							   Type="integer"
 							   Value="1"
@@ -194,7 +199,7 @@
                     <ShortcutProperty Key="System.AppUserModel.ID" Value="{{identifier}}"/>
                 </Shortcut>
                 <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
-                <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Start Menu Shortcut" Type="integer" Value="1" KeyPath="yes"/>
+                <RegistryValue Root="HKCU" Key="Software\\opencircle\\{{product_name}}" Name="Start Menu Shortcut" Type="integer" Value="1" KeyPath="yes"/>
            </Component>
         </DirectoryRef>
 

@@ -202,8 +202,12 @@ pub fn outcome(code: u32, last: Option<&str>) -> Result<(), Fault> {
 
 #[cfg(windows)]
 pub use win::{
-    ask_yes_no, install, install_quiet, installed, installed_size, uninstall, uninstall_quiet,
+    ask_yes_no, enable_log, install, install_quiet, installed, installed_size, uninstall,
+    uninstall_quiet,
 };
+
+#[cfg(not(windows))]
+pub fn enable_log(_: &str) {}
 
 #[cfg(not(windows))]
 pub fn installed_size(_: &Package) -> Option<u64> {
@@ -403,6 +407,19 @@ mod win {
             _ => {}
         }
         0
+    }
+
+    /// Windows Installer's verbose log of the next install / uninstall in this
+    /// process goes (appended) to `file` (`/log=`).
+    pub fn enable_log(file: &str) {
+        // SAFETY: a NUL-terminated wide string that outlives the call.
+        let _ = unsafe {
+            MsiEnableLogW(
+                INSTALLLOGMODE_VERBOSE,
+                &HSTRING::from(file),
+                INSTALLLOGATTRIBUTES_APPEND.0 as u32,
+            )
+        };
     }
 
     pub fn install(package: &Package, folder: &str, repair: bool, report: &dyn Fn(Event)) {
