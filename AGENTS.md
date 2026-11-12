@@ -1018,3 +1018,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Translation preview pacing (owner, 2026-11-03): every target language must be recognizable; preserve actual language changes and allow readable result holds. Separate language clips and editorial labels/freezes are allowed. Do not compress the sequence so language choices disappear.
 
 - Preview task scope (owner, 2026-11-03, latest): stop image-source investigation; finish the translation-video pacing revision, then stop this editing task. Existing provenance findings remain notes; this is not an instruction to publish or install clips.
+
+- v0.1.7 size clean-up (owner, 2026-11-12, "ok", after the size audit: 141,421 Rust lines = 86,773 product + 54,648 tests;
+  code written twice is about 1-3 %): done now, no behaviour change: the audit's safe group (model pin table one row per
+  entry, one golden helper, the unread `selection.after` / `search_with` keys, small duplicates), the vendored OCR library's
+  never-compiled files, and the switched-off edge-glow breathing code (deleted; SUPERSEDES the 4 s breath of "Screen edge",
+  2026-10-27: the glow is static). The rest of the audit (shared wrapper widget, test helpers, the Lens page's PNG code,
+  splitting long files) goes with v0.1.8's restructure.
