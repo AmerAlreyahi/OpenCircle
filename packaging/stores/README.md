@@ -30,7 +30,7 @@ Test (Windows 10/11, elevated PowerShell, folder = `packaging/stores/winget/0.1.
 
     winget validate --manifest <folder>
     winget settings --enable LocalManifestFiles
-    winget install --manifest <folder>          # takes about 2 minutes on a VM: the Setup runs the MSI
+    winget install --manifest <folder>          # an unsigned exe from a local manifest shows SmartScreen: click More info > Run anyway (see "Why ... waits" below)
     winget list OpenCircle                       # must show Id ARP\Machine\X64\OpenCircle, version 0.1.6
     winget uninstall --id "ARP\Machine\X64\OpenCircle"
     # optional, isolated: Tools\SandboxTest.ps1 <folder> in the clone (Windows Sandbox, Pro/Enterprise)
@@ -142,8 +142,24 @@ Notes on the manifest:
    stores use the hyphen one; nothing to change (frozen channel).
 7. Silent install time under winget's pipeline timeouts: not measured.
 
-If `winget install` waits at "Starting package install": run it with `--verbose-logs` (logs under
-`%LOCALAPPDATA%\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir`), look for a
-`Zone.Identifier` stream on the downloaded Setup in `%TEMP%\WinGet\...` (a Mark of the Web on an unsigned exe can raise a
-security prompt that nothing shows), and run the same Setup by hand from an elevated prompt (`/quiet`, then `echo %errorlevel%`). There is no `/log` switch: a setup that runs as
-administrator must not write to a path the caller chose (planted-link risk).
+### Why `winget install --manifest` waits at "Starting package install" (measured, Windows 10 VM, winget 1.29.380)
+
+Not the Setup: while it waits there is no Setup process. winget downloads the exe, marks it (Mark of the Web,
+`ZoneId=3`, internet) and launches it with ShellExecute; for an UNSIGNED exe Windows shows SmartScreen's "Windows
+protected your PC - Microsoft Defender SmartScreen prevented an unrecognized app from starting" (buttons "More info" /
+"Don't run"; a `CHXSmartScreen` window the user may not see in a non-interactive session) and winget waits behind it.
+Proof on the VM (one scripted pass): as is, winget hung 151 s with that dialog; the same manifest with the download not
+marked (policy `SaveZoneInformation=1`) installed in 9 s ("Successfully installed"); the Setup copy with `ZoneId=3`
+started by ShellExecute blocked on the prompt, the same file with `ZoneId=2` or no stream ran at once.
+Why a local manifest differs from the repository: winget's `UpdateInstallerFileMotwIfApplicable` writes `ZoneId=2`
+(Trusted) only for an installer whose package comes from a source with trust level Trusted (the default `winget`
+community source), and `ZoneId=3` through the Attachment Execution Service for everything else, which a local
+`--manifest` is. Measured: `winget download` of Notepad++ and of 7-Zip (7-Zip's MSI is not signed) from the community source
+wrote `ZoneId=2`. So a package installed from the repository gets no prompt, signed or not.
+Answer: v0.1.7 may be submitted unsigned; `winget install AmerAlreyahi.OpenCircle` from the repository should then
+install without the prompt (not provable until the package is live; the first moderator run and a first install on a clean PC
+are the proof). `winget install --manifest <local>` of an unsigned exe always shows the prompt (`Unblock-File` on the download is
+useless: winget marks it again): click "More info" > "Run anyway", or test with the policy above. Code signing
+(SignPath Foundation, applied for: README "Code signing policy") would remove the prompt for local installs and for
+direct downloads too, and builds SmartScreen reputation; it is not required for winget.
+There is no `/log` switch: a setup that runs as administrator must not write to a path the caller chose (planted-link risk).
