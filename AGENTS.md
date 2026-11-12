@@ -932,6 +932,18 @@ production systems.
   that release; the owner opens the PRs. (4) Old worktrees: their unsaved reports/proof are archived outside the repo,
   then the worktrees are removed.
 
+- Model folders carry the OptimaMT name (owner, 2026-11-12, "why not the OptimaMT name?"): the translation model folders
+  on disk are renamed from `opus-mt-<pair>` to the OptimaMT naming (the Hugging Face repos are `OptimaMT/<source>-<target>`),
+  once, at start, for every existing install (no re-download; an old-named folder is found and moved, never left beside
+  the new one). The OPUS-MT credit and licence stay in About / NOTICE.
+- v0.1.7 publish (owner, 2026-11-12, "you can publish directly"; lead's reading): the lead may PUBLISH v0.1.7 without
+  asking again, but only when every gate has passed (clean-up, the security review and QA gates of the last 0.1.x, docs
+  and notes, CI green, the update gate v0.1.6 Setup + portable -> draft on the Windows VM, About opened on the draft exe,
+  the Ubuntu AppImage check); any failure = it stays a draft for the owner.
+- Code size (owner, 2026-11-12, "too many lines, how?"): measured 137,558 Rust lines = 89,247 product + 48,311 tests (35 %).
+  The owner doubts the size: the release clean-up includes a real size audit (duplication, dead code, things written
+  twice), with a list for the owner and before -> after line counts; the feature-folder restructure comes after v0.1.7.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
