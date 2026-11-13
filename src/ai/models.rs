@@ -11,8 +11,8 @@ use serde_json::Value;
 
 use super::providers::{Api, Preset};
 use super::{AiError, HttpRequest, join_url, map_status};
-use crate::config::AiConfig;
-use crate::secrets::Secret;
+use crate::shared::config::AiConfig;
+use crate::shared::secrets::Secret;
 
 /// What the provider charges for a model, by its own word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,7 +305,7 @@ mod tests {
     use super::super::mock;
     use super::super::providers::{ANTHROPIC, PRESETS};
     use super::*;
-    use crate::config::Provider;
+    use crate::shared::config::Provider;
 
     fn preset(id: &str) -> Preset {
         *PRESETS.iter().find(|p| p.id == id).unwrap()

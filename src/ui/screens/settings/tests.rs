@@ -8,16 +8,16 @@ use iced::{Color, Element, Length, Size};
 use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
-use crate::config::{
+use crate::labs::{Feature, Labs};
+use crate::music::{self};
+use crate::shared::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,
 };
-use crate::labs::{Feature, Labs};
-use crate::music::{self};
-use crate::secrets::{AiKey, KeyStore, Secret, SecretsError};
 use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion;
 use crate::shared::platform::hotkey::{DesktopKey, managed};
+use crate::shared::secrets::{AiKey, KeyStore, Secret, SecretsError};
 use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES};
 
@@ -25,7 +25,7 @@ use crate::translate::lang::{self, LANGUAGES};
 fn view(s: &State) -> Element<'_, Message> {
     super::view(s, false)
 }
-use crate::secrets::MemoryStore;
+use crate::shared::secrets::MemoryStore;
 
 /// `update` with its disk write done at once (the shell does it on a thread),
 /// and its motion over (the shots show the window at rest).
@@ -75,7 +75,7 @@ fn general_has_the_start_with_the_os_switch_on_by_default() {
     assert!(
         texts
             .iter()
-            .any(|t| t == crate::app_language::tr(pages::START_LABEL)),
+            .any(|t| t == crate::shared::app_language::tr(pages::START_LABEL)),
         "{texts:?}"
     );
     update(&mut s, Message::Autostart(false));
@@ -104,14 +104,22 @@ fn ai_has_the_chat_rows_and_saves_them() {
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
-    update(&mut s, Message::ChatStays(crate::config::StaysOpen::Always));
+    update(
+        &mut s,
+        Message::ChatStays(crate::shared::config::StaysOpen::Always),
+    );
     update(&mut s, Message::KeepChats(false));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.problems);
     };
-    assert_eq!(cfg.chat.stays_open, crate::config::StaysOpen::Always);
+    assert_eq!(
+        cfg.chat.stays_open,
+        crate::shared::config::StaysOpen::Always
+    );
     let back = Config::load_from(&path).0;
-    assert!(!back.chat.keep_history && back.chat.stays_open == crate::config::StaysOpen::Always);
+    assert!(
+        !back.chat.keep_history && back.chat.stays_open == crate::shared::config::StaysOpen::Always
+    );
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
@@ -141,7 +149,7 @@ fn song_search_section_saves_a_write_only_token_and_its_choices() {
     assert!(
         texts
             .iter()
-            .any(|t| t == crate::app_language::tr(SONG_PRIVACY)),
+            .any(|t| t == crate::shared::app_language::tr(SONG_PRIVACY)),
         "{texts:?}"
     );
     assert!(texts.iter().any(|t| t.contains("dashboard.audd.io")));
@@ -187,7 +195,7 @@ impl KeyStore for Shared {
 }
 
 pub fn tmp(tag: &str) -> PathBuf {
-    crate::paths::test_dir(&format!("settings-test-{tag}")).join("config.toml")
+    crate::shared::paths::test_dir(&format!("settings-test-{tag}")).join("config.toml")
 }
 
 fn state(path: Option<PathBuf>) -> (State, Arc<MemoryStore>) {
@@ -310,7 +318,7 @@ fn page(s: &mut State, section: Section) -> Vec<String> {
 
 fn sidebar(s: &State) -> Vec<&'static str> {
     pages::visible(&s.draft.labs)
-        .map(|p| crate::app_language::tr(p.title))
+        .map(|p| crate::shared::app_language::tr(p.title))
         .collect()
 }
 
@@ -688,7 +696,7 @@ fn a_saved_key_shows_as_dots_only() {
     update(&mut s, Message::Preset(preset("OpenAI")));
     update(&mut s, Message::Section(Section::Ai));
     assert_eq!(
-        crate::app_language::tr(super::state::API_KEY.placeholder),
+        crate::shared::app_language::tr(super::state::API_KEY.placeholder),
         "Paste your API key"
     );
     update(
@@ -1181,7 +1189,7 @@ fn every_control_has_its_own_label() {
             labels,
             unique,
             "duplicate control labels on {}",
-            crate::app_language::tr(page.title)
+            crate::shared::app_language::tr(page.title)
         );
         all.extend(labels);
     }
@@ -1198,7 +1206,7 @@ fn no_visible_tooltip_repeats_its_control() {
     for page in &PAGES {
         update(&mut s, Message::Section(page.id));
         let _ = view(&s);
-        assert_tips_add_something(crate::app_language::tr(page.title));
+        assert_tips_add_something(crate::shared::app_language::tr(page.title));
     }
     // Text that says what it is shows no tooltip: Settings has none by default.
     update(&mut s, Message::Section(Section::General));
@@ -1269,7 +1277,7 @@ fn live_interval_is_checked_against_its_range() {
         assert_eq!(s.interval, bad, "the field keeps what was typed");
         assert_eq!(update(&mut s, Message::Save), Outcome::None, "{bad}");
     }
-    assert_eq!(*crate::config::LIVE_INTERVAL_MS.start(), 500);
+    assert_eq!(*crate::shared::config::LIVE_INTERVAL_MS.start(), 500);
 }
 
 /// Translate's model row: hidden with no pair installed (OptimaMT's line
@@ -1353,7 +1361,7 @@ fn the_model_row_says_what_is_left_and_updates_it() {
 /// Daylight; nothing drawn past its box.
 #[test]
 fn the_model_row_matches_its_golden_images() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use pages::translate::{Models, Now};
@@ -1479,7 +1487,7 @@ fn general_switches_updates_and_checks_now() {
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Checking…"));
     update(
         &mut s,
-        Message::UpdateStatus(crate::update::Answer::UpToDate("1.0.0".into())),
+        Message::UpdateStatus(crate::shared::update::Answer::UpToDate("1.0.0".into())),
     );
     assert!(
         shot::texts(view(&s))
@@ -1891,7 +1899,7 @@ fn renders_every_section_in_both_themes() {
                 );
                 press(&mut s, chord(true, true, "Space"));
             }
-            let slug = crate::app_language::tr(label)
+            let slug = crate::shared::app_language::tr(label)
                 .to_lowercase()
                 .replace(" & ", "-");
             let file = format!("settings-{slug}-{name}");
@@ -2063,7 +2071,7 @@ fn every_rows_control_shares_one_column_on_every_page() {
 #[test]
 fn every_rows_control_shares_one_column_on_every_page_in_arabic() {
     every_rows_control_shares_one_column("ar");
-    crate::app_language::set(crate::app_language::Lang::En);
+    crate::shared::app_language::set(crate::shared::app_language::Lang::En);
 }
 
 fn every_rows_control_shares_one_column(language: &'static str) {
@@ -2075,7 +2083,7 @@ fn every_rows_control_shares_one_column(language: &'static str) {
     s.draft.look.theme = LookTheme::Custom;
     update(
         &mut s,
-        Message::AppLanguage(crate::app_language::Choice(language)),
+        Message::AppLanguage(crate::shared::app_language::Choice(language)),
     );
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
     update(
@@ -2093,7 +2101,7 @@ fn every_rows_control_shares_one_column(language: &'static str) {
             assert!(
                 !found.is_empty(),
                 "{}: no rows",
-                crate::app_language::tr(page.title)
+                crate::shared::app_language::tr(page.title)
             );
         }
         // a row's single button (or two) fills the column exactly, as tall as the
@@ -2113,14 +2121,14 @@ fn every_rows_control_shares_one_column(language: &'static str) {
             assert!(
                 (left - column.x).abs() < 0.5 && (right - column.x - column.width).abs() < 0.5,
                 "{}: buttons span {left}..{right}, the column {}..{}",
-                crate::app_language::tr(page.title),
+                crate::shared::app_language::tr(page.title),
                 column.x,
                 column.x + column.width
             );
             assert!(
                 inside.iter().all(|a| (a.height - TRACK_H).abs() < 0.5),
                 "{}: a button is not {TRACK_H} tall: {inside:?}",
-                crate::app_language::tr(page.title)
+                crate::shared::app_language::tr(page.title)
             );
         }
         columns.extend(found.into_iter().map(|b| (page.title, b.x, b.width)));
@@ -2176,7 +2184,7 @@ fn the_ported_pages_match_their_golden_images() {
 fn general_shows_the_waiting_update_with_restart_now() {
     use crate::shared::kit::testing::{golden, shot};
     use crate::shared::kit::themes;
-    use crate::update::How;
+    use crate::shared::update::How;
     golden::each_theme(|theme, failed| {
         for (name, how) in [("restart", How::Restart), ("setup", How::Setup)] {
             let (mut s, _) = state(None);
@@ -2267,7 +2275,7 @@ fn the_step_33_pages_match_their_golden_images() {
         ("history", Section::History, 0.0, |s| {
             update(
                 s,
-                Message::Kept(crate::history::Counts {
+                Message::Kept(crate::shared::history::Counts {
                     captures: 12,
                     chats: 0,
                 }),
@@ -2276,7 +2284,7 @@ fn the_step_33_pages_match_their_golden_images() {
         ("history-clear-all", Section::History, 0.0, |s| {
             update(
                 s,
-                Message::Kept(crate::history::Counts {
+                Message::Kept(crate::shared::history::Counts {
                     captures: 3,
                     chats: 7,
                 }),
@@ -2509,7 +2517,9 @@ fn play_preview_downloads_only_on_the_click() {
     update(&mut s, Message::Fetched("ai", false));
     let texts = shot::texts(view(&s));
     assert!(
-        texts.iter().any(|t| t == crate::app_language::tr(FAILED))
+        texts
+            .iter()
+            .any(|t| t == crate::shared::app_language::tr(FAILED))
             && texts.iter().any(|t| t == "Play preview")
     );
     // the retry clears the note
@@ -2520,7 +2530,7 @@ fn play_preview_downloads_only_on_the_click() {
     assert!(
         !shot::texts(view(&s))
             .iter()
-            .any(|t| t == crate::app_language::tr(FAILED))
+            .any(|t| t == crate::shared::app_language::tr(FAILED))
     );
     update(&mut s, Message::Fetched("ai", true));
     assert!(s.fetching.is_empty() && s.failed.is_empty());
@@ -2551,7 +2561,7 @@ fn the_ai_preview_follows_the_provider() {
     moving_update(&mut s, Message::Section(Section::Ai));
     let want = chosen(ai, &s.draft);
     assert!(s.players[0].1.plays(&want));
-    s.draft.ai.provider = crate::config::Provider::Anthropic;
+    s.draft.ai.provider = crate::shared::config::Provider::Anthropic;
     moving_update(&mut s, Message::Preview("ai", true));
     let chat = chosen(ai, &s.draft);
     assert_ne!(chat, want, "another clip");
@@ -2852,7 +2862,7 @@ fn the_snip_page_says_when_print_screen_or_a_key_is_taken() {
 /// asks first. Counting and clearing are handed to the shell (a thread).
 #[test]
 fn history_counts_clears_and_asks_before_clearing_all() {
-    use crate::history::{Counts, Kind};
+    use crate::shared::history::{Counts, Kind};
     let (mut s, _) = state(None);
     assert_eq!(
         update(&mut s, Message::Section(Section::History)),
@@ -3047,7 +3057,7 @@ fn a_typed_model_id_is_offered_and_kept() {
 /// "Your language" goes back to following the onboarding pick.
 #[test]
 fn the_app_language_switches_live_both_ways() {
-    use crate::app_language::{self, CHOICES, Choice, Lang};
+    use crate::shared::app_language::{self, CHOICES, Choice, Lang};
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::General));
     let names: Vec<String> = CHOICES.iter().map(ToString::to_string).collect();
@@ -3078,7 +3088,7 @@ fn the_app_language_switches_live_both_ways() {
 /// goldens are untouched by the mirroring: they pass as they were.
 #[test]
 fn every_page_in_arabic_matches_its_golden_image() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
@@ -3109,7 +3119,7 @@ fn every_page_in_arabic_matches_its_golden_image() {
 /// wrapped line inside its column (with `no_text_is_drawn_past_its_box_on_any_page`).
 #[test]
 fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes;
     use crate::ui::screens::settings::state::MIN_WIDTH;
@@ -3137,7 +3147,7 @@ fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
 /// at the row's right edge, #37). Tall: every row on screen, none scrolled.
 #[test]
 fn no_text_is_drawn_past_its_box_on_any_page() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::ui::screens::settings::state::MIN_WIDTH;
     let mut past = Vec::new();
     for language in ["en", "ar"] {
@@ -3172,7 +3182,7 @@ fn no_text_is_drawn_past_its_box_on_any_page() {
 /// the declared exceptions (mono text, the English legal block on About).
 #[test]
 fn every_settings_text_has_the_uis_base_direction() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     // declared: About's English legal block (a left-to-right island in Arabic),
     // and Latin names shown alone
     let declared = |t: &str| {
@@ -3204,12 +3214,12 @@ fn every_settings_text_has_the_uis_base_direction() {
 /// edge, the Latin-first and the Latin-only ones too (they sat at the left).
 #[test]
 fn privacy_cells_in_arabic_start_at_the_columns_right_edge() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     let (mut s, _) = state(None);
     update(&mut s, Message::AppLanguage(Choice("ar")));
     update(&mut s, Message::Section(Section::Privacy));
     let at = shot::texts_at(view(&s), Size::new(WINDOW_SIZE.width, 900.0));
-    use crate::app_language::{S, tr};
+    use crate::shared::app_language::{S, tr};
     let rights = |key: S| -> Vec<f32> {
         let want = tr(key);
         (at.iter().filter(|(_, t)| *t == want))
@@ -3364,7 +3374,7 @@ fn reset_done(s: &mut State) {
 /// The reset row in Arabic (mirrored), the four states, Sapphire and Daylight.
 #[test]
 fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes;
     type Setup = fn(&mut State);
@@ -3394,7 +3404,7 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
 /// Arabic), at the smallest, the usual, a 1920 and a 3440 px window.
 #[test]
 fn every_page_keeps_its_content_width_on_a_wide_window() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::tokens::{size, space};
     use crate::ui::screens::settings::state::MIN_WIDTH;
     use crate::ui::screens::settings::window::PAGE_ID;
@@ -3437,7 +3447,7 @@ fn every_page_keeps_its_content_width_on_a_wide_window() {
 /// with "Made by others" in full; no text past its box, nothing out of reach.
 #[test]
 fn about_matches_its_golden_images_in_every_state() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
@@ -3479,7 +3489,7 @@ fn about_matches_its_golden_images_in_every_state() {
 /// box, in English and Arabic, folded and unfolded.
 #[test]
 fn about_draws_no_text_past_its_box_at_any_width() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::ui::screens::settings::state::MIN_WIDTH;
     let mut past = Vec::new();
     for language in ["en", "ar"] {
@@ -3555,7 +3565,7 @@ fn about_folds_the_credits_and_shows_the_first_names() {
 /// version line; it opens About, where the card is (in Arabic too).
 #[test]
 fn the_sidebar_footer_reports_a_problem_from_every_page() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     for (language, word) in [("en", "Report a problem"), ("ar", "\u{200F}الإبلاغ عن مشكلة")]
     {
         let (mut s, _) = state(None);
@@ -3579,7 +3589,7 @@ fn the_sidebar_footer_reports_a_problem_from_every_page() {
 /// The sidebar footer with its link, on another page, in both languages.
 #[test]
 fn the_sidebar_footer_link_matches_its_golden_images() {
-    use crate::app_language::{self, Choice, Lang};
+    use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
@@ -3606,7 +3616,7 @@ fn the_sidebar_footer_link_matches_its_golden_images() {
 /// page, Space flips an Off / On switch.
 #[test]
 fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
-    use crate::app_language::{self, Lang};
+    use crate::shared::app_language::{self, Lang};
     use crate::shared::kit::tokens::size::SIDEBAR;
     use iced::keyboard::key::Named;
     let key = |k| shot::named(k, false)[1].clone();
@@ -3704,7 +3714,10 @@ fn a_question_focuses_its_cancel_and_esc_cancels() {
     use crate::shared::kit::focus::CANCEL;
     use iced::keyboard::key::Named;
     let (mut s, _) = state(None);
-    update(&mut s, Message::Kept(crate::history::Counts::default()));
+    update(
+        &mut s,
+        Message::Kept(crate::shared::history::Counts::default()),
+    );
     update(&mut s, Message::Section(Section::History));
     assert_eq!(
         update(&mut s, Message::ClearAll(false)),

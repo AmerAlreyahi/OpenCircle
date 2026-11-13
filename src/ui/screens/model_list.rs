@@ -11,12 +11,12 @@ use iced::widget::column;
 
 use crate::ai::models::{self, Model};
 use crate::ai::providers::Preset;
-use crate::app_language::{S, fmt};
-use crate::config::AiConfig;
-use crate::secrets::{AiKey, KeyStore};
+use crate::shared::app_language::{S, fmt};
+use crate::shared::config::AiConfig;
 use crate::shared::kit::dropdown::{Search, combo};
 use crate::shared::kit::text::{error, sub};
 use crate::shared::kit::tokens::{Role, space};
+use crate::shared::secrets::{AiKey, KeyStore};
 use crate::t;
 
 /// The search field's widget id, and the list's own (`kit::dropdown::open`).

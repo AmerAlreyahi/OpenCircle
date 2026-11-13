@@ -30,7 +30,7 @@ pub struct Action {
     /// Stable name (logs, later the config's quick actions).
     pub id: &'static str,
     /// Button text (a key of the string table).
-    pub label: crate::app_language::S,
+    pub label: crate::shared::app_language::S,
     pub key: Key,
     /// Glyph in `assets/lucide/lucide-subset.ttf` (must be listed in its `subset.sh`).
     pub icon: char,
@@ -77,7 +77,7 @@ pub fn for_key(labs: &crate::labs::Labs, letter: char, ctrl: bool) -> Option<&'s
 
 /// The action Enter runs: the config's `general.default_action` (the first
 /// registry entry if the registry ever lacks it).
-pub fn default_for(cfg: &crate::config::Config) -> &'static Action {
+pub fn default_for(cfg: &crate::shared::config::Config) -> &'static Action {
     let id = cfg.general.default_action.id();
     ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
 }
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn enter_runs_the_configured_default_action() {
-        use crate::config::{Config, DefaultAction};
+        use crate::shared::config::{Config, DefaultAction};
         let mut cfg = Config::default();
         assert_eq!(default_for(&cfg).id, "lens", "Lens out of the box");
         for (choice, id) in [

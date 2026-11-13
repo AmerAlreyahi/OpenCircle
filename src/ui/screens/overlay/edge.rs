@@ -25,8 +25,8 @@ use iced::widget::canvas::{self, Action, Geometry};
 use iced::widget::image::{FilterMethod, Handle};
 use iced::{Color, Element, Fill, Rectangle, Renderer, Theme, window};
 
-pub use crate::config::EdgeMode as Mode;
-use crate::config::{self, EdgeStyle, LookConfig};
+pub use crate::shared::config::EdgeMode as Mode;
+use crate::shared::config::{self, EdgeStyle, LookConfig};
 use crate::shared::kit::looks::Kind;
 use crate::shared::theme;
 
@@ -543,7 +543,7 @@ fn render(strips: &[Strip], paint: &Paint) -> Vec<([u32; 4], Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ColourSet, Look, LookTheme, PRESETS};
+    use crate::shared::config::{ColourSet, Look, LookTheme, PRESETS};
     use std::time::{Duration, Instant};
 
     fn spectrum() -> LookConfig {

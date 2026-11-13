@@ -1,13 +1,13 @@
 //! General (`settings-window.js` "GENERAL"): what Enter does, start with the
 //! OS, the save folder, updates.
-use crate::app_language::{S, count, fmt, tr};
+use crate::shared::app_language::{S, count, fmt, tr};
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{column, container};
 use iced::{Center, Element, Fill};
 
 use super::super::state::{Message, Pick, State, UpdateLine, issue};
-use crate::config::DefaultAction;
+use crate::shared::config::DefaultAction;
 use crate::shared::kit::button::{Kind, button, label, labelled, labelled_width};
 use crate::shared::kit::field::field;
 use crate::shared::kit::icon::Icon;
@@ -59,7 +59,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// onboarding pick; the default), then each language in its own name. A
 /// pick speaks at once in every window (no restart).
 fn language_row(state: &State) -> Element<'_, Message> {
-    use crate::app_language::{CHOICES, Choice};
+    use crate::shared::app_language::{CHOICES, Choice};
     let now = CHOICES
         .into_iter()
         .find(|c| c.0 == state.draft.general.app_language)
@@ -74,14 +74,14 @@ fn language_row(state: &State) -> Element<'_, Message> {
 /// Updates: what waits and when GitHub last answered; Check now, or the
 /// waiting update's What's new and Restart now (Get it where the user installs it).
 fn updates_row(state: &State) -> Element<'_, Message> {
-    use crate::update::How;
+    use crate::shared::update::How;
     let waiting = (state.update_waiting.as_ref()).map(|(v, how)| (v.as_str(), *how));
-    use crate::update::{Head, Say};
+    use crate::shared::update::{Head, Say};
     let last = match &state.update_status {
         Some(UpdateLine::Answer(a)) => Some(a),
         _ => None,
     };
-    let (head, line) = crate::update::status(
+    let (head, line) = crate::shared::update::status(
         waiting,
         env!("CARGO_PKG_VERSION"),
         state.update_checked,
@@ -96,8 +96,8 @@ fn updates_row(state: &State) -> Element<'_, Message> {
     let line = match (&state.update_status, line) {
         (Some(UpdateLine::Checking), _) => t!(key_checking).to_string(),
         // a package manager owns this copy: say who updates it (added for stores)
-        (_, Say::GetIt | Say::Have(..)) if crate::update::managed_by().is_some() => {
-            managed_words(crate::update::managed_by()).to_string()
+        (_, Say::GetIt | Say::Have(..)) if crate::shared::update::managed_by().is_some() => {
+            managed_words(crate::shared::update::managed_by()).to_string()
         }
         (_, Say::GetIt) => t!(up_line_getit).to_string(),
         (_, Say::Have(v, when)) => fmt(S::us_have, &[&v, &when_words(when)]),
@@ -137,8 +137,8 @@ fn updates_row(state: &State) -> Element<'_, Message> {
 }
 
 /// "Updates are managed by <who>" (added for stores).
-fn managed_words(by: Option<crate::update::Manager>) -> &'static str {
-    use crate::update::Manager;
+fn managed_words(by: Option<crate::shared::update::Manager>) -> &'static str {
+    use crate::shared::update::Manager;
     match by {
         Some(Manager::Winget) => t!(up_managed_winget),
         Some(Manager::Scoop) => t!(up_managed_scoop),
@@ -147,8 +147,8 @@ fn managed_words(by: Option<crate::update::Manager>) -> &'static str {
 }
 
 /// When the last check was, in the app's language.
-fn when_words(when: crate::update::When) -> String {
-    use crate::update::When;
+fn when_words(when: crate::shared::update::When) -> String {
+    use crate::shared::update::When;
     match when {
         When::Never => t!(us_never).into(),
         When::JustNow => t!(us_just).into(),
@@ -168,8 +168,8 @@ fn when_words(when: crate::update::When) -> String {
 }
 
 /// What a check found, in the app's language.
-fn answer_words(a: &crate::update::Answer) -> String {
-    use crate::update::Answer;
+fn answer_words(a: &crate::shared::update::Answer) -> String {
+    use crate::shared::update::Answer;
     match a {
         Answer::Wait(s) => fmt(S::ua_wait, &[&s.div_ceil(60)]),
         Answer::Unreachable => t!(ua_unreachable).into(),

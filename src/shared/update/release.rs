@@ -304,9 +304,9 @@ pub struct Net;
 impl Http for Net {
     fn get(&self, url: &str, etag: Option<&str>) -> Result<Got, String> {
         // https only, except the test hook's local fake server
-        let agent = crate::net::agent(crate::net::Policy {
+        let agent = crate::shared::net::agent(crate::shared::net::Policy {
             https_only: super::test_url().is_none(),
-            ..crate::net::UPDATE
+            ..crate::shared::net::UPDATE
         });
         let mut req = agent
             .get(url)
@@ -563,7 +563,7 @@ fn save_hashed(body: impl Read, path: &Path) -> io::Result<[u8; 32]> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::update::verify::tests::{self as v, APPIMAGE, EXE, TEST_KEY, WRONG_KEY};
+    use crate::shared::update::verify::tests::{self as v, APPIMAGE, EXE, TEST_KEY, WRONG_KEY};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -866,7 +866,7 @@ pub(crate) mod tests {
     fn a_beta_prerelease_is_never_picked() {
         // The updater only asks for GitHub's "latest" (final releases only)...
         assert!(
-            crate::update::LATEST_URL.ends_with("/releases/latest"),
+            crate::shared::update::LATEST_URL.ends_with("/releases/latest"),
             "listing releases would need its own pre-release filter"
         );
         // ...and if a pre-release still arrived, it is refused, flagged or not.

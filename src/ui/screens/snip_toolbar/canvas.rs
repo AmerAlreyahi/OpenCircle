@@ -22,7 +22,7 @@ pub fn margin(e: &Annotator) -> f32 {
 }
 use crate::shared::kit::area;
 use crate::shared::kit::themes::c;
-use crate::ui::touch::Touched;
+use crate::shared::touch::Touched;
 
 /// How a window shows Snip's live area (`app::screens`' one unit): its px =
 /// the starting screen's px * `k` + `at`; the image's top-left pixel is at
@@ -135,7 +135,7 @@ impl canvas::Program<Message> for Input<'_> {
         cursor: Cursor,
     ) -> Option<Action<Message>> {
         let e = self.editor;
-        let (event, cursor) = match crate::ui::touch::as_mouse(event, &mut pointer.finger) {
+        let (event, cursor) = match crate::shared::touch::as_mouse(event, &mut pointer.finger) {
             Some(Touched::Cancel) => {
                 return std::mem::take(&mut pointer.down).then(|| Action::publish(Message::Cancel));
             }
@@ -232,7 +232,7 @@ impl canvas::Program<Message> for Input<'_> {
         // active look's colours, the held or hovered one hot.
         if e.movable {
             let r = Rectangle::with_size(e.size());
-            let look = crate::shared::theme::accent_of(&crate::config::look());
+            let look = crate::shared::theme::accent_of(&crate::shared::config::look());
             let hot = match e.area_hot(None) {
                 Some((edges, _)) => Some((edges, area::Handle::Held)),
                 None => pointer.hot.map(|edges| (edges, area::Handle::Hot)),
@@ -286,7 +286,7 @@ impl canvas::Program<Message> for Input<'_> {
         }
         let marks = e.handle_marks();
         if !marks.is_empty() {
-            let look = crate::shared::theme::accent_of(&crate::config::look());
+            let look = crate::shared::theme::accent_of(&crate::shared::config::look());
             for at in marks {
                 area::handle(&mut frame, at, (1, 1), area::Handle::Rest, look.0);
             }

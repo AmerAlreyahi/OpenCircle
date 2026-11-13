@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{Action, Crop, Key};
-use crate::app_language::{S, Said, fmt};
-use crate::config::{Format, SnipConfig};
+use crate::shared::app_language::{S, Said, fmt};
+use crate::shared::config::{Format, SnipConfig};
 
 pub const ACTION: Action = Action {
     id: "save",
@@ -19,7 +19,7 @@ pub const ACTION: Action = Action {
 
 /// Ctrl+S: straight into the save folder (no dialog); Ok = the pill's text.
 fn run(crop: Crop) -> Result<String, String> {
-    let config = crate::config::current();
+    let config = crate::shared::config::current();
     let (crop, format) = export(crop, &config.snip);
     let folder = start_folder(&config.general.save_folder).ok_or_else(|| NOT_SAVED.to_string())?;
     write_into(&folder, &crop, format)
@@ -180,17 +180,17 @@ mod tests {
         };
         let dir = std::env::temp_dir().join(format!("oc-save-into-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let said = super::write_into(&dir, &crop(), crate::config::Format::Png).unwrap();
+        let said = super::write_into(&dir, &crop(), crate::shared::config::Format::Png).unwrap();
         assert!(
-            said.starts_with(&crate::app_language::fmt(
-                crate::app_language::S::pill_saved,
+            said.starts_with(&crate::shared::app_language::fmt(
+                crate::shared::app_language::S::pill_saved,
                 &[&""]
             )),
             "{said}"
         );
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
-        let said = super::write_into(&dir, &crop(), crate::config::Format::Png);
+        let said = super::write_into(&dir, &crop(), crate::shared::config::Format::Png);
         assert_eq!(
             said.unwrap_err(),
             super::NOT_SAVED.to_string(),
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn save_scales_unless_the_original_size_is_asked_for() {
-        use crate::config::{Format, SnipConfig};
+        use crate::shared::config::{Format, SnipConfig};
         let crop = || super::Crop {
             width: 3000,
             height: 1000,

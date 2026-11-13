@@ -9,7 +9,7 @@
 //! its state and view (kit parts only: the widget surface, the grip, the
 //! language picker's openers and list, `.oc-btn`s); `live_layer` owns the
 //! window.
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::t;
 use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Size};

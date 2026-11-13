@@ -9,7 +9,7 @@
 //! Long capture: the user scrolls the page under the picked area by hand while
 //! a thread grabs and stitches it (`screens::long_capture`, `scroll::by_hand`).
 //! The colour picker and the ruler run on the frozen screen (`screens::tools`).
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::t;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -20,7 +20,7 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::overlay;
 use crate::actions::Crop;
-use crate::config::{SnipAfter, Target};
+use crate::shared::config::{SnipAfter, Target};
 use crate::shared::kit::button;
 use crate::shared::kit::chip;
 use crate::shared::kit::icon::Icon;
@@ -916,9 +916,11 @@ mod tests {
         }
         // The default config: Alt+A is the one snip entry (Region).
         let by_target = |target: Target| {
-            let q = (crate::config::Config::default().quick_actions.into_iter())
-                .find(|q| q.action == "snip" && q.target == target)
-                .unwrap();
+            let q = (crate::shared::config::Config::default()
+                .quick_actions
+                .into_iter())
+            .find(|q| q.action == "snip" && q.target == target)
+            .unwrap();
             (q.shortcut, Kind::for_target(q.target))
         };
         assert_eq!(by_target(Target::Circle), ("Alt+A".into(), Kind::Region));
@@ -998,7 +1000,7 @@ mod tests {
         assert!(copies(SnipAfter::Both));
         assert!(!copies(SnipAfter::Editor));
         // Out of the box a pick copies nothing: only Ctrl+C / Copy write the clipboard.
-        assert!(!copies(crate::config::Config::default().snip.after));
+        assert!(!copies(crate::shared::config::Config::default().snip.after));
     }
 
     #[test]
@@ -1142,7 +1144,7 @@ mod tests {
 
     #[test]
     fn the_recent_strip_shows_only_with_pictures() {
-        assert!(!crate::config::Config::default().snip.history);
+        assert!(!crate::shared::config::Config::default().snip.history);
         // The strip is empty without history; with pictures it shows them.
         let mut s = Snip::new(
             wins(&[rect(0.0, 0.0, 10.0, 10.0)]),

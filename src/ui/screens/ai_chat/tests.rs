@@ -136,7 +136,7 @@ fn ask_panel_offers_the_six_presets() {
         assert!(
             texts
                 .iter()
-                .any(|t| t == crate::app_language::tr(preset.label)),
+                .any(|t| t == crate::shared::app_language::tr(preset.label)),
             "{texts:?}"
         );
     }
@@ -869,7 +869,7 @@ fn history_says_how_long_ago() {
     assert_eq!(view::ago(now - day - 5, now), "Yesterday");
     assert_eq!(
         view::ago(now - 3 * day, now),
-        crate::log::date(now - 3 * day)
+        crate::shared::log::date(now - 3 * day)
     );
     assert_eq!(
         view::ago(now + 5, now),

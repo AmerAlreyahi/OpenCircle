@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Like `eprintln!`, and the line goes to the log file too.
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => { $crate::log::write(format_args!($($arg)*)) };
+    ($($arg:tt)*) => { $crate::shared::log::write(format_args!($($arg)*)) };
 }
 
 const FILE: &str = "opencircle.log";
@@ -49,7 +49,7 @@ pub fn memory_only() {
 }
 
 pub fn dir() -> PathBuf {
-    crate::paths::logs()
+    crate::shared::paths::logs()
 }
 
 impl Log {

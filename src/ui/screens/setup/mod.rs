@@ -1,4 +1,4 @@
-//! The setup window (`crate::setup`): the new design's installer
+//! The setup window (`crate::shared::setup`): the new design's installer
 //! (`newdesing/widgets/installer.js`, theme Sapphire, solid look). One card:
 //! Install (folder under "Customize install") → progress → Launch, with "Start
 //! with Windows" on the last step. Composed from kit parts; the blurs the CPU
@@ -16,10 +16,8 @@ use iced::widget::{Space, column, container, image, stack, text};
 use iced::window;
 use iced::{Center, Element, Fill, Padding, Size, Subscription, Task};
 
-use crate::app_language::{Lang, S, fmt, tr};
 use crate::dir_row;
-use crate::setup::msi::{self, Fault, Package};
-use crate::setup::{self as setup_core, BadFolder, Installed};
+use crate::shared::app_language::{Lang, S, fmt, tr};
 use crate::shared::kit::button::{self, Kind, cta_label};
 use crate::shared::kit::divider::divider;
 use crate::shared::kit::field::field;
@@ -32,6 +30,8 @@ use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use crate::shared::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::{chip, header, progress, segmented};
+use crate::shared::setup::msi::{self, Fault, Package};
+use crate::shared::setup::{self as setup_core, BadFolder, Installed};
 use crate::ui::windows;
 
 /// The window: 420 logical px wide (`max-w-[420px]`), its height per step.
@@ -200,7 +200,7 @@ pub struct State {
 
 /// The setup's whole program: the window until it closes.
 pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
-    crate::app_language::set(language());
+    crate::shared::app_language::set(language());
     let started = std::time::Instant::now();
     let package = match Package::write(msi_bytes) {
         Ok(p) => Arc::new(p),
@@ -221,7 +221,7 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "OpenCircle-Setup.exe".into());
-    let (config, warnings) = crate::config::Config::peek();
+    let (config, warnings) = crate::shared::config::Config::peek();
     let shown = Config {
         shortcut: config.shortcut,
         autostart: !warnings.is_empty() || config.general.autostart,
@@ -240,8 +240,8 @@ pub fn run(msi_bytes: &'static [u8]) -> iced::Result {
 /// The uninstall window (`setup::uninstall_ui`): removes the installed product
 /// `code` from `folder`, and the user's data too if they choose so.
 pub fn run_uninstall(code: String, folder: String) -> iced::Result {
-    crate::app_language::set(language());
-    let (config, _) = crate::config::Config::peek();
+    crate::shared::app_language::set(language());
+    let (config, _) = crate::shared::config::Config::peek();
     let shown = Config {
         shortcut: config.shortcut,
         autostart: false,
@@ -596,7 +596,7 @@ impl State {
     }
 
     pub fn view(&self, _: window::Id) -> Element<'_, Message> {
-        let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+        let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
         let rise = RISE * (1.0 - motion::progress(self.risen, self.now, motion::MORPH, Curve::Out));
         // the window's inside is 418 px (a 1 px rim): backdrop, glow, content
         let backdrop = column![
@@ -1011,11 +1011,11 @@ fn keep_choice(folder: &str, autostart: bool) {
     if let Err(e) = crate::shared::platform::autostart::choose(&exe, autostart) {
         crate::log!("[opencircle] setup: start with Windows: {e}");
     }
-    if crate::config::Config::path().is_some_and(|p| p.exists()) {
-        let (config, warnings) = crate::config::Config::load();
+    if crate::shared::config::Config::path().is_some_and(|p| p.exists()) {
+        let (config, warnings) = crate::shared::config::Config::load();
         if warnings.is_empty()
             && config.general.autostart != autostart
-            && let Err(e) = crate::config::update(|c| c.general.autostart = autostart)
+            && let Err(e) = crate::shared::config::update(|c| c.general.autostart = autostart)
         {
             crate::log!("[opencircle] setup: save the setting: {e}");
         }
@@ -1139,7 +1139,7 @@ mod tests {
     /// past its box.
     #[test]
     fn every_screen_in_arabic_matches_its_golden_image() {
-        use crate::app_language::{self, Lang};
+        use crate::shared::app_language::{self, Lang};
         app_language::set(Lang::Ar);
         let mut failed = Vec::new();
         for ((name, s), light) in (screens().into_iter().map(|n| (n, false)))

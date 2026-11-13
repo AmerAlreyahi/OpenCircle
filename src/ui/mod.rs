@@ -17,7 +17,6 @@ use screens::{ai_chat, settings, song, translate};
 mod snip;
 #[cfg(test)]
 mod snip_shots;
-mod touch;
 mod windows;
 
 use crate::Trigger;

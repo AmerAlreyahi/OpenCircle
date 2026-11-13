@@ -296,7 +296,7 @@ pub(crate) fn missing_bytes(files: &[(PathBuf, &ModelFile)]) -> u64 {
 /// Per-user folder for ORT and the models (Linux `~/.local/share/OpenCircle/ocr`,
 /// Windows `%LOCALAPPDATA%\OpenCircle\ocr`).
 pub fn models_dir() -> PathBuf {
-    crate::paths::ocr()
+    crate::shared::paths::ocr()
 }
 
 /// Makes sure every file OCR needs for the configured source language
@@ -310,7 +310,7 @@ pub fn ensure_models(progress: impl FnMut(u64, u64)) -> Result<PathBuf, OcrError
 
 /// The recognizer for the configured source language.
 pub(crate) fn current_recognizer() -> &'static Recognizer {
-    recognizer_for(&crate::config::current().translate.source)
+    recognizer_for(&crate::shared::config::current().translate.source)
 }
 
 /// What the app's OCR (Text, tap a word) needs is on disk: the user agreed
@@ -390,9 +390,9 @@ pub(crate) fn ensure_until(
             let agent = agent.get_or_insert_with(|| {
                 // tests' and the VM's fake servers are plain HTTP
                 let local = cfg!(test) || redirect("https://x").is_some();
-                crate::net::agent(crate::net::Policy {
+                crate::shared::net::agent(crate::shared::net::Policy {
                     https_only: !local,
-                    ..crate::net::MODELS
+                    ..crate::shared::net::MODELS
                 })
             });
             let got = fetch_retrying(agent, f, path, stop, |n| progress(done + n, total));
@@ -702,7 +702,7 @@ fn is_verified(path: &Path, f: &ModelFile) -> io::Result<bool> {
         return Ok(false);
     }
     // Streamed: a model is tens of MB, never held in RAM to be hashed.
-    let hash = crate::update::verify::sha256(file)?;
+    let hash = crate::shared::update::verify::sha256(file)?;
     Ok(hash.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256)
 }
 
@@ -762,7 +762,7 @@ pub(crate) mod tests {
 
     #[test]
     fn checksum_rejects_corrupt_download_and_keeps_nothing() {
-        let dir = crate::paths::test_dir("ocr-corrupt");
+        let dir = crate::shared::paths::test_dir("ocr-corrupt");
         let dest = dir.join(HELLO.name);
         for bad in [&b"hellO"[..], b"hell", b"hello!"] {
             let r = write_verified(bad, &dest, &HELLO, |_| {});
@@ -794,7 +794,7 @@ pub(crate) mod tests {
     #[test]
     fn ensure_spans_folders_and_fetches_only_what_is_missing() {
         LOCAL_FAKE.set(true); // its files come from a local fake server
-        let dir = crate::paths::test_dir("ocr-ensure");
+        let dir = crate::shared::paths::test_dir("ocr-ensure");
         let files = [
             (dir.join("a/hello.bin"), &HELLO),
             (dir.join("b/hello.bin"), &HELLO),
@@ -908,7 +908,7 @@ pub(crate) mod tests {
     /// Downloads `f` into a fresh folder: the result and the folder.
     fn download(f: &'static ModelFile, name: &str) -> (Result<(), OcrError>, PathBuf) {
         LOCAL_FAKE.set(true);
-        let dir = crate::paths::test_dir(&format!("ocr-{name}"));
+        let dir = crate::shared::paths::test_dir(&format!("ocr-{name}"));
         let got = ensure(&[(dir.join(f.name), f)], |_, _| {});
         (got, dir)
     }
@@ -970,7 +970,7 @@ pub(crate) mod tests {
         let data = payload();
         let (f, seen) = fake_server("stale.bin", data, vec![Answer::File]);
         LOCAL_FAKE.set(true);
-        let dir = crate::paths::test_dir("ocr-stale");
+        let dir = crate::shared::paths::test_dir("ocr-stale");
         let _ = fs::remove_file(dir.join(f.name));
         fs::write(dir.join("stale.part"), vec![b'x'; data.len() / 2]).unwrap();
         ensure(&[(dir.join(f.name), f)], |_, _| {}).unwrap();

@@ -3,7 +3,7 @@
 //! only, in the one result card frame (`kit::panel_frame::chat_frame`).
 use std::sync::Arc;
 
-use crate::app_language::{S, fmt, tr};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::t;
 
 use iced::widget::tooltip::Position;
@@ -15,7 +15,7 @@ use crate::actions;
 use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::ai::providers::{self, Preset};
 use crate::ai::{AiError, Fix};
-use crate::config::{self, StaysOpen};
+use crate::shared::config::{self, StaysOpen};
 use crate::shared::kit::bubble::bubble;
 use crate::shared::kit::button::{Kind, button, cta_label, label};
 use crate::shared::kit::chip::Tone;
@@ -420,7 +420,7 @@ impl AiChat {
         let open = match &self.state {
             State::Ask { chat, .. } => chat.id.clone(),
         };
-        let now = crate::store::chats::now();
+        let now = crate::shared::store::chats::now();
         let mut cards = column![].spacing(space::GAP).width(Fill);
         for entry in &self.listed {
             cards = cards.push(crate::shared::kit::card::chat(
@@ -575,6 +575,6 @@ pub(super) fn ago(then: u64, now: u64) -> String {
         s if s < HOUR => fmt(S::chat_min_ago, &[&(s / MIN)]),
         s if s < DAY => fmt(S::chat_hour_ago, &[&(s / HOUR)]),
         s if s < 2 * DAY => t!(chat_yesterday).into(),
-        _ => crate::log::date(then),
+        _ => crate::shared::log::date(then),
     }
 }

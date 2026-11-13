@@ -9,7 +9,7 @@ use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop, Run, copy, save, text};
-use crate::config::{self};
+use crate::shared::config;
 use crate::shared::platform::capture;
 
 use crate::ui::app::background::background;
@@ -73,7 +73,7 @@ impl App {
                     }
                     _ => return whole,
                 };
-                crate::history::recent::remember(&crop);
+                crate::shared::history::recent::remember(&crop);
                 // the toolbar's button (Enter = Copy) acts on the stitched image
                 let then = match long.then.unwrap_or(Finish::Copy) {
                     Finish::Copy | Finish::Cancel | Finish::Done => {
@@ -150,7 +150,7 @@ impl App {
                 Task::none()
             }
             snip::Msg::OpenRecent(path) => background(move |tx| {
-                let _ = tx.unbounded_send(crate::history::recent::open(&path));
+                let _ = tx.unbounded_send(crate::shared::history::recent::open(&path));
             })
             .map(|read| Message::Snip(snip::Msg::Loaded(read))),
             snip::Msg::Loaded(Ok(crop)) => {
@@ -164,7 +164,7 @@ impl App {
             }
             snip::Msg::ClearRecent => {
                 snip.set_recent(Vec::new());
-                crate::history::recent::clear();
+                crate::shared::history::recent::clear();
                 Task::none()
             }
             snip::Msg::HintGone(opening) if opening == self.opening => {
@@ -225,7 +225,7 @@ impl App {
         let Some(crop) = self.crop() else {
             return extras;
         };
-        crate::history::recent::remember(&crop);
+        crate::shared::history::recent::remember(&crop);
         // Snip pressed on a selection: its picked state (the live area and the
         // toolbar), whatever "After a capture" says a fresh pick does.
         Task::batch([self.snip_routed(crop, true, false), extras])
@@ -284,7 +284,7 @@ impl App {
     /// `Snip::set_reader`), for outlines and snapping.
     pub(crate) fn snip_extras(&self, read: std::sync::mpsc::Receiver<isize>) -> Task<Message> {
         let recent = background(|tx| {
-            let _ = tx.unbounded_send(crate::history::recent::load());
+            let _ = tx.unbounded_send(crate::shared::history::recent::load());
         })
         .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
         // the freeze hint goes after its 2 s (no frame clock while still)
@@ -325,7 +325,7 @@ impl App {
             return Task::none();
         };
         if remember {
-            crate::history::recent::remember(&crop);
+            crate::shared::history::recent::remember(&crop);
         }
         let copy = snip::copies(config::current().snip.after);
         self.snip_routed(crop, in_place, copy)
@@ -640,7 +640,7 @@ impl App {
                 return Task::none();
             }
         };
-        crate::history::recent::remember(&crop);
+        crate::shared::history::recent::remember(&crop);
         let action = match cast.then {
             Some(Finish::Copy) => &copy::ACTION,
             Some(Finish::Save) => &save::ACTION,

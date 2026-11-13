@@ -5,26 +5,15 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
 mod ai;
-mod app_language;
-mod config;
-mod diagnostics;
-mod history;
 mod labs;
 mod live;
-mod log;
 mod mt;
 mod music;
-mod net;
 mod ocr;
-mod paths;
-mod secrets;
-mod setup;
 mod shared;
 mod snip;
-mod store;
 mod translate;
 mod ui;
-mod update;
 
 use std::process::ExitCode;
 use std::time::Instant;
@@ -36,7 +25,7 @@ use iced::futures::channel::mpsc;
 pub enum Trigger {
     Capture(Instant),
     /// A quick action (its shortcut or `opencircle run`): action id + target + live flag.
-    Quick(Instant, config::QuickAction),
+    Quick(Instant, crate::shared::config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
     /// Linux: no tray icon can show (no host, library or GTK): open a window instead (first run: the onboarding).
@@ -45,7 +34,7 @@ pub enum Trigger {
     /// (`[left, top, right, bottom]`, physical desktop px).
     TrayMenu([i32; 4]),
     /// From the update thread (`update::Event`).
-    Update(update::Event),
+    Update(crate::shared::update::Event),
     /// Restart now (the update pill, the tray menu's first row, Settings):
     /// install the waiting update.
     RestartToUpdate,
@@ -102,7 +91,7 @@ fn main() -> ExitCode {
     crate::shared::platform::sys::mem::limit_malloc_arenas();
     crate::shared::platform::sys::fix_appimage_env();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
-    if let Some(msi) = setup::payload() {
+    if let Some(msi) = crate::shared::setup::payload() {
         // Elevated: DLLs it loads later come from System32 only, never from its folder.
         #[cfg(windows)]
         // SAFETY: a process-wide setting with no pointers.
@@ -112,17 +101,21 @@ fn main() -> ExitCode {
             )
         };
         let args: Vec<String> = std::env::args().skip(1).collect();
-        if setup::elevated() || args.iter().any(|a| a.starts_with(setup::SHA256_ARG)) {
+        if crate::shared::setup::elevated()
+            || args
+                .iter()
+                .any(|a| a.starts_with(crate::shared::setup::SHA256_ARG))
+        {
             // run elevated (the app's update, winget, IT): no file of the user's is
             // written as admin (a planted link in the log folder); the app logs the
             // outcome of its update in the user's own log
-            log::memory_only();
+            crate::shared::log::memory_only();
         }
-        if let Some(code) = setup::relocate(&args) {
+        if let Some(code) = crate::shared::setup::relocate(&args) {
             std::process::exit(code as i32);
         }
-        match setup::parse_silent(&args) {
-            Ok(Some(what)) => std::process::exit(setup::silent(msi, what) as i32),
+        match crate::shared::setup::parse_silent(&args) {
+            Ok(Some(what)) => std::process::exit(crate::shared::setup::silent(msi, what) as i32),
             Err(code) => std::process::exit(code as i32),
             Ok(None) => {}
         }
@@ -135,40 +128,42 @@ fn main() -> ExitCode {
         };
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let relaunched = args.first().map(String::as_str) == Some(update::RELAUNCH_ARG);
+    let relaunched = args.first().map(String::as_str) == Some(crate::shared::update::RELAUNCH_ARG);
     let command = match args.first().map(String::as_str) {
         None => None,
         Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
         // hidden: Wayland's long capture pop-up, spawned by the app on XWayland
         Some(ui::long_capture_popup::ARG) => return ui::long_capture_popup::main(),
-        Some(setup::FORGET_ARG) => {
+        Some(crate::shared::setup::FORGET_ARG) => {
             // hidden: the MSI's uninstall
-            return setup::forget_user_data(args.get(1).is_some_and(|a| a == "--quiet"));
+            return crate::shared::setup::forget_user_data(
+                args.get(1).is_some_and(|a| a == "--quiet"),
+            );
         }
         // hidden: our Apps & features entry's uninstall
-        Some(setup::UNINSTALL_ARG) => {
-            return match setup::uninstall_ui(args.get(1).map(String::as_str)) {
-                setup::Uninstall::Exit(code) => code,
-                setup::Uninstall::Window { code, folder, dir } => {
+        Some(crate::shared::setup::UNINSTALL_ARG) => {
+            return match crate::shared::setup::uninstall_ui(args.get(1).map(String::as_str)) {
+                crate::shared::setup::Uninstall::Exit(code) => code,
+                crate::shared::setup::Uninstall::Window { code, folder, dir } => {
                     if let Err(e) = ui::setup::run_uninstall(code, folder) {
                         crate::log!("[opencircle] uninstall: {e}");
                     }
-                    setup::delete_when_gone(&dir);
+                    crate::shared::setup::delete_when_gone(&dir);
                     ExitCode::SUCCESS
                 }
             };
         }
-        Some(update::VERSION_ARG) => {
+        Some(crate::shared::update::VERSION_ARG) => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         // hidden: started by an update, once the old process has exited
-        Some(update::RELAUNCH_ARG)
-            if update::wait_for_old(crate::shared::platform::hotkey::running) =>
+        Some(crate::shared::update::RELAUNCH_ARG)
+            if crate::shared::update::wait_for_old(crate::shared::platform::hotkey::running) =>
         {
             None
         }
-        Some(update::RELAUNCH_ARG) => return ExitCode::FAILURE,
+        Some(crate::shared::update::RELAUNCH_ARG) => return ExitCode::FAILURE,
         Some("quit") => {
             // Never starts the app: with none running there is nothing to quit.
             let _ = crate::shared::platform::hotkey::forward(
@@ -218,7 +213,7 @@ fn main() -> ExitCode {
         }
         // Started by an update, or right after one (the setup's own start, Windows
         // restarting what it closed): the running copy is the new one; open nothing.
-        Ok(_) if relaunched || update::just_updated() => {
+        Ok(_) if relaunched || crate::shared::update::just_updated() => {
             crate::log!("OpenCircle is already running (just updated); nothing opened");
             return ExitCode::SUCCESS;
         }
@@ -234,7 +229,7 @@ fn main() -> ExitCode {
         _ => {}
     }
 
-    log::install_panic_hook(log::dir());
+    crate::shared::log::install_panic_hook(crate::shared::log::dir());
     crate::log!("[opencircle] {} starting", env!("CARGO_PKG_VERSION"));
     // Hidden test hook (the CLI is frozen, so an env var): a thread panics, the crash file appears.
     if crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_CRASH").is_some() {
@@ -245,7 +240,7 @@ fn main() -> ExitCode {
         crate::log!("cannot open the command socket: {e}");
         return ExitCode::FAILURE;
     }
-    let (config, warnings) = config::Config::load();
+    let (config, warnings) = crate::shared::config::Config::load();
     for warning in &warnings {
         crate::log!("[opencircle] config: {warning}");
     }
@@ -255,18 +250,20 @@ fn main() -> ExitCode {
     crate::shared::platform::capture::portal::repair_user_launcher();
     // before any helper can have a model file open: old-named model folders get the OptimaMT name
     mt::adopt_old_folders();
-    std::thread::spawn(|| remove_old_webview(&paths::app_data()));
-    std::thread::spawn(|| remove_search_history(paths::search_history().as_deref()));
+    std::thread::spawn(|| remove_old_webview(&crate::shared::paths::app_data()));
+    std::thread::spawn(|| remove_search_history(crate::shared::paths::search_history().as_deref()));
     // once: the key all OpenAI-compatible providers shared goes to the one chosen
     let ai = config.ai.clone();
     std::thread::spawn(move || {
-        if let Err(e) = secrets::migrate_shared(&secrets::Keyring, &ai) {
+        if let Err(e) =
+            crate::shared::secrets::migrate_shared(&crate::shared::secrets::Keyring, &ai)
+        {
             crate::log!("[opencircle] keyring: {e}");
         }
     });
-    config::set_current(config);
+    crate::shared::config::set_current(config);
     let _tray = ui::start_tray(tx.clone());
-    update::start(tx.clone());
+    crate::shared::update::start(tx.clone());
 
     let ran = ui::run(rx);
     crate::shared::platform::hotkey::stop();
@@ -274,8 +271,8 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             crate::log!("{e}");
-            if relaunched || update::pending() {
-                update::roll_back(); // a new version that can't start: the old one again
+            if relaunched || crate::shared::update::pending() {
+                crate::shared::update::roll_back(); // a new version that can't start: the old one again
             }
             ExitCode::FAILURE
         }

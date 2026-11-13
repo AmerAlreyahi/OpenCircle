@@ -15,7 +15,7 @@ use super::{
     set_portal_failed,
 };
 use crate::Triggers;
-use crate::config::parse_shortcut;
+use crate::shared::config::parse_shortcut;
 use crate::shared::platform::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
 
 const IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";

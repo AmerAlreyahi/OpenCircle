@@ -65,7 +65,7 @@ pub fn recognize_in_child(
     width: u32,
     height: u32,
 ) -> Result<Vec<TextBlock>, OcrError> {
-    let source = crate::config::current().translate.source;
+    let source = crate::shared::config::current().translate.source;
     recognize_as(rgba, width, height, &source)
 }
 
@@ -104,7 +104,7 @@ pub fn recognize_band(
     gently: bool,
 ) -> Result<Vec<TextBlock>, OcrError> {
     check_image(rgba, width, height)?;
-    let read = Read::for_source(&crate::config::current().translate.source);
+    let read = Read::for_source(&crate::shared::config::current().translate.source);
     ready(read)?;
     let header = [
         [BAND, read.byte(), u8::from(gently)].as_slice(),
@@ -223,7 +223,7 @@ pub fn read_screen(
 /// recognizer for the configured source, gently, so the first read is quick.
 /// Nothing is started without the models.
 pub fn warm() -> Result<(), OcrError> {
-    let read = Read::for_source(&crate::config::current().translate.source);
+    let read = Read::for_source(&crate::shared::config::current().translate.source);
     ready(read)?;
     parse(session::call(&[&[WARM, read.byte()]])?)
 }

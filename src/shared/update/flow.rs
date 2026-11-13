@@ -212,7 +212,7 @@ pub fn status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::update::Answer;
+    use crate::shared::update::Answer;
 
     /// A portable / AppImage update installs at the button, at quit and when
     /// locked; a setup's only at the button (never a prompt from nowhere);

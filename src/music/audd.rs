@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 use super::{Clip, Error, Song, youtube};
-use crate::secrets::Secret;
+use crate::shared::secrets::Secret;
 
 const URL: &str = "https://api.audd.io/";
 /// Extra metadata asked for: Apple Music has the cover, Spotify the track link.
@@ -39,7 +39,7 @@ fn request(key: &Secret, clip: &Clip) -> (String, Vec<u8>) {
 }
 
 pub fn identify(key: &Secret, clip: &Clip) -> Result<Song, Error> {
-    let agent = crate::net::agent(crate::net::SONG);
+    let agent = crate::shared::net::agent(crate::shared::net::SONG);
     let (kind, body) = request(key, clip);
     let mut resp = agent
         .post(URL)

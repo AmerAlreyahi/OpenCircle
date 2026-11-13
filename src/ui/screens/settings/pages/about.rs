@@ -5,7 +5,7 @@
 //! kit's quiet links; a link opens only when it is clicked (the page itself
 //! never touches the network: the avatar and the profile are bundled,
 //! refreshed at each release by `scripts/refresh-about.sh`).
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::t;
 use std::sync::LazyLock;
 

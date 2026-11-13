@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use std::ops::ControlFlow;
 
 use super::{AiError, Event, HttpRequest, Message, Role, join_url, png_b64, run_stream};
-use crate::config::AiConfig;
-use crate::secrets::Secret;
+use crate::shared::config::AiConfig;
+use crate::shared::secrets::Secret;
 
 /// `fast` = Some(max answer tokens) for translate calls (see `fast_fields`).
 pub fn ask_stream(
@@ -152,7 +152,7 @@ pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Provider;
+    use crate::shared::config::Provider;
 
     const FAKE_KEY: &str = "sk-FAKE-000000";
 

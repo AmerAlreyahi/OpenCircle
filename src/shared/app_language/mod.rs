@@ -70,9 +70,9 @@ thread_local! {
 
 /// The UI language: Settings' App language, else the language picked in
 /// onboarding (`general.language`, "" = the OS's), when the app has it; else English.
-pub fn of_config(general: &crate::config::GeneralConfig) -> Lang {
+pub fn of_config(general: &crate::shared::config::GeneralConfig) -> Lang {
     let picked = match general.language.as_str() {
-        "" => crate::config::os_language(),
+        "" => crate::shared::config::os_language(),
         code => code,
     };
     [general.app_language.as_str(), picked]
@@ -85,7 +85,7 @@ pub fn of_config(general: &crate::config::GeneralConfig) -> Lang {
 /// The language this thread speaks (read from the config once).
 pub fn current() -> Lang {
     CURRENT.get().unwrap_or_else(|| {
-        let lang = of_config(&crate::config::current().general);
+        let lang = of_config(&crate::shared::config::current().general);
         CURRENT.set(Some(lang));
         lang
     })
@@ -98,8 +98,8 @@ pub fn set(lang: Lang) {
 
 /// Speak what `general` says (Settings' choice, else "your language"), and
 /// remember which language "your language" is (the App language list).
-pub fn apply(general: &crate::config::GeneralConfig) {
-    let yours = crate::config::GeneralConfig {
+pub fn apply(general: &crate::shared::config::GeneralConfig) {
+    let yours = crate::shared::config::GeneralConfig {
         app_language: String::new(),
         ..general.clone()
     };
@@ -262,7 +262,7 @@ impl std::fmt::Display for S {
 #[macro_export]
 macro_rules! t {
     ($key:ident) => {
-        $crate::app_language::tr($crate::app_language::S::$key)
+        $crate::shared::app_language::tr($crate::shared::app_language::S::$key)
     };
 }
 

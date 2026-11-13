@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self};
-use crate::config::{self, SelectStyle};
+use crate::shared::config::{self, SelectStyle};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};

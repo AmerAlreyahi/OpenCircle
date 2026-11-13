@@ -44,7 +44,7 @@ pub fn path() -> Option<PathBuf> {
     #[cfg(test)]
     return TEST_PATH.with(|d| d.borrow().clone());
     #[cfg(not(test))]
-    crate::paths::database()
+    crate::shared::paths::database()
 }
 
 #[cfg(test)]

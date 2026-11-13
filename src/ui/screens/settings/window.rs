@@ -11,7 +11,7 @@ use iced::{Center, Element, Fill, Padding};
 
 use super::state::{Message, Section, State};
 use super::{pages, previews};
-use crate::app_language::{S, count, tr};
+use crate::shared::app_language::{S, count, tr};
 use crate::shared::kit::button::{Kind, button, cancel, label};
 use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::divider::divider;
@@ -39,7 +39,7 @@ const OS: &str = if cfg!(windows) { "Windows" } else { "Linux" };
 
 pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     // the whole window in the app's language and direction
-    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+    let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
     let logo = crate::shared::kit::logo::logo(16);
     let header = regular(
         logo,

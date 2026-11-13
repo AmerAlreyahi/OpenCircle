@@ -2,8 +2,8 @@
 //! process (`crate::ocr`); its models are downloaded once, only after the user
 //! agrees (the download card; the app asks before it ever gets here).
 use super::{Action, Crop, Key, Run};
-use crate::app_language::S;
 use crate::ocr::{self, TextBlock};
+use crate::shared::app_language::S;
 
 pub const ACTION: Action = Action {
     id: "text",
@@ -18,7 +18,8 @@ pub const ACTION: Action = Action {
 
 /// The text reader's models aren't here: Copy text never fetches them itself
 /// (only the download card does, on the user's click).
-pub const NEEDS_READER: crate::app_language::Said = crate::app_language::Said(S::pill_need_reader);
+pub const NEEDS_READER: crate::shared::app_language::Said =
+    crate::shared::app_language::Said(S::pill_need_reader);
 
 /// Reads `crop`'s text and copies it (the pill's text, or why not). Never
 /// downloads: without the models it says so (the overlay shows the download

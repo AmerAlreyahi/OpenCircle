@@ -32,7 +32,9 @@ pub(super) fn migrate(path: &Path, text: &str, config: &Config) {
             "[opencircle] config: updated from schema {old} to {VERSION} (old file: {})",
             backup.display()
         ),
-        Err(e) => crate::log!("[opencircle] config: could not write the updated file ({e})"),
+        Err(e) => {
+            crate::log!("[opencircle] config: could not write the updated file ({e})")
+        }
     }
 }
 

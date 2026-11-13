@@ -22,7 +22,7 @@ pub use worker::{
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::config::TextReader;
+use crate::shared::config::TextReader;
 use crate::translate::lang::{self, Script};
 
 use image::RgbImage;

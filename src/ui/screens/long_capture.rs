@@ -13,7 +13,7 @@
 //! is kept out of the grabs (`corner`; owner, 2026-11-03). A calm hint near the
 //! area until the first scroll. The grabbing and stitching run on a thread
 //! (`capture::scroll::by_hand`).
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::dir;
 use crate::t;
 use std::sync::Arc;

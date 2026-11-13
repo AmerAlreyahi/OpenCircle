@@ -108,7 +108,7 @@ fn counts_take_arabics_plural_forms() {
 /// a language the app doesn't speak is English.
 #[test]
 fn the_ui_language_comes_from_the_config() {
-    let g = |app: &str, picked: &str| crate::config::GeneralConfig {
+    let g = |app: &str, picked: &str| crate::shared::config::GeneralConfig {
         app_language: app.into(),
         language: picked.into(),
         ..Default::default()
@@ -489,9 +489,13 @@ const UNCONVERTED: &[&str] = &[
 /// missing one would fall to whatever face the OS has, unjoined or boxed.
 #[test]
 fn every_character_of_the_arabic_table_has_a_bundled_glyph() {
-    let noto = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/NotoSansArabic.ttf"), 0)
-        .unwrap();
-    let inter = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/Inter.ttf"), 0).unwrap();
+    let noto = ttf_parser::Face::parse(
+        include_bytes!("../../../assets/fonts/NotoSansArabic.ttf"),
+        0,
+    )
+    .unwrap();
+    let inter =
+        ttf_parser::Face::parse(include_bytes!("../../../assets/fonts/Inter.ttf"), 0).unwrap();
     let mut missing = std::collections::BTreeSet::new();
     for [_, ar] in TABLE {
         for c in ar.chars() {
@@ -513,9 +517,13 @@ fn every_character_of_the_arabic_table_has_a_bundled_glyph() {
 /// adding a bundled face (or a language) changes it on purpose.
 #[test]
 fn the_language_names_the_pickers_show_are_covered_or_listed() {
-    let noto = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/NotoSansArabic.ttf"), 0)
-        .unwrap();
-    let inter = ttf_parser::Face::parse(include_bytes!("../../assets/fonts/Inter.ttf"), 0).unwrap();
+    let noto = ttf_parser::Face::parse(
+        include_bytes!("../../../assets/fonts/NotoSansArabic.ttf"),
+        0,
+    )
+    .unwrap();
+    let inter =
+        ttf_parser::Face::parse(include_bytes!("../../../assets/fonts/Inter.ttf"), 0).unwrap();
     let covered = |s: &str| {
         s.chars().all(|c| {
             matches!(c, '\u{200F}' | '\u{2066}'..='\u{2069}')

@@ -8,14 +8,14 @@
 //! loop while the page is open (`player`), also at later visits, from disk.
 //! No still yet (owner, 2026-10-30): only the heading, no Hide / Show preview
 //! and no stage; the still's file appearing shows both.
-use crate::app_language::{S, tr};
+use crate::shared::app_language::{S, tr};
 use crate::t;
 use iced::widget::column;
 use iced::{Element, Padding};
 
 use super::state::{Message, Section, State, key_labels};
-use crate::config::{Config, Provider};
 use crate::labs::Feature;
+use crate::shared::config::{Config, Provider};
 use crate::shared::kit::hero::{self, hero};
 use crate::shared::platform::hotkey::QuickId;
 

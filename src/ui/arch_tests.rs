@@ -10,6 +10,7 @@ const UI: &[&str] = &[
     "ui",
     "shared/kit",
     "shared/theme.rs",
+    "shared/touch.rs",
     "shared/platform/monitor.rs",
     "shared/platform/shape.rs",
     "shared/platform/tray.rs",
@@ -21,6 +22,7 @@ const UI_MODULES: &[&str] = &[
     "crate::ui",
     "crate::shared::kit",
     "crate::shared::theme",
+    "crate::shared::touch",
     "crate::shared::platform::monitor",
     "crate::shared::platform::shape",
     "crate::shared::platform::tray",
@@ -164,7 +166,7 @@ fn kit_depends_only_on_tokens() {
                 !line[i..].starts_with("crate::shared::kit")
                     && !line[i..].starts_with("crate::dir_row!")
                     // (`kit::dir` is the one bridge to the app's language: its direction)
-                    && !(name == "shared/kit/dir.rs" && line[i..].starts_with("crate::app_language::rtl"))
+                    && !(name == "shared/kit/dir.rs" && line[i..].starts_with("crate::shared::app_language::rtl"))
             });
             assert!(!outside, "{name} reaches outside the kit: {}", line.trim());
         }
@@ -552,7 +554,7 @@ fn named_paths(src: &str) -> Vec<String> {
     out
 }
 
-/// `path` names the module `module` (`crate::app`, not `crate::app_language`).
+/// `path` names the module `module` (`crate::app`, not `crate::shared::app_language`).
 fn names_module(path: &str, module: &str) -> bool {
     path.strip_prefix(module)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))

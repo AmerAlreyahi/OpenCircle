@@ -4,8 +4,8 @@
 //! window (`ui::windows`) closes it on focus loss, which an outside click is.
 use iced::{Element, Size};
 
-use crate::config::Config;
 use crate::labs::Labs;
+use crate::shared::config::Config;
 use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
 use crate::shared::kit::tokens::radius;
 use crate::shared::kit::tooltip::tip;

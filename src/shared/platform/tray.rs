@@ -10,9 +10,9 @@ use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem}
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
-use crate::app_language::{S, fmt};
-use crate::config::{Config, Target};
 use crate::labs::{Feature, Labs};
+use crate::shared::app_language::{S, fmt};
+use crate::shared::config::{Config, Target};
 #[cfg(target_os = "linux")]
 use crate::shared::platform::capture::scroll::Finish;
 use crate::{Trigger, Triggers, t};
@@ -124,7 +124,7 @@ impl Entry {
             Entry::Snip => run("snip", None),
             Entry::Live => Trigger::Quick(
                 at,
-                crate::config::QuickAction {
+                crate::shared::config::QuickAction {
                     action: "translate".into(),
                     shortcut: String::new(),
                     target: Target::FullScreen,
@@ -151,9 +151,9 @@ pub fn entries(labs: &Labs, update: bool) -> Vec<Entry> {
 /// The update row's text for the waiting update (`update::offer`): "Restart to
 /// update (0.1.5)", or "Get OpenCircle 0.1.5" where the user installs it.
 pub fn update_label() -> Option<String> {
-    let offer = crate::update::offer()?;
+    let offer = crate::shared::update::offer()?;
     Some(match offer.how {
-        crate::update::How::GetIt => fmt(S::tray_get_v, &[&offer.version]),
+        crate::shared::update::How::GetIt => fmt(S::tray_get_v, &[&offer.version]),
         _ => fmt(S::tray_update_v, &[&offer.version]),
     })
 }
@@ -292,10 +292,10 @@ pub fn capturing(label: Option<String>) {
     #[cfg(test)]
     SHOWN.with_borrow_mut(|s| s.push(label.clone()));
     #[cfg(target_os = "linux")]
-    let lang = crate::app_language::current();
+    let lang = crate::shared::app_language::current();
     #[cfg(target_os = "linux")]
     gtk::glib::idle_add_once(move || {
-        crate::app_language::set(lang);
+        crate::shared::app_language::set(lang);
         let on = label.is_some();
         let was = CAPTURING.replace(on);
         HELD.with_borrow(|held| {
@@ -319,7 +319,7 @@ pub fn capturing(label: Option<String>) {
                         }
                     }
                     false => {
-                        let labs = crate::config::current().labs;
+                        let labs = crate::shared::config::current().labs;
                         fill(built, &labs, update_label().as_deref());
                     }
                 }
@@ -380,13 +380,13 @@ fn fill(built: &Built, labs: &Labs, update: Option<&str>) {
 pub fn refresh() {
     #[cfg(target_os = "linux")]
     {
-        let labs = crate::config::current().labs;
+        let labs = crate::shared::config::current().labs;
         let update = update_label();
-        let lang = crate::app_language::current();
+        let lang = crate::shared::app_language::current();
         // (a long capture's menu stays until it ends: `capturing` fills it then)
         let apply = move || {
             // the GTK thread speaks the UI's language (it has its own copy)
-            crate::app_language::set(lang);
+            crate::shared::app_language::set(lang);
             if !CAPTURING.get() {
                 BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
             }
@@ -628,7 +628,7 @@ fn desktop_menu(tx: Triggers) -> Menu {
     };
     fill(
         &built,
-        &crate::config::current().labs,
+        &crate::shared::config::current().labs,
         update_label().as_deref(),
     );
     let menu = built.menu.clone();
@@ -648,8 +648,8 @@ fn desktop_menu(tx: Triggers) -> Menu {
         };
         // turned off in Labs meanwhile: nothing
         if !entries(
-            &crate::config::current().labs,
-            crate::update::offer().is_some(),
+            &crate::shared::config::current().labs,
+            crate::shared::update::offer().is_some(),
         )
         .contains(&entry)
         {
@@ -820,8 +820,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::host_appears;
     use super::{Entry, add_with_fallback, entries, guid_for, place};
-    use crate::config::Config;
     use crate::labs::{Feature, Labs};
+    use crate::shared::config::Config;
     use std::path::Path;
 
     /// A tray host that never comes is reported after the tries; one that comes late is found.

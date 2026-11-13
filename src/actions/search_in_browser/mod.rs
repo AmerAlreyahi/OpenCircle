@@ -3,7 +3,7 @@
 pub mod page;
 
 use super::{Action, Crop, Key, Run};
-use crate::app_language::S;
+use crate::shared::app_language::S;
 
 pub const ACTION: Action = Action {
     id: "lens",
@@ -17,7 +17,8 @@ pub const ACTION: Action = Action {
 };
 
 /// What the user reads when the selection is one flat colour (nothing is sent).
-pub const BLANK: crate::app_language::Said = crate::app_language::Said(S::pill_blank);
+pub const BLANK: crate::shared::app_language::Said =
+    crate::shared::app_language::Said(S::pill_blank);
 
 /// `crop` as the PNG Lens gets, every pixel opaque (a screen has no
 /// see-through pixels, and a zero alpha from any capture path would reach Lens

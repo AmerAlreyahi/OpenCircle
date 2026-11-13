@@ -6,7 +6,7 @@
 //!
 //! Blocking (ureq + rustls), no async runtime: call from a worker thread.
 //! Nothing here runs unless the caller does; the key comes from
-//! `crate::secrets` and never appears in an error, a log or a `Debug`.
+//! `crate::shared::secrets` and never appears in an error, a log or a `Debug`.
 
 pub mod anthropic;
 pub mod browser;
@@ -20,8 +20,8 @@ use std::ops::ControlFlow;
 
 use serde_json::Value;
 
-use crate::config::{AiConfig, Provider};
-use crate::secrets::Secret;
+use crate::shared::config::{AiConfig, Provider};
+use crate::shared::secrets::Secret;
 
 /// The one place default model ids live. Anthropic: current Sonnet (DESIGN.md);
 /// an OpenAI-compatible server has no sensible default, the user picks one.
@@ -138,7 +138,7 @@ impl AiError {
     /// The error card's headline: short and plain, by kind. `provider`: the
     /// provider's name as Settings shows it ("" when unknown).
     pub fn headline(&self, provider: &str) -> String {
-        use crate::app_language::{S, fmt};
+        use crate::shared::app_language::{S, fmt};
         use crate::t;
         let who = match provider.is_empty() {
             true => t!(err_the_provider),
@@ -487,9 +487,9 @@ pub(crate) fn send(
 ) -> Result<ureq::http::Response<ureq::Body>, AiError> {
     let mut waits = DROP_RETRIES.iter();
     loop {
-        match request(&crate::net::agent(crate::net::AI)) {
+        match request(&crate::shared::net::agent(crate::shared::net::AI)) {
             Ok(resp) => return Ok(resp),
-            Err(e) if crate::net::dropped(&e) => {
+            Err(e) if crate::shared::net::dropped(&e) => {
                 let why = scrub(&e.to_string(), key);
                 let Some(wait) = waits.next() else {
                     return Err(AiError::Dropped(why));
@@ -1031,7 +1031,7 @@ mod tests {
         })
         .unwrap_err();
         assert!(matches!(err, AiError::Rejected(400, _)), "{err}");
-        let line = crate::log::tail(200)
+        let line = crate::shared::log::tail(200)
             .into_iter()
             .find(|l| l.contains("w45 unique reason"))
             .expect("the error is logged");

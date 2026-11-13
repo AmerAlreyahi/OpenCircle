@@ -7,8 +7,8 @@ use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
 use crate::actions::{self, qr, search_in_browser, text};
-use crate::app_language::{S, fmt, tr};
 use crate::labs::{self, BarButton};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, icon_button};
 use crate::shared::kit::surface::{Material, surface};

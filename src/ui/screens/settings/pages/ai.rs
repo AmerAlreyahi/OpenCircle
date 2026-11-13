@@ -4,7 +4,7 @@
 //! server's URL, the model and the key (key + Save; mono where a value is
 //! code). The design's sign-in, local-model and answer-style parts belong to
 //! AI online and are not drawn.
-use crate::app_language::tr;
+use crate::shared::app_language::tr;
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column};
@@ -13,8 +13,7 @@ use iced::{Element, Fill};
 use super::super::state::{
     Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Pick, Preset, State, issue,
 };
-use crate::config::{Provider, StaysOpen};
-use crate::secrets::Secret;
+use crate::shared::config::{Provider, StaysOpen};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
@@ -23,6 +22,7 @@ use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, sub};
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
+use crate::shared::secrets::Secret;
 use crate::ui::screens::model_list;
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -80,7 +80,7 @@ fn model_row(state: &State, preset: Preset) -> Element<'_, Message> {
     let ai = &state.draft.ai;
     let example = match preset.model {
         "" => t!(ai_model_type).to_string(),
-        m => crate::app_language::fmt(crate::app_language::S::ai_model_eg, &[&m]),
+        m => crate::shared::app_language::fmt(crate::shared::app_language::S::ai_model_eg, &[&m]),
     };
     let on = model_list::On {
         opened: Message::ModelsOpened,

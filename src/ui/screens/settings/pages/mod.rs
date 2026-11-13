@@ -4,8 +4,8 @@
 use iced::Element;
 
 use super::state::{Message, Section, State};
-use crate::app_language::S;
 use crate::labs::{Feature, Labs};
+use crate::shared::app_language::S;
 
 pub mod about;
 mod ai;

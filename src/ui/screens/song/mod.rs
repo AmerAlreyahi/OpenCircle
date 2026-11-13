@@ -2,7 +2,7 @@
 //! the "Listening… N s" pill with Cancel, then the result card (cover, title,
 //! artist, album · year, links opened only on click). The work is `crate::music`.
 
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::t;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use iced::widget::{column, container, image, opaque, row, text};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
-use crate::config;
-use crate::history::song as history;
 use crate::music::{self, LISTEN_SECS, Song};
+use crate::shared::config;
+use crate::shared::history::song as history;
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::chip;
 use crate::shared::kit::icon::FONT;

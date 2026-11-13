@@ -7,8 +7,8 @@
 use iced::widget::{Space, column, container, pin, row, text};
 use iced::{Center, Element, Fill, Padding, Rectangle, Size};
 
-use crate::app_language::{S, fmt, tr};
 use crate::dir_row;
+use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, regular};
 use crate::shared::kit::chip::emblem;
 use crate::shared::kit::dir;

@@ -6,7 +6,7 @@ use iced::window::{self};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
-use crate::config::{self};
+use crate::shared::config;
 
 use crate::shared::kit::panel_frame as card;
 use crate::shared::kit::{motion, surface};
@@ -247,7 +247,7 @@ impl App {
         let top = if let Some(pill) = snip.and_then(|s| s.pill_view()) {
             pill.map(Message::Snip) // Wayland only (above)
         } else if let Some(toast) = self.o.toast {
-            container(surface::hint(crate::app_language::tr(toast.0)))
+            container(surface::hint(crate::shared::app_language::tr(toast.0)))
                 .center_x(Fill)
                 .padding(24)
                 .into()

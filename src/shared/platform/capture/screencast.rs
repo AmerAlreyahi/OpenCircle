@@ -508,7 +508,7 @@ fn compose(mut frames: Vec<(Stream, Frame)>) -> Result<Frame, CaptureError> {
 }
 
 fn token_file() -> PathBuf {
-    crate::paths::app_data().join("screencast-token")
+    crate::shared::paths::app_data().join("screencast-token")
 }
 
 fn read_token(path: &Path) -> Option<String> {

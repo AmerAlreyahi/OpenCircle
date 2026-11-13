@@ -6,8 +6,8 @@ use iced::Element;
 use iced::widget::{Space, column};
 
 use super::super::state::{Message, Pick, State};
-use crate::config::SongSource;
 use crate::music::SERVICE;
+use crate::shared::config::SongSource;
 use crate::shared::kit::card::card;
 use crate::shared::kit::chip::pill;
 use crate::shared::kit::segmented::{boolean, segmented};
@@ -16,7 +16,8 @@ use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, space};
 
 /// What song search sends, and when (also in docs/privacy.md).
-pub const SONG_PRIVACY: crate::app_language::S = crate::app_language::S::song_privacy;
+pub const SONG_PRIVACY: crate::shared::app_language::S =
+    crate::shared::app_language::S::song_privacy;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let song = &state.draft.song;
@@ -69,6 +70,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
     ));
     rows.push(Space::new().height(space::ROW_Y))
-        .push(card(sub(Role::NOTE, crate::app_language::tr(SONG_PRIVACY))))
+        .push(card(sub(
+            Role::NOTE,
+            crate::shared::app_language::tr(SONG_PRIVACY),
+        )))
         .into()
 }

@@ -8,7 +8,7 @@ use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Pick, Section, State};
-use crate::history::Kind;
+use crate::shared::history::Kind;
 use crate::shared::kit::button::{Kind as Button, button, label};
 use crate::shared::kit::segmented::boolean;
 use crate::shared::kit::setting_row::{self, title};
@@ -28,7 +28,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         t!(s_recent),
         t!(h_captures_desc),
         boolean(off_on(), d.snip.history, d.snip.history, 1.0, move |on| {
-            Message::Snip(crate::config::SnipConfig {
+            Message::Snip(crate::shared::config::SnipConfig {
                 history: on,
                 ..snip.clone()
             })
@@ -61,7 +61,7 @@ fn row_of<'a>(
         None => t!(h_counting).to_string(),
         Some(0) => t!(h_none).to_string(),
         Some(1) => "1 kept".to_string(),
-        Some(n) => crate::app_language::fmt(crate::app_language::S::h_kept, &[&n]),
+        Some(n) => crate::shared::app_language::fmt(crate::shared::app_language::S::h_kept, &[&n]),
     };
     let clear = button(
         label(t!(h_clear)),

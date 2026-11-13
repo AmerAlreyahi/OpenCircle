@@ -7,10 +7,10 @@ use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
 use crate::actions::{self, Action, qr, search_in_browser, text};
-use crate::app_language::{S, Said};
-use crate::config::{self, Target};
 use crate::labs::BarButton;
 use crate::ocr::TextBlock;
+use crate::shared::app_language::{S, Said};
+use crate::shared::config::{self, Target};
 use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate;
 use crate::ui::app::{keys, quick::Quick, word};

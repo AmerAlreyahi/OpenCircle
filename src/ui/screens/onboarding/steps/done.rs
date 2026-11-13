@@ -28,7 +28,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         super::logo_card(
             LOGO,
-            crate::app_language::fmt(crate::app_language::S::o_done_press, &[&keys.join("+")]),
+            crate::shared::app_language::fmt(
+                crate::shared::app_language::S::o_done_press,
+                &[&keys.join("+")]
+            ),
             t!(o_done_desc),
             Some(caps.into()),
         ),

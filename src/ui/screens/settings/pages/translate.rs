@@ -2,7 +2,7 @@
 //! target languages, (Live translate on in Labs) the live refresh, the
 //! offline models' update (while one still has the older v1 decoder) and
 //! the OptimaMT credit.
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container};
@@ -10,9 +10,9 @@ use iced::{Element, Fill};
 
 use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 
-use crate::config::Engine;
 use crate::labs::Feature;
 use crate::mt;
+use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;

@@ -92,7 +92,10 @@ pub fn loupe<'a>(
 /// ×. Mirrored in a right-to-left view (`kit::dir`).
 pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]]) -> Element<'a, Msg> {
     let now = chip::readout(
-        under.map_or_else(|| "#------".into(), |c| crate::config::Rgb(c).hex(true)),
+        under.map_or_else(
+            || "#------".into(),
+            |c| crate::shared::config::Rgb(c).hex(true),
+        ),
         true,
         None,
     );

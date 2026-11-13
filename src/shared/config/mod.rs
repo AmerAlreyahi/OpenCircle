@@ -887,7 +887,7 @@ pub enum StaysOpen {
     Always,
 }
 
-/// `[update]`: automatic updates from GitHub Releases (`crate::update`).
+/// `[update]`: automatic updates from GitHub Releases (`crate::shared::update`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct UpdateConfig {
     /// `None` = never asked (no checks); onboarding asks, Settings changes it.
@@ -1071,7 +1071,7 @@ impl Config {
         if cfg!(test) {
             return None;
         }
-        crate::paths::config_file()
+        crate::shared::paths::config_file()
     }
 
     /// Read the config. Never fails: problems come back as warnings (one line
@@ -1151,11 +1151,11 @@ mod tests {
     use super::*;
 
     fn tmp_dir(tag: &str) -> PathBuf {
-        crate::paths::test_dir(&format!("config-test-{tag}"))
+        crate::shared::paths::test_dir(&format!("config-test-{tag}"))
     }
 
-    const V010_DEFAULT: &str = include_str!("../../tests/fixtures/config/v0.1.0-default.toml");
-    const V010_USED: &str = include_str!("../../tests/fixtures/config/v0.1.0-used.toml");
+    const V010_DEFAULT: &str = include_str!("../../../tests/fixtures/config/v0.1.0-default.toml");
+    const V010_USED: &str = include_str!("../../../tests/fixtures/config/v0.1.0-used.toml");
 
     /// A config folder holding `text` as config.toml.
     fn config_with(tag: &str, text: &str) -> (PathBuf, PathBuf) {

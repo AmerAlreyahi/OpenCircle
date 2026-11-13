@@ -8,7 +8,7 @@ use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
 use crate::actions::{self, Crop, search_in_browser, stack_crops};
-use crate::config::{self, Provider};
+use crate::shared::config::{self, Provider};
 
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;

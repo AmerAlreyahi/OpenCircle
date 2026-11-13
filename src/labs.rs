@@ -72,7 +72,7 @@ impl Labs {
 
 /// Is `f` on in the running app's config?
 pub fn has(f: Feature) -> bool {
-    crate::config::current().labs.has(f)
+    crate::shared::config::current().labs.has(f)
 }
 
 /// The Labs feature an action id (registry, quick action or `opencircle run`) belongs to.
@@ -91,7 +91,7 @@ pub fn action_on(labs: &Labs, id: &QuickId) -> bool {
 }
 
 /// Is this quick action available? Live translate is its own Labs feature.
-pub fn quick_on(labs: &Labs, q: &crate::config::QuickAction) -> bool {
+pub fn quick_on(labs: &Labs, q: &crate::shared::config::QuickAction) -> bool {
     action_on(labs, &q.action) && (!q.live || labs.live)
 }
 

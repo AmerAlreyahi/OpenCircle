@@ -20,12 +20,12 @@ use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::{self, Crop};
 use crate::ai;
 use crate::ai::providers::{self, Preset};
-use crate::app_language::{S, Said};
-use crate::config::{self, Provider, StaysOpen};
+use crate::shared::app_language::{S, Said};
+use crate::shared::config::{self, Provider, StaysOpen};
 use crate::shared::kit::markdown::Act;
 use crate::shared::kit::panel_frame::{self, Event};
 use crate::shared::kit::{dropdown, motion, spinner};
-use crate::store::{self, chats};
+use crate::shared::store::{self, chats};
 use crate::ui::background;
 use crate::ui::keys;
 use crate::ui::screens::model_list::{self, ModelList};
@@ -509,7 +509,8 @@ impl AiChat {
             (_, Msg::LoadModels) => {
                 let ai = config::current().ai;
                 let owner = providers::key_of(&ai);
-                let store: Arc<dyn crate::secrets::KeyStore> = Arc::new(crate::secrets::Keyring);
+                let store: Arc<dyn crate::shared::secrets::KeyStore> =
+                    Arc::new(crate::shared::secrets::Keyring);
                 if let Some(job) = self.models.load(&ai, store, owner) {
                     return background(move |tx| {
                         let (ai, n) = job.run();
@@ -607,7 +608,8 @@ impl AiChat {
             }
             (State::Ask { .. }, Msg::Preset(i)) => {
                 if let Some(preset) = PRESETS.get(i) {
-                    return self.send(&preset.text(&crate::config::current().translate.target));
+                    return self
+                        .send(&preset.text(&crate::shared::config::current().translate.target));
                 }
             }
             (State::Ask { chat, .. }, Msg::Stop) => {

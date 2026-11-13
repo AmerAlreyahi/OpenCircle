@@ -2456,7 +2456,7 @@ fn the_annotator_opens_on_the_last_tool_colour_sizes_and_options() {
     e.update(Message::Release);
     assert_eq!(
         e.saved,
-        crate::config::EditorConfig::default(),
+        crate::shared::config::EditorConfig::default(),
         "no choice yet"
     );
     let purple = style::ANNOTATION[7].into_rgba8();
@@ -2475,7 +2475,7 @@ fn the_annotator_opens_on_the_last_tool_colour_sizes_and_options() {
 
     let dir = std::env::temp_dir().join(format!("oc-editor-remember-{}", std::process::id()));
     let path = dir.join("config.toml");
-    let c = crate::config::Config {
+    let c = crate::shared::config::Config {
         editor: e.remembered(),
         ..Default::default()
     };
@@ -2485,7 +2485,7 @@ fn the_annotator_opens_on_the_last_tool_colour_sizes_and_options() {
         text.contains("tool = \"highlighter\"") && text.contains("colour = \"#AF52DE\""),
         "{text}"
     );
-    let (back, w) = crate::config::Config::load_from(&path);
+    let (back, w) = crate::shared::config::Config::load_from(&path);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(w.is_empty(), "{w:?}");
 
@@ -3173,7 +3173,7 @@ fn ctrl_z_undoes_the_last_thing_also_while_typing() {
 /// text (no outline); a config without the keys keeps working.
 #[test]
 fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
-    use crate::config::EditorConfig;
+    use crate::shared::config::EditorConfig;
     let fresh = Annotator::restored(checker(50, 50), 1.0, EditorConfig::default());
     assert_eq!(fresh.text_style.back, text::Back::None);
     let mut e = Annotator::restored(checker(50, 50), 1.0, EditorConfig::default());
@@ -3190,7 +3190,7 @@ fn text_font_bold_and_background_are_remembered_and_default_to_plain() {
     // the file: written snake_case, read back
     let toml = toml::to_string(&again.remembered()).unwrap();
     assert!(toml.contains("text_font = \"mono\""), "{toml}");
-    let (c, _) = crate::config::Config::parse(&format!("[editor]\n{toml}"));
+    let (c, _) = crate::shared::config::Config::parse(&format!("[editor]\n{toml}"));
     assert_eq!(c.editor.text_back, Some(text::Back::Box));
     assert_eq!(c.editor.text_bold, Some(false));
 }

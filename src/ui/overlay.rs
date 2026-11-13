@@ -16,10 +16,10 @@ use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::touch::Touched;
-use crate::config::{BracketStyle, Look};
+use crate::shared::config::{BracketStyle, Look};
 use crate::shared::kit::{area as kit_area, motion, tokens::fixed};
 use crate::shared::theme;
+use crate::shared::touch::Touched;
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
 pub const MIN_SIDE: f32 = 12.0;
@@ -988,7 +988,7 @@ impl canvas::Program<Event> for Overlay<'_> {
         cursor: Cursor,
     ) -> Option<Action<Event>> {
         // A finger or pen is the mouse: its place is the pointer (no cursor comes with it).
-        let touched = super::touch::as_mouse(event, &mut pointer.finger);
+        let touched = crate::shared::touch::as_mouse(event, &mut pointer.finger);
         let (event, cursor) = match touched {
             Some(Touched::Cancel) => {
                 return std::mem::take(&mut pointer.down)
@@ -1580,7 +1580,7 @@ mod tests {
             hover: false,
             dim: true,
             live_drag: false,
-            look: crate::config::Config::default().look.active(),
+            look: crate::shared::config::Config::default().look.active(),
             morph: None,
             words: &[],
             picked: Vec::new(),
@@ -2384,7 +2384,7 @@ mod tests {
             hover: false,
             dim: true,
             live_drag: false,
-            look: crate::config::Config::default().look.active(),
+            look: crate::shared::config::Config::default().look.active(),
             morph: None,
             words: &[],
             picked: Vec::new(),
@@ -2475,7 +2475,7 @@ mod tests {
             hover: false,
             dim: true,
             live_drag,
-            look: crate::config::Config::default().look.active(),
+            look: crate::shared::config::Config::default().look.active(),
             morph: None,
             words: &[],
             picked: Vec::new(),
@@ -2517,7 +2517,7 @@ mod tests {
             hover: false,
             dim: true,
             live_drag: false,
-            look: crate::config::Config::default().look.active(),
+            look: crate::shared::config::Config::default().look.active(),
             morph: None,
             words: &[],
             picked: Vec::new(),

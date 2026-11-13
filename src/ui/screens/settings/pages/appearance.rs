@@ -3,14 +3,14 @@
 //! mode or logo colour rows; a config that never picked one follows the OS)
 //! and the active look cards (the design's 10, or the user's own: its rows
 //! under the cards). No Glass row until glass exists.
-use crate::app_language::{S, tr};
+use crate::shared::app_language::{S, tr};
 use crate::t;
 use iced::Element;
 use iced::widget::column;
 
 use super::super::state::{Message, State};
 use super::custom;
-use crate::config::{LookTheme, PRESETS};
+use crate::shared::config::{LookTheme, PRESETS};
 use crate::shared::kit::card::{grid, look_card, theme_card};
 use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::looks::{LOOKS, Look};

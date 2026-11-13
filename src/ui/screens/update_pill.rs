@@ -8,7 +8,7 @@
 use iced::widget::row;
 use iced::{Center, Element, Size};
 
-use crate::app_language::{S, fmt};
+use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::button::{Kind as Button, button, label, labelled, labelled_width};
 use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::logo::logo;
@@ -16,8 +16,8 @@ use crate::shared::kit::spinner::spinner;
 use crate::shared::kit::text::{font, width};
 use crate::shared::kit::toast::{Tone, banner, banner_size, size_with_action, with_action};
 use crate::shared::kit::tokens::{Role, radius, size, space};
+use crate::shared::update::How;
 use crate::t;
-use crate::update::How;
 
 /// The corners the window is cut to (`platform::windows::floating`).
 pub const RADIUS: f32 = radius::DROPDOWN;

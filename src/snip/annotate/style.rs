@@ -1,6 +1,6 @@
 //! Style presets (one click: colour + weight + the tool they are for) and the
 //! copy / paste style between items.
-use crate::app_language::S;
+use crate::shared::app_language::S;
 use iced::Color;
 
 use super::document::{Item, Shape};

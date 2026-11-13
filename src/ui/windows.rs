@@ -26,8 +26,8 @@ use crate::shared::platform;
 use crate::shared::theme;
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 use crate::actions::{Action, Crop, Run, copy, save};
-use crate::app_language::S;
-use crate::config::{self, Config, Theme};
+use crate::shared::app_language::S;
+use crate::shared::config::{self, Config, Theme};
 use crate::shared::platform::capture::live;
 #[cfg(test)]
 pub use crate::shared::platform::windows::CLEARED;
@@ -81,7 +81,7 @@ pub enum Msg {
     /// What's new after Restart now: the Updating pill goes, the card opens.
     ShowCard(Box<update_card::Card>),
     /// The result of Settings > Check now.
-    UpdateStatus(crate::update::Answer),
+    UpdateStatus(crate::shared::update::Answer),
     /// From the tray menu's window.
     TrayMenu(tray_menu::Msg),
     /// A window lost the keyboard focus (the tray menu closes then).
@@ -179,11 +179,11 @@ struct Live {
 }
 
 /// A live pin's opacity steps (its button walks them) and their tooltips.
-const OPACITY: [(f32, crate::app_language::S); 4] = [
-    (1.0, crate::app_language::S::pin_op_100),
-    (0.8, crate::app_language::S::pin_op_80),
-    (0.6, crate::app_language::S::pin_op_60),
-    (0.4, crate::app_language::S::pin_op_40),
+const OPACITY: [(f32, crate::shared::app_language::S); 4] = [
+    (1.0, crate::shared::app_language::S::pin_op_100),
+    (0.8, crate::shared::app_language::S::pin_op_80),
+    (0.6, crate::shared::app_language::S::pin_op_60),
+    (0.4, crate::shared::app_language::S::pin_op_40),
 ];
 /// Live pins open at once: each holds a window capture and a thread.
 pub const MAX_LIVE: usize = 4;
@@ -303,7 +303,7 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 tool(
                     OPACITY_GLYPH,
                     PinMsg::Opacity,
-                    crate::app_language::tr(OPACITY[l.opacity].1)
+                    crate::shared::app_language::tr(OPACITY[l.opacity].1)
                 ),
                 tool(THROUGH, PinMsg::ClickThrough, crate::t!(pin_through)),
             ]
@@ -948,8 +948,8 @@ impl Windows {
     /// Settings > General shows it.
     pub fn refresh_update(&mut self) {
         if let Some((_, s)) = &mut self.settings {
-            let waiting = crate::update::offer().map(|o| (o.version, o.how));
-            s.set_update(waiting, crate::update::checked());
+            let waiting = crate::shared::update::offer().map(|o| (o.version, o.how));
+            s.set_update(waiting, crate::shared::update::checked());
         }
     }
 
@@ -960,7 +960,7 @@ impl Windows {
 
     /// The What's new card of the update waiting now (Settings > What's new).
     fn whats_next(&mut self) -> Task<Msg> {
-        match crate::update::offer() {
+        match crate::shared::update::offer() {
             Some(o) => self.update_card(update_card::Card::preview(&o.version, &o.notes, &o.url)),
             None => Task::none(),
         }
@@ -1232,7 +1232,9 @@ impl Windows {
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {
-                            let report = crate::diagnostics::report(&crate::config::current());
+                            let report = crate::shared::diagnostics::report(
+                                &crate::shared::config::current(),
+                            );
                             let toast = match crate::actions::copy::text(report) {
                                 Ok(()) => self.toast(t!(pill_diag), true, None, TOAST_MS),
                                 Err(e) => {
@@ -1242,7 +1244,7 @@ impl Windows {
                             };
                             return Task::batch([keys, toast]);
                         }
-                        settings::Outcome::CheckUpdate => crate::update::check_now(),
+                        settings::Outcome::CheckUpdate => crate::shared::update::check_now(),
                         settings::Outcome::RestartToUpdate => {
                             return Task::batch([
                                 keys,
@@ -1254,7 +1256,7 @@ impl Windows {
                         }
                         settings::Outcome::History(clear) => {
                             let tidy = super::background(move |tx| {
-                                let _ = tx.unbounded_send(crate::history::tidy(&clear));
+                                let _ = tx.unbounded_send(crate::shared::history::tidy(&clear));
                             });
                             let kept = tidy.map(|k| Msg::Settings(settings::Message::Kept(k)));
                             return Task::batch([keys, kept]);
@@ -1839,7 +1841,7 @@ impl Windows {
             "save" => self.update(Msg::Settings(settings::Message::Save)),
             // A draft Settings cannot save yet (no model for a custom server): closing asks.
             "problem" => self.update(Msg::Settings(settings::Message::Provider(
-                crate::config::Provider::OpenaiCompatible,
+                crate::shared::config::Provider::OpenaiCompatible,
             ))),
             "close" => match self.id(Kind::Settings) {
                 Some(id) => self.close_window(id),
@@ -1875,11 +1877,11 @@ fn apply_from(old: &Config, cfg: Config) {
     crate::shared::platform::autostart::apply(&cfg);
     // Keep chat history turned off: what was kept goes now, nothing more is written
     if old.chat.keep_history && !cfg.chat.keep_history {
-        crate::store::chats::forget_all();
+        crate::shared::store::chats::forget_all();
     }
     // Recent captures likewise
     if old.snip.history && !cfg.snip.history {
-        std::thread::spawn(crate::history::recent::clear);
+        std::thread::spawn(crate::shared::history::recent::clear);
     }
     let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);
@@ -1966,7 +1968,7 @@ pub const NOTICE_MS: u64 = 6000;
 /// names the shortcut that is really configured.
 pub fn tray_notice(shortcut: &str) -> String {
     let keys = super::settings::key_labels(shortcut).join("+");
-    crate::app_language::fmt(S::pill_tray, &[&keys])
+    crate::shared::app_language::fmt(S::pill_tray, &[&keys])
 }
 
 /// The start notice for shortcuts another app holds (`taken`); none when
@@ -1982,7 +1984,7 @@ pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
         1 => S::pill_taken_one,
         _ => S::pill_taken_many,
     };
-    Some(crate::app_language::fmt(key, &[&keys.join(", ")]))
+    Some(crate::shared::app_language::fmt(key, &[&keys.join(", ")]))
 }
 
 /// The update pill's window on `monitor` (a taskbar `inset` logical px tall at
@@ -2020,7 +2022,7 @@ pub fn toast_size(text: &str) -> Size {
 /// `build` with the layout direction of the app's language (the floating
 /// widgets of part 2a: sizes are measured, and views built, in it).
 fn spoken<T>(build: impl FnOnce() -> T) -> T {
-    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+    let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
     build()
 }
 
@@ -2085,12 +2087,12 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secrets::{AiKey, Secret, SecretsError};
     use crate::shared::kit::motion;
     use crate::shared::kit::testing::shot;
+    use crate::shared::secrets::{AiKey, Secret, SecretsError};
 
     struct NoKeys;
-    impl crate::secrets::KeyStore for NoKeys {
+    impl crate::shared::secrets::KeyStore for NoKeys {
         fn is_set(&self, _: AiKey) -> Result<bool, SecretsError> {
             Ok(false)
         }
@@ -2179,7 +2181,7 @@ mod tests {
         );
         settings::update(
             &mut state,
-            settings::Message::Theme(crate::config::Theme::Dark),
+            settings::Message::Theme(crate::shared::config::Theme::Dark),
         );
         let settings::Outcome::Write(w) = settings::update(&mut state, settings::Message::Save)
         else {
@@ -2189,9 +2191,9 @@ mod tests {
         drop(state); // the window closed while the write ran
         let mut windows = Windows::default();
         let _ = windows.update(Msg::Settings(settings::Message::Written(done)));
-        assert_eq!(config::current().theme, crate::config::Theme::Dark);
+        assert_eq!(config::current().theme, crate::shared::config::Theme::Dark);
         config::set_current(Config::default());
-        theme::apply(crate::config::Theme::System);
+        theme::apply(crate::shared::config::Theme::System);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

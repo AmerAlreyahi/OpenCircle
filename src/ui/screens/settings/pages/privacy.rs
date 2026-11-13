@@ -5,8 +5,8 @@ use iced::widget::{column, container};
 use iced::{Element, Fill, Length};
 
 use super::super::state::{Message, State};
-use crate::app_language::{S, tr};
 use crate::labs::Feature;
+use crate::shared::app_language::{S, tr};
 use crate::shared::kit::card::card;
 use crate::shared::kit::dir;
 use crate::shared::kit::divider::divider;

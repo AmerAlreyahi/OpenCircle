@@ -8,8 +8,8 @@
 use iced::widget::{column, row};
 use iced::{Center, Element, Size};
 
-use crate::app_language::{S, fmt};
 use crate::dir_row;
+use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::button::{FOLD_H, Kind, button, fold, label, regular};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::{Icon, icon};
@@ -17,8 +17,8 @@ use crate::shared::kit::panel_frame::{PADDING, frame, height};
 use crate::shared::kit::text::paragraph;
 use crate::shared::kit::text::{Ink, LINKED_LINE, font, lines, muted, styled, width};
 use crate::shared::kit::tokens::{Role, radius, size, space};
+use crate::shared::update::{NoteLine, NoteStyle, Notes, parse_notes, plain_note};
 use crate::t;
-use crate::update::{NoteLine, NoteStyle, Notes, parse_notes, plain_note};
 
 /// The card's width (the design: 520) and its body's (padding 22).
 pub const WIDTH: f32 = 520.0;

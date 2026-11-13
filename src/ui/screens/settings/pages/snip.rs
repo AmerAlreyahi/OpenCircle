@@ -11,7 +11,7 @@ use iced::widget::column;
 
 use super::super::state::{Message, Slot, State};
 use super::{general, history, shortcuts};
-use crate::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
+use crate::shared::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
@@ -37,7 +37,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let snips: Vec<_> = snips.collect();
     // The note is for a user whose Snip key is Print Screen (Alt+A is the default).
     let on_print_screen = (snips.iter()).any(|&slot| {
-        crate::config::parse_shortcut(state.shortcut(slot)).ok()
+        crate::shared::config::parse_shortcut(state.shortcut(slot)).ok()
             == super::super::state::print_screen()
     });
     let mut rows = column(snips.into_iter().map(|slot| shortcuts::row(state, slot)));

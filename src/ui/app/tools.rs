@@ -199,7 +199,7 @@ impl App {
         picker::remember(&mut self.colours, colour);
         let text = match rgb {
             true => picker::rgb(colour),
-            false => crate::config::Rgb(colour).hex(true),
+            false => crate::shared::config::Rgb(colour).hex(true),
         };
         self.copy_tool_text(text)
     }

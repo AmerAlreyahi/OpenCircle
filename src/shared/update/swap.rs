@@ -89,7 +89,7 @@ pub struct Marker {
 impl Marker {
     /// `<local data dir>/opencircle/update.json`.
     pub fn path() -> Option<PathBuf> {
-        crate::paths::update_marker()
+        crate::shared::paths::update_marker()
     }
 
     pub fn write(&self, path: &Path) -> io::Result<()> {
@@ -141,7 +141,7 @@ pub fn roll_back(path: &Path) -> Option<Marker> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::update::release::tests::temp;
+    use crate::shared::update::release::tests::temp;
 
     #[test]
     fn replace_keeps_the_old_file_and_restore_brings_it_back() {
@@ -151,7 +151,7 @@ mod tests {
         let new = dir.join("download.exe");
         std::fs::write(&target, b"old").unwrap();
         std::fs::write(&new, b"new").unwrap();
-        let hash = crate::update::verify::sha256(&b"new"[..]).unwrap();
+        let hash = crate::shared::update::verify::sha256(&b"new"[..]).unwrap();
 
         let backup = replace(&target, &new, &hash).unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new");
@@ -202,7 +202,7 @@ mod tests {
         // changed after it was verified: refused, nothing moved
         let new = dir.join("download.exe");
         std::fs::write(&new, b"swapped").unwrap();
-        let verified = crate::update::verify::sha256(&b"verified"[..]).unwrap();
+        let verified = crate::shared::update::verify::sha256(&b"verified"[..]).unwrap();
         let err = replace(&target, &new, &verified).unwrap_err();
         assert!(err.to_string().contains("changed after"), "{err}");
         assert_eq!(std::fs::read(&target).unwrap(), b"old");

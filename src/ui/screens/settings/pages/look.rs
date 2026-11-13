@@ -5,7 +5,7 @@ use iced::Element;
 use iced::widget::column;
 
 use super::super::state::{Message, Pick, Section, State};
-use crate::config::SelectStyle;
+use crate::shared::config::SelectStyle;
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::segmented::segmented;
 use crate::shared::kit::setting_row::{self, title};

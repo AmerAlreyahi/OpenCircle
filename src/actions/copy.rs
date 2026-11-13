@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::sync::Mutex;
 
 use super::{Action, Crop, Key};
-use crate::app_language::{S, Said};
+use crate::shared::app_language::{S, Said};
 
 pub const ACTION: Action = Action {
     id: "copy",
@@ -25,7 +25,7 @@ static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
 /// The one copy path: the picture alone. No text rides along (a browser or chat
 /// would paste the text instead of the image); text is copied only by `text`.
 fn run(crop: Crop) -> Result<String, String> {
-    let max_edge = crate::config::current().snip.max_edge;
+    let max_edge = crate::shared::config::current().snip.max_edge;
     let shown = super::fit_long_edge(crop, max_edge);
     #[cfg(test)]
     copied::set_image((shown.width, shown.height));

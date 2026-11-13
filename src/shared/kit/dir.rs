@@ -22,7 +22,7 @@ thread_local! {
 /// language's direction (so a bar or a card measured outside any view agrees
 /// with the one drawn).
 pub fn rtl() -> bool {
-    RTL.get().unwrap_or_else(crate::app_language::rtl)
+    RTL.get().unwrap_or_else(crate::shared::app_language::rtl)
 }
 
 /// The direction for as long as the guard lives (a view's whole build): the

@@ -138,12 +138,12 @@ impl App {
         if self.o.script_offered || self.o.noise < 3 || !matches!(self.o.reader, Reader::Idle) {
             return;
         }
-        let cfg = crate::config::current();
+        let cfg = crate::shared::config::current();
         let system = std::env::var("LANG")
             .ok()
             .map(|l| l.chars().take(2).collect());
         let mut languages = vec![
-            crate::app_language::current().code().to_string(),
+            crate::shared::app_language::current().code().to_string(),
             cfg.translate.target.clone(),
             cfg.translate.source.clone(),
         ];
@@ -412,7 +412,9 @@ impl App {
                 .enumerate()
             {
                 match ocr::system::recognize(&c.rgba, c.width, c.height, k) {
-                    Err(e) if i > 0 => crate::log!("[opencircle] Windows OCR's second read: {e}"),
+                    Err(e) if i > 0 => {
+                        crate::log!("[opencircle] Windows OCR's second read: {e}")
+                    }
                     read => send(read, [x0, y0]),
                 }
             }

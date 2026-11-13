@@ -645,10 +645,10 @@ fn settings_view(s: &settings::State) -> Element<'_, settings::Message> {
 fn settings_at(section: settings::Section) -> settings::State {
     crate::shared::kit::text::load(); // the bundled fonts, as the app has them
     let mut s = settings::State::new(
-        crate::config::Config::default(),
+        crate::shared::config::Config::default(),
         vec![],
         None,
-        Box::new(crate::secrets::MemoryStore::default()),
+        Box::new(crate::shared::secrets::MemoryStore::default()),
     );
     let _ = settings::update(&mut s, settings::Message::Section(section));
     s
@@ -693,7 +693,7 @@ fn settings_frame_times() {
     // in English, then in Arabic (right to left: the same frames)
     let arabic = |s: &mut settings::State, ar: bool| {
         if ar {
-            let _ = settings::update(s, M::AppLanguage(crate::app_language::Choice("ar")));
+            let _ = settings::update(s, M::AppLanguage(crate::shared::app_language::Choice("ar")));
         }
     };
     for (k, size, ar) in [false, true].into_iter().flat_map(|ar| {
@@ -756,7 +756,7 @@ fn settings_frame_times() {
         );
         report(&format!("appearance scroll{lang}"), size, k, &t);
     }
-    crate::app_language::set(crate::app_language::Lang::En);
+    crate::shared::app_language::set(crate::shared::app_language::Lang::En);
 }
 
 /// The frames after a Settings page switch: their damage (logical px).
@@ -896,9 +896,9 @@ fn onboarding_view(s: &onboarding::State) -> Element<'_, onboarding::Message> {
 /// The frames after Next on the first step (drawn in real time).
 fn next_frames(k: f32, pixels: bool, frames: u32) -> Vec<Drawn> {
     let mut s = onboarding::State::new(
-        crate::config::Config::default(),
+        crate::shared::config::Config::default(),
         None,
-        Box::new(crate::secrets::MemoryStore::default()),
+        Box::new(crate::shared::secrets::MemoryStore::default()),
     );
     std::thread::sleep(Duration::from_millis(250));
     let _ = onboarding::update(&mut s, onboarding::Message::Tick);

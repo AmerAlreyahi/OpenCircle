@@ -35,7 +35,11 @@ impl State {
     }
 
     /// Its answer (one for another provider, picked meanwhile, is dropped).
-    pub(super) fn models_loaded(&mut self, ai: &crate::config::AiConfig, n: Result<usize, String>) {
+    pub(super) fn models_loaded(
+        &mut self,
+        ai: &crate::shared::config::AiConfig,
+        n: Result<usize, String>,
+    ) {
         self.model_list.loaded(&self.draft.ai, ai, n);
     }
 }

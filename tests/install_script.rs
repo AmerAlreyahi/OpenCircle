@@ -1,6 +1,6 @@
 //! `scripts/install.sh` (the Linux one-command install), run for real in its test
 //! mode against local files: a good release, tampered ones, the real v0.1.0 list.
-//! The signed fixtures are the updater's own test pair (src/update/verify.rs).
+//! The signed fixtures are the updater's own test pair (src/shared/update/verify.rs).
 #![cfg(unix)]
 
 use std::fs;
@@ -245,10 +245,13 @@ fn the_real_release_key_accepts_the_real_v0_1_0_list() {
     );
 }
 
-/// The key the app's updater trusts (src/update/verify.rs), which the script must share.
+/// The key the app's updater trusts (src/shared/update/verify.rs), which the script must share.
 fn release_key() -> String {
-    let source =
-        fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/update/verify.rs")).unwrap();
+    let source = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/shared/update/verify.rs"
+    ))
+    .unwrap();
     let key = source
         .lines()
         .find_map(|l| l.strip_prefix("pub const RELEASE_PUBLIC_KEY: &str = \""))

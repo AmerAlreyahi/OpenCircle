@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 
 use super::{Action, Crop, Key, Run};
 use crate::ai::{self, Role};
-use crate::app_language::{S, fmt as say, tr};
-use crate::config::{AiConfig, Config, Provider};
-use crate::secrets::{self, Secret};
-use crate::store::chats as history;
+use crate::shared::app_language::{S, fmt as say, tr};
+use crate::shared::config::{AiConfig, Config, Provider};
+use crate::shared::secrets::{self, Secret};
+use crate::shared::store::chats as history;
 
 pub const ACTION: Action = Action {
     id: "ai",
@@ -100,7 +100,7 @@ impl Setup {
 /// Reads the config and the key, encodes the crop. Blocking (file, keyring,
 /// PNG): call off the UI thread. `Err` = what to tell the user, with the steps.
 pub fn setup(crop: &Crop) -> Result<Setup, String> {
-    setup_for(crate::config::current().ai, crop)
+    setup_for(crate::shared::config::current().ai, crop)
 }
 
 fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
@@ -120,7 +120,7 @@ fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
 /// The provider settings and the key, checked. Blocking (file, keyring): call
 /// off the UI thread. `Err` = what to tell the user (first line), then the steps.
 pub fn credentials() -> Result<(AiConfig, Option<Secret>), String> {
-    credentials_for(crate::config::current().ai)
+    credentials_for(crate::shared::config::current().ai)
 }
 
 /// The one gate every AI use passes (Ask AI, Explain, translate): an unknown
@@ -463,7 +463,7 @@ pub fn stream(
 #[cfg(test)]
 mod key_tests {
     use super::*;
-    use crate::secrets::{AiKey, KeyStore, MemoryStore};
+    use crate::shared::secrets::{AiKey, KeyStore, MemoryStore};
 
     fn cfg(provider: Provider, base_url: &str) -> AiConfig {
         AiConfig {
@@ -513,7 +513,7 @@ pub(crate) mod tests {
     fn presets_are_the_six_suggestions_in_order() {
         let labels: Vec<_> = PRESETS
             .iter()
-            .map(|p| crate::app_language::tr(p.label))
+            .map(|p| crate::shared::app_language::tr(p.label))
             .collect();
         assert_eq!(
             labels,
@@ -528,7 +528,7 @@ pub(crate) mod tests {
         );
         for (i, p) in PRESETS.iter().enumerate() {
             assert!(
-                p.prompt.len() > crate::app_language::tr(p.label).len(),
+                p.prompt.len() > crate::shared::app_language::tr(p.label).len(),
                 "{:?}",
                 p.label
             );

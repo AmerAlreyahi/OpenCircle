@@ -1,7 +1,7 @@
 //! Labs (`settings-window.js` "LABS"): one Off / On row per unfinished
 //! feature, each tagged "Experimental". A switch saves at once; while it is
 //! off, the feature's page, rows and shortcuts are hidden.
-use crate::app_language::{S, tr};
+use crate::shared::app_language::{S, tr};
 use crate::t;
 use iced::widget::column;
 use iced::{Center, Element};

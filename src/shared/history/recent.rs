@@ -14,12 +14,12 @@ const STRIP: usize = 8;
 
 /// `<user data dir>/opencircle/recent` (Windows: %LOCALAPPDATA%).
 pub fn dir() -> Option<PathBuf> {
-    crate::paths::recent()
+    crate::shared::paths::recent()
 }
 
 /// Keeps `crop` in Recent (on a thread) if the user turned history on.
 pub fn remember(crop: &Crop) {
-    if !crate::config::current().snip.history {
+    if !crate::shared::config::current().snip.history {
         return;
     }
     let (Some(dir), crop) = (dir(), crop.clone()) else {
@@ -77,7 +77,7 @@ pub fn load() -> Vec<(PathBuf, image::Handle)> {
     let Some(dir) = dir() else {
         return Vec::new();
     };
-    if !crate::config::current().snip.history {
+    if !crate::shared::config::current().snip.history {
         clear_dir(&dir);
         return Vec::new();
     }
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn recent_is_off_by_default_and_never_written_then() {
-        assert!(!crate::config::Config::default().snip.history);
+        assert!(!crate::shared::config::Config::default().snip.history);
         // Off: `remember` writes nothing (the running config has the default).
         let before = dir().map(|d| list(&d).len());
         remember(&Crop {

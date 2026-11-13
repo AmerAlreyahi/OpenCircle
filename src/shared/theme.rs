@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use iced::Color;
 
-use crate::config::{self, BracketColour, ColourSet, Look, Rgb, Theme};
+use crate::shared::config::{self, BracketColour, ColourSet, Look, Rgb, Theme};
 
 /// The accent gradient of the Aurora / Spectrum looks (the selection stroke).
 const ACCENT_START: Color = Color::from_rgb8(0x8f, 0x80, 0xff);
@@ -223,7 +223,7 @@ pub fn kit_theme(
 /// is the design's Prism, "mono" its Frost, "calm" Prism's colours without the
 /// glow. `None` = the user's own (`custom`). Stored values never change.
 pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::shared::kit::looks::Look> {
-    use crate::config::LookTheme as T;
+    use crate::shared::config::LookTheme as T;
     use crate::shared::kit::looks::*;
     Some(match theme {
         T::Spectrum => &SPECTRUM,

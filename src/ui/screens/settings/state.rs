@@ -14,7 +14,7 @@
 //! to the OS keyring through `KeyStore`, is never shown, and is never part of any
 //! `Debug` output (`Secret` is redacted).
 
-use crate::app_language::S;
+use crate::shared::app_language::S;
 use crate::t;
 use std::fmt;
 use std::path::PathBuf;
@@ -23,20 +23,20 @@ use std::time::{Duration, Instant};
 
 use iced::{Color, Size, Subscription, event, keyboard};
 
-use crate::config::{
+use crate::labs::Feature;
+use crate::music::{self, SERVICE, Service};
+use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,
     SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
-use crate::history::{Counts, Kind};
-use crate::labs::Feature;
-use crate::music::{self, SERVICE, Service};
-use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
+use crate::shared::history::{Counts, Kind};
 use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion::{self, Curve};
 use crate::shared::kit::themes::THEMES;
 use crate::shared::kit::tokens::{size, space};
 use crate::shared::platform::hotkey::{DesktopKey, managed};
+use crate::shared::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES, Language};
 
@@ -119,7 +119,7 @@ pub fn bind<K: Clone + Send + Sync + 'static>(
 /// Song search's key store: tests get an in-memory one (never the real keyring).
 pub(super) fn song_keyring() -> Arc<dyn KeyStore<Service>> {
     #[cfg(test)]
-    return Arc::<crate::secrets::MemoryStore>::default();
+    return Arc::<crate::shared::secrets::MemoryStore>::default();
     #[cfg(not(test))]
     Arc::new(Keyring)
 }
@@ -378,7 +378,7 @@ impl std::fmt::Display for Named {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self.0.code {
             lang::AUTO => t!(tr_detect),
-            code => crate::app_language::language_name(code),
+            code => crate::shared::app_language::language_name(code),
         })
     }
 }
@@ -430,7 +430,7 @@ pub(super) fn target_name(t: Target) -> &'static str {
 }
 
 /// The hint under a quick action's name: snip shows what the mode does.
-pub(super) fn quick_hint(q: &crate::config::QuickAction) -> &'static str {
+pub(super) fn quick_hint(q: &crate::shared::config::QuickAction) -> &'static str {
     match (q.action.as_str(), q.target) {
         ("snip", _) => t!(s_row_desc),
         ("song_search", _) => t!(k_song_desc),
@@ -562,7 +562,7 @@ fn quick_text(config: &Config) -> Vec<SlotText> {
             let label = action_name(&q.action, q.live);
             SlotText {
                 hint: quick_hint(q).to_string(),
-                tip: crate::app_language::fmt(S::k_tip, &[&label]),
+                tip: crate::shared::app_language::fmt(S::k_tip, &[&label]),
                 label,
             }
         })
@@ -577,7 +577,7 @@ pub struct State {
     pub(super) path: Option<PathBuf>,
     pub(super) store: Arc<dyn KeyStore>,
     /// Whose key the field shows (`ai::providers::key_of` of the draft).
-    pub(super) key_owner: Option<crate::secrets::AiKey>,
+    pub(super) key_owner: Option<crate::shared::secrets::AiKey>,
     pub(super) recording: Option<Slot>,
     pub(super) shortcut_error: Option<(Slot, String)>,
     pub(super) key: KeyField,
@@ -611,7 +611,7 @@ pub struct State {
     pub(super) update_status: Option<UpdateLine>,
     /// The update waiting (its version, how it installs) and when GitHub last
     /// answered (`set_update`, from `update::offer` / `update::checked`).
-    pub(super) update_waiting: Option<(String, crate::update::How)>,
+    pub(super) update_waiting: Option<(String, crate::shared::update::How)>,
     pub(super) update_checked: Option<std::time::SystemTime>,
     /// Windows OCR's recognizers and the Windows display language, asked when
     /// the window opens (#63; empty off Windows).
@@ -710,7 +710,7 @@ pub enum Message {
     Caption(Caption),
     DefaultAction(DefaultAction),
     /// General's App language: "" = your language (the onboarding pick), else en | ar.
-    AppLanguage(crate::app_language::Choice),
+    AppLanguage(crate::shared::app_language::Choice),
     Autostart(bool),
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
@@ -802,7 +802,7 @@ pub enum Message {
     /// About: keep OpenCircle up to date, Check now, and that check's result.
     AutoUpdate(bool),
     CheckUpdate,
-    UpdateStatus(crate::update::Answer),
+    UpdateStatus(crate::shared::update::Answer),
     /// The waiting update's Restart now, and its What's new.
     RestartToUpdate,
     WhatsNew,
@@ -995,7 +995,7 @@ impl State {
     /// when GitHub last answered.
     pub fn set_update(
         &mut self,
-        waiting: Option<(String, crate::update::How)>,
+        waiting: Option<(String, crate::shared::update::How)>,
         checked: Option<std::time::SystemTime>,
     ) {
         self.update_waiting = waiting;
@@ -1015,7 +1015,7 @@ impl State {
         store: Box<dyn KeyStore>,
     ) -> Self {
         theme::apply(config.theme);
-        crate::app_language::apply(&config.general);
+        crate::shared::app_language::apply(&config.general);
         let mut config = config;
         config.add_new_quick_actions(); // their rows show; the file gets them at the next save
         let store: Arc<dyn KeyStore> = store.into();
@@ -1049,7 +1049,7 @@ impl State {
             notice: warnings
                 .first()
                 // Not "reset": an unknown or unread provider is kept off, not defaulted.
-                .map(|w| crate::app_language::fmt(S::win_invalid, &[&w])),
+                .map(|w| crate::shared::app_language::fmt(S::win_invalid, &[&w])),
             desktop: crate::shared::platform::hotkey::desktop_key,
             edge_mode: EdgeMode::Overlay,
             picker: None,
@@ -1126,7 +1126,7 @@ impl State {
         self.draft.translate.target = code.into();
         self.draft.general.language = code.into();
         // picking Arabic turns the app (onboarding first) Arabic at once
-        crate::app_language::apply(&self.draft.general);
+        crate::shared::app_language::apply(&self.draft.general);
         self.revalidate();
     }
 
@@ -1194,8 +1194,10 @@ impl State {
             return Some(t!(k_prtsc_windows).into());
         }
         Some(match (self.desktop)(shortcut)? {
-            DesktopKey::Other(keys) => crate::app_language::fmt(S::k_in_use, &[&keys, &managed()]),
-            DesktopKey::UsedBy(name) => crate::app_language::fmt(S::k_used_by, &[&name]),
+            DesktopKey::Other(keys) => {
+                crate::shared::app_language::fmt(S::k_in_use, &[&keys, &managed()])
+            }
+            DesktopKey::UsedBy(name) => crate::shared::app_language::fmt(S::k_used_by, &[&name]),
             // the desktop bound nothing: another app (or the desktop) holds the key
             DesktopKey::Unassigned | DesktopKey::Taken => t!(k_taken).into(),
             DesktopKey::Failed => {
@@ -1205,7 +1207,7 @@ impl State {
                         format!("opencircle run {}", self.draft.quick_actions[i].action)
                     }
                 };
-                crate::app_language::fmt(S::k_no_service, &[&command])
+                crate::shared::app_language::fmt(S::k_no_service, &[&command])
             }
         })
     }
@@ -1297,10 +1299,12 @@ impl State {
         let Some(shortcut) = chord.shortcut() else {
             return Err(String::new()); // lone modifier: keep waiting
         };
-        let hotkey = crate::config::parse_shortcut_typed(&shortcut).map_err(|e| {
-            use crate::config::ShortcutFault;
+        let hotkey = crate::shared::config::parse_shortcut_typed(&shortcut).map_err(|e| {
+            use crate::shared::config::ShortcutFault;
             match e {
-                ShortcutFault::UnknownKey(k) => crate::app_language::fmt(S::sc_unknown, &[&k]),
+                ShortcutFault::UnknownKey(k) => {
+                    crate::shared::app_language::fmt(S::sc_unknown, &[&k])
+                }
                 ShortcutFault::Shape => t!(sc_shape).to_string(),
                 ShortcutFault::NeedsModifier => t!(sc_modifier).to_string(),
             }
@@ -1310,7 +1314,7 @@ impl State {
         }
         for other in self.slots().filter(|&o| o != slot) {
             if parse_shortcut(self.shortcut(other)).is_ok_and(|h| h == hotkey) {
-                return Err(crate::app_language::fmt(
+                return Err(crate::shared::app_language::fmt(
                     S::k_already,
                     &[&self.label(other)],
                 ));
@@ -1365,7 +1369,7 @@ fn reserved_words(r: &crate::shared::platform::hotkey::Reserved) -> String {
         Reserved::UnicodeKeys => t!(rv_unicode_keys).into(),
         Reserved::Screenshots => t!(rv_screens).into(),
         Reserved::Super => t!(rv_super).into(),
-        Reserved::UsedBy(n) => crate::app_language::fmt(S::k_used_by, &[n]),
+        Reserved::UsedBy(n) => crate::shared::app_language::fmt(S::k_used_by, &[n]),
     }
 }
 
@@ -1373,7 +1377,7 @@ fn reserved_words(r: &crate::shared::platform::hotkey::Reserved) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateLine {
     Checking,
-    Answer(crate::update::Answer),
+    Answer(crate::shared::update::Answer),
 }
 
 /// Print Screen alone: the key Windows' own screen capture can keep.
@@ -1416,7 +1420,10 @@ impl Problem {
             Why::ModelMissing => t!(pr_model).to_string(),
             Why::UrlMissing => t!(pr_url).to_string(),
             Why::UrlBad => t!(pr_url_bad).to_string(),
-            Why::Config(e) if crate::app_language::current() == crate::app_language::Lang::En => {
+            Why::Config(e)
+                if crate::shared::app_language::current()
+                    == crate::shared::app_language::Lang::En =>
+            {
                 e.clone()
             }
             Why::Config(_) => t!(pr_invalid).to_string(),
@@ -1674,7 +1681,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::AppLanguage(code) => {
             state.draft.general.app_language = code.0.into();
             // every window speaks it at its next redraw (no restart)
-            crate::app_language::apply(&state.draft.general);
+            crate::shared::app_language::apply(&state.draft.general);
             state.quick_text = quick_text(&state.draft);
         }
         Message::SelectStyle(v) => state.draft.selection.style = v,
@@ -1774,7 +1781,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ClearFolder => state.draft.general.save_folder.clear(),
         Message::OpenLink(url) => return Outcome::OpenLink(url),
         Message::CopyDiagnostics => return Outcome::CopyDiagnostics,
-        Message::ReportProblem => return Outcome::OpenLink(crate::diagnostics::issue_url()),
+        Message::ReportProblem => return Outcome::OpenLink(crate::shared::diagnostics::issue_url()),
         Message::Credits(open) => state.credits_open = open,
         Message::MadeByAll(all) => state.made_by_all = all,
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
@@ -1997,7 +2004,7 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
             // The failed edit stays in the draft (auto-save retries it); the switches
             // flipped meanwhile are still written.
             state.closing = false;
-            state.notice = Some(crate::app_language::fmt(S::win_save_failed, &[&e]));
+            state.notice = Some(crate::shared::app_language::fmt(S::win_save_failed, &[&e]));
             if state.queued_labs.is_empty() {
                 return Outcome::None;
             }

@@ -3,8 +3,8 @@
 //! link opens a pre-filled GitHub page with only the version and the OS (the
 //! user pastes the diagnostics himself). Everything passes `log::redact`.
 
-use crate::config::Config;
-use crate::log::{os, redact, tail};
+use crate::shared::config::Config;
+use crate::shared::log::{os, redact, tail};
 
 const ISSUES: &str = "https://github.com/AmerAlreyahi/OpenCircle/issues/new";
 
@@ -114,12 +114,12 @@ mod tests {
         c.ai.model = "gpt-secret-model".into();
         c.ai.base_url = format!(
             "https://example.com/v1?key={}",
-            crate::log::tests::fake("sk-live-")
+            crate::shared::log::tests::fake("sk-live-")
         );
         c.general.save_folder = "/home/amer/Pictures".into();
         crate::log!(
             "[opencircle] failed: Bearer {}",
-            crate::log::tests::fake("sk-ant-api03-")
+            crate::shared::log::tests::fake("sk-ant-api03-")
         );
         crate::log!("[opencircle] cannot read /home/amer/.config/x");
         let r = report(&c);

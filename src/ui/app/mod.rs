@@ -8,7 +8,7 @@ pub(crate) mod opening;
 pub(crate) mod quick;
 pub(crate) mod word;
 
-use crate::app_language::S;
+use crate::shared::app_language::S;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,7 +25,7 @@ use self::message::{Hiding, Message, Purpose};
 use self::opening::Open;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::can_hide_windows;
-use crate::ui::touch;
+use crate::shared::touch;
 use crate::ui::{live_layer, overlay, windows};
 
 pub(crate) mod actions;
@@ -230,7 +230,10 @@ pub(crate) struct App {
     /// The update waiting for a moment to install (`update::flow`), with its pill.
     pub(crate) update: Option<Waiting>,
     /// After a quiet install (a quit, a lock): its "Updated" pill, once.
-    pub(crate) updated: Option<(crate::update::Pill, crate::update::Installed)>,
+    pub(crate) updated: Option<(
+        crate::shared::update::Pill,
+        crate::shared::update::Installed,
+    )>,
     /// The update clock runs (`Message::UpdateTick`).
     pub(crate) update_ticks: bool,
 }
@@ -239,11 +242,11 @@ pub(crate) struct App {
 pub(crate) struct Waiting {
     pub version: String,
     pub url: String,
-    pub how: crate::update::How,
+    pub how: crate::shared::update::How,
     /// Downloaded and verified (none for one the user gets: "Get it").
-    pub staged: Option<crate::update::Staged>,
-    pub pill: crate::update::Pill,
-    pub lock: crate::update::Lock,
+    pub staged: Option<crate::shared::update::Staged>,
+    pub pill: crate::shared::update::Pill,
+    pub lock: crate::shared::update::Lock,
 }
 
 /// Translations kept for reuse (each a short text).
@@ -275,7 +278,7 @@ impl App {
         let start = app.windows.start().map(Message::Windows);
         // Started by an update: it is confirmed (the old program goes), then
         // What's new (after Restart now) or its small pill (after a quiet install).
-        let notes = match crate::update::confirm() {
+        let notes = match crate::shared::update::confirm() {
             Some(installed) => app.on_installed(installed),
             None => Task::none(),
         };

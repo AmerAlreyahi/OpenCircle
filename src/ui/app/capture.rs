@@ -1,6 +1,6 @@
 //! Opening an overlay: the capture, the frame, showing and closing the window.
 
-use crate::app_language::Said;
+use crate::shared::app_language::Said;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,9 +9,9 @@ use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
-use crate::config::{self};
 use crate::labs::BarButton;
 use crate::ocr::{self};
+use crate::shared::config;
 use crate::shared::platform::capture::{self, CaptureError};
 
 use crate::shared::kit::motion;

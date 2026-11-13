@@ -9,8 +9,8 @@ use iced::Element;
 use iced::widget::{Space, column};
 
 use super::super::flow::{Message, State};
-use crate::app_language::{S, fmt, language_name};
 use crate::mt;
+use crate::shared::app_language::{S, fmt, language_name};
 use crate::shared::kit::card::card;
 use crate::shared::kit::dir;
 use crate::shared::kit::text::{paragraph, sub, text};

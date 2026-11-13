@@ -90,7 +90,7 @@ pub(crate) const CLIPS: [ModelFile; 12] = [
 
 /// The clips `names` on disk, where they go (`None`: one isn't pinned).
 pub fn files(names: &[&str]) -> Option<Vec<(PathBuf, &'static ModelFile)>> {
-    files_in(&crate::paths::previews(), names)
+    files_in(&crate::shared::paths::previews(), names)
 }
 
 pub(crate) fn files_in(
@@ -196,7 +196,7 @@ mod tests {
         let f = files_in(d, &["snip-blur", "snip-long"]).unwrap();
         assert_eq!(f[0].0, d.join("snip-blur.ivf"));
         assert!(files_in(d, &["translate"]).is_none(), "held: not pinned");
-        assert!(crate::paths::previews().ends_with("OpenCircle/previews"));
+        assert!(crate::shared::paths::previews().ends_with("OpenCircle/previews"));
         let release =
             "https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/previews-1/";
         for c in &CLIPS {

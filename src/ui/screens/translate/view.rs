@@ -8,7 +8,7 @@ use super::{Card, Msg, Phase, Session};
 use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ai::Fix;
-use crate::app_language::{S, fmt, tr};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon_button::{State, icon_button};
@@ -50,7 +50,7 @@ impl Session {
     pub fn view<'a>(&'a self, screen: Size, at: Rectangle, hover: bool) -> Element<'a, Msg> {
         // the pill and its lists speak the app's language (the word card's
         // own text follows the translation's language: `Card::rtl`)
-        let _dir = dir::scope(crate::app_language::rtl());
+        let _dir = dir::scope(crate::shared::app_language::rtl());
         let card =
             |body: Element<'a, Msg>, footer: Option<Element<'a, Msg>>, title: Option<&'a str>| {
                 let title = title.unwrap_or(tr(actions::translate::ACTION.label));
@@ -294,7 +294,7 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
             Fix::Retry => Msg::Explain,
             Fix::Model | Fix::Key | Fix::Settings => Msg::OpenSettings,
         };
-        let provider = provider_name(&crate::config::current().ai);
+        let provider = provider_name(&crate::shared::config::current().ai);
         body = body.push(ai_error(
             e,
             &provider,

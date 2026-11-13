@@ -17,7 +17,7 @@ use gtk::glib::{self, ToVariant, Variant};
 
 use super::{Binding, bindings, desktop_spelling, set_desktop_keys};
 use crate::Triggers;
-use crate::config::{Config, parse_shortcut};
+use crate::shared::config::{Config, parse_shortcut};
 
 const BUS: &str = "org.kde.kglobalaccel";
 const PATH: &str = "/kglobalaccel";

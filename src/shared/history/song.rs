@@ -18,7 +18,7 @@ pub struct Entry {
 }
 
 pub fn path() -> Option<PathBuf> {
-    crate::paths::song_history()
+    crate::shared::paths::song_history()
 }
 
 /// Newest first; nothing when the file is missing or unreadable.
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn history_is_off_by_default_and_off_deletes_it() {
-        assert!(!crate::config::Config::default().song.history);
+        assert!(!crate::shared::config::Config::default().song.history);
         let dir = std::env::temp_dir().join(format!("oc-song-hist-{}", std::process::id()));
         let path = dir.join("h.json");
         let _ = std::fs::remove_dir_all(&dir);

@@ -7,8 +7,8 @@ use super::{
     ANTHROPIC_API_VERSION, AiError, DEFAULT_ANTHROPIC_MODEL, Event, HttpRequest, Message, Role,
     join_url, png_b64, run_stream,
 };
-use crate::config::AiConfig;
-use crate::secrets::Secret;
+use crate::shared::config::AiConfig;
+use crate::shared::secrets::Secret;
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 /// Cap on the answer (not a cost). Streaming, so a big cap does not risk a timeout.

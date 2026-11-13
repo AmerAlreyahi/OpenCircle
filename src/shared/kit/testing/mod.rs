@@ -11,12 +11,12 @@ mod gallery;
 pub struct Arabic(#[allow(dead_code)] super::dir::Scope);
 
 pub fn arabic() -> Arabic {
-    crate::app_language::set(crate::app_language::Lang::Ar);
+    crate::shared::app_language::set(crate::shared::app_language::Lang::Ar);
     Arabic(super::dir::scope(true))
 }
 
 impl Drop for Arabic {
     fn drop(&mut self) {
-        crate::app_language::set(crate::app_language::Lang::En);
+        crate::shared::app_language::set(crate::shared::app_language::Lang::En);
     }
 }

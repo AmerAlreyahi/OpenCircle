@@ -11,9 +11,9 @@ use iced::{Point, Rectangle, Size, Task, task};
 use crate::actions::ask::{self, Chat, Status};
 use crate::actions::{self, Crop};
 use crate::ai::AiError;
-use crate::app_language::{S, fmt};
 use crate::mt::Pair;
 use crate::ocr::models;
+use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::panel_frame as card;
 use crate::t;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
@@ -108,7 +108,7 @@ pub struct Offer {
 
 impl Offer {
     fn new((pair, lines): (&'static Pair, Vec<String>), source: &str, target: &str) -> Offer {
-        use crate::app_language::language_name as name;
+        use crate::shared::app_language::language_name as name;
         Offer {
             pair,
             lines,
@@ -212,7 +212,7 @@ impl Session {
         models: bool,
         taskbar: u32,
     ) -> (Session, Task<Msg>) {
-        let cfg = crate::config::current().translate;
+        let cfg = crate::shared::config::current().translate;
         let offline = actions::translate::will_be_offline();
         let size = match &frame {
             image::Handle::Rgba { width, height, .. } => (*width, *height),
@@ -237,7 +237,7 @@ impl Session {
             scale,
             partial: None,
             readers: None,
-            snip_keys: (crate::config::current().quick_actions.into_iter())
+            snip_keys: (crate::shared::config::current().quick_actions.into_iter())
                 .find(|q| q.action == actions::snip::ACTION.id)
                 .map(|q| q.shortcut)
                 .unwrap_or_default(),
@@ -768,7 +768,7 @@ fn translate(
         let message = match &e {
             Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
             Error::Ai(ai) => ai.headline(&crate::ui::ai_chat::provider_name(
-                &crate::config::current().ai,
+                &crate::shared::config::current().ai,
             )),
             _ => e.to_string(),
         };

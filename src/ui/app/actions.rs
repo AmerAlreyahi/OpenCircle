@@ -1,6 +1,6 @@
 //! Running actions on a selection: pills, quick actions, auto-search, QR, translate, song.
 
-use crate::app_language::{S, Said};
+use crate::shared::app_language::{S, Said};
 use std::time::Instant;
 
 use iced::futures::channel::mpsc::UnboundedSender;
@@ -9,8 +9,8 @@ use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
 use crate::actions::{self, Action, Crop, Run, copy, qr, search_in_browser, text};
-use crate::config::{self, QuickAction, Target};
 use crate::labs::BarButton;
+use crate::shared::config::{self, QuickAction, Target};
 
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, taskbar_inset};

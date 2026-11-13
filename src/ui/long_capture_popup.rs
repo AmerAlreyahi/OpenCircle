@@ -267,8 +267,8 @@ fn clicks(stdout: ChildStdout) -> Task<Finish> {
 /// `opencircle long-capture-popup`: the pop-up's process (X11), until its
 /// stdin ends.
 pub fn main() -> ExitCode {
-    let (config, _) = crate::config::Config::load();
-    crate::config::set_current(config);
+    let (config, _) = crate::shared::config::Config::load();
+    crate::shared::config::set_current(config);
     let run = super::with_fonts(iced::daemon(Helper::boot, Helper::update, Helper::view))
         .theme(|_: &Helper, _| Some(platform::clear_theme()))
         .run();
@@ -306,7 +306,7 @@ struct Helper {
 
 impl Helper {
     fn boot() -> (Helper, Task<Event>) {
-        crate::shared::theme::apply(crate::config::current().theme);
+        crate::shared::theme::apply(crate::shared::config::current().theme);
         let input = background(|tx| {
             let mut stdin = io::BufReader::new(io::stdin().lock());
             loop {

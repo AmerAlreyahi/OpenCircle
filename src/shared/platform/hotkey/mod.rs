@@ -25,7 +25,7 @@ use std::time::Instant;
 use global_hotkey::hotkey::{Code, HotKey};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 
-use crate::config::{Config, QuickAction, Target, parse_shortcut};
+use crate::shared::config::{Config, QuickAction, Target, parse_shortcut};
 use crate::{Trigger, Triggers};
 
 /// Is `id` an action `opencircle run` may start?
@@ -215,18 +215,18 @@ fn desktop_keys() -> MutexGuard<'static, Vec<(String, Option<String>)>> {
 }
 
 /// Where the user changes a key the desktop keeps (logged, and shown in Settings).
-pub fn managed() -> crate::app_language::S {
+pub fn managed() -> crate::shared::app_language::S {
     managed_on(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default())
 }
 
 /// `managed()` in English, for the log.
 #[cfg(target_os = "linux")]
 pub fn managed_log() -> &'static str {
-    crate::app_language::english(managed())
+    crate::shared::app_language::english(managed())
 }
 
-fn managed_on(desktop: &str) -> crate::app_language::S {
-    use crate::app_language::S;
+fn managed_on(desktop: &str) -> crate::shared::app_language::S {
+    use crate::shared::app_language::S;
     if desktop.split(':').any(|d| d.eq_ignore_ascii_case("gnome")) {
         S::k_managed_gnome
     } else if desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")) {
@@ -822,7 +822,7 @@ mod tests {
         assert_ne!(plan(&changed).0, plan(&default).0);
         changed.shortcut = default.shortcut.clone();
         for (q, d) in changed.quick_actions.iter_mut().zip(&default.quick_actions) {
-            q.shortcut = crate::config::default_quick_shortcut(&d.action, d.live);
+            q.shortcut = crate::shared::config::default_quick_shortcut(&d.action, d.live);
         }
         let (reset, default) = (plan(&changed), plan(&default));
         assert_eq!(reset, default);
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn names_where_each_desktop_changes_its_keys() {
-        use crate::app_language::{S, english};
+        use crate::shared::app_language::{S, english};
         assert!(
             english(managed_on("ubuntu:GNOME"))
                 .ends_with("Settings → Apps → OpenCircle → Global Shortcuts")

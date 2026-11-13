@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use iced::{Point, Size};
 
 use super::*;
-use crate::config::{Config, Provider, Theme};
-use crate::secrets::{MemoryStore, Secret};
+use crate::shared::config::{Config, Provider, Theme};
 use crate::shared::kit::testing::shot;
+use crate::shared::secrets::{MemoryStore, Secret};
 use crate::shared::theme;
 use crate::ui::screens::common::language_picker as picker;
 use crate::ui::screens::settings::{self, KeyMessage, PRESETS, tests::tmp};
@@ -272,7 +272,7 @@ fn the_switches_are_settings_rows_and_kept() {
     let t = texts(&s);
     assert!(
         t.iter()
-            .any(|t| t == crate::app_language::tr(settings::START_LABEL)),
+            .any(|t| t == crate::shared::app_language::tr(settings::START_LABEL)),
         "{t:?}"
     );
     let keys = settings::key_labels(&s.config().shortcut).join("+");
@@ -421,7 +421,7 @@ fn every_step_matches_its_golden_image() {
             themes::set(t);
             let name = format!(
                 "onboarding-{}-{}",
-                crate::app_language::bare(page.label)
+                crate::shared::app_language::bare(page.label)
                     .to_lowercase()
                     .replace(' ', "-"),
                 t.id
@@ -443,7 +443,7 @@ fn every_step_matches_its_golden_image() {
 /// Daylight (ARABIC_UI_SPEC.md; the English goldens above stay as they were).
 #[test]
 fn every_step_in_arabic_matches_its_golden_image() {
-    use crate::app_language::{self, Lang};
+    use crate::shared::app_language::{self, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();

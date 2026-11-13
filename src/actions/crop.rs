@@ -71,10 +71,10 @@ pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
 }
 
 /// `crop` as file bytes: PNG, or JPEG at quality 85 (no alpha: opaque screenshots).
-pub fn encode(crop: &Crop, format: crate::config::Format) -> Result<Vec<u8>, String> {
+pub fn encode(crop: &Crop, format: crate::shared::config::Format) -> Result<Vec<u8>, String> {
     match format {
-        crate::config::Format::Png => encode_png(crop.width, crop.height, &crop.rgba),
-        crate::config::Format::Jpeg => {
+        crate::shared::config::Format::Png => encode_png(crop.width, crop.height, &crop.rgba),
+        crate::shared::config::Format::Jpeg => {
             let (pixels, _) = crop.rgba.as_chunks::<4>();
             let rgb: Vec<u8> = pixels.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
             let mut out = Vec::new();
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn export_writes_png_or_jpeg() {
-        use crate::config::Format;
+        use crate::shared::config::Format;
         let c = solid(40, 30);
         let png = encode(&c, Format::Png).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");

@@ -9,8 +9,8 @@ use iced::{Rectangle, Task};
 
 use crate::actions::snip_more::{self as more, Hidden, Read, Row};
 use crate::actions::{Crop, text};
-use crate::config;
 use crate::ocr::{self, TextBlock};
+use crate::shared::config;
 use crate::snip::annotate::{self, Message as E};
 use crate::ui::background;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
@@ -515,7 +515,7 @@ mod tests {
         let _ = app.on_snip_toolbar(E::MenuEdge(true));
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let last = &toolbar::more_rows(editor)[editor.row.unwrap()];
-        assert_eq!(crate::app_language::tr(last.name), "Screen ruler");
+        assert_eq!(crate::shared::app_language::tr(last.name), "Screen ruler");
         let _ = app.on_snip_toolbar(E::MenuEdge(false));
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let first = &toolbar::more_rows(editor)[editor.row.unwrap()];
@@ -529,7 +529,10 @@ mod tests {
         let mut app = open();
         open_more(&mut app);
         let info = &app.o.edit.as_ref().unwrap().annotator.more;
-        assert_eq!(info.caps, more::caps_from(&crate::config::current()));
+        assert_eq!(
+            info.caps,
+            more::caps_from(&crate::shared::config::current())
+        );
         // (while it reads, the spinner takes the caps' place on the text rows)
         let (opening, id) = (app.opening, app.o.more.reads);
         let _ = app.on_more_read(opening, id, Ok(vec![block("hello", 5.0, 5.0)]));
@@ -658,7 +661,7 @@ mod tests {
     #[test]
     fn the_quick_key_runs_the_row_on_the_area() {
         let mut app = open();
-        let cfg = crate::config::Config::default();
+        let cfg = crate::shared::config::Config::default();
         let ask = (cfg.quick_actions.iter())
             .find(|q| q.action == "ai_explain")
             .unwrap();

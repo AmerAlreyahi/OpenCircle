@@ -2,7 +2,7 @@
 //! holds it only while the overlay is open (`Open`). Closing takes it whole,
 //! so no field (the frame, the text read) outlives its opening.
 
-use crate::app_language::Said;
+use crate::shared::app_language::Said;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,9 +11,9 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
-use crate::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::labs::{BarButton, Labs};
 use crate::ocr;
+use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};

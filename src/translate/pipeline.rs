@@ -12,10 +12,10 @@ pub use super::lang::is_rtl;
 use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
 use crate::ai::{self, AiError};
-use crate::config::{AiConfig, TextReader};
 use crate::mt;
 use crate::ocr::{self, OcrError, TextBlock};
-use crate::secrets::Secret;
+use crate::shared::config::{AiConfig, TextReader};
+use crate::shared::secrets::Secret;
 
 /// OCR and translation, behind a trait so tests inject fakes. [`Real`] is the app's.
 pub trait Deps {
@@ -96,7 +96,7 @@ impl Real {
 
     /// Windows OCR reads this source (`system_reads`; asks Windows once).
     fn system(&self) -> bool {
-        let reader = crate::config::current().selection.text_reader;
+        let reader = crate::shared::config::current().selection.text_reader;
         system_reads(reader, ocr::system::language(), &self.source)
     }
 
@@ -851,7 +851,9 @@ impl Real {
                     let (keep, known) = words_read(lines, ocr::system::language());
                     match ocr::recognize_except(rgba, width, height, &known, false) {
                         Ok(other) if !other.is_empty() => return Ok(merged(keep, other)),
-                        Ok(_) => crate::log!("[opencircle] no other script read; PP-OCR reads"),
+                        Ok(_) => {
+                            crate::log!("[opencircle] no other script read; PP-OCR reads")
+                        }
                         Err(e) => {
                             crate::log!("[opencircle] second reader failed ({e}); PP-OCR reads")
                         }
@@ -868,7 +870,9 @@ impl Real {
                     });
                 }
                 Ok(lines) => return Ok(lines),
-                Err(e) => crate::log!("[opencircle] Windows OCR failed ({e}); PP-OCR reads"),
+                Err(e) => {
+                    crate::log!("[opencircle] Windows OCR failed ({e}); PP-OCR reads")
+                }
             }
         }
         ocr::recognize_as(rgba, width, height, &self.source)

@@ -19,8 +19,8 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::config::SongSource;
-use crate::secrets::{self, Secret, SecretsError};
+use crate::shared::config::SongSource;
+use crate::shared::secrets::{self, Secret, SecretsError};
 
 /// How long one search listens.
 pub const LISTEN_SECS: u32 = 10;
@@ -297,7 +297,7 @@ pub fn cover(url: &str) -> Option<(u32, u32, Vec<u8>)> {
     if !url.starts_with("https://") {
         return None;
     }
-    let agent = crate::net::agent(crate::net::COVER);
+    let agent = crate::shared::net::agent(crate::shared::net::COVER);
     let bytes = agent
         .get(url)
         .call()

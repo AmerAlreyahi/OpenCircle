@@ -4,8 +4,8 @@
 
 use std::fmt;
 
-use crate::config::AiConfig;
 use crate::music::Service;
+use crate::shared::config::AiConfig;
 
 const SERVICE: &str = "opencircle";
 
@@ -288,7 +288,7 @@ mod tests {
         Secret::new(format!("fake-{tag}-{:x}", std::process::id()))
     }
 
-    fn ai(provider: crate::config::Provider, base_url: &str) -> AiConfig {
+    fn ai(provider: crate::shared::config::Provider, base_url: &str) -> AiConfig {
         AiConfig {
             provider,
             base_url: base_url.into(),
@@ -300,7 +300,7 @@ mod tests {
     /// config selects; nobody else gets it, and a key saved there stays.
     #[test]
     fn the_shared_key_moves_once_to_the_selected_provider_only() {
-        use crate::config::Provider::{Anthropic, Browser, OpenaiCompatible};
+        use crate::shared::config::Provider::{Anthropic, Browser, OpenaiCompatible};
         let old = fake("old");
         let shared = || {
             let s = MemoryStore::default();

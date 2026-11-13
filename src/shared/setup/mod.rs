@@ -138,7 +138,7 @@ pub fn relocate(args: &[String]) -> Option<u32> {
     if args.iter().any(|a| a == RELOCATED_ARG) {
         return None;
     }
-    let Some(want) = crate::update::verify::parse_hex(hash) else {
+    let Some(want) = crate::shared::update::verify::parse_hex(hash) else {
         return Some(ERROR_INVALID_COMMAND_LINE);
     };
     let dir = admin_root().join(format!(
@@ -222,7 +222,7 @@ fn copy_verified(
     #[cfg(windows)]
     std::os::windows::fs::OpenOptionsExt::share_mode(&mut open, 1); // FILE_SHARE_READ
     let file = open.open(&copy)?;
-    if crate::update::verify::sha256(&file)? != *want {
+    if crate::shared::update::verify::sha256(&file)? != *want {
         drop(file);
         let _ = std::fs::remove_file(&copy);
         return Err(std::io::Error::other(
@@ -616,7 +616,7 @@ pub fn quit_running_app() -> bool {
 /// The user's data: the settings folder and the local data (models, recent
 /// captures, histories, the update cache), and the keys in the keyring.
 fn user_data() -> Vec<PathBuf> {
-    crate::paths::user_data()
+    crate::shared::paths::user_data()
 }
 
 /// `opencircle --forget-user-data [--quiet]`, run by the MSI's uninstall (not
@@ -633,13 +633,14 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     }
     // in Windows' display language, as the setup window (no config is read)
     let lang = crate::shared::platform::sys::locale::language();
-    crate::app_language::set(
-        crate::app_language::Lang::of(&lang).unwrap_or(crate::app_language::Lang::En),
+    crate::shared::app_language::set(
+        crate::shared::app_language::Lang::of(&lang)
+            .unwrap_or(crate::shared::app_language::Lang::En),
     );
     if !quiet
         && msi::ask_yes_no(
-            crate::app_language::tr(crate::app_language::S::su_uninstall_title),
-            crate::app_language::tr(crate::app_language::S::su_forget_ask),
+            crate::shared::app_language::tr(crate::shared::app_language::S::su_uninstall_title),
+            crate::shared::app_language::tr(crate::shared::app_language::S::su_forget_ask),
         )
     {
         remove_user_data();
@@ -651,11 +652,12 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 pub fn remove_user_data() {
     crate::shared::platform::hotkey::forget_desktop_shortcuts();
     remove_dirs(&user_data());
-    let owners = (crate::ai::providers::PRESETS.iter()).map(|p| crate::secrets::AiKey(p.id));
-    for owner in owners.chain([crate::secrets::AiKey::SHARED]) {
-        let _ = crate::secrets::delete(owner);
+    let owners =
+        (crate::ai::providers::PRESETS.iter()).map(|p| crate::shared::secrets::AiKey(p.id));
+    for owner in owners.chain([crate::shared::secrets::AiKey::SHARED]) {
+        let _ = crate::shared::secrets::delete(owner);
     }
-    let _ = crate::secrets::by_name::delete(crate::music::SERVICE.key_entry());
+    let _ = crate::shared::secrets::by_name::delete(crate::music::SERVICE.key_entry());
 }
 
 fn remove_dirs(dirs: &[PathBuf]) {
@@ -688,7 +690,7 @@ mod tests {
         for d in names.iter().chain([&other]) {
             std::fs::create_dir_all(d).unwrap();
         }
-        let found = crate::paths::user_data_in(Some(&data), Some(&config));
+        let found = crate::shared::paths::user_data_in(Some(&data), Some(&config));
         remove_dirs(&found);
         // (a case-insensitive disk is one folder: gone either way)
         assert!(names.iter().all(|d| !d.exists()), "{found:?}");
@@ -879,7 +881,7 @@ mod tests {
             }))
         );
         // the app's own update (`update::SETUP_ARGS`): install, then start the app
-        let update: Vec<String> = (crate::update::SETUP_ARGS.split(' '))
+        let update: Vec<String> = (crate::shared::update::SETUP_ARGS.split(' '))
             .map(String::from)
             .collect();
         assert_eq!(
@@ -952,7 +954,7 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         let exe = base.join("OpenCircle-Setup-9.9.9-x64.exe");
         std::fs::write(&exe, b"setup").unwrap();
-        let good = crate::update::verify::sha256(&b"setup"[..]).unwrap();
+        let good = crate::shared::update::verify::sha256(&b"setup"[..]).unwrap();
         let (copy, _held) = copy_verified(&exe, &base.join("ok"), &good).unwrap();
         assert_eq!(std::fs::read(&copy).unwrap(), b"setup");
         assert_eq!(copy.parent(), Some(base.join("ok").as_path()));
@@ -992,7 +994,7 @@ mod tests {
         let planted = r"C:\Users\u\AppData\Local\Planted";
         let vars = ["WINDIR", "SystemRoot", "ProgramW6432", "ProgramFiles"];
         if std::env::var("SystemRoot").as_deref() != Ok(planted) {
-            let name = "setup::tests::the_elevated_setup_never_takes_folders_from_the_environment";
+            let name = "shared::setup::tests::the_elevated_setup_never_takes_folders_from_the_environment";
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
             child.args(["--exact", name, "--test-threads=1"]);
             for var in vars {

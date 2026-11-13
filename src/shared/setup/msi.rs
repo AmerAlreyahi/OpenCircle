@@ -573,7 +573,7 @@ mod win {
                     | MB_TOPMOST
                     | MB_SETFOREGROUND
                     // right to left (Arabic): read and laid out from the right
-                    | match crate::app_language::rtl() {
+                    | match crate::shared::app_language::rtl() {
                         true => MB_RTLREADING | MB_RIGHT,
                         false => MESSAGEBOX_STYLE(0),
                     },

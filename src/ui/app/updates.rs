@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use iced::Task;
 
+use crate::shared::update::{Event, How, Installed, Moment, Step};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Hiding, Message};
 use crate::ui::screens::update_pill::{self, Kind, Pill};
 use crate::ui::{update_card, windows};
-use crate::update::{Event, How, Installed, Moment, Step};
 
 use super::{App, Waiting};
 
@@ -78,7 +78,8 @@ impl App {
     pub(crate) fn update_tick(&mut self) -> Task<Message> {
         let now = Instant::now();
         let locked = crate::shared::platform::sys::session::locked();
-        let away = crate::update::away(locked, crate::shared::platform::sys::session::idle_for());
+        let away =
+            crate::shared::update::away(locked, crate::shared::platform::sys::session::idle_for());
         let mut tasks = Vec::new();
         let idle = self.is_idle();
         if let Some(w) = &mut self.update {
@@ -97,10 +98,10 @@ impl App {
             let lock_moment = w
                 .staged
                 .as_ref()
-                .is_some_and(|s| crate::update::installs_at(&s.install, Moment::Locked));
+                .is_some_and(|s| crate::shared::update::installs_at(&s.install, Moment::Locked));
             if lock_moment && w.lock.long_enough(now, locked) && idle {
                 let staged = w.staged.clone().expect("checked");
-                match crate::update::restart(&staged, Moment::Locked) {
+                match crate::shared::update::restart(&staged, Moment::Locked) {
                     Ok(()) => return iced::exit(),
                     Err(e) => crate::log!("[opencircle] update {}: {e}", staged.version),
                 }
@@ -118,9 +119,10 @@ impl App {
                 Step::Nothing => {}
             }
         }
-        let shown = |p: &crate::update::Pill| p.is_shown();
+        let shown = |p: &crate::shared::update::Pill| p.is_shown();
         let more = self.update.is_some()
-            || (self.updated.as_ref()).is_some_and(|(p, _)| *p != crate::update::Pill::Done);
+            || (self.updated.as_ref())
+                .is_some_and(|(p, _)| *p != crate::shared::update::Pill::Done);
         let pace = match (self.update.as_ref().is_some_and(|w| shown(&w.pill)))
             || (self.updated.as_ref()).is_some_and(|(p, _)| shown(p))
         {
@@ -140,13 +142,15 @@ impl App {
     pub(crate) fn on_quit(&self) {
         let Some(w) = &self.update else { return };
         let at_quit = (w.staged.as_ref())
-            .is_some_and(|s| crate::update::installs_at(&s.install, Moment::Quit));
+            .is_some_and(|s| crate::shared::update::installs_at(&s.install, Moment::Quit));
         match at_quit {
             true => crate::log!(
                 "[opencircle] update {}: starts with the next run",
                 w.version
             ),
-            false => crate::log!("[opencircle] update {}: waits for Restart now", w.version),
+            false => {
+                crate::log!("[opencircle] update {}: waits for Restart now", w.version)
+            }
         }
     }
 
@@ -203,7 +207,7 @@ impl App {
             crate::ui::windows::open_url(&w.url);
             return self.windows.update_pill(None).map(Message::Windows);
         };
-        match crate::update::restart(&staged, Moment::Button) {
+        match crate::shared::update::restart(&staged, Moment::Button) {
             Ok(()) => {
                 self.update = None; // on its way (a quit meanwhile, e.g. the setup's, says nothing)
                 // the clock starts once the pill's window is there (GNOME on Wayland

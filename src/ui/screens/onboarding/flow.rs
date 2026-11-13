@@ -8,7 +8,7 @@
 //! // update: if let onboarding::Outcome::Finished(cfg) = onboarding::update(&mut state, msg) { ...close, start... }
 //! // view: onboarding::view(&state)
 //! ```
-use crate::app_language::{S, fmt, tr};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::t;
 use std::fmt;
 use std::path::PathBuf;
@@ -19,8 +19,7 @@ use iced::{Center, Element, Fill, Padding, Size, Subscription};
 
 use super::steps;
 use super::steps::screenshots::{Access, ask};
-use crate::config::{AiConfig, Config, Engine};
-use crate::secrets::{KeyStore, Keyring};
+use crate::shared::config::{AiConfig, Config, Engine};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::divider::divider;
 use crate::shared::kit::header::{Caption, regular};
@@ -29,6 +28,7 @@ use crate::shared::kit::segmented::spread;
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, space};
+use crate::shared::secrets::{KeyStore, Keyring};
 use crate::ui::screens::common::language_picker::{self as picker, Picker, Side};
 use crate::ui::screens::settings::{self, KeyJob};
 
@@ -310,7 +310,7 @@ fn finish(state: &mut State) -> Outcome {
         return Outcome::None;
     }
     let config = state.config().clone();
-    match crate::config::update_at(state.path.as_deref(), |c| *c = config.clone()) {
+    match crate::shared::config::update_at(state.path.as_deref(), |c| *c = config.clone()) {
         Ok(_) => Outcome::Finished(config),
         Err(e) => {
             state.error = Some(fmt(S::o_save_failed, &[&e]));
@@ -334,7 +334,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
 pub fn view(state: &State) -> Element<'_, Message> {
     // the whole window in the app's language and direction
-    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+    let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
     let logo = crate::shared::kit::logo::logo(16);
     let header = regular(logo, t!(o_title), Space::new(), None, Message::Caption);
     let (from, glide) = match state.moving() {

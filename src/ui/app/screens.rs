@@ -18,8 +18,8 @@ use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
-use crate::config;
 use crate::ocr;
+use crate::shared::config;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{Place, place_window};
 use crate::snip::annotate;
@@ -569,7 +569,9 @@ impl App {
         (screen.read, screen.reading) = (true, false);
         match read {
             Ok(lines) => screen.lines = lines,
-            Err(e) => crate::log!("[opencircle] Windows OCR didn't read another screen: {e}"),
+            Err(e) => {
+                crate::log!("[opencircle] Windows OCR didn't read another screen: {e}")
+            }
         }
         let done = self.more_text();
         Task::batch([done, self.read_more()])

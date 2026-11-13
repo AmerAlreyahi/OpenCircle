@@ -11,7 +11,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 
 use crate::actions::share;
 use crate::actions::snip_more::{self, Read, Row};
-use crate::app_language::{S, fmt, tr};
+use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
@@ -517,7 +517,13 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         let px = e.stroke.round() as u8;
         let chosen = Width::ALL.iter().position(|w| w.stroke() == e.stroke);
         let presets = segmented::presets(chosen, None, false, |i| Message::Width(Width::ALL[i]));
-        let slider = slider::bare(crate::config::STROKE, px, SLIDER_W, false, Message::Stroke);
+        let slider = slider::bare(
+            crate::shared::config::STROKE,
+            px,
+            SLIDER_W,
+            false,
+            Message::Stroke,
+        );
         sizes(t!(sn_size), format!("{px} px"), presets, Some(slider))
     };
     let font = || {
@@ -526,7 +532,7 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         let presets = segmented::presets(chosen, Some("A"), false, |i| {
             Message::TextSize(TEXT_PRESETS[i])
         });
-        let slider = slider::bare(crate::config::TEXT_SIZE, px, SLIDER_W, false, |v| {
+        let slider = slider::bare(crate::shared::config::TEXT_SIZE, px, SLIDER_W, false, |v| {
             Message::TextSize(f32::from(v))
         });
         sizes(t!(sn_font_size), format!("{px} px"), presets, Some(slider))
@@ -867,7 +873,7 @@ mod tests {
                 let more_with = |info: Info, capturing: bool| {
                     let mut e = editor();
                     e.more = Info {
-                        caps: snip_more::caps_from(&crate::config::Config::default()),
+                        caps: snip_more::caps_from(&crate::shared::config::Config::default()),
                         ..info
                     };
                     e.capturing = capturing;

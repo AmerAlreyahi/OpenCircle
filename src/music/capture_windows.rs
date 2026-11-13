@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use super::{Clip, Downmix, Error};
-use crate::config::SongSource;
+use crate::shared::config::SongSource;
 
 pub fn record(
     source: SongSource,

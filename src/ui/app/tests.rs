@@ -1,4 +1,4 @@
-use crate::app_language::{S, Said};
+use crate::shared::app_language::{S, Said};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,9 +9,9 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
-use crate::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
+use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate::{self};
 
@@ -31,8 +31,8 @@ use crate::shared::kit::field;
 use crate::ui::screens::bar::view::ask_placeholder;
 
 use crate::actions::crop::STACK_GAP;
-use crate::config::{BarAnchor, TextReader};
 use crate::labs::Labs;
+use crate::shared::config::{BarAnchor, TextReader};
 
 fn closing_app() -> App {
     let mut app = App::idle(window::Id::unique());
@@ -58,8 +58,8 @@ fn a_shot() -> Result<Shot, CaptureError> {
 /// at the first idle minute, the app vanishing under the user.
 #[test]
 fn an_update_waits_for_a_moment_the_user_picks() {
+    use crate::shared::update::{Event, How, Install, Staged};
     use crate::ui::screens::update_pill::{Kind, Msg as PillMsg};
-    use crate::update::{Event, How, Install, Staged};
     let staged = Staged {
         version: "9.9.9".into(),
         file: "missing".into(),
@@ -170,7 +170,7 @@ fn a_grab_right_after_the_overlay_closed_waits_until_it_is_gone() {
 /// now keeps it for another try (the tray row, Settings).
 #[test]
 fn an_installed_copys_update_waits_for_restart_now() {
-    use crate::update::{Event, How, Install, Staged};
+    use crate::shared::update::{Event, How, Install, Staged};
     let staged = Staged {
         version: "9.9.9".into(),
         file: std::env::temp_dir().join("oc-update-test-no-setup.exe"), // missing: never runs
@@ -199,7 +199,11 @@ fn a_shortcut_while_open_brings_the_overlay_back_and_says_so() {
     let mut app = App::idle(window::Id::unique());
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
     let n = app.capturing.expect("pending");
-    let said = |line: &str| crate::log::tail(200).iter().any(|l| l.contains(line));
+    let said = |line: &str| {
+        crate::shared::log::tail(200)
+            .iter()
+            .any(|l| l.contains(line))
+    };
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
     assert!(
         said("a capture is still on its way"),
@@ -1902,9 +1906,9 @@ fn reading_the_screen_shows_how_far_it_is() {
 /// in the existing download card; not before 3 such lines.
 #[test]
 fn a_screen_read_as_noise_offers_the_readers_language() {
-    let mut cfg = crate::config::current();
+    let mut cfg = crate::shared::config::current();
     cfg.translate.target = "ar".into();
-    crate::config::set_current(cfg);
+    crate::shared::config::set_current(cfg);
     let mut app = reader_app();
     let _ = app.update(Message::ScreenNoise(app.opening, 2));
     assert!(matches!(app.o.reader, Reader::Idle), "2 lines: not yet");
@@ -1915,7 +1919,7 @@ fn a_screen_read_as_noise_offers_the_readers_language() {
     let _ = app.update(Message::ReaderDismiss);
     let _ = app.update(Message::ScreenNoise(app.opening, 5));
     assert!(matches!(app.o.reader, Reader::Idle), "once per opening");
-    crate::config::set_current(crate::config::Config::default());
+    crate::shared::config::set_current(crate::shared::config::Config::default());
 }
 
 /// `reader_app` with all its screen read.
@@ -2288,7 +2292,7 @@ fn without_the_text_reader_the_bar_offers_its_download() {
     let _ = app.update(step(Err(S::md_err_offline)));
     let texts = overlay_texts(&app);
     assert!(
-        texts.contains(&crate::app_language::tr(S::md_err_offline).to_string()),
+        texts.contains(&crate::shared::app_language::tr(S::md_err_offline).to_string()),
         "{texts:?}"
     );
     assert!(

@@ -336,7 +336,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        crate::paths::test_dir(&format!("chats-{name}")).join("opencircle.db")
+        crate::shared::paths::test_dir(&format!("chats-{name}")).join("opencircle.db")
     }
 
     fn chat(id: &str, updated: u64) -> Saved {
@@ -401,7 +401,8 @@ mod tests {
         let db = tmp("v1");
         std::fs::create_dir_all(db.parent().unwrap()).unwrap();
         let old = Connection::open(&db).unwrap();
-        old.execute_batch(crate::store::MIGRATIONS[0]).unwrap();
+        old.execute_batch(crate::shared::store::MIGRATIONS[0])
+            .unwrap();
         old.execute_batch(
             "INSERT INTO chats (id, title, created, updated) VALUES ('1-0', 'Old', 1, 1);
              PRAGMA user_version = 1;",
@@ -491,7 +492,7 @@ mod tests {
     fn forgetting_clears_every_saved_chat() {
         let db = tmp("forget");
         save(&db, &chat("1-0", 1), generation()).unwrap();
-        crate::store::test_path(Some(db.clone()));
+        crate::shared::store::test_path(Some(db.clone()));
         forget_all();
         // The clear runs on a thread behind the one write lock: under a busy test run
         // (parallel tests, other builds) it can take seconds; it stops as soon as it's done.
@@ -499,7 +500,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
             list(&db, "").is_empty()
         });
-        crate::store::test_path(None);
+        crate::shared::store::test_path(None);
         assert!(gone);
         let _ = std::fs::remove_dir_all(db.parent().unwrap());
     }

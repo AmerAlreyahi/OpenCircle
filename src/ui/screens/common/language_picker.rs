@@ -14,8 +14,8 @@
 use iced::widget::{Space, column, container, mouse_area, row};
 use iced::{Center, Element, Fill, Size, Vector};
 
-use crate::app_language::{Lang, RLM, S, tr};
 use crate::mt;
+use crate::shared::app_language::{Lang, RLM, S, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::divider::divider;
 use crate::shared::kit::field;
@@ -146,7 +146,7 @@ pub struct Picker {
 
 impl Picker {
     pub fn new(source: &str, target: &str, offline: bool) -> Picker {
-        let saved = crate::config::current().translate;
+        let saved = crate::shared::config::current().translate;
         Picker {
             source: source.into(),
             target: target.into(),
@@ -272,7 +272,7 @@ impl Picker {
         let mut all: Vec<&'static lang::Language> = (LANGUAGES.iter())
             .filter(|l| side == Side::Target || l.ocr.is_some())
             .collect();
-        all.sort_by_key(|l| crate::app_language::language_name(l.code));
+        all.sort_by_key(|l| crate::shared::app_language::language_name(l.code));
         let choice = |code: &str, current: bool| Item::Choice(code.to_string(), current);
         let q = self.query.trim().to_lowercase();
         if !q.is_empty() {
@@ -286,7 +286,7 @@ impl Picker {
             let matches = all.iter().filter(|l| {
                 l.code.to_lowercase().starts_with(&q)
                     || l.name.to_lowercase().contains(&q)
-                    || crate::app_language::language_name(l.code)
+                    || crate::shared::app_language::language_name(l.code)
                         .to_lowercase()
                         .contains(&q)
                     || l.native.to_lowercase().contains(&q)
@@ -412,7 +412,7 @@ impl Picker {
         {
             let [sources, targets] = self.recent.clone();
             std::thread::spawn(move || {
-                let saved = crate::config::update(|c| {
+                let saved = crate::shared::config::update(|c| {
                     c.translate.recent_sources = sources;
                     c.translate.recent_targets = targets;
                 });
@@ -427,7 +427,7 @@ impl Picker {
     fn name(&self, code: &str) -> &'static str {
         match code {
             AUTO => t!(pk_detect_long),
-            c => crate::app_language::language_name(c),
+            c => crate::shared::app_language::language_name(c),
         }
     }
 
@@ -438,7 +438,7 @@ impl Picker {
             // "Chinese (Simplified)" -> "Chinese": one line in the chip
             let label = match code {
                 AUTO => t!(pk_detect),
-                c => crate::app_language::language_name(c)
+                c => crate::shared::app_language::language_name(c)
                     .split(" (")
                     .next()
                     .unwrap_or_default(),
@@ -546,13 +546,13 @@ impl Picker {
                     };
                     let (name, look) = match (self.endonyms, lang::find(code)) {
                         (true, Some(l)) => {
-                            let ours = crate::app_language::language_name(l.code);
+                            let ours = crate::shared::app_language::language_name(l.code);
                             let aside =
                                 (ours.trim_start_matches('\u{200F}') != l.native).then_some(ours);
                             (l.native, Look { aside, ..look })
                         }
                         // another UI language: the name in it, the language's own beside it
-                        (false, Some(l)) if crate::app_language::current() != Lang::En => {
+                        (false, Some(l)) if crate::shared::app_language::current() != Lang::En => {
                             let ours = self.name(code);
                             let aside =
                                 (ours.trim_start_matches(RLM) != l.native).then_some(l.native);

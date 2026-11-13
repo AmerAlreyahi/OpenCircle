@@ -8,7 +8,7 @@
 use std::io;
 use std::path::Path;
 
-use crate::config::Config;
+use crate::shared::config::Config;
 
 /// Brings the OS entry in line with the setting (errors are logged, never fatal).
 pub fn apply(config: &Config) {

@@ -64,8 +64,8 @@ mod tests {
                 (
                     Tone::Neutral,
                     "neutral",
-                    crate::app_language::fmt(
-                        crate::app_language::S::pill_tray,
+                    crate::shared::app_language::fmt(
+                        crate::shared::app_language::S::pill_tray,
                         &[&"Ctrl+Shift+Space"],
                     ),
                 ),

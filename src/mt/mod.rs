@@ -684,7 +684,7 @@ fn adopt_old_folders_in(root: &Path, mv: impl Fn(&Path, &Path) -> std::io::Resul
 /// Per-user folder (Linux `~/.local/share/OpenCircle/mt`, Windows
 /// `%LOCALAPPDATA%\OpenCircle\mt`), beside OCR's.
 fn models_root() -> PathBuf {
-    crate::paths::mt()
+    crate::shared::paths::mt()
 }
 
 /// A pair's folder name starts with this, then `<source>-<target>`: the
@@ -997,7 +997,7 @@ fn has_size(path: &Path, size: u64) -> bool {
 fn verified(path: &Path, f: &ModelFile) -> bool {
     has_size(path, f.size)
         && std::fs::File::open(path)
-            .and_then(crate::update::verify::sha256)
+            .and_then(crate::shared::update::verify::sha256)
             .is_ok_and(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256)
 }
 
@@ -1454,7 +1454,7 @@ mod tests {
 
     /// A pinned file with `bytes` as its content.
     fn pinned(name: &'static str, bytes: &[u8]) -> &'static ModelFile {
-        let hash = crate::update::verify::sha256(bytes).unwrap();
+        let hash = crate::shared::update::verify::sha256(bytes).unwrap();
         let hash: String = hash.iter().map(|b| format!("{b:02x}")).collect();
         Box::leak(Box::new(ModelFile::plain(
             name,
@@ -1735,7 +1735,7 @@ mod tests {
     #[test]
     fn the_model_folders_sit_under_the_data_folder_uninstall_removes() {
         let (data, config) = (PathBuf::from("/d"), PathBuf::from("/c"));
-        let removed = crate::paths::user_data_in(Some(&data), Some(&config));
+        let removed = crate::shared::paths::user_data_in(Some(&data), Some(&config));
         let folder = data.join("OpenCircle").join("mt").join(PAIRS[0].dir);
         assert!(removed.iter().any(|r| folder.starts_with(r)), "{removed:?}");
         for p in &PAIRS {

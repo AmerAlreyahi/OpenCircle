@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use pulseaudio::protocol::{self, Command};
 
 use super::{Clip, Error, RATE};
-use crate::config::SongSource;
+use crate::shared::config::SongSource;
 
 pub fn record(
     source: SongSource,

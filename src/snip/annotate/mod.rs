@@ -72,7 +72,7 @@ pub fn badge(
     layer.pm
 }
 
-use crate::app_language::S;
+use crate::shared::app_language::S;
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
@@ -80,7 +80,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::actions::Crop;
-use crate::config::{EditorConfig, Rgb};
+use crate::shared::config::{EditorConfig, Rgb};
 use document::int_rect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1748,7 +1748,7 @@ const SAVE_AFTER: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn remembered() -> EditorConfig {
     let last = LAST.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    last.unwrap_or_else(|| crate::config::current().editor)
+    last.unwrap_or_else(|| crate::shared::config::current().editor)
 }
 
 /// Remembers the editor's options (`[editor]`) for the next editor: at once in
@@ -1766,7 +1766,7 @@ fn remember(options: EditorConfig) {
         std::thread::sleep(SAVE_AFTER);
         WRITE_DUE.store(false, Ordering::Release);
         // Read under the writer's lock: the last write always has the newest.
-        let written = crate::config::update(|c| {
+        let written = crate::shared::config::update(|c| {
             if let Some(last) = LAST.lock().unwrap_or_else(|e| e.into_inner()).clone() {
                 c.editor = last;
             }

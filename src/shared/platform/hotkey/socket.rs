@@ -17,7 +17,7 @@ use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Name};
 
 use crate::Triggers;
-use crate::config::Target;
+use crate::shared::config::Target;
 
 /// Longest accepted command line; anything longer is dropped.
 const MAX_LINE: u64 = 64;
@@ -89,7 +89,7 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
         return Err(format!("unknown action \"{}\"", printable(action)));
     }
     // A Labs feature that is off: the CLI says how to turn it on (`main`: exit status 2).
-    crate::labs::command_allowed(&crate::config::current().labs, action)?;
+    crate::labs::command_allowed(&crate::shared::config::current().labs, action)?;
     let target = match target {
         None => None,
         Some(t) => Some(super::parse_target(t).ok_or_else(|| {
@@ -221,7 +221,7 @@ pub fn is_older(answer: Option<&str>, ours: &str) -> bool {
     match answer {
         None => true,
         Some(v) => matches!(
-            (crate::update::version(v), crate::update::version(ours)),
+            (crate::shared::update::version(v), crate::shared::update::version(ours)),
             (Some(theirs), Some(ours)) if theirs < ours
         ),
     }

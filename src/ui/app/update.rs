@@ -1,6 +1,6 @@
 //! Message dispatch: every message to its handler.
 
-use crate::app_language::{S, Said};
+use crate::shared::app_language::{S, Said};
 use std::time::Instant;
 
 use iced::window::{self, Mode};
@@ -8,9 +8,9 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, text};
-use crate::config::{self};
 use crate::labs::{self};
 use crate::ocr::{self};
+use crate::shared::config;
 
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
@@ -157,7 +157,9 @@ impl App {
                 }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.next = Purpose::Quick(q, qa.target),
-                    None => crate::log!("unknown action {}; opening the overlay", qa.action),
+                    None => {
+                        crate::log!("unknown action {}; opening the overlay", qa.action)
+                    }
                 }
                 self.capture(at, None)
             }

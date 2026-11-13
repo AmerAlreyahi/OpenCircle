@@ -7,8 +7,8 @@ use iced::widget::column;
 use iced::widget::tooltip::Position;
 
 use super::super::state::{BARS, BarChoice, Message, PALETTES, PaletteChoice, State};
-use crate::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
 use crate::labs::{Feature, Labs};
+use crate::shared::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
 use crate::shared::kit::colour::{picker, swatch};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::segmented::segmented;
@@ -76,7 +76,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
             t!(cu_glow),
             t!(cu_glow_desc),
             tip(
-                slider(crate::config::GLOW, c.glow, " %", Message::Glow),
+                slider(crate::shared::config::GLOW, c.glow, " %", Message::Glow),
                 t!(cu_glow),
                 Position::Top,
             ),
@@ -85,7 +85,7 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
             t!(cu_dim),
             t!(cu_dim_desc),
             tip(
-                slider(crate::config::DIM, c.dim, " %", Message::Dim),
+                slider(crate::shared::config::DIM, c.dim, " %", Message::Dim),
                 t!(cu_dim_tip),
                 Position::Top,
             ),

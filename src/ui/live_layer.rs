@@ -15,10 +15,10 @@ use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 use super::live_controller::{self, Controller, Out};
 use super::screens::overlay::edge as border;
 use super::{background, windows};
-use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
 use crate::ocr;
+use crate::shared::config;
 use crate::shared::platform::capture::{self, window_rect};
 use crate::shared::theme;
 use crate::translate::live::{self as live_steps, Live as Steps, Patch};
@@ -28,7 +28,12 @@ use crate::translate::pipeline::Cache;
 /// 1.5 s by default): steps start on this fixed beat, and a slow step skips
 /// the beats it ran over (`translate::live::pump`).
 fn interval() -> Duration {
-    Duration::from_millis(crate::config::current().translate.live_interval_ms.into())
+    Duration::from_millis(
+        crate::shared::config::current()
+            .translate
+            .live_interval_ms
+            .into(),
+    )
 }
 /// The first live run's note, shown once.
 const NOTE_TIME: Duration = Duration::from_secs(6);
@@ -546,7 +551,7 @@ impl Live {
                 let target = &langs.1;
                 let mut frame = match capture::monitor_under_cursor() {
                     Ok(f) => f,
-                    Err(e) => return report(&mut last_error, crate::app_language::fmt(crate::app_language::S::lv_capture_failed, &[&e])),
+                    Err(e) => return report(&mut last_error, crate::shared::app_language::fmt(crate::shared::app_language::S::lv_capture_failed, &[&e])),
                 };
                 // ponytail: the cursor on another monitor pauses live mode;
                 // capture that monitor by its origin if people use two screens.

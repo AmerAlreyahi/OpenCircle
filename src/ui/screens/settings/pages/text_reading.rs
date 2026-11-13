@@ -8,7 +8,7 @@ use iced::Element;
 use iced::widget::column;
 
 use super::super::state::{Message, Pick, State};
-use crate::config::TextReader;
+use crate::shared::config::TextReader;
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::segmented::segmented;
 use crate::shared::kit::setting_row::{self, title};
@@ -77,10 +77,10 @@ impl State {
         }
         let names: Vec<&str> = missing
             .iter()
-            .map(|c| crate::app_language::language_name(c))
+            .map(|c| crate::shared::app_language::language_name(c))
             .collect();
-        Some(crate::app_language::fmt(
-            crate::app_language::S::t_note_lang,
+        Some(crate::shared::app_language::fmt(
+            crate::shared::app_language::S::t_note_lang,
             &[&names.join(", ")],
         ))
     }

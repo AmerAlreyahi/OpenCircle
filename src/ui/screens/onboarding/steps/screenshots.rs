@@ -78,7 +78,7 @@ fn control(access: &Access) -> Element<'_, Message> {
         Access::Failed(e) if e.is_refused() => error(Role::ROW_DESC, t!(o_said_no)).into(),
         Access::Failed(e) => error(
             Role::ROW_DESC,
-            crate::app_language::fmt(crate::app_language::S::o_not_allowed, &[&e]),
+            crate::shared::app_language::fmt(crate::shared::app_language::S::o_not_allowed, &[&e]),
         )
         .into(),
     };

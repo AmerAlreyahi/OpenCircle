@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn sweep_removes_only_old_pages_with_our_prefix() {
-        let dir = crate::paths::test_dir("lens-test-sweep");
+        let dir = crate::shared::paths::test_dir("lens-test-sweep");
         let old = SystemTime::now() - Duration::from_secs(3600);
         let mk = |name: &str, aged: bool| {
             let p = dir.join(name);

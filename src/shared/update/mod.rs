@@ -174,7 +174,7 @@ fn run(now: &mpsc::Receiver<()>, tx: &Triggers) {
     };
     let mut asked = now.recv_timeout(first).is_ok();
     loop {
-        if asked || crate::config::current().update.auto == Some(true) {
+        if asked || crate::shared::config::current().update.auto == Some(true) {
             let status = match Setup::this() {
                 Some(setup) => check(&release::Net, &setup, &mut memo, &mut handled, tx, &prepare),
                 None => Answer::DevBuild,
@@ -319,7 +319,7 @@ fn check(
 /// Where downloads are staged: `<local data dir>/opencircle/update`, this user's
 /// own (never the shared temp dir), made fresh and private for each download.
 fn stage_dir() -> Option<std::path::PathBuf> {
-    crate::paths::update_stage()
+    crate::shared::paths::update_stage()
 }
 
 /// A download left by an earlier run (only one instance runs, so none is in use).
@@ -399,7 +399,7 @@ fn run_setup(
     };
     marker.write(marker_path).map_err(|e| e.to_string())?;
     let hex: String = staged.sha256.iter().map(|b| format!("{b:02x}")).collect();
-    let args = format!("{SETUP_ARGS} {}{hex}", crate::setup::SHA256_ARG);
+    let args = format!("{SETUP_ARGS} {}{hex}", crate::shared::setup::SHA256_ARG);
     if let Err(e) = run(&staged.file, &args) {
         let _ = std::fs::remove_file(marker_path);
         return Err(format!("the setup did not start: {e}"));

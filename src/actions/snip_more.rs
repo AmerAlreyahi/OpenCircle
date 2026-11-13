@@ -13,9 +13,9 @@
 use iced::Rectangle;
 
 use super::Crop;
-use crate::app_language::S;
-use crate::config::Config;
 use crate::ocr::TextBlock;
+use crate::shared::app_language::S;
+use crate::shared::config::Config;
 
 /// The three rows, in menu order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,7 +151,7 @@ pub fn caps_from(cfg: &Config) -> [Vec<String>; 3] {
 }
 
 /// The row a quick action's shortcut answers while Snip has a picked area.
-pub fn row_of(qa: &crate::config::QuickAction) -> Option<Row> {
+pub fn row_of(qa: &crate::shared::config::QuickAction) -> Option<Row> {
     if qa.live {
         return None;
     }
@@ -353,14 +353,14 @@ mod tests {
         assert_eq!(why(Row::AskAi, &info, true), None);
         assert_eq!(why(Row::Translate, &info, true), Some(Why::LongCapture));
         assert_eq!(
-            crate::app_language::tr(foot(&info, true).unwrap()),
+            crate::shared::app_language::tr(foot(&info, true).unwrap()),
             "Translate works on one screen at a time"
         );
         // "Show original" always works
         info.translated = true;
         assert_eq!(why(Row::Translate, &info, true), None);
         assert_eq!(
-            crate::app_language::tr(Row::Translate.label(true)),
+            crate::shared::app_language::tr(Row::Translate.label(true)),
             "Show original"
         );
         // no AI key: the browser note
@@ -369,7 +369,7 @@ mod tests {
             ..Info::default()
         };
         assert_eq!(
-            crate::app_language::tr(foot(&browser, false).unwrap()),
+            crate::shared::app_language::tr(foot(&browser, false).unwrap()),
             "Opens in your browser with this picture"
         );
         assert_eq!(foot(&Info::default(), false), None);

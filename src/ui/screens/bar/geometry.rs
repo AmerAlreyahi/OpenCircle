@@ -6,8 +6,8 @@
 use iced::{Point, Rectangle, Size};
 
 use crate::actions::Key;
-use crate::config::BarAnchor;
 use crate::labs::BarButton;
+use crate::shared::config::BarAnchor;
 use crate::shared::kit::tokens::{size, space};
 use crate::shared::kit::{field, grip};
 

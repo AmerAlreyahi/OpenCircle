@@ -14,7 +14,7 @@ use gtk::gio::{self, prelude::*};
 
 use super::Reserved;
 use super::{Binding, What, desktop_spelling, target_name};
-use crate::config::parse_shortcut;
+use crate::shared::config::parse_shortcut;
 
 const SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys";
 const ENTRY_SCHEMA: &str = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding";
@@ -362,7 +362,7 @@ mod tests {
     }
 
     fn planned(shortcut: &str) -> Vec<Binding> {
-        let cfg = crate::config::Config {
+        let cfg = crate::shared::config::Config {
             shortcut: shortcut.into(),
             ..Default::default()
         };

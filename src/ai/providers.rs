@@ -4,7 +4,7 @@
 //! request and its key always come from the same provider.
 use std::fmt;
 
-use crate::config::{AiConfig, Provider};
+use crate::shared::config::{AiConfig, Provider};
 
 /// The API a provider speaks: chosen here, never shown (owner, 2026-10-28:
 /// protocol names mislead).
@@ -70,7 +70,7 @@ impl Preset {
 /// stays as it is ("Ollama (local)" adds the word), Custom server is words.
 impl fmt::Display for Preset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::app_language::{S, fmt, tr};
+        use crate::shared::app_language::{S, fmt, tr};
         match (self.custom(), self.local) {
             (true, _) => f.write_str(tr(S::prov_custom)),
             (false, true) => f.write_str(&fmt(S::prov_local, &[&self.name])),
@@ -179,6 +179,6 @@ pub const PRESETS: &[Preset] = &[
 /// The keyring entry of the provider `ai` sends to (`None`: the browser, or a
 /// value the file can't give). Derived from the same `[ai]` the request
 /// uses, so a key goes only to the provider it was saved for.
-pub fn key_of(ai: &AiConfig) -> Option<crate::secrets::AiKey> {
-    Preset::of(ai).map(|p| crate::secrets::AiKey(p.id))
+pub fn key_of(ai: &AiConfig) -> Option<crate::shared::secrets::AiKey> {
+    Preset::of(ai).map(|p| crate::shared::secrets::AiKey(p.id))
 }
