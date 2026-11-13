@@ -8,9 +8,9 @@ use std::sync::Arc;
 use iced::widget::{image, markdown};
 use iced::{Point, Rectangle, Size, Task, task};
 
-use crate::actions::{self, Crop};
 use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
+use crate::features::circle::actions::{self, Crop};
 use crate::features::text_reading::models;
 use crate::features::text_reading::screens::model_download;
 use crate::features::translate::mt::Pair;

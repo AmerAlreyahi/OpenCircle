@@ -213,7 +213,9 @@ fn the_whole_ui_writes_no_words_of_its_own() {
 /// folders): folders and single files.
 const UI_SOURCES: &[&str] = &[
     "src/ui",
-    "src/actions",
+    "src/features/circle/actions",
+    "src/features/circle/screens",
+    "src/features/circle/app",
     "src/shared/kit",
     "src/shared/theme.rs",
     "src/shared/touch.rs",
@@ -254,8 +256,8 @@ const EXEMPT_FILES: &[&str] = &[
     // the model's own prompts (English, sent to the provider), the AI setup steps
     "src/features/ask_ai/ask.rs",
     // the page the browser posts the picture from (no words), QR content tests
-    "src/actions/search_in_browser/page.rs",
-    "src/actions/qr.rs",
+    "src/features/circle/actions/search_in_browser/page.rs",
+    "src/features/circle/actions/qr.rs",
     // OS, window-class and font names; the tray icon's decode checks
     "src/shared/platform/shape.rs",
     "src/shared/platform/tray.rs",

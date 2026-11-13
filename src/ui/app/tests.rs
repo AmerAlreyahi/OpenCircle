@@ -11,32 +11,32 @@ use crate::Trigger;
 use crate::features::settings::labs::{self, BarButton};
 use crate::features::snip::annotate;
 use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::features::{
+    circle::actions::{self, Crop, copy, qr, search_in_browser},
+    text_reading::text,
+};
 use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
-use crate::{
-    actions::{self, Crop, copy, qr, search_in_browser},
-    features::text_reading::text,
-};
 
+use crate::features::circle::app::quick::Quick;
+use crate::features::circle::screens::bar::geometry as bar;
+use crate::features::circle::screens::edge as border;
 use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
 use crate::ui::app::opening::Opening;
-use crate::ui::app::quick::Quick;
-use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::overlay::edge as border;
-use crate::{
-    features::snip::screens::snip,
-    ui::{ai_chat, overlay, song, translate, windows},
-};
 use crate::{features::text_reading::app::word, ui::app::keys};
+use crate::{
+    features::{circle::screens::overlay, snip::screens::snip},
+    ui::{ai_chat, song, translate, windows},
+};
 
 use super::view::chips_at;
 use super::*;
+use crate::features::circle::screens::bar::view::ask_placeholder;
 use crate::shared::kit::field;
-use crate::ui::screens::bar::view::ask_placeholder;
 
-use crate::actions::crop::STACK_GAP;
+use crate::features::circle::actions::crop::STACK_GAP;
 use crate::features::settings::labs::Labs;
 use crate::shared::config::{BarAnchor, TextReader};
 
@@ -4468,7 +4468,7 @@ fn the_docked_chat_never_covers_the_bar() {
             let chat = app.chat_rect();
             // full height: the chat is never cut short for the bar
             assert_eq!(chat.height, ((h as f32 - 48.0) * 0.95).round(), "{w}x{h}");
-            for anchor in crate::ui::screens::bar::geometry::ANCHORS {
+            for anchor in crate::features::circle::screens::bar::geometry::ANCHORS {
                 app.o.bar_anchor = anchor;
                 let bar = Rectangle::new(app.bar_target(), app.dock_size());
                 assert!(
@@ -4477,7 +4477,7 @@ fn the_docked_chat_never_covers_the_bar() {
                 );
                 // let go where it is drawn: the same spot (beside a wide
                 // chat, a centre and a corner can be one spot)
-                use crate::ui::screens::bar::geometry::{anchor_at, nearest};
+                use crate::features::circle::screens::bar::geometry::{anchor_at, nearest};
                 let room = app.bar_room();
                 let at = bar.position() - iced::Vector::new(room.x, room.y);
                 let near = nearest(at, room.size(), bar.size(), 48.0);
@@ -4759,7 +4759,7 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
 /// at 100, 175 and 250 % and on a second monitor.
 #[test]
 fn the_copied_pill_goes_beside_the_selection_at_any_scale() {
-    use super::actions::pill_at;
+    use crate::features::circle::app::actions::pill_at;
     let size = windows::toast_size("Copied");
     let screen = Size::new(1280.0, 720.0);
     let sel = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));

@@ -12,6 +12,7 @@ use iced::widget::{Space, canvas as draw, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
 use super::{CLOSE, Msg};
+use crate::features::circle::screens::bar::geometry;
 use crate::shared::kit::area;
 use crate::shared::kit::chip;
 use crate::shared::kit::divider;
@@ -21,7 +22,6 @@ use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::ui::screens::bar::geometry;
 
 /// lucide "ruler" (the Snip toolbar's button), and the modes' glyphs:
 /// "move-diagonal-2", "move-horizontal", "move-vertical", "square-dashed".

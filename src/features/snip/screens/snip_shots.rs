@@ -7,7 +7,8 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::snip;
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
+use crate::features::circle::screens::overlay::Event;
 use crate::features::snip::annotate::Message as E;
 use crate::features::snip::capture::scroll::Update;
 use crate::features::snip::capture::stitch::MAX_HEIGHT;
@@ -19,7 +20,6 @@ use crate::ui::app::App;
 use crate::ui::app::message::Message;
 use crate::ui::app::tests::snipping_on;
 use crate::ui::frame_times::frames;
-use crate::ui::overlay::Event;
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -325,7 +325,7 @@ fn shoot(name: &str, app: &mut App) -> Result<(), String> {
     if let Some(dir) = std::env::var_os("OPENCIRCLE_RENDER_DIR") {
         let file = std::path::Path::new(&dir).join(format!("{name}.png"));
         let _ = std::fs::create_dir_all(file.parent().unwrap());
-        crate::actions::write_png(&file, W, H, rgba).unwrap();
+        crate::features::circle::actions::write_png(&file, W, H, rgba).unwrap();
     }
     if !golden::enabled() {
         return Ok(());

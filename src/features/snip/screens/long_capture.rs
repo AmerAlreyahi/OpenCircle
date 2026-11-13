@@ -811,7 +811,7 @@ mod tests {
             height: 680,
             full: false,
             lost: false,
-            preview: Some(crate::actions::Crop {
+            preview: Some(crate::features::circle::actions::Crop {
                 width: 160,
                 height: 85,
                 rgba: vec![9; 160 * 85 * 4],
@@ -958,7 +958,7 @@ mod tests {
                 height: h,
                 full: false,
                 lost: false,
-                preview: Some(crate::actions::Crop {
+                preview: Some(crate::features::circle::actions::Crop {
                     width: w,
                     height: h,
                     rgba: vec![0; (w * h * 4) as usize],

@@ -10,7 +10,8 @@ use std::time::Instant;
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
-use crate::actions::qr;
+use crate::features::circle::actions::qr;
+use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::settings::labs::{BarButton, Labs};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading as ocr;
@@ -21,8 +22,10 @@ use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
 use crate::ui::app::screens::Screen;
 use crate::ui::app::{Reader, TextMode};
-use crate::ui::screens::bar::geometry as bar;
-use crate::ui::{ai_chat, overlay, song, translate};
+use crate::{
+    features::circle::screens::overlay,
+    ui::{ai_chat, song, translate},
+};
 
 pub(crate) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
@@ -48,7 +51,7 @@ pub(crate) struct Opening {
     pub(crate) view: overlay::View,
     pub(crate) pan: Option<(Point, overlay::View)>,
     /// The wheel zoom easing `view` to its target (`zoom.rs`).
-    pub(crate) zoom: Option<crate::ui::app::zoom::ZoomMotion>,
+    pub(crate) zoom: Option<crate::features::circle::app::zoom::ZoomMotion>,
     /// The tapped word(s) the selection is (the tap's number: `App::taps`).
     pub(crate) word: Option<word::Picked>,
     /// Main mode: the frame's text lines (image px), read on demand band by

@@ -18,7 +18,8 @@ use iced::widget::tooltip::Position;
 use iced::widget::{canvas, column, container, image, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
+use crate::features::circle::screens::overlay;
 use crate::features::snip::{SNAP, snap};
 use crate::shared::config::{SnipAfter, Target};
 use crate::shared::kit::button;
@@ -32,7 +33,6 @@ use crate::shared::kit::text::{sub, text};
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::tip;
 use crate::shared::platform::capture::window_rect::WinRect;
-use crate::ui::overlay;
 
 /// The hover info chip's height, the drag size chip's width (logical px).
 const INFO_H: f32 = 30.0;
@@ -1083,7 +1083,12 @@ mod tests {
         // lands on its real pixels.
         let p = snap(Point::new(283.0, 197.0), &[r], SNAP);
         assert_eq!(p, Point::new(280.0, 200.0));
-        let crop = crate::actions::crop_bounds(3840, 2160, 1.5, Rectangle::new(p, r.size()));
+        let crop = crate::features::circle::actions::crop_bounds(
+            3840,
+            2160,
+            1.5,
+            Rectangle::new(p, r.size()),
+        );
         assert_eq!(crop, Some([420, 300, 540, 345]));
         // 100 %: unchanged.
         assert_eq!(
@@ -1476,7 +1481,8 @@ mod tests {
         let Some(Next::Edit(area)) = picked else {
             panic!("{picked:?}")
         };
-        let [x0, y0, x1, y1] = crate::actions::crop_bounds(3220, 1812, scale, area).unwrap();
+        let [x0, y0, x1, y1] =
+            crate::features::circle::actions::crop_bounds(3220, 1812, scale, area).unwrap();
         assert!(x0.abs_diff(335) <= 1 && y0.abs_diff(168) <= 1, "{x0} {y0}");
         assert!((x1 - x0).abs_diff(1342) <= 1 && (y1 - y0).abs_diff(1006) <= 1);
         // And the label says the physical size.

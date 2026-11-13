@@ -25,7 +25,7 @@ use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
 use crate::shared::theme;
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
-use crate::actions::{Action, Crop, Run, copy, save};
+use crate::features::circle::actions::{Action, Crop, Run, copy, save};
 use crate::features::snip::annotate::dragout::{self, DragFile};
 use crate::features::snip::capture::live;
 use crate::shared::app_language::S;
@@ -1235,7 +1235,7 @@ impl Windows {
                             let report = crate::shared::diagnostics::report(
                                 &crate::shared::config::current(),
                             );
-                            let toast = match crate::actions::copy::text(report) {
+                            let toast = match crate::features::circle::actions::copy::text(report) {
                                 Ok(()) => self.toast(t!(pill_diag), true, None, TOAST_MS),
                                 Err(e) => {
                                     crate::log!("[opencircle] copy diagnostics failed: {e}");
@@ -2082,7 +2082,12 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     };
     let name = format!("{name}-{step}.png");
     let path = std::path::Path::new(&dir).join(name);
-    let result = crate::actions::write_png(&path, shot.size.width, shot.size.height, &shot.rgba);
+    let result = crate::features::circle::actions::write_png(
+        &path,
+        shot.size.width,
+        shot.size.height,
+        &shot.rgba,
+    );
     if let Err(e) = result {
         crate::log!("test shot failed: {e}");
     }

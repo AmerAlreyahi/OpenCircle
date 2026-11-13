@@ -10,6 +10,7 @@ use iced::widget::{Space, canvas, row};
 use iced::{Color, Element, Fill, Point};
 
 use super::{CLOSE, Msg};
+use crate::features::circle::screens::bar::geometry;
 use crate::shared::kit::chip;
 use crate::shared::kit::colour;
 use crate::shared::kit::divider;
@@ -20,7 +21,6 @@ use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::ui::screens::bar::geometry;
 
 /// lucide "pipette" (the Snip toolbar's button).
 pub const ICON: char = '\u{e13e}';

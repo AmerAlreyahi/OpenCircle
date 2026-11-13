@@ -4,20 +4,19 @@ use std::time::{Duration, Instant};
 
 use iced::{Point, Rectangle, Size, Task, Vector};
 
-use crate::actions::{self};
+use crate::features::circle::actions;
 use crate::shared::config::{self, SelectStyle};
 
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading::app::word;
+use crate::features::{
+    circle::screens::overlay, snip::screens::snip, translate::screens::translate,
+};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};
-use crate::{
-    features::snip::screens::snip,
-    ui::{overlay, translate},
-};
 
-use super::App;
-use super::screens::keep_on;
+use crate::ui::app::App;
+use crate::ui::app::screens::keep_on;
 
 impl App {
     pub(crate) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {

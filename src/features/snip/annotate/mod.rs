@@ -79,7 +79,7 @@ use iced::{Point, Rectangle, Size, Vector};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
 use crate::shared::config::{EditorConfig, Rgb};
 use document::int_rect;
 
@@ -543,7 +543,7 @@ pub struct Annotator {
     /// The PNG of the last drag-out (deleted with the editor).
     dragged: Option<dragout::DragFile>,
     /// The last share (its PNG and the sheet's handlers; go with the editor).
-    shared: Option<crate::actions::share::Shared>,
+    shared: Option<crate::features::circle::actions::share::Shared>,
     /// Line help: a blur stroke keeps to the line it started on (config
     /// `editor.line_assist`).
     pub(crate) assist: bool,
@@ -872,7 +872,7 @@ impl Annotator {
                 self.commit();
                 let flat = render(&self.doc);
                 self.shared = None; // one share at a time
-                match crate::actions::share::start(&flat) {
+                match crate::features::circle::actions::share::start(&flat) {
                     Ok((shared, chosen)) => {
                         self.shared = Some(shared);
                         return Some(Output::Sharing(chosen));
@@ -1536,7 +1536,9 @@ impl Annotator {
     /// else a new text (the last text style) at `at`, being typed into.
     /// A picture on the clipboard: nothing (pasting pictures is not built).
     fn paste(&mut self, at: Option<Point>) {
-        let Some(text) = crate::actions::copy::read_text().map(|t| clean_paste(&t)) else {
+        let Some(text) =
+            crate::features::circle::actions::copy::read_text().map(|t| clean_paste(&t))
+        else {
             return;
         };
         if text.is_empty() {

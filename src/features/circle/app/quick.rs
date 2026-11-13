@@ -2,7 +2,7 @@
 //! which area it runs on for its target.
 use iced::{Rectangle, Size};
 
-use crate::actions::{self, Action};
+use crate::features::circle::actions::{self, Action};
 use crate::shared::config::Target;
 use crate::shared::platform::hotkey::QuickId;
 

@@ -3,7 +3,6 @@
 // Debug builds keep the console. `attach_parent_console` brings the logs back when
 // a release exe is run from a terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-mod actions;
 mod features;
 mod shared;
 mod ui;

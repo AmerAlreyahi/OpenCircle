@@ -12,7 +12,7 @@
 //! `actions::ask`, `actions::translate`): nothing is implemented twice.
 use iced::Rectangle;
 
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
 use crate::features::text_reading::TextBlock;
 use crate::shared::app_language::S;
 use crate::shared::config::Config;

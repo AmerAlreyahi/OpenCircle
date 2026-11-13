@@ -1,7 +1,7 @@
 //! Text (Copy text): read the text in the crop and copy it. OCR runs in a helper
 //! process (`crate::features::text_reading`); its models are downloaded once, only after the user
 //! agrees (the download card; the app asks before it ever gets here).
-use crate::actions::{Action, Crop, Key, Run};
+use crate::features::circle::actions::{Action, Crop, Key, Run};
 use crate::features::text_reading::{self as ocr, TextBlock};
 use crate::shared::app_language::S;
 
@@ -32,7 +32,8 @@ fn copy_read(crop: Crop) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err(crate::t!(pill_no_text).into());
     }
-    crate::actions::copy::text(text).map(|()| crate::actions::copy::COPIED_PILL.to_string())
+    crate::features::circle::actions::copy::text(text)
+        .map(|()| crate::features::circle::actions::copy::COPIED_PILL.to_string())
 }
 
 /// How reading is going.
@@ -253,7 +254,7 @@ mod copy_read_tests {
     #[test]
     fn copy_text_never_downloads_the_models() {
         super::MODELS_HERE.set(Some(false));
-        let crop = crate::actions::Crop {
+        let crop = crate::features::circle::actions::Crop {
             width: 1,
             height: 1,
             rgba: vec![0; 4],

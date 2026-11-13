@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn the_registry_and_the_enum_agree() {
-        for a in crate::actions::ACTIONS {
+        for a in crate::features::circle::actions::ACTIONS {
             assert!(QuickId::from_name(a.id).is_known(), "{}", a.id);
         }
     }

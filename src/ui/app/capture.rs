@@ -10,13 +10,15 @@ use iced::{Point, Size, Task};
 
 use crate::features::settings::labs::BarButton;
 use crate::features::text_reading as ocr;
+use crate::features::{
+    circle::actions::{self, Action, Run},
+    text_reading::text,
+};
 use crate::shared::config;
 use crate::shared::platform::capture::{self, CaptureError};
-use crate::{
-    actions::{self, Action, Run},
-    features::text_reading::text,
-};
 
+use crate::features::circle::app::quick;
+use crate::features::circle::app::quick::{Quick, Start};
 use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{place_window, taskbar_inset};
@@ -24,11 +26,9 @@ use crate::shared::platform::shape;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
 use crate::ui::app::opening::Opening;
-use crate::ui::app::quick;
-use crate::ui::app::quick::{Quick, Start};
 use crate::{
-    features::snip::screens::snip,
-    ui::{overlay, windows},
+    features::{circle::screens::overlay, snip::screens::snip},
+    ui::windows,
 };
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};

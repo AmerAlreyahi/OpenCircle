@@ -3,7 +3,7 @@
 use iced::widget::image;
 use iced::{Point, Rectangle, Task};
 
-use crate::actions::{self, Crop, copy, save};
+use crate::features::circle::actions::{self, Crop, copy, save};
 use crate::features::snip::annotate::{self, Image, Output};
 
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
@@ -342,7 +342,7 @@ impl App {
 mod tests {
     use iced::{Point, Rectangle, Size};
 
-    use crate::actions::share;
+    use crate::features::circle::actions::share;
     use crate::features::settings::labs::Labs;
     use crate::features::snip::annotate::{Message as E, dragout};
     use crate::features::snip::screens::snip_toolbar::toolbar;
@@ -388,7 +388,7 @@ mod tests {
         let all = Message::Windows(crate::ui::windows::Msg::Steps(Steps::CopyAll));
         let task = app.update(all);
         run_task(&mut app, task);
-        let copied = crate::actions::copy::copied::image();
+        let copied = crate::features::circle::actions::copy::copied::image();
         assert_eq!(copied, Some((440, 40 + 12 * 200 + 11 * 32 + 40)));
         assert!(
             bar_names(&app)

@@ -6,11 +6,11 @@ use std::time::Duration;
 use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
-use crate::actions::copy;
+use crate::features::circle::actions::copy;
 use crate::features::snip::screens::tools::{self, Tool, Which, picker, ruler};
+use crate::features::{circle::screens::overlay, snip::screens::snip};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
-use crate::{features::snip::screens::snip, ui::overlay};
 
 use crate::ui::app::App;
 
@@ -272,14 +272,14 @@ mod tests {
 
     use iced::{Point, Rectangle, Size};
 
-    use crate::actions::copy;
+    use crate::features::circle::actions::copy;
+    use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::annotate;
     use crate::features::snip::screens::snip::{self, Snip};
     use crate::features::snip::screens::tools::{self, Which, ruler};
     use crate::ui::app::App;
     use crate::ui::app::message::{Message, Purpose, Shot};
     use crate::ui::app::tests::{open_app, snipping_on};
-    use crate::ui::overlay::Event;
 
     const WINDOW: Rectangle = Rectangle {
         x: 100.0,
@@ -461,11 +461,11 @@ mod tests {
 mod frames {
     use iced::{Point, Rectangle, Size, Vector};
 
+    use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::screens::tools::Which;
     use crate::ui::app::App;
     use crate::ui::app::tests::snipping_on;
     use crate::ui::frame_times::{Drawn, frames};
-    use crate::ui::overlay::Event;
 
     fn moved(which: Which, n: u32) -> (Vec<Drawn>, App) {
         let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));

@@ -9,7 +9,8 @@ use iced::widget::{Space, column, container, tooltip};
 use iced::widget::{Space as Gap, row};
 use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 
-use crate::actions::share;
+use crate::features::circle::actions::share;
+use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
     Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
 };
@@ -26,7 +27,6 @@ use crate::shared::kit::{
     button, chip, colour, divider, grip, keycap, option_list, segmented, slider,
 };
 use crate::t;
-use crate::ui::screens::bar::geometry as bar;
 
 const SPACING: f32 = bar::SPACING;
 /// A button's side.

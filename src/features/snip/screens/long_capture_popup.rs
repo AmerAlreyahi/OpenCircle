@@ -20,7 +20,7 @@ use iced::widget::image;
 use iced::window::{self, Position};
 use iced::{Element, Point, Rectangle, Size, Task};
 
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
 use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::shared::platform::windows as platform;
 use crate::ui::app::background::background;

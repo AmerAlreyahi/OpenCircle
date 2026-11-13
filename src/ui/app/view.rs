@@ -5,18 +5,18 @@ use iced::widget::{canvas, container, image, opaque, pin, space, stack};
 use iced::window::{self};
 use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 
-use crate::actions::qr;
+use crate::features::circle::actions::qr;
 use crate::shared::config;
 
+use crate::features::circle::screens::bar::geometry as bar;
+use crate::features::circle::screens::edge as border;
+use crate::features::circle::screens::overlay;
 use crate::features::snip::screens::snip;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading::app::word;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::kit::{motion, surface};
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::overlay;
-use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::overlay::edge as border;
 use crate::ui::screens::toast;
 
 use super::{App, CHIP_SPACE, LINK_WIDTH, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode};
@@ -458,15 +458,20 @@ impl App {
             let size = Size::new(SELECT_WIDTH, bar::HEIGHT);
             let at = chips_at(area, size, room, bar);
             below = area.union(&Rectangle::new(at, size));
-            let chip =
-                crate::ui::screens::bar::view::action_chip(label.into(), Message::SelectText);
+            let chip = crate::features::circle::screens::bar::view::action_chip(
+                label.into(),
+                Message::SelectText,
+            );
             let chip = container(chip).center_x(SELECT_WIDTH);
             layers = layers.push(iced::widget::pin(opaque(chip)).position(at));
         }
         if let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.as_deref()) {
             let open = qr::web_url(text).map(|_| Message::Qr(qr::Act::Open));
-            let chip =
-                crate::ui::screens::bar::view::qr_chip(text, Message::Qr(qr::Act::Copy), open);
+            let chip = crate::features::circle::screens::bar::view::qr_chip(
+                text,
+                Message::Qr(qr::Act::Copy),
+                open,
+            );
             let size = Size::new(QR_WIDTH, bar::HEIGHT);
             let at = chips_at(below, size, room, bar);
             let chip = container(chip).center_x(QR_WIDTH);
@@ -476,7 +481,7 @@ impl App {
         // A link or email in the selected words: a click-only chip to open it.
         if let Some(entity) = self.chip_entity() {
             let open = Message::OpenEntity(entity.clone());
-            let chip = crate::ui::screens::bar::view::link_chip(&entity, open);
+            let chip = crate::features::circle::screens::bar::view::link_chip(&entity, open);
             let size = Size::new(LINK_WIDTH, bar::HEIGHT);
             let at = chips_at(below, size, room, bar);
             let chip = container(chip).center_x(LINK_WIDTH);

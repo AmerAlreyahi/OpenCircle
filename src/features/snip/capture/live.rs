@@ -12,7 +12,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use crate::actions::Crop;
+use crate::features::circle::actions::Crop;
 use crate::shared::platform::capture::window_rect::WinRect;
 
 /// Live pins exist here.
@@ -277,7 +277,7 @@ mod win {
     use windows::core::{IInspectable, Interface, factory};
 
     use super::{Geom, Pick, Wake};
-    use crate::actions::Crop;
+    use crate::features::circle::actions::Crop;
 
     const FORMAT: DirectXPixelFormat = DirectXPixelFormat::B8G8R8A8UIntNormalized;
     /// Two buffers: one being read, one the next change lands in.

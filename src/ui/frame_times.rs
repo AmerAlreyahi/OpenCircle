@@ -323,7 +323,7 @@ fn a_gliding_bar_redraws_only_round_itself() {
 /// too.
 #[test]
 fn the_frozen_frame_is_the_frame() {
-    use crate::ui::overlay::Frozen;
+    use crate::features::circle::screens::overlay::Frozen;
     use iced::widget::{canvas, image};
     struct S(image::Handle, f32, bool);
     fn view(s: &S) -> Element<'_, ()> {
@@ -954,7 +954,7 @@ fn an_onboarding_step_change_redraws_only_the_track() {
 /// tiny-skia's own pipeline draws.
 #[test]
 fn a_zoomed_frame_and_its_dim_are_drawn_as_tiny_skia_draws_them() {
-    use crate::ui::overlay::{View, Zoomed};
+    use crate::features::circle::screens::overlay::{View, Zoomed};
     use iced::widget::canvas;
     struct Dim;
     const DIM_AT: Rectangle = Rectangle {
@@ -1052,7 +1052,7 @@ fn a_zoomed_frame_and_its_dim_are_drawn_as_tiny_skia_draws_them() {
 #[test]
 #[ignore = "timing: run by hand, in release"]
 fn zoom_frame_times() {
-    use crate::ui::overlay::Event;
+    use crate::features::circle::screens::overlay::Event;
     for (w, h, k) in [(1920, 1080, 1.0), (3840, 2160, 2.0), (3840, 2160, 2.5)] {
         let mut app = open_app(w, h, k);
         settle_bar(&mut app);
@@ -1099,7 +1099,7 @@ fn across_screens(
     gesture: Gesture,
 ) -> [Vec<Drawn>; 2] {
     use super::app::screens::Screen;
-    use crate::ui::overlay::Event;
+    use crate::features::circle::screens::overlay::Event;
     fn other(app: &App) -> Element<'_, Message> {
         app.view(app.o.screens[0].window)
     }
@@ -1128,7 +1128,7 @@ fn across_screens(
                 .view
                 .rect_to_screen(app.o.selection.expect("a selection").area);
             from.set(match gesture {
-                Gesture::Resize => crate::ui::overlay::corner(r, 2),
+                Gesture::Resize => crate::features::circle::screens::overlay::corner(r, 2),
                 _ => r.center(),
             });
         }
@@ -1230,12 +1230,12 @@ fn a_box_resized_across_screens_redraws_only_its_moving_edges() {
         .o
         .view
         .rect_to_screen(app.o.selection.expect("a box").area);
-    let corner = crate::ui::overlay::corner(r, 0);
+    let corner = crate::features::circle::screens::overlay::corner(r, 0);
     let t = frames(&mut app, 12, true, |app, i, _| {
         let at = corner + Vector::new(9.0, 7.0) * i as f32;
         let e = match i {
-            0 => crate::ui::overlay::Event::Press { at, shift: false },
-            _ => crate::ui::overlay::Event::Move(at),
+            0 => crate::features::circle::screens::overlay::Event::Press { at, shift: false },
+            _ => crate::features::circle::screens::overlay::Event::Move(at),
         };
         let _ = app.on_overlay(e);
     });
@@ -1275,10 +1275,11 @@ fn a_resized_box_redraws_its_edges_not_its_middle() {
         .rect_to_screen(app.o.selection.expect("a box").area);
     let middle = r.center();
     let t = frames(&mut app, 12, false, |app, i, _| {
-        let at = crate::ui::overlay::corner(r, 2) + Vector::new(-4.0, 3.0) * i as f32;
+        let at = crate::features::circle::screens::overlay::corner(r, 2)
+            + Vector::new(-4.0, 3.0) * i as f32;
         let e = match i {
-            0 => crate::ui::overlay::Event::Press { at, shift: false },
-            _ => crate::ui::overlay::Event::Move(at),
+            0 => crate::features::circle::screens::overlay::Event::Press { at, shift: false },
+            _ => crate::features::circle::screens::overlay::Event::Move(at),
         };
         let _ = app.on_overlay(e);
     });
@@ -1391,8 +1392,8 @@ enum SnipDrag {
 /// the live area starts there.
 fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn>, App) {
     use super::app::tests::snipping_on;
+    use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::annotate::Message as E;
-    use crate::ui::overlay::Event;
     let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
     let mut app = snipping_on(w, h, window);
     if drag != SnipDrag::Pick {

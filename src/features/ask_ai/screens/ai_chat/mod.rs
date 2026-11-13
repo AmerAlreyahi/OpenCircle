@@ -16,11 +16,11 @@ use std::time::Instant;
 use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
-use crate::actions::{self, Crop};
 use crate::features::ask_ai as ai;
 use crate::features::ask_ai::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::features::ask_ai::providers::{self, Preset};
 use crate::features::ask_ai::screens::model_list::{self, ModelList};
+use crate::features::circle::actions::{self, Crop};
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Provider, StaysOpen};
 use crate::shared::kit::markdown::Act;

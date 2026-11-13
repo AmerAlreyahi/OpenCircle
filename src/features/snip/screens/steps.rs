@@ -18,7 +18,7 @@ use iced::widget::tooltip::Position as Side;
 use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
-use crate::actions::{Crop, encode_png, fit_long_edge};
+use crate::features::circle::actions::{Crop, encode_png, fit_long_edge};
 use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};

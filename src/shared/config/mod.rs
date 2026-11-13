@@ -1984,7 +1984,9 @@ mod tests {
     fn default_action_ids_are_registry_actions() {
         for a in DefaultAction::ALL {
             assert!(
-                crate::actions::ACTIONS.iter().any(|x| x.id == a.id()),
+                crate::features::circle::actions::ACTIONS
+                    .iter()
+                    .any(|x| x.id == a.id()),
                 "{a:?}"
             );
             let (c, w) = Config::parse(&format!("[general]\ndefault_action = \"{}\"\n", a.id()));

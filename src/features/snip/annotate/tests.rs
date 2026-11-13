@@ -2740,7 +2740,7 @@ fn shoot(
     let scale = 2.0;
     let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);
     let rgba = renderer.screenshot(Size::new(w, h), scale, background);
-    crate::actions::write_png(path, w, h, &rgba).unwrap();
+    crate::features::circle::actions::write_png(path, w, h, &rgba).unwrap();
 }
 
 /// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots_move -- --ignored`
@@ -2852,7 +2852,8 @@ fn snapshots() {
     shoot(e.view(), size, backdrop, &dir.join("editor-dark.png"));
     let flat = render(&e.doc);
     let path = dir.join("flattened.png");
-    crate::actions::write_png(&path, flat.width, flat.height, &flat.rgba).unwrap();
+    crate::features::circle::actions::write_png(&path, flat.width, flat.height, &flat.rgba)
+        .unwrap();
 }
 
 /// The toolbar is icon-only: each button's tooltip is its only name, and none of
@@ -3219,7 +3220,7 @@ fn ctrl_v_pastes_the_clipboard_text() {
     let mut e = editor(200, 200);
     e.update(Message::Tool(Tool::Arrow));
     assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
-    crate::actions::copy::copied::set_paste("hello\r\nworld\t!\n\n");
+    crate::features::circle::actions::copy::copied::set_paste("hello\r\nworld\t!\n\n");
     e.update(Message::Paste(Some(Point::new(40.0, 50.0))));
     assert!(e.typing());
     assert_eq!(
@@ -3228,13 +3229,13 @@ fn ctrl_v_pastes_the_clipboard_text() {
     );
     // typing: into the same text
     assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
-    crate::actions::copy::copied::set_paste(" again");
+    crate::features::circle::actions::copy::copied::set_paste(" again");
     e.update(Message::Paste(None));
     assert_eq!(text_of(&e).1, "hello\nworld! again");
     e.update(Message::Finish);
     assert_eq!(e.doc.items.len(), 1, "committed like typed text");
     // outside the area: its middle; the tool stays the user's
-    crate::actions::copy::copied::set_paste("x");
+    crate::features::circle::actions::copy::copied::set_paste("x");
     e.update(Message::Paste(None));
     assert_eq!(text_of(&e).0, e.doc.view().center());
     assert_eq!(e.tool, Tool::Arrow);

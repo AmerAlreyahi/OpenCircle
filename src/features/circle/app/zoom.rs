@@ -9,10 +9,10 @@ use std::time::Instant;
 
 use iced::Point;
 
+use crate::features::circle::screens::overlay::View;
 use crate::shared::kit::motion;
-use crate::ui::overlay::View;
 
-use super::App;
+use crate::ui::app::App;
 
 /// The drawn view on its way from `from` to `to`; `start` is the first
 /// frame's time (the clock the frames step by).

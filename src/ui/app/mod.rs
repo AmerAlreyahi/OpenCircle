@@ -5,7 +5,6 @@ pub(crate) mod background;
 pub(crate) mod keys;
 pub(crate) mod message;
 pub(crate) mod opening;
-pub(crate) mod quick;
 
 use crate::shared::app_language::S;
 use std::cell::{Cell, RefCell};
@@ -26,21 +25,17 @@ use crate::shared::kit::motion;
 use crate::shared::platform::monitor::can_hide_windows;
 use crate::shared::touch;
 use crate::{
-    features::live_translate::screens::live_layer,
-    ui::{overlay, windows},
+    features::{circle::screens::overlay, live_translate::screens::live_layer},
+    ui::windows,
 };
 
-pub(crate) mod actions;
-pub(crate) mod bar;
 pub(crate) mod capture;
 pub(crate) mod screens;
-pub(crate) mod selection;
 #[cfg(test)]
 pub(crate) mod tests;
 pub(crate) mod update;
 pub(crate) mod updates;
 pub(crate) mod view;
-pub(crate) mod zoom;
 
 /// The hint over the screen as the overlay opens (the app's language).
 pub(crate) fn hint() -> &'static str {
@@ -205,7 +200,7 @@ pub(crate) struct App {
     pub(crate) tool_next: Option<crate::features::snip::screens::tools::Which>,
     /// The next snip opens this image picked: a step of the Steps strip, to
     /// update it (its index), or a long capture finished on Wayland (none).
-    pub(crate) picked_next: Option<(Option<usize>, crate::actions::Crop)>,
+    pub(crate) picked_next: Option<(Option<usize>, crate::features::circle::actions::Crop)>,
     /// Wayland: a long capture going on after its overlay went (the user
     /// scrolls the page itself, its pop-up beside the area): `App::cast_done`.
     pub(crate) cast: Option<crate::features::snip::app::snip::Cast>,

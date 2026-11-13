@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn every_icon_is_in_the_subset_font() {
-        let script = include_str!("../../assets/lucide/subset.sh");
+        let script = include_str!("../../../../assets/lucide/subset.sh");
         for a in ACTIONS {
             let code = format!("U+{:04X}", a.icon as u32);
             assert!(script.contains(&code), "{}: add {code} to subset.sh", a.id);

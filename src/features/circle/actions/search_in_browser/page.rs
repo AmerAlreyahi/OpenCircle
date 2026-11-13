@@ -28,7 +28,7 @@ const SWEPT: [&str; 3] = [PREFIX, "opencircle-drag-", "opencircle-share-"];
 // font, script or image from anywhere. The button is a fallback that appears
 // after 2 s (CSS, no script needed), in case the post did not go.
 /// The new design's logo (`newdesing/assets/logo.svg`, its colours filled in).
-const LOGO: &str = include_str!("../../../assets/lens/logo.svg");
+const LOGO: &str = include_str!("../../../../../assets/lens/logo.svg");
 
 const TEMPLATE: &str = r#"<!doctype html>
 <html lang="en">

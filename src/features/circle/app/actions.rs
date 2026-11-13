@@ -9,23 +9,26 @@ use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
 use crate::features::settings::labs::BarButton;
-use crate::shared::config::{self, QuickAction, Target};
-use crate::{
-    actions::{self, Action, Crop, Run, copy, qr, search_in_browser},
-    features::text_reading::text,
+use crate::features::{
+    circle::actions::{self, Action, Crop, Run, copy, qr, search_in_browser},
+    text_reading::text,
 };
+use crate::shared::config::{self, QuickAction, Target};
 
+use crate::features::circle::app::quick::Quick;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, taskbar_inset};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
-use crate::ui::app::quick::Quick;
 use crate::{
-    features::live_translate::screens::live_layer,
-    ui::{ai_chat, settings, song, translate, windows},
+    features::{
+        ask_ai::screens::ai_chat, live_translate::screens::live_layer, settings,
+        song::screens::song, translate::screens::translate,
+    },
+    ui::windows,
 };
 
-use super::{App, Reader, TOAST_MARGIN};
+use crate::ui::app::{App, Reader, TOAST_MARGIN};
 
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a

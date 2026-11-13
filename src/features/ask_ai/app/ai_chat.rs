@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
-use crate::actions::{self, Crop, search_in_browser, stack_crops};
+use crate::features::circle::actions::{self, Crop, search_in_browser, stack_crops};
 use crate::shared::config::{self, Provider};
 
 use crate::features::ask_ai::screens::ai_chat;

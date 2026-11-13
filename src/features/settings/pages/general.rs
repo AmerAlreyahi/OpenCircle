@@ -236,7 +236,7 @@ pub(super) fn folder_row(state: &State) -> Element<'_, Message> {
 fn folder(state: &State) -> Element<'_, Message> {
     let folder = state.draft.general.save_folder.as_str();
     let shown = match folder.is_empty() {
-        true => crate::actions::save::default_folder().map_or_else(
+        true => crate::features::circle::actions::save::default_folder().map_or_else(
             || t!(g_folder_system).into(),
             |p| p.to_string_lossy().into_owned(),
         ),

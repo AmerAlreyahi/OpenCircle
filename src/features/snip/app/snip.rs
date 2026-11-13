@@ -8,12 +8,12 @@ use iced::widget::image;
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
+use crate::features::{
+    circle::actions::{self, Crop, Run, copy, save},
+    text_reading::text,
+};
 use crate::shared::config;
 use crate::shared::platform::capture;
-use crate::{
-    actions::{self, Crop, Run, copy, save},
-    features::text_reading::text,
-};
 
 use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;

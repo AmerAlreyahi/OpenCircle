@@ -5,7 +5,7 @@
 //! placing small things beside a selection, and the Tab order.
 use iced::{Point, Rectangle, Size};
 
-use crate::actions::Key;
+use crate::features::circle::actions::Key;
 use crate::features::settings::labs::BarButton;
 use crate::shared::config::BarAnchor;
 use crate::shared::kit::tokens::{size, space};

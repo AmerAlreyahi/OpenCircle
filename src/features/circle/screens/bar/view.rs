@@ -7,6 +7,11 @@ use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
 use crate::features::settings::labs::{self, BarButton};
+use crate::features::song::screens::song;
+use crate::features::{
+    circle::actions::{qr, search_in_browser},
+    text_reading::text,
+};
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, icon_button};
@@ -19,11 +24,6 @@ use crate::t;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
-use crate::ui::song;
-use crate::{
-    actions::{qr, search_in_browser},
-    features::text_reading::text,
-};
 
 impl App {
     /// The bottom bar, the one action hub, as the new design's search bar: a
@@ -334,9 +334,12 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use crate::shared::kit::icon::FONT;
     let shown = qr::shown(text, bar::QR_SHOWN);
-    let glyph = crate::shared::kit::text::text(Role::NOTE, crate::actions::copy::ACTION.icon)
-        .font(FONT)
-        .size(size::ICON);
+    let glyph = crate::shared::kit::text::text(
+        Role::NOTE,
+        crate::features::circle::actions::copy::ACTION.icon,
+    )
+    .font(FONT)
+    .size(size::ICON);
     let mut chips = crate::dir_row![glyph, chip::action(fmt(S::bar_qr, &[&shown.text]), copy),]
         .spacing(bar::QR_GAP)
         .align_y(iced::Center);
@@ -362,10 +365,10 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
 /// The chip for a link or email read in the selected words: "Open <host>" /
 /// "Write <address>". It opens only on its click (`open`).
 pub fn link_chip<'a, Message: Clone + 'a>(
-    entity: &crate::actions::entities::Entity,
+    entity: &crate::features::circle::actions::entities::Entity,
     open: Message,
 ) -> Element<'a, Message> {
-    use crate::actions::entities::Kind;
+    use crate::features::circle::actions::entities::Kind;
     let key = match entity.kind {
         Kind::Email => S::bar_write_to,
         _ => S::bar_open_host,
@@ -598,7 +601,7 @@ mod tests {
 
     #[test]
     fn link_chips_match_their_golden_images() {
-        use crate::actions::entities::{Entity, Kind};
+        use crate::features::circle::actions::entities::{Entity, Kind};
         golden::each_theme(|theme, failed| {
             for (name, kind, text) in [
                 ("link", Kind::Link, "https://shop.example/track/4412"),

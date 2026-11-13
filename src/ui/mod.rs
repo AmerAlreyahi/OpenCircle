@@ -6,7 +6,6 @@ pub(crate) mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 pub(crate) mod frame_times;
-pub(crate) mod overlay;
 pub(crate) mod screens;
 use crate::features::ask_ai::screens::ai_chat;
 use crate::features::settings;
@@ -26,7 +25,7 @@ use screens::{update_card, update_pill};
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
-    crate::actions::search_in_browser::page::sweep_stale(); // temp files left by a crash
+    crate::features::circle::actions::search_in_browser::page::sweep_stale(); // temp files left by a crash
     let logo = crate::shared::kit::logo::window_icon();
     crate::shared::platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let result = with_fonts(iced::daemon(App::boot, App::update, App::view))

@@ -8,15 +8,15 @@ use iced::{Point, Rectangle, Task, Vector};
 
 use crate::features::text_reading::screen::Wants;
 use crate::features::text_reading::{self as ocr, TextBlock};
-use crate::{
-    actions::{self, Crop, copy},
-    features::text_reading::text,
+use crate::features::{
+    circle::actions::{self, Crop, copy},
+    text_reading::text,
 };
 
+use crate::features::circle::screens::overlay;
 use crate::features::text_reading::app::word;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Await, Message, PickAct, Purpose, WordRead};
-use crate::ui::overlay;
 
 use crate::ui::app::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
 

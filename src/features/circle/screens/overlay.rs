@@ -2341,7 +2341,8 @@ mod tests {
         // a drag from (400, 300) to (700, 520) on screen
         let (a, b) = (Point::new(400.0, 300.0), Point::new(700.0, 520.0));
         let sel = select(&[v.to_image(a), v.to_image(b)], v.zoom()).unwrap();
-        let crop = crate::actions::crop(&frame, 3840, 2160, 2.0, sel.area).unwrap();
+        let crop =
+            crate::features::circle::actions::crop(&frame, 3840, 2160, 2.0, sel.area).unwrap();
         let first = pixel_xy(&crop.rgba[..4]);
         let want = drawn_at(a);
         assert!(
@@ -2616,7 +2617,7 @@ mod tests {
             std::env::var("OPENCIRCLE_DRAW_PNG").expect("OPENCIRCLE_DRAW_PNG=<dir>"),
         );
         let write = |name: String, rgba: &[u8]| {
-            crate::actions::write_png(&dir.join(name), 960, 540, rgba).unwrap();
+            crate::features::circle::actions::write_png(&dir.join(name), 960, 540, rgba).unwrap();
         };
         let ring = arc(64, 360.0);
         for n in [1, 2, 3, 5, 10, 20, 40, 64] {

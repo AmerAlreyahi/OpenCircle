@@ -4,9 +4,9 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use crate::actions::{Action, Crop, Key, Run};
 use crate::features::ask_ai::chats as history;
 use crate::features::ask_ai::{self as ai, Role};
+use crate::features::circle::actions::{Action, Crop, Key, Run};
 use crate::shared::app_language::{S, fmt as say, tr};
 use crate::shared::config::{AiConfig, Config, Provider};
 use crate::shared::secrets::{self, Secret};
@@ -113,7 +113,7 @@ fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
         });
     }
     let (cfg, key) = credentials_for(cfg)?;
-    let png = crate::actions::encode_png(crop.width, crop.height, &crop.rgba)?;
+    let png = crate::features::circle::actions::encode_png(crop.width, crop.height, &crop.rgba)?;
     Ok(Setup { cfg, key, png })
 }
 

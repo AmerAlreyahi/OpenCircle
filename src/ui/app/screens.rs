@@ -17,7 +17,8 @@ use iced::widget::{canvas, image, stack};
 use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
-use crate::actions::{self, Crop};
+use crate::features::circle::actions::{self, Crop};
+use crate::features::circle::screens::edge as border;
 use crate::features::snip::annotate;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
@@ -31,8 +32,7 @@ use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::view::{grow, lifted};
-use crate::ui::screens::overlay::edge as border;
-use crate::ui::{overlay, windows};
+use crate::{features::circle::screens::overlay, ui::windows};
 
 use super::App;
 
@@ -299,7 +299,7 @@ impl App {
     pub(crate) fn on_area(&self, area: Rectangle) -> On {
         let all = self.screens_on();
         let rects: Vec<Rectangle> = all.iter().map(|on| self.monitor_of(on)).collect();
-        all[crate::ui::screens::bar::geometry::dock_screen(area, &rects)]
+        all[crate::features::circle::screens::bar::geometry::dock_screen(area, &rects)]
     }
 
     /// The monitor `on` in the starting screen's px.
@@ -1243,7 +1243,7 @@ mod tests {
             (place.0, place.1, place.2),
             (s.logical_origin(), s.size(), s.scale)
         );
-        let at = crate::ui::app::actions::pill_at(place, Size::new(120.0, 36.0), 0.0);
+        let at = crate::features::circle::app::actions::pill_at(place, Size::new(120.0, 36.0), 0.0);
         let (x0, y0) = s.origin;
         let (x1, y1) = (x0 + s.px.0 as i32, y0 + s.px.1 as i32);
         assert!(
@@ -1261,7 +1261,11 @@ mod tests {
             Point::new(1500.0, 600.0),
             Size::new(200.0, 100.0),
         ));
-        let at = crate::ui::app::actions::pill_at(app.pill_place(), Size::new(120.0, 36.0), 0.0);
+        let at = crate::features::circle::app::actions::pill_at(
+            app.pill_place(),
+            Size::new(120.0, 36.0),
+            0.0,
+        );
         assert!(
             (x0..x1).contains(&at.origin.0) && (y0..y1).contains(&at.origin.1),
             "beside the selection on its screen: {at:?}"

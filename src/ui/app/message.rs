@@ -6,25 +6,25 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
+use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::settings::labs::BarButton;
 use crate::features::snip::annotate;
 use crate::features::snip::screens::snip::{self, Snip};
 use crate::features::text_reading::TextBlock;
+use crate::features::{
+    circle::actions::{Action, qr, search_in_browser},
+    text_reading::text,
+};
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Target};
 use crate::shared::platform::capture::CaptureError;
-use crate::ui::screens::bar::geometry as bar;
 use crate::{
-    actions::{Action, qr, search_in_browser},
-    features::text_reading::text,
+    features::{circle::app::quick::Quick, text_reading::app::word},
+    ui::app::keys,
 };
 use crate::{
-    features::live_translate::screens::live_layer,
-    ui::{ai_chat, overlay, song, translate, windows},
-};
-use crate::{
-    features::text_reading::app::word,
-    ui::app::{keys, quick::Quick},
+    features::{circle::screens::overlay, live_translate::screens::live_layer},
+    ui::{ai_chat, song, translate, windows},
 };
 
 /// Where the overlay was when a Copy / Save ran: its origin, size and scale
@@ -105,7 +105,7 @@ pub(crate) enum Message {
     /// The QR chip's Copy / Open link.
     Qr(qr::Act),
     /// The selection's link or email chip was clicked (the only thing that opens it).
-    OpenEntity(crate::actions::entities::Entity),
+    OpenEntity(crate::features::circle::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, translate::Msg),
     /// Alt went down / up (peek at the original under a translation).

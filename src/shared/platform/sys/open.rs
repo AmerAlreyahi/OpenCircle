@@ -41,9 +41,9 @@ pub fn web_host(url: &str) -> Option<String> {
         b'%' => tail
             .get(i + 1..i + 3)
             .is_some_and(|h| h.bytes().all(|b| b.is_ascii_hexdigit())),
-        _ => crate::actions::entities::url_byte(b),
+        _ => crate::features::circle::actions::entities::url_byte(b),
     });
-    tail_ok.then(|| crate::actions::entities::host_name(authority))?
+    tail_ok.then(|| crate::features::circle::actions::entities::host_name(authority))?
 }
 
 /// Open a link the user clicked (link chip, QR chip) in the default
@@ -62,7 +62,7 @@ pub fn open_mailto(address: &str) -> io::Result<()> {
     let plain = address
         .bytes()
         .all(|b| b.is_ascii_graphic() && !b"%?&=#".contains(&b));
-    if !plain || !crate::actions::entities::is_email(address) {
+    if !plain || !crate::features::circle::actions::entities::is_email(address) {
         return Err(bad("not an email address"));
     }
     spawn(std::ffi::OsStr::new(&format!("mailto:{address}")))

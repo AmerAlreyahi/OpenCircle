@@ -72,7 +72,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("oc-history-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (dir, db) = (root.join("recent"), root.join("opencircle.db"));
-        let shot = crate::actions::Crop {
+        let shot = crate::features::circle::actions::Crop {
             width: 1,
             height: 1,
             rgba: vec![0; 4],

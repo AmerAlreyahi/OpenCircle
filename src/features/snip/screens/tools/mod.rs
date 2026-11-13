@@ -10,11 +10,11 @@ use iced::widget::image;
 use iced::widget::{Space, column, container, opaque, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Size};
 
+use crate::features::circle::screens::overlay;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::key_hint::{self, key_hint};
 use crate::shared::kit::toast::{Tone, toast};
 use crate::shared::kit::tokens::{radius, space};
-use crate::ui::overlay;
 
 pub mod picker;
 pub mod ruler;
