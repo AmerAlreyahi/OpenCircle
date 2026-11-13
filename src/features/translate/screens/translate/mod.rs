@@ -238,7 +238,7 @@ impl Session {
             partial: None,
             readers: None,
             snip_keys: (crate::shared::config::current().quick_actions.into_iter())
-                .find(|q| q.action == actions::snip::ACTION.id)
+                .find(|q| q.action == crate::features::snip::action::ACTION.id)
                 .map(|q| q.shortcut)
                 .unwrap_or_default(),
             updating: None,

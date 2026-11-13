@@ -157,7 +157,7 @@ pub const LAYER_CLEAR: Color = Color::TRANSPARENT;
 
 /// The editor's colour picker lives in `annotate::style` (annotations belong to the image,
 /// not the UI); re-exported for the Settings colour field.
-pub use crate::snip::annotate::style::ANNOTATION;
+pub use crate::features::snip::annotate::style::ANNOTATION;
 
 /// Light instead of dark on this thread (snapshot tests).
 #[cfg(test)]

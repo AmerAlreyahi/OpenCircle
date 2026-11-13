@@ -7,15 +7,15 @@ use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
 use crate::features::settings::labs::BarButton;
+use crate::features::snip::annotate;
+use crate::features::snip::screens::snip::{self, Snip};
 use crate::features::text_reading::TextBlock;
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Target};
 use crate::shared::platform::capture::CaptureError;
-use crate::snip::annotate;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::snip::{self, Snip};
 use crate::{
-    actions::{self, Action, qr, search_in_browser},
+    actions::{Action, qr, search_in_browser},
     features::text_reading::text,
 };
 use crate::{
@@ -203,7 +203,7 @@ impl BarKeys {
             translate: quick(crate::features::translate::action::ACTION.id, false),
             live: quick(crate::features::translate::action::ACTION.id, true),
             song: quick("song_search", false),
-            edit: key(&actions::snip::ACTION),
+            edit: key(&crate::features::snip::action::ACTION),
         }
     }
 }

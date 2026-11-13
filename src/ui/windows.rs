@@ -10,11 +10,11 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
 use super::{settings, shape, update_card, update_pill};
 use crate::features::onboarding;
+use crate::features::snip::screens::steps::{self, Strip};
 use crate::shared::kit::chip;
 use crate::shared::kit::header::{self as chrome, Caption};
 use crate::shared::kit::icon::Icon;
@@ -26,9 +26,10 @@ use crate::shared::platform;
 use crate::shared::theme;
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 use crate::actions::{Action, Crop, Run, copy, save};
+use crate::features::snip::annotate::dragout::{self, DragFile};
+use crate::features::snip::capture::live;
 use crate::shared::app_language::S;
 use crate::shared::config::{self, Config, Theme};
-use crate::shared::platform::capture::live;
 #[cfg(test)]
 pub use crate::shared::platform::windows::CLEARED;
 pub use crate::shared::platform::windows::{
@@ -36,7 +37,6 @@ pub use crate::shared::platform::windows::{
     floating_in_captures, foreground, forget, hide_from_capture, hole, is_floating, keep_above,
     no_backdrop, opacity, reshape, screen, setup_window, show, uncut,
 };
-use crate::snip::annotate::dragout::{self, DragFile};
 use crate::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

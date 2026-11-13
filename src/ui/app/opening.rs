@@ -12,6 +12,7 @@ use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
 use crate::features::settings::labs::{BarButton, Labs};
+use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading as ocr;
 use crate::features::text_reading::app::word;
 use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
@@ -21,7 +22,6 @@ use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
 use crate::ui::app::screens::Screen;
 use crate::ui::app::{Reader, TextMode};
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{ai_chat, overlay, song, translate};
 
 pub(crate) struct Opening {
@@ -211,14 +211,14 @@ pub(crate) struct Opening {
     /// frame lands (`app::screens`); freed with the opening.
     pub(crate) screens: Vec<Screen>,
     /// Their frames that landed during the opening animation (shown after it).
-    pub(crate) waiting: Vec<(crate::ui::snip::Place, image::Handle)>,
+    pub(crate) waiting: Vec<(crate::features::snip::screens::snip::Place, image::Handle)>,
     /// Where the edge glow is: the screen the mouse is on (`screens::Glow`).
     pub(crate) glow: crate::ui::app::screens::Glow,
     /// Main mode: the desktop's windows at the freeze (`Shot::windows`), for
     /// the bar's Snip (a late list drifts from the frozen frames).
-    pub(crate) windows: Vec<crate::ui::snip::Pick>,
+    pub(crate) windows: Vec<crate::features::snip::screens::snip::Pick>,
     /// Snip's More menu: the area's text read, the translation on it.
-    pub(crate) more: crate::ui::app::snip_more::More,
+    pub(crate) more: crate::features::snip::app::snip_more::More,
 }
 
 impl Default for Opening {

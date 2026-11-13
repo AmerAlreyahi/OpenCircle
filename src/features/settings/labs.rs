@@ -87,7 +87,7 @@ pub fn action_feature(id: &QuickId) -> Option<Feature> {
 /// Is the action `id` available with these switches? A live pin also needs Windows.
 pub fn action_on(labs: &Labs, id: &QuickId) -> bool {
     action_feature(id).is_none_or(|f| labs.has(f))
-        && (*id != QuickId::LivePin || crate::shared::platform::capture::live::SUPPORTED)
+        && (*id != QuickId::LivePin || crate::features::snip::capture::live::SUPPORTED)
 }
 
 /// Is this quick action available? Live translate is its own Labs feature.

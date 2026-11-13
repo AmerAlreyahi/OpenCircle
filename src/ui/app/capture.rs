@@ -17,6 +17,7 @@ use crate::{
     features::text_reading::text,
 };
 
+use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{place_window, taskbar_inset};
 use crate::shared::platform::shape;
@@ -25,8 +26,10 @@ use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick;
 use crate::ui::app::quick::{Quick, Start};
-use crate::ui::snip::Snip;
-use crate::ui::{overlay, snip, windows};
+use crate::{
+    features::snip::screens::snip,
+    ui::{overlay, windows},
+};
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
 use crate::shared::platform::monitor::can_hide_windows;
@@ -199,12 +202,12 @@ impl App {
         kind: snip::Kind,
         chosen: impl FnOnce(&capture::Monitor),
     ) -> Result<Shot, CaptureError> {
-        let capture::snip::Snapshot {
+        let crate::features::snip::capture::snip::Snapshot {
             frames,
             on,
             windows,
             foreground,
-        } = capture::snip::snapshot(config::current().snip.cursor, chosen)?;
+        } = crate::features::snip::capture::snip::snapshot(config::current().snip.cursor, chosen)?;
         let windows = (windows.into_iter())
             .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
             .collect();
@@ -277,7 +280,7 @@ impl App {
             let mut snip = Snip::new(
                 windows,
                 self.place(),
-                crate::shared::platform::capture::scroll::can_scroll(),
+                crate::features::snip::capture::scroll::can_scroll(),
                 foreground,
             );
             // Every other monitor gets its window over its frame once the
@@ -547,7 +550,7 @@ impl App {
         let chat = Task::batch([chat, super::screens::close_all(&opening.screens), back]);
         drop(opening); // the panel, translate, song, helper and frame stop or free themselves
         // hidden or closed alike: the editor's glyphs go with the opening
-        crate::snip::annotate::free_glyphs();
+        crate::features::snip::annotate::free_glyphs();
         if self.can_hide {
             // Gone at once: the hide steps draw the empty view (the theme's
             // background) full-screen, then restore the window from full-screen,

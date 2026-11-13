@@ -11,10 +11,10 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
 use crate::features::settings::labs::{Feature, Labs};
+#[cfg(target_os = "linux")]
+use crate::features::snip::capture::scroll::Finish;
 use crate::shared::app_language::{S, fmt};
 use crate::shared::config::{Config, Target};
-#[cfg(target_os = "linux")]
-use crate::shared::platform::capture::scroll::Finish;
 use crate::{Trigger, Triggers, t};
 
 /// The tray menu's entries, in order.

@@ -7,11 +7,14 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 use crate::actions::{self};
 use crate::shared::config::{self, SelectStyle};
 
+use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading::app::word;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};
-use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::{overlay, snip, translate};
+use crate::{
+    features::snip::screens::snip,
+    ui::{overlay, translate},
+};
 
 use super::App;
 use super::screens::keep_on;
@@ -47,7 +50,7 @@ impl App {
         // Long capture: Enter and Ctrl+C are Copy, Ctrl+S Save (as the
         // toolbar's buttons); the rest of the overlay is still.
         if self.scroll().is_some() {
-            use crate::ui::screens::long_capture::Finish;
+            use crate::features::snip::screens::long_capture::Finish;
             let how = match event {
                 overlay::Event::Enter
                 | overlay::Event::Key {
@@ -60,7 +63,7 @@ impl App {
                 } => Finish::Save,
                 _ => return Task::none(),
             };
-            return self.on_snip(crate::ui::snip::Msg::Finish(how));
+            return self.on_snip(crate::features::snip::screens::snip::Msg::Finish(how));
         }
         // The editor, a toast or a timer's pill has the screen.
         if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
@@ -180,7 +183,7 @@ impl App {
                 overlay::Event::Key { letter, ctrl }
                     if !session.has_card()
                         && actions::for_key(&o.labs, letter, ctrl)
-                            .is_some_and(|a| a.id == actions::snip::ACTION.id) =>
+                            .is_some_and(|a| a.id == crate::features::snip::action::ACTION.id) =>
                 {
                     return self.snip_here(None);
                 }
@@ -425,7 +428,9 @@ impl App {
                     Some(id) if id == crate::features::translate::action::ACTION.id => {
                         Some(Message::TranslateScreen)
                     }
-                    Some(id) if id == actions::snip::ACTION.id => Some(Message::EditScreen),
+                    Some(id) if id == crate::features::snip::action::ACTION.id => {
+                        Some(Message::EditScreen)
+                    }
                     _ => None,
                 };
                 if let (None, Some(message)) = (self.o.selection, bar) {

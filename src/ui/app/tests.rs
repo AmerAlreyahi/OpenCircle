@@ -9,23 +9,26 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::features::settings::labs::{self, BarButton};
+use crate::features::snip::annotate;
 use crate::features::text_reading::{self as ocr, TextBlock};
 use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
-use crate::snip::annotate::{self};
 use crate::{
     actions::{self, Crop, copy, qr, search_in_browser},
     features::text_reading::text,
 };
 
+use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick::Quick;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
-use crate::ui::snip::Snip;
-use crate::ui::{ai_chat, overlay, snip, song, translate, windows};
+use crate::{
+    features::snip::screens::snip,
+    ui::{ai_chat, overlay, song, translate, windows},
+};
 use crate::{features::text_reading::app::word, ui::app::keys};
 
 use super::view::chips_at;
@@ -738,7 +741,7 @@ fn snip_ctrl_c_copies_the_area_under_the_pointer_as_an_image() {
 /// Copy takes the area as it is now. Enter while picking = the whole screen.
 #[test]
 fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
-    use crate::snip::annotate::Message as E;
+    use crate::features::snip::annotate::Message as E;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.o.labs = crate::features::settings::labs::Labs::all_on();
@@ -746,7 +749,10 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     let crop = app.crop().unwrap();
     let _ = app.snip_routed(crop, true, false);
     let edit = app.o.edit.as_ref().expect("the editor is open");
-    assert!(edit.annotator.movable && edit.annotator.tool == crate::snip::annotate::Tool::Select);
+    assert!(
+        edit.annotator.movable
+            && edit.annotator.tool == crate::features::snip::annotate::Tool::Select
+    );
     assert_eq!(edit.canvas_rect(), area, "over the picked area");
     // The bottom-right handle out by (100, 50).
     let _ = app.on_snip_toolbar(E::Press(Point::new(400.0, 280.0)));
@@ -788,8 +794,8 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
 /// stays put (no frame per move), and glides to its new dock once let go.
 #[test]
 fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
-    use crate::snip::annotate::Message as E;
-    use crate::ui::screens::snip_toolbar::toolbar;
+    use crate::features::snip::annotate::Message as E;
+    use crate::features::snip::screens::snip_toolbar::toolbar;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.o.labs = crate::features::settings::labs::Labs::all_on();
@@ -1022,8 +1028,8 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
 /// the area on its free (left) side, clear of the toolbar.
 #[test]
 fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
-    use crate::shared::platform::capture::scroll::Update;
-    use crate::ui::screens::long_capture;
+    use crate::features::snip::capture::scroll::Update;
+    use crate::features::snip::screens::long_capture;
     for y in [0.0, 0.4, 1.0] {
         let area = Rectangle::new(Point::new(858.0, y), Size::new(858.0, 1231.0 - y));
         let mut app = snipping_on(1716, 1271, area);
@@ -1088,8 +1094,8 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
 /// the toolbar, kept in the overlay's hole (the overlay is kept out of the grabs).
 #[test]
 fn a_full_screen_long_capture_shows_a_small_picture_in_the_corner() {
-    use crate::shared::platform::capture::scroll::Update;
-    use crate::ui::screens::long_capture;
+    use crate::features::snip::capture::scroll::Update;
+    use crate::features::snip::screens::long_capture;
     let area = Rectangle::new(Point::ORIGIN, Size::new(1280.0, 720.0));
     let mut app = snipping_on(1280, 720, area);
     app.select(area);
@@ -1166,7 +1172,7 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
 /// toolbar re-docks to it).
 #[test]
 fn the_three_drags_each_move_their_own_thing() {
-    use crate::snip::annotate::{Message as E, dragout};
+    use crate::features::snip::annotate::{Message as E, dragout};
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.select(area);
@@ -1220,7 +1226,7 @@ fn the_three_drags_each_move_their_own_thing() {
 /// toolbar's buttons do (its canvas, which takes the editor's keys, is off).
 #[test]
 fn long_capture_finishes_on_ctrl_c_and_ctrl_s_like_its_buttons() {
-    use crate::ui::screens::long_capture::Finish;
+    use crate::features::snip::screens::long_capture::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let key = |letter| overlay::Event::Key { letter, ctrl: true };
     for (letter, button, how) in [
@@ -1245,7 +1251,7 @@ fn long_capture_finishes_on_ctrl_c_and_ctrl_s_like_its_buttons() {
 
 #[test]
 fn the_snip_toolbars_scroll_button_starts_a_scrolling_capture_of_the_area() {
-    use crate::ui::screens::long_capture::Finish;
+    use crate::features::snip::screens::long_capture::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let stitched = || {
         Message::Snip(snip::Msg::Done(Ok(Crop {
@@ -1348,7 +1354,7 @@ fn a_pick_copies_nothing_by_default_and_the_copy_button_does() {
         None,
         "the pick left the clipboard alone"
     );
-    let task = app.on_snip_toolbar(crate::snip::annotate::Message::Copy);
+    let task = app.on_snip_toolbar(crate::features::snip::annotate::Message::Copy);
     run_task(&mut app, task);
     assert_eq!(copied_image(), Some((300, 200)), "Copy wrote it");
 }
@@ -1373,7 +1379,7 @@ fn a_recent_capture_opens_picked_with_snips_toolbar() {
         !edit.annotator.bare(),
         "its own pixels drawn, not the frozen frame's"
     );
-    let stops = crate::ui::screens::snip_toolbar::toolbar::stops(&edit.annotator);
+    let stops = crate::features::snip::screens::snip_toolbar::toolbar::stops(&edit.annotator);
     assert!(!stops.contains(&annotate::Message::Back), "Snip's toolbar");
     assert!(
         !stops.contains(&annotate::Message::Scroll),
@@ -2710,7 +2716,7 @@ fn hidden_features_have_no_bar_button_and_turning_them_on_brings_them_back() {
         Point::new(500.0, 350.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::snip::ACTION));
+    let _ = app.update(Message::Run(&crate::features::snip::action::ACTION));
     assert!(app.editing());
 }
 
@@ -2726,7 +2732,7 @@ fn main_modes_snip_runs_the_one_snip_flow() {
             edit.annotator.movable,
             "Snip's live area, not the in-place editor"
         );
-        let stops = crate::ui::screens::snip_toolbar::toolbar::stops(&edit.annotator);
+        let stops = crate::features::snip::screens::snip_toolbar::toolbar::stops(&edit.annotator);
         assert!(
             !stops.contains(&annotate::Message::Back),
             "no Back: Snip's toolbar"
@@ -2750,7 +2756,7 @@ fn main_modes_snip_runs_the_one_snip_flow() {
     // with an area selected (the bar's Snip, E, `run edit`): picked at once
     for message in [
         |app: &App| app.bar_message(BarButton::Edit).unwrap(),
-        |_: &App| Message::Run(&actions::snip::ACTION),
+        |_: &App| Message::Run(&crate::features::snip::action::ACTION),
     ] {
         let mut app = open_app(1280, 800, 1.0);
         drag(
@@ -2778,7 +2784,7 @@ fn a_still_pin_needs_no_labs_switch() {
         Point::new(500.0, 350.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::snip::ACTION));
+    let _ = app.update(Message::Run(&crate::features::snip::action::ACTION));
     app.o.labs.set(labs::Feature::Pins, false);
     let _ = app.update(Message::Annotate(annotate::Message::Pin));
     assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
@@ -2924,7 +2930,7 @@ fn bar_box(app: &mut App) -> (Rectangle, bool) {
     );
     let is_edit = |m: &Message| match m {
         Message::EditScreen => true,
-        Message::Run(a) => a.id == actions::snip::ACTION.id,
+        Message::Run(a) => a.id == crate::features::snip::action::ACTION.id,
         _ => false,
     };
     let edits = edit.iter().any(is_edit);
@@ -5307,7 +5313,7 @@ fn ctrl_key_after(app: &App, c: char, physical: iced::keyboard::key::Code) -> Ve
 
 #[test]
 fn ctrl_z_reaches_the_snip_toolbar() {
-    use crate::snip::annotate::Message as E;
+    use crate::features::snip::annotate::Message as E;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
     app.select(area);
@@ -5337,8 +5343,8 @@ fn casting_on(w: u32, h: u32, area: Rectangle) -> App {
     app
 }
 
-fn cast_frames() -> Vec<crate::ui::long_capture_popup::Frame> {
-    use crate::ui::long_capture_popup::{Msg, tests::sent};
+fn cast_frames() -> Vec<crate::features::snip::screens::long_capture_popup::Frame> {
+    use crate::features::snip::screens::long_capture_popup::{Msg, tests::sent};
     (sent(false).into_iter())
         .filter_map(|m| match m {
             Msg::Frame(f) => Some(f),
@@ -5357,7 +5363,7 @@ fn stitched_page(height: u32) -> Crop {
 
 #[test]
 fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state() {
-    use crate::shared::platform::capture::scroll::Update;
+    use crate::features::snip::capture::scroll::Update;
     use crate::shared::platform::tray::SHOWN;
     SHOWN.with_borrow_mut(Vec::clear);
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
@@ -5422,7 +5428,7 @@ fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state
 /// corner out), with the whole-screen tip until the page grows.
 #[test]
 fn on_wayland_a_whole_screen_long_capture_shows_its_pop_up_in_the_corner() {
-    use crate::shared::platform::capture::scroll::Update;
+    use crate::features::snip::capture::scroll::Update;
     let area = Rectangle::new(Point::new(0.0, 0.0), Size::new(1280.0, 720.0));
     let mut app = casting_on(1280, 720, area);
     assert!(
@@ -5466,9 +5472,9 @@ fn on_wayland_a_whole_screen_long_capture_shows_its_pop_up_in_the_corner() {
 /// pop-up says so and goes, the tray is itself again.
 #[test]
 fn on_wayland_copy_from_the_pop_up_copies_the_page() {
-    use crate::shared::platform::capture::scroll::Finish;
+    use crate::features::snip::capture::scroll::Finish;
+    use crate::features::snip::screens::long_capture_popup::{Msg, tests::sent};
     use crate::shared::platform::tray::SHOWN;
-    use crate::ui::long_capture_popup::{Msg, tests::sent};
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
     let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Copy)));
@@ -5493,7 +5499,7 @@ fn on_wayland_copy_from_the_pop_up_copies_the_page() {
 /// fresh frame with the stitched page picked; Cancel drops the page.
 #[test]
 fn on_wayland_done_opens_snip_with_the_page_and_cancel_drops_it() {
-    use crate::shared::platform::capture::scroll::Finish;
+    use crate::features::snip::capture::scroll::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
@@ -5517,9 +5523,9 @@ fn on_wayland_done_opens_snip_with_the_page_and_cancel_drops_it() {
 /// sign and its menu finishes it.
 #[test]
 fn on_wayland_without_xwayland_the_tray_alone_shows_the_capture() {
-    use crate::shared::platform::capture::scroll::Finish;
+    use crate::features::snip::capture::scroll::Finish;
+    use crate::features::snip::screens::long_capture_popup::tests::NO_X11;
     use crate::shared::platform::tray::SHOWN;
-    use crate::ui::long_capture_popup::tests::NO_X11;
     NO_X11.set(true);
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
@@ -5559,7 +5565,7 @@ fn snip_over_a_translation_takes_the_translated_page() {
             window: 5,
         }];
     };
-    let key = actions::snip::ACTION.key;
+    let key = crate::features::snip::action::ACTION.key;
     for entry in ["shortcut", "key", "pill button"] {
         let mut app = open_app(40, 20, 1.0);
         translated(&mut app);

@@ -21,7 +21,7 @@ use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 use crate::ui::song;
 use crate::{
-    actions::{self, qr, search_in_browser},
+    actions::{qr, search_in_browser},
     features::text_reading::text,
 };
 
@@ -164,7 +164,7 @@ impl App {
             ),
             (
                 BarButton::Edit,
-                actions::snip::ACTION.icon,
+                crate::features::snip::action::ACTION.icon,
                 if selected {
                     t!(bar_snip_image)
                 } else {

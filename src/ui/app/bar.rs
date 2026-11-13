@@ -5,16 +5,15 @@ use iced::futures::channel::mpsc::UnboundedSender;
 use iced::widget::operation;
 use iced::{Point, Rectangle, Size, Task, Vector};
 
-use crate::actions;
 use crate::features::settings::labs::{self, BarButton};
 use crate::shared::config;
 
+use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::screens;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 use super::{ASK_INPUT, App};
 
@@ -328,7 +327,9 @@ impl App {
             BarButton::Translate => Some(Message::Pill(which)),
             BarButton::Live => Some(Message::LiveToggle),
             BarButton::Song => Some(Message::SongStart),
-            BarButton::Edit if selected => Some(Message::Run(&actions::snip::ACTION)),
+            BarButton::Edit if selected => {
+                Some(Message::Run(&crate::features::snip::action::ACTION))
+            }
             BarButton::Edit => Some(Message::EditScreen),
         }
     }

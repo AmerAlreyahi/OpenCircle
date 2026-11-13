@@ -6,6 +6,7 @@ pub(crate) mod ask_ai;
 pub(crate) mod live_translate;
 pub(crate) mod onboarding;
 pub(crate) mod settings;
+pub(crate) mod snip;
 pub(crate) mod song;
 pub(crate) mod text_reading;
 pub(crate) mod translate;

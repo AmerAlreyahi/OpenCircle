@@ -5,16 +5,11 @@
 //! `screencast.rs` where GNOME's screenshot portal would ask every time),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
-pub mod live;
-pub mod pace;
 #[cfg(target_os = "linux")]
 pub mod portal;
 #[cfg(target_os = "linux")]
-mod screencast;
-pub mod scroll;
+pub(crate) mod screencast;
 pub mod shrink;
-pub mod snip;
-pub mod stitch;
 pub mod uia;
 pub mod window_rect;
 
@@ -26,7 +21,7 @@ mod x11;
 use x11 as platform;
 
 #[cfg(windows)]
-mod win;
+pub(crate) mod win;
 #[cfg(windows)]
 use win as platform;
 

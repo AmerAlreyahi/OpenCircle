@@ -6,7 +6,6 @@
 mod actions;
 mod features;
 mod shared;
-mod snip;
 mod ui;
 
 use std::process::ExitCode;
@@ -34,7 +33,7 @@ pub enum Trigger {
     RestartToUpdate,
     /// Wayland: the running long capture ends so (its pop-up or the tray's
     /// capturing menu).
-    LongCapture(crate::shared::platform::capture::scroll::Finish),
+    LongCapture(crate::features::snip::capture::scroll::Finish),
     Quit,
 }
 
@@ -129,7 +128,9 @@ fn main() -> ExitCode {
             return crate::features::text_reading::worker_main();
         } // hidden: spawned by the app
         // hidden: Wayland's long capture pop-up, spawned by the app on XWayland
-        Some(ui::long_capture_popup::ARG) => return ui::long_capture_popup::main(),
+        Some(crate::features::snip::screens::long_capture_popup::ARG) => {
+            return crate::features::snip::screens::long_capture_popup::main();
+        }
         Some(crate::shared::setup::FORGET_ARG) => {
             // hidden: the MSI's uninstall
             return crate::shared::setup::forget_user_data(

@@ -8,8 +8,6 @@ pub mod qr;
 pub mod save;
 pub mod search_in_browser;
 pub mod share;
-pub mod snip;
-pub mod snip_more;
 
 /// Every action, in action-bar order. The first one runs on Enter.
 pub const ACTIONS: &[Action] = &[
@@ -17,7 +15,7 @@ pub const ACTIONS: &[Action] = &[
     crate::features::ask_ai::ask::ACTION,
     crate::features::text_reading::text::ACTION,
     crate::features::translate::action::ACTION,
-    snip::ACTION,
+    crate::features::snip::action::ACTION,
     copy::ACTION,
     save::ACTION,
 ];
@@ -134,7 +132,7 @@ mod tests {
             crate::features::settings::labs::Labs::default(),
             crate::features::settings::labs::Labs::all_on(),
         );
-        let e = snip::ACTION.key;
+        let e = crate::features::snip::action::ACTION.key;
         // out of Labs since 0.1.3 (N-41)
         assert_eq!(for_key(&off, e.letter, e.ctrl).map(|a| a.id), Some("edit"));
         assert_eq!(for_key(&on, e.letter, e.ctrl).map(|a| a.id), Some("edit"));

@@ -244,7 +244,7 @@ fn holding(
 
 /// `area` of a `width` x `height` BGRx frame (rows maybe padded) as RGBA;
 /// an error when the area isn't inside it.
-pub(super) fn cut_bgrx(
+pub(crate) fn cut_bgrx(
     bytes: &[u8],
     width: u32,
     height: u32,

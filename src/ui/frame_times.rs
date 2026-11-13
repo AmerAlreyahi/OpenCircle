@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use iced::window::{self};
 use iced::{Element, Point, Rectangle, Size, Vector};
 
-use crate::actions;
 use crate::features::text_reading::{self as ocr, TextBlock};
 
 use super::app::message::Message;
@@ -237,7 +236,7 @@ fn animation_frame_times() {
         settle_bar(&mut app);
         let t = frames(&mut app, 16, false, |app, i, now| {
             if i == 0 {
-                let _ = app.update(Message::Run(&actions::snip::ACTION));
+                let _ = app.update(Message::Run(&crate::features::snip::action::ACTION));
             }
             let _ = app.update(Message::Frame(now));
         });
@@ -1392,7 +1391,7 @@ enum SnipDrag {
 /// the live area starts there.
 fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn>, App) {
     use super::app::tests::snipping_on;
-    use crate::snip::annotate::Message as E;
+    use crate::features::snip::annotate::Message as E;
     use crate::ui::overlay::Event;
     let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
     let mut app = snipping_on(w, h, window);
@@ -1448,7 +1447,7 @@ fn snip_frame_times() {
 #[ignore = "timing: run by hand, in release"]
 fn snip_toolbar_frame_times() {
     use super::app::tests::snipping_on;
-    use crate::snip::annotate::Message as E;
+    use crate::features::snip::annotate::Message as E;
     fn view(app: &App) -> Element<'_, Message> {
         app.view(app.overlay)
     }
@@ -1465,7 +1464,7 @@ fn snip_toolbar_frame_times() {
         let mut app = picked();
         let (at, size) = (
             app.bar_at(),
-            crate::ui::screens::snip_toolbar::SnipToolbar::toolbar_size(),
+            crate::features::snip::screens::snip_toolbar::SnipToolbar::toolbar_size(),
         );
         let y = at.y + size.height / 2.0;
         let step = size.width / 40.0;
@@ -1552,7 +1551,7 @@ fn a_snips_drags_redraw_round_what_moves() {
 #[ignore = "timing: run by hand, in release"]
 fn snip_nudge_frame_times() {
     use super::app::tests::snipping_on;
-    use crate::snip::annotate::Message as E;
+    use crate::features::snip::annotate::Message as E;
     for (w, h) in [(1920, 1080), (1280, 720)] {
         let (wf, hf) = (w as f32, h as f32);
         let full = Rectangle::new(Point::ORIGIN, Size::new(wf, hf));

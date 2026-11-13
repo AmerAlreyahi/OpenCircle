@@ -448,10 +448,13 @@ fn every_text_names_a_bundled_face() {
         "Family::Fantasy",
     ];
     const WIDGETS: [&str; 2] = ["widget::text(", "rich_text("];
-    let snip: Vec<(String, String)> = ["src/snip/annotate/text.rs", "src/snip/annotate/style.rs"]
-        .iter()
-        .map(|p| (p.to_string(), std::fs::read_to_string(p).unwrap()))
-        .collect();
+    let snip: Vec<(String, String)> = [
+        "src/features/snip/annotate/text.rs",
+        "src/features/snip/annotate/style.rs",
+    ]
+    .iter()
+    .map(|p| (p.to_string(), std::fs::read_to_string(p).unwrap()))
+    .collect();
     let mut found = Vec::new();
     for (name, src) in sources("").into_iter().chain(snip) {
         let test_only = name.starts_with("shared/kit/testing/") || name.ends_with("tests.rs");

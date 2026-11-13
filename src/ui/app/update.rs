@@ -12,6 +12,7 @@ use crate::features::text_reading as ocr;
 use crate::features::text_reading::text;
 use crate::shared::config;
 
+use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor;
@@ -20,8 +21,10 @@ use crate::ui::app::keys;
 use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
 use crate::ui::screens::bar::geometry as bar;
-use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::{overlay, snip, translate, windows};
+use crate::{
+    features::snip::screens::snip,
+    ui::{overlay, translate, windows},
+};
 
 use super::capture::{TEST_SHOT, save_test_shot};
 use super::{App, BAR_MORPH, CAPTURE_TIMEOUT, GLIDE, REVEAL_WAIT, Reader, SHRINK_FRAMES, SHRUNK};
@@ -100,7 +103,7 @@ impl App {
             // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
             Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.cast.is_some() => {
-                self.cast_finish(crate::shared::platform::capture::scroll::Finish::Done)
+                self.cast_finish(crate::features::snip::capture::scroll::Finish::Done)
             }
             Message::Snip(snip::Msg::Progress(update)) if self.cast.is_some() => {
                 self.cast_progress(update)
@@ -151,7 +154,7 @@ impl App {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
                 // the colour picker, the ruler: a snip that opens with it
-                if let Some(tool) = crate::ui::screens::tools::for_action(&qa.action) {
+                if let Some(tool) = crate::features::snip::screens::tools::for_action(&qa.action) {
                     self.tool_next = Some(tool);
                     return self.capture(at, Some(snip::Kind::Region));
                 }
@@ -235,11 +238,11 @@ impl App {
             }
             // long capture's Esc is its Cancel: back to the picked area
             Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Finish(
-                crate::ui::screens::long_capture::Finish::Cancel,
+                crate::features::snip::screens::long_capture::Finish::Cancel,
             )),
             // a screen tool's closes it (back to the picked area, if it came from there)
             Message::Escape if self.tool().is_some() => {
-                self.on_tool(crate::ui::screens::tools::Msg::Close)
+                self.on_tool(crate::features::snip::screens::tools::Msg::Close)
             }
             // The editor has its own Esc (finish typing, close the picker, back).
             Message::Escape if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open) => {

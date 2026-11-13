@@ -35,12 +35,8 @@ pub(crate) mod bar;
 pub(crate) mod capture;
 pub(crate) mod screens;
 pub(crate) mod selection;
-pub(crate) mod snip;
-pub(crate) mod snip_more;
-pub(crate) mod snip_toolbar;
 #[cfg(test)]
 pub(crate) mod tests;
-pub(crate) mod tools;
 pub(crate) mod update;
 pub(crate) mod updates;
 pub(crate) mod view;
@@ -206,13 +202,13 @@ pub(crate) struct App {
     /// The next snip capture is the live pin quick action's (`Snip::live_pin`).
     pub(crate) live_next: bool,
     /// The next snip opens this screen tool (its quick action).
-    pub(crate) tool_next: Option<crate::ui::screens::tools::Which>,
+    pub(crate) tool_next: Option<crate::features::snip::screens::tools::Which>,
     /// The next snip opens this image picked: a step of the Steps strip, to
     /// update it (its index), or a long capture finished on Wayland (none).
     pub(crate) picked_next: Option<(Option<usize>, crate::actions::Crop)>,
     /// Wayland: a long capture going on after its overlay went (the user
     /// scrolls the page itself, its pop-up beside the area): `App::cast_done`.
-    pub(crate) cast: Option<snip::Cast>,
+    pub(crate) cast: Option<crate::features::snip::app::snip::Cast>,
     /// The colours the picker copied, newest first (this run of the app only).
     pub(crate) colours: Vec<[u8; 3]>,
     /// Where the user moved / sized the result card (this run of the app).
@@ -367,7 +363,7 @@ impl App {
             || self.chat.as_ref().is_some_and(|c| c.panel.spinning())
             || self.o.bar_now.is_none()
             || (self.o.edit.as_ref())
-                .is_some_and(crate::ui::screens::snip_toolbar::SnipToolbar::growing)
+                .is_some_and(crate::features::snip::screens::snip_toolbar::SnipToolbar::growing)
             || !self.o.waiting.is_empty() // other screens wait for a frame after the opening
             || (self.reading_text().is_some() && !motion::reduced()) // Copy text's spinner (#169)
     }
@@ -504,9 +500,11 @@ impl App {
             // Snip: Shift or Alt held = no snapping.
             let shift = match self.o.purpose {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
-                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => Some(
-                        Message::Snip(crate::ui::snip::Msg::Shift(m.shift() || m.alt())),
-                    ),
+                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                        Some(Message::Snip(
+                            crate::features::snip::screens::snip::Msg::Shift(m.shift() || m.alt()),
+                        ))
+                    }
                     _ => None,
                 }),
                 _ => Subscription::none(),

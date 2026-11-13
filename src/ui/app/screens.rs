@@ -18,20 +18,20 @@ use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
+use crate::features::snip::annotate;
+use crate::features::snip::screens::snip_toolbar::SnipToolbar;
+use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading as ocr;
 use crate::features::text_reading::app::word;
 use crate::shared::config;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{Place, place_window};
-use crate::snip::annotate;
 use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::view::{grow, lifted};
 use crate::ui::screens::overlay::edge as border;
-use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
 use crate::ui::{overlay, windows};
 
 use super::App;
@@ -847,7 +847,10 @@ impl App {
             let size = screen.place.size();
             if let Some(tool) = &snip.tool {
                 let tool = tool.view(frame, scale, screen.view, size, false, false, &[], look);
-                layers = layers.push(tool.map(|m| Message::Snip(crate::ui::snip::Msg::Tool(m))));
+                layers =
+                    layers.push(tool.map(|m| {
+                        Message::Snip(crate::features::snip::screens::snip::Msg::Tool(m))
+                    }));
             } else if let Some(guides) =
                 snip.guides(frame, scale, screen.view, size, self.snip_drag(), look)
             {
@@ -1382,7 +1385,7 @@ mod tests {
     }
 
     /// `snipped` with these windows on the desktop (physical desktop px).
-    fn snipped_with(windows: Vec<crate::ui::snip::Pick>) -> (App, window::Id) {
+    fn snipped_with(windows: Vec<crate::features::snip::screens::snip::Pick>) -> (App, window::Id) {
         let mut app = App::idle(window::Id::unique());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
@@ -1398,7 +1401,12 @@ mod tests {
             scale: START.scale,
             origin: START.logical_origin(),
             size: START.size(),
-            snip: Some((crate::ui::snip::Kind::Region, windows, None, frames)),
+            snip: Some((
+                crate::features::snip::screens::snip::Kind::Region,
+                windows,
+                None,
+                frames,
+            )),
             windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
@@ -1418,7 +1426,7 @@ mod tests {
     /// larger part, drawn by that screen's window.
     #[test]
     fn a_snip_area_spans_screens_and_its_snip_toolbar_copies_both_frames() {
-        use crate::snip::annotate::Message as E;
+        use crate::features::snip::annotate::Message as E;
         let (mut app, id) = snipped();
         // hover on the other screen: its window outlines (forwarded in start px)
         let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
@@ -1493,7 +1501,7 @@ mod tests {
         use overlay::Event::{Enter, Hover, Move, Press, Release};
         // a window on the right screen, desktop px (1000, 150) 900 x 600
         let rect = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
-        let window = crate::ui::snip::Pick::window(rect, "Notes", 7);
+        let window = crate::features::snip::screens::snip::Pick::window(rect, "Notes", 7);
         let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
         let press = |at: Point| Press { at, shift: false };
         let picked = |app: &App| {
@@ -1547,8 +1555,8 @@ mod tests {
     /// nothing; one across both was cut to the starting screen).
     #[test]
     fn a_long_capture_runs_on_the_screen_of_its_area() {
-        use crate::shared::platform::capture::scroll::Update;
-        use crate::snip::annotate::Message as E;
+        use crate::features::snip::annotate::Message as E;
+        use crate::features::snip::capture::scroll::Update;
         let (mut app, id) = snipped();
         let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
         let on = app.on_area(area);
@@ -1582,7 +1590,9 @@ mod tests {
                 rgba: vec![200; (w * h * 4) as usize],
             }),
         };
-        let _ = app.update(Message::Snip(crate::ui::snip::Msg::Progress(first)));
+        let _ = app.update(Message::Snip(
+            crate::features::snip::screens::snip::Msg::Progress(first),
+        ));
         let long = app.scroll().unwrap();
         let picture = long.picture(on.work, bar).expect("the picture");
         assert_eq!(picture.size(), Size::new(100.0, 200.0), "1:1 physical");
@@ -1595,7 +1605,9 @@ mod tests {
             height: 1,
             rgba: vec![0; 4],
         };
-        let _ = app.update(Message::Snip(crate::ui::snip::Msg::Done(Ok(none))));
+        let _ = app.update(Message::Snip(
+            crate::features::snip::screens::snip::Msg::Done(Ok(none)),
+        ));
         assert!(app.scroll().is_none() && app.o.edit.is_some());
     }
 
@@ -1655,8 +1667,8 @@ mod tests {
     /// Ctrl+C copy, Ctrl+S saves, Ctrl+Z undoes.
     #[test]
     fn the_keys_work_after_a_pick_on_another_screen() {
+        use crate::features::snip::annotate::Message as E;
         use crate::shared::kit::testing::shot::{Clip, Focus, chord, feed, named};
-        use crate::snip::annotate::Message as E;
         use iced::keyboard::key::Named;
         let (mut app, id) = snipped();
         let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
@@ -1719,7 +1731,9 @@ mod tests {
             origin: START.logical_origin(),
             size: START.size(),
             snip: None,
-            windows: vec![crate::ui::snip::Pick::window(rect, "Notes", 7)],
+            windows: vec![crate::features::snip::screens::snip::Pick::window(
+                rect, "Notes", 7,
+            )],
         };
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         app.o.appear = Some((Instant::now(), 1.0));

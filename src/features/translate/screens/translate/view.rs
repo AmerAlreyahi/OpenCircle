@@ -5,7 +5,6 @@ use iced::widget::{column, container, opaque, pin, row, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::{Card, Msg, Phase, Session};
-use crate::actions::{self};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
 use crate::features::ask_ai::screens::ai_chat::{actions, ai_error, card, note, provider_name};
@@ -175,14 +174,18 @@ impl Session {
     /// Snip would take), dimmed before.
     fn snip_button(&self) -> Element<'_, Msg> {
         let on = self.seen().map(|_| Msg::Snip);
-        let button = icon_button(actions::snip::ACTION.icon, State::default(), on);
+        let button = icon_button(
+            crate::features::snip::action::ACTION.icon,
+            State::default(),
+            on,
+        );
         let why = match self.snip_keys.is_empty() {
             true => Why::Icon,
             false => Why::Keys(&self.snip_keys),
         };
         hint(
             button,
-            tr(actions::snip::ACTION.label),
+            tr(crate::features::snip::action::ACTION.label),
             why,
             iced::widget::tooltip::Position::Bottom,
         )

@@ -2,16 +2,11 @@
 //! (no style in place: `arch_tests::screens_never_style`). Ported one at a
 //! time from `ui/` (the UI plan's phase 5).
 pub mod bar;
-pub mod common;
-pub mod long_capture;
-pub mod snip_toolbar;
 pub mod overlay {
     pub mod edge;
 }
 pub mod setup;
-pub mod steps;
 pub mod toast;
-pub mod tools;
 pub mod tray_menu;
 pub mod update_card;
 pub mod update_pill;
