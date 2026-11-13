@@ -202,6 +202,14 @@ fn setup_folder() -> Option<String> {
     None
 }
 
+/// A `ManagedBy` value's manager. An empty one is "not managed": a plain Setup's full
+/// repair (REINSTALL=ALL) rewrites every registry value even when the MSI's MANAGEDBY
+/// condition is false, so over a `/managed=winget` install it leaves the value blank.
+#[cfg(any(windows, test))]
+fn arp_manager(text: &str) -> Option<Manager> {
+    (!text.trim().is_empty()).then(|| Manager::parse(text))
+}
+
 /// The setup install's `ManagedBy` (see `managed_by`): not there = `None`; there, or
 /// unreadable for any reason but "not there" = a manager (`Other` if unreadable).
 #[cfg(windows)]
@@ -209,7 +217,7 @@ fn arp_managed() -> Option<Manager> {
     use windows::core::w;
     const NOT_FOUND: u32 = 2; // ERROR_FILE_NOT_FOUND
     match arp_value(w!("ManagedBy")) {
-        Ok(text) => Some(Manager::parse(&text)),
+        Ok(text) => arp_manager(&text),
         Err(NOT_FOUND) => None,
         Err(_) => Some(Manager::Other),
     }
@@ -825,6 +833,10 @@ pub(crate) mod tests {
         assert_eq!(Manager::parse(" WinGet "), Manager::Winget);
         assert_eq!(Manager::parse(""), Manager::Other);
         assert_eq!(Manager::parse("apt"), Manager::Other);
+        // a blank ARP value (plain Setup repair over a managed install) is not a manager
+        assert_eq!(arp_manager(""), None);
+        assert_eq!(arp_manager(" \r\n"), None);
+        assert_eq!(arp_manager("winget"), Some(Manager::Winget));
     }
 
     /// Installed by our setup = this exe is in the folder its Apps & features entry names.
