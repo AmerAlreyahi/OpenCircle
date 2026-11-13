@@ -4,7 +4,7 @@
 //! translation from the [`Cache`], and the layer gets [`Patch`]es to show.
 //!
 //! Our own layer is never read back: the platform excludes it from capture
-//! (`crate::live`, Windows), and as a second guard (X11 can't exclude) a
+//! (`crate::features::live_translate`, Windows), and as a second guard (X11 can't exclude) a
 //! patch region that shows our last patch is put back to what was under it
 //! before the diff.
 
@@ -13,13 +13,13 @@ use std::hash::{DefaultHasher, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use super::pipeline::{
+use crate::features::text_reading::TextBlock;
+use crate::translate::pipeline::{
     Cache, Deps, Error, Timings, check_frame, cut_off, is_rtl, to_line, translate_blocks,
 };
 #[cfg(test)]
-use super::pipeline::{Translation, translations};
-use super::{Block, Drawn, Line, group_blocks, render};
-use crate::features::text_reading::TextBlock;
+use crate::translate::pipeline::{Translation, translations};
+use crate::translate::{Block, Drawn, Line, group_blocks, render};
 
 /// Diff granularity in pixels.
 const TILE: u32 = 32;
@@ -493,8 +493,8 @@ pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::pipeline::tests::{Fake, frame, tb};
     use super::*;
+    use crate::translate::pipeline::tests::{Fake, frame, tb};
 
     const W: u32 = 320;
     const H: u32 = 192;

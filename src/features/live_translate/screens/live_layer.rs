@@ -1,6 +1,6 @@
 //! Live translate (DESIGN.md "Full-screen translate", Ctrl+Shift+L): a
 //! borderless, monitor-sized, always-on-top window made click-through (and,
-//! on Windows, invisible to capture) by `crate::live::prepare_layer`. It shows
+//! on Windows, invisible to capture) by `crate::features::live_translate::prepare_layer`. It shows
 //! only the translated patches; everything else is see-through. A thread at
 //! below-normal priority captures the monitor every 1.5 s (by default) and runs
 //! `translate::live::Live`, one step at a time, and sends what changed.
@@ -12,17 +12,19 @@ use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
-use super::live_controller::{self, Controller, Out};
-use super::screens::overlay::edge as border;
-use super::{background, windows};
+use crate::features::live_translate::live::{self as live_steps, Live as Steps, Patch};
+use crate::features::live_translate::screens::live::controller::{
+    self as live_controller, Controller, Out,
+};
+use crate::features::live_translate::{self as live, LayerError};
 use crate::features::text_reading as ocr;
-use crate::live::{self, LayerError};
 use crate::mt::Pair;
 use crate::shared::config;
 use crate::shared::platform::capture::{self, window_rect};
 use crate::shared::theme;
-use crate::translate::live::{self as live_steps, Live as Steps, Patch};
 use crate::translate::pipeline::Cache;
+use crate::ui::screens::overlay::edge as border;
+use crate::ui::{app::background::background, windows};
 
 /// How often live mode re-captures (Settings > Translate > Live refresh;
 /// 1.5 s by default): steps start on this fixed beat, and a slow step skips
@@ -274,7 +276,8 @@ impl Live {
         let size = self.ctl.size();
         let (x, y) = (m.x as f32 / m.scale, m.y as f32 / m.scale);
         let screen = Size::new(m.width as f32 / m.scale, m.height as f32 / m.scale);
-        let taskbar = super::taskbar_inset(Point::new(x, y), screen, m.scale);
+        let taskbar =
+            crate::shared::platform::monitor::taskbar_inset(Point::new(x, y), screen, m.scale);
         self.ctl_at = Point::new(
             x + screen.width - size.width - CONTROLLER_MARGIN,
             y + screen.height - size.height - CONTROLLER_MARGIN - taskbar,
@@ -776,7 +779,7 @@ mod tests {
             ..live()
         };
         let _ = l.update(Msg::Monitor(Ok(MONITOR)));
-        let layer = crate::live::Layer {
+        let layer = crate::features::live_translate::Layer {
             excluded_from_capture: false,
         };
         let _ = l.update(Msg::Prepared(Ok(layer)));
@@ -880,7 +883,11 @@ mod tests {
         let _ = l.open_controller(MONITOR);
         let id = l.controller().expect("the controller opens");
         let bottom = l.ctl_at.y + l.ctl.size().height;
-        let taskbar = crate::ui::taskbar_inset(Point::ORIGIN, Size::new(1920.0, 1080.0), 1.0);
+        let taskbar = crate::shared::platform::monitor::taskbar_inset(
+            Point::ORIGIN,
+            Size::new(1920.0, 1080.0),
+            1.0,
+        );
         assert_eq!(bottom, 1080.0 - CONTROLLER_MARGIN - taskbar, "bottom right");
         assert!(
             l.ctl.notice.is_some(),
@@ -907,7 +914,7 @@ mod tests {
         // the language list opens upward and closes back
         let closed = l.ctl.size();
         {
-            use crate::ui::picker::{Msg as P, Side};
+            use crate::ui::screens::common::language_picker::{Msg as P, Side};
             let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
             assert!(l.ctl.size().height > closed.height);
             assert_eq!(l.ctl_at.y + l.ctl.size().height, bottom, "grows upward");
@@ -940,7 +947,7 @@ mod tests {
         assert!(!l.paused.load(Ordering::Relaxed));
 
         // another language reaches the step thread
-        use crate::ui::picker::{Msg as P, Side};
+        use crate::ui::screens::common::language_picker::{Msg as P, Side};
         let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
         let _ = l.update(Msg::Controller(C::Picker(P::Pick("ja".into()))));
         assert_eq!(l.langs.lock().unwrap().1, "ja");

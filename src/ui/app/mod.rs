@@ -25,7 +25,10 @@ use self::opening::Open;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::can_hide_windows;
 use crate::shared::touch;
-use crate::ui::{live_layer, overlay, windows};
+use crate::{
+    features::live_translate::screens::live_layer,
+    ui::{overlay, windows},
+};
 
 pub(crate) mod actions;
 pub(crate) mod bar;

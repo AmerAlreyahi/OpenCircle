@@ -6,7 +6,6 @@ pub(crate) mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 pub(crate) mod frame_times;
-pub(crate) mod live_layer;
 pub(crate) mod long_capture_popup;
 pub(crate) mod overlay;
 pub(crate) mod screens;
@@ -14,7 +13,6 @@ use crate::features::ask_ai::screens::ai_chat;
 use crate::features::settings;
 use crate::features::song::screens::song;
 use screens::common::language_picker as picker;
-use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
 use screens::translate;
 pub(crate) mod snip;

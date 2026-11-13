@@ -1482,7 +1482,7 @@ fn parts(blocks: &[Block], batch: usize) -> Vec<Vec<usize>> {
     out
 }
 
-pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Error> {
+pub(crate) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Error> {
     if width == 0 || height == 0 || rgba.len() as u64 != width as u64 * height as u64 * 4 {
         return Err(Error::Ocr(OcrError::BadImage(format!(
             "{width}x{height} RGBA needs {} bytes, got {}",
@@ -1497,7 +1497,7 @@ pub(super) fn check_frame(rgba: &[u8], width: u32, height: u32) -> Result<(), Er
 /// it, a panel beside the window's edge; its OCR box within 3 px of the
 /// edge): OCR read part of it and the erase finds no background beyond it,
 /// so it is left as it is.
-pub(super) fn cut_off(b: &TextBlock, (width, height): (u32, u32)) -> bool {
+pub(crate) fn cut_off(b: &TextBlock, (width, height): (u32, u32)) -> bool {
     let [x, y, w, h] = b.bounds;
     y <= 3.0 || y + h >= height as f32 - 3.0 || x <= 3.0 || x + w >= width as f32 - 3.0
 }
@@ -1555,7 +1555,7 @@ pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
 /// the background just inside the edge), so pad it like a layout line box:
 /// 15% of the height above and below, 10% left and right, inside the frame.
-pub(super) fn to_line(b: TextBlock, width: u32, height: u32) -> Line {
+pub(crate) fn to_line(b: TextBlock, width: u32, height: u32) -> Line {
     let [x, y, w, h] = b.bounds;
     let (x0, y0) = ((x - 0.1 * h).max(0.0), (y - 0.15 * h).max(0.0));
     let x1 = (x + w + 0.1 * h).min(width as f32);
@@ -1614,7 +1614,7 @@ pub(super) fn game_read(text: &str) -> String {
     words.join(" ")
 }
 
-pub(super) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> {
+pub(crate) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> {
     blocks
         .iter()
         .zip(tr)
@@ -1631,7 +1631,7 @@ pub(super) fn translations(blocks: &[Block], tr: &[String]) -> Vec<Translation> 
 /// block of short items ("[ modifier | modifier le code ]", [`items`]) is
 /// translated item by item and put back together with its brackets and
 /// bars, so each link label reads the same wherever it shows.
-pub(super) fn translate_blocks(
+pub(crate) fn translate_blocks(
     blocks: &[Block],
     target: &str,
     cache: &Cache,
@@ -1967,7 +1967,7 @@ impl Cache {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::cell::RefCell;
 
@@ -2646,8 +2646,8 @@ pub(super) mod tests {
     #[test]
     #[ignore]
     fn e2e_real_ocr_fake_translator() {
-        use super::super::live::Live;
         use super::super::tests::{ar, game_frame, save_png};
+        use crate::features::live_translate::live::Live;
 
         struct RealOcr(Mutex<ocr::Engine>);
         impl Deps for RealOcr {

@@ -14,10 +14,13 @@ use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
-use crate::ui::{ai_chat, live_layer, overlay, song, translate, windows};
 use crate::{
     actions::{self, Action, qr, search_in_browser},
     features::text_reading::text,
+};
+use crate::{
+    features::live_translate::screens::live_layer,
+    ui::{ai_chat, overlay, song, translate, windows},
 };
 use crate::{
     features::text_reading::app::word,

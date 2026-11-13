@@ -20,7 +20,10 @@ use crate::shared::platform::monitor::{self, taskbar_inset};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::{ai_chat, live_layer, settings, song, translate, windows};
+use crate::{
+    features::live_translate::screens::live_layer,
+    ui::{ai_chat, settings, song, translate, windows},
+};
 
 use super::{App, Reader, TOAST_MARGIN};
 

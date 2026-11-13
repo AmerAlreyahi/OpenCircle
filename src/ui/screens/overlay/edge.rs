@@ -342,7 +342,7 @@ fn erfc(x: f32) -> f32 {
 /// A colour too near the live layer's key (it would be keyed out, a hole) is
 /// darkened away from it.
 fn off_key(c: [u8; 3]) -> [u8; 3] {
-    let key = crate::live::COLOUR_KEY;
+    let key = crate::features::live_translate::COLOUR_KEY;
     let near: u32 = (c.iter().zip(key)).map(|(a, b)| a.abs_diff(b) as u32).sum();
     if near > 220 {
         return c;
@@ -824,7 +824,7 @@ mod tests {
     /// near the key.
     #[test]
     fn the_keyed_edge_is_a_thin_solid_line_away_from_the_key() {
-        let key = crate::live::COLOUR_KEY;
+        let key = crate::features::live_translate::COLOUR_KEY;
         let mut magenta = spectrum().active();
         magenta.palette = ColourSet::TwoColour;
         magenta.colours = [config::Rgb(key), config::Rgb([250, 10, 240])];

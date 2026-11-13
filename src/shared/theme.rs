@@ -149,7 +149,7 @@ pub fn bracket(look: &Look) -> Color {
 /// Windows keys out `live::COLOUR_KEY`; elsewhere the window is transparent.
 #[cfg(windows)]
 pub const LAYER_CLEAR: Color = {
-    let [r, g, b] = crate::live::COLOUR_KEY;
+    let [r, g, b] = crate::features::live_translate::COLOUR_KEY;
     Color::from_rgb8(r, g, b)
 };
 #[cfg(not(windows))]

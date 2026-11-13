@@ -11,7 +11,6 @@ mod draw;
 mod erase;
 mod glossary;
 pub mod lang;
-pub mod live;
 pub mod pipeline;
 #[cfg(test)]
 pub(crate) mod tests;

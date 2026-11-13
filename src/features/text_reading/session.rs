@@ -632,7 +632,7 @@ mod tests {
         frame: &[u8],
         changed: &[u8],
     ) -> String {
-        let mut live = crate::translate::live::Live::new();
+        let mut live = crate::features::live_translate::live::Live::new();
         let cache = crate::translate::pipeline::Cache::new(512);
         let t = Instant::now();
         live.step(frame, 1920, 1080, "ar", &cache, deps).unwrap();

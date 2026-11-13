@@ -4,6 +4,8 @@
 //! `Level::AlwaysOnTop`) and passes its raw handle, e.g.
 //! `window::run(id, |w| w.window_handle().map(|h| live::prepare_layer(h.as_raw())))`.
 //! What to draw comes from `translate::Live`.
+pub(crate) mod live;
+pub(crate) mod screens;
 
 use std::sync::atomic::{AtomicU8, Ordering};
 

@@ -235,6 +235,7 @@ const UI_SOURCES: &[&str] = &[
     "src/features/text_reading/screens",
     "src/features/text_reading/app",
     "src/features/text_reading/text.rs",
+    "src/features/live_translate/screens",
 ];
 
 /// Files of the UI that hold no user-visible words, and why.
