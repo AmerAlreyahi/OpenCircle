@@ -200,8 +200,8 @@ impl BarKeys {
         BarKeys {
             search: key(&search_in_browser::ACTION),
             copy_text: quick("copy_text", false),
-            translate: quick(actions::translate::ACTION.id, false),
-            live: quick(actions::translate::ACTION.id, true),
+            translate: quick(crate::features::translate::action::ACTION.id, false),
+            live: quick(crate::features::translate::action::ACTION.id, true),
             song: quick("song_search", false),
             edit: key(&actions::snip::ACTION),
         }

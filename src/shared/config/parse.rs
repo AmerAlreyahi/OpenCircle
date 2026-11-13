@@ -199,7 +199,7 @@ impl Config {
                 d.translate.source,
                 &mut w,
                 |s: &String| match s.as_str() {
-                    crate::translate::lang::AUTO => Ok(()),
+                    crate::features::translate::lang::AUTO => Ok(()),
                     s => check_lang(s).map_err(|e| format!("{e}, or \"auto\"")),
                 },
             );

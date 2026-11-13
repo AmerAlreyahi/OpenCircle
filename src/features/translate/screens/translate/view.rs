@@ -8,9 +8,11 @@ use super::{Card, Msg, Phase, Session};
 use crate::actions::{self};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
+use crate::features::ask_ai::screens::ai_chat::{actions, ai_error, card, note, provider_name};
 use crate::features::text_reading::screens::model_download::{
     self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION,
 };
+use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label};
 use crate::shared::kit::dir;
@@ -22,8 +24,6 @@ use crate::shared::kit::text::text as label;
 use crate::shared::kit::tokens::{Role, radius};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
-use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
-use crate::ui::picker;
 
 /// The pill's distance to the top of the screen, and the status tag's to
 /// the pill (PICKER_SPEC.md).
@@ -55,9 +55,9 @@ impl Session {
         let _dir = dir::scope(crate::shared::app_language::rtl());
         let card =
             |body: Element<'a, Msg>, footer: Option<Element<'a, Msg>>, title: Option<&'a str>| {
-                let title = title.unwrap_or(tr(actions::translate::ACTION.label));
+                let title = title.unwrap_or(tr(crate::features::translate::action::ACTION.label));
                 let header = Header {
-                    glyph: actions::translate::ACTION.icon,
+                    glyph: crate::features::translate::action::ACTION.icon,
                     title,
                     chip: None,
                     menu: false,

@@ -618,7 +618,10 @@ impl App {
         }
         let at = card::place(self.o.screen, selection, self.card);
         if self.o.translate.is_some() {
-            return crate::ui::screens::translate::view::clear_of_pill(at, self.o.screen);
+            return crate::features::translate::screens::translate::view::clear_of_pill(
+                at,
+                self.o.screen,
+            );
         }
         at
     }

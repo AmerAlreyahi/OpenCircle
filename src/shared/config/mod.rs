@@ -168,7 +168,7 @@ pub fn os_language() -> &'static str {
     }
     static OS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     OS.get_or_init(|| {
-        crate::translate::lang::yours(&crate::shared::platform::sys::locale::language())
+        crate::features::translate::lang::yours(&crate::shared::platform::sys::locale::language())
     })
 }
 /// Ends the warning when `Provider::Unreadable` is set.
@@ -319,7 +319,7 @@ pub enum Engine {
     /// The AI provider (`[ai]`). Without a usable one (the browser provider,
     /// no key) translation falls back to `Offline` (`actions::translate::deps`).
     Ai,
-    /// On-device model (`crate::mt`): no key, nothing leaves the PC. The
+    /// On-device model (`crate::features::translate::mt`): no key, nothing leaves the PC. The
     /// default: AI only when the user picks it in Settings > Translate.
     #[default]
     Offline,
@@ -925,7 +925,7 @@ impl Default for AiConfig {
 impl Default for TranslateConfig {
     fn default() -> Self {
         TranslateConfig {
-            source: crate::translate::lang::AUTO.to_string(),
+            source: crate::features::translate::lang::AUTO.to_string(),
             target: os_language().to_string(),
             engine: Engine::Offline,
             live_interval_ms: DEFAULT_LIVE_INTERVAL_MS,

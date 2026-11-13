@@ -52,7 +52,7 @@ impl Row {
     pub fn glyph(self) -> char {
         match self {
             Row::CopyText => crate::features::text_reading::text::ACTION.icon,
-            Row::Translate => super::translate::ACTION.icon,
+            Row::Translate => crate::features::translate::action::ACTION.icon,
             // the OpenCircle logo is drawn instead (never sparkles)
             Row::AskAi => crate::features::ask_ai::ask::ACTION.icon,
         }

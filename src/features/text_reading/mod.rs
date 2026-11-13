@@ -25,8 +25,8 @@ pub use worker::{
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::features::translate::lang::{self, Script};
 use crate::shared::config::TextReader;
-use crate::translate::lang::{self, Script};
 
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
@@ -395,7 +395,7 @@ pub enum Read {
 impl Read {
     /// For a source language: its recognizer, or `Auto` for "auto".
     pub fn for_source(source: &str) -> Read {
-        if source == crate::translate::lang::AUTO {
+        if source == crate::features::translate::lang::AUTO {
             return Read::Auto;
         }
         let rec = models::recognizer_for(source);
@@ -436,7 +436,7 @@ pub enum Source {
 pub fn route(setting: TextReader, system: Option<Option<&str>>) -> Source {
     match (setting, system) {
         (TextReader::PpOcr, _) | (_, Some(None)) => Source::Helper,
-        (TextReader::Auto, Some(Some(tag))) if crate::translate::lang::is_rtl(tag) => {
+        (TextReader::Auto, Some(Some(tag))) if crate::features::translate::lang::is_rtl(tag) => {
             Source::Helper
         }
         _ => Source::System,
@@ -1812,7 +1812,7 @@ mod tests {
     #[ignore]
     fn reads_whole_lines_on_a_wide_screen() {
         let mut engine = Engine::load(&ensure_models(|_, _| {}).unwrap()).unwrap();
-        let (frame, lines) = crate::translate::tests::game_frame();
+        let (frame, lines) = crate::features::translate::tests::game_frame();
         let frame = image::RgbaImage::from_raw(1920, 1080, frame).unwrap();
         let mut wide = image::RgbaImage::from_pixel(3440, 1440, image::Rgba([0, 0, 0, 255]));
         image::imageops::overlay(&mut wide, &frame, 3440 - 1920, 0);

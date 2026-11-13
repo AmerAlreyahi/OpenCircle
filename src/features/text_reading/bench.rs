@@ -8,7 +8,7 @@
 //! "Gently" (2 cores) is the helper pinning itself: run under `taskset -c`.
 //! Paths named `x-*` are experiments, not shipped behaviour.
 use super::*;
-use crate::translate::pipeline;
+use crate::features::translate::pipeline;
 use serde_json::{Value, json};
 use std::io::Write;
 use std::time::Instant;

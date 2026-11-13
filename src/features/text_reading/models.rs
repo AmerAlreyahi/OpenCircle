@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::OcrError;
-use crate::translate::lang::Script;
+use crate::features::translate::lang::Script;
 
 #[derive(Debug)]
 pub(crate) struct ModelFile {
@@ -194,7 +194,7 @@ pub(crate) const RECOGNIZERS: [&Recognizer; 5] = [
 /// The recognizer for a source language: the table's, else `EN` ("auto",
 /// unknown codes, languages no recognizer reads yet).
 pub(crate) fn recognizer_for(source: &str) -> &'static Recognizer {
-    let id = crate::translate::lang::find(source).and_then(|l| l.ocr);
+    let id = crate::features::translate::lang::find(source).and_then(|l| l.ocr);
     (RECOGNIZERS.into_iter().find(|r| Some(r.id) == id)).unwrap_or(&EN)
 }
 
@@ -204,7 +204,7 @@ pub(crate) fn recognizer_for(source: &str) -> &'static Recognizer {
 pub(crate) fn missing_reader(languages: &[String]) -> Option<&'static Recognizer> {
     (languages.iter())
         .map(|l| recognizer_for(l))
-        .find(|r| r.script() != crate::translate::lang::Script::Latin && !installed(r))
+        .find(|r| r.script() != crate::features::translate::lang::Script::Latin && !installed(r))
 }
 
 /// Downloads recognizer `rec` (and what OCR needs besides), `progress` as
@@ -720,7 +720,7 @@ pub(crate) mod tests {
     /// Every language's recognizer exists; ids and files are unique and pinned.
     #[test]
     fn recognizer_table_and_choice() {
-        use crate::translate::lang::{AUTO, LANGUAGES};
+        use crate::features::translate::lang::{AUTO, LANGUAGES};
         for (i, r) in RECOGNIZERS.iter().enumerate() {
             assert!(
                 RECOGNIZERS[..i]

@@ -8,3 +8,4 @@ pub(crate) mod onboarding;
 pub(crate) mod settings;
 pub(crate) mod song;
 pub(crate) mod text_reading;
+pub(crate) mod translate;

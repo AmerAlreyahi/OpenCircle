@@ -10,14 +10,14 @@ use iced::widget::{Space, column};
 
 use super::super::flow::{Message, State};
 use crate::features::text_reading::screens::model_download::mb;
-use crate::mt;
+use crate::features::translate::lang::{self, AUTO};
+use crate::features::translate::mt;
 use crate::shared::app_language::{S, fmt, language_name};
 use crate::shared::kit::card::card;
 use crate::shared::kit::dir;
 use crate::shared::kit::text::{paragraph, sub, text};
 use crate::shared::kit::tokens::{Role, space};
 use crate::t;
-use crate::translate::lang::{self, AUTO};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let target = &state.settings.draft().translate.target;

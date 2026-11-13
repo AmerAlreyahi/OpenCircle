@@ -152,7 +152,7 @@ impl App {
                 self.update(Message::TranslateScreen)
             }
             BarButton::Translate if picked => self.on_picked(PickAct::Translate),
-            BarButton::Translate => self.run(&actions::translate::ACTION),
+            BarButton::Translate => self.run(&crate::features::translate::action::ACTION),
             _ => Task::none(),
         }
     }
@@ -564,7 +564,7 @@ impl App {
     /// The one-shot full-screen translate (Ctrl+Shift+T).
     pub(crate) fn translate_once(&mut self, at: Instant) -> Task<Message> {
         let once = QuickAction {
-            action: actions::translate::ACTION.id.into(),
+            action: crate::features::translate::action::ACTION.id.into(),
             shortcut: String::new(),
             target: Target::FullScreen,
             live: false,

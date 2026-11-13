@@ -1,15 +1,15 @@
 //! Translate: the text in the selection (or the whole screen, Ctrl+Shift+T) is
-//! replaced by its translation in place. `crate::translate` does the work,
+//! replaced by its translation in place. `crate::features::translate` does the work,
 //! `ui/translate.rs` shows it, `ui/live_layer.rs` repeats it (live mode).
-use super::{Action, Key, Run};
+use crate::actions::{Action, Key, Run};
 use crate::features::ask_ai::ask;
 use crate::features::text_reading::models;
-use crate::mt;
+use crate::features::translate::lang;
+use crate::features::translate::mt;
+use crate::features::translate::pipeline::{Real, Via};
 use crate::shared::app_language::{S, fmt, language_name, tr};
 use crate::shared::config::{self, AiConfig, Engine, Provider};
 use crate::shared::secrets::Secret;
-use crate::translate::lang;
-use crate::translate::pipeline::{Real, Via};
 
 pub const ACTION: Action = Action {
     id: "translate",

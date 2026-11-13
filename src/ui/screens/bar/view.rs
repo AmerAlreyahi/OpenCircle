@@ -93,8 +93,8 @@ impl App {
             ),
             (
                 BarButton::Translate,
-                actions::translate::ACTION.icon,
-                tr(actions::translate::ACTION.label),
+                crate::features::translate::action::ACTION.icon,
+                tr(crate::features::translate::action::ACTION.label),
                 &keys.translate,
             ),
         ]
@@ -497,7 +497,7 @@ mod tests {
             let pills = [
                 tr(search_in_browser::ACTION.label),
                 tr(text::ACTION.label),
-                tr(actions::translate::ACTION.label),
+                tr(crate::features::translate::action::ACTION.label),
             ];
             let at = crate::shared::kit::testing::shot::texts_at(app.bottom_bar(), size);
             let x = |label: &str| {

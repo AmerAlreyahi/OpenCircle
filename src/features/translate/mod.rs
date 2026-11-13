@@ -7,11 +7,14 @@
 //! `pipeline::translate_frame` runs it once; `live::Live` runs it per
 //! frame, re-reading only what changed.
 
+pub(crate) mod action;
 mod draw;
 mod erase;
 mod glossary;
 pub mod lang;
+pub(crate) mod mt;
 pub mod pipeline;
+pub(crate) mod screens;
 #[cfg(test)]
 pub(crate) mod tests;
 

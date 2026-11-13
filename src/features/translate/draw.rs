@@ -18,8 +18,8 @@ const ARABIC: &str = "Noto Sans Arabic";
 /// instancer (Inter opsz=14, Noto wdth=100, wght 400:700), then subset with
 /// the default layout features.
 static FONT_DATA: [&[u8]; 2] = [
-    include_bytes!("../../assets/fonts/Inter.ttf"),
-    include_bytes!("../../assets/fonts/NotoSansArabic.ttf"),
+    include_bytes!("../../../assets/fonts/Inter.ttf"),
+    include_bytes!("../../../assets/fonts/NotoSansArabic.ttf"),
 ];
 
 pub struct Fonts {

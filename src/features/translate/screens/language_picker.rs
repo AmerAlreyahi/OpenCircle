@@ -14,7 +14,8 @@
 use iced::widget::{Space, column, container, mouse_area, row};
 use iced::{Center, Element, Fill, Size, Vector};
 
-use crate::mt;
+use crate::features::translate::lang::{self, AUTO, LANGUAGES};
+use crate::features::translate::mt;
 use crate::shared::app_language::{Lang, RLM, S, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::divider::divider;
@@ -27,7 +28,6 @@ use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius, size};
 use crate::t;
-use crate::translate::lang::{self, AUTO, LANGUAGES};
 
 /// A chip, and the gaps in the pill (the design's 128 x 32 chips, 24 px
 /// arrow, 4 px gaps, 6 px in).

@@ -824,7 +824,7 @@ fn languages_end_to_end() {
             t.elapsed()
         );
     }
-    let pair = crate::mt::pair("fr", "en").unwrap();
+    let pair = crate::features::translate::mt::pair("fr", "en").unwrap();
     let missing = pair.missing_bytes();
     let t = Instant::now();
     pair.ensure(|_, _| {}).unwrap();
@@ -923,7 +923,8 @@ fn languages_end_to_end() {
     println!("en on French reads {got_en:?} at {en_on_fr:.2}");
 
     let t = Instant::now();
-    let mut tr = crate::mt::Translator::load(pair, &ocr::models_dir()).unwrap();
+    let mut tr =
+        crate::features::translate::mt::Translator::load(pair, &ocr::models_dir()).unwrap();
     println!("fr->en load {:.1?}", t.elapsed());
     let t = Instant::now();
     let lines = [
@@ -993,13 +994,13 @@ fn real_frames() {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default(),
     );
-    let pair = crate::mt::pair("en", "ar").unwrap();
+    let pair = crate::features::translate::mt::pair("en", "ar").unwrap();
     let mt = RefCell::new(None);
     struct Real<'a> {
         found: Vec<TextBlock>,
         cache: &'a RefCell<HashMap<String, String>>,
-        mt: &'a RefCell<Option<crate::mt::Translator>>,
-        pair: &'static crate::mt::Pair,
+        mt: &'a RefCell<Option<crate::features::translate::mt::Translator>>,
+        pair: &'static crate::features::translate::mt::Pair,
     }
     impl Deps for Real<'_> {
         fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
@@ -1014,7 +1015,11 @@ fn real_frames() {
                 if !missing.is_empty() {
                     let mut mt = self.mt.borrow_mut();
                     let tr = mt.get_or_insert_with(|| {
-                        crate::mt::Translator::load(self.pair, &ocr::models_dir()).unwrap()
+                        crate::features::translate::mt::Translator::load(
+                            self.pair,
+                            &ocr::models_dir(),
+                        )
+                        .unwrap()
                     });
                     for (k, v) in missing.iter().zip(tr.translate(&missing).unwrap()) {
                         self.cache.borrow_mut().insert(k.clone(), v);
@@ -1103,7 +1108,7 @@ fn real_matrix() {
     struct M {
         real: Real,
         found: Vec<TextBlock>,
-        models: RefCell<HashMap<&'static str, crate::mt::Translator>>,
+        models: RefCell<HashMap<&'static str, crate::features::translate::mt::Translator>>,
     }
     impl Deps for M {
         fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
@@ -1132,7 +1137,8 @@ fn real_matrix() {
                 let mut models = self.models.borrow_mut();
                 let key = Box::leak(format!("{}-{}", pair.source, pair.target).into_boxed_str());
                 let tr = models.entry(key).or_insert_with(|| {
-                    crate::mt::Translator::load(pair, &ocr::models_dir()).unwrap()
+                    crate::features::translate::mt::Translator::load(pair, &ocr::models_dir())
+                        .unwrap()
                 });
                 let out = tr
                     .translate(t)
@@ -1152,7 +1158,7 @@ fn real_matrix() {
     let mut engine = None;
     // OC_ENSURE=ar: as after a user once picked Arabic (its recognizer is on disk)
     for code in std::env::var("OC_ENSURE").unwrap_or_default().split(',') {
-        if let Some(p) = crate::mt::pair(code, "en") {
+        if let Some(p) = crate::features::translate::mt::pair(code, "en") {
             p.ensure(|_, _| {}).unwrap();
         }
     }
@@ -1268,7 +1274,7 @@ fn profile_helper() {
             worker::recognize_via(|p| self.call(p), rgba, w, h, Read::One(0))
         }
         fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-            let pair = crate::mt::pair("en", target).unwrap();
+            let pair = crate::features::translate::mt::pair("en", target).unwrap();
             by_sentence(texts, |t| {
                 worker::translate_via(|p| self.call(p), t, pair)
                     .map_err(|e| AiError::Offline(e.to_string()))
@@ -1314,7 +1320,7 @@ fn profile_helper() {
 /// went wrong: `fixtures/` (cut by a script from the demo's PNGs).
 mod real {
     use super::*;
-    use crate::translate::pipeline::{by_sentence, cut_off, to_line};
+    use crate::features::translate::pipeline::{by_sentence, cut_off, to_line};
 
     fn image(png: &[u8]) -> (Rgba, (usize, usize)) {
         let mut d = png::Decoder::new(std::io::Cursor::new(png));
@@ -1378,7 +1384,7 @@ mod real {
     /// left out; the page's own header right under them is not.
     #[test]
     fn the_browsers_tabs_are_never_translated() {
-        use crate::translate::pipeline::without_chrome;
+        use crate::features::translate::pipeline::without_chrome;
         for name in ["linux_fr", "linux_en", "linux_ar"] {
             let all = lines(name, (1920, 1440));
             let kept = without_chrome(all.clone(), 1440);
@@ -1429,7 +1435,7 @@ mod real {
     #[test]
     fn linux_pages_go_the_page_way_and_keep_the_address() {
         use crate::features::ask_ai::AiError;
-        use crate::translate::pipeline::{Deps, Real, Via, code};
+        use crate::features::translate::pipeline::{Deps, Real, Via, code};
         let blocks = |name| group_blocks(&lines(name, (1920, 1440)));
         let texts = |b: &[Block]| b.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
         for name in ["linux_fr", "linux_en", "linux_ar"] {
@@ -1778,7 +1784,7 @@ mod real {
     /// Real offline MT output (`fixtures/mt.json`: sentence -> Arabic) for
     /// the Moon article's fixtures.
     struct Mt;
-    impl crate::translate::pipeline::Deps for Mt {
+    impl crate::features::translate::pipeline::Deps for Mt {
         fn recognize(
             &self,
             _: &[u8],
@@ -1816,8 +1822,9 @@ mod real {
     /// Fixture `name` (image + OCR lines) -> its blocks and their Arabic.
     fn arabic_blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
         let blocks = group_blocks(&lines(name, (w, h)));
-        let cache = crate::translate::pipeline::Cache::new(64);
-        let tr = crate::translate::pipeline::translate_blocks(&blocks, "ar", &cache, &Mt).unwrap();
+        let cache = crate::features::translate::pipeline::Cache::new(64);
+        let tr = crate::features::translate::pipeline::translate_blocks(&blocks, "ar", &cache, &Mt)
+            .unwrap();
         (blocks, tr)
     }
 

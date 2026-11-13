@@ -9,11 +9,11 @@ use iced::{Rectangle, Task};
 
 use crate::actions::snip_more::{self as more, Hidden, Read, Row};
 use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::features::translate::screens::translate;
 use crate::shared::config;
 use crate::snip::annotate::{self, Message as E};
 use crate::ui::background;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
-use crate::ui::screens::translate;
 use crate::{actions::Crop, features::text_reading::text};
 
 use super::message::{Message, Purpose};

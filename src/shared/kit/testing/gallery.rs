@@ -973,7 +973,7 @@ fn icon_button_sheet() {
 #[test]
 fn button_compact_sheet() {
     use button::compact;
-    const GLYPH: char = crate::actions::translate::ACTION.icon;
+    const GLYPH: char = crate::features::translate::action::ACTION.icon;
     let view = |active, focused, live: bool| {
         move |ar| {
             let label = Some(s(ar, "Translate", "ترجمة"));

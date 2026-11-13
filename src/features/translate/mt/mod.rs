@@ -20,7 +20,7 @@ use ort::value::{DynValue, Tensor};
 
 use crate::features::text_reading::models::{self, ModelFile};
 use crate::features::text_reading::{self as ocr, OcrError};
-use crate::translate::lang;
+use crate::features::translate::lang;
 use unigram::Unigram;
 
 /// One direction (`source` -> `target`): its pinned files and the model's shape.

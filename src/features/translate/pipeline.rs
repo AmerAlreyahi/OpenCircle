@@ -13,7 +13,7 @@ use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
 use crate::features::ask_ai::{self as ai, AiError};
 use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
-use crate::mt;
+use crate::features::translate::mt;
 use crate::shared::config::{AiConfig, TextReader};
 use crate::shared::secrets::Secret;
 
@@ -40,7 +40,7 @@ pub trait Deps {
 
 /// OCR by Windows OCR where it reads the source (`system_reads`), else in
 /// the helper process (the recognizer for `source`); translation by the
-/// user's AI provider, or offline (`crate::mt`, also in the helper).
+/// user's AI provider, or offline (`crate::features::translate::mt`, also in the helper).
 pub struct Real {
     /// `translate.source`: "auto" or a language code.
     pub source: String,

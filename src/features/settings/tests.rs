@@ -10,6 +10,7 @@ use super::pages::{self, PAGES};
 use super::*;
 use crate::features::settings::labs::{Feature, Labs};
 use crate::features::song as music;
+use crate::features::translate::lang::{self, LANGUAGES};
 use crate::shared::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,
@@ -19,7 +20,6 @@ use crate::shared::kit::motion;
 use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::secrets::{AiKey, KeyStore, Secret, SecretsError};
 use crate::shared::theme;
-use crate::translate::lang::{self, LANGUAGES};
 
 /// The window as drawn, not maximised.
 fn view(s: &State) -> Element<'_, Message> {

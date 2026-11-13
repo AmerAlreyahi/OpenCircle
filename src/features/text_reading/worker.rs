@@ -24,7 +24,7 @@ use super::{
     Engine, NO_FRAME, OcrError, Read, ScreenRead, TextBlock, check_image, models, models_dir,
     to_rgb,
 };
-use crate::mt::{self, Pair, Translator};
+use crate::features::translate::mt::{self, Pair, Translator};
 
 /// The hidden subcommand that runs the worker.
 pub const WORKER_ARG: &str = "ocr-worker";
@@ -120,8 +120,9 @@ pub fn recognize_band(
 /// Some recognizer for a script Windows OCR doesn't read for the user is on
 /// disk: the second reader has something to read with.
 pub fn reads_other_scripts() -> bool {
-    (models::RECOGNIZERS.iter())
-        .any(|r| r.script() != crate::translate::lang::Script::Latin && models::installed(r))
+    (models::RECOGNIZERS.iter()).any(|r| {
+        r.script() != crate::features::translate::lang::Script::Latin && models::installed(r)
+    })
 }
 
 /// The lines of an RGBA image that aren't in the `known` boxes (Windows
@@ -270,7 +271,7 @@ pub(crate) fn recognize_via(
     parse(call(&[&header, rgba])?)
 }
 
-/// Translates `texts` with `pair` offline in the helper (`crate::mt`; its
+/// Translates `texts` with `pair` offline in the helper (`crate::features::translate::mt`; its
 /// models must already be present).
 pub fn translate_in_child(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
     if pair.missing_bytes() > 0 {

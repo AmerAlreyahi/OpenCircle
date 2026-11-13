@@ -25,7 +25,7 @@ fn shown(blocks: Vec<Translation>) -> Msg {
 }
 
 fn es_ar() -> &'static Pair {
-    crate::mt::route("es", "ar").unwrap()[0]
+    crate::features::translate::mt::route("es", "ar").unwrap()[0]
 }
 
 /// A page translated with a Spanish line kept (es-ar not here): the pill
@@ -136,7 +136,10 @@ fn auto_asks_only_for_what_the_page_needs() {
 #[test]
 fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
     let mut s = session(false);
-    s.phase = Phase::Consent(Some((crate::mt::pair("en", "ar").unwrap(), 160_000_000)));
+    s.phase = Phase::Consent(Some((
+        crate::features::translate::mt::pair("en", "ar").unwrap(),
+        160_000_000,
+    )));
     for (w, h) in [(1280.0, 800.0), (1125.0, 575.0)] {
         let size = Size::new(w, h);
         let at = card::place(size, None, None);
@@ -170,7 +173,8 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
     let mut s = session(true);
     let _ = s.update(shown(Vec::new()));
     let calm = crate::shared::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
-    let why = crate::mt::unavailable(crate::translate::lang::AUTO, "pt");
+    let why =
+        crate::features::translate::mt::unavailable(crate::features::translate::lang::AUTO, "pt");
     for (message, setup) in [
         (format!("T{}.", &why[1..]), true),
         ("Already in English".into(), false),
@@ -216,7 +220,10 @@ fn the_prompts_are_short_cards_on_small_screens() {
         ("consent", Phase::Consent(None)),
         (
             "offline consent",
-            Phase::Consent(Some((crate::mt::pair("en", "ar").unwrap(), 160_000_000))),
+            Phase::Consent(Some((
+                crate::features::translate::mt::pair("en", "ar").unwrap(),
+                160_000_000,
+            ))),
         ),
         ("downloading", Phase::Downloading(0.4)),
     ];
@@ -365,7 +372,7 @@ fn missing_models_ask_first() {
 }
 
 fn en_ar() -> &'static Pair {
-    crate::mt::pair("en", "ar").unwrap()
+    crate::features::translate::mt::pair("en", "ar").unwrap()
 }
 
 #[test]
@@ -475,7 +482,7 @@ fn notes_are_opaque_in_the_light_theme() {
 /// the headless renderer (`OPENCIRCLE_RENDER_DIR=<dir>`).
 #[test]
 fn the_pill_picks_languages_and_translates_again() {
-    use crate::ui::picker::{Msg as P, Side};
+    use crate::features::translate::screens::language_picker::{Msg as P, Side};
     let mut s = session(true);
     let size = Size::new(720.0, 420.0);
     let texts = crate::shared::kit::testing::shot::texts(s.view(
@@ -891,7 +898,7 @@ fn a_changed_language_leaves_no_ghost_text() {
 fn every_picker_state_matches_its_golden_image() {
     use crate::shared::kit::testing::golden;
 
-    use crate::ui::picker::{Msg as P, Nav, Side};
+    use crate::features::translate::screens::language_picker::{Msg as P, Nav, Side};
     const SCREEN: Size = Size::new(720.0, 440.0);
     let at = card::place(SCREEN, None, None);
     let make = |name: &str| {
@@ -919,7 +926,10 @@ fn every_picker_state_matches_its_golden_image() {
             "p6-ai-picked" => {
                 p(P::Open(Side::Target));
                 p(P::Pick("pt".into()));
-                let why = crate::mt::unavailable(crate::translate::lang::AUTO, "pt");
+                let why = crate::features::translate::mt::unavailable(
+                    crate::features::translate::lang::AUTO,
+                    "pt",
+                );
                 s.phase = Phase::Failed(problem(format!("T{}.", &why[1..]), true));
             }
             "p7-target-ar" => {

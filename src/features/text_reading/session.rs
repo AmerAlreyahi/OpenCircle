@@ -332,7 +332,7 @@ impl Drop for Hold {
                 if HOLDS.load(Ordering::SeqCst) == 0 {
                     *shared = None;
                     drop(shared);
-                    when_idle(crate::mt::swap_finished); // the helper is gone
+                    when_idle(crate::features::translate::mt::swap_finished); // the helper is gone
                 }
             });
         }
@@ -605,7 +605,9 @@ mod tests {
     struct Via<F>(F);
 
     #[cfg(target_os = "linux")]
-    impl<F: Fn(&[&[u8]]) -> Result<Vec<u8>, OcrError>> crate::translate::pipeline::Deps for Via<F> {
+    impl<F: Fn(&[&[u8]]) -> Result<Vec<u8>, OcrError>> crate::features::translate::pipeline::Deps
+        for Via<F>
+    {
         fn recognize(
             &self,
             rgba: &[u8],
@@ -619,7 +621,7 @@ mod tests {
             texts: &[String],
             target: &str,
         ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
-            let pair = crate::mt::pair("en", target).expect("an offline pair");
+            let pair = crate::features::translate::mt::pair("en", target).expect("an offline pair");
             super::super::worker::translate_via(&self.0, texts, pair)
                 .map_err(|e| crate::features::ask_ai::AiError::Offline(e.to_string()))
         }
@@ -628,12 +630,12 @@ mod tests {
     /// A fresh live session: the first frame, then `changed`; both timed.
     #[cfg(target_os = "linux")]
     fn live_steps(
-        deps: &impl crate::translate::pipeline::Deps,
+        deps: &impl crate::features::translate::pipeline::Deps,
         frame: &[u8],
         changed: &[u8],
     ) -> String {
         let mut live = crate::features::live_translate::live::Live::new();
-        let cache = crate::translate::pipeline::Cache::new(512);
+        let cache = crate::features::translate::pipeline::Cache::new(512);
         let t = Instant::now();
         live.step(frame, 1920, 1080, "ar", &cache, deps).unwrap();
         let first = t.elapsed();
@@ -668,7 +670,7 @@ mod tests {
         };
         let exe = std::env::current_exe().unwrap();
         let exe = exe.parent().unwrap().parent().unwrap().join("opencircle");
-        let (frame, _) = crate::translate::tests::game_frame();
+        let (frame, _) = crate::features::translate::tests::game_frame();
         let w = 1920;
         // Two new lines: the OCR fixture ("Hello OpenCircle", "Read 42 words
         // here") on an empty part of the frame.

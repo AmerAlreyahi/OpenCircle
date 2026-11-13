@@ -1286,13 +1286,15 @@ impl Windows {
                         }
                         settings::Outcome::UpdateModels => {
                             let update = super::background(move |tx| {
-                                let (pairs, _) = crate::mt::installed();
+                                let (pairs, _) = crate::features::translate::mt::installed();
                                 let progress = |done: u64, total: u64| {
                                     let _ = tx.unbounded_send(settings::Message::ModelsProgress(
                                         done as f32 / total.max(1) as f32,
                                     ));
                                 };
-                                let got = match crate::mt::update(&pairs, progress) {
+                                let got = match crate::features::translate::mt::update(
+                                    &pairs, progress,
+                                ) {
                                     // Cancel: not a failure (the row is counted again)
                                     Err(crate::features::text_reading::OcrError::Stopped) => Ok(()),
                                     got => got.map_err(|e| {

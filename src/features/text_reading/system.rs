@@ -185,7 +185,7 @@ pub fn missing(installed: &[String], wanted: &[String]) -> Vec<String> {
 /// Arabic as "awgall n", "oscluall", which passed `plain` on 47 % of an
 /// Arabic page's lines). Another script: `plain`, as before.
 pub fn read_well(lines: &[&str], language: Option<&str>) -> Vec<bool> {
-    use crate::translate::lang;
+    use crate::features::translate::lang;
     let base = language.and_then(|t| t.split(['-', '_']).next());
     match base.and_then(lang::find).map(|l| l.script) {
         Some(lang::Script::Latin) => lang::real_lines(lines),

@@ -229,7 +229,7 @@ pub fn language_name(code: &str) -> &'static str {
         "ko" => S::lang_ko,
         "zh" => S::lang_zh,
         "zh-Hant" => S::lang_zh_hant,
-        _ => return crate::translate::lang::find(code).map_or("", |l| l.name),
+        _ => return crate::features::translate::lang::find(code).map_or("", |l| l.name),
     };
     tr(key)
 }

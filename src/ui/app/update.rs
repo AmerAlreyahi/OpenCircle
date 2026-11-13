@@ -9,8 +9,8 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 use crate::Trigger;
 use crate::features::settings::labs;
 use crate::features::text_reading as ocr;
+use crate::features::text_reading::text;
 use crate::shared::config;
-use crate::{actions, features::text_reading::text};
 
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
@@ -84,7 +84,7 @@ impl App {
             // the rebuilt view shows the actions (nothing runs by itself)
             Message::Settled => Task::none(),
             Message::Trigger(Trigger::Quick(at, qa))
-                if qa.live && qa.action == actions::translate::ACTION.id =>
+                if qa.live && qa.action == crate::features::translate::action::ACTION.id =>
             {
                 self.toggle_live(at)
             }

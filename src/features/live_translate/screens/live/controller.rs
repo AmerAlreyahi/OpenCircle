@@ -15,13 +15,15 @@ use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Size};
 
 use crate::features::ask_ai::screens::ai_chat::note;
+use crate::features::translate::screens::language_picker::{
+    self as picker, CHIP_HEIGHT, Picker, SPACING,
+};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::grip::{self, grip};
 use crate::shared::kit::progress;
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, radius};
-use crate::ui::screens::common::language_picker::{self as picker, CHIP_HEIGHT, Picker, SPACING};
 
 /// The window's corners (`rounded-2xl`) and the room inside its edge (`p-2`).
 pub const RADIUS: f32 = radius::WINDOW;
@@ -261,7 +263,7 @@ pub fn mask(rgba: &mut [u8], width: u32, height: u32, rect: [u32; 4]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::screens::common::language_picker::Side;
+    use crate::features::translate::screens::language_picker::Side;
 
     fn open(c: &mut Controller, side: Side) {
         c.update(Msg::Picker(picker::Msg::Open(side)));

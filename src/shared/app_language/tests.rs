@@ -160,8 +160,8 @@ fn the_part_2a_surfaces_write_no_words_of_their_own() {
         "src/ui/screens/toast.rs",
         "src/features/text_reading/screens/model_download.rs",
         "src/features/ask_ai/screens/model_list.rs",
-        "src/ui/screens/translate/view.rs",
-        "src/ui/screens/common/language_picker.rs",
+        "src/features/translate/screens/translate/view.rs",
+        "src/features/translate/screens/language_picker.rs",
     ]
     .iter()
     .map(std::path::PathBuf::from)
@@ -236,6 +236,8 @@ const UI_SOURCES: &[&str] = &[
     "src/features/text_reading/app",
     "src/features/text_reading/text.rs",
     "src/features/live_translate/screens",
+    "src/features/translate/screens",
+    "src/features/translate/action.rs",
 ];
 
 /// Files of the UI that hold no user-visible words, and why.
@@ -571,7 +573,7 @@ fn the_language_names_the_pickers_show_are_covered_or_listed() {
         })
     };
     let mut uncovered = Vec::new();
-    for l in crate::translate::lang::LANGUAGES {
+    for l in crate::features::translate::lang::LANGUAGES {
         let names = [l.native, l.name, language_name_in(l.code, Lang::Ar)];
         if !names.iter().all(|n| covered(n)) {
             uncovered.push(l.code);

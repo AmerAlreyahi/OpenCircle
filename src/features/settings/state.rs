@@ -25,6 +25,7 @@ use iced::{Color, Size, Subscription, event, keyboard};
 
 use crate::features::settings::labs::Feature;
 use crate::features::song::{self as music, SERVICE, Service};
+use crate::features::translate::lang::{self, LANGUAGES, Language};
 use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,
@@ -38,7 +39,6 @@ use crate::shared::kit::tokens::{size, space};
 use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::shared::theme;
-use crate::translate::lang::{self, LANGUAGES, Language};
 
 use super::pages::snip::open_keyboard_settings;
 use super::pages::text_reading::open_language_settings;
@@ -1715,7 +1715,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::ModelsProgress(share) => state.models.progress(share),
         // the row stays "updating" until the thread has stopped (`ModelsUpdated`)
-        Message::StopModels => crate::mt::stop_update(),
+        Message::StopModels => crate::features::translate::mt::stop_update(),
         Message::ModelsUpdated(done) => state.models.finished(done),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.

@@ -12,7 +12,7 @@ use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 
 use crate::features::settings::labs::Feature;
 use crate::features::text_reading::screens::model_download::mb;
-use crate::mt;
+use crate::features::translate::mt;
 use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
 use crate::shared::kit::dropdown::dropdown;

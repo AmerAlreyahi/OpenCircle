@@ -14,12 +14,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::features::text_reading::TextBlock;
-use crate::translate::pipeline::{
+use crate::features::translate::pipeline::{
     Cache, Deps, Error, Timings, check_frame, cut_off, is_rtl, to_line, translate_blocks,
 };
 #[cfg(test)]
-use crate::translate::pipeline::{Translation, translations};
-use crate::translate::{Block, Drawn, Line, group_blocks, render};
+use crate::features::translate::pipeline::{Translation, translations};
+use crate::features::translate::{Block, Drawn, Line, group_blocks, render};
 
 /// Diff granularity in pixels.
 const TILE: u32 = 32;
@@ -494,7 +494,7 @@ pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::translate::pipeline::tests::{Fake, frame, tb};
+    use crate::features::translate::pipeline::tests::{Fake, frame, tb};
 
     const W: u32 = 320;
     const H: u32 = 192;

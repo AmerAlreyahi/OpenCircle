@@ -108,9 +108,9 @@ fn counters_are_read_and_kept_exactly() {
         assert_eq!(game_read(same), same);
     }
     // offline outputs (fr-en, fr-ar; Win10 VM build 3acbcc9 and here)
-    let route = crate::mt::route("fr", "ar").unwrap();
+    let route = crate::features::translate::mt::route("fr", "ar").unwrap();
     let sent = RefCell::new(Vec::new());
-    let run = |t: &[String], _: &'static crate::mt::Pair| {
+    let run = |t: &[String], _: &'static crate::features::translate::mt::Pair| {
         sent.borrow_mut().extend(t.iter().cloned());
         Ok(t.iter()
             .map(|s| match s.as_str() {
@@ -163,9 +163,9 @@ fn counters_are_read_and_kept_exactly() {
 #[test]
 fn a_number_in_groups_of_three_is_kept_as_written() {
     // es-ar wrote "- 3.482" for the battle's "-3 482"
-    let route = crate::mt::route("es", "en").unwrap();
+    let route = crate::features::translate::mt::route("es", "en").unwrap();
     let sent = RefCell::new(Vec::new());
-    let run = |t: &[String], _: &'static crate::mt::Pair| {
+    let run = |t: &[String], _: &'static crate::features::translate::mt::Pair| {
         sent.borrow_mut().extend(t.iter().cloned());
         Ok(t.iter()
             .map(|s| match s.as_str() {
@@ -192,9 +192,9 @@ fn a_number_in_groups_of_three_is_kept_as_written() {
 
 #[test]
 fn key_hints_names_and_quotes_stay_as_the_source_has_them() {
-    let route = crate::mt::route("de", "ar").unwrap();
+    let route = crate::features::translate::mt::route("de", "ar").unwrap();
     // de-en then en-ar as the models answered (Win10 VM, the owner's run)
-    let run = |t: &[String], p: &'static crate::mt::Pair| {
+    let run = |t: &[String], p: &'static crate::features::translate::mt::Pair| {
         Ok(t.iter()
             .map(|s| match (p.source, s.as_str()) {
                 ("de", "Questgebiet anzeigen") => "Show quest area".to_string(),
@@ -242,8 +242,8 @@ fn a_key_hint_line_is_an_item_of_its_own() {
 fn a_title_s_noun_is_not_kept_as_a_name() {
     // fr-en kept "Givre" as a name in a Title Case label; in lower case it is
     // "frost" (real fr-en outputs); a real name stays a name
-    let route = crate::mt::route("fr", "en").unwrap();
-    let run = |t: &[String], _: &'static crate::mt::Pair| {
+    let route = crate::features::translate::mt::route("fr", "en").unwrap();
+    let run = |t: &[String], _: &'static crate::features::translate::mt::Pair| {
         Ok(t.iter()
             .map(|s| {
                 match s.as_str() {

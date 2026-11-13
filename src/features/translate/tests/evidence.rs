@@ -18,8 +18,10 @@ fn image(name: &str) -> (Rgba, (usize, usize)) {
 
 /// The fixture's blocks and their English ("" = left as it is).
 fn blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
-    let all: serde_json::Value =
-        serde_json::from_str(include_str!("../../../tests/fixtures/translate/lines.json")).unwrap();
+    let all: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/translate/lines.json"
+    ))
+    .unwrap();
     let lines: Vec<Line> = (all[name].as_array().unwrap().iter())
         .map(|l| crate::features::text_reading::TextBlock {
             bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
@@ -29,7 +31,7 @@ fn blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
         .map(|b| super::super::pipeline::to_line(b, w as u32, h as u32))
         .collect();
     let tr: HashMap<String, HashMap<String, String>> = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/translate/translations.json"
+        "../../../../tests/fixtures/translate/translations.json"
     ))
     .unwrap();
     let blocks = group_blocks(&lines);

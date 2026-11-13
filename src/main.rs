@@ -5,10 +5,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
 mod features;
-mod mt;
 mod shared;
 mod snip;
-mod translate;
 mod ui;
 
 use std::process::ExitCode;
@@ -247,7 +245,7 @@ fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
     crate::shared::platform::capture::portal::repair_user_launcher();
     // before any helper can have a model file open: old-named model folders get the OptimaMT name
-    mt::adopt_old_folders();
+    crate::features::translate::mt::adopt_old_folders();
     std::thread::spawn(|| remove_old_webview(&crate::shared::paths::app_data()));
     std::thread::spawn(|| remove_search_history(crate::shared::paths::search_history().as_deref()));
     // once: the key all OpenAI-compatible providers shared goes to the one chosen

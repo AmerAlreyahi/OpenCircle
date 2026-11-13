@@ -8,13 +8,13 @@ use iced::Element;
 use iced::widget::column;
 
 use super::super::state::{Message, Pick, State};
+use crate::features::translate::lang;
 use crate::shared::config::TextReader;
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::segmented::segmented;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, space};
-use crate::translate::lang;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let reader = state.draft.selection.text_reader;

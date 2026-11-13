@@ -422,7 +422,7 @@ impl App {
                     Some(id) if id == crate::features::ask_ai::ask::ACTION.id => {
                         Some(Message::AskButton)
                     }
-                    Some(id) if id == actions::translate::ACTION.id => {
+                    Some(id) if id == crate::features::translate::action::ACTION.id => {
                         Some(Message::TranslateScreen)
                     }
                     Some(id) if id == actions::snip::ACTION.id => Some(Message::EditScreen),

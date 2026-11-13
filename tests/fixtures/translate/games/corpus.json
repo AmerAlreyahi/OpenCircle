@@ -1,5 +1,5 @@
 {
-  "_": "Every element of the 13 game screens and how one-shot translate must handle it (src/translate/tests/corpus.rs). t = the text on screen; keep = shown exactly as it is (nothing drawn, or the same text); tokens = parts a translation must carry exactly; en = words one of which an English translation must have; src = the screen's language. Element texts are matched to blocks ignoring case, accents, spaces and punctuation.",
+  "_": "Every element of the 13 game screens and how one-shot translate must handle it (src/features/translate/tests/corpus.rs). t = the text on screen; keep = shown exactly as it is (nothing drawn, or the same text); tokens = parts a translation must carry exactly; en = words one of which an English translation must have; src = the screen's language. Element texts are matched to blocks ignoring case, accents, spaces and punctuation.",
   "quest": {
     "src": "de",
     "elements": [

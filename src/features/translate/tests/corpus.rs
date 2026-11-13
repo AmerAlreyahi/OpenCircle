@@ -11,7 +11,7 @@ use super::super::lang::{self, Script};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-const SPEC: &str = include_str!("../../../tests/fixtures/translate/games/corpus.json");
+const SPEC: &str = include_str!("../../../../tests/fixtures/translate/games/corpus.json");
 
 #[derive(Deserialize)]
 pub(super) struct Screen {

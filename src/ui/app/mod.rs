@@ -16,7 +16,7 @@ use iced::keyboard::{self, key::Named};
 use iced::window::{self};
 use iced::{Point, Rectangle, Size, Subscription, Task};
 
-use crate::translate::pipeline::Cache;
+use crate::features::translate::pipeline::Cache;
 
 use self::background::triggers;
 use self::capture::overlay_window;

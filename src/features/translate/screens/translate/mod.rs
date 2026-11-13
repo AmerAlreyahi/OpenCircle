@@ -13,13 +13,13 @@ use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
 use crate::features::text_reading::models;
 use crate::features::text_reading::screens::model_download;
-use crate::mt::Pair;
+use crate::features::translate::mt::Pair;
+use crate::features::translate::pipeline::{self, Cache, Deps, Error, Translation};
+use crate::features::translate::screens::language_picker::{self as picker, Picker};
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::panel_frame as card;
 use crate::t;
-use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
-use crate::ui::background;
-use crate::ui::picker::{self, Picker};
+use crate::ui::app::background::background;
 
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;
@@ -213,7 +213,7 @@ impl Session {
         taskbar: u32,
     ) -> (Session, Task<Msg>) {
         let cfg = crate::shared::config::current().translate;
-        let offline = actions::translate::will_be_offline();
+        let offline = crate::features::translate::action::will_be_offline();
         let size = match &frame {
             image::Handle::Rgba { width, height, .. } => (*width, *height),
             _ => (0, 0),
@@ -254,7 +254,7 @@ impl Session {
     /// (keyring), which then asks (`Msg::Offline`).
     fn begin(&mut self, models: bool) -> Task<Msg> {
         let (source, target) = (&self.picker.source, &self.picker.target);
-        let offline = (actions::translate::will_be_offline())
+        let offline = (crate::features::translate::action::will_be_offline())
             .then(|| asked_first(source, target))
             .flatten()
             .map(|p| (p, p.missing_bytes()))
@@ -593,7 +593,7 @@ impl Session {
             let progress = |done: u64, total: u64| {
                 let _ = tx.unbounded_send(Msg::ModelUpdate(done as f32 / total.max(1) as f32));
             };
-            let got = crate::mt::update(&pairs, progress);
+            let got = crate::features::translate::mt::update(&pairs, progress);
             if let Err(e) = &got {
                 crate::log!("[opencircle] translation model update stopped: {e}");
             }
@@ -613,18 +613,22 @@ impl Session {
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
         let (agreed, scale, readers) = (self.offline, self.scale, self.readers.is_some());
         let (task, handle) = background(move |tx| {
-            let deps = actions::translate::deps_for(&source, &target).map(|(mut real, target)| {
-                real.scale = scale;
-                (real, target)
-            });
+            let deps = crate::features::translate::action::deps_for(&source, &target).map(
+                |(mut real, target)| {
+                    real.scale = scale;
+                    (real, target)
+                },
+            );
             let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
             if download {
                 let progress = |done: u64, total: u64| {
                     let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
                 let got = match readers {
-                    true => actions::translate::download_readers(progress),
-                    false => actions::translate::download(&source, agreed, progress),
+                    true => crate::features::translate::action::download_readers(progress),
+                    false => {
+                        crate::features::translate::action::download(&source, agreed, progress)
+                    }
                 };
                 if let Err(e) = got {
                     let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
@@ -669,7 +673,7 @@ impl Session {
                 }
                 if real.wants_readers() {
                     let (bytes, names) = (
-                        actions::translate::readers_bytes(),
+                        crate::features::translate::action::readers_bytes(),
                         crate::features::text_reading::models::missing_other_scripts(),
                     );
                     let _ = tx.unbounded_send(Msg::Readers(bytes, names));
@@ -688,8 +692,8 @@ impl Session {
 /// "auto" asks only for what the page turns out to need (a guessed English
 /// pair asked a French page into German for en-de first, then for fr-de).
 fn asked_first(source: &str, target: &str) -> Option<&'static Pair> {
-    (source != crate::translate::lang::AUTO)
-        .then(|| crate::mt::next(source, target))
+    (source != crate::features::translate::lang::AUTO)
+        .then(|| crate::features::translate::mt::next(source, target))
         .flatten()
 }
 
@@ -767,9 +771,11 @@ fn translate(
         // an AI provider's error: the error card's short headline (owner, 2026-11-10)
         let message = match &e {
             Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
-            Error::Ai(ai) => ai.headline(&crate::ui::ai_chat::provider_name(
-                &crate::shared::config::current().ai,
-            )),
+            Error::Ai(ai) => {
+                ai.headline(&crate::features::ask_ai::screens::ai_chat::provider_name(
+                    &crate::shared::config::current().ai,
+                ))
+            }
             _ => e.to_string(),
         };
         problem(message, setup)

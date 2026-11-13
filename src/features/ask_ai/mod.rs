@@ -105,7 +105,7 @@ pub enum AiError {
     Dropped(String),
     /// The provider answered, but not in the expected shape.
     BadResponse(String),
-    /// The offline translation engine (`crate::mt`) failed; no AI involved.
+    /// The offline translation engine (`crate::features::translate::mt`) failed; no AI involved.
     Offline(String),
     /// Nothing to translate: the text is in the target already (its name).
     /// Not a failure: shown as a quiet note, never an error card.
@@ -380,7 +380,7 @@ pub(crate) fn translate_with(
 /// target works, a code outside the table is sent as is. Source "auto" = the
 /// model detects it.
 fn translate_system_prompt(source: &str, target: &str, n: usize) -> String {
-    use crate::translate::lang;
+    use crate::features::translate::lang;
     let from = match source {
         lang::AUTO => String::new(),
         s => format!(" written in {} (\"{s}\")", lang::name(s)),

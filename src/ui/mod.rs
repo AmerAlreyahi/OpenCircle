@@ -12,9 +12,8 @@ pub(crate) mod screens;
 use crate::features::ask_ai::screens::ai_chat;
 use crate::features::settings;
 use crate::features::song::screens::song;
-use screens::common::language_picker as picker;
+use crate::features::translate::screens::translate;
 pub(crate) use screens::setup;
-use screens::translate;
 pub(crate) mod snip;
 #[cfg(test)]
 pub(crate) mod snip_shots;

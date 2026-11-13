@@ -18,11 +18,11 @@ use crate::features::live_translate::screens::live::controller::{
 };
 use crate::features::live_translate::{self as live, LayerError};
 use crate::features::text_reading as ocr;
-use crate::mt::Pair;
+use crate::features::translate::mt::Pair;
+use crate::features::translate::pipeline::Cache;
 use crate::shared::config;
 use crate::shared::platform::capture::{self, window_rect};
 use crate::shared::theme;
-use crate::translate::pipeline::Cache;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::{app::background::background, windows};
 
@@ -171,7 +171,7 @@ impl Live {
     }
 
     fn new(cache: Arc<Cache>, source: &str, target: &str) -> Live {
-        let offline = crate::actions::translate::will_be_offline();
+        let offline = crate::features::translate::action::will_be_offline();
         Live {
             phase: Phase::Starting,
             controller: None,
@@ -189,7 +189,7 @@ impl Live {
             work: None,
             shot_taken: false,
             _helper: ocr::hold(),
-            check: crate::actions::translate::missing,
+            check: crate::features::translate::action::missing,
             pending: None,
             stepping: false,
             download: None,
@@ -218,9 +218,10 @@ impl Live {
             if cfg!(test) {
                 return; // never the network (an aborted task's thread still runs)
             }
-            let done = crate::actions::translate::download(&source, pair, |done, total| {
-                let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
-            });
+            let done =
+                crate::features::translate::action::download(&source, pair, |done, total| {
+                    let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
+                });
             let _ = tx.unbounded_send(Msg::Downloaded(done.map_err(|e| e.to_string())));
         })
         .abortable();
@@ -514,7 +515,7 @@ impl Live {
             // The languages are the controller's (they start as the config's).
             let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
             let deps_for = |(source, target): &(String, String)| {
-                crate::actions::translate::deps_for(source, target).map(|(mut real, _)| {
+                crate::features::translate::action::deps_for(source, target).map(|(mut real, _)| {
                     real.scale = monitor.scale;
                     real
                 })
@@ -914,7 +915,7 @@ mod tests {
         // the language list opens upward and closes back
         let closed = l.ctl.size();
         {
-            use crate::ui::screens::common::language_picker::{Msg as P, Side};
+            use crate::features::translate::screens::language_picker::{Msg as P, Side};
             let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
             assert!(l.ctl.size().height > closed.height);
             assert_eq!(l.ctl_at.y + l.ctl.size().height, bottom, "grows upward");
@@ -947,7 +948,7 @@ mod tests {
         assert!(!l.paused.load(Ordering::Relaxed));
 
         // another language reaches the step thread
-        use crate::ui::screens::common::language_picker::{Msg as P, Side};
+        use crate::features::translate::screens::language_picker::{Msg as P, Side};
         let _ = l.update(Msg::Controller(C::Picker(P::Open(Side::Target))));
         let _ = l.update(Msg::Controller(C::Picker(P::Pick("ja".into()))));
         assert_eq!(l.langs.lock().unwrap().1, "ja");
