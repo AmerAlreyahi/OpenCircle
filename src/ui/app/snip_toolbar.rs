@@ -18,7 +18,7 @@ impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
     /// place on screen; the toolbar takes the bar's place. Edits made before
     /// (then Back) are still there.
-    pub(in crate::ui) fn open_snip_toolbar(&mut self) -> Task<Message> {
+    pub(crate) fn open_snip_toolbar(&mut self) -> Task<Message> {
         self.o.ai_chat = None;
         self.o.view = self.o.view.reset(); // the editor works at 1x
         self.o.zoom = None;
@@ -91,7 +91,7 @@ impl App {
         Task::none()
     }
 
-    pub(in crate::ui) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
+    pub(crate) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
         // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
         if matches!(msg, annotate::Message::Back) && crate::sys::test_hook(TEST_SHOT).is_some() {
             return self.test_shot();
@@ -236,7 +236,7 @@ impl App {
 
     /// Pin: the overlay closes and the image floats where the selection was,
     /// on whichever screen holds the larger part of it (at that screen's scale).
-    pub(in crate::ui) fn pin(&mut self, crop: Crop) -> Task<Message> {
+    pub(crate) fn pin(&mut self, crop: Crop) -> Task<Message> {
         let place = (self.o.selection).and_then(|s| self.pin_place(s.area));
         let at = place.map(|(_, (x, y, ..))| (x, y));
         let scale = place.map_or(self.o.scale, |(on, _)| on.place.scale);
@@ -247,7 +247,7 @@ impl App {
     /// Add to steps / Add step N / Update step N: the overlay closes and the
     /// capture goes to the Steps strip (opened on this monitor by its first
     /// step) as its next step, or in place of the `update`th.
-    pub(in crate::ui) fn add_step(&mut self, crop: Crop, update: Option<usize>) -> Task<Message> {
+    pub(crate) fn add_step(&mut self, crop: Crop, update: Option<usize>) -> Task<Message> {
         let (place, inset) = (self.place(), self.o.work_inset);
         let added = self.windows.add_step(crop, update, place, inset);
         Task::batch([self.close(), added.map(Message::Windows)])
@@ -255,7 +255,7 @@ impl App {
 
     /// A double-click on a step: Snip opens (freezing the screen) with that
     /// step picked, its toolbar saying "Update step N" (`capture::open`).
-    pub(in crate::ui) fn edit_step(&mut self, i: usize) -> Task<Message> {
+    pub(crate) fn edit_step(&mut self, i: usize) -> Task<Message> {
         let Some(crop) = self.windows.step_crop(i) else {
             return Task::none();
         };
@@ -271,7 +271,7 @@ impl App {
     /// window under it floats where it was, kept updating (`Windows::live_pin`).
     /// Any screen: its part on the screen holding the larger part of it, from
     /// that screen's own frozen pixels, at that screen's scale.
-    pub(in crate::ui) fn live_pin(&mut self, area: iced::Rectangle) -> Task<Message> {
+    pub(crate) fn live_pin(&mut self, area: iced::Rectangle) -> Task<Message> {
         let window = match &self.o.purpose {
             Purpose::Snip(snip) => snip.window_under(area),
             _ => None,
@@ -291,7 +291,7 @@ impl App {
 
     /// Where a pin of `area` (image px) goes: the screen holding the larger
     /// part of it and that part in physical desktop px.
-    pub(in crate::ui) fn pin_place(
+    pub(crate) fn pin_place(
         &self,
         area: iced::Rectangle,
     ) -> Option<(super::screens::On, crate::capture::window_rect::WinRect)> {
@@ -300,7 +300,7 @@ impl App {
     }
 
     /// The running long capture.
-    pub(in crate::ui) fn scroll(&self) -> Option<&crate::ui::screens::long_capture::Long> {
+    pub(crate) fn scroll(&self) -> Option<&crate::ui::screens::long_capture::Long> {
         match &self.o.purpose {
             Purpose::Snip(snip) => snip.scroll.as_ref(),
             _ => None,
@@ -308,23 +308,23 @@ impl App {
     }
 
     /// The editing toolbar is up (not back at the bar).
-    pub(in crate::ui) fn editing(&self) -> bool {
+    pub(crate) fn editing(&self) -> bool {
         self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
     }
 
     /// The bar is the toolbar (1) while editing, else the bar (0).
-    pub(in crate::ui) fn swap_target(&self) -> f32 {
+    pub(crate) fn swap_target(&self) -> f32 {
         if self.editing() { 1.0 } else { 0.0 }
     }
 
     /// The bar is turning into the toolbar, or back.
-    pub(in crate::ui) fn swapping(&self) -> bool {
+    pub(crate) fn swapping(&self) -> bool {
         self.o.frame.is_some() && self.o.swap != self.swap_target()
     }
 
     /// How far the bar has turned into the toolbar (0..1, eased); Snip, which
     /// has no bar, is always there.
-    pub(in crate::ui) fn swapped(&self) -> f32 {
+    pub(crate) fn swapped(&self) -> f32 {
         match self.o.purpose {
             // back to the bar: the same curve run backwards, an ease-in
             Purpose::Search => motion::Curve::Out.ease(self.o.swap),

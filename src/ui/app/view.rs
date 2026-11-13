@@ -27,7 +27,7 @@ impl App {
     /// only while nothing is picked: it says "the screen is frozen"; over a
     /// picked area (the live area, long capture) it would read as "the whole
     /// screen was captured", so the area's outline alone shows (owner, 2026-10-31).
-    pub(in crate::ui) fn edge_glow(&self, window: Option<window::Id>) -> f32 {
+    pub(crate) fn edge_glow(&self, window: Option<window::Id>) -> f32 {
         match &self.o.purpose {
             Purpose::Snip(s) if s.scroll.is_some() || self.o.edit.is_some() => 0.0,
             _ => self.o.glow.at(window),
@@ -36,7 +36,7 @@ impl App {
 
     /// The running long capture's outline, picture, hint and note, drawn by
     /// the window of the screen it runs on (`window` is that one).
-    pub(in crate::ui) fn long_view(&self, window: window::Id) -> Option<Element<'_, Message>> {
+    pub(crate) fn long_view(&self, window: window::Id) -> Option<Element<'_, Message>> {
         let long = self.scroll()?;
         let on = self.long_on();
         (long.window.unwrap_or(self.overlay) == window).then(|| {
@@ -46,7 +46,7 @@ impl App {
         })
     }
 
-    pub(in crate::ui) fn view(&self, window: window::Id) -> Element<'_, Message> {
+    pub(crate) fn view(&self, window: window::Id) -> Element<'_, Message> {
         if let Some(page) = self.windows.view(window) {
             return page.map(Message::Windows);
         }
@@ -382,7 +382,7 @@ impl App {
     }
 
     /// Snip: the box dragged so far (its stroke's span, image px), while drawing.
-    pub(in crate::ui) fn snip_drag(&self) -> Option<Rectangle> {
+    pub(crate) fn snip_drag(&self) -> Option<Rectangle> {
         if !self.o.drawing || self.o.stroke.is_empty() {
             return None;
         }
@@ -406,7 +406,7 @@ impl App {
 
     /// The part of the overlay a result card leaves free (all of it without
     /// one): the bar, chips, popup and pills go there.
-    pub(in crate::ui) fn room(&self) -> Rectangle {
+    pub(crate) fn room(&self) -> Rectangle {
         let card = match (&self.o.ai_chat, self.pinned_drawn()) {
             (Some(_), _) => Some(self.chat_card_at()),
             (None, Some(_)) => Some(self.chat_rect()),
@@ -417,7 +417,7 @@ impl App {
     }
 
     /// Where the bar goes, for the chips to keep off it (it is drawn over them).
-    pub(in crate::ui) fn chip_bar(&self) -> Option<Rectangle> {
+    pub(crate) fn chip_bar(&self) -> Option<Rectangle> {
         (self.bottom_bar_shown()).then(|| Rectangle::new(self.bar_target(), self.dock_size()))
     }
 
@@ -425,7 +425,7 @@ impl App {
     /// snapped box, a QR code's); every action is in the bottom bar.
     /// Drawn by `window` only if the selection is on that screen (the rule of
     /// everything dragged across screens, `screen_holding`), in its own px (#147).
-    pub(in crate::ui) fn selection_ui(
+    pub(crate) fn selection_ui(
         &self,
         selection: overlay::Selection,
         window: iced::window::Id,
@@ -489,11 +489,7 @@ impl App {
 /// The card at `at`, `grown` of the way open: from `motion::OPEN_SCALE` to its
 /// size, about its own middle (the design's open, without its fade: the CPU
 /// renderer has no alpha for a group of widgets). Plain once open.
-pub(in crate::ui) fn grow(
-    card: Element<'_, Message>,
-    at: Rectangle,
-    grown: f32,
-) -> Element<'_, Message> {
+pub(crate) fn grow(card: Element<'_, Message>, at: Rectangle, grown: f32) -> Element<'_, Message> {
     if grown >= 1.0 {
         return card;
     }
@@ -507,7 +503,7 @@ pub(in crate::ui) fn grow(
 
 /// A card at `at` picked up (`held`): `motion::DRAG_SCALE` about its middle
 /// while dragged, 1 once let go (or with reduced motion).
-pub(in crate::ui) fn lifted<'a>(
+pub(crate) fn lifted<'a>(
     card: Element<'a, Message>,
     at: Rectangle,
     held: bool,
@@ -526,7 +522,7 @@ pub(in crate::ui) fn lifted<'a>(
 /// below it, else above it, else under the bar (`dock`) when the bar is on
 /// the box's other side; inside `room` (logical px), never on the box or the
 /// bar unless the box fills the screen.
-pub(in crate::ui) fn chips_at(
+pub(crate) fn chips_at(
     area: Rectangle,
     size: Size,
     room: Rectangle,

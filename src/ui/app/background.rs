@@ -13,13 +13,13 @@ use crate::Trigger;
 static TRIGGERS: Mutex<Option<UnboundedReceiver<Trigger>>> = Mutex::new(None);
 
 /// Hands `run`'s trigger receiver to the subscription.
-pub(in crate::ui) fn set_triggers(rx: UnboundedReceiver<Trigger>) {
+pub(crate) fn set_triggers(rx: UnboundedReceiver<Trigger>) {
     *TRIGGERS.lock().unwrap() = Some(rx);
 }
 
 /// Runs `work` on its own thread; what it sends arrives as messages, so the UI
 /// never waits on it. Dropping (aborting) the task disconnects `work`'s sender.
-pub(in crate::ui) fn background<T: Send + 'static>(
+pub(crate) fn background<T: Send + 'static>(
     work: impl FnOnce(&UnboundedSender<T>) + Send + 'static,
 ) -> Task<T> {
     let (tx, rx) = mpsc::unbounded();
@@ -37,6 +37,6 @@ pub(in crate::ui) fn background<T: Send + 'static>(
     Task::stream(rx)
 }
 
-pub(in crate::ui) fn triggers() -> impl Stream<Item = Trigger> {
+pub(crate) fn triggers() -> impl Stream<Item = Trigger> {
     stream::iter(TRIGGERS.lock().unwrap().take()).flatten()
 }

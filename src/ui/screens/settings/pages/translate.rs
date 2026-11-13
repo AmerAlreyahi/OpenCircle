@@ -31,10 +31,10 @@ pub const OPTIMA_MT: &str = "https://huggingface.co/OptimaMT";
 /// v1 decoder (with the bytes their update fetches), and the update.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Models {
-    pub(in super::super) old: usize,
-    pub(in super::super) all: usize,
-    pub(in super::super) bytes: u64,
-    pub(in super::super) now: Now,
+    pub(crate) old: usize,
+    pub(crate) all: usize,
+    pub(crate) bytes: u64,
+    pub(crate) now: Now,
     /// The row's description and button, made from the above.
     desc: String,
     button: String,
@@ -62,7 +62,7 @@ impl Models {
         Models::of(bytes.len(), all, bytes.iter().sum(), Now::Idle)
     }
 
-    pub(in super::super) fn of(old: usize, all: usize, bytes: u64, now: Now) -> Models {
+    pub(crate) fn of(old: usize, all: usize, bytes: u64, now: Now) -> Models {
         let mut m = Models {
             old,
             all,
@@ -89,14 +89,14 @@ impl Models {
     }
 
     /// The page is visited: counted again, unless an update runs.
-    pub(in super::super) fn recount(&mut self) {
+    pub(crate) fn recount(&mut self) {
         if !matches!(self.now, Now::Updating(_)) {
             *self = Models::count();
         }
     }
 
     /// Update now: `true` = start it (something to fetch, none running).
-    pub(in super::super) fn start(&mut self) -> bool {
+    pub(crate) fn start(&mut self) -> bool {
         if matches!(self.now, Now::Updating(_)) || self.bytes == 0 {
             return false;
         }
@@ -105,7 +105,7 @@ impl Models {
         true
     }
 
-    pub(in super::super) fn progress(&mut self, share: f32) {
+    pub(crate) fn progress(&mut self, share: f32) {
         if let Now::Updating(at) = &mut self.now {
             *at = share;
             self.words();
@@ -114,7 +114,7 @@ impl Models {
 
     /// The update ended (a Cancel too, once its thread has stopped and
     /// swapped in what was complete): counted again.
-    pub(in super::super) fn finished(&mut self, done: Result<(), String>) {
+    pub(crate) fn finished(&mut self, done: Result<(), String>) {
         if !matches!(self.now, Now::Updating(_)) {
             return;
         }

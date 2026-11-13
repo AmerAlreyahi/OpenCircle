@@ -21,7 +21,7 @@ use super::{App, Reader};
 
 /// What More keeps for the picked area.
 #[derive(Default)]
-pub(in crate::ui) struct More {
+pub(crate) struct More {
     /// The area and hidden parts the last read was started for.
     key: Option<(Rectangle, Hidden)>,
     read: Read,
@@ -41,18 +41,18 @@ pub(in crate::ui) struct More {
 
 impl App {
     /// The Snip toolbar is up on a picked area.
-    pub(in crate::ui) fn more_editing(&self) -> bool {
+    pub(crate) fn more_editing(&self) -> bool {
         matches!(self.o.purpose, Purpose::Snip(_))
             && self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
     }
 
     /// The row a quick action's shortcut runs while Snip has an area.
-    pub(in crate::ui) fn more_row_of(&self, qa: &config::QuickAction) -> Option<Row> {
+    pub(crate) fn more_row_of(&self, qa: &config::QuickAction) -> Option<Row> {
         self.more_editing().then(|| more::row_of(qa)).flatten()
     }
 
     /// What the menu shows: the read, the user's own keys, where Ask AI goes.
-    pub(in crate::ui) fn sync_more(&mut self) {
+    pub(crate) fn sync_more(&mut self) {
         let m = &self.o.more;
         let info = more::Info {
             read: m.read,
@@ -66,7 +66,7 @@ impl App {
     }
 
     /// More opened: its text rows' keys, and the area is read (once).
-    pub(in crate::ui) fn more_opened(&mut self) -> Task<Message> {
+    pub(crate) fn more_opened(&mut self) -> Task<Message> {
         self.sync_more();
         self.read_area()
     }
@@ -117,7 +117,7 @@ impl App {
         ocr::route(self.o.behaviour.text_reader, Some(ocr::system::language()))
     }
 
-    pub(in crate::ui) fn on_more_read(
+    pub(crate) fn on_more_read(
         &mut self,
         opening: u32,
         id: u32,
@@ -151,7 +151,7 @@ impl App {
 
     /// A row run by its shortcut (the toolbar's own path: a long capture
     /// running finishes first, the area is read if More never opened).
-    pub(in crate::ui) fn run_more(&mut self, row: Row) -> Task<Message> {
+    pub(crate) fn run_more(&mut self, row: Row) -> Task<Message> {
         self.on_snip_toolbar(match row {
             Row::CopyText => E::CopyText,
             Row::AskAi => E::AskAi,
@@ -183,7 +183,7 @@ impl App {
 
     /// Copy text: the area's text (clean capture, hidden parts out) on the
     /// clipboard with the Copied pill, as the bar's Copy text does.
-    pub(in crate::ui) fn more_copy_text(&mut self) -> Task<Message> {
+    pub(crate) fn more_copy_text(&mut self) -> Task<Message> {
         if let Some(wait) = self.after_read(Row::CopyText) {
             return wait;
         }
@@ -203,7 +203,7 @@ impl App {
     }
 
     /// The models came: read again, then copy.
-    pub(in crate::ui) fn more_after_download(&mut self) -> Task<Message> {
+    pub(crate) fn more_after_download(&mut self) -> Task<Message> {
         self.o.more.key = None;
         self.o.more.then = Some(Row::CopyText);
         self.read_area()
@@ -212,7 +212,7 @@ impl App {
     /// Translate: on the clean capture (hidden parts painted out), in place
     /// inside the area; the picture the toolbar copies, saves and drags out is
     /// the translated one. While it is on the row reads Show original.
-    pub(in crate::ui) fn more_translate(&mut self) -> Task<Message> {
+    pub(crate) fn more_translate(&mut self) -> Task<Message> {
         if self.o.more.shown || self.o.translate.is_some() {
             return self.show_original();
         }
@@ -266,7 +266,7 @@ impl App {
     /// The translation on the picture, as far as it is (called after each
     /// message of the session): pasted into the picture under the drawing,
     /// hidden parts as they were.
-    pub(in crate::ui) fn sync_translation(&mut self) {
+    pub(crate) fn sync_translation(&mut self) {
         if !self.more_editing() {
             return;
         }
@@ -313,7 +313,7 @@ impl App {
     }
 
     /// Show original: the picture as it was; the translation goes.
-    pub(in crate::ui) fn show_original(&mut self) -> Task<Message> {
+    pub(crate) fn show_original(&mut self) -> Task<Message> {
         self.o.translate = None;
         let (original, was_own) = (self.o.more.original.take(), self.o.more.was_own);
         self.o.more.shown = false;
@@ -330,7 +330,7 @@ impl App {
     }
 
     /// The area is gone (Back, a new pick): nothing of More stays.
-    pub(in crate::ui) fn more_reset(&mut self) {
+    pub(crate) fn more_reset(&mut self) {
         self.o.more = More::default();
         if matches!(self.o.purpose, Purpose::Snip(_)) {
             self.o.translate = None;
@@ -365,13 +365,13 @@ fn read_crop(
 #[cfg(test)]
 impl App {
     /// Tests and snapshots: which read is the latest.
-    pub(in crate::ui) fn more_reads(&self) -> u32 {
+    pub(crate) fn more_reads(&self) -> u32 {
         self.o.more.reads
     }
 
     /// Tests and snapshots: the session's translation arrives (the area's text
     /// lines drawn as translated bars on white) and goes into the picture.
-    pub(in crate::ui) fn show_translated_for_test(&mut self) {
+    pub(crate) fn show_translated_for_test(&mut self) {
         let Some(edit) = &self.o.edit else {
             return;
         };

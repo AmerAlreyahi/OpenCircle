@@ -321,7 +321,7 @@ pub fn no_pick<T: Send + 'static>(id: window::Id) -> Task<T> {
 /// title bar painted over the window at (de)activation (`super::shape::no_caption`).
 /// A window asked off the taskbar (`skip_taskbar`: the overlay, popups) is a tool
 /// window for good (`super::shape::no_taskbar`: winit's own skip comes undone).
-pub(in crate::ui) fn open(settings: window::Settings) -> (window::Id, Task<window::Id>) {
+pub(crate) fn open(settings: window::Settings) -> (window::Id, Task<window::Id>) {
     #[cfg(windows)]
     let no_taskbar = settings.platform_specific.skip_taskbar;
     #[cfg(not(windows))]
@@ -371,7 +371,7 @@ thread_local! {
 }
 
 /// Floating windows and their corner radius (see `floating`).
-pub(in crate::ui) static FLOATING: Mutex<Vec<(window::Id, f32, Motion)>> = Mutex::new(Vec::new());
+pub(crate) static FLOATING: Mutex<Vec<(window::Id, f32, Motion)>> = Mutex::new(Vec::new());
 
 pub fn is_floating(id: window::Id) -> bool {
     FLOATING.lock().unwrap().iter().any(|(f, ..)| *f == id)
@@ -540,7 +540,7 @@ pub fn reshape<T: Send + 'static>(id: window::Id) -> Task<T> {
 /// Alt+Tab) and, on Linux,
 /// our app id: the desktop ties the window to `APP_ID.desktop`, and GNOME asks for
 /// screenshot permission only for the app it sees in front.
-pub(in crate::ui) fn app_window(settings: window::Settings) -> window::Settings {
+pub(crate) fn app_window(settings: window::Settings) -> window::Settings {
     let settings = window::Settings {
         decorations: false,
         icon: ICON.get().cloned(),

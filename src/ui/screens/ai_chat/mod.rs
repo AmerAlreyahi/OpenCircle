@@ -35,7 +35,7 @@ pub use view::{actions, ai_error, card, note, provider_name};
 
 /// The follow-up input. Never focused by itself: until it is clicked, letters
 /// are the overlay's action shortcuts.
-pub(in crate::ui) const INPUT: &str = "panel-input";
+pub(crate) const INPUT: &str = "panel-input";
 /// The Ask AI conversation (scrolled to the end as the answer grows).
 const LOG: &str = "panel-log";
 

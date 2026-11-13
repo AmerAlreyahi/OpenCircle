@@ -20,10 +20,10 @@ use crate::ui::{ai_chat, live_layer, overlay, song, translate, windows};
 
 /// Where the overlay was when a Copy / Save ran: its origin, size and scale
 /// (logical px), and what its pill goes beside (overlay px; `actions::pill_at`).
-pub(in crate::ui) type PillPlace = (Point, Size, f32, Option<Rectangle>);
+pub(crate) type PillPlace = (Point, Size, f32, Option<Rectangle>);
 
 #[derive(Debug, Clone)]
-pub(in crate::ui) enum Message {
+pub(crate) enum Message {
     Trigger(Trigger),
     /// Capture number `.0`'s thread is done (`Instant` = trigger time, latency log).
     Captured(u32, Instant, Result<Shot, CaptureError>),
@@ -167,17 +167,17 @@ pub(in crate::ui) enum Message {
 
 /// The shortcuts of the bottom bar's buttons, as the tooltips show them ("" = none).
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(in crate::ui) struct BarKeys {
-    pub(in crate::ui) search: String,
-    pub(in crate::ui) copy_text: String,
-    pub(in crate::ui) translate: String,
-    pub(in crate::ui) live: String,
-    pub(in crate::ui) song: String,
-    pub(in crate::ui) edit: String,
+pub(crate) struct BarKeys {
+    pub(crate) search: String,
+    pub(crate) copy_text: String,
+    pub(crate) translate: String,
+    pub(crate) live: String,
+    pub(crate) song: String,
+    pub(crate) edit: String,
 }
 
 impl BarKeys {
-    pub(in crate::ui) fn of(cfg: &config::Config) -> BarKeys {
+    pub(crate) fn of(cfg: &config::Config) -> BarKeys {
         let quick = |id: &str, live: bool| {
             let bound = (cfg.quick_actions.iter())
                 .find(|q| q.action == id && q.live == live && !q.shortcut.is_empty());
@@ -197,7 +197,7 @@ impl BarKeys {
 
 /// What the select-text popup does with the picked words.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::ui) enum PickAct {
+pub(crate) enum PickAct {
     Copy,
     Translate,
     Search,
@@ -205,7 +205,7 @@ pub(in crate::ui) enum PickAct {
 
 /// What waits for the band under it to be read (main mode).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::ui) enum Await {
+pub(crate) enum Await {
     /// A tap: the word there (a triple tap: the line) becomes the selection.
     Tap(word::Unit),
     /// A Shift+click: the text selection stretches there.
@@ -214,32 +214,32 @@ pub(in crate::ui) enum Await {
 
 /// What an OCR read for words was asked for, to place its answer.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::ui) struct WordRead {
+pub(crate) struct WordRead {
     /// The tap's number (a newer press makes older reads stale).
-    pub(in crate::ui) id: u32,
+    pub(crate) id: u32,
     /// The tap, or where the drag ended (image px).
-    pub(in crate::ui) at: Point,
+    pub(crate) at: Point,
     /// The crop's top-left (frame px) and extent (image px).
-    pub(in crate::ui) origin: [u32; 2],
-    pub(in crate::ui) region: Rectangle,
+    pub(crate) origin: [u32; 2],
+    pub(crate) region: Rectangle,
     /// Stretch the picked words to `at` (else: pick the word at `at`).
-    pub(in crate::ui) extend: bool,
+    pub(crate) extend: bool,
 }
 
 /// A press on the selection: resizing it by a corner or an edge, or moving it.
-pub(in crate::ui) struct Grab {
+pub(crate) struct Grab {
     /// The corner or edge, or `None` = move.
-    pub(in crate::ui) grip: Option<overlay::Grip>,
+    pub(crate) grip: Option<overlay::Grip>,
     /// Where the press was (image px).
-    pub(in crate::ui) from: Point,
+    pub(crate) from: Point,
     /// The selection and its stroke when the press began.
-    pub(in crate::ui) start: (overlay::Selection, Vec<Point>),
+    pub(crate) start: (overlay::Selection, Vec<Point>),
     /// It moved further than a tap.
-    pub(in crate::ui) moved: bool,
+    pub(crate) moved: bool,
 }
 
 /// What the open overlay is for.
-pub(in crate::ui) enum Purpose {
+pub(crate) enum Purpose {
     /// Circle to Search: select, then the action bar.
     Search,
     /// A quick action: runs on its target's area, or on the first selection.
@@ -251,7 +251,7 @@ pub(in crate::ui) enum Purpose {
 /// Closing steps. The renderer frees the frame cache and resizes its buffers only
 /// when it draws, and a hidden window never draws, so shrink first, then hide.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::ui) enum Hiding {
+pub(crate) enum Hiding {
     No,
     /// Wait for one empty full-size frame (drops the cached frame).
     Empty,
@@ -263,22 +263,22 @@ pub(in crate::ui) enum Hiding {
 
 /// A captured monitor, ready to show.
 #[derive(Debug, Clone)]
-pub(in crate::ui) struct Shot {
-    pub(in crate::ui) image: image::Handle,
-    pub(in crate::ui) scale: f32,
+pub(crate) struct Shot {
+    pub(crate) image: image::Handle,
+    pub(crate) scale: f32,
     /// Logical px: the monitor's origin and size.
-    pub(in crate::ui) origin: Point,
-    pub(in crate::ui) size: Size,
+    pub(crate) origin: Point,
+    pub(crate) size: Size,
     /// Snip mode: the mode to start in, every window (physical desktop px,
     /// topmost first), the window the user was in (Windows), and every monitor
     /// with its frame (this one too).
-    pub(in crate::ui) snip: Option<SnipShot>,
+    pub(crate) snip: Option<SnipShot>,
     /// Main mode: every window at the freeze (physical desktop px, topmost
     /// first), for the bar's Snip; Snip's own are in `snip`.
-    pub(in crate::ui) windows: Vec<snip::Pick>,
+    pub(crate) windows: Vec<snip::Pick>,
 }
 
-pub(in crate::ui) type SnipShot = (
+pub(crate) type SnipShot = (
     snip::Kind,
     Vec<snip::Pick>,
     Option<isize>,

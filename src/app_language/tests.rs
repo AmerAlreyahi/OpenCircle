@@ -252,7 +252,7 @@ fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
             .split("#[cfg(test)]\nmod tests {")
             .next()
             .unwrap()
-            .split("#[cfg(test)]\npub(in crate::ui) mod tests {")
+            .split("#[cfg(test)]\npub(crate) mod tests {")
             .next()
             .unwrap()
             .split("#[cfg(test)]\npub(crate) mod tests {")

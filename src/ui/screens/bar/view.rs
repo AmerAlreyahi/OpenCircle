@@ -33,7 +33,7 @@ impl App {
     /// takes the whole screen. Always the same size (`bar_size`). Its field
     /// takes the keys only once clicked: until then letters are the action
     /// shortcuts (L, A, T still search, ask and translate).
-    pub(in crate::ui) fn bottom_bar(&self) -> Element<'_, Message> {
+    pub(crate) fn bottom_bar(&self) -> Element<'_, Message> {
         // laid out for the screen it is on (its own logical px), as `bar_spot` sizes it
         let (.., room) = self.bar_spot();
         let (width, _) = self.bar_size_on(room);
@@ -208,7 +208,7 @@ impl App {
 
     /// The text reader's download card (`model_download`) over the bar: its
     /// question with its size, its progress, a failure to try again.
-    pub(in crate::ui) fn reader_note(&self) -> Option<Element<'_, Message>> {
+    pub(crate) fn reader_note(&self) -> Option<Element<'_, Message>> {
         use crate::ui::screens::model_download::{self as download, On, Stage};
         let (bytes, stage) = match &self.o.reader {
             Reader::Idle => return None,
@@ -255,7 +255,7 @@ impl App {
     /// drawing it, `screen` px tall): above it, or below it when the bar is at
     /// the top, as tall as it is; opaque, so a press on it never starts a
     /// selection.
-    pub(in crate::ui) fn beside_bar<'a>(
+    pub(crate) fn beside_bar<'a>(
         &self,
         note: Element<'a, Message>,
         bar: iced::Rectangle,
@@ -280,7 +280,7 @@ impl App {
     /// surface only, sized between the two (`dock_size`); opaque, so a press
     /// on it never starts a selection.
     // ponytail: a plain size morph; the full motion returns with the GPU renderer.
-    pub(in crate::ui) fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
+    pub(crate) fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
         let size = self.dock_size();
         let shape = surface(Material::Widget, radius::WINDOW, space())
             .width(size.width)
@@ -290,7 +290,7 @@ impl App {
 }
 
 /// The placeholder that fits a field `width` wide, in the UI font.
-pub(in crate::ui) fn ask_placeholder(width: f32) -> &'static str {
+pub(crate) fn ask_placeholder(width: f32) -> &'static str {
     crate::ui::kit::text::fitting(
         &ask_placeholders(),
         field::SLOTS_TEXT,
@@ -300,7 +300,7 @@ pub(in crate::ui) fn ask_placeholder(width: f32) -> &'static str {
 
 /// A round button of the bottom bar, named `label` (its tooltip adds `keys`);
 /// `on_press: None` = dimmed (nothing to act on yet).
-pub(in crate::ui) fn bar_button<'a>(
+pub(crate) fn bar_button<'a>(
     glyph: char,
     label: &'a str,
     keys: &'a str,

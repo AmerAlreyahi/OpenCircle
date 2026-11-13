@@ -16,7 +16,7 @@ use super::App;
 
 impl App {
     /// The running screen tool.
-    pub(in crate::ui) fn tool(&self) -> Option<&Tool> {
+    pub(crate) fn tool(&self) -> Option<&Tool> {
         match &self.o.purpose {
             Purpose::Snip(snip) => snip.tool.as_ref(),
             _ => None,
@@ -32,7 +32,7 @@ impl App {
 
     /// Starts `which` over the frozen screens. From Snip's toolbar the picked
     /// area and its editor wait for Esc (kept as they are).
-    pub(in crate::ui) fn start_tool(&mut self, which: Which) -> Task<Message> {
+    pub(crate) fn start_tool(&mut self, which: Which) -> Task<Message> {
         if !matches!(self.o.purpose, Purpose::Snip(_)) {
             return Task::none();
         }
@@ -60,7 +60,7 @@ impl App {
 
     /// The frozen frame under `p` (the starting screen's logical px), that
     /// screen's scale and its view of the starting screen's px.
-    pub(in crate::ui) fn frame_at(&self, p: Point) -> Option<(&image::Handle, f32, overlay::View)> {
+    pub(crate) fn frame_at(&self, p: Point) -> Option<(&image::Handle, f32, overlay::View)> {
         if Rectangle::with_size(self.o.screen).contains(p) {
             return Some((self.o.frame.as_ref()?, self.o.scale, self.o.view));
         }
@@ -73,7 +73,7 @@ impl App {
     /// An overlay event while a tool runs (points in the starting screen's
     /// logical px): the pointer and the arrows move it, a click picks or a
     /// drag measures, Enter / Ctrl+C copy.
-    pub(in crate::ui) fn on_tool_event(&mut self, event: overlay::Event) -> Task<Message> {
+    pub(crate) fn on_tool_event(&mut self, event: overlay::Event) -> Task<Message> {
         let Purpose::Snip(snip) = &mut self.o.purpose else {
             return Task::none();
         };
@@ -147,7 +147,7 @@ impl App {
     }
 
     /// The toolbar's messages, and Esc (`Close`).
-    pub(in crate::ui) fn on_tool(&mut self, msg: tools::Msg) -> Task<Message> {
+    pub(crate) fn on_tool(&mut self, msg: tools::Msg) -> Task<Message> {
         match msg {
             tools::Msg::Mode(mode) => {
                 if let Some(tool) = self.tool_mut() {

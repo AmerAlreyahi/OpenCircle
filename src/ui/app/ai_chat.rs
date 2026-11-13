@@ -24,7 +24,7 @@ use super::App;
 
 /// The AI chat once pinned (`ai_chat::AiChat::pinned`): it outlives the overlay
 /// (`App::chat`) until its pin closes it. Never more than one.
-pub(in crate::ui) struct Resident {
+pub(crate) struct Resident {
     /// Its panel number (`Message::AiChat`).
     pub id: u32,
     pub panel: ai_chat::AiChat,
@@ -36,7 +36,7 @@ pub(in crate::ui) struct Resident {
 /// close: above the overlay while that is open (`windows::keep_above`), never
 /// re-created when the overlay opens or closes (#170). Wayland: only while the
 /// overlay is closed (the overlay draws the chat while it is open).
-pub(in crate::ui) struct ChatWindow {
+pub(crate) struct ChatWindow {
     pub id: window::Id,
     /// The monitor it docks on: origin and size (logical px), taskbar inset.
     pub home: (Point, Size, f32),
@@ -60,14 +60,14 @@ pub(in crate::ui) struct ChatWindow {
 
 /// `t` (0..1, eased) of the way from `from` to `to`, on whole px; exactly
 /// `to` at the end.
-pub(in crate::ui) fn glided(from: Point, to: Point, t: f32) -> Point {
+pub(crate) fn glided(from: Point, to: Point, t: f32) -> Point {
     let at = from + (to - from) * t;
     Point::new(at.x.round(), at.y.round())
 }
 
 /// A dragged widget's top-left `at` (`size`) held inside the `screen`: 6 px
 /// from its left, right and top, 54 px from its bottom (design 3.4).
-pub(in crate::ui) fn held_in(at: Point, size: Size, desk: Rectangle) -> Point {
+pub(crate) fn held_in(at: Point, size: Size, desk: Rectangle) -> Point {
     let (e, b) = (motion::DRAG_EDGE, motion::DRAG_EDGE_BOTTOM);
     let (right, bottom) = (desk.x + desk.width, desk.y + desk.height);
     Point::new(
@@ -84,7 +84,7 @@ const SETTLE: Duration = Duration::from_millis(250);
 const HANDOVER_BEAT: Duration = Duration::from_millis(60);
 
 /// Ask AI only opens the browser: the provider is Google AI Mode (no key).
-pub(in crate::ui) fn hands_off() -> bool {
+pub(crate) fn hands_off() -> bool {
     #[cfg(test)]
     if !HAND_OFF.get() {
         return false; // most tests drive the chat with the browser provider's setup
@@ -95,15 +95,11 @@ pub(in crate::ui) fn hands_off() -> bool {
 #[cfg(test)]
 thread_local! {
     /// Tests: `hands_off` asks the config (else the chat opens, as with a key).
-    pub(in crate::ui) static HAND_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static HAND_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 impl App {
-    pub(in crate::ui) fn open_chat(
-        &mut self,
-        crop: Crop,
-        question: Option<String>,
-    ) -> Task<Message> {
+    pub(crate) fn open_chat(&mut self, crop: Crop, question: Option<String>) -> Task<Message> {
         // one chat: a question while one stays open goes into it, with this crop
         if let Some(chat) = &mut self.chat {
             let id = chat.id;
@@ -139,7 +135,7 @@ impl App {
     }
 
     /// The overlay's chat pinned itself: the App keeps it from now on.
-    pub(in crate::ui) fn keep_chat(&mut self) {
+    pub(crate) fn keep_chat(&mut self) {
         if !(self.o.ai_chat.as_ref()).is_some_and(|(_, p)| p.pinned()) {
             return;
         }
@@ -151,7 +147,7 @@ impl App {
     }
 
     /// The pinned chat's pin: it closes (its window with it, `sync_chat_window`).
-    pub(in crate::ui) fn drop_chat(&mut self) -> Task<Message> {
+    pub(crate) fn drop_chat(&mut self) -> Task<Message> {
         if self.chat.take().is_some() {
             crate::log!("[opencircle] AI chat unpinned and closed");
         }
@@ -164,12 +160,12 @@ impl App {
     /// it is open and the chat's window comes only when it closes (C6).
     // ponytail: Wayland keeps the old path; an XWayland chat needs a helper
     // process (winit runs one backend) and its keyboard focus is unproven.
-    pub(in crate::ui) fn own_window(&self) -> bool {
+    pub(crate) fn own_window(&self) -> bool {
         self.can_hide
     }
 
     /// The chat shown: the pinned one, else the overlay's.
-    pub(in crate::ui) fn chat_shown(&self) -> Option<(u32, &ai_chat::AiChat)> {
+    pub(crate) fn chat_shown(&self) -> Option<(u32, &ai_chat::AiChat)> {
         (self.chat.as_ref().map(|c| (c.id, &c.panel)))
             .or_else(|| self.o.ai_chat.as_ref().map(|(id, p)| (*id, p)))
     }
@@ -265,7 +261,7 @@ impl App {
 
     /// Wayland: the overlay closes with a pinned chat: it goes on in its own
     /// window, at its dock.
-    pub(in crate::ui) fn float_chat(&mut self) -> Task<Message> {
+    pub(crate) fn float_chat(&mut self) -> Task<Message> {
         match self.chat.is_some() && self.chat_win.is_none() && !self.own_window() {
             true => self.open_chat_window(true),
             false => Task::none(),
@@ -273,7 +269,7 @@ impl App {
     }
 
     /// Wayland: the overlay is up again: it draws the chat, its window goes.
-    pub(in crate::ui) fn unfloat_chat(&mut self) -> Task<Message> {
+    pub(crate) fn unfloat_chat(&mut self) -> Task<Message> {
         if self.own_window() {
             return Task::none();
         }
@@ -289,7 +285,7 @@ impl App {
     /// hidden while Snip is open or a grab runs (X11), and put where the
     /// overlay docks it while the overlay holds it (not one it found pinned
     /// there, `Opening::chat_fixed`, until it is picked up).
-    pub(in crate::ui) fn sync_chat_window(&mut self) -> Task<Message> {
+    pub(crate) fn sync_chat_window(&mut self) -> Task<Message> {
         if self.chat_shown().is_none() {
             return match self.chat_win.take() {
                 Some(w) => windows::close(w.id),
@@ -339,7 +335,7 @@ impl App {
 
     /// The chat's window moved (dragged by the OS, the overlay closed): it
     /// docks once it stops.
-    pub(in crate::ui) fn chat_moved(&mut self, window: window::Id, at: Point) -> Task<Message> {
+    pub(crate) fn chat_moved(&mut self, window: window::Id, at: Point) -> Task<Message> {
         if self.o.is_some() {
             return Task::none(); // the overlay put it there (`sync_chat_window`)
         }
@@ -356,7 +352,7 @@ impl App {
     }
 
     /// The drag is over: its window's scale now says which monitor it is on.
-    pub(in crate::ui) fn chat_settle(&mut self, moves: u32) -> Task<Message> {
+    pub(crate) fn chat_settle(&mut self, moves: u32) -> Task<Message> {
         match self.chat_win.as_ref().filter(|c| c.moves == moves) {
             Some(w) if self.o.is_none() => {
                 window::scale_factor(w.id).map(move |k| Message::ChatDocked(moves, k))
@@ -367,7 +363,7 @@ impl App {
 
     /// The window docks to the side its middle is on, on the monitor of
     /// `monitors` holding it (`scale`: its window's).
-    pub(in crate::ui) fn chat_docked(
+    pub(crate) fn chat_docked(
         &mut self,
         moves: u32,
         scale: f32,
@@ -406,7 +402,7 @@ impl App {
     }
 
     /// A frame of the chat window's glide to its dock: where it is now.
-    pub(in crate::ui) fn chat_glide(&mut self, now: std::time::Instant) -> Task<Message> {
+    pub(crate) fn chat_glide(&mut self, now: std::time::Instant) -> Task<Message> {
         let Some(chat) = self.chat_win.as_mut() else {
             return Task::none();
         };
@@ -431,7 +427,7 @@ impl App {
     /// The overlay opening on a screen at `origin` (logical px) finds the
     /// pinned chat: its window's spot is out of the frame (`chat_hole`), and
     /// it stays where it is, live above the overlay (#170 C4).
-    pub(in crate::ui) fn find_chat(&mut self, origin: Point) {
+    pub(crate) fn find_chat(&mut self, origin: Point) {
         let found = (self.chat_win.as_ref())
             .filter(|_| self.chat.is_some())
             .map(|c| Rectangle::new(c.at - (origin - Point::ORIGIN), c.size));
@@ -458,7 +454,7 @@ impl App {
         self.o.chat_off = r.position() - dock;
     }
 
-    pub(in crate::ui) fn on_ai_chat(&mut self, id: u32, msg: ai_chat::Msg) -> Task<Message> {
+    pub(crate) fn on_ai_chat(&mut self, id: u32, msg: ai_chat::Msg) -> Task<Message> {
         let resident = self.chat.as_ref().is_some_and(|c| c.id == id);
         let open = self.o.is_some();
         if !resident && !open {
@@ -550,13 +546,13 @@ impl App {
 
     /// A question sent now may end the tool (#170): not in Snip, never while
     /// the user draws or drags the chat.
-    pub(in crate::ui) fn ends_tool(&self) -> bool {
+    pub(crate) fn ends_tool(&self) -> bool {
         !self.o.drawing && self.o.chat_drag.is_none() && !matches!(self.o.purpose, Purpose::Snip(_))
     }
 
     /// The selection cut out of the frozen frame, in physical pixels; with the
     /// edits once it was edited (Ask AI then sees the annotations).
-    pub(in crate::ui) fn crop(&self) -> Option<Crop> {
+    pub(crate) fn crop(&self) -> Option<Crop> {
         if let Some(edit) = &self.o.edit {
             return Some(edit.image());
         }
@@ -564,7 +560,7 @@ impl App {
     }
 
     /// What `crop` cuts out (logical px): every selection's union.
-    pub(in crate::ui) fn crop_area(&self) -> Option<Rectangle> {
+    pub(crate) fn crop_area(&self) -> Option<Rectangle> {
         let selection = self.o.selection?;
         Some((self.o.others.iter()).fold(selection.area, |all, (s, _)| all.union(&s.area)))
     }
@@ -572,7 +568,7 @@ impl App {
     /// The pinned chat's spot (`Opening::chat_hole`) in the selection's crop px,
     /// if the crop meets it, on whichever screen (through desktop px, as the
     /// crop is cut: a crop across screens is one image); not on an edited capture.
-    pub(in crate::ui) fn chat_hole(&self) -> Option<[u32; 4]> {
+    pub(crate) fn chat_hole(&self) -> Option<[u32; 4]> {
         if self.o.edit.is_some() || self.o.frame.is_none() {
             return None;
         }
@@ -601,7 +597,7 @@ impl App {
     /// One selection: just its crop.
     // ponytail: one stacked image, not one image per selection: the AI chat
     // sends one; give `ai::Message` several images when it can.
-    pub(in crate::ui) fn stacked(&self) -> Option<Crop> {
+    pub(crate) fn stacked(&self) -> Option<Crop> {
         if self.o.others.is_empty() || self.o.edit.is_some() {
             return self.crop();
         }
@@ -613,7 +609,7 @@ impl App {
 
     /// Where the result card shows: where the user left it, else away from
     /// the selection (`card::place`). The AI chat docks (`chat_at`).
-    pub(in crate::ui) fn chat_card_at(&self) -> Rectangle {
+    pub(crate) fn chat_card_at(&self) -> Rectangle {
         let selection = self.o.selection.map(|s| self.o.view.rect_to_screen(s.area));
         if self.chatting() {
             return self.chat_at(selection);
@@ -629,7 +625,7 @@ impl App {
     /// keep off it): not in Snip. Snip's frozen screen shows it already (its
     /// window is in the grab, a pick like any window, `widgets_in_grab`), and
     /// nothing of ours covers Snip's outline (its window hides meanwhile).
-    pub(in crate::ui) fn pinned_drawn(&self) -> Option<&Resident> {
+    pub(crate) fn pinned_drawn(&self) -> Option<&Resident> {
         self.chat
             .as_ref()
             .filter(|_| !matches!(self.o.purpose, Purpose::Snip(_)))
@@ -637,12 +633,12 @@ impl App {
 
     /// The overlay draws the AI chat's card itself: only where the chat has no
     /// window of its own while the overlay is open (Wayland, `own_window`).
-    pub(in crate::ui) fn draws_chat(&self) -> bool {
+    pub(crate) fn draws_chat(&self) -> bool {
         !self.own_window()
     }
 
     /// The AI chat is the card shown.
-    pub(in crate::ui) fn chatting(&self) -> bool {
+    pub(crate) fn chatting(&self) -> bool {
         self.o.ai_chat.is_some()
     }
 
@@ -708,7 +704,7 @@ impl App {
 
     /// Where the chat docks: the screen's logical size, its taskbar inset, its
     /// origin in the starting screen's px and its scale against that (`k`).
-    pub(in crate::ui) fn chat_room(&self) -> (Size, f32, Point, f32) {
+    pub(crate) fn chat_room(&self) -> (Size, f32, Point, f32) {
         let other = (self.o.chat_on).and_then(|i| self.work_areas().get(i + 1).copied());
         match other {
             Some((work, k)) => (
@@ -722,23 +718,23 @@ impl App {
     }
 
     /// The window drawing the AI chat's card: the screen holding most of it.
-    pub(in crate::ui) fn chat_window(&self) -> window::Id {
+    pub(crate) fn chat_window(&self) -> window::Id {
         self.window_of(self.screen_holding(self.chat_rect()))
     }
 
     /// The chat docked on `side` of a `screen` (taskbar `inset`), as wide as
     /// the user made it; full height (the bar moves aside, `bar_room`).
-    pub(in crate::ui) fn chat_dock(&self, screen: Size, side: card::Side, inset: f32) -> Rectangle {
+    pub(crate) fn chat_dock(&self, screen: Size, side: card::Side, inset: f32) -> Rectangle {
         card::docked(screen, side, inset, self.chat_width)
     }
 
     /// The AI chat's card on the overlay (the pinned one or the overlay's).
-    pub(in crate::ui) fn chat_rect(&self) -> Rectangle {
+    pub(crate) fn chat_rect(&self) -> Rectangle {
         self.chat_at(self.o.selection.map(|s| self.o.view.rect_to_screen(s.area)))
     }
 
     /// The chat card let go: it docks to the side its middle is on, gliding there.
-    pub(in crate::ui) fn dock_chat(&mut self, now: std::time::Instant) {
+    pub(crate) fn dock_chat(&mut self, now: std::time::Instant) {
         let at = self.chat_rect();
         self.o.chat_on = self.screen_holding(at); // dropped across a bezel: the larger part
         let (screen, _, origin, k) = self.chat_room();
@@ -750,7 +746,7 @@ impl App {
 
     /// How open the result card is (0..1; 0 before its first frame, 1 at once
     /// when the OS asks for no animations).
-    pub(in crate::ui) fn chat_grown(&self) -> f32 {
+    pub(crate) fn chat_grown(&self) -> f32 {
         match (&self.o.ai_chat, self.o.chat_open) {
             _ if motion::reduced() || self.own_window() => 1.0, // (its window fades in)
             (Some((id, _)), Some((was, _, grown))) if *id == was => grown,
@@ -759,7 +755,7 @@ impl App {
     }
 
     /// The result card still opening (frames wanted).
-    pub(in crate::ui) fn chat_opening(&self) -> bool {
+    pub(crate) fn chat_opening(&self) -> bool {
         self.o.frame.is_some() && self.o.ai_chat.is_some() && self.chat_grown() < 1.0
     }
 }

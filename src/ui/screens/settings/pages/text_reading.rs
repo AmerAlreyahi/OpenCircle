@@ -69,7 +69,7 @@ impl State {
     }
 
     /// The one quiet note under the engine row, if a language is missing.
-    pub(in super::super) fn reader_note(&self) -> Option<String> {
+    pub(crate) fn reader_note(&self) -> Option<String> {
         let missing = self.missing_recognizers();
         if missing.is_empty() || self.draft.selection.text_reader == TextReader::PpOcr {
             return None;

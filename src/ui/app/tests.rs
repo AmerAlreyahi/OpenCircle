@@ -561,14 +561,14 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
 
 /// An open overlay on a `w` x `h` frame at `scale`; pixel (x, y) is
 /// [x % 256, y % 256, x / 256, 255].
-pub(in crate::ui) fn open_app(w: u32, h: u32, scale: f32) -> App {
+pub(crate) fn open_app(w: u32, h: u32, scale: f32) -> App {
     let mut app = App::idle(window::Id::unique());
     reopen(&mut app, w, h, scale);
     app
 }
 
 /// `app`'s overlay opened again on a fresh `w` x `h` frame (as `open_app`).
-pub(in crate::ui) fn reopen(app: &mut App, w: u32, h: u32, scale: f32) {
+pub(crate) fn reopen(app: &mut App, w: u32, h: u32, scale: f32) {
     app.o.start(Opening::default());
     app.o.labs = Labs::all_on();
     let rgba: Vec<u8> = (0..h)
@@ -590,7 +590,7 @@ fn event(app: &mut App, e: overlay::Event) {
 
 /// Runs `task` to its end (its threads' work done) and hands its messages
 /// to the app (their own tasks are dropped).
-pub(in crate::ui) fn run_task(app: &mut App, task: Task<Message>) {
+pub(crate) fn run_task(app: &mut App, task: Task<Message>) {
     let actions = iced_runtime::task::into_stream(task)
         .map(iced::futures::executor::block_on_stream)
         .into_iter()
@@ -615,7 +615,7 @@ fn copied_image() -> Option<(u32, u32)> {
 }
 
 /// A press-drag-release on screen from `a` to `b`.
-pub(in crate::ui) fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
+pub(crate) fn drag(app: &mut App, a: Point, b: Point, shift: bool) {
     event(app, overlay::Event::Press { at: a, shift });
     for i in 1..=10 {
         event(app, overlay::Event::Move(a + (b - a) * (i as f32 / 10.0)));
@@ -658,7 +658,7 @@ fn snipping(area: Rectangle) -> App {
 }
 
 /// A snip over a `w` x `h` screen (scale 1) with one window (`area`) the pointer is on.
-pub(in crate::ui) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
+pub(crate) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
     let mut app = open_app(w, h, 1.0);
     let window = snip::Pick::window(area, "App", 1);
     app.o.purpose = Purpose::Snip(Box::new(Snip::new(vec![window], app.place(), true, None)));
@@ -2886,7 +2886,7 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
 }
 
 /// Frames until the bar is where it goes (it glides there).
-pub(in crate::ui) fn settle_bar(app: &mut App) {
+pub(crate) fn settle_bar(app: &mut App) {
     let start = Instant::now();
     for i in 0..100 {
         let _ = app.update(Message::Frame(start + Duration::from_millis(16 * i)));

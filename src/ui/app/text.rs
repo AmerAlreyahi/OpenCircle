@@ -22,7 +22,7 @@ impl App {
     /// for an earlier tap are reused (a tap on the same line makes a range);
     /// otherwise OCR reads around the tap on a thread. Without the OCR models a
     /// tap does nothing (it never asks to download them).
-    pub(in crate::ui) fn tap(&mut self, at: Point) -> Task<Message> {
+    pub(crate) fn tap(&mut self, at: Point) -> Task<Message> {
         if self.o.selection.is_none() {
             self.o.stroke.clear(); // the tap's own dot
         }
@@ -44,7 +44,7 @@ impl App {
 
     /// A press at `p` (image px) on the screen's text read there (main mode
     /// only): the caret there, or its word or line (`unit`).
-    pub(in crate::ui) fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
+    pub(crate) fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
         let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
         let read = main && self.text_known(p);
         read.then(|| word::Picked::new(self.all_lines(), self.o.desk(), p, unit))?
@@ -54,7 +54,7 @@ impl App {
     /// Counts a press at `p` (image px) as the first, second or third click in
     /// a row (each within `DOUBLE_CLICK` of the last and near it): what it
     /// selects on text.
-    pub(in crate::ui) fn click(&mut self, p: Point) -> word::Unit {
+    pub(crate) fn click(&mut self, p: Point) -> word::Unit {
         let now = Instant::now();
         let n = match self.o.clicks {
             Some((at, last, n)) if now - at <= DOUBLE_CLICK && last.distance(p) <= 4.0 => n + 1,
@@ -71,7 +71,7 @@ impl App {
     /// A press that began on text moved to `p` (image px): the words stretch
     /// there, unless the stroke loops, which makes it a circle after all.
     /// Into rows not read yet: they are read first (`read_more`).
-    pub(in crate::ui) fn drag_text(&mut self, p: Point) -> Task<Message> {
+    pub(crate) fn drag_text(&mut self, p: Point) -> Task<Message> {
         let zoom = self.o.view.zoom();
         let Some(stroke) = &mut self.o.text_press else {
             return Task::none();
@@ -95,7 +95,7 @@ impl App {
     /// The screen's text has just been read while a press drew: one that
     /// began on text becomes a text selection to where the pointer is now
     /// (a loop stays a circle, `drag_text`).
-    pub(in crate::ui) fn drag_became_text(&mut self) {
+    pub(crate) fn drag_became_text(&mut self) {
         let Some(&start) = self
             .o
             .stroke
@@ -123,7 +123,7 @@ impl App {
 
     /// Main mode without the OCR models: the note over the bar says so and
     /// offers them (`Reader::Missing`). Nothing is read at open (#123).
-    pub(in crate::ui) fn note_reader(&mut self) {
+    pub(crate) fn note_reader(&mut self) {
         if matches!(self.o.purpose, Purpose::Search) && !self.o.ocr_ready && !self.system_text() {
             self.o.reader = Reader::Missing(ocr::download_size());
         }
@@ -133,7 +133,7 @@ impl App {
     /// from 3 on, the reader for the user's language (app language, translate
     /// target and source, the system's language) is offered, if one isn't on
     /// disk (#169, sheet b7: once per opening, the existing download card).
-    pub(in crate::ui) fn note_noise(&mut self, n: usize) {
+    pub(crate) fn note_noise(&mut self, n: usize) {
         self.o.noise += n;
         if self.o.script_offered || self.o.noise < 3 || !matches!(self.o.reader, Reader::Idle) {
             return;
@@ -159,7 +159,7 @@ impl App {
 
     /// The reader for the script found is on disk now: the screen's text is
     /// read again (Windows: the second reader; Linux: every band).
-    pub(in crate::ui) fn read_again(&mut self) -> Task<Message> {
+    pub(crate) fn read_again(&mut self) -> Task<Message> {
         match self.o.text_by {
             Some(ocr::Source::System) => {
                 self.o.other_read = false;
@@ -174,7 +174,7 @@ impl App {
 
     /// Main mode's text can be read: Windows OCR or the OCR models here, no
     /// translation shown.
-    pub(in crate::ui) fn reads_text(&self) -> bool {
+    pub(crate) fn reads_text(&self) -> bool {
         (self.o.ocr_ready || self.system_text())
             && self.o.frame.is_some()
             && matches!(self.o.purpose, Purpose::Search)
@@ -184,14 +184,14 @@ impl App {
     /// Main mode's screen text is being read now (#169): how many of the
     /// lines found are read, of how many (`None` inside: none found yet).
     /// Windows: Windows OCR's read, then the second reader's.
-    pub(in crate::ui) fn reading_text(&self) -> Option<Option<(usize, usize)>> {
+    pub(crate) fn reading_text(&self) -> Option<Option<(usize, usize)>> {
         let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
         let other = self.o.other_reading.is_some();
         (main && (self.o.reading.is_some() || other)).then(|| self.o.screen_text.progress(other))
     }
 
     /// Main mode read the whole screen and found no text (#169).
-    pub(in crate::ui) fn no_text(&self) -> bool {
+    pub(crate) fn no_text(&self) -> bool {
         let others_done = self.o.text_by != Some(ocr::Source::System)
             || self.o.other_read
             || !ocr::reads_other_scripts();
@@ -204,7 +204,7 @@ impl App {
 
     /// The lines found but not read yet (image px): the pointer over them
     /// is the system's working cursor (#169).
-    pub(in crate::ui) fn text_waiting(&self) -> Vec<Rectangle> {
+    pub(crate) fn text_waiting(&self) -> Vec<Rectangle> {
         match self.reading_text() {
             Some(_) => (self.o.screen_text).waiting(self.o.other_reading.is_some()),
             None => Vec::new(),
@@ -212,12 +212,12 @@ impl App {
     }
 
     /// Copy text's spinner's turn (0..1).
-    pub(in crate::ui) fn text_turn(&self) -> f32 {
+    pub(crate) fn text_turn(&self) -> f32 {
         self.o.text_spin.map_or(0.0, |(_, turn)| turn)
     }
 
     /// A frame at `now`: the spinner turns while the text is read.
-    pub(in crate::ui) fn tick_text(&mut self, now: Instant) {
+    pub(crate) fn tick_text(&mut self, now: Instant) {
         self.o.text_spin = match (self.reading_text().is_some(), self.o.text_spin) {
             (false, _) => None,
             (true, None) => Some((now, 0.0)),
@@ -230,7 +230,7 @@ impl App {
 
     /// Windows OCR reads this opening's text (#62): decided at its first read,
     /// until then what `ocr::route` says now.
-    pub(in crate::ui) fn system_text(&self) -> bool {
+    pub(crate) fn system_text(&self) -> bool {
         let route = || ocr::route(self.o.behaviour.text_reader, ocr::system::known());
         self.o.text_by.unwrap_or_else(route) == ocr::Source::System
     }
@@ -238,7 +238,7 @@ impl App {
     /// After the opening animation: Windows OCR reads the whole screen (#62)
     /// if it didn't start at the capture, or the held helper starts and loads its models (gently), so the first
     /// text read is quick. Nothing during it.
-    pub(in crate::ui) fn warm(&mut self) -> Task<Message> {
+    pub(crate) fn warm(&mut self) -> Task<Message> {
         if !self.reads_text() {
             return Task::none();
         }
@@ -268,7 +268,7 @@ impl App {
     /// read: where the user touches text (a press, a drag going on into
     /// unread rows, a tap, a Shift+click) first; then, once text was used
     /// (or Ctrl+A waits), the rest, nearest the pointer first.
-    pub(in crate::ui) fn read_more(&mut self) -> Task<Message> {
+    pub(crate) fn read_more(&mut self) -> Task<Message> {
         if self.o.reading.is_some() || !self.reads_text() {
             return Task::none();
         }
@@ -309,7 +309,7 @@ impl App {
     /// OCR reads `band` (image px) of the frame on a thread: at once where the
     /// user waits for it, else gently (the helper on at most two cores, below
     /// normal priority).
-    pub(in crate::ui) fn read_band(&mut self, band: Rectangle, gently: bool) -> Task<Message> {
+    pub(crate) fn read_band(&mut self, band: Rectangle, gently: bool) -> Task<Message> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -431,7 +431,7 @@ impl App {
     /// recognizers are on disk), gently, band by band from the pointer out
     /// (#169: they become selectable as they are read), once per opening
     /// (owner, 2026-10-30). Nothing without such a recognizer.
-    pub(in crate::ui) fn read_other_scripts(&mut self) -> Task<Message> {
+    pub(crate) fn read_other_scripts(&mut self) -> Task<Message> {
         if self.o.other_read
             || self.o.other_reading.is_some()
             || self.o.text_by != Some(ocr::Source::System)
@@ -541,7 +541,7 @@ impl App {
 
     /// The held release (and the events after it) go on, now that the band
     /// under the press is read (or failed): a text selection or a stroke.
-    pub(in crate::ui) fn release_held(&mut self) -> Task<Message> {
+    pub(crate) fn release_held(&mut self) -> Task<Message> {
         let Some(events) = self.o.held.take() else {
             return Task::none();
         };
@@ -554,7 +554,7 @@ impl App {
     /// lines (a drag can go on into them), a press that began on text becomes
     /// a text selection, and a tap, Shift+click or Ctrl+A waiting for it is
     /// done.
-    pub(in crate::ui) fn more_text(&mut self) -> Task<Message> {
+    pub(crate) fn more_text(&mut self) -> Task<Message> {
         let (all, lines) = (self.o.desk(), self.all_lines());
         let o = &mut *self.o;
         if let Some(word) = &mut o.word {
@@ -599,7 +599,7 @@ impl App {
     }
 
     /// The whole frozen frame (Ask before a selection).
-    pub(in crate::ui) fn whole(&self) -> Option<Crop> {
+    pub(crate) fn whole(&self) -> Option<Crop> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -616,7 +616,7 @@ impl App {
     /// The picked words stretch to `at` (image px), where a drag ended or a Shift
     /// click landed. Past the lines already read, OCR reads a band across the
     /// screen first (on a thread, through the warm helper).
-    pub(in crate::ui) fn extend_words(&mut self, at: Point) -> Task<Message> {
+    pub(crate) fn extend_words(&mut self, at: Point) -> Task<Message> {
         if self.o.word.is_some() && self.reads_text() && !self.text_known(at) {
             self.o.awaits = Some((at, Await::Extend));
             return self.read_more();
@@ -638,7 +638,7 @@ impl App {
     /// Reads the text in `region` (image px) on a thread, for the tap or drag
     /// end at `at`; the answer comes back as `Tapped`. Without the OCR models
     /// nothing happens (it never asks to download them).
-    pub(in crate::ui) fn read_words(
+    pub(crate) fn read_words(
         &mut self,
         region: Rectangle,
         at: Point,
@@ -679,7 +679,7 @@ impl App {
 
     /// OCR for tap or drag `what` is back: the word under the tap is the
     /// selection, or the picked words stretch to where the drag ended.
-    pub(in crate::ui) fn on_tapped(
+    pub(crate) fn on_tapped(
         &mut self,
         what: WordRead,
         read: Result<Vec<TextBlock>, String>,
@@ -724,7 +724,7 @@ impl App {
     /// The selected text as the (only) selection: a flat highlight per line
     /// (the stroke holds a top-left / bottom-right pair for each). Nothing
     /// selected yet (a caret): no selection.
-    pub(in crate::ui) fn select_word(&mut self) {
+    pub(crate) fn select_word(&mut self) {
         let o = &mut *self.o;
         o.others.clear();
         o.selection = None;
@@ -741,14 +741,14 @@ impl App {
     }
 
     /// Words picked in a snapped box (select-text mode), not still being dragged.
-    pub(in crate::ui) fn picked_in_box(&self) -> bool {
+    pub(crate) fn picked_in_box(&self) -> bool {
         (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)
     }
 
     /// The "Select text" chip: OCR reads the box (the warm helper) and every
     /// word in it becomes pickable. Without the OCR models the download card
     /// asks before downloading them.
-    pub(in crate::ui) fn select_text(&mut self) -> Task<Message> {
+    pub(crate) fn select_text(&mut self) -> Task<Message> {
         if self.o.text_mode.take().is_some() {
             return Task::none(); // "Done"
         }
@@ -807,11 +807,7 @@ impl App {
 
     /// OCR read the box `area` for select-text mode (dropped if the selection
     /// moved on or the mode was left).
-    pub(in crate::ui) fn on_text_lines(
-        &mut self,
-        area: Rectangle,
-        read: Result<Vec<word::Line>, String>,
-    ) {
+    pub(crate) fn on_text_lines(&mut self, area: Rectangle, read: Result<Vec<word::Line>, String>) {
         let same = self.area() == area;
         let Some(mode) = self.o.text_mode.as_mut().filter(|_| same) else {
             return;
@@ -830,7 +826,7 @@ impl App {
 
     /// A press at `p` (image px) picks words: select-text mode is on, read, and
     /// `p` is in the box.
-    pub(in crate::ui) fn picks_text_at(&self, p: Point) -> bool {
+    pub(crate) fn picks_text_at(&self, p: Point) -> bool {
         self.o.text_mode.as_ref().is_some_and(|m| m.lines.is_some())
             && self.area().contains(p)
             && self.grab_at(p).is_none() // (a bracket or edge adjusts the box)
@@ -838,7 +834,7 @@ impl App {
 
     /// The select-text popup: Copy closes with the words copied; Translate and
     /// Search make the words' box the selection and translate it in place / search it.
-    pub(in crate::ui) fn on_picked(&mut self, act: PickAct) -> Task<Message> {
+    pub(crate) fn on_picked(&mut self, act: PickAct) -> Task<Message> {
         let picked = (self.o.text_mode.as_ref())
             .and_then(|m| m.picked.clone())
             .or_else(|| self.o.word.clone());
@@ -865,13 +861,13 @@ impl App {
     }
 
     /// Closes the overlay with `text` copied (the "Copied" pill).
-    pub(in crate::ui) fn copy_text(&mut self, text: String) -> Task<Message> {
+    pub(crate) fn copy_text(&mut self, text: String) -> Task<Message> {
         self.confirm_after(move || copy::text(text).map(|()| copy::COPIED_PILL.to_string()))
     }
 
     /// Select-text mode's box, read: all its text in reading order (`None`
     /// before it is read, or with no text in it).
-    pub(in crate::ui) fn box_text(&self) -> Option<String> {
+    pub(crate) fn box_text(&self) -> Option<String> {
         let lines = self.o.text_mode.as_ref()?.lines.as_ref()?;
         let text: Vec<&str> = (lines.iter().map(|l| l.text.trim()))
             .filter(|t| !t.is_empty())
@@ -880,7 +876,7 @@ impl App {
     }
 
     /// Picked words (a word selection, or select-text mode's picks): their text.
-    pub(in crate::ui) fn picked_text(&self) -> Option<String> {
+    pub(crate) fn picked_text(&self) -> Option<String> {
         let picked = (self.o.text_mode.as_ref()).and_then(|m| m.picked.as_ref());
         picked.or(self.o.word.as_ref()).map(word::Picked::text)
     }

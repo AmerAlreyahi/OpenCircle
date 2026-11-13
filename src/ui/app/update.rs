@@ -34,7 +34,7 @@ const STEP_ASIDE: f32 = 12.0;
 impl App {
     /// Every message, then the chat's own window brought in line with it
     /// (`sync_chat_window`).
-    pub(in crate::ui) fn update(&mut self, message: Message) -> Task<Message> {
+    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         Task::batch([task, self.sync_chat_window()])
     }
@@ -825,7 +825,7 @@ impl App {
 /// The messages that mean something while no overlay is open (a trigger, a
 /// capture's answer, the other windows, live translate, the hide steps, a
 /// Copy / Save pill, a snip timer's shot); every other one needs the opening.
-pub(in crate::ui) fn works_closed(message: &Message) -> bool {
+pub(crate) fn works_closed(message: &Message) -> bool {
     #[cfg(target_os = "linux")]
     if matches!(message, Message::CaptureSlow(_)) {
         return true; // the overlay isn't open yet

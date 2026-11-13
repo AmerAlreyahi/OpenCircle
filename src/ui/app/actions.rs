@@ -24,7 +24,7 @@ use super::{App, Reader, TOAST_MARGIN};
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a
     /// thread; the result comes back as `Scanned` and is dropped if the selection moved on.
-    pub(in crate::ui) fn scan(&mut self, area: Rectangle) -> Task<Message> {
+    pub(crate) fn scan(&mut self, area: Rectangle) -> Task<Message> {
         let Some(crop) = self.crop() else {
             return Task::none();
         };
@@ -42,7 +42,7 @@ impl App {
     }
 
     /// The QR chip was clicked: copy its text, or open it (a link, on this click only).
-    pub(in crate::ui) fn on_qr(&mut self, act: qr::Act) -> Task<Message> {
+    pub(crate) fn on_qr(&mut self, act: qr::Act) -> Task<Message> {
         let Some(text) = self.o.scan.as_ref().and_then(|s| s.qr.clone()) else {
             return Task::none();
         };
@@ -69,10 +69,7 @@ impl App {
 
     /// The link / email chip beside the selection was clicked: open it in the
     /// user's browser or mail app (on this click only), then give them the screen.
-    pub(in crate::ui) fn open_entity(
-        &mut self,
-        entity: actions::entities::Entity,
-    ) -> Task<Message> {
+    pub(crate) fn open_entity(&mut self, entity: actions::entities::Entity) -> Task<Message> {
         use actions::entities::Kind;
         background(move |tx| {
             let opened = match entity.kind {
@@ -89,7 +86,7 @@ impl App {
     }
 
     /// The first link or email in the selected words' text (the chip's).
-    pub(in crate::ui) fn chip_entity(&self) -> Option<actions::entities::Entity> {
+    pub(crate) fn chip_entity(&self) -> Option<actions::entities::Entity> {
         use actions::entities::{Kind, find};
         let text = self.picked_text()?;
         find(&text).into_iter().find(|e| e.kind != Kind::Phone)
@@ -98,7 +95,7 @@ impl App {
     /// Search in browser on a text selection: the text, as a Google search in
     /// the user's own browser (the user picked it; no web view). Like Lens,
     /// the overlay closes.
-    pub(in crate::ui) fn search_text(&mut self, text: String) -> Task<Message> {
+    pub(crate) fn search_text(&mut self, text: String) -> Task<Message> {
         let text = text.trim();
         if text.is_empty() {
             return Task::none();
@@ -125,7 +122,7 @@ impl App {
     }
 
     /// The browser has the Lens page, or not.
-    pub(in crate::ui) fn on_search_opened(&mut self, opened: Result<(), String>) -> Task<Message> {
+    pub(crate) fn on_search_opened(&mut self, opened: Result<(), String>) -> Task<Message> {
         match opened {
             _ if self.o.frame.is_none() => Task::none(), // the overlay closed meanwhile
             Ok(()) => self.close(),
@@ -135,7 +132,7 @@ impl App {
 
     /// A pill of the bottom bar: Search in browser and Copy text act on the
     /// selection (dimmed without one); Translate on it, else the whole screen.
-    pub(in crate::ui) fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
+    pub(crate) fn on_pill(&mut self, pill: BarButton) -> Task<Message> {
         let picked = self.picked_in_box();
         match pill {
             BarButton::Search => self.run(&search_in_browser::ACTION),
@@ -153,7 +150,7 @@ impl App {
     /// Runs `action` on the selection: a finishing action closes the overlay first
     /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
     /// turns the bar into the editing toolbar. No selection yet = nothing to do.
-    pub(in crate::ui) fn run(&mut self, action: &'static Action) -> Task<Message> {
+    pub(crate) fn run(&mut self, action: &'static Action) -> Task<Message> {
         // Search in browser on picked words: their text, not a picture of them.
         if action.id == search_in_browser::ACTION.id
             && self.o.edit.is_none()
@@ -203,7 +200,7 @@ impl App {
     }
 
     /// Closes the overlay, then runs a finishing action (Copy, Save) on `crop`.
-    pub(in crate::ui) fn finish(&mut self, action: &Action, crop: Crop) -> Task<Message> {
+    pub(crate) fn finish(&mut self, action: &Action, crop: Crop) -> Task<Message> {
         let Run::Finish(finish) = action.run else {
             return Task::none();
         };
@@ -223,7 +220,7 @@ impl App {
     /// (encoding, the clipboard, a file) runs on a thread: the pill comes when
     /// it is done (#123). Wayland: the overlay stays until then and draws the
     /// pill itself (`toast_for`).
-    pub(in crate::ui) fn confirm_after(
+    pub(crate) fn confirm_after(
         &mut self,
         work: impl FnOnce() -> Result<String, String> + Send + 'static,
     ) -> Task<Message> {
@@ -241,7 +238,7 @@ impl App {
     /// Where the Copy / Save pill goes (`pill_at`): beside the selection, else
     /// beside the bottom bar, on the screen holding most of it (#130), else at
     /// the starting screen's corner.
-    pub(in crate::ui) fn pill_place(&self) -> PillPlace {
+    pub(crate) fn pill_place(&self) -> PillPlace {
         let selected = self.o.selection.as_ref().map(|s| s.area);
         let bar = (self.bottom_bar_shown() && self.o.edit.is_none())
             .then(|| Rectangle::new(self.bar_at(), self.dock_size()));
@@ -271,7 +268,7 @@ impl App {
 
     /// The Copy / Save pill for an overlay at `place` (origin, size, scale,
     /// what it goes beside).
-    pub(in crate::ui) fn toast_for(
+    pub(crate) fn toast_for(
         &mut self,
         place: PillPlace,
         result: Result<String, String>,
@@ -317,7 +314,7 @@ impl App {
 
     /// Runs a quick action on the selection (no action bar). Only once: a new
     /// selection after it gets the bar.
-    pub(in crate::ui) fn run_quick(&mut self, quick: Quick) -> Task<Message> {
+    pub(crate) fn run_quick(&mut self, quick: Quick) -> Task<Message> {
         self.o.purpose = Purpose::Search;
         match quick {
             Quick::Action(action) => self.run(action),
@@ -356,7 +353,7 @@ impl App {
 
     /// The music button: song search with a key (`has_key`); without one its
     /// setup (Settings > Song search), and nothing is recorded.
-    pub(in crate::ui) fn song(&mut self, has_key: bool) -> Task<Message> {
+    pub(crate) fn song(&mut self, has_key: bool) -> Task<Message> {
         if has_key {
             return self.start_song();
         }
@@ -371,7 +368,7 @@ impl App {
     }
 
     /// Song search: listens on a thread; its pill, then its card, over the overlay.
-    pub(in crate::ui) fn start_song(&mut self) -> Task<Message> {
+    pub(crate) fn start_song(&mut self) -> Task<Message> {
         self.songs = self.songs.wrapping_add(1);
         let id = self.songs;
         // The song's card takes the result card's turn: one card at a time.
@@ -381,7 +378,7 @@ impl App {
         work.map(move |msg| Message::Song(id, msg))
     }
 
-    pub(in crate::ui) fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
+    pub(crate) fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
         let Some((current, session)) = &mut self.o.song else {
             return Task::none();
         };
@@ -409,12 +406,12 @@ impl App {
     }
 
     /// The music button shows only once a key is known to be saved.
-    pub(in crate::ui) fn has_song_key(&self) -> bool {
+    pub(crate) fn has_song_key(&self) -> bool {
         crate::music::key_known() == Some(true)
     }
 
     /// First open: ask the keyring (off the UI thread) whether a song key is saved.
-    pub(in crate::ui) fn check_song_key(&self) -> Task<Message> {
+    pub(crate) fn check_song_key(&self) -> Task<Message> {
         if crate::music::key_known().is_some() || cfg!(test) {
             return Task::none();
         }
@@ -426,7 +423,7 @@ impl App {
 
     /// Translate in place: the selection (or, with no selection left, the whole
     /// frame) is translated on a thread, then swapped in.
-    pub(in crate::ui) fn start_translate(&mut self) -> Task<Message> {
+    pub(crate) fn start_translate(&mut self) -> Task<Message> {
         let frame = self.o.frame.clone();
         let (Some(frame @ image::Handle::Rgba { width, height, .. }), Some(selection)) =
             (&frame, self.o.selection)
@@ -460,7 +457,7 @@ impl App {
         task.map(move |msg| Message::Translate(id, msg))
     }
 
-    pub(in crate::ui) fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
+    pub(crate) fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
         let Some((_, session)) = self.o.translate.as_mut().filter(|(open, _)| *open == id) else {
             return Task::none();
         };
@@ -517,7 +514,7 @@ impl App {
     }
 
     /// Ctrl+Shift+L (or the tray): live translate on, or off again.
-    pub(in crate::ui) fn toggle_live(&mut self, at: Instant) -> Task<Message> {
+    pub(crate) fn toggle_live(&mut self, at: Instant) -> Task<Message> {
         if let Some(live) = self.live.take() {
             crate::log!("[opencircle] live translate off");
             return live.stop().map(Message::Live);
@@ -533,7 +530,7 @@ impl App {
         task.map(Message::Live)
     }
 
-    pub(in crate::ui) fn on_live(&mut self, msg: live_layer::Msg) -> Task<Message> {
+    pub(crate) fn on_live(&mut self, msg: live_layer::Msg) -> Task<Message> {
         let Some(live) = &mut self.live else {
             return Task::none();
         };
@@ -552,7 +549,7 @@ impl App {
     }
 
     /// The one-shot full-screen translate (Ctrl+Shift+T).
-    pub(in crate::ui) fn translate_once(&mut self, at: Instant) -> Task<Message> {
+    pub(crate) fn translate_once(&mut self, at: Instant) -> Task<Message> {
         let once = QuickAction {
             action: actions::translate::ACTION.id.into(),
             shortcut: String::new(),
@@ -569,7 +566,7 @@ impl App {
 /// above it, kept `TOAST_MARGIN` inside the screen; nothing to go beside:
 /// bottom right. In physical desktop px, so it lands there at any scale and
 /// on any monitor (#149).
-pub(in crate::ui) fn pill_at(
+pub(crate) fn pill_at(
     (origin, screen, scale, near): PillPlace,
     size: Size,
     inset: f32,

@@ -3,7 +3,7 @@
 //! (`previews`, one list).
 mod model_list;
 mod pages;
-pub(in crate::ui) mod previews;
+pub(crate) mod previews;
 mod state;
 #[cfg(test)]
 pub(crate) mod tests;

@@ -24,7 +24,7 @@ const UPDATING_FOR: Duration = Duration::from_millis(1200);
 
 impl App {
     /// From the update thread.
-    pub(in crate::ui) fn on_update(&mut self, event: Event) -> Task<Message> {
+    pub(crate) fn on_update(&mut self, event: Event) -> Task<Message> {
         let waiting = match event {
             Event::Status(status) => {
                 return self
@@ -63,7 +63,7 @@ impl App {
 
     /// Nothing of OpenCircle is in use: no overlay (editor, snip, panel), capture,
     /// live translate, Settings, onboarding or pinned image.
-    pub(in crate::ui) fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         self.o.is_none()
             && self.chat.is_none()
             && self.capturing.is_none()
@@ -75,7 +75,7 @@ impl App {
     /// The update clock: the pills wait while the user is away and fade on time;
     /// a swap install restarts into its update once the session has been locked
     /// a minute with nothing open.
-    pub(in crate::ui) fn update_tick(&mut self) -> Task<Message> {
+    pub(crate) fn update_tick(&mut self) -> Task<Message> {
         let now = Instant::now();
         let locked = crate::sys::session::locked();
         let away = crate::update::away(locked, crate::sys::session::idle_for());
@@ -137,7 +137,7 @@ impl App {
     /// Quit: a swap install's update is in place already (`update::prepare`), so
     /// it is what starts next; a setup's waits for Restart now (never a prompt
     /// at quit). Says which in the log.
-    pub(in crate::ui) fn on_quit(&self) {
+    pub(crate) fn on_quit(&self) {
         let Some(w) = &self.update else { return };
         let at_quit = (w.staged.as_ref())
             .is_some_and(|s| crate::update::installs_at(&s.install, Moment::Quit));
@@ -167,7 +167,7 @@ impl App {
     }
 
     /// A pill's button.
-    pub(in crate::ui) fn on_update_pill(&mut self, msg: update_pill::Msg) -> Task<Message> {
+    pub(crate) fn on_update_pill(&mut self, msg: update_pill::Msg) -> Task<Message> {
         match msg {
             update_pill::Msg::Later => {
                 if let Some(w) = &mut self.update {
@@ -194,7 +194,7 @@ impl App {
     /// and this process exits into the new version; a setup's copy asks Windows
     /// once (declined: nothing changes, it can be asked again). "Get it": the
     /// release page.
-    pub(in crate::ui) fn restart_to_update(&mut self) -> Task<Message> {
+    pub(crate) fn restart_to_update(&mut self) -> Task<Message> {
         let Some(w) = &mut self.update else {
             return Task::none();
         };
@@ -222,7 +222,7 @@ impl App {
     /// This process started with an update: after Restart now, the Updating
     /// pill a moment longer, then What's new; after a quiet install (a quit, a
     /// lock, a reboot) its "Updated" pill once, when the user is there.
-    pub(in crate::ui) fn on_installed(&mut self, installed: Installed) -> Task<Message> {
+    pub(crate) fn on_installed(&mut self, installed: Installed) -> Task<Message> {
         if installed.quiet {
             self.updated = Some((Default::default(), installed));
             return self.start_ticks();

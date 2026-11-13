@@ -12,7 +12,7 @@ use crate::ui::kit::tokens::{size, space};
 use crate::ui::kit::{field, grip};
 
 /// Between a bar or chip and the selection, and the minimum distance to screen edges.
-pub(in crate::ui) const GAP: f32 = 16.0;
+pub(crate) const GAP: f32 = 16.0;
 
 /// The bar (the design's search bar, solid): its gap to the work area's edges
 /// (above the taskbar), its top spot's distance from the top (clear of the
@@ -21,32 +21,32 @@ pub(in crate::ui) const GAP: f32 = 16.0;
 /// field's width with the focus ring, its three pills' widths (Search in
 /// browser, Copy text, Translate: fixed, so the bar never changes size), and
 /// a pill's width with its icon alone (narrow screens).
-pub(in crate::ui) const BOTTOM_GAP: f32 = 28.0;
-pub(in crate::ui) const TOP: f32 = 84.0;
-pub(in crate::ui) const PAD: f32 = space::BAR_PAD + 1.0;
-pub(in crate::ui) const SPACING: f32 = space::GAP;
-pub(in crate::ui) const PILL_GAP: f32 = 4.0;
-pub(in crate::ui) const HANDLE: f32 = grip::SIZE.width;
-pub(in crate::ui) const FIELD: f32 = 270.0 + 2.0 * field::RING;
+pub(crate) const BOTTOM_GAP: f32 = 28.0;
+pub(crate) const TOP: f32 = 84.0;
+pub(crate) const PAD: f32 = space::BAR_PAD + 1.0;
+pub(crate) const SPACING: f32 = space::GAP;
+pub(crate) const PILL_GAP: f32 = 4.0;
+pub(crate) const HANDLE: f32 = grip::SIZE.width;
+pub(crate) const FIELD: f32 = 270.0 + 2.0 * field::RING;
 const MIN_FIELD: f32 = 160.0;
-pub(in crate::ui) const PILLS: [f32; 3] = [132.0, 88.0, 88.0];
-pub(in crate::ui) const ICON_PILL: f32 = 36.0;
+pub(crate) const PILLS: [f32; 3] = [132.0, 88.0, 88.0];
+pub(crate) const ICON_PILL: f32 = 36.0;
 /// The round lab buttons after the pills.
-pub(in crate::ui) const BUBBLE: f32 = size::ICON_BUTTON;
+pub(crate) const BUBBLE: f32 = size::ICON_BUTTON;
 /// The thin line between the field, the pills and the icon buttons (16 px
 /// tall), and the room it takes (2 px either side).
-pub(in crate::ui) const DIVIDER_H: f32 = 16.0;
-pub(in crate::ui) const DIVIDER: f32 = 5.0;
+pub(crate) const DIVIDER_H: f32 = 16.0;
+pub(crate) const DIVIDER: f32 = 5.0;
 /// The bar's height: its tallest control (the icon buttons) and its padding.
-pub(in crate::ui) const HEIGHT: f32 = BUBBLE + 2.0 * PAD;
+pub(crate) const HEIGHT: f32 = BUBBLE + 2.0 * PAD;
 /// The QR code chip: as tall as the bar; its padding across and the space
 /// between its parts; the longest QR text it shows, in characters.
-pub(in crate::ui) const QR_PAD: f32 = 14.0;
-pub(in crate::ui) const QR_GAP: f32 = 10.0;
-pub(in crate::ui) const QR_SHOWN: usize = 36;
+pub(crate) const QR_PAD: f32 = 14.0;
+pub(crate) const QR_GAP: f32 = 10.0;
+pub(crate) const QR_SHOWN: usize = 36;
 
 /// The room the field's text has, `field` wide (its slots and ring aside).
-pub(in crate::ui) fn text_room(field: f32) -> f32 {
+pub(crate) fn text_room(field: f32) -> f32 {
     field - 2.0 * field::RING - field::SLOTS_LEFT - field::SLOTS_RIGHT
 }
 
@@ -92,7 +92,7 @@ pub fn tab(stops: &[Stop], at: Option<Stop>, back: bool) -> Option<Stop> {
 }
 
 /// A shortcut as a tooltip shows it, e.g. "Ctrl+C".
-pub(in crate::ui) fn key_hint(key: Key) -> String {
+pub(crate) fn key_hint(key: Key) -> String {
     let letter = key.letter.to_ascii_uppercase();
     if key.ctrl {
         format!("Ctrl+{letter}")
@@ -114,7 +114,7 @@ fn fixed(pills: [f32; 3], bubbles: f32) -> f32 {
 /// The pills' widths on a screen `width` wide: labelled (`PILLS`), or icons
 /// only (`ICON_PILL` each) where the labelled bar would not fit (the design
 /// hides their labels on narrow screens).
-pub(in crate::ui) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
+pub(crate) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
     match fixed(PILLS, bubbles) + MIN_FIELD <= width - 2.0 * GAP {
         true => PILLS,
         false => [ICON_PILL; 3],
@@ -125,20 +125,20 @@ pub(in crate::ui) fn pill_widths(width: f32, bubbles: f32) -> [f32; 3] {
 /// wide, with the three pills (`pill_widths`) and `bubbles` round buttons
 /// after them: the field gives up width on a narrow screen, then the pills
 /// their labels; the buttons never shrink.
-pub(in crate::ui) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
+pub(crate) fn bottom_size(width: f32, bubbles: f32) -> (f32, Size) {
     let fixed = fixed(pill_widths(width, bubbles), bubbles);
     let field = (width - 2.0 * GAP - fixed).clamp(MIN_FIELD, FIELD);
     (field, Size::new(fixed + field, HEIGHT))
 }
 
 /// How long a held bar takes to catch up with the pointer (95 % of the way).
-pub(in crate::ui) const FOLLOW: std::time::Duration = std::time::Duration::from_millis(50);
+pub(crate) const FOLLOW: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// A held bar drawn at `at`, `since` the last frame, eased toward `to` (where
 /// the pointer holds it): critically damped, no overshoot, by the time passed
 /// (a late frame catches up more), so uneven mouse events still draw an even
 /// glide; within half a pixel it is there.
-pub(in crate::ui) fn follow(at: Point, to: Point, since: std::time::Duration) -> Point {
+pub(crate) fn follow(at: Point, to: Point, since: std::time::Duration) -> Point {
     // 95 % in FOLLOW: e^-3 = 5 %
     let left = (-3.0 * since.as_secs_f32() / FOLLOW.as_secs_f32()).exp();
     let p = to + (at - to) * left;
@@ -149,7 +149,7 @@ pub(in crate::ui) fn follow(at: Point, to: Point, since: std::time::Duration) ->
 }
 
 /// Every spot the bar docks at.
-pub(in crate::ui) const ANCHORS: [BarAnchor; 6] = [
+pub(crate) const ANCHORS: [BarAnchor; 6] = [
     BarAnchor::Bottom,
     BarAnchor::Top,
     BarAnchor::BottomLeft,
@@ -160,7 +160,7 @@ pub(in crate::ui) const ANCHORS: [BarAnchor; 6] = [
 
 /// The bar's top-left at `anchor` on `screen` (`size`), inside the work area
 /// (`inset`: how much of the screen's bottom the taskbar takes).
-pub(in crate::ui) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32) -> Point {
+pub(crate) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inset: f32) -> Point {
     let bottom = screen.height - inset - BOTTOM_GAP - size.height;
     let centre = (screen.width - size.width) / 2.0;
     let (x, y) = match anchor {
@@ -175,7 +175,7 @@ pub(in crate::ui) fn anchor_at(anchor: BarAnchor, screen: Size, size: Size, inse
 }
 
 /// The anchor nearest to a bar let go at top-left `at`.
-pub(in crate::ui) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnchor {
+pub(crate) fn nearest(at: Point, screen: Size, size: Size, inset: f32) -> BarAnchor {
     let off = |a: BarAnchor| anchor_at(a, screen, size, inset).distance(at);
     let mut all = ANCHORS;
     all.sort_by(|a, b| off(*a).total_cmp(&off(*b)));
@@ -184,7 +184,7 @@ pub(in crate::ui) fn nearest(at: Point, screen: Size, size: Size, inset: f32) ->
 
 /// Where the bar goes: `chosen`, unless it would cover something `blocked`
 /// (the selection): then the free anchor nearest to it; none free, `chosen`.
-pub(in crate::ui) fn free(
+pub(crate) fn free(
     chosen: BarAnchor,
     blocked: &[Rectangle],
     screen: Size,
@@ -205,7 +205,7 @@ pub(in crate::ui) fn free(
 /// Which of `screens` (work areas) Snip's toolbar docks on for the live area
 /// `area`: the one holding the larger part of it (design state 8), the first
 /// on a tie or when it is on none.
-pub(in crate::ui) fn dock_screen(area: Rectangle, screens: &[Rectangle]) -> usize {
+pub(crate) fn dock_screen(area: Rectangle, screens: &[Rectangle]) -> usize {
     let part = |s: &Rectangle| area.intersection(s).map_or(0.0, |r| r.width * r.height);
     (screens.iter().enumerate())
         .fold((0, 0.0), |(best, most), (i, s)| match part(s) {
@@ -221,7 +221,7 @@ pub(in crate::ui) fn dock_screen(area: Rectangle, screens: &[Rectangle]) -> usiz
 /// holds the larger part of the area (`dock_screen`); never off that screen,
 /// and never over `avoid` (the handle being dragged) nor `keep_off` (the
 /// translate pill, which never moves) while another spot is free.
-pub(in crate::ui) fn dock(
+pub(crate) fn dock(
     area: Rectangle,
     bar: Size,
     screens: &[Rectangle],

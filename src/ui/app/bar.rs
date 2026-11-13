@@ -23,7 +23,7 @@ impl App {
     /// and selecting; a translation, the song card or a toast take its place.
     /// The AI chat sits beside it (`bar_room`): Translate and Copy text stay
     /// reachable while it is open (#170).
-    pub(in crate::ui) fn bottom_bar_shown(&self) -> bool {
+    pub(crate) fn bottom_bar_shown(&self) -> bool {
         matches!(self.o.purpose, Purpose::Search)
             && self.o.translate.is_none()
             && self.o.song.is_none()
@@ -33,12 +33,12 @@ impl App {
     /// The bottom bar's field width and size: the same in every state (no
     /// selection, a selection, after a card), so it never jumps.
     /// Beside a pinned chat, it fits what the chat leaves (a shorter field).
-    pub(in crate::ui) fn bar_size(&self) -> (f32, Size) {
+    pub(crate) fn bar_size(&self) -> (f32, Size) {
         self.bar_size_on(self.bar_room().width)
     }
 
     /// The bar's field width and size on a screen `width` wide.
-    pub(in crate::ui) fn bar_size_on(&self, width: f32) -> (f32, Size) {
+    pub(crate) fn bar_size_on(&self, width: f32) -> (f32, Size) {
         let icons = labs::bar(&self.o.labs)
             .iter()
             .filter(|b| !b.is_pill())
@@ -48,7 +48,7 @@ impl App {
 
     /// The size of what is docked at the bar's spot now: the bar, the editing
     /// toolbar, or the shape between them while one turns into the other.
-    pub(in crate::ui) fn dock_size(&self) -> Size {
+    pub(crate) fn dock_size(&self) -> Size {
         if let Some((_, _, size)) = self.snip_dock() {
             return size;
         }
@@ -66,14 +66,14 @@ impl App {
     }
 
     /// Where the bar is drawn now (top-left): on its way to `bar_target`.
-    pub(in crate::ui) fn bar_at(&self) -> Point {
+    pub(crate) fn bar_at(&self) -> Point {
         self.o.bar_now.unwrap_or_else(|| self.bar_target())
     }
 
     /// Where the bar (or the toolbar in its place) goes: following the pointer
     /// while held, else its spot, or the nearest free one while the selection
     /// (the editor's canvas) is where it would be.
-    pub(in crate::ui) fn bar_target(&self) -> Point {
+    pub(crate) fn bar_target(&self) -> Point {
         if let Some((_, at)) = self.o.bar_drag {
             // held whole on one screen (`bar_on`, set as it moves): never
             // across a bezel, where one window would cut it
@@ -121,7 +121,7 @@ impl App {
 
     /// Every screen's work area (the starting screen's px, the taskbar left
     /// out), the starting one first, with its scale against it (`Lens::k`).
-    pub(in crate::ui) fn work_areas(&self) -> Vec<(Rectangle, f32)> {
+    pub(crate) fn work_areas(&self) -> Vec<(Rectangle, f32)> {
         let start = self.o.place();
         let here = Size::new(
             self.o.screen.width,
@@ -143,7 +143,7 @@ impl App {
     /// area and the toolbar's size there, in the starting screen's px. The
     /// screen holding the larger part of the area (design state 8): it fits
     /// there whole, never across a bezel.
-    pub(in crate::ui) fn snip_dock(&self) -> Option<(Option<usize>, Rectangle, Size)> {
+    pub(crate) fn snip_dock(&self) -> Option<(Option<usize>, Rectangle, Size)> {
         let edit = self.o.edit.as_ref().filter(|e| e.annotator.movable)?;
         let works = self.work_areas();
         let rects: Vec<Rectangle> = works.iter().map(|(r, _)| *r).collect();
@@ -156,7 +156,7 @@ impl App {
 
     /// The window Snip's toolbar is drawn in: the screen its spot is on now
     /// (where it docked, or where it was left), else the starting one.
-    pub(in crate::ui) fn toolbar_on(&self) -> Option<iced::window::Id> {
+    pub(crate) fn toolbar_on(&self) -> Option<iced::window::Id> {
         self.o.edit.as_ref().filter(|e| e.annotator.movable)?;
         let at = self.bar_at();
         let start = self.o.place();
@@ -171,7 +171,7 @@ impl App {
     /// `bar_on`), the bar's size there, the taskbar's share of the room's
     /// bottom, and the room's width (logical px, the screen's own: the bar's
     /// field and pills are laid out for it, `bar_size_on`).
-    pub(in crate::ui) fn bar_spot(&self) -> (Rectangle, Size, f32, f32) {
+    pub(crate) fn bar_spot(&self) -> (Rectangle, Size, f32, f32) {
         match self.bar_other() {
             Some((work, k)) => (work, self.dock_size(), 0.0, work.width * k),
             None => {
@@ -190,7 +190,7 @@ impl App {
     }
 
     /// The window the bar is drawn in: the screen it is on now.
-    pub(in crate::ui) fn bar_window(&self) -> iced::window::Id {
+    pub(crate) fn bar_window(&self) -> iced::window::Id {
         let held = Rectangle::new(self.bar_at(), self.dock_size());
         let on = self.screen_holding(held).filter(|_| self.o.edit.is_none());
         self.window_of(on)
@@ -201,7 +201,7 @@ impl App {
     /// user drags across screens (the bar, the AI chat) finds the screen it is
     /// on, whole at its drop and drawn by that screen's window.
     /// Off every screen (held past the desktop's edge): the nearest one.
-    pub(in crate::ui) fn screen_holding(&self, r: Rectangle) -> Option<usize> {
+    pub(crate) fn screen_holding(&self, r: Rectangle) -> Option<usize> {
         let rects: Vec<Rectangle> = self.work_areas().iter().map(|(w, _)| *w).collect();
         let off = |w: &Rectangle| {
             let c = r.center();
@@ -225,18 +225,18 @@ impl App {
     /// while dragged. Only that screen's window draws it, so across a bezel it
     /// would be cut (or squeezed at the window's edge); it moves over whole
     /// once most of it is over.
-    pub(in crate::ui) fn screen_area(&self, on: Option<usize>) -> Rectangle {
+    pub(crate) fn screen_area(&self, on: Option<usize>) -> Rectangle {
         let all = self.screens_on();
         self.monitor_of(&all[on.map_or(0, |i| i + 1).min(all.len() - 1)])
     }
 
     /// The window of the screen `on` (`screen_holding`).
-    pub(in crate::ui) fn window_of(&self, on: Option<usize>) -> iced::window::Id {
+    pub(crate) fn window_of(&self, on: Option<usize>) -> iced::window::Id {
         (on.and_then(|i| self.o.screens.get(i))).map_or(self.overlay, |s| s.window)
     }
 
     /// A pointer position in `window`'s own px as the starting screen's px.
-    pub(in crate::ui) fn start_px(&self, window: iced::window::Id, p: Point) -> Point {
+    pub(crate) fn start_px(&self, window: iced::window::Id, p: Point) -> Point {
         // the chat's own window, moved under the pointer as it drags it: the
         // pointer on the desktop, never its px in a window still moving
         if let Some(placed) = (self.chat_win.as_ref())
@@ -264,7 +264,7 @@ impl App {
 
     /// The bar was let go at `at`: it docks to the nearest spot of the screen
     /// holding most of it, however many screens there are.
-    pub(in crate::ui) fn dock_bar(&mut self, at: Point) {
+    pub(crate) fn dock_bar(&mut self, at: Point) {
         self.o.bar_on = self.screen_holding(Rectangle::new(at, self.dock_size()));
         let (room, size, inset, _) = self.bar_spot();
         let at = at - Vector::new(room.x, room.y);
@@ -275,7 +275,7 @@ impl App {
     /// on the overlay or pinned) (it never covers the bar; centre = the middle of what it leaves),
     /// else the whole screen.
     // ponytail: a chat leaving no room for the shortest bar: the whole screen.
-    pub(in crate::ui) fn bar_room(&self) -> Rectangle {
+    pub(crate) fn bar_room(&self) -> Rectangle {
         let all = Rectangle::with_size(self.o.screen);
         let card = match (&self.o.ai_chat, &self.chat) {
             (Some(_), _) => self.chat_card_at(),
@@ -291,12 +291,12 @@ impl App {
     }
 
     /// The bar is on its way somewhere.
-    pub(in crate::ui) fn bar_gliding(&self) -> bool {
+    pub(crate) fn bar_gliding(&self) -> bool {
         self.o.frame.is_some() && self.o.bar_now.is_some_and(|at| at != self.bar_target())
     }
 
     /// The bar was dropped: its place is remembered (config `[bar]`).
-    pub(in crate::ui) fn remember_bar(&self) -> Task<Message> {
+    pub(crate) fn remember_bar(&self) -> Task<Message> {
         let anchor = self.o.bar_anchor;
         if cfg!(test) {
             let mut cfg = config::current();
@@ -313,14 +313,14 @@ impl App {
     }
 
     /// Something is selected for the bar's pills to act on.
-    pub(in crate::ui) fn selected_for_bar(&self) -> bool {
+    pub(crate) fn selected_for_bar(&self) -> bool {
         self.o.selection.is_some() && !self.settling()
     }
 
     /// What a bar button does (also what Enter / Space do on it once Tab
     /// focused it); none = dimmed: Search in browser and Copy text need a
     /// selection, Translate takes the whole screen without one.
-    pub(in crate::ui) fn bar_message(&self, which: BarButton) -> Option<Message> {
+    pub(crate) fn bar_message(&self, which: BarButton) -> Option<Message> {
         let selected = self.selected_for_bar();
         match which {
             BarButton::Search | BarButton::CopyText => selected.then_some(Message::Pill(which)),
@@ -334,7 +334,7 @@ impl App {
 
     /// Tab / Shift+Tab: the focus moves on through the bar (`bar::stops`).
     /// The AI field takes the text input's focus, any other stop lets go of it.
-    pub(in crate::ui) fn tab_bar(&mut self, back: bool) -> Task<Message> {
+    pub(crate) fn tab_bar(&mut self, back: bool) -> Task<Message> {
         let stops = bar::stops(self.selected_for_bar(), &labs::bar(&self.o.labs));
         self.o.bar_focus = bar::tab(&stops, self.o.bar_focus, back);
         match self.o.bar_focus {
@@ -344,7 +344,7 @@ impl App {
     }
 
     /// Enter / Space on the stop Tab focused.
-    pub(in crate::ui) fn activate(&mut self, stop: bar::Stop) -> Task<Message> {
+    pub(crate) fn activate(&mut self, stop: bar::Stop) -> Task<Message> {
         match stop {
             bar::Stop::Logo => self.update(Message::AskButton),
             bar::Stop::Include => self.update(Message::IncludeScreen),

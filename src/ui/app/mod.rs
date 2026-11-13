@@ -1,12 +1,12 @@
 //! The overlay's state and logic: its messages, the work off the UI thread, key
 //! focus, word picking and the quick actions. No widgets are built here.
 
-pub(in crate::ui) mod background;
-pub(in crate::ui) mod keys;
-pub(in crate::ui) mod message;
-pub(in crate::ui) mod opening;
-pub(in crate::ui) mod quick;
-pub(in crate::ui) mod word;
+pub(crate) mod background;
+pub(crate) mod keys;
+pub(crate) mod message;
+pub(crate) mod opening;
+pub(crate) mod quick;
+pub(crate) mod word;
 
 use crate::app_language::S;
 use std::cell::{Cell, RefCell};
@@ -28,37 +28,37 @@ use crate::ui::platform::monitor::can_hide_windows;
 use crate::ui::touch;
 use crate::ui::{live_layer, overlay, windows};
 
-pub(in crate::ui) mod actions;
-pub(in crate::ui) mod ai_chat;
-pub(in crate::ui) mod bar;
-pub(in crate::ui) mod capture;
-pub(in crate::ui) mod screens;
-pub(in crate::ui) mod selection;
-pub(in crate::ui) mod snip;
-pub(in crate::ui) mod snip_more;
-pub(in crate::ui) mod snip_toolbar;
+pub(crate) mod actions;
+pub(crate) mod ai_chat;
+pub(crate) mod bar;
+pub(crate) mod capture;
+pub(crate) mod screens;
+pub(crate) mod selection;
+pub(crate) mod snip;
+pub(crate) mod snip_more;
+pub(crate) mod snip_toolbar;
 #[cfg(test)]
-pub(in crate::ui) mod tests;
-pub(in crate::ui) mod text;
-pub(in crate::ui) mod tools;
-pub(in crate::ui) mod update;
-pub(in crate::ui) mod updates;
-pub(in crate::ui) mod view;
-pub(in crate::ui) mod zoom;
+pub(crate) mod tests;
+pub(crate) mod text;
+pub(crate) mod tools;
+pub(crate) mod update;
+pub(crate) mod updates;
+pub(crate) mod view;
+pub(crate) mod zoom;
 
 /// The hint over the screen as the overlay opens (the app's language).
-pub(in crate::ui) fn hint() -> &'static str {
+pub(crate) fn hint() -> &'static str {
     crate::t!(bar_hint)
 }
 
 /// Shown over a selection that came out black (DRM / protected windows).
-pub(in crate::ui) fn protected() -> &'static str {
+pub(crate) fn protected() -> &'static str {
     crate::t!(bar_protected)
 }
 
 /// The ask bar at the bottom of the overlay: its text field, width, and the
 /// height kept free for it (the action bar stays above it).
-pub(in crate::ui) const ASK_INPUT: &str = "overlay-ask";
+pub(crate) const ASK_INPUT: &str = "overlay-ask";
 
 /// The bottom bar (the new design's search bar, owner 2026-10-26: "circle, then
 /// choose"): grip, the AI field, the pills Search in browser · Copy text ·
@@ -69,60 +69,60 @@ pub(in crate::ui) const ASK_INPUT: &str = "overlay-ask";
 /// The field's placeholder, then shorter ones where the font or a narrow
 /// screen leaves the field too little room for it (#144): never cut off
 /// mid-word.
-pub(in crate::ui) fn ask_placeholders() -> [&'static str; 4] {
+pub(crate) fn ask_placeholders() -> [&'static str; 4] {
     use crate::t;
     [t!(bar_ask_1), t!(bar_ask_2), t!(bar_ask_3), t!(bar_ask_4)]
 }
 
 /// How long the bar takes to turn into the editing toolbar (and back),
 /// and to settle on a new spot after a drag (the design's drag release).
-pub(in crate::ui) const BAR_MORPH: Duration = motion::MORPH;
+pub(crate) const BAR_MORPH: Duration = motion::MORPH;
 
-pub(in crate::ui) const GLIDE: Duration = motion::DOCK;
+pub(crate) const GLIDE: Duration = motion::DOCK;
 
 /// A QR code's chip under a selection (its room; the chip is centred in it).
-pub(in crate::ui) const QR_WIDTH: f32 = 520.0;
+pub(crate) const QR_WIDTH: f32 = 520.0;
 /// The width the link / email chip is centred in.
-pub(in crate::ui) const LINK_WIDTH: f32 = 400.0;
+pub(crate) const LINK_WIDTH: f32 = 400.0;
 /// The "Select text" chip's room beside a snapped box (its chip is centred in it).
-pub(in crate::ui) const SELECT_WIDTH: f32 = 160.0;
+pub(crate) const SELECT_WIDTH: f32 = 160.0;
 
 /// The bottom bar's Live translate icon (lucide "radio").
-pub(in crate::ui) const LIVE: char = '\u{e145}';
+pub(crate) const LIVE: char = '\u{e145}';
 
-pub(in crate::ui) const ASK_MARGIN: f32 = 24.0;
+pub(crate) const ASK_MARGIN: f32 = 24.0;
 
 /// A capture still unanswered after this is given up (a Wayland portal may wait
 /// on a dialog; its late answer is dropped).
-pub(in crate::ui) const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const CAPTURE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Linux: a capture still unanswered after this waits on the desktop's own dialog
 /// (the portal asks for permission): the shell's overview, if it shows, is left so
 /// the dialog can be seen (#173). A silent capture takes 50-150 ms (ScreenCast).
 #[cfg(target_os = "linux")]
-pub(in crate::ui) const CAPTURE_SLOW: Duration = Duration::from_millis(1500);
+pub(crate) const CAPTURE_SLOW: Duration = Duration::from_millis(1500);
 
 /// Snip reads the controls (UI Automation) of this many topmost windows at
 /// once, of any other when the pointer first goes over it.
-pub(in crate::ui) const UIA_WINDOWS: usize = 4;
+pub(crate) const UIA_WINDOWS: usize = 4;
 
 /// How far (logical px) the hint and the bottom bar slide in as the overlay opens.
-pub(in crate::ui) const SLIDE: f32 = 80.0;
+pub(crate) const SLIDE: f32 = 80.0;
 
 /// Presses this close together are a double (triple) click.
 // (Windows' default; also forgiving when a busy machine delays the second press.)
-pub(in crate::ui) const DOUBLE_CLICK: Duration = Duration::from_millis(500);
+pub(crate) const DOUBLE_CLICK: Duration = Duration::from_millis(500);
 
 /// The text reader's helper starts this long after the opening animation.
-pub(in crate::ui) const WARM_AFTER: Duration = Duration::from_millis(400);
+pub(crate) const WARM_AFTER: Duration = Duration::from_millis(400);
 
 /// The overlay fades in at most this long after it was shown, its first
 /// full frame drawn or not (never left invisible over the screen).
-pub(in crate::ui) const REVEAL_WAIT: Duration = Duration::from_millis(400);
+pub(crate) const REVEAL_WAIT: Duration = Duration::from_millis(400);
 
 /// Select-text mode on a snapped box: its words (`None` while OCR reads them)
 /// and the ones picked by a press-drag over them.
-pub(in crate::ui) struct TextMode {
+pub(crate) struct TextMode {
     lines: Option<Vec<word::Line>>,
     boxes: Vec<Rectangle>,
     picked: Option<word::Picked>,
@@ -132,7 +132,7 @@ pub(in crate::ui) struct TextMode {
 /// The text reader (OCR) behind text selection in main mode, as the note over
 /// the bar tells it: without its models a press on text can only draw.
 #[derive(Debug, Clone, PartialEq)]
-pub(in crate::ui) enum Reader {
+pub(crate) enum Reader {
     /// Nothing to say: the screen's text is read (or nothing reads it).
     Idle,
     /// Its models aren't downloaded (this many bytes to go): the note offers
@@ -144,99 +144,99 @@ pub(in crate::ui) enum Reader {
     Failed(S),
 }
 
-pub(in crate::ui) const CHIP_SPACE: f32 = 12.0;
+pub(crate) const CHIP_SPACE: f32 = 12.0;
 
 /// Below this (logical px) the window counts as shrunk.
-pub(in crate::ui) const SHRUNK: f32 = 64.0;
+pub(crate) const SHRUNK: f32 = 64.0;
 
 /// Hide anyway after this many frames without the shrink (a WM may refuse it): a
 /// window left on top of the screen would be far worse than unshrunk buffers.
 // ponytail: fixed frame count, not a timer; frames come back to back while closing.
-pub(in crate::ui) const SHRINK_FRAMES: u8 = 10;
+pub(crate) const SHRINK_FRAMES: u8 = 10;
 
 /// The toast pill's gap to the screen's right edge and to the taskbar (design: 16).
-pub(in crate::ui) const TOAST_MARGIN: f32 = 16.0;
+pub(crate) const TOAST_MARGIN: f32 = 16.0;
 
-pub(in crate::ui) struct App {
+pub(crate) struct App {
     /// Everything one capture holds, while the overlay is open (`Open`);
     /// `close` drops it whole.
-    pub(in crate::ui) o: Open,
+    pub(crate) o: Open,
     /// What the capture on its way opens for (`Opening::purpose` at `open`).
-    pub(in crate::ui) next: Purpose,
+    pub(crate) next: Purpose,
     /// The overlay window's id; a closed window's while `overlay_open` is false.
-    pub(in crate::ui) overlay: window::Id,
+    pub(crate) overlay: window::Id,
     /// The overlay window exists: always where it is pre-created and hidden
     /// (`can_hide`), else only while it is shown.
-    pub(in crate::ui) overlay_open: bool,
+    pub(crate) overlay_open: bool,
     /// Linux: when the last opening's windows were closed (or hidden); the desktop
     /// still fades them out a moment, so a grab then waits (`grab_wait`).
-    pub(in crate::ui) overlay_gone: Option<Instant>,
+    pub(crate) overlay_gone: Option<Instant>,
     /// `can_hide_windows()`, read once at boot.
-    pub(in crate::ui) can_hide: bool,
+    pub(crate) can_hide: bool,
     /// The number of the capture running on its thread. Cleared by Esc or the
     /// timeout: that capture's late answer is then dropped.
-    pub(in crate::ui) capturing: Option<u32>,
+    pub(crate) capturing: Option<u32>,
     /// The overlay shows, unseen, for the snip being grabbed (`pre_show`).
-    pub(in crate::ui) pre_shown: bool,
+    pub(crate) pre_shown: bool,
     /// Captures started (numbers them).
-    pub(in crate::ui) captures: u32,
+    pub(crate) captures: u32,
     /// The latest word tap's number (a tap still reading is stale after it).
-    pub(in crate::ui) taps: u32,
+    pub(crate) taps: u32,
     /// When the overlay drew each frame since the last `log_frames` (the
     /// VM frame budget: the opening, a bar or card drag, the glide after).
-    pub(in crate::ui) frame_times: RefCell<Vec<Instant>>,
+    pub(crate) frame_times: RefCell<Vec<Instant>>,
     /// Bumped on every open (resets the overlay's pointer state).
-    pub(in crate::ui) opening: u32,
+    pub(crate) opening: u32,
     /// Trigger time + expected size of the full-screen frame not drawn yet (latency log).
-    pub(in crate::ui) first_draw: Cell<Option<(Instant, Size)>>,
-    pub(in crate::ui) hiding: Hiding,
+    pub(crate) first_draw: Cell<Option<(Instant, Size)>>,
+    pub(crate) hiding: Hiding,
     /// Result panels opened (numbers them).
-    pub(in crate::ui) panels: u32,
-    pub(in crate::ui) windows: windows::Windows,
+    pub(crate) panels: u32,
+    pub(crate) windows: windows::Windows,
     /// The last selection per monitor, for `last_region` (memory only).
-    pub(in crate::ui) regions: Vec<(Point, Rectangle)>,
+    pub(crate) regions: Vec<(Point, Rectangle)>,
     /// Translate sessions started (numbers them).
-    pub(in crate::ui) translates: u32,
+    pub(crate) translates: u32,
     /// Translations by text, shared by one-shot and live mode.
-    pub(in crate::ui) cache: Arc<Cache>,
+    pub(crate) cache: Arc<Cache>,
     /// Live translate, while on.
-    pub(in crate::ui) live: Option<live_layer::Live>,
+    pub(crate) live: Option<live_layer::Live>,
     /// The next snip capture is the one a timer waited for: no timer again.
-    pub(in crate::ui) timed: bool,
+    pub(crate) timed: bool,
     /// The next snip capture is the live pin quick action's (`Snip::live_pin`).
-    pub(in crate::ui) live_next: bool,
+    pub(crate) live_next: bool,
     /// The next snip opens this screen tool (its quick action).
-    pub(in crate::ui) tool_next: Option<crate::ui::screens::tools::Which>,
+    pub(crate) tool_next: Option<crate::ui::screens::tools::Which>,
     /// The next snip opens this image picked: a step of the Steps strip, to
     /// update it (its index), or a long capture finished on Wayland (none).
-    pub(in crate::ui) picked_next: Option<(Option<usize>, crate::actions::Crop)>,
+    pub(crate) picked_next: Option<(Option<usize>, crate::actions::Crop)>,
     /// Wayland: a long capture going on after its overlay went (the user
     /// scrolls the page itself, its pop-up beside the area): `App::cast_done`.
-    pub(in crate::ui) cast: Option<snip::Cast>,
+    pub(crate) cast: Option<snip::Cast>,
     /// The colours the picker copied, newest first (this run of the app only).
-    pub(in crate::ui) colours: Vec<[u8; 3]>,
+    pub(crate) colours: Vec<[u8; 3]>,
     /// Where the user moved / sized the result card (this run of the app).
-    pub(in crate::ui) card: Option<Rectangle>,
+    pub(crate) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
-    pub(in crate::ui) chat_side: Option<crate::ui::kit::panel_frame::Side>,
+    pub(crate) chat_side: Option<crate::ui::kit::panel_frame::Side>,
     /// The AI chat's width the user set by its inner edge (this run of the app).
-    pub(in crate::ui) chat_width: Option<f32>,
+    pub(crate) chat_width: Option<f32>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
-    pub(in crate::ui) chat: Option<ai_chat::Resident>,
+    pub(crate) chat: Option<ai_chat::Resident>,
     /// The AI chat's own window (`ai_chat::ChatWindow`).
-    pub(in crate::ui) chat_win: Option<ai_chat::ChatWindow>,
+    pub(crate) chat_win: Option<ai_chat::ChatWindow>,
     /// Song searches started (numbers them).
-    pub(in crate::ui) songs: u32,
+    pub(crate) songs: u32,
     /// The update waiting for a moment to install (`update::flow`), with its pill.
-    pub(in crate::ui) update: Option<Waiting>,
+    pub(crate) update: Option<Waiting>,
     /// After a quiet install (a quit, a lock): its "Updated" pill, once.
-    pub(in crate::ui) updated: Option<(crate::update::Pill, crate::update::Installed)>,
+    pub(crate) updated: Option<(crate::update::Pill, crate::update::Installed)>,
     /// The update clock runs (`Message::UpdateTick`).
-    pub(in crate::ui) update_ticks: bool,
+    pub(crate) update_ticks: bool,
 }
 
 /// An update waiting: what it is, how it installs, its pill, the lock watch.
-pub(in crate::ui) struct Waiting {
+pub(crate) struct Waiting {
     pub version: String,
     pub url: String,
     pub how: crate::update::How,
@@ -247,15 +247,15 @@ pub(in crate::ui) struct Waiting {
 }
 
 /// Translations kept for reuse (each a short text).
-pub(in crate::ui) const CACHE_SIZE: usize = 512;
+pub(crate) const CACHE_SIZE: usize = 512;
 
 /// The part of a `screen` above the taskbar (`inset` px of its bottom).
-pub(in crate::ui) fn work_area(screen: Size, inset: f32) -> Size {
+pub(crate) fn work_area(screen: Size, inset: f32) -> Size {
     Size::new(screen.width, screen.height - inset)
 }
 
 impl App {
-    pub(in crate::ui) fn boot() -> (Self, Task<Message>) {
+    pub(crate) fn boot() -> (Self, Task<Message>) {
         let can_hide = can_hide_windows();
         // Where windows can hide: created once, hidden, so a trigger only has to
         // show it (latency). Elsewhere `show` opens it on each use.
@@ -283,7 +283,7 @@ impl App {
     }
 
     /// Nothing open yet (the overlay window `overlay` pre-created, hidden).
-    pub(in crate::ui) fn idle(overlay: window::Id) -> App {
+    pub(crate) fn idle(overlay: window::Id) -> App {
         App {
             o: Open::default(),
             next: Purpose::Search,
@@ -323,7 +323,7 @@ impl App {
         }
     }
 
-    pub(in crate::ui) fn title(&self, window: window::Id) -> String {
+    pub(crate) fn title(&self, window: window::Id) -> String {
         if self.live.as_ref().and_then(live_layer::Live::window) == Some(window) {
             return crate::t!(win_t_live).into();
         }
@@ -338,7 +338,7 @@ impl App {
 
     /// The live layer's (and its controller's) see-through background; the rest
     /// follow the OS.
-    pub(in crate::ui) fn theme(&self, window: window::Id) -> Option<iced::Theme> {
+    pub(crate) fn theme(&self, window: window::Id) -> Option<iced::Theme> {
         if windows::is_floating(window) {
             return Some(windows::clear_theme());
         }
@@ -350,7 +350,7 @@ impl App {
 
     /// Something on the overlay moves by the clock (`Message::Frame` wanted):
     /// the opening, the bar turning or gliding, a card opening.
-    pub(in crate::ui) fn animating(&self) -> bool {
+    pub(crate) fn animating(&self) -> bool {
         self.o.appear.is_none()
             || self.o.reveal.is_some()
             || self.appearing()
@@ -372,13 +372,13 @@ impl App {
     /// The gaps between the overlay's frames since the last log, as `what`
     /// (the VM frame budget, #23: p95 <= 16 ms, none over 25 ms); then forgets
     /// them.
-    pub(in crate::ui) fn log_frames(&self, what: &str) {
+    pub(crate) fn log_frames(&self, what: &str) {
         log_gaps(what, &self.frame_times);
     }
 
     /// Logs `what` (a mark of reading the screen's text, "[opencircle] ...") with the time since
     /// the overlay's first frame: the VM's timings.
-    pub(in crate::ui) fn log_mark(&self, what: &str) {
+    pub(crate) fn log_mark(&self, what: &str) {
         match self.o.appear.map(|(at, _)| at.elapsed().as_millis()) {
             Some(ms) => crate::log!("{what} {ms} ms after the first frame"),
             None => crate::log!("{what} before the first frame"),
@@ -387,7 +387,7 @@ impl App {
 }
 
 /// The gaps between the frames in `times`, as `what`; then forgets them.
-pub(in crate::ui) fn log_gaps(what: &str, times: &RefCell<Vec<Instant>>) {
+pub(crate) fn log_gaps(what: &str, times: &RefCell<Vec<Instant>>) {
     let drawn = std::mem::take(&mut *times.borrow_mut());
     let mut gaps: Vec<u128> = (drawn.windows(2))
         .map(|w| (w[1] - w[0]).as_millis())
@@ -404,7 +404,7 @@ pub(in crate::ui) fn log_gaps(what: &str, times: &RefCell<Vec<Instant>>) {
 
 impl App {
     /// How far the opening animation is (0..1, eased out); 0 on its first frame.
-    pub(in crate::ui) fn appeared(&self) -> f32 {
+    pub(crate) fn appeared(&self) -> f32 {
         self.o
             .appear
             .map_or(0.0, |(_, t)| motion::Curve::Out.ease(t))
@@ -412,17 +412,17 @@ impl App {
 
     /// A drawn stroke is still morphing into its box: the selection's actions
     /// wait for it (draw, release, snap, then the user acts).
-    pub(in crate::ui) fn settling(&self) -> bool {
+    pub(crate) fn settling(&self) -> bool {
         (self.o.morph.as_ref())
             .is_some_and(|(_, at)| overlay::morph_progress(*at, Instant::now()) < 1.0)
     }
 
     /// The opening animation still runs (a frame drawn and more to come).
-    pub(in crate::ui) fn appearing(&self) -> bool {
+    pub(crate) fn appearing(&self) -> bool {
         self.o.frame.is_some() && self.appeared() < 1.0
     }
 
-    pub(in crate::ui) fn subscription(&self) -> Subscription<Message> {
+    pub(crate) fn subscription(&self) -> Subscription<Message> {
         // Live translate: where its controller was dragged.
         let moved = match self.live {
             Some(_) => iced::event::listen_with(|event, _, id| match event {

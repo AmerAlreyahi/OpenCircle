@@ -17,7 +17,7 @@ use super::App;
 use super::screens::keep_on;
 
 impl App {
-    pub(in crate::ui) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
+    pub(crate) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {
         if let overlay::Event::Alt(alt) = event {
             self.o.alt = alt;
             return Task::none();
@@ -479,7 +479,7 @@ impl App {
 
     /// The frame can be zoomed: Circle to Search and quick actions (Snip, the
     /// editor and a translation draw at 1x).
-    pub(in crate::ui) fn can_zoom(&self) -> bool {
+    pub(crate) fn can_zoom(&self) -> bool {
         matches!(self.o.purpose, Purpose::Search | Purpose::Quick(..))
             && self.o.edit.is_none()
             && self.o.translate.is_none()
@@ -487,7 +487,7 @@ impl App {
 
     /// The selection shows its handles (and can be resized / moved) while the
     /// action bar is there.
-    pub(in crate::ui) fn handles(&self) -> bool {
+    pub(crate) fn handles(&self) -> bool {
         let snapped = self
             .o
             .selection
@@ -501,7 +501,7 @@ impl App {
 
     /// A press at `p` (image px) on the selection: a corner or an edge resizes
     /// it; inside moves it, unless the press is on text (that selects text).
-    pub(in crate::ui) fn grab_at(&self, p: Point) -> Option<Grab> {
+    pub(crate) fn grab_at(&self, p: Point) -> Option<Grab> {
         // Selected text is not a box: a press on it starts a new selection.
         let sel = (self.o.selection).filter(|s| self.handles() && s.kind != overlay::Kind::Word)?;
         let on_screen = self.o.view.rect_to_screen(sel.area);
@@ -520,7 +520,7 @@ impl App {
     /// Resizes / moves the grabbed selection to the pointer at `p` (image px),
     /// never off the screen. A freehand loop scales with its box; anything
     /// else becomes that box.
-    pub(in crate::ui) fn drag_grab(&mut self, p: Point) {
+    pub(crate) fn drag_grab(&mut self, p: Point) {
         let o = &mut *self.o;
         let desk = o.desk();
         let Some(grab) = &mut o.grab else { return };
@@ -567,7 +567,7 @@ impl App {
 
     /// An arrow key on the box (`overlay::Event::Arrow`): 1 px (Shift: 10) on
     /// the overlay, kept on the screen and over the minimum size.
-    pub(in crate::ui) fn nudge(&mut self, dx: i8, dy: i8, resize: bool, big: bool) {
+    pub(crate) fn nudge(&mut self, dx: i8, dy: i8, resize: bool, big: bool) {
         let Some(sel) = self
             .o
             .selection
@@ -603,7 +603,7 @@ impl App {
     }
 
     /// The selection on the shown monitor, for `last_region`.
-    pub(in crate::ui) fn remember_region(&mut self) {
+    pub(crate) fn remember_region(&mut self) {
         if let Some(sel) = self.o.selection {
             self.regions.retain(|(origin, _)| *origin != self.o.origin);
             self.regions.push((self.o.origin, sel.area));
@@ -612,7 +612,7 @@ impl App {
 
     /// A selection was made (drawn, moved, a word tapped): remembered, and a
     /// quick action waiting for it runs. No selection: the stroke goes.
-    pub(in crate::ui) fn selected(&mut self) -> Task<Message> {
+    pub(crate) fn selected(&mut self) -> Task<Message> {
         if self.o.selection.is_none() {
             self.o.stroke.clear();
             return Task::none();
@@ -630,7 +630,7 @@ impl App {
     }
 
     /// Makes `area` the selection, drawn as a dragged rectangle.
-    pub(in crate::ui) fn select(&mut self, area: Rectangle) {
+    pub(crate) fn select(&mut self, area: Rectangle) {
         self.o.selection = Some(overlay::Selection {
             area,
             kind: overlay::Kind::Drag,
@@ -639,18 +639,18 @@ impl App {
     }
 
     /// A finished stroke snaps to a box (`[selection] style`; not in Snip).
-    pub(in crate::ui) fn snaps(&self) -> bool {
+    pub(crate) fn snaps(&self) -> bool {
         self.o.behaviour.style == SelectStyle::Snap
             && matches!(self.o.purpose, Purpose::Search | Purpose::Quick(..))
     }
 
     /// The selection's box (image px), or nothing.
-    pub(in crate::ui) fn area(&self) -> Rectangle {
+    pub(crate) fn area(&self) -> Rectangle {
         self.o.selection.map(|s| s.area).unwrap_or_default()
     }
 
     /// The previous selection on the shown monitor.
-    pub(in crate::ui) fn last_region(&self) -> Option<Rectangle> {
+    pub(crate) fn last_region(&self) -> Option<Rectangle> {
         let mine = self
             .regions
             .iter()

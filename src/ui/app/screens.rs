@@ -37,30 +37,30 @@ use crate::ui::{overlay, windows};
 use super::App;
 
 /// Another monitor's overlay while the overlay is open.
-pub(in crate::ui) struct Screen {
+pub(crate) struct Screen {
     /// Its overlay window.
-    pub(in crate::ui) window: window::Id,
+    pub(crate) window: window::Id,
     /// Where the monitor sits (physical desktop px) and its scale.
-    pub(in crate::ui) place: Place,
+    pub(crate) place: Place,
     /// Its frozen frame: what it shows (one image, `overlay::Frozen`) and what crops take.
-    pub(in crate::ui) frame: image::Handle,
+    pub(crate) frame: image::Handle,
     /// The starting screen's image px <-> this window's logical px.
-    pub(in crate::ui) view: overlay::View,
+    pub(crate) view: overlay::View,
     /// The taskbar's share of its bottom (its logical px): Snip's toolbar keeps off it.
-    pub(in crate::ui) inset: f32,
+    pub(crate) inset: f32,
     /// Its own draw log, so the starting screen's frame budget stays its own.
-    pub(in crate::ui) first_draw: Cell<Option<(Instant, Size)>>,
-    pub(in crate::ui) frame_times: RefCell<Vec<Instant>>,
+    pub(crate) first_draw: Cell<Option<(Instant, Size)>>,
+    pub(crate) frame_times: RefCell<Vec<Instant>>,
     /// Its text (Windows OCR, one read of its frame), in the starting screen's
     /// px, once `read`; `reading` while it is out.
-    pub(in crate::ui) lines: Vec<word::Line>,
-    pub(in crate::ui) read: bool,
-    pub(in crate::ui) reading: bool,
+    pub(crate) lines: Vec<word::Line>,
+    pub(crate) read: bool,
+    pub(crate) reading: bool,
 }
 
 impl Screen {
     /// The monitor at `place` with its `frame`, beside the starting screen `start`.
-    pub(in crate::ui) fn new(
+    pub(crate) fn new(
         window: window::Id,
         start: Place,
         place: Place,
@@ -91,7 +91,7 @@ impl Screen {
 /// widget pace (150 ms ease-in out, 210 ms expo-out in), from wherever each
 /// was; the frame clock runs only while a fade is on (`moving`).
 #[derive(Default)]
-pub(in crate::ui) struct Glow {
+pub(crate) struct Glow {
     /// Each screen that faded (the starting one: `None`), and how.
     fades: Vec<(Option<window::Id>, motion::Shown)>,
     /// The latest frame's time (`tick`); `None` until the first move.
@@ -100,12 +100,12 @@ pub(in crate::ui) struct Glow {
 
 impl Glow {
     /// The screen it is on (or going to).
-    pub(in crate::ui) fn here(&self) -> Option<window::Id> {
+    pub(crate) fn here(&self) -> Option<window::Id> {
         (self.fades.iter().find(|(_, s)| s.is_open())).and_then(|(w, _)| *w)
     }
 
     /// The pointer is on the screen `to` at `now`: the glow goes there.
-    pub(in crate::ui) fn move_to(&mut self, to: Option<window::Id>, now: Instant) {
+    pub(crate) fn move_to(&mut self, to: Option<window::Id>, now: Instant) {
         let from = self.here();
         if from == to {
             return;
@@ -126,20 +126,20 @@ impl Glow {
     }
 
     /// A frame at `now`.
-    pub(in crate::ui) fn tick(&mut self, now: Instant) {
+    pub(crate) fn tick(&mut self, now: Instant) {
         if self.now.is_some() {
             self.now = Some(now);
         }
     }
 
     /// A fade is on: frames wanted.
-    pub(in crate::ui) fn moving(&self) -> bool {
+    pub(crate) fn moving(&self) -> bool {
         self.now
             .is_some_and(|now| self.fades.iter().any(|(_, s)| s.moving(now)))
     }
 
     /// How strong the glow is on the screen `on` (0..1) at the latest frame.
-    pub(in crate::ui) fn at(&self, on: Option<window::Id>) -> f32 {
+    pub(crate) fn at(&self, on: Option<window::Id>) -> f32 {
         let fade = self.fades.iter().find(|(w, _)| *w == on);
         match (fade, self.now) {
             (Some((_, s)), Some(now)) => s.at(now),
@@ -150,7 +150,7 @@ impl Glow {
 }
 
 /// A point in the starting screen's image px (`start`) in desktop physical px.
-pub(in crate::ui) fn to_desktop(start: Place, u: Point) -> Point {
+pub(crate) fn to_desktop(start: Place, u: Point) -> Point {
     Point::new(
         start.origin.0 as f32 + u.x * start.scale,
         start.origin.1 as f32 + u.y * start.scale,
@@ -158,7 +158,7 @@ pub(in crate::ui) fn to_desktop(start: Place, u: Point) -> Point {
 }
 
 /// A desktop physical px point in the starting screen's image px.
-pub(in crate::ui) fn from_desktop(start: Place, d: Point) -> Point {
+pub(crate) fn from_desktop(start: Place, d: Point) -> Point {
     Point::new(
         (d.x - start.origin.0 as f32) / start.scale,
         (d.y - start.origin.1 as f32) / start.scale,
@@ -166,7 +166,7 @@ pub(in crate::ui) fn from_desktop(start: Place, d: Point) -> Point {
 }
 
 /// The monitor at `place` in the starting screen's image px.
-pub(in crate::ui) fn area_of(start: Place, place: Place) -> Rectangle {
+pub(crate) fn area_of(start: Place, place: Place) -> Rectangle {
     let at = from_desktop(
         start,
         Point::new(place.origin.0 as f32, place.origin.1 as f32),
@@ -180,13 +180,13 @@ pub(in crate::ui) fn area_of(start: Place, place: Place) -> Rectangle {
 /// How the window over the monitor at `place` shows the starting screen's
 /// image px: `u` at `u * start.scale / place.scale + (start - place origin) /
 /// place.scale` of its logical px, i.e. through the desktop px both share.
-pub(in crate::ui) fn view_of(start: Place, place: Place) -> overlay::View {
+pub(crate) fn view_of(start: Place, place: Place) -> overlay::View {
     let ScreenMap { k, at, .. } = screen_map_of(start, place);
     overlay::View::mapped(place.size(), k, at)
 }
 
 /// The same map for the editor drawn there (Snip's live area across screens).
-pub(in crate::ui) fn screen_map_of(start: Place, place: Place) -> ScreenMap {
+pub(crate) fn screen_map_of(start: Place, place: Place) -> ScreenMap {
     let k = start.scale / place.scale;
     let at = Vector::new(
         (start.origin.0 - place.origin.0) as f32 / place.scale,
@@ -201,7 +201,7 @@ pub(in crate::ui) fn screen_map_of(start: Place, place: Place) -> ScreenMap {
 
 /// How the lines of the monitor at `place` (its own logical px) go into the
 /// starting screen's px (`Line::mapped`): through the desktop px both share.
-pub(in crate::ui) fn into_model(start: Place, place: Place) -> (f32, Vector) {
+pub(crate) fn into_model(start: Place, place: Place) -> (f32, Vector) {
     let k = place.scale / start.scale;
     let at = Vector::new(
         (place.origin.0 - start.origin.0) as f32 / start.scale,
@@ -212,7 +212,7 @@ pub(in crate::ui) fn into_model(start: Place, place: Place) -> (f32, Vector) {
 
 impl Opening {
     /// The starting screen in physical desktop px.
-    pub(in crate::ui) fn place(&self) -> Place {
+    pub(crate) fn place(&self) -> Place {
         let px = |v: f32| (v * self.scale).round();
         Place {
             origin: (px(self.origin.x) as i32, px(self.origin.y) as i32),
@@ -223,7 +223,7 @@ impl Opening {
 
     /// Where a selection may go (image px): the starting screen, or the box
     /// round every screen (a stroke, box or text drag crosses between them).
-    pub(in crate::ui) fn desk(&self) -> Rectangle {
+    pub(crate) fn desk(&self) -> Rectangle {
         let start = self.place();
         (self.screens.iter()).fold(Rectangle::with_size(self.screen), |all, s| {
             all.union(&area_of(start, s.place))
@@ -236,28 +236,28 @@ impl Opening {
 /// the starting screen's px land on its logical px, and its work area (its
 /// logical px, the taskbar left out). The starting screen is one like any other.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::ui) struct On {
-    pub(in crate::ui) window: window::Id,
-    pub(in crate::ui) place: Place,
+pub(crate) struct On {
+    pub(crate) window: window::Id,
+    pub(crate) place: Place,
     /// `None`: the starting screen, whose px they are (exactly, no float map).
-    pub(in crate::ui) view: Option<overlay::View>,
-    pub(in crate::ui) work: Size,
+    pub(crate) view: Option<overlay::View>,
+    pub(crate) work: Size,
 }
 
 impl On {
     /// A rect in the starting screen's px on this screen (its logical px).
-    pub(in crate::ui) fn to_local(self, r: Rectangle) -> Rectangle {
+    pub(crate) fn to_local(self, r: Rectangle) -> Rectangle {
         self.view.map_or(r, |v| v.rect_to_screen(r))
     }
 
     /// A point of this screen (its logical px) in the starting screen's px.
-    pub(in crate::ui) fn to_start(self, p: Point) -> Point {
+    pub(crate) fn to_start(self, p: Point) -> Point {
         self.view.map_or(p, |v| v.to_image(p))
     }
 }
 
 /// `area` slid back inside `desk` (`overlay::keep_inside`, which keeps to a box at 0, 0).
-pub(in crate::ui) fn keep_on(desk: Rectangle, area: Rectangle) -> Rectangle {
+pub(crate) fn keep_on(desk: Rectangle, area: Rectangle) -> Rectangle {
     let at = Vector::new(desk.x, desk.y);
     overlay::keep_inside(area - at, desk.size()) + at
 }
@@ -266,7 +266,7 @@ pub(in crate::ui) fn keep_on(desk: Rectangle, area: Rectangle) -> Rectangle {
 /// frame of it shows while it closes). Their frames go with the opening.
 // ponytail: opened and closed per opening, no pool of hidden windows; add one
 // if opening the second screen's window ever shows as late.
-pub(in crate::ui) fn close_all<T: Send + 'static>(screens: &[Screen]) -> Task<T> {
+pub(crate) fn close_all<T: Send + 'static>(screens: &[Screen]) -> Task<T> {
     Task::batch(screens.iter().map(|s| {
         windows::clear_now(s.window);
         windows::forget(s.window);
@@ -276,7 +276,7 @@ pub(in crate::ui) fn close_all<T: Send + 'static>(screens: &[Screen]) -> Task<T>
 
 impl App {
     /// Every screen of this opening, the starting one first.
-    pub(in crate::ui) fn screens_on(&self) -> Vec<On> {
+    pub(crate) fn screens_on(&self) -> Vec<On> {
         let start = On {
             window: self.overlay,
             place: self.o.place(),
@@ -296,14 +296,14 @@ impl App {
     /// one on a tie: where a long capture of it runs and a pin of it floats
     /// (the toolbar's own rule, `bar::dock_screen`). An area across screens is
     /// taken on that one only (its part there), never across a bezel.
-    pub(in crate::ui) fn on_area(&self, area: Rectangle) -> On {
+    pub(crate) fn on_area(&self, area: Rectangle) -> On {
         let all = self.screens_on();
         let rects: Vec<Rectangle> = all.iter().map(|on| self.monitor_of(on)).collect();
         all[crate::ui::screens::bar::geometry::dock_screen(area, &rects)]
     }
 
     /// The monitor `on` in the starting screen's px.
-    pub(in crate::ui) fn monitor_of(&self, on: &On) -> Rectangle {
+    pub(crate) fn monitor_of(&self, on: &On) -> Rectangle {
         match on.view {
             None => Rectangle::with_size(self.o.screen),
             Some(_) => area_of(self.o.place(), on.place),
@@ -311,14 +311,14 @@ impl App {
     }
 
     /// The screen whose window is `window` (the starting one if none is).
-    pub(in crate::ui) fn on_window(&self, window: window::Id) -> On {
+    pub(crate) fn on_window(&self, window: window::Id) -> On {
         let all = self.screens_on();
         (all.iter().find(|on| on.window == window)).map_or(all[0], |on| *on)
     }
 
     /// `area` (image px) cut to the screen `on`: in its window's logical px,
     /// and in physical desktop px (its frame's own pixels).
-    pub(in crate::ui) fn region_on(
+    pub(crate) fn region_on(
         &self,
         on: On,
         area: Rectangle,
@@ -337,7 +337,7 @@ impl App {
     /// alone, as with one screen, unless it reaches another screen; then
     /// stitched from every frame it meets in desktop px (`actions::stitch`), at
     /// each screen's own pixels: one image whose text reads in order across.
-    pub(in crate::ui) fn crop_of(&self, area: Rectangle) -> Option<Crop> {
+    pub(crate) fn crop_of(&self, area: Rectangle) -> Option<Crop> {
         let Some(image::Handle::Rgba {
             width,
             height,
@@ -354,7 +354,7 @@ impl App {
     }
 
     /// `area` (image px) reaches another screen.
-    pub(in crate::ui) fn spans(&self, area: Rectangle) -> bool {
+    pub(crate) fn spans(&self, area: Rectangle) -> bool {
         let start = self.o.place();
         (self.o.screens.iter()).any(|s| {
             (area_of(start, s.place).intersection(&area)).is_some_and(|r| r.width * r.height > 0.0)
@@ -368,7 +368,7 @@ impl App {
     /// the document, as before).
     // ponytail: a copy of every frame while the editor is open (as one screen
     // copies its frame); share the frames if several 4K screens ever weigh.
-    pub(in crate::ui) fn desktop_live(&self, area: Rectangle) -> Option<SnipToolbar> {
+    pub(crate) fn desktop_live(&self, area: Rectangle) -> Option<SnipToolbar> {
         if self.o.screens.is_empty() {
             return None;
         }
@@ -415,7 +415,7 @@ impl App {
     /// `area` (image px, on a stitched crop) in desktop px: `[x0, y0, x1, y1]`, the
     /// edges rounded outwards, as `crop` does (past a mapping's float error), kept
     /// on the screens.
-    pub(in crate::ui) fn desk_bounds(&self, area: Rectangle) -> Option<[i32; 4]> {
+    pub(crate) fn desk_bounds(&self, area: Rectangle) -> Option<[i32; 4]> {
         let start = self.o.place();
         let desk = self.o.desk().intersection(&area)?;
         let a = to_desktop(start, desk.position());
@@ -428,7 +428,7 @@ impl App {
     }
 
     /// The desktop px (physical) of `crop_of(area)`'s top-left corner.
-    pub(in crate::ui) fn crop_origin(&self, area: Rectangle) -> Option<(i32, i32)> {
+    pub(crate) fn crop_origin(&self, area: Rectangle) -> Option<(i32, i32)> {
         let image::Handle::Rgba { width, height, .. } = self.o.frame.as_ref()? else {
             return None;
         };
@@ -453,7 +453,7 @@ impl App {
 
     /// Row or screen under `p` (image px) was read: its lines are known (or
     /// there are none).
-    pub(in crate::ui) fn text_known(&self, p: Point) -> bool {
+    pub(crate) fn text_known(&self, p: Point) -> bool {
         let start = self.o.place();
         let other = (self.o.screens.iter())
             .filter(|_| self.screens_text())
@@ -462,19 +462,19 @@ impl App {
     }
 
     /// Every screen's text was read.
-    pub(in crate::ui) fn text_whole(&self) -> bool {
+    pub(crate) fn text_whole(&self) -> bool {
         self.o.screen_text.is_whole(self.o.screen.height)
             && (!self.screens_text() || self.o.screens.iter().all(|s| s.read))
     }
 
     /// Every line read so far, whichever screen.
-    pub(in crate::ui) fn lines_iter(&self) -> impl Iterator<Item = &word::Line> {
+    pub(crate) fn lines_iter(&self) -> impl Iterator<Item = &word::Line> {
         let others = (self.o.screens.iter()).flat_map(|s| s.lines.iter());
         self.o.screen_text.iter().chain(others)
     }
 
     /// Each monitor's area (image px) while text is read on several, else none.
-    pub(in crate::ui) fn screen_areas(&self) -> Vec<Rectangle> {
+    pub(crate) fn screen_areas(&self) -> Vec<Rectangle> {
         if !self.screens_text() {
             return Vec::new();
         }
@@ -488,7 +488,7 @@ impl App {
     /// Every line read so far in reading order: screen by screen, left to
     /// right (then top to bottom), so a selection across a seam runs from the
     /// end of one screen's text into the start of the next's.
-    pub(in crate::ui) fn all_lines(&self) -> Vec<word::Line> {
+    pub(crate) fn all_lines(&self) -> Vec<word::Line> {
         if !self.screens_text() {
             return self.o.screen_text.lines();
         }
@@ -503,7 +503,7 @@ impl App {
     /// Windows OCR reads the next other screen not read yet, when the starting
     /// screen's own read is done and none is out: one read of its frame, in
     /// the starting screen's px.
-    pub(in crate::ui) fn read_screens(&mut self) -> Task<Message> {
+    pub(crate) fn read_screens(&mut self) -> Task<Message> {
         if !self.screens_text() || self.o.screens.iter().any(|s| s.reading) {
             return Task::none();
         }
@@ -555,7 +555,7 @@ impl App {
 
     /// Another screen's text is back (or failed: it is then read, with none):
     /// a text selection takes it in, and the next screen is read.
-    pub(in crate::ui) fn on_screen_lines(
+    pub(crate) fn on_screen_lines(
         &mut self,
         window: window::Id,
         read: Result<Vec<word::Line>, String>,
@@ -574,10 +574,7 @@ impl App {
 
     /// `overlay::settle` on the desk (`Opening::desk`): a scribble's hull is
     /// kept to the screens, not to the starting one.
-    pub(in crate::ui) fn settle_on_desk(
-        &self,
-        zoom: f32,
-    ) -> Option<(overlay::Selection, Vec<Point>)> {
+    pub(crate) fn settle_on_desk(&self, zoom: f32) -> Option<(overlay::Selection, Vec<Point>)> {
         let desk = self.o.desk();
         let at = Vector::new(desk.x, desk.y);
         let stroke: Vec<Point> = self.o.stroke.iter().map(|&p| p - at).collect();
@@ -594,7 +591,7 @@ impl App {
     /// late (closed, another capture's) or this opening is neither Circle to
     /// Search nor the Snip it turned into (the bar's Snip pressed before every
     /// frame was in: that screen is Snip's too).
-    pub(in crate::ui) fn add_screen(
+    pub(crate) fn add_screen(
         &mut self,
         n: u32,
         place: Place,
@@ -631,7 +628,7 @@ impl App {
     /// Every monitor this opening froze (image px), the starting one first:
     /// those shown and those still waiting for the opening to end. The one
     /// list every Snip entry picks on (`Snip::set_monitors`).
-    pub(in crate::ui) fn monitors(&self) -> Vec<Rectangle> {
+    pub(crate) fn monitors(&self) -> Vec<Rectangle> {
         let start = self.o.place();
         let others =
             (self.o.screens.iter().map(|s| s.place)).chain(self.o.waiting.iter().map(|(p, _)| *p));
@@ -641,7 +638,7 @@ impl App {
     }
 
     /// A press with other screens open: every screen's frame log starts over.
-    pub(in crate::ui) fn clear_screen_frames(&self) {
+    pub(crate) fn clear_screen_frames(&self) {
         if self.o.screens.is_empty() {
             return;
         }
@@ -652,7 +649,7 @@ impl App {
     }
 
     /// Its release: each screen's frames since the press.
-    pub(in crate::ui) fn log_screen_frames(&self) {
+    pub(crate) fn log_screen_frames(&self) {
         if self.o.screens.is_empty() {
             return;
         }
@@ -664,7 +661,7 @@ impl App {
     }
 
     /// The frames that waited for the opening (`add_screen`), shown now.
-    pub(in crate::ui) fn show_waiting(&mut self) -> Task<Message> {
+    pub(crate) fn show_waiting(&mut self) -> Task<Message> {
         let waiting = std::mem::take(&mut self.o.waiting);
         Task::batch(
             waiting
@@ -696,7 +693,7 @@ impl App {
     /// starting screen's px (where `on_overlay` takes them), so a stroke, box
     /// or text drag carries on across screens. Zoom and pan are the starting
     /// screen's own.
-    pub(in crate::ui) fn on_screen_event(
+    pub(crate) fn on_screen_event(
         &mut self,
         window: window::Id,
         event: overlay::Event,
@@ -740,7 +737,7 @@ impl App {
 
     /// The pointer came into `window` at `now`: the edge glow follows it there
     /// when it is one of this opening's screens (the bar stays put).
-    pub(in crate::ui) fn pointer_on(&mut self, window: window::Id, now: Instant) {
+    pub(crate) fn pointer_on(&mut self, window: window::Id, now: Instant) {
         if self.o.is_none() || !matches!(self.o.purpose, Purpose::Search) {
             return;
         }
@@ -756,7 +753,7 @@ impl App {
     /// selection is on it, and the edge glow while the mouse is there (still,
     /// like every edge). No bar, card, toast or hint:
     /// those stay on the starting screen.
-    pub(in crate::ui) fn screen_view<'a>(&'a self, screen: &'a Screen) -> Element<'a, Message> {
+    pub(crate) fn screen_view<'a>(&'a self, screen: &'a Screen) -> Element<'a, Message> {
         let snip = match &self.o.purpose {
             Purpose::Snip(snip) => Some(snip),
             _ => None,

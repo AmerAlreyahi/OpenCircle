@@ -21,7 +21,7 @@ use crate::ui::{long_capture_popup, snip, windows};
 use super::{ASK_MARGIN, App, work_area};
 
 impl App {
-    pub(in crate::ui) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
+    pub(crate) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
         // The timer ran out and the overlay is gone (hidden or closed): capture
         // again in that mode, unless something else opened meanwhile.
         if let snip::Msg::Shoot(kind) = msg {
@@ -182,7 +182,7 @@ impl App {
     /// Main mode's state (selections, words, cards) goes; the frame stays.
     /// With a translation on screen (every entry: the bar's E, Alt+A, tray),
     /// Snip takes the page as translated (`Session::seen`) as its frame.
-    pub(in crate::ui) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
+    pub(crate) fn snip_here(&mut self, picked: Option<Rectangle>) -> Task<Message> {
         // the windows as they were at the freeze (as Snip's own shortcut lists
         // them), not now: a late list drifts from the frozen frames
         let mut windows = std::mem::take(&mut self.o.windows);
@@ -232,12 +232,12 @@ impl App {
     }
 
     /// The window is only Snip's pill (scrolling, the timer).
-    pub(in crate::ui) fn snip_pill(&self) -> bool {
+    pub(crate) fn snip_pill(&self) -> bool {
         matches!(&self.o.purpose, Purpose::Snip(s) if s.is_pill())
     }
 
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
-    pub(in crate::ui) fn pill_at_top(&mut self) -> Task<Message> {
+    pub(crate) fn pill_at_top(&mut self) -> Task<Message> {
         let x = (self.o.screen.width - snip::PILL.width) / 2.0;
         self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
     }
@@ -248,7 +248,7 @@ impl App {
     /// Wayland can't move, shrink or hide a window (`can_hide_windows`): the
     /// overlay stays full-screen there and `view` draws the pill over the frame.
     /// The other screens' windows go (a pill leaves the screens to the user).
-    pub(in crate::ui) fn pill_window(&mut self, at: Point) -> Task<Message> {
+    pub(crate) fn pill_window(&mut self, at: Point) -> Task<Message> {
         if !self.can_hide {
             return Task::none();
         }
@@ -271,7 +271,7 @@ impl App {
     }
 
     /// `Shoot(kind)` after `wait` (the overlay is gone by then).
-    pub(in crate::ui) fn shoot_after(wait: Duration, kind: snip::Kind) -> Task<Message> {
+    pub(crate) fn shoot_after(wait: Duration, kind: snip::Kind) -> Task<Message> {
         background(move |tx| {
             std::thread::sleep(wait);
             let _ = tx.unbounded_send(());
@@ -282,10 +282,7 @@ impl App {
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
     /// controls of each window the snip asks for (`read`, see
     /// `Snip::set_reader`), for outlines and snapping.
-    pub(in crate::ui) fn snip_extras(
-        &self,
-        read: std::sync::mpsc::Receiver<isize>,
-    ) -> Task<Message> {
+    pub(crate) fn snip_extras(&self, read: std::sync::mpsc::Receiver<isize>) -> Task<Message> {
         let recent = background(|tx| {
             let _ = tx.unbounded_send(crate::history::recent::load());
         })
@@ -322,11 +319,7 @@ impl App {
     /// A snip is taken: the selection on the frozen frame (`given: None`), or a
     /// stitched / recent capture. Kept in Recent (`remember`, if history is on),
     /// then picked with the toolbar, and copied unless `snip.after` is "editor".
-    pub(in crate::ui) fn snip_captured(
-        &mut self,
-        given: Option<Crop>,
-        remember: bool,
-    ) -> Task<Message> {
+    pub(crate) fn snip_captured(&mut self, given: Option<Crop>, remember: bool) -> Task<Message> {
         let in_place = given.is_none();
         let Some(crop) = given.or_else(|| self.crop()) else {
             return Task::none();
@@ -339,12 +332,7 @@ impl App {
     }
 
     /// Picks a snip's `crop` (the Snip toolbar, always), also copied if `copy`.
-    pub(in crate::ui) fn snip_routed(
-        &mut self,
-        crop: Crop,
-        in_place: bool,
-        copy: bool,
-    ) -> Task<Message> {
+    pub(crate) fn snip_routed(&mut self, crop: Crop, in_place: bool, copy: bool) -> Task<Message> {
         // Copied quietly (the toolbar opening says it went; a failure is logged
         // and the capture is in the editor).
         let copied = match copy {
@@ -378,7 +366,7 @@ impl App {
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.
-    pub(in crate::ui) fn snip_next(&mut self, next: Option<snip::Next>) -> Task<Message> {
+    pub(crate) fn snip_next(&mut self, next: Option<snip::Next>) -> Task<Message> {
         match next {
             None => {
                 self.o.selection = None;
@@ -399,7 +387,7 @@ impl App {
     }
 
     /// `area` (logical px, this screen) in physical desktop px, cut to the screen.
-    pub(in crate::ui) fn screen_region(
+    pub(crate) fn screen_region(
         &self,
         area: Rectangle,
     ) -> Option<crate::capture::window_rect::WinRect> {
@@ -441,14 +429,14 @@ impl App {
     }
 
     /// The screen the running long capture is on (the starting one without one).
-    pub(in crate::ui) fn long_on(&self) -> super::screens::On {
+    pub(crate) fn long_on(&self) -> super::screens::On {
         let window = self.scroll().and_then(|l| l.window);
         self.on_window(window.unwrap_or(self.overlay))
     }
 
     /// Snip's toolbar during a long capture, as its picture and hint keep
     /// clear of it: in the logical px of the long capture's screen.
-    pub(in crate::ui) fn long_bar(&self) -> Rectangle {
+    pub(crate) fn long_bar(&self) -> Rectangle {
         self.long_bar_on(&self.long_on())
     }
 
@@ -468,7 +456,7 @@ impl App {
     /// hint and note are drawn there too. What is grabbed lies inside the hole;
     /// only when the toolbar has to sit over the area (an area as big as the
     /// screen) is the window kept out of captures (`hide_from_capture`).
-    pub(in crate::ui) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
+    pub(crate) fn start_scroll(&mut self, area: Rectangle) -> Task<Message> {
         let on = self.on_area(area);
         let Some((area, region)) = self.region_on(on, area) else {
             return Task::none();
@@ -610,10 +598,7 @@ impl App {
     }
 
     /// Wayland: the long capture going on without its overlay, so far.
-    pub(in crate::ui) fn cast_progress(
-        &mut self,
-        u: crate::capture::scroll::Update,
-    ) -> Task<Message> {
+    pub(crate) fn cast_progress(&mut self, u: crate::capture::scroll::Update) -> Task<Message> {
         if let Some(cast) = &mut self.cast {
             cast.show(u.height, u.full, u.lost, u.preview);
         }
@@ -622,7 +607,7 @@ impl App {
 
     /// Wayland: the long capture ends so (the pop-up, the tray, a shortcut =
     /// Done); the first end asked for wins.
-    pub(in crate::ui) fn cast_finish(&mut self, how: Finish) -> Task<Message> {
+    pub(crate) fn cast_finish(&mut self, how: Finish) -> Task<Message> {
         if let Some(cast) = &mut self.cast {
             crate::log!("[opencircle] long capture: {how:?}");
             cast.then.get_or_insert(how);
@@ -636,7 +621,7 @@ impl App {
     /// and goes); Done, a shortcut or the stream stopping: Snip opens on a
     /// fresh frame with the stitched page picked (its toolbar's Copy / Save /
     /// drag, Ctrl+C); Cancel drops it.
-    pub(in crate::ui) fn cast_done(&mut self, stitched: Result<Crop, String>) -> Task<Message> {
+    pub(crate) fn cast_done(&mut self, stitched: Result<Crop, String>) -> Task<Message> {
         let Some(cast) = self.cast.take() else {
             return Task::none();
         };
@@ -678,12 +663,12 @@ impl App {
 }
 
 /// Wayland's long capture going on without its overlay (`App::cast`).
-pub(in crate::ui) struct Cast {
+pub(crate) struct Cast {
     stop: Arc<AtomicBool>,
     /// How it ends (the first asked for).
-    pub(in crate::ui) then: Option<Finish>,
+    pub(crate) then: Option<Finish>,
     /// Its pop-up (none without XWayland or room beside the area).
-    pub(in crate::ui) popup: Option<long_capture_popup::Popup>,
+    pub(crate) popup: Option<long_capture_popup::Popup>,
     /// The area and the work area of its screen (logical px), that screen's
     /// origin (logical desktop px) and scale.
     area: Rectangle,
@@ -745,7 +730,7 @@ impl Cast {
     }
 
     #[cfg(test)]
-    pub(in crate::ui) fn stopped(&self) -> bool {
+    pub(crate) fn stopped(&self) -> bool {
         self.stop.load(std::sync::atomic::Ordering::Relaxed)
     }
 }

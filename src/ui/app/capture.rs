@@ -39,11 +39,7 @@ impl App {
     /// still hidden.
     /// After `CAPTURE_TIMEOUT` the capture is given up (the next trigger works) and
     /// its answer, if it still comes, is dropped.
-    pub(in crate::ui) fn capture(
-        &mut self,
-        at: Instant,
-        snip: Option<snip::Kind>,
-    ) -> Task<Message> {
+    pub(crate) fn capture(&mut self, at: Instant, snip: Option<snip::Kind>) -> Task<Message> {
         self.captures = self.captures.wrapping_add(1);
         let n = self.captures;
         self.capturing = Some(n);
@@ -159,7 +155,7 @@ impl App {
     /// till the grab is over (X11, `grabbed`: then it is live above the
     /// overlay), or goes where windows can't hide (the overlay draws the chat).
     /// `None`: none was there.
-    pub(in crate::ui) fn leave_frame(&mut self, n: u32) -> Option<Task<Message>> {
+    pub(crate) fn leave_frame(&mut self, n: u32) -> Option<Task<Message>> {
         let out = (self.windows.leave_frame(n)).map(|out| out.map(Message::Windows));
         let own = self.own_window();
         let gone = match self.chat_win.as_mut() {
@@ -183,7 +179,7 @@ impl App {
 
     /// Capture `n`'s grab is done: what left its frame comes back unless the
     /// overlay is up (then when it closes, `close`: no window over it).
-    pub(in crate::ui) fn grabbed(&mut self, n: u32) -> Task<Message> {
+    pub(crate) fn grabbed(&mut self, n: u32) -> Task<Message> {
         if let Some(w) = &mut self.chat_win {
             w.out = false; // (shown again by `sync_chat_window`)
         }
@@ -196,7 +192,7 @@ impl App {
     /// Snip: every monitor at once (the overlay shows the pointer's, then follows
     /// the pointer) and every window; `chosen` gets the pointer's monitor first
     /// (`App::pre_show`).
-    pub(in crate::ui) fn snip_shot(
+    pub(crate) fn snip_shot(
         kind: snip::Kind,
         chosen: impl FnOnce(&capture::Monitor),
     ) -> Result<Shot, CaptureError> {
@@ -221,11 +217,7 @@ impl App {
         })
     }
 
-    pub(in crate::ui) fn open(
-        &mut self,
-        at: Instant,
-        shot: Result<Shot, CaptureError>,
-    ) -> Task<Message> {
+    pub(crate) fn open(&mut self, at: Instant, shot: Result<Shot, CaptureError>) -> Task<Message> {
         self.capturing = None;
         let shot = match shot {
             Ok(shot) => shot,
@@ -366,7 +358,7 @@ impl App {
 
     /// The frozen frame of the monitor at `origin` (logical px, `size`) becomes
     /// what the overlay shows.
-    pub(in crate::ui) fn set_frame(
+    pub(crate) fn set_frame(
         &mut self,
         image: image::Handle,
         scale: f32,
@@ -384,13 +376,13 @@ impl App {
     }
 
     /// The shown monitor in physical desktop px.
-    pub(in crate::ui) fn place(&self) -> snip::Place {
+    pub(crate) fn place(&self) -> snip::Place {
         self.o.place()
     }
 
     /// Shows the (hidden or pill-sized) window over the whole monitor, or opens
     /// it full-screen where it was closed (see `can_hide_windows`).
-    pub(in crate::ui) fn show(&mut self) -> Task<Message> {
+    pub(crate) fn show(&mut self) -> Task<Message> {
         if !self.overlay_open {
             windows::activate_next();
             let (id, open) = windows::screen(overlay_window(Some(self.o.screen)));
@@ -426,7 +418,7 @@ impl App {
     /// a clear layered window is in no GDI grab and our windows are never
     /// listed. `open` then only fades it in; a capture that ends without
     /// opening hides it again (`unshow`).
-    pub(in crate::ui) fn pre_show(&mut self, place: snip::Place) -> Task<Message> {
+    pub(crate) fn pre_show(&mut self, place: snip::Place) -> Task<Message> {
         let ready = self.can_hide
             && shape::can_fade()
             && self.overlay_open
@@ -453,7 +445,7 @@ impl App {
 
     /// A capture ended without opening: the window `pre_show` showed is hidden
     /// again (the steps `close` takes).
-    pub(in crate::ui) fn unshow(&mut self) {
+    pub(crate) fn unshow(&mut self) {
         if std::mem::take(&mut self.pre_shown) {
             windows::clear_now(self.overlay);
             self.hiding = Hiding::Empty;
@@ -485,7 +477,7 @@ impl App {
     /// behind iced's back (`search_in_browser::hand_off_foreground`): Normal then
     /// AlwaysOnTop makes it apply again. At the fade-in, not in `show_steps`:
     /// each step is a round trip the first frame waited for (~30 ms on the VM).
-    pub(in crate::ui) fn relevel(&self) -> Task<Message> {
+    pub(crate) fn relevel(&self) -> Task<Message> {
         #[cfg(windows)]
         return window::set_level(self.overlay, Level::Normal)
             .chain(window::set_level(self.overlay, Level::AlwaysOnTop));
@@ -494,13 +486,13 @@ impl App {
     }
 
     /// Shows `message` over the frame for a moment, then closes the overlay.
-    pub(in crate::ui) fn toast_then_close(&mut self, message: Said) -> Task<Message> {
+    pub(crate) fn toast_then_close(&mut self, message: Said) -> Task<Message> {
         self.o.toast = Some(message);
         Self::hold_then_close()
     }
 
     /// `ToastDone` once a pill over the frame has been read (it then closes).
-    pub(in crate::ui) fn hold_then_close() -> Task<Message> {
+    pub(crate) fn hold_then_close() -> Task<Message> {
         background(|tx| {
             std::thread::sleep(Duration::from_millis(900));
             let _ = tx.unbounded_send(());
@@ -509,7 +501,7 @@ impl App {
     }
 
     /// Test hook: shoot what the overlay shows after the next frame, then close.
-    pub(in crate::ui) fn test_shot(&self) -> Task<Message> {
+    pub(crate) fn test_shot(&self) -> Task<Message> {
         // No message (= no relayout) in between: a relayout drops the text
         // editor's drawn text.
         let overlay = self.overlay;
@@ -523,7 +515,7 @@ impl App {
 
     /// Frees the frame and drops the panel (stopping its work); Lens pages go
     /// once old enough. The window is shrunk and hidden in steps (see `Hiding`).
-    pub(in crate::ui) fn close(&mut self) -> Task<Message> {
+    pub(crate) fn close(&mut self) -> Task<Message> {
         // Wayland: a pinned chat drawn on the overlay: its own window comes up
         // over the same spot first (no blank beat); the overlay goes when it is
         // up. Elsewhere the chat has its window already: nothing changes for it.
@@ -576,7 +568,7 @@ impl App {
 /// whole `LEAVE_FRAME` when some just left it (`left`), else what is left of it
 /// since the last opening's windows went (`gone`, Linux: an Esc then the shortcut
 /// at once froze the closing overlay, its chips and all, into the next frame).
-pub(in crate::ui) fn grab_wait(left: bool, gone: Option<Instant>, now: Instant) -> Duration {
+pub(crate) fn grab_wait(left: bool, gone: Option<Instant>, now: Instant) -> Duration {
     match (left, gone) {
         (true, _) => LEAVE_FRAME,
         (false, Some(gone)) => LEAVE_FRAME.saturating_sub(now.saturating_duration_since(gone)),
@@ -596,7 +588,7 @@ enum Grabbed {
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
 /// the taskbar (Windows): it leaves full-screen visible while it closes (`Hiding`).
-pub(in crate::ui) fn overlay_window(shown: Option<Size>) -> window::Settings {
+pub(crate) fn overlay_window(shown: Option<Size>) -> window::Settings {
     #[cfg(windows)]
     let platform_specific = window::settings::PlatformSpecific {
         skip_taskbar: true,
@@ -618,9 +610,9 @@ pub(in crate::ui) fn overlay_window(shown: Option<Size>) -> window::Settings {
 }
 
 /// Test hook: on Esc, save what the overlay shows before closing (WSLg can't grab it).
-pub(in crate::ui) const TEST_SHOT: &str = "OPENCIRCLE_TEST_SHOT";
+pub(crate) const TEST_SHOT: &str = "OPENCIRCLE_TEST_SHOT";
 
-pub(in crate::ui) fn save_test_shot(shot: &window::Screenshot) {
+pub(crate) fn save_test_shot(shot: &window::Screenshot) {
     let Some(path) = crate::sys::test_hook(TEST_SHOT) else {
         return;
     };

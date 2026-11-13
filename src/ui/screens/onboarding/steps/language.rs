@@ -43,7 +43,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 
 /// Which local model translating into `target` downloads the first time,
 /// and its size (English text: the most common source).
-pub(in super::super) fn model_note(target: &str) -> String {
+pub(crate) fn model_note(target: &str) -> String {
     let name = language_name(target);
     if lang::find(target).is_some_and(|l| l.code == "en") {
         return t!(o_model_en).into();

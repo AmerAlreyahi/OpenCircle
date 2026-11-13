@@ -420,7 +420,7 @@ impl Helper {
 }
 
 #[cfg(test)]
-pub(in crate::ui) mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
 
