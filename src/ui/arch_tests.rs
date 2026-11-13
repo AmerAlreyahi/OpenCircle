@@ -428,3 +428,213 @@ fn bare_text_call(line: &str) -> bool {
             !role && !before.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | ':' | '.'))
         })
 }
+
+/// Every `.rs` file under `src/<dir>`, as (path relative to `src`, source with LF).
+fn tree(dir: &str) -> Vec<(String, String)> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&Path::new("src").join(dir), &mut files);
+    let mut out: Vec<_> = files
+        .into_iter()
+        .map(|p| {
+            let name = p
+                .strip_prefix("src")
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let src = std::fs::read_to_string(&p).unwrap().replace("\r\n", "\n");
+            (name, src)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The paths a source names: each `use` tree flattened to whole paths
+/// (`use a::{b, c::d}` -> `a::b`, `a::c::d`), plus every `crate::..` path in
+/// the code. Comments are skipped.
+fn named_paths(src: &str) -> Vec<String> {
+    fn expand(prefix: &str, tree: &str, out: &mut Vec<String>) {
+        let tree = tree.trim();
+        let Some(open) = tree.find('{') else {
+            let leaf = tree.split(" as ").next().unwrap_or("").trim();
+            out.push(match (prefix.is_empty(), leaf) {
+                (_, "self") => prefix.trim_end_matches("::").to_string(),
+                (true, _) => leaf.to_string(),
+                (false, _) => format!("{prefix}{leaf}"),
+            });
+            return;
+        };
+        let head = format!("{prefix}{}", &tree[..open]);
+        let inner = &tree[open + 1..tree.rfind('}').unwrap_or(tree.len())];
+        let (mut depth, mut start) = (0, 0);
+        for (i, c) in inner.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    if !inner[start..i].trim().is_empty() {
+                        expand(&head, &inner[start..i], out);
+                    }
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        if !inner[start..].trim().is_empty() {
+            expand(&head, &inner[start..], out);
+        }
+    }
+    let code: String = code(src).collect::<Vec<_>>().join("\n");
+    let mut out = Vec::new();
+    let mut rest = code.as_str();
+    while let Some(i) = rest.find("use ") {
+        let word = i == 0 || !rest[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_');
+        let after = &rest[i + 4..];
+        match after.find(';') {
+            Some(end) if word && after.starts_with(|c: char| c.is_alphabetic() || c == '$') => {
+                expand("", &after[..end].replace('\n', " "), &mut out);
+                rest = &after[end..];
+            }
+            _ => rest = after,
+        }
+    }
+    for (i, _) in code.match_indices("crate::") {
+        let path: String = code[i..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+            .collect();
+        out.push(path);
+    }
+    out
+}
+
+/// `path` names the module `module` (`crate::app`, not `crate::app_language`).
+fn names_module(path: &str, module: &str) -> bool {
+    path.strip_prefix(module)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+}
+
+/// Shared files that still reach into a feature or the app shell (code that
+/// belongs elsewhere: a follow-up moves it). A ratchet: the list only shrinks.
+const SHARED_LEGACY: &[&str] = &[];
+
+/// `shared/` (kit, platform, config, ...) never imports `features/` or `app/`:
+/// what every feature uses depends on no feature.
+#[test]
+#[ignore = "switched on once the feature-folder moves are done"]
+fn shared_never_imports_features_or_app() {
+    let mut reaching = Vec::new();
+    for (name, src) in tree("shared") {
+        let prod = src.split("#[cfg(test)]\nmod tests {").next().unwrap_or("");
+        let bad = named_paths(prod).into_iter().find(|p| {
+            ["crate::features", "crate::app"]
+                .iter()
+                .any(|m| names_module(p, m))
+                || p.starts_with("super::super::super")
+        });
+        if let Some(p) = bad {
+            reaching.push((name, p));
+        }
+    }
+    let new: Vec<_> = reaching
+        .iter()
+        .filter(|(n, _)| !SHARED_LEGACY.contains(&n.as_str()))
+        .collect();
+    assert!(
+        new.is_empty(),
+        "shared/ reaches into a feature or the app: {new:#?}"
+    );
+    let clean: Vec<_> = SHARED_LEGACY
+        .iter()
+        .filter(|n| !reaching.iter().any(|(r, _)| r == *n))
+        .collect();
+    assert!(
+        clean.is_empty(),
+        "now clean, remove from SHARED_LEGACY: {clean:?}"
+    );
+}
+
+/// Feature files that still reach into another feature's own files. A ratchet:
+/// the list only shrinks.
+const FEATURE_LEGACY: &[&str] = &[];
+
+/// A feature uses another feature only through that feature's `mod.rs` (its
+/// public face: `crate::features::snip::Thing`), never its inner files
+/// (`crate::features::snip::flow::..`).
+#[test]
+#[ignore = "switched on once the feature-folder moves are done"]
+fn features_meet_only_through_mod_rs() {
+    let features: Vec<String> = std::fs::read_dir("src/features")
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(features.contains(&"snip".to_string()), "{features:?}");
+    let inner = |feature: &str, part: &str| {
+        let dir = Path::new("src/features").join(feature);
+        dir.join(format!("{part}.rs")).exists() || dir.join(part).is_dir()
+    };
+    let mut reaching = Vec::new();
+    for (name, src) in tree("features") {
+        let own = name.split('/').nth(1).unwrap_or("");
+        let bad = named_paths(&src).into_iter().find(|p| {
+            let mut parts = p
+                .strip_prefix("crate::features::")
+                .unwrap_or("")
+                .split("::");
+            let (f, part) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+            !f.is_empty() && f != own && inner(f, part)
+        });
+        if let Some(p) = bad {
+            reaching.push((name, p));
+        }
+    }
+    let new: Vec<_> = reaching
+        .iter()
+        .filter(|(n, _)| !FEATURE_LEGACY.contains(&n.as_str()))
+        .collect();
+    assert!(
+        new.is_empty(),
+        "a feature reaches into another one's files: {new:#?}"
+    );
+    let clean: Vec<_> = FEATURE_LEGACY
+        .iter()
+        .filter(|n| !reaching.iter().any(|(r, _)| r == *n))
+        .collect();
+    assert!(
+        clean.is_empty(),
+        "now clean, remove from FEATURE_LEGACY: {clean:?}"
+    );
+}
+
+/// The path scan sees `use` trees and inline paths, and tells `app` from
+/// `app_language`.
+#[test]
+fn the_path_scan_finds_paths() {
+    let src = "use crate::{features::snip::{flow, mod_x as y}, shared::kit};\n\
+               // use crate::features::song::x;\n\
+               fn f() { crate::app::App::go(); }\n";
+    let paths = named_paths(src);
+    for p in [
+        "crate::features::snip::flow",
+        "crate::features::snip::mod_x",
+        "crate::shared::kit",
+        "crate::app::App::go",
+    ] {
+        assert!(paths.iter().any(|x| x == p), "{p} in {paths:?}");
+    }
+    assert!(!paths.iter().any(|x| x.contains("song")), "{paths:?}");
+    assert!(names_module("crate::app::App", "crate::app"));
+    assert!(!names_module("crate::app_language::S", "crate::app"));
+}
