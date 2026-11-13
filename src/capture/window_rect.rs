@@ -473,26 +473,56 @@ fn page((x, y, w, h): WinRect, browser: bool, maximized: bool, scale: f32) -> Op
     (w > 32 && h > bars + 32).then(|| (x, y + bars as i32, w, h - bars))
 }
 
+/// The file name of process `pid`'s exe ("firefox.exe"), empty when it can't
+/// be read (another user's or a protected process).
+#[cfg(windows)]
+pub fn exe_name(pid: u32) -> String {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows::core::PWSTR;
+
+    let mut name = [0u16; 260];
+    let mut len = name.len() as u32;
+    // SAFETY: the buffer outlives the call; the process handle is closed.
+    let path = unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return String::new();
+        };
+        let ok = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(name.as_mut_ptr()),
+            &mut len,
+        )
+        .is_ok();
+        let _ = CloseHandle(process);
+        if !ok {
+            return String::new();
+        }
+        String::from_utf16_lossy(&name[..len as usize])
+    };
+    path.rsplit('\\').next().unwrap_or_default().to_string()
+}
+
 /// The active window not ours: its client rect, app name, maximised. When ours
 /// (or none usable) is active: the next window down if `next_down`, else none.
 #[cfg(windows)]
 fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
     use std::ffi::c_void;
-    use windows::Win32::Foundation::{CloseHandle, HWND};
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
-    use windows::Win32::System::Threading::{
-        GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-        QueryFullProcessImageNameW,
-    };
+    use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
         GA_ROOTOWNER, GW_HWNDNEXT, GWL_EXSTYLE, GetAncestor, GetClassNameW, GetForegroundWindow,
         GetTopWindow, GetWindow, GetWindowInfo, GetWindowLongW, GetWindowThreadProcessId, IsIconic,
         IsWindowVisible, IsZoomed, WINDOWINFO, WS_EX_TOOLWINDOW,
     };
-    use windows::core::PWSTR;
 
     // SAFETY (whole block): plain queries on window handles the system just
-    // gave us; buffers outlive the calls; the process handle is closed.
+    // gave us; buffers outlive the calls.
     unsafe {
         let me = GetCurrentProcessId();
         let pid = |hwnd: HWND| {
@@ -553,27 +583,7 @@ fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
         };
         GetWindowInfo(hwnd, &mut info).ok()?;
         let r = info.rcClient;
-        let mut name = [0u16; 260];
-        let mut len = name.len() as u32;
-        let app = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid(hwnd)) {
-            Ok(process) => {
-                let ok = QueryFullProcessImageNameW(
-                    process,
-                    PROCESS_NAME_WIN32,
-                    PWSTR(name.as_mut_ptr()),
-                    &mut len,
-                )
-                .is_ok();
-                let _ = CloseHandle(process);
-                if ok {
-                    String::from_utf16_lossy(&name[..len as usize])
-                } else {
-                    String::new()
-                }
-            }
-            Err(_) => String::new(),
-        };
-        let app = app.rsplit('\\').next().unwrap_or_default().to_string();
+        let app = exe_name(pid(hwnd));
         (r.right > r.left && r.bottom > r.top).then(|| {
             let rect = (
                 r.left,

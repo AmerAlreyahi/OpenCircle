@@ -616,12 +616,24 @@ mod tests {
 /// joining the foreground thread's input for the call works; it is skipped
 /// for a hung window (attaching would hang us with it).
 ///
+/// The Start menu or the Search pane (also the Action Center on Windows 10)
+/// in front: Windows keeps its band above every app window and refuses the
+/// foreground while it is open, so it is closed first (`shell_launcher`).
+///
 /// Linux: the shell's overview (GNOME's Activities) is drawn over every window;
 /// it is left first, else the overlay stays behind it (#173, `sys::shell`).
 pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
     #[cfg(target_os = "linux")]
     crate::sys::shell::leave_overview();
-    window::gain_focus(id)
+    // Start / Search is closed before gain_focus: its Alt tap would reach
+    // Start first and, with the shortcut's Alt still held (Alt+A), leave it in
+    // its access-key mode, where Esc no longer closes it (VM).
+    #[cfg(windows)]
+    let close_launcher = window::run(id, |_| win::close_launcher()).discard();
+    #[cfg(not(windows))]
+    let close_launcher = Task::none();
+    close_launcher
+        .chain(window::gain_focus(id))
         .chain(window::run(id, |w| {
             #[cfg(windows)]
             if let Ok(handle) = w.window_handle()
@@ -657,15 +669,111 @@ fn must_join(front: isize, ours: isize, hung: bool) -> bool {
     front != 0 && front != ours && !hung
 }
 
+/// The processes that host the Start menu, the Search pane and (Windows 10)
+/// the Action Center / tray flyouts, by exe name: Windows 10 1903+ and 11 use
+/// the first three, older Windows 10 ShellExperienceHost for Start too.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn shell_launcher(exe: &str) -> bool {
+    [
+        "StartMenuExperienceHost.exe",
+        "SearchApp.exe",
+        "SearchHost.exe",
+        "ShellExperienceHost.exe",
+    ]
+    .iter()
+    .any(|n| n.eq_ignore_ascii_case(exe))
+}
+
 #[cfg(windows)]
 mod win {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput, SetFocus, VIRTUAL_KEY, VK_CONTROL,
+        VK_ESCAPE, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+        VK_SHIFT,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsHungAppWindow,
         SetForegroundWindow,
     };
+
+    /// Whether `front` belongs to the Start / Search host.
+    fn launcher(front: HWND) -> bool {
+        let mut pid = 0u32;
+        // SAFETY: a plain query on a window handle the system gave us.
+        unsafe { GetWindowThreadProcessId(front, Some(&mut pid)) };
+        pid != 0 && super::shell_launcher(&crate::capture::window_rect::exe_name(pid))
+    }
+
+    /// Closes the Start menu / Search pane in front with an Esc, the way the
+    /// user would. Windows has no documented call that dismisses it
+    /// (IAppVisibility only reports it). The shortcut's modifiers may still be
+    /// held: they are released first, else the Esc becomes Ctrl+Shift+Esc
+    /// (Task Manager), Alt+Esc (next window) or Ctrl+Esc (Start again).
+    fn dismiss_launcher() {
+        let key = |vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    dwFlags: flags,
+                    ..Default::default()
+                },
+            },
+        };
+        // The generic key is checked (a synthetic Alt without a scan code
+        // sets only VK_MENU, VM); both sides go up.
+        let ext = KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY;
+        let mut keys: Vec<INPUT> = [
+            (VK_CONTROL, VK_LCONTROL, VK_RCONTROL),
+            (VK_SHIFT, VK_LSHIFT, VK_RSHIFT),
+            (VK_MENU, VK_LMENU, VK_RMENU),
+        ]
+        .into_iter()
+        // SAFETY: a plain key-state query.
+        .filter(|(vk, _, _)| unsafe { GetAsyncKeyState(i32::from(vk.0)) } < 0)
+        .flat_map(|(_, left, right)| {
+            let right_flags = if right == VK_RSHIFT {
+                KEYEVENTF_KEYUP
+            } else {
+                ext
+            };
+            [key(left, KEYEVENTF_KEYUP), key(right, right_flags)]
+        })
+        .collect();
+        keys.extend([
+            key(VK_ESCAPE, KEYBD_EVENT_FLAGS(0)),
+            key(VK_ESCAPE, KEYEVENTF_KEYUP),
+        ]);
+        // SAFETY: INPUTs of ours, their size given.
+        unsafe { SendInput(&keys, size_of::<INPUT>() as i32) };
+    }
+
+    /// Closes the Start menu / Search pane when it is in front.
+    pub fn close_launcher() {
+        // SAFETY: plain queries on the foreground window.
+        let mut front = unsafe { GetForegroundWindow() };
+        if !launcher(front) {
+            return;
+        }
+        dismiss_launcher();
+        // ponytail: waits on the UI thread, at most 0.5 s and only with Start /
+        // Search open; Start hands the foreground back to the app below it
+        // within a few frames (to no window for a moment)
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            front = unsafe { GetForegroundWindow() };
+            if !front.is_invalid() && !launcher(front) {
+                break;
+            }
+        }
+        crate::log!(
+            "[opencircle] closed the Start menu / Search in front of the overlay: {}",
+            !launcher(front)
+        );
+    }
 
     pub fn take_foreground(hwnd: isize) {
         let ours = HWND(hwnd as *mut _);
@@ -693,7 +801,22 @@ mod win {
 
 #[cfg(test)]
 mod foreground_tests {
-    use super::must_join;
+    use super::{must_join, shell_launcher};
+
+    #[test]
+    fn the_start_menu_and_search_hosts_are_closed_first_and_nothing_else() {
+        for exe in [
+            "StartMenuExperienceHost.exe",
+            "SearchApp.exe",
+            "SearchHost.exe",
+            "shellexperiencehost.EXE",
+        ] {
+            assert!(shell_launcher(exe), "{exe}");
+        }
+        for exe in ["explorer.exe", "firefox.exe", "opencircle.exe", ""] {
+            assert!(!shell_launcher(exe), "{exe}");
+        }
+    }
 
     #[test]
     fn the_overlay_joins_the_foreground_input_only_when_another_live_window_holds_it() {
