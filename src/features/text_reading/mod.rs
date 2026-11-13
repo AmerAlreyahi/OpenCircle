@@ -1886,12 +1886,15 @@ mod tests {
         };
         println!("app before: {}", rss());
 
-        let png = png::Decoder::new(std::io::Cursor::new(include_bytes!("fixture.png")));
-        let mut reader = png::Decoder::read_info(png).unwrap();
-        let mut tile = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut tile).unwrap();
-        assert_eq!(info.color_type, png::ColorType::Rgba);
-        let (tw, th) = (info.width as usize, info.height as usize);
+        let fixture = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+            include_bytes!("fixture.png"),
+        ))
+        .unwrap();
+        let (tile, tw, th) = (
+            fixture.rgba,
+            fixture.width as usize,
+            fixture.height as usize,
+        );
 
         let (lines, took) = recognize(&tile, tw, th);
         let texts: Vec<&str> = lines.iter().map(|b| b.text.as_str()).collect();

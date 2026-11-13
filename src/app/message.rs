@@ -294,6 +294,21 @@ pub(crate) struct Shot {
     pub(crate) windows: Vec<pick::Pick>,
 }
 
+#[cfg(test)]
+impl Shot {
+    /// A main-mode capture: no Snip start, no windows listed.
+    pub(crate) fn plain(image: image::Handle, scale: f32, origin: Point, size: Size) -> Self {
+        Shot {
+            image,
+            scale,
+            origin,
+            size,
+            snip: None,
+            windows: Vec::new(),
+        }
+    }
+}
+
 pub(crate) type SnipShot = (
     pick::Kind,
     Vec<pick::Pick>,

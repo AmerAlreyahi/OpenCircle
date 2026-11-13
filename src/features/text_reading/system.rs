@@ -693,13 +693,12 @@ mod tests {
             println!("SKIPPED: this Windows has no OCR recognizer for its languages");
             return;
         };
-        let png = png::Decoder::new(std::io::Cursor::new(include_bytes!("fixture.png")));
-        let mut reader = png.read_info().unwrap();
-        let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut rgba).unwrap();
-        assert_eq!(info.color_type, png::ColorType::Rgba);
+        let fixture = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+            include_bytes!("fixture.png"),
+        ))
+        .unwrap();
         let began = Instant::now();
-        let got = recognize(&rgba, info.width, info.height, 2).unwrap();
+        let got = recognize(&fixture.rgba, fixture.width, fixture.height, 2).unwrap();
         // Latency budget (#59) on a developer machine. A shared CI runner can be 3x
         // slower (4.4 s seen), so there the time is only logged, not asserted.
         let took = began.elapsed();
@@ -717,7 +716,7 @@ mod tests {
             let [x, y, w, h] = b.bounds;
             assert!(x >= 0.0 && y >= 0.0 && w > 0.0 && h > 0.0, "{b:?}");
             assert!(
-                x + w <= info.width as f32 && y + h <= info.height as f32,
+                x + w <= fixture.width as f32 && y + h <= fixture.height as f32,
                 "{b:?}"
             );
         }
@@ -735,11 +734,15 @@ mod tests {
             println!("SKIPPED: this Windows has no OCR recognizer for its languages");
             return;
         }
-        let png = png::Decoder::new(std::io::Cursor::new(include_bytes!("fixture.png")));
-        let mut reader = png.read_info().unwrap();
-        let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut rgba).unwrap();
-        let (rgba, w, h) = (std::sync::Arc::new(rgba), info.width, info.height);
+        let fixture = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+            include_bytes!("fixture.png"),
+        ))
+        .unwrap();
+        let (rgba, w, h) = (
+            std::sync::Arc::new(fixture.rgba),
+            fixture.width,
+            fixture.height,
+        );
         for _ in 0..4 {
             let reads: Vec<_> = (1..=3)
                 .map(|k| {

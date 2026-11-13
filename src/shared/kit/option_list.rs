@@ -6,9 +6,9 @@
 //! `elevated` with its edge; a `badge` at its end. States change colour only.
 //! A menu (`menu`, `item`, `separator`: the tray menu) is the same kind of
 //! list: plain rows with a shortcut hint.
-use iced::advanced::layout::{self, Layout};
-use iced::advanced::widget::{Operation, Tree, tree};
-use iced::advanced::{Clipboard, Shell, Widget, mouse, overlay, renderer};
+use iced::advanced::layout::Layout;
+use iced::advanced::widget::Tree;
+use iced::advanced::{Clipboard, Shell, mouse};
 use iced::keyboard::key::Named;
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Border, Center, Element, Fill, Padding};
@@ -21,6 +21,7 @@ use super::surface::{Material, surface};
 use super::text::font;
 use super::themes::c;
 use super::tokens::{Role, radius, size, space};
+use super::wrap::{Hook, wrap};
 
 /// A row's corners (`rounded-lg`) and its room.
 const ROW_RADIUS: f32 = 8.0;
@@ -602,69 +603,24 @@ pub fn keyed<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     on_key: impl Fn(Named, bool) -> Option<Message> + 'a,
 ) -> Element<'a, Message> {
-    Element::new(Keyed {
-        content: content.into(),
-        on_key: Box::new(on_key),
-    })
+    wrap(
+        content,
+        Keyed {
+            on_key: Box::new(on_key),
+        },
+    )
 }
 
 type OnKey<'a, Message> = Box<dyn Fn(Named, bool) -> Option<Message> + 'a>;
 
 struct Keyed<'a, Message> {
-    content: Element<'a, Message>,
     on_key: OnKey<'a, Message>,
 }
 
-impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Keyed<'_, Message> {
-    fn tag(&self) -> tree::Tag {
-        self.content.as_widget().tag()
-    }
-    fn state(&self) -> tree::State {
-        self.content.as_widget().state()
-    }
-    fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
-    }
-    fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
-    }
-    fn size(&self) -> iced::Size<iced::Length> {
-        self.content.as_widget().size()
-    }
-    fn size_hint(&self) -> iced::Size<iced::Length> {
-        self.content.as_widget().size_hint()
-    }
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        self.content.as_widget_mut().layout(tree, renderer, limits)
-    }
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut iced::Renderer,
-        theme: &iced::Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &iced::Rectangle,
-    ) {
-        (self.content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
-    }
-    fn operate(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &iced::Renderer,
-        operation: &mut dyn Operation,
-    ) {
-        (self.content.as_widget_mut()).operate(tree, layout, renderer, operation);
-    }
+impl<Message> Hook<Message> for Keyed<'_, Message> {
     fn update(
         &mut self,
+        content: &mut Element<'_, Message>,
         tree: &mut Tree,
         event: &iced::Event,
         layout: Layout<'_>,
@@ -686,29 +642,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Keyed<'_, Message
             shell.capture_event();
             return;
         }
-        self.content.as_widget_mut().update(
+        content.as_widget_mut().update(
             tree, event, layout, cursor, renderer, clipboard, shell, viewport,
         );
-    }
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &iced::Rectangle,
-        renderer: &iced::Renderer,
-    ) -> mouse::Interaction {
-        (self.content.as_widget()).mouse_interaction(tree, layout, cursor, viewport, renderer)
-    }
-    fn overlay<'b>(
-        &'b mut self,
-        tree: &'b mut Tree,
-        layout: Layout<'b>,
-        renderer: &iced::Renderer,
-        viewport: &iced::Rectangle,
-        translation: iced::Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
-        (self.content.as_widget_mut()).overlay(tree, layout, renderer, viewport, translation)
     }
 }
 

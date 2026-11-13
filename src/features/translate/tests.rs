@@ -1335,16 +1335,8 @@ mod real {
     use crate::features::translate::pipeline::{by_sentence, cut_off, to_line};
 
     fn image(png: &[u8]) -> (Rgba, (usize, usize)) {
-        let mut d = png::Decoder::new(std::io::Cursor::new(png));
-        d.set_transformations(png::Transformations::normalize_to_color8());
-        let mut r = d.read_info().unwrap();
-        let mut buf = vec![0; r.output_buffer_size().unwrap()];
-        let info = r.next_frame(&mut buf).unwrap();
-        let rgba = buf[..info.buffer_size()]
-            .chunks(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
-            .collect();
-        (rgba, (info.width as usize, info.height as usize))
+        let f = crate::shared::platform::capture::decode_png(std::io::Cursor::new(png)).unwrap();
+        (f.rgba, (f.width as usize, f.height as usize))
     }
 
     /// The OCR lines of fixture `name`: x, y, w, h (OCR box) and text.

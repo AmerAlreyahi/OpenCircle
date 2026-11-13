@@ -174,12 +174,12 @@ mod tests {
         assert_eq!(path, shared.file.path());
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("opencircle-share-") && name.ends_with(".png"));
-        let png = png::Decoder::new(std::io::Cursor::new(std::fs::read(&path).unwrap()));
-        let mut png = png.read_info().unwrap();
-        let mut px = vec![0; png.output_buffer_size().unwrap()];
-        let info = png.next_frame(&mut px).unwrap();
-        assert_eq!((info.width, info.height), (3, 2));
-        assert_eq!(px, crop.rgba, "the capture, pixel for pixel");
+        let got = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+            std::fs::read(&path).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!((got.width, got.height), (3, 2));
+        assert_eq!(got.rgba, crop.rgba, "the capture, pixel for pixel");
         drop(shared);
         assert!(!path.exists(), "gone with the share");
 

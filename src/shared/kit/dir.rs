@@ -11,7 +11,9 @@ use std::cell::Cell;
 
 use iced::alignment::Horizontal;
 use iced::widget::Row;
-use iced::{Element, Padding};
+use iced::{Element, Padding, Point};
+
+use super::wrap::{Hook, wrap};
 
 thread_local! {
     /// A view's own direction (`scope`); none = the app language's.
@@ -93,117 +95,42 @@ impl<'a, Message: 'a> DirRow<'a, Message> {
 
 impl<'a, Message: 'a> From<DirRow<'a, Message>> for Element<'a, Message> {
     fn from(row: DirRow<'a, Message>) -> Self {
-        Element::new(row)
+        let mirror = Mirror {
+            rtl: row.rtl,
+            padding: row.padding,
+        };
+        wrap(row.row, mirror)
     }
 }
 
-mod mirrored {
-    use iced::advanced::layout::{self, Layout};
-    use iced::advanced::widget::{Operation, Tree, tree};
-    use iced::advanced::{Clipboard, Shell, Widget, overlay, renderer};
-    use iced::{Event, Point, Rectangle, Size, Vector, mouse};
+/// Right to left: the laid-out row mirrored inside its padded room (the first
+/// child ends at the right).
+struct Mirror {
+    rtl: bool,
+    padding: Padding,
+}
 
-    type R = iced::Renderer;
-    type T = iced::Theme;
-
-    impl<'a, Message> Widget<Message, T, R> for super::DirRow<'a, Message> {
-        fn size(&self) -> Size<iced::Length> {
-            Widget::size(&self.row)
+impl<Message> Hook<Message> for Mirror {
+    fn layout(
+        &mut self,
+        content: &mut Element<'_, Message>,
+        tree: &mut iced::advanced::widget::Tree,
+        renderer: &iced::Renderer,
+        limits: &iced::advanced::layout::Limits,
+    ) -> iced::advanced::layout::Node {
+        let node = content.as_widget_mut().layout(tree, renderer, limits);
+        if !self.rtl {
+            return node;
         }
-        fn size_hint(&self) -> Size<iced::Length> {
-            self.row.size_hint()
-        }
-        fn layout(
-            &mut self,
-            tree: &mut Tree,
-            renderer: &R,
-            limits: &layout::Limits,
-        ) -> layout::Node {
-            let node = self.row.layout(tree, renderer, limits);
-            if !self.rtl {
-                return node;
-            }
-            // mirrored within the padded room: the first child ends at its right
-            let edges = self.padding.left + node.size().width - self.padding.right;
-            let children = (node.children().iter())
-                .map(|c| {
-                    let b = c.bounds();
-                    c.clone().move_to(Point::new(edges - b.x - b.width, b.y))
-                })
-                .collect();
-            layout::Node::with_children(node.size(), children).move_to(node.bounds().position())
-        }
-        fn draw(
-            &self,
-            tree: &Tree,
-            renderer: &mut R,
-            theme: &T,
-            style: &renderer::Style,
-            layout: Layout<'_>,
-            cursor: mouse::Cursor,
-            viewport: &Rectangle,
-        ) {
-            self.row
-                .draw(tree, renderer, theme, style, layout, cursor, viewport);
-        }
-        fn tag(&self) -> tree::Tag {
-            self.row.tag()
-        }
-        fn state(&self) -> tree::State {
-            self.row.state()
-        }
-        fn children(&self) -> Vec<Tree> {
-            self.row.children()
-        }
-        fn diff(&self, tree: &mut Tree) {
-            self.row.diff(tree);
-        }
-        fn operate(
-            &mut self,
-            tree: &mut Tree,
-            layout: Layout<'_>,
-            renderer: &R,
-            operation: &mut dyn Operation,
-        ) {
-            self.row.operate(tree, layout, renderer, operation);
-        }
-        fn update(
-            &mut self,
-            tree: &mut Tree,
-            event: &Event,
-            layout: Layout<'_>,
-            cursor: mouse::Cursor,
-            renderer: &R,
-            clipboard: &mut dyn Clipboard,
-            shell: &mut Shell<'_, Message>,
-            viewport: &Rectangle,
-        ) {
-            self.row.update(
-                tree, event, layout, cursor, renderer, clipboard, shell, viewport,
-            );
-        }
-        fn mouse_interaction(
-            &self,
-            tree: &Tree,
-            layout: Layout<'_>,
-            cursor: mouse::Cursor,
-            viewport: &Rectangle,
-            renderer: &R,
-        ) -> mouse::Interaction {
-            self.row
-                .mouse_interaction(tree, layout, cursor, viewport, renderer)
-        }
-        fn overlay<'b>(
-            &'b mut self,
-            tree: &'b mut Tree,
-            layout: Layout<'b>,
-            renderer: &R,
-            viewport: &Rectangle,
-            translation: Vector,
-        ) -> Option<overlay::Element<'b, Message, T, R>> {
-            self.row
-                .overlay(tree, layout, renderer, viewport, translation)
-        }
+        let edges = self.padding.left + node.size().width - self.padding.right;
+        let children = (node.children().iter())
+            .map(|c| {
+                let b = c.bounds();
+                c.clone().move_to(Point::new(edges - b.x - b.width, b.y))
+            })
+            .collect();
+        iced::advanced::layout::Node::with_children(node.size(), children)
+            .move_to(node.bounds().position())
     }
 }
 

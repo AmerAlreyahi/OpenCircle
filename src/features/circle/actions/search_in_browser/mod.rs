@@ -79,16 +79,9 @@ mod tests {
         assert_eq!((crop.width, crop.height), (6, 4));
         // What the browser's page sends: the PNG inside the auto-submit form.
         let png = search_png(&crop).unwrap();
-        let mut dec = png::Decoder::new(std::io::Cursor::new(png))
-            .read_info()
-            .unwrap();
-        let mut sent = vec![0; dec.output_buffer_size().unwrap()];
-        let info = dec.next_frame(&mut sent).unwrap();
-        assert_eq!(
-            (info.width, info.height, info.color_type),
-            (6, 4, png::ColorType::Rgba)
-        );
-        for (i, p) in sent.as_chunks::<4>().0.iter().enumerate() {
+        let sent = crate::shared::platform::capture::decode_png(std::io::Cursor::new(png)).unwrap();
+        assert_eq!((sent.width, sent.height), (6, 4));
+        for (i, p) in sent.rgba.as_chunks::<4>().0.iter().enumerate() {
             let (x, y) = (4 + i as u32 % 6, 2 + i as u32 / 6);
             assert_eq!(p[..3], px(x, y)[..3], "pixel ({x}, {y})");
             assert_eq!(p[3], 255, "never see-through");

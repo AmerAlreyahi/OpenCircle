@@ -47,6 +47,7 @@ pub mod text_area;
 pub mod thumb;
 pub mod toast;
 pub mod tooltip;
+pub mod wrap;
 
 #[cfg(test)]
 pub mod testing;

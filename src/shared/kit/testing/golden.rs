@@ -92,11 +92,6 @@ pub fn compare(dir: &str, name: &str, w: u32, h: u32, pixels: &[u8]) -> Result<(
 }
 
 fn decode(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
-    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
-        .read_info()
-        .unwrap();
-    let mut rgba = vec![0; reader.output_buffer_size().unwrap()];
-    let info = reader.next_frame(&mut rgba).unwrap();
-    rgba.truncate(info.buffer_size());
-    (info.width, info.height, rgba)
+    let f = crate::shared::platform::capture::decode_png(std::io::Cursor::new(bytes)).unwrap();
+    (f.width, f.height, f.rgba)
 }

@@ -232,7 +232,7 @@ fn platform_is_isolated() {
 }
 
 /// Not components: the kit's data and clock.
-const KIT_DATA: [&str; 6] = ["dir", "looks", "mod", "motion", "themes", "tokens"];
+const KIT_DATA: [&str; 7] = ["dir", "looks", "mod", "motion", "themes", "tokens", "wrap"];
 
 /// Each kit component has its gallery sheet (`kit/testing/gallery.rs`) and
 /// its golden images in both themes (`tests/fixtures/kit/`).

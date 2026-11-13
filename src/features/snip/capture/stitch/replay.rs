@@ -215,14 +215,11 @@ fn record_replay() {
     let (mut size, mut text) = (None, String::new());
     let mut prev: Option<Vec<u8>> = None;
     for path in &paths {
-        let mut reader =
-            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()))
-                .read_info()
-                .unwrap();
-        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut buf).unwrap();
-        assert_eq!(info.color_type, png::ColorType::Rgba);
-        let (w, h) = (info.width as usize, info.height as usize);
+        let frame = crate::shared::platform::capture::decode_png(std::io::BufReader::new(
+            std::fs::File::open(path).unwrap(),
+        ))
+        .unwrap();
+        let (buf, w, h) = (frame.rgba, frame.width as usize, frame.height as usize);
         assert_eq!(*size.get_or_insert((w, h)), (w, h));
         if prev.as_ref() == Some(&buf) {
             continue;

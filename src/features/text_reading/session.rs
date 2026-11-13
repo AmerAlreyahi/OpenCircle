@@ -674,11 +674,15 @@ mod tests {
         let w = 1920;
         // Two new lines: the OCR fixture ("Hello OpenCircle", "Read 42 words
         // here") on an empty part of the frame.
-        let png = png::Decoder::new(Cursor::new(include_bytes!("fixture.png")));
-        let mut reader = png::Decoder::read_info(png).unwrap();
-        let mut tile = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut tile).unwrap();
-        let (tw, th) = (info.width as usize, info.height as usize);
+        let fixture = crate::shared::platform::capture::decode_png(Cursor::new(include_bytes!(
+            "fixture.png"
+        )))
+        .unwrap();
+        let (tile, tw, th) = (
+            fixture.rgba,
+            fixture.width as usize,
+            fixture.height as usize,
+        );
         let mut changed = frame.clone();
         for y in 0..th {
             let at = ((300 + y) * w + 700) * 4;

@@ -927,14 +927,12 @@ mod tests {
         let mut app = App::idle(window::Id::unique());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
-        let shot = Shot {
-            image: solid(START, 200),
-            scale: START.scale,
-            origin: START.logical_origin(),
-            size: START.size(),
-            snip: None,
-            windows: Vec::new(),
-        };
+        let shot = Shot::plain(
+            solid(START, 200),
+            START.scale,
+            START.logical_origin(),
+            START.size(),
+        );
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         assert!(app.o.is_some());
         app.o.appear = Some((Instant::now(), 1.0)); // its opening is over
@@ -1965,14 +1963,7 @@ mod text_tests {
         let mut app = App::idle(window::Id::unique());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
-        let shot = Shot {
-            image: solid(START),
-            scale: 1.0,
-            origin: START.logical_origin(),
-            size: START.size(),
-            snip: None,
-            windows: Vec::new(),
-        };
+        let shot = Shot::plain(solid(START), 1.0, START.logical_origin(), START.size());
         let _ = app.update(Message::Captured(n, Instant::now(), Ok(shot)));
         app.o.appear = Some((Instant::now(), 1.0));
         let _ = app.update(Message::Screen(n, RIGHT, solid(RIGHT)));

@@ -10,6 +10,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use crate::features::ask_ai::png_b64 as base64;
+use crate::shared::picture::encode_png;
+use crate::shared::platform::capture::decode_png;
 
 /// Lens pages older versions wrote to the temp folder (still swept).
 const PREFIX: &str = "opencircle-lens-";
@@ -214,35 +216,14 @@ fn fit(png: &[u8], w: u32, h: u32) -> io::Result<(Vec<u8>, u32, u32)> {
     if w.max(h) <= MAX_EDGE {
         return Ok((png.to_vec(), w, h));
     }
-    let mut dec = png::Decoder::new(Cursor::new(png));
-    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = dec.read_info().map_err(bad)?;
-    let mut buf = vec![
-        0;
-        reader
-            .output_buffer_size()
-            .ok_or_else(|| bad("image too large"))?
-    ];
-    let info = reader.next_frame(&mut buf).map_err(bad)?;
-    if (info.width, info.height) != (w, h) {
+    let frame = decode_png(Cursor::new(png)).map_err(bad)?;
+    if (frame.width, frame.height) != (w, h) {
         return Err(bad("PNG size does not match the given size"));
     }
-    let ch = match info.color_type {
-        png::ColorType::Grayscale => 1,
-        png::ColorType::GrayscaleAlpha => 2,
-        png::ColorType::Rgb => 3,
-        png::ColorType::Rgba => 4,
-        png::ColorType::Indexed => return Err(bad("unexpected indexed PNG")),
-    };
+    let buf = &frame.rgba;
     let px = |x: u32, y: u32| -> [u32; 4] {
-        let i = (y as usize * w as usize + x as usize) * ch;
-        let p = &buf[i..i + ch];
-        match ch {
-            1 => [p[0] as u32, p[0] as u32, p[0] as u32, 255],
-            2 => [p[0] as u32, p[0] as u32, p[0] as u32, p[1] as u32],
-            3 => [p[0] as u32, p[1] as u32, p[2] as u32, 255],
-            _ => [p[0] as u32, p[1] as u32, p[2] as u32, p[3] as u32],
-        }
+        let i = (y as usize * w as usize + x as usize) * 4;
+        std::array::from_fn(|c| buf[i + c] as u32)
     };
     let (dw, dh) = scaled_size(w, h);
     let mut out = Vec::with_capacity(dw as usize * dh as usize * 4);
@@ -262,15 +243,7 @@ fn fit(png: &[u8], w: u32, h: u32) -> io::Result<(Vec<u8>, u32, u32)> {
             out.extend(sum.iter().map(|s| (s / n) as u8));
         }
     }
-    let mut enc_out = Vec::new();
-    let mut enc = png::Encoder::new(&mut enc_out, dw, dh);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    enc.set_compression(png::Compression::Fast);
-    enc.write_header()
-        .and_then(|mut w| w.write_image_data(&out))
-        .map_err(bad)?;
-    Ok((enc_out, dw, dh))
+    Ok((encode_png(dw, dh, &out).map_err(bad)?, dw, dh))
 }
 
 #[cfg(test)]

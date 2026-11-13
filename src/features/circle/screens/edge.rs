@@ -907,12 +907,15 @@ mod tests {
             if std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some() {
                 crate::shared::picture::write_png(&path, 1920, 1080, &img).unwrap();
             }
-            let png = png::Decoder::new(std::io::Cursor::new(std::fs::read(&path).unwrap()));
-            let mut reader = png.read_info().unwrap();
-            let mut want = vec![0; reader.output_buffer_size().unwrap()];
-            let info = reader.next_frame(&mut want).unwrap();
-            assert_eq!((info.width, info.height), (1920, 1080));
-            assert!(img == want[..img.len()], "{name} differs from the edge");
+            let want = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+                std::fs::read(&path).unwrap(),
+            ))
+            .unwrap();
+            assert_eq!((want.width, want.height), (1920, 1080));
+            assert!(
+                img == want.rgba[..img.len()],
+                "{name} differs from the edge"
+            );
         }
     }
 }

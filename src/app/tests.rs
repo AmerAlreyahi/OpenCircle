@@ -51,14 +51,12 @@ fn closing_app() -> App {
 }
 
 fn a_shot() -> Result<Shot, CaptureError> {
-    Ok(Shot {
-        image: image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]),
-        scale: 1.0,
-        origin: Point::ORIGIN,
-        size: Size::new(4.0, 4.0),
-        snip: None,
-        windows: Vec::new(),
-    })
+    Ok(Shot::plain(
+        image::Handle::from_rgba(4, 4, vec![9; 4 * 4 * 4]),
+        1.0,
+        Point::ORIGIN,
+        Size::new(4.0, 4.0),
+    ))
 }
 
 /// A waiting update never installs while the user works, idle or not (owner,
@@ -2382,14 +2380,12 @@ fn the_screen_is_read_on_demand_the_touched_band_first() {
     text::MODELS_HERE.set(Some(true));
     let page = text_app();
     let mut app = App::idle(window::Id::unique());
-    let shot = Shot {
-        image: page.o.frame.clone().unwrap(),
-        scale: 1.0,
-        origin: Point::ORIGIN,
-        size: page.o.screen,
-        snip: None,
-        windows: Vec::new(),
-    };
+    let shot = Shot::plain(
+        page.o.frame.clone().unwrap(),
+        1.0,
+        Point::ORIGIN,
+        page.o.screen,
+    );
     let _ = app.open(Instant::now(), Ok(shot));
     assert!(app.o.ocr_ready && app.o.reader == Reader::Idle);
     assert_eq!(app.o.reading, None, "nothing read at open");
@@ -2476,14 +2472,12 @@ fn windows_ocr_reads_the_whole_screen_from_the_capture() {
     text_reading::system::LANGUAGE_HERE.set(Some(Some("en-US")));
     let page = text_app();
     let mut app = App::idle(window::Id::unique());
-    let shot = Shot {
-        image: page.o.frame.clone().unwrap(),
-        scale: 1.0,
-        origin: Point::ORIGIN,
-        size: page.o.screen,
-        snip: None,
-        windows: Vec::new(),
-    };
+    let shot = Shot::plain(
+        page.o.frame.clone().unwrap(),
+        1.0,
+        Point::ORIGIN,
+        page.o.screen,
+    );
     let opened = app.open(Instant::now(), Ok(shot));
     assert_eq!(app.o.reader, Reader::Idle, "no download offered");
     let whole = Rectangle::with_size(app.o.screen);
@@ -4344,14 +4338,7 @@ fn late_answers_after_close_are_dropped_and_the_frame_is_freed() {
     };
     let pixels = pixels.clone();
     let mut app = App::idle(window::Id::unique());
-    let shot = Shot {
-        image: frame,
-        scale: 1.0,
-        origin: Point::ORIGIN,
-        size: Size::new(w as f32, h as f32),
-        snip: None,
-        windows: Vec::new(),
-    };
+    let shot = Shot::plain(frame, 1.0, Point::ORIGIN, Size::new(w as f32, h as f32));
     let _ = app.open(Instant::now(), Ok(shot));
     assert!(app.o.is_some() && app.o.frame.is_some());
     app.select(Rectangle::new(Point::new(4.0, 4.0), Size::new(40.0, 30.0)));
