@@ -233,7 +233,9 @@ looked; **Check now** looks at once, on request.
 
 Settings (tray icon, left-click) has a sidebar with General, Appearance, Look & behaviour, Ask AI, Text reading (Windows), Translate,
 Snip, History, Shortcuts, Privacy, About and Labs (Song search appears
-once switched on in Labs). It writes a plain TOML file you may
+once switched on in Labs). It works with the keyboard too: `Tab` / `Shift+Tab` move through the
+sidebar and the page, `Enter` / `Space` press, the arrow keys change a choice, `Esc` closes a menu or
+a question. It writes a plain TOML file you may
 also edit by hand:
 
 - Windows: `%APPDATA%\opencircle\config.toml`
