@@ -8,11 +8,14 @@ use iced::widget::image;
 use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
-use crate::actions::{self, Action, Run, text};
 use crate::features::settings::labs::BarButton;
-use crate::ocr::{self};
+use crate::features::text_reading as ocr;
 use crate::shared::config;
 use crate::shared::platform::capture::{self, CaptureError};
+use crate::{
+    actions::{self, Action, Run},
+    features::text_reading::text,
+};
 
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{place_window, taskbar_inset};

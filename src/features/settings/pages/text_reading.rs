@@ -66,7 +66,7 @@ impl State {
             .chain((source != lang::AUTO).then_some(source))
             .cloned()
             .collect();
-        crate::ocr::system::missing(&self.recognizers, &wanted)
+        crate::features::text_reading::system::missing(&self.recognizers, &wanted)
     }
 
     /// The one quiet note under the engine row, if a language is missing.

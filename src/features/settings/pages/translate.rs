@@ -11,6 +11,7 @@ use iced::{Element, Fill};
 use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 
 use crate::features::settings::labs::Feature;
+use crate::features::text_reading::screens::model_download::mb;
 use crate::mt;
 use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
@@ -22,7 +23,6 @@ use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, paragraph, sub};
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
-use crate::ui::screens::model_download::mb;
 
 /// The OptimaMT models (the lighter decoders) on Hugging Face.
 pub const OPTIMA_MT: &str = "https://huggingface.co/OptimaMT";

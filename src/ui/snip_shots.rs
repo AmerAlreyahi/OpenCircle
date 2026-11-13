@@ -196,8 +196,8 @@ fn states() -> Vec<(&'static str, App)> {
 }
 
 /// More open on the picked area, the text read as `read` says.
-fn more(read: Option<Result<Vec<crate::ocr::TextBlock>, String>>) -> App {
-    crate::actions::text::MODELS_HERE.set(Some(true));
+fn more(read: Option<Result<Vec<crate::features::text_reading::TextBlock>, String>>) -> App {
+    crate::features::text_reading::text::MODELS_HERE.set(Some(true));
     let mut app = picked();
     let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
     if let Some(read) = read {
@@ -207,8 +207,8 @@ fn more(read: Option<Result<Vec<crate::ocr::TextBlock>, String>>) -> App {
     app
 }
 
-fn line(text: &str) -> crate::ocr::TextBlock {
-    crate::ocr::TextBlock {
+fn line(text: &str) -> crate::features::text_reading::TextBlock {
+    crate::features::text_reading::TextBlock {
         text: text.into(),
         bounds: [20.0, 20.0, 200.0, 14.0],
         confidence: 1.0,
@@ -254,12 +254,12 @@ fn more_states() -> Vec<(&'static str, App)> {
     settle(&mut app);
     out.push(("10h-translated", app));
     // no offline model for the pair yet: the existing download card
-    crate::actions::text::MODELS_HERE.set(Some(false));
+    crate::features::text_reading::text::MODELS_HERE.set(Some(false));
     let mut app = picked();
     let _ = app.on_snip_toolbar(E::Translate);
     settle(&mut app);
     out.push(("10i-nomodel", app));
-    crate::actions::text::MODELS_HERE.set(Some(true));
+    crate::features::text_reading::text::MODELS_HERE.set(Some(true));
     out
 }
 

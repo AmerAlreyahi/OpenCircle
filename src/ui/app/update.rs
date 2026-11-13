@@ -7,10 +7,10 @@ use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
-use crate::actions::{self, text};
 use crate::features::settings::labs;
-use crate::ocr::{self};
+use crate::features::text_reading as ocr;
 use crate::shared::config;
+use crate::{actions, features::text_reading::text};
 
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
@@ -748,7 +748,9 @@ impl App {
                     };
                     let done = text::download_reader(rec, progress)
                         .map(|()| text::Progress::Reading)
-                        .map_err(|e| crate::ui::screens::model_download::why_key(&e));
+                        .map_err(|e| {
+                            crate::features::text_reading::screens::model_download::why_key(&e)
+                        });
                     let _ = tx.unbounded_send(done);
                 })
                 .map(move |step| Message::Reader(opening, step))

@@ -6,7 +6,7 @@
 
 use super::super::pipeline::*;
 use super::*;
-use crate::ocr::TextBlock;
+use crate::features::text_reading::TextBlock;
 use std::cell::RefCell;
 
 const DIR: &str = concat!(

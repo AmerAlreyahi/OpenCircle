@@ -4,12 +4,15 @@
 //! `recognize_in_child`, so ORT and its memory live only in an
 //! `opencircle ocr-worker` process that runs `Engine` (one per call, or one
 //! warm one while a `Hold` lives: `session`).
+pub(crate) mod app;
 #[cfg(all(test, target_os = "linux"))]
 mod bench;
 pub(crate) mod models;
 pub mod screen;
+pub(crate) mod screens;
 pub(crate) mod session;
 pub mod system;
+pub(crate) mod text;
 pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};

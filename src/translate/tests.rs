@@ -808,7 +808,7 @@ pub(super) fn ar(en: &str) -> Option<&'static str> {
 #[test]
 #[ignore]
 fn languages_end_to_end() {
-    use crate::ocr::{self, Read, models};
+    use crate::features::text_reading::{self as ocr, Read, models};
     use std::time::Instant;
     let index = |id: &str| models::RECOGNIZERS.iter().position(|r| r.id == id).unwrap();
     for id in ["latin", "arabic", "cyrillic"] {
@@ -981,7 +981,7 @@ fn languages_end_to_end() {
 fn real_frames() {
     use super::pipeline::{Cache, Deps, translate_frame};
     use crate::features::ask_ai::AiError;
-    use crate::ocr::{self, OcrError, TextBlock};
+    use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
     let out = std::path::PathBuf::from(std::env::var("OC_REAL_OUT").unwrap());
@@ -1097,7 +1097,7 @@ fn real_frames() {
 fn real_matrix() {
     use super::pipeline::{Cache, Deps, Real, Via, translate_frame};
     use crate::features::ask_ai::AiError;
-    use crate::ocr::{self, OcrError, TextBlock};
+    use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
     struct M {
@@ -1254,8 +1254,8 @@ fn real_matrix() {
 fn profile_helper() {
     use super::pipeline::{Cache, Deps, by_sentence, translate_frame};
     use crate::features::ask_ai::AiError;
-    use crate::ocr::session::Session;
-    use crate::ocr::{OcrError, Read, TextBlock, worker};
+    use crate::features::text_reading::session::Session;
+    use crate::features::text_reading::{OcrError, Read, TextBlock, worker};
     use std::sync::Mutex;
     struct Helper(Mutex<Session>);
     impl Helper {
@@ -1330,14 +1330,14 @@ mod real {
     }
 
     /// The OCR lines of fixture `name`: x, y, w, h (OCR box) and text.
-    fn ocr(name: &str) -> Vec<crate::ocr::TextBlock> {
+    fn ocr(name: &str) -> Vec<crate::features::text_reading::TextBlock> {
         let all: serde_json::Value =
             serde_json::from_str(include_str!("fixtures/lines.json")).unwrap();
         all[name]
             .as_array()
             .unwrap()
             .iter()
-            .map(|l| crate::ocr::TextBlock {
+            .map(|l| crate::features::text_reading::TextBlock {
                 bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
                 text: l[4].as_str().unwrap().into(),
                 confidence: 0.9,
@@ -1763,7 +1763,7 @@ mod real {
     /// A line the frame's edge cuts through is left alone.
     #[test]
     fn lines_cut_by_the_frame_edge_are_skipped() {
-        let tb = |y: f32| crate::ocr::TextBlock {
+        let tb = |y: f32| crate::features::text_reading::TextBlock {
             bounds: [10.0, y, 100.0, 20.0],
             text: "x".into(),
             confidence: 0.9,
@@ -1784,7 +1784,10 @@ mod real {
             _: &[u8],
             _: u32,
             _: u32,
-        ) -> Result<Vec<crate::ocr::TextBlock>, crate::ocr::OcrError> {
+        ) -> Result<
+            Vec<crate::features::text_reading::TextBlock>,
+            crate::features::text_reading::OcrError,
+        > {
             unreachable!("the fixture's lines are given")
         }
         fn translate(

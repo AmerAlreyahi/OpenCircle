@@ -15,7 +15,7 @@ use std::time::Duration;
 use iced::widget::image::Handle;
 
 use super::{av1, online};
-use crate::ocr::models::ModelFile;
+use crate::features::text_reading::models::ModelFile;
 
 mod bundled {
     include!(concat!(env!("OUT_DIR"), "/previews.rs"));

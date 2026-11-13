@@ -8,6 +8,9 @@ use super::{Card, Msg, Phase, Session};
 use crate::actions::{self};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
+use crate::features::text_reading::screens::model_download::{
+    self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION,
+};
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label};
 use crate::shared::kit::dir;
@@ -21,7 +24,6 @@ use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
 use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
 use crate::ui::picker;
-use crate::ui::screens::model_download::{self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
 /// The pill's distance to the top of the screen, and the status tag's to
 /// the pill (PICKER_SPEC.md).
@@ -105,7 +107,12 @@ impl Session {
                         None,
                     )
                 }
-                None => download(&OCR, crate::ocr::models::full_size(), stage, None),
+                None => download(
+                    &OCR,
+                    crate::features::text_reading::models::full_size(),
+                    stage,
+                    None,
+                ),
             },
         };
         match &self.phase {

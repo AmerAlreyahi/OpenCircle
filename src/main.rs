@@ -7,7 +7,6 @@ mod actions;
 mod features;
 mod live;
 mod mt;
-mod ocr;
 mod shared;
 mod snip;
 mod translate;
@@ -129,7 +128,9 @@ fn main() -> ExitCode {
     let relaunched = args.first().map(String::as_str) == Some(crate::shared::update::RELAUNCH_ARG);
     let command = match args.first().map(String::as_str) {
         None => None,
-        Some(ocr::WORKER_ARG) => return ocr::worker_main(), // hidden: spawned by the app
+        Some(crate::features::text_reading::WORKER_ARG) => {
+            return crate::features::text_reading::worker_main();
+        } // hidden: spawned by the app
         // hidden: Wayland's long capture pop-up, spawned by the app on XWayland
         Some(ui::long_capture_popup::ARG) => return ui::long_capture_popup::main(),
         Some(crate::shared::setup::FORGET_ARG) => {

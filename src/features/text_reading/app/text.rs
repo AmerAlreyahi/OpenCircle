@@ -6,16 +6,19 @@ use std::time::Instant;
 use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
-use crate::actions::{self, Crop, copy, text};
-use crate::ocr::screen::Wants;
-use crate::ocr::{self, TextBlock};
+use crate::features::text_reading::screen::Wants;
+use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::{
+    actions::{self, Crop, copy},
+    features::text_reading::text,
+};
 
+use crate::features::text_reading::app::word;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Await, Message, PickAct, Purpose, WordRead};
-use crate::ui::app::word;
 use crate::ui::overlay;
 
-use super::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
+use crate::ui::app::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
 
 impl App {
     /// A tap at `at` (image px): the word there becomes the selection. Lines read
@@ -905,6 +908,6 @@ fn found(boxes: Vec<[f32; 4]>, scale: f32) -> Vec<Rectangle> {
 /// Windows OCR read the screen (at least one line) and every line as real
 /// words: the second reader has nothing to add, so the helper never starts
 /// (it read and kept none of an English page's 42 lines, 554 ms).
-pub(super) fn needs_no_second_reader(well: &[bool]) -> bool {
+pub(crate) fn needs_no_second_reader(well: &[bool]) -> bool {
     !well.is_empty() && well.iter().all(|w| *w)
 }

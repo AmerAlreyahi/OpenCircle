@@ -19,7 +19,7 @@ use super::pipeline::{
 #[cfg(test)]
 use super::pipeline::{Translation, translations};
 use super::{Block, Drawn, Line, group_blocks, render};
-use crate::ocr::TextBlock;
+use crate::features::text_reading::TextBlock;
 
 /// Diff granularity in pixels.
 const TILE: u32 = 32;

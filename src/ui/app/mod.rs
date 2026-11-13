@@ -6,7 +6,6 @@ pub(crate) mod keys;
 pub(crate) mod message;
 pub(crate) mod opening;
 pub(crate) mod quick;
-pub(crate) mod word;
 
 use crate::shared::app_language::S;
 use std::cell::{Cell, RefCell};
@@ -38,7 +37,6 @@ pub(crate) mod snip_more;
 pub(crate) mod snip_toolbar;
 #[cfg(test)]
 pub(crate) mod tests;
-pub(crate) mod text;
 pub(crate) mod tools;
 pub(crate) mod update;
 pub(crate) mod updates;
@@ -122,10 +120,10 @@ pub(crate) const REVEAL_WAIT: Duration = Duration::from_millis(400);
 /// Select-text mode on a snapped box: its words (`None` while OCR reads them)
 /// and the ones picked by a press-drag over them.
 pub(crate) struct TextMode {
-    lines: Option<Vec<word::Line>>,
-    boxes: Vec<Rectangle>,
-    picked: Option<word::Picked>,
-    picking: bool,
+    pub(crate) lines: Option<Vec<crate::features::text_reading::app::word::Line>>,
+    pub(crate) boxes: Vec<Rectangle>,
+    pub(crate) picked: Option<crate::features::text_reading::app::word::Picked>,
+    pub(crate) picking: bool,
 }
 
 /// The text reader (OCR) behind text selection in main mode, as the note over

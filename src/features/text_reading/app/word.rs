@@ -8,8 +8,8 @@
 //! to the caret on the last. All boxes are image px (the overlay at 1x).
 use iced::{Point, Rectangle, Size, Vector};
 
-use crate::ocr::screen::{self, Band, Next, Rows, Wants};
-use crate::ocr::{self, TextBlock};
+use crate::features::text_reading::screen::{self, Band, Next, Rows, Wants};
+use crate::features::text_reading::{self as ocr, TextBlock};
 
 /// What OCR reads around a tap (image px): wide enough for the line around a word.
 const REGION: Size = Size::new(720.0, 160.0);

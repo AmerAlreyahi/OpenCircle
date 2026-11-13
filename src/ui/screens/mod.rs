@@ -5,7 +5,6 @@ pub mod bar;
 pub mod common;
 pub mod live;
 pub mod long_capture;
-pub mod model_download;
 pub mod snip_toolbar;
 pub mod overlay {
     pub mod edge;

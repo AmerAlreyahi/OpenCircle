@@ -158,7 +158,7 @@ fn the_part_2a_surfaces_write_no_words_of_their_own() {
         "src/ui/screens/update_pill.rs",
         "src/ui/screens/update_card.rs",
         "src/ui/screens/toast.rs",
-        "src/ui/screens/model_download.rs",
+        "src/features/text_reading/screens/model_download.rs",
         "src/features/ask_ai/screens/model_list.rs",
         "src/ui/screens/translate/view.rs",
         "src/ui/screens/common/language_picker.rs",
@@ -232,6 +232,9 @@ const UI_SOURCES: &[&str] = &[
     "src/features/ask_ai/screens",
     "src/features/ask_ai/app",
     "src/features/ask_ai/ask.rs",
+    "src/features/text_reading/screens",
+    "src/features/text_reading/app",
+    "src/features/text_reading/text.rs",
 ];
 
 /// Files of the UI that hold no user-visible words, and why.

@@ -11,15 +11,15 @@ use iced::{Point, Rectangle, Size, Task, task};
 use crate::actions::{self, Crop};
 use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
+use crate::features::text_reading::models;
+use crate::features::text_reading::screens::model_download;
 use crate::mt::Pair;
-use crate::ocr::models;
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::panel_frame as card;
 use crate::t;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
 use crate::ui::background;
 use crate::ui::picker::{self, Picker};
-use crate::ui::screens::model_download;
 
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;
@@ -670,7 +670,7 @@ impl Session {
                 if real.wants_readers() {
                     let (bytes, names) = (
                         actions::translate::readers_bytes(),
-                        crate::ocr::models::missing_other_scripts(),
+                        crate::features::text_reading::models::missing_other_scripts(),
                     );
                     let _ = tx.unbounded_send(Msg::Readers(bytes, names));
                     return;

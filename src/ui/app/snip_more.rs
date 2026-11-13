@@ -8,13 +8,13 @@ use iced::widget::image;
 use iced::{Rectangle, Task};
 
 use crate::actions::snip_more::{self as more, Hidden, Read, Row};
-use crate::actions::{Crop, text};
-use crate::ocr::{self, TextBlock};
+use crate::features::text_reading::{self as ocr, TextBlock};
 use crate::shared::config;
 use crate::snip::annotate::{self, Message as E};
 use crate::ui::background;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::screens::translate;
+use crate::{actions::Crop, features::text_reading::text};
 
 use super::message::{Message, Purpose};
 use super::{App, Reader};
@@ -398,15 +398,18 @@ mod tests {
     use iced::{Point, Rectangle};
 
     use crate::Trigger;
-    use crate::actions::{copy, snip_more as more, text};
     use crate::features::settings::labs::Labs;
-    use crate::ocr::TextBlock;
+    use crate::features::text_reading::TextBlock;
     use crate::shared::kit::testing::shot;
     use crate::snip::annotate::{Edit, Item, Menu, Message as E, Shape};
     use crate::ui::app::App;
     use crate::ui::app::message::{Hiding, Message};
     use crate::ui::app::tests::{run_task, snipping_on};
     use crate::ui::screens::snip_toolbar::toolbar;
+    use crate::{
+        actions::{copy, snip_more as more},
+        features::text_reading::text,
+    };
 
     const AREA: Rectangle = Rectangle {
         x: 100.0,

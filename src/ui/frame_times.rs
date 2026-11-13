@@ -12,10 +12,10 @@ use iced::window::{self};
 use iced::{Element, Point, Rectangle, Size, Vector};
 
 use crate::actions;
-use crate::ocr::{self, TextBlock};
+use crate::features::text_reading::{self as ocr, TextBlock};
 
 use super::app::message::Message;
-use super::app::word;
+use crate::features::text_reading::app::word;
 use crate::features::{onboarding, settings};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;

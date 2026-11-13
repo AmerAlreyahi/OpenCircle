@@ -8,9 +8,12 @@ use iced::widget::image;
 use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
-use crate::actions::{self, Crop, Run, copy, save, text};
 use crate::shared::config;
 use crate::shared::platform::capture;
+use crate::{
+    actions::{self, Crop, Run, copy, save},
+    features::text_reading::text,
+};
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};

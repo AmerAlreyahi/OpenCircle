@@ -6,17 +6,23 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, window};
 
 use crate::Trigger;
-use crate::actions::{self, Action, qr, search_in_browser, text};
 use crate::features::settings::labs::BarButton;
-use crate::ocr::TextBlock;
+use crate::features::text_reading::TextBlock;
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Target};
 use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate;
-use crate::ui::app::{keys, quick::Quick, word};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::snip::{self, Snip};
 use crate::ui::{ai_chat, live_layer, overlay, song, translate, windows};
+use crate::{
+    actions::{self, Action, qr, search_in_browser},
+    features::text_reading::text,
+};
+use crate::{
+    features::text_reading::app::word,
+    ui::app::{keys, quick::Quick},
+};
 
 /// Where the overlay was when a Copy / Save ran: its origin, size and scale
 /// (logical px), and what its pill goes beside (overlay px; `actions::pill_at`).
@@ -76,7 +82,11 @@ pub(crate) enum Message {
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),
     /// Snip's More read the area's text (opening, which read; its lines).
-    MoreRead(u32, u32, Result<Vec<crate::ocr::TextBlock>, String>),
+    MoreRead(
+        u32,
+        u32,
+        Result<Vec<crate::features::text_reading::TextBlock>, String>,
+    ),
     /// A Copy / Save run off the UI thread is done: its pill, where the
     /// overlay was (`PillPlace`).
     Confirm(PillPlace, Result<String, String>),

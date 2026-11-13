@@ -3,8 +3,8 @@
 //! `ui/translate.rs` shows it, `ui/live_layer.rs` repeats it (live mode).
 use super::{Action, Key, Run};
 use crate::features::ask_ai::ask;
+use crate::features::text_reading::models;
 use crate::mt;
-use crate::ocr::models;
 use crate::shared::app_language::{S, fmt, language_name, tr};
 use crate::shared::config::{self, AiConfig, Engine, Provider};
 use crate::shared::secrets::Secret;
@@ -81,7 +81,7 @@ pub fn download(
     source: &str,
     pair: Option<&'static mt::Pair>,
     progress: impl FnMut(u64, u64),
-) -> Result<(), crate::ocr::OcrError> {
+) -> Result<(), crate::features::text_reading::OcrError> {
     match pair {
         Some(pair) => pair.ensure(progress),
         None => models::ensure(&models::ocr_files(models::recognizer_for(source)), progress),
@@ -90,7 +90,9 @@ pub fn download(
 
 /// The readers for other scripts (Arabic, Cyrillic, Chinese and Japanese)
 /// that aren't on disk, for a page read as noise.
-pub fn download_readers(progress: impl FnMut(u64, u64)) -> Result<(), crate::ocr::OcrError> {
+pub fn download_readers(
+    progress: impl FnMut(u64, u64),
+) -> Result<(), crate::features::text_reading::OcrError> {
     models::ensure(&models::other_scripts_files(), progress)
 }
 

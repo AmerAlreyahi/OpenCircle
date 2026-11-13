@@ -1026,7 +1026,7 @@ impl State {
         };
         let quick_text = quick_text(&config);
         let interval = config.translate.live_interval_ms.to_string();
-        let (recognizers, profile) = crate::ocr::system::windows_languages();
+        let (recognizers, profile) = crate::features::text_reading::system::windows_languages();
         let mut s = State {
             section: Section::General,
             saved: config.clone(),

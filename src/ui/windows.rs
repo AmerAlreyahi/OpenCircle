@@ -1294,10 +1294,12 @@ impl Windows {
                                 };
                                 let got = match crate::mt::update(&pairs, progress) {
                                     // Cancel: not a failure (the row is counted again)
-                                    Err(crate::ocr::OcrError::Stopped) => Ok(()),
-                                    got => {
-                                        got.map_err(|e| crate::ui::screens::model_download::why(&e))
-                                    }
+                                    Err(crate::features::text_reading::OcrError::Stopped) => Ok(()),
+                                    got => got.map_err(|e| {
+                                        crate::features::text_reading::screens::model_download::why(
+                                            &e,
+                                        )
+                                    }),
                                 };
                                 let _ = tx.unbounded_send(settings::Message::ModelsUpdated(got));
                             });

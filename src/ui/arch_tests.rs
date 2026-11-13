@@ -137,6 +137,8 @@ fn screens_never_style() {
             !name.starts_with("shared/kit/")
                 && !name.starts_with("shared/platform/")
                 && !name.starts_with("ui/app/")
+                && !name.starts_with("app/")
+                && !(name.starts_with("features/") && name.split('/').nth(2) == Some("app"))
         })
         .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
         .filter(|(_, src)| code(src).any(styles))

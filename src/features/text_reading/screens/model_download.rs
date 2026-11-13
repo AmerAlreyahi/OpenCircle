@@ -84,7 +84,7 @@ impl Stage<'_> {
     /// A download at `share`: the files are checked as the last ones land.
     /// Retrying while the download waits for another try.
     pub fn at(share: f32) -> Self {
-        Self::of(share, crate::ocr::models::retrying())
+        Self::of(share, crate::features::text_reading::models::retrying())
     }
 
     fn of(share: f32, retrying: bool) -> Self {
@@ -142,14 +142,14 @@ const TEXT_LINE: f32 = 1.6;
 
 /// Why a download stopped, in the app's language: what the user can do about
 /// it (the detail goes to the log).
-pub fn why(e: &crate::ocr::OcrError) -> String {
+pub fn why(e: &crate::features::text_reading::OcrError) -> String {
     tr(why_key(e)).into()
 }
 
 /// The string saying why (a state that crosses threads carries the key, the
 /// UI words it in the language it speaks when it draws).
-pub fn why_key(e: &crate::ocr::OcrError) -> S {
-    use crate::ocr::OcrError;
+pub fn why_key(e: &crate::features::text_reading::OcrError) -> S {
+    use crate::features::text_reading::OcrError;
     crate::log!("[opencircle] model download failed: {e}");
     match e {
         OcrError::Unreachable { server: true } => S::md_err_server,

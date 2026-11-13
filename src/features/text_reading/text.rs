@@ -1,8 +1,8 @@
 //! Text (Copy text): read the text in the crop and copy it. OCR runs in a helper
-//! process (`crate::ocr`); its models are downloaded once, only after the user
+//! process (`crate::features::text_reading`); its models are downloaded once, only after the user
 //! agrees (the download card; the app asks before it ever gets here).
-use super::{Action, Crop, Key, Run};
-use crate::ocr::{self, TextBlock};
+use crate::actions::{Action, Crop, Key, Run};
+use crate::features::text_reading::{self as ocr, TextBlock};
 use crate::shared::app_language::S;
 
 pub const ACTION: Action = Action {
@@ -32,7 +32,7 @@ fn copy_read(crop: Crop) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err(crate::t!(pill_no_text).into());
     }
-    super::copy::text(text).map(|()| super::copy::COPIED_PILL.to_string())
+    crate::actions::copy::text(text).map(|()| crate::actions::copy::COPIED_PILL.to_string())
 }
 
 /// How reading is going.

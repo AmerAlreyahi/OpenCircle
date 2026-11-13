@@ -12,13 +12,13 @@ use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
 use crate::features::settings::labs::{BarButton, Labs};
-use crate::ocr;
+use crate::features::text_reading as ocr;
+use crate::features::text_reading::app::word;
 use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
 use crate::ui::app::screens::Screen;
-use crate::ui::app::word;
 use crate::ui::app::{Reader, TextMode};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
@@ -69,7 +69,7 @@ pub(crate) struct Opening {
     pub(crate) frame_sent: bool,
     /// The reader offered for the script found (#169, sheet b7): the card
     /// asks for it, once per opening.
-    pub(crate) script_reader: Option<&'static crate::ocr::models::Recognizer>,
+    pub(crate) script_reader: Option<&'static crate::features::text_reading::models::Recognizer>,
     pub(crate) script_offered: bool,
     /// Lines the Latin reader read as noise with no other reader on disk.
     pub(crate) noise: usize,

@@ -12,8 +12,8 @@ pub use super::lang::is_rtl;
 use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
 use crate::features::ask_ai::{self as ai, AiError};
+use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
 use crate::mt;
-use crate::ocr::{self, OcrError, TextBlock};
 use crate::shared::config::{AiConfig, TextReader};
 use crate::shared::secrets::Secret;
 

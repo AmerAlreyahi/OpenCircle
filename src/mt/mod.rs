@@ -18,8 +18,8 @@ use ort::session::builder::SessionBuilder;
 use ort::session::{Session, SessionInputValue};
 use ort::value::{DynValue, Tensor};
 
-use crate::ocr::models::{self, ModelFile};
-use crate::ocr::{self, OcrError};
+use crate::features::text_reading::models::{self, ModelFile};
+use crate::features::text_reading::{self as ocr, OcrError};
 use crate::translate::lang;
 use unigram::Unigram;
 

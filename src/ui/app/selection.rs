@@ -7,9 +7,9 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 use crate::actions::{self};
 use crate::shared::config::{self, SelectStyle};
 
+use crate::features::text_reading::app::word;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Grab, Message, Purpose};
-use crate::ui::app::word;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, snip, translate};
 

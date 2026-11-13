@@ -18,7 +18,8 @@ use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop};
-use crate::ocr;
+use crate::features::text_reading as ocr;
+use crate::features::text_reading::app::word;
 use crate::shared::config;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{Place, place_window};
@@ -28,7 +29,6 @@ use crate::ui::app::capture::overlay_window;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::view::{grow, lifted};
-use crate::ui::app::word;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
@@ -1901,7 +1901,7 @@ mod text_tests {
 
     use super::*;
     use crate::Trigger;
-    use crate::ocr::Source;
+    use crate::features::text_reading::Source;
     use crate::ui::app::message::Shot;
 
     const START: Place = Place {

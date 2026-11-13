@@ -6,7 +6,6 @@ use iced::widget::{container, opaque, space};
 use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
-use crate::actions::{self, qr, search_in_browser, text};
 use crate::features::settings::labs::{self, BarButton};
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
@@ -21,6 +20,10 @@ use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 use crate::ui::song;
+use crate::{
+    actions::{self, qr, search_in_browser},
+    features::text_reading::text,
+};
 
 impl App {
     /// The bottom bar, the one action hub, as the new design's search bar: a
@@ -209,12 +212,18 @@ impl App {
     /// The text reader's download card (`model_download`) over the bar: its
     /// question with its size, its progress, a failure to try again.
     pub(crate) fn reader_note(&self) -> Option<Element<'_, Message>> {
-        use crate::ui::screens::model_download::{self as download, On, Stage};
+        use crate::features::text_reading::screens::model_download::{self as download, On, Stage};
         let (bytes, stage) = match &self.o.reader {
             Reader::Idle => return None,
             Reader::Missing(bytes) => (*bytes, Stage::Ask),
-            Reader::Downloading(done) => (crate::ocr::models::full_size(), Stage::at(*done)),
-            Reader::Failed(e) => (crate::ocr::models::full_size(), Stage::Failed(tr(*e))),
+            Reader::Downloading(done) => (
+                crate::features::text_reading::models::full_size(),
+                Stage::at(*done),
+            ),
+            Reader::Failed(e) => (
+                crate::features::text_reading::models::full_size(),
+                Stage::Failed(tr(*e)),
+            ),
         };
         // the reader for the script found (sheet b7): named, its own size
         let (bytes, model) = match self.o.script_reader {

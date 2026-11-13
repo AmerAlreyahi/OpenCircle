@@ -13,7 +13,7 @@
 use iced::Rectangle;
 
 use super::Crop;
-use crate::ocr::TextBlock;
+use crate::features::text_reading::TextBlock;
 use crate::shared::app_language::S;
 use crate::shared::config::Config;
 
@@ -51,7 +51,7 @@ impl Row {
 
     pub fn glyph(self) -> char {
         match self {
-            Row::CopyText => super::text::ACTION.icon,
+            Row::CopyText => crate::features::text_reading::text::ACTION.icon,
             Row::Translate => super::translate::ACTION.icon,
             // the OpenCircle logo is drawn instead (never sparkles)
             Row::AskAi => crate::features::ask_ai::ask::ACTION.icon,
@@ -240,7 +240,7 @@ pub fn visible(blocks: Vec<TextBlock>, hidden: &Hidden) -> Vec<TextBlock> {
 
 /// The text of the lines (`text::join_lines`: reading order, rows joined).
 pub fn text_of(blocks: &[TextBlock]) -> String {
-    super::text::join_lines(blocks)
+    crate::features::text_reading::text::join_lines(blocks)
 }
 
 #[cfg(test)]

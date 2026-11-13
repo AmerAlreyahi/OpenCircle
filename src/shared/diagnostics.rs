@@ -23,7 +23,7 @@ pub fn report(c: &Config) -> String {
     let windows_ocr = if !cfg!(windows) {
         String::new() // no Windows OCR here: say nothing of it (#143)
     } else {
-        match crate::ocr::system::known() {
+        match crate::features::text_reading::system::known() {
             Some(Some(tag)) => format!("  Windows OCR: reads {tag}\n"),
             Some(None) => "  Windows OCR: no recognizer for the Windows languages\n".into(),
             None => "  Windows OCR: not asked yet\n".into(),
@@ -65,7 +65,7 @@ pub fn report(c: &Config) -> String {
         autostart = c.general.autostart,
         update = c.update.auto,
         quick = c.quick_actions.len(),
-        ready = crate::ocr::ready(),
+        ready = crate::features::text_reading::ready(),
         log = tail(50).join("\n"),
     );
     redact(&text)

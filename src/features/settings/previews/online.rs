@@ -7,7 +7,7 @@
 //! (docs/previews.md); a new clip = one line here + its still.
 use std::path::PathBuf;
 
-use crate::ocr::models::{self, ModelFile};
+use crate::features::text_reading::models::{self, ModelFile};
 
 macro_rules! clip {
     ($name:literal, $size:expr, $sha256:literal) => {
@@ -138,7 +138,7 @@ pub fn load(path: &std::path::Path, f: &ModelFile) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ocr::models::LOCAL_FAKE;
+    use crate::features::text_reading::models::LOCAL_FAKE;
 
     /// "hello", pinned.
     const HELLO: ModelFile = ModelFile::plain(

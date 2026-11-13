@@ -10,14 +10,13 @@ pub mod search_in_browser;
 pub mod share;
 pub mod snip;
 pub mod snip_more;
-pub mod text;
 pub mod translate;
 
 /// Every action, in action-bar order. The first one runs on Enter.
 pub const ACTIONS: &[Action] = &[
     search_in_browser::ACTION,
     crate::features::ask_ai::ask::ACTION,
-    text::ACTION,
+    crate::features::text_reading::text::ACTION,
     translate::ACTION,
     snip::ACTION,
     copy::ACTION,

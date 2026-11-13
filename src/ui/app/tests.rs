@@ -8,22 +8,25 @@ use iced::window::{self};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
-use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
 use crate::features::settings::labs::{self, BarButton};
-use crate::ocr::{self, TextBlock};
+use crate::features::text_reading::{self as ocr, TextBlock};
 use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate::{self};
+use crate::{
+    actions::{self, Crop, copy, qr, search_in_browser},
+    features::text_reading::text,
+};
 
 use crate::shared::kit::panel_frame as card;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick::Quick;
-use crate::ui::app::{keys, word};
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::snip::Snip;
 use crate::ui::{ai_chat, overlay, snip, song, translate, windows};
+use crate::{features::text_reading::app::word, ui::app::keys};
 
 use super::view::chips_at;
 use super::*;
@@ -5599,8 +5602,8 @@ fn snip_over_a_translation_takes_the_translated_page() {
 
 /// The second reader (`text::needs_no_second_reader`).
 mod second_reader {
-    use super::super::text::needs_no_second_reader;
-    use crate::ocr::system::read_well;
+    use crate::features::text_reading::app::text::needs_no_second_reader;
+    use crate::features::text_reading::system::read_well;
 
     #[test]
     fn an_english_page_sends_no_line_to_the_second_reader() {

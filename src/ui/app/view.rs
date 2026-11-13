@@ -8,10 +8,10 @@ use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 use crate::actions::qr;
 use crate::shared::config;
 
+use crate::features::text_reading::app::word;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::kit::{motion, surface};
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::app::word;
 use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;

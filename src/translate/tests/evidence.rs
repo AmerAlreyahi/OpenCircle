@@ -21,7 +21,7 @@ fn blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
     let all: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/translate/lines.json")).unwrap();
     let lines: Vec<Line> = (all[name].as_array().unwrap().iter())
-        .map(|l| crate::ocr::TextBlock {
+        .map(|l| crate::features::text_reading::TextBlock {
             bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
             text: l[4].as_str().unwrap().into(),
             confidence: 0.9,

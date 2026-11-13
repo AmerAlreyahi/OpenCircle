@@ -8,9 +8,12 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
-use crate::actions::{self, Action, Crop, Run, copy, qr, search_in_browser, text};
 use crate::features::settings::labs::BarButton;
 use crate::shared::config::{self, QuickAction, Target};
+use crate::{
+    actions::{self, Action, Crop, Run, copy, qr, search_in_browser},
+    features::text_reading::text,
+};
 
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, taskbar_inset};
@@ -326,7 +329,7 @@ impl App {
             // the text is copied once it is Done (`Reader` in update.rs).
             Quick::CopyText if !text::models_present() => {
                 self.o.copy_after = true;
-                self.o.reader = Reader::Missing(crate::ocr::download_size());
+                self.o.reader = Reader::Missing(crate::features::text_reading::download_size());
                 Task::none()
             }
             Quick::CopyText => {

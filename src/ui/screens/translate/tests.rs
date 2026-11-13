@@ -1,6 +1,6 @@
 //! Translate in place: its sessions, partials, cards and picker pill.
 use super::*;
-use crate::ocr;
+use crate::features::text_reading as ocr;
 use iced::widget::container as c;
 
 fn block(text: &str, tr: &str, bounds: [f32; 4]) -> Translation {
@@ -111,8 +111,8 @@ fn a_page_read_as_noise_offers_the_other_readers() {
     assert_eq!(s.readers, Some((32_000_000, "Cyrillic".into())));
     // the picker's next language asks for its own models, not these
     let source = s.picker.source.clone();
-    let _ = s.begin(crate::ocr::models::installed(
-        crate::ocr::models::recognizer_for(&source),
+    let _ = s.begin(crate::features::text_reading::models::installed(
+        crate::features::text_reading::models::recognizer_for(&source),
     ));
     assert_eq!(s.readers, None);
 }
@@ -244,8 +244,8 @@ fn the_prompts_are_short_cards_on_small_screens() {
             );
             // the card floats clear of the corner and the pill
             let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
-            let p = crate::ui::screens::model_download::float_at(size, pill);
-            let cw = crate::ui::screens::model_download::WIDTH.min(w - 64.0);
+            let p = crate::features::text_reading::screens::model_download::float_at(size, pill);
+            let cw = crate::features::text_reading::screens::model_download::WIDTH.min(w - 64.0);
             let at = Rectangle::new(p, Size::new(cw, h - p.y));
             let at_px = |x: f32, y: f32| &px[((y as usize * w as usize) + x as usize) * 4..][..3];
             let dark = |p: &[u8]| p.iter().all(|&v| v < 100);

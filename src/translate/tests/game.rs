@@ -25,7 +25,7 @@ fn field(img: &mut Rgba, r: [usize; 4]) {
 
 /// OCR-like boxes become line boxes as the pipeline pads them.
 fn ocr(l: Line) -> Line {
-    let b = crate::ocr::TextBlock {
+    let b = crate::features::text_reading::TextBlock {
         bounds: l.bounds,
         text: l.text,
         confidence: 0.9,
