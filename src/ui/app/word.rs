@@ -154,15 +154,21 @@ fn on_frame(line: &Line, rgba: &[u8], width: u32, height: u32, scale: f32) -> Op
     }
     edges.push(last + 1);
     // each word's ink, left to right: (from, to) columns
-    let mut inks: Vec<(usize, usize)> = edges.chunks(2).map(|e| (e[0], e[1])).collect();
-    let rtl = is_rtl(&line.text);
-    if rtl {
-        inks.reverse(); // the first word is the rightmost
-    }
+    let inks: Vec<(usize, usize)> = edges.chunks(2).map(|e| (e[0], e[1])).collect();
+    // the words left to right (bidi: on an Arabic line the first word is
+    // the rightmost, but a run of English words inside it reads left to
+    // right), each in its own direction
+    let levels = levels(&line.text);
+    let place = visual_order(&levels);
+    let mut at = vec![0; place.len()];
+    place.iter().enumerate().for_each(|(j, &i)| at[i] = j);
+    let mut shown = spans.clone();
+    shown.sort_by_key(|&(c0, c1, ..)| (c0..c1).map(|i| at[i]).min());
     let to_image = |col: f32| (x0 as f32 + col) / scale;
     let count = line.text.chars().count();
     let mut carets: Vec<Option<f32>> = vec![None; count + 1];
-    for (&(c0, c1, ..), &(from, to)) in spans.iter().zip(&inks) {
+    for (&(c0, c1, ..), &(from, to)) in shown.iter().zip(&inks) {
+        let rtl = levels[c0].is_rtl();
         let m = c1 - c0;
         let chars: Vec<char> = line.text.chars().skip(c0).take(m).collect();
         let gaps: Vec<f32> = (gaps_in(from, to).iter())
@@ -267,6 +273,29 @@ fn word_spans(text: &str) -> Vec<(usize, usize, usize, usize)> {
     out
 }
 
+/// The bidi level of each character of `text` (the line's direction from
+/// `is_rtl`): odd = right to left. A Latin word or a number inside an
+/// Arabic line runs left to right, an Arabic word inside an English line
+/// right to left.
+fn levels(text: &str) -> Vec<unicode_bidi::Level> {
+    use unicode_bidi::{BidiInfo, Level};
+    let base = if is_rtl(text) {
+        Level::rtl()
+    } else {
+        Level::ltr()
+    };
+    let info = BidiInfo::new(text, Some(base));
+    (text.char_indices())
+        .map(|(b, _)| info.levels.get(b).copied().unwrap_or(base))
+        .collect()
+}
+
+/// The characters of `text` with `levels` in visual order, left to right
+/// (logical indices).
+fn visual_order(levels: &[unicode_bidi::Level]) -> Vec<usize> {
+    unicode_bidi::BidiInfo::reorder_visual(levels)
+}
+
 /// The x of each caret position of `line` (see `Line::carets`): measured, or
 /// an even share of the box per character, from the right on an RTL line.
 fn carets(line: &Line) -> Vec<f32> {
@@ -288,20 +317,75 @@ fn carets(line: &Line) -> Vec<f32> {
         .collect()
 }
 
-/// The box (line height) between carets `a` and `b` of `line`.
-fn between(line: &Line, carets: &[f32], a: usize, b: usize) -> Rectangle {
-    let (xa, xb) = (carets[a], carets[b]);
-    Rectangle::new(
-        Point::new(xa.min(xb), line.bounds.y),
-        Size::new((xa - xb).abs(), line.bounds.height),
-    )
+/// Where each character of `line` is (left, right; image px). Measured
+/// carets already put each word's characters in place; else an even share
+/// of the box laid out in visual order (a Latin word inside an Arabic line
+/// runs left to right in its place).
+fn cells(line: &Line) -> Vec<(f32, f32)> {
+    let count = line.text.chars().count();
+    if line.carets.len() == count + 1 {
+        let c = &line.carets;
+        return (0..count)
+            .map(|i| (c[i].min(c[i + 1]), c[i].max(c[i + 1])))
+            .collect();
+    }
+    let per = line.bounds.width / count.max(1) as f32;
+    let mut out = vec![(0.0, 0.0); count];
+    for (j, i) in visual_order(&levels(&line.text)).into_iter().enumerate() {
+        let x = line.bounds.x + per * j as f32;
+        out[i] = (x, x + per);
+    }
+    out
+}
+
+/// The highlight of characters `a..b` of `line`: one flat box (line height)
+/// per visual piece, left to right. A mixed line selected across its
+/// direction change is two pieces or more; spaces join the characters
+/// beside them and never make a piece of their own.
+fn pieces(line: &Line, a: usize, b: usize) -> Vec<Rectangle> {
+    let cells = cells(line);
+    let chars: Vec<char> = line.text.chars().collect();
+    let mut shown: Vec<(f32, f32, bool)> = (0..chars.len())
+        .filter(|&i| !chars[i].is_whitespace())
+        .map(|i| (cells[i].0, cells[i].1, (a..b).contains(&i)))
+        .collect();
+    shown.sort_by(|p, q| p.0.total_cmp(&q.0));
+    let mut out: Vec<Rectangle> = Vec::new();
+    let mut last_in = false;
+    for (l, r, inside) in shown {
+        match (inside, last_in, out.last_mut()) {
+            (true, true, Some(piece)) => piece.width = r - piece.x,
+            (true, ..) => out.push(Rectangle::new(
+                Point::new(l, line.bounds.y),
+                Size::new(r - l, line.bounds.height),
+            )),
+            _ => {}
+        }
+        last_in = inside;
+    }
+    out
+}
+
+/// The box (line height) around characters `a..b` of `line`; an empty range
+/// (or only spaces): a thin box at caret `a`.
+fn between(line: &Line, a: usize, b: usize) -> Rectangle {
+    let mut pieces = pieces(line, a, b).into_iter();
+    match pieces.next() {
+        Some(first) => pieces.fold(first, |all, p| all.union(&p)),
+        None => {
+            let x = carets(line)[a];
+            Rectangle::new(
+                Point::new(x, line.bounds.y),
+                Size::new(0.0, line.bounds.height),
+            )
+        }
+    }
 }
 
 /// A line's words (in text order) and their boxes.
 fn words(line: &Line) -> Vec<(Rectangle, &str)> {
-    let carets = carets(line);
     (word_spans(&line.text).into_iter())
-        .map(|(c0, c1, b0, b1)| (between(line, &carets, c0, c1), &line.text[b0..b1]))
+        .map(|(c0, c1, b0, b1)| (between(line, c0, c1), &line.text[b0..b1]))
         .collect()
 }
 
@@ -311,7 +395,6 @@ fn words(line: &Line) -> Vec<(Rectangle, &str)> {
 pub fn within<'a>(lines: impl IntoIterator<Item = &'a Line>, area: Rectangle) -> Vec<Line> {
     let mut out = Vec::new();
     for line in lines {
-        let carets = carets(line);
         let spans = word_spans(&line.text);
         let inside: Vec<usize> = (words(line).iter().enumerate())
             .filter(|(_, (r, _))| area.contains(r.center()))
@@ -323,8 +406,12 @@ pub fn within<'a>(lines: impl IntoIterator<Item = &'a Line>, area: Rectangle) ->
         let ((c0, _, b0, _), (_, c1, _, b1)) = (spans[first], spans[last]);
         out.push(Line {
             text: line.text[b0..b1].to_string(),
-            bounds: between(line, &carets, c0, c1),
-            carets: carets[c0..=c1].to_vec(),
+            bounds: between(line, c0, c1),
+            // (a mixed line's carets aren't in visual order: laid out again)
+            carets: match levels(&line.text).windows(2).all(|w| w[0] == w[1]) {
+                true => carets(line)[c0..=c1].to_vec(),
+                false => Vec::new(),
+            },
         });
     }
     out
@@ -337,12 +424,23 @@ pub fn boxes(lines: &[Line]) -> Vec<Rectangle> {
         .collect()
 }
 
-/// The caret position of `line` nearest to `x`.
+/// The caret position of `line` nearest to `x`: before or after the
+/// character there (its start is its right edge if it runs right to left).
 fn caret_at(line: &Line, x: f32) -> usize {
-    let carets = carets(line);
-    (0..carets.len())
-        .min_by(|&a, &b| (carets[a] - x).abs().total_cmp(&(carets[b] - x).abs()))
-        .unwrap_or(0)
+    let cells = cells(line);
+    let chars: Vec<char> = line.text.chars().collect();
+    let levels = levels(&line.text);
+    let off = |(l, r): (f32, f32)| (l - x).max(x - r).max(0.0);
+    let nearest = (0..chars.len())
+        .filter(|&i| !chars[i].is_whitespace())
+        .min_by(|&a, &b| off(cells[a]).total_cmp(&off(cells[b])));
+    match nearest {
+        Some(i) => {
+            let right = x > (cells[i].0 + cells[i].1) / 2.0;
+            i + usize::from(right != levels[i].is_rtl())
+        }
+        None => 0,
+    }
 }
 
 /// The line under `p`: its box (with `SLACK`) holds it (the nearest by height
@@ -562,10 +660,13 @@ impl Picked {
     pub fn rects(&self) -> Vec<Rectangle> {
         let pad = Vector::new(0.0, PAD);
         let mut out: Vec<Rectangle> = (self.spans().into_iter())
-            .map(|(l, first, last)| {
+            .flat_map(|(l, first, last)| {
                 let line = &self.lines[l];
-                let r = between(line, &carets(line), first, last);
-                Rectangle::new(r.position() - pad, r.size() + Size::new(0.0, 2.0 * PAD))
+                (pieces(line, first, last).into_iter())
+                    .map(|r| {
+                        Rectangle::new(r.position() - pad, r.size() + Size::new(0.0, 2.0 * PAD))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect();
         for i in 1..out.len() {
@@ -1003,6 +1104,79 @@ mod tests {
         assert!(q.extend(Point::new(101.0, 134.0)));
         assert_eq!(q.text(), "القائمة الرئيسية\nخروج");
         assert_eq!(q.rects()[0].x, 100.0);
+    }
+
+    /// #169: a Latin word inside an Arabic line (and an Arabic word inside an
+    /// English one) sits where bidi puts it; a selection across the
+    /// direction change is one flat bar per visual piece.
+    #[test]
+    fn mixed_rtl_lines_highlight_each_visual_piece() {
+        // logical: كلمة(0-3) _ Hello(5-9) _ عربي(11-14); shown left to right:
+        // عربي x 100..140, Hello 150..200, كلمة 210..250 (10 px a character)
+        let l = line("كلمة Hello عربي", 100.0, 100.0);
+        let w = words(&l);
+        let span = |k: usize| (w[k].0.x, w[k].0.x + w[k].0.width);
+        assert_eq!((w[1].1, span(1)), ("Hello", (150.0, 200.0)));
+        assert_eq!(span(0), (210.0, 250.0));
+        assert_eq!(span(2), (100.0, 140.0));
+        // from inside كلمة (caret 2: its third letter's right edge) to after "He"
+        let mut p = press(vec![l], Point::new(228.0, 110.0), Unit::Caret).unwrap();
+        assert!(p.extend(Point::new(169.0, 110.0)));
+        assert_eq!(p.text(), "مة He");
+        let bars: Vec<(f32, f32)> = p.rects().iter().map(|r| (r.x, r.x + r.width)).collect();
+        assert_eq!(
+            bars,
+            [(150.0, 170.0), (210.0, 230.0)],
+            "\"llo\" between stays clear"
+        );
+        // an English line with an Arabic word: the word reads right to left
+        let e = line("see كلمة now", 0.0, 0.0);
+        let w = words(&e);
+        assert_eq!((w[1].0.x, w[1].0.width), (40.0, 40.0));
+        assert_eq!(
+            caret_at(&e, 79.0),
+            4,
+            "the Arabic word starts at its right edge"
+        );
+        // a number inside an Arabic line runs left to right
+        let n = line("عام 2024", 0.0, 0.0);
+        let cells = cells(&n);
+        assert!(cells[4].0 < cells[7].0, "2 left of the last 4");
+    }
+
+    /// #169: measured on the frame, the words of a mixed line take the ink
+    /// where bidi shows them (the English run inside the Arabic line reads
+    /// left to right: "Hi" is left of "Yo").
+    #[test]
+    fn mixed_lines_are_measured_in_visual_order() {
+        let (w, h) = (300u32, 20u32);
+        let mut rgba = vec![255u8; (w * h * 4) as usize];
+        // ink shown left to right: عربي, Hi, Yo, كلمة
+        for (a, b) in [(10, 50), (70, 120), (140, 190), (210, 250)] {
+            for y in 7..13 {
+                for x in a..b {
+                    rgba[((y * w + x) * 4) as usize..][..3].fill(0);
+                }
+            }
+        }
+        let mut lines = vec![Line {
+            text: "كلمة Hi Yo عربي".into(),
+            bounds: Rectangle::new(Point::new(5.0, 2.0), Size::new(250.0, 16.0)),
+            carets: Vec::new(),
+        }];
+        measure(&mut lines, &rgba, w, h, 1.0);
+        let got: Vec<(&str, f32, f32)> = (words(&lines[0]).into_iter())
+            .map(|(r, t)| (t, r.x, r.x + r.width))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("كلمة", 210.0, 250.0),
+                ("Hi", 70.0, 120.0),
+                ("Yo", 140.0, 190.0),
+                ("عربي", 10.0, 50.0)
+            ]
+        );
     }
 
     #[test]

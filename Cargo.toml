@@ -45,6 +45,9 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dy
 image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
 # Same version iced_tiny_skia already builds: the editor flattens annotations with it.
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+# Already built for cosmic-text (iced): the selection highlight of mixed
+# right-to-left lines (`ui/app/word.rs`).
+unicode-bidi = "0.3"
 hmac-sha256 = "1.1"
 flate2 = "1"
 # Blocking HTTP for the AI clients: rustls (ring), no gzip, no async runtime.
