@@ -1,0 +1,1499 @@
+use super::*;
+
+fn tmp_dir(tag: &str) -> PathBuf {
+    crate::shared::paths::test_dir(&format!("config-test-{tag}"))
+}
+
+const V010_DEFAULT: &str = include_str!("../../../tests/fixtures/config/v0.1.0-default.toml");
+const V010_USED: &str = include_str!("../../../tests/fixtures/config/v0.1.0-used.toml");
+
+/// A config folder holding `text` as config.toml.
+fn config_with(tag: &str, text: &str) -> (PathBuf, PathBuf) {
+    let dir = tmp_dir(tag);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    std::fs::write(&path, text).unwrap();
+    (dir, path)
+}
+
+#[test]
+fn a_v0_1_0_file_loads_without_warnings_and_gets_labs_defaults() {
+    for (name, text) in [("default", V010_DEFAULT), ("used", V010_USED)] {
+        let (c, w) = Config::parse(text);
+        assert!(w.is_empty(), "{name}: {w:?}");
+        assert_eq!(c.labs, Labs::default(), "{name}: Labs off");
+        assert_eq!(c.version, VERSION);
+    }
+    // What the user had set is read as before, snip / song / history included.
+    let (c, _) = Config::parse(V010_USED);
+    assert_eq!(c.theme, Theme::Dark);
+    assert!(c.snip.history && c.song.history);
+    assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 2048));
+    assert_eq!(c.song.source, SongSource::Microphone);
+    let quick: Vec<_> = c
+        .quick_actions
+        .iter()
+        .map(|q| (q.action.as_str(), q.shortcut.as_str()))
+        .collect();
+    assert_eq!(
+        quick,
+        [
+            ("translate", "Ctrl+Shift+T"),
+            ("snip", "Alt+A"),
+            ("song_search", "Ctrl+Shift+M"),
+        ]
+    );
+}
+
+#[test]
+fn migrating_backs_the_old_file_up_once_then_rewrites_it_as_the_new_schema() {
+    let (dir, path) = config_with("migrate", V010_USED);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    // The old file, byte for byte, next to the new one.
+    let backup = dir.join("config.toml.bak-v1");
+    assert_eq!(std::fs::read_to_string(&backup).unwrap(), V010_USED);
+    // The file is the new schema now, with every old value and the Labs switches.
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("version = 11") && text.contains("[labs]"),
+        "{text}"
+    );
+    let (again, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(kept(&again), kept(&c), "nothing lost in the rewrite");
+    assert_eq!(
+        again.quick_actions,
+        Config::parse(V010_USED).0.quick_actions
+    );
+    // Loading again changes nothing and writes no second backup.
+    let after = std::fs::read_to_string(&path).unwrap();
+    Config::load_from(&path);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+    let backups = std::fs::read_dir(&dir).unwrap().count();
+    assert_eq!(backups, 2, "config.toml and one backup");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_backup_is_never_overwritten() {
+    let (dir, path) = config_with("keep-backup", V010_DEFAULT);
+    std::fs::write(dir.join("config.toml.bak-v1"), "an older copy").unwrap();
+    Config::load_from(&path);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml.bak-v1")).unwrap(),
+        "an older copy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml.bak-v1-2")).unwrap(),
+        V010_DEFAULT
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
+    let (dir, path) = config_with("current", "version = 11\n[labs]\nsong = true\n");
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty() && c.labs.song, "{w:?}");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "version = 11\n[labs]\nsong = true\n"
+    );
+    let gone = dir.join("none.toml");
+    Config::load_from(&gone);
+    assert!(!gone.exists());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_file_with_a_problem_is_not_rewritten() {
+    let bad = "version = 1\nshortcut = \"nonsense\"\n";
+    let (dir, path) = config_with("bad", bad);
+    let (_, w) = Config::load_from(&path);
+    assert!(!w.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        bad,
+        "kept as the user wrote it"
+    );
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn concurrent_updates_all_land_and_leave_no_temp_file() {
+    let dir = tmp_dir("concurrent");
+    let path = dir.join("config.toml");
+    std::thread::scope(|s| {
+        s.spawn(|| update_at(Some(&path), |c| c.bar.anchor = BarAnchor::Top).unwrap());
+        s.spawn(|| update_at(Some(&path), |c| c.theme = Theme::Light).unwrap());
+        s.spawn(|| update_at(Some(&path), |c| c.general.autostart = false).unwrap());
+    });
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert!(c.bar.anchor == BarAnchor::Top && c.theme == Theme::Light && !c.general.autostart);
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn chat_settings_round_trip_and_default_to_follow_up_with_history() {
+    let d = Config::default();
+    assert_eq!(d.chat.stays_open, StaysOpen::FollowUp);
+    assert!(d.chat.keep_history);
+    let mut c = d.clone();
+    c.chat = ChatConfig {
+        stays_open: StaysOpen::Always,
+        keep_history: false,
+    };
+    let dir = tmp_dir("chat-roundtrip");
+    let path = dir.join("config.toml");
+    c.save_to(&path).unwrap();
+    let (back, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.chat, c.chat);
+    let _ = std::fs::remove_dir_all(dir);
+    let (c, w) = Config::parse("version = 4\n[chat]\nstays_open = \"sometimes\"\n");
+    assert_eq!(c.chat.stays_open, StaysOpen::FollowUp);
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn labs_switches_round_trip_and_keep_the_hidden_features_settings() {
+    let (mut c, _) = Config::parse(V010_USED);
+    c.labs.pins = true;
+    let dir = tmp_dir("labs-roundtrip");
+    let path = dir.join("config.toml");
+    c.save_to(&path).unwrap();
+    let (back, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(kept(&back), kept(&c));
+    assert!(back.labs.pins && !back.labs.song);
+    let _ = std::fs::remove_dir_all(dir);
+    let (c, w) = Config::parse("version = 2\n[labs]\nsong = \"yes\"\n");
+    assert!(
+        !c.labs.song && w.iter().any(|w| w.starts_with("labs.song")),
+        "{w:?}"
+    );
+}
+
+/// N-41: a v0.1.2 file (schema 4, Snip a Labs switch) loads as it is:
+/// Snip works whatever `[labs] snip` / `editor` say, the user's snip
+/// choices are kept, and a save drops those two keys (schema 9).
+#[test]
+fn a_v0_1_2_file_keeps_its_snip_settings_and_snip_is_on_whatever_labs_says() {
+    for (snip, editor) in [(false, false), (true, true), (true, false)] {
+        let text = format!(
+            "version = 4\n[snip]\nafter = \"editor\"\nmax_edge = 1568\nformat = \"jpeg\"\n\
+                 history = true\ndelay = 3\n[labs]\nsnip = {snip}\neditor = {editor}\npins = true\n"
+        );
+        let (dir, path) = config_with(&format!("v012-{snip}-{editor}"), &text);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v4")), text);
+        assert_eq!((c.snip.after, c.snip.max_edge), (SnipAfter::Editor, 0));
+        assert_eq!(
+            (c.snip.format, c.snip.history, c.snip.delay),
+            (Format::Jpeg, true, 3)
+        );
+        assert_eq!(c.snip.long_max, DEFAULT_LONG_MAX);
+        assert!(c.labs.pins, "the Labs switches that remain are kept");
+        for id in ["snip", "edit", "colour_picker", "ruler"] {
+            let id = crate::shared::platform::hotkey::QuickId::from_name(id);
+            assert!(
+                crate::features::settings::labs::action_on(&c.labs, &id),
+                "{id:?}"
+            );
+        }
+        c.save_to(&path).unwrap();
+        let saved: Table = fs_text(&path).parse().unwrap();
+        assert!(saved["labs"].get("snip").is_none() && saved["labs"].get("editor").is_none());
+        assert!(
+            saved["snip"].get("long_max").is_none(),
+            "default: not written"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn the_long_capture_limit_is_one_of_three_heights() {
+    let (c, w) = Config::parse("version = 4\n[snip]\nlong_max = 10000\n");
+    assert!(w.is_empty() && c.snip.long_max == 10_000, "{w:?}");
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("long_max = 10000"), "{text}");
+    let (c, w) = Config::parse("version = 4\n[snip]\nlong_max = 123\n");
+    assert_eq!(c.snip.long_max, DEFAULT_LONG_MAX);
+    assert!(w.iter().any(|w| w.starts_with("snip.long_max")), "{w:?}");
+}
+
+#[test]
+fn tests_never_read_or_write_the_machines_config() {
+    assert_eq!(Config::path(), None);
+    assert!(update(|_| {}).is_err());
+}
+
+#[test]
+fn set_current_replaces_what_everyone_reads() {
+    // The only test that touches the process-wide config.
+    let mut c = Config::default();
+    c.ai.model = "model-from-settings".into();
+    set_current(c.clone());
+    assert_eq!(current(), c);
+    c.theme = Theme::Light;
+    set_current(c.clone());
+    assert_eq!(current(), c, "the next save replaces it");
+}
+
+#[test]
+fn quick_ids_round_trip_byte_equal() {
+    let c = Config {
+        quick_actions: QuickId::KNOWN
+            .into_iter()
+            .chain([QuickId::from_name("future_thing")])
+            .map(|action| QuickAction {
+                action,
+                shortcut: String::new(),
+                target: Target::Circle,
+                live: false,
+            })
+            .collect(),
+        ..Config::default()
+    };
+    let text = toml::to_string_pretty(&c).unwrap();
+    // The names in the file are the ones every version wrote.
+    for id in QuickId::KNOWN {
+        assert!(text.contains(&format!("action = \"{id}\"")), "{id}");
+    }
+    assert!(text.contains("action = \"future_thing\""));
+    let (back, w) = Config::parse(&text);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back, c);
+    assert_eq!(toml::to_string_pretty(&back).unwrap(), text);
+}
+
+#[test]
+fn new_quick_actions_join_unbound_once_and_the_default_file_stays() {
+    let mut c = Config::default();
+    c.add_new_quick_actions();
+    assert_eq!(
+        c.quick_actions.len(),
+        Config::default().quick_actions.len() + 3
+    );
+    let added: Vec<_> = (c.quick_actions.iter().rev().take(3).rev())
+        .map(|q| (q.action.as_str(), q.shortcut.as_str()))
+        .collect();
+    assert_eq!(
+        added,
+        [("live_pin", ""), ("colour_picker", ""), ("ruler", "")]
+    );
+    let once = c.clone();
+    c.add_new_quick_actions();
+    assert_eq!(c, once, "never twice");
+    // a file Settings saved keeps it
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert_eq!(Config::parse(&text).0, c);
+}
+
+#[test]
+fn defaults_match_design() {
+    let c = Config::default();
+    assert_eq!(c.version, VERSION);
+    assert_eq!(c.labs, Labs::default(), "Labs: everything off");
+    assert_eq!(c.theme, Theme::System);
+    assert_eq!(c.shortcut, "Ctrl+Shift+Space");
+    assert_eq!(
+        c.translate.target, "en",
+        "the OS language (English in tests), never Arabic by default"
+    );
+    assert_eq!(c.ai.provider, Provider::Browser);
+    assert_eq!(c.quick_actions.len(), 7);
+    // Song search: unbound, history off.
+    let song = c.quick_actions.last().unwrap();
+    assert_eq!(
+        (song.action.as_str(), song.shortcut.as_str()),
+        ("song_search", "")
+    );
+    assert_eq!(c.song.source, SongSource::System);
+    assert!(!c.song.history);
+    assert!(c.quick_actions[1].live);
+    assert_eq!(c.general.default_action, DefaultAction::Lens);
+    assert_eq!(c.general.save_folder, "");
+    assert_eq!(c.translate.live_interval_ms, 1500);
+    assert_eq!(c.translate.engine, Engine::Offline);
+    // Snip: Alt+A, its one shortcut.
+    let snip: Vec<_> = c
+        .quick_actions
+        .iter()
+        .filter(|q| q.action == "snip")
+        .map(|q| (q.shortcut.as_str(), q.target))
+        .collect();
+    assert_eq!(snip, [("Alt+A", Target::Circle)]);
+    // Every default shortcut is valid and unique.
+    let (c2, warnings) = Config::parse("");
+    assert_eq!(c2, c);
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn look_and_selection_defaults_round_trip_and_old_files_keep_working() {
+    let d = Config::default();
+    assert_eq!(d.selection.style, SelectStyle::Snap);
+    assert_eq!(d.look.theme, LookTheme::SapphireGlow);
+    let look = d.look.active();
+    assert_eq!(look.overlay, edge(EdgeStyle::Glow, 6, true));
+    assert_eq!(look.live, edge(EdgeStyle::Glow, 6, true));
+    assert_eq!(look.snip, edge(EdgeStyle::Thin, 3, false));
+    assert!(look.activation_glow && look.dim == 12);
+    // a file from before these sections: the defaults, no warning
+    let (old, w) = Config::parse("theme = \"dark\"\n[general]\ndefault_action = \"ai\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!((old.selection, old.look), (d.selection, d.look));
+    // every preset is a theme, and every theme but Custom has one
+    for (theme, _) in PRESETS {
+        assert_ne!(theme, LookTheme::Custom);
+    }
+    assert_eq!(PRESETS.len(), 12);
+    // a custom look and a selection setting survive a save
+    let mut c = Config {
+        selection: SelectionConfig {
+            style: SelectStyle::Shape,
+            text_reader: TextReader::PpOcr,
+        },
+        ..Config::default()
+    };
+    c.look.theme = LookTheme::Custom;
+    c.look.custom.palette = ColourSet::TwoColour;
+    c.look.custom.colours = [Rgb([1, 2, 3]), Rgb([0xfe, 0xdc, 0xba])];
+    c.look.custom.bar = BarStyle::Outline;
+    *c.look.edge_mut(EdgeMode::Live) = edge(EdgeStyle::None, 12, true); // animate is not written
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(
+        text.contains("\"#fedcba\"") && text.contains("[look.custom.live]"),
+        "{text}"
+    );
+    let (back, w) = Config::parse(&text);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back, c);
+    assert_eq!(back.look.active().live.style, EdgeStyle::None);
+    // a preset ignores the custom look but keeps it
+    c.look.theme = LookTheme::Calm;
+    assert_eq!(c.look.active().overlay.style, EdgeStyle::Thin);
+    assert_eq!(c.look.custom.bar, BarStyle::Outline);
+}
+
+#[test]
+fn look_values_are_checked_one_by_one() {
+    let (c, w) = Config::parse(
+        "[selection]\nstyle = \"blob\"\nafter = \"wait\"\n\
+             [look]\ntheme = \"custom\"\n\
+             [look.custom]\nglow = 101\ndim = 61\ncolours = [\"#12345\", \"#000000\"]\n\
+             bar = \"solid\"\n\
+             [look.custom.overlay]\nthickness = 13\nstyle = \"thin\"\n\
+             [look.custom.snip]\nthickness = 0\n",
+    );
+    let d = Config::default();
+    assert_eq!(c.selection.style, SelectStyle::Snap);
+    assert_eq!(c.selection.text_reader, TextReader::Auto, "good survives");
+    let look = c.look.active();
+    assert_eq!((look.glow, look.dim), (100, 12));
+    assert_eq!(look.colours, d.look.custom.colours);
+    assert_eq!(look.bar, BarStyle::Solid);
+    assert_eq!(look.overlay.style, EdgeStyle::Thin);
+    assert_eq!(look.overlay.thickness, 6);
+    assert_eq!(look.snip.thickness, 3);
+    for key in [
+        "selection.style",
+        "look.custom.glow",
+        "look.custom.dim",
+        "look.custom.colours",
+        "look.custom.overlay.thickness",
+        "look.custom.snip.thickness",
+    ] {
+        assert!(w.iter().any(|m| m.starts_with(key)), "{key}: {w:?}");
+    }
+    assert_eq!(w.len(), 6, "{w:?}");
+    // range ends are fine
+    let (c, w) =
+        Config::parse("[look.custom]\nglow = 0\ndim = 60\n[look.custom.live]\nthickness = 12\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!((c.look.custom.glow, c.look.custom.dim), (0, 60));
+    assert_eq!(Rgb::parse("#8F80ff"), Some(Rgb([0x8f, 0x80, 0xff])));
+    assert_eq!(Rgb::parse("8f80ff"), None);
+    assert_eq!(Rgb([30, 144, 255]).hex(true), "#1E90FF");
+    assert_eq!(Rgb([30, 144, 255]).hex(false), "#1e90ff");
+}
+
+#[test]
+fn missing_file_gives_defaults_without_warnings() {
+    let (c, w) = Config::load_from(&tmp_dir("missing").join("nope.toml"));
+    assert_eq!(c, Config::default());
+    assert!(w.is_empty());
+}
+
+#[test]
+fn the_bar_anchor_reads_back_and_bad_values_fall_back() {
+    let (c, w) = Config::parse("[bar]\nanchor = \"bottom_left\"\n");
+    assert_eq!((c.bar.anchor, w.len()), (BarAnchor::BottomLeft, 0));
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert_eq!(Config::parse(&text).0.bar.anchor, BarAnchor::BottomLeft);
+    let (bad, w) = Config::parse("[bar]\nanchor = \"middle\"\n");
+    assert_eq!((bad.bar.anchor, w.len()), (BarAnchor::Bottom, 1));
+}
+
+/// The frozen spellings survive the renames of the code behind them (the Snip
+/// editor is `snip::annotate` now): `[editor]` keys, `snip.after = "editor"`.
+#[test]
+fn editor_keys_and_snip_after_values_stay_as_written() {
+    let text = "[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\n\n[snip]\nafter = \"editor\"\n";
+    let (c, w) = Config::parse(text);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.snip.after, SnipAfter::Editor);
+    let dir = tmp_dir("frozen-editor");
+    let path = dir.join("config.toml");
+    c.save_to(&path).unwrap();
+    let out = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        out.contains("[editor]") && out.contains("tool = \"step\""),
+        "{out}"
+    );
+    assert!(out.contains("after = \"editor\""), "{out}");
+    assert_eq!(Config::load_from(&path).0, c);
+}
+
+#[test]
+fn save_then_load_round_trips() {
+    let dir = tmp_dir("rt");
+    let path = dir.join("opencircle").join("config.toml");
+    let mut c = Config {
+        theme: Theme::Dark,
+        ..Config::default()
+    };
+    c.ai.provider = Provider::OpenaiCompatible;
+    c.ai.base_url = "http://localhost:11434/v1".into();
+    c.ai.model = "llama3:8b".into();
+    c.general.default_action = DefaultAction::Copy;
+    c.general.save_folder = std::env::temp_dir().to_string_lossy().into_owned();
+    c.translate.live_interval_ms = 2500;
+    c.translate.live_note_shown = true;
+    c.translate.whole_screen = true;
+    c.translate.recent_targets = vec!["fr".into(), "ar".into()];
+    c.general.language = "fr".into();
+    c.translate.source = "ja".into();
+    c.song.source = SongSource::Microphone;
+    c.song.history = true;
+    c.update.auto = Some(false);
+    c.snip.after = SnipAfter::Editor;
+    c.snip.history = true;
+    c.snip.max_edge = 0;
+    c.snip.delay = 3;
+    c.editor.line_assist = false;
+    c.glass_effect = false;
+    c.quick_actions.pop();
+    c.save_to(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("[[quick_actions]]") && !text.contains("api_key"),
+        "{text}"
+    );
+    let (back, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back, c);
+    assert!(!path.with_extension("toml.tmp").exists());
+    assert!(text.contains("[general]") && text.contains("default_action = \"copy\""));
+    assert!(text.contains("[editor]\nline_assist = false"), "{text}");
+    assert!(text.contains("glass_effect = false"));
+    // A typo falls back to the default with a warning.
+    let (bad, w) = Config::parse("widget_theme = \"frosty\"\nglass_effect = 3\n");
+    assert!(bad.glass_effect);
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(text.contains("[update]\nauto = false"), "{text}");
+    // Not asked yet: no [update] key written, none read.
+    let unasked = Config::default();
+    assert!(
+        !toml::to_string(&unasked)
+            .unwrap()
+            .contains("[update]\nauto")
+    );
+    assert_eq!(
+        Config::parse("[update]\nauto = true\n").0.update.auto,
+        Some(true)
+    );
+    let (c, w) = Config::parse("[update]\nauto = \"yes\"\n");
+    assert!(
+        c.update.auto.is_none() && w[0].starts_with("update.auto"),
+        "{w:?}"
+    );
+    // Older files have no [editor]: line assist on, no warning.
+    let (c, w) = Config::parse("version = 1\n");
+    assert!(c.editor.line_assist && w.is_empty(), "{w:?}");
+    let (c, w) = Config::parse("[editor]\nline_assist = \"yes\"\n");
+    assert!(
+        c.editor.line_assist && w[0].starts_with("editor.line_assist"),
+        "{w:?}"
+    );
+    // The remembered tool and options: read back; a bad one is its default.
+    let (c, w) = Config::parse(
+        "[editor]\ntool = \"step\"\ncolour = \"#AF52DE\"\nsize = \"thin\"\ntext_size = 38\n\
+             outline = true\nfill = false\nblur_size = \"thick\"\nblur_cell = \"thin\"\n",
+    );
+    assert!(w.is_empty(), "{w:?}");
+    use crate::features::snip::annotate::{Tool, Width};
+    assert_eq!(
+        (c.editor.tool, c.editor.colour.as_deref(), c.editor.size),
+        (Some(Tool::Step), Some("#AF52DE"), Some(Width::Thin))
+    );
+    assert_eq!(
+        (c.editor.text_size, c.editor.outline, c.editor.fill),
+        (Some(38), Some(true), Some(false))
+    );
+    assert_eq!(
+        (c.editor.blur_size, c.editor.blur_cell),
+        (Some(Width::Thick), Some(Width::Thin))
+    );
+    let (c, w) = Config::parse(
+        "[editor]\ntool = \"crop\"\ncolour = \"purple\"\nsize = \"huge\"\ntext_size = 200\n\
+             outline = 1\nfill = \"no\"\nblur_size = 3\nblur_cell = \"x\"\n",
+    );
+    assert_eq!(c.editor, EditorConfig::default());
+    assert_eq!(w.len(), 8, "{w:?}");
+    for key in [
+        "tool",
+        "colour",
+        "size",
+        "text_size",
+        "outline",
+        "fill",
+        "blur_size",
+        "blur_cell",
+    ] {
+        let key = format!("editor.{key}");
+        assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Owner, 2026-11-10: a config that already has a target keeps it (the old
+/// default Arabic too, from any schema); one without gets the OS language.
+#[test]
+fn a_stored_target_is_kept_and_a_missing_one_follows_the_os() {
+    for version in [1, 10, VERSION] {
+        let text = format!("version = {version}\n[translate]\ntarget = \"ar\"\n");
+        let (c, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.translate.target, "ar", "schema {version}");
+        let saved = toml::to_string_pretty(&c).unwrap();
+        assert_eq!(Config::parse(&saved).0.translate.target, "ar");
+    }
+    let (c, _) = Config::parse("version = 11\n[translate]\nengine = \"offline\"\n");
+    assert_eq!(c.translate.target, os_language());
+    assert_eq!(c.general.language, "", "the app language follows the OS");
+    let (c, w) = Config::parse("[general]\nlanguage = \"not a code\"\n");
+    assert_eq!((c.general.language.as_str(), w.len()), ("", 1), "{w:?}");
+    assert_eq!(
+        Config::parse("[general]\nlanguage = \"fr\"\n")
+            .0
+            .general
+            .language,
+        "fr"
+    );
+}
+
+#[test]
+fn translate_source_defaults_to_auto_and_is_checked() {
+    // a config from before `source` existed: auto, no warning
+    let (c, w) = Config::parse("[translate]\ntarget = \"fr\"\n");
+    assert_eq!(
+        (c.translate.source.as_str(), c.translate.target.as_str()),
+        ("auto", "fr")
+    );
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(Config::default().translate.source, "auto");
+    let (c, _) = Config::parse("[translate]\nsource = \"zh-Hant\"\n");
+    assert_eq!(c.translate.source, "zh-Hant");
+    let (c, w) = Config::parse("[translate]\nsource = \"automatic\"\n");
+    assert_eq!(c.translate.source, "auto");
+    assert!(
+        w[0].starts_with("translate.source") && w[0].contains("\"auto\""),
+        "{w:?}"
+    );
+}
+
+#[test]
+fn new_fields_are_validated() {
+    let (c, w) = Config::parse(
+        "[general]\ndefault_action = \"text\"\nsave_folder = \"relative/dir\"\n\
+             [translate]\nlive_interval_ms = 100\n",
+    );
+    assert_eq!(
+        c.general.default_action,
+        DefaultAction::Text,
+        "good survives"
+    );
+    assert_eq!(c.general.save_folder, "");
+    assert_eq!(c.translate.live_interval_ms, 1500);
+    assert!(
+        w.iter().any(|m| m.starts_with("general.save_folder")),
+        "{w:?}"
+    );
+    assert!(
+        w.iter()
+            .any(|m| m.starts_with("translate.live_interval_ms") && m.contains("500")),
+        "{w:?}"
+    );
+    for bad in ["\"nope\"", "7", "\"translate\""] {
+        let (c, w) = Config::parse(&format!("[general]\ndefault_action = {bad}\n"));
+        assert_eq!(c.general.default_action, DefaultAction::Lens);
+        assert!(
+            w.iter().any(|m| m.starts_with("general.default_action")),
+            "{w:?}"
+        );
+    }
+    // Range ends are valid; a string or a negative number is not.
+    for ok in [500, 5000] {
+        let (c, w) = Config::parse(&format!("[translate]\nlive_interval_ms = {ok}\n"));
+        assert_eq!((c.translate.live_interval_ms, w.len()), (ok, 0));
+    }
+    for bad in ["5001", "499", "-1", "\"1000\"", "1.5"] {
+        let (c, w) = Config::parse(&format!("[translate]\nlive_interval_ms = {bad}\n"));
+        assert_eq!(
+            c.translate.live_interval_ms, DEFAULT_LIVE_INTERVAL_MS,
+            "{bad}"
+        );
+        assert_eq!(w.len(), 1, "{bad}: {w:?}");
+    }
+    let abs = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+    let (c, w) = Config::parse(&format!("[general]\nsave_folder = \"{abs}\"\n"));
+    assert_eq!((c.general.save_folder.as_str(), w.len()), (abs.as_str(), 0));
+    // Start with the OS: on unless turned off; a non-bool is reported.
+    assert!(Config::default().general.autostart);
+    let (c, w) = Config::parse("[general]\nautostart = false\n");
+    assert!(!c.general.autostart && w.is_empty());
+    let (c, w) = Config::parse("[general]\nautostart = \"yes\"\n");
+    assert!(c.general.autostart && w.len() == 1, "{w:?}");
+}
+
+/// The web view card is gone (N-02): its `[results]` keys, good or bad, load
+/// silently and are not written back.
+#[test]
+fn old_results_keys_load_with_no_warning_and_are_dropped() {
+    for text in [
+        "[results]\nside = \"left\"\nwidth = 640\nheight = 300\n",
+        "version = 2\n[results]\nside = \"top\"\nwidth = 5\nheight = -1\n",
+        "version = 3\nresults = 7\n",
+    ] {
+        let (c, w) = Config::parse(text);
+        assert!(w.is_empty(), "{text}: {w:?}");
+        let saved = toml::to_string_pretty(&c).unwrap();
+        assert!(!saved.contains("results"), "{saved}");
+    }
+}
+
+/// Schema 3 (N-03): a file from before it that searched by itself waits for the
+/// user's choice now, with the old file backed up; a schema-3 file that opted
+/// back in ("Auto action") keeps "search".
+#[test]
+fn an_old_auto_search_migrates_to_wait_with_a_backup() {
+    for (tag, old) in [
+        ("v1", V010_DEFAULT.to_string()),
+        ("v2", V010_DEFAULT.replace("version = 1", "version = 2")),
+    ] {
+        assert!(old.contains("after = \"search\""), "the fixture searched");
+        let (dir, path) = config_with(&format!("wait-{tag}"), &old);
+        let (_, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        let v = if tag == "v1" { 1 } else { 2 };
+        let backup = dir.join(format!("config.toml.bak-v{v}"));
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("version = 11") && !text.contains("search_with"),
+            "{text}"
+        );
+        assert!(!text.contains("[results]"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let (_, w) = Config::parse("version = 3\n[selection]\nafter = \"search\"\n");
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn a_config_from_before_the_timer_setting_still_loads() {
+    // v0.1.0 wrote no `delay`: it loads with the default, nothing else changes.
+    let (c, w) = Config::parse("[snip]\nafter = \"both\"\nmax_edge = 1024\nhistory = true\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        (c.snip.delay, c.snip.after, c.snip.max_edge),
+        (0, SnipAfter::Editor, 1024)
+    );
+    let (c, w) = Config::parse("[snip]\ndelay = 5\n");
+    assert!(w.is_empty() && c.snip.delay == 5, "{w:?}");
+    let (c, w) = Config::parse("[snip]\ndelay = 7\n");
+    assert!(c.snip.delay == 0 && w.len() == 1, "{w:?}");
+}
+
+#[test]
+fn snip_section_defaults_and_checks() {
+    let d = Config::default().snip;
+    assert_eq!(
+        d.after,
+        SnipAfter::Editor,
+        "picked with the toolbar, nothing copied"
+    );
+    assert_eq!(
+        (d.max_edge, d.format),
+        (0, Format::Png),
+        "full size by default"
+    );
+    assert!(!d.history, "nothing kept on disk unless turned on");
+    assert!(!d.cursor && !d.save_original);
+    assert_eq!(d.delay, 0, "no timer unless set");
+    let (c, w) = Config::parse(
+        "[snip]\nafter = \"both\"\nmax_edge = 0\nformat = \"jpeg\"\n\
+             save_original = true\ncursor = true\nhistory = true\n",
+    );
+    assert!(w.is_empty(), "{w:?}");
+    let s = &c.snip;
+    assert_eq!(
+        (s.after, s.max_edge, s.format),
+        (SnipAfter::Editor, 0, Format::Jpeg)
+    );
+    assert!(s.save_original && s.cursor && s.history);
+    // and back through the writer
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(
+        text.contains("[snip]") && text.contains("after = \"editor\""),
+        "{text}"
+    );
+    assert_eq!(Config::parse(&text).0, c);
+    for bad in [
+        "max_edge = 100",
+        "max_edge = 9000",
+        "after = \"paste\"",
+        "format = \"gif\"",
+        "history = \"yes\"",
+    ] {
+        let (c, w) = Config::parse(&format!("[snip]\n{bad}\n"));
+        assert_eq!(c.snip, d, "{bad}");
+        assert_eq!(w.len(), 1, "{bad}: {w:?}");
+        assert!(w[0].starts_with("snip."), "{w:?}");
+    }
+}
+
+#[test]
+fn engine_is_ai_or_offline() {
+    for value in ["\"gemini\"", "\"Offline\"", "3"] {
+        let (c, w) = Config::parse(&format!("version = 4\n[translate]\nengine = {value}\n"));
+        assert_eq!(c.translate.engine, Engine::Offline);
+        assert_eq!(w.len(), 1, "{value}: {w:?}");
+        assert!(w[0].starts_with("translate.engine"), "{w:?}");
+    }
+    for (value, engine) in [("ai", Engine::Ai), ("offline", Engine::Offline)] {
+        let text = format!("version = 4\n[translate]\nengine = \"{value}\"\n");
+        let (c, w) = Config::parse(&text);
+        assert!(
+            w.is_empty() && c.translate.engine == engine,
+            "{value}: {w:?}"
+        );
+        // and saved the same way
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(text.contains(&format!("engine = \"{value}\"")), "{text}");
+    }
+    assert_eq!(Config::default().translate.engine, Engine::Offline);
+}
+
+/// Schema 4: a v0.1.1 file's "ai" (the old default) becomes on-device unless
+/// an API provider was already translating with it, so picking a chat
+/// provider later never starts sending page text (gate 0.1.2, item 16).
+#[test]
+fn an_old_ai_translate_without_an_api_provider_migrates_to_on_device() {
+    let old = |ai: &str| format!("version = 3\n{ai}[translate]\nengine = \"ai\"\n");
+    for ai in ["", "[ai]\nprovider = \"browser\"\n"] {
+        let (dir, path) = config_with("engine-v3", &old(ai));
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.translate.engine, Engine::Offline, "{ai}");
+        assert!(fs_text(&path).contains("engine = \"offline\""));
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v3")), old(ai));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    let (c, _) = Config::parse(&old("[ai]\nprovider = \"anthropic\"\n"));
+    assert_eq!(c.translate.engine, Engine::Ai, "it was translating with AI");
+    let (c, _) = Config::parse("version = 4\n[translate]\nengine = \"ai\"\n");
+    assert_eq!(c.translate.engine, Engine::Ai, "a v4 choice is kept");
+}
+
+#[test]
+fn default_action_ids_are_registry_actions() {
+    for a in DefaultAction::ALL {
+        assert!(
+            crate::features::circle::actions::ACTIONS
+                .iter()
+                .any(|x| x.id == a.id()),
+            "{a:?}"
+        );
+        let (c, w) = Config::parse(&format!("[general]\ndefault_action = \"{}\"\n", a.id()));
+        assert_eq!((c.general.default_action, w.len()), (a, 0));
+    }
+}
+
+#[test]
+fn browser_is_the_default_provider_and_old_configs_keep_theirs() {
+    assert_eq!(Config::parse("").0.ai.provider, Provider::Browser);
+    // A file written before the browser provider existed: no provider line, or an API one.
+    let (c, w) = Config::parse("[ai]\nmodel = \"claude-sonnet-5-5\"\n");
+    assert_eq!((c.ai.provider, w.len()), (Provider::Browser, 0));
+    for (id, provider) in [
+        ("browser", Provider::Browser),
+        ("anthropic", Provider::Anthropic),
+        ("openai_compatible", Provider::OpenaiCompatible),
+    ] {
+        assert_eq!(provider.id(), id);
+        let url = if provider == Provider::OpenaiCompatible {
+            "base_url = \"http://localhost:11434/v1\"\nmodel = \"llama3\"\n"
+        } else {
+            ""
+        };
+        let (c, w) = Config::parse(&format!("[ai]\nprovider = \"{id}\"\n{url}"));
+        assert_eq!((c.ai.provider.clone(), w.len()), (provider, 0), "{w:?}");
+        // and back through the serializer
+        let text = toml::to_string_pretty(&c).unwrap();
+        assert!(text.contains(&format!("provider = \"{id}\"")), "{text}");
+        assert_eq!(Config::parse(&text).0, c);
+    }
+}
+
+#[test]
+fn unknown_provider_fails_closed_and_keeps_the_users_value() {
+    for (value, raw) in [
+        ("\"antropic\"", "antropic"),
+        ("\"Anthropic\"", "Anthropic"),
+        ("\"\"", ""),
+        ("3", "3"),
+    ] {
+        let text = format!("[ai]\nprovider = {value}\nmodel = \"m\"\n");
+        let (c, w) = Config::parse(&text);
+        assert_eq!(c.ai.provider, Provider::Invalid(raw.into()), "{value}");
+        assert_ne!(c.ai.provider, Provider::Browser);
+        assert_eq!(w.len(), 1, "{value}: {w:?}");
+        assert!(
+            w[0].starts_with("ai.provider:") && w[0].contains("off"),
+            "{w:?}"
+        );
+        assert_eq!(c.ai.model, "m", "the rest of [ai] is still read");
+        // Written back as the user wrote it (never "browser"), and still invalid.
+        let out = toml::to_string_pretty(&c).unwrap();
+        assert!(out.contains(&format!("provider = \"{raw}\"")), "{out}");
+        assert!(!out.contains("provider = \"browser\""), "{out}");
+        assert_eq!(Config::parse(&out).0.ai.provider, c.ai.provider);
+    }
+    // Loading never rewrites the file.
+    let dir = tmp_dir("bad-provider");
+    let path = dir.join("config.toml");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&path, "[ai]\nprovider = \"antropic\"\n").unwrap();
+    let (c, _) = Config::load_from(&path);
+    assert_eq!(c.ai.provider, Provider::Invalid("antropic".into()));
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "[ai]\nprovider = \"antropic\"\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn invalid_fields_warn_and_default() {
+    let (c, w) = Config::parse(
+        r#"
+            theme = "neon"
+            shortcut = "Ctrl+"
+            [ai]
+            base_url = "ftp://x"
+            model = "has space"
+            [translate]
+            target = "not a code"
+            engine = 3
+            "#,
+    );
+    assert_eq!(c, Config::default());
+    for key in [
+        "theme",
+        "shortcut",
+        "ai.base_url",
+        "ai.model",
+        "translate.target",
+        "translate.engine",
+    ] {
+        assert!(
+            w.iter().any(|m| m.starts_with(key)),
+            "no warning for {key}: {w:?}"
+        );
+    }
+}
+
+#[test]
+fn good_fields_survive_next_to_bad_ones() {
+    let (c, w) =
+        Config::parse("theme = \"light\"\nshortcut = 5\n[translate]\ntarget = \"pt-BR\"\n");
+    assert_eq!(c.theme, Theme::Light);
+    assert_eq!(c.translate.target, "pt-BR");
+    assert_eq!(c.shortcut, "Ctrl+Shift+Space");
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn broken_toml_and_wrong_shapes_do_not_crash() {
+    // Defaults everywhere, except AI: off (fail closed), never Browser.
+    let (c, w) = Config::parse("theme = = =");
+    assert_eq!(c, Config::unreadable());
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("AI is off"), "{w:?}");
+    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 12\n");
+    assert_eq!(c, Config::unreadable());
+    assert_eq!(w.len(), 3, "{w:?}");
+    assert!(
+        w.iter()
+            .any(|m| m.starts_with("ai:") && m.contains("AI is off"))
+    );
+    // Nothing can save it: an unread choice is never replaced by a guess.
+    assert!(toml::to_string_pretty(&c).is_err());
+    let dir = tmp_dir("unreadable");
+    assert!(c.save_to(&dir.join("config.toml")).is_err());
+    // A file that exists but can't be read (here: a folder) is the same.
+    std::fs::create_dir_all(&dir).unwrap();
+    let (c, w) = Config::load_from(&dir);
+    assert_eq!((c.ai.provider, w.len()), (Provider::Unreadable, 1));
+    let _ = std::fs::remove_dir_all(&dir);
+    // Only a missing file is a first run: Browser.
+    let (c, _) = Config::load_from(&dir.join("nope.toml"));
+    assert_eq!(c.ai.provider, Provider::Browser);
+}
+
+#[test]
+fn quick_actions_are_validated_per_entry() {
+    let (c, w) = Config::parse(
+        r#"
+            [[quick_actions]]
+            action = "translate"
+            shortcut = "Ctrl+Alt+9"
+            target = "last_region"
+            [[quick_actions]]
+            shortcut = "Ctrl+Alt+8"
+            [[quick_actions]]
+            action = "lens"
+            shortcut = "Banana+Q"
+            target = "nowhere"
+            [[quick_actions]]
+            action = "copy_text"
+            shortcut = "Ctrl+Alt+9"
+            "#,
+    );
+    assert_eq!(c.quick_actions.len(), 3);
+    assert_eq!(c.quick_actions[0].target, Target::LastRegion);
+    assert_eq!(c.quick_actions[1].shortcut, "", "bad shortcut = unbound");
+    assert_eq!(c.quick_actions[1].target, Target::FullScreen);
+    assert_eq!(c.quick_actions[2].shortcut, "", "duplicate = unbound");
+    assert!(w.iter().any(|m| m.contains("no valid action")), "{w:?}");
+    assert!(w.iter().any(|m| m.contains("already used")), "{w:?}");
+}
+
+#[test]
+fn capture_shortcut_conflict_unbinds_the_quick_action() {
+    let (c, w) =
+        Config::parse("[[quick_actions]]\naction = \"lens\"\nshortcut = \"ctrl+shift+space\"\n");
+    assert_eq!(c.quick_actions[0].shortcut, "");
+    assert_eq!(w.len(), 1);
+}
+
+#[test]
+fn shortcut_validation() {
+    for ok in [
+        "Ctrl+Shift+Space",
+        "ctrl+shift+t",
+        "Alt+PrintScreen",
+        "PrintScreen",
+        "F9",
+        "Ctrl+Alt+F12",
+        "Super+KeyA",
+    ] {
+        assert!(parse_shortcut(ok).is_ok(), "{ok}");
+    }
+    for bad in [
+        "",
+        "Ctrl+",
+        "Ctrl+Shift",
+        "A",
+        "Space",
+        "Shift+Ctrl+",
+        "Ctrl+Banana",
+        "Ctrl+A+B",
+        "Ctrl+B+Shift",
+        "+",
+    ] {
+        assert!(parse_shortcut(bad).is_err(), "{bad}");
+    }
+    assert_eq!(
+        parse_shortcut("Ctrl+Banana").unwrap_err(),
+        "unknown key \"Banana\""
+    );
+}
+
+/// `c` without the keys that are read but never written (schema 11): what a
+/// save and reload keeps.
+fn kept(c: &Config) -> Config {
+    let d = Config::default();
+    let mut c = c.clone();
+    let look = |l: &mut Look| {
+        l.activation_glow = d.look.custom.activation_glow;
+        for m in EdgeMode::ALL {
+            l.edge_mut(m).animate = d.look.custom.edge(m).animate;
+        }
+    };
+    look(&mut c.look.custom);
+    c
+}
+
+fn fixture(name: &str) -> String {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config");
+    std::fs::read_to_string(dir.join(name)).unwrap()
+}
+
+/// The default file is byte-for-byte the frozen v11 one (the file format is
+/// frozen), but for the target: the OS language since 2026-11-10 (English
+/// in tests), no longer Arabic.
+#[test]
+fn the_default_file_is_byte_for_byte_the_frozen_one() {
+    let dir = tmp_dir("default-bytes");
+    let path = dir.join("config.toml");
+    Config::default().save_to(&path).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    let frozen = fixture("default-v11.toml").replace("target = \"ar\"", "target = \"en\"");
+    assert_eq!(written, frozen);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Schema 9 (the clean-up before 0.1.3): every older file, v1 to v8, loads
+/// without a warning and acts the same; the next save (a backup first) drops
+/// the retired keys: `[labs] snip` / `editor`, the window / full-screen snip
+/// entries and the old `[results]`.
+#[test]
+fn older_files_load_quietly_and_schema_9_drops_the_retired_keys() {
+    let v2 = V010_USED.replace("version = 1", "version = 2");
+    let labs_on = fixture("default-v4.toml").replace(
+        "[labs]\nsnip = false\neditor = false",
+        "[labs]\nsnip = true\neditor = true",
+    );
+    let mut files = vec![
+        (1, V010_DEFAULT.to_string()),
+        (1, V010_USED.to_string()),
+        (2, v2),
+        (4, labs_on),
+    ];
+    files.extend((3..=9).map(|n| (n, fixture(&format!("default-v{n}.toml")))));
+    let snip_entries = |q: &[QuickAction]| {
+        (q.iter().filter(|q| q.action == "snip"))
+            .map(|q| q.target)
+            .collect::<Vec<_>>()
+    };
+    for (i, (n, text)) in files.iter().enumerate() {
+        let (dir, path) = config_with(&format!("schema9-{i}"), text);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "v{n}: {w:?}");
+        assert_eq!(&fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
+        // Same behaviour: what was read is what the rewritten file reads back.
+        let (again, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "v{n}: {w:?}");
+        assert_eq!(kept(&again), kept(&c), "v{n}");
+        assert_eq!(c, Config::parse(text).0, "v{n}");
+        let saved: Table = fs_text(&path).parse().unwrap();
+        assert_eq!(saved["version"].as_integer(), Some(11));
+        let labs = saved["labs"].as_table().unwrap();
+        assert!(
+            !labs.contains_key("snip") && !labs.contains_key("editor"),
+            "v{n}"
+        );
+        assert!(!saved.contains_key("results"), "v{n}");
+        assert!(
+            snip_entries(&c.quick_actions)
+                .iter()
+                .all(|t| *t == Target::Circle)
+        );
+    }
+    // v8's default file is today's default, its stored target kept.
+    let mut want = Config::default();
+    want.translate.target = "ar".into();
+    assert_eq!(Config::parse(&fixture("default-v8.toml")), (want, vec![]));
+    assert_eq!(
+        snip_entries(&Config::default().quick_actions),
+        [Target::Circle]
+    );
+}
+
+/// Additive only: every key of the frozen v3 default file is still written, so
+/// an older OpenCircle reads a v4 file with its own keys.
+#[test]
+fn a_v4_file_still_has_every_v3_key() {
+    use toml::Value;
+    fn paths(t: &Table, prefix: &str, out: &mut Vec<String>) {
+        for (k, v) in t {
+            let key = format!("{prefix}{k}");
+            match v {
+                Value::Table(t) => paths(t, &format!("{key}."), out),
+                Value::Array(a) => a
+                    .iter()
+                    .filter_map(Value::as_table)
+                    .for_each(|t| paths(t, &format!("{key}[]."), out)),
+                _ => {}
+            }
+            out.push(key);
+        }
+    }
+    let keys = |text: &str| {
+        let mut out = Vec::new();
+        paths(&text.parse::<Table>().unwrap(), "", &mut out);
+        out
+    };
+    let (v4, v5) = (
+        keys(&fixture("default-v4.toml")),
+        keys(&fixture("default-v6.toml")),
+    );
+    for key in keys(&fixture("default-v3.toml")) {
+        assert!(v4.contains(&key), "{key} is gone");
+    }
+    for key in &v4 {
+        assert!(v5.contains(key), "{key} is gone in v5");
+    }
+    // The v3 default file loads (and migrates) to the current defaults.
+    let (dir, path) = config_with("v3-default", &fixture("default-v3.toml"));
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    // (schema 7 moves the old default 1568 px to Original; schema 8 moves Snip to
+    // Alt+A; schema 9 drops the window / full-screen snip entries; its explicit
+    // theme = "spectrum" stays the user's: only a new file gets Sapphire Glow)
+    let mut want = Config::default();
+    want.look.theme = LookTheme::Spectrum;
+    want.translate.target = "ar".into(); // stored: kept
+    assert_eq!(c, want);
+    let frozen = fixture("default-v11.toml").replace("sapphire_glow", "spectrum");
+    assert_eq!(fs_text(&path), frozen);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Schema 8 (owner, 2026-11-03): Snip's old default Print Screen moves to Alt+A once,
+/// unless Alt+A is taken; a user's own key stays; the window / full-screen snip
+/// entries are dropped (schema 9).
+#[test]
+fn schema_8_moves_snip_off_print_screen() {
+    let snip = |c: &Config| {
+        (c.quick_actions.iter())
+            .find(|q| q.action == "snip" && q.target == Target::Circle)
+            .map(|q| q.shortcut.clone())
+    };
+    assert_eq!(snip(&Config::default()).as_deref(), Some("Alt+A"));
+    let entry = |key: &str, target: &str| {
+        format!(
+            "[[quick_actions]]\naction = \"snip\"\nshortcut = \"{key}\"\ntarget = \"{target}\"\n"
+        )
+    };
+    for (v, key, extra, want) in [
+        (7, "PrintScreen", String::new(), "Alt+A"),
+        (7, "Ctrl+Shift+Z", String::new(), "Ctrl+Shift+Z"),
+        (
+            7,
+            "PrintScreen",
+            entry("Alt+A", "full_screen").replace("snip", "copy_text"),
+            "PrintScreen",
+        ),
+        (8, "PrintScreen", String::new(), "PrintScreen"),
+    ] {
+        let text = format!("version = {v}\n{}{extra}", entry(key, "circle"));
+        let (c, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(snip(&c).as_deref(), Some(want), "v{v} {key}");
+    }
+    let text = format!(
+        "version = 8\n{}{}",
+        entry("Alt+PrintScreen", "window"),
+        entry("Ctrl+PrintScreen", "full_screen")
+    );
+    let (c, w) = Config::parse(&text);
+    assert!(w.is_empty() && c.quick_actions.is_empty(), "{w:?}");
+}
+
+/// Schema 7: the old default max_edge (1568) moves to Original once, with a backup;
+/// any other choice stays; a new file is Original.
+#[test]
+fn schema_7_moves_the_old_default_size_to_original() {
+    assert_eq!(Config::default().snip.max_edge, 0);
+    for (v, edge, want) in [
+        (4, 1568, 0),
+        (5, 1568, 0),
+        (6, 1568, 0),
+        (6, 1024, 1024),
+        (6, 2048, 2048),
+        (6, 0, 0),
+        (7, 1568, 1568),
+    ] {
+        let text = format!("version = {v}\n[snip]\nmax_edge = {edge}\n");
+        let (dir, path) = config_with(&format!("edge-{v}-{edge}"), &text);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(c.snip.max_edge, want, "v{v} {edge}");
+        if v < 7 {
+            assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{v}"))), text);
+            assert!(fs_text(&path).contains(&format!("max_edge = {want}")));
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Schema 4 never changes a stored look: every v3 value is read and written as
+/// it is, so an older OpenCircle (which knows only the v3 values) keeps the
+/// user's look in a v4 file. Only the widget theme maps to an `[appearance]` pick.
+#[test]
+fn v3_looks_are_kept_and_widget_themes_map_to_schema_4() {
+    const V3_LOOKS: [&str; 8] = [
+        "spectrum", "aurora", "sunset", "ocean", "neon", "mono", "calm", "custom",
+    ];
+    for old in V3_LOOKS {
+        for v in ["", "version = 1\n", "version = 3\n", "version = 4\n"] {
+            let (c, w) = Config::parse(&format!("{v}[look]\ntheme = \"{old}\"\n"));
+            assert!(w.is_empty(), "{w:?}");
+            // What an older OpenCircle reads back from the file this writes.
+            let saved: Table = toml::to_string_pretty(&c).unwrap().parse().unwrap();
+            let stored = saved["look"]["theme"].as_str().unwrap();
+            assert_eq!(stored, old, "{v}");
+            assert!(V3_LOOKS.contains(&stored));
+        }
+    }
+    for (widget, dark, light) in [
+        ("default", "sapphire", "daylight"),
+        ("frost", "sapphire", "frost"),
+        ("graphite", "graphite", "daylight"),
+    ] {
+        let (c, w) = Config::parse(&format!("version = 3\nwidget_theme = \"{widget}\"\n"));
+        assert!(w.is_empty(), "{w:?}");
+        let picks = (c.appearance.dark.as_str(), c.appearance.light.as_str());
+        assert_eq!(picks, (dark, light), "{widget}");
+    }
+    // An [appearance] wins over the old widget theme; a v4 file is taken as is.
+    let (c, _) = Config::parse(
+        "version = 3\nwidget_theme = \"frost\"\n[appearance]\nlight = \"sandstone\"\n",
+    );
+    assert_eq!(c.appearance.light, "sandstone");
+    let (c, _) = Config::parse("version = 4\nwidget_theme = \"graphite\"\n");
+    assert_eq!(c.appearance.dark, "sapphire");
+}
+
+/// A v3 file is backed up once as `.bak-v3` and rewritten as the current schema with the mapped
+/// values and its old keys; after that it is left alone.
+#[test]
+fn a_v3_file_migrates_once_with_a_bak_v3() {
+    let old = "version = 3\nwidget_theme = \"graphite\"\nglass_effect = false\n[look]\ntheme = \"aurora\"\n";
+    let (dir, path) = config_with("v3-to-v4", old);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(fs_text(&dir.join("config.toml.bak-v3")), old);
+    // The stored look comes back byte-equal.
+    let look = |text: &str| text.parse::<Table>().unwrap()["look"]["theme"].clone();
+    assert_eq!(look(&fs_text(&path)), look(old));
+    let text = fs_text(&path);
+    for want in [
+        "version = 11",
+        "glass_effect = false",
+        "theme = \"aurora\"",
+        "[appearance]",
+        "dark = \"graphite\"",
+        "hidden_previews = []",
+    ] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    let (again, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(again, c);
+    assert_eq!(fs_text(&path), text, "not rewritten again");
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "one backup");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Schema 6 (owner, 2026-11-02): "copy" (copy and close) is gone. Any older file
+/// (v3, v4, v5) with "copy" moves to "both", once, with a backup, whatever Labs
+/// says; "editor" and "both" stay as they were.
+#[test]
+fn a_stored_copy_moves_to_both_once_editor_and_both_stay() {
+    let on = |text: &str| text.replace("[labs]\nsnip = false\n", "[labs]\nsnip = true\n");
+    let (v3, v4) = (fixture("default-v3.toml"), fixture("default-v4.toml"));
+    let v5 = v4.replace("version = 4", "version = 5");
+    assert!(v5.contains("version = 5") && v4.contains("after = \"copy\""));
+    for (name, old, n) in [("v3", &v3, 3), ("v4", &v4, 4), ("v5", &v5, 5)] {
+        let with = |after: &str| old.replace("after = \"copy\"", &format!("after = \"{after}\""));
+        for (snip, text, want) in [
+            (false, old.clone(), SnipAfter::Editor),
+            (true, on(old), SnipAfter::Editor),
+            (false, with("both"), SnipAfter::Editor),
+            (false, with("editor"), SnipAfter::Editor),
+        ] {
+            let (dir, path) = config_with(&format!("v6-{name}-{snip}-{want:?}"), &text);
+            let (c, w) = Config::load_from(&path);
+            assert!(w.is_empty(), "{name}: {w:?}");
+            assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
+            assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
+            let saved: Table = fs_text(&path).parse().unwrap();
+            assert_eq!(saved["version"].as_integer(), Some(11));
+            assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
+            let (again, _) = Config::load_from(&path);
+            assert_eq!(again.snip.after, want, "migrated once");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+    // a stored "copy" in a newer file reads as "both" too, without a warning
+    let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"copy\"\n");
+    assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
+}
+
+/// Schema 10 (owner, 2026-11-08): a pick copies nothing by default. Every stored
+/// "both" (and the old "copy") moves to "editor" once, with a backup; the frozen
+/// v9 file still loads.
+#[test]
+fn schema_10_moves_both_to_editor_once_with_a_backup() {
+    let v9 = fixture("default-v9.toml");
+    assert!(v9.contains("after = \"both\""));
+    let (dir, path) = config_with("v10-both", &v9);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.snip.after, SnipAfter::Editor);
+    assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
+    assert_eq!(fs_text(&path), fixture("default-v11.toml"));
+    let _ = std::fs::remove_dir_all(dir);
+    // a v10 file keeps a deliberate "both"
+    let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
+    assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
+}
+
+/// Schema 11 (clean-up before 0.1.4): the keys nothing reads stop being written.
+/// A v10 file still loads without a warning, with its (ignored) values read; a
+/// save drops them, the old file backed up.
+#[test]
+fn schema_11_stops_writing_the_ignored_keys_with_a_backup() {
+    let mut v10 = fixture("default-v10.toml");
+    for key in ["widget_theme", "search_with", "activation_glow", "animate"] {
+        assert!(v10.contains(key), "{key}");
+    }
+    v10 = v10.replace("search_with = \"lens\"", "search_with = \"both\"");
+    let (dir, path) = config_with("v11-drop", &v10);
+    let (_, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(fs_text(&dir.join("config.toml.bak-v10")), v10);
+    let text = fs_text(&path);
+    for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {
+        assert!(!text.contains(gone), "{gone}: {text}");
+    }
+    assert!(text.contains("version = 11"), "{text}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The removed search history (owner, 2026-11-08; folded into schema 11, which no
+/// release has written yet): its keys still load without a warning and a save
+/// drops them, the old file backed up.
+#[test]
+fn the_removed_search_history_keys_load_quietly_and_are_not_written() {
+    let old =
+        "version = 10\n[general]\nsearch_history = true\n[labs]\nhistory = true\nsong = true\n";
+    let (dir, path) = config_with("no-search-history", old);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty() && c.labs.song, "{w:?}");
+    assert_eq!(fs_text(&dir.join("config.toml.bak-v10")), old);
+    let text = fs_text(&path);
+    assert!(!text.contains("search_history"), "{text}");
+    let saved: Table = text.parse().unwrap();
+    assert!(saved["labs"].get("history").is_none(), "{text}");
+    assert_eq!(saved["labs"]["song"].as_bool(), Some(true));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn fs_text(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
+/// `[appearance]` is checked field by field, and round-trips.
+#[test]
+fn appearance_values_fall_back_one_by_one_and_round_trip() {
+    let (c, w) = Config::parse(
+        "[appearance]\ndark = \"daylight\"\nlight = \"frost\"\nlogo = \"gold\"\nhidden_previews = [\"translate\"]\n",
+    );
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(
+        w[0].starts_with("appearance.dark: expected one of sapphire"),
+        "{w:?}"
+    );
+    assert!(w[1].starts_with("appearance.logo:"), "{w:?}");
+    assert_eq!(c.appearance.dark, "sapphire", "a light id is no dark pick");
+    assert_eq!(c.appearance.light, "frost");
+    assert_eq!(c.appearance.logo, Logo::Theme);
+    assert_eq!(c.appearance.hidden_previews, ["translate"]);
+    let mut c = Config {
+        appearance: AppearanceConfig {
+            dark: "midnight".into(),
+            light: "sandstone".into(),
+            logo: Logo::Purple,
+            hidden_previews: vec!["look".into(), "ai".into()],
+        },
+        ..Config::default()
+    };
+    c.look.theme = LookTheme::Hud;
+    let (back, w) = Config::parse(&toml::to_string_pretty(&c).unwrap());
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back, c);
+}
+
+/// Sapphire Glow is the main look (owner, 2026-11-03): the default of a new
+/// config and of one with no `[look] theme`; Liquid Prism ("aurora") has no
+/// card but a config that has it still loads it; both round trip.
+#[test]
+fn sapphire_glow_is_the_default_and_prism_still_loads() {
+    assert_eq!(LookTheme::default(), LookTheme::SapphireGlow);
+    let (none, w) = Config::parse("version = 4\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(none.look.theme, LookTheme::SapphireGlow);
+    let (prism, w) = Config::parse("version = 4\n[look]\ntheme = \"aurora\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(prism.look.theme, LookTheme::Aurora);
+    assert_eq!(prism.look.active().palette, ColourSet::Aurora);
+    for t in [LookTheme::SapphireGlow, LookTheme::Aurora] {
+        let mut c = Config::default();
+        c.look.theme = t;
+        let text = toml::to_string_pretty(&c).unwrap();
+        let (back, w) = Config::parse(&text);
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(back.look.theme, t);
+    }
+    let mut c = Config::default();
+    c.look.theme = LookTheme::SapphireGlow;
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("theme = \"sapphire_glow\""), "{text}");
+}
+
+/// The design's Aurora Borealis is stored as "borealis", written only when
+/// picked; a value a version doesn't know (as an older one reads
+/// "borealis") falls back to the default look with a warning.
+#[test]
+fn borealis_is_stored_only_when_picked() {
+    let default = toml::to_string_pretty(&Config::default()).unwrap();
+    assert!(!default.contains("borealis"));
+    let mut c = Config::default();
+    c.look.theme = LookTheme::Borealis;
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("theme = \"borealis\""), "{text}");
+    let (back, w) = Config::parse(&text);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.look.theme, LookTheme::Borealis);
+    let (old, w) = Config::parse("version = 4\n[look]\ntheme = \"glimmer\"\n");
+    assert_eq!(old.look.theme, LookTheme::SapphireGlow);
+    assert_eq!(w.len(), 1, "{w:?}");
+}

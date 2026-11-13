@@ -677,7 +677,6 @@ const FEATURE_LEGACY: &[&str] = &[
     "features/live_translate/screens/live/controller.rs",
     "features/live_translate/screens/live_layer.rs",
     "features/onboarding/flow.rs",
-    "features/onboarding/steps/done.rs",
     "features/onboarding/steps/language.rs",
     "features/onboarding/tests.rs",
     "features/settings/labs.rs",
@@ -718,7 +717,7 @@ const FEATURE_LEGACY: &[&str] = &[
     "features/text_reading/worker.rs",
     "features/translate/action.rs",
     "features/translate/mt/mod.rs",
-    "features/translate/pipeline.rs",
+    "features/translate/pipeline/tests.rs",
     "features/translate/screens/pill/mod.rs",
     "features/translate/screens/pill/tests.rs",
     "features/translate/screens/pill/view.rs",
@@ -750,7 +749,7 @@ fn features_meet_only_through_mod_rs() {
                 .unwrap_or("")
                 .split("::");
             let (f, part) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-            !f.is_empty() && f != own && inner(f, part)
+            !f.is_empty() && !part.is_empty() && f != own && inner(f, part)
         });
         if let Some(p) = bad {
             reaching.push((name, p));
