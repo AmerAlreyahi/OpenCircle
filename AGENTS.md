@@ -1044,3 +1044,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   switch missed the pass line (English/French pages +11..+47 % time, some +16..+44 % memory; Arabic/mixed much better). The
   measured follow-up (skip the Arabic try on Latin pages, smaller strip-detector input) runs after the restructure if time is
   left, else in 0.2.0, with the same pass line. Report: docs/internal/reports-0.1.8/w3-linux-reading.md.
+- v0.1.8 publish (owner, 2026-11-13, "you can publish directly; if there is an issue I will tell you to fix it in newer
+  versions"): the lead publishes v0.1.8 without asking again. The update gate (v0.1.7 Setup + portable -> draft), About on
+  the draft exe and the release workflow's signed assets still run first: a broken updater is the one bug users can't wait
+  out. Other findings ship as known issues in the notes and are fixed in the next version.
