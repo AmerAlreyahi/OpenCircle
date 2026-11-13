@@ -4,7 +4,7 @@
 
 use std::fmt;
 
-use crate::music::Service;
+use crate::features::song::Service;
 use crate::shared::config::AiConfig;
 
 const SERVICE: &str = "opencircle";

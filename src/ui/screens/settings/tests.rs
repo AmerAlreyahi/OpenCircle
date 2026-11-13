@@ -8,8 +8,8 @@ use iced::{Color, Element, Length, Size};
 use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
+use crate::features::song as music;
 use crate::labs::{Feature, Labs};
-use crate::music::{self};
 use crate::shared::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,

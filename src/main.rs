@@ -5,10 +5,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod actions;
 mod ai;
+mod features;
 mod labs;
 mod live;
 mod mt;
-mod music;
 mod ocr;
 mod shared;
 mod snip;

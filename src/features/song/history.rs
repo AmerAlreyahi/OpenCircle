@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::music::Song;
+use crate::features::song::Song;
 
 /// Entries kept.
 const KEEP: usize = 50;

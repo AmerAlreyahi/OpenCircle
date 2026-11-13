@@ -5,7 +5,6 @@
 use std::path::Path;
 
 pub mod recent;
-pub mod song;
 
 /// A kind of record Settings > History lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

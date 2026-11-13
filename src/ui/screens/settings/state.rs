@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 
 use iced::{Color, Size, Subscription, event, keyboard};
 
+use crate::features::song::{self as music, SERVICE, Service};
 use crate::labs::Feature;
-use crate::music::{self, SERVICE, Service};
 use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,

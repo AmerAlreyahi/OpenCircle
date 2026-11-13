@@ -6,7 +6,7 @@ use iced::Element;
 use iced::widget::{Space, column};
 
 use super::super::state::{Message, Pick, State};
-use crate::music::SERVICE;
+use crate::features::song::SERVICE;
 use crate::shared::config::SongSource;
 use crate::shared::kit::card::card;
 use crate::shared::kit::chip::pill;

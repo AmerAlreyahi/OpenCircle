@@ -31,11 +31,41 @@ const UI_MODULES: &[&str] = &[
 
 /// `line` names a module of the UI.
 fn names_ui(line: &str) -> bool {
-    UI_MODULES.iter().any(|m| {
-        line.match_indices(m).any(|(i, _)| {
-            !line[i + m.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+    // a feature's screens and its part of the App
+    let feature_ui = line.match_indices("crate::features::").any(|(i, m)| {
+        let mut parts = line[i + m.len()..].split("::");
+        let feature = parts.next().unwrap_or("");
+        let part: String = parts
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        (UI_FEATURES.contains(&feature) && part != "labs") || part == "screens" || part == "app"
+    });
+    feature_ui
+        || UI_MODULES.iter().any(|m| {
+            line.match_indices(m).any(|(i, _)| {
+                !line[i + m.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
         })
-    })
+}
+
+/// Features that are all UI (no logic of their own besides their screens).
+const UI_FEATURES: &[&str] = &["onboarding", "settings"];
+
+/// `name` (a path under `src`) is a file of the UI.
+fn in_ui(name: &str) -> bool {
+    let mut parts = name.split('/');
+    let feature_ui = parts.next() == Some("features") && {
+        let feature = parts.next().unwrap_or("");
+        let part = parts.next().unwrap_or("");
+        (UI_FEATURES.contains(&feature) && part != "labs.rs") || part == "screens" || part == "app"
+    };
+    feature_ui
+        || UI
+            .iter()
+            .any(|r| name == *r || name.starts_with(&format!("{r}/")))
 }
 
 /// Every `.rs` file of the UI (`dir` = "") or under `src/<dir>`, as (path
@@ -45,6 +75,7 @@ fn sources(dir: &str) -> Vec<(String, String)> {
         return tree(dir);
     }
     let mut out: Vec<_> = UI.iter().flat_map(|root| tree(root)).collect();
+    out.extend(tree("features").into_iter().filter(|(name, _)| in_ui(name)));
     out.sort();
     out
 }
@@ -271,10 +302,7 @@ fn backend_never_imports_ui() {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        let in_ui = UI
-            .iter()
-            .any(|r| name == *r || name.starts_with(&format!("{r}/")));
-        if in_ui || name == "main.rs" || name.ends_with("tests.rs") {
+        if in_ui(&name) || name == "main.rs" || name.ends_with("tests.rs") {
             continue;
         }
         // LF everywhere (Windows checks out CRLF), so both platforms scan the same code

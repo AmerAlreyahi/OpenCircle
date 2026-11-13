@@ -657,7 +657,7 @@ pub fn remove_user_data() {
     for owner in owners.chain([crate::shared::secrets::AiKey::SHARED]) {
         let _ = crate::shared::secrets::delete(owner);
     }
-    let _ = crate::shared::secrets::by_name::delete(crate::music::SERVICE.key_entry());
+    let _ = crate::shared::secrets::by_name::delete(crate::features::song::SERVICE.key_entry());
 }
 
 fn remove_dirs(dirs: &[PathBuf]) {
@@ -994,7 +994,8 @@ mod tests {
         let planted = r"C:\Users\u\AppData\Local\Planted";
         let vars = ["WINDIR", "SystemRoot", "ProgramW6432", "ProgramFiles"];
         if std::env::var("SystemRoot").as_deref() != Ok(planted) {
-            let name = "shared::setup::tests::the_elevated_setup_never_takes_folders_from_the_environment";
+            let name =
+                "shared::setup::tests::the_elevated_setup_never_takes_folders_from_the_environment";
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
             child.args(["--exact", name, "--test-threads=1"]);
             for var in vars {

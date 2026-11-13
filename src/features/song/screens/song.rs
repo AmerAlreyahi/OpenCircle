@@ -1,6 +1,6 @@
 //! Song search on the overlay (its button is in the overlay's bottom bar):
 //! the "Listening… N s" pill with Cancel, then the result card (cover, title,
-//! artist, album · year, links opened only on click). The work is `crate::music`.
+//! artist, album · year, links opened only on click). The work is `crate::features::song`.
 
 use crate::shared::app_language::{S, fmt};
 use crate::t;
@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use iced::widget::{column, container, image, opaque, row, text};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
-use crate::music::{self, LISTEN_SECS, Song};
+use crate::features::song::history;
+use crate::features::song::{self as music, LISTEN_SECS, Song};
 use crate::shared::config;
-use crate::shared::history::song as history;
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::chip;
 use crate::shared::kit::icon::FONT;
@@ -20,8 +20,8 @@ use crate::shared::kit::panel_frame as card;
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{accent, error, sub, text as line};
 use crate::shared::kit::tokens::{Role, radius, size, space};
-use crate::ui::ai_chat::{actions, note};
-use crate::ui::background;
+use crate::ui::app::background::background;
+use crate::ui::screens::ai_chat::{actions, note};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
@@ -182,7 +182,7 @@ impl Session {
             held: false,
             logo: None,
         };
-        super::ai_chat::card(
+        crate::ui::screens::ai_chat::card(
             header,
             body,
             footer,

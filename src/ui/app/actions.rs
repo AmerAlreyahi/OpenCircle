@@ -411,16 +411,16 @@ impl App {
 
     /// The music button shows only once a key is known to be saved.
     pub(crate) fn has_song_key(&self) -> bool {
-        crate::music::key_known() == Some(true)
+        crate::features::song::key_known() == Some(true)
     }
 
     /// First open: ask the keyring (off the UI thread) whether a song key is saved.
     pub(crate) fn check_song_key(&self) -> Task<Message> {
-        if crate::music::key_known().is_some() || cfg!(test) {
+        if crate::features::song::key_known().is_some() || cfg!(test) {
             return Task::none();
         }
         background(|tx| {
-            let _ = tx.unbounded_send(crate::music::check_key());
+            let _ = tx.unbounded_send(crate::features::song::check_key());
         })
         .map(|_| Message::SongKey)
     }

@@ -15,7 +15,6 @@ pub mod overlay {
 pub mod ai_chat;
 pub mod settings;
 pub mod setup;
-pub mod song;
 pub mod steps;
 pub mod toast;
 pub mod tools;

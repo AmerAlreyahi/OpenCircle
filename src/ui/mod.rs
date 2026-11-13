@@ -1,23 +1,24 @@
 //! The iced daemon: owns the overlay window (pre-created and hidden between uses
 //! where windows can hide, see `can_hide_windows`) and its state.
-mod app;
+pub(crate) mod app;
 #[cfg(test)]
-mod arch_tests;
+pub(crate) mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
-mod frame_times;
-mod live_layer;
+pub(crate) mod frame_times;
+pub(crate) mod live_layer;
 pub(crate) mod long_capture_popup;
-mod overlay;
+pub(crate) mod overlay;
 pub(crate) mod screens;
+use crate::features::song::screens::song;
 use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
-use screens::{ai_chat, settings, song, translate};
-mod snip;
+use screens::{ai_chat, settings, translate};
+pub(crate) mod snip;
 #[cfg(test)]
-mod snip_shots;
-mod windows;
+pub(crate) mod snip_shots;
+pub(crate) mod windows;
 
 use crate::Trigger;
 use crate::shared::platform::monitor::taskbar_inset;
