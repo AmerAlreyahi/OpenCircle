@@ -9,10 +9,10 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
-use crate::capture::CaptureError;
 use crate::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
+use crate::shared::platform::capture::CaptureError;
 use crate::snip::annotate::{self};
 
 use crate::shared::kit::panel_frame as card;
@@ -1015,7 +1015,7 @@ fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
 /// the area on its free (left) side, clear of the toolbar.
 #[test]
 fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
-    use crate::capture::scroll::Update;
+    use crate::shared::platform::capture::scroll::Update;
     use crate::ui::screens::long_capture;
     for y in [0.0, 0.4, 1.0] {
         let area = Rectangle::new(Point::new(858.0, y), Size::new(858.0, 1231.0 - y));
@@ -1081,7 +1081,7 @@ fn long_capture_shows_its_picture_and_hint_before_any_scroll() {
 /// the toolbar, kept in the overlay's hole (the overlay is kept out of the grabs).
 #[test]
 fn a_full_screen_long_capture_shows_a_small_picture_in_the_corner() {
-    use crate::capture::scroll::Update;
+    use crate::shared::platform::capture::scroll::Update;
     use crate::ui::screens::long_capture;
     let area = Rectangle::new(Point::ORIGIN, Size::new(1280.0, 720.0));
     let mut app = snipping_on(1280, 720, area);
@@ -4548,7 +4548,7 @@ fn a_pinned_chat_window_glides_to_its_dock() {
 /// THAT screen's side and glides there, not back to the one it opened on (#125).
 #[test]
 fn a_pinned_chat_dragged_to_another_screen_docks_there() {
-    use crate::ui::platform::monitor::Place;
+    use crate::shared::platform::monitor::Place;
     let mut app = open_app(800, 600, 1.0);
     drag(
         &mut app,
@@ -5349,8 +5349,8 @@ fn stitched_page(height: u32) -> Crop {
 
 #[test]
 fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state() {
-    use crate::capture::scroll::Update;
-    use crate::ui::platform::tray::SHOWN;
+    use crate::shared::platform::capture::scroll::Update;
+    use crate::shared::platform::tray::SHOWN;
     SHOWN.with_borrow_mut(Vec::clear);
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
@@ -5414,7 +5414,7 @@ fn on_wayland_a_long_capture_shows_its_pop_up_beside_the_area_and_the_tray_state
 /// corner out), with the whole-screen tip until the page grows.
 #[test]
 fn on_wayland_a_whole_screen_long_capture_shows_its_pop_up_in_the_corner() {
-    use crate::capture::scroll::Update;
+    use crate::shared::platform::capture::scroll::Update;
     let area = Rectangle::new(Point::new(0.0, 0.0), Size::new(1280.0, 720.0));
     let mut app = casting_on(1280, 720, area);
     assert!(
@@ -5458,9 +5458,9 @@ fn on_wayland_a_whole_screen_long_capture_shows_its_pop_up_in_the_corner() {
 /// pop-up says so and goes, the tray is itself again.
 #[test]
 fn on_wayland_copy_from_the_pop_up_copies_the_page() {
-    use crate::capture::scroll::Finish;
+    use crate::shared::platform::capture::scroll::Finish;
+    use crate::shared::platform::tray::SHOWN;
     use crate::ui::long_capture_popup::{Msg, tests::sent};
-    use crate::ui::platform::tray::SHOWN;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
     let _ = app.update(Message::Trigger(Trigger::LongCapture(Finish::Copy)));
@@ -5485,7 +5485,7 @@ fn on_wayland_copy_from_the_pop_up_copies_the_page() {
 /// fresh frame with the stitched page picked; Cancel drops the page.
 #[test]
 fn on_wayland_done_opens_snip_with_the_page_and_cancel_drops_it() {
-    use crate::capture::scroll::Finish;
+    use crate::shared::platform::capture::scroll::Finish;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);
     let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
@@ -5509,9 +5509,9 @@ fn on_wayland_done_opens_snip_with_the_page_and_cancel_drops_it() {
 /// sign and its menu finishes it.
 #[test]
 fn on_wayland_without_xwayland_the_tray_alone_shows_the_capture() {
-    use crate::capture::scroll::Finish;
+    use crate::shared::platform::capture::scroll::Finish;
+    use crate::shared::platform::tray::SHOWN;
     use crate::ui::long_capture_popup::tests::NO_X11;
-    use crate::ui::platform::tray::SHOWN;
     NO_X11.set(true);
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = casting(area);

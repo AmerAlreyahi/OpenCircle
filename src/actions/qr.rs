@@ -128,7 +128,9 @@ pub fn decode(crop: &Crop) -> Option<String> {
 /// `text` as a link to offer "Open" for: one http(s) URL and nothing else.
 pub fn web_url(text: &str) -> Option<&str> {
     let text = text.trim();
-    crate::sys::open::web_host(text).is_some().then_some(text)
+    crate::shared::platform::sys::open::web_host(text)
+        .is_some()
+        .then_some(text)
 }
 
 /// What the QR chip shows for the code's `text`.

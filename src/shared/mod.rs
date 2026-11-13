@@ -3,4 +3,5 @@
 //! services (log, paths, secrets, network). Never imports a feature or the app
 //! shell (`arch_tests::shared_never_imports_features_or_app`).
 pub(crate) mod kit;
+pub(crate) mod platform;
 pub(crate) mod theme;

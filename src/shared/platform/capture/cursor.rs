@@ -215,7 +215,7 @@ mod tests {
     #[test]
     #[ignore = "needs an X display (xvfb-run)"]
     fn x11_pointer_is_drawn_into_a_real_capture() {
-        let mut f = crate::capture::monitor_under_cursor().unwrap();
+        let mut f = crate::shared::platform::capture::monitor_under_cursor().unwrap();
         let before = f.rgba.clone();
         draw(&mut f);
         let changed = (f.rgba.chunks(4).zip(before.chunks(4))).filter(|(a, b)| a != b);

@@ -483,7 +483,7 @@ fn part_len(dest: &Path) -> u64 {
 /// instead, as `<base>/<host>/<path>` over plain HTTP (the VM's flaky-server
 /// test). Never read in a user's copy (`sys::test_hook`).
 fn redirect(url: &str) -> Option<String> {
-    let base = crate::sys::test_hook("OPENCIRCLE_TEST_MODELS_URL")?;
+    let base = crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_MODELS_URL")?;
     let base = base.to_str()?.trim_end_matches('/');
     Some(format!("{base}/{}", url.strip_prefix("https://")?))
 }

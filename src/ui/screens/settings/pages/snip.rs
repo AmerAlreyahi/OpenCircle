@@ -161,7 +161,9 @@ fn px_label(px: u32) -> &'static str {
 pub fn open_keyboard_settings() {
     #[cfg(windows)]
     {
-        let run = crate::sys::open::open_system_settings("ms-settings:easeofaccess-keyboard");
+        let run = crate::shared::platform::sys::open::open_system_settings(
+            "ms-settings:easeofaccess-keyboard",
+        );
         if let Err(e) = run {
             crate::log!("[opencircle] could not open Windows' keyboard settings: {e}");
         }

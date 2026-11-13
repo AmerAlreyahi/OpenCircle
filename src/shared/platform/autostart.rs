@@ -17,7 +17,7 @@ pub fn apply(config: &Config) {
     }
     // No config file = onboarding is not finished (it saves the file): no entry yet.
     let onboarded = Config::path().is_some_and(|p| p.exists());
-    let result = crate::sys::launcher().and_then(|exe| {
+    let result = crate::shared::platform::sys::launcher().and_then(|exe| {
         sync_when_onboarded(&Store::real(), &exe, config.general.autostart, onboarded)
     });
     if let Err(e) = result {
@@ -74,7 +74,7 @@ mod os {
     };
     use windows::core::PCWSTR;
 
-    use crate::sys::wide;
+    use crate::shared::platform::sys::wide;
 
     const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const NAME: &str = "OpenCircle";

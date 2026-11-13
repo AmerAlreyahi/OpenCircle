@@ -4,7 +4,7 @@
 use iced::window;
 use iced::{Point, Size, Task};
 
-pub use crate::sys::session::can_hide_windows;
+pub use crate::shared::platform::sys::session::can_hide_windows;
 
 /// A monitor as the overlay shows it: its origin and size in physical desktop
 /// px, and physical px per logical px.
@@ -32,7 +32,7 @@ impl Place {
 
 /// Every monitor as a `Place` (empty where the platform can't list them).
 pub fn places() -> Vec<Place> {
-    (crate::capture::monitor_list().iter())
+    (crate::shared::platform::capture::monitor_list().iter())
         .map(|m| Place {
             origin: (m.rect.0, m.rect.1),
             px: (m.rect.2, m.rect.3),

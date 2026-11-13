@@ -109,7 +109,7 @@ pub fn ask_with(
 
 /// [`ask_with`] through the user's default browser.
 pub fn ask(question: &str) -> Result<String, String> {
-    ask_with(question, crate::sys::open::open_google)
+    ask_with(question, crate::shared::platform::sys::open::open_google)
 }
 
 #[cfg(test)]
@@ -148,7 +148,7 @@ mod tests {
         );
         // what search_in_browser::open_link accepts: one plain link on Google's host
         assert_eq!(
-            crate::sys::open::web_host(&u).as_deref(),
+            crate::shared::platform::sys::open::web_host(&u).as_deref(),
             Some("www.google.com")
         );
         assert!(!search_url("x&udm=50").contains("&udm"));

@@ -119,7 +119,7 @@ fn words(fault: &Fault) -> String {
 /// has it (Arabic), else English (`OPENCIRCLE_TEST_LANGUAGE` stands in for
 /// Windows' in tests: `sys::locale::language`).
 fn language() -> Lang {
-    Lang::of(&crate::sys::locale::language()).unwrap_or(Lang::En)
+    Lang::of(&crate::shared::platform::sys::locale::language()).unwrap_or(Lang::En)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -423,7 +423,7 @@ impl State {
             return Task::none();
         };
         self.applied = h;
-        crate::ui::platform::monitor::resize(id, Size::new(WIDTH, h))
+        crate::shared::platform::monitor::resize(id, Size::new(WIDTH, h))
             .chain(windows::reshape::<()>(id).discard())
     }
 
@@ -1008,7 +1008,7 @@ fn finish(folder: &str, autostart: bool, launch: bool, updating: bool) -> Result
 /// run's onboarding asks again).
 fn keep_choice(folder: &str, autostart: bool) {
     let exe = setup_core::app_in(folder);
-    if let Err(e) = crate::autostart::choose(&exe, autostart) {
+    if let Err(e) = crate::shared::platform::autostart::choose(&exe, autostart) {
         crate::log!("[opencircle] setup: start with Windows: {e}");
     }
     if crate::config::Config::path().is_some_and(|p| p.exists()) {

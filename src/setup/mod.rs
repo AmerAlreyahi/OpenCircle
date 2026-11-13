@@ -527,13 +527,15 @@ const START_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 /// argument: an elevated setup starts the app through Explorer, which passes none.
 pub fn launch(exe: &Path, settings: bool) -> Result<(), String> {
     let show = || {
-        let _ = crate::hotkey::forward(&crate::hotkey::Command::OpenSettings.line());
+        let _ = crate::shared::platform::hotkey::forward(
+            &crate::shared::platform::hotkey::Command::OpenSettings.line(),
+        );
     };
     launch_with(
         exe,
         quit_running_app,
         start,
-        crate::hotkey::running,
+        crate::shared::platform::hotkey::running,
         START_WAIT,
         settings.then_some(&show as &dyn Fn()),
     )
@@ -582,7 +584,7 @@ fn start(exe: &Path) -> std::io::Result<()> {
             .spawn()
             .map(drop);
     }
-    crate::sys::spawn::spawn_detached(exe)
+    crate::shared::platform::sys::spawn::spawn_detached(exe)
 }
 
 /// What is installed already (the MSI's upgrade family).
@@ -598,7 +600,7 @@ pub struct Installed {
 /// Asks a running OpenCircle to quit and waits up to 10 s for it (its files can
 /// then be replaced or removed). `true` = none is running any more.
 pub fn quit_running_app() -> bool {
-    use crate::hotkey;
+    use crate::shared::platform::hotkey;
     if hotkey::forward(&hotkey::Command::Quit.line()).is_err() {
         return true; // none running
     }
@@ -625,12 +627,12 @@ fn user_data() -> Vec<PathBuf> {
 pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
     quit_running_app();
     if let Ok(exe) = std::env::current_exe()
-        && let Err(e) = crate::autostart::forget(&exe)
+        && let Err(e) = crate::shared::platform::autostart::forget(&exe)
     {
         crate::log!("[opencircle] start with Windows: {e}");
     }
     // in Windows' display language, as the setup window (no config is read)
-    let lang = crate::sys::locale::language();
+    let lang = crate::shared::platform::sys::locale::language();
     crate::app_language::set(
         crate::app_language::Lang::of(&lang).unwrap_or(crate::app_language::Lang::En),
     );
@@ -647,7 +649,7 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 
 /// The user's settings, downloaded models, histories and saved keys: gone.
 pub fn remove_user_data() {
-    crate::hotkey::forget_desktop_shortcuts();
+    crate::shared::platform::hotkey::forget_desktop_shortcuts();
     remove_dirs(&user_data());
     let owners = (crate::ai::providers::PRESETS.iter()).map(|p| crate::secrets::AiKey(p.id));
     for owner in owners.chain([crate::secrets::AiKey::SHARED]) {

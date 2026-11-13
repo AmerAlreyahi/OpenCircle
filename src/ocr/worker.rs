@@ -363,7 +363,7 @@ fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
     let idle = Arc::new(Mutex::new(None::<Instant>));
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {
-        crate::sys::mem::keep_free_heap();
+        crate::shared::platform::sys::mem::keep_free_heap();
         let mark = idle.clone();
         std::thread::spawn(move || {
             loop {
@@ -372,7 +372,7 @@ fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
                 if since.is_some_and(|t| t.elapsed() >= IDLE_TRIM) {
                     *since = None;
                     drop(since);
-                    crate::sys::mem::trim_heap();
+                    crate::shared::platform::sys::mem::trim_heap();
                 }
             }
         });

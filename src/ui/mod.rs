@@ -9,7 +9,6 @@ mod frame_times;
 mod live_layer;
 pub(crate) mod long_capture_popup;
 mod overlay;
-mod platform;
 pub(crate) mod screens;
 use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
@@ -22,27 +21,27 @@ mod touch;
 mod windows;
 
 use crate::Trigger;
+use crate::shared::platform::monitor::taskbar_inset;
+use crate::shared::platform::shape;
+pub use crate::shared::platform::tray::{refresh as refresh_tray, start as start_tray};
 use app::App;
 use app::background::background;
 use app::keys;
 use iced::futures::channel::mpsc::UnboundedReceiver;
-use platform::monitor::taskbar_inset;
-use platform::shape;
-pub use platform::tray::{refresh as refresh_tray, start as start_tray};
 use screens::{update_card, update_pill};
 
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
     crate::actions::search_in_browser::page::sweep_stale(); // temp files left by a crash
     let logo = crate::shared::kit::logo::window_icon();
-    platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
+    crate::shared::platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let result = with_fonts(iced::daemon(App::boot, App::update, App::view))
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
         .run()
         .inspect(|()| crate::snip::annotate::dragout::clear_own()); // a drop's grace ends with us
-    platform::tray::release(); // the tray icon goes with the one `main` holds
+    crate::shared::platform::tray::release(); // the tray icon goes with the one `main` holds
     result
 }
 

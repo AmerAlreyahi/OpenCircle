@@ -12,7 +12,7 @@ const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/translate
 
 fn image(name: &str) -> (Rgba, (usize, usize)) {
     let path = format!("{DIR}{name}.png");
-    let f = crate::capture::from_png(path.as_ref()).unwrap();
+    let f = crate::shared::platform::capture::from_png(path.as_ref()).unwrap();
     (f.rgba, (f.width as usize, f.height as usize))
 }
 

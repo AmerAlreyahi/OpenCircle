@@ -29,7 +29,6 @@ use crate::config::{
     SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::history::{Counts, Kind};
-use crate::hotkey::{DesktopKey, managed};
 use crate::labs::Feature;
 use crate::music::{self, SERVICE, Service};
 use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
@@ -37,6 +36,7 @@ use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion::{self, Curve};
 use crate::shared::kit::themes::THEMES;
 use crate::shared::kit::tokens::{size, space};
+use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES, Language};
 
@@ -1050,7 +1050,7 @@ impl State {
                 .first()
                 // Not "reset": an unknown or unread provider is kept off, not defaulted.
                 .map(|w| crate::app_language::fmt(S::win_invalid, &[&w])),
-            desktop: crate::hotkey::desktop_key,
+            desktop: crate::shared::platform::hotkey::desktop_key,
             edge_mode: EdgeMode::Overlay,
             picker: None,
             hex: String::new(),
@@ -1074,7 +1074,7 @@ impl State {
             win_h: 720.0,
             fetching: Vec::new(),
             failed: Vec::new(),
-            print_screen_taken: crate::hotkey::windows_snips_print_screen(),
+            print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
             resetting: false,
@@ -1305,7 +1305,7 @@ impl State {
                 ShortcutFault::NeedsModifier => t!(sc_modifier).to_string(),
             }
         })?;
-        if let Some(why) = crate::hotkey::unusable_reason(&shortcut) {
+        if let Some(why) = crate::shared::platform::hotkey::unusable_reason(&shortcut) {
             return Err(reserved_words(&why));
         }
         for other in self.slots().filter(|&o| o != slot) {
@@ -1358,8 +1358,8 @@ impl State {
 }
 
 /// Why a key is not ours, in the app's language.
-fn reserved_words(r: &crate::hotkey::Reserved) -> String {
-    use crate::hotkey::Reserved;
+fn reserved_words(r: &crate::shared::platform::hotkey::Reserved) -> String {
+    use crate::shared::platform::hotkey::Reserved;
     match r {
         Reserved::Unicode => t!(rv_unicode).into(),
         Reserved::UnicodeKeys => t!(rv_unicode_keys).into(),
@@ -1549,7 +1549,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             match s {
                 // the user may have changed it in Windows meanwhile
                 Section::Snip => {
-                    state.print_screen_taken = crate::hotkey::windows_snips_print_screen()
+                    state.print_screen_taken =
+                        crate::shared::platform::hotkey::windows_snips_print_screen()
                 }
                 Section::History => return Outcome::History(Vec::new()),
                 Section::Translate => state.models.recount(),
@@ -1607,8 +1608,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             } else if std::mem::take(&mut state.mods_held) && state.wayland {
                 // the desktop ate the key: say which of its own keys that was, when known
                 let m = state.last_mods;
-                let why =
-                    crate::hotkey::eaten_key_reason(m.control(), m.alt(), m.shift(), m.logo());
+                let why = crate::shared::platform::hotkey::eaten_key_reason(
+                    m.control(),
+                    m.alt(),
+                    m.shift(),
+                    m.logo(),
+                );
                 // a later, partial release (one modifier let go at a time) must not
                 // replace the reason the first one gave with the generic note
                 let noted = state
@@ -2178,7 +2183,7 @@ impl State {
 
 #[cfg(target_os = "linux")]
 fn linux_wayland() -> bool {
-    crate::sys::session::wayland_session()
+    crate::shared::platform::sys::session::wayland_session()
 }
 
 #[cfg(not(target_os = "linux"))]

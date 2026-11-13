@@ -15,10 +15,10 @@ use super::screens::long_capture;
 use super::screens::tools::{self, Which, picker, ruler};
 use super::snip;
 use crate::actions::Crop;
-use crate::capture::scroll::Update;
-use crate::capture::stitch::MAX_HEIGHT;
 use crate::shared::kit::testing::golden;
 use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+use crate::shared::platform::capture::scroll::Update;
+use crate::shared::platform::capture::stitch::MAX_HEIGHT;
 use crate::snip::annotate::Message as E;
 
 const W: u32 = 1280;
@@ -294,7 +294,7 @@ fn long(height: u32, full: bool) -> App {
         .cycle()
         .take(tall * w * 4)
         .collect();
-    let mut st = crate::capture::stitch::Stitcher::new(w as u32, tall as u32);
+    let mut st = crate::shared::platform::capture::stitch::Stitcher::new(w as u32, tall as u32);
     st.push(&page);
     let (rgba, width, height) = st.whole(room.width as u32, room.height as u32);
     let preview = Crop {

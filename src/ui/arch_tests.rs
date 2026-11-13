@@ -6,10 +6,26 @@ use std::path::{Path, PathBuf};
 
 /// Where the UI lives (paths under `src`): the app shell, the kit and its
 /// config glue, the OS's windows, and each feature's screens and App parts.
-const UI: &[&str] = &["ui", "shared/kit", "shared/theme.rs"];
+const UI: &[&str] = &[
+    "ui",
+    "shared/kit",
+    "shared/theme.rs",
+    "shared/platform/monitor.rs",
+    "shared/platform/shape.rs",
+    "shared/platform/tray.rs",
+    "shared/platform/windows.rs",
+];
 
 /// The UI's modules (`UI` as paths): what the backend and the OS layer never name.
-const UI_MODULES: &[&str] = &["crate::ui", "crate::shared::kit", "crate::shared::theme"];
+const UI_MODULES: &[&str] = &[
+    "crate::ui",
+    "crate::shared::kit",
+    "crate::shared::theme",
+    "crate::shared::platform::monitor",
+    "crate::shared::platform::shape",
+    "crate::shared::platform::tray",
+    "crate::shared::platform::windows",
+];
 
 /// `line` names a module of the UI.
 fn names_ui(line: &str) -> bool {
@@ -86,7 +102,7 @@ fn screens_never_style() {
         .into_iter()
         .filter(|(name, _)| {
             !name.starts_with("shared/kit/")
-                && !name.starts_with("ui/platform/")
+                && !name.starts_with("shared/platform/")
                 && !name.starts_with("ui/app/")
         })
         .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
@@ -160,9 +176,15 @@ fn kit_depends_only_on_tokens() {
 /// fade's clock and pace (no colours, no widgets), which every fade is timed by.
 #[test]
 fn platform_is_isolated() {
-    for (name, src) in sources("ui/platform") {
+    for (name, src) in sources("") {
+        if !name.starts_with("shared/platform/") {
+            continue;
+        }
         for line in code(&src) {
-            let ui = names_ui(&line.replace("crate::shared::kit::motion", ""));
+            let line = line
+                .replace("crate::shared::kit::motion", "")
+                .replace("crate::shared::platform::", "");
+            let ui = names_ui(&line);
             assert!(
                 !ui && !line.contains("super::super"),
                 "{name} reaches into the UI (take it as a parameter): {}",
@@ -342,7 +364,7 @@ fn every_kit_press_is_a_focus_stop() {
 fn only_the_window_helper_shows_windows() {
     for (name, src) in sources("") {
         if [
-            "ui/platform/windows.rs",
+            "shared/platform/windows.rs",
             "ui/app/update.rs",
             "ui/arch_tests.rs",
         ]
@@ -364,7 +386,7 @@ fn only_the_window_helper_shows_windows() {
 #[test]
 fn only_the_monitor_helper_calls_window_resize() {
     for (name, src) in sources("") {
-        if name == "ui/platform/monitor.rs" || name == "ui/arch_tests.rs" {
+        if name == "shared/platform/monitor.rs" || name == "ui/arch_tests.rs" {
             continue;
         }
         for l in code(&src) {

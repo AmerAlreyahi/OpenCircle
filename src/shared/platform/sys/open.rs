@@ -129,7 +129,7 @@ fn open_on_linux(target: &std::ffi::OsStr) -> bool {
 
 #[cfg(target_os = "linux")]
 fn open_uri(uri: &str) -> Result<(), String> {
-    use crate::capture::portal;
+    use crate::shared::platform::capture::portal;
     use gtk::gio::{Cancellable, DBusCallFlags};
     use gtk::glib::{ToVariant, VariantDict};
 

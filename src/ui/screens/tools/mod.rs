@@ -237,7 +237,10 @@ mod tests {
         assert_eq!(for_action("ruler"), Some(Which::Ruler));
         assert_eq!(for_action("snip"), None);
         for id in ["colour_picker", "ruler"] {
-            assert!(crate::hotkey::QuickId::from_name(id).is_known(), "{id}");
+            assert!(
+                crate::shared::platform::hotkey::QuickId::from_name(id).is_known(),
+                "{id}"
+            );
         }
     }
 

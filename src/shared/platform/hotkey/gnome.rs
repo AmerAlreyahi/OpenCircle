@@ -136,7 +136,7 @@ pub fn adopt(bindings: &[Binding]) -> bool {
 /// Brings our GNOME entries in line with `bindings` (`held_off`: all keys cleared while a
 /// shortcut field records, so the recorder gets every key).
 pub fn sync(bindings: &[Binding], held_off: bool) {
-    let exe = crate::sys::launcher()
+    let exe = crate::shared::platform::sys::launcher()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "opencircle".into());
     let want = entries(bindings, &exe, held_off);

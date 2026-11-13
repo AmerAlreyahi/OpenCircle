@@ -6,12 +6,9 @@
 mod actions;
 mod ai;
 mod app_language;
-mod autostart;
-mod capture;
 mod config;
 mod diagnostics;
 mod history;
-mod hotkey;
 mod labs;
 mod live;
 mod log;
@@ -25,7 +22,6 @@ mod setup;
 mod shared;
 mod snip;
 mod store;
-mod sys;
 mod translate;
 mod ui;
 mod update;
@@ -55,7 +51,7 @@ pub enum Trigger {
     RestartToUpdate,
     /// Wayland: the running long capture ends so (its pop-up or the tray's
     /// capturing menu).
-    LongCapture(capture::scroll::Finish),
+    LongCapture(crate::shared::platform::capture::scroll::Finish),
     Quit,
 }
 
@@ -95,16 +91,16 @@ fn attach_parent_console() {
 /// Starts this exe with no arguments as the resident app, detached from the
 /// terminal (own process group, no console, no stdio), and returns at once.
 fn start_detached() -> std::io::Result<()> {
-    sys::spawn::spawn_detached(&std::env::current_exe()?)
+    crate::shared::platform::sys::spawn::spawn_detached(&std::env::current_exe()?)
 }
 
 fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
-    sys::init_x11_threads();
+    crate::shared::platform::sys::init_x11_threads();
     #[cfg(all(windows, not(debug_assertions)))]
     attach_parent_console();
-    sys::mem::limit_malloc_arenas();
-    sys::fix_appimage_env();
+    crate::shared::platform::sys::mem::limit_malloc_arenas();
+    crate::shared::platform::sys::fix_appimage_env();
     // The setup build (OpenCircle-Setup-*.exe) is the setup, whatever it is asked.
     if let Some(msi) = setup::payload() {
         // Elevated: DLLs it loads later come from System32 only, never from its folder.
@@ -167,14 +163,21 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         // hidden: started by an update, once the old process has exited
-        Some(update::RELAUNCH_ARG) if update::wait_for_old(hotkey::running) => None,
+        Some(update::RELAUNCH_ARG)
+            if update::wait_for_old(crate::shared::platform::hotkey::running) =>
+        {
+            None
+        }
         Some(update::RELAUNCH_ARG) => return ExitCode::FAILURE,
         Some("quit") => {
             // Never starts the app: with none running there is nothing to quit.
-            let _ = hotkey::forward(&hotkey::Command::Quit.line());
+            let _ = crate::shared::platform::hotkey::forward(
+                &crate::shared::platform::hotkey::Command::Quit.line(),
+            );
             return ExitCode::SUCCESS;
         }
-        Some("capture" | "run") => match hotkey::Command::from_args(&args) {
+        Some("capture" | "run") => match crate::shared::platform::hotkey::Command::from_args(&args)
+        {
             Ok(command) => Some(command),
             Err(e) => {
                 crate::log!("{e}\n{USAGE}");
@@ -190,9 +193,11 @@ fn main() -> ExitCode {
     // A running instance takes the command; this launch is done. A command with
     // none running starts the app in the background first, so the terminal is
     // not taken over (a bare launch, e.g. a double-click, is the app itself).
-    let line = command.as_ref().map(hotkey::Command::line);
+    let line = command
+        .as_ref()
+        .map(crate::shared::platform::hotkey::Command::line);
     if let Some(line) = &line {
-        return match hotkey::forward_or_start(line, start_detached) {
+        return match crate::shared::platform::hotkey::forward_or_start(line, start_detached) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 crate::log!("OpenCircle did not start: {e}");
@@ -201,9 +206,9 @@ fn main() -> ExitCode {
         };
     }
     let ours = env!("CARGO_PKG_VERSION");
-    match hotkey::running_version() {
+    match crate::shared::platform::hotkey::running_version() {
         // An older copy ignores what we forward: ask it to quit and start in its place.
-        Ok(theirs) if hotkey::is_older(theirs.as_deref(), ours) => {
+        Ok(theirs) if crate::shared::platform::hotkey::is_older(theirs.as_deref(), ours) => {
             let was = theirs.as_deref().unwrap_or("0.1.x");
             if !take_over() {
                 crate::log!("OpenCircle v{was} is running and did not quit");
@@ -217,7 +222,12 @@ fn main() -> ExitCode {
             crate::log!("OpenCircle is already running (just updated); nothing opened");
             return ExitCode::SUCCESS;
         }
-        Ok(_) if hotkey::forward(&hotkey::Command::OpenSettings.line()).is_ok() => {
+        Ok(_)
+            if crate::shared::platform::hotkey::forward(
+                &crate::shared::platform::hotkey::Command::OpenSettings.line(),
+            )
+            .is_ok() =>
+        {
             crate::log!("OpenCircle is already running; opened its Settings");
             return ExitCode::SUCCESS;
         }
@@ -227,11 +237,11 @@ fn main() -> ExitCode {
     log::install_panic_hook(log::dir());
     crate::log!("[opencircle] {} starting", env!("CARGO_PKG_VERSION"));
     // Hidden test hook (the CLI is frozen, so an env var): a thread panics, the crash file appears.
-    if sys::test_hook("OPENCIRCLE_TEST_CRASH").is_some() {
+    if crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_CRASH").is_some() {
         let _ = std::thread::spawn(|| panic!("OPENCIRCLE_TEST_CRASH")).join();
     }
     let (tx, rx) = mpsc::unbounded();
-    if let Err(e) = hotkey::listen(tx.clone()) {
+    if let Err(e) = crate::shared::platform::hotkey::listen(tx.clone()) {
         crate::log!("cannot open the command socket: {e}");
         return ExitCode::FAILURE;
     }
@@ -239,10 +249,10 @@ fn main() -> ExitCode {
     for warning in &warnings {
         crate::log!("[opencircle] config: {warning}");
     }
-    hotkey::start(tx.clone(), &config);
-    autostart::apply(&config);
+    crate::shared::platform::hotkey::start(tx.clone(), &config);
+    crate::shared::platform::autostart::apply(&config);
     #[cfg(target_os = "linux")]
-    capture::portal::repair_user_launcher();
+    crate::shared::platform::capture::portal::repair_user_launcher();
     // before any helper can have a model file open: old-named model folders get the OptimaMT name
     mt::adopt_old_folders();
     std::thread::spawn(|| remove_old_webview(&paths::app_data()));
@@ -259,7 +269,7 @@ fn main() -> ExitCode {
     update::start(tx.clone());
 
     let ran = ui::run(rx);
-    hotkey::stop();
+    crate::shared::platform::hotkey::stop();
     match ran {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -274,9 +284,11 @@ fn main() -> ExitCode {
 
 /// Asks the running copy to quit and waits (5 s) until it lets go of the socket.
 fn take_over() -> bool {
-    let _ = hotkey::forward(&hotkey::Command::Quit.line());
+    let _ = crate::shared::platform::hotkey::forward(
+        &crate::shared::platform::hotkey::Command::Quit.line(),
+    );
     for _ in 0..50 {
-        if !hotkey::running() {
+        if !crate::shared::platform::hotkey::running() {
             return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

@@ -244,7 +244,7 @@ impl App {
             .and_then(|w| w.placed)
         {
             #[cfg(not(test))]
-            let pointer = crate::capture::pointer();
+            let pointer = crate::shared::platform::capture::pointer();
             #[cfg(test)]
             let pointer = None::<(i32, i32)>; // (not the test machine's)
             let desk = pointer.map_or_else(

@@ -391,7 +391,10 @@ mod tests {
             assert!(port.parse::<u16>().unwrap() > 0);
             assert_eq!(secret.len(), 32, "128 bits");
             assert!(secret.bytes().all(|c| c.is_ascii_hexdigit()));
-            assert!(crate::sys::open::web_host(url).is_some(), "a plain link");
+            assert!(
+                crate::shared::platform::sys::open::web_host(url).is_some(),
+                "a plain link"
+            );
         }
         assert_ne!(a.rsplit('/').next(), b.rsplit('/').next(), "never reused");
         for url in [a, b] {

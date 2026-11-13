@@ -13,10 +13,10 @@ use crate::config::{self, QuickAction, Target};
 use crate::labs::BarButton;
 
 use crate::shared::kit::panel_frame as card;
+use crate::shared::platform::monitor::{self, taskbar_inset};
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::platform::monitor::{self, taskbar_inset};
 use crate::ui::{ai_chat, live_layer, settings, song, translate, windows};
 
 use super::{App, Reader, TOAST_MARGIN};
@@ -34,7 +34,11 @@ impl App {
         background(move |tx| {
             // the windows their apps keep out of captures, where the crop is
             let windows = origin.map_or_else(Vec::new, |o| {
-                qr::crop_rects(o, size, &crate::capture::window_rect::protected())
+                qr::crop_rects(
+                    o,
+                    size,
+                    &crate::shared::platform::capture::window_rect::protected(),
+                )
             });
             let _ = tx.unbounded_send(qr::scan_around(&crop, hole, &windows));
         })
@@ -58,7 +62,7 @@ impl App {
             qr::Act::Open => match qr::web_url(&text).map(str::to_string) {
                 // the browser has the screen now
                 Some(url) => background(move |tx| {
-                    let opened = crate::sys::open::open_link(&url);
+                    let opened = crate::shared::platform::sys::open::open_link(&url);
                     let pill = opened.err().map(|e| failed(e.to_string()));
                     let _ = tx.unbounded_send(Message::ThenClose(pill));
                 }),
@@ -73,8 +77,8 @@ impl App {
         use actions::entities::Kind;
         background(move |tx| {
             let opened = match entity.kind {
-                Kind::Link => crate::sys::open::open_link(&entity.text),
-                Kind::Email => crate::sys::open::open_mailto(&entity.text),
+                Kind::Link => crate::shared::platform::sys::open::open_link(&entity.text),
+                Kind::Email => crate::shared::platform::sys::open::open_mailto(&entity.text),
                 Kind::Phone => return, // (no chip)
             };
             let pill = opened.err().map(|e| {
@@ -102,7 +106,7 @@ impl App {
         }
         let url = crate::ai::browser::search_url(text);
         background(move |tx| {
-            let pill = match crate::sys::open::open_link(&url) {
+            let pill = match crate::shared::platform::sys::open::open_link(&url) {
                 Ok(()) => None,
                 Err(e) => {
                     crate::log!("[opencircle] text search not opened: {e}");
@@ -395,7 +399,7 @@ impl App {
             // The browser comes to the front: the overlay closes so it isn't on top.
             song::Outcome::Open(url) => {
                 let open = background(move |_: &UnboundedSender<()>| {
-                    if let Err(e) = crate::sys::open::open_link(&url) {
+                    if let Err(e) = crate::shared::platform::sys::open::open_link(&url) {
                         crate::log!("[opencircle] can't open the link: {e}");
                     }
                 })

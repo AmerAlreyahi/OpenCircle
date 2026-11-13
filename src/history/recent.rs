@@ -83,7 +83,7 @@ pub fn load() -> Vec<(PathBuf, image::Handle)> {
     }
     (list(&dir).into_iter().take(STRIP))
         .filter_map(|path| {
-            let frame = crate::capture::from_png(path.as_os_str()).ok()?;
+            let frame = crate::shared::platform::capture::from_png(path.as_os_str()).ok()?;
             let crop = Crop {
                 width: frame.width,
                 height: frame.height,
@@ -98,7 +98,7 @@ pub fn load() -> Vec<(PathBuf, image::Handle)> {
 
 /// Blocking: a recent capture, full size.
 pub fn open(path: &Path) -> Result<Crop, String> {
-    let frame = crate::capture::from_png(path.as_os_str())?;
+    let frame = crate::shared::platform::capture::from_png(path.as_os_str())?;
     Ok(Crop {
         width: frame.width,
         height: frame.height,

@@ -23,10 +23,10 @@ use iced::widget::canvas::{self, Frame, Geometry};
 use iced::widget::{canvas as draw, container, image, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme, mouse};
 
-use crate::capture::scroll::Update;
 use crate::shared::kit::area;
 use crate::shared::kit::chip;
 use crate::shared::kit::key_hint::{self, key_hint};
+use crate::shared::platform::capture::scroll::Update;
 use crate::ui::snip::Msg;
 
 /// Between the area, the picture and the screen's edge (logical px).
@@ -45,7 +45,7 @@ const MIN_H: f32 = 80.0;
 /// The count chip under the picture.
 const CHIP_GAP: f32 = 6.0;
 
-pub use crate::capture::scroll::Finish;
+pub use crate::shared::platform::capture::scroll::Finish;
 
 /// The running capture (`Snip::scroll`).
 pub struct Long {

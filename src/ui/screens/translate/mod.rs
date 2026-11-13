@@ -450,7 +450,7 @@ impl Session {
                 return match act {
                     Act::Link(url) => background(
                         move |_: &iced::futures::channel::mpsc::UnboundedSender<Msg>| {
-                            if let Err(e) = crate::sys::open::open_link(&url) {
+                            if let Err(e) = crate::shared::platform::sys::open::open_link(&url) {
                                 crate::log!("explanation link not opened: {e}");
                             }
                         },

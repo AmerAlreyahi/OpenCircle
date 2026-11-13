@@ -307,7 +307,7 @@ pub fn cover(url: &str) -> Option<(u32, u32, Vec<u8>)> {
         .limit(2 << 20)
         .read_to_vec()
         .ok()?;
-    let frame = crate::capture::decode_png(Cursor::new(bytes)).ok()?;
+    let frame = crate::shared::platform::capture::decode_png(Cursor::new(bytes)).ok()?;
     Some((frame.width, frame.height, frame.rgba))
 }
 
@@ -388,7 +388,7 @@ mod tests {
             youtube("Kevin MacLeod", "Wallpaper & Co?"),
             "https://www.youtube.com/results?search_query=Kevin+MacLeod+Wallpaper+%26+Co%3F"
         );
-        assert!(crate::sys::open::web_host(&youtube("Ünïcode", "ü")).is_some());
+        assert!(crate::shared::platform::sys::open::web_host(&youtube("Ünïcode", "ü")).is_some());
     }
 
     #[test]

@@ -11,7 +11,7 @@ const ISSUES: &str = "https://github.com/AmerAlreyahi/OpenCircle/issues/new";
 /// The report: version, OS, screens, a settings summary (no keys, no folders,
 /// no URLs, no prompts), Labs, OCR, and the last 50 log lines. Redacted.
 pub fn report(c: &Config) -> String {
-    let screens = crate::capture::monitor_list()
+    let screens = crate::shared::platform::capture::monitor_list()
         .iter()
         .map(|m| {
             let (x, y, w, h) = m.rect;
@@ -152,7 +152,7 @@ mod tests {
             "https://github.com/AmerAlreyahi/OpenCircle/issues/new?title=Problem%3A%20&body="
         ));
         assert_eq!(
-            crate::sys::open::web_host(&url).as_deref(),
+            crate::shared::platform::sys::open::web_host(&url).as_deref(),
             Some("github.com")
         );
         assert!(!url.contains([' ', '\n', '"']), "{url}");

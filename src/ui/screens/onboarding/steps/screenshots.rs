@@ -27,7 +27,7 @@ pub enum Access {
     /// A request is out: the desktop's dialog is up.
     Asking,
     Allowed,
-    Failed(crate::capture::CaptureError),
+    Failed(crate::shared::platform::capture::CaptureError),
 }
 
 /// The Allow button (or Allow again after a failure) and the screenshot request's

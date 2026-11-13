@@ -12,12 +12,12 @@ use crate::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,
 };
-use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
 use crate::music::{self};
 use crate::secrets::{AiKey, KeyStore, Secret, SecretsError};
 use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion;
+use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES};
 

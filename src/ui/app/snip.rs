@@ -9,8 +9,8 @@ use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions::{self, Crop, Run, copy, save, text};
-use crate::capture;
 use crate::config::{self};
+use crate::shared::platform::capture;
 
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
@@ -258,7 +258,7 @@ impl App {
         others
             .chain(windows::show(self.overlay, Mode::Windowed))
             .chain(windows::opacity(self.overlay, 1.0))
-            .chain(crate::ui::platform::monitor::resize(
+            .chain(crate::shared::platform::monitor::resize(
                 self.overlay,
                 snip::PILL,
             ))
@@ -390,7 +390,7 @@ impl App {
     pub(crate) fn screen_region(
         &self,
         area: Rectangle,
-    ) -> Option<crate::capture::window_rect::WinRect> {
+    ) -> Option<crate::shared::platform::capture::window_rect::WinRect> {
         let o = &*self.o;
         let area = area.intersection(&Rectangle::with_size(o.screen))?;
         let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
@@ -403,7 +403,10 @@ impl App {
 
     /// Long capture's news; the small picture over the area (`Long::over_area`)
     /// is kept in its screen's hole as it grows.
-    fn on_progress(&mut self, update: crate::capture::scroll::Update) -> Task<Message> {
+    fn on_progress(
+        &mut self,
+        update: crate::shared::platform::capture::scroll::Update,
+    ) -> Task<Message> {
         let on = self.long_on();
         let bar = self.long_bar_on(&on);
         let Purpose::Snip(snip) = &mut self.o.purpose else {
@@ -598,7 +601,10 @@ impl App {
     }
 
     /// Wayland: the long capture going on without its overlay, so far.
-    pub(crate) fn cast_progress(&mut self, u: crate::capture::scroll::Update) -> Task<Message> {
+    pub(crate) fn cast_progress(
+        &mut self,
+        u: crate::shared::platform::capture::scroll::Update,
+    ) -> Task<Message> {
         if let Some(cast) = &mut self.cast {
             cast.show(u.height, u.full, u.lost, u.preview);
         }
@@ -625,7 +631,7 @@ impl App {
         let Some(cast) = self.cast.take() else {
             return Task::none();
         };
-        crate::ui::platform::tray::capturing(None);
+        crate::shared::platform::tray::capturing(None);
         let crop = match stitched {
             Ok(crop) if crop.height > 0 && cast.then != Some(Finish::Cancel) => crop,
             Ok(_) => return Task::none(),
@@ -699,7 +705,7 @@ impl Cast {
         // update (the pop-up has the exact count); a timer if it matters
         let due = self.labelled.is_none_or(|t| t.elapsed() >= LABEL_EVERY);
         if label != self.label && due {
-            crate::ui::platform::tray::capturing(Some(label.clone()));
+            crate::shared::platform::tray::capturing(Some(label.clone()));
             (self.label, self.labelled) = (label, Some(Instant::now()));
         }
         let Some(popup) = &self.popup else { return };
@@ -756,7 +762,9 @@ fn stitch(
             let _ = tx.unbounded_send(snip::Msg::Progress(update));
         };
         let max = config::current().snip.long_max;
-        let stitched = crate::capture::scroll::by_hand(region, preview, cover, max, &stop, each);
+        let stitched = crate::shared::platform::capture::scroll::by_hand(
+            region, preview, cover, max, &stop, each,
+        );
         let _ = tx.unbounded_send(snip::Msg::Done(stitched));
     })
     .map(Message::Snip)

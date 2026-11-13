@@ -9,24 +9,24 @@ use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
-use crate::capture::{self, CaptureError};
 use crate::config::{self};
 use crate::labs::BarButton;
 use crate::ocr::{self};
+use crate::shared::platform::capture::{self, CaptureError};
 
 use crate::shared::kit::motion;
+use crate::shared::platform::monitor::{place_window, taskbar_inset};
+use crate::shared::platform::shape;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick;
 use crate::ui::app::quick::{Quick, Start};
-use crate::ui::platform::monitor::{place_window, taskbar_inset};
-use crate::ui::platform::shape;
 use crate::ui::snip::Snip;
 use crate::ui::{overlay, snip, windows};
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
-use crate::ui::platform::monitor::can_hide_windows;
+use crate::shared::platform::monitor::can_hide_windows;
 
 /// How long the grab waits for the screen to redraw without our floating
 /// windows (`App::leave_frame`): GNOME animates a closing window for ~150 ms
@@ -274,7 +274,7 @@ impl App {
             let mut snip = Snip::new(
                 windows,
                 self.place(),
-                crate::capture::scroll::can_scroll(),
+                crate::shared::platform::capture::scroll::can_scroll(),
                 foreground,
             );
             // Every other monitor gets its window over its frame once the
@@ -559,7 +559,7 @@ impl App {
         }
         crate::log!("[opencircle] overlay window closed");
         // the window's buffers are freed after the close: trim then, not now
-        crate::sys::mem::trim_heap_soon();
+        crate::shared::platform::sys::mem::trim_heap_soon();
         chat.chain(window::close(self.overlay))
     }
 }
@@ -613,7 +613,7 @@ pub(crate) fn overlay_window(shown: Option<Size>) -> window::Settings {
 pub(crate) const TEST_SHOT: &str = "OPENCIRCLE_TEST_SHOT";
 
 pub(crate) fn save_test_shot(shot: &window::Screenshot) {
-    let Some(path) = crate::sys::test_hook(TEST_SHOT) else {
+    let Some(path) = crate::shared::platform::sys::test_hook(TEST_SHOT) else {
         return;
     };
     let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);

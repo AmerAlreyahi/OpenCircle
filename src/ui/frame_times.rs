@@ -1096,7 +1096,7 @@ enum Gesture {
 /// then of the box it made, moved or resized (`gesture`).
 fn across_screens(
     (w, h, k): (u32, u32, f32),
-    side: super::platform::monitor::Place,
+    side: crate::shared::platform::monitor::Place,
     gesture: Gesture,
 ) -> [Vec<Drawn>; 2] {
     use super::app::screens::Screen;
@@ -1170,7 +1170,7 @@ fn across_screens(
 /// and every pointer move redrew both windows whole (102-153 % of each).
 #[test]
 fn a_stroke_across_screens_redraws_only_round_itself() {
-    use super::platform::monitor::Place;
+    use crate::shared::platform::monitor::Place;
     let side = Place {
         origin: (1920, 0),
         px: (1920, 1080),
@@ -1201,7 +1201,7 @@ fn a_stroke_across_screens_redraws_only_round_itself() {
 /// 35 % of the other a frame), and draws what a fresh frame draws.
 #[test]
 fn a_box_resized_across_screens_redraws_only_its_moving_edges() {
-    use super::platform::monitor::Place;
+    use crate::shared::platform::monitor::Place;
     let side = Place {
         origin: (1920, 0),
         px: (1920, 1080),
@@ -1350,7 +1350,7 @@ fn other_windows_draw_with_the_one_that_draws() {
 #[test]
 #[ignore = "timing: run by hand, in release"]
 fn stroke_across_screens_frame_times() {
-    use super::platform::monitor::Place;
+    use crate::shared::platform::monitor::Place;
     let place = |origin, px, scale| Place { origin, px, scale };
     for (start, side) in [
         ((1920, 1080, 1.0), place((1920, 0), (1920, 1080), 1.5)),

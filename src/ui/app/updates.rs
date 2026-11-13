@@ -56,7 +56,7 @@ impl App {
         );
         self.update = Some(waiting);
         let accent = crate::shared::kit::themes::c().accent.into_rgba8();
-        crate::ui::platform::tray::show_update(Some([accent[0], accent[1], accent[2]]));
+        crate::shared::platform::tray::show_update(Some([accent[0], accent[1], accent[2]]));
         self.windows.refresh_update();
         self.update_tick()
     }
@@ -77,8 +77,8 @@ impl App {
     /// a minute with nothing open.
     pub(crate) fn update_tick(&mut self) -> Task<Message> {
         let now = Instant::now();
-        let locked = crate::sys::session::locked();
-        let away = crate::update::away(locked, crate::sys::session::idle_for());
+        let locked = crate::shared::platform::sys::session::locked();
+        let away = crate::update::away(locked, crate::shared::platform::sys::session::idle_for());
         let mut tasks = Vec::new();
         let idle = self.is_idle();
         if let Some(w) = &mut self.update {

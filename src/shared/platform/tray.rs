@@ -11,10 +11,10 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
 use crate::app_language::{S, fmt};
-#[cfg(target_os = "linux")]
-use crate::capture::scroll::Finish;
 use crate::config::{Config, Target};
 use crate::labs::{Feature, Labs};
+#[cfg(target_os = "linux")]
+use crate::shared::platform::capture::scroll::Finish;
 use crate::{Trigger, Triggers, t};
 
 /// The tray menu's entries, in order.
@@ -110,11 +110,11 @@ impl Entry {
     /// What choosing it does.
     pub fn trigger(self, at: Instant) -> Trigger {
         let run = |action: &str, target| {
-            let run = crate::hotkey::Command::Run {
+            let run = crate::shared::platform::hotkey::Command::Run {
                 action: action.into(),
                 target,
             };
-            crate::hotkey::trigger(&run, at)
+            crate::shared::platform::hotkey::trigger(&run, at)
         };
         match self {
             Entry::Update => Trigger::RestartToUpdate,

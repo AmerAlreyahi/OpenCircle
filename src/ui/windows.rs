@@ -10,7 +10,6 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::platform;
 use super::screens::onboarding;
 use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
@@ -23,19 +22,20 @@ use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::tokens::{radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::platform;
 use crate::shared::theme;
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
+use crate::actions::{Action, Crop, Run, copy, save};
+use crate::app_language::S;
+use crate::config::{self, Config, Theme};
+use crate::shared::platform::capture::live;
 #[cfg(test)]
-pub use super::platform::windows::CLEARED;
-pub use super::platform::windows::{
+pub use crate::shared::platform::windows::CLEARED;
+pub use crate::shared::platform::windows::{
     POPUP, TOAST, activate_next, appear, clear_now, clear_theme, close, cut, fade, floating,
     floating_in_captures, foreground, forget, hide_from_capture, hole, is_floating, keep_above,
     no_backdrop, opacity, reshape, screen, setup_window, show, uncut,
 };
-use crate::actions::{Action, Crop, Run, copy, save};
-use crate::app_language::S;
-use crate::capture::live;
-use crate::config::{self, Config, Theme};
 use crate::snip::annotate::dragout::{self, DragFile};
 use crate::t;
 
@@ -654,7 +654,7 @@ impl Windows {
         if Config::path().is_some_and(|p| !p.exists()) {
             tasks.push(self.open(Kind::Onboarding));
         } else {
-            tasks.push(self.taken_once(crate::hotkey::taken_shortcuts()));
+            tasks.push(self.taken_once(crate::shared::platform::hotkey::taken_shortcuts()));
         }
         Task::batch(tasks)
     }
@@ -767,7 +767,7 @@ impl Windows {
     pub fn live_pin(
         &mut self,
         source: isize,
-        region: crate::capture::window_rect::WinRect,
+        region: crate::shared::platform::capture::window_rect::WinRect,
         first: Crop,
         at: Option<(i32, i32)>,
         scale: f32,
@@ -1157,7 +1157,7 @@ impl Windows {
         // from a shortcut in the shell's overview (the permission window), or
         // a second launch's token: in front, not behind the overview (#173)
         #[cfg(target_os = "linux")]
-        crate::sys::shell::leave_overview();
+        crate::shared::platform::sys::shell::leave_overview();
         activate_next();
         let (id, open) = normal(kind);
         match kind {
@@ -1184,7 +1184,7 @@ impl Windows {
         // A shortcut field that records gets the keys: the global shortcuts are
         // held off until it stops (a key set, Esc, another page, the window closed).
         let recording = self.settings.as_ref().is_some_and(|(_, s)| s.recording());
-        crate::hotkey::suspend(recording);
+        crate::shared::platform::hotkey::suspend(recording);
         task
     }
 
@@ -1483,7 +1483,7 @@ impl Windows {
                     theme::apply(config::current().theme);
                     // the window's state, glyphs and pixels are freed: give them back
                     // (a beat later, once the renderer has dropped its buffers)
-                    crate::sys::mem::trim_heap_soon();
+                    crate::shared::platform::sys::mem::trim_heap_soon();
                     return Task::none();
                 }
             }
@@ -1794,7 +1794,7 @@ impl Windows {
                 };
                 window::screenshot(id).map(move |shot| Msg::TestShot(step, name, shot))
             }
-            "pin" => match crate::capture::monitor_under_cursor() {
+            "pin" => match crate::shared::platform::capture::monitor_under_cursor() {
                 // The test frame (OPENCIRCLE_TEST_FRAME) or the screen, 400x300 of it.
                 Ok(f) => {
                     let (w, h) = (f.width.min(400), f.height.min(300));
@@ -1869,10 +1869,10 @@ fn apply_from(old: &Config, cfg: Config) {
         || old.quick_actions != cfg.quick_actions
         || old.labs != cfg.labs
     {
-        crate::hotkey::reload(&cfg);
+        crate::shared::platform::hotkey::reload(&cfg);
     }
     let language_changed = old.general.app_language != cfg.general.app_language;
-    crate::autostart::apply(&cfg);
+    crate::shared::platform::autostart::apply(&cfg);
     // Keep chat history turned off: what was kept goes now, nothing more is written
     if old.chat.keep_history && !cfg.chat.keep_history {
         crate::store::chats::forget_all();
@@ -1930,8 +1930,12 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
 /// under the pointer (primary when unknown), kept inside its usable area. The origin is
 /// `None` where screens can't be listed (the OS then centres it).
 fn settings_placement() -> (Size, Size, Option<Point>) {
-    let monitors = crate::capture::monitor_list();
-    let chosen = crate::capture::choose(&monitors, None, crate::capture::pointer());
+    let monitors = crate::shared::platform::capture::monitor_list();
+    let chosen = crate::shared::platform::capture::choose(
+        &monitors,
+        None,
+        crate::shared::platform::capture::pointer(),
+    );
     let Some(m) = chosen.map(|i| monitors[i]) else {
         let (size, min) = settings::window_limits(settings::WINDOW_SIZE * 1.2);
         return (size, min, None);
@@ -2025,7 +2029,7 @@ fn spoken<T>(build: impl FnOnce() -> T) -> T {
 fn ask_screenshot(to: fn(onboarding::Message) -> Msg) -> Task<Msg> {
     super::background(|tx| {
         #[cfg(target_os = "linux")]
-        let answer = crate::capture::portal::allow();
+        let answer = crate::shared::platform::capture::portal::allow();
         #[cfg(not(target_os = "linux"))]
         let answer = Ok(());
         let _ = tx.unbounded_send(answer);
@@ -2034,8 +2038,8 @@ fn ask_screenshot(to: fn(onboarding::Message) -> Msg) -> Task<Msg> {
 }
 
 fn test_hook() -> Task<Msg> {
-    let Some(script) =
-        crate::sys::test_hook("OPENCIRCLE_TEST_OPEN").and_then(|s| s.into_string().ok())
+    let Some(script) = crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_OPEN")
+        .and_then(|s| s.into_string().ok())
     else {
         return Task::none();
     };
@@ -2061,13 +2065,13 @@ fn pick_folder() -> Task<Msg> {
 
 /// Opens `url` in the browser if it is one plain web link (`search_in_browser::open_link`).
 pub fn open_url(url: &str) {
-    if let Err(e) = crate::sys::open::open_link(url) {
+    if let Err(e) = crate::shared::platform::sys::open::open_link(url) {
         crate::log!("cannot open {url}: {e}");
     }
 }
 
 fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
-    let Some(dir) = crate::sys::test_hook("OPENCIRCLE_TEST_DIR") else {
+    let Some(dir) = crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_DIR") else {
         return;
     };
     let name = format!("{name}-{step}.png");
@@ -2137,18 +2141,30 @@ mod tests {
         let mut windows = Windows::default();
         let id = window::Id::unique();
         windows.settings = Some((id, settings_state()));
-        assert!(!crate::hotkey::suspended());
+        assert!(!crate::shared::platform::hotkey::suspended());
         let _ = windows.update(record.clone());
-        assert!(crate::hotkey::suspended(), "recording: held off");
+        assert!(
+            crate::shared::platform::hotkey::suspended(),
+            "recording: held off"
+        );
         let _ = windows.update(key("Escape", false));
-        assert!(!crate::hotkey::suspended(), "Esc: back on");
+        assert!(
+            !crate::shared::platform::hotkey::suspended(),
+            "Esc: back on"
+        );
         let _ = windows.update(record.clone());
         let _ = windows.update(key("KeyK", true));
-        assert!(!crate::hotkey::suspended(), "a key set: back on");
+        assert!(
+            !crate::shared::platform::hotkey::suspended(),
+            "a key set: back on"
+        );
         let _ = windows.update(record);
-        assert!(crate::hotkey::suspended());
+        assert!(crate::shared::platform::hotkey::suspended());
         let _ = windows.update(Msg::Closed(id));
-        assert!(!crate::hotkey::suspended(), "the window closed: back on");
+        assert!(
+            !crate::shared::platform::hotkey::suspended(),
+            "the window closed: back on"
+        );
     }
 
     #[test]
@@ -2221,7 +2237,7 @@ mod tests {
         assert_eq!(windows.title(id), "OpenCircle needs screenshot permission");
         assert!(windows.view(id).is_some());
         let _ = windows.update(Msg::Permission(onboarding::Message::Allow));
-        let refused = Err(crate::capture::CaptureError::Refused(
+        let refused = Err(crate::shared::platform::capture::CaptureError::Refused(
             "refused by the desktop".into(),
         ));
         let _ = windows.update(Msg::Permission(onboarding::Message::Allowed(refused)));

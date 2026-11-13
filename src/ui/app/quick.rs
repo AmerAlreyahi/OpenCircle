@@ -4,7 +4,7 @@ use iced::{Rectangle, Size};
 
 use crate::actions::{self, Action};
 use crate::config::Target;
-use crate::hotkey::QuickId;
+use crate::shared::platform::hotkey::QuickId;
 
 /// What a quick action runs once it has its area.
 #[derive(Debug, Clone, Copy)]

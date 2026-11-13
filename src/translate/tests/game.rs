@@ -328,7 +328,9 @@ fn the_dialog_matches_its_golden() {
         save_png(path.as_ref(), (W, H), &out);
         return;
     }
-    let want = crate::capture::from_png(path.as_ref()).unwrap().rgba;
+    let want = crate::shared::platform::capture::from_png(path.as_ref())
+        .unwrap()
+        .rgba;
     let off = (out.chunks(4).zip(want.chunks(4)))
         .filter(|(a, b)| (0..3).any(|k| a[k].abs_diff(b[k]) > 24))
         .count();

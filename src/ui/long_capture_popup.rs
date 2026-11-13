@@ -21,9 +21,9 @@ use iced::window::{self, Position};
 use iced::{Element, Point, Rectangle, Size, Task};
 
 use super::app::background::background;
-use super::platform::windows as platform;
 use super::screens::long_capture::{self, Finish};
 use crate::actions::Crop;
+use crate::shared::platform::windows as platform;
 
 /// The helper's hidden argument (spawned by the app only).
 pub const ARG: &str = "long-capture-popup";
@@ -397,7 +397,10 @@ impl Helper {
                     moved = window::move_to(id, f.window.position());
                 }
                 if was.size() != f.window.size() {
-                    moved = moved.chain(super::platform::monitor::resize(id, f.window.size()));
+                    moved = moved.chain(crate::shared::platform::monitor::resize(
+                        id,
+                        f.window.size(),
+                    ));
                 }
                 moved.chain(shape(id))
             }

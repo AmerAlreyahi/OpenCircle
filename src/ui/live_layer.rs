@@ -15,11 +15,11 @@ use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 use super::live_controller::{self, Controller, Out};
 use super::screens::overlay::edge as border;
 use super::{background, windows};
-use crate::capture::{self, window_rect};
 use crate::config;
 use crate::live::{self, LayerError};
 use crate::mt::Pair;
 use crate::ocr;
+use crate::shared::platform::capture::{self, window_rect};
 use crate::shared::theme;
 use crate::translate::live::{self as live_steps, Live as Steps, Patch};
 use crate::translate::pipeline::Cache;
@@ -233,7 +233,7 @@ impl Live {
         }
         self.ctl_at += Vector::new(old.width - new.width, old.height - new.height);
         self.update_mask();
-        crate::ui::platform::monitor::resize(id, new).chain(window::move_to(id, self.ctl_at))
+        crate::shared::platform::monitor::resize(id, new).chain(window::move_to(id, self.ctl_at))
     }
 
     /// The layer window, once open.
@@ -476,7 +476,10 @@ impl Live {
     /// error (no key or no models: the layer and its border still show).
     fn test_shot(&mut self) -> Outcome {
         match self.window() {
-            Some(window) if !self.shot_taken && crate::sys::test_hook(TEST_SHOT).is_some() => {
+            Some(window)
+                if !self.shot_taken
+                    && crate::shared::platform::sys::test_hook(TEST_SHOT).is_some() =>
+            {
                 self.shot_taken = true;
                 Outcome::Task(shot_later(window))
             }
@@ -612,7 +615,7 @@ impl Live {
             // Live off: its frames and patches are freed; give the memory
             // back (glibc keeps it: the app stayed ~80 MB, not ~30).
             drop(steps);
-            crate::sys::mem::trim_heap();
+            crate::shared::platform::sys::mem::trim_heap();
         })
         .abortable();
         self.work = Some(handle.abort_on_drop());
@@ -729,7 +732,7 @@ fn shot_later(window: window::Id) -> Task<Msg> {
 }
 
 fn save_test_shot(shot: &window::Screenshot) {
-    let Some(path) = crate::sys::test_hook(TEST_SHOT) else {
+    let Some(path) = crate::shared::platform::sys::test_hook(TEST_SHOT) else {
         return;
     };
     let (w, h) = (shot.size.width, shot.size.height);

@@ -49,7 +49,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
 pub fn open_language_settings() {
     #[cfg(windows)]
     {
-        let run = crate::sys::open::open_system_settings("ms-settings:regionlanguage");
+        let run =
+            crate::shared::platform::sys::open::open_system_settings("ms-settings:regionlanguage");
         if let Err(e) = run {
             crate::log!("[opencircle] could not open Windows' language settings: {e}");
         }

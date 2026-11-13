@@ -68,7 +68,10 @@ pub fn for_key(labs: &crate::labs::Labs, letter: char, ctrl: bool) -> Option<&'s
     (ACTIONS.iter())
         .find(|action| action.key == key)
         .filter(|action| {
-            crate::labs::action_on(labs, &crate::hotkey::QuickId::from_name(action.id))
+            crate::labs::action_on(
+                labs,
+                &crate::shared::platform::hotkey::QuickId::from_name(action.id),
+            )
         })
 }
 

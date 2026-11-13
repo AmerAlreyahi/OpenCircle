@@ -9,7 +9,7 @@ use crate::labs::Labs;
 use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
 use crate::shared::kit::tokens::radius;
 use crate::shared::kit::tooltip::tip;
-use crate::ui::platform::tray::{Entry, entries};
+use crate::shared::platform::tray::{Entry, entries};
 
 /// The corners the window is cut to (`platform::windows::floating`).
 pub const RADIUS: f32 = radius::MENU;

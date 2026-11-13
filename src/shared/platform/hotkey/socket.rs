@@ -182,7 +182,7 @@ fn launch_token(wayland: bool, xdg: Option<String>, startup_id: Option<String>) 
 pub fn forward(command: &str) -> io::Result<()> {
     #[cfg(target_os = "linux")]
     let token = launch_token(
-        crate::sys::session::wayland_session(),
+        crate::shared::platform::sys::session::wayland_session(),
         std::env::var("XDG_ACTIVATION_TOKEN").ok(),
         std::env::var("DESKTOP_STARTUP_ID").ok(),
     );

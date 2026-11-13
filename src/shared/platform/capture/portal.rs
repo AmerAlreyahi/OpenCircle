@@ -204,7 +204,7 @@ fn register(conn: &DBusConnection) {
 /// wrote names another path). Returns the path written.
 fn ensure_desktop_file() -> std::io::Result<Option<PathBuf>> {
     let (data_home, system) = desktop_dirs()?;
-    let exe = crate::sys::launcher()?;
+    let exe = crate::shared::platform::sys::launcher()?;
     write_desktop_file(&data_home, &system, &exe)
 }
 
@@ -310,7 +310,7 @@ fn write_desktop_file(
 }
 
 const ICON_DIR: &str = "icons/hicolor/128x128/apps";
-const ICON: &[u8] = include_bytes!("../../assets/icons/128x128.png");
+const ICON: &[u8] = include_bytes!("../../../../assets/icons/128x128.png");
 
 /// The minimal entry. Not hidden: GNOME lists an app's global shortcuts on its
 /// page in Settings → Apps, which skips hidden entries.

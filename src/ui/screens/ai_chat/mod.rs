@@ -567,7 +567,7 @@ impl AiChat {
                 return match act {
                     // Only on a click, and only a web link (`open_link`).
                     Act::Link(url) => background(move |tx| {
-                        let done = crate::sys::open::open_link(&url)
+                        let done = crate::shared::platform::sys::open::open_link(&url)
                             .map(|()| Said(S::chat_opened))
                             .map_err(|e| {
                                 crate::log!("[opencircle] a link did not open: {e}");

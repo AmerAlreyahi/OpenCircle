@@ -106,7 +106,7 @@ pub fn init_x11_threads() -> bool {
 #[test]
 fn xlib_is_made_thread_safe_first_in_main() {
     // the crash comes back if anything starts a thread or opens X before it
-    let main = include_str!("../main.rs");
+    let main = include_str!("../../../main.rs");
     let body = &main[main.find("fn main() -> ExitCode {").unwrap()..];
     let first = body.lines().nth(1).unwrap().trim();
     assert_eq!(first, "#[cfg(target_os = \"linux\")]");

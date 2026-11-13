@@ -128,7 +128,7 @@ pub fn by_hand(
     // duplication waits for frames itself: no input check, no period
     let idle = || match source.borrow().fast() {
         true => Duration::ZERO,
-        false => crate::sys::session::idle_for(),
+        false => crate::shared::platform::sys::session::idle_for(),
     };
     let period = || match source.borrow().fast() {
         true => Duration::ZERO,

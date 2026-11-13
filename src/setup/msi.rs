@@ -297,7 +297,7 @@ mod win {
     use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
     use super::*;
-    use crate::sys::wide;
+    use crate::shared::platform::sys::wide;
 
     /// A string property of an MSI handle by `get(handle, buffer, len)`.
     fn read(get: impl Fn(Option<PWSTR>, *mut u32) -> u32) -> Option<String> {

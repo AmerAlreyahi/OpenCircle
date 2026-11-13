@@ -106,7 +106,7 @@ fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
     // Refused: said so, and Allow works again.
     update(
         &mut s,
-        Message::Allowed(Err(crate::capture::CaptureError::from(
+        Message::Allowed(Err(crate::shared::platform::capture::CaptureError::from(
             "no portal".to_string(),
         ))),
     );
@@ -117,7 +117,9 @@ fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
     );
     #[cfg(target_os = "linux")]
     {
-        let refused = crate::capture::CaptureError::Refused("refused by the desktop".into());
+        let refused = crate::shared::platform::capture::CaptureError::Refused(
+            "refused by the desktop".into(),
+        );
         update(&mut s, Message::Allowed(Err(refused)));
         let t = texts(&s);
         assert!(

@@ -14,11 +14,11 @@ use crate::ocr::{self};
 
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
+use crate::shared::platform::monitor;
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::platform::monitor;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::{overlay, snip, translate, windows};
@@ -100,7 +100,7 @@ impl App {
             // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
             Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.cast.is_some() => {
-                self.cast_finish(crate::capture::scroll::Finish::Done)
+                self.cast_finish(crate::shared::platform::capture::scroll::Finish::Done)
             }
             Message::Snip(snip::Msg::Progress(update)) if self.cast.is_some() => {
                 self.cast_progress(update)
@@ -146,7 +146,7 @@ impl App {
             Message::Trigger(Trigger::Quick(at, qa)) => {
                 self.next = Purpose::Search;
                 // the live pin quick action is a snip whose pick is pinned live
-                self.live_next = qa.action == crate::hotkey::QuickId::LivePin;
+                self.live_next = qa.action == crate::shared::platform::hotkey::QuickId::LivePin;
                 if qa.action == "snip" || self.live_next {
                     return self.capture(at, Some(snip::Kind::for_target(qa.target)));
                 }
@@ -203,7 +203,7 @@ impl App {
             #[cfg(target_os = "linux")]
             Message::CaptureSlow(n) => {
                 if self.capturing == Some(n) {
-                    crate::sys::shell::leave_overview();
+                    crate::shared::platform::sys::shell::leave_overview();
                 }
                 Task::none()
             }
@@ -243,7 +243,9 @@ impl App {
             Message::Escape if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open) => {
                 Task::none()
             }
-            Message::Escape if crate::sys::test_hook(TEST_SHOT).is_some() => self.test_shot(),
+            Message::Escape if crate::shared::platform::sys::test_hook(TEST_SHOT).is_some() => {
+                self.test_shot()
+            }
             // The editor's Esc went back to the bar: the same key's Escape
             // (it may come after) doesn't close the overlay too.
             Message::Escape if self.o.esc_back => {
@@ -785,7 +787,7 @@ impl App {
             Message::Drawn if self.hiding == Hiding::Empty => {
                 self.hiding = Hiding::Shrinking(0);
                 window::set_mode(self.overlay, Mode::Windowed).chain(
-                    crate::ui::platform::monitor::resize(self.overlay, Size::new(1.0, 1.0)),
+                    crate::shared::platform::monitor::resize(self.overlay, Size::new(1.0, 1.0)),
                 )
             }
             Message::Resized(size)
@@ -804,7 +806,7 @@ impl App {
                 self.hiding = Hiding::No;
                 // Panel threads (PNG, HTTP, OCR I/O) leave freed memory in their
                 // own malloc arenas; give it back to the OS while idle.
-                crate::sys::mem::trim_heap();
+                crate::shared::platform::sys::mem::trim_heap();
                 window::set_mode(self.overlay, Mode::Hidden)
             }
             Message::Drawn => {

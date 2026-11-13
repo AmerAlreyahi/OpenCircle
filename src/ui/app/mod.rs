@@ -24,7 +24,7 @@ use self::capture::overlay_window;
 use self::message::{Hiding, Message, Purpose};
 use self::opening::Open;
 use crate::shared::kit::motion;
-use crate::ui::platform::monitor::can_hide_windows;
+use crate::shared::platform::monitor::can_hide_windows;
 use crate::ui::touch;
 use crate::ui::{live_layer, overlay, windows};
 

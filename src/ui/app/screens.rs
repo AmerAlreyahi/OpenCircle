@@ -21,6 +21,7 @@ use crate::actions::{self, Crop};
 use crate::config;
 use crate::ocr;
 use crate::shared::kit::motion;
+use crate::shared::platform::monitor::{Place, place_window};
 use crate::snip::annotate;
 use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
@@ -28,7 +29,6 @@ use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::view::{grow, lifted};
 use crate::ui::app::word;
-use crate::ui::platform::monitor::{Place, place_window};
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 use crate::ui::screens::snip_toolbar::canvas::ScreenMap;
@@ -71,7 +71,7 @@ impl Screen {
             place,
             frame,
             view: view_of(start, place),
-            inset: crate::ui::platform::monitor::taskbar_inset(
+            inset: crate::shared::platform::monitor::taskbar_inset(
                 place.logical_origin(),
                 place.size(),
                 place.scale,
@@ -322,7 +322,10 @@ impl App {
         &self,
         on: On,
         area: Rectangle,
-    ) -> Option<(Rectangle, crate::capture::window_rect::WinRect)> {
+    ) -> Option<(
+        Rectangle,
+        crate::shared::platform::capture::window_rect::WinRect,
+    )> {
         let part = area.intersection(&self.monitor_of(&on))?;
         if on.view.is_none() {
             return Some((part, self.screen_region(part)?)); // its own frame's px
@@ -1542,7 +1545,7 @@ mod tests {
     /// nothing; one across both was cut to the starting screen).
     #[test]
     fn a_long_capture_runs_on_the_screen_of_its_area() {
-        use crate::capture::scroll::Update;
+        use crate::shared::platform::capture::scroll::Update;
         use crate::snip::annotate::Message as E;
         let (mut app, id) = snipped();
         let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));

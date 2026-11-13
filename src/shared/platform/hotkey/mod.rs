@@ -601,7 +601,7 @@ pub fn start(tx: Triggers, cfg: &Config) {
     *bindings() = planned;
 
     #[cfg(target_os = "linux")]
-    if crate::capture::wayland_session() {
+    if crate::shared::platform::capture::wayland_session() {
         portal::bind(tx);
         return;
     }
@@ -647,7 +647,7 @@ pub fn reload(cfg: &Config) {
         return;
     }
     #[cfg(target_os = "linux")]
-    if crate::capture::wayland_session() {
+    if crate::shared::platform::capture::wayland_session() {
         portal::rebind();
         return;
     }

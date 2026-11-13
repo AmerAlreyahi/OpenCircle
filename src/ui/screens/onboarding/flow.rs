@@ -131,7 +131,7 @@ pub enum Message {
     /// The Allow button.
     Allow,
     /// The desktop's answer to the screenshot request.
-    Allowed(Result<(), crate::capture::CaptureError>),
+    Allowed(Result<(), crate::shared::platform::capture::CaptureError>),
     /// The Language step's list.
     Language(picker::Msg),
     /// A Settings row (the same messages as in Settings).
@@ -158,7 +158,7 @@ impl State {
     pub fn open() -> Self {
         let (config, _warnings) = Config::load();
         #[cfg(target_os = "linux")]
-        let wayland = crate::sys::session::wayland_session();
+        let wayland = crate::shared::platform::sys::session::wayland_session();
         #[cfg(not(target_os = "linux"))]
         let wayland = false;
         Self::new(config, None, Box::new(Keyring)).on_wayland(wayland)

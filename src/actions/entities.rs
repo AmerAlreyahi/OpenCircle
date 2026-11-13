@@ -32,7 +32,9 @@ impl Entity {
     /// are no control or text-direction characters to hide here.
     pub fn shown(&self) -> String {
         match self.kind {
-            Kind::Link => crate::sys::open::web_host(&self.text).unwrap_or_default(),
+            Kind::Link => {
+                crate::shared::platform::sys::open::web_host(&self.text).unwrap_or_default()
+            }
             _ => shorten(&self.text, 28),
         }
     }
@@ -171,7 +173,7 @@ fn link_in(token: &[u8]) -> Option<(usize, usize, String)> {
     };
     let url = format!("{scheme}{rest}");
     // Same check as the opener: never a chip whose link can't be opened.
-    crate::sys::open::web_host(&url)?;
+    crate::shared::platform::sys::open::web_host(&url)?;
     Some((from, to, url))
 }
 

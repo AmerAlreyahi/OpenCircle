@@ -67,7 +67,8 @@ pub const GLYPHS: &[char] = &[
 /// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
 /// (`Annotator::scroll`). Still pins left Labs (owner, 2026-10-31): Pin is always there.
 fn live_pin() -> bool {
-    crate::labs::has(crate::labs::Feature::Pins) && crate::capture::live::SUPPORTED
+    crate::labs::has(crate::labs::Feature::Pins)
+        && crate::shared::platform::capture::live::SUPPORTED
 }
 
 /// The labelled primary in Copy's place while the Steps strip is open

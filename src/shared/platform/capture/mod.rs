@@ -196,13 +196,13 @@ fn whole_desktop_only() -> bool {
     if wayland_session() {
         return true;
     }
-    crate::sys::test_hook("OPENCIRCLE_TEST_FRAME").is_some()
+    crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_FRAME").is_some()
 }
 
 fn whole_desktop() -> Option<Result<Frame, CaptureError>> {
     // ponytail: test hook. WSLg and headless CI can't capture the screen, so a PNG
     // stands in; keep it for UI snapshot tests, never document it for users.
-    if let Some(path) = crate::sys::test_hook("OPENCIRCLE_TEST_FRAME") {
+    if let Some(path) = crate::shared::platform::sys::test_hook("OPENCIRCLE_TEST_FRAME") {
         return Some(from_png(&path).map_err(CaptureError::from));
     }
     #[cfg(target_os = "linux")]
@@ -210,7 +210,7 @@ fn whole_desktop() -> Option<Result<Frame, CaptureError>> {
         let frame = portal::capture();
         // the overlay that shows it must be made outside GNOME's overview, or
         // it opens behind it without the keyboard (#173, `sys::shell`)
-        crate::sys::shell::leave_overview_and_wait();
+        crate::shared::platform::sys::shell::leave_overview_and_wait();
         return Some(frame);
     }
     None
@@ -260,7 +260,7 @@ pub fn choose(
 }
 
 #[cfg(target_os = "linux")]
-pub use crate::sys::session::wayland_session;
+pub use crate::shared::platform::sys::session::wayland_session;
 
 pub(crate) fn from_png(path: &std::ffi::OsStr) -> Result<Frame, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;

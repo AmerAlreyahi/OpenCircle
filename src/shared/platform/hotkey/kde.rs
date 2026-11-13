@@ -24,7 +24,7 @@ const PATH: &str = "/kglobalaccel";
 const IFACE: &str = "org.kde.KGlobalAccel";
 const COMPONENT_IFACE: &str = "org.kde.kglobalaccel.Component";
 /// Our component: the app id, so KDE can match it to our desktop file.
-const COMPONENT: &str = crate::capture::portal::APP_ID;
+const COMPONENT: &str = crate::shared::platform::capture::portal::APP_ID;
 const FRIENDLY: &str = "OpenCircle";
 
 // `setShortcutKeys` flags (KGlobalAccel's SetShortcutFlag).

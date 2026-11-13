@@ -20,7 +20,6 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::overlay;
 use crate::actions::Crop;
-use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
 use crate::shared::kit::button;
 use crate::shared::kit::chip;
@@ -32,6 +31,7 @@ use crate::shared::kit::surface::{self, Material, surface};
 use crate::shared::kit::text::{sub, text};
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::tip;
+use crate::shared::platform::capture::window_rect::WinRect;
 use crate::snip::{SNAP, snap};
 
 /// The hover info chip's height, the drag size chip's width (logical px).
@@ -68,7 +68,7 @@ pub enum Msg {
     /// Share; Esc / close = Cancel).
     Finish(crate::ui::screens::long_capture::Finish),
     /// Long capture so far.
-    Progress(crate::capture::scroll::Update),
+    Progress(crate::shared::platform::capture::scroll::Update),
     /// Long capture ended (Done or Cancel): the image gathered.
     Done(Result<Crop, String>),
     /// The timer: hide, wait this many seconds, capture again (0 = off).
@@ -180,10 +180,10 @@ impl Pick {
     }
 }
 
-pub use super::platform::monitor::Place;
+pub use crate::shared::platform::monitor::Place;
 
 /// A captured monitor as the overlay shows it: where, and its frame.
-pub fn screen_of(frame: crate::capture::Frame) -> (Place, image::Handle) {
+pub fn screen_of(frame: crate::shared::platform::capture::Frame) -> (Place, image::Handle) {
     let place = Place {
         origin: (frame.x, frame.y),
         px: (frame.width, frame.height),

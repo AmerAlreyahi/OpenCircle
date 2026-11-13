@@ -15,8 +15,8 @@ use super::{
     set_portal_failed,
 };
 use crate::Triggers;
-use crate::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
 use crate::config::parse_shortcut;
+use crate::shared::platform::capture::portal::{DESKTOP, PATH, handle_path, request, session_bus};
 
 const IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
 
@@ -324,7 +324,7 @@ fn trigger_of(list: &Variant, id: &str) -> Option<String> {
 }
 
 fn manual_hint(why: &str) -> String {
-    let exe = crate::sys::launcher()
+    let exe = crate::shared::platform::sys::launcher()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "opencircle".into());
     format!(

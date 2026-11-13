@@ -142,8 +142,8 @@ use global_hotkey::hotkey::{Code, HotKey, HotKeyParseError, Modifiers};
 use serde::{Deserialize, Serialize};
 use toml::Table;
 
-use crate::hotkey::QuickId;
 use crate::labs::Labs;
+use crate::shared::platform::hotkey::QuickId;
 
 mod look;
 mod migrate;
@@ -167,7 +167,9 @@ pub fn os_language() -> &'static str {
         return "en";
     }
     static OS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    OS.get_or_init(|| crate::translate::lang::yours(&crate::sys::locale::language()))
+    OS.get_or_init(|| {
+        crate::translate::lang::yours(&crate::shared::platform::sys::locale::language())
+    })
 }
 /// Ends the warning when `Provider::Unreadable` is set.
 const AI_OFF: &str = ", but AI is off until you choose a provider in Settings > Ask AI";
@@ -1353,7 +1355,7 @@ mod tests {
             assert_eq!(c.snip.long_max, DEFAULT_LONG_MAX);
             assert!(c.labs.pins, "the Labs switches that remain are kept");
             for id in ["snip", "edit", "colour_picker", "ruler"] {
-                let id = crate::hotkey::QuickId::from_name(id);
+                let id = crate::shared::platform::hotkey::QuickId::from_name(id);
                 assert!(crate::labs::action_on(&c.labs, &id), "{id:?}");
             }
             c.save_to(&path).unwrap();

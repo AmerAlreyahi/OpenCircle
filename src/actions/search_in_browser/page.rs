@@ -89,8 +89,8 @@ form{display:none}
 /// (Lens "add to your search"). Nothing is written to disk.
 pub fn open(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Result<()> {
     let html = page(png, width, height, question)?;
-    let url = crate::sys::serve_once::serve(&html, &csp(&html))?;
-    crate::sys::open::open_link(&url)
+    let url = crate::shared::platform::sys::serve_once::serve(&html, &csp(&html))?;
+    crate::shared::platform::sys::open::open_link(&url)
 }
 
 /// The page's Content-Security-Policy: only its own inline script and styles
@@ -125,7 +125,7 @@ fn page(png: &[u8], width: u32, height: u32, question: Option<&str>) -> io::Resu
         &png,
         w,
         h,
-        &crate::sys::locale::tag(),
+        &crate::shared::platform::sys::locale::tag(),
         epoch_ms(),
         question,
     ))
@@ -379,7 +379,7 @@ mod tests {
         };
         let before = ours();
         let html = page_html(b"Ma", 3, 2, "en", 7, Some("What is this?"));
-        let url = crate::sys::serve_once::serve(&html, &csp(&html)).unwrap();
+        let url = crate::shared::platform::sys::serve_once::serve(&html, &csp(&html)).unwrap();
         let (host, path) = url[7..].split_at(url[7..].find('/').unwrap());
         let mut s = std::net::TcpStream::connect(host).unwrap();
         write!(s, "GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();

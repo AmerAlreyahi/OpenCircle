@@ -25,7 +25,7 @@ use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
 use crate::shared::kit::tokens::radius;
 use crate::shared::kit::tooltip::tip;
 use crate::shared::kit::{grip, scroll, toast};
-use crate::ui::platform::monitor::{self, Place};
+use crate::shared::platform::monitor::{self, Place};
 
 /// Steps at most (open point 3: 12).
 pub const MAX: usize = crate::snip::annotate::STEPS_MAX;
@@ -66,7 +66,8 @@ impl Step {
 
     /// The capture again.
     pub fn crop(&self) -> Option<Crop> {
-        let frame = crate::capture::decode_png(std::io::Cursor::new(&self.png)).ok()?;
+        let frame =
+            crate::shared::platform::capture::decode_png(std::io::Cursor::new(&self.png)).ok()?;
         Some(Crop {
             width: frame.width,
             height: frame.height,

@@ -1029,7 +1029,7 @@ fn real_frames() {
     }
     let mut engine = None;
     for p in std::env::var("OC_REAL").unwrap().split(',') {
-        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        let f = crate::shared::platform::capture::from_png(p.as_ref()).unwrap();
         let name = std::path::Path::new(p)
             .file_stem()
             .unwrap()
@@ -1158,7 +1158,7 @@ fn real_matrix() {
     }
     for run in std::env::var("OC_MATRIX").unwrap().split(';') {
         let (p, targets) = run.split_once(':').unwrap();
-        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        let f = crate::shared::platform::capture::from_png(p.as_ref()).unwrap();
         let name = std::path::Path::new(p)
             .file_stem()
             .unwrap()
@@ -1278,7 +1278,7 @@ fn profile_helper() {
     let exe = std::env::var("OC_EXE").unwrap();
     let deps = Helper(Mutex::new(Session::worker(exe.as_ref())));
     for p in std::env::var("OC_REAL").unwrap().split(',') {
-        let f = crate::capture::from_png(p.as_ref()).unwrap();
+        let f = crate::shared::platform::capture::from_png(p.as_ref()).unwrap();
         for run in ["cold", "warm"] {
             let r = translate_frame(&f.rgba, f.width, f.height, "ar", &Cache::new(4096), &deps)
                 .unwrap();

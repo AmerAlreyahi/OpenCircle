@@ -134,7 +134,7 @@ const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 /// (`window_rect::widgets_in_grab`; owner, 2026-11-10).
 /// `seen`: one that shows in captures (`floating_in_captures`).
 fn keep_out<T: Send + 'static>(id: window::Id, seen: bool) -> Task<T> {
-    let out = !seen && crate::sys::test_hook(CAPTURABLE).is_none();
+    let out = !seen && crate::shared::platform::sys::test_hook(CAPTURABLE).is_none();
     hide_from_capture(id, out)
 }
 
@@ -312,7 +312,7 @@ pub fn no_pick<T: Send + 'static>(id: window::Id) -> Task<T> {
             Ok(RawWindowHandle::Xcb(h)) => h.window.get() as isize,
             _ => return,
         };
-        crate::capture::window_rect::no_pick(handle);
+        crate::shared::platform::capture::window_rect::no_pick(handle);
     })
     .discard()
 }
@@ -549,7 +549,7 @@ pub(crate) fn app_window(settings: window::Settings) -> window::Settings {
     #[cfg(target_os = "linux")]
     return window::Settings {
         platform_specific: window::settings::PlatformSpecific {
-            application_id: crate::capture::portal::APP_ID.into(),
+            application_id: crate::shared::platform::capture::portal::APP_ID.into(),
             ..settings.platform_specific
         },
         ..settings
@@ -592,7 +592,7 @@ mod tests {
                     // The tests of this very file mention the call.
                     let code = text.split("#[cfg(test)]").next().unwrap();
                     let n = code.matches(call).count();
-                    if path.ends_with("ui/platform/windows.rs") {
+                    if path.ends_with("shared/platform/windows.rs") {
                         assert_eq!(n, 1, "normal, floating and screen all go through open");
                     } else if n > 0 {
                         stray.push(path.display().to_string());
@@ -624,7 +624,7 @@ mod tests {
 /// it is left first, else the overlay stays behind it (#173, `sys::shell`).
 pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
     #[cfg(target_os = "linux")]
-    crate::sys::shell::leave_overview();
+    crate::shared::platform::sys::shell::leave_overview();
     // Start / Search is closed before gain_focus: its Alt tap would reach
     // Start first and, with the shortcut's Alt still held (Alt+A), leave it in
     // its access-key mode, where Esc no longer closes it (VM).
@@ -651,7 +651,7 @@ pub fn foreground<T: Send + 'static>(id: window::Id) -> Task<T> {
 /// desktop's permission to come to the front: Wayland xdg-activation, X11
 /// startup notification), once; elsewhere there is none.
 pub fn activate_next() {
-    let token = crate::hotkey::activation::take();
+    let token = crate::shared::platform::hotkey::activation::take();
     #[cfg(target_os = "linux")]
     if let Some(token) = token {
         crate::log!("[opencircle] the window opens with the desktop's activation token");
@@ -704,7 +704,10 @@ mod win {
         let mut pid = 0u32;
         // SAFETY: a plain query on a window handle the system gave us.
         unsafe { GetWindowThreadProcessId(front, Some(&mut pid)) };
-        pid != 0 && super::shell_launcher(&crate::capture::window_rect::exe_name(pid))
+        pid != 0
+            && super::shell_launcher(&crate::shared::platform::capture::window_rect::exe_name(
+                pid,
+            ))
     }
 
     /// Closes the Start menu / Search pane in front with an Esc, the way the

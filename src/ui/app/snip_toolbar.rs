@@ -93,7 +93,9 @@ impl App {
 
     pub(crate) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
         // Test hook: the editor's Esc (Back) takes the shot of the editor instead.
-        if matches!(msg, annotate::Message::Back) && crate::sys::test_hook(TEST_SHOT).is_some() {
+        if matches!(msg, annotate::Message::Back)
+            && crate::shared::platform::sys::test_hook(TEST_SHOT).is_some()
+        {
             return self.test_shot();
         }
         // The toolbar's grip (its own press, so the toolbar's `grab` under it
@@ -294,7 +296,10 @@ impl App {
     pub(crate) fn pin_place(
         &self,
         area: iced::Rectangle,
-    ) -> Option<(super::screens::On, crate::capture::window_rect::WinRect)> {
+    ) -> Option<(
+        super::screens::On,
+        crate::shared::platform::capture::window_rect::WinRect,
+    )> {
         let on = self.on_area(area);
         self.region_on(on, area).map(|(_, region)| (on, region))
     }

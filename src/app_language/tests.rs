@@ -212,10 +212,10 @@ const EXEMPT_FILES: &[&str] = &[
     "src/actions/search_in_browser/page.rs",
     "src/actions/qr.rs",
     // OS, window-class and font names; the tray icon's decode checks
-    "src/ui/platform/shape.rs",
-    "src/ui/platform/tray.rs",
-    "src/ui/platform/monitor.rs",
-    "src/ui/platform/windows.rs",
+    "src/shared/platform/shape.rs",
+    "src/shared/platform/tray.rs",
+    "src/shared/platform/monitor.rs",
+    "src/shared/platform/windows.rs",
     "src/shared/kit/text.rs",
     // the look and theme names: ids and English fallbacks; Settings shows them from the table
     "src/shared/kit/looks.rs",
