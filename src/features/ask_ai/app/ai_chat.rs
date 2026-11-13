@@ -10,17 +10,17 @@ use iced::{Point, Rectangle, Size, Task};
 use crate::features::circle::actions::{self, Crop, search_in_browser, stack_crops};
 use crate::shared::config::{self, Provider};
 
+use crate::app::background::background;
+use crate::app::keys;
+use crate::app::message::{Message, Purpose};
+use crate::app::windows;
 use crate::features::ask_ai::screens::ai_chat;
 use crate::features::settings;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, Place, place_window};
-use crate::ui::app::background::background;
-use crate::ui::app::keys;
-use crate::ui::app::message::{Message, Purpose};
-use crate::ui::windows;
 
-use crate::ui::app::App;
+use crate::app::App;
 
 /// The AI chat once pinned (`ai_chat::AiChat::pinned`): it outlives the overlay
 /// (`App::chat`) until its pin closes it. Never more than one.
@@ -576,8 +576,8 @@ impl App {
         let origin = self.crop_origin(area)?;
         let size = self.crop_of(area).map(|c| (c.width, c.height))?;
         let (start, hole) = (self.o.place(), self.o.chat_hole?);
-        let a = crate::ui::app::screens::to_desktop(start, hole.position());
-        let b = crate::ui::app::screens::to_desktop(
+        let a = crate::app::monitors::to_desktop(start, hole.position());
+        let b = crate::app::monitors::to_desktop(
             start,
             hole.position() + iced::Vector::from(hole.size()),
         );

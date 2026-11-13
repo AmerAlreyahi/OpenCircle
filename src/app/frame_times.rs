@@ -4,8 +4,8 @@
 //! animation (`animation_frame_times`, by hand in release) and checks that a
 //! moving widget redraws only around itself.
 
-use super::app::tests::{drag, open_app, settle_bar};
-use super::app::{App, GLIDE};
+use crate::app::tests::{drag, open_app, settle_bar};
+use crate::app::{App, GLIDE};
 use std::time::{Duration, Instant};
 
 use iced::window::{self};
@@ -13,12 +13,12 @@ use iced::{Element, Point, Rectangle, Size, Vector};
 
 use crate::features::text_reading::{self as ocr, TextBlock};
 
-use super::app::message::Message;
+use crate::app::message::Message;
+use crate::features::ask_ai::screens::ai_chat;
 use crate::features::text_reading::app::word;
 use crate::features::{onboarding, settings};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
-use crate::ui::ai_chat;
 
 use iced::advanced::graphics::{Viewport, damage};
 use iced::{Color, Theme};
@@ -520,7 +520,7 @@ fn the_first_frame_sets_the_clip_mask_about_once() {
     let area = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
     for mut app in [
         open_app(w, h, 1.0),
-        super::app::tests::snipping_on(w, h, area),
+        crate::app::tests::snipping_on(w, h, area),
     ] {
         let before = iced_tiny_skia::MASK_PIXELS.get();
         let _ = frames(&mut app, 0, false, |_, _, _| {});
@@ -593,7 +593,7 @@ fn widgets_open_by_the_design_motion_or_at_once() {
     assert_eq!(steps[4], (1.0, 1.0));
     assert!(opened(true).iter().all(|&s| s == (1.0, 1.0)), "at once");
     // the AI chat has its own window: it fades in by the same motion
-    assert_eq!(crate::ui::windows::POPUP.pace, motion::WIDGET);
+    assert_eq!(crate::app::windows::POPUP.pace, motion::WIDGET);
 }
 
 /// An image that lands pixel for pixel is drawn by the renderer's own copy
@@ -1098,7 +1098,7 @@ fn across_screens(
     side: crate::shared::platform::monitor::Place,
     gesture: Gesture,
 ) -> [Vec<Drawn>; 2] {
-    use super::app::screens::Screen;
+    use crate::app::monitors::Screen;
     use crate::features::circle::screens::overlay::Event;
     fn other(app: &App) -> Element<'_, Message> {
         app.view(app.o.screens[0].window)
@@ -1391,7 +1391,7 @@ enum SnipDrag {
 /// the app after them; the window under the pointer is (200, 150, 600 x 400),
 /// the live area starts there.
 fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn>, App) {
-    use super::app::tests::snipping_on;
+    use crate::app::tests::snipping_on;
     use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::annotate::Message as E;
     let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
@@ -1447,7 +1447,7 @@ fn snip_frame_times() {
 #[test]
 #[ignore = "timing: run by hand, in release"]
 fn snip_toolbar_frame_times() {
-    use super::app::tests::snipping_on;
+    use crate::app::tests::snipping_on;
     use crate::features::snip::annotate::Message as E;
     fn view(app: &App) -> Element<'_, Message> {
         app.view(app.overlay)
@@ -1551,7 +1551,7 @@ fn a_snips_drags_redraw_round_what_moves() {
 #[test]
 #[ignore = "timing: run by hand, in release"]
 fn snip_nudge_frame_times() {
-    use super::app::tests::snipping_on;
+    use crate::app::tests::snipping_on;
     use crate::features::snip::annotate::Message as E;
     for (w, h) in [(1920, 1080), (1280, 720)] {
         let (wf, hf) = (w as f32, h as f32);

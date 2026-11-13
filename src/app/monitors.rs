@@ -17,6 +17,11 @@ use iced::widget::{canvas, image, stack};
 use iced::window::{self, Mode};
 use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
+use crate::app::background::background;
+use crate::app::capture::overlay_window;
+use crate::app::message::{Message, Purpose};
+use crate::app::opening::Opening;
+use crate::app::view::{grow, lifted};
 use crate::features::circle::actions::{self, Crop};
 use crate::features::circle::screens::edge as border;
 use crate::features::snip::annotate;
@@ -27,12 +32,7 @@ use crate::features::text_reading::app::word;
 use crate::shared::config;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{Place, place_window};
-use crate::ui::app::background::background;
-use crate::ui::app::capture::overlay_window;
-use crate::ui::app::message::{Message, Purpose};
-use crate::ui::app::opening::Opening;
-use crate::ui::app::view::{grow, lifted};
-use crate::{features::circle::screens::overlay, ui::windows};
+use crate::{app::windows, features::circle::screens::overlay};
 
 use super::App;
 
@@ -900,8 +900,8 @@ mod tests {
 
     use super::*;
     use crate::Trigger;
+    use crate::app::message::Shot;
     use crate::shared::kit::testing::shot;
-    use crate::ui::app::message::Shot;
 
     fn place(origin: (i32, i32), px: (u32, u32), scale: f32) -> Place {
         Place { origin, px, scale }
@@ -1010,7 +1010,7 @@ mod tests {
         let right = place((640, 0), (960, 600), 1.5);
         let _ = app.update(Message::Screen(n, right, solid(right, 90)));
         let id = app.o.screens[0].window;
-        crate::ui::app::tests::drag(
+        crate::app::tests::drag(
             &mut app,
             Point::new(50.0, 50.0),
             Point::new(150.0, 120.0),
@@ -1022,9 +1022,11 @@ mod tests {
         // picked up, then dragged 700 px right: across the bezel
         let _ = app.update(Message::AiChat(
             app.o.ai_chat.as_ref().unwrap().0,
-            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
-                crate::shared::kit::panel_frame::Drag::Move,
-            )),
+            crate::features::ask_ai::screens::ai_chat::Msg::Card(
+                crate::shared::kit::panel_frame::Event::Grab(
+                    crate::shared::kit::panel_frame::Drag::Move,
+                ),
+            ),
         ));
         let _ = app.update(Message::CardMoved(Point::new(100.0, 100.0)));
         let _ = app.update(Message::CardMoved(Point::new(780.0, 100.0)));
@@ -1144,7 +1146,7 @@ mod tests {
     fn the_chat_crosses_unequal_screens_whole() {
         let (mut app, n) = opened();
         let _ = unequal(&mut app, n);
-        crate::ui::app::tests::drag(
+        crate::app::tests::drag(
             &mut app,
             Point::new(50.0, 50.0),
             Point::new(150.0, 120.0),
@@ -1155,9 +1157,11 @@ mod tests {
         let id = app.o.ai_chat.as_ref().unwrap().0;
         let _ = app.update(Message::AiChat(
             id,
-            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
-                crate::shared::kit::panel_frame::Drag::Move,
-            )),
+            crate::features::ask_ai::screens::ai_chat::Msg::Card(
+                crate::shared::kit::panel_frame::Event::Grab(
+                    crate::shared::kit::panel_frame::Drag::Move,
+                ),
+            ),
         ));
         let from = Point::new(300.0, 100.0);
         let _ = app.update(Message::CardMoved(from));
@@ -1185,7 +1189,7 @@ mod tests {
     fn a_pinned_chat_dragged_onto_another_screen_is_drawn_there() {
         let (mut app, n) = opened();
         let (right, _) = unequal(&mut app, n);
-        crate::ui::app::tests::drag(
+        crate::app::tests::drag(
             &mut app,
             Point::new(50.0, 50.0),
             Point::new(150.0, 120.0),
@@ -1194,13 +1198,18 @@ mod tests {
         let crop = app.crop().unwrap();
         drop(app.open_chat(crop, None));
         let id = app.o.ai_chat.as_ref().unwrap().0;
-        let _ = app.update(Message::AiChat(id, crate::ui::ai_chat::Msg::Pin));
+        let _ = app.update(Message::AiChat(
+            id,
+            crate::features::ask_ai::screens::ai_chat::Msg::Pin,
+        ));
         assert!(app.chat.is_some() && app.o.ai_chat.is_none(), "pinned");
         let _ = app.update(Message::AiChat(
             id,
-            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
-                crate::shared::kit::panel_frame::Drag::Move,
-            )),
+            crate::features::ask_ai::screens::ai_chat::Msg::Card(
+                crate::shared::kit::panel_frame::Event::Grab(
+                    crate::shared::kit::panel_frame::Drag::Move,
+                ),
+            ),
         ));
         let from = Point::new(300.0, 100.0);
         let _ = app.update(Message::CardMoved(from));
@@ -1252,11 +1261,11 @@ mod tests {
         );
         // the reader note: drawn by that screen's window, beside the bar
         let before = shot::render(app.view(right), 1280, 720);
-        app.o.reader = crate::ui::app::Reader::Missing(1000);
+        app.o.reader = crate::app::Reader::Missing(1000);
         let after = shot::render(app.view(right), 1280, 720);
         assert!(before != after, "the note shows on the bar's screen");
         // a selection on that screen: the pill goes beside it, there too
-        app.o.reader = crate::ui::app::Reader::Idle;
+        app.o.reader = crate::app::Reader::Idle;
         app.select(Rectangle::new(
             Point::new(1500.0, 600.0),
             Size::new(200.0, 100.0),
@@ -1336,7 +1345,7 @@ mod tests {
         let view: for<'a> fn(&'a Both) -> Element<'a, Message> = |(app, id)| app.view(*id);
         let no_input = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
         let mut both = (app, id);
-        let drawn = crate::ui::frame_times::drawn(
+        let drawn = crate::app::frame_times::drawn(
             &mut both,
             right.size(),
             1.5,
@@ -1919,8 +1928,8 @@ mod text_tests {
 
     use super::*;
     use crate::Trigger;
+    use crate::app::message::Shot;
     use crate::features::text_reading::Source;
-    use crate::ui::app::message::Shot;
 
     const START: Place = Place {
         origin: (0, 0),

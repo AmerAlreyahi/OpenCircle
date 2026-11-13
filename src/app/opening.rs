@@ -10,22 +10,22 @@ use std::time::Instant;
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
+use crate::app::message::{Await, BarKeys, Grab, Purpose};
+use crate::app::monitors::Screen;
+use crate::app::{Reader, TextMode};
 use crate::features::circle::actions::qr;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::settings::labs::{BarButton, Labs};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading as ocr;
 use crate::features::text_reading::app::word;
+use crate::features::{
+    ask_ai::screens::ai_chat, circle::screens::overlay, song::screens::song,
+    translate::screens::translate,
+};
 use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
-use crate::ui::app::message::{Await, BarKeys, Grab, Purpose};
-use crate::ui::app::screens::Screen;
-use crate::ui::app::{Reader, TextMode};
-use crate::{
-    features::circle::screens::overlay,
-    ui::{ai_chat, song, translate},
-};
 
 pub(crate) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
@@ -216,7 +216,7 @@ pub(crate) struct Opening {
     /// Their frames that landed during the opening animation (shown after it).
     pub(crate) waiting: Vec<(crate::features::snip::screens::snip::Place, image::Handle)>,
     /// Where the edge glow is: the screen the mouse is on (`screens::Glow`).
-    pub(crate) glow: crate::ui::app::screens::Glow,
+    pub(crate) glow: crate::app::monitors::Glow,
     /// Main mode: the desktop's windows at the freeze (`Shot::windows`), for
     /// the bar's Snip (a late list drifts from the frozen frames).
     pub(crate) windows: Vec<crate::features::snip::screens::snip::Pick>,

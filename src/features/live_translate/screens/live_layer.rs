@@ -12,6 +12,7 @@ use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
 use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
+use crate::app::{background::background, windows};
 use crate::features::circle::screens::edge as border;
 use crate::features::live_translate::live::{self as live_steps, Live as Steps, Patch};
 use crate::features::live_translate::screens::live::controller::{
@@ -24,7 +25,6 @@ use crate::features::translate::pipeline::Cache;
 use crate::shared::config;
 use crate::shared::platform::capture::{self, window_rect};
 use crate::shared::theme;
-use crate::ui::{app::background::background, windows};
 
 /// How often live mode re-captures (Settings > Translate > Live refresh;
 /// 1.5 s by default): steps start on this fixed beat, and a slow step skips

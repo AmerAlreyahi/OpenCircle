@@ -7,16 +7,16 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 use crate::features::circle::actions;
 use crate::shared::config::{self, SelectStyle};
 
+use crate::app::background::background;
+use crate::app::message::{Grab, Message, Purpose};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading::app::word;
 use crate::features::{
     circle::screens::overlay, snip::screens::snip, translate::screens::translate,
 };
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Grab, Message, Purpose};
 
-use crate::ui::app::App;
-use crate::ui::app::screens::keep_on;
+use crate::app::App;
+use crate::app::monitors::keep_on;
 
 impl App {
     pub(crate) fn on_overlay(&mut self, event: overlay::Event) -> Task<Message> {

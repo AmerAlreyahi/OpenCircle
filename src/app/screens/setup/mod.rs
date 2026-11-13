@@ -16,6 +16,7 @@ use iced::widget::{Space, column, container, image, stack, text};
 use iced::window;
 use iced::{Center, Element, Fill, Padding, Size, Subscription, Task};
 
+use crate::app::windows;
 use crate::dir_row;
 use crate::shared::app_language::{Lang, S, fmt, tr};
 use crate::shared::kit::button::{self, Kind, cta_label};
@@ -32,7 +33,6 @@ use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::{chip, header, progress, segmented};
 use crate::shared::setup::msi::{self, Fault, Package};
 use crate::shared::setup::{self as setup_core, BadFolder, Installed};
-use crate::ui::windows;
 
 /// The window: 420 logical px wide (`max-w-[420px]`), its height per step.
 pub const WIDTH: f32 = 420.0;
@@ -463,7 +463,7 @@ impl State {
             }
             Message::Browse => {
                 let start = PathBuf::from(&self.folder);
-                crate::ui::app::background::background(move |tx| {
+                crate::app::background::background(move |tx| {
                     let mut dialog = rfd::FileDialog::new().set_title(tr(S::su_pick_title));
                     if let Some(parent) = start.parent().filter(|p| p.is_dir()) {
                         dialog = dialog.set_directory(parent);
@@ -479,7 +479,7 @@ impl State {
                 let remove_data = self.remove_data;
                 self.bar = (0.0, 0.0, Instant::now());
                 let steps = self.go(Step::Installing);
-                let work = crate::ui::app::background::background(move |tx| {
+                let work = crate::app::background::background(move |tx| {
                     msi::uninstall(&code, &|event| {
                         if remove_data && event == msi::Event::Done(Ok(())) {
                             setup_core::remove_user_data();
@@ -509,7 +509,7 @@ impl State {
                 self.bar = (0.0, 0.0, Instant::now());
                 let repair = self.installed.as_ref().is_some_and(|i| i.same);
                 let steps = self.go(Step::Installing);
-                let work = crate::ui::app::background::background(move |tx| {
+                let work = crate::app::background::background(move |tx| {
                     setup_core::quit_running_app();
                     msi::install(&package, &folder, repair, &|event| {
                         let _ = tx.unbounded_send(event);
@@ -571,7 +571,7 @@ impl State {
         let updating = self.installed.is_some();
         self.launch_error = None;
         let work = self.finish;
-        crate::ui::app::background::background(move |tx| {
+        crate::app::background::background(move |tx| {
             let _ = tx.unbounded_send(work(&folder, autostart, launch, updating));
         })
         .map(Message::Left)

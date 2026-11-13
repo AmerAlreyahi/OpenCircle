@@ -17,18 +17,18 @@ use crate::features::{
 use crate::shared::config;
 use crate::shared::platform::capture::{self, CaptureError};
 
+use crate::app::background::background;
+use crate::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
+use crate::app::opening::Opening;
 use crate::features::circle::app::quick;
 use crate::features::circle::app::quick::{Quick, Start};
 use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{place_window, taskbar_inset};
 use crate::shared::platform::shape;
-use crate::ui::app::background::background;
-use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
-use crate::ui::app::opening::Opening;
 use crate::{
+    app::windows,
     features::{circle::screens::overlay, snip::screens::snip},
-    ui::windows,
 };
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
@@ -547,7 +547,11 @@ impl App {
         }
         // the other monitors' windows go with it, at once; what left the frame is back
         let back = self.windows.back_in_frame(None).map(Message::Windows);
-        let chat = Task::batch([chat, super::screens::close_all(&opening.screens), back]);
+        let chat = Task::batch([
+            chat,
+            crate::app::monitors::close_all(&opening.screens),
+            back,
+        ]);
         drop(opening); // the panel, translate, song, helper and frame stop or free themselves
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::features::snip::annotate::free_glyphs();

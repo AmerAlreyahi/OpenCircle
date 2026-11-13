@@ -6,6 +6,9 @@ use iced::widget::{container, opaque, space};
 use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
+use crate::app::keys;
+use crate::app::message::Message;
+use crate::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 use crate::features::settings::labs::{self, BarButton};
 use crate::features::song::screens::song;
 use crate::features::{
@@ -21,9 +24,6 @@ use crate::shared::kit::tokens::{Role, radius, size};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{button, chip, dir, divider, field, grip};
 use crate::t;
-use crate::ui::app::keys;
-use crate::ui::app::message::Message;
-use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 
 impl App {
     /// The bottom bar, the one action hub, as the new design's search bar: a
@@ -388,9 +388,9 @@ pub fn action_chip<'a, Message: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::tests::{drag, open_app};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    use crate::ui::app::tests::{drag, open_app};
     use iced::Size;
 
     /// The bar at rest, with a selection made, with its field focused, and
@@ -529,8 +529,8 @@ mod tests {
                 themes::set(theme);
                 type Chip = fn() -> Element<'static, ()>;
                 let chips: [(&str, Chip); 3] = [
-                    ("hint", || hint(crate::ui::app::hint()).into()),
-                    ("protected", || hint(crate::ui::app::protected()).into()),
+                    ("hint", || hint(crate::app::hint()).into()),
+                    ("protected", || hint(crate::app::protected()).into()),
                     ("select", || action_chip(t!(bar_select_text).into(), ())),
                 ];
                 for (name, chip) in chips {

@@ -6,13 +6,13 @@ use iced::{Point, Rectangle, Task};
 use crate::features::circle::actions::{self, Crop, copy, save};
 use crate::features::snip::annotate::{self, Image, Output};
 
+use crate::app::message::{Message, Purpose};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::motion;
-use crate::ui::app::message::{Message, Purpose};
 
-use crate::ui::app::App;
-use crate::ui::app::capture::TEST_SHOT;
-use crate::ui::app::screens::to_desktop;
+use crate::app::App;
+use crate::app::capture::TEST_SHOT;
+use crate::app::monitors::to_desktop;
 
 impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
@@ -297,7 +297,7 @@ impl App {
         &self,
         area: iced::Rectangle,
     ) -> Option<(
-        crate::ui::app::screens::On,
+        crate::app::monitors::On,
         crate::shared::platform::capture::window_rect::WinRect,
     )> {
         let on = self.on_area(area);
@@ -342,14 +342,14 @@ impl App {
 mod tests {
     use iced::{Point, Rectangle, Size};
 
+    use crate::app::App;
+    use crate::app::message::Hiding;
+    use crate::app::tests::{run_task, snipping_on};
+    use crate::app::windows::Windows;
     use crate::features::circle::actions::share;
     use crate::features::settings::labs::Labs;
     use crate::features::snip::annotate::{Message as E, dragout};
     use crate::features::snip::screens::snip_toolbar::toolbar;
-    use crate::ui::app::App;
-    use crate::ui::app::message::Hiding;
-    use crate::ui::app::tests::{run_task, snipping_on};
-    use crate::ui::windows::Windows;
 
     /// Add to steps (More, owner 2026-11-02): the overlay closes and the
     /// capture is the strip's step 1; the next snip's primary is "Add step
@@ -383,9 +383,9 @@ mod tests {
         // full: dimmed, nothing added, the overlay stays
         let mut app = snip_toolbar_open_with(windows);
         // Copy all: ONE image of the 12 (300 x 200) stacked and numbered
+        use crate::app::message::Message;
         use crate::features::snip::screens::steps::Msg as Steps;
-        use crate::ui::app::message::Message;
-        let all = Message::Windows(crate::ui::windows::Msg::Steps(Steps::CopyAll));
+        let all = Message::Windows(crate::app::windows::Msg::Steps(Steps::CopyAll));
         let task = app.update(all);
         run_task(&mut app, task);
         let copied = crate::features::circle::actions::copy::copied::image();
@@ -440,9 +440,9 @@ mod tests {
     /// 2001 ms apart" was the wait between two nudges); docked by OPEN.
     #[test]
     fn the_toolbar_glide_after_a_nudge_times_only_its_own_frames() {
+        use crate::app::message::Message;
+        use crate::app::tests::settle_bar;
         use crate::shared::kit::motion;
-        use crate::ui::app::message::Message;
-        use crate::ui::app::tests::settle_bar;
         use std::time::{Duration, Instant};
         let mut app = snip_toolbar_open();
         settle_bar(&mut app);

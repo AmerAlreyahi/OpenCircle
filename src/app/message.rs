@@ -19,12 +19,15 @@ use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Target};
 use crate::shared::platform::capture::CaptureError;
 use crate::{
+    app::keys,
     features::{circle::app::quick::Quick, text_reading::app::word},
-    ui::app::keys,
 };
 use crate::{
-    features::{circle::screens::overlay, live_translate::screens::live_layer},
-    ui::{ai_chat, song, translate, windows},
+    app::windows,
+    features::{
+        ask_ai::screens::ai_chat, circle::screens::overlay, live_translate::screens::live_layer,
+        song::screens::song, translate::screens::translate,
+    },
 };
 
 /// Where the overlay was when a Copy / Save ran: its origin, size and scale

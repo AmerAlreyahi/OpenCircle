@@ -5,7 +5,7 @@ The SVG colours itself from a 16-step ramp (--logo-t0 darkest ... t15 brightest)
 We render it once (headless Chromium, transparent) in its own purple ramp and store,
 per pixel, WHERE on that ramp the colour sits (0..255 = tone 0..15 in 1/17 steps, so
 gradients keep their smoothness) plus alpha. Output: 512x512 grey+alpha PNG.
-src/ui/kit/logo.rs rebuilds the 16 colours from the theme accent at run time.
+src/shared/kit/logo.rs rebuilds the 16 colours from the theme accent at run time.
 Needs Pillow and a Chromium (CHROME=path; default: Playwright's cache).
 Run from the repo root: python3 scripts/logo-tones.py
 """

@@ -154,7 +154,7 @@ if [ -n "$legacy" ]; then
         "Quit OpenCircle (tray icon > Quit) before '"'"'scoop update opencircle'"'"'."'
   post=
 else
-  # the marker file turns the app's own updater off for this copy (src/update: MANAGED_FILE)
+  # the marker file turns the app's own updater off for this copy (src/shared/update: MANAGED_FILE)
   notes='        "OpenCircle keeps its settings in %APPDATA%\\opencircle and its models in %LOCALAPPDATA%\\opencircle (not in Scoop'"'"'s folders).",
         "Scoop updates this install (OpenCircle'"'"'s own updater is off for it): run '"'"'scoop update opencircle'"'"'.",
         "Quit OpenCircle (tray icon > Quit) before '"'"'scoop update opencircle'"'"'."'

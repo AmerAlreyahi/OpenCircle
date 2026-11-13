@@ -156,7 +156,7 @@ jobs:
           if ($info.CompanyName -ne 'Amer Alreyahi') { throw 'version info has no CompanyName' }
           if (-not $info.FileVersion.StartsWith((Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value)) { throw "version info does not match Cargo.toml" }
 
-      # Our setup (src/setup): this program again with the MSI inside. Built after
+      # Our setup (src/shared/setup): this program again with the MSI inside. Built after
       # the checks above, since it overwrites target/release/opencircle.exe.
       - name: Setup exe (Windows)
         if: runner.os == 'Windows'

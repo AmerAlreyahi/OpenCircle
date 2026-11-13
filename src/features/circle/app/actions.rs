@@ -15,20 +15,20 @@ use crate::features::{
 };
 use crate::shared::config::{self, QuickAction, Target};
 
+use crate::app::background::background;
+use crate::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::features::circle::app::quick::Quick;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, taskbar_inset};
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Message, PickAct, PillPlace, Purpose};
 use crate::{
+    app::windows,
     features::{
         ask_ai::screens::ai_chat, live_translate::screens::live_layer, settings,
         song::screens::song, translate::screens::translate,
     },
-    ui::windows,
 };
 
-use crate::ui::app::{App, Reader, TOAST_MARGIN};
+use crate::app::{App, Reader, TOAST_MARGIN};
 
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a

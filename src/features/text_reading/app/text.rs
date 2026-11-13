@@ -13,12 +13,12 @@ use crate::features::{
     text_reading::text,
 };
 
+use crate::app::background::background;
+use crate::app::message::{Await, Message, PickAct, Purpose, WordRead};
 use crate::features::circle::screens::overlay;
 use crate::features::text_reading::app::word;
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Await, Message, PickAct, Purpose, WordRead};
 
-use crate::ui::app::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
+use crate::app::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
 
 impl App {
     /// A tap at `at` (image px): the word there becomes the selection. Lines read

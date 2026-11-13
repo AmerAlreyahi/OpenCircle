@@ -65,10 +65,10 @@ and signs everything and creates a **draft**; it never publishes.
     - Install the previous version, let it auto-update to the new one, check
       the new version starts and its release notes show.
     - Rollback check: a new version that fails to start must be rolled back by
-      the updater (`update::roll_back`, `src/update/swap.rs`).
+      the updater (`update::roll_back`, `src/shared/update/swap.rs`).
     - Re-download the published assets; verify them against `SHA256SUMS.txt`
       and verify the signature of `SHA256SUMS.txt` with the public key in
-      `src/update/verify.rs`.
+      `src/shared/update/verify.rs`.
 
 ## Frozen: the update channel
 
@@ -103,7 +103,7 @@ Asset names, `SHA256SUMS.txt`, `SHA256SUMS.txt.minisig` and the trusted comment
 - The private minisign key exists only in the `release` environment's secret
   (usable by `v*` tag runs only) and in the maintainer's offline backup. There is
   no repository-level copy. The public key is built into the app
-  (`src/update/verify.rs`).
+  (`src/shared/update/verify.rs`).
 - Every installed copy checks that `SHA256SUMS.txt.minisig` verifies with that key
   and that its trusted comment is exactly `OpenCircle v<version>` of the release it
   downloads. A replayed signature from another version, a missing comment or an

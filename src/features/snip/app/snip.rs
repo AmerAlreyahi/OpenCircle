@@ -15,16 +15,16 @@ use crate::features::{
 use crate::shared::config;
 use crate::shared::platform::capture;
 
+use crate::app::background::background;
+use crate::app::message::{Message, Purpose};
 use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Message, Purpose};
 use crate::{
+    app::windows,
     features::snip::screens::{long_capture_popup, snip},
-    ui::windows,
 };
 
-use crate::ui::app::{ASK_MARGIN, App, work_area};
+use crate::app::{ASK_MARGIN, App, work_area};
 
 impl App {
     pub(crate) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
@@ -218,7 +218,7 @@ impl App {
         let _ = snip.start(snip::Kind::Region, self.o.screen);
         let (reader, read) = std::sync::mpsc::channel();
         if cfg!(windows) {
-            snip.read_later(reader, crate::ui::app::UIA_WINDOWS);
+            snip.read_later(reader, crate::app::UIA_WINDOWS);
             snip.start_reading(); // its first frame is long up
         }
         let o = &mut *self.o;
@@ -266,7 +266,7 @@ impl App {
             return Task::none();
         }
         self.o.waiting.clear();
-        let others = crate::ui::app::screens::close_all(&std::mem::take(&mut self.o.screens));
+        let others = crate::app::monitors::close_all(&std::mem::take(&mut self.o.screens));
         // never left clear by an opening that hadn't faded in yet (`show`)
         others
             .chain(windows::show(self.overlay, Mode::Windowed))
@@ -445,7 +445,7 @@ impl App {
     }
 
     /// The screen the running long capture is on (the starting one without one).
-    pub(crate) fn long_on(&self) -> crate::ui::app::screens::On {
+    pub(crate) fn long_on(&self) -> crate::app::monitors::On {
         let window = self.scroll().and_then(|l| l.window);
         self.on_window(window.unwrap_or(self.overlay))
     }
@@ -457,7 +457,7 @@ impl App {
     }
 
     /// Snip's toolbar in the logical px of the screen `on` (its size there).
-    fn long_bar_on(&self, on: &crate::ui::app::screens::On) -> Rectangle {
+    fn long_bar_on(&self, on: &crate::app::monitors::On) -> Rectangle {
         let size =
             (self.o.edit.as_ref()).map_or_else(SnipToolbar::toolbar_size, SnipToolbar::bar_size);
         let at = on.to_local(Rectangle::new(self.bar_at(), Size::ZERO));
@@ -550,7 +550,7 @@ impl App {
     /// one sign without XWayland). Any shortcut, the pop-up or the tray ends it.
     fn start_cast(
         &mut self,
-        on: crate::ui::app::screens::On,
+        on: crate::app::monitors::On,
         area: Rectangle,
         region: (i32, i32, u32, u32),
     ) -> Task<Message> {

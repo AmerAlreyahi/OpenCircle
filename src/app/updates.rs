@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use iced::Task;
 
+use crate::app::background::background;
+use crate::app::message::{Hiding, Message};
+use crate::app::screens::update_pill::{self, Kind, Pill};
+use crate::app::{screens::update_card, windows};
 use crate::shared::update::{Event, How, Installed, Moment, Step};
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Hiding, Message};
-use crate::ui::screens::update_pill::{self, Kind, Pill};
-use crate::ui::{update_card, windows};
 
 use super::{App, Waiting};
 
@@ -204,7 +204,7 @@ impl App {
         };
         w.pill.dismiss();
         let Some(staged) = w.staged.clone() else {
-            crate::ui::windows::open_url(&w.url);
+            crate::app::windows::open_url(&w.url);
             return self.windows.update_pill(None).map(Message::Windows);
         };
         match crate::shared::update::restart(&staged, Moment::Button) {

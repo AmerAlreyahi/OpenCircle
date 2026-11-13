@@ -8,6 +8,8 @@ use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::qr;
 use crate::shared::config;
 
+use crate::app::message::{Message, Purpose};
+use crate::app::screens::toast;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::circle::screens::edge as border;
 use crate::features::circle::screens::overlay;
@@ -16,8 +18,6 @@ use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading::app::word;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::kit::{motion, surface};
-use crate::ui::app::message::{Message, Purpose};
-use crate::ui::screens::toast;
 
 use super::{App, CHIP_SPACE, LINK_WIDTH, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode};
 

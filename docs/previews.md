@@ -28,7 +28,7 @@ preview.
   (`previews::HEROES`) and one without a still is just absent.
 - Clip: `<clip>.ivf` (AV1 in IVF, 1920x1080, 20 fps, BT.709, ~0.2-1.6 MB),
   a GitHub release asset, pinned by size and SHA-256 in
-  `src/ui/screens/settings/previews/online.rs` and saved under
+  `src/features/settings/previews/online.rs` and saved under
   `<data>/OpenCircle/previews`. A wrong or partial file is deleted and fetched
   again on the next click.
 - `assets/previews/<clip>.webp`: the animated versions the README shows

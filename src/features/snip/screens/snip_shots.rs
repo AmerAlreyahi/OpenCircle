@@ -7,6 +7,10 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::snip;
+use crate::app::App;
+use crate::app::frame_times::frames;
+use crate::app::message::Message;
+use crate::app::tests::snipping_on;
 use crate::features::circle::actions::Crop;
 use crate::features::circle::screens::overlay::Event;
 use crate::features::snip::annotate::Message as E;
@@ -16,10 +20,6 @@ use crate::features::snip::screens::long_capture;
 use crate::features::snip::screens::tools::{self, Which, picker, ruler};
 use crate::shared::kit::testing::golden;
 use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-use crate::ui::app::App;
-use crate::ui::app::message::Message;
-use crate::ui::app::tests::snipping_on;
-use crate::ui::frame_times::frames;
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -98,7 +98,7 @@ fn picked() -> App {
 fn settle(app: &mut App) {
     let now = std::time::Instant::now();
     for ms in [0, 400, 800, 1600, 4000] {
-        let _ = app.update(crate::ui::app::message::Message::Frame(
+        let _ = app.update(crate::app::message::Message::Frame(
             now + std::time::Duration::from_millis(ms),
         ));
     }
@@ -236,7 +236,7 @@ fn more_states() -> Vec<(&'static str, App)> {
     // Ask AI: the chat docks on the side away from the area, the picture attached
     let mut app = picked();
     let task = app.on_snip_toolbar(E::AskAi);
-    crate::ui::app::tests::run_task(&mut app, task);
+    crate::app::tests::run_task(&mut app, task);
     settle(&mut app);
     out.push(("10f-ai", app));
     // Translate: the session starts (the pill and "Translating…")

@@ -20,10 +20,10 @@ use iced::widget::image;
 use iced::window::{self, Position};
 use iced::{Element, Point, Rectangle, Size, Task};
 
+use crate::app::background::background;
 use crate::features::circle::actions::Crop;
 use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::shared::platform::windows as platform;
-use crate::ui::app::background::background;
 
 /// The helper's hidden argument (spawned by the app only).
 pub const ARG: &str = "long-capture-popup";
@@ -269,9 +269,10 @@ fn clicks(stdout: ChildStdout) -> Task<Finish> {
 pub fn main() -> ExitCode {
     let (config, _) = crate::shared::config::Config::load();
     crate::shared::config::set_current(config);
-    let run = crate::ui::with_fonts(iced::daemon(Helper::boot, Helper::update, Helper::view))
-        .theme(|_: &Helper, _| Some(platform::clear_theme()))
-        .run();
+    let run =
+        crate::app::shell::with_fonts(iced::daemon(Helper::boot, Helper::update, Helper::view))
+            .theme(|_: &Helper, _| Some(platform::clear_theme()))
+            .run();
     match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

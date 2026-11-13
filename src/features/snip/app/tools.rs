@@ -6,13 +6,13 @@ use std::time::Duration;
 use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
+use crate::app::background::background;
+use crate::app::message::{Message, Purpose};
 use crate::features::circle::actions::copy;
 use crate::features::snip::screens::tools::{self, Tool, Which, picker, ruler};
 use crate::features::{circle::screens::overlay, snip::screens::snip};
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Message, Purpose};
 
-use crate::ui::app::App;
+use crate::app::App;
 
 impl App {
     /// The running screen tool.
@@ -66,7 +66,7 @@ impl App {
         }
         let start = self.o.place();
         (self.o.screens.iter())
-            .find(|s| crate::ui::app::screens::area_of(start, s.place).contains(p))
+            .find(|s| crate::app::monitors::area_of(start, s.place).contains(p))
             .map(|s| (&s.frame, s.place.scale, s.view))
     }
 
@@ -272,14 +272,14 @@ mod tests {
 
     use iced::{Point, Rectangle, Size};
 
+    use crate::app::App;
+    use crate::app::message::{Message, Purpose, Shot};
+    use crate::app::tests::{open_app, snipping_on};
     use crate::features::circle::actions::copy;
     use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::annotate;
     use crate::features::snip::screens::snip::{self, Snip};
     use crate::features::snip::screens::tools::{self, Which, ruler};
-    use crate::ui::app::App;
-    use crate::ui::app::message::{Message, Purpose, Shot};
-    use crate::ui::app::tests::{open_app, snipping_on};
 
     const WINDOW: Rectangle = Rectangle {
         x: 100.0,
@@ -461,11 +461,11 @@ mod tests {
 mod frames {
     use iced::{Point, Rectangle, Size, Vector};
 
+    use crate::app::App;
+    use crate::app::frame_times::{Drawn, frames};
+    use crate::app::tests::snipping_on;
     use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::screens::tools::Which;
-    use crate::ui::app::App;
-    use crate::ui::app::tests::snipping_on;
-    use crate::ui::frame_times::{Drawn, frames};
 
     fn moved(which: Which, n: u32) -> (Vec<Drawn>, App) {
         let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
@@ -485,7 +485,7 @@ mod frames {
     }
 
     /// The messages a click at `at` on the overlay's window sends.
-    fn clicked(app: &App, at: Point) -> Vec<crate::ui::app::message::Message> {
+    fn clicked(app: &App, at: Point) -> Vec<crate::app::message::Message> {
         use iced::mouse::{Button, Cursor, Event as Mouse};
         use iced_runtime::user_interface::{Cache, UserInterface};
         let mut renderer = crate::shared::kit::testing::shot::renderer();
@@ -515,8 +515,8 @@ mod frames {
     /// A click on the ruler's toolbar switches its mode and never measures.
     #[test]
     fn the_toolbar_takes_its_clicks() {
+        use crate::app::message::Message;
         use crate::features::snip::screens::tools::{Msg, ruler::Mode};
-        use crate::ui::app::message::Message;
         let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
         let mut app = snipping_on(1280, 720, window);
         let _ = app.start_tool(Which::Ruler);
@@ -554,7 +554,7 @@ mod frames {
     fn tool_frame_times() {
         for which in [Which::Picker, Which::Ruler] {
             let (t, app) = moved(which, 60);
-            crate::ui::frame_times::report(&format!("{which:?}"), app.o.screen, 1.0, &t[1..]);
+            crate::app::frame_times::report(&format!("{which:?}"), app.o.screen, 1.0, &t[1..]);
         }
     }
 

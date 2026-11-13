@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 /// Where the UI lives (paths under `src`): the app shell, the kit and its
 /// config glue, the OS's windows, and each feature's screens and App parts.
 const UI: &[&str] = &[
-    "ui",
+    "app",
     "shared/kit",
     "shared/theme.rs",
     "shared/touch.rs",
@@ -19,7 +19,7 @@ const UI: &[&str] = &[
 
 /// The UI's modules (`UI` as paths): what the backend and the OS layer never name.
 const UI_MODULES: &[&str] = &[
-    "crate::ui",
+    "crate::app",
     "crate::shared::kit",
     "crate::shared::theme",
     "crate::shared::touch",
@@ -116,13 +116,13 @@ fn styles(line: &str) -> bool {
 /// Not screens: the kit, the config-to-kit glue (theme.rs), OS glue
 /// (platform/, windows.rs), state and logic (app/), and tests.
 const NOT_SCREENS: [&str; 7] = [
-    "ui/arch_tests.rs",
-    "ui/frame_times.rs",
+    "app/arch_tests.rs",
+    "app/frame_times.rs",
     "features/ask_ai/screens/ai_chat/tests.rs",
     "features/translate/screens/translate/tests.rs",
     "features/settings/tests.rs",
     "shared/theme.rs",
-    "ui/windows.rs",
+    "app/windows.rs",
 ];
 
 /// Screen files that still style in place. A ratchet: a port removes its file
@@ -136,8 +136,10 @@ fn screens_never_style() {
         .filter(|(name, _)| {
             !name.starts_with("shared/kit/")
                 && !name.starts_with("shared/platform/")
-                && !name.starts_with("ui/app/")
-                && !name.starts_with("app/")
+                // the app shell's state and logic (its screens and its start are screens)
+                && !(name.starts_with("app/")
+                    && !name.starts_with("app/screens/")
+                    && name != "app/shell.rs")
                 && !(name.starts_with("features/") && name.split('/').nth(2) == Some("app"))
         })
         .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
@@ -346,7 +348,7 @@ fn one_scrollbar_and_one_dropdown() {
     ];
     let mut found = Vec::new();
     for (name, src) in sources("") {
-        if name == "shared/kit/scroll.rs" || name == "ui/arch_tests.rs" {
+        if name == "shared/kit/scroll.rs" || name == "app/arch_tests.rs" {
             continue;
         }
         for line in code(&src) {
@@ -397,8 +399,8 @@ fn only_the_window_helper_shows_windows() {
     for (name, src) in sources("") {
         if [
             "shared/platform/windows.rs",
-            "ui/app/update.rs",
-            "ui/arch_tests.rs",
+            "app/update.rs",
+            "app/arch_tests.rs",
         ]
         .contains(&name.as_str())
         {
@@ -418,7 +420,7 @@ fn only_the_window_helper_shows_windows() {
 #[test]
 fn only_the_monitor_helper_calls_window_resize() {
     for (name, src) in sources("") {
-        if name == "shared/platform/monitor.rs" || name == "ui/arch_tests.rs" {
+        if name == "shared/platform/monitor.rs" || name == "app/arch_tests.rs" {
             continue;
         }
         for l in code(&src) {
@@ -458,7 +460,7 @@ fn every_text_names_a_bundled_face() {
     let mut found = Vec::new();
     for (name, src) in sources("").into_iter().chain(snip) {
         let test_only = name.starts_with("shared/kit/testing/") || name.ends_with("tests.rs");
-        if name == "ui/arch_tests.rs" || name == "ui/frame_times.rs" || test_only {
+        if name == "app/arch_tests.rs" || name == "app/frame_times.rs" || test_only {
             continue;
         }
         let src = src.replace("\r\n", "\n");
@@ -570,7 +572,13 @@ fn named_paths(src: &str) -> Vec<String> {
         let word = i == 0 || !rest[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_');
         let after = &rest[i + 4..];
         match after.find(';') {
-            Some(end) if word && after.starts_with(|c: char| c.is_alphabetic() || c == '$') => {
+            Some(end)
+                if word
+                    && after.starts_with(|c: char| c.is_alphabetic() || c == '$')
+                    && after[..end]
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || "_:{}, *$\n\t\r".contains(c)) =>
+            {
                 expand("", &after[..end].replace('\n', " "), &mut out);
                 rest = &after[end..];
             }
@@ -595,15 +603,33 @@ fn names_module(path: &str, module: &str) -> bool {
 
 /// Shared files that still reach into a feature or the app shell (code that
 /// belongs elsewhere: a follow-up moves it). A ratchet: the list only shrinks.
-const SHARED_LEGACY: &[&str] = &[];
+const SHARED_LEGACY: &[&str] = &[
+    "shared/app_language/mod.rs",
+    "shared/config/mod.rs",
+    "shared/config/parse.rs",
+    "shared/diagnostics.rs",
+    "shared/history/mod.rs",
+    "shared/history/recent.rs",
+    "shared/platform/hotkey/kde.rs",
+    "shared/platform/hotkey/mod.rs",
+    "shared/platform/hotkey/socket.rs",
+    "shared/platform/sys/open.rs",
+    "shared/platform/tray.rs",
+    "shared/secrets.rs",
+    "shared/setup/mod.rs",
+    "shared/theme.rs",
+];
 
 /// `shared/` (kit, platform, config, ...) never imports `features/` or `app/`:
 /// what every feature uses depends on no feature.
 #[test]
-#[ignore = "switched on once the feature-folder moves are done"]
 fn shared_never_imports_features_or_app() {
     let mut reaching = Vec::new();
     for (name, src) in tree("shared") {
+        // test code (tests, the kit's golden harness) may use anything
+        if name.ends_with("tests.rs") || name.contains("/testing/") {
+            continue;
+        }
         let prod = src.split("#[cfg(test)]\nmod tests {").next().unwrap_or("");
         let bad = named_paths(prod).into_iter().find(|p| {
             ["crate::features", "crate::app"]
@@ -635,13 +661,81 @@ fn shared_never_imports_features_or_app() {
 
 /// Feature files that still reach into another feature's own files. A ratchet:
 /// the list only shrinks.
-const FEATURE_LEGACY: &[&str] = &[];
+const FEATURE_LEGACY: &[&str] = &[
+    "features/ask_ai/app/ai_chat.rs",
+    "features/ask_ai/ask.rs",
+    "features/ask_ai/mod.rs",
+    "features/ask_ai/screens/ai_chat/mod.rs",
+    "features/circle/actions/mod.rs",
+    "features/circle/actions/search_in_browser/page.rs",
+    "features/circle/actions/share.rs",
+    "features/circle/app/actions.rs",
+    "features/circle/app/bar.rs",
+    "features/circle/app/selection.rs",
+    "features/circle/screens/bar/geometry.rs",
+    "features/circle/screens/bar/view.rs",
+    "features/live_translate/live.rs",
+    "features/live_translate/screens/live/controller.rs",
+    "features/live_translate/screens/live_layer.rs",
+    "features/onboarding/flow.rs",
+    "features/onboarding/steps/done.rs",
+    "features/onboarding/steps/language.rs",
+    "features/onboarding/tests.rs",
+    "features/settings/labs.rs",
+    "features/settings/model_list.rs",
+    "features/settings/pages/ai.rs",
+    "features/settings/pages/general.rs",
+    "features/settings/pages/snip.rs",
+    "features/settings/pages/text_reading.rs",
+    "features/settings/pages/translate.rs",
+    "features/settings/previews/online.rs",
+    "features/settings/previews/player.rs",
+    "features/settings/state.rs",
+    "features/settings/tests.rs",
+    "features/snip/action.rs",
+    "features/snip/annotate/document.rs",
+    "features/snip/annotate/dragout.rs",
+    "features/snip/annotate/mod.rs",
+    "features/snip/annotate/tests.rs",
+    "features/snip/app/snip.rs",
+    "features/snip/app/snip_more.rs",
+    "features/snip/app/snip_toolbar.rs",
+    "features/snip/app/tools.rs",
+    "features/snip/capture/live.rs",
+    "features/snip/capture/scroll.rs",
+    "features/snip/screens/long_capture.rs",
+    "features/snip/screens/long_capture_popup.rs",
+    "features/snip/screens/snip.rs",
+    "features/snip/screens/snip_shots.rs",
+    "features/snip/screens/snip_toolbar/mod.rs",
+    "features/snip/screens/snip_toolbar/toolbar.rs",
+    "features/snip/screens/steps.rs",
+    "features/snip/screens/tools/mod.rs",
+    "features/snip/screens/tools/picker.rs",
+    "features/snip/screens/tools/ruler.rs",
+    "features/snip/snip_more.rs",
+    "features/song/screens/song.rs",
+    "features/text_reading/app/text.rs",
+    "features/text_reading/bench.rs",
+    "features/text_reading/mod.rs",
+    "features/text_reading/models.rs",
+    "features/text_reading/session.rs",
+    "features/text_reading/system.rs",
+    "features/text_reading/text.rs",
+    "features/text_reading/worker.rs",
+    "features/translate/action.rs",
+    "features/translate/mt/mod.rs",
+    "features/translate/pipeline.rs",
+    "features/translate/screens/translate/mod.rs",
+    "features/translate/screens/translate/tests.rs",
+    "features/translate/screens/translate/view.rs",
+    "features/translate/tests.rs",
+];
 
 /// A feature uses another feature only through that feature's `mod.rs` (its
 /// public face: `crate::features::snip::Thing`), never its inner files
 /// (`crate::features::snip::flow::..`).
 #[test]
-#[ignore = "switched on once the feature-folder moves are done"]
 fn features_meet_only_through_mod_rs() {
     let features: Vec<String> = std::fs::read_dir("src/features")
         .unwrap()

@@ -18,17 +18,20 @@ use crate::features::{
 use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
 
+use crate::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
+use crate::app::opening::Opening;
 use crate::features::circle::app::quick::Quick;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::circle::screens::edge as border;
 use crate::features::snip::screens::snip::Snip;
 use crate::shared::kit::panel_frame as card;
-use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot, WordRead};
-use crate::ui::app::opening::Opening;
-use crate::{features::text_reading::app::word, ui::app::keys};
+use crate::{app::keys, features::text_reading::app::word};
 use crate::{
-    features::{circle::screens::overlay, snip::screens::snip},
-    ui::{ai_chat, song, translate, windows},
+    app::windows,
+    features::{
+        ask_ai::screens::ai_chat, circle::screens::overlay, snip::screens::snip,
+        song::screens::song, translate::screens::translate,
+    },
 };
 
 use super::view::chips_at;
@@ -64,8 +67,8 @@ fn a_shot() -> Result<Shot, CaptureError> {
 /// at the first idle minute, the app vanishing under the user.
 #[test]
 fn an_update_waits_for_a_moment_the_user_picks() {
+    use crate::app::screens::update_pill::{Kind, Msg as PillMsg};
     use crate::shared::update::{Event, How, Install, Staged};
-    use crate::ui::screens::update_pill::{Kind, Msg as PillMsg};
     let staged = Staged {
         version: "9.9.9".into(),
         file: "missing".into(),

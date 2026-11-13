@@ -16,6 +16,8 @@ use std::time::Instant;
 use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
+use crate::app::background::background;
+use crate::app::keys;
 use crate::features::ask_ai as ai;
 use crate::features::ask_ai::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::features::ask_ai::providers::{self, Preset};
@@ -26,8 +28,6 @@ use crate::shared::config::{self, Provider, StaysOpen};
 use crate::shared::kit::markdown::Act;
 use crate::shared::kit::panel_frame::{self, Event};
 use crate::shared::kit::{dropdown, motion, spinner};
-use crate::ui::app::background::background;
-use crate::ui::app::keys;
 use crate::{features::ask_ai::chats, shared::store};
 
 mod view;

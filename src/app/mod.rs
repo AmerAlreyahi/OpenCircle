@@ -21,21 +21,26 @@ use self::background::triggers;
 use self::capture::overlay_window;
 use self::message::{Hiding, Message, Purpose};
 use self::opening::Open;
+use crate::features::{circle::screens::overlay, live_translate::screens::live_layer};
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::can_hide_windows;
 use crate::shared::touch;
-use crate::{
-    features::{circle::screens::overlay, live_translate::screens::live_layer},
-    ui::windows,
-};
 
+#[cfg(test)]
+pub(crate) mod arch_tests;
 pub(crate) mod capture;
+/// Frames as the window draws them (damage), and the animations' timing.
+#[cfg(test)]
+pub(crate) mod frame_times;
+pub(crate) mod monitors;
 pub(crate) mod screens;
+pub(crate) mod shell;
 #[cfg(test)]
 pub(crate) mod tests;
 pub(crate) mod update;
 pub(crate) mod updates;
 pub(crate) mod view;
+pub(crate) mod windows;
 
 /// The hint over the screen as the overlay opens (the app's language).
 pub(crate) fn hint() -> &'static str {

@@ -154,10 +154,10 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
 #[test]
 fn the_part_2a_surfaces_write_no_words_of_their_own() {
     let files: Vec<std::path::PathBuf> = [
-        "src/ui/screens/tray_menu.rs",
-        "src/ui/screens/update_pill.rs",
-        "src/ui/screens/update_card.rs",
-        "src/ui/screens/toast.rs",
+        "src/app/screens/tray_menu.rs",
+        "src/app/screens/update_pill.rs",
+        "src/app/screens/update_card.rs",
+        "src/app/screens/toast.rs",
         "src/features/text_reading/screens/model_download.rs",
         "src/features/ask_ai/screens/model_list.rs",
         "src/features/translate/screens/translate/view.rs",
@@ -212,13 +212,14 @@ fn the_whole_ui_writes_no_words_of_its_own() {
 /// The UI's files (what was `src/ui/` and `src/actions/` before the feature
 /// folders): folders and single files.
 const UI_SOURCES: &[&str] = &[
-    "src/ui",
+    "src/app",
     "src/features/circle/actions",
     "src/features/circle/screens",
     "src/features/circle/app",
     "src/shared/kit",
     "src/shared/theme.rs",
     "src/shared/touch.rs",
+    "src/shared/platform/mod.rs",
     "src/shared/platform/monitor.rs",
     "src/shared/platform/shape.rs",
     "src/shared/platform/tray.rs",
@@ -261,6 +262,7 @@ const EXEMPT_FILES: &[&str] = &[
     // OS, window-class and font names; the tray icon's decode checks
     "src/shared/platform/shape.rs",
     "src/shared/platform/tray.rs",
+    "src/shared/platform/mod.rs",
     "src/shared/platform/monitor.rs",
     "src/shared/platform/windows.rs",
     "src/shared/kit/text.rs",
@@ -270,7 +272,7 @@ const EXEMPT_FILES: &[&str] = &[
     // the kit's English default words (tests): Settings always passes its own
     "src/shared/kit/hero.rs",
     // the installer's own window (its words are the Setup block of the table)
-    "src/ui/screens/setup/mod.rs",
+    "src/app/screens/setup/mod.rs",
 ];
 
 /// The user-visible-looking literals of `files` (production code) that are

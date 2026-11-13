@@ -8,14 +8,14 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 use crate::features::settings::labs::{self, BarButton};
 use crate::shared::config;
 
+use crate::app::background::background;
+use crate::app::message::{Message, Purpose};
+use crate::app::monitors as screens;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::panel_frame as card;
-use crate::ui::app::background::background;
-use crate::ui::app::message::{Message, Purpose};
-use crate::ui::app::screens;
 
-use crate::ui::app::{ASK_INPUT, App};
+use crate::app::{ASK_INPUT, App};
 
 impl App {
     /// The bottom bar shows in main mode from the first frame, through drawing
@@ -255,7 +255,7 @@ impl App {
                 |(x, y)| Point::new(x as f32, y as f32),
             );
             return (self.o.view)
-                .to_screen(crate::ui::app::screens::from_desktop(self.o.place(), desk));
+                .to_screen(crate::app::monitors::from_desktop(self.o.place(), desk));
         }
         match self.o.screens.iter().find(|s| s.window == window) {
             Some(s) => self.o.view.to_screen(s.view.to_image(p)),

@@ -75,18 +75,19 @@ where they differ.
 
 ## Architecture
 
-Planned layout (details and change recipes: `docs/ARCHITECTURE.md`, written with
-the first code):
+Layout by feature since 0.1.8 (details, rules and change recipes: `docs/ARCHITECTURE.md` "Layout"):
 
 | Part | Role |
 |---|---|
-| `src/capture/` | Screen capture per platform (xcap / windows-capture / portal) |
-| `src/hotkey/` | Global shortcuts (`global-hotkey`; Wayland GlobalShortcuts portal; CLI fallback) |
-| `src/actions/` | One file per action: lens, ocr, translate, ai, copy, save. Registry = one list (action bar and quick actions share it) |
-| `src/translate/` | OCR → erase → translate → redraw pipeline; live layer |
-| `src/ai/` | Two API clients only: Anthropic Messages, OpenAI-compatible (covers OpenAI, Gemini, Ollama, LM Studio, OpenRouter); plus the no-key browser provider (Google AI Mode in the user's browser, default) |
-| `src/ui/` | iced windows: overlay, action bar, panels, snip editor (one file per annotation tool), settings, onboarding; `kit/` = the one UI kit and the only colour tokens (`theme.rs` = config-to-kit glue) |
-| `src/config/` | The one config reader/validator (TOML): mod.rs types, parse, migrate, look, store (the one writer) |
+| `src/app/` | The iced app shell: App state, messages, update / view dispatch, opening, keys, monitors, windows |
+| `src/features/<feature>/` | One folder per feature (circle, text_reading, translate, live_translate, ask_ai, snip, song, settings, onboarding): its logic, `app/` (its `impl App` handlers), `screens/` (its views) |
+| `src/shared/kit/` | The one UI kit and the only colour tokens (`shared/theme.rs` = config-to-kit glue) |
+| `src/shared/platform/` | The OS: capture core, hotkeys, sys, autostart, windows / monitor / shape / tray glue |
+| `src/shared/config/` | The one config reader/validator (TOML): mod.rs types, parse, migrate, look, store (the one writer) |
+| `src/shared/` (rest) | app_language, store, update, setup, history, log, paths, secrets, net, diagnostics |
+
+`shared/` never imports a feature or the app; features meet only through each other's `mod.rs` (arch tests, with
+a shrinking ratchet list).
 
 ## Commands
 

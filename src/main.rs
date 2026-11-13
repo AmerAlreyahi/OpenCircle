@@ -3,9 +3,9 @@
 // Debug builds keep the console. `attach_parent_console` brings the logs back when
 // a release exe is run from a terminal.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+pub(crate) mod app;
 mod features;
 mod shared;
-mod ui;
 
 use std::process::ExitCode;
 use std::time::Instant;
@@ -111,7 +111,7 @@ fn main() -> ExitCode {
             Err(code) => std::process::exit(code as i32),
             Ok(None) => {}
         }
-        return match ui::setup::run(msi) {
+        return match crate::app::screens::setup::run(msi) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 crate::log!("{e}");
@@ -141,7 +141,7 @@ fn main() -> ExitCode {
             return match crate::shared::setup::uninstall_ui(args.get(1).map(String::as_str)) {
                 crate::shared::setup::Uninstall::Exit(code) => code,
                 crate::shared::setup::Uninstall::Window { code, folder, dir } => {
-                    if let Err(e) = ui::setup::run_uninstall(code, folder) {
+                    if let Err(e) = crate::app::screens::setup::run_uninstall(code, folder) {
                         crate::log!("[opencircle] uninstall: {e}");
                     }
                     crate::shared::setup::delete_when_gone(&dir);
@@ -258,10 +258,10 @@ fn main() -> ExitCode {
         }
     });
     crate::shared::config::set_current(config);
-    let _tray = ui::start_tray(tx.clone());
+    let _tray = crate::shared::platform::tray::start(tx.clone());
     crate::shared::update::start(tx.clone());
 
-    let ran = ui::run(rx);
+    let ran = crate::app::shell::run(rx);
     crate::shared::platform::hotkey::stop();
     match ran {
         Ok(()) => ExitCode::SUCCESS,

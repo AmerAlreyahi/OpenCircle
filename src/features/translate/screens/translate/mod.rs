@@ -8,6 +8,7 @@ use std::sync::Arc;
 use iced::widget::{image, markdown};
 use iced::{Point, Rectangle, Size, Task, task};
 
+use crate::app::background::background;
 use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
 use crate::features::circle::actions::{self, Crop};
@@ -19,7 +20,6 @@ use crate::features::translate::screens::language_picker::{self as picker, Picke
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::panel_frame as card;
 use crate::t;
-use crate::ui::app::background::background;
 
 /// Context around a block in the image the word card sends (physical px).
 const CONTEXT: u32 = 8;

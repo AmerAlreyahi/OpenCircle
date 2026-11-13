@@ -11,6 +11,7 @@ use iced::widget::{column, container, markdown as md, stack};
 use iced::{Center, Element, Fill, Rectangle, Size};
 
 use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
+use crate::app::keys;
 use crate::features::ask_ai::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::features::ask_ai::providers::{self, Preset};
 use crate::features::ask_ai::screens::model_list;
@@ -35,7 +36,6 @@ use crate::shared::kit::text_area::text_area;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{chip, field};
-use crate::ui::app::keys;
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);

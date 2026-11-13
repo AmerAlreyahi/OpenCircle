@@ -1356,7 +1356,7 @@ mod tests {
     /// Shift+Enter = every screen.
     #[test]
     fn picks_work_on_every_screen_in_one_unit_at_any_scale() {
-        use crate::ui::app::screens::{area_of, to_desktop, view_of};
+        use crate::app::monitors::{area_of, to_desktop, view_of};
         // The starting screen at 150 %; screen 2 LEFT of it, 100 %, its top 200 px higher.
         let primary = Place {
             origin: (0, 0),

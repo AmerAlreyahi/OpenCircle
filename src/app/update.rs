@@ -12,18 +12,18 @@ use crate::features::text_reading as ocr;
 use crate::features::text_reading::text;
 use crate::shared::config;
 
+use crate::app::background::background;
+use crate::app::keys;
+use crate::app::message::{Hiding, Message, Purpose};
 use crate::features::circle::app::quick::Quick;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor;
-use crate::ui::app::background::background;
-use crate::ui::app::keys;
-use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::{
-    features::{circle::screens::overlay, snip::screens::snip},
-    ui::{translate, windows},
+    app::windows,
+    features::{circle::screens::overlay, snip::screens::snip, translate::screens::translate},
 };
 
 use super::capture::{TEST_SHOT, save_test_shot};

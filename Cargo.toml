@@ -36,7 +36,7 @@ toml = "1"
 # Save dialog. xdg-portal on Linux (the tray owns the GTK thread, so no gtk3 backend).
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 tray-icon = "0.26"
-# OCR (src/ocr): PP-OCRv5 on ONNX Runtime. Nothing of ORT is linked: its shared
+# OCR (src/features/text_reading): PP-OCRv5 on ONNX Runtime. Nothing of ORT is linked: its shared
 # library is downloaded with the models on first use and loaded at runtime
 # (ort `load-dynamic`), only inside the short-lived `ocr-worker` process.
 oar-ocr = { version = "0.10.1", default-features = false, features = ["simd"] }
@@ -69,20 +69,20 @@ gtk = "0.18"
 # iced's own window shell (vendored, `[patch.crates-io]`): its `activate_next_window`
 # hands the desktop's activation token to the overlay's window (no new crate).
 iced_winit = { version = "0.14", default-features = false }
-# Song search's audio (src/music): the PulseAudio protocol in pure Rust (no libpulse;
+# Song search's audio (src/features/song): the PulseAudio protocol in pure Rust (no libpulse;
 # PipeWire's pulse server speaks it). Opened only while listening.
 pulseaudio = "0.3"
 # xfixes + shape: the live layer's empty input shape (click-through)
 xcb = { version = "1.7", features = ["randr", "xfixes", "shape"] }
 
 [target.'cfg(windows)'.dependencies]
-# Song search's audio (src/music): WASAPI loopback / microphone, only while listening.
+# Song search's audio (src/features/song): WASAPI loopback / microphone, only while listening.
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
 xcap = "0.9"
-# Media_Ocr + Graphics_Imaging + Storage_Streams + Globalization: Windows OCR (src/ocr/system.rs).
+# Media_Ocr + Graphics_Imaging + Storage_Streams + Globalization: Windows OCR (src/features/text_reading/system.rs).
 # ApplicationModel_DataTransfer + Storage (+ windows-collections, already in the tree via windows):
-# the share sheet (src/actions/share.rs).
+# the share sheet (src/features/circle/actions/share.rs).
 windows = { version = "0.62", features = ["ApplicationModel_DataTransfer", "Storage", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "System_UserProfile", "Foundation", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics", "Win32_System_WinRT_Graphics_Capture", "Win32_System_ApplicationInstallationAndServicing", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-collections = "0.3"
 
@@ -117,7 +117,7 @@ icons = [
     "assets/icons/512x512.png",
 ]
 # cargo-packager has no rpm format: the .rpm comes from cargo-generate-rpm (below).
-# Windows: the MSI only. Our own setup exe (src/setup, OpenCircle-Setup-*.exe) is
+# Windows: the MSI only. Our own setup exe (src/shared/setup, OpenCircle-Setup-*.exe) is
 # built over it by release.yml (owner 2026-10-26, #55: no NSIS).
 formats = ["wix", "appimage", "deb"]
 # The MSI's licence/notice page (RTF is what WiX needs).

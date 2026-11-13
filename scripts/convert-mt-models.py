@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Converts Helsinki-NLP's own OPUS-MT models to the ONNX layout the app's
-offline translator reads (`src/mt`): the same files Xenova's transformers.js
+offline translator reads (`src/features/translate/mt`): the same files Xenova's transformers.js
 exports have (int8 encoder + optimum's merged decoder, source.spm, vocab.json).
 
     uv venv -p 3.12 .venv
@@ -19,7 +19,7 @@ decoder's bytes (and sha256) differ: the app pins the published files' hashes.
 Sources are pinned (REVISIONS); OUT_DIR/<pair>/ gets the four files and
 OUT_DIR/manifest.json lists them (file, size, sha256, source, revision,
 licence) and OUT_DIR/release/ holds the files under their published names,
-`opus-mt-<pair>-<file>` (one flat release, models-v1); `src/mt` pins the same
+`opus-mt-<pair>-<file>` (one flat release, models-v1); `src/features/translate/mt` pins the same
 sizes and hashes.
 """
 

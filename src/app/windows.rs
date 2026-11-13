@@ -12,7 +12,6 @@ use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard,
 
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
-use super::{settings, shape, update_card, update_pill};
 use crate::features::onboarding;
 use crate::features::snip::screens::steps::{self, Strip};
 use crate::shared::kit::chip;
@@ -24,6 +23,11 @@ use crate::shared::kit::tokens::{radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
 use crate::shared::theme;
+use crate::{
+    app::screens::{update_card, update_pill},
+    features::settings,
+    shared::platform::shape,
+};
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 use crate::features::circle::actions::{Action, Crop, Run, copy, save};
 use crate::features::snip::annotate::dragout::{self, DragFile};
@@ -467,7 +471,7 @@ impl Windows {
             let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
             self.steps = Some((id, Strip::new(monitor, inset, rtl)));
         }
-        super::background(move |tx| match steps::Step::new(&crop) {
+        crate::app::background::background(move |tx| match steps::Step::new(&crop) {
             Ok(step) => {
                 let _ = tx.unbounded_send(std::sync::Arc::new(step));
             }
@@ -533,14 +537,14 @@ impl Windows {
                 let clears = strip.clears;
                 let place = strip.place();
                 let place = self.place_steps(id, place);
-                let expire = super::background(move |tx| {
+                let expire = crate::app::background::background(move |tx| {
                     std::thread::sleep(Duration::from_millis(steps::UNDO_MS));
                     let _ = tx.unbounded_send(());
                 })
                 .map(move |()| Msg::Steps(steps::Msg::Expire(clears)));
                 Task::batch([place, expire])
             }
-            (steps::Do::Wait(moves), _) => super::background(move |tx| {
+            (steps::Do::Wait(moves), _) => crate::app::background::background(move |tx| {
                 std::thread::sleep(STEPS_SETTLE);
                 let _ = tx.unbounded_send(());
             })
@@ -555,7 +559,7 @@ impl Windows {
                 let crops = strip.crops();
                 let colours = [c().bg, c().accent, c().rim].map(|c| c.into_rgba8());
                 let rtl = strip.rtl;
-                super::background(move |tx| {
+                crate::app::background::background(move |tx| {
                     let ok = steps::stack_numbered(&crops, colours, rtl).is_some_and(copy_image);
                     let _ = tx.unbounded_send(ok);
                 })
@@ -1208,7 +1212,7 @@ impl Windows {
                     let leaving = state.leaving();
                     let keys = state.take_key_jobs();
                     let keys = Task::batch(keys.into_iter().map(|(song, job)| {
-                        super::background(move |tx| {
+                        crate::app::background::background(move |tx| {
                             let _ = tx.unbounded_send(job.run());
                         })
                         .map(move |k| {
@@ -1223,7 +1227,7 @@ impl Windows {
                         settings::Outcome::Write(w) => {
                             return Task::batch([
                                 keys,
-                                super::background(move |tx| {
+                                crate::app::background::background(move |tx| {
                                     let _ = tx.unbounded_send(w.run());
                                 })
                                 .map(|d| Msg::Settings(settings::Message::Written(d))),
@@ -1255,14 +1259,14 @@ impl Windows {
                             return Task::batch([keys, self.whats_next()]);
                         }
                         settings::Outcome::History(clear) => {
-                            let tidy = super::background(move |tx| {
+                            let tidy = crate::app::background::background(move |tx| {
                                 let _ = tx.unbounded_send(crate::shared::history::tidy(&clear));
                             });
                             let kept = tidy.map(|k| Msg::Settings(settings::Message::Kept(k)));
                             return Task::batch([keys, kept]);
                         }
                         settings::Outcome::Fetch(key, names) => {
-                            let fetch = super::background(move |tx| {
+                            let fetch = crate::app::background::background(move |tx| {
                                 use settings::previews::online;
                                 let ok = online::files(&names)
                                     .is_some_and(|f| online::fetch(&f).is_ok());
@@ -1276,7 +1280,7 @@ impl Windows {
                             return Task::batch([keys, iced::widget::operation::focus(field)]);
                         }
                         settings::Outcome::LoadModels(job) => {
-                            let load = super::background(move |tx| {
+                            let load = crate::app::background::background(move |tx| {
                                 let _ = tx.unbounded_send(job.run());
                             });
                             let done = load.map(|(ai, n)| {
@@ -1285,7 +1289,7 @@ impl Windows {
                             return Task::batch([keys, done]);
                         }
                         settings::Outcome::UpdateModels => {
-                            let update = super::background(move |tx| {
+                            let update = crate::app::background::background(move |tx| {
                                 let (pairs, _) = crate::features::translate::mt::installed();
                                 let progress = |done: u64, total: u64| {
                                     let _ = tx.unbounded_send(settings::Message::ModelsProgress(
@@ -1380,7 +1384,7 @@ impl Windows {
                     let outcome = onboarding::update(state, msg);
                     let keys = state.take_key_jobs();
                     let keys = Task::batch(keys.into_iter().map(|job| {
-                        super::background(move |tx| {
+                        crate::app::background::background(move |tx| {
                             let _ = tx.unbounded_send(job.run());
                         })
                         .map(|k| {
@@ -1890,7 +1894,7 @@ fn apply_from(old: &Config, cfg: Config) {
     let labs_changed = old.labs != cfg.labs;
     config::set_current(cfg);
     if labs_changed || language_changed {
-        super::refresh_tray(); // reads the config just set
+        crate::shared::platform::tray::refresh(); // reads the config just set
     }
 }
 
@@ -1952,7 +1956,7 @@ fn settings_placement() -> (Size, Size, Option<Point>) {
     let full = Size::new(w as f32 / s, h as f32 / s);
     let work = Size::new(
         full.width,
-        full.height - super::taskbar_inset(origin, full, s),
+        full.height - crate::shared::platform::monitor::taskbar_inset(origin, full, s),
     );
     let (size, min) = settings::window_limits(work);
     let at = Point::new(
@@ -1971,7 +1975,7 @@ pub const NOTICE_MS: u64 = 6000;
 /// The notice after onboarding (the window closes, the app lives on in the tray); it
 /// names the shortcut that is really configured.
 pub fn tray_notice(shortcut: &str) -> String {
-    let keys = super::settings::key_labels(shortcut).join("+");
+    let keys = crate::features::settings::key_labels(shortcut).join("+");
     crate::shared::app_language::fmt(S::pill_tray, &[&keys])
 }
 
@@ -1982,7 +1986,7 @@ pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
         return None;
     }
     let keys: Vec<String> = (taken.iter())
-        .map(|k| super::settings::key_labels(k).join("+"))
+        .map(|k| crate::features::settings::key_labels(k).join("+"))
         .collect();
     let key = match keys.len() {
         1 => S::pill_taken_one,
@@ -2033,7 +2037,7 @@ fn spoken<T>(build: impl FnOnce() -> T) -> T {
 /// One screenshot request on its own thread (Wayland), sent while the window asking
 /// has the focus; the answer comes back as `Allowed` to `to`.
 fn ask_screenshot(to: fn(onboarding::Message) -> Msg) -> Task<Msg> {
-    super::background(|tx| {
+    crate::app::background::background(|tx| {
         #[cfg(target_os = "linux")]
         let answer = crate::shared::platform::capture::portal::allow();
         #[cfg(not(target_os = "linux"))]
@@ -2049,7 +2053,7 @@ fn test_hook() -> Task<Msg> {
     else {
         return Task::none();
     };
-    super::background(move |tx| {
+    crate::app::background::background(move |tx| {
         for (i, what) in script.split(',').enumerate() {
             std::thread::sleep(std::time::Duration::from_millis(1500));
             let _ = tx.unbounded_send((i, what.to_string()));
@@ -2060,7 +2064,7 @@ fn test_hook() -> Task<Msg> {
 
 /// The folder picker (native dialog) on its own thread; answers `Msg::Folder`.
 fn pick_folder() -> Task<Msg> {
-    let start = super::background(|tx| {
+    let start = crate::app::background::background(|tx| {
         let picked = rfd::FileDialog::new()
             .set_title(crate::t!(dlg_folder))
             .pick_folder();
