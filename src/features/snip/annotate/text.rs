@@ -71,7 +71,7 @@ pub enum Back {
     Box,
 }
 
-/// The sans face: the bundled Inter (`ui::kit::text::FONTS`, loaded at start;
+/// The sans face: the bundled Inter (`shared::kit::text::FONTS`, loaded at start;
 /// Arabic falls back to the bundled Noto Sans Arabic), the same on every PC.
 /// Serif and mono stay the system's.
 const SANS: Family<'static> = Family::Name("Inter");

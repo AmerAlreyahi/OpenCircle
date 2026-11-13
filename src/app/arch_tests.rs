@@ -119,7 +119,7 @@ const NOT_SCREENS: [&str; 7] = [
     "app/arch_tests.rs",
     "app/frame_times.rs",
     "features/ask_ai/screens/ai_chat/tests.rs",
-    "features/translate/screens/translate/tests.rs",
+    "features/translate/screens/pill/tests.rs",
     "features/settings/tests.rs",
     "shared/theme.rs",
     "app/windows.rs",
@@ -190,7 +190,7 @@ fn no_drawn_shadows() {
 
 #[test]
 fn kit_depends_only_on_tokens() {
-    // the test harness (goldens, gallery) writes PNGs with `actions::write_png`
+    // the test harness (goldens, gallery) writes PNGs with `picture::write_png`
     for (name, src) in sources("shared/kit") {
         if name.starts_with("shared/kit/testing/") {
             continue;
@@ -609,7 +609,6 @@ const SHARED_LEGACY: &[&str] = &[
     "shared/config/parse.rs",
     "shared/diagnostics.rs",
     "shared/history/mod.rs",
-    "shared/history/recent.rs",
     "shared/platform/hotkey/kde.rs",
     "shared/platform/hotkey/mod.rs",
     "shared/platform/hotkey/socket.rs",
@@ -693,7 +692,6 @@ const FEATURE_LEGACY: &[&str] = &[
     "features/settings/state.rs",
     "features/settings/tests.rs",
     "features/snip/action.rs",
-    "features/snip/annotate/document.rs",
     "features/snip/annotate/dragout.rs",
     "features/snip/annotate/mod.rs",
     "features/snip/annotate/tests.rs",
@@ -701,20 +699,15 @@ const FEATURE_LEGACY: &[&str] = &[
     "features/snip/app/snip_more.rs",
     "features/snip/app/snip_toolbar.rs",
     "features/snip/app/tools.rs",
-    "features/snip/capture/live.rs",
-    "features/snip/capture/scroll.rs",
-    "features/snip/screens/long_capture.rs",
-    "features/snip/screens/long_capture_popup.rs",
-    "features/snip/screens/snip.rs",
+    "features/snip/screens/pick.rs",
     "features/snip/screens/snip_shots.rs",
     "features/snip/screens/snip_toolbar/mod.rs",
     "features/snip/screens/snip_toolbar/toolbar.rs",
-    "features/snip/screens/steps.rs",
     "features/snip/screens/tools/mod.rs",
     "features/snip/screens/tools/picker.rs",
     "features/snip/screens/tools/ruler.rs",
     "features/snip/snip_more.rs",
-    "features/song/screens/song.rs",
+    "features/song/screens/listen.rs",
     "features/text_reading/app/text.rs",
     "features/text_reading/bench.rs",
     "features/text_reading/mod.rs",
@@ -726,9 +719,9 @@ const FEATURE_LEGACY: &[&str] = &[
     "features/translate/action.rs",
     "features/translate/mt/mod.rs",
     "features/translate/pipeline.rs",
-    "features/translate/screens/translate/mod.rs",
-    "features/translate/screens/translate/tests.rs",
-    "features/translate/screens/translate/view.rs",
+    "features/translate/screens/pill/mod.rs",
+    "features/translate/screens/pill/tests.rs",
+    "features/translate/screens/pill/view.rs",
     "features/translate/tests.rs",
 ];
 

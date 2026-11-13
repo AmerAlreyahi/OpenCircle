@@ -47,7 +47,7 @@ impl Fonts {
         // Each variable font registers once, at 400; cosmic-text matches the
         // exact weight first, so with the system's fonts loaded Arabic at 600
         // went to Segoe UI (Windows). Every weight names the bundled face (drawn
-        // at it on the `wght` axis), as `ui::kit::text::load` does.
+        // at it on the `wght` axis), as `shared::kit::text::load` does.
         for face in db.faces().cloned().collect::<Vec<_>>() {
             for weight in (100..=900).step_by(100) {
                 if weight != face.weight.0 {

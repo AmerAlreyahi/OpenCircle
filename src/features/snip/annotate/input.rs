@@ -1,6 +1,6 @@
 //! What the pointer and the keys mean to the editor: which item shows its
 //! handles, the cursor, canvas <-> image coordinates, key -> message.
-//! (The canvas that draws and feeds these is `ui::screens::snip_toolbar::canvas`.)
+//! (The canvas that draws and feeds these is `features::snip::screens::snip_toolbar::canvas`.)
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::mouse;
 use iced::{Point, Rectangle};

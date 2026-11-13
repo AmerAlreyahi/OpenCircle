@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use iced::widget::image;
 
-use crate::features::circle::actions::Crop;
+use crate::shared::picture::Crop;
 
 /// Captures kept on disk, and shown in the strip.
 const HISTORY: usize = 20;
@@ -50,7 +50,7 @@ pub(super) fn keep(dir: &Path, crop: &Crop, limit: usize) -> Result<PathBuf, Str
         .and_then(|p| p.file_stem()?.to_str()?.parse::<u128>().ok());
     let stamp = newest.map_or(now, |n| now.max(n + 1));
     let path = dir.join(format!("{stamp:016}.png"));
-    crate::features::circle::actions::write_png(&path, crop.width, crop.height, &crop.rgba)?;
+    crate::shared::picture::write_png(&path, crop.width, crop.height, &crop.rgba)?;
     for old in list(dir).into_iter().skip(limit) {
         let _ = std::fs::remove_file(old);
     }
@@ -89,7 +89,7 @@ pub fn load() -> Vec<(PathBuf, image::Handle)> {
                 height: frame.height,
                 rgba: frame.rgba,
             };
-            let small = crate::features::circle::actions::fit_long_edge(crop, 96);
+            let small = crate::shared::picture::fit_long_edge(crop, 96);
             let picture = image::Handle::from_rgba(small.width, small.height, small.rgba);
             Some((path, picture))
         })

@@ -20,7 +20,7 @@ pub enum QuickId {
     SongSearch,
     /// Snip a part of a window into a live pin (Windows, Labs Pins).
     LivePin,
-    /// Snip's screen tools (`ui::screens::tools`).
+    /// Snip's screen tools (`features::snip::screens::tools`).
     ColourPicker,
     Ruler,
     /// Any other well-formed id in the config: kept and written back as it was, but

@@ -1,6 +1,6 @@
 //! Translate in place: its sessions, partials, cards and picker pill.
 use super::*;
-use crate::features::text_reading as ocr;
+use crate::features::text_reading;
 use iced::widget::container as c;
 
 fn block(text: &str, tr: &str, bounds: [f32; 4]) -> Translation {
@@ -535,8 +535,13 @@ fn the_pill_picks_languages_and_translates_again() {
 /// OCR finds one line at (20, 10) of what it is given; AI answers or fails.
 struct Fake(Result<&'static str, AiError>);
 impl Deps for Fake {
-    fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<ocr::TextBlock>, ocr::OcrError> {
-        Ok(vec![ocr::TextBlock {
+    fn recognize(
+        &self,
+        _: &[u8],
+        _: u32,
+        _: u32,
+    ) -> Result<Vec<text_reading::TextBlock>, text_reading::OcrError> {
+        Ok(vec![text_reading::TextBlock {
             text: "Quit".into(),
             bounds: [20.0, 10.0, 40.0, 20.0],
             confidence: 0.9,
@@ -621,11 +626,16 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
 /// before the second is translated.
 struct Two;
 impl Deps for Two {
-    fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<ocr::TextBlock>, ocr::OcrError> {
+    fn recognize(
+        &self,
+        _: &[u8],
+        _: u32,
+        _: u32,
+    ) -> Result<Vec<text_reading::TextBlock>, text_reading::OcrError> {
         Ok(["Quit", "Play"]
             .into_iter()
             .zip([10.0, 100.0])
-            .map(|(text, y)| ocr::TextBlock {
+            .map(|(text, y)| text_reading::TextBlock {
                 text: text.into(),
                 bounds: [20.0, y, 40.0, 20.0],
                 confidence: 0.9,

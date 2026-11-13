@@ -10,6 +10,7 @@ pub(crate) mod kit;
 pub(crate) mod log;
 pub(crate) mod net;
 pub(crate) mod paths;
+pub(crate) mod picture;
 pub(crate) mod platform;
 pub(crate) mod secrets;
 pub(crate) mod setup;

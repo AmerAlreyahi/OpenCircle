@@ -29,11 +29,12 @@ use crate::{
     shared::platform::shape,
 };
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
-use crate::features::circle::actions::{Action, Crop, Run, copy, save};
+use crate::features::circle::actions::{Action, Run, copy, save};
 use crate::features::snip::annotate::dragout::{self, DragFile};
 use crate::features::snip::capture::live;
 use crate::shared::app_language::S;
 use crate::shared::config::{self, Config, Theme};
+use crate::shared::picture::Crop;
 #[cfg(test)]
 pub use crate::shared::platform::windows::CLEARED;
 pub use crate::shared::platform::windows::{
@@ -56,7 +57,7 @@ pub enum Msg {
     Settings(settings::Message),
     Onboarding(onboarding::Message),
     Permission(onboarding::Message),
-    /// Any window closed (ours are forgotten; the overlay is `ui::App`'s).
+    /// Any window closed (ours are forgotten; the overlay is `app::App`'s).
     Closed(window::Id),
     /// The OS asked a window to close (Alt+F4, the taskbar). Only Settings
     /// listens: it asks first when it has unsaved changes (#136).
@@ -69,7 +70,7 @@ pub enum Msg {
     Folder(Option<std::path::PathBuf>),
     /// From a normal window's header or edges.
     Chrome(window::Id, chrome::Event),
-    /// A window was resized (any of ours; the overlay's is `ui::App`'s).
+    /// A window was resized (any of ours; the overlay's is `app::App`'s).
     Resized(window::Id, f32),
     /// Whether a normal window is maximised now (asked after every resize).
     Maximised(window::Id, bool),
@@ -78,7 +79,7 @@ pub enum Msg {
     TestShot(usize, &'static str, window::Screenshot),
     /// From the update card.
     UpdateCard(update_card::Msg),
-    /// From the update pill (`ui::App` decides what its buttons do).
+    /// From the update pill (`app::App` decides what its buttons do).
     UpdatePill(update_pill::Msg),
     /// A frame while the Updating pill's logo spins.
     PillFrame(Instant),
@@ -90,7 +91,7 @@ pub enum Msg {
     TrayMenu(tray_menu::Msg),
     /// A window lost the keyboard focus (the tray menu closes then).
     Unfocused(window::Id),
-    /// A tray menu row was chosen and the menu is gone: `ui::App` runs it as if it came from the tray.
+    /// A tray menu row was chosen and the menu is gone: `app::App` runs it as if it came from the tray.
     Run(crate::Trigger),
     /// From the Steps strip.
     Steps(steps::Msg),
@@ -100,7 +101,7 @@ pub enum Msg {
     CopyKey(window::Id),
     /// A window moved (the Steps strip docks once it stops).
     Moved(window::Id, Point),
-    /// Edit the strip's `i`th step in Snip: `ui::App` opens it ("Update step N").
+    /// Edit the strip's `i`th step in Snip: `app::App` opens it ("Update step N").
     EditStep(usize),
 }
 
@@ -1437,7 +1438,7 @@ impl Windows {
                 return self.leave_tray_menu(None);
             }
             Msg::Unfocused(_) => {}
-            // `ui::App` takes it before here.
+            // `app::App` takes it before here.
             Msg::Run(_) => {}
             Msg::Chrome(id, event) => return self.on_chrome(id, event),
             Msg::Resized(id, h) => {
@@ -2086,12 +2087,8 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     };
     let name = format!("{name}-{step}.png");
     let path = std::path::Path::new(&dir).join(name);
-    let result = crate::features::circle::actions::write_png(
-        &path,
-        shot.size.width,
-        shot.size.height,
-        &shot.rgba,
-    );
+    let result =
+        crate::shared::picture::write_png(&path, shot.size.width, shot.size.height, &shot.rgba);
     if let Err(e) = result {
         crate::log!("test shot failed: {e}");
     }

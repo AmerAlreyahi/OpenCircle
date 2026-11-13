@@ -1,7 +1,7 @@
 //! Offline translation: no key, no account, nothing leaves the PC. OPUS-MT
 //! (Helsinki-NLP's Marian transformer models; attribution in `docs/NOTICE.md`) as int8
 //! ONNX, greedy decoding on the ONNX Runtime that OCR already downloads.
-//! Like OCR it runs only in the helper process (`ocr::worker`), so ORT and
+//! Like OCR it runs only in the helper process (`text_reading::worker`), so ORT and
 //! the ~600 MB it peaks at never stay in the app: the app calls
 //! [`translate`]. One model per direction (`PAIRS`), downloaded the first
 //! time that direction is used, after the user agreed.
@@ -19,7 +19,7 @@ use ort::session::{Session, SessionInputValue};
 use ort::value::{DynValue, Tensor};
 
 use crate::features::text_reading::models::{self, ModelFile};
-use crate::features::text_reading::{self as ocr, OcrError};
+use crate::features::text_reading::{self, OcrError};
 use crate::features::translate::lang;
 use unigram::Unigram;
 
@@ -952,7 +952,7 @@ pub fn installed() -> (Vec<&'static Pair>, usize) {
 pub fn update(pairs: &[&'static Pair], progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
     let decoders: Vec<Decoder> = pairs.iter().map(|p| p.decoder()).collect();
     update_decoders(&decoders, progress, |swap| {
-        ocr::when_idle(|| swap.iter().for_each(|d| _ = d.swap()))
+        text_reading::when_idle(|| swap.iter().for_each(|d| _ = d.swap()))
     })
 }
 
@@ -982,7 +982,7 @@ pub fn stop_update() {
 }
 
 /// Swaps in every finished update (two file sizes per pair): app side when
-/// the helper ends (`ocr::when_idle`).
+/// the helper ends (`text_reading::when_idle`).
 pub fn swap_finished() {
     for p in &PAIRS {
         p.decoder().swap();
@@ -1004,12 +1004,12 @@ fn verified(path: &Path, f: &ModelFile) -> bool {
 /// App side: translates `texts` with `pair` in the helper process. The
 /// models must be present (`Pair::ensure`).
 pub fn translate(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
-    ocr::translate_in_child(texts, pair)
+    text_reading::translate_in_child(texts, pair)
 }
 
 /// No ORT memory arena. glibc: ~350 MB less in a warm helper at the same
 /// speed (each run allocates ~200 MB; the helper's malloc settings in
-/// `ocr::worker` keep that memory between runs instead of the arena).
+/// `text_reading::worker` keep that memory between runs instead of the arena).
 /// Windows (Win10 VM, dense page, 3 runs each): helper 437 -> 418 MB working
 /// set (-4 %), total time 1.85 -> 1.84 s (no change).
 fn without_arena(b: SessionBuilder) -> ort::Result<SessionBuilder> {
@@ -1041,7 +1041,7 @@ impl Translator {
         let decoder = pair.decoder();
         decoder.swap();
         let in_use = InUse::new(decoder.path);
-        ocr::init_ort(ort_dir)?;
+        text_reading::init_ort(ort_dir)?;
         let dir = pair.dir();
         // Every batch has a new shape: memory patterns would only add RAM.
         // No spin-waiting threads after a run (they slowed the app, see OCR).
@@ -1757,7 +1757,7 @@ mod tests {
         assert_eq!(p.missing_bytes(), 0);
         // a test that tried to download would panic
         p.ensure(|_, _| {}).unwrap();
-        let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+        let mut tr = Translator::load(p, &text_reading::models_dir()).unwrap();
         let out = tr.translate(&["New Game".to_string()]).unwrap();
         println!("v1 decoder: New Game -> {}", out[0]);
         assert_eq!(out[0], "لعبة جديدة");
@@ -1804,7 +1804,7 @@ mod tests {
         for p in route(src, tgt).unwrap() {
             p.ensure(|_, _| {}).unwrap(); // (a verified v1 decoder is kept)
             let v = if p.outdated() { "v1" } else { "v2" };
-            let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+            let mut tr = Translator::load(p, &text_reading::models_dir()).unwrap();
             text = tr.translate(&text).unwrap();
             println!("{} ({v} decoder): peak {} MB", p.dir, rss_mb("VmHWM:"));
         }
@@ -1831,7 +1831,7 @@ mod tests {
             let mut text = vec![line.to_string()];
             for p in route(src, tgt).unwrap() {
                 p.ensure(|_, _| {}).unwrap();
-                let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+                let mut tr = Translator::load(p, &text_reading::models_dir()).unwrap();
                 text = tr.translate(&text).unwrap();
             }
             println!("{src}->{tgt}: {line} -> {}", text[0]);
@@ -1853,7 +1853,7 @@ mod tests {
         p.ensure(|_, _| {}).unwrap();
         let lines: Vec<String> = GAME_LINES.iter().map(|(en, _)| en.to_string()).collect();
         let t = std::time::Instant::now();
-        let mut tr = Translator::load(p, &ocr::models_dir()).unwrap();
+        let mut tr = Translator::load(p, &text_reading::models_dir()).unwrap();
         println!("load {:?}, RSS {} MB", t.elapsed(), rss_mb("VmRSS"));
         // the same pieces as Hugging Face's MarianTokenizer, >>ara<< first
         // (spike S7 compared 16 lines with quotes, CJK, URLs, tabs: all equal)
@@ -1884,7 +1884,7 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         let exe = exe.parent().unwrap().parent().unwrap().join("opencircle");
         let t = std::time::Instant::now();
-        let child = ocr::worker::translate_with(&exe, &lines, p).unwrap();
+        let child = text_reading::worker::translate_with(&exe, &lines, p).unwrap();
         println!("helper process, cold: {:?}", t.elapsed());
         assert_eq!(child, out);
     }

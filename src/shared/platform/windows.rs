@@ -1,7 +1,7 @@
 //! THE window helper: every window of ours is opened here (`open`), floating
 //! popups (`floating`), screen-sized ones (`screen`), the setup's (`setup_window`).
 //! The OS side of windows only: opacity, fades, the cut shape, capture exclusion.
-//! Which windows exist and what they show is `ui::windows`.
+//! Which windows exist and what they show is `app::windows`.
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ pub fn set_icon(rgba: Vec<u8>, width: u32, height: u32) {
     }
 }
 
-/// The setup's window (`ui::screens::setup`): a fixed-size normal window (taskbar entry,
+/// The setup's window (`app::screens::setup`): a fixed-size normal window (taskbar entry,
 /// our own header), centred, cut to the design's rounded corners (`radius`, as
 /// a floating window: nothing shows outside them, and it fades in and out by
 /// `POPUP`). After a `window::resize`, `reshape` cuts it again.
@@ -241,7 +241,7 @@ pub fn fade<T: Send + 'static>(id: window::Id, open: bool, how: Motion, wait: bo
     }
 }
 
-/// Wayland's long capture pop-up (`ui::long_capture_popup`, a helper process
+/// Wayland's long capture pop-up (`features::snip::screens::long_capture_popup`, a helper process
 /// on XWayland): an X11 override-redirect window, so it sits exactly where
 /// asked and stays over every other window (a Wayland window can't be placed
 /// or kept on top on GNOME). Takes no keyboard. `popup_shape` cuts it.
@@ -467,7 +467,7 @@ pub fn hole<T: Send + 'static>(
     scale: f32,
 ) -> Task<T> {
     forget_floating(id);
-    // outward to whole px, as `actions::crop_bounds`: what is grabbed is in the hole
+    // outward to whole px, as `picture::crop_bounds`: what is grabbed is in the hole
     let px = move |r: iced::Rectangle| {
         let (x0, y0) = ((r.x * scale).floor() as i32, (r.y * scale).floor() as i32);
         let (x1, y1) = (
@@ -571,7 +571,7 @@ mod tests {
         assert!(!app_window(asked).decorations);
     }
 
-    /// Every window is opened by `normal` (ui/windows.rs), `floating`, `screen` or `setup_window` here, all
+    /// Every window is opened by `normal` (app/windows.rs), `floating`, `screen` or `setup_window` here, all
     /// through `open`, so none can show a box, a gray strip or the OS title bar by forgetting
     /// a setting.
     #[test]

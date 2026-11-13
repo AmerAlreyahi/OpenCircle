@@ -1,8 +1,9 @@
 //! The action registry: ONE list of what can be done with a selection. The action
 //! bar renders it in order; the first entry is the default (Enter).
 //! To add an action: see docs/ARCHITECTURE.md ("Add an action").
+use crate::shared::picture::Crop;
+
 pub mod copy;
-pub mod crop;
 pub mod entities;
 pub mod qr;
 pub mod save;
@@ -79,30 +80,6 @@ pub fn for_key(
 pub fn default_for(cfg: &crate::shared::config::Config) -> &'static Action {
     let id = cfg.general.default_action.id();
     ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
-}
-
-pub use crop::{Crop, crop, crop_bounds, encode, fit_long_edge, stack_crops, stitch};
-
-/// Writes an RGBA image as an 8-bit PNG.
-pub fn write_png(
-    path: &std::path::Path,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-) -> Result<(), String> {
-    std::fs::write(path, encode_png(width, height, rgba)?).map_err(|e| e.to_string())
-}
-
-/// An RGBA image as 8-bit PNG bytes.
-pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    let mut encoder = png::Encoder::new(&mut out, width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-    writer.write_image_data(rgba).map_err(|e| e.to_string())?;
-    writer.finish().map_err(|e| e.to_string())?;
-    Ok(out)
 }
 
 #[cfg(test)]

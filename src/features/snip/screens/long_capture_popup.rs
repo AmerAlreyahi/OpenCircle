@@ -21,8 +21,8 @@ use iced::window::{self, Position};
 use iced::{Element, Point, Rectangle, Size, Task};
 
 use crate::app::background::background;
-use crate::features::circle::actions::Crop;
 use crate::features::snip::screens::long_capture::{self, Finish};
+use crate::shared::picture::Crop;
 use crate::shared::platform::windows as platform;
 
 /// The helper's hidden argument (spawned by the app only).

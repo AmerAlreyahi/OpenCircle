@@ -10,7 +10,7 @@ use super::legend::{self, Legend};
 use super::{
     arrow, blur, callout, highlighter, label, magnifier, pen, pointer, shape, spotlight, step, text,
 };
-use crate::features::circle::actions::Crop;
+use crate::shared::picture::Crop;
 
 /// The captured image: RGBA, straight alpha, `width * height * 4` bytes.
 pub struct Image {

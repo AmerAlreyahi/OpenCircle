@@ -695,8 +695,7 @@ pub fn save<Message>(name: &str, view: Element<'_, Message>, size: Size) -> Vec<
     if let Some(dir) = std::env::var_os("OPENCIRCLE_RENDER_DIR") {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
-        crate::features::circle::actions::write_png(&dir.join(format!("{name}.png")), w, h, &rgba)
-            .unwrap();
+        crate::shared::picture::write_png(&dir.join(format!("{name}.png")), w, h, &rgba).unwrap();
     }
     rgba
 }

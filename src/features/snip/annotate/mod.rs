@@ -79,8 +79,8 @@ use iced::{Point, Rectangle, Size, Vector};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::features::circle::actions::Crop;
 use crate::shared::config::{EditorConfig, Rgb};
+use crate::shared::picture::Crop;
 use document::int_rect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -422,7 +422,7 @@ pub enum Message {
 }
 
 /// Snip's screen tools on the frozen screen (its toolbar's buttons; the
-/// host runs them, `ui::screens::tools`).
+/// host runs them, `features::snip::screens::tools`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenTool {
     /// The colour picker (N-75).

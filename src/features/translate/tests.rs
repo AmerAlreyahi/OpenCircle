@@ -808,7 +808,7 @@ pub(super) fn ar(en: &str) -> Option<&'static str> {
 #[test]
 #[ignore]
 fn languages_end_to_end() {
-    use crate::features::text_reading::{self as ocr, Read, models};
+    use crate::features::text_reading::{self, Read, models};
     use std::time::Instant;
     let index = |id: &str| models::RECOGNIZERS.iter().position(|r| r.id == id).unwrap();
     for id in ["latin", "arabic", "cyrillic"] {
@@ -844,7 +844,7 @@ fn languages_end_to_end() {
         (img, dims)
     };
     let t = Instant::now();
-    let mut engine = ocr::Engine::load(&ocr::models_dir()).unwrap();
+    let mut engine = text_reading::Engine::load(&text_reading::models_dir()).unwrap();
     println!("OCR engine load {:.1?}", t.elapsed());
     let mut read = |name: &str, img: &Rgba, dims: (usize, usize), how: Read| {
         let t = Instant::now();
@@ -924,7 +924,8 @@ fn languages_end_to_end() {
 
     let t = Instant::now();
     let mut tr =
-        crate::features::translate::mt::Translator::load(pair, &ocr::models_dir()).unwrap();
+        crate::features::translate::mt::Translator::load(pair, &text_reading::models_dir())
+            .unwrap();
     println!("fr->en load {:.1?}", t.elapsed());
     let t = Instant::now();
     let lines = [
@@ -973,7 +974,7 @@ fn languages_end_to_end() {
     );
 }
 
-/// Real screenshots (not in CI, needs the models in `ocr::models_dir()`):
+/// Real screenshots (not in CI, needs the models in `text_reading::models_dir()`):
 /// OCR and offline EN -> AR in process; OCR lines and translations are
 /// cached as JSON in the output folder, so a re-render takes a second.
 /// `OC_REAL=a.png,b.png OC_REAL_OUT=dir cargo test --release real_frames -- --ignored --nocapture`
@@ -982,7 +983,7 @@ fn languages_end_to_end() {
 fn real_frames() {
     use super::pipeline::{Cache, Deps, translate_frame};
     use crate::features::ask_ai::AiError;
-    use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
+    use crate::features::text_reading::{self, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
     let out = std::path::PathBuf::from(std::env::var("OC_REAL_OUT").unwrap());
@@ -1017,7 +1018,7 @@ fn real_frames() {
                     let tr = mt.get_or_insert_with(|| {
                         crate::features::translate::mt::Translator::load(
                             self.pair,
-                            &ocr::models_dir(),
+                            &text_reading::models_dir(),
                         )
                         .unwrap()
                     });
@@ -1045,16 +1046,19 @@ fn real_frames() {
             Ok(b) => serde_json::from_slice(&b).unwrap(),
             // OC_WINOCR=1 (Windows): read as one-shot translate does there
             Err(_) if std::env::var_os("OC_WINOCR").is_some() => {
-                let k = *ocr::system::passes(1.0, f.width, f.height).last().unwrap();
-                let got = ocr::system::recognize(&f.rgba, f.width, f.height, k).unwrap();
+                let k = *text_reading::system::passes(1.0, f.width, f.height)
+                    .last()
+                    .unwrap();
+                let got = text_reading::system::recognize(&f.rgba, f.width, f.height, k).unwrap();
                 std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
                 got
             }
             Err(_) => {
-                let e =
-                    engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
+                let e = engine.get_or_insert_with(|| {
+                    text_reading::Engine::load(&text_reading::models_dir()).unwrap()
+                });
                 let got = e
-                    .recognize(&f.rgba, f.width, f.height, ocr::Read::One(0))
+                    .recognize(&f.rgba, f.width, f.height, text_reading::Read::One(0))
                     .unwrap();
                 std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
                 got
@@ -1102,7 +1106,7 @@ fn real_frames() {
 fn real_matrix() {
     use super::pipeline::{Cache, Deps, Real, Via, translate_frame};
     use crate::features::ask_ai::AiError;
-    use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
+    use crate::features::text_reading::{self, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
     struct M {
@@ -1137,8 +1141,11 @@ fn real_matrix() {
                 let mut models = self.models.borrow_mut();
                 let key = Box::leak(format!("{}-{}", pair.source, pair.target).into_boxed_str());
                 let tr = models.entry(key).or_insert_with(|| {
-                    crate::features::translate::mt::Translator::load(pair, &ocr::models_dir())
-                        .unwrap()
+                    crate::features::translate::mt::Translator::load(
+                        pair,
+                        &text_reading::models_dir(),
+                    )
+                    .unwrap()
                 });
                 let out = tr
                     .translate(t)
@@ -1176,29 +1183,34 @@ fn real_matrix() {
             Err(_) => {
                 // as `Real::recognize`: Windows OCR, PP-OCR ("auto") when it misread
                 let win = std::env::var_os("OC_WINOCR").map(|_| {
-                    let k = *ocr::system::passes(1.0, f.width, f.height).last().unwrap();
-                    ocr::system::recognize(&f.rgba, f.width, f.height, k).unwrap()
+                    let k = *text_reading::system::passes(1.0, f.width, f.height)
+                        .last()
+                        .unwrap();
+                    text_reading::system::recognize(&f.rgba, f.width, f.height, k).unwrap()
                 });
-                let pp =
-                    engine.get_or_insert_with(|| ocr::Engine::load(&ocr::models_dir()).unwrap());
+                let pp = engine.get_or_insert_with(|| {
+                    text_reading::Engine::load(&text_reading::models_dir()).unwrap()
+                });
                 let got = match win {
                     Some(lines)
                         if !super::pipeline::misread(&lines)
                             && lines.len() <= super::pipeline::SPARSE =>
                     {
-                        let read = pp.recognize(&f.rgba, f.width, f.height, ocr::Read::Auto);
+                        let read =
+                            pp.recognize(&f.rgba, f.width, f.height, text_reading::Read::Auto);
                         super::pipeline::reread(lines, read.unwrap())
                     }
                     Some(lines) if !super::pipeline::misread(&lines) => lines,
                     Some(lines) => {
                         let (keep, known) =
-                            super::pipeline::words_read(lines, ocr::system::language());
+                            super::pipeline::words_read(lines, text_reading::system::language());
                         let other = pp
                             .recognize_except(&f.rgba, f.width, f.height, &known)
                             .unwrap();
                         super::pipeline::merged(keep, other)
                     }
-                    None => (pp.recognize(&f.rgba, f.width, f.height, ocr::Read::Auto)).unwrap(),
+                    None => (pp.recognize(&f.rgba, f.width, f.height, text_reading::Read::Auto))
+                        .unwrap(),
                 };
                 std::fs::write(&ocr_path, serde_json::to_vec_pretty(&got).unwrap()).unwrap();
                 got

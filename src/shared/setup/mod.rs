@@ -1,7 +1,7 @@
 //! OpenCircle's own Windows setup, `OpenCircle-Setup-<ver>-x64.exe`: this same
 //! program built with the release MSI inside (build.rs embeds the file named by
 //! `OPENCIRCLE_SETUP_MSI`; release.yml builds it after the MSI). Started with no
-//! arguments it shows the setup window (`ui::screens::setup`) and installs the MSI through
+//! arguments it shows the setup window (`app::screens::setup`) and installs the MSI through
 //! Windows Installer's external UI (`msi`), so upgrade, repair, the uninstall in
 //! Apps & features and silent IT installs (`msiexec /i … /qn INSTALLDIR=…`) stay
 //! the MSI's own. The MSI's uninstall runs `opencircle.exe --forget-user-data`
@@ -26,7 +26,7 @@ pub const FORGET_ARG: &str = "--forget-user-data";
 
 /// The hidden argument of our Apps & features entry's uninstall
 /// (`opencircle.exe --uninstall-ui {ProductCode}`, written by the MSI; its own
-/// entry is hidden, ARPSYSTEMCOMPONENT): our uninstall window (`ui::screens::setup`).
+/// entry is hidden, ARPSYSTEMCOMPONENT): our uninstall window (`app::screens::setup`).
 pub const UNINSTALL_ARG: &str = "--uninstall-ui";
 
 /// The temp folder a copy of the exe runs the uninstall window from.
@@ -48,7 +48,7 @@ pub fn is_product_code(code: &str) -> bool {
 pub enum Uninstall {
     /// Nothing more: exit with this code (a bad argument, or the hand-over to the copy).
     Exit(std::process::ExitCode),
-    /// This is the copy: `main` shows the uninstall window (`ui::setup::run_uninstall`
+    /// This is the copy: `main` shows the uninstall window (`app::screens::setup::run_uninstall`
     /// with `code` and the installed `folder`), then calls `delete_when_gone(&dir)`.
     Window {
         code: String,

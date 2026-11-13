@@ -30,7 +30,7 @@ fn is_wayland(
 }
 
 /// winit's own rule (0.30): Wayland whenever either variable is set and not empty.
-/// Where it holds, windows can't be hidden or cut (`ui::platform::monitor`).
+/// Where it holds, windows can't be hidden or cut (`shared::platform::monitor`).
 #[cfg(any(target_os = "linux", test))]
 pub fn winit_picks_wayland(
     display: Option<&std::ffi::OsStr>,

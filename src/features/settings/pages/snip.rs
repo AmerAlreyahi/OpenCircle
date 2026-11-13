@@ -28,7 +28,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         change(&mut next);
         Message::Snip(next)
     };
-    let copies = crate::features::snip::screens::snip::copies(d.after);
+    let copies = crate::features::snip::screens::pick::copies(d.after);
     let pick = |name, desc, control| setting_row::row(title(name), desc, control);
     let snips = state.slots().filter(|slot| match slot {
         Slot::Quick(i) => state.draft.quick_actions[*i].action == "snip",

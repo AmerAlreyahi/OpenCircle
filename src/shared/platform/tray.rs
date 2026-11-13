@@ -1,5 +1,5 @@
 //! The tray icon and its menu's entries (`entries`, the design's widgets/tray-menu.js). Windows shows our own
-//! popup for them (`ui::screens::tray_menu`, opened at the icon by `Trigger::TrayMenu`); Linux the desktop's
+//! popup for them (`app::screens::tray_menu`, opened at the icon by `Trigger::TrayMenu`); Linux the desktop's
 //! own menu (AppIndicator) with the same rows. A missing tray is not an error: the app keeps working through
 //! its shortcut and `opencircle capture`. The capturing entries wait until the menu is off the screen, so it
 //! is never captured.
@@ -28,7 +28,7 @@ pub enum Entry {
     Live,
     Song,
     /// Only while a live pin lets clicks pass through (`tray_menu::Menu::with_click_pins`;
-    /// not in `ALL`): they take clicks again. `ui::windows` runs it itself.
+    /// not in `ALL`): they take clicks again. `app::windows` runs it itself.
     ClickPins,
     Settings,
     Quit,
@@ -132,7 +132,7 @@ impl Entry {
                 },
             ),
             Entry::Song => run("song_search", None),
-            // never sent: `ui::windows` runs it (the pins are its own); Settings at worst
+            // never sent: `app::windows` runs it (the pins are its own); Settings at worst
             Entry::ClickPins | Entry::Settings => Trigger::OpenSettings,
             Entry::Quit => Trigger::Quit,
         }

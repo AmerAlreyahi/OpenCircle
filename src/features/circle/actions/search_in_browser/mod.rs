@@ -1,9 +1,10 @@
 //! Search in browser: the crop in Google Lens in the user's own browser (see
-//! `page`; a text selection searches its text instead: `ui::App::run`).
+//! `page`; a text selection searches its text instead: `app::App::run`).
 pub mod page;
 
-use super::{Action, Crop, Key, Run};
+use super::{Action, Key, Run};
 use crate::shared::app_language::S;
+use crate::shared::picture::Crop;
 
 pub const ACTION: Action = Action {
     id: "lens",
@@ -30,7 +31,7 @@ pub fn search_png(crop: &Crop) -> Result<Vec<u8>, String> {
     if pixels.windows(2).all(|w| w[0] == w[1]) {
         return Err(BLANK.to_string());
     }
-    super::encode_png(crop.width, crop.height, &rgba)
+    crate::shared::picture::encode_png(crop.width, crop.height, &rgba)
 }
 
 /// Serves the Lens page for `crop` once and opens it in the default browser.
@@ -74,7 +75,7 @@ mod tests {
             .flat_map(|y| (0..fw).flat_map(move |x| px(x, y)))
             .collect();
         let area = iced::Rectangle::new(iced::Point::new(2.0, 1.0), iced::Size::new(3.0, 2.0));
-        let crop = super::super::crop(&frame, fw, fh, 2.0, area).unwrap();
+        let crop = crate::shared::picture::crop(&frame, fw, fh, 2.0, area).unwrap();
         assert_eq!((crop.width, crop.height), (6, 4));
         // What the browser's page sends: the PNG inside the auto-submit form.
         let png = search_png(&crop).unwrap();

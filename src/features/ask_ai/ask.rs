@@ -4,11 +4,12 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use crate::features::ask_ai::chats as history;
-use crate::features::ask_ai::{self as ai, Role};
-use crate::features::circle::actions::{Action, Crop, Key, Run};
+use crate::features::ask_ai::chats;
+use crate::features::ask_ai::{self, Role};
+use crate::features::circle::actions::{Action, Key, Run};
 use crate::shared::app_language::{S, fmt as say, tr};
 use crate::shared::config::{AiConfig, Config, Provider};
+use crate::shared::picture::Crop;
 use crate::shared::secrets::{self, Secret};
 
 pub const ACTION: Action = Action {
@@ -113,7 +114,7 @@ fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
         });
     }
     let (cfg, key) = credentials_for(cfg)?;
-    let png = crate::features::circle::actions::encode_png(crop.width, crop.height, &crop.rgba)?;
+    let png = crate::shared::picture::encode_png(crop.width, crop.height, &crop.rgba)?;
     Ok(Setup { cfg, key, png })
 }
 
@@ -194,7 +195,7 @@ fn steps(cfg: &AiConfig) -> String {
     let toml = format!(
         "[ai]\nprovider = \"anthropic\"  (or \"openai_compatible\")\nmodel = \"{}\"\n\
          base_url = \"\"  (openai_compatible: e.g. http://localhost:11434/v1)",
-        ai::DEFAULT_ANTHROPIC_MODEL
+        ask_ai::DEFAULT_ANTHROPIC_MODEL
     );
     say(S::ai_steps, &[&path, &toml, &keyring])
 }
@@ -223,7 +224,7 @@ pub enum Status {
     Streaming,
     Done,
     /// The answer failed: shown as the calm error card (`kit::error_card`).
-    Failed(ai::AiError),
+    Failed(ask_ai::AiError),
     /// Stopped by the user; the partial answer stays.
     Cancelled,
 }
@@ -245,10 +246,10 @@ pub struct Chat {
     pub status: Status,
     /// The model began thinking (no text yet).
     thinking: Option<Instant>,
-    /// Its saved file's name (`history::chat`), once saved or opened from History.
+    /// Its saved file's name (`chats::chat`), once saved or opened from History.
     pub id: Option<String>,
     /// The older messages' summary (`WINDOW`), from the provider.
-    pub summary: Option<history::Summary>,
+    pub summary: Option<chats::Summary>,
 }
 
 /// A summary is due for a chat of `messages` messages, the last written at `last`.
@@ -278,27 +279,27 @@ impl Chat {
     /// the summary of any older ones, and the question. The crop `png`, if any, goes
     /// with this question unless an earlier answered one already took it. `None` while
     /// an answer streams, or for a blank question.
-    pub fn ask(&mut self, question: &str, png: &[u8]) -> Option<Vec<ai::Message>> {
+    pub fn ask(&mut self, question: &str, png: &[u8]) -> Option<Vec<ask_ai::Message>> {
         let question = question.trim();
         if question.is_empty() || self.status == Status::Streaming {
             return None;
         }
         // Earlier turns without an answer (failed at once) are shown, not sent.
         let answered: Vec<&Turn> = self.answered().collect();
-        let mut messages = vec![ai::Message::new(Role::System, SYSTEM)];
+        let mut messages = vec![ask_ai::Message::new(Role::System, SYSTEM)];
         let skip = answered.len().saturating_sub(WINDOW / 2);
         if let (true, Some(summary)) = (skip > 0, &self.summary) {
             let text = format!("Summary of the earlier conversation:\n{}", summary.text);
-            messages.push(ai::Message::new(Role::System, text));
+            messages.push(ask_ai::Message::new(Role::System, text));
         }
         for turn in &answered[skip..] {
-            let mut asked = ai::Message::user(&turn.question);
+            let mut asked = ask_ai::Message::user(&turn.question);
             asked.image_png = turn.image.as_deref().map(<[u8]>::to_vec);
             messages.push(asked);
-            messages.push(ai::Message::new(Role::Assistant, &turn.answer));
+            messages.push(ask_ai::Message::new(Role::Assistant, &turn.answer));
         }
         let new = self.takes(png);
-        let mut asked = ai::Message::user(question);
+        let mut asked = ask_ai::Message::user(question);
         asked.image_png = new.then(|| png.to_vec()); // none: a plain question, or sent already
         messages.push(asked);
         self.turns.push(Turn {
@@ -317,7 +318,7 @@ impl Chat {
     /// A summary is due (`summary_due`): the chat's message count and the request
     /// that writes it (text only: the messages before the last `WINDOW`, and the
     /// summary so far). Not while an answer streams.
-    pub fn summary_request(&self) -> Option<(usize, Vec<ai::Message>)> {
+    pub fn summary_request(&self) -> Option<(usize, Vec<ask_ai::Message>)> {
         let answered: Vec<&Turn> = self.answered().collect();
         let count = 2 * answered.len();
         if self.status == Status::Streaming
@@ -333,21 +334,21 @@ impl Chat {
             text += &format!("User: {}\nAssistant: {}\n\n", turn.question, turn.answer);
         }
         let messages = vec![
-            ai::Message::new(Role::System, SUMMARY_SYSTEM),
-            ai::Message::user(text),
+            ask_ai::Message::new(Role::System, SUMMARY_SYSTEM),
+            ask_ai::Message::user(text),
         ];
         Some((count, messages))
     }
 
     /// The chat as History keeps it: text only (a screenshot leaves only its marker).
     /// Gets its id on the first save.
-    pub fn saved(&mut self) -> history::Saved {
-        let id = self.id.get_or_insert_with(history::new_id).clone();
-        history::Saved {
+    pub fn saved(&mut self) -> chats::Saved {
+        let id = self.id.get_or_insert_with(chats::new_id).clone();
+        chats::Saved {
             id,
-            updated: history::now(),
+            updated: chats::now(),
             turns: (self.turns.iter())
-                .map(|t| history::Turn {
+                .map(|t| chats::Turn {
                     question: t.question.clone(),
                     answer: t.answer.clone(),
                     screen: t.screen,
@@ -359,7 +360,7 @@ impl Chat {
     }
 
     /// A chat opened from History, to go on with (its screenshots were not kept).
-    pub fn from_saved(saved: history::Saved) -> Chat {
+    pub fn from_saved(saved: chats::Saved) -> Chat {
         Chat {
             turns: (saved.turns.into_iter())
                 .map(|t| Turn {
@@ -378,7 +379,7 @@ impl Chat {
         }
     }
 
-    /// A piece of the answer; an empty one = the model is thinking (`ai::ask_stream`).
+    /// A piece of the answer; an empty one = the model is thinking (`ask_ai::ask_stream`).
     pub fn delta(&mut self, piece: &str) {
         if let (Status::Streaming, Some(turn)) = (&self.status, self.turns.last_mut()) {
             if piece.is_empty() {
@@ -403,7 +404,7 @@ impl Chat {
         Some(question)
     }
 
-    pub fn finish(&mut self, result: Result<(), ai::AiError>) {
+    pub fn finish(&mut self, result: Result<(), ask_ai::AiError>) {
         if self.status == Status::Streaming {
             self.status = result.map_or_else(Status::Failed, |()| Status::Done);
         }
@@ -418,11 +419,11 @@ impl Chat {
 
 /// Writes a chat's summary (`Chat::summary_request`) with the user's own provider:
 /// one normal request, text only. Blocking (network): call off the UI thread.
-pub fn summarize(setup: &Setup, messages: &[ai::Message]) -> Result<String, String> {
+pub fn summarize(setup: &Setup, messages: &[ask_ai::Message]) -> Result<String, String> {
     if setup.browser() {
         return Err("no API provider".into());
     }
-    ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |_| {
+    ask_ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |_| {
         ControlFlow::Continue(())
     })
     .map(|text| text.trim().to_string())
@@ -437,16 +438,16 @@ pub fn summarize(setup: &Setup, messages: &[ai::Message]) -> Result<String, Stri
 /// user's browser, and `on_delta` gets one line saying so.
 pub fn stream(
     setup: &Setup,
-    messages: &[ai::Message],
+    messages: &[ask_ai::Message],
     mut on_delta: impl FnMut(&str) -> bool,
-) -> Result<(), ai::AiError> {
+) -> Result<(), ask_ai::AiError> {
     if setup.browser() {
         let question = messages.last().map_or("", |m| m.text.as_str());
-        on_delta(&ai::browser::ask(question).map_err(ai::AiError::Browser)?);
+        on_delta(&ask_ai::browser::ask(question).map_err(ask_ai::AiError::Browser)?);
         return Ok(());
     }
     let mut stopped = false;
-    let answer = ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
+    let answer = ask_ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
         if on_delta(piece) {
             ControlFlow::Continue(())
         } else {
@@ -455,7 +456,7 @@ pub fn stream(
         }
     });
     match answer {
-        Ok(_) if stopped => Err(ai::AiError::Network("Stopped.".into())),
+        Ok(_) if stopped => Err(ask_ai::AiError::Network("Stopped.".into())),
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     }
@@ -540,7 +541,7 @@ pub(crate) mod tests {
         assert!(PRESETS[5].text("pt-BR").contains("\"pt-BR\""));
         assert_eq!(PRESETS[0].text("ar"), PRESETS[0].prompt);
         // The browser provider puts the same text in front of the selection's text.
-        let q = ai::browser::question(&PRESETS[2].text("ar"), Some("You won! Pay now"));
+        let q = ask_ai::browser::question(&PRESETS[2].text("ar"), Some("You won! Pay now"));
         assert!(q.starts_with("Could this be a scam") && q.ends_with("Pay now"));
     }
 
@@ -582,7 +583,7 @@ pub(crate) mod tests {
     fn chat_records_errors_and_cancels() {
         let mut chat = Chat::default();
         chat.ask("Explain", b"png").unwrap();
-        let e = ai::AiError::Auth(401, String::new());
+        let e = ask_ai::AiError::Auth(401, String::new());
         chat.finish(Err(e.clone()));
         assert_eq!(chat.status, Status::Failed(e));
         // A failed turn with no answer is not resent.
@@ -670,7 +671,7 @@ pub(crate) mod tests {
     #[test]
     fn a_long_chat_sends_the_last_twenty_messages_and_one_summary() {
         let mut chat = long_chat(15); // 30 messages
-        chat.summary = Some(history::Summary {
+        chat.summary = Some(chats::Summary {
             text: "They talked about Q 0 to Q 4.".into(),
             at: 22,
         });
@@ -715,7 +716,7 @@ pub(crate) mod tests {
         // text only: the older turns, never a picture
         assert!(request.iter().all(|m| m.image_png.is_none()));
         assert!(request[1].text.contains("User: Q 0") && !request[1].text.contains("Q 1\n"));
-        chat.summary = Some(history::Summary {
+        chat.summary = Some(chats::Summary {
             text: "s".into(),
             at,
         });
@@ -876,9 +877,9 @@ pub(crate) mod tests {
             png: Vec::new(),
         };
         assert!(setup.browser());
-        let question = ai::browser::question("Explain", Some("Pastel de nata\n1,40 €"));
+        let question = ask_ai::browser::question("Explain", Some("Pastel de nata\n1,40 €"));
         let mut lines = Vec::new();
-        let result = stream(&setup, &[ai::Message::user(question)], |piece| {
+        let result = stream(&setup, &[ask_ai::Message::user(question)], |piece| {
             lines.push(piece.to_string());
             true
         });
@@ -930,7 +931,7 @@ pub(crate) mod tests {
             };
             assert!(!invalid.browser());
             let mut got = Vec::new();
-            let result = stream(&invalid, &[ai::Message::user("hi")], |piece| {
+            let result = stream(&invalid, &[ask_ai::Message::user("hi")], |piece| {
                 got.push(piece.to_string());
                 true
             });
@@ -945,7 +946,7 @@ pub(crate) mod tests {
 
         // A launcher that cannot start is reported, not swallowed.
         unsafe { std::env::set_var("OPENCIRCLE_TEST_BROWSER", dir.join("missing")) };
-        let result = stream(&setup, &[ai::Message::user("hi")], |_| true);
+        let result = stream(&setup, &[ask_ai::Message::user("hi")], |_| true);
         assert!(
             result
                 .unwrap_err()
@@ -1036,7 +1037,7 @@ pub(crate) mod tests {
             got.push(piece.to_string());
             false // the panel is gone
         });
-        assert_eq!(result, Err(ai::AiError::Network("Stopped.".into())));
+        assert_eq!(result, Err(ask_ai::AiError::Network("Stopped.".into())));
         assert_eq!(got, ["one"]);
     }
 
@@ -1046,7 +1047,7 @@ pub(crate) mod tests {
         let messages = Chat::default().ask("Explain", &setup.png).unwrap();
         let mut got = Vec::new();
         // No unwinding: the caller gets the partial answer back as a normal Ok.
-        let text = ai::ask_stream(&setup.cfg, setup.key.as_ref(), &messages, |piece| {
+        let text = ask_ai::ask_stream(&setup.cfg, setup.key.as_ref(), &messages, |piece| {
             got.push(piece.to_string());
             ControlFlow::Break(())
         });

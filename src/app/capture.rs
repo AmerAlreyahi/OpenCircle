@@ -9,9 +9,9 @@ use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
 use crate::features::settings::labs::BarButton;
-use crate::features::text_reading as ocr;
+use crate::features::text_reading;
 use crate::features::{
-    circle::actions::{self, Action, Run},
+    circle::actions::{Action, Run},
     text_reading::text,
 };
 use crate::shared::config;
@@ -22,16 +22,17 @@ use crate::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
 use crate::app::opening::Opening;
 use crate::features::circle::app::quick;
 use crate::features::circle::app::quick::{Quick, Start};
-use crate::features::snip::screens::snip::Snip;
+use crate::features::snip::screens::pick::Snip;
 use crate::shared::kit::motion;
 use crate::shared::platform::monitor::{place_window, taskbar_inset};
 use crate::shared::platform::shape;
 use crate::{
     app::windows,
-    features::{circle::screens::overlay, snip::screens::snip},
+    features::{circle::screens::overlay, snip::screens::pick},
 };
 
 use super::{App, CAPTURE_TIMEOUT, UIA_WINDOWS};
+use crate::shared::picture;
 use crate::shared::platform::monitor::can_hide_windows;
 
 /// How long the grab waits for the screen to redraw without our floating
@@ -45,7 +46,7 @@ impl App {
     /// still hidden.
     /// After `CAPTURE_TIMEOUT` the capture is given up (the next trigger works) and
     /// its answer, if it still comes, is dropped.
-    pub(crate) fn capture(&mut self, at: Instant, snip: Option<snip::Kind>) -> Task<Message> {
+    pub(crate) fn capture(&mut self, at: Instant, snip: Option<pick::Kind>) -> Task<Message> {
         self.captures = self.captures.wrapping_add(1);
         let n = self.captures;
         self.capturing = Some(n);
@@ -82,7 +83,7 @@ impl App {
                         capture::mouse_first(all, |frame| {
                             let grabbed = match (std::mem::take(&mut first), frame) {
                                 (true, frame) => Grabbed::Active(frame.map(|frame| {
-                                    let (place, image) = snip::screen_of(frame);
+                                    let (place, image) = pick::screen_of(frame);
                                     let windows = (listing.take().map(|l| l.join()))
                                         .and_then(Result::ok)
                                         .unwrap_or_default();
@@ -94,14 +95,14 @@ impl App {
                                         snip: None,
                                         windows: (windows.into_iter())
                                             .map(|w| {
-                                                let rect = snip::desktop_rect(w.rect);
-                                                snip::Pick::window(rect, &w.title, w.handle)
+                                                let rect = pick::desktop_rect(w.rect);
+                                                pick::Pick::window(rect, &w.title, w.handle)
                                             })
                                             .collect(),
                                     }
                                 })),
                                 (false, Ok(frame)) => {
-                                    let (place, image) = snip::screen_of(frame);
+                                    let (place, image) = pick::screen_of(frame);
                                     Grabbed::Other(place, image)
                                 }
                                 (false, Err(_)) => return, // (`mouse_first` hands over none)
@@ -115,7 +116,7 @@ impl App {
                             return;
                         }
                         let (x, y, w, h) = m.rect;
-                        let place = snip::Place {
+                        let place = pick::Place {
                             origin: (x, y),
                             px: (w, h),
                             scale: m.scale,
@@ -199,19 +200,22 @@ impl App {
     /// the pointer) and every window; `chosen` gets the pointer's monitor first
     /// (`App::pre_show`).
     pub(crate) fn snip_shot(
-        kind: snip::Kind,
+        kind: pick::Kind,
         chosen: impl FnOnce(&capture::Monitor),
     ) -> Result<Shot, CaptureError> {
-        let crate::features::snip::capture::snip::Snapshot {
+        let crate::features::snip::capture::frozen::Snapshot {
             frames,
             on,
             windows,
             foreground,
-        } = crate::features::snip::capture::snip::snapshot(config::current().snip.cursor, chosen)?;
+        } = crate::features::snip::capture::frozen::snapshot(
+            config::current().snip.cursor,
+            chosen,
+        )?;
         let windows = (windows.into_iter())
-            .map(|w| snip::Pick::window(snip::desktop_rect(w.rect), &w.title, w.handle))
+            .map(|w| pick::Pick::window(pick::desktop_rect(w.rect), &w.title, w.handle))
             .collect();
-        let screens: Vec<_> = frames.into_iter().map(snip::screen_of).collect();
+        let screens: Vec<_> = frames.into_iter().map(pick::screen_of).collect();
         let (place, image) = screens.get(on).cloned().ok_or("no monitor found")?;
         Ok(Shot {
             origin: place.logical_origin(),
@@ -256,7 +260,7 @@ impl App {
         });
         self.set_frame(shot.image, shot.scale, shot.origin, size);
         self.find_chat(shot.origin);
-        self.o.helper = Some(Arc::new(ocr::hold()));
+        self.o.helper = Some(Arc::new(text_reading::hold()));
         self.o.ocr_ready = text::models_present();
         self.frame_times.borrow_mut().clear();
         self.opening = self.opening.wrapping_add(1);
@@ -323,7 +327,7 @@ impl App {
             }
             let next = match (first, timer) {
                 (Some(next), _) => self.snip_next(Some(next)),
-                (None, Some(secs)) => self.on_snip(snip::Msg::Delay(secs)),
+                (None, Some(secs)) => self.on_snip(pick::Msg::Delay(secs)),
                 (None, None) => Task::none(),
             };
             if self.snip_pill() {
@@ -382,7 +386,7 @@ impl App {
     }
 
     /// The shown monitor in physical desktop px.
-    pub(crate) fn place(&self) -> snip::Place {
+    pub(crate) fn place(&self) -> pick::Place {
         self.o.place()
     }
 
@@ -424,7 +428,7 @@ impl App {
     /// a clear layered window is in no GDI grab and our windows are never
     /// listed. `open` then only fades it in; a capture that ends without
     /// opening hides it again (`unshow`).
-    pub(crate) fn pre_show(&mut self, place: snip::Place) -> Task<Message> {
+    pub(crate) fn pre_show(&mut self, place: pick::Place) -> Task<Message> {
         let ready = self.can_hide
             && shape::can_fade()
             && self.overlay_open
@@ -462,7 +466,7 @@ impl App {
     /// (its opacity) first, `chat` last.
     fn show_steps(
         &self,
-        place: snip::Place,
+        place: pick::Place,
         clear: Task<Message>,
         chat: Task<Message>,
     ) -> Task<Message> {
@@ -591,9 +595,9 @@ pub(crate) fn grab_wait(left: bool, gone: Option<Instant>, now: Instant) -> Dura
 enum Grabbed {
     /// The grab is over (every monitor's).
     Done,
-    Chosen(snip::Place),
+    Chosen(pick::Place),
     Active(Result<Shot, CaptureError>),
-    Other(snip::Place, image::Handle),
+    Other(pick::Place, image::Handle),
 }
 
 /// The overlay window: hidden (pre-created), or full-screen at `size`. Never on
@@ -626,7 +630,7 @@ pub(crate) fn save_test_shot(shot: &window::Screenshot) {
     let Some(path) = crate::shared::platform::sys::test_hook(TEST_SHOT) else {
         return;
     };
-    let result = actions::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);
+    let result = picture::write_png(path.as_ref(), shot.size.width, shot.size.height, &shot.rgba);
     if let Err(e) = result {
         crate::log!("test shot failed: {e}");
     }

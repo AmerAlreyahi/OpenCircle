@@ -3,8 +3,9 @@
 use std::borrow::Cow;
 use std::sync::Mutex;
 
-use super::{Action, Crop, Key};
+use super::{Action, Key};
 use crate::shared::app_language::{S, Said};
+use crate::shared::picture::Crop;
 
 pub const ACTION: Action = Action {
     id: "copy",
@@ -26,7 +27,7 @@ static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
 /// would paste the text instead of the image); text is copied only by `text`.
 fn run(crop: Crop) -> Result<String, String> {
     let max_edge = crate::shared::config::current().snip.max_edge;
-    let shown = super::fit_long_edge(crop, max_edge);
+    let shown = crate::shared::picture::fit_long_edge(crop, max_edge);
     #[cfg(test)]
     copied::set_image((shown.width, shown.height));
     with_clipboard(|clipboard| {
@@ -100,7 +101,7 @@ fn a_clipboard_error_reads_plainly() {
 }
 
 /// Tests: what was put on the clipboard, per test (its thread's name; the
-/// UI's background threads carry it, `ui::background`).
+/// UI's background threads carry it, `app::background`).
 #[cfg(test)]
 pub mod copied {
     use std::collections::HashMap;

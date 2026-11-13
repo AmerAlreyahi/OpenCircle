@@ -87,7 +87,7 @@ fn x11_no_pick(window: u32) -> Result<(), String> {
 /// Snip (owner, 2026-11-10): our floating widgets (Steps strip, pins, pills, the
 /// chat's) are in this one grab, so a hover + click picks one like any window, and
 /// `list` has them; every other capture still leaves them out
-/// (`ui::platform::windows::keep_out`). Windows: each one's capture exclusion is
+/// (`shared::platform::windows::keep_out`). Windows: each one's capture exclusion is
 /// lifted until the guard drops (then back on); the grab follows the next screen
 /// composition. Linux: nothing here (the UI leaves them on screen until Snip's
 /// grab is over, `App::capture`).

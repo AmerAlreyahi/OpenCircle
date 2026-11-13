@@ -10,7 +10,7 @@ use iced::{Point, Rectangle, Size, Task};
 use crate::Trigger;
 use crate::features::settings::labs::BarButton;
 use crate::features::{
-    circle::actions::{self, Action, Crop, Run, copy, qr, search_in_browser},
+    circle::actions::{self, Action, Run, copy, qr, search_in_browser},
     text_reading::text,
 };
 use crate::shared::config::{self, QuickAction, Target};
@@ -24,11 +24,12 @@ use crate::{
     app::windows,
     features::{
         ask_ai::screens::ai_chat, live_translate::screens::live_layer, settings,
-        song::screens::song, translate::screens::translate,
+        song::screens::listen, translate::screens::pill,
     },
 };
 
 use crate::app::{App, Reader, TOAST_MARGIN};
+use crate::shared::picture::{self, Crop};
 
 impl App {
     /// Scans the new selection for a QR code and a black (protected) capture, on a
@@ -389,12 +390,12 @@ impl App {
         let id = self.songs;
         // The song's card takes the result card's turn: one card at a time.
         self.o.ai_chat = None;
-        let (session, work) = song::Session::start();
+        let (session, work) = listen::Session::start();
         self.o.song = Some((id, session));
         work.map(move |msg| Message::Song(id, msg))
     }
 
-    pub(crate) fn on_song(&mut self, id: u32, msg: song::Msg) -> Task<Message> {
+    pub(crate) fn on_song(&mut self, id: u32, msg: listen::Msg) -> Task<Message> {
         let Some((current, session)) = &mut self.o.song else {
             return Task::none();
         };
@@ -402,14 +403,14 @@ impl App {
             return Task::none();
         }
         match session.update(msg) {
-            song::Outcome::None => Task::none(),
-            song::Outcome::Close => {
+            listen::Outcome::None => Task::none(),
+            listen::Outcome::Close => {
                 self.o.song = None;
                 Task::none()
             }
-            song::Outcome::Retry => self.start_song(),
+            listen::Outcome::Retry => self.start_song(),
             // The browser comes to the front: the overlay closes so it isn't on top.
-            song::Outcome::Open(url) => {
+            listen::Outcome::Open(url) => {
                 let open = background(move |_: &UnboundedSender<()>| {
                     if let Err(e) = crate::shared::platform::sys::open::open_link(&url) {
                         crate::log!("[opencircle] can't open the link: {e}");
@@ -446,7 +447,7 @@ impl App {
         else {
             return Task::none();
         };
-        let Some(area) = actions::crop_bounds(*width, *height, self.o.scale, selection.area) else {
+        let Some(area) = picture::crop_bounds(*width, *height, self.o.scale, selection.area) else {
             return Task::none();
         };
         self.o.ai_chat = None;
@@ -454,7 +455,7 @@ impl App {
         self.o.view = self.o.view.reset(); // the translation is drawn at 1x
         self.o.zoom = None;
         let models = text::models_present();
-        let (session, task) = translate::Session::start(
+        let (session, task) = pill::Session::start(
             frame.clone(),
             area,
             self.o.scale,
@@ -473,34 +474,34 @@ impl App {
         task.map(move |msg| Message::Translate(id, msg))
     }
 
-    pub(crate) fn on_translate(&mut self, id: u32, msg: translate::Msg) -> Task<Message> {
+    pub(crate) fn on_translate(&mut self, id: u32, msg: pill::Msg) -> Task<Message> {
         let Some((_, session)) = self.o.translate.as_mut().filter(|(open, _)| *open == id) else {
             return Task::none();
         };
         match msg {
-            translate::Msg::Card(card::Event::Grab(how)) => {
+            pill::Msg::Card(card::Event::Grab(how)) => {
                 self.o.chat_drag = Some((how, None));
                 self.frame_times.borrow_mut().clear();
                 Task::none()
             }
-            translate::Msg::Card(card::Event::Hover(on)) => {
+            pill::Msg::Card(card::Event::Hover(on)) => {
                 self.o.chat_hover = on;
                 Task::none()
             }
-            translate::Msg::Card(card::Event::Reset) => {
+            pill::Msg::Card(card::Event::Reset) => {
                 self.card = None;
                 Task::none()
             }
             // (the cards have no close button: Esc, or a click on the screen)
-            translate::Msg::Close => self.close(),
-            translate::Msg::Snip => self.snip_here(None),
-            translate::Msg::OpenSettings => {
+            pill::Msg::Close => self.close(),
+            pill::Msg::Snip => self.snip_here(None),
+            pill::Msg::OpenSettings => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);
                 closing.chain(settings.map(Message::Windows))
             }
             // The word card goes on as an Ask AI chat (its crop, its explanation).
-            translate::Msg::Ask => match session.take_chat() {
+            pill::Msg::Ask => match session.take_chat() {
                 // one chat: the explanation goes on in the pinned one
                 Some((_, chat)) if self.chat.is_some() => {
                     if let Some(open) = &mut self.chat {

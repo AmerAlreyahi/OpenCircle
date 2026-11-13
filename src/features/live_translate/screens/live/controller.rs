@@ -3,7 +3,7 @@
 //! layer's monitor (the layer shows nothing else; errors and the first-run
 //! note are its notice line). It takes clicks (the layer
 //! doesn't) and, on Windows, is excluded from capture like the layer. The
-//! language picker (source → target, `ui/picker.rs`), Pause / Resume, Hide
+//! language picker (source → target, `features/translate/screens/language_picker.rs`), Pause / Resume, Hide
 //! (collapses to a dot), Stop; and, when the languages' models are missing,
 //! the download question (live mode never steps without them). This file is
 //! its state and view (kit parts only: the widget surface, the grip, the

@@ -9,7 +9,7 @@ use crate::Trigger;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::settings::labs::BarButton;
 use crate::features::snip::annotate;
-use crate::features::snip::screens::snip::{self, Snip};
+use crate::features::snip::screens::pick::{self, Snip};
 use crate::features::text_reading::TextBlock;
 use crate::features::{
     circle::actions::{Action, qr, search_in_browser},
@@ -26,7 +26,7 @@ use crate::{
     app::windows,
     features::{
         ask_ai::screens::ai_chat, circle::screens::overlay, live_translate::screens::live_layer,
-        song::screens::song, translate::screens::translate,
+        song::screens::listen, translate::screens::pill,
     },
 };
 
@@ -47,10 +47,10 @@ pub(crate) enum Message {
     #[cfg(target_os = "linux")]
     CaptureSlow(u32),
     /// Snip capture number `.0` will open on this monitor (its grab runs).
-    Chosen(u32, snip::Place),
+    Chosen(u32, pick::Place),
     Overlay(overlay::Event),
     /// Another monitor's frame of capture number `.0` landed (`app::screens`).
-    Screen(u32, snip::Place, image::Handle),
+    Screen(u32, pick::Place, image::Handle),
     /// From another monitor's overlay window (its logical px).
     ScreenEvent(window::Id, overlay::Event),
     /// The pointer came into one of our windows: the edge glow follows it
@@ -84,7 +84,7 @@ pub(crate) enum Message {
     Windows(windows::Msg),
     /// From the Snip annotation editor.
     Annotate(annotate::Message),
-    Snip(snip::Msg),
+    Snip(pick::Msg),
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),
     /// Snip's More read the area's text (opening, which read; its lines).
@@ -110,7 +110,7 @@ pub(crate) enum Message {
     /// The selection's link or email chip was clicked (the only thing that opens it).
     OpenEntity(crate::features::circle::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
-    Translate(u32, translate::Msg),
+    Translate(u32, pill::Msg),
     /// Alt went down / up (peek at the original under a translation).
     Peek(bool),
     Live(live_layer::Msg),
@@ -172,7 +172,7 @@ pub(crate) enum Message {
     /// The music button (or the song_search quick action).
     SongStart,
     /// From the song search with this number (stale numbers are ignored).
-    Song(u32, song::Msg),
+    Song(u32, listen::Msg),
     /// Whether a song-search key is saved (checked once, off the UI thread).
     SongKey,
     /// Try the waiting update again (it waits while OpenCircle is in use).
@@ -291,12 +291,12 @@ pub(crate) struct Shot {
     pub(crate) snip: Option<SnipShot>,
     /// Main mode: every window at the freeze (physical desktop px, topmost
     /// first), for the bar's Snip; Snip's own are in `snip`.
-    pub(crate) windows: Vec<snip::Pick>,
+    pub(crate) windows: Vec<pick::Pick>,
 }
 
 pub(crate) type SnipShot = (
-    snip::Kind,
-    Vec<snip::Pick>,
+    pick::Kind,
+    Vec<pick::Pick>,
     Option<isize>,
-    Vec<(snip::Place, image::Handle)>,
+    Vec<(pick::Place, image::Handle)>,
 );

@@ -435,7 +435,7 @@ fn except_split(e: &mut Engine, p: &Page, split: bool) -> Vec<TextBlock> {
 /// PP-OCR reader returns, filtered as main mode filters Windows OCR's lines
 /// before the second reader (`plain`).
 fn plain_boxes(en: &[TextBlock]) -> Vec<[f32; 4]> {
-    // ponytail: a copy of ui::app::text::plain (private to the UI): the
+    // ponytail: a copy of features::text_reading::app::text::plain (private to the UI): the
     // stand-in's input only, not a second implementation in the app.
     let plain = |text: &str| {
         let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -511,7 +511,7 @@ fn run(
 /// Linux main mode as the app reads a screen once text is used (as before
 /// #169): bands from the pointer (mid-screen) out (`ocr::screen`), each
 /// band's crop sent to the helper with the rows it is read for
-/// (`ui::app::text::read_band`, `Engine::recognize_band`).
+/// (`features::text_reading::app::text::read_band`, `Engine::recognize_band`).
 fn linux_main(e: &mut Engine, p: &Page) -> Vec<TextBlock> {
     use super::screen::{Next, Rows, Wants, next};
     e.band_auto = 0; // a fresh helper: English first

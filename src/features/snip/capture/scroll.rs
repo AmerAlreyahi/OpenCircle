@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use super::stitch::{Push, Stitcher};
-use crate::features::circle::actions::Crop;
+use crate::shared::picture::Crop;
 
 /// Time between two GDI grabs (~15 fps).
 const PERIOD: Duration = Duration::from_millis(66);
@@ -426,7 +426,7 @@ impl Debug {
         if let Some(dir) = &self.dump {
             let path = dir.join(format!("{i:05}.png"));
             let (w, h) = self.size;
-            if let Err(e) = crate::features::circle::actions::write_png(&path, w, h, rgba) {
+            if let Err(e) = crate::shared::picture::write_png(&path, w, h, rgba) {
                 crate::log!("[opencircle] long capture: frame not saved ({e})");
             }
         }

@@ -160,7 +160,7 @@ fn the_part_2a_surfaces_write_no_words_of_their_own() {
         "src/app/screens/toast.rs",
         "src/features/text_reading/screens/model_download.rs",
         "src/features/ask_ai/screens/model_list.rs",
-        "src/features/translate/screens/translate/view.rs",
+        "src/features/translate/screens/pill/view.rs",
         "src/features/translate/screens/language_picker.rs",
     ]
     .iter()

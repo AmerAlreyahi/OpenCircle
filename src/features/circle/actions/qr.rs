@@ -1,7 +1,7 @@
 //! What the selection holds besides pictures: a QR code (its text becomes a chip on
 //! the action bar) and whether the capture came out black (a protected window).
 //! Blocking, so call [`scan`] off the UI thread. Nothing here opens anything.
-use super::Crop;
+use crate::shared::picture::Crop;
 
 /// Pixels this dark (every channel) count as black.
 const BLACK: u8 = 3;

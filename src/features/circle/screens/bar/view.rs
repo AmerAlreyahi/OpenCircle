@@ -10,7 +10,7 @@ use crate::app::keys;
 use crate::app::message::Message;
 use crate::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
 use crate::features::settings::labs::{self, BarButton};
-use crate::features::song::screens::song;
+use crate::features::song::screens::listen;
 use crate::features::{
     circle::actions::{qr, search_in_browser},
     text_reading::text,
@@ -157,7 +157,7 @@ impl App {
             ),
             (
                 BarButton::Song,
-                song::MUSIC,
+                listen::MUSIC,
                 t!(bar_song),
                 &keys.song,
                 false,

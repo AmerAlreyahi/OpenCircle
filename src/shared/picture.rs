@@ -1,6 +1,6 @@
-//! Crops of the frozen frame: cutting, scaling for export, encoding, stacking.
+//! Pictures: crops of the frozen frame (cutting, scaling for export, stacking) and
+//! PNG encoding, the one writer every feature and the test harness use.
 
-use super::encode_png;
 use iced::Rectangle;
 
 /// A crop of the frozen frame, in physical pixels.
@@ -151,6 +151,28 @@ pub fn stitch(frames: &[Part<'_>], area: [i32; 4]) -> Option<Crop> {
         height: height as u32,
         rgba,
     })
+}
+
+/// Writes an RGBA image as an 8-bit PNG.
+pub fn write_png(
+    path: &std::path::Path,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<(), String> {
+    std::fs::write(path, encode_png(width, height, rgba)?).map_err(|e| e.to_string())
+}
+
+/// An RGBA image as 8-bit PNG bytes.
+pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(rgba).map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::features::settings::labs;
-use crate::features::text_reading as ocr;
+use crate::features::text_reading;
 use crate::features::text_reading::text;
 use crate::shared::config;
 
@@ -23,7 +23,7 @@ use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor;
 use crate::{
     app::windows,
-    features::{circle::screens::overlay, snip::screens::snip, translate::screens::translate},
+    features::{circle::screens::overlay, snip::screens::pick, translate::screens::pill},
 };
 
 use super::capture::{TEST_SHOT, save_test_shot};
@@ -95,7 +95,7 @@ impl App {
             Message::Translate(id, msg) => self.on_translate(id, msg),
             Message::Peek(down) => {
                 if let Some((_, session)) = &mut self.o.translate {
-                    let _ = session.update(translate::Msg::Peek(down));
+                    let _ = session.update(pill::Msg::Peek(down));
                 }
                 Task::none()
             }
@@ -105,10 +105,10 @@ impl App {
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..)) if self.cast.is_some() => {
                 self.cast_finish(crate::features::snip::capture::scroll::Finish::Done)
             }
-            Message::Snip(snip::Msg::Progress(update)) if self.cast.is_some() => {
+            Message::Snip(pick::Msg::Progress(update)) if self.cast.is_some() => {
                 self.cast_progress(update)
             }
-            Message::Snip(snip::Msg::Done(stitched)) if self.cast.is_some() => {
+            Message::Snip(pick::Msg::Done(stitched)) if self.cast.is_some() => {
                 self.cast_done(stitched)
             }
             Message::Trigger(Trigger::Capture(_) | Trigger::Quick(..))
@@ -151,12 +151,12 @@ impl App {
                 // the live pin quick action is a snip whose pick is pinned live
                 self.live_next = qa.action == crate::shared::platform::hotkey::QuickId::LivePin;
                 if qa.action == "snip" || self.live_next {
-                    return self.capture(at, Some(snip::Kind::for_target(qa.target)));
+                    return self.capture(at, Some(pick::Kind::for_target(qa.target)));
                 }
                 // the colour picker, the ruler: a snip that opens with it
                 if let Some(tool) = crate::features::snip::screens::tools::for_action(&qa.action) {
                     self.tool_next = Some(tool);
-                    return self.capture(at, Some(snip::Kind::Region));
+                    return self.capture(at, Some(pick::Kind::Region));
                 }
                 match Quick::for_id(&qa.action) {
                     Some(q) => self.next = Purpose::Quick(q, qa.target),
@@ -237,7 +237,7 @@ impl App {
                 Task::none()
             }
             // long capture's Esc is its Cancel: back to the picked area
-            Message::Escape if self.scroll().is_some() => self.on_snip(snip::Msg::Finish(
+            Message::Escape if self.scroll().is_some() => self.on_snip(pick::Msg::Finish(
                 crate::features::snip::screens::long_capture::Finish::Cancel,
             )),
             // a screen tool's closes it (back to the picked area, if it came from there)
@@ -639,8 +639,8 @@ impl App {
                 self.o.reading = None;
                 match read {
                     Ok(lines) => {
-                        let system = self.o.text_by == Some(ocr::Source::System);
-                        let source = self.o.text_by.unwrap_or(ocr::Source::Helper);
+                        let system = self.o.text_by == Some(text_reading::Source::System);
+                        let source = self.o.text_by.unwrap_or(text_reading::Source::Helper);
                         let screen = self.o.screen;
                         // (Windows OCR's closer read replaces its quick one)
                         let first = self.o.screen_text.add_read(source, band, lines, screen);
@@ -651,7 +651,7 @@ impl App {
                         if first {
                             self.log_mark("[opencircle] first lines under the pointer");
                         }
-                        let other = system && ocr::reads_other_scripts();
+                        let other = system && text_reading::reads_other_scripts();
                         if whole && !other && (first || !system) {
                             self.log_mark("[opencircle] screen text ready");
                         }
@@ -661,9 +661,9 @@ impl App {
                         Task::batch([done, released, self.read_more(), other])
                     }
                     // Windows OCR couldn't (no recognizer, #63): the helper reads
-                    Err(e) if self.o.text_by == Some(ocr::Source::System) => {
+                    Err(e) if self.o.text_by == Some(text_reading::Source::System) => {
                         crate::log!("[opencircle] Windows OCR didn't read the screen: {e}");
-                        self.o.text_by = Some(ocr::Source::Helper);
+                        self.o.text_by = Some(text_reading::Source::Helper);
                         self.note_reader();
                         let released = self.release_held();
                         Task::batch([released, self.warm(), self.read_more()])
@@ -863,7 +863,7 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::SongKey
             | Message::UpdateTick
             | Message::TestShot(_)
-            | Message::Snip(snip::Msg::Shoot(_) | snip::Msg::Done(_) | snip::Msg::Progress(_))
+            | Message::Snip(pick::Msg::Shoot(_) | pick::Msg::Done(_) | pick::Msg::Progress(_))
     )
 }
 

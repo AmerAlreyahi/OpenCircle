@@ -9,7 +9,7 @@
 use iced::{Point, Rectangle, Size, Vector};
 
 use crate::features::text_reading::screen::{self, Band, Next, Rows, Wants};
-use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::features::text_reading::{self, TextBlock};
 
 /// What OCR reads around a tap (image px): wide enough for the line around a word.
 const REGION: Size = Size::new(720.0, 160.0);
@@ -704,13 +704,13 @@ impl Picked {
 /// Main mode's text, read on demand band by band (#123): never at open; the
 /// band the user touches first, then (once text was used) the rest, nearest
 /// the pointer first. Which rows are read and what comes next is
-/// `ocr::screen`; this keeps the lines.
+/// `text_reading::screen`; this keeps the lines.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Screen {
     /// The lines of each read stretch of rows, by its first row: top to bottom.
     parts: Vec<(f32, Vec<Line>)>,
     rows: Rows,
-    /// Lines the second reader found in other scripts (`ocr::read_screen`
+    /// Lines the second reader found in other scripts (`text_reading::read_screen`
     /// after Windows OCR): they replace any first-read line they overlap.
     extra: Vec<Line>,
     /// The rows the second reader read.
@@ -822,7 +822,7 @@ impl Screen {
         Some(rect(self.rows.next_band(y, screen.height)?, screen))
     }
 
-    /// What the user wants read now (`ocr::screen::next`): `None` = nothing;
+    /// What the user wants read now (`text_reading::screen::next`): `None` = nothing;
     /// else the band (`None` inside: the whole screen) and whether gently.
     pub fn schedule(&self, screen: Size, w: &Wants) -> Option<(Option<Rectangle>, bool)> {
         match screen::next(&self.rows, screen.height, w) {
@@ -850,13 +850,13 @@ impl Screen {
     /// quick one. Returns whether this is the first read.
     pub fn add_read(
         &mut self,
-        source: ocr::Source,
+        source: text_reading::Source,
         band: Rectangle,
         lines: Vec<Line>,
         screen: Size,
     ) -> bool {
         let (new, first) = self.rows.mark_read(source, band_of(band), screen.height);
-        if source == ocr::Source::System {
+        if source == text_reading::Source::System {
             self.parts.clear();
         }
         self.keep(new, lines);

@@ -4,7 +4,7 @@ use iced::Element;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::column;
 
-/// The views of the editor's screen (`ui::screens::snip_toolbar`), as the tests
+/// The views of the editor's screen (`features::snip::screens::snip_toolbar`), as the tests
 /// look at them.
 impl Annotator {
     fn canvas(&self) -> Element<'_, Message> {
@@ -2740,7 +2740,7 @@ fn shoot(
     let scale = 2.0;
     let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);
     let rgba = renderer.screenshot(Size::new(w, h), scale, background);
-    crate::features::circle::actions::write_png(path, w, h, &rgba).unwrap();
+    crate::shared::picture::write_png(path, w, h, &rgba).unwrap();
 }
 
 /// `OPENCIRCLE_EDITOR_PNG=<dir> cargo test annotate::tests::snapshots_move -- --ignored`
@@ -2852,8 +2852,7 @@ fn snapshots() {
     shoot(e.view(), size, backdrop, &dir.join("editor-dark.png"));
     let flat = render(&e.doc);
     let path = dir.join("flattened.png");
-    crate::features::circle::actions::write_png(&path, flat.width, flat.height, &flat.rgba)
-        .unwrap();
+    crate::shared::picture::write_png(&path, flat.width, flat.height, &flat.rgba).unwrap();
 }
 
 /// The toolbar is icon-only: each button's tooltip is its only name, and none of

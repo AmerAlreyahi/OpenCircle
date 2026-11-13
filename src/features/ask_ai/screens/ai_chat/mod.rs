@@ -18,11 +18,11 @@ use iced::{Task, task};
 
 use crate::app::background::background;
 use crate::app::keys;
-use crate::features::ask_ai as ai;
+use crate::features::ask_ai;
 use crate::features::ask_ai::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::features::ask_ai::providers::{self, Preset};
 use crate::features::ask_ai::screens::model_list::{self, ModelList};
-use crate::features::circle::actions::{self, Crop};
+
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Provider, StaysOpen};
 use crate::shared::kit::markdown::Act;
@@ -31,6 +31,8 @@ use crate::shared::kit::{dropdown, motion, spinner};
 use crate::{features::ask_ai::chats, shared::store};
 
 mod view;
+use crate::features::circle::actions;
+use crate::shared::picture::Crop;
 pub use view::{actions, ai_error, card, note, provider_name};
 
 /// The follow-up input. Never focused by itself: until it is clicked, letters
@@ -47,7 +49,7 @@ pub enum Tab {
 }
 
 /// A provider the drawer's quick picker offers: Settings' own list
-/// (`ai::providers::PRESETS`, by real name), after the browser. Its key is that
+/// (`ask_ai::providers::PRESETS`, by real name), after the browser. Its key is that
 /// provider's own keyring entry (`providers::key_of`, read by the reload).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pick(Option<Preset>);
@@ -122,7 +124,7 @@ pub enum Msg {
     Stop,
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
-    Answered(Result<(), ai::AiError>),
+    Answered(Result<(), ask_ai::AiError>),
     /// The error card's Show / Hide details.
     Details,
     /// Search the crop with Lens (the chat's "Search the image with Lens").
@@ -852,7 +854,7 @@ fn open_in_browser(crop: &Crop, prompt: &str, include: bool) -> Result<String, S
         prompt,
         include,
         actions::search_in_browser::open_asking,
-        ai::browser::ask,
+        ask_ai::browser::ask,
     )
 }
 
@@ -864,7 +866,7 @@ fn open_in_browser_with(
     lens: impl FnOnce(&Crop, &str) -> Result<(), String>,
     ai_mode: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<String, String> {
-    let prompt = ai::browser::question(prompt, None); // trimmed
+    let prompt = ask_ai::browser::question(prompt, None); // trimmed
     if !include {
         ai_mode(&prompt)?;
         return Ok(crate::t!(chat_opened_short).into());

@@ -1,4 +1,4 @@
-//! The overlay's view (moves to ui/screens with the UI plan).
+//! The overlay's view.
 
 use crate::t;
 use iced::widget::{canvas, container, image, opaque, pin, space, stack};
@@ -13,7 +13,7 @@ use crate::app::screens::toast;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::circle::screens::edge as border;
 use crate::features::circle::screens::overlay;
-use crate::features::snip::screens::snip;
+use crate::features::snip::screens::pick;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading::app::word;
 use crate::shared::kit::panel_frame as card;
@@ -276,7 +276,7 @@ impl App {
                         &self.colours,
                         look,
                     ))
-                    .map(snip::Msg::Tool)
+                    .map(pick::Msg::Tool)
                 }
                 (None, None) => snip.view(),
             }

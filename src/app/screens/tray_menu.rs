@@ -1,7 +1,7 @@
 //! The tray menu (Windows; the design's widgets/tray-menu.js): `platform::tray::entries` as
 //! `kit::option_list` rows with the user's shortcuts as hints, a separator above Settings, a ✓ on
 //! Live translate while it runs. Arrows walk the rows, Enter picks, Esc closes (`Menu::key`); the
-//! window (`ui::windows`) closes it on focus loss, which an outside click is.
+//! window (`app::windows`) closes it on focus loss, which an outside click is.
 use iced::{Element, Size};
 
 use crate::features::settings::labs::Labs;

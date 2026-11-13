@@ -1,6 +1,6 @@
 //! Translate: the text in the selection (or the whole screen, Ctrl+Shift+T) is
 //! replaced by its translation in place. `crate::features::translate` does the work,
-//! `ui/translate.rs` shows it, `ui/live_layer.rs` repeats it (live mode).
+//! `features/translate/screens/pill/` shows it, `features/live_translate/screens/live_layer.rs` repeats it (live mode).
 use crate::features::ask_ai::ask;
 use crate::features::circle::actions::{Action, Key, Run};
 use crate::features::text_reading::models;

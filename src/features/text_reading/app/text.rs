@@ -7,11 +7,8 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Task, Vector};
 
 use crate::features::text_reading::screen::Wants;
-use crate::features::text_reading::{self as ocr, TextBlock};
-use crate::features::{
-    circle::actions::{self, Crop, copy},
-    text_reading::text,
-};
+use crate::features::text_reading::{self, TextBlock};
+use crate::features::{circle::actions::copy, text_reading::text};
 
 use crate::app::background::background;
 use crate::app::message::{Await, Message, PickAct, Purpose, WordRead};
@@ -19,6 +16,7 @@ use crate::features::circle::screens::overlay;
 use crate::features::text_reading::app::word;
 
 use crate::app::{App, DOUBLE_CLICK, Reader, TextMode, WARM_AFTER};
+use crate::shared::picture::{self, Crop};
 
 impl App {
     /// A tap at `at` (image px): the word there becomes the selection. Lines read
@@ -128,7 +126,7 @@ impl App {
     /// offers them (`Reader::Missing`). Nothing is read at open (#123).
     pub(crate) fn note_reader(&mut self) {
         if matches!(self.o.purpose, Purpose::Search) && !self.o.ocr_ready && !self.system_text() {
-            self.o.reader = Reader::Missing(ocr::download_size());
+            self.o.reader = Reader::Missing(text_reading::download_size());
         }
     }
 
@@ -151,10 +149,10 @@ impl App {
             cfg.translate.source.clone(),
         ];
         languages.extend(system);
-        if let Some(rec) = ocr::models::missing_reader(&languages) {
+        if let Some(rec) = text_reading::models::missing_reader(&languages) {
             self.o.script_offered = true;
             self.o.script_reader = Some(rec);
-            let bytes = ocr::models::missing_bytes(&ocr::models::ocr_files(rec));
+            let bytes = text_reading::models::missing_bytes(&text_reading::models::ocr_files(rec));
             crate::log!("[opencircle] the {} text reader is offered", rec.script);
             self.o.reader = Reader::Missing(bytes);
         }
@@ -164,7 +162,7 @@ impl App {
     /// read again (Windows: the second reader; Linux: every band).
     pub(crate) fn read_again(&mut self) -> Task<Message> {
         match self.o.text_by {
-            Some(ocr::Source::System) => {
+            Some(text_reading::Source::System) => {
                 self.o.other_read = false;
                 self.read_other_scripts()
             }
@@ -195,9 +193,9 @@ impl App {
 
     /// Main mode read the whole screen and found no text (#169).
     pub(crate) fn no_text(&self) -> bool {
-        let others_done = self.o.text_by != Some(ocr::Source::System)
+        let others_done = self.o.text_by != Some(text_reading::Source::System)
             || self.o.other_read
-            || !ocr::reads_other_scripts();
+            || !text_reading::reads_other_scripts();
         self.reads_text()
             && self.reading_text().is_none()
             && self.text_whole()
@@ -232,10 +230,11 @@ impl App {
     }
 
     /// Windows OCR reads this opening's text (#62): decided at its first read,
-    /// until then what `ocr::route` says now.
+    /// until then what `text_reading::route` says now.
     pub(crate) fn system_text(&self) -> bool {
-        let route = || ocr::route(self.o.behaviour.text_reader, ocr::system::known());
-        self.o.text_by.unwrap_or_else(route) == ocr::Source::System
+        let route =
+            || text_reading::route(self.o.behaviour.text_reader, text_reading::system::known());
+        self.o.text_by.unwrap_or_else(route) == text_reading::Source::System
     }
 
     /// After the opening animation: Windows OCR reads the whole screen (#62)
@@ -259,7 +258,7 @@ impl App {
             // after the bar has settled too; closed meanwhile: nothing starts
             std::thread::sleep(WARM_AFTER);
             if let Some(_held) = held.upgrade()
-                && let Err(e) = ocr::warm()
+                && let Err(e) = text_reading::warm()
             {
                 crate::log!("[opencircle] the text reader didn't start: {e}");
             }
@@ -285,8 +284,8 @@ impl App {
             .map(|p| p.y)
             .collect();
         let source = match self.system_text() {
-            true => ocr::Source::System,
-            false => ocr::Source::Helper,
+            true => text_reading::Source::System,
+            false => text_reading::Source::Helper,
         };
         let wants = Wants {
             source,
@@ -297,7 +296,7 @@ impl App {
             pointer: self.o.pointer.y,
         };
         let next = self.o.screen_text.schedule(self.o.screen, &wants);
-        if source == ocr::Source::Helper || next.is_some() {
+        if source == text_reading::Source::Helper || next.is_some() {
             self.o.text_by = Some(source);
         }
         let Some((band, gently)) = next else {
@@ -323,7 +322,7 @@ impl App {
             return Task::none();
         };
         let (width, height, pixels) = (*width, *height, pixels.clone());
-        let Some([x0, y0, ..]) = actions::crop_bounds(width, height, self.o.scale, band) else {
+        let Some([x0, y0, ..]) = picture::crop_bounds(width, height, self.o.scale, band) else {
             return Task::none();
         };
         // only the lines it is read for (frame px in the crop)
@@ -338,11 +337,11 @@ impl App {
         let band_rows = (at(top), at(bottom));
         self.o.reading = Some(band);
         let opening = self.opening;
-        let system =
-            (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
+        let system = (self.o.text_by == Some(text_reading::Source::System))
+            .then_some(self.o.behaviour.text_reader);
         // Linux main mode keeps the band-by-band read (owner, 2026-11-12) until
         // its follow-up plugs in HERE: the part-by-part read below
-        // (`ocr::read_screen`; the helper keeps the lines it found, not the
+        // (`text_reading::read_screen`; the helper keeps the lines it found, not the
         // picture, and loads one reader at a time).
         let whole_screen = cfg!(windows);
         let held = self
@@ -356,7 +355,7 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return;
             };
-            let send = |read: Result<Vec<TextBlock>, ocr::OcrError>, origin: [u32; 2]| {
+            let send = |read: Result<Vec<TextBlock>, text_reading::OcrError>, origin: [u32; 2]| {
                 let lines = read.map(|blocks| {
                     let mut lines = word::lines(blocks, origin, scale);
                     word::measure(&mut lines, &pixels, width, height, scale);
@@ -366,22 +365,23 @@ impl App {
             };
             let Some(setting) = system else {
                 if !whole_screen {
-                    let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
-                        let empty = ocr::OcrError::BadImage("an empty band".into());
+                    let Some(c) = picture::crop(&pixels, width, height, scale, band) else {
+                        let empty = text_reading::OcrError::BadImage("an empty band".into());
                         return send(Err(empty), [x0, y0]);
                     };
-                    let read = ocr::recognize_band(&c.rgba, c.width, c.height, band_rows, gently);
+                    let read =
+                        text_reading::recognize_band(&c.rgba, c.width, c.height, band_rows, gently);
                     return send(read, [x0, y0]);
                 }
                 // (the helper keeps the lines it found, the part's rows come
                 // with each part)
                 let key = u64::from(opening);
-                let read = ocr::read_screen(
+                let read = text_reading::read_screen(
                     key,
                     &pixels,
                     width,
                     height,
-                    Some(ocr::part_rows(rows, height)),
+                    Some(text_reading::part_rows(rows, height)),
                     rows,
                     &[],
                     true,
@@ -398,23 +398,25 @@ impl App {
                     Err(e) => send(Err(e), [0, 0]),
                 };
             };
-            let Some(c) = actions::crop(&pixels, width, height, scale, band) else {
+            let Some(c) = picture::crop(&pixels, width, height, scale, band) else {
                 return send(
-                    Err(ocr::OcrError::BadImage("an empty band".into())),
+                    Err(text_reading::OcrError::BadImage("an empty band".into())),
                     [x0, y0],
                 );
             };
             // its language known now: a right-to-left one goes to the helper
-            if ocr::route(setting, Some(ocr::system::language())) == ocr::Source::Helper {
+            if text_reading::route(setting, Some(text_reading::system::language()))
+                == text_reading::Source::Helper
+            {
                 let rtl = "Windows OCR: a right-to-left language";
-                return send(Err(ocr::OcrError::Engine(rtl.into())), [x0, y0]);
+                return send(Err(text_reading::OcrError::Engine(rtl.into())), [x0, y0]);
             }
             // fast, then (small text) doubled: each read replaces the last
-            for (i, &k) in ocr::system::passes(scale, c.width, c.height)
+            for (i, &k) in text_reading::system::passes(scale, c.width, c.height)
                 .iter()
                 .enumerate()
             {
-                match ocr::system::recognize(&c.rgba, c.width, c.height, k) {
+                match text_reading::system::recognize(&c.rgba, c.width, c.height, k) {
                     Err(e) if i > 0 => {
                         crate::log!("[opencircle] Windows OCR's second read: {e}")
                     }
@@ -439,17 +441,18 @@ impl App {
     pub(crate) fn read_other_scripts(&mut self) -> Task<Message> {
         if self.o.other_read
             || self.o.other_reading.is_some()
-            || self.o.text_by != Some(ocr::Source::System)
+            || self.o.text_by != Some(text_reading::Source::System)
             || !self.o.screen_text.is_whole(self.o.screen.height)
         {
             return Task::none();
         }
-        if !ocr::reads_other_scripts() {
+        if !text_reading::reads_other_scripts() {
             // no reader for another script: Windows OCR's noise says one is needed
             self.o.other_read = true;
             let lines = self.o.screen_text.lines();
             let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
-            let well = ocr::system::read_well(&texts, ocr::system::known().flatten());
+            let well =
+                text_reading::system::read_well(&texts, text_reading::system::known().flatten());
             let letters = |t: &&str| t.chars().any(char::is_alphabetic);
             let noise = (texts.iter().zip(&well))
                 .filter(|(t, w)| letters(t) && !**w)
@@ -465,8 +468,8 @@ impl App {
         if self.o.other_known.is_none() {
             let lines = self.o.screen_text.lines();
             let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
-            let language = ocr::system::known().flatten();
-            let well = ocr::system::read_well(&texts, language);
+            let language = text_reading::system::known().flatten();
+            let well = text_reading::system::read_well(&texts, language);
             let known: Vec<[f32; 4]> = (lines.iter().zip(&well))
                 .filter(|(_, well)| **well)
                 .map(|(l, _)| {
@@ -523,8 +526,9 @@ impl App {
             };
             let key = u64::from(opening);
             let part = send_frame.then_some((0, height));
-            let read =
-                ocr::read_screen(key, &pixels, width, height, part, rows, &known, false, true);
+            let read = text_reading::read_screen(
+                key, &pixels, width, height, part, rows, &known, false, true,
+            );
             let read = read.map(|read| {
                 let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
                 if read.done {
@@ -615,7 +619,7 @@ impl App {
             return None;
         };
         let all = Rectangle::with_size(self.o.screen);
-        actions::crop(pixels, *width, *height, self.o.scale, all)
+        picture::crop(pixels, *width, *height, self.o.scale, all)
     }
 
     /// The picked words stretch to `at` (image px), where a drag ended or a Shift
@@ -662,8 +666,8 @@ impl App {
             return Task::none();
         }
         let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.o.scale, region),
-            actions::crop(pixels, *width, *height, self.o.scale, region),
+            picture::crop_bounds(*width, *height, self.o.scale, region),
+            picture::crop(pixels, *width, *height, self.o.scale, region),
         ) else {
             return Task::none();
         };
@@ -676,7 +680,7 @@ impl App {
             extend,
         };
         background(move |tx| {
-            let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
+            let read = text_reading::recognize_in_child(&crop.rgba, crop.width, crop.height);
             let _ = tx.unbounded_send(read.map_err(|e| e.to_string()));
         })
         .map(move |read| Message::Tapped(what, read))
@@ -760,7 +764,7 @@ impl App {
         let area = self.area();
         // Windows OCR read the screen: its words in the box, the same ones (and
         // places) a text selection there picks; no second read (#150).
-        if self.o.text_by == Some(ocr::Source::System) && self.text_whole() {
+        if self.o.text_by == Some(text_reading::Source::System) && self.text_whole() {
             let lines = word::within(self.lines_iter(), area);
             self.o.ai_chat = None;
             self.o.text_mode = Some(TextMode {
@@ -772,7 +776,7 @@ impl App {
             return Task::none();
         }
         if !text::models_present() {
-            self.o.reader = Reader::Missing(ocr::download_size());
+            self.o.reader = Reader::Missing(text_reading::download_size());
             return Task::none();
         }
         let Some(image::Handle::Rgba {
@@ -785,8 +789,8 @@ impl App {
             return Task::none();
         };
         let (Some([x0, y0, ..]), Some(crop)) = (
-            actions::crop_bounds(*width, *height, self.o.scale, area),
-            actions::crop(pixels, *width, *height, self.o.scale, area),
+            picture::crop_bounds(*width, *height, self.o.scale, area),
+            picture::crop(pixels, *width, *height, self.o.scale, area),
         ) else {
             return Task::none();
         };
@@ -799,7 +803,7 @@ impl App {
             picking: false,
         });
         background(move |tx| {
-            let read = ocr::recognize_in_child(&crop.rgba, crop.width, crop.height);
+            let read = text_reading::recognize_in_child(&crop.rgba, crop.width, crop.height);
             let lines = read.map(|blocks| {
                 let mut lines = word::lines(blocks, [x0, y0], scale);
                 word::measure(&mut lines, &frame.2, frame.0, frame.1, scale);

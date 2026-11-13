@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use iced::window::{self};
 use iced::{Element, Point, Rectangle, Size, Vector};
 
-use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::features::text_reading::{self, TextBlock};
 
 use crate::app::message::Message;
 use crate::features::ask_ai::screens::ai_chat;
@@ -451,7 +451,7 @@ fn the_opening_stays_within_its_frame_budget() {
     for _ in 0..3 {
         let mut app = open_app(w, h, 1.0);
         app.o.appear = None;
-        app.o.text_by = Some(ocr::Source::System);
+        app.o.text_by = Some(text_reading::Source::System);
         let mut read = Duration::ZERO;
         let drawn = frames(&mut app, 16, false, |app, i, now| {
             let _ = app.update(Message::Frame(now));

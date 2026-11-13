@@ -10,7 +10,7 @@ use crate::app::background::background;
 use crate::app::message::{Message, Purpose};
 use crate::features::circle::actions::copy;
 use crate::features::snip::screens::tools::{self, Tool, Which, picker, ruler};
-use crate::features::{circle::screens::overlay, snip::screens::snip};
+use crate::features::{circle::screens::overlay, snip::screens::pick};
 
 use crate::app::App;
 
@@ -52,10 +52,10 @@ impl App {
         self.frame_times.borrow_mut().clear();
         let opening = self.opening;
         background(|tx| {
-            std::thread::sleep(Duration::from_secs(snip::HINT_SECS));
+            std::thread::sleep(Duration::from_secs(pick::HINT_SECS));
             let _ = tx.unbounded_send(());
         })
-        .map(move |()| Message::Snip(snip::Msg::HintGone(opening)))
+        .map(move |()| Message::Snip(pick::Msg::HintGone(opening)))
     }
 
     /// The frozen frame under `p` (the starting screen's logical px), that
@@ -230,13 +230,13 @@ impl App {
             std::thread::sleep(Duration::from_millis(tools::COPIED_MS));
             let _ = tx.unbounded_send(());
         });
-        copied.map(move |()| Message::Snip(snip::Msg::Tool(tools::Msg::CopiedGone(id))))
+        copied.map(move |()| Message::Snip(pick::Msg::Tool(tools::Msg::CopiedGone(id))))
     }
 }
 
 /// The pointer at `p`: the tool's, snapped to window and control edges for a
 /// box (as a snip's corners are; the snip's hover reads the controls there).
-fn place(snip: &mut snip::Snip, p: Point) -> (&mut Tool, Point) {
+fn place(snip: &mut pick::Snip, p: Point) -> (&mut Tool, Point) {
     let boxed = (snip.tool.as_ref()).is_some_and(|t| t.ruler.mode == ruler::Mode::Box);
     // (the snip's hover walks every control under the pointer: only a box snaps)
     let p = match boxed {
@@ -278,7 +278,7 @@ mod tests {
     use crate::features::circle::actions::copy;
     use crate::features::circle::screens::overlay::Event;
     use crate::features::snip::annotate;
-    use crate::features::snip::screens::snip::{self, Snip};
+    use crate::features::snip::screens::pick::{self, Snip};
     use crate::features::snip::screens::tools::{self, Which, ruler};
 
     const WINDOW: Rectangle = Rectangle {
@@ -446,7 +446,7 @@ mod tests {
             scale: 1.0,
             origin: Point::ORIGIN,
             size: Size::new(4.0, 4.0),
-            snip: Some((snip::Kind::Region, Vec::new(), None, Vec::new())),
+            snip: Some((pick::Kind::Region, Vec::new(), None, Vec::new())),
             windows: Vec::new(),
         };
         let _ = app.update(Message::Captured(3, Instant::now(), Ok(shot)));
@@ -528,7 +528,7 @@ mod frames {
             let mut through = false;
             for m in clicked(&app, Point::new(x as f32, 46.0)) {
                 match m {
-                    Message::Snip(crate::features::snip::screens::snip::Msg::Tool(Msg::Mode(
+                    Message::Snip(crate::features::snip::screens::pick::Msg::Tool(Msg::Mode(
                         mode,
                     ))) => modes.push(mode),
                     Message::Overlay(Event::Press { .. }) => through = true,

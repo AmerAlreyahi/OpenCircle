@@ -12,7 +12,7 @@ use super::{OcrError, TextBlock};
 
 /// A gap between two words wider than this many line heights splits a line:
 /// two columns side by side are two lines (as PP-OCR's detector finds them),
-/// so a drag keeps to its column (`ui::word::Picked`).
+/// so a drag keeps to its column (`features::text_reading::app::word::Picked`).
 const COLUMN_GAP: f32 = 2.5;
 
 /// A word Windows read: its text and box (x, y, w, h; frame px).

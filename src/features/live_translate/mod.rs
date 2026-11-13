@@ -62,7 +62,7 @@ pub fn prepare_controller(handle: RawWindowHandle) -> Result<bool, LayerError> {
 /// (its patches have their own guard). A step blanks these out, so our own
 /// UI (a menu, a card, a pill, a toast) is never read or translated.
 // ponytail: Windows only; X11 needs a walk of the window tree by _NET_WM_PID,
-// so there only the controller's rect is masked (`ui::live_layer`).
+// so there only the controller's rect is masked (`features::live_translate::screens::live_layer`).
 pub fn own_windows() -> Vec<[i32; 4]> {
     #[cfg(windows)]
     return win::own_windows();
@@ -315,7 +315,7 @@ mod win {
             let old = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             // tool window: no taskbar button, not in Alt+Tab
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, old | (ex | WS_EX_TOOLWINDOW).0 as isize);
-            // a fade under way (`ui::windows::fade`, the controller) keeps its alpha
+            // a fade under way (`app::windows::fade`, the controller) keeps its alpha
             let (mut alpha, mut flags) = (255, LAYERED_WINDOW_ATTRIBUTES_FLAGS(0));
             let fading = old & WS_EX_LAYERED.0 as isize != 0
                 && GetLayeredWindowAttributes(hwnd, None, Some(&mut alpha), Some(&mut flags))

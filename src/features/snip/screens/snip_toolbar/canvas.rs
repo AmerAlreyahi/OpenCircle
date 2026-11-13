@@ -120,7 +120,7 @@ struct Pointer {
     hot: Option<(i8, i8)>,
     /// Ctrl is held: a press moves what is under it (`Message::PressMove`).
     ctrl: bool,
-    /// The finger held (touch or pen acts as the left button: `ui::touch`).
+    /// The finger held (touch or pen acts as the left button: `shared::touch`).
     finger: Option<iced::touch::Finger>,
 }
 

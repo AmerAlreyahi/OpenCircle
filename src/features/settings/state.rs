@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use iced::{Color, Size, Subscription, event, keyboard};
 
 use crate::features::settings::labs::Feature;
-use crate::features::song::{self as music, SERVICE, Service};
+use crate::features::song::{self, SERVICE, Service};
 use crate::features::translate::lang::{self, LANGUAGES, Language};
 use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
@@ -1573,7 +1573,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     .extend(field.update(slot, k).map(|j| (true, j)));
                 // The overlay's music button shows from now on (or hides).
                 if answer || !field.busy() {
-                    music::remember_key(field.status == KeyStatus::Saved);
+                    song::remember_key(field.status == KeyStatus::Saved);
                 }
             }
         }

@@ -9,7 +9,7 @@ use iced::window::{self, Mode};
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::features::{
-    circle::actions::{self, Crop, Run, copy, save},
+    circle::actions::{Run, copy, save},
     text_reading::text,
 };
 use crate::shared::config;
@@ -21,26 +21,27 @@ use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::{
     app::windows,
-    features::snip::screens::{long_capture_popup, snip},
+    features::snip::screens::{long_capture_popup, pick},
 };
 
 use crate::app::{ASK_MARGIN, App, work_area};
+use crate::shared::picture::{self, Crop};
 
 impl App {
-    pub(crate) fn on_snip(&mut self, msg: snip::Msg) -> Task<Message> {
+    pub(crate) fn on_snip(&mut self, msg: pick::Msg) -> Task<Message> {
         // The timer ran out and the overlay is gone (hidden or closed): capture
         // again in that mode, unless something else opened meanwhile.
-        if let snip::Msg::Shoot(kind) = msg {
+        if let pick::Msg::Shoot(kind) = msg {
             if self.o.frame.is_some() || self.capturing.is_some() {
                 return Task::none();
             }
             self.timed = true;
             return self.capture(Instant::now(), Some(kind));
         }
-        if let snip::Msg::Tool(msg) = msg {
+        if let pick::Msg::Tool(msg) = msg {
             return self.on_tool(msg);
         }
-        if let snip::Msg::Progress(update) = msg {
+        if let pick::Msg::Progress(update) = msg {
             return self.on_progress(update);
         }
         let o = &mut *self.o;
@@ -48,13 +49,13 @@ impl App {
             return Task::none();
         };
         match msg {
-            snip::Msg::Finish(how) => {
+            pick::Msg::Finish(how) => {
                 if let Some(long) = &mut snip.scroll {
                     long.finish(how);
                 }
                 Task::none()
             }
-            snip::Msg::Done(stitched) => {
+            pick::Msg::Done(stitched) => {
                 let Some(long) = snip.scroll.take() else {
                     return Task::none();
                 };
@@ -102,7 +103,7 @@ impl App {
                 };
                 whole.chain(then)
             }
-            snip::Msg::Delay(secs) => {
+            pick::Msg::Delay(secs) => {
                 let Some(id) = snip.delay(secs) else {
                     return Task::none();
                 };
@@ -128,12 +129,12 @@ impl App {
                         }
                     }
                 })
-                .map(move |left| Message::Snip(snip::Msg::Tick(id, left)));
+                .map(move |left| Message::Snip(pick::Msg::Tick(id, left)));
                 self.pill_at_top().chain(ticks)
             }
             // Time's up: the overlay goes first (hidden or closed, as anything
             // closes), so the pill is in no capture.
-            snip::Msg::Tick(id, left) => match snip.tick(id, left) {
+            pick::Msg::Tick(id, left) => match snip.tick(id, left) {
                 Some(true) if snip.shoot(id) => {
                     let kind = snip.kind;
                     let wait = Duration::from_millis(300);
@@ -141,46 +142,46 @@ impl App {
                 }
                 _ => Task::none(),
             },
-            snip::Msg::Shoot(_) => Task::none(), // handled above
-            snip::Msg::Cancel => self.close(),
-            snip::Msg::Controls(opening, controls) => {
+            pick::Msg::Shoot(_) => Task::none(), // handled above
+            pick::Msg::Cancel => self.close(),
+            pick::Msg::Controls(opening, controls) => {
                 if opening == self.opening {
                     snip.add_controls(controls);
                 }
                 Task::none()
             }
-            snip::Msg::Shift(held) => {
+            pick::Msg::Shift(held) => {
                 snip.set_shift(held);
                 Task::none()
             }
-            snip::Msg::Recent(recent) => {
+            pick::Msg::Recent(recent) => {
                 snip.set_recent(recent);
                 Task::none()
             }
-            snip::Msg::OpenRecent(path) => background(move |tx| {
+            pick::Msg::OpenRecent(path) => background(move |tx| {
                 let _ = tx.unbounded_send(crate::shared::history::recent::open(&path));
             })
-            .map(|read| Message::Snip(snip::Msg::Loaded(read))),
-            snip::Msg::Loaded(Ok(crop)) => {
+            .map(|read| Message::Snip(pick::Msg::Loaded(read))),
+            pick::Msg::Loaded(Ok(crop)) => {
                 self.o.selection = None;
                 self.o.stroke.clear();
                 self.snip_captured(Some(crop), false)
             }
-            snip::Msg::Loaded(Err(e)) => {
+            pick::Msg::Loaded(Err(e)) => {
                 crate::log!("[opencircle] recent capture unreadable: {e}");
                 Task::none()
             }
-            snip::Msg::ClearRecent => {
+            pick::Msg::ClearRecent => {
                 snip.set_recent(Vec::new());
                 crate::shared::history::recent::clear();
                 Task::none()
             }
-            snip::Msg::HintGone(opening) if opening == self.opening => {
+            pick::Msg::HintGone(opening) if opening == self.opening => {
                 snip.hinting = false;
                 Task::none()
             }
-            snip::Msg::HintGone(_) => Task::none(),
-            snip::Msg::Tool(_) | snip::Msg::Progress(_) => Task::none(), // handled above
+            pick::Msg::HintGone(_) => Task::none(),
+            pick::Msg::Tool(_) | pick::Msg::Progress(_) => Task::none(), // handled above
         }
     }
 
@@ -208,14 +209,14 @@ impl App {
             .find(|w| w.label != "Window")
             .map(|w| w.window);
         let start = self.place();
-        let mut snip = snip::Snip::new(
+        let mut snip = pick::Snip::new(
             windows,
             start,
             crate::features::snip::capture::scroll::can_scroll(),
             user,
         );
         snip.set_monitors(self.monitors());
-        let _ = snip.start(snip::Kind::Region, self.o.screen);
+        let _ = snip.start(pick::Kind::Region, self.o.screen);
         let (reader, read) = std::sync::mpsc::channel();
         if cfg!(windows) {
             snip.read_later(reader, crate::app::UIA_WINDOWS);
@@ -251,12 +252,12 @@ impl App {
 
     /// Shrinks the overlay to the pill at the top of the monitor (no focus taken).
     pub(crate) fn pill_at_top(&mut self) -> Task<Message> {
-        let x = (self.o.screen.width - snip::PILL.width) / 2.0;
+        let x = (self.o.screen.width - pick::PILL.width) / 2.0;
         self.pill_window(Point::new(x.max(0.0), ASK_MARGIN))
     }
 
     /// THE one way Snip's pills (timer, scrolling progress) become a
-    /// window: the overlay shrunk to `snip::PILL` at `at` (logical px on this
+    /// window: the overlay shrunk to `pick::PILL` at `at` (logical px on this
     /// monitor). Switch it to the shared floating-window helper when it lands.
     /// Wayland can't move, shrink or hide a window (`can_hide_windows`): the
     /// overlay stays full-screen there and `view` draws the pill over the frame.
@@ -273,23 +274,23 @@ impl App {
             .chain(windows::opacity(self.overlay, 1.0))
             .chain(crate::shared::platform::monitor::resize(
                 self.overlay,
-                snip::PILL,
+                pick::PILL,
             ))
             .chain(window::move_to(
                 self.overlay,
                 self.o.origin + Vector::new(at.x, at.y),
             ))
             // The window is exactly the pill: cut it to the pill's shape (no box).
-            .chain(windows::cut(self.overlay, snip::PILL_RADIUS).map(Message::Windows))
+            .chain(windows::cut(self.overlay, pick::PILL_RADIUS).map(Message::Windows))
     }
 
     /// `Shoot(kind)` after `wait` (the overlay is gone by then).
-    pub(crate) fn shoot_after(wait: Duration, kind: snip::Kind) -> Task<Message> {
+    pub(crate) fn shoot_after(wait: Duration, kind: pick::Kind) -> Task<Message> {
         background(move |tx| {
             std::thread::sleep(wait);
             let _ = tx.unbounded_send(());
         })
-        .map(move |()| Message::Snip(snip::Msg::Shoot(kind)))
+        .map(move |()| Message::Snip(pick::Msg::Shoot(kind)))
     }
 
     /// Snip's slow extras, on threads: the Recent strip, and (Windows) the
@@ -299,14 +300,14 @@ impl App {
         let recent = background(|tx| {
             let _ = tx.unbounded_send(crate::shared::history::recent::load());
         })
-        .map(|recent| Message::Snip(snip::Msg::Recent(recent)));
+        .map(|recent| Message::Snip(pick::Msg::Recent(recent)));
         // the freeze hint goes after its 2 s (no frame clock while still)
         let opening = self.opening;
         let hint = background(|tx| {
-            std::thread::sleep(std::time::Duration::from_secs(snip::HINT_SECS));
+            std::thread::sleep(std::time::Duration::from_secs(pick::HINT_SECS));
             let _ = tx.unbounded_send(());
         })
-        .map(move |()| Message::Snip(snip::Msg::HintGone(opening)));
+        .map(move |()| Message::Snip(pick::Msg::HintGone(opening)));
         let recent = Task::batch([recent, hint]);
         if !cfg!(windows) {
             return recent;
@@ -319,13 +320,13 @@ impl App {
                 let tx = tx.clone();
                 std::thread::spawn(move || {
                     let controls = (capture::uia::controls(window).into_iter())
-                        .map(|(r, what)| snip::Pick::control(snip::desktop_rect(r), &what, window))
+                        .map(|(r, what)| pick::Pick::control(pick::desktop_rect(r), &what, window))
                         .collect();
                     let _ = tx.unbounded_send(controls);
                 });
             }
         })
-        .map(move |rects| Message::Snip(snip::Msg::Controls(opening, rects)));
+        .map(move |rects| Message::Snip(pick::Msg::Controls(opening, rects)));
         Task::batch([recent, controls])
     }
 
@@ -340,7 +341,7 @@ impl App {
         if remember {
             crate::shared::history::recent::remember(&crop);
         }
-        let copy = snip::copies(config::current().snip.after);
+        let copy = pick::copies(config::current().snip.after);
         self.snip_routed(crop, in_place, copy)
     }
 
@@ -379,7 +380,7 @@ impl App {
     }
 
     /// Where a snip pick leads: the editor on the area, or a scrolling capture.
-    pub(crate) fn snip_next(&mut self, next: Option<snip::Next>) -> Task<Message> {
+    pub(crate) fn snip_next(&mut self, next: Option<pick::Next>) -> Task<Message> {
         match next {
             None => {
                 self.o.selection = None;
@@ -387,12 +388,12 @@ impl App {
                 Task::none()
             }
             // the live pin quick action: no editor, the pin at once
-            Some(snip::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.live_pin) =>
+            Some(pick::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.live_pin) =>
             {
                 self.select(area);
                 self.live_pin(area)
             }
-            Some(snip::Next::Edit(area)) => {
+            Some(pick::Next::Edit(area)) => {
                 self.select(area);
                 self.snip_captured(None, true)
             }
@@ -409,7 +410,7 @@ impl App {
         let Some(image::Handle::Rgba { width, height, .. }) = &o.frame else {
             return None;
         };
-        let [x0, y0, x1, y1] = actions::crop_bounds(*width, *height, o.scale, area)?;
+        let [x0, y0, x1, y1] = picture::crop_bounds(*width, *height, o.scale, area)?;
         let at = |v: f32, offset: u32| (v * o.scale).round() as i32 + offset as i32;
         Some((at(o.origin.x, x0), at(o.origin.y, y0), x1 - x0, y1 - y0))
     }
@@ -663,7 +664,7 @@ impl App {
                 }
                 self.picked_next = Some((None, crop));
                 self.next = Purpose::Search;
-                return self.capture(Instant::now(), Some(snip::Kind::Region));
+                return self.capture(Instant::now(), Some(pick::Kind::Region));
             }
         };
         let (Run::Finish(run), id, popup) = (action.run, action.id, cast.popup) else {
@@ -772,13 +773,13 @@ fn stitch(
     background(move |tx| {
         std::thread::sleep(wait);
         let each = |update| {
-            let _ = tx.unbounded_send(snip::Msg::Progress(update));
+            let _ = tx.unbounded_send(pick::Msg::Progress(update));
         };
         let max = config::current().snip.long_max;
         let stitched = crate::features::snip::capture::scroll::by_hand(
             region, preview, cover, max, &stop, each,
         );
-        let _ = tx.unbounded_send(snip::Msg::Done(stitched));
+        let _ = tx.unbounded_send(pick::Msg::Done(stitched));
     })
     .map(Message::Snip)
 }

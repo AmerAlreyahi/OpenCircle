@@ -2,9 +2,10 @@
 //! folder (else Pictures/OpenCircle), named OpenCircle-date-time. Scaled to `snip.max_edge` unless `snip.save_original`.
 use std::path::{Path, PathBuf};
 
-use super::{Action, Crop, Key};
+use super::{Action, Key};
 use crate::shared::app_language::{S, Said, fmt};
 use crate::shared::config::{Format, SnipConfig};
+use crate::shared::picture::Crop;
 
 pub const ACTION: Action = Action {
     id: "save",
@@ -31,7 +32,7 @@ fn write_into(folder: &Path, crop: &Crop, format: Format) -> Result<String, Stri
         Format::Jpeg => "jpg",
     };
     let stamp = timestamp();
-    super::encode(crop, format)
+    crate::shared::picture::encode(crop, format)
         .and_then(|bytes| write_new(folder, &stamp, ext, &bytes).map_err(|e| e.to_string()))
         .map_err(|e| {
             crate::log!("save failed: {e}");
@@ -81,7 +82,10 @@ fn short_path(folder: &Path) -> String {
 /// What Save writes: the crop at the export size (or original), and its format.
 fn export(crop: Crop, snip: &SnipConfig) -> (Crop, Format) {
     let max = if snip.save_original { 0 } else { snip.max_edge };
-    (super::fit_long_edge(crop, max), snip.format)
+    (
+        crate::shared::picture::fit_long_edge(crop, max),
+        snip.format,
+    )
 }
 
 /// Where saves go when no folder is set: the Pictures folder + `OpenCircle`.

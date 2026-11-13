@@ -6,12 +6,11 @@
 use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
-use super::snip;
+use super::pick;
 use crate::app::App;
 use crate::app::frame_times::frames;
 use crate::app::message::Message;
 use crate::app::tests::snipping_on;
-use crate::features::circle::actions::Crop;
 use crate::features::circle::screens::overlay::Event;
 use crate::features::snip::annotate::Message as E;
 use crate::features::snip::capture::scroll::Update;
@@ -20,6 +19,7 @@ use crate::features::snip::screens::long_capture;
 use crate::features::snip::screens::tools::{self, Which, picker, ruler};
 use crate::shared::kit::testing::golden;
 use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+use crate::shared::picture::Crop;
 
 const W: u32 = 1280;
 const H: u32 = 720;
@@ -268,7 +268,7 @@ fn tool(which: Which) -> App {
     let mut app = snipping();
     let _ = app.start_tool(which);
     let opening = app.opening;
-    let _ = app.update(Message::Snip(snip::Msg::HintGone(opening)));
+    let _ = app.update(Message::Snip(pick::Msg::HintGone(opening)));
     app
 }
 
@@ -314,8 +314,8 @@ fn long(height: u32, full: bool) -> App {
         lost: false,
         preview: Some(preview),
     };
-    let _ = app.update(Message::Snip(snip::Msg::Progress(first)));
-    let _ = app.update(Message::Snip(snip::Msg::Progress(update)));
+    let _ = app.update(Message::Snip(pick::Msg::Progress(first)));
+    let _ = app.update(Message::Snip(pick::Msg::Progress(update)));
     app
 }
 
@@ -325,7 +325,7 @@ fn shoot(name: &str, app: &mut App) -> Result<(), String> {
     if let Some(dir) = std::env::var_os("OPENCIRCLE_RENDER_DIR") {
         let file = std::path::Path::new(&dir).join(format!("{name}.png"));
         let _ = std::fs::create_dir_all(file.parent().unwrap());
-        crate::features::circle::actions::write_png(&file, W, H, rgba).unwrap();
+        crate::shared::picture::write_png(&file, W, H, rgba).unwrap();
     }
     if !golden::enabled() {
         return Ok(());
@@ -348,7 +348,7 @@ fn the_long_capture_count_mirrors() {
             ("limit-rtl", MAX_HEIGHT, true, true),
         ] {
             let _ar = rtl.then(crate::shared::kit::testing::arabic);
-            let view = long_capture::count::<crate::features::snip::screens::snip::Msg>(
+            let view = long_capture::count::<crate::features::snip::screens::pick::Msg>(
                 height, full, false,
             );
             let px = crate::shared::kit::testing::shot::render(

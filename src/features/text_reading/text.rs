@@ -1,9 +1,10 @@
 //! Text (Copy text): read the text in the crop and copy it. OCR runs in a helper
 //! process (`crate::features::text_reading`); its models are downloaded once, only after the user
 //! agrees (the download card; the app asks before it ever gets here).
-use crate::features::circle::actions::{Action, Crop, Key, Run};
-use crate::features::text_reading::{self as ocr, TextBlock};
+use crate::features::circle::actions::{Action, Key, Run};
+use crate::features::text_reading::{self, TextBlock};
 use crate::shared::app_language::S;
+use crate::shared::picture::Crop;
 
 pub const ACTION: Action = Action {
     id: "text",
@@ -53,7 +54,7 @@ pub fn models_present() -> bool {
     if let Some(here) = MODELS_HERE.get() {
         return here;
     }
-    ocr::ready()
+    text_reading::ready()
 }
 
 #[cfg(test)]
@@ -67,35 +68,35 @@ thread_local! {
 pub fn read(crop: &Crop, mut progress: impl FnMut(Progress)) -> Result<String, String> {
     download(&mut progress).map_err(|e| e.to_string())?;
     progress(Progress::Reading);
-    let blocks =
-        ocr::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())?;
+    let blocks = text_reading::recognize_in_child(&crop.rgba, crop.width, crop.height)
+        .map_err(|e| e.to_string())?;
     Ok(join_lines(&blocks))
 }
 
 /// Blocking: fetches any missing OCR model (only after the user agreed),
 /// reporting whole-percent `Progress::Download` steps.
-pub fn download(progress: impl FnMut(Progress)) -> Result<(), ocr::OcrError> {
+pub fn download(progress: impl FnMut(Progress)) -> Result<(), text_reading::OcrError> {
     download_reader(None, progress)
 }
 
 /// `download` for recognizer `rec` (the configured source's for `None`).
 pub(crate) fn download_reader(
-    rec: Option<&'static ocr::models::Recognizer>,
+    rec: Option<&'static text_reading::models::Recognizer>,
     mut progress: impl FnMut(Progress),
-) -> Result<(), ocr::OcrError> {
+) -> Result<(), text_reading::OcrError> {
     let mut shown = None;
     let each = |done: u64, total: u64| {
         let percent = done * 100 / total.max(1);
         // a retry's wait redraws the card too ("Retrying...")
-        let now = (percent, ocr::models::retrying());
+        let now = (percent, text_reading::models::retrying());
         if shown != Some(now) {
             shown = Some(now);
             progress(Progress::Download(percent as f32 / 100.0));
         }
     };
     match rec {
-        Some(rec) => ocr::models::ensure_reader(rec, each),
-        None => ocr::ensure_models(each).map(drop),
+        Some(rec) => text_reading::models::ensure_reader(rec, each),
+        None => text_reading::ensure_models(each).map(drop),
     }
 }
 
@@ -254,7 +255,7 @@ mod copy_read_tests {
     #[test]
     fn copy_text_never_downloads_the_models() {
         super::MODELS_HERE.set(Some(false));
-        let crop = crate::features::circle::actions::Crop {
+        let crop = crate::shared::picture::Crop {
             width: 1,
             height: 1,
             rgba: vec![0; 4],

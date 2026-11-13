@@ -24,7 +24,7 @@ use iced::widget::{canvas as draw, container, image, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme, mouse};
 
 use crate::features::snip::capture::scroll::Update;
-use crate::features::snip::screens::snip::Msg;
+use crate::features::snip::screens::pick::Msg;
 use crate::shared::kit::area;
 use crate::shared::kit::chip;
 use crate::shared::kit::key_hint::{self, key_hint};
@@ -359,7 +359,7 @@ pub fn corner(area: Rectangle, bar: Rectangle, scale: f32) -> Option<Rectangle> 
 
 /// Wayland's long capture pop-up (owner, 2026-11-10): the overlay can't be cut
 /// there, so the picture, its count and Copy / Save / Done / Cancel sit in a
-/// window of their own beside the area (`ui::long_capture_popup`, XWayland):
+/// window of their own beside the area (`features::snip::screens::long_capture_popup`, XWayland):
 /// the picture (with its 1 px edge) over this panel, both against the area's
 /// side, top-aligned with it. Never over the area: the stream would hold it.
 pub const POPUP_PANEL: Size = Size::new(174.0, 128.0);
@@ -811,7 +811,7 @@ mod tests {
             height: 680,
             full: false,
             lost: false,
-            preview: Some(crate::features::circle::actions::Crop {
+            preview: Some(crate::shared::picture::Crop {
                 width: 160,
                 height: 85,
                 rgba: vec![9; 160 * 85 * 4],
@@ -958,7 +958,7 @@ mod tests {
                 height: h,
                 full: false,
                 lost: false,
-                preview: Some(crate::features::circle::actions::Crop {
+                preview: Some(crate::shared::picture::Crop {
                     width: w,
                     height: h,
                     rgba: vec![0; (w * h * 4) as usize],

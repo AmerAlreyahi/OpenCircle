@@ -194,7 +194,7 @@ pub enum Theme {
     Dark,
 }
 
-/// The dark themes `[appearance] dark` may name (`ui::kit::themes`; a test there keeps
+/// The dark themes `[appearance] dark` may name (`shared::kit::themes`; a test there keeps
 /// both lists equal to its own).
 pub const DARK_THEMES: [&str; 9] = [
     "sapphire", "obsidian", "mica", "titanium", "amethyst", "emerald", "rose", "graphite",
@@ -236,7 +236,7 @@ pub enum Logo {
     Purple,
 }
 
-/// The look of the floating widgets (bar, cards, toolbar), from `ui/theme.rs`.
+/// The look of the floating widgets (bar, cards, toolbar), from `shared/theme.rs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetTheme {
@@ -566,7 +566,7 @@ pub enum LookTheme {
     Mono,
     Calm,
     Custom,
-    /// Schema 4: the design's other looks (`ui::kit::looks`), written only when picked.
+    /// Schema 4: the design's other looks (`shared::kit::looks`), written only when picked.
     Horizon,
     Solar,
     Hud,
@@ -578,7 +578,7 @@ pub enum LookTheme {
 }
 
 /// The edge / accent colours: a preset palette (its colours live in
-/// `ui/theme.rs`) or two of the user's own.
+/// `shared/theme.rs`) or two of the user's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColourSet {

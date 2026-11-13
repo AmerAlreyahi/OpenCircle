@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 pub use super::lang::is_rtl;
 use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
-use crate::features::ask_ai::{self as ai, AiError};
-use crate::features::text_reading::{self as ocr, OcrError, TextBlock};
+use crate::features::ask_ai::{self, AiError};
+use crate::features::text_reading::{self, OcrError, TextBlock};
 use crate::features::translate::mt;
 use crate::shared::config::{AiConfig, TextReader};
 use crate::shared::secrets::Secret;
@@ -60,7 +60,7 @@ pub struct Real {
     /// waited for).
     held: Mutex<Option<(&'static mt::Pair, Vec<String>)>>,
     /// "auto": the page read as noise and readers for other scripts are
-    /// missing: the UI offers them (`ocr::models::other_scripts_files`).
+    /// missing: the UI offers them (`text_reading::models::other_scripts_files`).
     readers: std::sync::atomic::AtomicBool,
     /// Offline: the pairs this translation used (`outdated`).
     used: Mutex<Vec<&'static mt::Pair>>,
@@ -97,7 +97,7 @@ impl Real {
     /// Windows OCR reads this source (`system_reads`; asks Windows once).
     fn system(&self) -> bool {
         let reader = crate::shared::config::current().selection.text_reader;
-        system_reads(reader, ocr::system::language(), &self.source)
+        system_reads(reader, text_reading::system::language(), &self.source)
     }
 
     pub fn offline(&self) -> bool {
@@ -250,7 +250,7 @@ impl Real {
         let Via::Ai { ai, key } = &self.via else {
             return self.on_device(texts, target);
         };
-        match ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
+        match ask_ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
             // A reply that isn't the array (a chatty model): on-device instead
             // of an error card, when a model exists for these lines.
             Err(AiError::BadResponse(why)) if self.routes(texts, target).is_ok() => {
@@ -301,7 +301,7 @@ impl Real {
                 pair.label()
             )));
         }
-        ocr::keep_warm();
+        text_reading::keep_warm();
         {
             let mut used = self.used.lock().unwrap_or_else(|e| e.into_inner());
             for p in routes.iter().flat_map(|(r, _)| r) {
@@ -586,7 +586,7 @@ fn word_count(lines: &[TextBlock]) -> (usize, usize) {
 }
 
 /// Of a `misread` page, the lines Windows OCR (reading `language`) read
-/// well (`ocr::system::read_well`: real words; #169, "all" and "lal" passed
+/// well (`text_reading::system::read_well`: real words; #169, "all" and "lal" passed
 /// as words) or an address (the browser's address bar: dropped, the tabs
 /// above it were not known as chrome on an Arabic page on Windows), and
 /// their boxes: the second reader leaves them alone.
@@ -595,7 +595,7 @@ pub(crate) fn words_read(
     language: Option<&str>,
 ) -> (Vec<TextBlock>, Vec<[f32; 4]>) {
     let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
-    let well = ocr::system::read_well(&texts, language);
+    let well = text_reading::system::read_well(&texts, language);
     let keep: Vec<TextBlock> = (lines.into_iter().zip(well))
         .filter(|(l, well)| *well || address(&l.text))
         .map(|(l, _)| l)
@@ -822,7 +822,7 @@ fn made_up(src: &str, out: &str, target: &str) -> bool {
 
 /// Windows OCR reads the text (#62: a screen in ~0.1-0.3 s, in this
 /// process) where `reader` routes to it for its language `tag`
-/// (`ocr::route`: not right-to-left) and `source` is that language or
+/// (`text_reading::route`: not right-to-left) and `source` is that language or
 /// "auto"; else PP-OCR. One-shot and live translate alike (#56, #107).
 fn system_reads(reader: TextReader, tag: Option<&str>, source: &str) -> bool {
     let base = |t: &str| {
@@ -831,7 +831,7 @@ fn system_reads(reader: TextReader, tag: Option<&str>, source: &str) -> bool {
             .unwrap_or_default()
             .to_lowercase()
     };
-    ocr::route(reader, Some(tag)) == ocr::Source::System
+    text_reading::route(reader, Some(tag)) == text_reading::Source::System
         && (source == lang::AUTO || tag.is_some_and(|t| base(t) == base(source)))
 }
 
@@ -839,17 +839,17 @@ impl Real {
     /// `recognize` without the check for noise.
     fn read_page(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
         if self.system() {
-            let k = *ocr::system::passes(self.scale, width, height)
+            let k = *text_reading::system::passes(self.scale, width, height)
                 .last()
                 .unwrap_or(&1);
-            match ocr::system::recognize(rgba, width, height, k) {
+            match text_reading::system::recognize(rgba, width, height, k) {
                 Ok(lines) if self.source == lang::AUTO && misread(&lines) => {
                     // another script: what it read as words stays (the
                     // address bar, Latin UI), the rest is read again in the
                     // script that suits it (main mode's second reader)
                     crate::log!("[opencircle] Windows OCR read no words: the second reader reads");
-                    let (keep, known) = words_read(lines, ocr::system::language());
-                    match ocr::recognize_except(rgba, width, height, &known, false) {
+                    let (keep, known) = words_read(lines, text_reading::system::language());
+                    match text_reading::recognize_except(rgba, width, height, &known, false) {
                         Ok(other) if !other.is_empty() => return Ok(merged(keep, other)),
                         Ok(_) => {
                             crate::log!("[opencircle] no other script read; PP-OCR reads")
@@ -861,13 +861,15 @@ impl Real {
                 }
                 // a game's screen: PP-OCR reads it too (no PP-OCR here: as read)
                 Ok(lines) if lines.len() <= SPARSE => {
-                    return Ok(match ocr::recognize_as(rgba, width, height, &self.source) {
-                        Ok(pp) => reread(lines, pp),
-                        Err(e) => {
-                            crate::log!("[opencircle] no second read of a sparse screen ({e})");
-                            lines
-                        }
-                    });
+                    return Ok(
+                        match text_reading::recognize_as(rgba, width, height, &self.source) {
+                            Ok(pp) => reread(lines, pp),
+                            Err(e) => {
+                                crate::log!("[opencircle] no second read of a sparse screen ({e})");
+                                lines
+                            }
+                        },
+                    );
                 }
                 Ok(lines) => return Ok(lines),
                 Err(e) => {
@@ -875,7 +877,7 @@ impl Real {
                 }
             }
         }
-        ocr::recognize_as(rgba, width, height, &self.source)
+        text_reading::recognize_as(rgba, width, height, &self.source)
     }
 }
 
@@ -916,7 +918,7 @@ impl Deps for Real {
         let lines = self.read_page(rgba, width, height)?;
         if self.source == lang::AUTO
             && unreadable(&lines)
-            && !ocr::models::other_scripts_files().is_empty()
+            && !text_reading::models::other_scripts_files().is_empty()
             && !READERS_ASKED.swap(true, Relaxed)
         {
             crate::log!("[opencircle] the page read as noise: readers for other scripts offered");
@@ -955,7 +957,7 @@ impl Deps for Real {
             return;
         };
         if self.offline() && pair.missing_bytes() == 0 {
-            ocr::keep_warm();
+            text_reading::keep_warm();
             std::thread::spawn(move || mt::translate(&[], pair));
         }
     }
@@ -2259,7 +2261,7 @@ pub(crate) mod tests {
         );
         assert!(out.rgba == direct, "the [[ ]] spans went to render as is");
         // and the real client asks for them
-        ai::translate_with(&["x".into()], "auto", "ar", MARKUP, |m| {
+        ask_ai::translate_with(&["x".into()], "auto", "ar", MARKUP, |m| {
             assert!(m[0].text.ends_with(MARKUP));
             Ok(r#"["y"]"#.into())
         })
@@ -2639,7 +2641,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Real OCR (in process; models from `ocr::models_dir()`), a fake
+    /// Real OCR (in process; models from `text_reading::models_dir()`), a fake
     /// translator (fixed Arabic, else the text reversed), the synthetic 1080p
     /// game frame; one-shot, then live steps. PNGs in the temp dir. Run:
     /// cargo test --release e2e_real_ocr -- --ignored --nocapture
@@ -2649,11 +2651,11 @@ pub(crate) mod tests {
         use super::super::tests::{ar, game_frame, save_png};
         use crate::features::live_translate::live::Live;
 
-        struct RealOcr(Mutex<ocr::Engine>);
+        struct RealOcr(Mutex<text_reading::Engine>);
         impl Deps for RealOcr {
             fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
                 let mut engine = self.0.lock().unwrap();
-                engine.recognize(rgba, w, h, ocr::Read::One(0))
+                engine.recognize(rgba, w, h, text_reading::Read::One(0))
             }
             fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
                 Ok(texts
@@ -2664,7 +2666,9 @@ pub(crate) mod tests {
         }
 
         let t = Instant::now();
-        let deps = RealOcr(Mutex::new(ocr::Engine::load(&ocr::models_dir()).unwrap()));
+        let deps = RealOcr(Mutex::new(
+            text_reading::Engine::load(&text_reading::models_dir()).unwrap(),
+        ));
         crate::log!("OCR engine load {:?}", t.elapsed());
         let (img, _) = game_frame();
         let (w, h) = (1920, 1080);

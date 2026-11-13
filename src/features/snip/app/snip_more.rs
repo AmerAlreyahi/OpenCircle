@@ -1,9 +1,10 @@
 //! Snip toolbar's More: Copy text, Ask AI, Translate on the picked area
 //! (`actions::snip_more` holds the decisions, `SNIP_MORE_SPEC.md` the design).
 //! The work is main mode's: `actions::text` reads, `open_chat` asks (the
-//! annotated picture), `translate::Session` translates; Copy text and
+//! annotated picture), `pill::Session` translates; Copy text and
 //! Translate see the clean capture with Blur / Redact / Spotlight-dimmed parts
 //! painted out first.
+use crate::shared::picture::Crop;
 use iced::widget::image;
 use iced::{Rectangle, Task};
 
@@ -11,9 +12,9 @@ use crate::app::background::background;
 use crate::features::snip::annotate::{self, Message as E};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::snip::snip_more::{self as more, Hidden, Read, Row};
-use crate::features::text_reading::{self as ocr, TextBlock};
-use crate::features::translate::screens::translate;
-use crate::features::{circle::actions::Crop, text_reading::text};
+use crate::features::text_reading::text;
+use crate::features::text_reading::{self, TextBlock};
+use crate::features::translate::screens::pill;
 use crate::shared::config;
 
 use crate::app::message::{Message, Purpose};
@@ -90,7 +91,7 @@ impl App {
         self.o.more.key = Some(key.clone());
         self.o.more.blocks.clear();
         let source = self.text_source();
-        if source == ocr::Source::Helper && !text::models_present() {
+        if source == text_reading::Source::Helper && !text::models_present() {
             // the card asks on the click (Copy text); Translate asks its own
             self.o.more.read = Read::NoModels;
             self.sync_more();
@@ -112,9 +113,12 @@ impl App {
         .map(move |read| Message::MoreRead(opening, id, read))
     }
 
-    /// Who reads here: main mode's decision (`ocr::route`).
-    fn text_source(&self) -> ocr::Source {
-        ocr::route(self.o.behaviour.text_reader, Some(ocr::system::language()))
+    /// Who reads here: main mode's decision (`text_reading::route`).
+    fn text_source(&self) -> text_reading::Source {
+        text_reading::route(
+            self.o.behaviour.text_reader,
+            Some(text_reading::system::language()),
+        )
     }
 
     pub(crate) fn on_more_read(
@@ -191,7 +195,7 @@ impl App {
             Read::NoModels => {
                 // the existing download card (beside the toolbar), then copy
                 self.o.copy_after = true;
-                self.o.reader = Reader::Missing(ocr::download_size());
+                self.o.reader = Reader::Missing(text_reading::download_size());
                 Task::none()
             }
             Read::Text => {
@@ -248,7 +252,7 @@ impl App {
         self.o.more.was_own = edit.annotator.own_image;
         self.o.more.original = Some(original);
         self.o.ai_chat = None;
-        let (session, task) = translate::Session::start(
+        let (session, task) = pill::Session::start(
             frame,
             area,
             self.o.scale,
@@ -339,7 +343,7 @@ impl App {
 }
 
 /// Reads `crop`'s lines as main mode's bar does: Windows OCR where
-/// `ocr::route` says so (Windows), else the PP-OCR helper (Linux and the
+/// `text_reading::route` says so (Windows), else the PP-OCR helper (Linux and the
 /// languages Windows OCR cannot read).
 fn read_crop(
     crop: &Crop,
@@ -350,16 +354,18 @@ fn read_crop(
     if cfg!(test) {
         return Err("no reader in tests".into());
     }
-    if ocr::route(setting, Some(ocr::system::language())) == ocr::Source::System {
-        let k = *ocr::system::passes(scale, crop.width, crop.height)
+    if text_reading::route(setting, Some(text_reading::system::language()))
+        == text_reading::Source::System
+    {
+        let k = *text_reading::system::passes(scale, crop.width, crop.height)
             .last()
             .unwrap_or(&1);
-        match ocr::system::recognize(&crop.rgba, crop.width, crop.height, k) {
+        match text_reading::system::recognize(&crop.rgba, crop.width, crop.height, k) {
             Ok(blocks) => return Ok(blocks),
             Err(e) => crate::log!("[opencircle] Windows OCR (More): {e}; using the helper"),
         }
     }
-    ocr::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())
+    text_reading::recognize_in_child(&crop.rgba, crop.width, crop.height).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

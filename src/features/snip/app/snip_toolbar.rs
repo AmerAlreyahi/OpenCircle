@@ -3,7 +3,7 @@
 use iced::widget::image;
 use iced::{Point, Rectangle, Task};
 
-use crate::features::circle::actions::{self, Crop, copy, save};
+use crate::features::circle::actions::{copy, save};
 use crate::features::snip::annotate::{self, Image, Output};
 
 use crate::app::message::{Message, Purpose};
@@ -13,6 +13,7 @@ use crate::shared::kit::motion;
 use crate::app::App;
 use crate::app::capture::TEST_SHOT;
 use crate::app::monitors::to_desktop;
+use crate::shared::picture::{self, Crop};
 
 impl App {
     /// Edit in place: the selection's pixels become the editor's canvas, at their
@@ -47,7 +48,7 @@ impl App {
             _ => None,
         };
         let edit = joined.or_else(|| {
-            let bounds = actions::crop_bounds(*width, *height, self.o.scale, selection.area)?;
+            let bounds = picture::crop_bounds(*width, *height, self.o.scale, selection.area)?;
             let frame = Image {
                 width: *width,
                 height: *height,
@@ -169,7 +170,7 @@ impl App {
                 annotate::Message::AskAi => Finish::AskAi,
                 _ => return Task::none(),
             };
-            return self.on_snip(crate::features::snip::screens::snip::Msg::Finish(how));
+            return self.on_snip(crate::features::snip::screens::pick::Msg::Finish(how));
         }
         let o = &mut *self.o;
         let Some(edit) = &mut o.edit else {
@@ -265,7 +266,7 @@ impl App {
         self.next = Purpose::Search;
         self.capture(
             std::time::Instant::now(),
-            Some(crate::features::snip::screens::snip::Kind::Region),
+            Some(crate::features::snip::screens::pick::Kind::Region),
         )
     }
 

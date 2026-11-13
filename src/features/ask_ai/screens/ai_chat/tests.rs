@@ -43,7 +43,7 @@ fn include_screen_off_opens_the_ai_mode_link_and_writes_no_page() {
             Ok(())
         },
         |q| {
-            url = ai::browser::url(q).0;
+            url = ask_ai::browser::url(q).0;
             Ok(String::new())
         },
     );
@@ -230,7 +230,9 @@ fn a_streamed_answer_is_markdown_and_stop_keeps_the_part_so_far() {
     // Stop mid-stream: no panic, the part so far stays, a late piece is dropped.
     let _ = panel.update(Msg::Stop);
     let _ = panel.update(Msg::Delta(rest.into()));
-    let _ = panel.update(Msg::Answered(Err(ai::AiError::Network("Stopped.".into()))));
+    let _ = panel.update(Msg::Answered(Err(ask_ai::AiError::Network(
+        "Stopped.".into(),
+    ))));
     assert_eq!(chat(&panel).status, Status::Cancelled);
     assert_eq!(chat(&panel).turns[0].answer, first);
     assert!(panel.work.is_none());
@@ -277,31 +279,31 @@ const GONE: &str = "This model models/gemini-2.0-flash is no longer available. P
 fn an_error_is_a_calm_card_with_its_fix() {
     let cases = [
         (
-            ai::AiError::Rejected(404, GONE.into()),
+            ask_ai::AiError::Rejected(404, GONE.into()),
             "This model isn't available",
             "Choose another model",
             true,
         ),
         (
-            ai::AiError::Server(503, String::new()),
+            ask_ai::AiError::Server(503, String::new()),
             "The AI provider is busy right now",
             "Retry",
             false,
         ),
         (
-            ai::AiError::Auth(401, String::new()),
+            ask_ai::AiError::Auth(401, String::new()),
             "The API key was rejected",
             "Check the key",
             false,
         ),
         (
-            ai::AiError::Network("dns failed".into()),
+            ask_ai::AiError::Network("dns failed".into()),
             "No connection",
             "Retry",
             false,
         ),
         (
-            ai::AiError::NotConfigured("add a key".into()),
+            ask_ai::AiError::NotConfigured("add a key".into()),
             "AI isn't set up yet",
             "Open settings",
             false,
@@ -332,18 +334,24 @@ fn an_error_is_a_calm_card_with_its_fix() {
     // the 404's detail: two lines, then all of it
     let mut panel = api_chat();
     ask(&mut panel, "Hi");
-    let _ = panel.update(Msg::Answered(Err(ai::AiError::Rejected(404, GONE.into()))));
-    let full = ai::AiError::Rejected(404, GONE.into()).detail();
+    let _ = panel.update(Msg::Answered(Err(ask_ai::AiError::Rejected(
+        404,
+        GONE.into(),
+    ))));
+    let full = ask_ai::AiError::Rejected(404, GONE.into()).detail();
     assert!(!texts(&panel).contains(&full) && texts(&panel).iter().any(|t| t.ends_with('…')));
     let _ = panel.update(Msg::Details);
     assert!(texts(&panel).contains(&full) && texts(&panel).iter().any(|t| t == "Hide details"));
     // each fix opens its place
-    assert!(matches!(view::fix(ai::Fix::Model), Msg::ChooseModel));
-    assert!(matches!(view::fix(ai::Fix::Key), Msg::OpenAiSettings));
-    assert!(matches!(view::fix(ai::Fix::Settings), Msg::OpenAiSettings));
-    assert!(matches!(view::fix(ai::Fix::Retry), Msg::Regenerate));
+    assert!(matches!(view::fix(ask_ai::Fix::Model), Msg::ChooseModel));
+    assert!(matches!(view::fix(ask_ai::Fix::Key), Msg::OpenAiSettings));
+    assert!(matches!(
+        view::fix(ask_ai::Fix::Settings),
+        Msg::OpenAiSettings
+    ));
+    assert!(matches!(view::fix(ask_ai::Fix::Retry), Msg::Regenerate));
     // Choose another model: the drawer's Settings tab, its Model list opened once drawn
-    let _ = panel.update(view::fix(ai::Fix::Model));
+    let _ = panel.update(view::fix(ask_ai::Fix::Model));
     assert_eq!(panel.drawer, Some(Tab::Settings), "the drawer's Model list");
 }
 
@@ -351,7 +359,10 @@ fn an_error_is_a_calm_card_with_its_fix() {
 fn an_error_says_why_and_offers_retry() {
     let mut panel = api_chat();
     ask(&mut panel, "Hi");
-    let _ = panel.update(Msg::Answered(Err(ai::AiError::Server(503, String::new()))));
+    let _ = panel.update(Msg::Answered(Err(ask_ai::AiError::Server(
+        503,
+        String::new(),
+    ))));
     let texts = crate::shared::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
     assert!(
         texts.iter().any(|t| t.ends_with("is busy right now")),
@@ -404,7 +415,7 @@ fn the_chat_matches_its_golden_images() {
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     const CARD: Size = Size::new(504.0, 760.0);
     let at = Rectangle::with_size(CARD);
-    let answered = |q: &str, a: &str, end: Option<Result<(), ai::AiError>>| {
+    let answered = |q: &str, a: &str, end: Option<Result<(), ask_ai::AiError>>| {
         let mut p = api_chat();
         ask(&mut p, q);
         let _ = p.update(Msg::Delta(a.into()));
@@ -464,7 +475,7 @@ fn the_chat_matches_its_golden_images() {
         (
             "error-404",
             Box::new(move || {
-                let e = ai::AiError::Rejected(404, GONE.into());
+                let e = ask_ai::AiError::Rejected(404, GONE.into());
                 answered("Explain", "", Some(Err(e)))
             }),
         ),
@@ -475,7 +486,7 @@ fn the_chat_matches_its_golden_images() {
                 answered(
                     "Explain",
                     "",
-                    Some(Err(ai::AiError::Server(503, busy.into()))),
+                    Some(Err(ask_ai::AiError::Server(503, busy.into()))),
                 )
             }),
         ),
@@ -483,14 +494,22 @@ fn the_chat_matches_its_golden_images() {
             "error-401",
             Box::new(move || {
                 let bad = "API key not valid. Please pass a valid API key.";
-                answered("Explain", "", Some(Err(ai::AiError::Auth(401, bad.into()))))
+                answered(
+                    "Explain",
+                    "",
+                    Some(Err(ask_ai::AiError::Auth(401, bad.into()))),
+                )
             }),
         ),
         (
             "error-offline",
             Box::new(move || {
                 let why = "dns lookup failed for generativelanguage.googleapis.com";
-                answered("Explain", "", Some(Err(ai::AiError::Network(why.into()))))
+                answered(
+                    "Explain",
+                    "",
+                    Some(Err(ask_ai::AiError::Network(why.into()))),
+                )
             }),
         ),
         (

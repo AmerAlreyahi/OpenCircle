@@ -17,11 +17,11 @@ use crate::features::circle::actions::qr;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::settings::labs::{BarButton, Labs};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
-use crate::features::text_reading as ocr;
+use crate::features::text_reading;
 use crate::features::text_reading::app::word;
 use crate::features::{
-    ask_ai::screens::ai_chat, circle::screens::overlay, song::screens::song,
-    translate::screens::translate,
+    ask_ai::screens::ai_chat, circle::screens::overlay, song::screens::listen,
+    translate::screens::pill,
 };
 use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::shared::kit::motion;
@@ -65,10 +65,10 @@ pub(crate) struct Opening {
     pub(crate) other_read: bool,
     pub(crate) other_reading: Option<Rectangle>,
     /// Windows OCR's lines the second reader leaves alone (image px x scale:
-    /// frame px), once judged (`ocr::system::read_well`).
+    /// frame px), once judged (`text_reading::system::read_well`).
     pub(crate) other_known: Option<std::sync::Arc<Vec<[f32; 4]>>>,
     /// The whole frame went to the helper for the second reader
-    /// (`ocr::read_screen`): later parts send only its key.
+    /// (`text_reading::read_screen`): later parts send only its key.
     pub(crate) frame_sent: bool,
     /// The reader offered for the script found (#169, sheet b7): the card
     /// asks for it, once per opening.
@@ -98,9 +98,9 @@ pub(crate) struct Opening {
     pub(crate) reader: Reader,
     /// Copy text asked for the OCR models: copy once they are downloaded.
     pub(crate) copy_after: bool,
-    /// Who reads this opening's text (`ocr::route`), once its first read
+    /// Who reads this opening's text (`text_reading::route`), once its first read
     /// started: Windows OCR (the whole screen at once) or the helper (bands).
-    pub(crate) text_by: Option<ocr::Source>,
+    pub(crate) text_by: Option<text_reading::Source>,
     /// A press that began on text: its stroke so far (image px). It selects
     /// words unless it turns into a loop (`overlay::winds`).
     pub(crate) text_press: Option<Vec<Point>>,
@@ -139,12 +139,12 @@ pub(crate) struct Opening {
     /// What the current selection holds (QR code, protected capture); `None` until scanned.
     pub(crate) scan: Option<qr::Scan>,
     /// Translate in place on this overlay, and its number.
-    pub(crate) translate: Option<(u32, translate::Session)>,
+    pub(crate) translate: Option<(u32, pill::Session)>,
     /// One warm OCR / translation helper while the overlay is open (tap a
     /// word, Text, Translate), started by the first of them.
     /// (shared with the screen's text reads: one that starts after the
     /// overlay closed reads nothing, `read_band`)
-    pub(crate) helper: Option<Arc<ocr::Hold>>,
+    pub(crate) helper: Option<Arc<text_reading::Hold>>,
     /// How selections behave (`[selection]`), read when the overlay opens.
     pub(crate) behaviour: SelectionConfig,
     /// A snapped selection's drawn stroke (image px) morphing into its box.
@@ -207,19 +207,19 @@ pub(crate) struct Opening {
     pub(crate) chat_on: Option<usize>,
     pub(crate) chat_glide: Option<(Instant, Rectangle, f32)>,
     /// Song search on this overlay, and its number.
-    pub(crate) song: Option<(u32, song::Session)>,
+    pub(crate) song: Option<(u32, listen::Session)>,
     /// The capture this opening shows (its other monitors' frames carry it).
     pub(crate) capture: u32,
     /// Circle to Search: every other monitor, each in its own window, as its
     /// frame lands (`app::screens`); freed with the opening.
     pub(crate) screens: Vec<Screen>,
     /// Their frames that landed during the opening animation (shown after it).
-    pub(crate) waiting: Vec<(crate::features::snip::screens::snip::Place, image::Handle)>,
+    pub(crate) waiting: Vec<(crate::features::snip::screens::pick::Place, image::Handle)>,
     /// Where the edge glow is: the screen the mouse is on (`screens::Glow`).
     pub(crate) glow: crate::app::monitors::Glow,
     /// Main mode: the desktop's windows at the freeze (`Shot::windows`), for
     /// the bar's Snip (a late list drifts from the frozen frames).
-    pub(crate) windows: Vec<crate::features::snip::screens::snip::Pick>,
+    pub(crate) windows: Vec<crate::features::snip::screens::pick::Pick>,
     /// Snip's More menu: the area's text read, the translation on it.
     pub(crate) more: crate::features::snip::app::snip_more::More,
 }

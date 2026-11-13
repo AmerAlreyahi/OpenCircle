@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::features::circle::actions::Crop;
+use crate::shared::picture::Crop;
 
 /// The platform can drag an image out.
 pub const SUPPORTED: bool = cfg!(windows);
@@ -48,7 +48,7 @@ impl DragFile {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let name = format!("opencircle-{what}-{}-{n}.png", std::process::id());
         let path = std::env::temp_dir().join(name);
-        crate::features::circle::actions::write_png(&path, crop.width, crop.height, &crop.rgba)?;
+        crate::shared::picture::write_png(&path, crop.width, crop.height, &crop.rgba)?;
         Ok(DragFile {
             path,
             dropped: false,

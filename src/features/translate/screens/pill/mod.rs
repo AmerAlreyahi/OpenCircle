@@ -11,7 +11,8 @@ use iced::{Point, Rectangle, Size, Task, task};
 use crate::app::background::background;
 use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
-use crate::features::circle::actions::{self, Crop};
+
+use crate::features::circle::actions;
 use crate::features::text_reading::models;
 use crate::features::text_reading::screens::model_download;
 use crate::features::translate::mt::Pair;
@@ -19,6 +20,7 @@ use crate::features::translate::pipeline::{self, Cache, Deps, Error, Translation
 use crate::features::translate::screens::language_picker::{self as picker, Picker};
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::panel_frame as card;
+use crate::shared::picture::{self, Crop};
 use crate::t;
 
 /// Context around a block in the image the word card sends (physical px).
@@ -513,7 +515,7 @@ impl Session {
             Point::new(x - pad, y - pad),
             Size::new(w + 2.0 * pad, h + 2.0 * pad),
         );
-        if let Some(crop) = actions::crop(pixels, *width, *height, 1.0, area) {
+        if let Some(crop) = picture::crop(pixels, *width, *height, 1.0, area) {
             self.card = Some(Card {
                 title: format!("{} · {}", block.translation, block.original),
                 block,
@@ -725,7 +727,7 @@ fn translate(
         Point::new(x0 as f32, y0 as f32),
         Size::new((x1 - x0) as f32, (y1 - y0) as f32),
     );
-    let crop = actions::crop(pixels, *width, *height, 1.0, rect)
+    let crop = picture::crop(pixels, *width, *height, 1.0, rect)
         .ok_or_else(|| problem(t!(tx_nothing_there).into(), false))?;
     // the area's result pasted into a copy of the whole frame
     let mut swap = std::time::Duration::ZERO;

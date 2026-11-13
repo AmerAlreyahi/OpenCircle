@@ -905,7 +905,7 @@ mod tests {
                 .join("tests/fixtures")
                 .join(name);
             if std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some() {
-                crate::features::circle::actions::write_png(&path, 1920, 1080, &img).unwrap();
+                crate::shared::picture::write_png(&path, 1920, 1080, &img).unwrap();
             }
             let png = png::Decoder::new(std::io::Cursor::new(std::fs::read(&path).unwrap()));
             let mut reader = png.read_info().unwrap();

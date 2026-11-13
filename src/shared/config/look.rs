@@ -28,7 +28,7 @@ const fn preset(palette: ColourSet, glow: u8, dim: u8, activation: bool, bar: Ba
     }
 }
 
-/// A design look drawn with its two colours (`ui::kit::looks` `solid`) until the
+/// A design look drawn with its two colours (`shared::kit::looks` `solid`) until the
 /// edge draws the design's looks.
 const fn two(a: u32, b: u32) -> Look {
     const fn rgb(c: u32) -> Rgb {
@@ -40,7 +40,7 @@ const fn two(a: u32, b: u32) -> Look {
     }
 }
 
-/// The presets: one table (their colours: `ui::theme::palette`).
+/// The presets: one table (their colours: `shared::theme::palette`).
 pub const PRESETS: [(LookTheme, Look); 12] = {
     let thin = edge(EdgeStyle::Thin, 3, true);
     let still = edge(EdgeStyle::Thin, 2, false);

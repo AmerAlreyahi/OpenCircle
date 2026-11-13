@@ -205,7 +205,7 @@ pub(crate) struct App {
     pub(crate) tool_next: Option<crate::features::snip::screens::tools::Which>,
     /// The next snip opens this image picked: a step of the Steps strip, to
     /// update it (its index), or a long capture finished on Wayland (none).
-    pub(crate) picked_next: Option<(Option<usize>, crate::features::circle::actions::Crop)>,
+    pub(crate) picked_next: Option<(Option<usize>, crate::shared::picture::Crop)>,
     /// Wayland: a long capture going on after its overlay went (the user
     /// scrolls the page itself, its pop-up beside the area): `App::cast_done`.
     pub(crate) cast: Option<crate::features::snip::app::snip::Cast>,
@@ -502,7 +502,7 @@ impl App {
                 Purpose::Snip(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                         Some(Message::Snip(
-                            crate::features::snip::screens::snip::Msg::Shift(m.shift() || m.alt()),
+                            crate::features::snip::screens::pick::Msg::Shift(m.shift() || m.alt()),
                         ))
                     }
                     _ => None,

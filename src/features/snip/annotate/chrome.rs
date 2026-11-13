@@ -1,5 +1,5 @@
 //! What the canvas draws over the image (display px), so the view
-//! (`ui::screens::snip_toolbar::canvas`) needs none of the editor's internals.
+//! (`features::snip::screens::snip_toolbar::canvas`) needs none of the editor's internals.
 use iced::{Point, Rectangle, Size};
 
 use super::{Annotator, Shape, select, text};

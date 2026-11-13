@@ -12,10 +12,10 @@
 //! `actions::ask`, `actions::translate`): nothing is implemented twice.
 use iced::Rectangle;
 
-use crate::features::circle::actions::Crop;
 use crate::features::text_reading::TextBlock;
 use crate::shared::app_language::S;
 use crate::shared::config::Config;
+use crate::shared::picture::Crop;
 
 /// The three rows, in menu order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

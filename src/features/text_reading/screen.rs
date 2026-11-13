@@ -1,6 +1,6 @@
 //! Which band of the screen to read next (main mode, #123): pure scheduling,
 //! no UI. Rows are image px from the top; a band is always full width, so it
-//! is just a top and a height. The app (`ui/app/text.rs`) turns a `Next` into
+//! is just a top and a height. The app (`features/text_reading/app/text.rs`) turns a `Next` into
 //! an OCR task and feeds the answer back into `Rows`.
 //!
 //! The rules: the band under what the user touches first (a press, a drag

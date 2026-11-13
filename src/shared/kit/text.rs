@@ -8,7 +8,7 @@ use iced::widget::text::{IntoFragment, Text};
 use super::themes;
 use super::tokens::Role;
 
-/// Every font the UI registers at start (`ui::run`; the headless renders too):
+/// Every font the UI registers at start (`app::run`; the headless renders too):
 /// the icons, Inter (the UI font where Segoe UI is missing), Noto Sans
 /// Arabic (Arabic where the UI font has none) and the design's mono font
 /// (`MONO`: a Latin subset of JetBrains Mono, weights 400-600, plus ▴ ▾ ✓ → Δ).

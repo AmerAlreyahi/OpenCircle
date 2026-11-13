@@ -62,7 +62,7 @@ pub fn compare(dir: &str, name: &str, w: u32, h: u32, pixels: &[u8]) -> Result<(
     let file = file(dir, name);
     if std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some() {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        crate::features::circle::actions::write_png(&file, w, h, pixels).unwrap();
+        crate::shared::picture::write_png(&file, w, h, pixels).unwrap();
         return Ok(());
     }
     let Ok(golden) = std::fs::read(&file) else {
@@ -83,7 +83,7 @@ pub fn compare(dir: &str, name: &str, w: u32, h: u32, pixels: &[u8]) -> Result<(
                     .join(dir)
                     .join(format!("{name}.png"));
                 let _ = std::fs::create_dir_all(file.parent().unwrap());
-                let _ = crate::features::circle::actions::write_png(&file, w, h, pixels);
+                let _ = crate::shared::picture::write_png(&file, w, h, pixels);
             }
             Err(format!("{name}: {off} pixels differ"))
         }

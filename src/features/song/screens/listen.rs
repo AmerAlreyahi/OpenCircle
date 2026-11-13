@@ -13,7 +13,7 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 use crate::app::background::background;
 use crate::features::ask_ai::screens::ai_chat::{actions, note};
 use crate::features::song::history;
-use crate::features::song::{self as music, LISTEN_SECS, Song};
+use crate::features::song::{self, LISTEN_SECS, Song};
 use crate::shared::config;
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::chip;
@@ -48,7 +48,7 @@ pub enum Msg {
     Heard(u32),
     /// Done listening; the clip is on its way to the service.
     Sent,
-    Done(Result<Song, music::Error>, Vec<history::Entry>),
+    Done(Result<Song, song::Error>, Vec<history::Entry>),
     Cover(image::Handle),
     Cancel,
     Retry,
@@ -104,16 +104,16 @@ impl Session {
             };
             let cfg = config::current().song;
             let found =
-                music::listen(cfg.source, &stop, &mut |s| send(Msg::Heard(s))).and_then(|clip| {
+                song::listen(cfg.source, &stop, &mut |s| send(Msg::Heard(s))).and_then(|clip| {
                     send(Msg::Sent);
-                    music::identify(&clip) // the clip is dropped here, never stored
+                    song::identify(&clip) // the clip is dropped here, never stored
                 });
             let recent = history::path()
                 .map(|p| history::after_search(&p, cfg.history, found.as_ref().ok()))
                 .unwrap_or_default();
             let cover = found.as_ref().ok().and_then(|s| s.cover.clone());
             send(Msg::Done(found, recent));
-            if let Some((w, h, rgba)) = cover.as_deref().and_then(music::cover) {
+            if let Some((w, h, rgba)) = cover.as_deref().and_then(song::cover) {
                 send(Msg::Cover(image::Handle::from_rgba(w, h, rgba)));
             }
         });
@@ -137,7 +137,7 @@ impl Session {
                 self.recent = recent;
                 self.state = State::Found(song, None);
             }
-            Msg::Done(Err(music::Error::Cancelled), _) => return Outcome::Close,
+            Msg::Done(Err(song::Error::Cancelled), _) => return Outcome::Close,
             Msg::Done(Err(e), recent) => {
                 self.recent = recent;
                 self.state = State::Failed(e.to_string());
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn errors_show_with_try_again_and_cancel_stops_the_capture() {
         let mut s = session(State::Listening(3));
-        s.update(Msg::Done(Err(music::Error::Silent), Vec::new()));
+        s.update(Msg::Done(Err(song::Error::Silent), Vec::new()));
         let texts = crate::shared::kit::testing::shot::texts(s.view(SCREEN));
         assert!(
             texts.iter().any(|t| t.starts_with("No sound is playing")),
@@ -385,7 +385,7 @@ mod tests {
         // A cancelled search just closes.
         let mut s = session(State::Listening(1));
         assert_eq!(
-            s.update(Msg::Done(Err(music::Error::Cancelled), Vec::new())),
+            s.update(Msg::Done(Err(song::Error::Cancelled), Vec::new())),
             Outcome::Close
         );
     }
@@ -416,7 +416,7 @@ mod tests {
             ("found-arabic", session(State::Found(arabic, None))),
             (
                 "failed",
-                session(State::Failed(music::Error::Silent.to_string())),
+                session(State::Failed(song::Error::Silent.to_string())),
             ),
         ];
         golden::each_theme(|theme, failed| {

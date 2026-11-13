@@ -18,8 +18,8 @@ use crate::features::live_translate::live::{self as live_steps, Live as Steps, P
 use crate::features::live_translate::screens::live::controller::{
     self as live_controller, Controller, Out,
 };
-use crate::features::live_translate::{self as live, LayerError};
-use crate::features::text_reading as ocr;
+use crate::features::live_translate::{self, LayerError};
+use crate::features::text_reading;
 use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::Cache;
 use crate::shared::config;
@@ -65,7 +65,7 @@ pub struct Shown {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Monitor(Result<Monitor, String>),
-    Prepared(Result<live::Layer, LayerError>),
+    Prepared(Result<live_translate::Layer, LayerError>),
     /// Everything the layer shows now.
     Patches(Vec<Shown>),
     /// The step failed (shown in the pill; the next step retries).
@@ -128,7 +128,7 @@ pub struct Live {
     work: Option<task::Handle>,
     shot_taken: bool,
     /// One warm OCR / translation helper while live mode is on.
-    _helper: ocr::Hold,
+    _helper: text_reading::Hold,
     /// What the languages need downloaded (a test swaps it).
     check: Check,
     /// The download asked for: the offline pair, or `Some(None)` = OCR's.
@@ -188,7 +188,7 @@ impl Live {
             stop: Arc::new(AtomicBool::new(false)),
             work: None,
             shot_taken: false,
-            _helper: ocr::hold(),
+            _helper: text_reading::hold(),
             check: crate::features::translate::action::missing,
             pending: None,
             stepping: false,
@@ -295,7 +295,7 @@ impl Live {
         );
         self.controller = Some(id);
         let prepare = window::run(id, |w| match w.window_handle() {
-            Ok(handle) => live::prepare_controller(handle.as_raw()),
+            Ok(handle) => live_translate::prepare_controller(handle.as_raw()),
             Err(e) => Err(LayerError::Os(e.to_string())),
         });
         open.discard().chain(prepare).map(Msg::ControllerReady)
@@ -382,7 +382,7 @@ impl Live {
                 let (window, open) = windows::screen(layer_window(monitor));
                 self.phase = Phase::Open { window, monitor };
                 let prepare = window::run(window, |w| match w.window_handle() {
-                    Ok(handle) => live::prepare_layer(handle.as_raw()),
+                    Ok(handle) => live_translate::prepare_layer(handle.as_raw()),
                     Err(e) => Err(LayerError::Os(e.to_string())),
                 });
                 return Outcome::Task(open.discard().chain(prepare).map(Msg::Prepared));
@@ -511,7 +511,7 @@ impl Live {
         let (paused, chosen, mask) = (self.paused.clone(), self.langs.clone(), self.mask.clone());
         let (task, handle) = background(move |tx| {
             // capture, OCR and translation after the game and the desktop
-            ocr::gently_here();
+            text_reading::gently_here();
             // The languages are the controller's (they start as the config's).
             let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
             let deps_for = |(source, target): &(String, String)| {
@@ -536,7 +536,7 @@ impl Live {
                 if paused.load(Ordering::Relaxed) {
                     return None;
                 }
-                if let Some(clear) = live_steps::away_gate(live::away(), &mut was_away, &mut steps)
+                if let Some(clear) = live_steps::away_gate(live_translate::away(), &mut was_away, &mut steps)
                 {
                     return clear.then(|| Msg::Patches(Vec::new()));
                 }
@@ -571,7 +571,7 @@ impl Live {
                     blanked.push(rect);
                 }
                 // our own UI is never read (a menu, a card, a toast)
-                let own = live::own_windows();
+                let own = live_translate::own_windows();
                 blanked.extend(blank_own(&mut frame.rgba, (frame.x, frame.y, w, h), &own));
                 // the foreground window's page (a full-screen game: all of
                 // it), unless the whole screen is asked for
@@ -745,7 +745,7 @@ fn save_test_shot(shot: &window::Screenshot) {
         return;
     };
     let (w, h) = (shot.size.width, shot.size.height);
-    if let Err(e) = crate::features::circle::actions::write_png(path.as_ref(), w, h, &shot.rgba) {
+    if let Err(e) = crate::shared::picture::write_png(path.as_ref(), w, h, &shot.rgba) {
         crate::log!("test shot failed: {e}");
     }
 }

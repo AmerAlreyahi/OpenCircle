@@ -9,11 +9,11 @@ use iced::{ContentFit, Element, Point, Rectangle, Size};
 pub mod canvas;
 pub mod toolbar;
 
-use crate::features::circle::actions::Crop;
 use crate::features::circle::screens::bar::geometry::{BOTTOM_GAP, GAP};
 use crate::features::snip::annotate::{self, Annotator, Image, Message, Output};
 use crate::shared::kit::chip;
 use crate::shared::kit::key_hint::{self, key_hint};
+use crate::shared::picture::Crop;
 
 /// Snip's keyboard hint (after an arrow key) and its position readout's width.
 fn nudge_hint() -> [key_hint::Group<'static>; 5] {

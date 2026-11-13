@@ -22,12 +22,12 @@ use crate::app::capture::overlay_window;
 use crate::app::message::{Message, Purpose};
 use crate::app::opening::Opening;
 use crate::app::view::{grow, lifted};
-use crate::features::circle::actions::{self, Crop};
+
 use crate::features::circle::screens::edge as border;
 use crate::features::snip::annotate;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
-use crate::features::text_reading as ocr;
+use crate::features::text_reading;
 use crate::features::text_reading::app::word;
 use crate::shared::config;
 use crate::shared::kit::motion;
@@ -35,6 +35,7 @@ use crate::shared::platform::monitor::{Place, place_window};
 use crate::{app::windows, features::circle::screens::overlay};
 
 use super::App;
+use crate::shared::picture::{self, Crop};
 
 /// Another monitor's overlay while the overlay is open.
 pub(crate) struct Screen {
@@ -338,7 +339,7 @@ impl App {
 
     /// `area` (image px) cut out of the frozen frames: the starting screen's
     /// alone, as with one screen, unless it reaches another screen; then
-    /// stitched from every frame it meets in desktop px (`actions::stitch`), at
+    /// stitched from every frame it meets in desktop px (`picture::stitch`), at
     /// each screen's own pixels: one image whose text reads in order across.
     pub(crate) fn crop_of(&self, area: Rectangle) -> Option<Crop> {
         let Some(image::Handle::Rgba {
@@ -351,7 +352,7 @@ impl App {
             return None;
         };
         if !self.spans(area) {
-            return actions::crop(pixels, *width, *height, self.o.scale, area);
+            return picture::crop(pixels, *width, *height, self.o.scale, area);
         }
         self.stitched(self.desk_bounds(area)?)
     }
@@ -365,7 +366,7 @@ impl App {
     }
 
     /// Snip's live area `area` (image px) on several screens: the editor's
-    /// document is every frame joined in desktop px (`actions::stitch`, pixel
+    /// document is every frame joined in desktop px (`picture::stitch`, pixel
     /// for pixel on every monitor whatever its scale; gaps white), its top-left
     /// pixel at the desk's top-left. `None` with one screen (its own frame is
     /// the document, as before).
@@ -411,8 +412,8 @@ impl App {
             _ => None,
         });
         let start = (self.o.place().origin, *width, *height, &pixels[..]);
-        let parts: Vec<actions::crop::Part<'_>> = std::iter::once(start).chain(others).collect();
-        actions::stitch(&parts, bounds)
+        let parts: Vec<picture::Part<'_>> = std::iter::once(start).chain(others).collect();
+        picture::stitch(&parts, bounds)
     }
 
     /// `area` (image px, on a stitched crop) in desktop px: `[x0, y0, x1, y1]`, the
@@ -440,7 +441,7 @@ impl App {
             return Some((x, y));
         }
         let start = self.o.place();
-        let [x, y, ..] = actions::crop_bounds(*width, *height, self.o.scale, area)?;
+        let [x, y, ..] = picture::crop_bounds(*width, *height, self.o.scale, area)?;
         Some((start.origin.0 + x as i32, start.origin.1 + y as i32))
     }
 
@@ -449,7 +450,7 @@ impl App {
     // ponytail: the helper's bands are the starting screen's rows; add a Rows
     // per screen if the helper ever reads other screens.
     fn screens_text(&self) -> bool {
-        self.o.text_by == Some(ocr::Source::System)
+        self.o.text_by == Some(text_reading::Source::System)
             && !self.o.screens.is_empty()
             && matches!(self.o.purpose, Purpose::Search)
     }
@@ -537,15 +538,17 @@ impl App {
                 return; // closed meanwhile
             };
             let read = || -> Result<Vec<word::Line>, String> {
-                if ocr::route(setting, Some(ocr::system::language())) == ocr::Source::Helper {
+                if text_reading::route(setting, Some(text_reading::system::language()))
+                    == text_reading::Source::Helper
+                {
                     return Err("Windows OCR: a right-to-left language".into());
                 }
                 // the closer read only: no quick one first (gently, nobody waits)
-                let k = *ocr::system::passes(place.scale, width, height)
+                let k = *text_reading::system::passes(place.scale, width, height)
                     .last()
                     .unwrap_or(&1);
-                let blocks =
-                    ocr::system::recognize(&pixels, width, height, k).map_err(|e| e.to_string())?;
+                let blocks = text_reading::system::recognize(&pixels, width, height, k)
+                    .map_err(|e| e.to_string())?;
                 let mut lines = word::lines(blocks, [0, 0], place.scale);
                 word::measure(&mut lines, &pixels, width, height, place.scale);
                 let (k, at) = into_model(start, place);
@@ -849,7 +852,7 @@ impl App {
                 let tool = tool.view(frame, scale, screen.view, size, false, false, &[], look);
                 layers =
                     layers.push(tool.map(|m| {
-                        Message::Snip(crate::features::snip::screens::snip::Msg::Tool(m))
+                        Message::Snip(crate::features::snip::screens::pick::Msg::Tool(m))
                     }));
             } else if let Some(guides) =
                 snip.guides(frame, scale, screen.view, size, self.snip_drag(), look)
@@ -1398,7 +1401,7 @@ mod tests {
     }
 
     /// `snipped` with these windows on the desktop (physical desktop px).
-    fn snipped_with(windows: Vec<crate::features::snip::screens::snip::Pick>) -> (App, window::Id) {
+    fn snipped_with(windows: Vec<crate::features::snip::screens::pick::Pick>) -> (App, window::Id) {
         let mut app = App::idle(window::Id::unique());
         let _ = app.update(Message::Trigger(Trigger::Capture(Instant::now())));
         let n = app.capturing.expect("pending");
@@ -1415,7 +1418,7 @@ mod tests {
             origin: START.logical_origin(),
             size: START.size(),
             snip: Some((
-                crate::features::snip::screens::snip::Kind::Region,
+                crate::features::snip::screens::pick::Kind::Region,
                 windows,
                 None,
                 frames,
@@ -1514,7 +1517,7 @@ mod tests {
         use overlay::Event::{Enter, Hover, Move, Press, Release};
         // a window on the right screen, desktop px (1000, 150) 900 x 600
         let rect = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));
-        let window = crate::features::snip::screens::snip::Pick::window(rect, "Notes", 7);
+        let window = crate::features::snip::screens::pick::Pick::window(rect, "Notes", 7);
         let local = |x: f32, y: f32| Point::new((x - 640.0) / 1.5, y / 1.5);
         let press = |at: Point| Press { at, shift: false };
         let picked = |app: &App| {
@@ -1604,7 +1607,7 @@ mod tests {
             }),
         };
         let _ = app.update(Message::Snip(
-            crate::features::snip::screens::snip::Msg::Progress(first),
+            crate::features::snip::screens::pick::Msg::Progress(first),
         ));
         let long = app.scroll().unwrap();
         let picture = long.picture(on.work, bar).expect("the picture");
@@ -1619,7 +1622,7 @@ mod tests {
             rgba: vec![0; 4],
         };
         let _ = app.update(Message::Snip(
-            crate::features::snip::screens::snip::Msg::Done(Ok(none)),
+            crate::features::snip::screens::pick::Msg::Done(Ok(none)),
         ));
         assert!(app.scroll().is_none() && app.o.edit.is_some());
     }
@@ -1744,7 +1747,7 @@ mod tests {
             origin: START.logical_origin(),
             size: START.size(),
             snip: None,
-            windows: vec![crate::features::snip::screens::snip::Pick::window(
+            windows: vec![crate::features::snip::screens::pick::Pick::window(
                 rect, "Notes", 7,
             )],
         };
@@ -2132,7 +2135,11 @@ mod text_tests {
         let origin = app.crop_origin(app.crop_area().unwrap()).unwrap();
         assert_eq!(origin, (700, 50));
         // a protected window of the right screen (desktop px), in that crop
-        let windows = actions::qr::crop_rects(origin, (50, 50), &[(690, 60, 100, 100)]);
+        let windows = crate::features::circle::actions::qr::crop_rects(
+            origin,
+            (50, 50),
+            &[(690, 60, 100, 100)],
+        );
         assert_eq!(windows, vec![[0, 10, 50, 50]]);
         // the starting screen's crop: its own origin, the chat not in it
         select(

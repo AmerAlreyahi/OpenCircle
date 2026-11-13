@@ -9,7 +9,7 @@ use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
 use crate::features::settings::labs::{Feature, Labs};
-use crate::features::song as music;
+use crate::features::song;
 use crate::features::translate::lang::{self, LANGUAGES};
 use crate::shared::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
@@ -160,13 +160,13 @@ fn song_search_section_saves_a_write_only_token_and_its_choices() {
     );
     update(&mut s, Message::SongKey(KeyMessage::Save));
     assert_eq!(s.song_key.as_ref().unwrap().status, KeyStatus::Saved);
-    assert_eq!(music::key_known(), Some(true), "the music button shows");
+    assert_eq!(song::key_known(), Some(true), "the music button shows");
     let texts = shot::texts(view(&s));
     assert!(!texts.iter().any(|t| t.contains("FAKE")), "{texts:?}");
     assert!(texts.iter().any(|t| t == KEY_MASK));
     shot::save("settings-song-saved", view(&s), WINDOW_SIZE);
     update(&mut s, Message::SongKey(KeyMessage::Remove));
-    assert_eq!(music::key_known(), Some(false), "and hides again");
+    assert_eq!(song::key_known(), Some(false), "and hides again");
     update(&mut s, Message::SongSource(SongSource::Microphone));
     update(&mut s, Message::SongHistory(true));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {

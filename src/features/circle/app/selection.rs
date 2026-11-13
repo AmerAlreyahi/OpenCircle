@@ -11,9 +11,7 @@ use crate::app::background::background;
 use crate::app::message::{Grab, Message, Purpose};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::text_reading::app::word;
-use crate::features::{
-    circle::screens::overlay, snip::screens::snip, translate::screens::translate,
-};
+use crate::features::{circle::screens::overlay, snip::screens::pick, translate::screens::pill};
 
 use crate::app::App;
 use crate::app::monitors::keep_on;
@@ -62,7 +60,7 @@ impl App {
                 } => Finish::Save,
                 _ => return Task::none(),
             };
-            return self.on_snip(crate::features::snip::screens::snip::Msg::Finish(how));
+            return self.on_snip(crate::features::snip::screens::pick::Msg::Finish(how));
         }
         // The editor, a toast or a timer's pill has the screen.
         if self.o.edit.as_ref().is_some_and(SnipToolbar::is_open)
@@ -170,13 +168,13 @@ impl App {
                     letter: 'e',
                     ctrl: false,
                 } if session.has_card() => {
-                    return self.on_translate(id, translate::Msg::Explain);
+                    return self.on_translate(id, pill::Msg::Explain);
                 }
                 overlay::Event::Key {
                     letter: 'a',
                     ctrl: false,
                 } if session.has_card() => {
-                    return self.on_translate(id, translate::Msg::Ask);
+                    return self.on_translate(id, pill::Msg::Ask);
                 }
                 // Snip's key (the bar's Snip, hidden under the translation)
                 overlay::Event::Key { letter, ctrl }
@@ -296,7 +294,7 @@ impl App {
                 self.o.pointer = p;
                 // Snip's Window mode: the window under the pointer lights up.
                 if let Purpose::Snip(snip) = &self.o.purpose
-                    && snip.kind == snip::Kind::Window
+                    && snip.kind == pick::Kind::Window
                 {
                     match snip.window_at(p) {
                         Some(w) if self.o.selection.map(|s| s.area) != Some(w) => self.select(w),
@@ -451,7 +449,7 @@ impl App {
                 };
                 let at = snip.pointer.unwrap_or(Point::ORIGIN);
                 let area = self.o.selection.map(|s| s.area);
-                let Some(snip::Next::Edit(area)) = snip.pick(area, at, self.o.screen) else {
+                let Some(pick::Next::Edit(area)) = snip.pick(area, at, self.o.screen) else {
                     return Task::none();
                 };
                 self.select(area);

@@ -7,7 +7,7 @@ use std::time::Duration;
 use iced::window;
 use iced::{Point, Rectangle, Size, Task};
 
-use crate::features::circle::actions::{self, Crop, search_in_browser, stack_crops};
+use crate::features::circle::actions::{self, search_in_browser};
 use crate::shared::config::{self, Provider};
 
 use crate::app::background::background;
@@ -21,6 +21,7 @@ use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, Place, place_window};
 
 use crate::app::App;
+use crate::shared::picture::{Crop, stack_crops};
 
 /// The AI chat once pinned (`ai_chat::AiChat::pinned`): it outlives the overlay
 /// (`App::chat`) until its pin closes it. Never more than one.
@@ -618,7 +619,7 @@ impl App {
         }
         let at = card::place(self.o.screen, selection, self.card);
         if self.o.translate.is_some() {
-            return crate::features::translate::screens::translate::view::clear_of_pill(
+            return crate::features::translate::screens::pill::view::clear_of_pill(
                 at,
                 self.o.screen,
             );
