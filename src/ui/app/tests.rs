@@ -5561,3 +5561,32 @@ fn snip_over_a_translation_takes_the_translated_page() {
     let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), snip)));
     assert!(matches!(app.o.purpose, Purpose::Search));
 }
+
+/// The second reader (`text::needs_no_second_reader`).
+mod second_reader {
+    use super::super::text::needs_no_second_reader;
+    use crate::ocr::system::read_well;
+
+    #[test]
+    fn an_english_page_sends_no_line_to_the_second_reader() {
+        let page = [
+            "Lighthouse",
+            "Main page",
+            "A lighthouse is a tower or other structure",
+            "Article Talk Read Edit History",
+        ];
+        assert!(needs_no_second_reader(&read_well(&page, Some("en-US"))));
+    }
+
+    #[test]
+    fn arabic_noise_or_an_empty_read_still_reach_the_second_reader() {
+        let mixed = [
+            "Main page",
+            "awgall n",
+            "oscluall",
+            "A tower or other structure",
+        ];
+        assert!(!needs_no_second_reader(&read_well(&mixed, Some("en-US"))));
+        assert!(!needs_no_second_reader(&[]));
+    }
+}

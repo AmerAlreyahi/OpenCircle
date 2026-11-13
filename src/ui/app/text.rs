@@ -454,26 +454,7 @@ impl App {
             }
             return Task::none();
         }
-        let Some(image::Handle::Rgba {
-            width,
-            height,
-            pixels,
-            ..
-        }) = &self.o.frame
-        else {
-            return Task::none();
-        };
-        let (width, height, pixels) = (*width, *height, pixels.clone());
-        let (scale, screen) = (self.o.scale, self.o.screen);
-        let Some(band) = self.o.screen_text.next_other(self.o.pointer.y, screen) else {
-            self.o.other_read = true; // all read
-            self.log_mark("[opencircle] screen text ready (the second reader's last line)");
-            return Task::none();
-        };
-        let Some((top, bottom)) = self.o.screen_text.other_unread(band, screen) else {
-            self.o.screen_text.add_extra(band, Vec::new(), screen);
-            return self.read_other_scripts();
-        };
+        let scale = self.o.scale;
         // lines read as real words are Windows OCR's; one that reads like
         // noise may be another script it misread: the second reader reads it
         if self.o.other_known.is_none() {
@@ -493,8 +474,36 @@ impl App {
                 lines.len(),
                 known.len()
             );
+            let all_read = needs_no_second_reader(&well);
             self.o.other_known = Some(Arc::new(known));
+            if all_read {
+                // every line is real words: nothing for another script to
+                // read, and the helper (a 554 ms detect pass) never starts
+                self.o.other_read = true;
+                self.log_mark("[opencircle] screen text ready (Windows OCR read it all as words)");
+                return Task::none();
+            }
         }
+        let Some(image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        }) = &self.o.frame
+        else {
+            return Task::none();
+        };
+        let (width, height, pixels) = (*width, *height, pixels.clone());
+        let screen = self.o.screen;
+        let Some(band) = self.o.screen_text.next_other(self.o.pointer.y, screen) else {
+            self.o.other_read = true; // all read
+            self.log_mark("[opencircle] screen text ready (the second reader's last line)");
+            return Task::none();
+        };
+        let Some((top, bottom)) = self.o.screen_text.other_unread(band, screen) else {
+            self.o.screen_text.add_extra(band, Vec::new(), screen);
+            return self.read_other_scripts();
+        };
         let known = self.o.other_known.clone().unwrap_or_default();
         let rows = (top * scale, bottom * scale);
         let send_frame = !std::mem::replace(&mut self.o.frame_sent, true);
@@ -893,4 +902,11 @@ fn found(boxes: Vec<[f32; 4]>, scale: f32) -> Vec<Rectangle> {
     (boxes.into_iter())
         .map(|[x, y, w, h]| Rectangle::new(Point::new(x, y), iced::Size::new(w, h)) * (1.0 / scale))
         .collect()
+}
+
+/// Windows OCR read the screen (at least one line) and every line as real
+/// words: the second reader has nothing to add, so the helper never starts
+/// (it read and kept none of an English page's 42 lines, 554 ms).
+pub(super) fn needs_no_second_reader(well: &[bool]) -> bool {
+    !well.is_empty() && well.iter().all(|w| *w)
 }
