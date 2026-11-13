@@ -9,7 +9,7 @@ use iced::window::{self, Level, Mode};
 use iced::{Point, Size, Task};
 
 use crate::actions::{self, Action, Run, text};
-use crate::labs::BarButton;
+use crate::features::settings::labs::BarButton;
 use crate::ocr::{self};
 use crate::shared::config;
 use crate::shared::platform::capture::{self, CaptureError};

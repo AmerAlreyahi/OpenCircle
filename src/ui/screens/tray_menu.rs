@@ -4,7 +4,7 @@
 //! window (`ui::windows`) closes it on focus loss, which an outside click is.
 use iced::{Element, Size};
 
-use crate::labs::Labs;
+use crate::features::settings::labs::Labs;
 use crate::shared::config::Config;
 use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
 use crate::shared::kit::tokens::radius;
@@ -145,7 +145,7 @@ pub fn view(m: &Menu) -> Element<'_, Msg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::labs::Feature;
+    use crate::features::settings::labs::Feature;
     use crate::shared::kit::testing::golden;
 
     fn all_on() -> Labs {

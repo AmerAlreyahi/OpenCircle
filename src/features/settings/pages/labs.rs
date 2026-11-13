@@ -7,7 +7,7 @@ use iced::widget::column;
 use iced::{Center, Element};
 
 use super::super::state::{Message, Pick, State};
-use crate::labs::Feature;
+use crate::features::settings::labs::Feature;
 use crate::shared::kit::chip::tag;
 use crate::shared::kit::segmented::boolean;
 use crate::shared::kit::setting_row::{self, title};

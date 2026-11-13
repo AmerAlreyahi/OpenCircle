@@ -10,11 +10,12 @@ pub(crate) mod live_layer;
 pub(crate) mod long_capture_popup;
 pub(crate) mod overlay;
 pub(crate) mod screens;
+use crate::features::settings;
 use crate::features::song::screens::song;
 use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
-use screens::{ai_chat, settings, translate};
+use screens::{ai_chat, translate};
 pub(crate) mod snip;
 #[cfg(test)]
 pub(crate) mod snip_shots;

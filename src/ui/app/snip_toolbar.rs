@@ -343,7 +343,7 @@ mod tests {
     use iced::{Point, Rectangle, Size};
 
     use crate::actions::share;
-    use crate::labs::Labs;
+    use crate::features::settings::labs::Labs;
     use crate::snip::annotate::{Message as E, dragout};
     use crate::ui::app::App;
     use crate::ui::app::message::Hiding;
@@ -529,9 +529,14 @@ mod tests {
     /// toolbar has Pin (and Tab lands on it) but no Live pin.
     #[test]
     fn pin_shows_with_labs_pins_off_live_pin_does_not() {
-        assert!(!crate::labs::has(crate::labs::Feature::Pins), "the default");
+        assert!(
+            !crate::features::settings::labs::has(crate::features::settings::labs::Feature::Pins),
+            "the default"
+        );
         let mut app = snip_toolbar_open();
-        app.o.labs.set(crate::labs::Feature::Pins, false);
+        app.o
+            .labs
+            .set(crate::features::settings::labs::Feature::Pins, false);
         let names = bar_names(&app);
         assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
         // More's rows

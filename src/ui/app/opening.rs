@@ -11,7 +11,7 @@ use iced::widget::image;
 use iced::{Point, Rectangle, Size, Vector};
 
 use crate::actions::qr;
-use crate::labs::{BarButton, Labs};
+use crate::features::settings::labs::{BarButton, Labs};
 use crate::ocr;
 use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader};
 use crate::shared::kit::motion;

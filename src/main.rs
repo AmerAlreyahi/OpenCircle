@@ -6,7 +6,6 @@
 mod actions;
 mod ai;
 mod features;
-mod labs;
 mod live;
 mod mt;
 mod ocr;

@@ -142,7 +142,7 @@ use global_hotkey::hotkey::{Code, HotKey, HotKeyParseError, Modifiers};
 use serde::{Deserialize, Serialize};
 use toml::Table;
 
-use crate::labs::Labs;
+use crate::features::settings::labs::Labs;
 use crate::shared::platform::hotkey::QuickId;
 
 mod look;
@@ -1356,7 +1356,10 @@ mod tests {
             assert!(c.labs.pins, "the Labs switches that remain are kept");
             for id in ["snip", "edit", "colour_picker", "ruler"] {
                 let id = crate::shared::platform::hotkey::QuickId::from_name(id);
-                assert!(crate::labs::action_on(&c.labs, &id), "{id:?}");
+                assert!(
+                    crate::features::settings::labs::action_on(&c.labs, &id),
+                    "{id:?}"
+                );
             }
             c.save_to(&path).unwrap();
             let saved: Table = fs_text(&path).parse().unwrap();

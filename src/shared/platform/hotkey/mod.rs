@@ -84,7 +84,7 @@ impl Binding {
     fn portal_id(&self) -> String {
         // Labs on: the ids of the shortcuts that can be hidden stay the same.
         let default = plan(&Config {
-            labs: crate::labs::Labs::all_on(),
+            labs: crate::features::settings::labs::Labs::all_on(),
             ..Config::default()
         })
         .0;
@@ -139,7 +139,7 @@ fn plan(cfg: &Config) -> (Vec<Binding>, Vec<String>) {
 
     for qa in &cfg.quick_actions {
         // A hidden (Labs) feature has no shortcut; its entry stays in the config.
-        if qa.shortcut.is_empty() || !crate::labs::quick_on(&cfg.labs, qa) {
+        if qa.shortcut.is_empty() || !crate::features::settings::labs::quick_on(&cfg.labs, qa) {
             continue;
         }
         let hotkey = match parse_shortcut(&qa.shortcut) {
@@ -783,7 +783,7 @@ mod tests {
 
     fn all_labs() -> Config {
         Config {
-            labs: crate::labs::Labs::all_on(),
+            labs: crate::features::settings::labs::Labs::all_on(),
             ..Config::default()
         }
     }
@@ -831,7 +831,7 @@ mod tests {
 
     #[test]
     fn a_hidden_feature_has_no_shortcut_and_turning_it_on_brings_it_back() {
-        use crate::labs::Feature;
+        use crate::features::settings::labs::Feature;
         let ids = |c: &Config| -> Vec<String> { plan(c).0.into_iter().map(|b| b.id).collect() };
         let off = ids(&Config::default());
         assert!(!off.iter().any(|i| i.contains("song")), "{off:?}");

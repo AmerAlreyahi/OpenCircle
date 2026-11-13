@@ -7,7 +7,7 @@ use iced::{Element, Point};
 
 use super::geometry::{self as bar, Stop};
 use crate::actions::{self, qr, search_in_browser, text};
-use crate::labs::{self, BarButton};
+use crate::features::settings::labs::{self, BarButton};
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, icon_button};
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn every_bar_state_matches_its_golden_image() {
         let mut app = open_app(1280, 800, 1.0);
-        app.o.labs = crate::labs::Labs::all_on();
+        app.o.labs = crate::features::settings::labs::Labs::all_on();
         let size = app.bar_size().1;
         let mut failed = Vec::new();
         let mut shoot = |app: &App, state: &str| {
@@ -427,7 +427,7 @@ mod tests {
     fn every_arabic_bar_state_matches_its_golden_image() {
         let _ar = crate::shared::kit::testing::arabic();
         let mut app = open_app(1280, 800, 1.0);
-        app.o.labs = crate::labs::Labs::all_on();
+        app.o.labs = crate::features::settings::labs::Labs::all_on();
         let size = app.bar_size().1;
         let mut failed = Vec::new();
         let mut shoot = |app: &App, state: &str| {
@@ -462,7 +462,7 @@ mod tests {
         let cost = |ar: bool| {
             let _dir = ar.then(crate::shared::kit::testing::arabic);
             let mut app = open_app(1280, 800, 1.0);
-            app.o.labs = crate::labs::Labs::all_on();
+            app.o.labs = crate::features::settings::labs::Labs::all_on();
             let size = app.bar_size().1;
             let (w, h) = (size.width as u32, size.height as u32);
             let _ = crate::shared::kit::testing::shot::render(app.bottom_bar(), w, h); // warm
@@ -483,7 +483,7 @@ mod tests {
         let order = |ar: bool| {
             let _dir = ar.then(crate::shared::kit::testing::arabic);
             let mut app = open_app(1280, 800, 1.0);
-            app.o.labs = crate::labs::Labs::all_on();
+            app.o.labs = crate::features::settings::labs::Labs::all_on();
             let size = app.bar_size().1;
             let pills = [
                 tr(search_in_browser::ACTION.label),

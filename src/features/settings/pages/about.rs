@@ -169,17 +169,15 @@ pub struct Profile {
 
 pub fn profile() -> &'static Profile {
     static PROFILE: LazyLock<Profile> = LazyLock::new(|| {
-        toml::from_str(include_str!("../../../../../assets/about/profile.toml")).unwrap_or_else(
-            |e| {
-                crate::log!("[opencircle] about: profile.toml unreadable: {e}");
-                Profile {
-                    name: "Amer Alreyahi".into(),
-                    login: "AmerAlreyahi".into(),
-                    website: PROFILE_URL.into(),
-                    bio: "Building fast, private desktop tools.".into(),
-                }
-            },
-        )
+        toml::from_str(include_str!("../../../../assets/about/profile.toml")).unwrap_or_else(|e| {
+            crate::log!("[opencircle] about: profile.toml unreadable: {e}");
+            Profile {
+                name: "Amer Alreyahi".into(),
+                login: "AmerAlreyahi".into(),
+                website: PROFILE_URL.into(),
+                bio: "Building fast, private desktop tools.".into(),
+            }
+        })
     });
     &PROFILE
 }
@@ -196,12 +194,10 @@ fn decode_avatar(bytes: &[u8]) -> Option<Handle> {
 
 fn avatar() -> Handle {
     static AVATAR: LazyLock<Handle> = LazyLock::new(|| {
-        decode_avatar(include_bytes!("../../../../../assets/about/avatar.png")).unwrap_or_else(
-            || {
-                crate::log!("[opencircle] about: the bundled avatar does not decode");
-                logo(TILE as u32)
-            },
-        )
+        decode_avatar(include_bytes!("../../../../assets/about/avatar.png")).unwrap_or_else(|| {
+            crate::log!("[opencircle] about: the bundled avatar does not decode");
+            logo(TILE as u32)
+        })
     });
     AVATAR.clone()
 }
@@ -438,7 +434,7 @@ mod tests {
 
     #[test]
     fn the_avatar_decodes_whatever_format_the_release_fetched() {
-        let bundled = include_bytes!("../../../../../assets/about/avatar.png");
+        let bundled = include_bytes!("../../../../assets/about/avatar.png");
         assert!(decode_avatar(bundled).is_some(), "the bundled file");
         let mut jpeg = Vec::new();
         ::image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
@@ -451,7 +447,7 @@ mod tests {
 
     #[test]
     fn notices_credit_the_models_we_download() {
-        let notice = include_str!("../../../../../docs/NOTICE.md");
+        let notice = include_str!("../../../../docs/NOTICE.md");
         for key in ["Helsinki-NLP", "Xenova", "OptimaMT", "PaddleOCR", t!(ab_n3)] {
             assert!(notice.contains(key), "{key} is in docs/NOTICE.md");
         }
@@ -490,7 +486,7 @@ mod tests {
     /// for is lost).
     #[test]
     fn every_clip_credit_links_to_its_full_section_in_notice() {
-        let notice = include_str!("../../../../../docs/NOTICE.md").replace("\r\n", "\n");
+        let notice = include_str!("../../../../docs/NOTICE.md").replace("\r\n", "\n");
         let sections: Vec<(String, &str)> = (notice.split("\n### ").skip(1))
             .map(|s| {
                 let (head, body) = s.split_once('\n').unwrap();

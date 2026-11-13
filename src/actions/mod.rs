@@ -63,12 +63,16 @@ pub struct Key {
 
 /// The action bound to `letter` (lower-case Latin) with/without Ctrl; none for an
 /// action whose Labs feature is off.
-pub fn for_key(labs: &crate::labs::Labs, letter: char, ctrl: bool) -> Option<&'static Action> {
+pub fn for_key(
+    labs: &crate::features::settings::labs::Labs,
+    letter: char,
+    ctrl: bool,
+) -> Option<&'static Action> {
     let key = Key { ctrl, letter };
     (ACTIONS.iter())
         .find(|action| action.key == key)
         .filter(|action| {
-            crate::labs::action_on(
+            crate::features::settings::labs::action_on(
                 labs,
                 &crate::shared::platform::hotkey::QuickId::from_name(action.id),
             )
@@ -119,7 +123,7 @@ mod tests {
                 assert_ne!(a.label, b.label);
             }
             assert!(a.key.letter.is_ascii_lowercase(), "{}", a.id);
-            let on = crate::labs::Labs::all_on();
+            let on = crate::features::settings::labs::Labs::all_on();
             assert_eq!(
                 for_key(&on, a.key.letter, a.key.ctrl).map(|f| f.id),
                 Some(a.id)
@@ -129,7 +133,10 @@ mod tests {
 
     #[test]
     fn snip_has_its_key_with_every_labs_switch_off() {
-        let (off, on) = (crate::labs::Labs::default(), crate::labs::Labs::all_on());
+        let (off, on) = (
+            crate::features::settings::labs::Labs::default(),
+            crate::features::settings::labs::Labs::all_on(),
+        );
         let e = snip::ACTION.key;
         // out of Labs since 0.1.3 (N-41)
         assert_eq!(for_key(&off, e.letter, e.ctrl).map(|a| a.id), Some("edit"));

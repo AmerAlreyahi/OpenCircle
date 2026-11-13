@@ -309,9 +309,9 @@ fn still_at(bytes: &[u8], w: u32) -> Option<Handle> {
 /// `tests/fixtures/previews/tiny-a.ivf` (red, green, blue) and `tiny-b.ivf`
 /// (white, black): 128x72, 100 ms a frame (`scripts/make-preview-fixture.py`).
 #[cfg(test)]
-pub const TINY_A: &[u8] = include_bytes!("../../../../../tests/fixtures/previews/tiny-a.ivf");
+pub const TINY_A: &[u8] = include_bytes!("../../../../tests/fixtures/previews/tiny-a.ivf");
 #[cfg(test)]
-pub const TINY_B: &[u8] = include_bytes!("../../../../../tests/fixtures/previews/tiny-b.ivf");
+pub const TINY_B: &[u8] = include_bytes!("../../../../tests/fixtures/previews/tiny-b.ivf");
 
 #[cfg(test)]
 mod tests {

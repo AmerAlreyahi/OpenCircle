@@ -10,6 +10,7 @@ use iced::{Point, Rectangle, Size, Task};
 use crate::actions::{self, Crop, search_in_browser, stack_crops};
 use crate::shared::config::{self, Provider};
 
+use crate::features::settings;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, Place, place_window};
@@ -17,7 +18,6 @@ use crate::ui::ai_chat;
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::screens::settings;
 use crate::ui::windows;
 
 use super::App;

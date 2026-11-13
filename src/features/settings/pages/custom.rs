@@ -7,7 +7,7 @@ use iced::widget::column;
 use iced::widget::tooltip::Position;
 
 use super::super::state::{BARS, BarChoice, Message, PALETTES, PaletteChoice, State};
-use crate::labs::{Feature, Labs};
+use crate::features::settings::labs::{Feature, Labs};
 use crate::shared::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
 use crate::shared::kit::colour::{picker, swatch};
 use crate::shared::kit::dropdown::dropdown;

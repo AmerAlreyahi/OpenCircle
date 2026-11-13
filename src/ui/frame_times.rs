@@ -16,10 +16,10 @@ use crate::ocr::{self, TextBlock};
 
 use super::app::message::Message;
 use super::app::word;
+use crate::features::{onboarding, settings};
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::ai_chat;
-use crate::{features::onboarding, ui::screens::settings};
 
 use iced::advanced::graphics::{Viewport, damage};
 use iced::{Color, Theme};
@@ -1397,7 +1397,7 @@ fn snip_drag(w: u32, h: u32, drag: SnipDrag, n: u32, pixels: bool) -> (Vec<Drawn
     let window = Rectangle::new(Point::new(200.0, 150.0), Size::new(600.0, 400.0));
     let mut app = snipping_on(w, h, window);
     if drag != SnipDrag::Pick {
-        app.o.labs = crate::labs::Labs::all_on();
+        app.o.labs = crate::features::settings::labs::Labs::all_on();
         app.select(window);
         let crop = app.crop().unwrap();
         let route = false;

@@ -19,6 +19,7 @@ use iced::{Center, Element, Fill, Padding, Size, Subscription};
 
 use super::steps;
 use super::steps::screenshots::{Access, ask};
+use crate::features::settings::{self, KeyJob};
 use crate::shared::config::{AiConfig, Config, Engine};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::divider::divider;
@@ -30,7 +31,6 @@ use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::secrets::{KeyStore, Keyring};
 use crate::ui::screens::common::language_picker::{self as picker, Picker, Side};
-use crate::ui::screens::settings::{self, KeyJob};
 
 /// The design's fixed size, the same for every step.
 pub const WINDOW_SIZE: Size = Size::new(680.0, 525.0);

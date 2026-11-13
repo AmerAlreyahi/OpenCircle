@@ -9,7 +9,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, Crop, copy, qr, search_in_browser, text};
-use crate::labs::{self, BarButton};
+use crate::features::settings::labs::{self, BarButton};
 use crate::ocr::{self, TextBlock};
 use crate::shared::config::{self, QuickAction, SelectStyle, SelectionConfig, Target};
 use crate::shared::platform::capture::CaptureError;
@@ -31,7 +31,7 @@ use crate::shared::kit::field;
 use crate::ui::screens::bar::view::ask_placeholder;
 
 use crate::actions::crop::STACK_GAP;
-use crate::labs::Labs;
+use crate::features::settings::labs::Labs;
 use crate::shared::config::{BarAnchor, TextReader};
 
 fn closing_app() -> App {
@@ -738,7 +738,7 @@ fn a_snips_area_stays_live_after_the_pick_and_copy_takes_it_as_it_is() {
     use crate::snip::annotate::Message as E;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
-    app.o.labs = crate::labs::Labs::all_on();
+    app.o.labs = crate::features::settings::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
     let _ = app.snip_routed(crop, true, false);
@@ -789,7 +789,7 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
     use crate::ui::screens::snip_toolbar::toolbar;
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
-    app.o.labs = crate::labs::Labs::all_on();
+    app.o.labs = crate::features::settings::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
     let _ = app.snip_routed(crop, true, false);
@@ -852,7 +852,7 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
 fn a_snip_routed_to_both_is_copied_and_edited() {
     let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
     let mut app = snipping(area);
-    app.o.labs = crate::labs::Labs::all_on();
+    app.o.labs = crate::features::settings::labs::Labs::all_on();
     app.select(area);
     let crop = app.crop().unwrap();
     let _ = copy::copied::image();

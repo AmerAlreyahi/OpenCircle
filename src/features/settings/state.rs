@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 
 use iced::{Color, Size, Subscription, event, keyboard};
 
+use crate::features::settings::labs::Feature;
 use crate::features::song::{self as music, SERVICE, Service};
-use crate::labs::Feature;
 use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
     EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,
@@ -1288,7 +1288,7 @@ impl State {
     pub(super) fn slots(&self) -> std::vec::IntoIter<Slot> {
         let labs = &self.draft.labs;
         let quick = self.draft.quick_actions.iter().enumerate();
-        let shown = quick.filter(|(_, q)| crate::labs::quick_on(labs, q));
+        let shown = quick.filter(|(_, q)| crate::features::settings::labs::quick_on(labs, q));
         let mut all = vec![Slot::Capture];
         all.extend(shown.map(|(i, _)| Slot::Quick(i)));
         all.into_iter()

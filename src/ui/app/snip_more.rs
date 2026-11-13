@@ -399,7 +399,7 @@ mod tests {
 
     use crate::Trigger;
     use crate::actions::{copy, snip_more as more, text};
-    use crate::labs::Labs;
+    use crate::features::settings::labs::Labs;
     use crate::ocr::TextBlock;
     use crate::shared::kit::testing::shot;
     use crate::snip::annotate::{Edit, Item, Menu, Message as E, Shape};

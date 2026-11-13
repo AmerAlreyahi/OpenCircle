@@ -8,7 +8,7 @@ use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::Trigger;
 use crate::actions::{self, text};
-use crate::labs::{self};
+use crate::features::settings::labs;
 use crate::ocr::{self};
 use crate::shared::config;
 

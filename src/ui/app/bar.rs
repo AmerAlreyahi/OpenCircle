@@ -6,7 +6,7 @@ use iced::widget::operation;
 use iced::{Point, Rectangle, Size, Task, Vector};
 
 use crate::actions;
-use crate::labs::{self, BarButton};
+use crate::features::settings::labs::{self, BarButton};
 use crate::shared::config;
 
 use crate::shared::kit::panel_frame as card;

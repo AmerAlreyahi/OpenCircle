@@ -9,7 +9,7 @@ use iced::{Point, Rectangle, Size, Task};
 
 use crate::Trigger;
 use crate::actions::{self, Action, Crop, Run, copy, qr, search_in_browser, text};
-use crate::labs::BarButton;
+use crate::features::settings::labs::BarButton;
 use crate::shared::config::{self, QuickAction, Target};
 
 use crate::shared::kit::panel_frame as card;

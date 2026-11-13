@@ -141,7 +141,7 @@ pub fn sync(planned: &[Binding], held_off: bool) {
 /// through, removes the actions that are no longer planned, and keeps what KDE answered.
 fn write(conn: &DBusConnection, planned: &[Binding]) {
     let defaults = super::plan(&Config {
-        labs: crate::labs::Labs::all_on(),
+        labs: crate::features::settings::labs::Labs::all_on(),
         ..Config::default()
     })
     .0;

@@ -89,7 +89,10 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
         return Err(format!("unknown action \"{}\"", printable(action)));
     }
     // A Labs feature that is off: the CLI says how to turn it on (`main`: exit status 2).
-    crate::labs::command_allowed(&crate::shared::config::current().labs, action)?;
+    crate::features::settings::labs::command_allowed(
+        &crate::shared::config::current().labs,
+        action,
+    )?;
     let target = match target {
         None => None,
         Some(t) => Some(super::parse_target(t).ok_or_else(|| {

@@ -132,17 +132,17 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
-            } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("tests.rs") {
+            } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("tests.rs")
+                // (labs.rs is the Labs switches' logic, not a screen)
+                && !p.ends_with("settings/labs.rs")
+            {
                 out.push(p);
             }
         }
     }
     let mut files = Vec::new();
-    walk(std::path::Path::new("src/ui/screens/settings"), &mut files);
-    walk(
-        std::path::Path::new("src/features/onboarding"),
-        &mut files,
-    );
+    walk(std::path::Path::new("src/features/settings"), &mut files);
+    walk(std::path::Path::new("src/features/onboarding"), &mut files);
     let found = words_outside_the_table(&files);
     assert!(found.is_empty(), "words outside the table: {found:#?}");
 }

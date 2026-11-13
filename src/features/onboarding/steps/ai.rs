@@ -5,7 +5,7 @@ use iced::Element;
 use iced::widget::column;
 
 use super::super::flow::{Message, State};
-use crate::ui::screens::settings::rows;
+use crate::features::settings::rows;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let s = &state.settings;

@@ -7,9 +7,9 @@ use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
 use super::super::flow::{Message, State};
+use crate::features::settings::{self, rows};
 use crate::shared::kit::keycap::keycap;
 use crate::shared::kit::tokens::space;
-use crate::ui::screens::settings::{self, rows};
 
 /// The logo's size in the card (`w-10`, its tile's inside).
 const LOGO: f32 = 32.0;

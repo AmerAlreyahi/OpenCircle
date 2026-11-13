@@ -14,7 +14,7 @@ use iced::widget::column;
 use iced::{Element, Padding};
 
 use super::state::{Message, Section, State, key_labels};
-use crate::labs::Feature;
+use crate::features::settings::labs::Feature;
 use crate::shared::config::{Config, Provider};
 use crate::shared::kit::hero::{self, hero};
 use crate::shared::platform::hotkey::QuickId;
@@ -244,7 +244,7 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::screens::settings::pages::about::{
+    use crate::features::settings::pages::about::{
         CLIP_CREDITS, NOT_AFFILIATED_CLIP, clip_credits,
     };
 

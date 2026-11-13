@@ -349,7 +349,7 @@ impl State {
             installed,
             size: size.map(|b| format!("· {} MB", (b + (1 << 19)) >> 20)),
             autostart: config.autostart,
-            shortcut: super::settings::key_labels(&config.shortcut).join(" + "),
+            shortcut: crate::features::settings::key_labels(&config.shortcut).join(" + "),
             file_name,
             version: env!("CARGO_PKG_VERSION"),
             bar: (0.0, 0.0, now),

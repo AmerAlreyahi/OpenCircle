@@ -120,7 +120,7 @@ const NOT_SCREENS: [&str; 7] = [
     "ui/frame_times.rs",
     "ui/screens/ai_chat/tests.rs",
     "ui/screens/translate/tests.rs",
-    "ui/screens/settings/tests.rs",
+    "features/settings/tests.rs",
     "shared/theme.rs",
     "ui/windows.rs",
 ];

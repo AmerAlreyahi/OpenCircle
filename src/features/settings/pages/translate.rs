@@ -10,7 +10,7 @@ use iced::{Element, Fill};
 
 use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 
-use crate::labs::Feature;
+use crate::features::settings::labs::Feature;
 use crate::mt;
 use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};

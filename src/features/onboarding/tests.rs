@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use iced::{Point, Size};
 
 use super::*;
+use crate::features::settings::{self, KeyMessage, PRESETS, tests::tmp};
 use crate::shared::config::{Config, Provider, Theme};
 use crate::shared::kit::testing::shot;
 use crate::shared::secrets::{MemoryStore, Secret};
 use crate::shared::theme;
 use crate::ui::screens::common::language_picker as picker;
-use crate::ui::screens::settings::{self, KeyMessage, PRESETS, tests::tmp};
 
 /// `update` with the keyring calls run at once (the shell runs them on a thread).
 fn update(state: &mut State, message: Message) -> Outcome {

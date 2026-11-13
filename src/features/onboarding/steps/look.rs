@@ -3,7 +3,7 @@
 use iced::Element;
 
 use super::super::flow::{Message, State};
-use crate::ui::screens::settings::rows;
+use crate::features::settings::rows;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     rows::themes_row(&state.settings).map(Message::Settings)

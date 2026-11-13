@@ -8,8 +8,8 @@ use iced::{Color, Element, Length, Size};
 use super::pages::SONG_PRIVACY;
 use super::pages::{self, PAGES};
 use super::*;
+use crate::features::settings::labs::{Feature, Labs};
 use crate::features::song as music;
-use crate::labs::{Feature, Labs};
 use crate::shared::config::{
     self, BarStyle, ColourSet, Config, DefaultAction, EdgeMode, EdgeStyle, Engine, Format,
     LookTheme, Provider, Rgb, SelectStyle, SnipAfter, SongSource, Target, TextReader, Theme,
@@ -2500,7 +2500,7 @@ fn a_preview_loops_until_the_page_is_left() {
 fn play_preview_downloads_only_on_the_click() {
     use super::previews::FAILED;
     let (mut s, _) = state(None);
-    s.draft.labs = crate::labs::Labs::all_on();
+    s.draft.labs = crate::features::settings::labs::Labs::all_on();
     for page in super::pages::PAGES.iter().map(|p| p.id) {
         let out = update(&mut s, Message::Section(page));
         assert!(!matches!(out, Outcome::Fetch(..)), "{page:?} fetched");
@@ -3119,10 +3119,10 @@ fn every_page_in_arabic_matches_its_golden_image() {
 /// wrapped line inside its column (with `no_text_is_drawn_past_its_box_on_any_page`).
 #[test]
 fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
+    use crate::features::settings::state::MIN_WIDTH;
     use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes;
-    use crate::ui::screens::settings::state::MIN_WIDTH;
     golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
         s.draft.labs = Labs::all_on();
@@ -3147,8 +3147,8 @@ fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
 /// at the row's right edge, #37). Tall: every row on screen, none scrolled.
 #[test]
 fn no_text_is_drawn_past_its_box_on_any_page() {
+    use crate::features::settings::state::MIN_WIDTH;
     use crate::shared::app_language::{self, Choice, Lang};
-    use crate::ui::screens::settings::state::MIN_WIDTH;
     let mut past = Vec::new();
     for language in ["en", "ar"] {
         let (mut s, _) = state(None);
@@ -3404,10 +3404,10 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
 /// Arabic), at the smallest, the usual, a 1920 and a 3440 px window.
 #[test]
 fn every_page_keeps_its_content_width_on_a_wide_window() {
+    use crate::features::settings::state::MIN_WIDTH;
+    use crate::features::settings::window::PAGE_ID;
     use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::tokens::{size, space};
-    use crate::ui::screens::settings::state::MIN_WIDTH;
-    use crate::ui::screens::settings::window::PAGE_ID;
     // the window's rim, the sidebar (its divider included), the page's side pad
     let start = 1.0 + size::SIDEBAR + space::PAGE[1];
     for language in ["en", "ar"] {
@@ -3489,8 +3489,8 @@ fn about_matches_its_golden_images_in_every_state() {
 /// box, in English and Arabic, folded and unfolded.
 #[test]
 fn about_draws_no_text_past_its_box_at_any_width() {
+    use crate::features::settings::state::MIN_WIDTH;
     use crate::shared::app_language::{self, Choice, Lang};
-    use crate::ui::screens::settings::state::MIN_WIDTH;
     let mut past = Vec::new();
     for language in ["en", "ar"] {
         let (mut s, _) = state(None);

@@ -10,7 +10,7 @@ use tray_icon::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem}
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use super::monitor::Place;
-use crate::labs::{Feature, Labs};
+use crate::features::settings::labs::{Feature, Labs};
 use crate::shared::app_language::{S, fmt};
 use crate::shared::config::{Config, Target};
 #[cfg(target_os = "linux")]
@@ -820,7 +820,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     use super::host_appears;
     use super::{Entry, add_with_fallback, entries, guid_for, place};
-    use crate::labs::{Feature, Labs};
+    use crate::features::settings::labs::{Feature, Labs};
     use crate::shared::config::Config;
     use std::path::Path;
 

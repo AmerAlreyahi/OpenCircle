@@ -1406,7 +1406,7 @@ mod tests {
         app.o.appear = Some((Instant::now(), 1.0));
         let _ = app.update(Message::Frame(Instant::now()));
         assert_eq!(app.o.screens.len(), 1, "the other screen's window");
-        app.o.labs = crate::labs::Labs::all_on();
+        app.o.labs = crate::features::settings::labs::Labs::all_on();
         let id = app.o.screens[0].window;
         (app, id)
     }
@@ -1743,7 +1743,7 @@ mod tests {
     #[test]
     fn shift_enter_snips_every_screen_and_a_pill_closes_the_other_windows() {
         let (mut app, _) = snipped();
-        app.o.labs = crate::labs::Labs::default();
+        app.o.labs = crate::features::settings::labs::Labs::default();
         let _ = app.update(Message::Overlay(overlay::Event::ShiftEnter));
         let edit = app.o.edit.as_ref().expect("picked");
         assert!(

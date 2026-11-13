@@ -6,7 +6,7 @@
 use iced::{Point, Rectangle, Size};
 
 use crate::actions::Key;
-use crate::labs::BarButton;
+use crate::features::settings::labs::BarButton;
 use crate::shared::config::BarAnchor;
 use crate::shared::kit::tokens::{size, space};
 use crate::shared::kit::{field, grip};
@@ -326,7 +326,8 @@ mod tests {
 
     #[test]
     fn tab_order_is_the_designs_and_skips_dimmed_pills() {
-        let all = crate::labs::bar(&crate::labs::Labs::all_on());
+        let all =
+            crate::features::settings::labs::bar(&crate::features::settings::labs::Labs::all_on());
         let order = |selected| stops(selected, &all);
         let b = Stop::Button;
         assert_eq!(

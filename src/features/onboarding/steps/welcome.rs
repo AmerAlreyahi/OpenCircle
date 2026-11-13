@@ -5,7 +5,7 @@ use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
 use super::super::flow::{Message, State};
-use crate::ui::screens::settings::rows;
+use crate::features::settings::rows;
 
 /// The logo's size in the card (`w-12`, its tile's inside).
 const LOGO: f32 = 40.0;
