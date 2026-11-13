@@ -41,8 +41,10 @@ const EXCEPT: u8 = b'x';
 /// Main mode's screen text, a part at a time (`Engine::read_screen`): `s`,
 /// gently (one byte), the Latin reader may read (one byte), the screen's key
 /// (u64 LE), the rows (top, bottom: f32 LE each), how many known boxes (u32
-/// LE) and each as `EXCEPT`'s, then whether the picture follows (one byte)
-/// and, if so, as `OCR`: width, height, RGBA. Reply `ScreenRead`.
+/// LE) and each as `EXCEPT`'s, then whether a picture follows (one byte)
+/// and, if so, its top row in the screen (u32 LE) and as `OCR`: width,
+/// height, RGBA (the whole screen, or the rows a part needs). Reply
+/// `ScreenRead`.
 const SCREEN: u8 = b's';
 /// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
 const WARM: u8 = b'w';
@@ -153,19 +155,22 @@ pub fn recognize_except(
 /// Main mode's screen text, a part at a time, in the helper (#169,
 /// `Engine::read_screen`): the lines whose middle is in `rows` (image px)
 /// and not in a `known` box (Windows OCR's lines read well), and every line
-/// found on the screen not known. The screen (`key`: one per opening) goes
-/// to the helper with the first part (`send`); after that only its key,
-/// unless the helper started again since. `latin`: the Latin reader may
-/// read (Linux); else lines in Latin letters are Windows OCR's. `gently` as
-/// as before: on at most two of the helper's cores at below-normal
-/// priority (`Gentle`), so the overlay and the rest of the PC keep the others.
+/// found on the screen not known. `part`: the rows of the screen (`key`:
+/// one per opening) sent with this part: all of them once (the second
+/// reader judges the whole screen), or each part's own (`part_rows`: the
+/// helper keeps the lines it found, not the picture); `None`: the screen
+/// the helper holds, sent whole again if it started again since. `latin`:
+/// the Latin reader may read (main mode's own read); else lines in Latin
+/// letters are Windows OCR's. `gently`: on at most two of the helper's
+/// cores at below-normal priority (`Gentle`), so the overlay and the rest
+/// of the PC keep the others.
 #[allow(clippy::too_many_arguments)]
 pub fn read_screen(
     key: u64,
     rgba: &[u8],
     width: u32,
     height: u32,
-    send: bool,
+    part: Option<(u32, u32)>,
     rows: (f32, f32),
     known: &[[f32; 4]],
     latin: bool,
@@ -184,7 +189,7 @@ pub fn read_screen(
         }
         false => {}
     }
-    let call = |send: bool| {
+    let call = |part: Option<(u32, u32)>| {
         let mut header = vec![SCREEN, u8::from(gently), u8::from(latin)];
         header.extend_from_slice(&key.to_le_bytes());
         header.extend_from_slice(&rows.0.to_le_bytes());
@@ -193,16 +198,23 @@ pub fn read_screen(
         for v in known.iter().flatten() {
             header.extend_from_slice(&v.to_le_bytes());
         }
-        header.push(u8::from(send));
-        if !send {
+        header.push(u8::from(part.is_some()));
+        let Some((top, bottom)) = part else {
             return parse(session::call(&[&header])?);
-        }
+        };
+        let bottom = bottom.min(height);
+        let top = top.min(bottom);
+        header.extend_from_slice(&top.to_le_bytes());
         header.extend_from_slice(&width.to_le_bytes());
-        header.extend_from_slice(&height.to_le_bytes());
-        parse(session::call(&[&header, rgba])?)
+        header.extend_from_slice(&(bottom - top).to_le_bytes());
+        let row = width as usize * 4;
+        parse(session::call(&[
+            &header,
+            &rgba[top as usize * row..bottom as usize * row],
+        ])?)
     };
-    match call(send) {
-        Err(OcrError::Engine(e)) if !send && e == NO_FRAME => call(true),
+    match call(part) {
+        Err(OcrError::Engine(e)) if part.is_none() && e == NO_FRAME => call(Some((0, height))),
         read => read,
     }
 }
@@ -420,10 +432,11 @@ fn screen_here(body: &[u8], engine: &mut Option<Engine>) -> Result<ScreenRead, O
     let img = match body.split_first() {
         Some((0, _)) => None,
         Some((_, body)) => {
-            let (size, rgba) = body.split_first_chunk::<8>().ok_or_else(short)?;
-            let w = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
-            let h = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
-            Some(to_rgb(rgba, w, h)?)
+            let (size, rgba) = body.split_first_chunk::<12>().ok_or_else(short)?;
+            let top = u32::from_le_bytes([size[0], size[1], size[2], size[3]]);
+            let w = u32::from_le_bytes([size[4], size[5], size[6], size[7]]);
+            let h = u32::from_le_bytes([size[8], size[9], size[10], size[11]]);
+            Some((to_rgb(rgba, w, h)?, top))
         }
         None => return Err(short()),
     };

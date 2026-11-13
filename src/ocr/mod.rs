@@ -63,6 +63,10 @@ type Strip = (u32, u32);
 /// Rows a Latin band sees past its own (`Engine::band`): main mode's bands
 /// overlap by 24 rows (`ocr::screen`), so a line up to 48 rows tall is whole.
 const BAND_SEE: f32 = 24.0;
+/// Rows a part sent to the helper reaches past the rows it reads
+/// (`part_rows`): a strip sees at most 64 past its own (`Grid`), a Latin
+/// band `BAND_SEE`.
+const PART_SEE: f32 = 64.0;
 
 /// The strips (owned rows: top, bottom) of an image `height` tall, `owned`
 /// rows each, that own rows of `rows` (all for `None`).
@@ -550,9 +554,10 @@ pub struct Engine {
     dir: PathBuf,
     det: TextDetectionPredictor,
     ort: OrtSessionConfig,
-    /// The loaded recognizers, the last used last: two at most (a page read
-    /// line by line takes a Latin and a non-Latin one; a third replaces the
-    /// one used longest ago).
+    /// The loaded recognizer: one at a time (#169: a second one held a 3440
+    /// helper 40-80 MB higher; loading one takes ~35 ms on 2 cores, and a
+    /// part reads each script's lines together, so it switches once or
+    /// twice per part at most).
     recs: Vec<(usize, TextRecognitionPredictor)>,
     /// `Auto`'s first try: the recognizer that read most lines last time.
     auto: usize,
@@ -573,7 +578,10 @@ pub const NO_FRAME: &str = "the screen isn't held";
 /// (shrunk, and at full size by strip: owned rows -> lines).
 pub(crate) struct Frame {
     key: u64,
+    /// The rows of the screen the helper has now (all of them, or a part's:
+    /// `part_rows`), from row `top`; every box here is in its px.
     img: RgbImage,
+    top: u32,
     shrunk: Option<Vec<[f32; 4]>>,
     strips: Vec<(Strip, Vec<[f32; 4]>)>,
     /// Lines already read whatever the rows (`few`).
@@ -582,10 +590,6 @@ pub(crate) struct Frame {
     grid: Option<Grid>,
     /// Every line to read was read (`ScreenRead::done`).
     done: bool,
-    /// Lines of a Latin and a non-Latin script were kept: both recognizers
-    /// stay loaded between its parts (else the one that read nothing is
-    /// freed after each part: a second held a 3440 helper ~40 MB higher).
-    two: bool,
     /// `ScreenRead::noise` of the last part read.
     noise: u32,
     /// The lines Latin bands found (`Engine::band`) when the whole screen
@@ -598,16 +602,44 @@ impl Frame {
         Frame {
             key,
             img,
+            top: 0,
             shrunk: None,
             strips: Vec::new(),
             read: Vec::new(),
             grid: None,
             done: false,
-            two: false,
             noise: 0,
             seen: Vec::new(),
         }
     }
+
+    /// The next part's rows of the same screen (`img`, from row `top`): the
+    /// lines found and read so far are kept (moved into its px), the last
+    /// part's picture and what was found on it only are dropped.
+    fn moved_to(mut self, img: RgbImage, top: u32) -> Frame {
+        let dy = self.top as f32 - top as f32;
+        for b in self.read.iter_mut().chain(self.seen.iter_mut()) {
+            b[1] += dy;
+        }
+        if let Some(boxes) = self.shrunk.take() {
+            let moved = boxes.into_iter().map(|b| [b[0], b[1] + dy, b[2], b[3]]);
+            self.seen.extend(moved);
+        }
+        self.strips.clear();
+        (self.img, self.top) = (img, top);
+        self
+    }
+}
+
+/// The rows of a screen `height` tall that main mode's part reading `rows`
+/// (top, bottom) sends to the helper: its own and `PART_SEE` past them (a
+/// line whose middle is in them is whole, found shrunk or in strips), so
+/// the helper never holds the whole picture (#169: a 3440 screen held its
+/// helper ~130 MB above the band read before it).
+pub fn part_rows(rows: (f32, f32), height: u32) -> (u32, u32) {
+    let top = (rows.0 - PART_SEE).max(0.0) as u32;
+    let bottom = ((rows.1 + PART_SEE).ceil() as u32).min(height);
+    (top.min(bottom), bottom)
 }
 
 /// A part of a screen read (`Engine::read_screen`): its lines, and every
@@ -680,9 +712,7 @@ impl Engine {
             let rec = self.recs.remove(k);
             self.recs.push(rec);
         } else {
-            if self.recs.len() >= 2 {
-                self.recs.remove(0); // freed before the next one loads
-            }
+            self.recs.clear(); // freed before the next one loads
             let files = models::RECOGNIZERS[i];
             if !models::installed(files) {
                 let what = format!("the {} text-recognition model", files.script);
@@ -862,8 +892,13 @@ impl Engine {
             .filter(|&i| script(i) != Script::Latin && installed(i))
             .collect();
         others.sort_by_key(|&i| Some(i) != self.other); // the last winner first
-        let latin_reader = [self.latin, 0]
+        // the Latin reader loaded now first (one is loaded at a time: a
+        // French page read by the English one, then the Latin one, switched
+        // twice a part), else the one that kept most lines last time
+        let loaded = self.recs.last().map(|(i, _)| *i);
+        let latin_reader = [loaded, Some(self.latin), Some(0)]
             .into_iter()
+            .flatten()
             .find(|&i| installed(i) && script(i) == Script::Latin)
             .filter(|_| latin);
         let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
@@ -1033,16 +1068,7 @@ impl Engine {
         let mut count = vec![0usize; models::RECOGNIZERS.len()];
         kept.iter().for_each(|(i, _)| count[*i] += 1);
         let most = (0..count.len()).filter(|&i| count[i] > 0);
-        let kept_by = |latin: bool| {
-            (0..count.len()).any(|i| count[i] > 0 && (script(i) == Script::Latin) == latin)
-        };
-        f.two |= kept_by(true) && kept_by(false);
         if let Some(best) = most.max_by_key(|&i| count[i]) {
-            // (one script on this screen so far: the other reader's memory
-            // goes back, #169: two loaded held 3440's peak 7-45 % over main's)
-            if !f.two {
-                self.recs.retain(|(i, _)| count[*i] > 0);
-            }
             self.auto = best;
             match script(best) {
                 Script::Latin => self.latin = best,
@@ -1188,28 +1214,46 @@ impl Engine {
     pub fn read_screen(
         &mut self,
         key: u64,
-        img: Option<RgbImage>,
+        img: Option<(RgbImage, u32)>,
         rows: (f32, f32),
         known: &[[f32; 4]],
         latin: bool,
     ) -> Result<ScreenRead, OcrError> {
         let mut f = match (img, self.frame.take()) {
-            (Some(img), _) => Frame::new(key, img),
+            (Some((img, top)), Some(f)) if f.key == key => f.moved_to(img, top),
+            (Some((img, top)), _) => Frame {
+                top,
+                ..Frame::new(key, img)
+            },
             (None, Some(f)) if f.key == key => f,
             _ => return Err(OcrError::Engine(NO_FRAME.into())),
         };
+        // every box below in the px of the rows held (`Frame::top`)
+        let dy = f.top as f32;
+        let known: Vec<[f32; 4]> = (known.iter())
+            .map(|k| [k[0], k[1] - dy, k[2], k[3]])
+            .collect();
+        let known = &known[..];
+        let rows = (rows.0 - dy, rows.1 - dy);
         let read = self.per_line(&mut f, Some(rows), known, latin);
+        let down = |b: [f32; 4]| [b[0], b[1] + dy, b[2], b[3]];
         // (only once found anyway: a Latin page read in bands never needs
         // the whole screen found, ~150 ms on 2 cores at 1080p; its bands'
         // lines found so far instead)
         let unknown = |b: &&[f32; 4]| !known.iter().any(|k| holds(k, b));
         let found = (f.shrunk.as_ref().unwrap_or(&f.seen).iter())
             .filter(unknown)
-            .copied()
+            .map(|b| down(*b))
             .collect();
         self.frame = Some(f);
+        let lines = (read?.into_iter())
+            .map(|b| TextBlock {
+                bounds: down(b.bounds),
+                ..b
+            })
+            .collect();
         Ok(ScreenRead {
-            lines: read?,
+            lines,
             found,
             done: self.frame.as_ref().is_some_and(|f| f.done),
             noise: self.frame.as_ref().map_or(0, |f| f.noise),
@@ -1339,6 +1383,9 @@ impl Engine {
         img: &RgbImage,
         boxes: &[[f32; 4]],
     ) -> Result<Vec<Option<TextBlock>>, OcrError> {
+        if boxes.is_empty() {
+            return Ok(Vec::new()); // (no reader loaded for nothing)
+        }
         let rtl = models::RECOGNIZERS[i].rtl();
         // long lines are read in pieces (`cut`), each piece's line noted
         let (mut pieces, mut owner) = (Vec::new(), Vec::new());
@@ -1700,6 +1747,28 @@ mod tests {
             "bands: the shrunk scale"
         );
         assert!(Grid::new(1920, 60.0, 0.667, false).shrunk);
+    }
+
+    /// #169: main mode sends the helper each part's own rows, not the whole
+    /// screen; the lines found on earlier parts are kept, in the new part's px.
+    #[test]
+    fn a_part_brings_its_rows_and_keeps_the_lines_found() {
+        assert_eq!(part_rows((500.0, 596.0), 1440), (436, 660));
+        assert_eq!(part_rows((10.0, 100.0), 1440), (0, 164));
+        assert_eq!(part_rows((1400.0, 1440.0), 1440), (1336, 1440));
+        let mut f = Frame::new(7, RgbImage::new(100, 224));
+        f.top = 436;
+        f.seen = vec![[0.0, 100.0, 50.0, 20.0]];
+        f.shrunk = Some(vec![[0.0, 120.0, 50.0, 20.0]]);
+        f.strips = vec![((0, 128), Vec::new())];
+        let f = f.moved_to(RgbImage::new(100, 224), 536);
+        assert_eq!((f.top, f.img.height()), (536, 224));
+        // screen rows 536 and 556 in its px
+        assert_eq!(f.seen, [[0.0, 0.0, 50.0, 20.0], [0.0, 20.0, 50.0, 20.0]]);
+        assert!(
+            f.shrunk.is_none() && f.strips.is_empty(),
+            "the last part's own"
+        );
     }
 
     #[test]

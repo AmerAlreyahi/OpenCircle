@@ -328,7 +328,7 @@ impl App {
             return Task::none();
         };
         let scale = self.o.scale;
-        // the helper: the whole frame's rows (frame px), the frame sent once
+        // the helper: the frame's rows (frame px), each part with its own rows
         let rows = (top * scale, bottom * scale);
         // Linux main mode: the band's crop and its rows in it, as before #169
         let at = |y: f32| ((y * scale) as u32).saturating_sub(y0);
@@ -338,12 +338,10 @@ impl App {
         let system =
             (self.o.text_by == Some(ocr::Source::System)).then_some(self.o.behaviour.text_reader);
         // Linux main mode keeps the band-by-band read (owner, 2026-11-12) until
-        // its follow-up plugs in HERE: the whole-screen read below
-        // (`ocr::read_screen`) once the helper keeps the lines it found, not
-        // the picture, and loads one reader at a time.
+        // its follow-up plugs in HERE: the part-by-part read below
+        // (`ocr::read_screen`; the helper keeps the lines it found, not the
+        // picture, and loads one reader at a time).
         let whole_screen = cfg!(windows);
-        let send_frame =
-            system.is_none() && whole_screen && !std::mem::replace(&mut self.o.frame_sent, true);
         let held = self
             .o
             .helper
@@ -372,13 +370,15 @@ impl App {
                     let read = ocr::recognize_band(&c.rgba, c.width, c.height, band_rows, gently);
                     return send(read, [x0, y0]);
                 }
+                // (the helper keeps the lines it found, the part's rows come
+                // with each part)
                 let key = u64::from(opening);
                 let read = ocr::read_screen(
                     key,
                     &pixels,
                     width,
                     height,
-                    send_frame,
+                    Some(ocr::part_rows(rows, height)),
                     rows,
                     &[],
                     true,
@@ -517,9 +517,9 @@ impl App {
                 return; // closed meanwhile
             };
             let key = u64::from(opening);
-            let read = ocr::read_screen(
-                key, &pixels, width, height, send_frame, rows, &known, false, true,
-            );
+            let part = send_frame.then_some((0, height));
+            let read =
+                ocr::read_screen(key, &pixels, width, height, part, rows, &known, false, true);
             let read = read.map(|read| {
                 let _ = tx.unbounded_send(Part::Found(found(read.found, scale)));
                 if read.done {

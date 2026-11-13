@@ -20,7 +20,7 @@ const PATHS: &[&str] = &[
     "arabic",
     "auto",           // Read::Auto = one-shot translate's read on Linux (source "auto")
     "linux-main", // Linux main mode: the whole screen band by band (`ocr::screen`), a fresh helper
-    "linux-frame", // the Linux follow-up: the screen held, read band by band (`Engine::read_screen`)
+    "linux-frame", // main mode's own read (Linux; Windows' helper route): band by band, each part's rows sent (`Engine::read_screen`)
     "except",      // second reader, nothing known
     "except-known", // second reader, EN PP-OCR's plain lines as Windows OCR's stand-in
     "main-today",  // what main mode shows: the stand-in's lines + the second reader's
@@ -547,8 +547,9 @@ fn linux_main(e: &mut Engine, p: &Page) -> Vec<TextBlock> {
 
 /// Main mode as the app reads a screen (#169): bands from the pointer
 /// (mid-screen) out (`ocr::screen`), each band's rows read by
-/// `Engine::read_screen` (the screen sent with the first band only). Linux:
-/// `known` empty, the Latin reader reads (a fresh helper: English first).
+/// `Engine::read_screen`. Main mode's own read (`latin`): `known` empty,
+/// each part's rows sent with it (`part_rows`; a fresh helper: English
+/// first). The second reader: the screen sent with the first band only.
 /// Windows: the second reader after Windows OCR (`known`: its lines read as
 /// words, the stand-in's here), Latin lines left to it. `first`: the band
 /// under the pointer only ("first lines under the pointer").
@@ -567,14 +568,23 @@ fn main_bands(
     }
     let h = p.h as f32;
     let key = KEY.fetch_add(1, Ordering::Relaxed);
-    let mut img = Some(to_rgb(&p.rgba, p.w, p.h).unwrap());
+    let mut img = (!latin).then(|| to_rgb(&p.rgba, p.w, p.h).unwrap());
     let mut rows = Rows::default();
     let mut out = Vec::new();
     let mut band = Some(Rows::touched(h / 2.0, h));
     while let Some(b) = band {
         if let Some((top, bottom)) = rows.unread(b, h) {
+            let img = match latin {
+                true => {
+                    let (y0, y1) = part_rows((top, bottom), p.h);
+                    let row = p.w as usize * 4;
+                    let part = &p.rgba[y0 as usize * row..y1 as usize * row];
+                    Some((to_rgb(part, p.w, y1 - y0).unwrap(), y0))
+                }
+                false => img.take().map(|img| (img, 0)),
+            };
             let read = e
-                .read_screen(key, img.take(), (top, bottom), known, latin)
+                .read_screen(key, img, (top, bottom), known, latin)
                 .unwrap();
             out.extend(read.lines);
             if read.done {

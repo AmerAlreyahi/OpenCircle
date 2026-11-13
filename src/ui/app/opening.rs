@@ -64,8 +64,8 @@ pub(in crate::ui) struct Opening {
     /// Windows OCR's lines the second reader leaves alone (image px x scale:
     /// frame px), once judged (`ocr::system::read_well`).
     pub(in crate::ui) other_known: Option<std::sync::Arc<Vec<[f32; 4]>>>,
-    /// The frame went to the helper (`ocr::read_screen`): later parts send
-    /// only its key.
+    /// The whole frame went to the helper for the second reader
+    /// (`ocr::read_screen`): later parts send only its key.
     pub(in crate::ui) frame_sent: bool,
     /// The reader offered for the script found (#169, sheet b7): the card
     /// asks for it, once per opening.
