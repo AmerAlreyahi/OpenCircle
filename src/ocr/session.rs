@@ -618,10 +618,10 @@ mod tests {
             &self,
             texts: &[String],
             target: &str,
-        ) -> Result<Vec<String>, crate::ai::AiError> {
+        ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
             let pair = crate::mt::pair("en", target).expect("an offline pair");
             super::super::worker::translate_via(&self.0, texts, pair)
-                .map_err(|e| crate::ai::AiError::Offline(e.to_string()))
+                .map_err(|e| crate::features::ask_ai::AiError::Offline(e.to_string()))
         }
     }
 

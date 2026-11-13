@@ -13,6 +13,7 @@ use iced::{Element, Fill};
 use super::super::state::{
     Busy, KEY_MASK, KeyField, KeyMessage, KeyStatus, Message, PRESETS, Pick, Preset, State, issue,
 };
+use crate::features::ask_ai::screens::model_list;
 use crate::shared::config::{Provider, StaysOpen};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::dropdown::dropdown;
@@ -23,7 +24,6 @@ use crate::shared::kit::text::{error, sub};
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
 use crate::shared::secrets::Secret;
-use crate::ui::screens::model_list;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     column![provider_rows(state), chat_rows(state)].into()

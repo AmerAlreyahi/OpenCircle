@@ -9,10 +9,14 @@
 //! `crate::shared::secrets` and never appears in an error, a log or a `Debug`.
 
 pub mod anthropic;
+pub(crate) mod app;
+pub(crate) mod ask;
 pub mod browser;
+pub(crate) mod chats;
 pub mod models;
 pub mod openai;
 pub mod providers;
+pub(crate) mod screens;
 
 use std::fmt;
 use std::io::BufRead;

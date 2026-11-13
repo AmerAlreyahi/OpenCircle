@@ -172,7 +172,10 @@ fn finish_writes_the_picked_config() {
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(back, cfg);
     assert_eq!(back.ai.provider, Provider::Anthropic);
-    assert_eq!(back.ai.model, crate::ai::DEFAULT_ANTHROPIC_MODEL);
+    assert_eq!(
+        back.ai.model,
+        crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL
+    );
     assert_eq!(
         (back.theme, back.appearance.light.as_str()),
         (Theme::Light, "frost")

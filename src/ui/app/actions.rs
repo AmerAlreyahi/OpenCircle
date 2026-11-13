@@ -104,7 +104,7 @@ impl App {
         if text.is_empty() {
             return Task::none();
         }
-        let url = crate::ai::browser::search_url(text);
+        let url = crate::features::ask_ai::browser::search_url(text);
         background(move |tx| {
             let pill = match crate::shared::platform::sys::open::open_link(&url) {
                 Ok(()) => None,
@@ -348,7 +348,10 @@ impl App {
             Quick::Explain => match self.crop() {
                 Some(crop) => self.open_chat(
                     crop,
-                    Some(actions::ask::PRESETS[0].text(&config::current().translate.target)),
+                    Some(
+                        crate::features::ask_ai::ask::PRESETS[0]
+                            .text(&config::current().translate.target),
+                    ),
                 ),
                 None => Task::none(),
             },

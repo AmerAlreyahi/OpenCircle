@@ -9,8 +9,8 @@ use std::sync::Arc;
 use iced::Element;
 use iced::widget::column;
 
-use crate::ai::models::{self, Model};
-use crate::ai::providers::Preset;
+use crate::features::ask_ai::models::{self, Model};
+use crate::features::ask_ai::providers::Preset;
 use crate::shared::app_language::{S, fmt};
 use crate::shared::config::AiConfig;
 use crate::shared::kit::dropdown::{Search, combo};
@@ -189,8 +189,8 @@ fn tag_words(t: &models::Tag) -> String {
 
 /// Why the model list could not load: a plain sentence in the app's language
 /// (the provider's own detail goes to the log, never to the screen).
-fn ai_words(e: &crate::ai::AiError) -> String {
-    use crate::ai::AiError;
+fn ai_words(e: &crate::features::ask_ai::AiError) -> String {
+    use crate::features::ask_ai::AiError;
     crate::log!("[opencircle] model list: {e}");
     match e {
         AiError::NotConfigured(_) => t!(ml_err_set_up),

@@ -652,8 +652,8 @@ pub fn forget_user_data(quiet: bool) -> std::process::ExitCode {
 pub fn remove_user_data() {
     crate::shared::platform::hotkey::forget_desktop_shortcuts();
     remove_dirs(&user_data());
-    let owners =
-        (crate::ai::providers::PRESETS.iter()).map(|p| crate::shared::secrets::AiKey(p.id));
+    let owners = (crate::features::ask_ai::providers::PRESETS.iter())
+        .map(|p| crate::shared::secrets::AiKey(p.id));
     for owner in owners.chain([crate::shared::secrets::AiKey::SHARED]) {
         let _ = crate::shared::secrets::delete(owner);
     }

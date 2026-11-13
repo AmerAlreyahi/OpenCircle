@@ -1,15 +1,15 @@
 //! Ask AI: a chat about the crop with the provider the user configured
-//! (`crate::ai`). Nothing is sent until the user asks a question.
+//! (`crate::features::ask_ai`). Nothing is sent until the user asks a question.
 use std::fmt;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use super::{Action, Crop, Key, Run};
-use crate::ai::{self, Role};
+use crate::actions::{Action, Crop, Key, Run};
+use crate::features::ask_ai::chats as history;
+use crate::features::ask_ai::{self as ai, Role};
 use crate::shared::app_language::{S, fmt as say, tr};
 use crate::shared::config::{AiConfig, Config, Provider};
 use crate::shared::secrets::{self, Secret};
-use crate::shared::store::chats as history;
 
 pub const ACTION: Action = Action {
     id: "ai",
@@ -113,7 +113,7 @@ fn setup_for(cfg: AiConfig, crop: &Crop) -> Result<Setup, String> {
         });
     }
     let (cfg, key) = credentials_for(cfg)?;
-    let png = super::encode_png(crop.width, crop.height, &crop.rgba)?;
+    let png = crate::actions::encode_png(crop.width, crop.height, &crop.rgba)?;
     Ok(Setup { cfg, key, png })
 }
 
@@ -168,7 +168,7 @@ fn key_for(
     store: &dyn secrets::KeyStore,
     cfg: &AiConfig,
 ) -> Result<Option<Secret>, secrets::SecretsError> {
-    let Some(owner) = crate::ai::providers::key_of(cfg) else {
+    let Some(owner) = crate::features::ask_ai::providers::key_of(cfg) else {
         return Ok(None);
     };
     Ok(store.read(owner)?.filter(|key| !key.is_empty()))
@@ -177,7 +177,8 @@ fn key_for(
 /// The exact steps to set the AI up by hand (until the Settings window does it).
 fn steps(cfg: &AiConfig) -> String {
     let path = Config::path().map_or(tr(S::ai_config_file).into(), |p| p.display().to_string());
-    let account = crate::ai::providers::key_of(cfg).map_or_else(String::new, |k| k.entry());
+    let account =
+        crate::features::ask_ai::providers::key_of(cfg).map_or_else(String::new, |k| k.entry());
     #[cfg(target_os = "linux")]
     let keyring = say(
         S::ai_keyring_linux,

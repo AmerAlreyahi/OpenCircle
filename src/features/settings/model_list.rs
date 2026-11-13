@@ -1,6 +1,6 @@
 //! Settings > Ask AI's Model list: the shared one (`screens::model_list`)
 //! on the draft's provider.
-pub use crate::ui::screens::model_list::{ModelList, ModelsJob, SEARCH};
+pub use crate::features::ask_ai::screens::model_list::{ModelList, ModelsJob, SEARCH};
 
 use super::state::{Outcome, State};
 

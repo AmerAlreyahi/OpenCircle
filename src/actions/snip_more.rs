@@ -54,7 +54,7 @@ impl Row {
             Row::CopyText => super::text::ACTION.icon,
             Row::Translate => super::translate::ACTION.icon,
             // the OpenCircle logo is drawn instead (never sparkles)
-            Row::AskAi => super::ask::ACTION.icon,
+            Row::AskAi => crate::features::ask_ai::ask::ACTION.icon,
         }
     }
 }

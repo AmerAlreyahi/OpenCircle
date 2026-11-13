@@ -9,7 +9,7 @@ use std::io::{self, Cursor};
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use crate::ai::png_b64 as base64;
+use crate::features::ask_ai::png_b64 as base64;
 
 /// Lens pages older versions wrote to the temp folder (still swept).
 const PREFIX: &str = "opencircle-lens-";
@@ -178,7 +178,7 @@ fn page_html(png: &[u8], w: u32, h: u32, hl: &str, st: u128, question: Option<&s
     let q = question
         .filter(|q| !q.trim().is_empty())
         .map_or(String::new(), |q| {
-            format!("&amp;q={}", crate::ai::browser::query(q).0)
+            format!("&amp;q={}", crate::features::ask_ai::browser::query(q).0)
         });
     TEMPLATE
         .replace("{{Q}}", &q)

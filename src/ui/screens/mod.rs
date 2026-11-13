@@ -6,12 +6,10 @@ pub mod common;
 pub mod live;
 pub mod long_capture;
 pub mod model_download;
-pub mod model_list;
 pub mod snip_toolbar;
 pub mod overlay {
     pub mod edge;
 }
-pub mod ai_chat;
 pub mod setup;
 pub mod steps;
 pub mod toast;

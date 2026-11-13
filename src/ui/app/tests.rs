@@ -3347,7 +3347,7 @@ fn letters_stay_shortcuts_with_a_result_card_open() {
     let opened = app.open_chat(crop.clone(), None);
     drop(opened); // its work (the setup) is done below by hand
     let id = app.o.ai_chat.as_ref().map(|(id, _)| *id).unwrap();
-    let setup = actions::ask::setup(&crop).map(Arc::new);
+    let setup = crate::features::ask_ai::ask::setup(&crop).map(Arc::new);
     assert!(setup.is_ok(), "the no-key provider needs no setup");
     let ready = app.update(Message::AiChat(id, ai_chat::Msg::Ready(setup)));
     let keys = key_after(&app, ready, None, 't');
@@ -3391,7 +3391,7 @@ fn shortcuts(messages: &[Message]) -> String {
 /// overlay; no chat card, no pinned chat (the owner, 2026-10-28).
 #[test]
 fn in_browser_mode_asking_opens_no_chat() {
-    super::ai_chat::HAND_OFF.set(true);
+    crate::features::ask_ai::app::ai_chat::HAND_OFF.set(true);
     let mut app = open_app(800, 600, 1.0);
     drag(
         &mut app,
@@ -3403,10 +3403,10 @@ fn in_browser_mode_asking_opens_no_chat() {
     assert_eq!(config::current().ai.provider, config::Provider::Browser);
     let _ = app.open_chat(crop, Some("What is this?".into()));
     // the same from the bar: its Ask AI action and the AI field's Enter
-    let _ = app.update(Message::Run(&actions::ask::ACTION));
+    let _ = app.update(Message::Run(&crate::features::ask_ai::ask::ACTION));
     let _ = app.update(Message::AskInput("What is this?".into()));
     let _ = app.update(Message::AskSubmit);
-    super::ai_chat::HAND_OFF.set(false);
+    crate::features::ask_ai::app::ai_chat::HAND_OFF.set(false);
     assert!(app.o.ai_chat.is_none() && app.chat.is_none(), "no chat");
 }
 
@@ -3439,7 +3439,7 @@ fn app_with_ask_panel() -> (App, u32) {
     let crop = app.crop().unwrap();
     let _ = app.open_chat(crop.clone(), None);
     let id = app.o.ai_chat.as_ref().map(|(id, _)| *id).unwrap();
-    let setup = actions::ask::setup(&crop).map(Arc::new);
+    let setup = crate::features::ask_ai::ask::setup(&crop).map(Arc::new);
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Ready(setup)));
     (app, id)
 }
@@ -4137,7 +4137,7 @@ fn nothing_floats_over_the_result_card() {
         Point::new(940.0, 500.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::ask::ACTION));
+    let _ = app.update(Message::Run(&crate::features::ask_ai::ask::ACTION));
     let card = app.chat_card_at();
     let room = app.room();
     assert!(room.intersection(&card).is_none(), "{room:?} vs {card:?}");
@@ -4151,7 +4151,7 @@ fn nothing_floats_over_the_result_card() {
 fn a_quick_action_on_a_drawn_area_runs_it() {
     let mut app = open_app(1920, 1080, 1.0);
     app.o.behaviour = SelectionConfig::default();
-    let ask = Quick::Action(&actions::ask::ACTION);
+    let ask = Quick::Action(&crate::features::ask_ai::ask::ACTION);
     app.o.purpose = Purpose::Quick(ask, config::Target::Circle);
     drag(
         &mut app,
@@ -4190,7 +4190,7 @@ fn the_result_card_opens_off_the_selection() {
         Point::new(400.0, 300.0),
         false,
     );
-    let _ = app.update(Message::Run(&actions::ask::ACTION)); // a card
+    let _ = app.update(Message::Run(&crate::features::ask_ai::ask::ACTION)); // a card
     assert!(app.o.ai_chat.is_some());
     let at = app.chat_card_at();
     assert_eq!(at.x + at.width, 1920.0 - 16.0, "right");
@@ -4244,7 +4244,7 @@ fn look_shots() {
     shot(&app, "look-1-snap-morphing.png");
     app.o.morph = None;
     shot(&app, "look-2-snapped-chips.png");
-    let _ = app.update(Message::Run(&actions::ask::ACTION)); // a card
+    let _ = app.update(Message::Run(&crate::features::ask_ai::ask::ACTION)); // a card
     shot(&app, "look-6-result-card.png");
     // Ask AI beside a selection at 1440x900, the bar kept out of the card,
     // the resize grip showing (hovered)
@@ -4256,7 +4256,7 @@ fn look_shots() {
         Point::new(640.0, 520.0),
         false,
     );
-    let _ = wide.update(Message::Run(&actions::ask::ACTION));
+    let _ = wide.update(Message::Run(&crate::features::ask_ai::ask::ACTION));
     wide.o.chat_hover = true;
     let rgba = crate::shared::kit::testing::shot::render(wide.view(wide.overlay), 1440, 900);
     actions::write_png(&dir.join("look-7-ask-card-1440.png"), 1440, 900, &rgba).unwrap();
@@ -4976,7 +4976,7 @@ fn chat_turn(app: &mut App, id: u32, question: &str, answer: &str) {
     ));
     let _ = app.update(Message::AiChat(
         id,
-        crate::ui::screens::ai_chat::tests::typed(question),
+        crate::features::ask_ai::screens::ai_chat::tests::typed(question),
     ));
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Submit));
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Delta(answer.into())));
@@ -4984,7 +4984,8 @@ fn chat_turn(app: &mut App, id: u32, question: &str, answer: &str) {
 }
 
 fn api_ready(app: &mut App, id: u32, png: &[u8]) {
-    let mut setup = actions::ask::tests::local_setup("http://127.0.0.1:9/v1".into());
+    let mut setup =
+        crate::features::ask_ai::ask::tests::local_setup("http://127.0.0.1:9/v1".into());
     setup.png = png.to_vec();
     let _ = app.update(Message::AiChat(
         id,

@@ -147,8 +147,8 @@ pub fn migrate_shared(store: &dyn KeyStore, ai: &AiConfig) -> Result<(), Secrets
     let Some(key) = store.read(AiKey::SHARED)? else {
         return Ok(());
     };
-    let to = (crate::ai::providers::Preset::of(ai))
-        .filter(|p| p.api == crate::ai::providers::Api::OpenAi)
+    let to = (crate::features::ask_ai::providers::Preset::of(ai))
+        .filter(|p| p.api == crate::features::ask_ai::providers::Api::OpenAi)
         .map(|p| AiKey(p.id));
     if let Some(to) = to
         && !store.is_set(to)?

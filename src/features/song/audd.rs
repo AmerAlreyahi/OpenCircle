@@ -53,7 +53,7 @@ pub fn identify(key: &Secret, clip: &Clip) -> Result<Song, Error> {
         .read_to_string()
         .map_err(|_| Error::Offline)?;
     parse(&text).map_err(|e| match e {
-        Error::Service(why) => Error::Service(crate::ai::scrub(&why, Some(key))),
+        Error::Service(why) => Error::Service(crate::features::ask_ai::scrub(&why, Some(key))),
         e => e,
     })
 }

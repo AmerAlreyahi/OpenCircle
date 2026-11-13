@@ -11,10 +11,10 @@ use iced::widget::{column, container, markdown as md, stack};
 use iced::{Center, Element, Fill, Rectangle, Size};
 
 use super::{AiChat, LOG, Msg, PICKS, State, Tab, classifier, picked};
-use crate::actions;
-use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
-use crate::ai::providers::{self, Preset};
-use crate::ai::{AiError, Fix};
+use crate::features::ask_ai::ask::{Chat, PRESETS, Setup, Status, Turn};
+use crate::features::ask_ai::providers::{self, Preset};
+use crate::features::ask_ai::screens::model_list;
+use crate::features::ask_ai::{AiError, Fix};
 use crate::shared::config::{self, StaysOpen};
 use crate::shared::kit::bubble::bubble;
 use crate::shared::kit::button::{Kind, button, cta_label, label};
@@ -35,8 +35,7 @@ use crate::shared::kit::text_area::text_area;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{chip, field};
-use crate::ui::keys;
-use crate::ui::screens::model_list;
+use crate::ui::app::keys;
 
 /// A card's body and its footer.
 type Part<'a> = (Element<'a, Msg>, Option<Element<'a, Msg>>);
@@ -106,7 +105,7 @@ impl AiChat {
                 include,
                 ..
             } => (
-                actions::ask::ACTION.icon,
+                crate::features::ask_ai::ask::ACTION.icon,
                 CHAT_TITLE,
                 self.ask_view(setup.as_ref(), chat, answers, *include, at.width),
             ),
@@ -420,7 +419,7 @@ impl AiChat {
         let open = match &self.state {
             State::Ask { chat, .. } => chat.id.clone(),
         };
-        let now = crate::shared::store::chats::now();
+        let now = crate::features::ask_ai::chats::now();
         let mut cards = column![].spacing(space::GAP).width(Fill);
         for entry in &self.listed {
             cards = cards.push(crate::shared::kit::card::chat(

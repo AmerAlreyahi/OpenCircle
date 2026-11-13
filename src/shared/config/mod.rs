@@ -917,7 +917,7 @@ impl Default for AiConfig {
         AiConfig {
             provider: Provider::Browser,
             base_url: String::new(),
-            model: crate::ai::DEFAULT_ANTHROPIC_MODEL.to_string(),
+            model: crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL.to_string(),
         }
     }
 }

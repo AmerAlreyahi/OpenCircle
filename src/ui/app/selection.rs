@@ -419,7 +419,9 @@ impl App {
                 // Nothing selected: Ask AI, Translate and Edit take the whole screen
                 // (as the bottom bar's buttons do).
                 let bar = match actions::for_key(&self.o.labs, letter, ctrl).map(|a| a.id) {
-                    Some(id) if id == actions::ask::ACTION.id => Some(Message::AskButton),
+                    Some(id) if id == crate::features::ask_ai::ask::ACTION.id => {
+                        Some(Message::AskButton)
+                    }
                     Some(id) if id == actions::translate::ACTION.id => {
                         Some(Message::TranslateScreen)
                     }

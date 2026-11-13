@@ -368,7 +368,7 @@ impl KeyField {
 
 // ---- data: presets, languages, action names ----
 
-pub use crate::ai::providers::{CUSTOM, PRESETS, Preset};
+pub use crate::features::ask_ai::providers::{CUSTOM, PRESETS, Preset};
 
 /// A language in a Settings list, named in the app's language at each draw.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1019,7 +1019,7 @@ impl State {
         let mut config = config;
         config.add_new_quick_actions(); // their rows show; the file gets them at the next save
         let store: Arc<dyn KeyStore> = store.into();
-        let key_owner = crate::ai::providers::key_of(&config.ai);
+        let key_owner = crate::features::ask_ai::providers::key_of(&config.ai);
         let key = match key_owner {
             Some(owner) => KeyField::new(bind(&store, owner)),
             None => KeyField::idle(),
@@ -1142,7 +1142,7 @@ impl State {
     /// provider's own keyring entry, asked again when it changes (another
     /// provider's key is never shown as saved, nor used).
     fn sync_key(&mut self) {
-        let owner = crate::ai::providers::key_of(&self.draft.ai);
+        let owner = crate::features::ask_ai::providers::key_of(&self.draft.ai);
         if owner == self.key_owner {
             return;
         }
@@ -1463,8 +1463,8 @@ pub(super) fn problems(cfg: &Config, key_saved: bool) -> Vec<Problem> {
     if cfg.ai.provider == Provider::OpenaiCompatible {
         if cfg.ai.base_url.is_empty() {
             out.push(Problem::new("ai.base_url", Why::UrlMissing));
-        } else if let Err(crate::ai::AiError::NotConfigured(why)) =
-            crate::ai::check_endpoint(&cfg.ai.base_url, key_saved)
+        } else if let Err(crate::features::ask_ai::AiError::NotConfigured(why)) =
+            crate::features::ask_ai::check_endpoint(&cfg.ai.base_url, key_saved)
             && !out.iter().any(|p| p.key == "ai.base_url")
         {
             crate::log!("[opencircle] ai.base_url refused: {why}");
@@ -1901,7 +1901,7 @@ fn set_provider(state: &mut State, p: Provider) {
         return;
     }
     let ai = &mut state.draft.ai;
-    let default_model = crate::ai::DEFAULT_ANTHROPIC_MODEL;
+    let default_model = crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL;
     ai.provider = p.clone();
     match p {
         // Hidden fields must stay valid: nothing half-typed blocks Save.

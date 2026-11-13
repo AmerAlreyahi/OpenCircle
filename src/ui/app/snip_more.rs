@@ -57,7 +57,7 @@ impl App {
         let info = more::Info {
             read: m.read,
             caps: more::caps_from(&config::current()),
-            browser: super::ai_chat::hands_off(),
+            browser: crate::features::ask_ai::app::ai_chat::hands_off(),
             translated: m.shown,
         };
         if let Some(edit) = &mut self.o.edit {

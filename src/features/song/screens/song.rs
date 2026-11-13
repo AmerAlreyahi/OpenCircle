@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use iced::widget::{column, container, image, opaque, row, text};
 use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 
+use crate::features::ask_ai::screens::ai_chat::{actions, note};
 use crate::features::song::history;
 use crate::features::song::{self as music, LISTEN_SECS, Song};
 use crate::shared::config;
@@ -21,7 +22,6 @@ use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{accent, error, sub, text as line};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::ui::app::background::background;
-use crate::ui::screens::ai_chat::{actions, note};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
@@ -182,7 +182,7 @@ impl Session {
             held: false,
             logo: None,
         };
-        crate::ui::screens::ai_chat::card(
+        crate::features::ask_ai::screens::ai_chat::card(
             header,
             body,
             footer,

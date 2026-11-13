@@ -10,12 +10,13 @@ pub(crate) mod live_layer;
 pub(crate) mod long_capture_popup;
 pub(crate) mod overlay;
 pub(crate) mod screens;
+use crate::features::ask_ai::screens::ai_chat;
 use crate::features::settings;
 use crate::features::song::screens::song;
 use screens::common::language_picker as picker;
 use screens::live::controller as live_controller;
 pub(crate) use screens::setup;
-use screens::{ai_chat, translate};
+use screens::translate;
 pub(crate) mod snip;
 #[cfg(test)]
 pub(crate) mod snip_shots;
@@ -27,7 +28,6 @@ use crate::shared::platform::shape;
 pub use crate::shared::platform::tray::{refresh as refresh_tray, start as start_tray};
 use app::App;
 use app::background::background;
-use app::keys;
 use iced::futures::channel::mpsc::UnboundedReceiver;
 use screens::{update_card, update_pill};
 

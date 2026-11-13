@@ -29,7 +29,6 @@ use crate::shared::touch;
 use crate::ui::{live_layer, overlay, windows};
 
 pub(crate) mod actions;
-pub(crate) mod ai_chat;
 pub(crate) mod bar;
 pub(crate) mod capture;
 pub(crate) mod screens;
@@ -222,9 +221,9 @@ pub(crate) struct App {
     /// The AI chat's width the user set by its inner edge (this run of the app).
     pub(crate) chat_width: Option<f32>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
-    pub(crate) chat: Option<ai_chat::Resident>,
+    pub(crate) chat: Option<crate::features::ask_ai::app::ai_chat::Resident>,
     /// The AI chat's own window (`ai_chat::ChatWindow`).
-    pub(crate) chat_win: Option<ai_chat::ChatWindow>,
+    pub(crate) chat_win: Option<crate::features::ask_ai::app::ai_chat::ChatWindow>,
     /// Song searches started (numbers them).
     pub(crate) songs: u32,
     /// The update waiting for a moment to install (`update::flow`), with its pill.

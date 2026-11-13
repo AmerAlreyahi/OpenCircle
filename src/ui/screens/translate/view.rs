@@ -5,9 +5,9 @@ use iced::widget::{column, container, opaque, pin, row, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::{Card, Msg, Phase, Session};
-use crate::actions::ask::Status;
 use crate::actions::{self};
-use crate::ai::Fix;
+use crate::features::ask_ai::Fix;
+use crate::features::ask_ai::ask::Status;
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label};
 use crate::shared::kit::dir;
@@ -304,7 +304,7 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
             on,
         ));
     }
-    let ask = &actions::ask::ACTION;
+    let ask = &crate::features::ask_ai::ask::ACTION;
     let buttons = actions((t!(tp_explain), Msg::Explain), [(tr(ask.label), Msg::Ask)]);
     (body.into(), buttons)
 }

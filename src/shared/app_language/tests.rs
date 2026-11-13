@@ -159,7 +159,7 @@ fn the_part_2a_surfaces_write_no_words_of_their_own() {
         "src/ui/screens/update_card.rs",
         "src/ui/screens/toast.rs",
         "src/ui/screens/model_download.rs",
-        "src/ui/screens/model_list.rs",
+        "src/features/ask_ai/screens/model_list.rs",
         "src/ui/screens/translate/view.rs",
         "src/ui/screens/common/language_picker.rs",
     ]
@@ -193,11 +193,46 @@ fn the_whole_ui_writes_no_words_of_its_own() {
         }
     }
     let mut files = Vec::new();
-    walk(std::path::Path::new("src/ui"), &mut files);
-    walk(std::path::Path::new("src/actions"), &mut files);
+    for root in UI_SOURCES {
+        let root = std::path::Path::new(root);
+        if root.is_file() {
+            files.push(root.to_path_buf());
+        } else {
+            walk(root, &mut files);
+        }
+    }
+    files.retain(|p| {
+        let name = p.to_string_lossy().replace('\\', "/");
+        !EXEMPT_FILES.iter().any(|f| name.ends_with(f))
+    });
     let found = words_outside_the_table(&files);
     assert!(found.is_empty(), "words outside the table: {found:#?}");
 }
+
+/// The UI's files (what was `src/ui/` and `src/actions/` before the feature
+/// folders): folders and single files.
+const UI_SOURCES: &[&str] = &[
+    "src/ui",
+    "src/actions",
+    "src/shared/kit",
+    "src/shared/theme.rs",
+    "src/shared/touch.rs",
+    "src/shared/platform/monitor.rs",
+    "src/shared/platform/shape.rs",
+    "src/shared/platform/tray.rs",
+    "src/shared/platform/windows.rs",
+    "src/features/song/screens",
+    "src/features/onboarding",
+    "src/features/settings/mod.rs",
+    "src/features/settings/model_list.rs",
+    "src/features/settings/pages",
+    "src/features/settings/previews",
+    "src/features/settings/state.rs",
+    "src/features/settings/window.rs",
+    "src/features/ask_ai/screens",
+    "src/features/ask_ai/app",
+    "src/features/ask_ai/ask.rs",
+];
 
 /// Files of the UI that hold no user-visible words, and why.
 const EXEMPT_FILES: &[&str] = &[
@@ -207,7 +242,7 @@ const EXEMPT_FILES: &[&str] = &[
     "/frame_times.rs",
     "/snip_shots.rs",
     // the model's own prompts (English, sent to the provider), the AI setup steps
-    "src/actions/ask.rs",
+    "src/features/ask_ai/ask.rs",
     // the page the browser posts the picture from (no words), QR content tests
     "src/actions/search_in_browser/page.rs",
     "src/actions/qr.rs",

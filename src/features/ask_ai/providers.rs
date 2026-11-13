@@ -113,7 +113,7 @@ pub const ANTHROPIC: Preset = Preset {
     name: "Anthropic",
     api: Api::Anthropic,
     base_url: "",
-    model: crate::ai::DEFAULT_ANTHROPIC_MODEL,
+    model: crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL,
     local: false,
 };
 

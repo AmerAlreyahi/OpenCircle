@@ -10,7 +10,7 @@ use rusqlite::params;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{Result, err, open, write};
+use crate::shared::store::{Result, err, open, write};
 
 /// Bumped by every "forget everything" (`forget_all`): a save that began
 /// before it (its `generation` older) writes nothing, even if it gets the
@@ -309,7 +309,7 @@ pub fn clear(path: &Path) -> Result<()> {
 /// goes, on a thread of its own; a save still on its way writes nothing.
 pub fn forget_all() {
     with_generation(|g| g.fetch_add(1, Ordering::SeqCst));
-    let Some(path) = super::path() else {
+    let Some(path) = crate::shared::store::path() else {
         return;
     };
     std::thread::spawn(move || {

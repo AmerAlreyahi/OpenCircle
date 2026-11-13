@@ -16,19 +16,19 @@ use std::time::Instant;
 use iced::widget::{markdown, operation, text_editor};
 use iced::{Task, task};
 
-use crate::actions::ask::{self, Chat, PRESETS, Setup, Status};
 use crate::actions::{self, Crop};
-use crate::ai;
-use crate::ai::providers::{self, Preset};
+use crate::features::ask_ai as ai;
+use crate::features::ask_ai::ask::{self, Chat, PRESETS, Setup, Status};
+use crate::features::ask_ai::providers::{self, Preset};
+use crate::features::ask_ai::screens::model_list::{self, ModelList};
 use crate::shared::app_language::{S, Said};
 use crate::shared::config::{self, Provider, StaysOpen};
 use crate::shared::kit::markdown::Act;
 use crate::shared::kit::panel_frame::{self, Event};
 use crate::shared::kit::{dropdown, motion, spinner};
-use crate::shared::store::{self, chats};
-use crate::ui::background;
-use crate::ui::keys;
-use crate::ui::screens::model_list::{self, ModelList};
+use crate::ui::app::background::background;
+use crate::ui::app::keys;
+use crate::{features::ask_ai::chats, shared::store};
 
 mod view;
 pub use view::{actions, ai_error, card, note, provider_name};

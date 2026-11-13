@@ -1,7 +1,6 @@
 //! The action registry: ONE list of what can be done with a selection. The action
 //! bar renders it in order; the first entry is the default (Enter).
 //! To add an action: see docs/ARCHITECTURE.md ("Add an action").
-pub mod ask;
 pub mod copy;
 pub mod crop;
 pub mod entities;
@@ -17,7 +16,7 @@ pub mod translate;
 /// Every action, in action-bar order. The first one runs on Enter.
 pub const ACTIONS: &[Action] = &[
     search_in_browser::ACTION,
-    ask::ACTION,
+    crate::features::ask_ai::ask::ACTION,
     text::ACTION,
     translate::ACTION,
     snip::ACTION,

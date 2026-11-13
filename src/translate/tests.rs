@@ -980,7 +980,7 @@ fn languages_end_to_end() {
 #[ignore]
 fn real_frames() {
     use super::pipeline::{Cache, Deps, translate_frame};
-    use crate::ai::AiError;
+    use crate::features::ask_ai::AiError;
     use crate::ocr::{self, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1096,7 +1096,7 @@ fn real_frames() {
 #[ignore]
 fn real_matrix() {
     use super::pipeline::{Cache, Deps, Real, Via, translate_frame};
-    use crate::ai::AiError;
+    use crate::features::ask_ai::AiError;
     use crate::ocr::{self, OcrError, TextBlock};
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1253,7 +1253,7 @@ fn real_matrix() {
 #[ignore]
 fn profile_helper() {
     use super::pipeline::{Cache, Deps, by_sentence, translate_frame};
-    use crate::ai::AiError;
+    use crate::features::ask_ai::AiError;
     use crate::ocr::session::Session;
     use crate::ocr::{OcrError, Read, TextBlock, worker};
     use std::sync::Mutex;
@@ -1428,7 +1428,7 @@ mod real {
     /// the address bar was one block with the logo under it and translated.
     #[test]
     fn linux_pages_go_the_page_way_and_keep_the_address() {
-        use crate::ai::AiError;
+        use crate::features::ask_ai::AiError;
         use crate::translate::pipeline::{Deps, Real, Via, code};
         let blocks = |name| group_blocks(&lines(name, (1920, 1440)));
         let texts = |b: &[Block]| b.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
@@ -1787,7 +1787,11 @@ mod real {
         ) -> Result<Vec<crate::ocr::TextBlock>, crate::ocr::OcrError> {
             unreachable!("the fixture's lines are given")
         }
-        fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, crate::ai::AiError> {
+        fn translate(
+            &self,
+            texts: &[String],
+            _: &str,
+        ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
             let all: std::collections::HashMap<String, String> =
                 serde_json::from_str(include_str!("fixtures/mt.json")).unwrap();
             by_sentence(texts, |s| {

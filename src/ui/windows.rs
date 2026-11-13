@@ -1877,7 +1877,7 @@ fn apply_from(old: &Config, cfg: Config) {
     crate::shared::platform::autostart::apply(&cfg);
     // Keep chat history turned off: what was kept goes now, nothing more is written
     if old.chat.keep_history && !cfg.chat.keep_history {
-        crate::shared::store::chats::forget_all();
+        crate::features::ask_ai::chats::forget_all();
     }
     // Recent captures likewise
     if old.snip.history && !cfg.snip.history {

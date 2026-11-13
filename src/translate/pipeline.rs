@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 pub use super::lang::is_rtl;
 use super::lang::{self, Script};
 use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
-use crate::ai::{self, AiError};
+use crate::features::ask_ai::{self as ai, AiError};
 use crate::mt;
 use crate::ocr::{self, OcrError, TextBlock};
 use crate::shared::config::{AiConfig, TextReader};
@@ -2196,11 +2196,12 @@ pub(super) mod tests {
     /// (gate 0.1.2): translated there, or that model's download asked for.
     #[test]
     fn an_unreadable_ai_reply_falls_back_to_on_device() {
-        let url = crate::actions::ask::tests::stub(&["Sure! Voici la traduction : Bonjour."]);
+        let url =
+            crate::features::ask_ai::ask::tests::stub(&["Sure! Voici la traduction : Bonjour."]);
         let real = Real::new(
             "en",
             Via::Ai {
-                ai: crate::actions::ask::tests::local_setup(url).cfg,
+                ai: crate::features::ask_ai::ask::tests::local_setup(url).cfg,
                 key: None,
             },
         );

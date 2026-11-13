@@ -54,18 +54,18 @@ fn tidy_in(captures: Option<&Path>, db: Option<&Path>, clear: &[Kind]) -> Counts
     if clear.contains(&Kind::Chats)
         && let Some(db) = db
     {
-        crate::shared::store::chats::forget(db);
+        crate::features::ask_ai::chats::forget(db);
     }
     Counts {
         captures: captures.map_or(0, |d| recent::list(d).len()),
-        chats: db.map_or(0, |db| crate::shared::store::chats::list(db, "").len()),
+        chats: db.map_or(0, |db| crate::features::ask_ai::chats::list(db, "").len()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::store::chats::{self, Saved, Turn};
+    use crate::features::ask_ai::chats::{self, Saved, Turn};
 
     #[test]
     fn tidy_counts_each_kind_and_clears_only_what_it_is_asked() {

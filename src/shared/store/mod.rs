@@ -7,8 +7,6 @@
 //! A new feature: a file here with its functions, and ONE new entry at the end
 //! of `MIGRATIONS` (never edit a shipped one).
 
-pub mod chats;
-
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -16,7 +14,7 @@ use rusqlite::Connection;
 
 /// Schema steps, in order: entry `i` takes the database from version `i` to
 /// `i + 1` (`PRAGMA user_version`).
-const MIGRATIONS: &[&str] = &[
+pub(crate) const MIGRATIONS: &[&str] = &[
     // 1: saved AI chats (`chats`), text only.
     "CREATE TABLE chats (
          id TEXT PRIMARY KEY, title TEXT NOT NULL,

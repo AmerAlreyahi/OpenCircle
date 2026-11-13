@@ -673,7 +673,10 @@ fn switching_provider_keeps_the_model_sensible() {
         "preset fills an empty model"
     );
     update(&mut s, Message::Provider(Provider::Anthropic));
-    assert_eq!(s.draft.ai.model, crate::ai::DEFAULT_ANTHROPIC_MODEL);
+    assert_eq!(
+        s.draft.ai.model,
+        crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL
+    );
     assert_eq!(s.draft.ai.base_url, "", "Anthropic uses its own endpoint");
 }
 

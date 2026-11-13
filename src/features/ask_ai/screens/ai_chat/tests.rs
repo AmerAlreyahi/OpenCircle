@@ -897,7 +897,7 @@ fn safety_classifier_models_are_flagged() {
 /// server), and a pick writes what Settings' list writes.
 #[test]
 fn the_picker_follows_settings_list() {
-    use crate::ai::providers::{ANTHROPIC, CUSTOM, PRESETS};
+    use crate::features::ask_ai::providers::{ANTHROPIC, CUSTOM, PRESETS};
     assert_eq!(PICKS.len(), PRESETS.len()); // + the browser, - Custom server
     assert_eq!(PICKS[0].to_string(), "Browser (Google AI Mode)");
     assert!(PICKS.iter().all(|p| p.to_string() != CUSTOM.name));
@@ -913,7 +913,7 @@ fn the_picker_follows_settings_list() {
     assert_eq!(picked(&cfg), Some(router));
     // its own key: the one stored for OpenRouter, never another provider's
     assert_eq!(
-        crate::ai::providers::key_of(&cfg).map(|k| k.entry()),
+        crate::features::ask_ai::providers::key_of(&cfg).map(|k| k.entry()),
         Some("ai-key-openrouter".into())
     );
     let anthropic = *PICKS
