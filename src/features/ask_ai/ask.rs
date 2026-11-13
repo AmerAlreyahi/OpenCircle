@@ -852,7 +852,9 @@ pub(crate) mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nprintf '%s' \"$1\" > '{0}.tmp' && mv '{0}.tmp' '{0}'\n",
+                // only this test's own questions: other tests running beside it
+                // (the AI chat's) open the browser provider too
+                "#!/bin/sh\ncase \"$1\" in *Pastel*|*q=hi) printf '%s' \"$1\" > '{0}.tmp' && mv '{0}.tmp' '{0}';; esac\n",
                 seen.display()
             ),
         )
