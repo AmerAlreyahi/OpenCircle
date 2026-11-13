@@ -1034,3 +1034,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   never-compiled files, and the switched-off edge-glow breathing code (deleted; SUPERSEDES the 4 s breath of "Screen edge",
   2026-10-27: the glow is static). The rest of the audit (shared wrapper widget, test helpers, the Lens page's PNG code,
   splitting long files) goes with v0.1.8's restructure.
+
+- v0.1.8 deadline + restructure (owner, 2026-11-13, "okay"): v0.1.8 is finished on 2026-11-14 (estimates are given in agent
+  working hours, never human days). The feature-folder restructure plan (docs/internal/reports-0.1.8/restructure-plan.md:
+  src/app + src/features/<feature> + src/shared, pure moves, arch tests) is approved as written. If "Latin words and digits
+  inside Arabic lines" runs late, it moves to 0.2.0.
