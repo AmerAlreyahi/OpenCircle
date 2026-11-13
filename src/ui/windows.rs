@@ -10,11 +10,11 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::screens::onboarding;
 use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
 use super::{settings, shape, update_card, update_pill};
+use crate::features::onboarding;
 use crate::shared::kit::chip;
 use crate::shared::kit::header::{self as chrome, Caption};
 use crate::shared::kit::icon::Icon;

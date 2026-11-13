@@ -140,7 +140,7 @@ fn settings_and_onboarding_write_no_words_of_their_own() {
     let mut files = Vec::new();
     walk(std::path::Path::new("src/ui/screens/settings"), &mut files);
     walk(
-        std::path::Path::new("src/ui/screens/onboarding"),
+        std::path::Path::new("src/features/onboarding"),
         &mut files,
     );
     let found = words_outside_the_table(&files);

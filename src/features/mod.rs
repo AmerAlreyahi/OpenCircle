@@ -2,4 +2,5 @@
 //! feature uses another only through that feature's `mod.rs`
 //! (`arch_tests::features_meet_only_through_mod_rs`); what several features use
 //! lives in `shared/`.
+pub(crate) mod onboarding;
 pub(crate) mod song;

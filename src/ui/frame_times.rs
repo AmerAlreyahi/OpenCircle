@@ -19,7 +19,7 @@ use super::app::word;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::ui::ai_chat;
-use crate::ui::screens::{onboarding, settings};
+use crate::{features::onboarding, ui::screens::settings};
 
 use iced::advanced::graphics::{Viewport, damage};
 use iced::{Color, Theme};
