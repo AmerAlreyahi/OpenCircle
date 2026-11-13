@@ -64,21 +64,24 @@ pub(crate) fn write() -> MutexGuard<'static, ()> {
     WRITING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// How long an open waits for another connection (a save thread, History, a
+/// second OpenCircle) that is creating or migrating the file; a loaded disk
+/// can make one migration take longer than the old 2 s.
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Opens (creating) the database at `path`, migrated to the current schema.
 pub(crate) fn open(path: &Path) -> Result<Connection> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
     let mut db = Connection::open(path).map_err(err)?;
-    db.busy_timeout(std::time::Duration::from_secs(2))
-        .map_err(err)?;
+    db.busy_timeout(BUSY_WAIT).map_err(err)?;
     // Switching a new file to WAL answers "locked" at once, without the busy
     // timeout, while another connection opens it too: try again for as long.
-    let mut tries = 0;
+    let give_up = std::time::Instant::now() + BUSY_WAIT;
     while let Err(e) = db.pragma_update(None, "journal_mode", "WAL") {
         let busy = e.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy);
-        tries += 1;
-        if !busy || tries == 200 {
+        if !busy || std::time::Instant::now() > give_up {
             return Err(err(e));
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -129,6 +132,28 @@ mod tests {
             .unwrap();
         drop(db);
         assert!(open(&file).is_err(), "a newer schema is not touched");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Another connection holds the write lock for longer than the old 2 s
+    /// wait (a slow disk under load): the open waits for it, never fails.
+    #[test]
+    fn an_open_waits_out_a_slow_writer() {
+        let dir = std::env::temp_dir().join(format!("oc-store-slow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("opencircle.db");
+        let mut holder = Connection::open(&file).unwrap();
+        holder.pragma_update(None, "journal_mode", "WAL").unwrap();
+        let tx = holder
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        std::thread::scope(|s| {
+            let opener = s.spawn(|| open(&file).map(drop));
+            std::thread::sleep(std::time::Duration::from_millis(2500));
+            tx.commit().unwrap();
+            assert_eq!(opener.join().unwrap(), Ok(()));
+        });
         let _ = std::fs::remove_dir_all(dir);
     }
 
