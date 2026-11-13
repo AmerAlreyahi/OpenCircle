@@ -105,7 +105,10 @@ mod tests {
     #[test]
     fn windows_ocr_is_only_reported_on_windows() {
         let (c, _) = Config::parse("");
-        assert_eq!(report(&c).contains("Windows OCR"), cfg!(windows));
+        // (the log lines it ends with are other tests' too: some log Windows OCR)
+        let report = report(&c);
+        let own = report.split("Last log lines:").next().unwrap();
+        assert_eq!(own.contains("Windows OCR"), cfg!(windows));
     }
 
     #[test]
