@@ -242,25 +242,28 @@ pub fn emblem<'a, Message: 'a>(icon: super::icon::Icon) -> Element<'a, Message> 
 /// under the cursor.
 pub fn action<'a, Message: Clone + 'a>(label: String, on_press: Message) -> Element<'a, Message> {
     use iced::widget::button;
-    button(text(label).size(12).font(weight(Weight::Normal)))
-        .padding([6, 12])
-        .on_press(on_press)
-        .style(|_, status| button::Style {
-            background: Some(
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
-                    _ => c().hover,
-                }
-                .into(),
-            ),
-            text_color: c().text,
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().divider),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(text(label).size(12).font(weight(Weight::Normal)))
+            .padding([6, 12])
+            .style(|_, status| button::Style {
+                background: Some(
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
+                        _ => c().hover,
+                    }
+                    .into(),
+                ),
+                text_color: c().text,
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(1)
+                    .color(c().divider),
+                ..button::Style::default()
+            }),
+        radius::FULL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// A chip floating over the screen on its own (a selection's Select text or
@@ -273,26 +276,29 @@ pub fn floating<'a, Message: Clone + 'a>(
     pad: f32,
 ) -> Element<'a, Message> {
     use iced::widget::button;
-    button(container(text(label).size(12).font(weight(Weight::Normal))).center_y(iced::Fill))
-        .height(height)
-        .padding([0.0, pad])
-        .on_press(on_press)
-        .style(|_, status| button::Style {
-            background: Some(
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
-                    _ => c().widget,
-                }
-                .into(),
-            ),
-            text_color: c().text,
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().rim),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(container(text(label).size(12).font(weight(Weight::Normal))).center_y(iced::Fill))
+            .height(height)
+            .padding([0.0, pad])
+            .style(|_, status| button::Style {
+                background: Some(
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
+                        _ => c().widget,
+                    }
+                    .into(),
+                ),
+                text_color: c().text,
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(1)
+                    .color(c().rim),
+                ..button::Style::default()
+            }),
+        radius::FULL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// The editing toolbar's Drag chip (`SnipDragHandle`: `.oc-btn`, 63x30, radius
@@ -320,7 +326,7 @@ pub fn drag_out<'a, Message: Clone + 'a>(on_down: Message, word: &'a str) -> Ele
         look(c().elevated_border, c().text_sub),
         look(c().accent, c().text),
     ))
-    .on_press(on_down)
+    .on_press(on_down) // mouse only: drags the picture out
     .interaction(iced::mouse::Interaction::Grab)
     .into()
 }
@@ -407,7 +413,7 @@ pub fn size_handle<'a, Message: Clone + 'a>(
             })
     };
     mouse_area(hover(look(false), look(true)))
-        .on_press(on_down)
+        .on_press(on_down) // mouse only: drags the picture out
         .interaction(iced::mouse::Interaction::Grab)
         .into()
 }

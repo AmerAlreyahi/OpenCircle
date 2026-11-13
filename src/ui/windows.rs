@@ -1499,7 +1499,9 @@ impl Windows {
             && *sid == id
             && !state.close_requested()
         {
-            return window::gain_focus(id);
+            // the question's Cancel (Keep editing) takes the focus: Enter keeps editing
+            let cancel = iced::widget::operation::focus(crate::ui::kit::focus::CANCEL);
+            return Task::batch([window::gain_focus(id), cancel]);
         }
         window::close(id)
     }

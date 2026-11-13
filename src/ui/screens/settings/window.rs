@@ -13,7 +13,7 @@ use super::state::{Message, Section, State};
 use super::{pages, previews};
 use crate::app_language::{S, count, tr};
 use crate::t;
-use crate::ui::kit::button::{Kind, button, label};
+use crate::ui::kit::button::{Kind, button, cancel, label};
 use crate::ui::kit::chip::{Tone, status};
 use crate::ui::kit::divider::divider;
 use crate::ui::kit::header::regular;
@@ -53,11 +53,13 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         main = main.push(close_question());
     }
     let rim = if maximised { 0.0 } else { RIM };
-    surface(Material::Window, 0.0, column![header, divider(), main])
-        .padding(rim)
-        .width(Fill)
-        .height(Fill)
-        .into()
+    // Tab / Shift+Tab walk the sidebar, then the page (`kit::focus`)
+    crate::ui::kit::focus::scope(
+        surface(Material::Window, 0.0, column![header, divider(), main])
+            .padding(rim)
+            .width(Fill)
+            .height(Fill),
+    )
 }
 
 /// The header pill, only when something needs the user (owner, 2026-10-29:
@@ -148,7 +150,11 @@ fn close_question<'a>() -> Element<'a, Message> {
         crate::dir_row![
             Space::new().width(Fill),
             b(t!(win_discard), Message::CloseDiscard),
-            b(t!(win_keep_editing), Message::CloseKeep),
+            cancel(
+                label(t!(win_keep_editing)),
+                Kind::Elevated,
+                Message::CloseKeep
+            ),
             b(t!(win_save), Message::CloseSave),
         ]
         .spacing(space::GAP)

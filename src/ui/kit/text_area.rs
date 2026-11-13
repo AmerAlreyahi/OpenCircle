@@ -111,7 +111,7 @@ pub fn text_area<'a, M: Clone + 'a>(
             ..container::Style::default()
         });
     mouse_area(boxed)
-        .on_press(on_focus)
+        .on_press(on_focus) // mouse only: a click focuses the editor; Tab reaches it as a field
         .interaction(iced::mouse::Interaction::Text)
         .into()
 }

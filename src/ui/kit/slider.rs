@@ -58,7 +58,7 @@ fn line<'a, Message: Clone + 'a>(
     value: u8,
     dim: bool,
     on_change: impl Fn(u8) -> Message + 'a,
-) -> rail::Slider<'a, u8, Message> {
+) -> Element<'a, Message> {
     let alpha = if dim { 0.45 } else { 1.0 };
     let fade = move |colour: Color| super::button::faded(colour, alpha);
     // right to left: the least at the right, filled from the right (the
@@ -74,8 +74,10 @@ fn line<'a, Message: Clone + 'a>(
         true => (filled.1, filled.0),
         false => filled,
     };
-    rail::Slider::new(range, flip(value), move |v| on_change(flip(v))).style(move |_, status| {
-        rail::Style {
+    let on_change = std::rc::Rc::new(on_change);
+    let step = on_change.clone();
+    let rail = rail::Slider::new(range, flip(value), move |v| on_change(flip(v))).style(
+        move |_, status| rail::Style {
             rail: Rail {
                 backgrounds,
 
@@ -92,6 +94,17 @@ fn line<'a, Message: Clone + 'a>(
                 border_width: 0.0,
                 border_color: Color::TRANSPARENT,
             },
-        }
-    })
+        },
+    );
+    // the arrows: one more / less (left is more right to left, as the rail runs)
+    super::focus::stop(rail, radius::FULL, None)
+        .up_is_on()
+        .steps(move |s| {
+            let to = match s {
+                super::focus::Step::On => value.checked_add(1).filter(|v| *v <= hi)?,
+                super::focus::Step::Back => value.checked_sub(1).filter(|v| *v >= lo)?,
+            };
+            Some(step(to))
+        })
+        .into()
 }

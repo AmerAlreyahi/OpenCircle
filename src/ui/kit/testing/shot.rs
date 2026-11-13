@@ -699,3 +699,49 @@ pub fn save<Message>(name: &str, view: Element<'_, Message>, size: Size) -> Vec<
     }
     rgba
 }
+
+/// Feeds `events` to `view` one by one (its widgets' state kept, as a window
+/// does) and returns the messages and, after each event, the bounds of the
+/// focused stop or field (`kit::focus`), if any.
+pub fn focus_walk<'a, Message>(
+    view: impl Fn() -> Element<'a, Message>,
+    size: Size,
+    events: &[iced::Event],
+) -> (Vec<Message>, Vec<Option<Rectangle>>) {
+    use iced::advanced::widget::{Id, Operation, operation::Focusable};
+    struct Focused(Option<Rectangle>);
+    impl Operation for Focused {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn focusable(&mut self, _: Option<&Id>, bounds: Rectangle, state: &mut dyn Focusable) {
+            if state.is_focused() && self.0.is_none() {
+                self.0 = Some(bounds);
+            }
+        }
+    }
+    let mut renderer = renderer();
+    let mut cache = Cache::default();
+    let (mut messages, mut focused) = (Vec::new(), Vec::new());
+    for e in events {
+        let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+        let at = match e {
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                mouse::Cursor::Available(*position)
+            }
+            _ => mouse::Cursor::Unavailable,
+        };
+        let _ = ui.update(
+            std::slice::from_ref(e),
+            at,
+            &mut renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut messages,
+        );
+        let mut find = Focused(None);
+        ui.operate(&renderer, &mut find);
+        focused.push(find.0);
+        cache = ui.into_cache();
+    }
+    (messages, focused)
+}

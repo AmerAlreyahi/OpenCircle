@@ -45,25 +45,28 @@ fn pick<'a, Message: Clone + 'a>(
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     use button::Status;
-    button(content)
-        .width(Fill)
-        .padding(space::CARD)
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let t = c();
-            let (fill, edge) = match (selected, status) {
-                (true, _) => (t.card_selected, t.card_ring.unwrap_or(t.elevated_border)),
-                (false, Status::Hovered | Status::Pressed) => (t.hover, t.rim),
-                (false, _) => (t.card_idle, t.divider),
-            };
-            button::Style {
-                background: Some(fill.into()),
-                text_color: t.text,
-                border: Border::default().rounded(radius::CARD).width(1).color(edge),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(content)
+            .width(Fill)
+            .padding(space::CARD)
+            .style(move |_, status| {
+                let t = c();
+                let (fill, edge) = match (selected, status) {
+                    (true, _) => (t.card_selected, t.card_ring.unwrap_or(t.elevated_border)),
+                    (false, Status::Hovered | Status::Pressed) => (t.hover, t.rim),
+                    (false, _) => (t.card_idle, t.divider),
+                };
+                button::Style {
+                    background: Some(fill.into()),
+                    text_color: t.text,
+                    border: Border::default().rounded(radius::CARD).width(1).color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        radius::CARD,
+        on_press,
+    )
+    .into()
 }
 
 /// A round dot of `colour` with a faint light edge (`border-white/25`).
@@ -210,20 +213,19 @@ pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Mes
     let starred = chat.starred;
     let star = button(icon(Icon::Star, STAR))
         .padding(0)
-        .on_press(chat.star)
         .style(move |_, s| {
             quiet(
                 matches!(s, button::Status::Hovered | button::Status::Pressed),
                 starred,
             )
         });
+    let star = super::focus::press(star, 4.0, Some(chat.star));
     let del = button(
         plain(chat.delete_label)
             .size(10)
             .font(super::text::weight(Weight::Normal)),
     )
     .padding([2, 6])
-    .on_press(chat.delete)
     .style(|_, s| {
         let hot = matches!(s, button::Status::Hovered | button::Status::Pressed);
         button::Style {
@@ -233,6 +235,7 @@ pub fn chat<'a, Message: Clone + 'a>(chat: Chat<'a, Message>) -> Element<'a, Mes
             ..button::Style::default()
         }
     });
+    let del = super::focus::press(del, radius::CONTROL, Some(chat.delete));
     let font = super::text::weight(Weight::Semibold);
     // the card's padding and edges, the star and its gap, Del and its gap
     let room = chat.width - 2.0 * (space::CARD[1] + 1.0) - (STAR + space::GAP) - 36.0;

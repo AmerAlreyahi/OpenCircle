@@ -85,6 +85,8 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
     const GAP: f32 = space::TRACK_GAP;
+    let on = std::rc::Rc::new(on);
+    let values: Vec<T> = options.iter().map(|&(v, _)| v).collect();
     // right to left: the first option at the right (Off right, On left)
     let options = &super::dir::order(options.to_vec())[..];
     let widths = &super::dir::order(widths.to_vec())[..];
@@ -116,6 +118,7 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     .width(widths.iter().map(|w| w + GAP).sum::<f32>() - GAP);
     let pills = options.iter().zip(widths).map(|(&(value, label), &w)| {
         let active = value == chosen;
+        let on = on.clone();
         // centred by its box, the text exactly as wide as drawn: a wider box
         // lays a right-to-left line out from its right edge (Arabic sat right
         // of the thumb on Windows), and the text's own centring shifts it too
@@ -133,7 +136,7 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
         .width(w)
         .padding([6, 0])
         .height(PILL)
-        .on_press(on(value))
+        .on_press(on(value)) // mouse only: the track is one focus stop (`choices`)
         .style(move |_, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {
@@ -150,7 +153,7 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
         .into()
     });
     let pills = row(pills).spacing(GAP).height(PILL);
-    container(stack![thumb, pills])
+    let track = container(stack![thumb, pills])
         .padding(space::TRACK_PAD)
         .style(|_| container::Style {
             background: Some(c().track.into()),
@@ -159,8 +162,9 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
                 .width(1)
                 .color(c().divider),
             ..container::Style::default()
-        })
-        .into()
+        });
+    let at = values.iter().position(|&v| v == chosen);
+    choices(track, values.len(), at, move |i| on(values[i]))
 }
 
 /// Three size presets in a small track (Snip's toolbar panels: S / M / L):
@@ -209,7 +213,7 @@ pub fn presets<'a, Message: Clone + 'a>(
             .width(CELL.width)
             .height(CELL.height)
             .padding(0)
-            .on_press(on(i))
+            .on_press(on(i)) // mouse only: the track is one focus stop (`choices`)
             .style(move |_, status| {
                 let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
@@ -228,7 +232,7 @@ pub fn presets<'a, Message: Clone + 'a>(
             })
             .into()
     });
-    container(row(cells).spacing(space::TRACK_GAP))
+    let track = container(row(cells).spacing(space::TRACK_GAP))
         .padding(space::TRACK_PAD)
         .style(|_| container::Style {
             background: Some(c().track.into()),
@@ -237,6 +241,29 @@ pub fn presets<'a, Message: Clone + 'a>(
                 .width(1)
                 .color(c().divider),
             ..container::Style::default()
+        });
+    choices(track, 3, chosen, on)
+}
+
+/// A track of `n` choices as one focus stop: Enter / Space picks the next
+/// (Off / On flips), the arrows step along (none past the ends); `chosen`'s
+/// index, `pick` sends the choice at an index.
+fn choices<'a, Message: Clone + 'a>(
+    track: impl Into<Element<'a, Message>>,
+    n: usize,
+    chosen: Option<usize>,
+    pick: impl Fn(usize) -> Message + 'a,
+) -> Element<'a, Message> {
+    let pick = std::rc::Rc::new(pick);
+    let press = (n > 0).then(|| pick(chosen.map_or(0, |i| (i + 1) % n)));
+    super::focus::stop(track, radius::TRACK, press)
+        .steps(move |s| {
+            let to = match (s, chosen) {
+                (super::focus::Step::On, Some(i)) => i + 1,
+                (super::focus::Step::Back, Some(i)) => i.checked_sub(1)?,
+                (_, None) => 0,
+            };
+            (to < n).then(|| pick(to))
         })
         .into()
 }

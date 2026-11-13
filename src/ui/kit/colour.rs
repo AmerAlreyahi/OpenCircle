@@ -42,33 +42,36 @@ pub fn swatch<'a, Message: Clone + 'a>(
         Some(_) => colour,
         None => colour.scale_alpha(0.4),
     };
-    button(container(dot(colour, DOT)).center(Fill))
-        .width(size::ICON_BUTTON)
-        .height(size::ICON_BUTTON)
-        .padding(0)
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let fill = if hot {
-                c().elevated_hover
-            } else {
-                c().elevated
-            };
-            let edge = if open {
-                c().accent
-            } else {
-                c().elevated_border
-            };
-            button::Style {
-                background: Some(fill.into()),
-                border: Border::default()
-                    .rounded(radius::CONTROL)
-                    .width(1)
-                    .color(edge),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(dot(colour, DOT)).center(Fill))
+            .width(size::ICON_BUTTON)
+            .height(size::ICON_BUTTON)
+            .padding(0)
+            .style(move |_, status| {
+                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let fill = if hot {
+                    c().elevated_hover
+                } else {
+                    c().elevated
+                };
+                let edge = if open {
+                    c().accent
+                } else {
+                    c().elevated_border
+                };
+                button::Style {
+                    background: Some(fill.into()),
+                    border: Border::default()
+                        .rounded(radius::CONTROL)
+                        .width(1)
+                        .color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        radius::FULL,
+        on_press,
+    )
+    .into()
 }
 
 /// `colours` to pick from (the chosen one ringed in `text`), and `hex` as typed.
@@ -119,18 +122,21 @@ pub fn picker_with<'a, Message: Clone + 'a>(
 
 /// One colour to pick: a 22 px dot, ringed in `text` when `chosen`.
 fn chip<'a, Message: Clone + 'a>(colour: Color, chosen: bool, on: Message) -> Element<'a, Message> {
-    button(dot(colour, CHIP))
-        .padding(2)
-        .on_press(on)
-        .style(move |_, status| button::Style {
-            background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(if chosen { 2 } else { 0 })
-                .color(c().text),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(dot(colour, CHIP))
+            .padding(2)
+            .style(move |_, status| button::Style {
+                background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(if chosen { 2 } else { 0 })
+                    .color(c().text),
+                ..button::Style::default()
+            }),
+        radius::FULL,
+        Some(on),
+    )
+    .into()
 }
 
 /// The colour picker's last colours, newest first, in one row: a click

@@ -20,6 +20,7 @@ pub mod divider;
 pub mod dropdown;
 pub mod error_card;
 pub mod field;
+pub mod focus;
 pub mod grip;
 pub mod header;
 pub mod hero;

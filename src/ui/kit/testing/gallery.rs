@@ -24,6 +24,8 @@ enum Act {
     Press,
     /// Press and release: focuses a field.
     Click,
+    /// Tab in a `focus::scope`: the first stop focused, its soft background shown.
+    Tab,
 }
 
 struct Row {
@@ -70,8 +72,16 @@ fn cell(r: &Row, arabic: bool, size: Size) -> Vec<u8> {
         Act::Hover => (Some(at), vec![moved]),
         Act::Press => (Some(at), vec![moved, down]),
         Act::Click => (Some(at), vec![moved, down, up]),
+        Act::Tab => (
+            None,
+            vec![shot::named(iced::keyboard::key::Named::Tab, false)[1].clone()],
+        ),
     };
-    let view = on_bg(container((r.view)(arabic)).center(Fill).padding([0, 16]));
+    let view = match r.act {
+        Act::Tab => super::super::focus::scope((r.view)(arabic)),
+        _ => (r.view)(arabic),
+    };
+    let view = on_bg(container(view).center(Fill).padding([0, 16]));
     shot::render_with(view, size, cursor, &events)
 }
 
@@ -1090,6 +1100,59 @@ fn dropdown_sheet() {
         }),
     ];
     sheet("dropdown", Size::new(332.0, 48.0), &rows);
+}
+
+/// The keyboard's focus (`kit::focus`: a soft background) on each kind of
+/// control: the same look everywhere, right to left too (the Arabic column is
+/// mirrored).
+#[test]
+fn focus_sheet() {
+    use super::super::{dir, dropdown::dropdown, segmented, setting_row, shortcut_field, slider};
+    const LATIN: [&str; 2] = ["Arabic", "English"];
+    const ARABIC: [&str; 2] = ["العربية", "الإنجليزية"];
+    let rows = vec![
+        row("button", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            setting_row::action(
+                s(ar, "Check now", "تحقق الآن"),
+                button::Kind::Elevated,
+                Some(()),
+            )
+        }),
+        row("cta", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            button::button(
+                button::cta_label(s(ar, "Install", "تثبيت"), None),
+                button::Kind::Accent,
+                Some(()),
+            )
+        }),
+        row("off / on", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            segmented::boolean(
+                [s(ar, "Off", "إيقاف"), s(ar, "On", "تشغيل")],
+                true,
+                true,
+                1.0,
+                |_| (),
+            )
+        }),
+        row("dropdown", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            let options: &'static [&'static str] = if ar { &ARABIC } else { &LATIN };
+            dropdown(options, Some(options[0]), "", |_| ())
+        }),
+        row("shortcut", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            let keys = vec!["Ctrl".to_string(), "Shift".to_string(), "Space".to_string()];
+            shortcut_field::shortcut_field(keys, shortcut_field::State::Rest, "", "", ())
+        }),
+        row("slider", Act::Tab, |ar| {
+            let _d = dir::scope(ar);
+            slider::slider(0..=100, 40, " %", |_| ())
+        }),
+    ];
+    sheet("focus", Size::new(340.0, 56.0), &rows);
 }
 
 #[test]

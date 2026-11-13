@@ -305,6 +305,36 @@ fn one_scrollbar_and_one_dropdown() {
     assert!(found.is_empty(), "{found:#?}");
 }
 
+/// Keyboard focus is ONE mechanism (`kit::focus`, v0.1.8): every kit control a
+/// press reaches is a focus stop, so Tab, Enter / Space and the focus look work the
+/// same on all of them. A kit press is made only by `focus::press` (button +
+/// stop) or, mouse-only by nature (a drag, a resize edge, a caption button),
+/// marked `// mouse only: <why>`; the dropdown is its own stop on
+/// `focus::State` / `focus::key` / `focus::shade`.
+#[test]
+fn every_kit_press_is_a_focus_stop() {
+    let mut found = Vec::new();
+    for (name, src) in sources("kit") {
+        if name == "kit/focus.rs" || name.starts_with("kit/testing/") {
+            continue;
+        }
+        for line in code(&src) {
+            let press = line.contains(".on_press(") || line.contains(".on_press_maybe(");
+            if press && !line.contains("// mouse only: ") {
+                found.push(format!("{name}: {}", line.trim()));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "use focus::press, or say why it is mouse only: {found:#?}"
+    );
+    let dropdown = std::fs::read_to_string("src/ui/kit/dropdown.rs").unwrap();
+    for part in ["focus::State", "focus::key(", "focus::shade("] {
+        assert!(dropdown.contains(part), "the dropdown's stop lacks {part}");
+    }
+}
+
 /// Our windows are shown by `platform::windows::show` (X11: "always on top"
 /// again once mapped, #172). The overlay's hiding (update.rs) leaves full-screen
 /// on its way out, not to show it.

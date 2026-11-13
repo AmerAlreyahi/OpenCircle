@@ -2879,7 +2879,10 @@ fn history_counts_clears_and_asks_before_clearing_all() {
         Outcome::History(vec![Kind::Chats])
     );
     // Clear all asks; Cancel keeps everything; Delete all clears every kind
-    assert_eq!(update(&mut s, Message::ClearAll(false)), Outcome::None);
+    assert_eq!(
+        update(&mut s, Message::ClearAll(false)),
+        Outcome::Focus(crate::ui::kit::focus::CANCEL)
+    );
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Delete all"));
     update(&mut s, Message::KeepHistory);
     assert!(!shot::texts(view(&s)).iter().any(|t| t == "Delete all"));
@@ -3264,7 +3267,7 @@ fn reset_shortcuts_asks_resets_saves_and_undoes() {
     update(&mut s, Message::KeepShortcuts);
     assert!(!s.resetting && s.draft == changed);
     let esc = |code| {
-        cancel_reset(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        cancel_question(iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
             key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
             modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
             physical_key: iced::keyboard::key::Physical::Code(code),
@@ -3276,7 +3279,7 @@ fn reset_shortcuts_asks_resets_saves_and_undoes() {
     };
     assert!(matches!(
         esc(iced::keyboard::key::Code::Escape),
-        Some(Message::KeepShortcuts)
+        Some(Message::Dismiss)
     ));
     assert!(esc(iced::keyboard::key::Code::KeyA).is_none());
     // reset: every shown key is the default again; a hidden entry keeps its key
@@ -3595,4 +3598,149 @@ fn the_sidebar_footer_link_matches_its_golden_images() {
     themes::set(&SAPPHIRE);
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Keyboard navigation (v0.1.8, `kit::focus`): Tab walks the sidebar top to
+/// bottom, then the page; Arabic mirrors it (the sidebar is at the right and
+/// a row's first control is its rightmost). Enter on a sidebar item opens its
+/// page, Space flips an Off / On switch.
+#[test]
+fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
+    use crate::app_language::{self, Lang};
+    use crate::ui::kit::tokens::size::SIDEBAR;
+    use iced::keyboard::key::Named;
+    let key = |k| shot::named(k, false)[1].clone();
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::AppLanguage(app_language::Choice(language)));
+        let rtl = app_language::rtl();
+        assert_eq!(rtl, language == "ar");
+        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        let tabs = vec![key(Named::Tab); shown.len() + 6];
+        let (_, at) = shot::focus_walk(|| view(&s), WINDOW_SIZE, &tabs);
+        let at: Vec<_> = at
+            .into_iter()
+            .map(|r| r.expect("Tab always focuses"))
+            .collect();
+        let side = |r: &iced::Rectangle| match rtl {
+            false => r.x + r.width <= SIDEBAR + 1.0,
+            true => r.x >= WINDOW_SIZE.width - SIDEBAR - 1.0,
+        };
+        let in_sidebar = at.iter().take_while(|r| side(r)).count();
+        assert!(in_sidebar >= shown.len(), "{language}: {at:#?}");
+        assert!(
+            at[..shown.len()].windows(2).all(|w| w[0].y < w[1].y),
+            "{language}: the sidebar top to bottom"
+        );
+        let page = &at[in_sidebar..];
+        assert!(page.iter().all(|r| !side(r)), "{language}: then the page");
+        assert!(
+            page.windows(2)
+                .all(|w| w[0].center_y() <= w[1].center_y() + 0.5),
+            "{language}: the page top to bottom {page:#?}"
+        );
+        // Enter on the second item opens its page
+        let events = [key(Named::Tab), key(Named::Tab), key(Named::Enter)];
+        let (sent, _) = shot::focus_walk(|| view(&s), WINDOW_SIZE, &events);
+        assert!(
+            matches!(sent.as_slice(), [Message::Section(p)] if *p == shown[1]),
+            "{language}"
+        );
+    }
+    app_language::set(Lang::En);
+    // General's first switch (Start with the OS): Space flips it
+    let (mut s, _) = state(None);
+    let on = s.draft.general.autostart;
+    let flips = (1..40).find(|&n| {
+        let mut events = vec![key(Named::Tab); n];
+        events.push(key(Named::Space));
+        let (sent, _) = shot::focus_walk(|| view(&s), WINDOW_SIZE, &events);
+        matches!(sent.as_slice(), [Message::Autostart(v)] if *v != on)
+    });
+    assert!(flips.is_some(), "no stop flips Start with the OS");
+    update(&mut s, Message::Autostart(!on));
+    assert_eq!(s.draft.general.autostart, !on);
+}
+
+/// Settings closed and opened again starts with no keyboard focus and no
+/// focus shown (the owner's rules: Tab focus once carried over to the next
+/// session): the window's tree, and the focus with it, is new.
+#[test]
+fn reopened_settings_has_no_focus_from_the_last_session() {
+    use iced::keyboard::key::Named;
+    let key = |k| shot::named(k, false)[1].clone();
+    let (s, _) = state(None);
+    let (_, at) = shot::focus_walk(
+        || view(&s),
+        WINDOW_SIZE,
+        &[key(Named::Tab), key(Named::Tab)],
+    );
+    assert!(at[1].is_some() && crate::ui::kit::focus::keyboard());
+    drop(s);
+    let (again, _) = state(None);
+    let rest = shot::render(
+        view(&again),
+        WINDOW_SIZE.width as u32,
+        WINDOW_SIZE.height as u32,
+    );
+    let (sent, at) = shot::focus_walk(|| view(&again), WINDOW_SIZE, &[key(Named::Enter)]);
+    assert!(sent.is_empty() && at[0].is_none(), "{sent:?} {at:?}");
+    assert!(
+        !crate::ui::kit::focus::keyboard(),
+        "the mouse leads in a new window"
+    );
+    let shown = shot::render(
+        view(&again),
+        WINDOW_SIZE.width as u32,
+        WINDOW_SIZE.height as u32,
+    );
+    assert_eq!(rest, shown, "no focus drawn");
+}
+
+/// A question (Clear all, Reset shortcuts) puts the focus on its Cancel, so
+/// Enter cancels; Esc cancels it too.
+#[test]
+fn a_question_focuses_its_cancel_and_esc_cancels() {
+    use crate::ui::kit::focus::CANCEL;
+    use iced::keyboard::key::Named;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Kept(crate::history::Counts::default()));
+    update(&mut s, Message::Section(Section::History));
+    assert_eq!(
+        update(&mut s, Message::ClearAll(false)),
+        Outcome::Focus(CANCEL)
+    );
+    assert!(s.clearing_all);
+    let enter = shot::named(Named::Enter, false);
+    let (sent, _) = shot::feed(
+        view(&s),
+        WINDOW_SIZE,
+        shot::Focus::Id(CANCEL),
+        &enter,
+        &mut iced::advanced::clipboard::Null,
+    );
+    assert!(
+        matches!(sent.as_slice(), [Message::KeepHistory]),
+        "{sent:?}"
+    );
+    update(&mut s, Message::Dismiss);
+    assert!(!s.clearing_all, "Esc cancels");
+    update(&mut s, Message::Section(Section::Shortcuts));
+    assert_eq!(
+        update(&mut s, Message::ResetShortcuts(false)),
+        Outcome::Focus(CANCEL)
+    );
+    let (sent, _) = shot::feed(
+        view(&s),
+        WINDOW_SIZE,
+        shot::Focus::Id(CANCEL),
+        &enter,
+        &mut iced::advanced::clipboard::Null,
+    );
+    assert!(
+        matches!(sent.as_slice(), [Message::KeepShortcuts]),
+        "{sent:?}"
+    );
+    update(&mut s, Message::Dismiss);
+    assert!(!s.resetting);
 }

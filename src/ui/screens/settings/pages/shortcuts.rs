@@ -27,7 +27,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 fn reset(state: &State) -> Element<'_, Message> {
     if state.resetting {
         let buttons = crate::dir_row![
-            setting_row::action(t!(c_cancel), Button::Elevated, Some(Message::KeepShortcuts)),
+            setting_row::cancel(t!(c_cancel), Message::KeepShortcuts),
             setting_row::action(
                 t!(k_reset_do),
                 Button::Elevated,

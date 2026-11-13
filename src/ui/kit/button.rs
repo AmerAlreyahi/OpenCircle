@@ -56,6 +56,24 @@ pub fn button<'a, Message: Clone + 'a>(
     kind: Kind,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    button_stop(content, kind, on_press).into()
+}
+
+/// A question's Cancel (`kind`'s look): focused when the question opens, by
+/// its id (`focus::CANCEL`), so Enter cancels.
+pub fn cancel<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    kind: Kind,
+    on_press: Message,
+) -> Element<'a, Message> {
+    (button_stop(content, kind, Some(on_press)).id(super::focus::CANCEL)).into()
+}
+
+fn button_stop<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    kind: Kind,
+    on_press: Option<Message>,
+) -> super::focus::Stop<'a, Message> {
     use iced_button::Status;
     let hot = |status| matches!(status, Status::Hovered | Status::Pressed);
     let enabled = on_press.is_some();
@@ -113,7 +131,10 @@ pub fn button<'a, Message: Clone + 'a>(
                 ..iced_button::Style::default()
             }),
     };
-    b.on_press_maybe(on_press).into()
+    match kind.fill() {
+        Some(fill) => super::focus::press(b, radius::CARD, on_press).on_fill(fill),
+        None => super::focus::press(b, radius::CONTROL, on_press),
+    }
 }
 
 /// `.oc-btn` across its share of a row (`grid` buttons, 8x13 px): `content`
@@ -124,26 +145,29 @@ pub fn fill<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use iced_button::Status;
     let enabled = on_press.is_some();
-    iced_button(container(content).center_x(Fill))
-        .width(Fill)
-        .padding([8.0, 13.0])
-        .on_press_maybe(on_press)
-        .style(move |_, status| iced_button::Style {
-            background: Some(
-                match status {
-                    Status::Hovered | Status::Pressed => c().elevated_hover,
-                    _ => c().elevated,
-                }
-                .into(),
-            ),
-            text_color: match enabled {
-                false => c().text_muted,
-                true => c().text,
-            },
-            border: Border::default().rounded(radius::CONTROL),
-            ..iced_button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        iced_button(container(content).center_x(Fill))
+            .width(Fill)
+            .padding([8.0, 13.0])
+            .style(move |_, status| iced_button::Style {
+                background: Some(
+                    match status {
+                        Status::Hovered | Status::Pressed => c().elevated_hover,
+                        _ => c().elevated,
+                    }
+                    .into(),
+                ),
+                text_color: match enabled {
+                    false => c().text_muted,
+                    true => c().text,
+                },
+                border: Border::default().rounded(radius::CONTROL),
+                ..iced_button::Style::default()
+            }),
+        radius::CONTROL,
+        on_press,
+    )
+    .into()
 }
 
 /// A setting row's one button (`setting_row::action`): `Elevated` fills its
@@ -154,30 +178,41 @@ pub fn control<'a, Message: Clone + 'a>(
     height: f32,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    control_stop(content, height, on_press).into()
+}
+
+/// `control` as its focus stop (a question's Cancel gets its id).
+pub fn control_stop<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    height: f32,
+    on_press: Option<Message>,
+) -> super::focus::Stop<'a, Message> {
     let enabled = on_press.is_some();
-    iced_button(container(content).center(Fill))
-        .width(Fill)
-        .height(height)
-        .padding([0.0, 8.0])
-        .on_press_maybe(on_press)
-        .style(move |_, status| iced_button::Style {
-            background: Some(
-                match status {
-                    iced_button::Status::Hovered | iced_button::Status::Pressed => {
-                        c().elevated_hover
+    super::focus::press(
+        iced_button(container(content).center(Fill))
+            .width(Fill)
+            .height(height)
+            .padding([0.0, 8.0])
+            .style(move |_, status| iced_button::Style {
+                background: Some(
+                    match status {
+                        iced_button::Status::Hovered | iced_button::Status::Pressed => {
+                            c().elevated_hover
+                        }
+                        _ => c().elevated,
                     }
-                    _ => c().elevated,
-                }
-                .into(),
-            ),
-            text_color: match enabled {
-                false => c().text_muted,
-                true => c().text,
-            },
-            border: Border::default().rounded(radius::CONTROL),
-            ..iced_button::Style::default()
-        })
-        .into()
+                    .into(),
+                ),
+                text_color: match enabled {
+                    false => c().text_muted,
+                    true => c().text,
+                },
+                border: Border::default().rounded(radius::CONTROL),
+                ..iced_button::Style::default()
+            }),
+        radius::CONTROL,
+        on_press,
+    )
 }
 
 /// A call to action's label: 13 px / 600, and an optional mono note at 75 %
@@ -228,39 +263,42 @@ pub fn regular<'a, Message: Clone + 'a>(
         true => weight(Weight::Semibold),
         false => super::text::font(Role::CONTROL),
     };
-    iced_button(
-        text(label)
-            .size(super::text::size(Role::CONTROL))
-            .font(font),
+    super::focus::press(
+        iced_button(
+            text(label)
+                .size(super::text::size(Role::CONTROL))
+                .font(font),
+        )
+        .padding([6.0, 13.0])
+        .style(move |_, status| {
+            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+            let (fill, ink, edge) = match accent {
+                true => (c().accent, c().bg, c().accent),
+                false => (c().elevated, c().text, c().elevated_border),
+            };
+            let fill = match () {
+                _ if hot && accent => brighter(fill),
+                _ if hot => c().elevated_hover,
+                _ => fill,
+            };
+            let dim = |v: Color| if live { v } else { faded(v, 0.45) };
+            let (width, edge) = match () {
+                _ if live && status == Status::Pressed => (2.0, c().widget),
+                _ => (1.0, edge),
+            };
+            iced_button::Style {
+                background: Some(dim(fill).into()),
+                text_color: dim(ink),
+                border: Border::default()
+                    .rounded(radius::CONTROL)
+                    .width(width)
+                    .color(dim(edge)),
+                ..iced_button::Style::default()
+            }
+        }),
+        radius::CONTROL,
+        on_press,
     )
-    .padding([6.0, 13.0])
-    .on_press_maybe(on_press)
-    .style(move |_, status| {
-        let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-        let (fill, ink, edge) = match accent {
-            true => (c().accent, c().bg, c().accent),
-            false => (c().elevated, c().text, c().elevated_border),
-        };
-        let fill = match () {
-            _ if hot && accent => brighter(fill),
-            _ if hot => c().elevated_hover,
-            _ => fill,
-        };
-        let dim = |v: Color| if live { v } else { faded(v, 0.45) };
-        let (width, edge) = match () {
-            _ if live && status == Status::Pressed => (2.0, c().widget),
-            _ => (1.0, edge),
-        };
-        iced_button::Style {
-            background: Some(dim(fill).into()),
-            text_color: dim(ink),
-            border: Border::default()
-                .rounded(radius::CONTROL)
-                .width(width)
-                .color(dim(edge)),
-            ..iced_button::Style::default()
-        }
-    })
     .into()
 }
 
@@ -284,10 +322,8 @@ pub fn switch<'a, Message: Clone + 'a>(
     ]
     .spacing(space::GAP)
     .align_y(Center);
-    iced_button(line)
-        .padding([4.0, 10.0])
-        .on_press(on_press)
-        .style(|_, status| {
+    super::focus::press(
+        iced_button(line).padding([4.0, 10.0]).style(|_, status| {
             let (fill, width, edge) = match status {
                 Status::Pressed => (c().elevated_hover, 2.0, c().widget),
                 Status::Hovered => (c().elevated_hover, 1.0, c().elevated_border),
@@ -302,8 +338,11 @@ pub fn switch<'a, Message: Clone + 'a>(
                     .color(edge),
                 ..iced_button::Style::default()
             }
-        })
-        .into()
+        }),
+        radius::MENU,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// An on / off switch (Snip's toolbar panels: Outline, Fill, Bold, Line
@@ -338,30 +377,33 @@ pub fn toggle<'a, Message: Clone + 'a>(
     } else {
         Horizontal::Left
     };
-    iced_button(container(knob).align_x(side).center_y(Fill).width(Fill))
-        .width(TOGGLE.width)
-        .height(TOGGLE.height)
-        .padding(3)
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-            let fill = match (on, hot) {
-                (true, false) => c().accent,
-                (true, true) => brighter(c().accent),
-                (false, false) => c().track,
-                (false, true) => c().hover,
-            };
-            let alpha = if live { 1.0 } else { 0.4 };
-            iced_button::Style {
-                background: Some(faded(fill, alpha).into()),
-                border: Border::default()
-                    .rounded(radius::FULL)
-                    .width(if on { 0 } else { 1 })
-                    .color(faded(c().divider, alpha)),
-                ..iced_button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        iced_button(container(knob).align_x(side).center_y(Fill).width(Fill))
+            .width(TOGGLE.width)
+            .height(TOGGLE.height)
+            .padding(3)
+            .style(move |_, status| {
+                let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+                let fill = match (on, hot) {
+                    (true, false) => c().accent,
+                    (true, true) => brighter(c().accent),
+                    (false, false) => c().track,
+                    (false, true) => c().hover,
+                };
+                let alpha = if live { 1.0 } else { 0.4 };
+                iced_button::Style {
+                    background: Some(faded(fill, alpha).into()),
+                    border: Border::default()
+                        .rounded(radius::FULL)
+                        .width(if on { 0 } else { 1 })
+                        .color(faded(c().divider, alpha)),
+                    ..iced_button::Style::default()
+                }
+            }),
+        radius::FULL,
+        on_press,
+    )
+    .into()
 }
 
 /// `toggle`'s size and its knob's.
@@ -373,26 +415,29 @@ const TOGGLE_KNOB: f32 = 12.0;
 /// 2 px inset edge of the widget colour while pressed.
 pub fn dot<'a, Message: Clone + 'a>(side: f32, on_press: Message) -> Element<'a, Message> {
     use iced_button::Status;
-    iced_button(iced::widget::Space::new())
-        .width(side)
-        .height(side)
-        .padding(0)
-        .on_press(on_press)
-        .style(|_, status| iced_button::Style {
-            background: Some(
-                match status {
-                    Status::Hovered | Status::Pressed => brighter(c().accent),
-                    _ => c().accent,
-                }
-                .into(),
-            ),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(if status == Status::Pressed { 2 } else { 0 })
-                .color(c().widget),
-            ..iced_button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        iced_button(iced::widget::Space::new())
+            .width(side)
+            .height(side)
+            .padding(0)
+            .style(|_, status| iced_button::Style {
+                background: Some(
+                    match status {
+                        Status::Hovered | Status::Pressed => brighter(c().accent),
+                        _ => c().accent,
+                    }
+                    .into(),
+                ),
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(if status == Status::Pressed { 2 } else { 0 })
+                    .color(c().widget),
+                ..iced_button::Style::default()
+            }),
+        radius::FULL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// `c` as CSS `brightness(1.1)` draws it.
@@ -467,39 +512,42 @@ fn compact_with<'a, Message: Clone + 'a>(
         }))
         .spacing(space::GAP)
         .align_y(Center);
-    iced_button(container(content).center(Fill))
-        .width(width)
-        .height(COMPACT_H)
-        .padding(0)
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-            let fill = match () {
-                _ if active && live => c().accent_soft,
-                _ if hot => c().elevated_hover,
-                _ => c().elevated,
-            };
-            let text_color = match () {
-                _ if !live => c().text_muted,
-                _ if active => c().accent,
-                _ => c().text,
-            };
-            let (width, edge) = match () {
-                _ if live && status == Status::Pressed => (2.0, c().widget),
-                _ if focused => (1.0, c().accent),
-                _ => (1.0, c().elevated_border),
-            };
-            iced_button::Style {
-                background: Some(fill.into()),
-                text_color,
-                border: Border::default()
-                    .rounded(radius::CARD)
-                    .width(width)
-                    .color(edge),
-                ..iced_button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        iced_button(container(content).center(Fill))
+            .width(width)
+            .height(COMPACT_H)
+            .padding(0)
+            .style(move |_, status| {
+                let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+                let fill = match () {
+                    _ if active && live => c().accent_soft,
+                    _ if hot => c().elevated_hover,
+                    _ => c().elevated,
+                };
+                let text_color = match () {
+                    _ if !live => c().text_muted,
+                    _ if active => c().accent,
+                    _ => c().text,
+                };
+                let (width, edge) = match () {
+                    _ if live && status == Status::Pressed => (2.0, c().widget),
+                    _ if focused => (1.0, c().accent),
+                    _ => (1.0, c().elevated_border),
+                };
+                iced_button::Style {
+                    background: Some(fill.into()),
+                    text_color,
+                    border: Border::default()
+                        .rounded(radius::CARD)
+                        .width(width)
+                        .color(edge),
+                    ..iced_button::Style::default()
+                }
+            }),
+        radius::CARD,
+        on_press,
+    )
+    .into()
 }
 
 /// A toolbar's action (Snip's Copy and Save, icon-only, owner 2026-11-02): a
@@ -580,24 +628,27 @@ pub fn fold<'a, Message: Clone + 'a>(
         .center_y(Fill)
         .width(Fill)
         .align_x(super::dir::start());
-    iced_button(content)
-        .width(Fill)
-        .height(FOLD_H)
-        .padding([0.0, 10.0])
-        .on_press(on_press)
-        .style(|_, status| iced_button::Style {
-            background: Some(
-                match status {
-                    Status::Hovered | Status::Pressed => c().elevated_hover,
-                    _ => c().hover,
-                }
-                .into(),
-            ),
-            text_color: c().text,
-            border: Border::default().rounded(radius::CONTROL),
-            ..iced_button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        iced_button(content)
+            .width(Fill)
+            .height(FOLD_H)
+            .padding([0.0, 10.0])
+            .style(|_, status| iced_button::Style {
+                background: Some(
+                    match status {
+                        Status::Hovered | Status::Pressed => c().elevated_hover,
+                        _ => c().hover,
+                    }
+                    .into(),
+                ),
+                text_color: c().text,
+                border: Border::default().rounded(radius::CONTROL),
+                ..iced_button::Style::default()
+            }),
+        radius::CONTROL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// `fold`'s height.
@@ -612,43 +663,46 @@ fn tooled<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use iced_button::Status;
     let live = on_press.is_some();
-    iced_button(container(content).center(Fill))
-        .width(width)
-        .height(size::ICON_BUTTON)
-        .padding(0)
-        .on_press_maybe(on_press)
-        .style(move |_, status| {
-            let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-            let accent = kind == Kind::Accent;
-            let fill = match () {
-                _ if accent && !live => faded(c().accent, 0.45),
-                _ if accent && hot => brighter(c().accent),
-                _ if accent => c().accent,
-                _ if focused => c().accent_soft,
-                _ if hot => c().elevated_hover,
-                _ => c().elevated,
-            };
-            let text_color = match () {
-                _ if accent && !live => faded(super::themes::on(c().accent), 0.45),
-                _ if !live => c().text_muted,
-                _ if accent => super::themes::on(c().accent),
-                _ => c().text,
-            };
-            let (width, edge) = match () {
-                _ if live && status == Status::Pressed => (2.0, c().widget),
-                _ if accent && focused => (3.0, c().accent_soft),
-                _ if accent => (0.0, c().accent),
-                _ => (1.0, c().elevated_border),
-            };
-            iced_button::Style {
-                background: Some(fill.into()),
-                text_color,
-                border: Border::default()
-                    .rounded(radius::CONTROL)
-                    .width(width)
-                    .color(edge),
-                ..iced_button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        iced_button(container(content).center(Fill))
+            .width(width)
+            .height(size::ICON_BUTTON)
+            .padding(0)
+            .style(move |_, status| {
+                let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+                let accent = kind == Kind::Accent;
+                let fill = match () {
+                    _ if accent && !live => faded(c().accent, 0.45),
+                    _ if accent && hot => brighter(c().accent),
+                    _ if accent => c().accent,
+                    _ if focused => c().accent_soft,
+                    _ if hot => c().elevated_hover,
+                    _ => c().elevated,
+                };
+                let text_color = match () {
+                    _ if accent && !live => faded(super::themes::on(c().accent), 0.45),
+                    _ if !live => c().text_muted,
+                    _ if accent => super::themes::on(c().accent),
+                    _ => c().text,
+                };
+                let (width, edge) = match () {
+                    _ if live && status == Status::Pressed => (2.0, c().widget),
+                    _ if accent && focused => (3.0, c().accent_soft),
+                    _ if accent => (0.0, c().accent),
+                    _ => (1.0, c().elevated_border),
+                };
+                iced_button::Style {
+                    background: Some(fill.into()),
+                    text_color,
+                    border: Border::default()
+                        .rounded(radius::CONTROL)
+                        .width(width)
+                        .color(edge),
+                    ..iced_button::Style::default()
+                }
+            }),
+        radius::CONTROL,
+        on_press,
+    )
+    .into()
 }

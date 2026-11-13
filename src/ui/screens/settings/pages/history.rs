@@ -79,7 +79,7 @@ fn row_of<'a>(
 fn clear_all(state: &State) -> Element<'_, Message> {
     if state.clearing_all {
         let buttons = crate::dir_row![
-            setting_row::action(t!(c_cancel), Button::Elevated, Some(Message::KeepHistory)),
+            setting_row::cancel(t!(c_cancel), Message::KeepHistory),
             // the elevated button, its words in the danger colour
             setting_row::action_with(
                 error(Role::CONTROL, t!(h_delete_all)).line_height(1.5),

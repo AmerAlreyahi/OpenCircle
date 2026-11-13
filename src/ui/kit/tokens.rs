@@ -36,6 +36,12 @@ pub mod space {
     pub const PANEL: f32 = 12.0;
 }
 
+/// Keyboard focus (`focus::shade`): how far clear of a scroll area's edge a
+/// focused control is scrolled. (Its look is the theme's `accent_soft`.)
+pub mod focus {
+    pub const MARGIN: f32 = 12.0;
+}
+
 /// Fixed control sizes.
 pub mod size {
     use iced::Size;

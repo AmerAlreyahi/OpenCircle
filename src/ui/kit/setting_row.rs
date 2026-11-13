@@ -102,6 +102,17 @@ pub fn action_with<'a, Message: Clone + 'a>(
     container(one).id(Id::new(ACTION)).width(Fill).into()
 }
 
+/// A question's Cancel as a row's `action` (Elevated): focused when the
+/// question opens (`focus::CANCEL`), so Enter cancels.
+pub fn cancel<'a, Message: Clone + 'a>(label: &'a str, on_press: Message) -> Element<'a, Message> {
+    let h = super::segmented::TRACK_H;
+    let stop = super::button::control_stop(super::button::label(label), h, Some(on_press));
+    container(stop.id(super::focus::CANCEL))
+        .id(Id::new(ACTION))
+        .width(Fill)
+        .into()
+}
+
 /// A row control of a field and its buttons on one line, within the
 /// control column (the field takes what the buttons leave): every "field +
 /// buttons" control (the save folder, a key), so its row keeps the normal

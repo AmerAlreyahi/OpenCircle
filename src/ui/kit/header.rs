@@ -63,7 +63,7 @@ pub fn regular<'a, Message: Clone + 'a>(
         .width(Fill)
         .align_x(super::dir::start());
     let mut parts = vec![
-        mouse_area(name).on_press(on(Caption::Drag)).into(),
+        mouse_area(name).on_press(on(Caption::Drag)).into(), // mouse only: drags the window
         status.into(),
         Space::new().width(STATUS_GAP).into(),
         caption(Icon::Minimise, GLYPH, H, false, on(Caption::Minimise)),
@@ -95,7 +95,7 @@ pub fn compact<'a, Message: Clone + 'a>(
             .width(Fill)
             .align_x(super::dir::start())
         )
-        .on_press(on_drag),
+        .on_press(on_drag), // mouse only: drags the window
         caption(Icon::Close, 14.0, H, true, on_close),
     ]
     .height(H)
@@ -115,7 +115,7 @@ fn caption<'a, Message: Clone + 'a>(
         .width(size::CAPTION_BUTTON)
         .height(height)
         .padding(0)
-        .on_press(on_press)
+        .on_press(on_press) // mouse only: caption buttons are not in the Tab order (as native windows)
         .style(move |_, status| {
             let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
             let (background, text_color) = match (hot, close) {
@@ -197,7 +197,7 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
     };
     let zone = |direction, interaction, width: Length, height: Length| {
         mouse_area(Space::new().width(width).height(height))
-            .on_press(on(Event::Resize(direction)))
+            .on_press(on(Event::Resize(direction))) // mouse only: resizes the window
             .interaction(interaction)
     };
     let corner = |direction, interaction| zone(direction, interaction, EDGE.into(), EDGE.into());

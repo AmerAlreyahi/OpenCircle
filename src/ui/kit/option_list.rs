@@ -69,34 +69,37 @@ pub fn opener<'a, Message: Clone + 'a>(
     }
     .spacing(space::GAP)
     .align_y(Center);
-    button(container(content).center_y(Fill))
-        .width(width)
-        .height(height)
-        .padding([0.0, OPENER_PAD])
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = open || matches!(status, Status::Hovered | Status::Pressed);
-            let (fill, colour) = match (accent, hot) {
-                (true, false) => (c().accent_soft, c().accent),
-                (true, true) => (faded(c().accent, 0.26), c().accent),
-                (false, false) => (c().hover, c().text),
-                (false, true) => (c().elevated, c().text),
-            };
-            let ring = match open {
-                true => Border::default()
-                    .rounded(radius::CONTROL)
-                    .width(FOCUS_RING)
-                    .color(faded(c().accent, 0.32)),
-                false => Border::default().rounded(radius::CONTROL),
-            };
-            button::Style {
-                background: Some(fill.into()),
-                text_color: colour,
-                border: ring,
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(width)
+            .height(height)
+            .padding([0.0, OPENER_PAD])
+            .style(move |_, status| {
+                let hot = open || matches!(status, Status::Hovered | Status::Pressed);
+                let (fill, colour) = match (accent, hot) {
+                    (true, false) => (c().accent_soft, c().accent),
+                    (true, true) => (faded(c().accent, 0.26), c().accent),
+                    (false, false) => (c().hover, c().text),
+                    (false, true) => (c().elevated, c().text),
+                };
+                let ring = match open {
+                    true => Border::default()
+                        .rounded(radius::CONTROL)
+                        .width(FOCUS_RING)
+                        .color(faded(c().accent, 0.32)),
+                    false => Border::default().rounded(radius::CONTROL),
+                };
+                button::Style {
+                    background: Some(fill.into()),
+                    text_color: colour,
+                    border: ring,
+                    ..button::Style::default()
+                }
+            }),
+        radius::CONTROL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// An open list's frame (the dropdown's menu, the language lists): the
@@ -201,27 +204,30 @@ pub fn choice<'a, Message: Clone + 'a>(
         parts.reverse();
     }
     let content = row(parts).spacing(space::GAP + 2.0).align_y(Center);
-    button(container(content).center_y(Fill))
-        .width(width)
-        .height(CHOICE_H)
-        .padding([0.0, OPENER_PAD])
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = look.hovered || matches!(status, button::Status::Hovered);
-            let (fill, edge) = match () {
-                _ if look.current => (Some(c().elevated), c().elevated_border),
-                _ if look.ringed => (Some(c().hover), faded(c().accent, 0.32)),
-                _ if hot => (Some(c().hover), iced::Color::TRANSPARENT),
-                _ => (None, iced::Color::TRANSPARENT),
-            };
-            button::Style {
-                background: fill.map(Into::into),
-                text_color: c().text,
-                border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(width)
+            .height(CHOICE_H)
+            .padding([0.0, OPENER_PAD])
+            .style(move |_, status| {
+                let hot = look.hovered || matches!(status, button::Status::Hovered);
+                let (fill, edge) = match () {
+                    _ if look.current => (Some(c().elevated), c().elevated_border),
+                    _ if look.ringed => (Some(c().hover), faded(c().accent, 0.32)),
+                    _ if hot => (Some(c().hover), iced::Color::TRANSPARENT),
+                    _ => (None, iced::Color::TRANSPARENT),
+                };
+                button::Style {
+                    background: fill.map(Into::into),
+                    text_color: c().text,
+                    border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        ROW_RADIUS,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// A `choice` row's height.
@@ -341,21 +347,24 @@ pub fn item<'a, Message: Clone + 'a>(
         .push(Space::new().width(Fill))
         .push(hint)
         .align_y(Center);
-    button(container(content).center_y(Fill))
-        .width(Fill)
-        .height(ITEM_H)
-        .padding([0.0, ITEM_PAD])
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
-            button::Style {
-                background: hot.then(|| c().hover.into()),
-                text_color: c().text,
-                border: Border::default().rounded(radius::MENU_ITEM),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(Fill)
+            .height(ITEM_H)
+            .padding([0.0, ITEM_PAD])
+            .style(move |_, status| {
+                let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
+                button::Style {
+                    background: hot.then(|| c().hover.into()),
+                    text_color: c().text,
+                    border: Border::default().rounded(radius::MENU_ITEM),
+                    ..button::Style::default()
+                }
+            }),
+        radius::MENU_ITEM,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// A glyph of the icon font as a row's lead: 16 px, `text_sub` (`text` when
@@ -455,26 +464,29 @@ pub fn action<'a, Message: Clone + 'a>(r: ActionRow<'a, Message>) -> Element<'a,
     }
     let content = row(parts).spacing(ACTION_SPACE).align_y(Center);
     let focused = r.focused;
-    button(container(content).center_y(Fill))
-        .width(Fill)
-        .height(ACTION_H)
-        .padding(ACTION_PAD)
-        .on_press_maybe(r.press)
-        .style(move |_, status| {
-            let hovered = live && matches!(status, Status::Hovered | Status::Pressed);
-            let fill = match (focused, hovered) {
-                (true, _) => Some(c().accent_soft),
-                (_, true) => Some(c().hover),
-                _ => None,
-            };
-            button::Style {
-                background: fill.map(Into::into),
-                text_color: c().text,
-                border: Border::default().rounded(radius::MENU_ITEM),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(Fill)
+            .height(ACTION_H)
+            .padding(ACTION_PAD)
+            .style(move |_, status| {
+                let hovered = live && matches!(status, Status::Hovered | Status::Pressed);
+                let fill = match (focused, hovered) {
+                    (true, _) => Some(c().accent_soft),
+                    (_, true) => Some(c().hover),
+                    _ => None,
+                };
+                button::Style {
+                    background: fill.map(Into::into),
+                    text_color: c().text,
+                    border: Border::default().rounded(radius::MENU_ITEM),
+                    ..button::Style::default()
+                }
+            }),
+        radius::MENU_ITEM,
+        r.press,
+    )
+    .into()
 }
 
 /// The foot of an action menu: a hairline and one 28 px line of `words` in
@@ -558,26 +570,29 @@ pub fn option<'a, Message: Clone + 'a>(
     ];
     content.extend(badge.map(tag));
     let content = super::dir::row(content).spacing(space::GAP).align_y(Center);
-    button(container(content).center_y(Fill))
-        .width(width)
-        .height(height)
-        .padding(ROW_PAD)
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = matches!(status, Status::Hovered | Status::Pressed);
-            let (fill, edge) = match () {
-                _ if active => (Some(c().elevated), c().elevated_border),
-                _ if hot => (Some(c().hover), iced::Color::TRANSPARENT),
-                _ => (None, iced::Color::TRANSPARENT),
-            };
-            button::Style {
-                background: fill.map(Into::into),
-                text_color: c().text,
-                border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(width)
+            .height(height)
+            .padding(ROW_PAD)
+            .style(move |_, status| {
+                let hot = matches!(status, Status::Hovered | Status::Pressed);
+                let (fill, edge) = match () {
+                    _ if active => (Some(c().elevated), c().elevated_border),
+                    _ if hot => (Some(c().hover), iced::Color::TRANSPARENT),
+                    _ => (None, iced::Color::TRANSPARENT),
+                };
+                button::Style {
+                    background: fill.map(Into::into),
+                    text_color: c().text,
+                    border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        ROW_RADIUS,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// `content` (a list with a search field) that takes the keys a list walks

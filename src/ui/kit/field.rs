@@ -202,18 +202,21 @@ pub fn logo<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     use iced::widget::{button, container, image};
     let picture = image(logo).width(16).height(16);
-    button(container(picture).center(20))
-        .padding(0)
-        .on_press(on_press)
-        .style(move |_, status| button::Style {
-            background: match status {
-                button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
-                _ => None,
-            },
-            border: slot_edge(focused),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(container(picture).center(20))
+            .padding(0)
+            .style(move |_, status| button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
+                    _ => None,
+                },
+                border: slot_edge(focused),
+                ..button::Style::default()
+            }),
+        radius::FULL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// A slot's badge (`#mainBarAiSubmitBadge`): "AI ↵" (the arrow at 75 %),
@@ -231,22 +234,27 @@ pub fn badge<'a, Message: Clone + 'a>(
         super::icon::icon(super::icon::Icon::Enter, 10.0).color(faded(c().accent, 0.75)),
     ]
     .spacing(4);
-    button(line)
-        .padding([2, 6])
-        .on_press(on_press)
-        .style(move |_, status| button::Style {
-            background: Some(
-                match status {
-                    button::Status::Hovered | button::Status::Pressed => faded(c().accent, 0.28),
-                    _ => c().accent_soft,
-                }
-                .into(),
-            ),
-            text_color: c().accent,
-            border: slot_edge(focused),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(line)
+            .padding([2, 6])
+            .style(move |_, status| button::Style {
+                background: Some(
+                    match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            faded(c().accent, 0.28)
+                        }
+                        _ => c().accent_soft,
+                    }
+                    .into(),
+                ),
+                text_color: c().accent,
+                border: slot_edge(focused),
+                ..button::Style::default()
+            }),
+        radius::PILL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// A slot's switch (the AI field's Include screen): `glyph` at 14 px in 20x20,
@@ -264,18 +272,21 @@ pub fn toggle<'a, Message: Clone + 'a>(
         false => faded(c().text_sub, 0.45),
     };
     let glyph = super::icon::icon(glyph, super::tokens::size::ICON_SMALL).color(colour);
-    button(container(glyph).center(20))
-        .padding(0)
-        .on_press(on_press)
-        .style(move |_, status| button::Style {
-            background: match status {
-                button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
-                _ => None,
-            },
-            border: slot_edge(focused),
-            ..button::Style::default()
-        })
-        .into()
+    super::focus::press(
+        button(container(glyph).center(20))
+            .padding(0)
+            .style(move |_, status| button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed => Some(c().hover.into()),
+                    _ => None,
+                },
+                border: slot_edge(focused),
+                ..button::Style::default()
+            }),
+        radius::FULL,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// Two slot parts side by side in one slot (the switch, then the badge), 4 px apart.

@@ -104,26 +104,29 @@ pub fn step<'a, Message: Clone + 'a>(
 /// a thumbnail too).
 pub fn close<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
     use button::Status;
-    button(
-        container(text(Icon::Close.glyph()).font(FONT).size(12))
-            .center(Fill)
-            .align_y(Center),
+    super::focus::press(
+        button(
+            container(text(Icon::Close.glyph()).font(FONT).size(12))
+                .center(Fill)
+                .align_y(Center),
+        )
+        .width(X)
+        .height(X)
+        .padding(0)
+        .style(|_, status| {
+            let hot = matches!(status, Status::Hovered | Status::Pressed);
+            button::Style {
+                background: Some(if hot { c().hover } else { c().widget }.into()),
+                text_color: if hot { c().text } else { c().text_muted },
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(1)
+                    .color(c().rim),
+                ..button::Style::default()
+            }
+        }),
+        radius::FULL,
+        Some(on_press),
     )
-    .width(X)
-    .height(X)
-    .padding(0)
-    .on_press(on_press)
-    .style(|_, status| {
-        let hot = matches!(status, Status::Hovered | Status::Pressed);
-        button::Style {
-            background: Some(if hot { c().hover } else { c().widget }.into()),
-            text_color: if hot { c().text } else { c().text_muted },
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().rim),
-            ..button::Style::default()
-        }
-    })
     .into()
 }

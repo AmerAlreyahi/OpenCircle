@@ -43,7 +43,7 @@ fn made<'a, Message: Clone + 'a>(
     // under the cursor the brighter dots are drawn over the dim ones:
     // 1 - (1 - .45)(1 - .73) = .85
     mouse_area(hover(dots(0.45), dots(0.73)))
-        .on_press(on_press)
+        .on_press(on_press) // mouse only: drags the bar
         .interaction(cursor)
         .into()
 }

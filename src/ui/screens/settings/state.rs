@@ -829,6 +829,9 @@ pub enum Message {
     CloseSave,
     CloseDiscard,
     CloseKeep,
+    /// Esc while a question is open (Reset shortcuts, Clear all, the close
+    /// question; an open dropdown takes it first): its Cancel.
+    Dismiss,
 }
 
 /// A colour set in the custom look's dropdown.
@@ -1674,7 +1677,10 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::OpenLanguageSettings => open_language_settings(),
         Message::OpenKeyboardSettings => open_keyboard_settings(),
         Message::ClearHistory(kind) => return Outcome::History(vec![kind]),
-        Message::ClearAll(false) => state.clearing_all = true,
+        Message::ClearAll(false) => {
+            state.clearing_all = true;
+            return Outcome::Focus(crate::ui::kit::focus::CANCEL);
+        }
         Message::ClearAll(true) => {
             state.clearing_all = false;
             return Outcome::History(Kind::ALL.to_vec());
@@ -1684,6 +1690,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.resetting = true;
             state.recording = None;
             state.shortcut_error = None;
+            return Outcome::Focus(crate::ui::kit::focus::CANCEL);
         }
         Message::ResetShortcuts(true) => state.reset_shortcuts(),
         Message::KeepShortcuts => state.resetting = false,
@@ -1868,6 +1875,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::CloseDiscard => state.leaving = true,
         Message::CloseKeep => {}
+        // (the close question went with every message but Save / Discard)
+        Message::Dismiss => (state.resetting, state.clearing_all) = (false, false),
     }
     state.revalidate();
     Outcome::None
@@ -2029,8 +2038,10 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         true => motion::frames().map(|_| Message::Tick),
         false => Subscription::none(),
     };
-    if state.resetting {
-        let esc = event::listen_with(|event, _status, _window| cancel_reset(event));
+    if state.resetting || state.clearing_all || state.asking_close {
+        let esc = event::listen_with(|event, status, _window| {
+            (status == event::Status::Ignored).then(|| cancel_question(event))?
+        });
         return Subscription::batch([esc, clock]);
     }
     if state.recording.is_none() {
@@ -2045,10 +2056,10 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([keys, clock])
 }
 
-/// Esc while "Reset shortcuts" asks: cancel it.
-pub(super) fn cancel_reset(event: iced::Event) -> Option<Message> {
+/// Esc while a question asks (Reset shortcuts, Clear all, closing): cancel it.
+pub(super) fn cancel_question(event: iced::Event) -> Option<Message> {
     let chord = chord_of(event)?;
-    (chord.bare() && chord.key == "Escape").then_some(Message::KeepShortcuts)
+    (chord.bare() && chord.key == "Escape").then_some(Message::Dismiss)
 }
 
 /// Ctrl+C on the page shown (nothing in it took the key, e.g. a field's

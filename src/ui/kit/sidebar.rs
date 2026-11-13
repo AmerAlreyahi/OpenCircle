@@ -120,29 +120,32 @@ fn nav_item<'a, Message: Clone + 'a>(
     }
     let line = super::dir::row(parts).height(Fill).align_y(Center);
 
-    button(line)
-        .width(Fill)
-        .height(size::NAV_ITEM)
-        // Arabic labels are 1 px larger: the longest ("Ask AI") needs 2 px of the
-        // end pad (it was drawn 2 px past its room); the start edge stays.
-        .padding(super::dir::pad(Padding {
-            left: ITEM_PAD,
-            right: ITEM_PAD - if super::dir::rtl() { END_GIVE } else { 0.0 },
-            ..Padding::ZERO
-        }))
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            button::Style {
-                background: (hot && !active).then(|| c().hover.into()),
-                text_color: if active || hot {
-                    c().text
-                } else {
-                    c().text_sub
-                },
-                border: Border::default().rounded(radius::CONTROL),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(line)
+            .width(Fill)
+            .height(size::NAV_ITEM)
+            // Arabic labels are 1 px larger: the longest ("Ask AI") needs 2 px of the
+            // end pad (it was drawn 2 px past its room); the start edge stays.
+            .padding(super::dir::pad(Padding {
+                left: ITEM_PAD,
+                right: ITEM_PAD - if super::dir::rtl() { END_GIVE } else { 0.0 },
+                ..Padding::ZERO
+            }))
+            .style(move |_, status| {
+                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                button::Style {
+                    background: (hot && !active).then(|| c().hover.into()),
+                    text_color: if active || hot {
+                        c().text
+                    } else {
+                        c().text_sub
+                    },
+                    border: Border::default().rounded(radius::CONTROL),
+                    ..button::Style::default()
+                }
+            }),
+        radius::CONTROL,
+        Some(on_press),
+    )
+    .into()
 }

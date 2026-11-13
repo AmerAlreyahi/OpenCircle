@@ -39,6 +39,8 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
     on_pick: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
     let shown = chosen.as_ref().map(ToString::to_string);
+    let at = options.iter().position(|o| chosen.as_ref() == Some(o));
+    let picks = options.iter().map(|o| on_pick(o.clone())).collect();
     let rows = options.iter().map(|o| {
         let active = chosen.as_ref() == Some(o);
         option(
@@ -59,6 +61,9 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         on_open: None,
         foot: false,
         id: None,
+        picks,
+        at,
+        rtl: super::dir::rtl(),
     })
 }
 
@@ -136,6 +141,9 @@ pub fn combo<'a, Message: Clone + 'a>(
         on_open: Some(on_open),
         foot: true,
         id: Some(widget::Id::new(search.id)),
+        picks: Vec::new(),
+        at: None,
+        rtl: super::dir::rtl(),
     })
 }
 
@@ -213,6 +221,11 @@ struct Dropdown<'a, Message> {
     foot: bool,
     /// A combo's id (its search field's): `open` finds it by it.
     id: Option<widget::Id>,
+    /// What each choice sends and the chosen one's index: the arrows step
+    /// along them while the menu is closed (a combo has none).
+    picks: Vec<Message>,
+    at: Option<usize>,
+    rtl: bool,
 }
 
 /// Opens the combo whose search field is `id` (its `on_open` is not sent:
@@ -237,9 +250,30 @@ pub fn open_op<T>(id: &'static str) -> impl widget::Operation<T> {
     Open(widget::Id::new(id))
 }
 
+/// Open or not, and its keyboard focus (`kit::focus`: the dropdown is one
+/// stop; Enter / Space open it, the arrows pick the next / last choice).
 #[derive(Default)]
 struct State {
     open: bool,
+    focus: super::focus::State,
+    /// Opened by the keyboard: the menu focuses its choice once laid out.
+    keyed: bool,
+}
+
+impl widget::operation::Focusable for State {
+    fn is_focused(&self) -> bool {
+        self.focus.focused()
+    }
+    fn focus(&mut self) {
+        widget::operation::Focusable::focus(&mut self.focus);
+    }
+    /// Kept while open: the combo's search field takes the focus then, and
+    /// Esc / a pick come back to the dropdown.
+    fn unfocus(&mut self) {
+        if !self.open {
+            widget::operation::Focusable::unfocus(&mut self.focus);
+        }
+    }
 }
 
 impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
@@ -273,6 +307,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         operation: &mut dyn widget::Operation,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        operation.focusable(None, layout.bounds(), state);
         operation.custom(self.id.as_ref(), layout.bounds(), state);
     }
 
@@ -305,8 +340,11 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
             cursor,
             viewport,
         );
-        let open = tree.state.downcast_ref::<State>().open;
-        if open || cursor.is_over(layout.bounds()) {
+        let state = tree.state.downcast_ref::<State>();
+        if state.focus.focused() {
+            super::focus::shade(renderer, layout.bounds(), radius::TRACK, None);
+        }
+        if state.open || cursor.is_over(layout.bounds()) {
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: layout.bounds(),
@@ -333,6 +371,33 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         _viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        state.focus.on_mouse(event, shell);
+        if state.focus.focused() && !shell.is_event_captured() {
+            use super::focus::{Key, Step};
+            let sent = match super::focus::key(event, self.rtl, false) {
+                Some(Key::Press) if !state.open => {
+                    state.open = true;
+                    state.keyed = true;
+                    self.on_open.clone()
+                }
+                Some(Key::Step(s)) if !state.open => {
+                    let to = match (s, self.at) {
+                        (Step::On, Some(i)) => Some(i + 1),
+                        (Step::Back, Some(i)) => i.checked_sub(1),
+                        (_, None) => Some(0),
+                    };
+                    to.and_then(|i| self.picks.get(i).cloned())
+                }
+                _ => return,
+            };
+            super::focus::lead(true);
+            if let Some(m) = sent {
+                shell.publish(m);
+            }
+            shell.capture_event();
+            shell.request_redraw();
+            return;
+        }
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 if cursor.is_over(layout.bounds()) =>
@@ -380,6 +445,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
         }
         let opener = layout.bounds() + translation;
         Some(overlay::Element::new(Box::new(Menu {
+            keyed: std::mem::take(&mut state.keyed).then_some(self.at.unwrap_or(0)),
             open: &mut state.open,
             tree: &mut children[1],
             menu: &mut self.menu,
@@ -391,6 +457,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
 
 /// The open menu, over everything.
 struct Menu<'a, 'b, Message> {
+    /// Opened by the keyboard: focus this choice once laid out (not a combo:
+    /// its search field takes the focus).
+    keyed: Option<usize>,
     open: &'b mut bool,
     tree: &'b mut Tree,
     menu: &'b mut Element<'a, Message>,
@@ -415,7 +484,12 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
             true => self.opener.y - MENU_GAP - h,
             false => below,
         };
-        node.move_to(Point::new(self.opener.x, y))
+        let node = node.move_to(Point::new(self.opener.x, y));
+        if let (Some(at), false) = (self.keyed.take(), self.foot) {
+            let mut nth = super::focus::nth(at);
+            (self.menu.as_widget_mut()).operate(self.tree, Layout::new(&node), renderer, &mut nth);
+        }
+        node
     }
 
     fn draw(
@@ -455,6 +529,32 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
                 ..
             }) => {
                 *self.open = false;
+                shell.capture_event();
+                shell.request_redraw();
+                return;
+            }
+            // Tab: closed, and the window's walk goes on from the dropdown
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(Named::Tab),
+                ..
+            }) => {
+                *self.open = false;
+                shell.request_redraw();
+                return;
+            }
+            // up / down walk the choices (and a combo's search field)
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(key @ (Named::ArrowUp | Named::ArrowDown)),
+                ..
+            }) => {
+                super::focus::walk(
+                    self.menu,
+                    self.tree,
+                    layout,
+                    renderer,
+                    *key == Named::ArrowUp,
+                );
+                super::focus::lead(true);
                 shell.capture_event();
                 shell.request_redraw();
                 return;

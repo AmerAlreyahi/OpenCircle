@@ -67,7 +67,6 @@ pub fn with_action<'a, Message: Clone + 'a>(
             .line_height(iced::Pixels(LINE)),
     )
     .padding(0)
-    .on_press(on_press)
     .style(|_, status| button::Style {
         text_color: match status {
             button::Status::Hovered | button::Status::Pressed => c().text,
@@ -75,6 +74,7 @@ pub fn with_action<'a, Message: Clone + 'a>(
         },
         ..button::Style::default()
     });
+    let word = super::focus::press(word, super::tokens::radius::CONTROL, Some(on_press));
     let at = size_with_action(label, action);
     made(label, tone, radius, Some(word.into()), at)
 }

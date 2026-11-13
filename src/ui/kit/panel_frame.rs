@@ -71,7 +71,7 @@ pub fn frame<'a, Message: Clone + 'a>(
         bottom: UNDER_HEADING,
         ..iced::Padding::ZERO
     }))
-    .on_press(on_drag);
+    .on_press(on_drag); // mouse only: drags the panel
     let body = super::scroll::scroll(body).height(Fill);
     let actions = container(actions).padding(iced::Padding {
         top: ABOVE_ACTIONS,
@@ -312,7 +312,7 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let glyph: Element<'a, Message> = match header.logo {
         Some(logo) if header.menu => mouse_area(iced::widget::image(logo).width(ICON).height(ICON))
-            .on_press(on(Event::Menu))
+            .on_press(on(Event::Menu)) // mouse only: the chat logo menu (the chat window, not in a Tab scope)
             .interaction(mouse::Interaction::Pointer)
             .into(),
         Some(logo) => iced::widget::image(logo).width(ICON).height(ICON).into(),
@@ -335,7 +335,7 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
             .center_y(TOP)
             .align_x(super::dir::start()),
     )
-    .on_press(on(Event::Grab(Drag::Move)))
+    .on_press(on(Event::Grab(Drag::Move))) // mouse only: drags the panel
     .interaction(mouse::Interaction::Grab);
     let top = match ends {
         Some(ends) => crate::dir_row![heading, ends],
@@ -393,7 +393,7 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
             .center_x(Length::Fixed(strip.width))
             .center_y(Length::Fixed(strip.height)),
     )
-    .on_press(on(Event::Grab(Drag::Resize)))
+    .on_press(on(Event::Grab(Drag::Resize))) // mouse only: resizes the panel
     .on_double_click(on(Event::Reset))
     .on_enter(on(Event::Hover(true)))
     .on_exit(on(Event::Hover(false)))

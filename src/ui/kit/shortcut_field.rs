@@ -50,28 +50,31 @@ pub fn shortcut_field<'a, Message: Clone + 'a>(
         _ if keys.is_empty() => line(not_set, c().text_muted),
         _ => row(keys.into_iter().map(keycap)).spacing(GAP).into(),
     };
-    button(container(inner).center_y(Fill))
-        .width(size::SHORTCUT.width)
-        .height(size::SHORTCUT.height)
-        .padding([0.0, PAD])
-        .on_press(on_press)
-        .style(move |_, status| {
-            let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-            let (width, edge) = match state {
-                State::Recording => (2.0, c().accent),
-                State::Conflict => (2.0, fixed::DANGER),
-                State::Rest if hot => (1.0, c().accent),
-                State::Rest => (1.0, c().rim),
-            };
-            button::Style {
-                background: Some(c().track.into()),
-                text_color: c().text,
-                border: Border::default()
-                    .rounded(radius::TRACK)
-                    .width(width)
-                    .color(edge),
-                ..button::Style::default()
-            }
-        })
-        .into()
+    super::focus::press(
+        button(container(inner).center_y(Fill))
+            .width(size::SHORTCUT.width)
+            .height(size::SHORTCUT.height)
+            .padding([0.0, PAD])
+            .style(move |_, status| {
+                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let (width, edge) = match state {
+                    State::Recording => (2.0, c().accent),
+                    State::Conflict => (2.0, fixed::DANGER),
+                    State::Rest if hot => (1.0, c().accent),
+                    State::Rest => (1.0, c().rim),
+                };
+                button::Style {
+                    background: Some(c().track.into()),
+                    text_color: c().text,
+                    border: Border::default()
+                        .rounded(radius::TRACK)
+                        .width(width)
+                        .color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        radius::TRACK,
+        Some(on_press),
+    )
+    .into()
 }
