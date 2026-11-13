@@ -9,17 +9,17 @@ use crate::actions::ask::Status;
 use crate::actions::{self};
 use crate::ai::Fix;
 use crate::app_language::{S, fmt, tr};
+use crate::shared::kit::button::{Kind, button, label as button_label};
+use crate::shared::kit::dir;
+use crate::shared::kit::icon_button::{State, icon_button};
+use crate::shared::kit::markdown;
+use crate::shared::kit::panel_frame::{self as frame, Header};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::text as label;
+use crate::shared::kit::tokens::{Role, radius};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
 use crate::ui::ai_chat::{actions, ai_error, card, note, provider_name};
-use crate::ui::kit::button::{Kind, button, label as button_label};
-use crate::ui::kit::dir;
-use crate::ui::kit::icon_button::{State, icon_button};
-use crate::ui::kit::markdown;
-use crate::ui::kit::panel_frame::{self as frame, Header};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::text as label;
-use crate::ui::kit::tokens::{Role, radius};
-use crate::ui::kit::tooltip::{Why, hint};
 use crate::ui::picker;
 use crate::ui::screens::model_download::{self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION};
 
@@ -258,7 +258,7 @@ pub fn clear_of_pill(at: Rectangle, screen: Size) -> Rectangle {
         return at;
     }
     let bottom = at.y + at.height;
-    let top = below.min(bottom - crate::ui::kit::panel_frame::MIN.height.min(at.height));
+    let top = below.min(bottom - crate::shared::kit::panel_frame::MIN.height.min(at.height));
     Rectangle::new(Point::new(at.x, top), Size::new(at.width, bottom - top))
 }
 

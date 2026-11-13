@@ -21,14 +21,14 @@ use super::steps;
 use super::steps::screenshots::{Access, ask};
 use crate::config::{AiConfig, Config, Engine};
 use crate::secrets::{KeyStore, Keyring};
-use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::header::{Caption, regular};
-use crate::ui::kit::motion::{self, Curve};
-use crate::ui::kit::segmented::spread;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::error;
-use crate::ui::kit::tokens::{Role, space};
+use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::divider::divider;
+use crate::shared::kit::header::{Caption, regular};
+use crate::shared::kit::motion::{self, Curve};
+use crate::shared::kit::segmented::spread;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::error;
+use crate::shared::kit::tokens::{Role, space};
 use crate::ui::screens::common::language_picker::{self as picker, Picker, Side};
 use crate::ui::screens::settings::{self, KeyJob};
 
@@ -334,8 +334,8 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
 pub fn view(state: &State) -> Element<'_, Message> {
     // the whole window in the app's language and direction
-    let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
-    let logo = crate::ui::kit::logo::logo(16);
+    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+    let logo = crate::shared::kit::logo::logo(16);
     let header = regular(logo, t!(o_title), Space::new(), None, Message::Caption);
     let (from, glide) = match state.moving() {
         Some((from, glide)) => (from, glide),
@@ -388,7 +388,7 @@ fn footer(state: &State) -> Element<'_, Message> {
         true => button(label(t!(o_finish)), Kind::Elevated, Some(Message::Finish)),
         false => button(label(t!(o_next_arrow)), Kind::Elevated, Some(Message::Next)),
     });
-    let line = crate::ui::kit::dir::row(line)
+    let line = crate::shared::kit::dir::row(line)
         .spacing(space::GAP)
         .align_y(Center);
 

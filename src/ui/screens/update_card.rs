@@ -10,14 +10,14 @@ use iced::{Center, Element, Size};
 
 use crate::app_language::{S, fmt};
 use crate::dir_row;
+use crate::shared::kit::button::{FOLD_H, Kind, button, fold, label, regular};
+use crate::shared::kit::dir;
+use crate::shared::kit::icon::{Icon, icon};
+use crate::shared::kit::panel_frame::{PADDING, frame, height};
+use crate::shared::kit::text::paragraph;
+use crate::shared::kit::text::{Ink, LINKED_LINE, font, lines, muted, styled, width};
+use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::t;
-use crate::ui::kit::button::{FOLD_H, Kind, button, fold, label, regular};
-use crate::ui::kit::dir;
-use crate::ui::kit::icon::{Icon, icon};
-use crate::ui::kit::panel_frame::{PADDING, frame, height};
-use crate::ui::kit::text::paragraph;
-use crate::ui::kit::text::{Ink, LINKED_LINE, font, lines, muted, styled, width};
-use crate::ui::kit::tokens::{Role, radius, size, space};
 use crate::update::{NoteLine, NoteStyle, Notes, parse_notes, plain_note};
 
 /// The card's width (the design: 520) and its body's (padding 22).
@@ -175,7 +175,7 @@ pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
     let n = &c.notes;
     let mut body = column![].spacing(GAP);
     if c.nothing() {
-        body = body.push(paragraph(crate::ui::kit::text::sub(TEXT, t!(wn_empty))));
+        body = body.push(paragraph(crate::shared::kit::text::sub(TEXT, t!(wn_empty))));
     }
     if !n.summary.is_empty() {
         body = body.push(quoted(|| styled(runs(&n.summary), TEXT, Msg::Link)));
@@ -220,7 +220,7 @@ pub fn view(c: &Card, radius: f32) -> Element<'_, Msg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::{golden, shot};
+    use crate::shared::kit::testing::{golden, shot};
 
     /// v0.1.4's shape: a bold summary, more highlights than shown, Fixes,
     /// Install, Upgrade notes, Known issues.
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn the_arabic_whats_new_card_matches_its_golden_image() {
         golden::each_theme(|theme, failed| {
-            let _ar = crate::ui::kit::testing::arabic();
+            let _ar = crate::shared::kit::testing::arabic();
             let mut open = Card::installed("0.1.5", NOTES, "https://e.x/r");
             open.fold(0);
             for (name, c) in [

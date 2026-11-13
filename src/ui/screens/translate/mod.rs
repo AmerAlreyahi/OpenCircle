@@ -14,10 +14,10 @@ use crate::ai::AiError;
 use crate::app_language::{S, fmt};
 use crate::mt::Pair;
 use crate::ocr::models;
+use crate::shared::kit::panel_frame as card;
 use crate::t;
 use crate::translate::pipeline::{self, Cache, Deps, Error, Translation};
 use crate::ui::background;
-use crate::ui::kit::panel_frame as card;
 use crate::ui::picker::{self, Picker};
 use crate::ui::screens::model_download;
 
@@ -56,7 +56,7 @@ pub enum Msg {
     /// The error card's Show / Hide details.
     Details,
     /// A click in the explanation: a link, or a code block's Copy.
-    Answer(crate::ui::kit::markdown::Act),
+    Answer(crate::shared::kit::markdown::Act),
     /// The word card's Ask AI (or `A`): continue as a chat.
     Ask,
     /// The AI is not set up: open Settings.
@@ -445,7 +445,7 @@ impl Session {
                 }
             }
             Msg::Answer(act) => {
-                use crate::ui::kit::markdown::Act;
+                use crate::shared::kit::markdown::Act;
                 // Only on a click, and only a web link (`open_link`).
                 return match act {
                     Act::Link(url) => background(

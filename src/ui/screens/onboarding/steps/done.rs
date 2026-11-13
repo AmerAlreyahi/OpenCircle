@@ -7,8 +7,8 @@ use iced::widget::{Space, column, container, row};
 use iced::{Element, Fill};
 
 use super::super::flow::{Message, State};
-use crate::ui::kit::keycap::keycap;
-use crate::ui::kit::tokens::space;
+use crate::shared::kit::keycap::keycap;
+use crate::shared::kit::tokens::space;
 use crate::ui::screens::settings::{self, rows};
 
 /// The logo's size in the card (`w-10`, its tile's inside).

@@ -488,7 +488,7 @@ mod frames {
     fn clicked(app: &App, at: Point) -> Vec<crate::ui::app::message::Message> {
         use iced::mouse::{Button, Cursor, Event as Mouse};
         use iced_runtime::user_interface::{Cache, UserInterface};
-        let mut renderer = crate::ui::kit::testing::shot::renderer();
+        let mut renderer = crate::shared::kit::testing::shot::renderer();
         let mut ui = UserInterface::build(
             app.view(app.overlay),
             app.o.screen,

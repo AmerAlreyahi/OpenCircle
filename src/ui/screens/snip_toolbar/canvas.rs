@@ -20,8 +20,8 @@ use crate::snip::annotate::{Annotator, Message};
 pub fn margin(e: &Annotator) -> f32 {
     if e.movable { REACH } else { 0.0 }
 }
-use crate::ui::kit::area;
-use crate::ui::kit::themes::c;
+use crate::shared::kit::area;
+use crate::shared::kit::themes::c;
 use crate::ui::touch::Touched;
 
 /// How a window shows Snip's live area (`app::screens`' one unit): its px =
@@ -232,7 +232,7 @@ impl canvas::Program<Message> for Input<'_> {
         // active look's colours, the held or hovered one hot.
         if e.movable {
             let r = Rectangle::with_size(e.size());
-            let look = crate::ui::theme::accent_of(&crate::config::look());
+            let look = crate::shared::theme::accent_of(&crate::config::look());
             let hot = match e.area_hot(None) {
                 Some((edges, _)) => Some((edges, area::Handle::Held)),
                 None => pointer.hot.map(|edges| (edges, area::Handle::Hot)),
@@ -286,7 +286,7 @@ impl canvas::Program<Message> for Input<'_> {
         }
         let marks = e.handle_marks();
         if !marks.is_empty() {
-            let look = crate::ui::theme::accent_of(&crate::config::look());
+            let look = crate::shared::theme::accent_of(&crate::config::look());
             for at in marks {
                 area::handle(&mut frame, at, (1, 1), area::Handle::Rest, look.0);
             }
@@ -320,8 +320,8 @@ mod tests {
     use iced::{Point, Size, Vector};
 
     use super::{ScreenMap, canvas};
+    use crate::shared::kit::testing::golden;
     use crate::snip::annotate::{Annotator, Image, Message, TOOLS, Tool};
-    use crate::ui::kit::testing::golden;
 
     const W: u32 = 280;
     const H: u32 = 150;
@@ -467,7 +467,7 @@ mod tests {
     /// update.
     #[test]
     fn every_tool_matches_its_golden_images() {
-        crate::ui::kit::text::load(); // the bundled faces the annotations use
+        crate::shared::kit::text::load(); // the bundled faces the annotations use
         let mut cases: Vec<(String, Tool, &str)> = Vec::new();
         for info in TOOLS.iter().filter(|t| t.tool != Tool::Select) {
             let name = format!("{:?}", info.tool).to_lowercase();

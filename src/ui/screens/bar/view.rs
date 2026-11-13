@@ -9,17 +9,17 @@ use super::geometry::{self as bar, Stop};
 use crate::actions::{self, qr, search_in_browser, text};
 use crate::app_language::{S, fmt, tr};
 use crate::labs::{self, BarButton};
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button::{self, icon_button};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::error;
+use crate::shared::kit::tokens::{Role, radius, size};
+use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::kit::{button, chip, dir, divider, field, grip};
 use crate::t;
 use crate::ui::app::keys;
 use crate::ui::app::message::Message;
 use crate::ui::app::{ASK_INPUT, App, LIVE, Reader, ask_placeholders};
-use crate::ui::kit::icon::Icon;
-use crate::ui::kit::icon_button::{self, icon_button};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::error;
-use crate::ui::kit::tokens::{Role, radius, size};
-use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{button, chip, dir, divider, field, grip};
 use crate::ui::song;
 
 impl App {
@@ -39,7 +39,7 @@ impl App {
         let (width, _) = self.bar_size_on(room);
         let kbd = |stop| self.o.bar_focus == Some(stop);
         let logo = field::logo(
-            crate::ui::kit::logo::logo(16),
+            crate::shared::kit::logo::logo(16),
             kbd(Stop::Logo),
             Message::AskButton,
         );
@@ -107,7 +107,7 @@ impl App {
                 .flatten();
             let pill = match reading {
                 Some(_) => button::compact_spinning(
-                    (self.text_turn(), crate::ui::kit::motion::reduced()),
+                    (self.text_turn(), crate::shared::kit::motion::reduced()),
                     labelled.then_some(label),
                     width,
                     state,
@@ -130,7 +130,7 @@ impl App {
                 None => None,
             };
             if let Some(status) = status {
-                return crate::ui::kit::tooltip::cut(pill, status);
+                return crate::shared::kit::tooltip::cut(pill, status);
             }
             // Its label is written on it; an icon-only pill (narrow screens)
             // names itself and its shortcut in a tooltip.
@@ -291,7 +291,7 @@ impl App {
 
 /// The placeholder that fits a field `width` wide, in the UI font.
 pub(crate) fn ask_placeholder(width: f32) -> &'static str {
-    crate::ui::kit::text::fitting(
+    crate::shared::kit::text::fitting(
         &ask_placeholders(),
         field::SLOTS_TEXT,
         bar::text_room(width),
@@ -323,9 +323,9 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
     copy: Message,
     open: Option<Message>,
 ) -> Element<'a, Message> {
-    use crate::ui::kit::icon::FONT;
+    use crate::shared::kit::icon::FONT;
     let shown = qr::shown(text, bar::QR_SHOWN);
-    let glyph = crate::ui::kit::text::text(Role::NOTE, crate::actions::copy::ACTION.icon)
+    let glyph = crate::shared::kit::text::text(Role::NOTE, crate::actions::copy::ACTION.icon)
         .font(FONT)
         .size(size::ICON);
     let mut chips = crate::dir_row![glyph, chip::action(fmt(S::bar_qr, &[&shown.text]), copy),]
@@ -376,9 +376,9 @@ pub fn action_chip<'a, Message: Clone + 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use crate::ui::app::tests::{drag, open_app};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use iced::Size;
 
     /// The bar at rest, with a selection made, with its field focused, and
@@ -425,7 +425,7 @@ mod tests {
     /// key caps keep their shapes.
     #[test]
     fn every_arabic_bar_state_matches_its_golden_image() {
-        let _ar = crate::ui::kit::testing::arabic();
+        let _ar = crate::shared::kit::testing::arabic();
         let mut app = open_app(1280, 800, 1.0);
         app.o.labs = crate::labs::Labs::all_on();
         let size = app.bar_size().1;
@@ -460,15 +460,15 @@ mod tests {
     #[ignore = "a measurement"]
     fn bar_frame_cost() {
         let cost = |ar: bool| {
-            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let _dir = ar.then(crate::shared::kit::testing::arabic);
             let mut app = open_app(1280, 800, 1.0);
             app.o.labs = crate::labs::Labs::all_on();
             let size = app.bar_size().1;
             let (w, h) = (size.width as u32, size.height as u32);
-            let _ = crate::ui::kit::testing::shot::render(app.bottom_bar(), w, h); // warm
+            let _ = crate::shared::kit::testing::shot::render(app.bottom_bar(), w, h); // warm
             let t = std::time::Instant::now();
             for _ in 0..40 {
-                let _ = crate::ui::kit::testing::shot::render(app.bottom_bar(), w, h);
+                let _ = crate::shared::kit::testing::shot::render(app.bottom_bar(), w, h);
             }
             t.elapsed().as_secs_f64() * 1000.0 / 40.0
         };
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn the_bar_reads_from_the_right_in_arabic() {
         let order = |ar: bool| {
-            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let _dir = ar.then(crate::shared::kit::testing::arabic);
             let mut app = open_app(1280, 800, 1.0);
             app.o.labs = crate::labs::Labs::all_on();
             let size = app.bar_size().1;
@@ -490,7 +490,7 @@ mod tests {
                 tr(text::ACTION.label),
                 tr(actions::translate::ACTION.label),
             ];
-            let at = crate::ui::kit::testing::shot::texts_at(app.bottom_bar(), size);
+            let at = crate::shared::kit::testing::shot::texts_at(app.bottom_bar(), size);
             let x = |label: &str| {
                 at.iter()
                     .find(|(_, t)| t == label)
@@ -508,10 +508,10 @@ mod tests {
     /// text chip, in English and Arabic.
     #[test]
     fn the_hint_chips_match_their_golden_images() {
-        use crate::ui::kit::surface::hint;
+        use crate::shared::kit::surface::hint;
         let mut failed = Vec::new();
         for ar in [false, true] {
-            let _ar = ar.then(crate::ui::kit::testing::arabic);
+            let _ar = ar.then(crate::shared::kit::testing::arabic);
             let lang = if ar { "ar" } else { "en" };
             for theme in [&SAPPHIRE, &DAYLIGHT] {
                 themes::set(theme);
@@ -539,7 +539,7 @@ mod tests {
         let screen = Size::new(1200.0, 420.0);
         let link = "https://example.com/a-long-link/that/goes/on/and/on/forever";
         let with_link = || qr_chip(link, (), Some(()));
-        let texts = crate::ui::kit::testing::shot::texts(with_link());
+        let texts = crate::shared::kit::testing::shot::texts(with_link());
         assert!(
             texts.contains(
                 &"QR code: https://example.com/a-long-link/that… (copies 59 chars)".to_string()
@@ -551,16 +551,16 @@ mod tests {
             texts.contains(&"Open link · example.com".to_string()),
             "{texts:?}"
         );
-        let px = crate::ui::kit::testing::shot::save("bar-qr-chip", with_link(), screen);
+        let px = crate::shared::kit::testing::shot::save("bar-qr-chip", with_link(), screen);
         assert!(px.as_chunks::<4>().0.iter().any(|p| p[..] != px[..4]));
 
         let wifi = qr_chip("WIFI:S:cafe;T:WPA;P:secret;;", (), None);
-        let texts = crate::ui::kit::testing::shot::texts(wifi);
+        let texts = crate::shared::kit::testing::shot::texts(wifi);
         assert!(texts.iter().any(|t| t.starts_with("QR code: WIFI:S:cafe")));
         assert!(!texts.iter().any(|t| t.starts_with("Open link")));
         // Text-direction controls: dropped from the chip, and a warning beside it.
         let rlo = qr_chip("https://evil.com/\u{202e}moc.elgoog", (), None);
-        let texts = crate::ui::kit::testing::shot::texts(rlo);
+        let texts = crate::shared::kit::testing::shot::texts(rlo);
         assert!(
             texts.contains(&"QR code: https://evil.com/moc.elgoog… (copies 28 chars)".to_string()),
             "{texts:?}"
@@ -576,7 +576,7 @@ mod tests {
     fn a_floating_chip_draws_one_outline() {
         let (w, h) = (200u32, bar::HEIGHT as u32);
         let chip = container(action_chip(t!(bar_select_text).into(), ())).center(iced::Fill);
-        let px = crate::ui::kit::testing::shot::render(chip.into(), w, h);
+        let px = crate::shared::kit::testing::shot::render(chip.into(), w, h);
         let at = |y: u32| &px[((y * w + w / 2) * 4) as usize..][..3];
         let mut edges = 0;
         for y in 1..h / 2 - 6 {

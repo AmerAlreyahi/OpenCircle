@@ -16,10 +16,10 @@ use crate::hotkey::{DesktopKey, managed};
 use crate::labs::{Feature, Labs};
 use crate::music::{self};
 use crate::secrets::{AiKey, KeyStore, Secret, SecretsError};
+use crate::shared::kit::header::Caption;
+use crate::shared::kit::motion;
+use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES};
-use crate::ui::kit::header::Caption;
-use crate::ui::kit::motion;
-use crate::ui::theme;
 
 /// The window as drawn, not maximised.
 fn view(s: &State) -> Element<'_, Message> {
@@ -62,9 +62,9 @@ fn moving_update(state: &mut State, message: Message) -> Outcome {
         }
     }
 }
-use crate::ui::kit::testing::shot;
-use crate::ui::kit::tooltip::TIPS;
-use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
+use crate::shared::kit::testing::shot;
+use crate::shared::kit::tooltip::TIPS;
+use crate::shared::kit::tooltip::tests_support::{assert_tips_add_something, shown};
 
 #[test]
 fn general_has_the_start_with_the_os_switch_on_by_default() {
@@ -1354,8 +1354,8 @@ fn the_model_row_says_what_is_left_and_updates_it() {
 #[test]
 fn the_model_row_matches_its_golden_images() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use pages::translate::{Models, Now};
     let mut failed = Vec::new();
     for ar in [false, true] {
@@ -1817,8 +1817,8 @@ fn renders_about_in_both_modes() {
 /// state it is in (owner, 2026-10-23: every shortcut field the same width).
 #[test]
 fn every_shortcut_field_is_the_same_size() {
-    use crate::ui::kit::shortcut_field::{State as Field, shortcut_field};
-    use crate::ui::kit::tokens::size;
+    use crate::shared::kit::shortcut_field::{State as Field, shortcut_field};
+    use crate::shared::kit::tokens::size;
     let keys = |s: &str| key_labels(s);
     for (shortcut, field) in [
         ("", Field::Rest),
@@ -1896,7 +1896,7 @@ fn renders_every_section_in_both_themes() {
                 .replace(" & ", "-");
             let file = format!("settings-{slug}-{name}");
             let px = shot::save(&file, view(&s), WINDOW_SIZE);
-            let window = crate::ui::kit::themes::c().bg;
+            let window = crate::shared::kit::themes::c().bg;
             // Not blank: more than the window colour is on screen.
             let bg = [window.r, window.g, window.b].map(|c| (c * 255.0).round() as u8);
             let other = px
@@ -2022,8 +2022,8 @@ fn the_header_reports_its_caption_buttons() {
 /// edge starts at the line under the header.
 #[test]
 fn the_header_line_and_the_sidebar_edge_are_the_same_hairline() {
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    use crate::ui::kit::tokens::size;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::tokens::size;
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         themes::set(theme);
         let (mut s, _) = state(None);
@@ -2067,9 +2067,9 @@ fn every_rows_control_shares_one_column_on_every_page_in_arabic() {
 }
 
 fn every_rows_control_shares_one_column(language: &'static str) {
-    use crate::ui::kit::segmented::TRACK_H;
-    use crate::ui::kit::setting_row::{ACTION, CONTROL};
-    use crate::ui::kit::tokens::size;
+    use crate::shared::kit::segmented::TRACK_H;
+    use crate::shared::kit::setting_row::{ACTION, CONTROL};
+    use crate::shared::kit::tokens::size;
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
     s.draft.look.theme = LookTheme::Custom;
@@ -2143,8 +2143,8 @@ fn every_rows_control_shares_one_column(language: &'static str) {
 /// Daylight; General with a Latin and an Arabic save folder.
 #[test]
 fn the_ported_pages_match_their_golden_images() {
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
         let cases: [(&str, Section, &str); 4] = [
             ("general", Section::General, "/home/me/Pictures/OpenCircle"),
@@ -2174,8 +2174,8 @@ fn the_ported_pages_match_their_golden_images() {
 /// version now" and Check now, whatever waited.
 #[test]
 fn general_shows_the_waiting_update_with_restart_now() {
-    use crate::ui::kit::testing::{golden, shot};
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::{golden, shot};
+    use crate::shared::kit::themes;
     use crate::update::How;
     golden::each_theme(|theme, failed| {
         for (name, how) in [("restart", How::Restart), ("setup", How::Setup)] {
@@ -2208,8 +2208,8 @@ fn general_shows_the_waiting_update_with_restart_now() {
 /// Privacy, and Appearance's custom look rows with a colour picker open.
 #[test]
 fn the_step_33_pages_match_their_golden_images() {
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     type Setup = fn(&mut State);
     let cases: [(&str, Section, f32, Setup); 18] = [
         ("ai", Section::Ai, 0.0, |s| {
@@ -2310,7 +2310,7 @@ fn the_step_33_pages_match_their_golden_images() {
 /// mode switches with it; the app re-themes at once, before the write.
 #[test]
 fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
-    use crate::ui::kit::themes;
+    use crate::shared::kit::themes;
     let path = tmp("themes");
     let (mut s, _) = state(Some(path.clone()));
     update(&mut s, Message::Theme(Theme::Dark));
@@ -2368,7 +2368,7 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
 /// again keeps "calm".
 #[test]
 fn look_cards_write_the_stored_look_names() {
-    use crate::ui::kit::looks;
+    use crate::shared::kit::looks;
     let (mut s, _) = state(None);
     s.draft.look.theme = LookTheme::Calm;
     update(&mut s, Message::Section(Section::Appearance));
@@ -2397,8 +2397,8 @@ fn look_cards_write_the_stored_look_names() {
 /// Every theme card draws its three swatch dots.
 #[test]
 fn every_theme_card_renders_its_swatches() {
-    use crate::ui::kit::card::theme_card;
-    use crate::ui::kit::themes::{self, SAPPHIRE, THEMES};
+    use crate::shared::kit::card::theme_card;
+    use crate::shared::kit::themes::{self, SAPPHIRE, THEMES};
     for t in THEMES {
         themes::set(t);
         let px = shot::render(theme_card::<()>(t, (t.name, t.desc), false, ()), 200, 48);
@@ -2414,8 +2414,8 @@ fn every_theme_card_renders_its_swatches() {
 /// Appearance and Look & behaviour as drawn, in Sapphire and Daylight.
 #[test]
 fn appearance_and_look_match_their_golden_images() {
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
         for (name, section) in [("appearance", Section::Appearance), ("look", Section::Look)] {
             let (mut s, _) = state(None);
@@ -2657,9 +2657,9 @@ fn with_labs(labs: Labs) -> State {
 /// only without a still), in Sapphire and Daylight.
 #[test]
 fn previews_stills_match_their_golden_images() {
-    use crate::ui::kit::surface::{Material, surface};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::surface::{Material, surface};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
         for (name, section, height) in [
             ("look", Section::Look, 470.0),
@@ -2720,8 +2720,8 @@ fn a_multi_clip_preview_has_arrows_that_jump() {
 /// in the page, never cropped or zoomed (owner, 2026-11-04).
 #[test]
 fn the_preview_stage_stays_small_in_a_maximized_window() {
-    use crate::ui::kit::surface::{Material, surface};
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::surface::{Material, surface};
+    use crate::shared::kit::testing::golden;
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Ai));
     s.win_h = 1440.0;
@@ -2881,7 +2881,7 @@ fn history_counts_clears_and_asks_before_clearing_all() {
     // Clear all asks; Cancel keeps everything; Delete all clears every kind
     assert_eq!(
         update(&mut s, Message::ClearAll(false)),
-        Outcome::Focus(crate::ui::kit::focus::CANCEL)
+        Outcome::Focus(crate::shared::kit::focus::CANCEL)
     );
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Delete all"));
     update(&mut s, Message::KeepHistory);
@@ -2965,7 +2965,7 @@ fn gemini_defaults_to_its_current_model_and_a_chosen_one_stays() {
 /// under the row (one for another provider is dropped).
 #[test]
 fn the_model_list_loads_only_on_its_click() {
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Ai));
     update(&mut s, Message::Provider(Provider::OpenaiCompatible));
@@ -3079,8 +3079,8 @@ fn the_app_language_switches_live_both_ways() {
 #[test]
 fn every_page_in_arabic_matches_its_golden_image() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
         s.draft.labs = Labs::all_on();
@@ -3110,8 +3110,8 @@ fn every_page_in_arabic_matches_its_golden_image() {
 #[test]
 fn long_arabic_descriptions_at_three_widths_match_their_golden_images() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     use crate::ui::screens::settings::state::MIN_WIDTH;
     golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
@@ -3365,8 +3365,8 @@ fn reset_done(s: &mut State) {
 #[test]
 fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
     type Setup = fn(&mut State);
     let states: [(&str, Setup); 4] = [
         ("idle", |_| {}),
@@ -3395,7 +3395,7 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
 #[test]
 fn every_page_keeps_its_content_width_on_a_wide_window() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::tokens::{size, space};
+    use crate::shared::kit::tokens::{size, space};
     use crate::ui::screens::settings::state::MIN_WIDTH;
     use crate::ui::screens::settings::window::PAGE_ID;
     // the window's rim, the sidebar (its divider included), the page's side pad
@@ -3438,8 +3438,8 @@ fn every_page_keeps_its_content_width_on_a_wide_window() {
 #[test]
 fn about_matches_its_golden_images_in_every_state() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
     let cases: [(&str, f32, f32, Setup); 4] = [
         ("default", WINDOW_SIZE.width, WINDOW_SIZE.height, |_| {}),
@@ -3580,8 +3580,8 @@ fn the_sidebar_footer_reports_a_problem_from_every_page() {
 #[test]
 fn the_sidebar_footer_link_matches_its_golden_images() {
     use crate::app_language::{self, Choice, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
     for language in ["en", "ar"] {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
@@ -3607,7 +3607,7 @@ fn the_sidebar_footer_link_matches_its_golden_images() {
 #[test]
 fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
     use crate::app_language::{self, Lang};
-    use crate::ui::kit::tokens::size::SIDEBAR;
+    use crate::shared::kit::tokens::size::SIDEBAR;
     use iced::keyboard::key::Named;
     let key = |k| shot::named(k, false)[1].clone();
     for language in ["en", "ar"] {
@@ -3675,7 +3675,7 @@ fn reopened_settings_has_no_focus_from_the_last_session() {
         WINDOW_SIZE,
         &[key(Named::Tab), key(Named::Tab)],
     );
-    assert!(at[1].is_some() && crate::ui::kit::focus::keyboard());
+    assert!(at[1].is_some() && crate::shared::kit::focus::keyboard());
     drop(s);
     let (again, _) = state(None);
     let rest = shot::render(
@@ -3686,7 +3686,7 @@ fn reopened_settings_has_no_focus_from_the_last_session() {
     let (sent, at) = shot::focus_walk(|| view(&again), WINDOW_SIZE, &[key(Named::Enter)]);
     assert!(sent.is_empty() && at[0].is_none(), "{sent:?} {at:?}");
     assert!(
-        !crate::ui::kit::focus::keyboard(),
+        !crate::shared::kit::focus::keyboard(),
         "the mouse leads in a new window"
     );
     let shown = shot::render(
@@ -3701,7 +3701,7 @@ fn reopened_settings_has_no_focus_from_the_last_session() {
 /// Enter cancels; Esc cancels it too.
 #[test]
 fn a_question_focuses_its_cancel_and_esc_cancels() {
-    use crate::ui::kit::focus::CANCEL;
+    use crate::shared::kit::focus::CANCEL;
     use iced::keyboard::key::Named;
     let (mut s, _) = state(None);
     update(&mut s, Message::Kept(crate::history::Counts::default()));

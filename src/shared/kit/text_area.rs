@@ -164,10 +164,11 @@ mod tests {
             )
         };
         let size = iced::Size::new(400.0, 120.0);
-        let pad = crate::ui::kit::testing::shot::click(view(), size, iced::Point::new(4.0, 4.0));
+        let pad =
+            crate::shared::kit::testing::shot::click(view(), size, iced::Point::new(4.0, 4.0));
         assert_eq!(pad, ["focus"], "the box's padding focuses the field");
         let right =
-            crate::ui::kit::testing::shot::click(view(), size, iced::Point::new(390.0, 40.0));
+            crate::shared::kit::testing::shot::click(view(), size, iced::Point::new(390.0, 40.0));
         assert_eq!(right, ["focus"], "beside the controls too");
     }
 
@@ -175,7 +176,7 @@ mod tests {
     /// right edge, like the text typed in it (iced's editor has no alignment of its own).
     #[test]
     fn the_placeholder_starts_at_the_right_edge_in_arabic() {
-        let _ar = crate::ui::kit::testing::arabic();
+        let _ar = crate::shared::kit::testing::arabic();
         let ink = || {
             let content = Content::new();
             let controls = iced::widget::space::horizontal().height(28).into();
@@ -189,7 +190,7 @@ mod tests {
                 controls,
                 "f",
             );
-            let px = crate::ui::kit::testing::shot::render(v, 400, 120);
+            let px = crate::shared::kit::testing::shot::render(v, 400, 120);
             let bg = px[(60 * 400 + 2) * 4];
             let xs: Vec<usize> = (12..40)
                 .flat_map(|y| (14..386).map(move |x| (x, y)))

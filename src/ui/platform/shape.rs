@@ -192,7 +192,7 @@ pub fn fadeable(handle: RawWindowHandle) -> Option<isize> {
 /// it on a thread of its own (`windows::fade`).
 pub fn fade(
     window: isize,
-    shown: crate::ui::kit::motion::Shown,
+    shown: crate::shared::kit::motion::Shown,
     rise: f32,
 ) -> impl FnOnce() + Send {
     #[cfg(windows)]
@@ -580,7 +580,7 @@ mod win {
     /// the window changes once a frame, by the clock.
     pub fn fade(
         hwnd: isize,
-        shown: crate::ui::kit::motion::Shown,
+        shown: crate::shared::kit::motion::Shown,
         rise: f32,
     ) -> impl FnOnce() + Send {
         // never reused (a number reused after a `clear_now` emptied the list
@@ -595,7 +595,7 @@ mod win {
         move || steps(hwnd, me, shown, rise)
     }
 
-    fn steps(hwnd: isize, me: u64, shown: crate::ui::kit::motion::Shown, rise: f32) {
+    fn steps(hwnd: isize, me: u64, shown: crate::shared::kit::motion::Shown, rise: f32) {
         use std::time::{Duration, Instant};
         use windows::Win32::UI::WindowsAndMessaging::{
             SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
@@ -637,7 +637,7 @@ mod win {
                     break;
                 }
                 // the frame clock's beat (`motion::FRAME`), on deadlines
-                next += crate::ui::kit::motion::FRAME;
+                next += crate::shared::kit::motion::FRAME;
                 std::thread::sleep(next.saturating_duration_since(Instant::now()));
             }
         }
@@ -1028,7 +1028,7 @@ mod tests {
         let now = std::time::Instant::now();
         let fade_in = fade(
             raw,
-            crate::ui::kit::motion::Shown::opening(crate::ui::kit::motion::WIDGET, now),
+            crate::shared::kit::motion::Shown::opening(crate::shared::kit::motion::WIDGET, now),
             0.0,
         );
         clear_now(raw);

@@ -10,8 +10,6 @@ use super::app::App;
 use super::app::message::Message;
 use super::app::tests::snipping_on;
 use super::frame_times::frames;
-use super::kit::testing::golden;
-use super::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use super::overlay::Event;
 use super::screens::long_capture;
 use super::screens::tools::{self, Which, picker, ruler};
@@ -19,6 +17,8 @@ use super::snip;
 use crate::actions::Crop;
 use crate::capture::scroll::Update;
 use crate::capture::stitch::MAX_HEIGHT;
+use crate::shared::kit::testing::golden;
+use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 use crate::snip::annotate::Message as E;
 
 const W: u32 = 1280;
@@ -347,9 +347,13 @@ fn the_long_capture_count_mirrors() {
             ("rtl", 3240, false, true),
             ("limit-rtl", MAX_HEIGHT, true, true),
         ] {
-            let _ar = rtl.then(super::kit::testing::arabic);
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
             let view = long_capture::count::<crate::ui::snip::Msg>(height, full, false);
-            let px = super::kit::testing::shot::render(view, size.width as u32, size.height as u32);
+            let px = crate::shared::kit::testing::shot::render(
+                view,
+                size.width as u32,
+                size.height as u32,
+            );
             let name = format!("snip-7-count-{name}-{}@1x", theme.id);
             if golden::enabled() {
                 let (w, h) = (size.width as u32, size.height as u32);
@@ -378,7 +382,7 @@ fn the_screen_tool_toolbars_mirror() {
         themes::set(theme);
         for rtl in [false, true] {
             let dir = if rtl { "rtl" } else { "ltr" };
-            let _ar = rtl.then(super::kit::testing::arabic);
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
             let bars = [
                 ("picker-empty", picker::toolbar(None, &[])),
                 ("picker", picker::toolbar(Some([30, 144, 255]), &recent)),
@@ -387,7 +391,7 @@ fn the_screen_tool_toolbars_mirror() {
             ];
             for (name, bar) in bars {
                 let (w, h) = (620, 60);
-                let px = super::kit::testing::shot::render(bar, w, h);
+                let px = crate::shared::kit::testing::shot::render(bar, w, h);
                 let name = format!("snip-tools-{name}-{dir}-{}@1x", theme.id);
                 if golden::enabled() {
                     failed.extend(golden::compare("screens", &name, w, h, &px).err());

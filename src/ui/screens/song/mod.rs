@@ -13,15 +13,15 @@ use iced::{Center, Element, Fill, Point, Rectangle, Size, Task};
 use crate::config;
 use crate::history::song as history;
 use crate::music::{self, LISTEN_SECS, Song};
+use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::chip;
+use crate::shared::kit::icon::FONT;
+use crate::shared::kit::panel_frame as card;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::{accent, error, sub, text as line};
+use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::ui::ai_chat::{actions, note};
 use crate::ui::background;
-use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::chip;
-use crate::ui::kit::icon::FONT;
-use crate::ui::kit::panel_frame as card;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{accent, error, sub, text as line};
-use crate::ui::kit::tokens::{Role, radius, size, space};
 
 /// Lucide "music" (in the subset font).
 pub const MUSIC: char = '\u{e125}';
@@ -323,16 +323,16 @@ mod tests {
     #[test]
     fn listening_counts_down_then_shows_the_song() {
         let mut s = session(State::Listening(0));
-        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
+        let texts = crate::shared::kit::testing::shot::texts(s.view(SCREEN));
         assert!(texts.iter().any(|t| t == "Listening… 10 s"), "{texts:?}");
         s.update(Msg::Heard(2));
-        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
+        let texts = crate::shared::kit::testing::shot::texts(s.view(SCREEN));
         assert!(texts.iter().any(|t| t == "Listening… 8 s"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "Cancel"));
-        crate::ui::kit::testing::shot::save("song-listening", s.view(SCREEN), SCREEN);
+        crate::shared::kit::testing::shot::save("song-listening", s.view(SCREEN), SCREEN);
         s.update(Msg::Sent);
         assert!(
-            crate::ui::kit::testing::shot::texts(s.view(SCREEN))
+            crate::shared::kit::testing::shot::texts(s.view(SCREEN))
                 .contains(&"Identifying…".to_string())
         );
         let recent = vec![history::Entry {
@@ -340,7 +340,7 @@ mod tests {
             artist: "Kevin MacLeod".into(),
         }];
         assert_eq!(s.update(Msg::Done(Ok(song()), recent)), Outcome::None);
-        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
+        let texts = crate::shared::kit::testing::shot::texts(s.view(SCREEN));
         for t in [
             "Wallpaper",
             "Kevin MacLeod",
@@ -354,7 +354,7 @@ mod tests {
             texts.iter().any(|t| t == "Carefree · Kevin MacLeod"),
             "recent"
         );
-        crate::ui::kit::testing::shot::save("song-card", s.view(SCREEN), SCREEN);
+        crate::shared::kit::testing::shot::save("song-card", s.view(SCREEN), SCREEN);
         // A late Heard doesn't undo the result.
         s.update(Msg::Heard(9));
         assert!(matches!(s.state, State::Found(..)));
@@ -367,13 +367,13 @@ mod tests {
     fn errors_show_with_try_again_and_cancel_stops_the_capture() {
         let mut s = session(State::Listening(3));
         s.update(Msg::Done(Err(music::Error::Silent), Vec::new()));
-        let texts = crate::ui::kit::testing::shot::texts(s.view(SCREEN));
+        let texts = crate::shared::kit::testing::shot::texts(s.view(SCREEN));
         assert!(
             texts.iter().any(|t| t.starts_with("No sound is playing")),
             "{texts:?}"
         );
         assert!(texts.iter().any(|t| t == "Try again"));
-        crate::ui::kit::testing::shot::save("song-error", s.view(SCREEN), SCREEN);
+        crate::shared::kit::testing::shot::save("song-error", s.view(SCREEN), SCREEN);
         assert_eq!(s.update(Msg::Retry), Outcome::Retry);
         assert_eq!(s.update(Msg::Cancel), Outcome::Close);
         let flag = s.cancel.clone();
@@ -394,7 +394,7 @@ mod tests {
     /// under it) and an error, in Sapphire and Daylight.
     #[test]
     fn every_song_state_matches_its_golden_image() {
-        use crate::ui::kit::testing::golden;
+        use crate::shared::kit::testing::golden;
         let recent = || {
             vec![history::Entry {
                 title: "Carefree".into(),

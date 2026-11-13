@@ -216,12 +216,12 @@ const EXEMPT_FILES: &[&str] = &[
     "src/ui/platform/tray.rs",
     "src/ui/platform/monitor.rs",
     "src/ui/platform/windows.rs",
-    "src/ui/kit/text.rs",
+    "src/shared/kit/text.rs",
     // the look and theme names: ids and English fallbacks; Settings shows them from the table
-    "src/ui/kit/looks.rs",
-    "src/ui/kit/themes.rs",
+    "src/shared/kit/looks.rs",
+    "src/shared/kit/themes.rs",
     // the kit's English default words (tests): Settings always passes its own
-    "src/ui/kit/hero.rs",
+    "src/shared/kit/hero.rs",
     // the installer's own window (its words are the Setup block of the table)
     "src/ui/screens/setup/mod.rs",
 ];

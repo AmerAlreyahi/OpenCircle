@@ -7,11 +7,11 @@ use iced::widget::{column, container};
 use iced::{Element, Fill, Size};
 
 use super::super::flow::{Message, Outcome, State};
-use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{error, sub, text};
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::tip;
+use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::{error, sub, text};
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::tip;
 
 /// Logical size of the prompt shown after a refused capture.
 pub const PROMPT_SIZE: Size = Size::new(500.0, 270.0);

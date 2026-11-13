@@ -6,9 +6,9 @@ use iced::{Element, Size};
 
 use crate::config::Config;
 use crate::labs::Labs;
-use crate::ui::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
-use crate::ui::kit::tokens::radius;
-use crate::ui::kit::tooltip::tip;
+use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
+use crate::shared::kit::tokens::radius;
+use crate::shared::kit::tooltip::tip;
 use crate::ui::platform::tray::{Entry, entries};
 
 /// The corners the window is cut to (`platform::windows::floating`).
@@ -146,7 +146,7 @@ pub fn view(m: &Menu) -> Element<'_, Msg> {
 mod tests {
     use super::*;
     use crate::labs::Feature;
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::testing::golden;
 
     fn all_on() -> Labs {
         let mut labs = Labs::default();
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn the_arabic_tray_menu_matches_its_golden_image() {
         golden::each_theme(|theme, failed| {
-            let _ar = crate::ui::kit::testing::arabic();
+            let _ar = crate::shared::kit::testing::arabic();
             let cfg = Config::default();
             let mut m = Menu::new(&all_on(), &cfg, true);
             m.update(Msg::Key(Key::Down));

@@ -10,9 +10,9 @@ use iced::Element;
 use iced::widget::{column, image};
 
 use super::flow::Message;
-use crate::ui::kit::card::card;
-use crate::ui::kit::text::{sub, text};
-use crate::ui::kit::tokens::{Role, space};
+use crate::shared::kit::card::card;
+use crate::shared::kit::text::{sub, text};
+use crate::shared::kit::tokens::{Role, space};
 
 /// Between the logo and the card's text (`gap-4`).
 const LOGO_GAP: f32 = 16.0;
@@ -25,11 +25,11 @@ fn logo_card<'a>(
     line: &'a str,
     trailing: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let handle = crate::ui::kit::logo::logo(logo as u32);
+    let handle = crate::shared::kit::logo::logo(logo as u32);
     let words = column![
         text(Role::ROW_TITLE, title.into()),
-        crate::ui::kit::text::paragraph(
-            sub(Role::ROW_DESC, line).line_height(crate::ui::kit::dir::line(1.5))
+        crate::shared::kit::text::paragraph(
+            sub(Role::ROW_DESC, line).line_height(crate::shared::kit::dir::line(1.5))
         )
     ]
     .spacing(space::GAP / 2.0)

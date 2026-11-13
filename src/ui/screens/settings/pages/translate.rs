@@ -13,15 +13,15 @@ use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 use crate::config::Engine;
 use crate::labs::Feature;
 use crate::mt;
-use crate::ui::kit::button::{Kind, button, label, regular};
-use crate::ui::kit::dropdown::dropdown;
-use crate::ui::kit::field::input;
-use crate::ui::kit::progress;
-use crate::ui::kit::segmented::segmented;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::{error, paragraph, sub};
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::tip;
+use crate::shared::kit::button::{Kind, button, label, regular};
+use crate::shared::kit::dropdown::dropdown;
+use crate::shared::kit::field::input;
+use crate::shared::kit::progress;
+use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::{error, paragraph, sub};
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::tip;
 use crate::ui::screens::model_download::mb;
 
 /// The OptimaMT models (the lighter decoders) on Hugging Face.
@@ -175,7 +175,7 @@ fn optima(m: &Models) -> Element<'_, Message> {
     container(
         note.push(link)
             .spacing(space::GAP)
-            .align_x(crate::ui::kit::dir::start()),
+            .align_x(crate::shared::kit::dir::start()),
     )
     .width(Fill)
     .padding([space::ROW_Y, 0.0])

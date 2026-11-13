@@ -11,13 +11,13 @@ use iced::widget::column;
 use super::super::state::{Message, State};
 use super::custom;
 use crate::config::{LookTheme, PRESETS};
-use crate::ui::kit::card::{grid, look_card, theme_card};
-use crate::ui::kit::chip::{Tone, status};
-use crate::ui::kit::looks::{LOOKS, Look};
-use crate::ui::kit::motion;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::themes::THEMES;
-use crate::ui::theme;
+use crate::shared::kit::card::{grid, look_card, theme_card};
+use crate::shared::kit::chip::{Tone, status};
+use crate::shared::kit::looks::{LOOKS, Look};
+use crate::shared::kit::motion;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::themes::THEMES;
+use crate::shared::theme;
 
 /// The theme cards' columns (`sm:grid-cols-3`), the look cards' (`grid-cols-2`).
 const COLUMNS: usize = 3;

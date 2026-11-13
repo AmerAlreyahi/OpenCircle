@@ -715,7 +715,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Keyed<'_, Message
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     use iced::advanced::widget::{Id, Operation};
     use iced::{Rectangle, Size};
 

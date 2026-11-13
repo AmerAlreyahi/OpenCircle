@@ -22,12 +22,12 @@ use crate::ai;
 use crate::ai::providers::{self, Preset};
 use crate::app_language::{S, Said};
 use crate::config::{self, Provider, StaysOpen};
+use crate::shared::kit::markdown::Act;
+use crate::shared::kit::panel_frame::{self, Event};
+use crate::shared::kit::{dropdown, motion, spinner};
 use crate::store::{self, chats};
 use crate::ui::background;
 use crate::ui::keys;
-use crate::ui::kit::markdown::Act;
-use crate::ui::kit::panel_frame::{self, Event};
-use crate::ui::kit::{dropdown, motion, spinner};
 use crate::ui::screens::model_list::{self, ModelList};
 
 mod view;

@@ -6,10 +6,10 @@ use iced::{Point, Size};
 use super::*;
 use crate::config::{Config, Provider, Theme};
 use crate::secrets::{MemoryStore, Secret};
-use crate::ui::kit::testing::shot;
+use crate::shared::kit::testing::shot;
+use crate::shared::theme;
 use crate::ui::screens::common::language_picker as picker;
 use crate::ui::screens::settings::{self, KeyMessage, PRESETS, tests::tmp};
-use crate::ui::theme;
 
 /// `update` with the keyring calls run at once (the shell runs them on a thread).
 fn update(state: &mut State, message: Message) -> Outcome {
@@ -359,7 +359,7 @@ fn the_key_never_shows_up() {
 /// (nothing scrolls, nothing is cut), the tallest AI step too.
 #[test]
 fn every_step_fits_the_fixed_window() {
-    use crate::ui::kit::testing::shot::out_of_reach;
+    use crate::shared::kit::testing::shot::out_of_reach;
     let mut s = state(None).on_wayland(true);
     row(
         &mut s,
@@ -382,8 +382,8 @@ const BODY: Size = Size::new(638.0, 355.0);
 
 #[test]
 fn every_control_has_its_own_label() {
-    use crate::ui::kit::tooltip::TIPS;
-    use crate::ui::kit::tooltip::tests_support::assert_tips_add_something;
+    use crate::shared::kit::tooltip::TIPS;
+    use crate::shared::kit::tooltip::tests_support::assert_tips_add_something;
     let mut s = state(None).on_wayland(true);
     row(
         &mut s,
@@ -406,8 +406,8 @@ fn every_control_has_its_own_label() {
 /// your own; the Screenshots step as Wayland shows it).
 #[test]
 fn every_step_matches_its_golden_image() {
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
     for t in [&SAPPHIRE, &DAYLIGHT] {
         for page in STEPS {
@@ -442,8 +442,8 @@ fn every_step_matches_its_golden_image() {
 #[test]
 fn every_step_in_arabic_matches_its_golden_image() {
     use crate::app_language::{self, Lang};
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
     for t in [&SAPPHIRE, &DAYLIGHT] {
         for page in STEPS {

@@ -587,9 +587,9 @@ mod tests {
     #[test]
     fn a_right_to_left_ui_gives_every_run_its_base_direction() {
         use super::{RLM, based, own, text, width};
-        use crate::ui::kit::testing::shot;
-        use crate::ui::kit::tokens::Role;
-        use crate::ui::kit::{dir, text::ui_font};
+        use crate::shared::kit::testing::shot;
+        use crate::shared::kit::tokens::Role;
+        use crate::shared::kit::{dir, text::ui_font};
         let size = iced::Size::new(400.0, 200.0);
         let sentence = "Google Lens \u{623}\u{648} \u{628}\u{62d}\u{62b} Google";
         let off = |view: iced::Element<'static, ()>, rtl| shot::off_base_direction(view, size, rtl);

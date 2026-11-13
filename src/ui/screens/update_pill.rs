@@ -9,14 +9,14 @@ use iced::widget::row;
 use iced::{Center, Element, Size};
 
 use crate::app_language::{S, fmt};
+use crate::shared::kit::button::{Kind as Button, button, label, labelled, labelled_width};
+use crate::shared::kit::icon::{Icon, icon};
+use crate::shared::kit::logo::logo;
+use crate::shared::kit::spinner::spinner;
+use crate::shared::kit::text::{font, width};
+use crate::shared::kit::toast::{Tone, banner, banner_size, size_with_action, with_action};
+use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::t;
-use crate::ui::kit::button::{Kind as Button, button, label, labelled, labelled_width};
-use crate::ui::kit::icon::{Icon, icon};
-use crate::ui::kit::logo::logo;
-use crate::ui::kit::spinner::spinner;
-use crate::ui::kit::text::{font, width};
-use crate::ui::kit::toast::{Tone, banner, banner_size, size_with_action, with_action};
-use crate::ui::kit::tokens::{Role, radius, size, space};
 use crate::update::How;
 
 /// The corners the window is cut to (`platform::windows::floating`).
@@ -90,7 +90,7 @@ impl Pill {
             Kind::Ready { how, .. } => {
                 let later = width(
                     t!(up_later),
-                    crate::ui::kit::text::size(Role::CONTROL),
+                    crate::shared::kit::text::size(Role::CONTROL),
                     font(Role::CONTROL),
                 );
                 later + ACTION_GAP + labelled_width(Pill::main(how).1)
@@ -153,7 +153,7 @@ pub fn view(p: &Pill, radius: f32, turn: f32, still: bool) -> Element<'_, Msg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::{golden, shot};
+    use crate::shared::kit::testing::{golden, shot};
 
     fn ready(how: How) -> Pill {
         Pill::new(Kind::Ready {
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn every_arabic_pill_matches_its_golden_image() {
         golden::each_theme(|theme, failed| {
-            let _ar = crate::ui::kit::testing::arabic();
+            let _ar = crate::shared::kit::testing::arabic();
             for (name, p) in [
                 ("ready", ready(How::Restart)),
                 ("setup", ready(How::Setup)),

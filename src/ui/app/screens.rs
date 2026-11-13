@@ -20,6 +20,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Task, Vector};
 use crate::actions::{self, Crop};
 use crate::config;
 use crate::ocr;
+use crate::shared::kit::motion;
 use crate::snip::annotate;
 use crate::ui::app::background::background;
 use crate::ui::app::capture::overlay_window;
@@ -27,7 +28,6 @@ use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::view::{grow, lifted};
 use crate::ui::app::word;
-use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{Place, place_window};
 use crate::ui::screens::overlay::edge as border;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
@@ -837,7 +837,7 @@ impl App {
                 .pointer
                 .is_some_and(|p| area_of(start, screen.place).contains(p))
         {
-            let look = crate::ui::theme::accent_of(&config::look());
+            let look = crate::shared::theme::accent_of(&config::look());
             let (frame, scale) = (&screen.frame, screen.place.scale);
             let size = screen.place.size();
             if let Some(tool) = &snip.tool {
@@ -892,8 +892,8 @@ mod tests {
 
     use super::*;
     use crate::Trigger;
+    use crate::shared::kit::testing::shot;
     use crate::ui::app::message::Shot;
-    use crate::ui::kit::testing::shot;
 
     fn place(origin: (i32, i32), px: (u32, u32), scale: f32) -> Place {
         Place { origin, px, scale }
@@ -1014,8 +1014,8 @@ mod tests {
         // picked up, then dragged 700 px right: across the bezel
         let _ = app.update(Message::AiChat(
             app.o.ai_chat.as_ref().unwrap().0,
-            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
-                crate::ui::kit::panel_frame::Drag::Move,
+            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
+                crate::shared::kit::panel_frame::Drag::Move,
             )),
         ));
         let _ = app.update(Message::CardMoved(Point::new(100.0, 100.0)));
@@ -1147,8 +1147,8 @@ mod tests {
         let id = app.o.ai_chat.as_ref().unwrap().0;
         let _ = app.update(Message::AiChat(
             id,
-            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
-                crate::ui::kit::panel_frame::Drag::Move,
+            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
+                crate::shared::kit::panel_frame::Drag::Move,
             )),
         ));
         let from = Point::new(300.0, 100.0);
@@ -1190,8 +1190,8 @@ mod tests {
         assert!(app.chat.is_some() && app.o.ai_chat.is_none(), "pinned");
         let _ = app.update(Message::AiChat(
             id,
-            crate::ui::ai_chat::Msg::Card(crate::ui::kit::panel_frame::Event::Grab(
-                crate::ui::kit::panel_frame::Drag::Move,
+            crate::ui::ai_chat::Msg::Card(crate::shared::kit::panel_frame::Event::Grab(
+                crate::shared::kit::panel_frame::Drag::Move,
             )),
         ));
         let from = Point::new(300.0, 100.0);
@@ -1650,8 +1650,8 @@ mod tests {
     /// Ctrl+C copy, Ctrl+S saves, Ctrl+Z undoes.
     #[test]
     fn the_keys_work_after_a_pick_on_another_screen() {
+        use crate::shared::kit::testing::shot::{Clip, Focus, chord, feed, named};
         use crate::snip::annotate::Message as E;
-        use crate::ui::kit::testing::shot::{Clip, Focus, chord, feed, named};
         use iced::keyboard::key::Named;
         let (mut app, id) = snipped();
         let area = Rectangle::new(Point::new(1000.0, 150.0), Size::new(900.0, 600.0));

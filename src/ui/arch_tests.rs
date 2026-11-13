@@ -4,32 +4,29 @@
 
 use std::path::{Path, PathBuf};
 
-/// Every `.rs` file under `dir`, as (path relative to `src/ui`, source).
-fn sources(dir: &str) -> Vec<(String, String)> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                out.push(p);
-            }
-        }
-    }
-    let root = Path::new("src/ui");
-    let mut files = Vec::new();
-    walk(&root.join(dir), &mut files);
-    let mut out: Vec<_> = files
-        .into_iter()
-        .map(|p| {
-            let name = p
-                .strip_prefix(root)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
-            (name, std::fs::read_to_string(&p).unwrap())
+/// Where the UI lives (paths under `src`): the app shell, the kit and its
+/// config glue, the OS's windows, and each feature's screens and App parts.
+const UI: &[&str] = &["ui", "shared/kit", "shared/theme.rs"];
+
+/// The UI's modules (`UI` as paths): what the backend and the OS layer never name.
+const UI_MODULES: &[&str] = &["crate::ui", "crate::shared::kit", "crate::shared::theme"];
+
+/// `line` names a module of the UI.
+fn names_ui(line: &str) -> bool {
+    UI_MODULES.iter().any(|m| {
+        line.match_indices(m).any(|(i, _)| {
+            !line[i + m.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
         })
-        .collect();
+    })
+}
+
+/// Every `.rs` file of the UI (`dir` = "") or under `src/<dir>`, as (path
+/// relative to `src`, source).
+fn sources(dir: &str) -> Vec<(String, String)> {
+    if !dir.is_empty() {
+        return tree(dir);
+    }
+    let mut out: Vec<_> = UI.iter().flat_map(|root| tree(root)).collect();
     out.sort();
     out
 }
@@ -70,13 +67,13 @@ fn styles(line: &str) -> bool {
 /// Not screens: the kit, the config-to-kit glue (theme.rs), OS glue
 /// (platform/, windows.rs), state and logic (app/), and tests.
 const NOT_SCREENS: [&str; 7] = [
-    "arch_tests.rs",
-    "frame_times.rs",
-    "screens/ai_chat/tests.rs",
-    "screens/translate/tests.rs",
-    "screens/settings/tests.rs",
-    "theme.rs",
-    "windows.rs",
+    "ui/arch_tests.rs",
+    "ui/frame_times.rs",
+    "ui/screens/ai_chat/tests.rs",
+    "ui/screens/translate/tests.rs",
+    "ui/screens/settings/tests.rs",
+    "shared/theme.rs",
+    "ui/windows.rs",
 ];
 
 /// Screen files that still style in place. A ratchet: a port removes its file
@@ -88,7 +85,9 @@ fn screens_never_style() {
     let styled: Vec<String> = sources("")
         .into_iter()
         .filter(|(name, _)| {
-            !name.starts_with("kit/") && !name.starts_with("platform/") && !name.starts_with("app/")
+            !name.starts_with("shared/kit/")
+                && !name.starts_with("ui/platform/")
+                && !name.starts_with("ui/app/")
         })
         .filter(|(name, _)| !NOT_SCREENS.contains(&name.as_str()))
         .filter(|(_, src)| code(src).any(styles))
@@ -139,17 +138,17 @@ fn no_drawn_shadows() {
 #[test]
 fn kit_depends_only_on_tokens() {
     // the test harness (goldens, gallery) writes PNGs with `actions::write_png`
-    for (name, src) in sources("kit") {
-        if name.starts_with("kit/testing/") {
+    for (name, src) in sources("shared/kit") {
+        if name.starts_with("shared/kit/testing/") {
             continue;
         }
         for line in code(&src) {
             let outside = line.match_indices("crate::").any(|(i, _)| {
                 // (`dir_row!` is the kit's own macro, exported at the crate root)
-                !line[i..].starts_with("crate::ui::kit")
+                !line[i..].starts_with("crate::shared::kit")
                     && !line[i..].starts_with("crate::dir_row!")
                     // (`kit::dir` is the one bridge to the app's language: its direction)
-                    && !(name == "kit/dir.rs" && line[i..].starts_with("crate::app_language::rtl"))
+                    && !(name == "shared/kit/dir.rs" && line[i..].starts_with("crate::app_language::rtl"))
             });
             assert!(!outside, "{name} reaches outside the kit: {}", line.trim());
         }
@@ -161,11 +160,9 @@ fn kit_depends_only_on_tokens() {
 /// fade's clock and pace (no colours, no widgets), which every fade is timed by.
 #[test]
 fn platform_is_isolated() {
-    for (name, src) in sources("platform") {
+    for (name, src) in sources("ui/platform") {
         for line in code(&src) {
-            let ui = line
-                .match_indices("crate::ui::")
-                .any(|(i, _)| !line[i..].starts_with("crate::ui::kit::motion"));
+            let ui = names_ui(&line.replace("crate::shared::kit::motion", ""));
             assert!(
                 !ui && !line.contains("super::super"),
                 "{name} reaches into the UI (take it as a parameter): {}",
@@ -182,11 +179,11 @@ const KIT_DATA: [&str; 6] = ["dir", "looks", "mod", "motion", "themes", "tokens"
 /// its golden images in both themes (`tests/fixtures/kit/`).
 #[test]
 fn every_kit_component_has_a_gallery_sheet() {
-    let gallery = std::fs::read_to_string("src/ui/kit/testing/gallery.rs").unwrap();
-    let components: Vec<String> = sources("kit")
+    let gallery = std::fs::read_to_string("src/shared/kit/testing/gallery.rs").unwrap();
+    let components: Vec<String> = sources("shared/kit")
         .into_iter()
         .filter_map(|(name, _)| {
-            let file = name.strip_prefix("kit/")?.strip_suffix(".rs")?;
+            let file = name.strip_prefix("shared/kit/")?.strip_suffix(".rs")?;
             (!file.contains('/') && !KIT_DATA.contains(&file)).then(|| file.to_string())
         })
         .collect();
@@ -250,7 +247,10 @@ fn backend_never_imports_ui() {
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
-        if name.starts_with("ui/") || name == "main.rs" || name.ends_with("tests.rs") {
+        let in_ui = UI
+            .iter()
+            .any(|r| name == *r || name.starts_with(&format!("{r}/")));
+        if in_ui || name == "main.rs" || name.ends_with("tests.rs") {
             continue;
         }
         // LF everywhere (Windows checks out CRLF), so both platforms scan the same code
@@ -268,7 +268,7 @@ fn backend_never_imports_ui() {
             })
             .unwrap_or(src.len());
         let prod = &src[..end];
-        let hits: Vec<&str> = code(prod).filter(|l| l.contains("crate::ui")).collect();
+        let hits: Vec<&str> = code(prod).filter(|l| names_ui(l)).collect();
         assert!(
             hits.is_empty(),
             "{name} imports the UI (the backend never does): {}",
@@ -292,7 +292,7 @@ fn one_scrollbar_and_one_dropdown() {
     ];
     let mut found = Vec::new();
     for (name, src) in sources("") {
-        if name == "kit/scroll.rs" || name == "arch_tests.rs" {
+        if name == "shared/kit/scroll.rs" || name == "ui/arch_tests.rs" {
             continue;
         }
         for line in code(&src) {
@@ -314,8 +314,8 @@ fn one_scrollbar_and_one_dropdown() {
 #[test]
 fn every_kit_press_is_a_focus_stop() {
     let mut found = Vec::new();
-    for (name, src) in sources("kit") {
-        if name == "kit/focus.rs" || name.starts_with("kit/testing/") {
+    for (name, src) in sources("shared/kit") {
+        if name == "shared/kit/focus.rs" || name.starts_with("shared/kit/testing/") {
             continue;
         }
         for line in code(&src) {
@@ -329,7 +329,7 @@ fn every_kit_press_is_a_focus_stop() {
         found.is_empty(),
         "use focus::press, or say why it is mouse only: {found:#?}"
     );
-    let dropdown = std::fs::read_to_string("src/ui/kit/dropdown.rs").unwrap();
+    let dropdown = std::fs::read_to_string("src/shared/kit/dropdown.rs").unwrap();
     for part in ["focus::State", "focus::key(", "focus::shade("] {
         assert!(dropdown.contains(part), "the dropdown's stop lacks {part}");
     }
@@ -341,7 +341,13 @@ fn every_kit_press_is_a_focus_stop() {
 #[test]
 fn only_the_window_helper_shows_windows() {
     for (name, src) in sources("") {
-        if ["platform/windows.rs", "app/update.rs", "arch_tests.rs"].contains(&name.as_str()) {
+        if [
+            "ui/platform/windows.rs",
+            "ui/app/update.rs",
+            "ui/arch_tests.rs",
+        ]
+        .contains(&name.as_str())
+        {
             continue;
         }
         for l in code(&src) {
@@ -358,7 +364,7 @@ fn only_the_window_helper_shows_windows() {
 #[test]
 fn only_the_monitor_helper_calls_window_resize() {
     for (name, src) in sources("") {
-        if name == "platform/monitor.rs" || name == "arch_tests.rs" {
+        if name == "ui/platform/monitor.rs" || name == "ui/arch_tests.rs" {
             continue;
         }
         for l in code(&src) {
@@ -394,8 +400,8 @@ fn every_text_names_a_bundled_face() {
         .collect();
     let mut found = Vec::new();
     for (name, src) in sources("").into_iter().chain(snip) {
-        let test_only = name.starts_with("kit/testing/") || name.ends_with("tests.rs");
-        if name == "arch_tests.rs" || name == "frame_times.rs" || test_only {
+        let test_only = name.starts_with("shared/kit/testing/") || name.ends_with("tests.rs");
+        if name == "ui/arch_tests.rs" || name == "ui/frame_times.rs" || test_only {
             continue;
         }
         let src = src.replace("\r\n", "\n");
@@ -403,9 +409,10 @@ fn every_text_names_a_bundled_face() {
         let lines: Vec<&str> = code(shipped).collect();
         for (i, line) in lines.iter().enumerate() {
             let generic = GENERIC.iter().any(|w| line.contains(w));
-            let widget = !name.starts_with("kit/") && WIDGETS.iter().any(|w| line.contains(w));
+            let widget =
+                !name.starts_with("shared/kit/") && WIDGETS.iter().any(|w| line.contains(w));
             // a text widget without a face: drawn in the renderer's default
-            let faceless = name != "kit/text.rs"
+            let faceless = name != "shared/kit/text.rs"
                 && bare_text_call(line)
                 && !lines[i..(i + 6).min(lines.len())]
                     .iter()
@@ -442,7 +449,12 @@ fn tree(dir: &str) -> Vec<(String, String)> {
         }
     }
     let mut files = Vec::new();
-    walk(&Path::new("src").join(dir), &mut files);
+    let root = Path::new("src").join(dir);
+    if root.is_file() {
+        files.push(root);
+    } else {
+        walk(&root, &mut files);
+    }
     let mut out: Vec<_> = files
         .into_iter()
         .map(|p| {

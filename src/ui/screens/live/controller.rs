@@ -14,13 +14,13 @@ use crate::t;
 use iced::widget::{column, container, row};
 use iced::{Center, Element, Fill, Size};
 
+use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::grip::{self, grip};
+use crate::shared::kit::progress;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::error;
+use crate::shared::kit::tokens::{Role, radius};
 use crate::ui::ai_chat::note;
-use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::grip::{self, grip};
-use crate::ui::kit::progress;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::error;
-use crate::ui::kit::tokens::{Role, radius};
 use crate::ui::picker::{self, CHIP_HEIGHT, Picker, SPACING};
 
 /// The window's corners (`rounded-2xl`) and the room inside its edge (`p-2`).
@@ -167,7 +167,7 @@ impl Controller {
 
     pub fn view<'a>(&'a self) -> Element<'a, Msg> {
         if self.minimised {
-            return crate::ui::kit::button::dot(DOT, Msg::Restore);
+            return crate::shared::kit::button::dot(DOT, Msg::Restore);
         }
         let controls = row![
             container(grip(Msg::Drag)).center_y(CHIP_HEIGHT),
@@ -293,19 +293,19 @@ mod tests {
     fn the_language_picker_switches_source_and_target() {
         let mut c = Controller::new("auto", "ar", false);
         let closed = c.size();
-        crate::ui::kit::testing::shot::save("live-controller", c.view(), closed);
+        crate::shared::kit::testing::shot::save("live-controller", c.view(), closed);
         open(&mut c, Side::Target);
         assert!(c.size().height > closed.height, "the list needs room");
         assert_eq!(c.size().width, closed.width, "never wider");
-        let texts = crate::ui::kit::testing::shot::texts(c.view());
+        let texts = crate::shared::kit::testing::shot::texts(c.view());
         assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
         let arabic = texts.iter().filter(|t| *t == "Arabic").count();
         assert_eq!(arabic, 3, "the chip, the list's current and A–Z: {texts:?}");
         let size = c.size();
-        let px = crate::ui::kit::testing::shot::save("live-controller-picker", c.view(), size);
+        let px = crate::shared::kit::testing::shot::save("live-controller-picker", c.view(), size);
         assert!(px.chunks(4).any(|p| p != &px[..4]), "something drawn");
         c.update(Msg::Picker(picker::Msg::Query("fren".into())));
-        crate::ui::kit::testing::shot::save("live-controller-search", c.view(), size);
+        crate::shared::kit::testing::shot::save("live-controller-search", c.view(), size);
         c.update(Msg::Picker(picker::Msg::First));
         assert_eq!(c.picker.target, "fr");
         assert_eq!(c.picker.label(), "Auto → FR");
@@ -337,12 +337,12 @@ mod tests {
         c.minimised = true;
         c.notice = None;
         states.push(("dot", c.clone()));
-        let bg = crate::ui::kit::themes::c().bg;
+        let bg = crate::shared::kit::themes::c().bg;
         let bg = [bg.r, bg.g, bg.b, bg.a].map(|v| (v * 255.0).round() as u8);
         for (name, c) in states {
             let size = c.size();
             let (w, h) = (size.width as u32 + 40, size.height as u32 + 40);
-            let px = crate::ui::kit::testing::shot::render(c.view(), w, h);
+            let px = crate::shared::kit::testing::shot::render(c.view(), w, h);
             let at = |x: u32, y: u32| px[((y * w + x) * 4) as usize..][..4].to_vec();
             let (sw, sh) = (size.width as u32, size.height as u32);
             let (mx, my) = (sw / 2, sh / 2);
@@ -371,7 +371,7 @@ mod tests {
     /// asking for its download, in Sapphire and Daylight.
     #[test]
     fn every_controller_state_matches_its_golden_image() {
-        use crate::ui::kit::testing::golden;
+        use crate::shared::kit::testing::golden;
         let mut c = Controller::new("auto", "ar", true);
         let mut states = vec![("closed", c.clone())];
         open(&mut c, Side::Target);

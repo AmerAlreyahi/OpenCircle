@@ -14,10 +14,10 @@ use crate::ai::providers::Preset;
 use crate::app_language::{S, fmt};
 use crate::config::AiConfig;
 use crate::secrets::{AiKey, KeyStore};
+use crate::shared::kit::dropdown::{Search, combo};
+use crate::shared::kit::text::{error, sub};
+use crate::shared::kit::tokens::{Role, space};
 use crate::t;
-use crate::ui::kit::dropdown::{Search, combo};
-use crate::ui::kit::text::{error, sub};
-use crate::ui::kit::tokens::{Role, space};
 
 /// The search field's widget id, and the list's own (`kit::dropdown::open`).
 pub const SEARCH: &str = "model-search";

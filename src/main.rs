@@ -22,6 +22,7 @@ mod ocr;
 mod paths;
 mod secrets;
 mod setup;
+mod shared;
 mod snip;
 mod store;
 mod sys;

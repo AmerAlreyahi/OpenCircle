@@ -9,16 +9,16 @@ use iced::{Center, Element, Fill, Padding, Rectangle, Size};
 
 use crate::app_language::{S, fmt, tr};
 use crate::dir_row;
+use crate::shared::kit::button::{Kind, button, regular};
+use crate::shared::kit::chip::emblem;
+use crate::shared::kit::dir;
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::progress;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::paragraph;
+use crate::shared::kit::text::{accent, sub};
+use crate::shared::kit::tokens::{Role, radius};
 use crate::t;
-use crate::ui::kit::button::{Kind, button, regular};
-use crate::ui::kit::chip::emblem;
-use crate::ui::kit::dir;
-use crate::ui::kit::icon::Icon;
-use crate::ui::kit::progress;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::paragraph;
-use crate::ui::kit::text::{accent, sub};
-use crate::ui::kit::tokens::{Role, radius};
 
 /// A model the card offers (the design's `models` catalog).
 pub struct Model<'s> {
@@ -172,7 +172,7 @@ pub fn card<'a, M: Clone + 'a>(
     on: On<M>,
 ) -> Element<'a, M> {
     let header = row![
-        container(crate::ui::kit::text::muted(Role::META, t!(md_header)))
+        container(crate::shared::kit::text::muted(Role::META, t!(md_header)))
             .width(Fill)
             .align_x(dir::start()),
     ]
@@ -202,7 +202,7 @@ fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a
         &[&tr(model.name), &format!("{} MB", mb(bytes)), &model.source],
     );
     let words = column![
-        crate::ui::kit::text::text(Role::CARD_HEADING, title).line_height(TITLE_LINE),
+        crate::shared::kit::text::text(Role::CARD_HEADING, title).line_height(TITLE_LINE),
         sub(Role::META, meta).line_height(TEXT_LINE),
     ]
     .spacing(META_GAP)
@@ -248,8 +248,8 @@ fn body<'a, M: Clone + 'a>(
                 said(fmt(S::md_on_pc, &[&does])).push(buttons(t!(md_download), t!(md_not_now)));
             if let Some(provider) = on.provider {
                 let link = text(t!(md_provider))
-                    .size(crate::ui::kit::text::size(Role::META))
-                    .font(crate::ui::kit::text::font(Role::META));
+                    .size(crate::shared::kit::text::size(Role::META))
+                    .font(crate::shared::kit::text::font(Role::META));
                 c = c.push(Space::new().height(ABOVE_LINK)).push(
                     container(button(link, Kind::Quiet, Some(provider)))
                         .width(Fill)
@@ -329,7 +329,7 @@ pub fn floating<'a, M: 'a>(card: Element<'a, M>, screen: Size, pill: Rectangle) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::{golden, shot};
+    use crate::shared::kit::testing::{golden, shot};
 
     const FAILED: &str = "No internet connection. Reconnect, then try again.";
 
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn every_arabic_stage_matches_its_golden_image() {
         golden::each_theme(|theme, failed| {
-            let _ar = crate::ui::kit::testing::arabic();
+            let _ar = crate::shared::kit::testing::arabic();
             let why = t!(md_err_offline);
             let stages = [
                 ("ask-ocr", &OCR, Stage::Ask, false),

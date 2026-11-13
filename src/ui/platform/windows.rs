@@ -9,7 +9,7 @@ use iced::Size;
 use iced::Task;
 use iced::window::{self, Level, Position};
 
-use crate::ui::kit::motion; // the one kit part platform reads: the fade's clock and pace
+use crate::shared::kit::motion; // the one kit part platform reads: the fade's clock and pace
 
 /// Our logo as the window icon (taskbar, Alt+Tab): given once at start by the UI, which owns the
 /// picture (platform imports none of the UI).

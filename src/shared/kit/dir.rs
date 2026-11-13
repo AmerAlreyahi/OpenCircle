@@ -284,7 +284,7 @@ pub fn content_start(text: &str) -> Horizontal {
 #[macro_export]
 macro_rules! dir_row {
     ($($x:expr),* $(,)?) => {
-        $crate::ui::kit::dir::row([$(iced::Element::from($x)),*])
+        $crate::shared::kit::dir::row([$(iced::Element::from($x)),*])
     };
 }
 

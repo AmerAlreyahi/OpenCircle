@@ -9,12 +9,12 @@ use iced::widget::column;
 
 use super::super::state::{Message, Pick, State};
 use crate::config::TextReader;
+use crate::shared::kit::button::Kind;
+use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::sub;
+use crate::shared::kit::tokens::{Role, space};
 use crate::translate::lang;
-use crate::ui::kit::button::Kind;
-use crate::ui::kit::segmented::segmented;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::sub;
-use crate::ui::kit::tokens::{Role, space};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let reader = state.draft.selection.text_reader;

@@ -17,7 +17,7 @@ use super::state::{Message, Section, State, key_labels};
 use crate::config::{Config, Provider};
 use crate::hotkey::QuickId;
 use crate::labs::Feature;
-use crate::ui::kit::hero::{self, hero};
+use crate::shared::kit::hero::{self, hero};
 
 mod av1;
 pub mod online;
@@ -194,7 +194,7 @@ pub const FAILED: S = S::c_preview_failed;
 
 /// The page's previews, `None` when it has none.
 pub fn view(state: &State) -> Option<Element<'_, Message>> {
-    let reduced = crate::ui::kit::motion::reduced();
+    let reduced = crate::shared::kit::motion::reduced();
     let heroes: Vec<_> = on(state, state.section)
         .map(|h| {
             let shown = !hidden(state, h);

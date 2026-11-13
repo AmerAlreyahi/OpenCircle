@@ -8,8 +8,8 @@ use iced::{Point, Rectangle, Size};
 use crate::actions::Key;
 use crate::config::BarAnchor;
 use crate::labs::BarButton;
-use crate::ui::kit::tokens::{size, space};
-use crate::ui::kit::{field, grip};
+use crate::shared::kit::tokens::{size, space};
+use crate::shared::kit::{field, grip};
 
 /// Between a bar or chip and the selection, and the minimum distance to screen edges.
 pub(crate) const GAP: f32 = 16.0;

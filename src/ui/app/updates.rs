@@ -55,7 +55,7 @@ impl App {
             waiting.how
         );
         self.update = Some(waiting);
-        let accent = crate::ui::kit::themes::c().accent.into_rgba8();
+        let accent = crate::shared::kit::themes::c().accent.into_rgba8();
         crate::ui::platform::tray::show_update(Some([accent[0], accent[1], accent[2]]));
         self.windows.refresh_update();
         self.update_tick()

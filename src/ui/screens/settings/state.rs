@@ -33,12 +33,12 @@ use crate::hotkey::{DesktopKey, managed};
 use crate::labs::Feature;
 use crate::music::{self, SERVICE, Service};
 use crate::secrets::{KeyStore, Keyring, Secret, SecretsError};
+use crate::shared::kit::header::Caption;
+use crate::shared::kit::motion::{self, Curve};
+use crate::shared::kit::themes::THEMES;
+use crate::shared::kit::tokens::{size, space};
+use crate::shared::theme;
 use crate::translate::lang::{self, LANGUAGES, Language};
-use crate::ui::kit::header::Caption;
-use crate::ui::kit::motion::{self, Curve};
-use crate::ui::kit::themes::THEMES;
-use crate::ui::kit::tokens::{size, space};
-use crate::ui::theme;
 
 use super::pages::snip::open_keyboard_settings;
 use super::pages::text_reading::open_language_settings;
@@ -54,7 +54,7 @@ pub const WINDOW_SIZE: Size = Size::new(820.0, 560.0);
 const SIDEBAR_FOOTER: f32 = 2.0 + 1.0 + 8.0 + 16.0 + LINK_LINE;
 /// Its Report a problem link over the version line (`kit::sidebar::LINK_GAP`
 /// and a 10.5 px line).
-const LINK_LINE: f32 = crate::ui::kit::sidebar::LINK_GAP + 14.0;
+const LINK_LINE: f32 = crate::shared::kit::sidebar::LINK_GAP + 14.0;
 
 /// The sidebar's pages on this OS with every Labs switch on (Text reading is
 /// Windows only).
@@ -1679,7 +1679,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ClearHistory(kind) => return Outcome::History(vec![kind]),
         Message::ClearAll(false) => {
             state.clearing_all = true;
-            return Outcome::Focus(crate::ui::kit::focus::CANCEL);
+            return Outcome::Focus(crate::shared::kit::focus::CANCEL);
         }
         Message::ClearAll(true) => {
             state.clearing_all = false;
@@ -1690,7 +1690,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.resetting = true;
             state.recording = None;
             state.shortcut_error = None;
-            return Outcome::Focus(crate::ui::kit::focus::CANCEL);
+            return Outcome::Focus(crate::shared::kit::focus::CANCEL);
         }
         Message::ResetShortcuts(true) => state.reset_shortcuts(),
         Message::KeepShortcuts => state.resetting = false,

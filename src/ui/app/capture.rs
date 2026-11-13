@@ -14,12 +14,12 @@ use crate::config::{self};
 use crate::labs::BarButton;
 use crate::ocr::{self};
 
+use crate::shared::kit::motion;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{BarKeys, Hiding, Message, Purpose, Shot};
 use crate::ui::app::opening::Opening;
 use crate::ui::app::quick;
 use crate::ui::app::quick::{Quick, Start};
-use crate::ui::kit::motion;
 use crate::ui::platform::monitor::{place_window, taskbar_inset};
 use crate::ui::platform::shape;
 use crate::ui::snip::Snip;

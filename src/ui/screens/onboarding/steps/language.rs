@@ -11,12 +11,12 @@ use iced::widget::{Space, column};
 use super::super::flow::{Message, State};
 use crate::app_language::{S, fmt, language_name};
 use crate::mt;
+use crate::shared::kit::card::card;
+use crate::shared::kit::dir;
+use crate::shared::kit::text::{paragraph, sub, text};
+use crate::shared::kit::tokens::{Role, space};
 use crate::t;
 use crate::translate::lang::{self, AUTO};
-use crate::ui::kit::card::card;
-use crate::ui::kit::dir;
-use crate::ui::kit::text::{paragraph, sub, text};
-use crate::ui::kit::tokens::{Role, space};
 use crate::ui::screens::model_download::mb;
 
 pub fn view(state: &State) -> Element<'_, Message> {

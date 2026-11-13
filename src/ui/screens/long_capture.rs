@@ -14,8 +14,8 @@
 //! area until the first scroll. The grabbing and stitching run on a thread
 //! (`capture::scroll::by_hand`).
 use crate::app_language::{S, fmt};
+use crate::shared::kit::dir;
 use crate::t;
-use crate::ui::kit::dir;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -24,9 +24,9 @@ use iced::widget::{canvas as draw, container, image, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme, mouse};
 
 use crate::capture::scroll::Update;
-use crate::ui::kit::area;
-use crate::ui::kit::chip;
-use crate::ui::kit::key_hint::{self, key_hint};
+use crate::shared::kit::area;
+use crate::shared::kit::chip;
+use crate::shared::kit::key_hint::{self, key_hint};
 use crate::ui::snip::Msg;
 
 /// Between the area, the picture and the screen's edge (logical px).
@@ -479,7 +479,7 @@ fn popup_window(
 /// (while `tip`) under them. Columns left out cost the stitcher evidence on
 /// every row, rows only at the top: the tip goes under, not beside.
 fn inside_parts(width: f32, picture: Size, tip: bool) -> Vec<(Rectangle, f32)> {
-    use crate::ui::kit::tokens::radius;
+    use crate::shared::kit::tokens::radius;
     let panel = Rectangle::new(Point::new(width - POPUP_PANEL.width, 0.0), POPUP_PANEL);
     let mut parts = vec![(panel, radius::DROPDOWN)];
     if picture.height > 0.0 {
@@ -550,7 +550,7 @@ pub fn popup_parts(
         y = framed.height + CHIP_GAP;
     }
     let panel = Rectangle::new(Point::new(against(POPUP_PANEL.width), y), POPUP_PANEL);
-    parts.push((panel, crate::ui::kit::tokens::radius::DROPDOWN));
+    parts.push((panel, crate::shared::kit::tokens::radius::DROPDOWN));
     parts
 }
 
@@ -565,11 +565,11 @@ pub fn popup_view<'a>(
     tip: bool,
     inside: bool,
 ) -> Element<'a, Finish> {
-    use crate::ui::kit::button::{self, Kind};
-    use crate::ui::kit::icon::Icon;
-    use crate::ui::kit::surface::{Material, surface};
-    use crate::ui::kit::text::muted;
-    use crate::ui::kit::tokens::{Role, radius, space};
+    use crate::shared::kit::button::{self, Kind};
+    use crate::shared::kit::icon::Icon;
+    use crate::shared::kit::surface::{Material, surface};
+    use crate::shared::kit::text::muted;
+    use crate::shared::kit::tokens::{Role, radius, space};
     use crate::ui::screens::snip_toolbar::toolbar::{COPY, SAVE};
     use iced::widget::{Space, column, row};
     let picture = picture.map(|(handle, size)| {
@@ -762,11 +762,11 @@ mod tests {
     /// hints, the whole-screen tip) in English and Arabic, both themes.
     #[test]
     fn the_popup_matches_its_golden_images() {
-        use crate::ui::kit::testing::golden;
-        use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        use crate::shared::kit::testing::golden;
+        use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
         let mut failed = Vec::new();
         for ar in [false, true] {
-            let _ar = ar.then(crate::ui::kit::testing::arabic);
+            let _ar = ar.then(crate::shared::kit::testing::arabic);
             for theme in [&SAPPHIRE, &DAYLIGHT] {
                 themes::set(theme);
                 let file = format!("long-popup{}-{}", if ar { "-ar" } else { "" }, theme.id);
@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(px(3240), "3,240 px");
         assert_eq!(px(20_000), "20,000 px");
         assert_eq!(group(1_234_567), "1,234,567");
-        let texts = crate::ui::kit::testing::shot::texts(count::<Msg>(20_000, true, false));
+        let texts = crate::shared::kit::testing::shot::texts(count::<Msg>(20_000, true, false));
         assert!(texts.iter().any(|t| t == "Limit reached"), "{texts:?}");
     }
 
@@ -1165,7 +1165,7 @@ mod tests {
         let (picture, panel) = (parts[0].0, parts[1].0);
         assert_eq!(picture, rect(window.width - 42.0, 0.0, 42.0, 102.0));
         assert_eq!(panel.position(), Point::new(0.0, 102.0 + CHIP_GAP));
-        assert_eq!(parts[1].1, crate::ui::kit::tokens::radius::DROPDOWN);
+        assert_eq!(parts[1].1, crate::shared::kit::tokens::radius::DROPDOWN);
         let parts = popup_parts(POPUP_PANEL, Size::ZERO, false, false, false);
         assert_eq!(parts, vec![(Rectangle::with_size(POPUP_PANEL), parts[0].1)]);
     }

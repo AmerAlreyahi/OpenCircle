@@ -6,8 +6,8 @@ use iced::{Point, Rectangle, Task};
 use crate::actions::{self, Crop, copy, save};
 use crate::snip::annotate::{self, Image, Output};
 
+use crate::shared::kit::motion;
 use crate::ui::app::message::{Message, Purpose};
-use crate::ui::kit::motion;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 
 use super::App;
@@ -435,9 +435,9 @@ mod tests {
     /// 2001 ms apart" was the wait between two nudges); docked by OPEN.
     #[test]
     fn the_toolbar_glide_after_a_nudge_times_only_its_own_frames() {
+        use crate::shared::kit::motion;
         use crate::ui::app::message::Message;
         use crate::ui::app::tests::settle_bar;
-        use crate::ui::kit::motion;
         use std::time::{Duration, Instant};
         let mut app = snip_toolbar_open();
         settle_bar(&mut app);
@@ -467,9 +467,9 @@ mod tests {
 
     /// The tooltips of what the overlay draws now (its buttons' names).
     fn bar_names(app: &App) -> Vec<String> {
-        use crate::ui::kit::tooltip::{SHOWN, tests_support::shown};
+        use crate::shared::kit::tooltip::{SHOWN, tests_support::shown};
         SHOWN.with(|s| s.borrow_mut().clear());
-        let _ = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        let _ = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
         shown()
     }
 
@@ -515,7 +515,7 @@ mod tests {
     fn share_shows_only_where_the_system_has_a_sheet() {
         let mut app = snip_toolbar_open();
         let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
-        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
         assert_eq!(texts.iter().any(|n| n == "Share"), share::SUPPORTED);
         assert_eq!(more(&app).contains(&Some(E::Share)), share::SUPPORTED);
     }
@@ -531,7 +531,7 @@ mod tests {
         assert!(names.iter().any(|n| n.starts_with("Copy")), "{names:?}");
         // More's rows
         let _ = app.on_snip_toolbar(E::Menu(crate::snip::annotate::Menu::More));
-        let names = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        let names = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
         assert!(
             names.iter().any(|n| n.starts_with("Pin to screen")),
             "{names:?}"
@@ -558,7 +558,7 @@ mod tests {
         use crate::snip::annotate::Menu;
         let mut app = snip_toolbar_open();
         let _ = app.on_snip_toolbar(E::Menu(Menu::More));
-        let texts = crate::ui::kit::testing::shot::texts(app.view(app.overlay));
+        let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
         for row in [
             "Long capture",
             "Add to steps",

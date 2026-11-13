@@ -1091,7 +1091,8 @@ fn text_edits_on_click_and_moves_only_with_ctrl() {
 /// the stroke, undo puts it back, Delete removes it. Shapes keep their handles.
 #[test]
 fn freehand_strokes_have_no_frame_and_move_by_the_stroke_with_ctrl() {
-    let canvas_px = |e: &Annotator| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
+    let canvas_px =
+        |e: &Annotator| crate::shared::kit::testing::shot::save("", e.canvas(), e.size());
     let wave = |y: f32| -> Vec<Point> {
         (0..40)
             .map(|i| pt(40.0 + 5.0 * i as f32, y + 12.0 * (i as f32 / 3.0).sin()))
@@ -1431,7 +1432,7 @@ fn every_icon_is_in_the_subset_font() {
         .map(|t| t.icon)
         .chain(toolbar::GLYPHS.iter().copied())
         .chain(crate::ui::screens::tools::GLYPHS.iter().copied())
-        .chain(['\u{e13e}', crate::ui::kit::icon::Icon::Grip.glyph()]);
+        .chain(['\u{e13e}', crate::shared::kit::icon::Icon::Grip.glyph()]);
     for icon in icons {
         let code = format!("U+{:04X}", icon as u32);
         assert!(script.contains(&code), "add {code} to subset.sh");
@@ -1553,7 +1554,7 @@ fn lines_snap_to_45_degrees_with_shift() {
 
 #[test]
 fn label_text_contrasts_with_its_fill() {
-    use crate::ui::theme::ANNOTATION;
+    use crate::shared::theme::ANNOTATION;
     for (i, dark_text) in [(2, true), (9, true), (5, false), (11, false), (0, false)] {
         let colour = ANNOTATION[i].into_rgba8();
         let at = pt(10.0, 10.0);
@@ -1681,7 +1682,7 @@ fn group_buttons_pick_their_last_tool_and_open_one_panel() {
 /// dimmed (the panel doesn't jump); Outline everywhere in Shapes.
 #[test]
 fn fill_is_greyed_for_lines_and_arrows() {
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     for (tool, fills) in [
         (Tool::Rect, true),
         (Tool::Ellipse, true),
@@ -1715,7 +1716,7 @@ fn undos_second_click_opens_its_panel() {
     assert_eq!((e.doc.steps(), e.menu), ((2, 3), None));
     e.update(Message::UndoClick);
     assert_eq!((e.doc.steps(), e.menu), ((2, 3), Some(Menu::Undo)));
-    let texts = crate::ui::kit::testing::shot::texts(e.toolbar());
+    let texts = crate::shared::kit::testing::shot::texts(e.toolbar());
     assert!(texts.iter().any(|t| t == "2 of 3 steps"), "{texts:?}");
     e.update(Message::Redo);
     assert_eq!(e.doc.steps(), (3, 3));
@@ -1730,7 +1731,7 @@ fn undos_second_click_opens_its_panel() {
 /// icon-only (their tooltips say them and their keys).
 #[test]
 fn the_toolbar_has_no_close_button() {
-    use crate::ui::kit::tooltip::tests_support::shown;
+    use crate::shared::kit::tooltip::tests_support::shown;
     let mut e = editor(100, 100);
     e.movable = true;
     let _ = shown();
@@ -1781,7 +1782,7 @@ fn toolbar_size_matches_its_layout() {
 
 #[test]
 fn presets_style_the_active_tool() {
-    use crate::ui::theme::ANNOTATION;
+    use crate::shared::theme::ANNOTATION;
     let colour = |i: usize| ANNOTATION[i].into_rgba8();
     let mut e = editor(200, 150);
     let key = |e: &Annotator, c: char| {
@@ -2282,7 +2283,8 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
 /// and its tail's tip; a box: its corners).
 #[test]
 fn a_selection_has_no_frame_only_its_handles() {
-    let canvas_px = |e: &Annotator| crate::ui::kit::testing::shot::save("", e.canvas(), e.size());
+    let canvas_px =
+        |e: &Annotator| crate::shared::kit::testing::shot::save("", e.canvas(), e.size());
     for tool in [
         Tool::Rect,
         Tool::Ellipse,
@@ -2588,7 +2590,7 @@ fn demo_editor() -> Annotator {
     let mut e = Annotator::new(demo_image(), 1.0);
     let colour = |e: &mut Annotator, i: usize| {
         e.update(Message::Colour(
-            crate::ui::theme::ANNOTATION[i].into_rgba8(),
+            crate::shared::theme::ANNOTATION[i].into_rgba8(),
         ));
     };
     // Draws with `tool` from `from` through `via` to `to`.
@@ -2805,7 +2807,7 @@ fn snapshots_popovers_at_the_bottom() {
 #[test]
 #[ignore = "writes PNGs to look at"]
 fn snapshots() {
-    use crate::ui::theme;
+    use crate::shared::theme;
     let dir = std::path::PathBuf::from(
         std::env::var("OPENCIRCLE_EDITOR_PNG").expect("OPENCIRCLE_EDITOR_PNG=<dir>"),
     );
@@ -2813,7 +2815,9 @@ fn snapshots() {
     iced::advanced::graphics::text::font_system()
         .write()
         .unwrap()
-        .load_font(std::borrow::Cow::Borrowed(crate::ui::kit::icon::FONT_BYTES));
+        .load_font(std::borrow::Cow::Borrowed(
+            crate::shared::kit::icon::FONT_BYTES,
+        ));
 
     let mut e = demo_editor();
     e.update(Message::Picker);
@@ -2851,7 +2855,7 @@ fn snapshots() {
 /// them repeats words already on the button.
 #[test]
 fn toolbar_tooltips_are_for_icon_only_buttons() {
-    use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
+    use crate::shared::kit::tooltip::tests_support::{assert_tips_add_something, shown};
     let e = Annotator::new(checker(200, 100), 1.0);
     let _ = e.toolbar();
     let tips = shown();
@@ -2869,7 +2873,9 @@ fn png_dir() -> std::path::PathBuf {
     iced::advanced::graphics::text::font_system()
         .write()
         .unwrap()
-        .load_font(std::borrow::Cow::Borrowed(crate::ui::kit::icon::FONT_BYTES));
+        .load_font(std::borrow::Cow::Borrowed(
+            crate::shared::kit::icon::FONT_BYTES,
+        ));
     dir
 }
 

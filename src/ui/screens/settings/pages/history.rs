@@ -9,11 +9,11 @@ use iced::{Element, Fill};
 
 use super::super::state::{Message, Pick, Section, State};
 use crate::history::Kind;
-use crate::ui::kit::button::{Kind as Button, button, label};
-use crate::ui::kit::segmented::boolean;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::{error, sub};
-use crate::ui::kit::tokens::{Role, space};
+use crate::shared::kit::button::{Kind as Button, button, label};
+use crate::shared::kit::segmented::boolean;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::{error, sub};
+use crate::shared::kit::tokens::{Role, space};
 
 fn off_on() -> [&'static str; 2] {
     [t!(c_off), t!(c_on)]

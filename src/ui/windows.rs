@@ -10,19 +10,20 @@ use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
 use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
 
-use super::kit::chip;
-use super::kit::header::{self as chrome, Caption};
-use super::kit::icon::Icon;
-use super::kit::icon_button::{self, State};
-use super::kit::surface::{Material, surface};
-use super::kit::tokens::{radius, space};
-use super::kit::tooltip::{Why, hint};
 use super::platform;
 use super::screens::onboarding;
 use super::screens::steps::{self, Strip};
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
-use super::{settings, shape, theme, update_card, update_pill};
+use super::{settings, shape, update_card, update_pill};
+use crate::shared::kit::chip;
+use crate::shared::kit::header::{self as chrome, Caption};
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button::{self, State};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::tokens::{radius, space};
+use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::theme;
 // The helper is `platform::windows`; these names stay reachable as `windows::..` for the callers.
 #[cfg(test)]
 pub use super::platform::windows::CLEARED;
@@ -463,7 +464,7 @@ impl Windows {
         if fresh {
             // a cleared strip's steps go now (its window shows the new strip)
             let id = self.steps.take().and_then(|(id, _)| id);
-            let rtl = super::kit::dir::rtl(); // the strip docks on the side the text starts
+            let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
             self.steps = Some((id, Strip::new(monitor, inset, rtl)));
         }
         super::background(move |tx| match steps::Step::new(&crop) {
@@ -550,7 +551,7 @@ impl Windows {
                 self.steps_toast(ok)
             }
             (steps::Do::CopyAll, _) => {
-                use super::kit::themes::c;
+                use crate::shared::kit::themes::c;
                 let crops = strip.crops();
                 let colours = [c().bg, c().accent, c().rim].map(|c| c.into_rgba8());
                 let rtl = strip.rtl;
@@ -1360,7 +1361,7 @@ impl Windows {
             }
             Msg::PillFrame(now) => {
                 if let Some((_, _, opened)) = &self.update_pill {
-                    self.pill_turn = super::kit::spinner::turn(now.duration_since(*opened));
+                    self.pill_turn = crate::shared::kit::spinner::turn(now.duration_since(*opened));
                 }
             }
             Msg::Onboarding(onboarding::Message::Caption(caption)) => {
@@ -1500,7 +1501,7 @@ impl Windows {
             && !state.close_requested()
         {
             // the question's Cancel (Keep editing) takes the focus: Enter keeps editing
-            let cancel = iced::widget::operation::focus(crate::ui::kit::focus::CANCEL);
+            let cancel = iced::widget::operation::focus(crate::shared::kit::focus::CANCEL);
             return Task::batch([window::gain_focus(id), cancel]);
         }
         window::close(id)
@@ -1638,7 +1639,7 @@ impl Windows {
         }
         if let Some((_, pill, _)) = self.update_pill.as_ref().filter(|(p, ..)| *p == window) {
             let radius = shape::radius(update_pill::RADIUS);
-            let still = super::kit::motion::reduced();
+            let still = crate::shared::kit::motion::reduced();
             let view = spoken(|| update_pill::view(pill, radius, self.pill_turn, still));
             return Some(view.map(Msg::UpdatePill));
         }
@@ -1672,7 +1673,7 @@ impl Windows {
             _ => return None,
         };
         Some(chrome::frame(
-            super::kit::logo::logo(16),
+            crate::shared::kit::logo::logo(16),
             crate::t!(win_t_perm_head),
             self.mode(window),
             page,
@@ -1745,8 +1746,8 @@ impl Windows {
             },
             // the Updating pill's logo turns (a frame clock only while it shows)
             match &self.update_pill {
-                Some((_, p, _)) if p.spins() && !super::kit::motion::reduced() => {
-                    super::kit::motion::frames().map(Msg::PillFrame)
+                Some((_, p, _)) if p.spins() && !crate::shared::kit::motion::reduced() => {
+                    crate::shared::kit::motion::frames().map(Msg::PillFrame)
                 }
                 _ => Subscription::none(),
             },
@@ -2015,7 +2016,7 @@ pub fn toast_size(text: &str) -> Size {
 /// `build` with the layout direction of the app's language (the floating
 /// widgets of part 2a: sizes are measured, and views built, in it).
 fn spoken<T>(build: impl FnOnce() -> T) -> T {
-    let _dir = super::kit::dir::scope(crate::app_language::rtl());
+    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
     build()
 }
 
@@ -2081,8 +2082,8 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
 mod tests {
     use super::*;
     use crate::secrets::{AiKey, Secret, SecretsError};
-    use crate::ui::kit::motion;
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::motion;
+    use crate::shared::kit::testing::shot;
 
     struct NoKeys;
     impl crate::secrets::KeyStore for NoKeys {
@@ -2485,7 +2486,7 @@ mod tests {
             let _ = windows.update(Msg::Pin(id, PinMsg::Hover(hover)));
             let px = shot::save(name, windows.view(id).unwrap(), Size::new(420.0, 260.0));
             // The picture fills the window: no window-colour background shows.
-            let bg = crate::ui::kit::themes::c().bg;
+            let bg = crate::shared::kit::themes::c().bg;
             let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
             let background = px.chunks(4).filter(|p| p[..3] == bg).count();
             assert!(background < 100, "{name}: {background} background pixels");
@@ -2499,7 +2500,7 @@ mod tests {
 
     #[test]
     fn the_pin_bar_adds_the_shortcuts_to_its_icons() {
-        use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
+        use crate::shared::kit::tooltip::tests_support::{assert_tips_add_something, shown};
         let mut windows = Windows::default();
         let _ = windows.pin(picture(300, 200), None, 1.0);
         let id = windows.pins[0].id;
@@ -2635,7 +2636,7 @@ mod tests {
 
     #[test]
     fn the_live_pin_bar_and_its_glyphs() {
-        use crate::ui::kit::tooltip::tests_support::{assert_tips_add_something, shown};
+        use crate::shared::kit::tooltip::tests_support::{assert_tips_add_something, shown};
         let script = include_str!("../../assets/lucide/subset.sh");
         for glyph in [OPACITY_GLYPH, THROUGH] {
             let code = format!("U+{:04X}", glyph as u32);
@@ -2668,7 +2669,7 @@ mod tests {
     /// The live pin's hover bar, Sapphire and Daylight.
     #[test]
     fn the_live_pin_matches_its_golden_images() {
-        use crate::ui::kit::testing::golden;
+        use crate::shared::kit::testing::golden;
         let mut windows = Windows::default();
         let id = live(&mut windows, 420, 260, 1.0);
         let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
@@ -2732,7 +2733,7 @@ mod tests {
                 );
                 // The header is the window's own colour all the way across (no gray strip).
                 let w = size.width as usize;
-                let bg = crate::ui::kit::themes::c().bg;
+                let bg = crate::shared::kit::themes::c().bg;
                 let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
                 let row = &px[(10 * w) * 4..(11 * w) * 4];
                 let plain = row.chunks(4).filter(|p| p[..3] == bg).count();
@@ -2824,8 +2825,8 @@ mod tests {
         let mut windows = Windows::default();
         theme::apply(Theme::System);
         let _ = windows.update(Msg::OsTheme(iced::theme::Mode::Light));
-        let light = crate::ui::kit::themes::c().text;
+        let light = crate::shared::kit::themes::c().text;
         let _ = windows.update(Msg::OsTheme(iced::theme::Mode::Dark));
-        assert_ne!(crate::ui::kit::themes::c().text, light);
+        assert_ne!(crate::shared::kit::themes::c().text, light);
     }
 }

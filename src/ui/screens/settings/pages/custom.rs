@@ -9,14 +9,14 @@ use iced::widget::tooltip::Position;
 use super::super::state::{BARS, BarChoice, Message, PALETTES, PaletteChoice, State};
 use crate::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
 use crate::labs::{Feature, Labs};
-use crate::ui::kit::colour::{picker, swatch};
-use crate::ui::kit::dropdown::dropdown;
-use crate::ui::kit::segmented::segmented;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::slider::slider;
-use crate::ui::kit::tokens::space;
-use crate::ui::kit::tooltip::{Why, hint, tip};
-use crate::ui::theme;
+use crate::shared::kit::colour::{picker, swatch};
+use crate::shared::kit::dropdown::dropdown;
+use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::slider::slider;
+use crate::shared::kit::tokens::space;
+use crate::shared::kit::tooltip::{Why, hint, tip};
+use crate::shared::theme;
 
 /// The bar style row, hidden until glass ships (the Glass version).
 const GLASS_BARS: bool = false;

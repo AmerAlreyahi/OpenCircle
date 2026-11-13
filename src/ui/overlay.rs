@@ -16,10 +16,10 @@ use iced::widget::image::{FilterMethod, Handle};
 use iced::widget::text::Alignment;
 use iced::{Color, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-use super::kit::{area as kit_area, motion, tokens::fixed};
-use super::theme;
 use super::touch::Touched;
 use crate::config::{BracketStyle, Look};
+use crate::shared::kit::{area as kit_area, motion, tokens::fixed};
+use crate::shared::theme;
 
 /// A selection smaller than this (screen px, either side) is a tap, not a circle.
 pub const MIN_SIDE: f32 = 12.0;
@@ -2485,7 +2485,7 @@ mod tests {
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
             .height(iced::Fill);
-        crate::ui::kit::testing::shot::render(canvas.into(), 960, 540)
+        crate::shared::kit::testing::shot::render(canvas.into(), 960, 540)
     }
 
     /// Selected text is drawn like a document's selection: flat boxes with
@@ -2527,7 +2527,7 @@ mod tests {
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
             .height(iced::Fill);
-        let rgba = crate::ui::kit::testing::shot::render(canvas.into(), 960, 540);
+        let rgba = crate::shared::kit::testing::shot::render(canvas.into(), 960, 540);
         let fill = px(&rgba, Point::new(200.0, 112.0));
         // the very corners are the same flat colour as the middle
         for corner in [

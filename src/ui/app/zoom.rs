@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use iced::Point;
 
-use crate::ui::kit::motion;
+use crate::shared::kit::motion;
 use crate::ui::overlay::View;
 
 use super::App;

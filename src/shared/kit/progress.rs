@@ -65,8 +65,8 @@ pub fn bar<'a, Message: 'a>(share: f32) -> Element<'a, Message> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::kit::testing::shot;
-    use crate::ui::kit::themes::c;
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::themes::c;
 
     /// An empty bar shows no fill and a full one is filled to its end (iced
     /// lays out a `FillPortion(0)` as if it had none: the two were swapped).

@@ -4,23 +4,23 @@
 //! nearest strong colour change each way along that axis (a gap or a box's
 //! width, live under the pointer); a box (W × H; its corners snap to window
 //! and control edges as a snip's do). Ctrl+C copies the measure as text.
+use crate::shared::kit::dir;
 use crate::t;
-use crate::ui::kit::dir;
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Geometry};
 use iced::widget::{Space, canvas as draw, pin, stack};
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Theme};
 
 use super::{CLOSE, Msg};
-use crate::ui::kit::area;
-use crate::ui::kit::chip;
-use crate::ui::kit::divider;
-use crate::ui::kit::icon_button::{self, State};
-use crate::ui::kit::key_hint::Group;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::sub;
-use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::kit::tooltip::{Why, hint};
+use crate::shared::kit::area;
+use crate::shared::kit::chip;
+use crate::shared::kit::divider;
+use crate::shared::kit::icon_button::{self, State};
+use crate::shared::kit::key_hint::Group;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::sub;
+use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::ui::screens::bar::geometry;
 
 /// lucide "ruler" (the Snip toolbar's button), and the modes' glyphs:

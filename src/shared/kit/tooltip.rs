@@ -80,7 +80,7 @@ pub fn tip<'a, Message: 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     use iced::{Point, Size, mouse};
 
     /// A control at the window's left edge: its tooltip stays `EDGE` inside
@@ -89,7 +89,7 @@ mod tests {
     fn a_tooltip_keeps_clear_of_the_window_edge() {
         let size = Size::new(240.0, 80.0);
         let view = || {
-            use crate::ui::kit::icon_button::{State, icon_button};
+            use crate::shared::kit::icon_button::{State, icon_button};
             let back = icon_button('\u{e048}', State::default(), Some(()));
             hint(back, "Back to the chat", Why::Icon, Position::Bottom)
         };
@@ -101,7 +101,7 @@ mod tests {
         let shown = shot::render_with(view(), size, Some(at), &moved);
         let w = size.width as usize;
         // below the (hovered) button: only the pill differs there
-        let below = (crate::ui::kit::tokens::size::ICON_BUTTON as usize + 2) * w;
+        let below = (crate::shared::kit::tokens::size::ICON_BUTTON as usize + 2) * w;
         let left = (plain
             .as_chunks::<4>()
             .0

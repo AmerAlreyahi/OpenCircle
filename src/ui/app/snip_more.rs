@@ -401,11 +401,11 @@ mod tests {
     use crate::actions::{copy, snip_more as more, text};
     use crate::labs::Labs;
     use crate::ocr::TextBlock;
+    use crate::shared::kit::testing::shot;
     use crate::snip::annotate::{Edit, Item, Menu, Message as E, Shape};
     use crate::ui::app::App;
     use crate::ui::app::message::{Hiding, Message};
     use crate::ui::app::tests::{run_task, snipping_on};
-    use crate::ui::kit::testing::shot;
     use crate::ui::screens::snip_toolbar::toolbar;
 
     const AREA: Rectangle = Rectangle {

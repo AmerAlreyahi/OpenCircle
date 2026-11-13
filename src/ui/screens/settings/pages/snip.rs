@@ -12,9 +12,9 @@ use iced::widget::column;
 use super::super::state::{Message, Slot, State};
 use super::{general, history, shortcuts};
 use crate::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
-use crate::ui::kit::button::Kind;
-use crate::ui::kit::segmented::{boolean, segmented};
-use crate::ui::kit::setting_row::{self, title};
+use crate::shared::kit::button::Kind;
+use crate::shared::kit::segmented::{boolean, segmented};
+use crate::shared::kit::setting_row::{self, title};
 
 fn off_on() -> [&'static str; 2] {
     [t!(c_off), t!(c_on)]
@@ -45,7 +45,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         rows = rows.push(pick(
             t!(s_prtsc),
             t!(s_prtsc_desc),
-            crate::ui::kit::setting_row::action(
+            crate::shared::kit::setting_row::action(
                 t!(s_prtsc_settings),
                 Kind::Elevated,
                 Some(Message::OpenKeyboardSettings),

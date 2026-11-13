@@ -8,12 +8,12 @@ use iced::widget::{Space, column};
 use super::super::state::{Message, Pick, State};
 use crate::config::SongSource;
 use crate::music::SERVICE;
-use crate::ui::kit::card::card;
-use crate::ui::kit::chip::pill;
-use crate::ui::kit::segmented::{boolean, segmented};
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::sub;
-use crate::ui::kit::tokens::{Role, space};
+use crate::shared::kit::card::card;
+use crate::shared::kit::chip::pill;
+use crate::shared::kit::segmented::{boolean, segmented};
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::sub;
+use crate::shared::kit::tokens::{Role, space};
 
 /// What song search sends, and when (also in docs/privacy.md).
 pub const SONG_PRIVACY: crate::app_language::S = crate::app_language::S::song_privacy;

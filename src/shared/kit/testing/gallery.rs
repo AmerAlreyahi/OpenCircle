@@ -445,7 +445,7 @@ fn error_card_sheet() {
                 on_details: (),
                 fix: Some(fix),
                 retry: long.then_some(()),
-                words: crate::ui::kit::error_card::Words {
+                words: crate::shared::kit::error_card::Words {
                     show: s(ar, "Show details", "إظهار التفاصيل"),
                     hide: s(ar, "Hide details", "إخفاء التفاصيل"),
                     retry: s(ar, "Retry", "إعادة المحاولة"),
@@ -561,7 +561,7 @@ fn header_sheet() {
     let close = SIZE.width - 16.0 - 23.0;
     let regular = move |ar| {
         let status = chip::status(s(ar, "Saved", "تم الحفظ"), chip::Tone::Ok);
-        let logo = crate::ui::kit::logo::logo(16);
+        let logo = crate::shared::kit::logo::logo(16);
         header::regular(
             logo,
             s(ar, "Settings", "الإعدادات"),
@@ -840,7 +840,7 @@ fn markdown_sheet() {
 #[test]
 fn spinner_sheet() {
     use super::super::spinner::{spinner, thinking};
-    let logo = || crate::ui::kit::logo::logo(24);
+    let logo = || crate::shared::kit::logo::logo(24);
     let rows = vec![
         row("turn 0", Act::Rest, move |_| {
             spinner(logo(), 24.0, 0.0, false)
@@ -1002,7 +1002,7 @@ fn field_slots_sheet() {
     let view = |typed: bool, focused| {
         move |ar| {
             let parts = (
-                logo(crate::ui::kit::logo::logo(16), false, ()),
+                logo(crate::shared::kit::logo::logo(16), false, ()),
                 field::pair(
                     toggle(super::super::icon::Icon::Screen, !typed, false, ()),
                     badge("AI", false, ()),

@@ -9,12 +9,12 @@ use iced::widget::column;
 use iced::widget::tooltip::Position;
 
 use super::super::state::{Message, Slot, State, key_labels};
-use crate::ui::kit::button::Kind as Button;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::shortcut_field::{self, shortcut_field};
-use crate::ui::kit::text::{error, text};
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::tip;
+use crate::shared::kit::button::Kind as Button;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::shortcut_field::{self, shortcut_field};
+use crate::shared::kit::text::{error, text};
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let rows = state.slots().map(|slot| row(state, slot));
@@ -88,7 +88,7 @@ pub(super) fn row(state: &State, slot: Slot) -> Element<'_, Message> {
     );
     // the problem under the name, above the hint
     let mut name_block =
-        column![text(Role::ROW_TITLE, label)].align_x(crate::ui::kit::dir::start());
+        column![text(Role::ROW_TITLE, label)].align_x(crate::shared::kit::dir::start());
     if let Some(p) = problem {
         name_block = name_block.push(error(Role::ROW_DESC, p));
     }

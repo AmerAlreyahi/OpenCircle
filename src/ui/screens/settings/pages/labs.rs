@@ -8,10 +8,10 @@ use iced::{Center, Element};
 
 use super::super::state::{Message, Pick, State};
 use crate::labs::Feature;
-use crate::ui::kit::chip::tag;
-use crate::ui::kit::segmented::boolean;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::tokens::space;
+use crate::shared::kit::chip::tag;
+use crate::shared::kit::segmented::boolean;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::tokens::space;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let labs = &state.draft.labs;

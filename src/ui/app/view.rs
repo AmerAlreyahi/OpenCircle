@@ -8,10 +8,10 @@ use iced::{ContentFit, Element, Fill, Point, Rectangle, Size, Vector};
 use crate::actions::qr;
 use crate::config::{self};
 
+use crate::shared::kit::panel_frame as card;
+use crate::shared::kit::{motion, surface};
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::word;
-use crate::ui::kit::panel_frame as card;
-use crate::ui::kit::{motion, surface};
 use crate::ui::overlay;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::overlay::edge as border;
@@ -40,7 +40,7 @@ impl App {
         let long = self.scroll()?;
         let on = self.long_on();
         (long.window.unwrap_or(self.overlay) == window).then(|| {
-            let look = crate::ui::theme::accent_of(&config::look());
+            let look = crate::shared::theme::accent_of(&config::look());
             let bar = self.long_bar();
             long.view(on.work, bar, look).map(Message::Snip)
         })
@@ -97,7 +97,7 @@ impl App {
         let dim_frame = (self.view_moving() && dim)
             .then_some(())
             .filter(|_| self.o.selection.is_none() && self.o.others.is_empty())
-            .map(|_| crate::ui::theme::dims(&config::look()).0.a);
+            .map(|_| crate::shared::theme::dims(&config::look()).0.a);
         let overlay = overlay::Overlay {
             stroke: &self.o.stroke,
             selection: self.o.selection,
@@ -237,7 +237,7 @@ impl App {
                     s.monitor_at(p) == Rectangle::with_size(self.o.screen)
                 })
                 .and_then(|s| {
-                    let look = crate::ui::theme::accent_of(&config::look());
+                    let look = crate::shared::theme::accent_of(&config::look());
                     let (view, screen) = (self.o.view, self.o.screen);
                     s.guides(frame, self.o.scale, view, screen, self.snip_drag(), look)
                 })
@@ -258,7 +258,7 @@ impl App {
         } else if let Some(cards) = self.cards() {
             cards
         } else if let Some(snip) = snip {
-            let look = crate::ui::theme::accent_of(&config::look());
+            let look = crate::shared::theme::accent_of(&config::look());
             match (&snip.scroll, &snip.tool) {
                 // (drawn with the toolbar, above)
                 (Some(_), _) => space().into(),

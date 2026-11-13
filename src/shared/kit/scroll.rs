@@ -386,7 +386,7 @@ mod tests {
     use iced::mouse::{Button, Event as M, ScrollDelta};
     use iced::{Element, Event, Point, Size};
 
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
 
     const SIZE: Size = Size::new(200.0, 200.0);
 
@@ -394,7 +394,7 @@ mod tests {
     fn area(rtl: bool) -> Element<'static, ()> {
         let _dir = super::super::dir::scope(rtl);
         let rows = (0..40).map(|i| {
-            crate::ui::kit::text::text(super::super::tokens::Role::ROW_DESC, format!("row {i}"))
+            crate::shared::kit::text::text(super::super::tokens::Role::ROW_DESC, format!("row {i}"))
                 .into()
         });
         let column = iced::widget::column(rows)

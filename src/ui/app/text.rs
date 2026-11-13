@@ -223,7 +223,7 @@ impl App {
             (true, None) => Some((now, 0.0)),
             (true, Some((start, _))) => Some((
                 start,
-                crate::ui::kit::spinner::turn(now.saturating_duration_since(start)),
+                crate::shared::kit::spinner::turn(now.saturating_duration_since(start)),
             )),
         };
     }

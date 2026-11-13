@@ -16,26 +16,26 @@ use crate::actions::ask::{Chat, PRESETS, Setup, Status, Turn};
 use crate::ai::providers::{self, Preset};
 use crate::ai::{AiError, Fix};
 use crate::config::{self, StaysOpen};
+use crate::shared::kit::bubble::bubble;
+use crate::shared::kit::button::{Kind, button, cta_label, label};
+use crate::shared::kit::chip::Tone;
+use crate::shared::kit::dir;
+use crate::shared::kit::dropdown::dropdown;
+use crate::shared::kit::error_card::{ErrorCard, Words, error_card};
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button::{self, icon_button};
+use crate::shared::kit::markdown;
+use crate::shared::kit::motion;
+use crate::shared::kit::panel_frame::{self as frame, Event, Header};
+use crate::shared::kit::scroll::scroll;
+use crate::shared::kit::segmented::{self, segmented};
+use crate::shared::kit::spinner;
+use crate::shared::kit::text::{error, sub};
+use crate::shared::kit::text_area::text_area;
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::kit::{chip, field};
 use crate::ui::keys;
-use crate::ui::kit::bubble::bubble;
-use crate::ui::kit::button::{Kind, button, cta_label, label};
-use crate::ui::kit::chip::Tone;
-use crate::ui::kit::dir;
-use crate::ui::kit::dropdown::dropdown;
-use crate::ui::kit::error_card::{ErrorCard, Words, error_card};
-use crate::ui::kit::icon::Icon;
-use crate::ui::kit::icon_button::{self, icon_button};
-use crate::ui::kit::markdown;
-use crate::ui::kit::motion;
-use crate::ui::kit::panel_frame::{self as frame, Event, Header};
-use crate::ui::kit::scroll::scroll;
-use crate::ui::kit::segmented::{self, segmented};
-use crate::ui::kit::spinner;
-use crate::ui::kit::text::{error, sub};
-use crate::ui::kit::text_area::text_area;
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{chip, field};
 use crate::ui::screens::model_list;
 
 /// A card's body and its footer.
@@ -127,7 +127,7 @@ impl AiChat {
             glyph,
             title,
             chip,
-            logo: chatting.then(|| crate::ui::kit::logo::logo(16)),
+            logo: chatting.then(|| crate::shared::kit::logo::logo(16)),
             menu: chatting,
             held: self.held,
         };
@@ -198,7 +198,7 @@ impl AiChat {
             let mut answer = column![].spacing(STACK).width(Fill);
             if let Some(thought) = turn.thought {
                 let line = fmt(S::chat_thought, &[&format!("{:.1}", thought.as_secs_f32())]);
-                answer = answer.push(chip::logo(line, crate::ui::kit::logo::logo(14)));
+                answer = answer.push(chip::logo(line, crate::shared::kit::logo::logo(14)));
             }
             let busy = last && streaming;
             if let (false, Some((_, parsed))) = (turn.answer.is_empty(), answers.get(i)) {
@@ -208,7 +208,7 @@ impl AiChat {
                 answer = answer.push(match browser {
                     true => note(t!(chat_opening)).into(),
                     false => spinner::thinking(
-                        crate::ui::kit::logo::logo(16),
+                        crate::shared::kit::logo::logo(16),
                         self.spin.map_or(0.0, |(_, turn)| turn),
                         motion::reduced(),
                         t!(tp_thinking),
@@ -275,7 +275,7 @@ impl AiChat {
                 self.composer(placeholder, include, attached, streaming)
             }
         };
-        let body = crate::ui::kit::scroll::quiet(log).id(LOG).height(Fill);
+        let body = crate::shared::kit::scroll::quiet(log).id(LOG).height(Fill);
         (body.into(), Some(input))
     }
 
@@ -313,7 +313,8 @@ impl AiChat {
     ) -> Element<'a, Msg> {
         let size = format!("{}×{} px", self.crop.width, self.crop.height);
         let top = attached.then(|| chip::attached("UI", t!(chat_attached), size));
-        let switch = crate::ui::kit::button::switch(t!(chat_include), include, Msg::IncludeScreen);
+        let switch =
+            crate::shared::kit::button::switch(t!(chat_include), include, Msg::IncludeScreen);
         self.follow_up(placeholder, streaming, top, Some(switch))
     }
 
@@ -327,7 +328,7 @@ impl AiChat {
         top: Option<Element<'a, Msg>>,
         extra: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
-        use crate::ui::kit::button::{COMPACT_H, compact};
+        use crate::shared::kit::button::{COMPACT_H, compact};
         let round =
             |icon: Icon, msg| compact(icon.glyph(), None, COMPACT_H, (false, false), Some(msg));
         let send = match streaming {
@@ -384,7 +385,7 @@ impl AiChat {
         );
         let top = crate::dir_row![
             back,
-            container(crate::ui::kit::text::text(
+            container(crate::shared::kit::text::text(
                 Role::CARD_HEADING,
                 t!(chat_workspace)
             ))
@@ -422,18 +423,20 @@ impl AiChat {
         let now = crate::store::chats::now();
         let mut cards = column![].spacing(space::GAP).width(Fill);
         for entry in &self.listed {
-            cards = cards.push(crate::ui::kit::card::chat(crate::ui::kit::card::Chat {
-                title: &entry.title,
-                when: ago(entry.updated, now),
-                crop: entry.crop.map(|(w, h)| format!("{w}×{h} px")),
-                starred: entry.star,
-                selected: open.as_deref() == Some(entry.id.as_str()),
-                width,
-                open: Msg::OpenSaved(entry.id.clone()),
-                star: Msg::Star(entry.id.clone(), !entry.star),
-                delete: Msg::DeleteSaved(entry.id.clone()),
-                delete_label: t!(chat_del),
-            }));
+            cards = cards.push(crate::shared::kit::card::chat(
+                crate::shared::kit::card::Chat {
+                    title: &entry.title,
+                    when: ago(entry.updated, now),
+                    crop: entry.crop.map(|(w, h)| format!("{w}×{h} px")),
+                    starred: entry.star,
+                    selected: open.as_deref() == Some(entry.id.as_str()),
+                    width,
+                    open: Msg::OpenSaved(entry.id.clone()),
+                    star: Msg::Star(entry.id.clone(), !entry.star),
+                    delete: Msg::DeleteSaved(entry.id.clone()),
+                    delete_label: t!(chat_del),
+                },
+            ));
         }
         let list: Element<'_, Msg> = match self.listed.is_empty() {
             true if self.find.trim().is_empty() => note(t!(chat_none)).into(),
@@ -442,9 +445,12 @@ impl AiChat {
         };
         let clear = button(label(t!(chat_clear)), Kind::Remove, Some(Msg::ClearHistory));
         let footer = crate::dir_row![
-            container(crate::ui::kit::text::muted(Role::CARD_DESC, t!(chat_local)))
-                .width(Fill)
-                .align_x(dir::start()),
+            container(crate::shared::kit::text::muted(
+                Role::CARD_DESC,
+                t!(chat_local)
+            ))
+            .width(Fill)
+            .align_x(dir::start()),
             clear
         ]
         .align_y(Center);
@@ -495,7 +501,7 @@ impl AiChat {
                 part = part.push(error(Role::NOTE, t!(chat_classifier)));
             }
         }
-        part.push(crate::ui::kit::button::fill(
+        part.push(crate::shared::kit::button::fill(
             label(t!(chat_open_ai)),
             Some(Msg::OpenAiSettings),
         ))

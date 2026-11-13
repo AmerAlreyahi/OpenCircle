@@ -16,18 +16,18 @@ use iced::{Center, Element, Fill, Size, Vector};
 
 use crate::app_language::{Lang, RLM, S, tr};
 use crate::mt;
+use crate::shared::kit::dir;
+use crate::shared::kit::divider::divider;
+use crate::shared::kit::field;
+use crate::shared::kit::icon::{Icon, icon};
+use crate::shared::kit::option_list::{self, Look, choice, group, keyed, needs_ai, opener};
+use crate::shared::kit::scroll;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::{muted, sub};
+use crate::shared::kit::themes::c;
+use crate::shared::kit::tokens::{Role, radius, size};
 use crate::t;
 use crate::translate::lang::{self, AUTO, LANGUAGES};
-use crate::ui::kit::dir;
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::field;
-use crate::ui::kit::icon::{Icon, icon};
-use crate::ui::kit::option_list::{self, Look, choice, group, keyed, needs_ai, opener};
-use crate::ui::kit::scroll;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{muted, sub};
-use crate::ui::kit::themes::c;
-use crate::ui::kit::tokens::{Role, radius, size};
 
 /// A chip, and the gaps in the pill (the design's 128 x 32 chips, 24 px
 /// arrow, 4 px gaps, 6 px in).
@@ -632,7 +632,7 @@ impl Picker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
 
     fn open(source: &str, target: &str, offline: bool, side: Side) -> Picker {
         let mut p = Picker::new(source, target, offline);

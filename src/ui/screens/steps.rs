@@ -10,8 +10,8 @@
 //! each keeps its capture as PNG bytes (a screenshot packs to a few % of its
 //! raw pixels) and a thumbnail of at most `THUMB` px (92 KB), so 12 steps of
 //! 1080p screens hold a few MB instead of 100.
+use crate::shared::kit::dir;
 use crate::t;
-use crate::ui::kit::dir;
 use std::sync::Arc;
 
 use iced::widget::tooltip::Position as Side;
@@ -19,12 +19,12 @@ use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
 use crate::actions::{Crop, encode_png, fit_long_edge};
-use crate::ui::kit::button::{self, Kind};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::thumb::{self, Look, PAD, TOP, WELL};
-use crate::ui::kit::tokens::radius;
-use crate::ui::kit::tooltip::tip;
-use crate::ui::kit::{grip, scroll, toast};
+use crate::shared::kit::button::{self, Kind};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
+use crate::shared::kit::tokens::radius;
+use crate::shared::kit::tooltip::tip;
+use crate::shared::kit::{grip, scroll, toast};
 use crate::ui::platform::monitor::{self, Place};
 
 /// Steps at most (open point 3: 12).
@@ -440,13 +440,13 @@ impl Strip {
         let n = self.steps.len().max(1) as f32;
         let thumbs = n * WELL.height + (n - 1.0) * PAD;
         let room = self.work().height - 2.0 * MARGIN;
-        let h = TOP + thumbs + PAD + crate::ui::kit::tokens::size::ICON_BUTTON + PAD;
+        let h = TOP + thumbs + PAD + crate::shared::kit::tokens::size::ICON_BUTTON + PAD;
         Size::new(WELL.width + 2.0 * PAD, h.min(room))
     }
 
     /// The thumbnails' room (they scroll when the strip would not fit).
     fn thumbs_height(&self) -> f32 {
-        self.size().height - TOP - 2.0 * PAD - crate::ui::kit::tokens::size::ICON_BUTTON
+        self.size().height - TOP - 2.0 * PAD - crate::shared::kit::tokens::size::ICON_BUTTON
     }
 
     /// Its monitor's work area, logical px from the monitor's origin.
@@ -713,7 +713,7 @@ pub fn stack_numbered(crops: &[Crop], colours: [[u8; 4]; 3], rtl: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::testing::golden;
 
     /// A 1080p monitor at 100 %, 40 px taskbar.
     const MONITOR: Place = Place {
@@ -797,7 +797,7 @@ mod tests {
     /// physical window is the logical size times the scale.
     #[test]
     fn copy_all_always_fits_the_window() {
-        let icon = crate::ui::kit::tokens::size::ICON_BUTTON;
+        let icon = crate::shared::kit::tokens::size::ICON_BUTTON;
         for k in [1.0, 1.25, 1.5, 2.0] {
             for n in 1..=MAX {
                 let mut s = strip(n);

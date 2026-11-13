@@ -9,10 +9,10 @@ use crate::actions;
 use crate::config::{self};
 use crate::labs::{self, BarButton};
 
+use crate::shared::kit::panel_frame as card;
 use crate::ui::app::background::background;
 use crate::ui::app::message::{Message, Purpose};
 use crate::ui::app::screens;
-use crate::ui::kit::panel_frame as card;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;
 

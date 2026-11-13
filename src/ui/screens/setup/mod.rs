@@ -20,18 +20,18 @@ use crate::app_language::{Lang, S, fmt, tr};
 use crate::dir_row;
 use crate::setup::msi::{self, Fault, Package};
 use crate::setup::{self as setup_core, BadFolder, Installed};
-use crate::ui::kit::button::{self, Kind, cta_label};
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::field::field;
-use crate::ui::kit::logo::png_handle;
-use crate::ui::kit::motion::{self, Curve};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text as ktext;
-use crate::ui::kit::text::{FONTS, ui_font};
-use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-use crate::ui::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
-use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::kit::{chip, header, progress, segmented};
+use crate::shared::kit::button::{self, Kind, cta_label};
+use crate::shared::kit::divider::divider;
+use crate::shared::kit::field::field;
+use crate::shared::kit::logo::png_handle;
+use crate::shared::kit::motion::{self, Curve};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text as ktext;
+use crate::shared::kit::text::{FONTS, ui_font};
+use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+use crate::shared::kit::tokens::fixed::{DANGER, ON_ACCENT, SUCCESS};
+use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::{chip, header, progress, segmented};
 use crate::ui::windows;
 
 /// The window: 420 logical px wide (`max-w-[420px]`), its height per step.
@@ -596,7 +596,7 @@ impl State {
     }
 
     pub fn view(&self, _: window::Id) -> Element<'_, Message> {
-        let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
+        let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
         let rise = RISE * (1.0 - motion::progress(self.risen, self.now, motion::MORPH, Curve::Out));
         // the window's inside is 418 px (a 1 px rim): backdrop, glow, content
         let backdrop = column![
@@ -869,7 +869,7 @@ impl State {
                     S::su_launch
                 });
                 // the arrow points the way the line reads
-                let arrow = if crate::ui::kit::dir::rtl() {
+                let arrow = if crate::shared::kit::dir::rtl() {
                     "←"
                 } else {
                     "→"
@@ -1037,7 +1037,7 @@ fn chosen(picked: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::{golden, shot};
+    use crate::shared::kit::testing::{golden, shot};
 
     fn state(installed: Option<Installed>) -> State {
         let mut s = State::new(

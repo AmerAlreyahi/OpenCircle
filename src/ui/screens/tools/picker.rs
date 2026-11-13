@@ -4,22 +4,22 @@
 //! HEX where the arrows put the pointer (1 px, Shift 10 px); the last
 //! `RECENT` colours sit in the toolbar, a click copies one again. They are
 //! kept for this run of the app only (nothing is written).
+use crate::shared::kit::dir;
 use crate::t;
-use crate::ui::kit::dir;
 use iced::widget::{Space, canvas, row};
 use iced::{Color, Element, Fill, Point};
 
 use super::{CLOSE, Msg};
-use crate::ui::kit::chip;
-use crate::ui::kit::colour;
-use crate::ui::kit::divider;
-use crate::ui::kit::icon_button::{self, State};
-use crate::ui::kit::key_hint::Group;
-use crate::ui::kit::loupe::Loupe;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::sub;
-use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::kit::tooltip::{Why, hint};
+use crate::shared::kit::chip;
+use crate::shared::kit::colour;
+use crate::shared::kit::divider;
+use crate::shared::kit::icon_button::{self, State};
+use crate::shared::kit::key_hint::Group;
+use crate::shared::kit::loupe::Loupe;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::sub;
+use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::ui::screens::bar::geometry;
 
 /// lucide "pipette" (the Snip toolbar's button).

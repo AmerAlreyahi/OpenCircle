@@ -18,17 +18,17 @@ use serde::Deserialize;
 
 use super::super::state::{Message, State};
 use crate::dir_row;
-use crate::ui::kit::button::{Kind, button, fold, label, regular};
-use crate::ui::kit::card::card;
-use crate::ui::kit::chip::{chip, pill};
-use crate::ui::kit::dir;
-use crate::ui::kit::icon::{Icon, icon};
-use crate::ui::kit::logo::logo;
-use crate::ui::kit::logo::try_decode;
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{accent, paragraph, sub, text};
-use crate::ui::kit::tokens::{Role, radius, space};
-use crate::ui::kit::tooltip::{Why, hint};
+use crate::shared::kit::button::{Kind, button, fold, label, regular};
+use crate::shared::kit::card::card;
+use crate::shared::kit::chip::{chip, pill};
+use crate::shared::kit::dir;
+use crate::shared::kit::icon::{Icon, icon};
+use crate::shared::kit::logo::logo;
+use crate::shared::kit::logo::try_decode;
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::{accent, paragraph, sub, text};
+use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::tooltip::{Why, hint};
 
 pub const PROJECT: &str = "https://github.com/AmerAlreyahi/OpenCircle";
 pub const LICENSE: &str = "https://github.com/AmerAlreyahi/OpenCircle/blob/main/LICENSE.md";
@@ -325,7 +325,7 @@ fn developer<'a>() -> Element<'a, Message> {
 fn others(state: &State) -> Element<'_, Message> {
     let all = made_by();
     let chip_w = (all.iter())
-        .map(|n| crate::ui::kit::text::width(n.2, CHIP_FONT, crate::ui::kit::text::MONO))
+        .map(|n| crate::shared::kit::text::width(n.2, CHIP_FONT, crate::shared::kit::text::MONO))
         .fold(0.0, f32::max)
         .ceil()
         + CHIP_PADS;

@@ -10,9 +10,9 @@ pub mod canvas;
 pub mod toolbar;
 
 use crate::actions::Crop;
+use crate::shared::kit::chip;
+use crate::shared::kit::key_hint::{self, key_hint};
 use crate::snip::annotate::{self, Annotator, Image, Message, Output};
-use crate::ui::kit::chip;
-use crate::ui::kit::key_hint::{self, key_hint};
 use crate::ui::screens::bar::geometry::{BOTTOM_GAP, GAP};
 
 /// Snip's keyboard hint (after an arrow key) and its position readout's width.
@@ -98,7 +98,7 @@ impl SnipToolbar {
     /// Snip's handles scale in from the pick's first frame (120 ms; at once
     /// with reduced motion).
     pub fn tick(&mut self, now: std::time::Instant) {
-        use crate::ui::kit::motion;
+        use crate::shared::kit::motion;
         let start = *self.grow.0.get_or_insert(now);
         if self.grow.1 < 1.0 {
             self.grow.1 = motion::progress(start, now, HANDLES_IN, motion::Curve::Standard);

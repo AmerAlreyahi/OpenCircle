@@ -27,8 +27,8 @@ use iced::{Color, Element, Fill, Rectangle, Renderer, Theme, window};
 
 pub use crate::config::EdgeMode as Mode;
 use crate::config::{self, EdgeStyle, LookConfig};
-use crate::ui::kit::looks::Kind;
-use crate::ui::theme;
+use crate::shared::kit::looks::Kind;
+use crate::shared::theme;
 
 /// The screen's corner radius in the overlay, logical px (the design's 14).
 const RADIUS: f32 = 14.0;

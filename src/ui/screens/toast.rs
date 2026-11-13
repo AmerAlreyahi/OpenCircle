@@ -2,9 +2,9 @@
 //! its window (`size`), with the window's corners.
 use iced::Element;
 
-use crate::ui::kit::toast::toast;
-pub use crate::ui::kit::toast::{Tone, size};
-use crate::ui::kit::tokens::radius;
+use crate::shared::kit::toast::toast;
+pub use crate::shared::kit::toast::{Tone, size};
+use crate::shared::kit::tokens::radius;
 
 /// The corners the window is cut to (`platform::windows::floating`).
 pub const RADIUS: f32 = radius::CARD;
@@ -18,7 +18,7 @@ pub fn view<'a, Message: 'a>(text: &'a str, tone: Tone, radius: f32) -> Element<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::testing::golden;
 
     /// Each tone, Latin and Arabic, Sapphire and Daylight, at 1x and 2x.
     #[test]
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn every_toast_mirrors_in_arabic() {
         golden::each_theme(|theme, failed| {
-            let _ar = crate::ui::kit::testing::arabic();
+            let _ar = crate::shared::kit::testing::arabic();
             for (tone, name, text) in [
                 (Tone::Ok, "ok", crate::t!(pill_copied).to_string()),
                 (Tone::Error, "error", crate::t!(pill_cant_copy).to_string()),

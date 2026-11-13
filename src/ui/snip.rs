@@ -18,20 +18,20 @@ use iced::widget::tooltip::Position;
 use iced::widget::{canvas, column, container, image, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
-use super::kit::button;
-use super::kit::chip;
-use super::kit::icon::Icon;
-use super::kit::icon_button::{self, State, icon_button};
-use super::kit::key_hint::{self, key_hint};
-use super::kit::loupe::Loupe;
-use super::kit::surface::{self, Material, surface};
-use super::kit::text::{sub, text};
-use super::kit::tokens::{Role, radius, space};
-use super::kit::tooltip::tip;
 use super::overlay;
 use crate::actions::Crop;
 use crate::capture::window_rect::WinRect;
 use crate::config::{SnipAfter, Target};
+use crate::shared::kit::button;
+use crate::shared::kit::chip;
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button::{self, State, icon_button};
+use crate::shared::kit::key_hint::{self, key_hint};
+use crate::shared::kit::loupe::Loupe;
+use crate::shared::kit::surface::{self, Material, surface};
+use crate::shared::kit::text::{sub, text};
+use crate::shared::kit::tokens::{Role, radius, space};
+use crate::shared::kit::tooltip::tip;
 use crate::snip::{SNAP, snap};
 
 /// The hover info chip's height, the drag size chip's width (logical px).
@@ -830,7 +830,7 @@ mod tests {
         overlay::View::new(1920, 1080, SCREEN)
     }
     fn look() -> (iced::Color, iced::Color) {
-        let c = crate::ui::kit::themes::c();
+        let c = crate::shared::kit::themes::c();
         (c.accent, c.text)
     }
 
@@ -957,7 +957,7 @@ mod tests {
             let first = s.start(Kind::for_target(target), SCREEN);
             // Hover picks a window or a control, a drag an area, the wheel
             // the screen: no Region / Window / Full switch.
-            let texts = crate::ui::kit::testing::shot::texts(s.view());
+            let texts = crate::shared::kit::testing::shot::texts(s.view());
             for mode in ["Region", "Window", "Full"] {
                 assert!(!texts.iter().any(|t| t == mode), "{target:?}: {texts:?}");
             }
@@ -1008,12 +1008,12 @@ mod tests {
         assert!(!s.is_pill());
         let id = s.delay(3).unwrap();
         assert!(s.is_pill());
-        let texts = crate::ui::kit::testing::shot::texts(s.pill_view().unwrap());
+        let texts = crate::shared::kit::testing::shot::texts(s.pill_view().unwrap());
         assert!(
             texts.iter().any(|t| t.contains("Capturing in 3 s")),
             "{texts:?}"
         );
-        crate::ui::kit::testing::shot::save("snip-countdown", s.pill_view().unwrap(), PILL);
+        crate::shared::kit::testing::shot::save("snip-countdown", s.pill_view().unwrap(), PILL);
         assert_eq!(s.tick(id, 2), Some(false));
         assert_eq!(s.tick(id, 1), Some(false));
         assert!(!s.shoot(id), "not before zero");
@@ -1096,7 +1096,7 @@ mod tests {
         let frame: Vec<u8> = (0..3u8)
             .flat_map(|y| (0..4u8).flat_map(move |x| [x, y, 7, 255]))
             .collect();
-        let cells = crate::ui::kit::loupe::sample(&frame, 4, 3, (1, 1), 1);
+        let cells = crate::shared::kit::loupe::sample(&frame, 4, 3, (1, 1), 1);
         assert_eq!(cells.len(), 9);
         assert_eq!(
             cells[4],
@@ -1106,13 +1106,18 @@ mod tests {
         assert_eq!(cells[0], [0, 0, 7, 255]);
         assert_eq!(cells[8], [2, 2, 7, 255]);
         // At the corner: outside the frame is transparent.
-        let cells = crate::ui::kit::loupe::sample(&frame, 4, 3, (0, 0), 1);
+        let cells = crate::shared::kit::loupe::sample(&frame, 4, 3, (0, 0), 1);
         assert_eq!(cells[0], [0; 4]);
         assert_eq!(cells[4], [0, 0, 7, 255]);
         assert_eq!(cells[8], [1, 1, 7, 255]);
         // Full size: 15x15 cells of 8 px = a 120 px loupe.
-        let cells =
-            crate::ui::kit::loupe::sample(&frame, 4, 3, (3, 2), crate::ui::kit::loupe::RADIUS);
+        let cells = crate::shared::kit::loupe::sample(
+            &frame,
+            4,
+            3,
+            (3, 2),
+            crate::shared::kit::loupe::RADIUS,
+        );
         assert_eq!(cells.len(), 15 * 15);
         assert_eq!(cells[cells.len() / 2], [3, 2, 7, 255]);
         // It shows while picking an area by hand, not in Full.
@@ -1145,13 +1150,13 @@ mod tests {
             true,
             None,
         );
-        let texts = crate::ui::kit::testing::shot::texts(s.view());
+        let texts = crate::shared::kit::testing::shot::texts(s.view());
         assert!(!texts.iter().any(|t| t == "Recent"), "{texts:?}");
         let picture = image::Handle::from_rgba(2, 1, vec![200; 8]);
         s.set_recent(vec![(PathBuf::from("a.png"), picture)]);
-        let texts = crate::ui::kit::testing::shot::texts(s.view());
+        let texts = crate::shared::kit::testing::shot::texts(s.view());
         assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
-        crate::ui::kit::testing::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
+        crate::shared::kit::testing::shot::save("snip-switch", s.view(), Size::new(1280.0, 260.0));
     }
 
     /// A browser at the back, an editor in front with a toolbar and a button
@@ -1202,7 +1207,7 @@ mod tests {
         let guides = s
             .guides(&frame, 1.0, ident(), SCREEN, None, look())
             .unwrap();
-        crate::ui::kit::testing::shot::save("snip-outline", guides, SCREEN);
+        crate::shared::kit::testing::shot::save("snip-outline", guides, SCREEN);
         // A click there captures exactly that window.
         assert_eq!(s.pick(None, at, SCREEN), Some(Next::Edit(outlined.rect)));
         // Only Region mode outlines.
@@ -1214,7 +1219,7 @@ mod tests {
         let screen = Rectangle::with_size(SCREEN);
         assert_eq!(w.outlined().unwrap().rect, screen);
         assert_eq!(w.pick(None, at, SCREEN), Some(Next::Edit(screen)));
-        let texts = crate::ui::kit::testing::shot::texts(w.view());
+        let texts = crate::shared::kit::testing::shot::texts(w.view());
         assert!(
             texts.iter().any(|t| t.contains("Click for this screen")),
             "{texts:?}"
@@ -1283,7 +1288,7 @@ mod tests {
         assert_eq!(s.outlined().unwrap().label, "Screen", "nothing smaller");
         let frame = image::Handle::from_rgba(4, 4, vec![90; 64]);
         let guides = s.guides(&frame, 1.0, ident(), SCREEN, None, look());
-        let texts = crate::ui::kit::testing::shot::texts(guides.unwrap());
+        let texts = crate::shared::kit::testing::shot::texts(guides.unwrap());
         let size = format!("{} × {}", SCREEN.width, SCREEN.height);
         assert!(texts.iter().any(|t| t.contains(&size)), "{texts:?}");
     }
@@ -1427,7 +1432,7 @@ mod tests {
     #[test]
     fn the_freeze_hint_offers_all_screens_only_when_there_are_some_and_it_fits() {
         let says = |s: &Snip| {
-            let texts = crate::ui::kit::testing::shot::texts(s.view());
+            let texts = crate::shared::kit::testing::shot::texts(s.view());
             texts.iter().any(|t| t == "All screens")
         };
         let one = wins(&[rect(0.0, 0.0, 10.0, 10.0)]);

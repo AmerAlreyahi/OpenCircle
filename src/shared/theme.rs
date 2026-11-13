@@ -180,7 +180,7 @@ pub fn apply(theme: Theme) {
 /// `apply` with `[appearance]` picks not saved yet (Settings shows a pick at once).
 pub fn preview(theme: Theme, picks: &config::AppearanceConfig) {
     SETTING.with(|s| s.set(theme));
-    crate::ui::kit::themes::set(kit_theme(theme, os_dark(), picks));
+    crate::shared::kit::themes::set(kit_theme(theme, os_dark(), picks));
 }
 
 /// The OS is in dark mode (or says nothing).
@@ -198,7 +198,7 @@ pub fn set_os(mode: iced::theme::Mode) {
 /// config, by the same mode choice and the `[appearance]` picks.
 fn to_kit() {
     let picks = config::appearance();
-    crate::ui::kit::themes::set(kit_theme(
+    crate::shared::kit::themes::set(kit_theme(
         SETTING.with(Cell::get),
         OS_DARK.with(Cell::get),
         &picks,
@@ -209,8 +209,8 @@ pub fn kit_theme(
     setting: Theme,
     os_dark: bool,
     picks: &config::AppearanceConfig,
-) -> &'static crate::ui::kit::themes::Theme {
-    use crate::ui::kit::themes::{self, Mode};
+) -> &'static crate::shared::kit::themes::Theme {
+    use crate::shared::kit::themes::{self, Mode};
     let mode = match setting {
         Theme::System => Mode::System,
         Theme::Light => Mode::Light,
@@ -222,9 +222,9 @@ pub fn kit_theme(
 /// The design look a stored look shows (names and cards come from it): "aurora"
 /// is the design's Prism, "mono" its Frost, "calm" Prism's colours without the
 /// glow. `None` = the user's own (`custom`). Stored values never change.
-pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::ui::kit::looks::Look> {
+pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::shared::kit::looks::Look> {
     use crate::config::LookTheme as T;
-    use crate::ui::kit::looks::*;
+    use crate::shared::kit::looks::*;
     Some(match theme {
         T::Spectrum => &SPECTRUM,
         T::Aurora | T::Calm => &PRISM,
@@ -250,7 +250,7 @@ mod tests {
     /// to `prism`, `mono` to `frost`).
     #[test]
     fn todays_edge_colours_are_the_design_looks() {
-        use crate::ui::kit::looks;
+        use crate::shared::kit::looks;
         for (set, look) in [
             (ColourSet::Aurora, &looks::PRISM),
             (ColourSet::Spectrum, &looks::SPECTRUM),
@@ -284,7 +284,7 @@ mod tests {
     /// What the OS reports reaches the kit under System; "no preference" is dark.
     #[test]
     fn os_mode_reaches_the_kit() {
-        use crate::ui::kit::themes;
+        use crate::shared::kit::themes;
         apply(Theme::System);
         set_os(Mode::Light);
         assert!(themes::current().light);
@@ -297,7 +297,7 @@ mod tests {
     /// The kit's screens (toast, update card) follow the same choice.
     #[test]
     fn the_kit_follows_light_and_dark() {
-        use crate::ui::kit::themes;
+        use crate::shared::kit::themes;
         let kit = || themes::current().id;
         apply(Theme::Light);
         assert_eq!(kit(), "daylight");
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn the_kit_shows_the_appearance_picks() {
-        use crate::ui::kit::themes::THEMES;
+        use crate::shared::kit::themes::THEMES;
         let picks = config::AppearanceConfig {
             dark: "emerald".into(),
             light: "sandstone".into(),

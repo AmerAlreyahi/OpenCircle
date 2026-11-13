@@ -8,14 +8,14 @@ use iced::{Center, Element, Fill};
 
 use super::super::state::{Message, Pick, State, UpdateLine, issue};
 use crate::config::DefaultAction;
-use crate::ui::kit::button::{Kind, button, label, labelled, labelled_width};
-use crate::ui::kit::field::field;
-use crate::ui::kit::icon::Icon;
-use crate::ui::kit::segmented::{boolean, segmented};
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::error;
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::{Why, hint, tip};
+use crate::shared::kit::button::{Kind, button, label, labelled, labelled_width};
+use crate::shared::kit::field::field;
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::segmented::{boolean, segmented};
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::error;
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::{Why, hint, tip};
 
 fn off_on() -> [&'static str; 2] {
     [t!(c_off), t!(c_on)]
@@ -67,7 +67,7 @@ fn language_row(state: &State) -> Element<'_, Message> {
     setting_row::row(
         title(t!(g_lang)),
         t!(g_lang_desc),
-        crate::ui::kit::dropdown::dropdown(&CHOICES, Some(now), "", Message::AppLanguage),
+        crate::shared::kit::dropdown::dropdown(&CHOICES, Some(now), "", Message::AppLanguage),
     )
 }
 

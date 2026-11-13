@@ -12,12 +12,12 @@ use crate::config::{self};
 use crate::labs::{self};
 use crate::ocr::{self};
 
+use crate::shared::kit::motion;
+use crate::shared::kit::panel_frame as card;
 use crate::ui::app::background::background;
 use crate::ui::app::keys;
 use crate::ui::app::message::{Hiding, Message, Purpose};
 use crate::ui::app::quick::Quick;
-use crate::ui::kit::motion;
-use crate::ui::kit::panel_frame as card;
 use crate::ui::platform::monitor;
 use crate::ui::screens::bar::geometry as bar;
 use crate::ui::screens::snip_toolbar::SnipToolbar;

@@ -15,14 +15,14 @@ use super::super::state::{
 };
 use crate::config::{Provider, StaysOpen};
 use crate::secrets::Secret;
-use crate::ui::kit::button::{Kind, button, label};
-use crate::ui::kit::dropdown::dropdown;
-use crate::ui::kit::field::input;
-use crate::ui::kit::segmented::segmented;
-use crate::ui::kit::setting_row::{self, title};
-use crate::ui::kit::text::{error, sub};
-use crate::ui::kit::tokens::{Role, space};
-use crate::ui::kit::tooltip::tip;
+use crate::shared::kit::button::{Kind, button, label};
+use crate::shared::kit::dropdown::dropdown;
+use crate::shared::kit::field::input;
+use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::{error, sub};
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::tip;
 use crate::ui::screens::model_list;
 
 pub fn view(state: &State) -> Element<'_, Message> {

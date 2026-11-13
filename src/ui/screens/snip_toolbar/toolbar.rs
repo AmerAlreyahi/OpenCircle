@@ -12,18 +12,20 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::actions::share;
 use crate::actions::snip_more::{self, Read, Row};
 use crate::app_language::{S, fmt, tr};
+use crate::shared::kit::dir;
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button::{self, State};
+use crate::shared::kit::surface::{self, Material, surface};
+use crate::shared::kit::text::{muted, sub, text as caption};
+use crate::shared::kit::tokens::{Role, radius, size, space};
+use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::kit::{
+    button, chip, colour, divider, grip, keycap, option_list, segmented, slider,
+};
 use crate::snip::annotate::{
     Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
 };
 use crate::t;
-use crate::ui::kit::dir;
-use crate::ui::kit::icon::Icon;
-use crate::ui::kit::icon_button::{self, State};
-use crate::ui::kit::surface::{self, Material, surface};
-use crate::ui::kit::text::{muted, sub, text as caption};
-use crate::ui::kit::tokens::{Role, radius, size, space};
-use crate::ui::kit::tooltip::{Why, hint};
-use crate::ui::kit::{button, chip, colour, divider, grip, keycap, option_list, segmented, slider};
 use crate::ui::screens::bar::geometry as bar;
 
 const SPACING: f32 = bar::SPACING;
@@ -800,9 +802,9 @@ fn colour_panel(e: &Annotator) -> Element<'_, Message> {
 mod tests {
     use super::*;
     use crate::actions::snip_more::Info;
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use crate::snip::annotate::Image;
-    use crate::ui::kit::testing::golden;
-    use crate::ui::kit::themes::{self, DAYLIGHT, SAPPHIRE};
 
     fn editor() -> Annotator {
         let image = Image {
@@ -821,15 +823,15 @@ mod tests {
     #[ignore = "a measurement"]
     fn toolbar_frame_cost() {
         let cost = |ar: bool| {
-            let _dir = ar.then(crate::ui::kit::testing::arabic);
+            let _dir = ar.then(crate::shared::kit::testing::arabic);
             let mut e = editor();
             e.update(Message::Tool(Tool::Text));
             e.update(Message::Slot(Tool::Text));
             let at = (size_for(&e).width as u32, 360);
-            let _ = crate::ui::kit::testing::shot::render(view(&e), at.0, at.1); // warm
+            let _ = crate::shared::kit::testing::shot::render(view(&e), at.0, at.1); // warm
             let t = std::time::Instant::now();
             for _ in 0..40 {
-                let _ = crate::ui::kit::testing::shot::render(view(&e), at.0, at.1);
+                let _ = crate::shared::kit::testing::shot::render(view(&e), at.0, at.1);
             }
             t.elapsed().as_secs_f64() * 1000.0 / 40.0
         };
@@ -852,7 +854,7 @@ mod tests {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
             for rtl in [false, true] {
-                let _ar = rtl.then(crate::ui::kit::testing::arabic);
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
                 let mut colour = editor();
                 colour.update(Message::Picker);
                 let mut undo = editor();

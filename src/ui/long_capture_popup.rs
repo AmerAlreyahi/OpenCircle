@@ -306,7 +306,7 @@ struct Helper {
 
 impl Helper {
     fn boot() -> (Helper, Task<Event>) {
-        super::theme::apply(crate::config::current().theme);
+        crate::shared::theme::apply(crate::config::current().theme);
         let input = background(|tx| {
             let mut stdin = io::BufReader::new(io::stdin().lock());
             loop {
@@ -356,7 +356,7 @@ impl Helper {
                 None => Task::none(),
             },
             Event::OsTheme(mode) => {
-                super::theme::set_os(mode);
+                crate::shared::theme::set_os(mode);
                 Task::none()
             }
         }

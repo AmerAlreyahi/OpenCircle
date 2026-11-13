@@ -12,16 +12,16 @@ use iced::{Center, Element, Fill, Padding};
 use super::state::{Message, Section, State};
 use super::{pages, previews};
 use crate::app_language::{S, count, tr};
+use crate::shared::kit::button::{Kind, button, cancel, label};
+use crate::shared::kit::chip::{Tone, status};
+use crate::shared::kit::divider::divider;
+use crate::shared::kit::header::regular;
+use crate::shared::kit::scroll::scroll;
+use crate::shared::kit::sidebar::{Item, sidebar};
+use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::text::{sub, text};
+use crate::shared::kit::tokens::{Role, size, space};
 use crate::t;
-use crate::ui::kit::button::{Kind, button, cancel, label};
-use crate::ui::kit::chip::{Tone, status};
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::header::regular;
-use crate::ui::kit::scroll::scroll;
-use crate::ui::kit::sidebar::{Item, sidebar};
-use crate::ui::kit::surface::{Material, surface};
-use crate::ui::kit::text::{sub, text};
-use crate::ui::kit::tokens::{Role, size, space};
 
 /// The window's 1 px rim (none when maximised: the screen's edge is the edge).
 const RIM: f32 = 1.0;
@@ -39,8 +39,8 @@ const OS: &str = if cfg!(windows) { "Windows" } else { "Linux" };
 
 pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     // the whole window in the app's language and direction
-    let _dir = crate::ui::kit::dir::scope(crate::app_language::rtl());
-    let logo = crate::ui::kit::logo::logo(16);
+    let _dir = crate::shared::kit::dir::scope(crate::app_language::rtl());
+    let logo = crate::shared::kit::logo::logo(16);
     let header = regular(
         logo,
         t!(win_title),
@@ -54,7 +54,7 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     }
     let rim = if maximised { 0.0 } else { RIM };
     // Tab / Shift+Tab walk the sidebar, then the page (`kit::focus`)
-    crate::ui::kit::focus::scope(
+    crate::shared::kit::focus::scope(
         surface(Material::Window, 0.0, column![header, divider(), main])
             .padding(rim)
             .width(Fill)
@@ -128,7 +128,7 @@ fn page(state: &State) -> Element<'_, Message> {
     if let Some(note) = page.note {
         title.push(sub(Role::ROW_DESC, tr(note)).into());
     }
-    let title = crate::ui::kit::dir::row(title).align_y(Center);
+    let title = crate::shared::kit::dir::row(title).align_y(Center);
     let body = column![title, Space::new().height(TITLE_GAP),]
         .push(previews::view(state))
         .push((page.view)(state));
@@ -139,7 +139,7 @@ fn page(state: &State) -> Element<'_, Message> {
     let body = container(body)
         .padding(space::PAGE)
         .width(Fill)
-        .align_x(crate::ui::kit::dir::start());
+        .align_x(crate::shared::kit::dir::start());
     scroll(body).width(Fill).height(Fill).into()
 }
 

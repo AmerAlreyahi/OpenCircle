@@ -7,12 +7,12 @@ use iced::{Element, Fill, Length};
 use super::super::state::{Message, State};
 use crate::app_language::{S, tr};
 use crate::labs::Feature;
+use crate::shared::kit::card::card;
+use crate::shared::kit::dir;
+use crate::shared::kit::divider::divider;
+use crate::shared::kit::text::{sub, text};
+use crate::shared::kit::tokens::{Role, space};
 use crate::t;
-use crate::ui::kit::card::card;
-use crate::ui::kit::dir;
-use crate::ui::kit::divider::divider;
-use crate::ui::kit::text::{sub, text};
-use crate::ui::kit::tokens::{Role, space};
 
 /// (feature, what leaves your PC, where it goes). Ask AI with no key sends
 /// the circled part too (owner, 2026-11-08): the browser posts the crop.

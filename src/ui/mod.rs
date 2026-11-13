@@ -6,7 +6,6 @@ mod arch_tests;
 /// Frames as the window draws them (damage), and the animations' timing.
 #[cfg(test)]
 mod frame_times;
-pub(crate) mod kit;
 mod live_layer;
 pub(crate) mod long_capture_popup;
 mod overlay;
@@ -19,7 +18,6 @@ use screens::{ai_chat, settings, song, translate};
 mod snip;
 #[cfg(test)]
 mod snip_shots;
-pub mod theme;
 mod touch;
 mod windows;
 
@@ -36,7 +34,7 @@ use screens::{update_card, update_pill};
 pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
     app::background::set_triggers(triggers);
     crate::actions::search_in_browser::page::sweep_stale(); // temp files left by a crash
-    let logo = kit::logo::window_icon();
+    let logo = crate::shared::kit::logo::window_icon();
     platform::windows::set_icon(logo.rgba.clone(), logo.width, logo.height);
     let result = with_fonts(iced::daemon(App::boot, App::update, App::view))
         .title(App::title)
@@ -51,8 +49,8 @@ pub fn run(triggers: UnboundedReceiver<Trigger>) -> iced::Result {
 /// `app` with the kit's fonts, the UI font the default (the app, and the long
 /// capture pop-up's own process).
 fn with_fonts<P: iced::Program>(mut app: iced::Daemon<P>) -> iced::Daemon<P> {
-    for font in kit::text::FONTS {
+    for font in crate::shared::kit::text::FONTS {
         app = app.font(font);
     }
-    app.default_font(kit::text::ui_font())
+    app.default_font(crate::shared::kit::text::ui_font())
 }

@@ -223,13 +223,13 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     use iced::Size;
 
     /// What one click at `at` reports, by name.
     fn pressing(at: (f32, f32), mode: Mode) -> Vec<String> {
         let page: Element<'_, Event> = text("page").into();
-        let logo = crate::ui::kit::logo::logo(16);
+        let logo = crate::shared::kit::logo::logo(16);
         let view = frame(logo, "Settings", mode, page, |e| e);
         let size = Size::new(400.0, 300.0);
         let events = shot::click(view, size, iced::Point::new(at.0, at.1));

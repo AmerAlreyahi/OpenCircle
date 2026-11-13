@@ -142,7 +142,7 @@ fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
         let at = card::place(size, None, None);
         // the Download button's row
         let damage = Rectangle::new(Point::new(at.x + 20.0, 150.0), Size::new(140.0, 60.0));
-        let (first, again) = crate::ui::kit::testing::shot::render_twice(
+        let (first, again) = crate::shared::kit::testing::shot::render_twice(
             s.view(size, at, false),
             w as u32,
             h as u32,
@@ -169,15 +169,15 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
     let at = card::place(size, None, None);
     let mut s = session(true);
     let _ = s.update(shown(Vec::new()));
-    let calm = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
+    let calm = crate::shared::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
     let why = crate::mt::unavailable(crate::translate::lang::AUTO, "pt");
     for (message, setup) in [
         (format!("T{}.", &why[1..]), true),
         ("Already in English".into(), false),
     ] {
         s.phase = Phase::Failed(problem(message, setup));
-        let texts = crate::ui::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
-        let px = crate::ui::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
+        let texts = crate::shared::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
+        let px = crate::shared::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
         // the pill's band (`PILL_TOP` down, `PILL` tall) is unchanged
         // (but for the Snip button's own state: dimmed with nothing translated)
         let pill = view::pill_at(Rectangle::with_size(size));
@@ -232,11 +232,12 @@ fn the_prompts_are_short_cards_on_small_screens() {
         ] {
             let size = Size::new(w, h);
             let at = card::place(size, None, None);
-            let lost = crate::ui::kit::testing::shot::out_of_reach(s.view(size, at, false), size);
+            let lost =
+                crate::shared::kit::testing::shot::out_of_reach(s.view(size, at, false), size);
             assert!(lost.is_empty(), "{name} at {w}x{h}: out of reach {lost:?}");
             let view =
                 c(s.view(size, at, false)).style(move |_| c::Style::default().background(backdrop));
-            let px = crate::ui::kit::testing::shot::save(
+            let px = crate::shared::kit::testing::shot::save(
                 &format!("prompt-{}-{w}x{h}", name.replace(' ', "-")),
                 view.into(),
                 size,
@@ -374,7 +375,7 @@ fn offline_models_are_asked_for_with_their_size() {
     let _ = s.update(Msg::Offline(en_ar(), 117_600_822));
     assert!(matches!(&s.phase, Phase::Consent(Some((_, 117_600_822)))));
     assert!(s.work.is_none(), "the thread is done");
-    let texts = crate::ui::kit::testing::shot::texts(s.view(
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
         Size::new(1920.0, 1080.0),
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
@@ -391,7 +392,7 @@ fn offline_models_are_asked_for_with_their_size() {
     // Download: that pair is the one fetched
     s.offline = Some(en_ar());
     s.phase = Phase::Downloading(0.3);
-    let texts = crate::ui::kit::testing::shot::texts(s.view(
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
         Size::new(1920.0, 1080.0),
         card::place(Size::new(1920.0, 1080.0), None, None),
         false,
@@ -413,8 +414,11 @@ fn a_failed_download_offers_try_again() {
         s.phase
     );
     let size = Size::new(1920.0, 1080.0);
-    let texts =
-        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
     for want in [
         "Download could not finish",
         "No internet connection.",
@@ -436,10 +440,10 @@ fn a_failed_download_offers_try_again() {
 #[test]
 fn notes_are_opaque_in_the_light_theme() {
     use iced::widget::container as c;
-    crate::ui::theme::set_light(true);
+    crate::shared::theme::set_light(true);
     let (text, solid) = (
-        crate::ui::kit::themes::c().text,
-        crate::ui::kit::themes::c().widget,
+        crate::shared::kit::themes::c().text,
+        crate::shared::kit::themes::c().widget,
     );
     let mut s = session(false);
     for phase in [Phase::Consent(None), Phase::Downloading(0.5)] {
@@ -450,7 +454,7 @@ fn notes_are_opaque_in_the_light_theme() {
             false,
         ))
         .style(|_| c::Style::default().background(iced::Color::from_rgb8(10, 12, 30)));
-        let px = crate::ui::kit::testing::shot::render(dark.into(), 720, 300);
+        let px = crate::shared::kit::testing::shot::render(dark.into(), 720, 300);
         let at = |x: usize, y: usize| &px[(y * 720 + x) * 4..][..3];
         let want = solid.into_rgba8();
         // the card floats (top right, or under the pill when narrow): look for
@@ -463,7 +467,7 @@ fn notes_are_opaque_in_the_light_theme() {
         let near = |p: &[u8]| p.iter().zip(&ink).all(|(a, b)| a.abs_diff(*b) < 40);
         assert!(px.chunks(4).any(near), "a visible label");
     }
-    crate::ui::theme::set_light(false);
+    crate::shared::theme::set_light(false);
 }
 
 /// The "Translating…" pill holds the picker; a new language translates
@@ -474,32 +478,41 @@ fn the_pill_picks_languages_and_translates_again() {
     use crate::ui::picker::{Msg as P, Side};
     let mut s = session(true);
     let size = Size::new(720.0, 420.0);
-    let texts =
-        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
     for t in ["Detect", "Arabic", "Translating…"] {
         assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
     }
-    crate::ui::kit::testing::shot::save(
+    crate::shared::kit::testing::shot::save(
         "translate-pill",
         s.view(size, card::place(size, None, None), false),
         size,
     );
     let _ = s.update(Msg::Picker(P::Open(Side::Target)));
-    crate::ui::kit::testing::shot::save(
+    crate::shared::kit::testing::shot::save(
         "translate-pill-picker",
         s.view(size, card::place(size, None, None), false),
         size,
     );
-    let texts =
-        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
     assert!(texts.iter().any(|t| t == "English"), "{texts:?}");
     // the same target again: nothing restarts
     let _ = s.update(Msg::Picker(P::Pick("ar".into())));
     assert!(matches!(s.phase, Phase::Translating));
     // a shown translation keeps the pill; a new target starts over
     let _ = s.update(shown(vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])]));
-    let texts =
-        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
     assert!(texts.iter().any(|t| t == "Arabic") && !texts.iter().any(|t| t == "Translating…"));
     let _ = s.update(Msg::Picker(P::Open(Side::Source)));
     let _ = s.update(Msg::Picker(P::Query("kyr".into())));
@@ -685,12 +698,12 @@ fn clicks_hit_translated_blocks_only() {
     // the word card is the shared floating card, the pill beside it
     let size = Size::new(1280.0, 720.0);
     let view = s.view(size, card::place(size, None, None), false);
-    let texts = crate::ui::kit::testing::shot::texts(view);
+    let texts = crate::shared::kit::testing::shot::texts(view);
     for t in ["المخزون · Inventory", "Inventory", "المخزون", "Explain"] {
         assert!(texts.iter().any(|x| x == t), "{t}: {texts:?}");
     }
     let view = s.view(size, card::place(size, None, None), false);
-    crate::ui::kit::testing::shot::save("translate-word-card", view, size);
+    crate::shared::kit::testing::shot::save("translate-word-card", view, size);
     s.click(Point::new(150.0, 90.0));
     assert!(!s.has_card(), "a click elsewhere closes the card");
 }
@@ -755,8 +768,11 @@ fn the_explanation_is_shown_as_markdown() {
         iced::widget::markdown::Item::List { .. }
     ));
     let size = Size::new(1280.0, 720.0);
-    let texts =
-        crate::ui::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false));
+    let texts = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
     assert!(!texts.join(" ").contains("**"), "raw Markdown: {texts:?}");
 }
 
@@ -773,7 +789,7 @@ fn paste_puts_the_area_back_in_place() {
 /// pill with the target list open, and the word card (Arabic translation).
 #[test]
 fn every_translate_state_matches_its_golden_image() {
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::testing::golden;
     const SCREEN: Size = Size::new(960.0, 600.0);
     let at = card::place(SCREEN, None, None);
     let make = |name: &str| {
@@ -859,7 +875,7 @@ fn a_changed_language_leaves_no_ghost_text() {
             })
         };
         let (window, fresh) =
-            crate::ui::kit::testing::shot::redrawn(view, Size::new(320.0, 80.0), scale);
+            crate::shared::kit::testing::shot::redrawn(view, Size::new(320.0, 80.0), scale);
         let differ = window.iter().zip(&fresh).filter(|(a, b)| a != b).count();
         assert_eq!(differ, 0, "{differ} stale bytes at {scale}x");
     }
@@ -873,7 +889,7 @@ fn a_changed_language_leaves_no_ghost_text() {
 /// (mirrored), and the found-language offer beside the pill.
 #[test]
 fn every_picker_state_matches_its_golden_image() {
-    use crate::ui::kit::testing::golden;
+    use crate::shared::kit::testing::golden;
 
     use crate::ui::picker::{Msg as P, Nav, Side};
     const SCREEN: Size = Size::new(720.0, 440.0);
@@ -943,7 +959,9 @@ fn every_picker_state_matches_its_golden_image() {
             "update-paused",
             "update-ar",
         ] {
-            let _ar = name.ends_with("-ar").then(crate::ui::kit::testing::arabic);
+            let _ar = name
+                .ends_with("-ar")
+                .then(crate::shared::kit::testing::arabic);
             let s = make(if name == "p7-target-ar" {
                 name
             } else {
@@ -991,7 +1009,7 @@ fn the_word_card_never_covers_the_pill() {
     let _ = s.update(shown(blocks));
     s.click(Point::new(650.0, 30.0));
     let view = s.view(screen, at, false);
-    crate::ui::kit::testing::shot::save("translate-word-card-1280", view, screen);
+    crate::shared::kit::testing::shot::save("translate-word-card-1280", view, screen);
 }
 
 /// Snip takes what the translation shows: the translated page, or the
@@ -1026,7 +1044,7 @@ fn seen_is_the_frame_as_the_translation_shows_it() {
 /// sends `Snip`. It looks as the kit makes it (the picker goldens show it in both themes).
 #[test]
 fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
-    use crate::ui::kit::testing::shot;
+    use crate::shared::kit::testing::shot;
     let size = Size::new(1280.0, 200.0);
     let at = card::place(size, None, None);
     let mut s = session(true);
@@ -1034,7 +1052,7 @@ fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
     let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
     // the button's centre: the pill's end, inside its padding
     let button = Point::new(
-        pill.x + pill.width - 6.0 - crate::ui::kit::tokens::size::ICON_BUTTON / 2.0,
+        pill.x + pill.width - 6.0 - crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
         pill.y + pill.height / 2.0,
     );
     let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };

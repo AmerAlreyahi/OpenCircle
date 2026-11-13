@@ -23,7 +23,7 @@ use self::background::triggers;
 use self::capture::overlay_window;
 use self::message::{Hiding, Message, Purpose};
 use self::opening::Open;
-use crate::ui::kit::motion;
+use crate::shared::kit::motion;
 use crate::ui::platform::monitor::can_hide_windows;
 use crate::ui::touch;
 use crate::ui::{live_layer, overlay, windows};
@@ -218,7 +218,7 @@ pub(crate) struct App {
     /// Where the user moved / sized the result card (this run of the app).
     pub(crate) card: Option<Rectangle>,
     /// The side the user docked the AI chat to (this run of the app).
-    pub(crate) chat_side: Option<crate::ui::kit::panel_frame::Side>,
+    pub(crate) chat_side: Option<crate::shared::kit::panel_frame::Side>,
     /// The AI chat's width the user set by its inner edge (this run of the app).
     pub(crate) chat_width: Option<f32>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
