@@ -1039,3 +1039,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   working hours, never human days). The feature-folder restructure plan (docs/internal/reports-0.1.8/restructure-plan.md:
   src/app + src/features/<feature> + src/shared, pure moves, arch tests) is approved as written. If "Latin words and digits
   inside Arabic lines" runs late, it moves to 0.2.0.
+- Linux main-mode reading (owner, 2026-11-13, "hold the switch"): W3's right-to-left highlight and the two engine pieces
+  (the helper keeps only its rows; one reader at a time) ship in v0.1.8; Linux main mode keeps today's band read because the
+  switch missed the pass line (English/French pages +11..+47 % time, some +16..+44 % memory; Arabic/mixed much better). The
+  measured follow-up (skip the Arabic try on Latin pages, smaller strip-detector input) runs after the restructure if time is
+  left, else in 0.2.0, with the same pass line. Report: docs/internal/reports-0.1.8/w3-linux-reading.md.
