@@ -1125,3 +1125,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   stays (GPU renderer stays at 0.9.0). Today's live loop costs ~2.2-2.5 CPU cores and ~700 MB (full-screen read every ~1 s):
   Live translation (0.3.0) must read only the areas that changed (cheap per-frame change check first) and is re-measured on a
   CPU-bound game with the cutscene test (#82). The owner watched today's Labs live and found it "not a nice experience".
+- Live translation's real problems (owner, 2026-11-14, after watching Labs live on his PC): the DELAY and the FLICKERING /
+  text rendering are what ruin it; other issues are fixable details. 0.3.0 targets these first: translated text appears
+  fast (measure time from subtitle shown to translation drawn), is drawn once and stays steady (no redraw flicker while the
+  same text is on screen; only changed areas re-read and redrawn), and leaves no stale patch. These are cutscene-test (#82)
+  pass lines next to the frozen-patch rule.
