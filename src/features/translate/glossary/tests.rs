@@ -31,6 +31,8 @@ fn matches_whole_words_case_insensitive_longest_first() {
     let found: Vec<&str> = h.iter().map(|h| h.term.text.as_str()).collect();
     // "Ash Warden" beats "Ash"; the suffixed words are not whole words
     assert_eq!(found, ["Ash Warden", "Vyrnhold"]);
+    // a Latin name stands alone next to Japanese (no spaces there)
+    assert_eq!(g.hits("Vyrnholdに村で話してください").len(), 1);
     // accents fold; case mode is exact
     let mut c = term("Élan", &[]);
     let g2 = Glossary {

@@ -88,7 +88,8 @@ impl Glossary {
             let want: Vec<char> = term.text.trim().chars().collect();
             let fold = |c: char| if term.case { c } else { lang::plain(c) };
             let want: Vec<char> = want.into_iter().map(fold).collect();
-            let word = |c: char| c.is_alphanumeric() || c == '_';
+            // (Japanese, Chinese, Korean write no spaces: a Latin name next to them stands alone)
+            let word = |c: char| (c.is_alphanumeric() && !spaceless(c)) || c == '_';
             for i in 0..chars.len() {
                 let end = i + want.len();
                 if end > chars.len()
@@ -288,3 +289,8 @@ fn numbers(s: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests;
+
+/// A letter of a script written without spaces (kana, Han, Hangul).
+fn spaceless(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}' | '\u{AC00}'..='\u{D7AF}')
+}
