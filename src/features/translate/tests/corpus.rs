@@ -28,6 +28,9 @@ pub(super) struct Element {
     pub tokens: Vec<String>,
     #[serde(default)]
     pub en: Vec<String>,
+    /// Targets that write the source's words as they are (French "Audio").
+    #[serde(default)]
+    pub same: Vec<String>,
 }
 
 /// One block as `real_matrix` writes it: bounds, original, translation ("" =
@@ -141,9 +144,11 @@ pub(super) fn score(screen: &Screen, rows: &[Row], target: &str) -> Score {
 /// Why a translated element is wrong, or `None`.
 fn judge(e: &Element, mine: &[&Row], out: &str, src: &str, target: &str) -> Option<String> {
     let same = |w: &str| e.en.iter().any(|x| key(x) == key(w));
-    // the same word in the target already ("Audio", "Garage" into English)
+    let theirs = e.same.iter().any(|t| t == target);
+    // the same word in the target already ("Audio", "Garage" into English,
+    // "Pause" into French)
     if mine.iter().all(|r| r.2.is_empty()) {
-        return match target == "en" && same(&e.t) {
+        return match (target == "en" && same(&e.t)) || theirs {
             true => None,
             false => Some(format!("{:?} left as it was", e.t)),
         };
@@ -179,7 +184,7 @@ fn judge(e: &Element, mine: &[&Row], out: &str, src: &str, target: &str) -> Opti
     // translated: "Benvenuto! Oggi carote sono in offerta."); one shared with
     // English ("chances", "dragon") is no sign
     let src_latin = lang::find(src).is_some_and(|l| l.script == Script::Latin);
-    if src_latin && lang::find(src) != lang::find(target) {
+    if src_latin && lang::find(src) != lang::find(target) && !theirs {
         let words = |s: &str| -> Vec<String> {
             (s.split(|c: char| !c.is_alphabetic()))
                 .filter(|w| w.chars().count() >= 5)
@@ -265,6 +270,10 @@ fn the_score_counts_what_each_element_needs() {
     let rows = vec![row(0, "Invoquer ×10", "استدعاء ×10")];
     let s = score(gacha, &rows, "ar");
     assert_eq!(s.right, 1, "{:#?}", s.wrong);
+    // French writes "Pause" so: left as it was is right there only
+    let rows = vec![([0, 0, 100, 40], "Pause".into(), String::new(), [0.0; 4])];
+    assert_eq!(score(&all["pause"], &rows, "fr").right, 1);
+    assert_eq!(score(&all["pause"], &rows, "ar").right, 0);
 }
 
 /// The scores of a `real_matrix` run over the corpus (frames named

@@ -1181,13 +1181,23 @@ fn real_matrix() {
         let found: Vec<TextBlock> = match std::fs::read(&ocr_path) {
             Ok(b) => serde_json::from_slice(&b).unwrap(),
             Err(_) => {
-                // as `Real::recognize`: Windows OCR, PP-OCR ("auto") when it misread
-                let win = std::env::var_os("OC_WINOCR").map(|_| {
-                    let k = *text_reading::system::passes(1.0, f.width, f.height)
-                        .last()
-                        .unwrap();
-                    text_reading::system::recognize(&f.rgba, f.width, f.height, k).unwrap()
-                });
+                // as `Real::recognize`: Windows OCR, PP-OCR ("auto") when it
+                // misread; its read is kept (`<frame>.win.json`) and replayed
+                // where it is found (any OS: the Windows path off Windows)
+                let win_path = out.join(format!("{name}.win.json"));
+                let win = match std::fs::read(&win_path) {
+                    Ok(b) => Some(serde_json::from_slice::<Vec<TextBlock>>(&b).unwrap()),
+                    Err(_) => std::env::var_os("OC_WINOCR").map(|_| {
+                        let k = *text_reading::system::passes(1.0, f.width, f.height)
+                            .last()
+                            .unwrap();
+                        let got =
+                            text_reading::system::recognize(&f.rgba, f.width, f.height, k).unwrap();
+                        std::fs::write(&win_path, serde_json::to_vec_pretty(&got).unwrap())
+                            .unwrap();
+                        got
+                    }),
+                };
                 let pp = engine.get_or_insert_with(|| {
                     text_reading::Engine::load(&text_reading::models_dir()).unwrap()
                 });

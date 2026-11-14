@@ -1,5 +1,5 @@
 {
-  "_": "Every element of the 13 game screens and how one-shot translate must handle it (src/features/translate/tests/corpus.rs). t = the text on screen; keep = shown exactly as it is (nothing drawn, or the same text); tokens = parts a translation must carry exactly; en = words one of which an English translation must have; src = the screen's language. Element texts are matched to blocks ignoring case, accents, spaces and punctuation.",
+  "_": "Every element of the 13 game screens and how one-shot translate must handle it (src/features/translate/tests/corpus.rs). t = the text on screen; keep = shown exactly as it is (nothing drawn, or the same text); tokens = parts a translation must carry exactly; en = words one of which an English translation must have; src = the screen's language; same = the targets that write the source's words as they are (French Audio, Pause: left as it was is right). Element texts are matched to blocks ignoring case, accents, spaces and punctuation.",
   "quest": {
     "src": "de",
     "elements": [
@@ -39,7 +39,7 @@
     "src": "es",
     "elements": [
       { "t": "Gráficos", "en": ["graphics"] },
-      { "t": "Audio", "en": ["audio"] },
+      { "t": "Audio", "en": ["audio"], "same": ["fr"] },
       { "t": "Calidad de texturas", "en": ["texture"] },
       { "t": "Alta", "en": ["high"] },
       { "t": "Sombras", "en": ["shadow"] },
@@ -48,7 +48,7 @@
       { "t": "Sincronización vertical", "en": ["vertical"] },
       { "t": "Activada", "en": ["enabled", "on", "activated"] },
       { "t": "Idioma", "en": ["language"] },
-      { "t": "Límite de FPS", "tokens": ["FPS"], "en": ["limit"] },
+      { "t": "Límite de FPS", "tokens": ["FPS"], "en": ["limit"], "same": ["fr"] },
       { "t": "60", "keep": true },
       { "t": "Cuenta", "en": ["account"] },
       { "t": "Brillo", "en": ["brightness"] },
@@ -107,7 +107,7 @@
   "battle": {
     "src": "es",
     "elements": [
-      { "t": "Gólem Ancestral", "en": ["golem"] },
+      { "t": "Gólem Ancestral", "en": ["golem"], "same": ["fr"] },
       { "t": "-3 482", "keep": true },
       { "t": "¡Golpe crítico!", "en": ["critical"] },
       { "t": "Atacar", "en": ["attack"] },
@@ -165,7 +165,7 @@
   "pause": {
     "src": "de",
     "elements": [
-      { "t": "Pause", "en": ["pause"] },
+      { "t": "Pause", "en": ["pause"], "same": ["fr"] },
       { "t": "Fortsetzen", "en": ["resume", "continue"] },
       { "t": "Optionen", "en": ["options"] },
       { "t": "Steuerung", "en": ["controls"] },
