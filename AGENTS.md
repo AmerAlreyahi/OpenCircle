@@ -1169,3 +1169,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   English 3440 -21..-37 % time + missed lines 5 -> 0; English 1080 at parity within noise; French faster, -14..-22 % memory;
   Arabic/mixed far better reads; Arabic 150 % +28..36 % time accepted for the better reading). Proven on the Ubuntu VM in the
   combined pass before release. Open: Arabic small-text CER 0.231 vs 0.157 at a3e0594f (still far better than the old 0.439).
+- v0.2.0 publish (owner, 2026-11-14, "publish directly, no problem"): the lead publishes v0.2.0 without asking again, once the
+  release gates pass: clean-up pass, docs + notes, CI green, the update gate (v0.1.8 Setup + portable -> the draft on the
+  Windows VM), About on the draft exe, the Ubuntu AppImage check, signed assets re-downloaded + verified. A broken updater
+  blocks; other findings ship as known issues and are fixed next.
