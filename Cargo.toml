@@ -39,7 +39,6 @@ tray-icon = "0.26"
 # OCR (src/features/text_reading): PP-OCRv5 on ONNX Runtime. Nothing of ORT is linked: its shared
 # library is downloaded with the models on first use and loaded at runtime
 # (ort `load-dynamic`), only inside the short-lived `ocr-worker` process.
-oar-ocr = { version = "0.10.1", default-features = false, features = ["simd"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic"] }
 # The text detector's box growing (`text_reading::ppocr::unclip`): PaddleOCR grows boxes with
 # Clipper; this is Clipper2's Rust port (BSL-1.0, num-traits only).
@@ -236,7 +235,3 @@ iced_graphics = { path = "vendor/iced_graphics" }
 # stayed on a full line, past the width: Arabic descriptions drawn past their column. "OpenCircle
 # patch" in its src/shape.rs. Still in 0.19; drop once upstream wraps at run boundaries.
 cosmic-text = { path = "vendor/cosmic-text" }
-# oar-ocr 0.10.1 with its zip dependency ^9.2 instead of ^8.6 (RUSTSEC-2026-0429, fixed in
-# zip 9). It only calls ZipArchive::new / by_name, unchanged in 9. "OpenCircle patch" in its
-# Cargo.toml. Drop when oar-ocr moves to zip 9.
-oar-ocr = { path = "vendor/oar-ocr" }

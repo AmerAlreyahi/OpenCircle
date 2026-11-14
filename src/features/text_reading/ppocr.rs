@@ -672,163 +672,39 @@ mod tests {
         assert_eq!((rw, rh), (4.0, 4.0));
     }
 
-    /// #61 parity: this pipeline against oar-ocr 0.10 (the reference) on
-    /// real screens: the same boxes (shrunk as `Engine` reads, and at full
-    /// size) and, for every recognizer, the same texts and confidences;
-    /// plus each one's time. `OC_EQ` = comma list of images or folders:
-    /// `OC_EQ=<dirs> cargo test --release ppocr::tests::parity -- --ignored --nocapture`
+    /// Where the detector's time goes on one screen (`OC_IMG`, a PNG, read at
+    /// its own size rounded to 32 px): input tensor, the model, post-processing.
+    /// `OC_IMG=<png> cargo test --release ppocr::tests::detector_stages -- --ignored --nocapture`
     #[test]
     #[ignore]
-    fn parity_with_oar_ocr() {
-        use oar_ocr::core::config::{OrtExecutionProvider, OrtSessionConfig};
-        use oar_ocr::domain::tasks::TextDetectionConfig;
-        use oar_ocr::predictors::{TextDetectionPredictor, TextRecognitionPredictor};
-        use oar_ocr::processors::LimitType;
+    fn detector_stages() {
         use std::time::Instant;
-
         let dir = super::super::ensure_models(|_, _| {}).unwrap();
         super::super::init_ort(&dir).unwrap();
-        let ort = OrtSessionConfig::new()
-            .with_memory_pattern(false)
-            .add_config_entry("session.intra_op.allow_spinning", "0")
-            .add_config_entry("session.inter_op.allow_spinning", "0")
-            .with_execution_providers(vec![OrtExecutionProvider::CPU]);
-        let det_ref = TextDetectionPredictor::builder()
-            .with_config(TextDetectionConfig {
-                score_threshold: 0.3,
-                box_threshold: 0.6,
-                unclip_ratio: 1.5,
-                max_candidates: 1000,
-                limit_side_len: Some(u32::MAX),
-                limit_type: Some(LimitType::Max),
-                max_side_len: Some(u32::MAX),
-            })
-            .with_ort_config(ort.clone())
-            .build(dir.join(super::super::models::DET.name))
-            .unwrap();
         let mut det = Detector::load(&dir.join(super::super::models::DET.name)).unwrap();
-        let recs: Vec<_> = (super::super::models::RECOGNIZERS.iter())
-            .filter(|r| super::super::models::installed(r))
-            .map(|r| {
-                let reference = TextRecognitionPredictor::builder()
-                    .dict_path(dir.join(r.dict.name))
-                    .with_ort_config(ort.clone())
-                    .build(dir.join(r.model.name))
-                    .unwrap();
-                let ours =
-                    Recognizer::load(&dir.join(r.model.name), &dir.join(r.dict.name)).unwrap();
-                (r.id, reference, ours)
-            })
-            .collect();
-        let mut recs = recs;
-
-        let mut files: Vec<std::path::PathBuf> = Vec::new();
-        for p in std::env::var("OC_EQ").expect("OC_EQ").split(',') {
-            let p = std::path::PathBuf::from(p);
-            if p.is_dir() {
-                let mut all: Vec<_> = (std::fs::read_dir(&p).unwrap())
-                    .map(|e| e.unwrap().path())
-                    .filter(|f| f.extension().is_some_and(|e| e == "png" || e == "jpg"))
-                    .collect();
-                all.sort();
-                files.extend(all);
-            } else {
-                files.push(p);
-            }
+        let file = std::fs::File::open(std::env::var("OC_IMG").expect("OC_IMG")).unwrap();
+        let png = crate::shared::platform::capture::decode_png(std::io::BufReader::new(file));
+        let png = png.unwrap();
+        let img = super::super::to_rgb(&png.rgba, png.width, png.height).unwrap();
+        let (w, h) = img.dimensions();
+        let side = |v: u32| (v + 16) / 32 * 32;
+        let img = image::imageops::resize(&img, side(w), side(h), Triangle);
+        let (pw, ph) = (img.width() as usize, img.height() as usize);
+        for _ in 0..3 {
+            let t = Instant::now();
+            let data = det_tensor(&img);
+            let t1 = t.elapsed();
+            let map = run(&mut det.session, [1, 3, ph, pw], data, |_, p| p.to_vec()).unwrap();
+            let t2 = t.elapsed();
+            let boxes = boxes_from_map(&map, pw, ph, pw as u32, ph as u32);
+            let t3 = t.elapsed();
+            println!(
+                "{pw}x{ph}: tensor {:?}, model {:?}, post {:?} ({} boxes)",
+                t1,
+                t2 - t1,
+                t3 - t2,
+                boxes.len()
+            );
         }
-        let best = |f: &mut dyn FnMut()| {
-            (0..3)
-                .map(|_| {
-                    let t = Instant::now();
-                    f();
-                    t.elapsed().as_secs_f64() * 1e3
-                })
-                .fold(f64::MAX, f64::min)
-        };
-        let (mut boxes_n, mut lines_n, mut bad) = (0, 0, Vec::new());
-        let (mut t_ref, mut t_ours) = ([0.0f64; 2], [0.0f64; 2]);
-        for file in &files {
-            let name = file.file_name().unwrap().to_string_lossy().to_string();
-            let img = if name.ends_with(".png") {
-                let file = std::io::BufReader::new(std::fs::File::open(file).unwrap());
-                let png = crate::shared::platform::capture::decode_png(file).unwrap();
-                super::super::to_rgb(&png.rgba, png.width, png.height).unwrap()
-            } else {
-                image::open(file).unwrap().to_rgb8()
-            };
-            let (w, h) = img.dimensions();
-            let (dw, dh) = super::super::detect_size(w, h);
-            let small = image::imageops::resize(&img, dw, dh, Triangle);
-            let mut page = Vec::new();
-            for (what, input) in [("shrunk", &small), ("full", &img)] {
-                let reference: Vec<[f32; 4]> = (det_ref.predict(vec![input.clone()]).unwrap())
-                    .detections[0]
-                    .iter()
-                    .map(|d| {
-                        let (x0, y0, x1, y1) = d.bbox.aabb();
-                        [x0, y0, x1, y1]
-                    })
-                    .collect();
-                let ours = det.boxes(input).unwrap();
-                boxes_n += reference.len();
-                if ours != reference {
-                    bad.push(format!("{name} {what}: boxes {ours:?} != {reference:?}"));
-                }
-                if what == "shrunk" {
-                    t_ref[0] += best(&mut || drop(det_ref.predict(vec![input.clone()]).unwrap()));
-                    t_ours[0] += best(&mut || drop(det.boxes(input).unwrap()));
-                    let (sx, sy) = (w as f32 / dw as f32, h as f32 / dh as f32);
-                    page = (ours.iter())
-                        .map(|b| [b[0] * sx, b[1] * sy, (b[2] - b[0]) * sx, (b[3] - b[1]) * sy])
-                        .map(|b| {
-                            [
-                                b[0],
-                                b[1],
-                                b[2].min(w as f32 - b[0]),
-                                b[3].min(h as f32 - b[1]),
-                            ]
-                        })
-                        .filter(|b| b[2] >= 2.0 && b[3] >= 2.0)
-                        .collect();
-                }
-            }
-            page.sort_by(|a, b| (a[2] / a[3]).total_cmp(&(b[2] / b[3])));
-            let crops: Vec<RgbImage> = (page.iter())
-                .map(|b| {
-                    let [x, y, w, h] = b.map(|v| v as u32);
-                    image::imageops::crop_imm(&img, x, y, w, h).to_image()
-                })
-                .collect();
-            for (id, reference, ours) in &mut recs {
-                for chunk in crops.chunks(8) {
-                    let r = reference.predict(chunk.to_vec()).unwrap();
-                    let o = ours.read(chunk).unwrap();
-                    lines_n += chunk.len();
-                    for ((rt, rs), (ot, os)) in r.texts.iter().zip(&r.scores).zip(&o) {
-                        if rt != ot || rs.to_bits() != os.to_bits() {
-                            bad.push(format!("{name} {id}: {ot:?} {os} != {rt:?} {rs}"));
-                        }
-                    }
-                    if *id == "en" {
-                        t_ref[1] += best(&mut || drop(reference.predict(chunk.to_vec()).unwrap()));
-                        t_ours[1] += best(&mut || drop(ours.read(chunk).unwrap()));
-                    }
-                }
-            }
-            println!("{name} {w}x{h}: {} lines", page.len());
-        }
-        println!(
-            "{} images, {boxes_n} boxes, {lines_n} line reads; detection {:.0} -> {:.0} ms, \
-             recognition (en) {:.0} -> {:.0} ms",
-            files.len(),
-            t_ref[0],
-            t_ours[0],
-            t_ref[1],
-            t_ours[1]
-        );
-        for b in &bad {
-            println!("DIFF {b}");
-        }
-        assert!(bad.is_empty(), "{} differences", bad.len());
     }
 }
