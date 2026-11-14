@@ -1103,3 +1103,5 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   when asked (his folders backed up first and restored after). (3) Draft Arabic references: the owner checks a mixed sample
   of ~30 lines; if they are fine, all 257 count. (4) Runs on the owner's PC never send keys with SendKeys or any input that
   can reach another window (2026-11-14: two early attempts sent f / Esc / Ctrl+W to an unknown front window).
+- Arabic references approved (owner, 2026-11-14): the 30-line sample (reports-0.2.0/w8-sample30.tsv) is approved, so all
+  257 lines of w8-lineset-draft-refs.tsv count as the live-translation reference set (no longer "draft").
