@@ -117,6 +117,19 @@ fn a_page_read_as_noise_offers_the_other_readers() {
     assert_eq!(s.readers, None);
 }
 
+/// #163: after the readers download, the next card asks for the pair's
+/// models; its Download must not run the finished readers download again.
+#[test]
+fn the_model_card_after_the_readers_fetches_the_models() {
+    let mut s = session(true);
+    let _ = s.update(Msg::Readers(32_000_000, "Arabic".into()));
+    s.phase = Phase::Translating;
+    let pair = crate::features::translate::mt::PAIRS.first().unwrap();
+    let _ = s.update(Msg::Offline(pair, 90_000_000));
+    assert!(matches!(&s.phase, Phase::Consent(Some(_))));
+    assert_eq!(s.readers, None);
+}
+
 /// A redraw of part of the screen (a hovered button, the progress bar)
 /// leaves the rest as it was. Before: the card's shadow was drawn whole,
 /// outside the redrawn part too (tiny-skia doesn't clip shadows), so it

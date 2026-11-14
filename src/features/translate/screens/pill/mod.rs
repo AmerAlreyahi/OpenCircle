@@ -375,6 +375,9 @@ impl Session {
             }
             Msg::Offline(pair, bytes) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
+                // the readers (if they were asked for) are installed by now:
+                // Download fetches the models, not the readers again (#163)
+                self.readers = None;
                 self.phase = Phase::Consent(Some((pair, bytes)));
             }
             Msg::GetHeld => {
