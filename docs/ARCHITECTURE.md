@@ -136,7 +136,7 @@ folders were made. The lists only shrink: a file that is clean must leave its li
    open (#123; `word::Screen`, `App::read_more`): nothing is
    read while the opening animation runs; after it the held helper starts (`App::warm`).
    A press, tap, Shift+click or Ctrl+A reads the full-width band under it first (at
-   once, `ocr::recognize_band` with only the band's new rows); once text was used (off
+   once, `text_reading::read_screen` with only the band's new rows and the frame's rows around them); once text was used (off
    Windows: once the helper is warm, `Message::Warmed`, so the I-beam shows over text
    before any press), the rest follows band by band, nearest the pointer first, gently (the helper on at most
    two cores, below normal priority: `features/text_reading/worker.rs` `Gentle`). One band at a time. A

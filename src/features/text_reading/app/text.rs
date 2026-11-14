@@ -332,18 +332,10 @@ impl App {
         let scale = self.o.scale;
         // the helper: the frame's rows (frame px), each part with its own rows
         let rows = (top * scale, bottom * scale);
-        // Linux main mode: the band's crop and its rows in it, as before #169
-        let at = |y: f32| ((y * scale) as u32).saturating_sub(y0);
-        let band_rows = (at(top), at(bottom));
         self.o.reading = Some(band);
         let opening = self.opening;
         let system = (self.o.text_by == Some(text_reading::Source::System))
             .then_some(self.o.behaviour.text_reader);
-        // Linux main mode keeps the band-by-band read (owner, 2026-11-12) until
-        // its follow-up plugs in HERE: the part-by-part read below
-        // (`text_reading::read_screen`; the helper keeps the lines it found, not the
-        // picture, and loads one reader at a time).
-        let whole_screen = cfg!(windows);
         let held = self
             .o
             .helper
@@ -364,17 +356,8 @@ impl App {
                 let _ = tx.unbounded_send(Part::Read(lines.map_err(|e| e.to_string())));
             };
             let Some(setting) = system else {
-                if !whole_screen {
-                    let Some(c) = picture::crop(&pixels, width, height, scale, band) else {
-                        let empty = text_reading::OcrError::BadImage("an empty band".into());
-                        return send(Err(empty), [x0, y0]);
-                    };
-                    let read =
-                        text_reading::recognize_band(&c.rgba, c.width, c.height, band_rows, gently);
-                    return send(read, [x0, y0]);
-                }
-                // (the helper keeps the lines it found, the part's rows come
-                // with each part)
+                // (Windows and Linux alike: the helper keeps the lines it
+                // found, each part's rows come with it)
                 let key = u64::from(opening);
                 let read = text_reading::read_screen(
                     key,

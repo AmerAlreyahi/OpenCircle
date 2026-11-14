@@ -19,7 +19,6 @@ const PATHS: &[&str] = &[
     "latin",
     "arabic",
     "auto",           // Read::Auto = one-shot translate's read on Linux (source "auto")
-    "linux-main", // Linux main mode: the whole screen band by band (`ocr::screen`), a fresh helper
     "linux-frame", // main mode's own read (Linux; Windows' helper route): band by band, each part's rows sent (`Engine::read_screen`)
     "except",      // second reader, nothing known
     "except-known", // second reader, EN PP-OCR's plain lines as Windows OCR's stand-in
@@ -467,7 +466,6 @@ fn run(
             e.recognize(rgba, w, h, Read::Auto).unwrap()
         }
         "except" => e.recognize_except(rgba, w, h, &[]).unwrap(),
-        "linux-main" => linux_main(e, p),
         "linux-frame" => main_bands(e, p, &[], true, false),
         "linux-first" => main_bands(e, p, &[], true, true),
         "main-new" => {
@@ -508,43 +506,6 @@ fn run(
     }
 }
 
-/// Linux main mode as the app reads a screen once text is used (as before
-/// #169): bands from the pointer (mid-screen) out (`ocr::screen`), each
-/// band's crop sent to the helper with the rows it is read for
-/// (`features::text_reading::app::text::read_band`, `Engine::recognize_band`).
-fn linux_main(e: &mut Engine, p: &Page) -> Vec<TextBlock> {
-    use super::screen::{Next, Rows, Wants, next};
-    e.band_auto = 0; // a fresh helper: English first
-    let (w, h) = (p.w, p.h);
-    let mut rows = Rows::default();
-    let mut out = Vec::new();
-    let wants = Wants {
-        source: Source::Helper,
-        started: true,
-        touches: &[],
-        waits: false,
-        text_used: true,
-        pointer: h as f32 / 2.0,
-    };
-    while let Next::Band { band, .. } = next(&rows, h as f32, &wants) {
-        let Some((top, bottom)) = rows.unread(band, h as f32) else {
-            rows.mark(band, h as f32);
-            continue;
-        };
-        let y0 = band.top as u32;
-        let bh = (band.height as u32).min(h - y0);
-        let crop = &p.rgba[(y0 * w * 4) as usize..((y0 + bh) * w * 4) as usize];
-        let r = (top as u32 - y0, bottom as u32 - y0);
-        let got = e.recognize_band(crop, w, bh, Read::Auto, r).unwrap();
-        out.extend(got.into_iter().map(|mut b| {
-            b.bounds[1] += y0 as f32;
-            b
-        }));
-        rows.mark(band, h as f32);
-    }
-    out
-}
-
 /// Main mode as the app reads a screen (#169): bands from the pointer
 /// (mid-screen) out (`ocr::screen`), each band's rows read by
 /// `Engine::read_screen`. Main mode's own read (`latin`): `known` empty,
@@ -571,7 +532,7 @@ fn main_bands(
     let mut img = (!latin).then(|| to_rgb(&p.rgba, p.w, p.h).unwrap());
     let mut rows = Rows::default();
     let mut out = Vec::new();
-    // (the first band as `linux_main`'s, the app's with nothing touched:
+    // (the first band as the app's with nothing touched:
     // Ctrl+A; the touched band only for `first`)
     let mut band = match first {
         true => Some(Rows::touched(h / 2.0, h)),
