@@ -1161,3 +1161,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   plan + Turnstile) that files a GitHub issue; a GitHub issue form / PR is the fallback. Garbage is kept out by automatic checks
   (GitHub Actions), human review before publishing, a signed index in the app, and the player's entries always winning. Plan in
   planning #181 (with Reach, 0.6.0). The relay needs the owner's free Cloudflare account then.
+- Arabic -> English (owner, 2026-11-14, W16 report reports-0.2.0/w16-ar-en.md): v0.2.0 ships the pipeline fix (Arabic
+  sentence split at . ! ? ؟, ، / ؛ cuts, vowel marks + tatweel stripped: COMET 0.852 -> 0.859). A bigger opt-in "Better Arabic
+  quality" model (tc-big-ar-en CC BY 4.0 or tc-bible-big-sem-en Apache-2.0: COMET ~0.89, 309 MB, ~2x RAM, ~1.8x slower) comes
+  in a LATER version, downloaded only on the user's click; target COMET >= 0.88 on the W16 set.
