@@ -142,15 +142,23 @@ const REC_BATCH: usize = 8;
 /// MB. Ordinary pages stay at 8 lines per run.
 const REC_BATCH_COLUMNS: f32 = 12_000.0;
 
+/// `REC_BATCH_COLUMNS` for main mode's screen parts (`Engine::read_screen`):
+/// three lines at the recognizer's widest input (3200 columns). At 12,000 a
+/// French page's six pieces of ~1900 went in one run and held the helper
+/// ~50 MB above main mode's band read (W12). Not for a whole image (translate):
+/// other runs read a French page's lines differently there (CER 0.002 ->
+/// 0.016).
+const PART_BATCH_COLUMNS: f32 = 9_600.0;
+
 /// How many of `boxes` (widest last, as `recognize_rows` sorts them) go in
 /// the first run: up to `REC_BATCH`, fewer while the widest would pad past
-/// `REC_BATCH_COLUMNS`; always at least one.
-fn rec_batch_len(boxes: &[[f32; 4]]) -> usize {
+/// `cap` columns (`REC_BATCH_COLUMNS`); always at least one.
+fn rec_batch_len(boxes: &[[f32; 4]], cap: f32) -> usize {
     let mut n = 0;
     let mut widest = 0f32;
     for b in boxes.iter().take(REC_BATCH) {
         widest = widest.max(b[2] / b[3].max(1.0) * 48.0);
-        if n > 0 && (n + 1) as f32 * widest > REC_BATCH_COLUMNS {
+        if n > 0 && (n + 1) as f32 * widest > cap {
             break;
         }
         n += 1;
@@ -163,7 +171,7 @@ fn rec_batch_len(boxes: &[[f32; 4]]) -> usize {
 /// shapes go together (as PaddleOCR does); callers put the lines in reading
 /// order. The second reader batched in detection order: a 1080p Arabic
 /// article took 2418 ms on 2 cores, sorted 1264 ms (#169).
-fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
+fn runs(boxes: &[[f32; 4]], cap: f32) -> Vec<Vec<usize>> {
     let ratio = |b: &[f32; 4]| b[2] / b[3].max(1.0);
     let mut order: Vec<usize> = (0..boxes.len()).collect();
     order.sort_by(|&a, &b| ratio(&boxes[a]).total_cmp(&ratio(&boxes[b])));
@@ -171,7 +179,7 @@ fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
     let mut from = 0;
     while from < sorted.len() {
-        let n = rec_batch_len(&sorted[from..]);
+        let n = rec_batch_len(&sorted[from..], cap);
         out.push(order[from..from + n].to_vec());
         from += n;
     }
@@ -186,8 +194,13 @@ fn runs(boxes: &[[f32; 4]]) -> Vec<Vec<usize>> {
 /// heights; past it the line is squeezed and lost) and cut pieces worse
 /// (the English reader read "n s.al and waves"), so only past that.
 // ponytail: measured for Arabic and English; Cyrillic and CJK keep the cap.
-fn longest(i: usize) -> f32 {
+/// `whole`: main mode's screen parts (`Engine::read_screen`), where a long
+/// Latin line is read whole (squeezed past the input cap, as main mode's band
+/// read did): its pieces cost a French page +27 % time and +50 MB for CER
+/// 0.003 -> 0.002 (W12).
+fn longest(i: usize, whole: bool) -> f32 {
     match models::RECOGNIZERS[i].rtl() {
+        false if whole => f32::INFINITY,
         true => 15.0,
         false => 66.0, // (cut at 60, a French page's 61-65 heights lines read worse)
     }
@@ -456,6 +469,14 @@ fn lookalike(text: &str) -> bool {
     letters.len() >= 3 && letters.iter().all(|c| "ABCEHKMOPTXY".contains(*c))
 }
 
+/// A Latin reading main mode's parts keep though it isn't real words: sure
+/// and 6 characters or more. The English reader on the corpus' Arabic pages
+/// read 4 of 204 lines at 0.9 or more, none longer than 5 ("lgsi", "bliso");
+/// English pages' names and numbers read 0.99-1.0 (W12).
+fn sure(r: &TextBlock) -> bool {
+    r.confidence >= 0.9 && r.text.chars().count() >= 6
+}
+
 /// `b`'s middle is in `k` (boxes: x, y, w, h).
 fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
     let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
@@ -580,6 +601,8 @@ pub struct Engine {
     band_auto: usize,
     /// The screen `read_screen` reads a part at a time.
     frame: Option<Frame>,
+    /// `read_screen` is reading one of its parts (`longest`).
+    parts: bool,
 }
 
 /// `Engine::read_screen`'s error for a screen it doesn't hold (the helper
@@ -604,6 +627,9 @@ pub(crate) struct Frame {
     done: bool,
     /// `ScreenRead::noise` of the last part read.
     noise: u32,
+    /// Lines its parts kept so far: read by a Latin reader, by another.
+    latin_kept: usize,
+    other_kept: usize,
     /// The lines Latin bands found (`Engine::band`) when the whole screen
     /// was never found shrunk.
     seen: Vec<[f32; 4]>,
@@ -621,8 +647,16 @@ impl Frame {
             grid: None,
             done: false,
             noise: 0,
+            latin_kept: 0,
+            other_kept: 0,
             seen: Vec::new(),
         }
+    }
+
+    /// A Latin screen so far: its parts kept `LATIN_SCREEN` Latin lines or
+    /// more and none in another script (`Engine::per_line`).
+    fn latin_screen(&self) -> bool {
+        self.other_kept == 0 && self.latin_kept >= LATIN_SCREEN
     }
 
     /// The next part's rows of the same screen (`img`, from row `top`): the
@@ -642,6 +676,16 @@ impl Frame {
         self
     }
 }
+
+/// Latin lines a screen's parts keep, with none in another script, before
+/// its next parts read as a Latin page (`Frame::latin_screen`): a line that
+/// isn't real words keeps its Latin reading (a name, "15 s"), the other Latin
+/// readers aren't tried, and a line no Latin reader read goes to the other
+/// scripts' readers as found (no strip at full size). W3's part read loaded
+/// up to three readers a part on English pages for such lines (+11..47 %
+/// time against main mode's band read); a mixed page shows its other script
+/// in the first parts (from the pointer out).
+const LATIN_SCREEN: usize = 8;
 
 /// The rows of a screen `height` tall that main mode's part reading `rows`
 /// (top, bottom) sends to the helper: its own and `PART_SEE` past them (a
@@ -688,6 +732,7 @@ impl Engine {
             other: None,
             band_auto: 0,
             frame: None,
+            parts: false,
         })
     }
 
@@ -827,7 +872,7 @@ impl Engine {
         let mut blocks = Vec::with_capacity(boxes.len());
         let mut rest = boxes;
         while !rest.is_empty() {
-            let (chunk, tail) = rest.split_at(rec_batch_len(rest));
+            let (chunk, tail) = rest.split_at(rec_batch_len(rest, REC_BATCH_COLUMNS));
             rest = tail;
             let crops: Vec<RgbImage> = (chunk.iter())
                 .map(|b| {
@@ -884,6 +929,9 @@ impl Engine {
         })
         .filter(|_| latin);
         let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
+        // (main mode's parts only: `rows`; a whole image is one call)
+        let parts = rows.is_some();
+        let latin_screen = parts && latin_reader.is_some() && f.latin_screen();
         let mut kept: Vec<(usize, TextBlock)> = Vec::new();
         // Latin readings not kept: a line no other reader keeps keeps it
         let mut fallback: Vec<TextBlock> = Vec::new();
@@ -916,16 +964,16 @@ impl Engine {
                 let mut left: Vec<([f32; 4], Option<TextBlock>)> = Vec::new();
                 for ((b, r), real) in boxes.iter().zip(read).zip(real) {
                     match r {
-                        Some(r) if real => kept.push((l, r)),
+                        Some(r) if real || latin_screen || (parts && sure(&r)) => kept.push((l, r)),
                         r => left.push((*b, r)),
                     }
                 }
                 // the other Latin readers next (as `Auto` did: on a 3440
                 // English page shrunk 2x the Latin reader read lines the
                 // English one garbled, CER-all 0.413 against 0.540)
-                for o in (0..models::RECOGNIZERS.len())
-                    .filter(|&o| o != l && script(o) == Script::Latin && installed(o))
-                {
+                for o in (0..models::RECOGNIZERS.len()).filter(|&o| {
+                    !latin_screen && o != l && script(o) == Script::Latin && installed(o)
+                }) {
                     if left.is_empty() {
                         break;
                     }
@@ -948,11 +996,16 @@ impl Engine {
                 let lines: Vec<[f32; 4]> = left.iter().map(|(b, _)| *b).collect();
                 fallback.extend(left.into_iter().filter_map(|(_, r)| r));
                 // (the grid only when strips are needed: it may find a band)
-                let strips = match lines.len() * 5 <= boxes.len() {
-                    true => Vec::new(),
-                    false => strips(h, self.grid(f, rows)?.owned, rows),
-                };
-                few(strips, lines, boxes.len())
+                match latin_screen {
+                    true => (Vec::new(), lines),
+                    false => {
+                        let strips = match lines.len() * 5 <= boxes.len() || others.is_empty() {
+                            true => Vec::new(),
+                            false => strips(h, self.grid(f, rows)?.owned, rows),
+                        };
+                        few(strips, lines, boxes.len())
+                    }
+                }
             }
             // found shrunk first (cheap): only the strips with lines left
             // are found again at full size
@@ -1067,6 +1120,8 @@ impl Engine {
                 }
             }
         }
+        f.other_kept += other;
+        f.latin_kept += kept.len() - other;
         let mut count = vec![0usize; models::RECOGNIZERS.len()];
         kept.iter().for_each(|(i, _)| count[*i] += 1);
         let most = (0..count.len()).filter(|&i| count[i] > 0);
@@ -1234,7 +1289,9 @@ impl Engine {
             .collect();
         let known = &known[..];
         let rows = (rows.0 - dy, rows.1 - dy);
+        self.parts = true;
         let read = self.per_line(&mut f, Some(rows), known, latin);
+        self.parts = false;
         let down = |b: [f32; 4]| [b[0], b[1] + dy, b[2], b[3]];
         // (only once found anyway: a Latin page read in bands never needs
         // the whole screen found, ~150 ms on 2 cores at 1080p; its bands'
@@ -1389,13 +1446,17 @@ impl Engine {
         // long lines are read in pieces (`cut`), each piece's line noted
         let (mut pieces, mut owner) = (Vec::new(), Vec::new());
         for (k, b) in boxes.iter().enumerate() {
-            let parts = cut(img, b, longest(i));
+            let parts = cut(img, b, longest(i, self.parts));
             owner.extend(std::iter::repeat_n(k, parts.len()));
             pieces.extend(parts);
         }
+        let cap = match self.parts {
+            true => PART_BATCH_COLUMNS,
+            false => REC_BATCH_COLUMNS,
+        };
         let rec = self.recognizer(i)?;
         let mut read: Vec<Vec<TextBlock>> = vec![Vec::new(); boxes.len()];
-        for run in runs(&pieces) {
+        for run in runs(&pieces, cap) {
             let crops: Vec<RgbImage> = (run.iter())
                 .map(|&j| {
                     let [x, y, w, h] = pieces[j].map(|v| v as u32);
@@ -1615,7 +1676,7 @@ mod tests {
             let mut rest = &boxes[..];
             let mut sizes = vec![];
             while !rest.is_empty() {
-                let n = rec_batch_len(rest);
+                let n = rec_batch_len(rest, REC_BATCH_COLUMNS);
                 sizes.push(n);
                 rest = &rest[n..];
             }
@@ -1642,7 +1703,7 @@ mod tests {
     fn lines_are_batched_by_shape() {
         let ratios = [5.0, 94.0, 5.0, 94.0, 6.0, 94.0, 5.0, 94.0];
         let boxes: Vec<_> = ratios.iter().map(|r| [0.0, 0.0, r * 40.0, 40.0]).collect();
-        let got: Vec<Vec<f32>> = (runs(&boxes).iter())
+        let got: Vec<Vec<f32>> = (runs(&boxes, REC_BATCH_COLUMNS).iter())
             .map(|run| run.iter().map(|&j| ratios[j]).collect())
             .collect();
         assert_eq!(
@@ -1787,6 +1848,60 @@ mod tests {
             f.shrunk.is_none() && f.strips.is_empty(),
             "the last part's own"
         );
+    }
+
+    /// W12: a run is padded to its widest line; cut pieces of ~1900 columns
+    /// six to a run held the helper ~50 MB above main mode's band read.
+    #[test]
+    fn a_run_holds_three_full_width_lines_at_most() {
+        let wide = [[0.0, 0.0, 40.0, 1.0]; 8]; // 1920 columns each
+        assert_eq!(rec_batch_len(&wide, PART_BATCH_COLUMNS), 5);
+        assert_eq!(rec_batch_len(&wide, REC_BATCH_COLUMNS), 6); // translate's runs as before
+        assert_eq!(
+            rec_batch_len(&[[0.0, 0.0, 4.0, 1.0]; 8], PART_BATCH_COLUMNS),
+            8
+        );
+        assert_eq!(
+            rec_batch_len(&[[0.0, 0.0, 400.0, 1.0]; 8], PART_BATCH_COLUMNS),
+            1
+        );
+    }
+
+    /// W12: main mode's parts read a long Latin line whole; Arabic lines are
+    /// cut there too, and every line elsewhere as before.
+    #[test]
+    fn main_mode_parts_read_latin_lines_whole() {
+        let rtl = |i: usize| models::RECOGNIZERS[i].rtl();
+        let latin = (0..models::RECOGNIZERS.len()).find(|&i| !rtl(i)).unwrap();
+        let arabic = (0..models::RECOGNIZERS.len()).find(|&i| rtl(i)).unwrap();
+        assert_eq!(longest(latin, true), f32::INFINITY);
+        assert_eq!(longest(latin, false), 66.0);
+        assert_eq!(
+            (longest(arabic, true), longest(arabic, false)),
+            (15.0, 15.0)
+        );
+    }
+
+    /// W12: a screen whose parts kept Latin lines only reads on as a Latin
+    /// page; one line in another script, and it never does; the count lives
+    /// through the parts.
+    #[test]
+    fn a_latin_screen_is_known_from_its_parts() {
+        let mut f = Frame::new(1, RgbImage::new(10, 10));
+        f.latin_kept = LATIN_SCREEN - 1;
+        assert!(!f.latin_screen());
+        f.latin_kept += 1;
+        let mut f = f.moved_to(RgbImage::new(10, 10), 100);
+        assert!(f.latin_screen());
+        f.other_kept = 1;
+        assert!(!f.latin_screen());
+        let line = |text: &str, confidence| TextBlock {
+            text: text.into(),
+            bounds: [0.0; 4],
+            confidence,
+        };
+        assert!(sure(&line("Landfall light", 0.998)));
+        assert!(!sure(&line("lgsi", 0.93)) && !sure(&line("bliso ab", 0.86)));
     }
 
     #[test]
