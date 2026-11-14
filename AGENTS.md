@@ -1105,3 +1105,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   can reach another window (2026-11-14: two early attempts sent f / Esc / Ctrl+W to an unknown front window).
 - Arabic references approved (owner, 2026-11-14): the 30-line sample (reports-0.2.0/w8-sample30.tsv) is approved, so all
   257 lines of w8-lineset-draft-refs.tsv count as the live-translation reference set (no longer "draft").
+- Live translation priority (owner, 2026-11-14, firm): never ruin the game experience comes FIRST, then speed; accuracy is
+  secondary. The worst failure is a frozen / stale patch left after the text changes. Design rule: show nothing rather than
+  something stale: a cheap per-frame change check on every drawn area; when an area changes, its patch is removed in the
+  next frame BEFORE any re-read or translation (the original shows briefly), then the new translation fades in; patches
+  only where text sits on a held box/bar; back off if the game loses frames. Cutscene test (#82) pass lines: zero patches
+  left after a change, removed within one frame, game frame rate unchanged; accuracy reported but not a gate. Run it early
+  in Live translation (0.3.0), before the bulk of the build.
