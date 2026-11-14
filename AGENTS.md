@@ -1079,3 +1079,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   rendered sheet of every size (16..512, light and dark backgrounds, tray) before it merges.
 - OpenCircle-models stays unarchived (owner, 2026-11-14): models-v3 (Portuguese) uploaded there; future model releases go to
   the same repo.
+- Hugging Face uploads (owner, 2026-11-14, "you can upload models to Hugging Face, no issues"; extends "HF upload" and
+  "Publish OK" of 2026-11-09): the lead may upload models to Hugging Face (OptimaMT organisation) without asking each time,
+  as the owner, with no AI/agent trace anywhere (commits, cards, metadata). Workers still only prepare files locally.
+- App downloads from OptimaMT later (owner, 2026-11-14, "sure"): plan moving the app's model source from the
+  OpenCircle-models GitHub releases to the OptimaMT Hugging Face repos in a later version (new URLs + sha256 pins, retry /
+  resume tested against Hugging Face); OpenCircle-models' releases stay forever for older installs. v0.2.0 keeps
+  OpenCircle-models. New pairs (Portuguese, models-v3) are also added to OptimaMT so both stay complete.
