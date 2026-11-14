@@ -1140,3 +1140,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   review; the app offers "A glossary for <game> exists (N names) . Get" only as a quiet line the player may act on;
   nothing downloads without that click. Names + the players' own translations only (never an official localisation copied).
   (3) Models help (draft names from a game's wiki under its licence, attribution kept), never published without human review.
+- Glossary only in games (owner, 2026-11-14, "very important"): the glossary UI (pill glossary button, the word card's dotted
+  names and "Add to glossary", name suggestions) and the glossary's effect on translations appear ONLY on a game screen, never
+  in a browser or a normal app. Lead's rule (one code path, strictest platform first): a screen counts as a game when no
+  browser address bar is found on the frame (pipeline::without_chrome's detection, works on every OS) AND, where the OS tells
+  the focused window (Windows, X11), that window is full-screen / borderless over its monitor and not a known browser; on
+  Wayland (no focused-window info) the frame test alone decides. A glossary auto-picked by window title also marks a game.
