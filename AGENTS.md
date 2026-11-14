@@ -1173,3 +1173,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   release gates pass: clean-up pass, docs + notes, CI green, the update gate (v0.1.8 Setup + portable -> the draft on the
   Windows VM), About on the draft exe, the Ubuntu AppImage check, signed assets re-downloaded + verified. A broken updater
   blocks; other findings ship as known issues and are fixed next.
+  Owner, 2026-11-14 (later): "publish now if there is nothing after the weak PC test". Lead's plan: W17 (#117) and W19
+  (Ubuntu-pass fixes) merge, then one Windows VM session runs the combined checks + the release gate, then publish directly.
+  #31 headings and (if unsolved) KDE Wayland 1280x800 Arabic reading ship as known issues.
