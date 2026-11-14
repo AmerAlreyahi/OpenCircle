@@ -206,6 +206,45 @@ fn longest(i: usize, whole: bool) -> f32 {
     }
 }
 
+/// Line `b` of `img` shrunk to its ink rows, a fifth of their height (at
+/// least 2 px) kept above and below; `b` itself without ink. A line found
+/// shrunk 2x (a 3440 screen) has a loose box, its text half the box's height:
+/// the English reader read 5-7 such paragraph lines of 1300-1500 px as
+/// nothing (W12), tightened it reads them.
+fn tight(img: &RgbImage, b: &[f32; 4]) -> [f32; 4] {
+    let [x0, y0, w, h] = b.map(|v| v as u32);
+    let (iw, ih) = img.dimensions();
+    if w == 0 || h == 0 || x0 >= iw || y0 >= ih {
+        return *b;
+    }
+    let (w, h) = (w.min(iw - x0), h.min(ih - y0));
+    let luma = |x: u32, y: u32| {
+        let p = img.get_pixel(x, y);
+        (p[0] as i32 * 3 + p[1] as i32 * 6 + p[2] as i32) / 10
+    };
+    // the background: the box's most common brightness on its top and bottom rows
+    let mut edge: Vec<i32> = (x0..x0 + w)
+        .flat_map(|x| [luma(x, y0), luma(x, y0 + h - 1)])
+        .collect();
+    edge.sort_unstable();
+    let bg = edge[edge.len() / 2];
+    // a row with ink, not a rule across the line (a separator above a
+    // paragraph line stayed in its tightened box: read as nothing again)
+    let ink = |y: u32| {
+        let n = (x0..x0 + w)
+            .filter(|&x| (luma(x, y) - bg).abs() > 40)
+            .count();
+        n > 0 && n * 5 < w as usize * 4
+    };
+    let Some(top) = (y0..y0 + h).find(|&y| ink(y)) else {
+        return *b;
+    };
+    let bottom = (y0..y0 + h).rev().find(|&y| ink(y)).unwrap_or(top) + 1;
+    let pad = ((bottom - top) / 5).max(2);
+    let (top, bottom) = (top.saturating_sub(pad).max(y0), (bottom + pad).min(y0 + h));
+    [b[0], top as f32, b[2], (bottom - top) as f32]
+}
+
 /// Line `b` of `img` in pieces of at most `most` heights: each cut in the
 /// widest empty gap (a word space is wider than the gap between letters)
 /// within 3 heights of its even place, else in the emptiest column there.
@@ -956,15 +995,36 @@ impl Engine {
                 let boxes: Vec<[f32; 4]> = (boxes.into_iter())
                     .filter(|b| inside(b) && unknown(b))
                     .collect();
-                let read = self.read_each(l, &f.img, &boxes)?;
+                let mut read = self.read_each(l, &f.img, &boxes)?;
+                // (main mode's parts: a line read as nothing, tightened to
+                // its ink and read again by the same reader: no reader
+                // switch for it; not where most lines read as nothing,
+                // another script's part, and such a reading must be words)
+                let empty: Vec<usize> = (0..read.len()).filter(|&k| read[k].is_none()).collect();
+                let again = parts && !empty.is_empty() && empty.len() * 2 <= read.len();
+                if again {
+                    let tighter: Vec<[f32; 4]> =
+                        empty.iter().map(|&k| tight(&f.img, &boxes[k])).collect();
+                    let again_read = self.read_each(l, &f.img, &tighter)?;
+                    let texts: Vec<&str> = (again_read.iter())
+                        .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
+                        .collect();
+                    // (words only: another script's line tightened reads as
+                    // Latin noise, which then stood in for it)
+                    let words = lang::real_lines(&texts);
+                    for ((&k, r), words) in empty.iter().zip(again_read).zip(words) {
+                        read[k] = r.filter(|_| words);
+                    }
+                }
                 let texts: Vec<&str> = (read.iter())
                     .map(|r| r.as_ref().map_or("", |b| b.text.as_str()))
                     .collect();
                 let real = lang::real_lines(&texts);
                 let mut left: Vec<([f32; 4], Option<TextBlock>)> = Vec::new();
-                for ((b, r), real) in boxes.iter().zip(read).zip(real) {
+                for (k, ((b, r), real)) in boxes.iter().zip(read).zip(real).enumerate() {
+                    let sure = |r: &TextBlock| parts && sure(r) && !(again && empty.contains(&k));
                     match r {
-                        Some(r) if real || latin_screen || (parts && sure(&r)) => kept.push((l, r)),
+                        Some(r) if real || latin_screen || sure(&r) => kept.push((l, r)),
                         r => left.push((*b, r)),
                     }
                 }
@@ -1902,6 +1962,29 @@ mod tests {
         };
         assert!(sure(&line("Landfall light", 0.998)));
         assert!(!sure(&line("lgsi", 0.93)) && !sure(&line("bliso ab", 0.86)));
+    }
+
+    /// W12: a loose box (text in its middle half) is tightened to its ink,
+    /// a fifth of the ink's height kept around it; no ink: as it was.
+    #[test]
+    fn a_loose_line_is_tightened_to_its_ink() {
+        let mut img = RgbImage::from_pixel(40, 40, image::Rgb([255, 255, 255]));
+        for y in 10..20 {
+            for x in 5..30 {
+                img.put_pixel(x, y, image::Rgb([20, 20, 20]));
+            }
+        }
+        assert_eq!(tight(&img, &[0.0, 0.0, 40.0, 32.0]), [0.0, 8.0, 40.0, 14.0]);
+        // a rule across the box's top is not ink
+        for x in 0..40 {
+            img.put_pixel(x, 1, image::Rgb([150, 150, 150]));
+        }
+        assert_eq!(tight(&img, &[0.0, 0.0, 40.0, 32.0]), [0.0, 8.0, 40.0, 14.0]);
+        let blank = RgbImage::from_pixel(40, 40, image::Rgb([255, 255, 255]));
+        assert_eq!(
+            tight(&blank, &[1.0, 2.0, 30.0, 20.0]),
+            [1.0, 2.0, 30.0, 20.0]
+        );
     }
 
     #[test]
