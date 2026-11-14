@@ -571,7 +571,12 @@ fn main_bands(
     let mut img = (!latin).then(|| to_rgb(&p.rgba, p.w, p.h).unwrap());
     let mut rows = Rows::default();
     let mut out = Vec::new();
-    let mut band = Some(Rows::touched(h / 2.0, h));
+    // (the first band as `linux_main`'s, the app's with nothing touched:
+    // Ctrl+A; the touched band only for `first`)
+    let mut band = match first {
+        true => Some(Rows::touched(h / 2.0, h)),
+        false => rows.next_band(h / 2.0, h),
+    };
     while let Some(b) = band {
         if let Some((top, bottom)) = rows.unread(b, h) {
             let img = match latin {
