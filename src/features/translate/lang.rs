@@ -406,7 +406,10 @@ fn latin(texts: &[&str]) -> &'static str {
     // labels, and the endings voted Spanish for a French results screen
     // ("Temps", "Meilleur tour", "Rejouer"), an Italian shop and a
     // Portuguese quest log (which have no `WORDS` row)
-    if let Some(code) = which(&all).filter(|_| words(&all) >= 6) {
+    if let Some(code) = (which(&all))
+        .filter(|c| *c != "pt" || portuguese(&all))
+        .filter(|_| words(&all) >= 6)
+    {
         return code;
     }
     let votes = votes(texts);
@@ -481,6 +484,20 @@ pub fn sure(text: &str) -> Option<&'static str> {
         }
         other => Some(other),
     }
+}
+
+/// Portuguese of its own in `text`: "ã" / "õ" or a word only Portuguese writes.
+/// The detector named the corpus' battle screen (Spanish names, French menu:
+/// "Gólem Ancestral", "Golpe crítico!", "Attaquer", "Objets") Portuguese at
+/// 1920x1080 on Ubuntu and Spanish at 1280x800 (W18); it has none of them.
+fn portuguese(text: &str) -> bool {
+    const ONLY: [&str; 14] = [
+        "não", "uma", "das", "dos", "ao", "com", "você", "também", "pelo", "pela", "seu", "sua",
+        "nas", "da",
+    ];
+    let lower = text.to_lowercase();
+    lower.contains(['ã', 'õ'])
+        || (lower.split(|c: char| !c.is_alphabetic())).any(|w| ONLY.contains(&w))
 }
 
 /// An Italian line: the detector says so and two of its words are only
@@ -851,5 +868,62 @@ mod tests {
             "Marco",
         ];
         assert_eq!(guess(battle), Some("es"));
+        // W18 (Ubuntu, PP-OCR): the battle screen translated into French
+        // (Spanish names left), at 1920x1080 and 1280x800: Portuguese at
+        // 1920, Spanish at 1280; one language at both sizes, never Portuguese
+        let at_1920 = [
+            "Gólem Ancestral",
+            "40",
+            "CPPN",
+            "-3 482",
+            "Golpe crítico!",
+            "R",
+            ">",
+            "Attaquer",
+            "M",
+            "0",
+            "B",
+            "Compétences",
+            "Objets",
+            "A",
+            "Objets",
+            "Defender",
+            "I",
+            "Elena",
+            "PV 1 240/1 500",
+            "PM",
+            "80/120",
+            "Fuir",
+            "PV",
+            "980/1 100",
+            "Cadre",
+        ];
+        let at_1280 = [
+            "Gólem Ancestral",
+            "R",
+            "-3 482",
+            "iGolpe",
+            "critico!",
+            "R",
+            "Attaquer",
+            "M",
+            "Y.",
+            ".",
+            "B",
+            "Compétences",
+            "Objets",
+            "Objets",
+            "Elena",
+            "PV 1 240/1 500",
+            "PM 80/120",
+            "Defender",
+            "Fuir",
+            "PV",
+            "980/1 100",
+            "Cadre",
+            ")",
+        ];
+        assert_eq!(guess(at_1920), guess(at_1280));
+        assert_ne!(guess(at_1920), Some("pt"));
     }
 }

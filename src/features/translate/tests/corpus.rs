@@ -225,6 +225,18 @@ fn the_corpus_is_well_formed() {
     }
 }
 
+/// Every Latin-script screen is told its own language from all its texts
+/// (es / fr / pt / it / de apart; W18: Portuguese named where there was none).
+#[test]
+fn every_latin_screen_is_its_own_language() {
+    for (name, s) in screens() {
+        if matches!(s.src.as_str(), "es" | "fr" | "pt" | "it" | "de") {
+            let texts = s.elements.iter().map(|e| e.t.as_str());
+            assert_eq!(lang::guess(texts), Some(s.src.as_str()), "{name}");
+        }
+    }
+}
+
 #[test]
 fn the_score_counts_what_each_element_needs() {
     let all = screens();
