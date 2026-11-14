@@ -25,6 +25,8 @@ use crate::features::translate::lang;
 pub const MAX_BYTES: usize = 1 << 20;
 pub const MAX_TERMS: usize = 5_000;
 pub const MAX_TERM_CHARS: usize = 200;
+/// "Use for windows named" entries per glossary.
+pub const MAX_WINDOWS: usize = 100;
 
 /// The folder of the glossary files.
 pub fn dir() -> PathBuf {
@@ -210,14 +212,34 @@ pub fn load(dir: &Path, slug: &str) -> Option<Glossary> {
     parse(&std::fs::read_to_string(path(dir, slug)).ok()?).ok()
 }
 
-/// Writes `g` as `slug` (a temp file, then a rename: a crash never leaves a
-/// half file).
+/// `g` within the limits `parse` enforces on reading (else the file would be
+/// refused on the next load and the glossary lost).
+pub fn check(g: &Glossary) -> Result<(), Error> {
+    if g.terms.len() > MAX_TERMS || g.windows.len() > MAX_WINDOWS || g.removed.len() > MAX_TERMS {
+        return Err(Error::TooMany);
+    }
+    match render(g).len() > MAX_BYTES {
+        true => Err(Error::TooBig),
+        false => Ok(()),
+    }
+}
+
+/// Writes `g` as `slug`: refused, the file untouched, when it is over the
+/// limits; else a unique temp file, then a rename (a crash never leaves a
+/// half file or loses the old one).
 pub fn save(dir: &Path, slug: &str, g: &Glossary) -> Result<(), Error> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    check(g)?;
     let io = |e: std::io::Error| Error::Io(e.to_string());
     std::fs::create_dir_all(dir).map_err(io)?;
-    let tmp = dir.join(format!("{slug}.toml.tmp"));
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!("{slug}.{}.{n}.tmp", std::process::id()));
     std::fs::write(&tmp, render(g)).map_err(io)?;
-    std::fs::rename(&tmp, path(dir, slug)).map_err(io)
+    std::fs::rename(&tmp, path(dir, slug)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        io(e)
+    })
 }
 
 pub fn delete(dir: &Path, slug: &str) {

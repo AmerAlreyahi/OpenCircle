@@ -1919,6 +1919,8 @@ strings! {
         | "تراجع";
     gl_merged: "{} terms added · {} kept yours · {} duplicates"
         | "أضيفت {} مصطلحات · بقيت {} من مصطلحاتك · {} مكرّرة";
+    gl_too_big: "Importing would make this glossary too big (at most 5,000 terms and 1 MB). Nothing was changed."
+        | "سيصبح هذا القاموس أكبر من الحد المسموح (5000 مصطلح و1 ميغابايت). لم يتغير شيء.";
     gl_more_rows: "{} more terms: search to narrow the list"
         | "{} مصطلحات أخرى: ابحث لتضييق القائمة";
     gl_hint: "Leave the translation empty to keep a name as it is."

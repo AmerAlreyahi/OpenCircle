@@ -409,6 +409,11 @@ impl Page {
             return self.add_imported(g);
         };
         let done = mine.merge(g);
+        // over a limit: refused, the file as it was (it would not load again)
+        if store::check(&mine).is_err() {
+            self.problem = Some(t!(gl_too_big).to_string());
+            return;
+        }
         if let Err(e) = store::save(&self.dir, &slug, &mine) {
             self.problem = Some(fmt(S::gl_failed, &[&e]));
         }

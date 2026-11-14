@@ -361,3 +361,46 @@ fn an_old_glossary_file_still_loads() {
     assert!(g.removed.is_empty() && g.terms[0].base.is_empty() && g.terms[0].case);
     assert_eq!(g.terms[0].translations["ar"], "زد");
 }
+
+/// An import that would pass a limit is refused and the file stays as it was.
+#[test]
+fn a_merge_over_a_limit_is_refused_and_the_file_is_untouched() {
+    let d = std::env::temp_dir().join(format!("oc-limit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    let mine = parsed("name = \"G\"\n[[term]]\ntext = \"Zed\"\n");
+    store::save(&d, "g", &mine).unwrap();
+    let before = std::fs::read(d.join("g.toml")).unwrap();
+    let term = |i: usize| Term {
+        text: format!("Name{i}"),
+        ..Term::default()
+    };
+    // too many terms
+    let mut many = mine.clone();
+    many.terms.extend((0..store::MAX_TERMS).map(term));
+    assert!(matches!(
+        store::save(&d, "g", &many),
+        Err(store::Error::TooMany)
+    ));
+    // too many windows
+    let mut windows = mine.clone();
+    windows.windows = (0..=store::MAX_WINDOWS).map(|i| format!("w{i}")).collect();
+    assert!(store::save(&d, "g", &windows).is_err());
+    // too many bytes (long translations)
+    let mut big = mine.clone();
+    big.terms.extend((0..4000).map(|i| Term {
+        text: format!("N{i}"),
+        translations: [("ar".to_string(), "ا".repeat(150))].into(),
+        ..Term::default()
+    }));
+    assert!(matches!(
+        store::save(&d, "g", &big),
+        Err(store::Error::TooBig)
+    ));
+    assert_eq!(std::fs::read(d.join("g.toml")).unwrap(), before);
+    assert_eq!(
+        std::fs::read_dir(&d).unwrap().count(),
+        1,
+        "no temp file left"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
