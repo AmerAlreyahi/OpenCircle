@@ -2019,6 +2019,7 @@ fn busy_background_threshold() {
 
 mod corpus;
 mod evidence;
+mod glossary_names;
 mod game;
 mod games;
 mod subtitles;
