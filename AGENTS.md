@@ -1156,3 +1156,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   deleted stays deleted when the base updates; base updates add new terms and update only terms the player hasn't changed.
   Importing a file for a game that already has a glossary MERGES into it with these rules and shows a one-line summary
   ("12 terms added . 3 kept yours . 0 duplicates"). Merge-on-import ships in v0.2.0; the repository's base layer in 0.6.0.
+- Community glossaries, easy upload first (owner, 2026-11-14): sharing a glossary must not need a GitHub account: "Share with
+  the community" in the app sends it (player's click only, after showing what is sent) to a free relay (Cloudflare Worker free
+  plan + Turnstile) that files a GitHub issue; a GitHub issue form / PR is the fallback. Garbage is kept out by automatic checks
+  (GitHub Actions), human review before publishing, a signed index in the app, and the player's entries always winning. Plan in
+  planning #181 (with Reach, 0.6.0). The relay needs the owner's free Cloudflare account then.
