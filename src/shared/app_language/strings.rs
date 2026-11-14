@@ -1887,8 +1887,6 @@ strings! {
         | "حذف القاموس";
     gl_crumb: "Glossaries"
         | "القواميس";
-    gl_more: "More"
-        | "المزيد";
     gl_rename: "Rename"
         | "إعادة تسمية";
     gl_import: "Import…"
