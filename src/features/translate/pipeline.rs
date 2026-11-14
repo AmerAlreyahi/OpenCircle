@@ -64,6 +64,9 @@ pub struct Real {
     readers: std::sync::atomic::AtomicBool,
     /// Offline: the pairs this translation used (`outdated`).
     used: Mutex<Vec<&'static mt::Pair>>,
+    /// The target `warm` was given (a page read twice warms its pair again,
+    /// from the first read's language).
+    target: Mutex<Option<String>>,
 }
 
 /// The other scripts' readers are offered once per run (declined: the next
@@ -91,7 +94,20 @@ impl Real {
             held: Mutex::default(),
             readers: Default::default(),
             used: Mutex::default(),
+            target: Mutex::default(),
         }
+    }
+
+    /// Offline: `source` -> `target`'s first model, if it is on disk: the
+    /// helper (kept warm) loads it while the screen is read (on its own
+    /// thread: `text_reading::worker::Mt`).
+    fn to_warm(&self, source: &str, target: &str) -> Option<&'static mt::Pair> {
+        let pair = mt::route(source, target).map(|r| r[0])?;
+        let warm = self.offline() && pair.missing_bytes() == 0;
+        warm.then(|| {
+            text_reading::keep_warm();
+            pair
+        })
     }
 
     /// Windows OCR reads this source (`system_reads`; asks Windows once).
@@ -1056,6 +1072,26 @@ fn system_reads(reader: TextReader, tag: Option<&str>, source: &str) -> bool {
 }
 
 impl Real {
+    /// "auto": the pair from `source` (the language of Windows OCR's words)
+    /// loads while PP-OCR reads the page again (2 cores: a French game
+    /// screen's pair loaded after its 4 s read); asked before that read, so
+    /// the helper gets it first.
+    // ponytail: a page Windows OCR read as noise warms nothing (any of the
+    // other scripts' readers may read it); the helper's last winning reader
+    // could name it if that cold load ever matters.
+    fn warm_before_read(&self, source: Option<&str>) {
+        let target = self
+            .target
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let (lang::AUTO, Some(target), Some(source)) = (self.source.as_str(), target, source)
+            && let Some(pair) = self.to_warm(source, &target)
+        {
+            let _ = mt::translate(&[], pair);
+        }
+    }
+
     /// `recognize` without the check for noise.
     fn read_page(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {
         if self.system() {
@@ -1081,6 +1117,7 @@ impl Real {
                 }
                 // a game's screen: PP-OCR reads it too (no PP-OCR here: as read)
                 Ok(lines) if lines.len() <= SPARSE => {
+                    self.warm_before_read(lang::guess(lines.iter().map(|l| l.text.as_str())));
                     return Ok(
                         match text_reading::recognize_as(rgba, width, height, &self.source) {
                             Ok(pp) => reread(lines, pp),
@@ -1173,11 +1210,8 @@ impl Deps for Real {
     /// Offline: loads the likely first model (English for "auto") in the
     /// helper, which stays warm, while the screen is read.
     fn warm(&self, target: &str) {
-        let Some(pair) = mt::route(self.source(&[]), target).map(|r| r[0]) else {
-            return;
-        };
-        if self.offline() && pair.missing_bytes() == 0 {
-            text_reading::keep_warm();
+        *self.target.lock().unwrap_or_else(|e| e.into_inner()) = Some(target.into());
+        if let Some(pair) = self.to_warm(self.source(&[]), target) {
             std::thread::spawn(move || mt::translate(&[], pair));
         }
     }

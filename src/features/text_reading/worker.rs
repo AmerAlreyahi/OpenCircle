@@ -289,7 +289,7 @@ pub fn worker_main() -> ExitCode {
     let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
     let idle = heap_keeper();
     let mut engine: Option<Engine> = None;
-    let mut translator = None;
+    let mut translator = Mt::Idle;
     loop {
         let (id, request) = match session::read_frame(&mut input, MAX_REQUEST) {
             Ok(Some(frame)) => frame,
@@ -540,10 +540,49 @@ impl Gentle {
     }
 }
 
-fn translate_here(
-    body: &[u8],
-    loaded: &mut Option<(&'static Pair, Translator)>,
-) -> Result<Vec<String>, OcrError> {
+/// The helper's translation model (`T`: a `Translator`): one pair, loaded or
+/// loading. A warm-up (an empty request) loads it on its own thread and is
+/// answered at once, so the screen read asked for next runs meanwhile
+/// (#117: on a 2-core PC the pair's 0.8-1.4 s load came after the read).
+pub(crate) enum Mt<T> {
+    Idle,
+    Loading(&'static Pair, std::thread::JoinHandle<Result<T, OcrError>>),
+    Loaded(&'static Pair, T),
+}
+
+impl<T: Send + 'static> Mt<T> {
+    /// `pair`'s model, loaded by `load` if it isn't (a load under way is
+    /// waited for; another pair is freed first). `warm`: only start loading
+    /// it, on a thread (`None`).
+    pub(crate) fn get(
+        &mut self,
+        pair: &'static Pair,
+        warm: bool,
+        load: impl FnOnce() -> Result<T, OcrError> + Send + 'static,
+    ) -> Result<Option<&mut T>, OcrError> {
+        // (a failed warm load is tried again here, as before)
+        if matches!(self, Mt::Loading(..))
+            && let Mt::Loading(p, job) = std::mem::replace(self, Mt::Idle)
+            && let Ok(Ok(t)) = job.join()
+        {
+            *self = Mt::Loaded(p, t);
+        }
+        if !matches!(self, Mt::Loaded(p, _) if std::ptr::eq(*p, pair)) {
+            *self = Mt::Idle; // free the other pair first
+            if warm {
+                *self = Mt::Loading(pair, std::thread::spawn(load));
+                return Ok(None);
+            }
+            *self = Mt::Loaded(pair, load()?);
+        }
+        match self {
+            Mt::Loaded(_, t) => Ok(Some(t)),
+            _ => unreachable!("loaded above"),
+        }
+    }
+}
+
+fn translate_here(body: &[u8], loaded: &mut Mt<Translator>) -> Result<Vec<String>, OcrError> {
     if body.len() > MAX_TEXT {
         return Err(OcrError::BadImage("too much text".into()));
     }
@@ -552,12 +591,20 @@ fn translate_here(
     let pair = mt::pair(&source, &target)
         .ok_or_else(|| OcrError::Engine(mt::unavailable(&source, &target)))?;
     let t = Instant::now();
-    if !loaded.as_ref().is_some_and(|(p, _)| std::ptr::eq(*p, pair)) {
-        *loaded = None; // free the other pair first
-        *loaded = Some((pair, Translator::load(pair, &models_dir())?));
-    }
+    let load = move || {
+        let t = Instant::now();
+        let loaded = Translator::load(pair, &models_dir());
+        crate::log!(
+            "[opencircle] mt {} loaded in {} ms",
+            pair.label(),
+            t.elapsed().as_millis()
+        );
+        loaded
+    };
+    let Some(translator) = loaded.get(pair, texts.is_empty(), load)? else {
+        return Ok(Vec::new()); // loading meanwhile
+    };
     let load = t.elapsed();
-    let (_, translator) = loaded.as_mut().expect("just loaded");
     let out = translator.translate(&texts);
     crate::log!(
         "[opencircle] mt {} texts: load {} ms, translate {} ms",
@@ -566,4 +613,61 @@ fn translate_here(
         (t.elapsed() - load).as_millis()
     );
     out
+}
+
+#[cfg(test)]
+mod mt_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::time::Duration;
+
+    static LOADS: AtomicUsize = AtomicUsize::new(0);
+
+    fn slow(n: u32) -> impl FnOnce() -> Result<u32, OcrError> + Send + 'static {
+        move || {
+            std::thread::sleep(Duration::from_millis(300));
+            LOADS.fetch_add(1, SeqCst);
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_warm_up_loads_meanwhile_and_the_next_request_waits_for_it() {
+        let (en_ar, fr_en) = (mt::pair("en", "ar").unwrap(), mt::pair("fr", "en").unwrap());
+        let mut m = Mt::Idle;
+        let t = Instant::now();
+        assert!(
+            m.get(en_ar, true, slow(1)).unwrap().is_none(),
+            "answered at once"
+        );
+        assert!(
+            t.elapsed() < Duration::from_millis(200),
+            "{:?}",
+            t.elapsed()
+        );
+        // the read asked for next would run here
+        assert_eq!(
+            m.get(en_ar, false, slow(2)).unwrap(),
+            Some(&mut 1),
+            "the warm one"
+        );
+        assert_eq!(
+            m.get(en_ar, false, slow(9)).unwrap(),
+            Some(&mut 1),
+            "kept for the next request"
+        );
+        assert_eq!(LOADS.load(SeqCst), 1, "loaded once");
+        // another pair: the first is freed, the new one loaded
+        assert_eq!(m.get(fr_en, false, slow(3)).unwrap(), Some(&mut 3));
+        assert!(matches!(m, Mt::Loaded(p, 3) if std::ptr::eq(p, fr_en)));
+        // a failed warm load is tried again by the next request
+        let mut m: Mt<u32> = Mt::Idle;
+        let fail = || Err(OcrError::Engine("broken".into()));
+        assert!(m.get(en_ar, true, fail).unwrap().is_none());
+        assert_eq!(
+            m.get(en_ar, false, slow(5)).unwrap(),
+            Some(&mut 5),
+            "tried again"
+        );
+    }
 }
