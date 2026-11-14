@@ -1121,3 +1121,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Live translate screen border (owner, 2026-11-14): the live mode's border must look like the app's Active Look edge (the same
   glow as main mode, maybe slightly different to tell live apart), NOT today's static thick border. Supersedes "Live and snip:
   static" for the look (still no moving colours; near 0 % CPU). For Live translation (0.3.0), design shown to the owner first.
+- #166 result (2026-11-14, owner's PC): the live text layer costs no game frames on a GPU-bound scene, so the version order
+  stays (GPU renderer stays at 0.9.0). Today's live loop costs ~2.2-2.5 CPU cores and ~700 MB (full-screen read every ~1 s):
+  Live translation (0.3.0) must read only the areas that changed (cheap per-frame change check first) and is re-measured on a
+  CPU-bound game with the cutscene test (#82). The owner watched today's Labs live and found it "not a nice experience".
