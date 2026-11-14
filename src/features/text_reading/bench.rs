@@ -625,6 +625,15 @@ fn peak_mb() -> i64 {
     usage.ru_maxrss / 1024
 }
 
+/// CPU seconds this process used so far (user + system).
+fn cpu_s() -> f64 {
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: getrusage only writes into the struct we pass.
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+    let s = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
+    s(usage.ru_utime) + s(usage.ru_stime)
+}
+
 #[test]
 #[ignore]
 fn screen_text_corpus() {
@@ -708,11 +717,13 @@ fn screen_text_corpus() {
                 };
                 let mut ms = Vec::new();
                 let mut boxes = Vec::new();
+                let cpu = cpu_s();
                 for _ in 0..reps {
                     let t = Instant::now();
                     boxes = e.detect_at(&img, p.w, p.h, size).unwrap().0;
                     ms.push(t.elapsed().as_secs_f64() * 1e3);
                 }
+                let cpu = (cpu_s() - cpu) / reps as f64;
                 let cov: Vec<f32> = p.lines.iter().map(|l| coverage(&l.bx, &boxes)).collect();
                 let found = cov.iter().filter(|c| **c >= 0.7).count();
                 println!(
@@ -722,7 +733,7 @@ fn screen_text_corpus() {
                 );
                 emit(
                     json!({"page": name, "path": path, "size": size, "ms": ms, "median": median(ms),
-                    "gt": p.lines.len(), "found": found, "coverage": cov, "boxes": boxes}),
+                    "gt": p.lines.len(), "found": found, "coverage": cov, "boxes": boxes, "cpu_s": cpu}),
                 );
                 continue;
             }
@@ -747,11 +758,13 @@ fn screen_text_corpus() {
             }
             let mut ms = Vec::new();
             let mut got = Vec::new();
+            let cpu = cpu_s();
             for _ in 0..reps {
                 let t = Instant::now();
                 got = run(&mut e, path, &p, &en, &known, &known3);
                 ms.push(t.elapsed().as_secs_f64() * 1e3);
             }
+            let cpu = (cpu_s() - cpu) / reps as f64;
             let mut s = score(&p, &got);
             println!(
                 "{name} {path}: {} blocks; green {} amber {} red {} of {}; CER {:.3} (all {:.3}); {:.0} ms",
@@ -768,6 +781,7 @@ fn screen_text_corpus() {
             s["path"] = json!(path);
             s["median"] = json!(median(ms.clone()));
             s["ms"] = json!(ms);
+            s["cpu_s"] = json!(cpu);
             s["blocks"] = json!(
                 got.iter()
                     .map(|b| json!([b.text, b.bounds, b.confidence]))

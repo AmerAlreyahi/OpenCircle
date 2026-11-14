@@ -4343,6 +4343,7 @@ version = "0.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
+ "clipper2-rust",
  "cosmic-text",
  "cpal",
  "dirs",

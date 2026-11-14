@@ -8,6 +8,9 @@ pub(crate) mod app;
 #[cfg(all(test, target_os = "linux"))]
 mod bench;
 pub(crate) mod models;
+// beside oar-ocr until `Engine` switches to it (#61)
+#[cfg(test)]
+mod ppocr;
 pub mod screen;
 pub(crate) mod screens;
 pub(crate) mod session;
