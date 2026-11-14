@@ -165,8 +165,19 @@ pub fn write_png(
 
 /// An RGBA image as 8-bit PNG bytes.
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    encode_png_with(width, height, rgba, png::Compression::default())
+}
+
+/// `encode_png` at a chosen compression (the Lens page wants `Fast`).
+pub fn encode_png_with(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    compression: png::Compression,
+) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_compression(compression);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     let mut writer = encoder.write_header().map_err(|e| e.to_string())?;

@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use crate::features::ask_ai::png_b64 as base64;
-use crate::shared::picture::encode_png;
+use crate::shared::picture::encode_png_with;
 use crate::shared::platform::capture::decode_png;
 
 /// Lens pages older versions wrote to the temp folder (still swept).
@@ -243,7 +243,8 @@ fn fit(png: &[u8], w: u32, h: u32) -> io::Result<(Vec<u8>, u32, u32)> {
             out.extend(sum.iter().map(|s| (s / n) as u8));
         }
     }
-    Ok((encode_png(dw, dh, &out).map_err(bad)?, dw, dh))
+    let png = encode_png_with(dw, dh, &out, png::Compression::Fast).map_err(bad)?;
+    Ok((png, dw, dh))
 }
 
 #[cfg(test)]
