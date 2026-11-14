@@ -6,7 +6,8 @@
 //! and says which, and presses come back as `globalShortcutPressed` signals.
 //!
 //! Who wins: KDE keeps the key it stored (a rebinding there is honoured, Settings shows
-//! it); a key changed in OpenCircle's Settings is written through to KDE.
+//! it); a key changed in OpenCircle's Settings is written through to KDE, and so is a
+//! default of ours that moved while KDE still had the old one (`old_default`).
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
@@ -173,13 +174,29 @@ fn write(conn: &DBusConnection, planned: &[Binding]) {
             .and_then(|d| qt_key(d.hotkey))
             .into_iter()
             .collect();
-        let changed = written.iter().find(|(i, _)| *i == b.id).map(|(_, s)| s) != Some(&b.shortcut);
         let _ = call(
             conn,
             "doRegister",
             (id.clone(),).to_variant(),
             DBusCallFlags::NONE,
         );
+        let stored = |method| {
+            call(
+                conn,
+                method,
+                (id.clone(),).to_variant(),
+                DBusCallFlags::NONE,
+            )
+            .ok()
+            .and_then(|r| first_key(&r.child_value(0)))
+        };
+        let changed = written.iter().find(|(i, _)| *i == b.id).map(|(_, s)| s) != Some(&b.shortcut)
+            || old_default(
+                stored("shortcutKeys"),
+                stored("defaultShortcutKeys"),
+                default.first().copied().and_then(from_qt),
+                b.hotkey,
+            );
         let _ = call(
             conn,
             "setShortcutKeys",
@@ -386,6 +403,20 @@ fn action_id(b: &Binding) -> Vec<String> {
 fn set_keys(id: &[String], keys: &[i32], flags: u32) -> Variant {
     let seqs: Vec<(Vec<i32>,)> = keys.iter().map(|k| (vec![*k, 0, 0, 0],)).collect();
     (id.to_vec(), seqs, flags).to_variant()
+}
+
+/// KDE still has the default an older OpenCircle registered, unchanged (`key` = KDE's
+/// recorded default), and our default has moved since (0.2.0: Translate Ctrl+Shift+T ->
+/// Alt+Shift+T, owner 2026-11-14) while the config is on the new one: the new key is
+/// written through, once (KDE then records the new default, so a key the user picks there
+/// later stays). A key the user chose in KDE differs from its default and stays.
+fn old_default(
+    key: Option<HotKey>,
+    kde_default: Option<HotKey>,
+    ours: Option<HotKey>,
+    planned: HotKey,
+) -> bool {
+    key.is_some() && key == kde_default && kde_default != ours && ours == Some(planned)
 }
 
 /// The first chord of the first sequence of an `a(ai)` answer, when it is a key we know.
@@ -597,6 +628,32 @@ mod tests {
         );
         assert_eq!((COMPONENT, "capture").to_variant().type_().as_str(), "(ss)");
         assert_eq!((true,).to_variant().type_().as_str(), "(b)");
+    }
+
+    /// W18 (KDE X11 and Wayland): after the v11 -> v12 move KDE kept Ctrl+Shift+T for
+    /// Translate, the default 0.1.8 registered; it follows the new default once, and a
+    /// key the user set in KDE stays.
+    #[test]
+    fn an_old_default_kde_kept_moves_to_the_new_one_once() {
+        let k = |s| parse_shortcut(s).ok();
+        let (old, new, own) = (k("Ctrl+Shift+T"), k("Alt+Shift+T"), k("Super+T"));
+        let alt = new.unwrap();
+        assert!(old_default(old, old, new, alt), "0.1.8's default moves");
+        assert!(
+            !old_default(new, new, new, alt),
+            "moved: KDE's default is ours"
+        );
+        assert!(!old_default(own, old, new, alt), "the user's KDE key stays");
+        assert!(
+            !old_default(old, new, new, alt),
+            "picked in KDE after the move"
+        );
+        assert!(!old_default(None, None, new, alt), "nothing stored yet");
+        let ctrl = old.unwrap();
+        assert!(
+            !old_default(old, old, new, ctrl),
+            "OpenCircle's config kept Ctrl+Shift+T (Alt+Shift+T was taken)"
+        );
     }
 
     #[test]
