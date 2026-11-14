@@ -1403,6 +1403,7 @@ fn glossary_terms_survive_the_offline_path() {
     let g = Glossary {
         name: "T".into(),
         windows: Vec::new(),
+        removed: Vec::new(),
         terms: vec![
             Term {
                 text: "Vyrnhold".into(),

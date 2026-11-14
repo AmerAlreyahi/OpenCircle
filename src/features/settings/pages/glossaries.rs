@@ -75,9 +75,6 @@ pub enum Msg {
     Import,
     /// The picked file's text (`None` = cancelled; an error says why).
     Imported(Option<Result<String, String>>),
-    Replace,
-    KeepBoth,
-    CancelImport,
     Export,
     Exported(Result<(), String>),
     Lang(Named),
@@ -153,8 +150,8 @@ pub struct Page {
     /// The name field (Rename / New), its text.
     renaming: Option<String>,
     confirm_delete: bool,
-    /// An imported glossary whose name is taken.
-    pending: Option<Glossary>,
+    /// What the last import merged into a glossary of the same name (one line).
+    summary: Option<String>,
     /// The last removed term (its index), for Undo.
     undo: Option<(usize, Term)>,
     problem: Option<String>,
@@ -178,7 +175,7 @@ impl Page {
             hover: None,
             renaming: None,
             confirm_delete: false,
-            pending: None,
+            summary: None,
             undo: None,
             problem: None,
             choices: Vec::new(),
@@ -249,6 +246,7 @@ impl Page {
         self.confirm_delete = false;
         self.undo = None;
         self.problem = None;
+        self.summary = None;
     }
 
     fn create(&mut self, name: &str) -> String {
@@ -330,40 +328,8 @@ impl Page {
             Msg::Imported(Some(Err(e))) => self.problem = Some(fmt(S::gl_failed, &[&e])),
             Msg::Imported(Some(Ok(text))) => match store::parse(&text) {
                 Err(e) => self.problem = Some(fmt(S::gl_failed, &[&e])),
-                Ok(g) => match self.all.iter().any(|(_, o)| o.name == g.name) {
-                    true => self.pending = Some(g),
-                    false => self.add_imported(g),
-                },
+                Ok(g) => self.import(g),
             },
-            Msg::Replace => {
-                if let Some(g) = self.pending.take() {
-                    let slug = (self.all.iter())
-                        .find(|(_, o)| o.name == g.name)
-                        .map(|(s, _)| s.clone());
-                    match slug {
-                        Some(s) => {
-                            if let Err(e) = store::save(&self.dir, &s, &g) {
-                                self.problem = Some(fmt(S::gl_failed, &[&e]));
-                            }
-                            self.reload();
-                            self.open(&s);
-                        }
-                        None => self.add_imported(g),
-                    }
-                }
-            }
-            Msg::KeepBoth => {
-                if let Some(mut g) = self.pending.take() {
-                    let mut n = 1;
-                    let base = g.name.clone();
-                    while self.all.iter().any(|(_, o)| o.name == g.name) {
-                        n += 1;
-                        g.name = [base.as_str(), &n.to_string()].join(" ");
-                    }
-                    self.add_imported(g);
-                }
-            }
-            Msg::CancelImport => self.pending = None,
             Msg::Export => {
                 if let Some(g) = self.cur() {
                     reply.job = Some(Job::Export {
@@ -413,6 +379,9 @@ impl Page {
                     .filter(|g| i < g.terms.len())
                     .map(|g| g.terms.remove(i));
                 if let Some(t) = removed {
+                    if let Some(g) = self.cur() {
+                        g.removed.push(t.key());
+                    }
                     self.undo = Some((i, t));
                     self.save();
                 }
@@ -421,12 +390,38 @@ impl Page {
                 if let Some((i, t)) = self.undo.take()
                     && let Some(g) = self.cur()
                 {
+                    g.removed.retain(|r| *r != t.key());
                     g.terms.insert(i.min(g.terms.len()), t);
                     self.save();
                 }
             }
         }
         reply
+    }
+
+    /// A file for a game that already has a glossary (the same name) merges into
+    /// it (`Glossary::merge`: yours win, deleted terms stay deleted); else it is
+    /// a new glossary.
+    fn import(&mut self, g: Glossary) {
+        let name = g.name.to_lowercase();
+        let same = (self.all.iter()).find(|(_, o)| o.name.to_lowercase() == name);
+        let Some((slug, mut mine)) = same.cloned() else {
+            return self.add_imported(g);
+        };
+        let done = mine.merge(g);
+        if let Err(e) = store::save(&self.dir, &slug, &mine) {
+            self.problem = Some(fmt(S::gl_failed, &[&e]));
+        }
+        self.reload();
+        self.open(&slug);
+        self.summary = Some(fmt(
+            S::gl_merged,
+            &[
+                &done.added.to_string(),
+                &done.kept_yours.to_string(),
+                &done.duplicates.to_string(),
+            ],
+        ));
     }
 
     fn add_imported(&mut self, g: Glossary) {
@@ -547,25 +542,9 @@ pub fn editor(state: &State) -> Element<'_, Message> {
     if let Some(line) = line {
         rows = rows.push(container(line).padding([space::ROW_Y, 0.0]));
     }
-    if let Some(pending) = &page.pending {
-        rows = rows.push(
-            container(
-                crate::dir_row![
-                    sub(Role::ROW_DESC, fmt(S::gl_exists, &[&pending.name])),
-                    Space::new().width(Fill),
-                    button(label(t!(c_cancel)), Kind::Quiet, Some(m(Msg::CancelImport))),
-                    button(
-                        label(t!(gl_keep_both)),
-                        Kind::Elevated,
-                        Some(m(Msg::KeepBoth))
-                    ),
-                    button(label(t!(gl_replace)), Kind::Elevated, Some(m(Msg::Replace)))
-                ]
-                .spacing(space::GAP)
-                .align_y(iced::Center),
-            )
-            .padding([space::ROW_Y, 0.0]),
-        );
+    if let Some(done) = &page.summary {
+        rows =
+            rows.push(container(muted(Role::ROW_DESC, done.as_str())).padding([space::ROW_Y, 0.0]));
     }
     if let Some(p) = &page.problem {
         rows = rows.push(crate::shared::kit::text::error(Role::ROW_DESC, p.as_str()));

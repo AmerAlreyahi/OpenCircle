@@ -1,3 +1,4 @@
+use super::merge::Merged;
 use super::*;
 
 fn term(text: &str, tr: &[(&str, &str)]) -> Term {
@@ -7,7 +8,7 @@ fn term(text: &str, tr: &[(&str, &str)]) -> Term {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
-        case: false,
+        ..Term::default()
     }
 }
 
@@ -21,6 +22,7 @@ fn game() -> Glossary {
             term("Ash Warden", &[("ar", "حارس الرماد")]),
             term("Ash", &[("ar", "رماد")]),
         ],
+        removed: Vec::new(),
     }
 }
 
@@ -289,4 +291,73 @@ fn off_a_game_screen_no_glossary_is_in_use() {
     assert!(!screen::is_game() && screen::active(&all, "a").is_none());
     screen::saw_frame(true);
     assert!(!screen::is_game() && screen::active(&all, "a").is_none());
+}
+
+fn parsed(text: &str) -> Glossary {
+    store::parse(text).unwrap()
+}
+
+/// Merge, never replace (owner, 2026-11-14): the same term (case, spaces,
+/// accents ignored) is one row; the player's translation wins and the file's
+/// goes underneath; new terms are added; a duplicate counts as one.
+#[test]
+fn a_merge_keeps_the_players_words_and_adds_the_rest() {
+    let mut mine = parsed(
+        "name = \"G\"\n[[term]]\ntext = \"Ash Warden\"\nar = \"حارس\"\n\
+         [[term]]\ntext = \"Emberglass\"\nar = \"جمر\"\n",
+    );
+    let file = parsed(
+        "name = \"G\"\nwindows = [\"G game\"]\n\
+         [[term]]\ntext = \"ASHWARDEN\"\nar = \"حارس الرماد\"\n\
+         [[term]]\ntext = \"Émberglass\"\nar = \"جمر\"\n\
+         [[term]]\ntext = \"Vyrnhold\"\n",
+    );
+    let done = mine.merge(file);
+    assert_eq!(
+        done,
+        Merged {
+            added: 1,
+            kept_yours: 1,
+            duplicates: 1
+        }
+    );
+    assert_eq!(mine.terms.len(), 3, "one row per term");
+    let w = &mine.terms[0];
+    assert_eq!(w.translations["ar"], "حارس", "yours stays");
+    assert_eq!(w.base["ar"], "حارس الرماد", "theirs underneath");
+    assert_eq!(mine.windows, ["G game"]);
+}
+
+/// A term the player deleted stays deleted when the file comes again, and the
+/// tombstone is in the file; a term typed again is no longer deleted.
+#[test]
+fn a_deleted_term_stays_deleted_after_a_re_import() {
+    let mut mine = parsed("name = \"G\"\n[[term]]\ntext = \"Vyrnhold\"\n");
+    let gone = mine.terms.remove(0);
+    mine.removed.push(gone.key());
+    let file =
+        || parsed("name = \"G\"\n[[term]]\ntext = \"vyrn hold\"\n[[term]]\ntext = \"Zed\"\n");
+    let done = mine.merge(file());
+    assert_eq!((done.added, mine.terms.len()), (1, 1));
+    // through the file and back
+    let mut again = parsed(&store::render(&mine));
+    assert_eq!(again.removed, mine.removed);
+    again.merge(file());
+    assert_eq!(again.terms.len(), 1, "still deleted");
+    // typed again: the tombstone goes
+    again.terms.push(Term {
+        text: "Vyrnhold".into(),
+        ..Term::default()
+    });
+    assert!(parsed(&store::render(&again)).removed.is_empty());
+}
+
+/// A file from before merging (no tombstones, no base) loads as it was.
+#[test]
+fn an_old_glossary_file_still_loads() {
+    let g = parsed(
+        "name = \"Old\"\nwindows = [\"Old\"]\n[[term]]\ntext = \"Zed\"\nar = \"زد\"\ncase = true\n",
+    );
+    assert!(g.removed.is_empty() && g.terms[0].base.is_empty() && g.terms[0].case);
+    assert_eq!(g.terms[0].translations["ar"], "زد");
 }

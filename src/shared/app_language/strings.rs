@@ -1917,12 +1917,8 @@ strings! {
         | "أُزيل المصطلح";
     gl_undo: "Undo"
         | "تراجع";
-    gl_exists: "A glossary named “{}” already exists."
-        | "يوجد قاموس باسم «{}» بالفعل.";
-    gl_replace: "Replace"
-        | "استبدال";
-    gl_keep_both: "Keep both"
-        | "الاحتفاظ بالاثنين";
+    gl_merged: "{} terms added · {} kept yours · {} duplicates"
+        | "أضيفت {} مصطلحات · بقيت {} من مصطلحاتك · {} مكرّرة";
     gl_more_rows: "{} more terms: search to narrow the list"
         | "{} مصطلحات أخرى: ابحث لتضييق القائمة";
     gl_hint: "Leave the translation empty to keep a name as it is."

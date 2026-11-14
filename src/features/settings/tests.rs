@@ -3784,6 +3784,7 @@ fn game_file(dir: &std::path::Path, slug: &str, name: &str, terms: &[(&str, &str
     let g = Glossary {
         name: name.into(),
         windows: vec![name.into()],
+        removed: Vec::new(),
         terms: terms
             .iter()
             .map(|(t, ar)| Term {
@@ -3792,7 +3793,7 @@ fn game_file(dir: &std::path::Path, slug: &str, name: &str, terms: &[(&str, &str
                     .then(|| ("ar".to_string(), (*ar).to_string()))
                     .into_iter()
                     .collect(),
-                case: false,
+                ..Term::default()
             })
             .collect(),
     };
@@ -3902,7 +3903,7 @@ fn the_glossary_editor_edits_the_file_as_you_type() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// New, rename, import (a taken name asks Replace / Keep both), export and
+/// New, rename, import (a taken name merges), export and
 /// delete: the file-level actions of More.
 #[test]
 fn the_glossary_editor_creates_imports_exports_and_deletes() {
@@ -3915,7 +3916,7 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
     update(&mut s, Message::Glossaries(Msg::Renaming(true)));
     update(&mut s, Message::Glossaries(Msg::Name("Ashen Tides".into())));
     assert_eq!(store::load_all(&dir)[0].1.name, "Ashen Tides");
-    // import: a bad file says why; a new name is added; a taken one asks
+    // import: a bad file says why; a new name is added; a taken one merges
     update(
         &mut s,
         Message::Glossaries(Msg::Imported(Some(Ok("not a file [".into())))),
@@ -3931,23 +3932,17 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
         Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
     );
     assert_eq!(store::load_all(&dir).len(), 2);
+    // the same name again merges into it (no second glossary, nothing replaced)
     update(
         &mut s,
         Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
     );
-    assert!(shot::texts(view(&s)).iter().any(|t| t == "Keep both"));
-    update(&mut s, Message::Glossaries(Msg::KeepBoth));
-    let names: Vec<_> = store::load_all(&dir)
-        .into_iter()
-        .map(|(_, g)| g.name)
-        .collect();
-    assert_eq!(names, ["Ashen Tides", "Other", "Other 2"]);
-    update(
-        &mut s,
-        Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
+    assert_eq!(store::load_all(&dir).len(), 2);
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t == "0 terms added \u{b7} 0 kept yours \u{b7} 1 duplicates")
     );
-    update(&mut s, Message::Glossaries(Msg::Replace));
-    assert_eq!(store::load_all(&dir).len(), 3, "replaced, not added");
     // export hands the file's text to the shell's dialog
     match update(&mut s, Message::Glossaries(Msg::Export)) {
         Outcome::Glossaries(Job::Export { name, text }) => {
@@ -3960,8 +3955,8 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
         Outcome::Glossaries(Job::Import)
     );
     // delete asks first, then removes the file and drops the active pick
-    s.draft.translate.glossary = "other-2".into();
-    update(&mut s, Message::Glossaries(Msg::Pick("other-2".into())));
+    s.draft.translate.glossary = "other".into();
+    update(&mut s, Message::Glossaries(Msg::Pick("other".into())));
     update(&mut s, Message::Glossaries(Msg::AskDelete(true)));
     assert!(
         shot::texts(view(&s))
@@ -3969,7 +3964,7 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
             .any(|t| t.starts_with("Delete the glossary"))
     );
     update(&mut s, Message::Glossaries(Msg::Delete));
-    assert_eq!(store::load_all(&dir).len(), 2);
+    assert_eq!(store::load_all(&dir).len(), 1);
     assert_eq!(s.draft.translate.glossary, "");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -31,11 +31,12 @@ fn game() -> Glossary {
             .then(|| ("ar".to_string(), ar.to_string()))
             .into_iter()
             .collect::<BTreeMap<_, _>>(),
-        case: false,
+        ..Term::default()
     };
     Glossary {
         name: "Test".into(),
         windows: Vec::new(),
+        removed: Vec::new(),
         terms: vec![
             term("Vyrnhold", ""),
             term("Kaelith", ""),

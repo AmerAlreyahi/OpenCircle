@@ -62,6 +62,9 @@ struct File {
     windows: Vec<String>,
     #[serde(default, rename = "term", skip_serializing_if = "Vec::is_empty")]
     terms: Vec<Entry>,
+    /// Deleted terms (tombstones); old files have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    removed: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -70,6 +73,9 @@ struct Entry {
     text: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     case: bool,
+    /// The shared translations under the player's own (merge); old files have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    base: BTreeMap<String, String>,
     /// Language codes -> translations; anything else is ignored on import.
     #[serde(flatten)]
     rest: BTreeMap<String, toml::Value>,
@@ -124,10 +130,15 @@ pub fn parse(text: &str) -> Result<Glossary, Error> {
         {
             return Err(Error::TermTooLong);
         }
+        let base = (e.base.into_iter())
+            .filter_map(|(k, v)| Some((lang::find(&k)?.code.to_string(), v)))
+            .filter(|(_, v)| !v.trim().is_empty() && v.chars().count() <= MAX_TERM_CHARS)
+            .collect();
         terms.push(Term {
             text,
             translations,
             case: e.case,
+            base,
         });
     }
     Ok(Glossary {
@@ -135,6 +146,11 @@ pub fn parse(text: &str) -> Result<Glossary, Error> {
         windows: (f.windows.into_iter())
             .map(|w| w.trim().to_string())
             .filter(|w| !w.is_empty())
+            .collect(),
+        removed: (f.removed.into_iter())
+            .map(|r| Term::key_of(&r))
+            .filter(|r| !r.is_empty())
+            .take(MAX_TERMS)
             .collect(),
         terms,
     })
@@ -149,10 +165,16 @@ pub fn render(g: &Glossary) -> String {
             .map(|t| Entry {
                 text: t.text.clone(),
                 case: t.case,
+                base: t.base.clone(),
                 rest: (t.translations.iter())
                     .map(|(k, v)| (k.clone(), toml::Value::String(v.clone())))
                     .collect(),
             })
+            .collect(),
+        // (a term typed again is no longer deleted)
+        removed: (g.removed.iter())
+            .filter(|r| !g.terms.iter().any(|t| t.key() == **r))
+            .cloned()
             .collect(),
     };
     toml::to_string(&f).unwrap_or_default()

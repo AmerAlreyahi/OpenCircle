@@ -13,6 +13,7 @@
 // pipeline.rs after W9's game-mode work: drop this allow with them.
 
 mod menu;
+mod merge;
 pub(crate) mod screen;
 pub(crate) mod store;
 
@@ -34,6 +35,9 @@ pub struct Term {
     pub translations: BTreeMap<String, String>,
     /// Match case (default off: game text is often all caps).
     pub case: bool,
+    /// What a merged-in file said where the player's own translation won: the
+    /// shared value underneath, for a later "Reset to shared".
+    pub base: BTreeMap<String, String>,
 }
 
 impl Term {
@@ -55,6 +59,9 @@ pub struct Glossary {
     /// Window titles that pick it by themselves (substring, case-insensitive).
     pub windows: Vec<String>,
     pub terms: Vec<Term>,
+    /// Terms the player deleted (`Term::key`): a merged-in file never brings
+    /// them back (tombstones).
+    pub removed: Vec<String>,
 }
 
 /// A term found in a line: its byte range and its entry.
