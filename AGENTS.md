@@ -1130,3 +1130,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   fast (measure time from subtitle shown to translation drawn), is drawn once and stays steady (no redraw flicker while the
   same text is on screen; only changed areas re-read and redrawn), and leaves no stale patch. These are cutscene-test (#82)
   pass lines next to the frozen-patch rule.
+- v0.2.0 scope trim (owner, 2026-11-14): #134 (MeikiOCR Japanese spike), #135 (PP-OCRv6 spike) and #137 (models-v2 three-way
+  measurement + README) move to Live translation (0.3.0). Japanese gets little effort in v0.2.0: no new Japanese reader work;
+  the Japanese corpus screen (loading) is best effort, not held to the 90 % target. Russian/Cyrillic and Portuguese stay.
