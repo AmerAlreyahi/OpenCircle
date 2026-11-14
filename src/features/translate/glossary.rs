@@ -321,6 +321,26 @@ const ROWS: &[[&str; 7]] = &[
         "Invocar",
         "استدعاء",
     ],
+    // an inventory's tab and an item's stat (de-en alone: "Watering",
+    // "Shelf life"; the corpus' inventory)
+    [
+        "Potions",
+        "Pociones",
+        "Potions",
+        "Tränke",
+        "Pozioni",
+        "Poções",
+        "الجرعات",
+    ],
+    [
+        "Durability",
+        "Durabilidad",
+        "Durabilité",
+        "Haltbarkeit",
+        "Durabilità",
+        "Durabilidade",
+        "المتانة",
+    ],
 ];
 
 /// `label`'s translation into `target` when it is exactly one of the
@@ -355,6 +375,8 @@ mod tests {
         assert_eq!(lookup("Restablecer", "fr"), Some("Réinitialiser"));
         assert_eq!(lookup("Aplicar", "de"), Some("Übernehmen"));
         assert_eq!(lookup("LANGUE:", "es"), Some("Idioma"));
+        assert_eq!(lookup("Tränke", "en"), Some("Potions"));
+        assert_eq!(lookup("Haltbarkeit", "ar"), Some("المتانة"));
         // a phrase, a word not in the table, a target not in it
         assert_eq!(lookup("Brillo de pantalla", "en"), None);
         assert_eq!(lookup("Alta", "en"), None);
