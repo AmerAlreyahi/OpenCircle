@@ -1165,3 +1165,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   sentence split at . ! ? ؟, ، / ؛ cuts, vowel marks + tatweel stripped: COMET 0.852 -> 0.859). A bigger opt-in "Better Arabic
   quality" model (tc-big-ar-en CC BY 4.0 or tc-bible-big-sem-en Apache-2.0: COMET ~0.89, 309 MB, ~2x RAM, ~1.8x slower) comes
   in a LATER version, downloaded only on the user's click; target COMET >= 0.88 on the W16 set.
+- Linux main-mode switch approved (owner, 2026-11-14): Linux main mode reads part by part like Windows in v0.2.0 (W12:
+  English 3440 -21..-37 % time + missed lines 5 -> 0; English 1080 at parity within noise; French faster, -14..-22 % memory;
+  Arabic/mixed far better reads; Arabic 150 % +28..36 % time accepted for the better reading). Proven on the Ubuntu VM in the
+  combined pass before release. Open: Arabic small-text CER 0.231 vs 0.157 at a3e0594f (still far better than the old 0.439).
