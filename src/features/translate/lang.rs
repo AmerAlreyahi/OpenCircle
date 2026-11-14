@@ -368,13 +368,46 @@ pub fn real_lines(lines: &[&str]) -> Vec<bool> {
         .collect()
 }
 
-/// Which Latin-script language `texts` are in (`votes`); English when none
-/// stands out.
+/// The Latin-script language the detector (whichlang) finds in `text`, of
+/// those offline models translate; `None` for the others it knows
+/// (Swedish, Turkish: a Spanish battle HUD of names and numbers was
+/// "Swedish").
+fn which(text: &str) -> Option<&'static str> {
+    use whichlang::Lang;
+    Some(match whichlang::detect_language(text) {
+        Lang::Eng => "en",
+        Lang::Fra => "fr",
+        Lang::Deu => "de",
+        Lang::Spa => "es",
+        Lang::Ita => "it",
+        Lang::Por => "pt",
+        Lang::Nld => "nl",
+        _ => return None,
+    })
+}
+
+/// Words of three letters or more in `text`.
+fn words(text: &str) -> usize {
+    (text.split(|c: char| !c.is_alphabetic()))
+        .filter(|w| w.chars().count() >= 3)
+        .count()
+}
+
+/// Which Latin-script language `texts` are in (the detector over all of
+/// them, else `votes`); English when none stands out.
 fn latin(texts: &[&str]) -> &'static str {
     // Italian has no `WORDS` row: its endings voted Spanish and an Italian
     // page was offered "Spanish -> Arabic" (Win10 VM and Ubuntu, it.wikipedia)
-    if italian(&texts.join("\n")) {
+    let all = texts.join("\n");
+    if italian(&all) {
         return "it";
+    }
+    // a page's words together, by the detector: game menus are short
+    // labels, and the endings voted Spanish for a French results screen
+    // ("Temps", "Meilleur tour", "Rejouer"), an Italian shop and a
+    // Portuguese quest log (which have no `WORDS` row)
+    if let Some(code) = which(&all).filter(|_| words(&all) >= 6) {
+        return code;
     }
     let votes = votes(texts);
     let (best, n) = (votes.iter().enumerate())
@@ -423,6 +456,8 @@ pub fn guess<'a>(texts: impl IntoIterator<Item = &'a str>) -> Option<&'static st
 /// plain words the votes can't settle goes to `detected`.
 pub fn sure(text: &str) -> Option<&'static str> {
     match guess([text])? {
+        // (a long line the detector names, of a language with no `WORDS` row)
+        g @ ("pt" | "nl") => Some(g),
         "en" | "es" | "fr" | "de" | "it" => {
             let words = text.split_whitespace();
             if words.filter(|w| w.chars().any(char::is_alphabetic)).count() < 3 {
@@ -435,8 +470,12 @@ pub fn sure(text: &str) -> Option<&'static str> {
             let mut sorted = v;
             sorted.sort_unstable();
             let best = v.iter().position(|n| *n == sorted[3])?;
+            // (not where the detector names another language: Portuguese
+            // has no `WORDS` row, and its endings voted Spanish: "Segredos
+            // da Floresta", "Recompensa: 500 moedas" went through es-en)
             if sorted[3] >= sorted[2] + 2 {
-                return Some(WORDS[best].0);
+                let other = which(text).is_some_and(|c| c != WORDS[best].0);
+                return (!other).then_some(WORDS[best].0);
             }
             detected(text, &v)
         }
@@ -748,5 +787,69 @@ mod tests {
             let got = certain(line);
             assert!(got.is_none() || got == Some(page), "{line}: {got:?}");
         }
+    }
+
+    /// Game screens of short labels (the corpus' racing, shop and quest log
+    /// screens as PP-OCR read them): Spanish endings outvoted French, and
+    /// Italian and Portuguese, which have no `WORDS` row.
+    #[test]
+    fn a_page_of_short_labels_is_told_by_all_its_words() {
+        let racing = [
+            "STAGE COMPLETE!",
+            "Nouveau record",
+            "personnel!",
+            "Position",
+            "Nova",
+            "Pilote",
+            "Temps",
+            "Meilleur tour",
+            "Kaito",
+            "Vous",
+            "Rejouer",
+            "Course suivante",
+            "Garage",
+        ];
+        assert_eq!(guess(racing), Some("fr"));
+        let shop = [
+            "Semi di zucca - 40",
+            "Annaffiatoio di rame",
+            "Fertilizzante - 25",
+            "Benvenuto! Oggi le carote sono in",
+            "offerta.",
+            "Compra",
+            "Vendi",
+            "Esci",
+        ];
+        assert_eq!(guess(shop), Some("it"));
+        let questlog = [
+            "Missoes principais",
+            "O Farol Perdido",
+            "Segredos da Floresta",
+            "A antiga guardi do farol, Irene, fala de uma",
+            "escuridao que consome a costa.. Devo ajudá-la.",
+            "Objetivos",
+            "Encontra 3 cristais de maré (1/3)",
+            "Recompensa: 500 moedas, 1 200 XP",
+            "Seguir missão",
+            "Abandonar",
+        ];
+        assert_eq!(guess(questlog), Some("pt"));
+        // a Portuguese line is not "sure" Spanish by its endings
+        for line in ["Segredos da Floresta", "Recompensa: 500 moedas, 1 200 XP"] {
+            assert_ne!(sure(line), Some("es"), "{line}");
+        }
+        // a battle HUD of names and numbers the detector calls Swedish
+        let battle = [
+            "Gólem Ancestral",
+            "Golpe crítico!",
+            "Atacar",
+            "Habilidades",
+            "Objetos",
+            "Defender",
+            "Elena",
+            "Huir",
+            "Marco",
+        ];
+        assert_eq!(guess(battle), Some("es"));
     }
 }
