@@ -370,7 +370,8 @@ pub(super) fn through_with(
     target: &str,
     run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
 ) -> Result<Vec<String>, AiError> {
-    let (bodies, marks): (Vec<String>, Vec<String>) = src.iter().map(|s| footnotes(s)).unzip();
+    let (bodies, marks): (Vec<String>, Vec<String>) =
+        src.iter().map(|s| footnotes(&unvowelled(s))).unzip();
     let (bodies, kept): (Vec<String>, Vec<_>) = bodies.iter().map(|s| shield(s)).unzip();
     // the user's glossary: each term is a number the model copies, put back
     // after (a lost number: that line again without, its terms fixed up);
@@ -411,6 +412,15 @@ pub(super) fn through_with(
             }
         });
     Ok(out.zip(marks).map(|(t, m)| t + &m).collect())
+}
+
+/// `s` without Arabic vowel marks and tatweel: the offline models don't read
+/// them (14 fully voweled lines: COMET 0.75 with, 0.86 without; plain text
+/// 0.8526 / 0.8524), so the model never sees them.
+fn unvowelled(s: &str) -> String {
+    (s.chars())
+        .filter(|c| !matches!(c, '\u{64B}'..='\u{652}' | '\u{670}' | '\u{640}'))
+        .collect()
 }
 
 /// `src` (sentences) through the models of `route` in turn. Through
@@ -1198,10 +1208,12 @@ pub(crate) fn by_sentence(
         .collect())
 }
 
-/// Sentence ends: `.`, `!` or `?` (and a citation mark after it, "planets.[12]",
-/// OCR's "Sedna.1131" for "[13]"), then a space and a capital, a digit, a
-/// quote or a bracket; not after an initial or a short abbreviation ("T.
-/// Goldsmith", "U.S. Patent", "Dr. Who": a fragment comes back as noise).
+/// Sentence ends: `.`, `!`, `?` or `؟` (and a citation mark after it, "planets.[12]",
+/// OCR's "Sedna.1131" for "[13]"), then a space and a capital, a letter of a
+/// script without case (Arabic, Hebrew: MT dropped every sentence of an
+/// Arabic paragraph after the first), a digit, a quote or a bracket; not
+/// after an initial or a short abbreviation ("T. Goldsmith", "U.S. Patent",
+/// "Dr. Who": a fragment comes back as noise).
 /// A sentence longer than [`LONG`] words is cut at its middle comma: Marian
 /// translates only the start of a long input (a Wikipedia paragraph whose
 /// stops all had citations came back as its first sentence; the rest of the
@@ -1211,14 +1223,22 @@ fn sentences(t: &str) -> Vec<String> {
     let mut start = 0;
     for (i, _) in t.match_indices(' ') {
         let next = t[i + 1..].chars().next();
-        if !next.is_some_and(|n| n.is_uppercase() || n.is_ascii_digit() || "\"'(“".contains(n)) {
+        let starts = |n: char| {
+            n.is_uppercase()
+                || n.is_ascii_digit()
+                || ('\u{660}'..='\u{669}').contains(&n)
+                || (n.is_alphabetic() && !n.is_lowercase())
+                || "\"'(“".contains(n)
+        };
+        if !next.is_some_and(starts) {
             continue;
         }
         let word = t[start..i].rsplit(' ').next().unwrap_or_default();
-        let Some(end) = word.rfind(['.', '!', '?']) else {
+        let Some(end) = word.rfind(['.', '!', '?', '؟']) else {
             continue;
         };
-        let (body, tail) = (&word[..end], &word[end + 1..]);
+        let stop = word[end..].chars().next().map_or(1, char::len_utf8);
+        let (body, tail) = (&word[..end], &word[end + stop..]);
         let cite = tail.is_empty()
             || (tail.len() <= 6
                 && (tail.starts_with('[') || tail.bytes().all(|b| b.is_ascii_digit())));
@@ -1474,8 +1494,10 @@ fn halves(s: &str) -> Vec<String> {
 /// galactique," has its only comma at the end).
 fn cut(s: &str) -> Option<[String; 2]> {
     let mid = s.len() / 2;
-    let after =
-        (s.match_indices([',', ';', ':']).map(|(i, _)| i + 1)).filter(|&i| s[i..].starts_with(' '));
+    let after = (s
+        .match_indices([',', ';', ':', '،', '؛'])
+        .map(|(i, c)| i + c.len()))
+    .filter(|&i| s[i..].starts_with(' '));
     let before = s.match_indices(" (").map(|(i, _)| i);
     let parts = |i: usize| [s[..i].trim().to_string(), s[i..].trim().to_string()];
     let fair = |p: &[String; 2]| p.iter().all(|p| p.split_whitespace().count() >= 3);

@@ -381,6 +381,28 @@ fn sentences_end_after_citations_and_long_ones_are_halved() {
     assert_eq!(sentences(&words), [words], "no comma: whole");
 }
 
+/// Arabic has no capitals and its question mark is `؟`: each sentence of a
+/// paragraph is its own model input (the model dropped all but the first of
+/// "توقف الخادم ... الصيانة. نعتذر ... سنعود قريباً."), an abbreviation ("د.
+/// أحمد") doesn't end one, and a long sentence is cut at its Arabic comma.
+#[test]
+fn arabic_sentences_are_split_at_their_stops() {
+    assert_eq!(
+        sentences("توقف الخادم عن العمل. نعتذر عن الإزعاج! سنعود قريباً؟ نعم، ١٠ دقائق."),
+        [
+            "توقف الخادم عن العمل.",
+            "نعتذر عن الإزعاج!",
+            "سنعود قريباً؟",
+            "نعم، ١٠ دقائق."
+        ]
+    );
+    assert_eq!(sentences("قال د. أحمد ذلك"), ["قال د. أحمد ذلك"]);
+    let long = format!("{}، {}.", ["كلمة"; 30].join(" "), ["أخرى"; 30].join(" "));
+    let parts = sentences(&long);
+    assert_eq!(parts.len(), 2, "{parts:?}");
+    assert!(parts[0].ends_with("كلمة،") && parts[1].starts_with("أخرى"));
+}
+
 /// Footnote marks (as Windows OCR read them on the matrix pages) leave
 /// the model's input and come back after the translation; brackets that
 /// are text stay.
@@ -1437,4 +1459,54 @@ fn glossary_terms_survive_the_offline_path() {
     };
     let out = through_with(&g, &src, &route, "en", loses).unwrap();
     assert_eq!(out, ["Go to Vyrnhold and Glassember"]);
+}
+
+/// Vowel marks and tatweel stay out of the model's input (it doesn't read them).
+#[test]
+fn arabic_vowel_marks_stay_out_of_the_model() {
+    use crate::features::translate::Glossary;
+    let seen = RefCell::new(Vec::new());
+    let run = |t: &[String], _: &'static mt::Pair| {
+        seen.borrow_mut().extend(t.iter().cloned());
+        Ok(t.iter().map(|_| "Sign in".to_string()).collect())
+    };
+    let route = mt::route("ar", "en").unwrap();
+    let src = vec!["تَسْجِيلُ الدُّخُولِ".to_string(), "مـرحـبـاً".to_string()];
+    let out = through_with(&Glossary::default(), &src, &route, "en", run).unwrap();
+    assert_eq!(*seen.borrow(), ["تسجيل الدخول", "مرحبا"]);
+    assert_eq!(out, ["Sign in", "Sign in"]);
+}
+
+/// Real Arabic -> English run, to measure the pipeline (not run by default):
+/// `OC_AR_SET=<tsv: id, kind, Arabic, ...> OC_AR_OUT=<tsv out> cargo test --release
+/// arabic_set_through_the_real_pipeline -- --ignored --nocapture` (downloads the
+/// pair on the first run). Writes `id <TAB> ms <TAB> English` per line, each line
+/// on its own as the app's `by_sentence` + `through` see it.
+#[test]
+#[ignore]
+fn arabic_set_through_the_real_pipeline() {
+    use crate::features::text_reading::models_dir;
+    use crate::features::translate::mt::{self, Translator};
+    let pair = mt::pair("ar", "en").unwrap();
+    pair.ensure(|_, _| {}).unwrap();
+    let tr = std::cell::RefCell::new(Translator::load(pair, &models_dir()).unwrap());
+    let run = |t: &[String], _: &'static mt::Pair| {
+        tr.borrow_mut()
+            .translate(t)
+            .map_err(|e| AiError::Offline(e.to_string()))
+    };
+    let set = std::fs::read_to_string(std::env::var("OC_AR_SET").unwrap()).unwrap();
+    let mut out = String::new();
+    for l in set.lines() {
+        let f: Vec<&str> = l.split('\t').collect();
+        let t0 = std::time::Instant::now();
+        let en = by_sentence(&[f[2].to_string()], |s| through(s, &[pair], "en", run)).unwrap();
+        out += &format!(
+            "{}\t{:.1}\t{}\n",
+            f[0],
+            t0.elapsed().as_secs_f64() * 1e3,
+            en[0]
+        );
+    }
+    std::fs::write(std::env::var("OC_AR_OUT").unwrap(), out).unwrap();
 }
