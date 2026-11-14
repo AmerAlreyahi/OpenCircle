@@ -119,6 +119,41 @@ fn one_call_in_order_skipping_numbers_and_target_language() {
     assert!(again.rgba == out.rgba);
 }
 
+/// #31: short headings and contents items are all sent to the model, one
+/// each; the OS's activation watermark (bottom-right corner, any Windows
+/// language) is never sent nor redrawn, but the same words mid-page are text.
+#[test]
+fn headings_and_contents_are_translated_and_the_os_watermark_is_left() {
+    let page = |watermark: [f32; 4]| {
+        vec![
+            tb("Contents", [40.0, 40.0, 120.0, 28.0]),
+            tb("1 History", [40.0, 90.0, 110.0, 28.0]),
+            tb("2.1 Early life", [40.0, 130.0, 140.0, 28.0]),
+            tb("See also", [40.0, 170.0, 90.0, 28.0]),
+            tb("Notes", [40.0, 210.0, 70.0, 28.0]),
+            tb("Activate Windows", watermark),
+            tb(
+                "Go to Settings to activate Windows.",
+                [watermark[0], watermark[1] + 30.0, 300.0, 24.0],
+            ),
+        ]
+    };
+    for (corner, sent) in [
+        ([650.0, 360.0, 200.0, 26.0], 5),
+        ([300.0, 250.0, 200.0, 26.0], 7),
+    ] {
+        let lines = page(corner);
+        let boxes: Vec<[f32; 4]> = lines.iter().map(|b| b.bounds).collect();
+        let img = frame(900, 450, &boxes);
+        let fake = Fake::new(move |_, _, _| lines.clone());
+        let out = translate_frame(&img, 900, 450, "ar", &Cache::new(64), &fake).unwrap();
+        let calls = fake.ai_calls.borrow();
+        let got: Vec<&String> = calls.iter().flatten().collect();
+        assert_eq!(got.len(), sent, "{got:?}");
+        assert!(out.blocks.iter().all(|b| b.original != "Activate Windows") == (sent == 5));
+    }
+}
+
 /// #27: top of the screen first, a few sentences, then more per call, and the first
 /// part is shown before the rest is translated; the whole page is then
 /// exactly the all-at-once result, and the part shown early stays put.

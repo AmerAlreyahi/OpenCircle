@@ -1377,6 +1377,9 @@ pub fn translate_progressively(
         .map(|b| to_line(b, width, height))
         .collect();
     let lines = split_fields(rgba, width as usize, height as usize, &lines);
+    let lines: Vec<Line> = (lines.into_iter())
+        .filter(|l| !os_watermark(l, (width, height)))
+        .collect();
     let ocr = start.elapsed();
     let blocks = group_blocks(&without_chrome(lines, height));
     deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());
@@ -1552,6 +1555,30 @@ pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
         );
     }
     kept
+}
+
+/// The OS's activation watermark ("Activate Windows" / "Go to Settings to
+/// activate Windows.", in the Windows language): in the frame's bottom-right
+/// corner, drawn by the system over every window, no text of the page. Left
+/// out like the browser's chrome (never translated, never redrawn); #31.
+// ponytail: the Windows watermark only, in its main languages; a table per
+// OS message if others (test mode, evaluation copy) are ever reported.
+fn os_watermark(l: &Line, (width, height): (u32, u32)) -> bool {
+    const TEXTS: &[&str] = &[
+        "activate windows",
+        "go to settings to activate windows",
+        "activer windows",
+        "accédez aux paramètres pour activer windows",
+        "windows aktivieren",
+        "activar windows",
+        "ativar o windows",
+        "تنشيط windows",
+        "windows الانتقال إلى الإعدادات لتنشيط",
+    ];
+    let [x, y, w, h] = l.bounds;
+    let corner = x + w / 2.0 > 0.55 * width as f32 && y + h / 2.0 > 0.6 * height as f32;
+    let text = l.text.trim().trim_end_matches('.').to_lowercase();
+    corner && TEXTS.iter().any(|t| text.starts_with(t))
 }
 
 /// An OCR box hugs the ink; `render`'s erase wants the line's box (it reads
