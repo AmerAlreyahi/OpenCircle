@@ -1118,3 +1118,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Runs on the owner's PC (2026-11-14 lesson): programs started from this session run inside the Claude desktop app's package,
   whose AppData (and possibly registry) writes go to a private copy (%LOCALAPPDATA%\Packages\Claude_*\LocalCache): start
   test builds through a scheduled task in his session and check the log shows the expected config before measuring.
+- Live translate screen border (owner, 2026-11-14): the live mode's border must look like the app's Active Look edge (the same
+  glow as main mode, maybe slightly different to tell live apart), NOT today's static thick border. Supersedes "Live and snip:
+  static" for the look (still no moving colours; near 0 % CPU). For Live translation (0.3.0), design shown to the owner first.
