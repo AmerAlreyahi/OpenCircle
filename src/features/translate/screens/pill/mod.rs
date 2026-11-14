@@ -413,11 +413,18 @@ impl Session {
             Msg::Add(msg) => return self.add(msg),
             Msg::Glossary(msg) => {
                 self.picker.close();
+                if let Some(task) = self.name_answer(&msg) {
+                    return task;
+                }
+                let asks = matches!(msg, glossary::GlossaryMsg::Ask(_));
                 // (New / Edit open Settings: the App takes `Glossary(Edit)` first)
                 if let Some(true) = self.glossary.update(msg) {
                     let source = &self.picker.source;
                     let models = models::installed(models::recognizer_for(source));
                     return self.begin(models);
+                }
+                if asks {
+                    return iced::widget::operation::focus(glossary::ASK);
                 }
             }
             Msg::Picker(msg) => {
@@ -451,6 +458,8 @@ impl Session {
                 self.work = None;
                 self.partial = None;
                 let update = (result.as_ref().ok()).map(|s| s.outdated.clone());
+                // (the names counted on this screen may now be suggestions)
+                self.glossary.refresh();
                 self.phase = match result {
                     Ok(shown) => Phase::Shown(shown),
                     Err(problem) => Phase::Failed(problem),
@@ -630,6 +639,41 @@ impl Session {
             }
         }
         Task::none()
+    }
+
+    /// A suggested name kept or given its translation: the term is saved
+    /// into the active glossary and the screen is translated again (like the
+    /// word card's Add). `None` = not such an answer.
+    fn name_answer(&mut self, msg: &glossary::GlossaryMsg) -> Option<Task<Msg>> {
+        use glossary::GlossaryMsg::{Keep, SaveAs};
+        let (word, fixed) = match msg {
+            Keep(w) => (w.clone(), None),
+            SaveAs => {
+                let (w, t) = self.glossary.asked()?;
+                (w.clone(), Some(t.trim().to_string()))
+            }
+            _ => return None,
+        };
+        let form = glossary::AddForm {
+            term: word.clone(),
+            keep: fixed.as_deref().is_none_or(str::is_empty),
+            always: fixed.unwrap_or_default(),
+            into: self.glossary.active.clone(),
+            name: String::new(),
+            picks: Vec::new(),
+        };
+        let dir = crate::features::translate::glossary_store::dir();
+        match form.save(&dir, &self.picker.target) {
+            Ok(_) => {
+                self.glossary.answered(&word);
+                let models = models::installed(models::recognizer_for(&self.picker.source));
+                Some(self.begin(models))
+            }
+            Err(e) => {
+                crate::log!("[opencircle] glossary name not saved: {e}");
+                Some(Task::none())
+            }
+        }
     }
 
     /// Explain: ONE streamed AI call with the block's text and image.

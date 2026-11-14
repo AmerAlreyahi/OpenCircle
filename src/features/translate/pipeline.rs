@@ -1661,6 +1661,12 @@ pub fn translate_progressively(
     // the glossary applies on a game screen only: decided on what the frame shows
     super::glossary::screen::saw_frame(has_address_bar(&lines, height));
     let blocks = group_blocks(&without_chrome(lines, height));
+    // repeated names become suggestions (a game screen's, counted in the background)
+    super::glossary::suggest::observe(
+        (blocks.iter())
+            .flat_map(|b| b.lines.iter().map(|l| l.text.clone()))
+            .collect(),
+    );
     deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());
     let mut tr = vec![String::new(); blocks.len()];
     let mut timings = Timings {

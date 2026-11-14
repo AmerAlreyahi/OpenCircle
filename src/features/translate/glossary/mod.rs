@@ -16,6 +16,7 @@ mod menu;
 mod merge;
 pub(crate) mod screen;
 pub(crate) mod store;
+pub(crate) mod suggest;
 
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
@@ -62,6 +63,9 @@ pub struct Glossary {
     /// Terms the player deleted (`Term::key`): a merged-in file never brings
     /// them back (tombstones).
     pub removed: Vec<String>,
+    /// Names the player rejected as suggestions (`Term::key`): never suggested
+    /// again (`suggest`).
+    pub rejected: Vec<String>,
 }
 
 /// A term found in a line: its byte range and its entry.

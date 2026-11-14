@@ -3785,6 +3785,7 @@ fn game_file(dir: &std::path::Path, slug: &str, name: &str, terms: &[(&str, &str
         name: name.into(),
         windows: vec![name.into()],
         removed: Vec::new(),
+        rejected: Vec::new(),
         terms: terms
             .iter()
             .map(|(t, ar)| Term {

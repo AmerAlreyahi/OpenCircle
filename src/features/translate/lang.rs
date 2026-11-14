@@ -266,7 +266,7 @@ pub fn common<'a>(texts: impl IntoIterator<Item = &'a str>) -> (usize, usize) {
 }
 
 /// `w` (lower case) is a common word of a `WORDS` language.
-fn common_word(w: &str) -> bool {
+pub fn common_word(w: &str) -> bool {
     WORDS.iter().any(|(_, list, _, _)| list.contains(&w))
 }
 

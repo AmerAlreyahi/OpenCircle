@@ -306,6 +306,9 @@ through the models, a lost number = that line again plain), `on_device_with` (a 
 word card's form `translate/screens/pill/glossary.rs`. The focused window's title is `window_rect::focused_title()` (Windows,
 X11; Wayland none), remembered at capture start. Other features reach it only through `translate::{Glossary, Term,
 glossary_store}`. New file field = an optional key in `store::File` / `Entry`, never a breaking one (files are shared).
+Name suggestions (0.2.0, #180): `glossary/suggest.rs` counts capitalised names per game on translated game screens
+(`pipeline` calls `suggest::observe` once, off-thread; counts in `<slug>.names.json`, rejections in the glossary file's
+`rejected`); the pill's dot and list read `suggest::pending`. A name shows on >= `NEEDED` different screens.
 
 **Add a colour**: a theme colour goes in every theme of `kit/themes.rs`; one
 that is the same in every theme in `kit::tokens::fixed`. Nowhere else.

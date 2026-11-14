@@ -1945,6 +1945,16 @@ strings! {
         | "في";
     gl_save_tag: "“{}” saved · {}"
         | "حُفظ «{}» · {}";
+    gl_names: "Names seen often"
+        | "أسماء تتكرر";
+    gl_names_tip: "{} · {} names to review"
+        | "{} · {} أسماء للمراجعة";
+    gl_translate_as: "Translate as…"
+        | "ترجمتها إلى…";
+    gl_reject: "Reject"
+        | "رفض";
+    gl_sug_save: "Save"
+        | "حفظ";
     // added in the Arabic finish (the backend sentences the UI shows, 2026-11-12)
     tx_not_rgba: "The captured picture could not be read."
         | "تعذّرت قراءة الصورة الملتقطة.";

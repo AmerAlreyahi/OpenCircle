@@ -61,6 +61,24 @@ pub fn badge<'a, Message: 'a>(
         .into()
 }
 
+/// A small accent disc with a count (the glossary button's names to
+/// review): 9 px / 600 in the window's colour on `accent`, round.
+pub fn count<'a, Message: 'a>(n: usize) -> Element<'a, Message> {
+    container(
+        text(n.min(9).to_string())
+            .size(9)
+            .font(weight(Weight::Semibold)),
+    )
+    .padding([1, 5])
+    .style(|_| container::Style {
+        background: Some(c().accent.into()),
+        text_color: Some(c().bg),
+        border: Border::default().rounded(radius::FULL),
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// A round pill: 10.5 px `text_sub` (`mono`: 11 px mono) on `hover` with a
 /// divider edge, 2x8 px; `width` = fixed, the label centred (the About page's
 /// "MIT", its licence pills).

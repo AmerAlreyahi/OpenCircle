@@ -67,6 +67,9 @@ struct File {
     /// Deleted terms (tombstones); old files have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     removed: Vec<String>,
+    /// Rejected name suggestions; old files have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rejected: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -154,6 +157,11 @@ pub fn parse(text: &str) -> Result<Glossary, Error> {
             .filter(|r| !r.is_empty())
             .take(MAX_TERMS)
             .collect(),
+        rejected: (f.rejected.into_iter())
+            .map(|r| Term::key_of(&r))
+            .filter(|r| !r.is_empty())
+            .take(super::suggest::MAX_REJECTED)
+            .collect(),
         terms,
     })
 }
@@ -178,6 +186,7 @@ pub fn render(g: &Glossary) -> String {
             .filter(|r| !g.terms.iter().any(|t| t.key() == **r))
             .cloned()
             .collect(),
+        rejected: g.rejected.clone(),
     };
     toml::to_string(&f).unwrap_or_default()
 }
@@ -215,7 +224,11 @@ pub fn load(dir: &Path, slug: &str) -> Option<Glossary> {
 /// `g` within the limits `parse` enforces on reading (else the file would be
 /// refused on the next load and the glossary lost).
 pub fn check(g: &Glossary) -> Result<(), Error> {
-    if g.terms.len() > MAX_TERMS || g.windows.len() > MAX_WINDOWS || g.removed.len() > MAX_TERMS {
+    if g.terms.len() > MAX_TERMS
+        || g.windows.len() > MAX_WINDOWS
+        || g.removed.len() > MAX_TERMS
+        || g.rejected.len() > super::suggest::MAX_REJECTED
+    {
         return Err(Error::TooMany);
     }
     match render(g).len() > MAX_BYTES {
@@ -245,6 +258,7 @@ pub fn save(dir: &Path, slug: &str, g: &Glossary) -> Result<(), Error> {
 pub fn delete(dir: &Path, slug: &str) {
     if !slug.contains(['/', '\\']) {
         let _ = std::fs::remove_file(path(dir, slug));
+        super::suggest::forget(dir, slug);
     }
 }
 

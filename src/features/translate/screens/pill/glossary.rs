@@ -6,16 +6,21 @@
 //! `translate.glossary` (remembered; where the OS tells the focused
 //! window's title, a glossary's `windows` list picks it by itself first).
 use iced::widget::tooltip::Position;
-use iced::{Element, Vector};
+use iced::widget::{column, container, stack};
+use iced::{Center, Element, Fill, Vector};
 
 use super::Msg;
-use crate::features::translate::glossary::{screen, store};
+use crate::features::translate::glossary::{Glossary, screen, store, suggest};
 use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt};
+use crate::shared::kit::chip;
 use crate::shared::kit::dir;
+use crate::shared::kit::field::input;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{State, icon_button};
-use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, separator};
+use crate::shared::kit::option_list::{MENU_WIDTH, group, item, menu, separator};
+use crate::shared::kit::text::text as label;
+use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
 
@@ -27,7 +32,18 @@ pub enum GlossaryMsg {
     Pick(String),
     /// New glossary / Edit glossaries…: the editor is Settings > Translate.
     Edit,
+    /// A suggested name: keep it as it is (the pill saves it and translates
+    /// again), ask for its translation, or never suggest it again.
+    Keep(String),
+    Ask(String),
+    Typed(String),
+    /// The typed translation of the name being asked about.
+    SaveAs,
+    Reject(String),
 }
+
+/// Suggestions the list shows at once (the rest follow as these are answered).
+const SHOWN: usize = 5;
 
 /// What the list shows.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +55,10 @@ pub struct Menu {
     pub active: String,
     /// The button's tooltip (names the active glossary).
     tip: String,
+    /// Names seen on several screens, to review (`suggest::pending`).
+    names: Vec<String>,
+    /// The name whose translation is being typed, and what is typed.
+    ask: Option<(String, String)>,
 }
 
 impl Menu {
@@ -55,16 +75,41 @@ impl Menu {
                 .map(|(s, g)| (s.clone(), g.name.clone(), g.terms.len()))
                 .collect(),
             tip: String::new(),
+            names: Vec::new(),
+            ask: None,
         };
+        menu.names = pending(&all, &menu.active);
         menu.words();
         menu
     }
 
+    /// Reads the counted names again (a screen was just translated).
+    pub fn refresh(&mut self) {
+        self.names = pending(&store::load_all(&store::dir()), &self.active);
+        self.words();
+    }
+
     fn words(&mut self) {
-        self.tip = match self.name() {
+        let tip = match self.name() {
             Some(n) => fmt(S::gl_tip_on, &[&n]),
             None => t!(gl_tip).to_string(),
         };
+        self.tip = match self.names.len() {
+            0 => tip,
+            n => fmt(S::gl_names_tip, &[&tip, &n]),
+        };
+    }
+
+    /// `word` is answered: it leaves the list.
+    pub fn answered(&mut self, word: &str) {
+        self.names.retain(|n| n != word);
+        self.ask = None;
+        self.words();
+    }
+
+    /// The typed translation to save, with its name (`SaveAs`).
+    pub fn asked(&self) -> Option<&(String, String)> {
+        self.ask.as_ref()
     }
 
     pub fn close(&mut self) {
@@ -84,7 +129,8 @@ impl Menu {
                 if changed {
                     screen::pick(&slug);
                     self.active = slug.clone();
-                    self.words();
+                    self.ask = None;
+                    self.refresh();
                     #[cfg(not(test))]
                     std::thread::spawn(move || {
                         if let Err(e) =
@@ -100,6 +146,25 @@ impl Menu {
                 self.open = false;
                 None
             }
+            GlossaryMsg::Ask(word) => {
+                self.ask = Some((word, String::new()));
+                Some(false)
+            }
+            GlossaryMsg::Typed(text) => {
+                if let Some((_, t)) = &mut self.ask {
+                    *t = text;
+                }
+                Some(false)
+            }
+            GlossaryMsg::Reject(word) => {
+                if let Err(e) = suggest::reject(&store::dir(), &self.active, &word) {
+                    crate::log!("[opencircle] could not remember the rejected name: {e}");
+                }
+                self.answered(&word);
+                Some(false)
+            }
+            // (the pill saves the term: it knows the target language)
+            GlossaryMsg::Keep(_) | GlossaryMsg::SaveAs => Some(false),
         }
     }
 
@@ -125,7 +190,17 @@ impl Menu {
             },
             Some(Msg::Glossary(GlossaryMsg::Toggle)),
         );
-        hint(b, &self.tip, Why::Icon, Position::Bottom)
+        let b = hint(b, &self.tip, Why::Icon, Position::Bottom);
+        if self.names.is_empty() {
+            return b;
+        }
+        // a small dot with the count at the button's corner (never a pop-up)
+        let dot = chip::count(self.names.len());
+        let dot = match dir::rtl() {
+            true => container(dot).align_left(Fill),
+            false => container(dot).align_right(Fill),
+        };
+        stack![b, dot.align_top(Fill)].into()
     }
 
     /// Where the list hangs, from the pill's top-left: under the buttons,
@@ -162,6 +237,11 @@ impl Menu {
                     pick(slug),
                 ));
             }
+            if !self.names.is_empty() {
+                rows.push(separator());
+                rows.push(group(t!(gl_names), 24.0));
+                rows.extend(self.names.iter().take(SHOWN).map(|n| self.suggestion(n)));
+            }
             rows.push(separator());
             let edit = Msg::Glossary(GlossaryMsg::Edit);
             rows.push(item(t!(gl_new), false, None, false, edit.clone()));
@@ -169,6 +249,63 @@ impl Menu {
             menu(rows)
         })
     }
+}
+
+impl Menu {
+    /// One suggested name: its three answers, or (after Translate as…) the
+    /// field for the translation.
+    fn suggestion<'a>(&'a self, name: &'a str) -> Element<'a, Msg> {
+        fn msg(m: GlossaryMsg) -> Msg {
+            Msg::Glossary(m)
+        }
+        let answers: Element<'a, Msg> = match &self.ask {
+            Some((w, typed)) if w == name => dir::row([
+                input(t!(gl_translate_as), typed, false, false)
+                    .id(ASK)
+                    .on_input(|s| msg(GlossaryMsg::Typed(s)))
+                    .on_submit(msg(GlossaryMsg::SaveAs))
+                    .width(Fill)
+                    .into(),
+                chip::action(t!(gl_sug_save).to_string(), msg(GlossaryMsg::SaveAs)),
+            ])
+            .spacing(space::GAP)
+            .align_y(Center)
+            .into(),
+            _ => dir::row([
+                chip::action(t!(gl_keep).to_string(), msg(GlossaryMsg::Keep(name.into()))),
+                chip::action(
+                    t!(gl_translate_as).to_string(),
+                    msg(GlossaryMsg::Ask(name.into())),
+                ),
+            ])
+            .spacing(space::GAP)
+            .into(),
+        };
+        // (the name, and a small x at its end: never suggested again)
+        let reject = icon_button(
+            Icon::Close.glyph(),
+            State::default(),
+            Some(msg(GlossaryMsg::Reject(name.into()))),
+        );
+        let title = dir::row([
+            container(label(Role::CONTROL, name)).width(Fill).into(),
+            hint(reject, t!(gl_reject), Why::Icon, Position::Bottom),
+        ])
+        .align_y(Center);
+        container(column![title, answers].spacing(space::GAP))
+            .padding([4.0, 10.0])
+            .into()
+    }
+}
+
+/// The field of "Translate as…".
+pub const ASK: &str = "glossary-name-translation";
+
+/// The names to review for glossary `slug` of `all`.
+fn pending(all: &[(String, Glossary)], slug: &str) -> Vec<String> {
+    (all.iter().find(|(s, _)| s == slug))
+        .map(|(s, g)| suggest::pending(&store::dir(), s, g))
+        .unwrap_or_default()
 }
 
 /// A glossary of the card's "In" dropdown.
@@ -206,18 +343,7 @@ pub enum AddMsg {
     Save,
 }
 
-/// Which of `words` may be names: capitalised, two letters or more, and not
-/// the start of a sentence (the first word, or one after . ! ? or :).
-pub fn names(words: &[&str]) -> Vec<bool> {
-    (0..words.len())
-        .map(|i| {
-            let starts = i == 0 || words[i - 1].ends_with(['.', '!', '?', ':']);
-            !starts
-                && words[i].starts_with(char::is_uppercase)
-                && words[i].chars().filter(|c| c.is_alphabetic()).count() > 1
-        })
-        .collect()
-}
+pub use crate::features::translate::glossary::suggest::names;
 
 /// The first name of `original` ("the Vyrnhold gate"), else the whole text.
 pub fn guess(original: &str) -> String {
@@ -326,8 +452,19 @@ impl Menu {
                 .collect(),
             active: active.into(),
             tip: String::new(),
+            names: Vec::new(),
+            ask: None,
         };
         m.words();
         m
+    }
+
+    /// `self` with suggested `names` (tests); `ask` = the one being typed.
+    #[cfg(test)]
+    pub fn with_names(mut self, names: &[&str], ask: Option<(&str, &str)>) -> Menu {
+        self.names = names.iter().map(|n| n.to_string()).collect();
+        self.ask = ask.map(|(a, b)| (a.into(), b.into()));
+        self.words();
+        self
     }
 }

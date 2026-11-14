@@ -921,6 +921,41 @@ fn every_translate_state_matches_its_golden_image() {
     });
 }
 
+/// The name suggestions (planning #180): the dot with the count on the glossary
+/// button, and the list with each name's three answers, then the field of
+/// "Translate as…", in English and Arabic, both themes.
+#[test]
+fn name_suggestions_match_their_golden_image() {
+    use crate::shared::kit::testing::golden;
+    const SCREEN: Size = Size::new(960.0, 560.0);
+    let at = card::place(SCREEN, None, None);
+    let make = |ask: bool| {
+        let mut s = session(true);
+        let _ = s.update(shown(Vec::new()));
+        let ask = ask.then_some(("Kaelith", "كايليث"));
+        s.glossary = glossary::Menu::sample(&["Ashen Tides", "Ruined Sky"], "ashen-tides", true)
+            .with_names(&["Kaelith", "Vyrnhold", "Emberglass"], ask);
+        s
+    };
+    golden::each_theme(|theme, failed| {
+        for (name, ask) in [
+            ("suggest", false),
+            ("ask", true),
+            ("suggest-ar", false),
+            ("ask-ar", true),
+        ] {
+            let _ar = name
+                .ends_with("-ar")
+                .then(crate::shared::kit::testing::arabic);
+            let s = make(ask);
+            let file = format!("translate-names-{name}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SCREEN, &[1.0], || {
+                s.view(SCREEN, at, false)
+            }));
+        }
+    });
+}
+
 /// Picking another language leaves no part of the old name on screen: each
 /// change redrawn only where it differs, as the window does, equals the same
 /// view drawn whole, at 100 % and 150 %.

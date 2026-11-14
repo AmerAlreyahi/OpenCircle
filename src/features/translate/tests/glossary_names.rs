@@ -37,6 +37,7 @@ fn game() -> Glossary {
         name: "Test".into(),
         windows: Vec::new(),
         removed: Vec::new(),
+        rejected: Vec::new(),
         terms: vec![
             term("Vyrnhold", ""),
             term("Kaelith", ""),

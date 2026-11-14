@@ -1426,6 +1426,7 @@ fn glossary_terms_survive_the_offline_path() {
         name: "T".into(),
         windows: Vec::new(),
         removed: Vec::new(),
+        rejected: Vec::new(),
         terms: vec![
             Term {
                 text: "Vyrnhold".into(),

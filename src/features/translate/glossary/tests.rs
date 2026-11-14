@@ -23,6 +23,7 @@ fn game() -> Glossary {
             term("Ash", &[("ar", "رماد")]),
         ],
         removed: Vec::new(),
+        rejected: Vec::new(),
     }
 }
 
