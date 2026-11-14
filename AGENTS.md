@@ -1150,3 +1150,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   window title (Windows, X11), the active glossary follows the game in front (its "Use for windows named" list); a game with
   no glossary gets none (never the previous game's). On Wayland the player's pick on the pill stays until changed (the pill
   shows which glossary is active, so a wrong one is visible at once).
+  Merge, never replace (owner, 2026-11-14): a game's glossary is two layers shown as one: a BASE layer (a glossary received:
+  a friend's file now, the community repository later) and the PLAYER's layer. Same term (case, spaces, accents ignored) =
+  one row; a conflict keeps the player's translation (the base one stays underneath: "Reset to shared"); a term the player
+  deleted stays deleted when the base updates; base updates add new terms and update only terms the player hasn't changed.
+  Importing a file for a game that already has a glossary MERGES into it with these rules and shows a one-line summary
+  ("12 terms added . 3 kept yours . 0 duplicates"). Merge-on-import ships in v0.2.0; the repository's base layer in 0.6.0.
