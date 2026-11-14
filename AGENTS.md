@@ -1086,3 +1086,12 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   OpenCircle-models GitHub releases to the OptimaMT Hugging Face repos in a later version (new URLs + sha256 pins, retry /
   resume tested against Hugging Face); OpenCircle-models' releases stay forever for older installs. v0.2.0 keeps
   OpenCircle-models. New pairs (Portuguese, models-v3) are also added to OptimaMT so both stay complete.
+- GPU research on the owner's PC (owner, 2026-11-14, "you can take control now, go ahead"): the live-translation research
+  (#136 model on the GPU, #166 live text layer cost) runs on the owner's Windows PC (RTX 3090) as the lead described: one temp
+  folder (%LOCALAPPDATA%\Temp\opencircle-gpu), portable programs only (no installer, admin, driver/registry/settings
+  change), temperature watched (stop above 83 C), everything closed and deleted after. Samples: game cutscenes STREAMED from
+  YouTube in the browser (never downloaded; private testing, nothing published), from MANY games and genres, not only
+  Genshin style, covering three scene kinds: fighting (little text), choices/thinking (much changing text, calm background),
+  balanced conversation. Menus/settings screens are already covered by the 13-screen corpus. Frame cost is measured on a
+  heavy full-screen browser 3D scene (no game); the owner tests real games himself and gives feedback. Never any automated
+  input into a game, never a handle to a game process.
