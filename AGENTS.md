@@ -1176,3 +1176,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   Owner, 2026-11-14 (later): "publish now if there is nothing after the weak PC test". Lead's plan: W17 (#117) and W19
   (Ubuntu-pass fixes) merge, then one Windows VM session runs the combined checks + the release gate, then publish directly.
   #31 headings and (if unsolved) KDE Wayland 1280x800 Arabic reading ship as known issues.
+- Glossary name suggester ships in v0.2.0 (owner, 2026-11-14; planning #180): local, quiet, game screens only: repeated
+  capitalised words / names on a game's translated screens become suggestions; a dot with a count on the pill's glossary button;
+  accept ("keep as is" / a translation) or reject in one click; rejected names are remembered per game and never suggested
+  again; never a pop-up during play; nothing leaves the PC. Built from the approved glossary design's parts (no new look).
