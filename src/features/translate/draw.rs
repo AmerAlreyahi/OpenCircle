@@ -327,9 +327,30 @@ fn weight(s: &LineStyle, em: f32) -> u16 {
     }
 }
 
+/// `spans` cut to their first `keep` characters (trailing space dropped) and
+/// closed with an ellipsis in the last kept span's colour.
+fn abbreviate(spans: &[Span], keep: usize) -> Vec<Span> {
+    let mut left = keep;
+    let mut out: Vec<Span> = Vec::new();
+    for (t, c) in spans {
+        let cut: String = t.chars().take(left).collect();
+        left -= cut.chars().count();
+        out.push((cut, *c));
+        if left == 0 {
+            break;
+        }
+    }
+    if let Some(last) = out.last_mut() {
+        last.0 = format!("{}\u{2026}", last.0.trim_end());
+    }
+    out
+}
+
 /// Lays out `text` to fit `p.bounds`: the original size at most, shrunk
 /// (wrapping at the room's width, inside the block's height) down to
-/// [`MIN_SCALE`] of it. `None` = it does not fit legibly.
+/// [`MIN_SCALE`] of it; then, at that floor, cut to the longest start that
+/// fits (whole words first, else part of the first word) and closed with an
+/// ellipsis (the last resort). `None` = not even a few letters fit legibly.
 pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     let s0 = &p.styles[0];
     // a paragraph's colour is most of its lines' (one line of links does
@@ -351,11 +372,10 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
         (false, false) => Align::Left,
     };
     let [bx, by, bw, bh] = p.bounds;
-    let mut size = em;
-    let (buf, h) = loop {
+    let mut try_at = |spans: &[Span], size: f32| {
         let lh = pitch.map_or(size * 1.3, |pt| pt.min(size * 1.6).max(size * 1.2));
         let buf = fonts.layout(
-            &spans,
+            spans,
             p.rtl,
             Metrics::new(size, lh),
             weight,
@@ -363,14 +383,47 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
             align,
         );
         let (w, h) = extent(&buf);
-        if w <= bw + 0.5 && h <= bh.max(lh) + 0.5 {
-            break (buf, h);
+        (w <= bw + 0.5 && h <= bh.max(lh) + 0.5).then_some((buf, h))
+    };
+    let floor = em * MIN_SCALE;
+    let mut size = em;
+    let mut found = None;
+    while size >= floor {
+        if let Some(f) = try_at(&spans, size) {
+            found = Some((f, size));
+            break;
         }
         size *= 0.95;
-        if size < em * MIN_SCALE {
-            return None;
-        }
-    };
+    }
+    let size = size / 0.95;
+    // a one-line label (a box under two lines at the floor size) that still
+    // does not fit: the last resort, the text cut at a word (or, with no
+    // word fitting, inside the first one) and an ellipsis. A paragraph is
+    // never cut: its original stays.
+    if found.is_none() && bh < 2.0 * size * 1.3 {
+        let chars: Vec<char> = spans.iter().flat_map(|(t, _)| t.chars()).collect();
+        let words: Vec<usize> = (2..chars.len())
+            .filter(|&k| chars[k].is_whitespace())
+            .collect();
+        let first = chars.iter().position(|c| c.is_whitespace());
+        let parts: Vec<usize> = (2..first.unwrap_or(chars.len())).collect();
+        // a fitting prefix stays fitting when shorter: bisect for the longest
+        let mut longest = |ks: &[usize]| {
+            let (mut lo, mut hi, mut best) = (0, ks.len(), None);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                match try_at(&abbreviate(&spans, ks[mid]), size) {
+                    Some(f) => (best, lo) = (Some(f), mid + 1),
+                    None => hi = mid,
+                }
+            }
+            best
+        };
+        found = longest(&words)
+            .or_else(|| longest(&parts))
+            .map(|f| (f, size));
+    }
+    let ((buf, h), size) = found?;
     // the buffer is `bw` wide and aligned inside it; centre it vertically
     let top = by + (bh - h) / 2.0;
     Some((buf, (bx.round() as i32, top.round() as i32), size))
@@ -539,13 +592,23 @@ mod tests {
         tall.styles[0].ink[1] -= 52;
         let (_, _, size) = fit(&mut fonts, "خروج", &tall).unwrap();
         assert!(size <= 40.0 / 1.3 + 0.1, "capped: {size}");
-        // too long for one line at 70 %: nothing
+        // too long for a label, even cut: nothing
         let p = placement([500.0, 50.0, 30.0, 40.0], 1, true);
         assert!(fit(&mut fonts, "مفعّلة", &p).is_none());
+        // a paragraph (a box of two lines or more) is never cut: the original stays
         let long = "أحضر [[حجر الشمس]] إلى المعبد القديم قبل حلول الليل، ولا تبتعد عن الطريق \
                     فالغابة ليست آمنة بعد حلول الظلام أبدا";
-        let p = placement([100.0, 50.0, 400.0, 40.0], 1, true);
+        let p = placement([100.0, 50.0, 200.0, 80.0], 2, true);
         assert!(fit(&mut fonts, long, &p).is_none());
+        let p = placement([100.0, 50.0, 100.0, 80.0], 2, false);
+        assert!(
+            fit(
+                &mut fonts,
+                "Bring the Sunstone to the old temple before nightfall",
+                &p
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -569,6 +632,87 @@ mod tests {
             size >= 27.7 * MIN_SCALE,
             "wrapping keeps it readable: {size}"
         );
+    }
+
+    /// Long translations into narrow buttons: the size shrinks to the floor,
+    /// then the text is cut with an ellipsis; the ink never leaves the box.
+    const BUTTONS: [(&str, bool); 6] = [
+        ("Geschwindigkeitsbegrenzung aktivieren", false),
+        ("Paramètres de configuration avancés", false),
+        ("Einstellungen", false),
+        ("إعدادات التكوين المتقدمة للعبة", true),
+        ("تفعيل الحد الأقصى للسرعة داخل المدينة", true),
+        ("OK", false),
+    ];
+
+    #[test]
+    fn long_translations_fit_narrow_buttons_or_are_cut_with_an_ellipsis() {
+        let mut fonts = Fonts::new();
+        for (text, rtl) in BUTTONS {
+            let b = [100.0, 50.0, 110.0, 34.0];
+            let p = placement(b, 1, rtl);
+            let fitted = fit(&mut fonts, text, &p).unwrap_or_else(|| panic!("{text}: nothing"));
+            assert!(
+                fitted.2 >= 27.7 * MIN_SCALE - 0.5,
+                "{text}: floor {}",
+                fitted.2
+            );
+            let e = ink_box(text, &p, (400, 150));
+            assert!(
+                e[0] >= 98 && e[2] <= 212 && e[1] >= 50 && e[3] <= 84,
+                "{text}: ink {e:?} outside the button {b:?}"
+            );
+        }
+        // an overlong one is marked as cut; a short one is whole
+        let p = placement([100.0, 50.0, 110.0, 34.0], 1, false);
+        let cut = fit(&mut fonts, BUTTONS[0].0, &p).unwrap();
+        assert!(cut.0.lines[0].text().ends_with('\u{2026}'));
+        let whole = fit(&mut fonts, "OK", &p).unwrap();
+        assert!(!whole.0.lines[0].text().contains('\u{2026}'));
+        // not even two letters: nothing (the original stays)
+        let p = placement([500.0, 50.0, 8.0, 40.0], 1, false);
+        assert!(fit(&mut fonts, "Einstellungen", &p).is_none());
+    }
+
+    /// A button row, Latin and Arabic, against its golden image
+    /// (`OC_BLESS=1` rewrites it; looked at by eye).
+    #[test]
+    fn the_button_rows_match_their_golden_images() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/translate/");
+        let latin = [BUTTONS[0].0, "Paramètres avancés", BUTTONS[2].0, "OK"];
+        let arabic = [BUTTONS[3].0, BUTTONS[4].0, "الإعدادات", "حسنا"];
+        for (name, rtl, texts) in [
+            ("fit_buttons_latin", false, latin),
+            ("fit_buttons_arabic", true, arabic),
+        ] {
+            let (w, h) = (640usize, 60usize);
+            let mut img = [28u8, 32, 44, 255].repeat(w * h);
+            let mut fonts = Fonts::new();
+            for (k, t) in texts.iter().enumerate() {
+                let b = [10.0 + 155.0 * k as f32, 13.0, 140.0, 34.0];
+                for y in b[1] as usize..(b[1] + b[3]) as usize {
+                    for x in b[0] as usize..(b[0] + b[2]) as usize {
+                        img[(y * w + x) * 4..][..3].copy_from_slice(&[52, 60, 84]);
+                    }
+                }
+                let p = placement(b, 1, rtl);
+                let f = fit(&mut fonts, t, &p).expect("fits");
+                draw_block(&mut fonts, &mut img, (w, h), &p, f);
+            }
+            let path = format!("{dir}{name}.png");
+            if std::env::var_os("OC_BLESS").is_some() {
+                super::super::tests::save_png(path.as_ref(), (w, h), &img);
+                continue;
+            }
+            let want = crate::shared::platform::capture::from_png(path.as_ref()).unwrap();
+            let off = (img.chunks(4).zip(want.rgba.chunks(4)))
+                .filter(|(a, b)| (0..3).any(|k| a[k].abs_diff(b[k]) > 24))
+                .count();
+            assert!(
+                off * 1000 <= w * h,
+                "{name}: {off} pixels differ from the golden"
+            );
+        }
     }
 
     /// Weight from stroke per em, capped at semibold; links are normal.
