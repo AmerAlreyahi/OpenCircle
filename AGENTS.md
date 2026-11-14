@@ -1049,3 +1049,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   versions"): the lead publishes v0.1.8 without asking again. The update gate (v0.1.7 Setup + portable -> draft), About on
   the draft exe and the release workflow's signed assets still run first: a broken updater is the one bug users can't wait
   out. Other findings ship as known issues in the notes and are fixed in the next version.
+- Snip Studio name and behaviour (owner, 2026-11-14, "great, ensure it is in the roadmap"): name "Snip Studio", short
+  "Studio" (Arabic «استوديو اللقطات»). Its own normal window (taskbar entry, side by side with Settings / chat / pins);
+  ONE Studio at a time (opening again or another picture brings it forward and loads the picture there); opens alone
+  (tray "Studio", Start menu / app grid shortcut, additive CLI `opencircle studio [file]`) or with any picture (Open
+  Ctrl+O, drop a file, Paste Ctrl+V, "Open with" from Explorer / file managers); unsaved edits ask Save / Don't save /
+  Cancel. Into the Studio design round first; version 0.5.0 (roadmap section 1, planning #162).
