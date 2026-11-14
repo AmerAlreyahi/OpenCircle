@@ -482,7 +482,10 @@ pub fn sure(text: &str) -> Option<&'static str> {
             }
             detected(text, &v)
         }
-        other => Some(other),
+        // one letter of another script is too little too: a rune on the
+        // corpus' Arabic battle screen read by the CJK reader as "人" asked
+        // for the Chinese model (Win10 VM, W17/W19)
+        other => (text.chars().filter(|c| c.is_alphabetic()).count() >= 2).then_some(other),
     }
 }
 
@@ -715,6 +718,12 @@ mod tests {
         assert_eq!(sure("Blender Studio"), None);
         assert_eq!(sure("Gracias."), None);
         assert_eq!(sure("Главное меню"), Some("ru"));
+        // the corpus' Arabic battle screen on the Win10 VM: a rune read as
+        // "人" asked for Chinese -> English after the page's Arabic model
+        assert_eq!(sure("人"), None);
+        assert_eq!(certain("人"), None);
+        assert_eq!(sure("主菜单"), Some("zh"));
+        assert_eq!(sure("ع"), None);
     }
 
     /// it.wikipedia "Sole" in Edge on the Win10 VM, read by PP-OCR: an
