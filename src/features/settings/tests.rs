@@ -3982,6 +3982,8 @@ fn the_glossary_screens_match_their_golden_images() {
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     use pages::glossaries::Msg;
+    // the "Use for windows named" row is drawn: it shows only where the OS names windows
+    crate::shared::platform::capture::window_rect::TITLES_FORCED.with(|c| c.set(Some(true)));
     let mut failed = Vec::new();
     for ar in [false, true] {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
@@ -4031,6 +4033,9 @@ fn the_glossary_screens_match_their_golden_images() {
                         .expect("the Glossary row");
                     let end = if ar { 56.0 } else { size.width - 56.0 };
                     let at = iced::Point::new(end, row);
+                    if !golden::enabled() {
+                        continue;
+                    }
                     let px = shot::after_clicks(|| view(&s), size, &[at]);
                     let (w, h) = (size.width as u32, size.height as u32);
                     failed

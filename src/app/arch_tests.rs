@@ -737,8 +737,15 @@ fn features_meet_only_through_mod_rs() {
         .collect();
     assert!(features.contains(&"snip".to_string()), "{features:?}");
     let inner = |feature: &str, part: &str| {
-        let dir = Path::new("src/features").join(feature);
-        dir.join(format!("{part}.rs")).exists() || dir.join(part).is_dir()
+        // Exact-case names: `exists()` on a case-insensitive disk (Windows, macOS)
+        // would match the type `Glossary` against `glossary.rs`.
+        std::fs::read_dir(Path::new("src/features").join(feature))
+            .unwrap()
+            .flatten()
+            .any(|e| {
+                let n = e.file_name().to_string_lossy().to_string();
+                n == format!("{part}.rs") || (n == part && e.path().is_dir())
+            })
     };
     let mut reaching = Vec::new();
     for (name, src) in tree("features") {

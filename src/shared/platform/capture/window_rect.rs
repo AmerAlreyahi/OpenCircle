@@ -272,9 +272,18 @@ pub fn focused_title() -> Option<String> {
     None
 }
 
+// Tests pin the answer (per thread), so a screen drawn with it looks the same
+// on every machine (CI has no X display).
+#[cfg(test)]
+thread_local!(pub static TITLES_FORCED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) });
+
 /// Whether [`focused_title`] can answer here (Windows, X11): the glossary's
 /// "Use for windows named" is shown only then.
 pub fn titles_available() -> bool {
+    #[cfg(test)]
+    if let Some(v) = TITLES_FORCED.with(|c| c.get()) {
+        return v;
+    }
     #[cfg(windows)]
     return true;
     #[cfg(target_os = "linux")]
