@@ -14,6 +14,10 @@ changes: same inputs and outputs, same int8 weights, same translations.
     uv pip install onnx==1.23.2 onnxruntime==1.28.0 numpy sentencepiece
     .venv/bin/python scripts/lighten-mt-decoders.py CACHE OUT [pair ...]
     .venv/bin/python scripts/lighten-mt-decoders.py CACHE OUT --check [pair ...]
+    .venv/bin/python scripts/lighten-mt-decoders.py --hoist IN.onnx OUT.onnx
+
+--hoist lightens one freshly converted decoder (a pair added after models-v2,
+whose v1 decoder was never pinned: models-v3's Portuguese).
 
 CACHE gets each pair's pinned files (downloaded once, sha256 checked).
 OUT gets `opus-mt-<pair>-decoder_model_merged_quantized.onnx` (one flat
@@ -269,6 +273,8 @@ def mem(cache: Path, pair: str, dec: Path) -> None:
 def main() -> None:
     if sys.argv[1] == "--mem-child":
         return mem(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]))
+    if sys.argv[1] == "--hoist":
+        return hoist(Path(sys.argv[2]), Path(sys.argv[3]))
     cache, out = Path(sys.argv[1]), Path(sys.argv[2])
     args = sys.argv[3:]
     mode = args.pop(0) if args and args[0].startswith("--") else None

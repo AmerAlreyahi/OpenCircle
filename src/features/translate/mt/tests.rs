@@ -70,7 +70,7 @@ fn pairs_by_language_code() {
         via.iter().map(|p| (p.source, p.target)).collect::<Vec<_>>(),
         [("it", "en"), ("en", "ar")]
     );
-    assert!(available("it", "ar") && route("pt", "en").is_none());
+    assert!(available("it", "ar") && route("pt", "ko").is_none());
     // our own conversions go direct, downloaded from the models release
     for (s, t) in [
         ("fr", "ar"),
@@ -91,9 +91,9 @@ fn pairs_by_language_code() {
     assert_eq!(route("de", "ar").unwrap().len(), 2);
     let why = unavailable("fr", "ja");
     assert!(why.contains("from French into Japanese") && why.contains("Choose AI"));
-    let why = unavailable(lang::AUTO, "pt");
+    let why = unavailable(lang::AUTO, "ko");
     assert!(
-        why.starts_with("there is no local model into Portuguese yet"),
+        why.starts_with("there is no local model into Korean yet"),
         "{why}"
     );
     let p = pair("en", "ar").unwrap();
@@ -144,21 +144,34 @@ fn the_pair_table_is_consistent() {
     assert_eq!(bytes, 113_896_297);
 }
 
-/// Every pair's decoder is the lighter models-v2 one, of another size
-/// than its v1 file (the two are told apart by size); encoders and
-/// tokenizers keep their v1 pins.
+/// Every pair's decoder is the lighter one, of another size than its v1
+/// file (the two are told apart by size); encoders and tokenizers keep their
+/// v1 pins. The pairs added after models-v2 (Portuguese) have no v1 file:
+/// all four of their files are models-v3 assets.
 #[test]
 fn every_decoder_is_the_lighter_v2_one() {
+    const V3: [(&str, &str); 2] = [("en", "pt"), ("pt", "en")];
     for p in &PAIRS {
+        let v3 = V3.contains(&(p.source, p.target));
         let url = format!(
             "\"https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/\
-                 models-v2/opus-mt-{}-{}-decoder_model_merged_quantized.onnx\"",
-            p.source, p.target
+                 models-{}/opus-mt-{}-{}-decoder_model_merged_quantized.onnx\"",
+            if v3 { "v3" } else { "v2" },
+            p.source,
+            p.target
         );
         assert!(format!("{:?}", p.decoder).contains(&url), "{}", p.dir);
         let v1 = V1_DECODERS
             .iter()
             .find(|f| p.dir == format!("{DIR_PREFIX}{}", f.0));
+        if v3 {
+            assert!(v1.is_none(), "{}", p.dir);
+            assert!(!p.outdated() && p.update_bytes() == 0, "{}", p.dir);
+            for f in [&p.encoder, &p.spm, &p.vocab] {
+                assert!(format!("{f:?}").contains("models-v3"), "{}", p.dir);
+            }
+            continue;
+        }
         assert_ne!(p.decoder.size, v1.unwrap().1, "{}", p.dir);
         assert!(
             !format!("{:?}", p.encoder).contains("models-v2"),
@@ -166,6 +179,23 @@ fn every_decoder_is_the_lighter_v2_one() {
             p.dir
         );
     }
+}
+
+/// Portuguese both ways with English; every other language reaches it
+/// through English (two models); en->pt asks for Brazilian Portuguese.
+#[test]
+fn portuguese_routes_through_english() {
+    let hops =
+        |s, t| route(s, t).map(|r| r.iter().map(|p| (p.source, p.target)).collect::<Vec<_>>());
+    assert_eq!(hops("pt", "en"), Some(vec![("pt", "en")]));
+    assert_eq!(hops("en", "pt"), Some(vec![("en", "pt")]));
+    assert_eq!(hops("pt", "ar"), Some(vec![("pt", "en"), ("en", "ar")]));
+    assert_eq!(hops("ar", "pt"), Some(vec![("ar", "en"), ("en", "pt")]));
+    assert_eq!(hops("pt", "fr"), Some(vec![("pt", "en"), ("en", "fr")]));
+    assert_eq!(hops("pt", "ko"), None);
+    assert!(available(lang::AUTO, "pt") && available("pt", "es"));
+    assert_eq!(pair("en", "pt").unwrap().lang_token, Some(">>pt_br<<"));
+    assert_eq!(pair("pt", "en").unwrap().lang_token, None);
 }
 
 /// A pinned file with `bytes` as its content.
@@ -663,3 +693,45 @@ const GAME_LINES: [(&str, &str); 20] = [
     ),
     ("Checkpoint reached", "تم الوصول إلى نقطة الحفظ"),
 ];
+
+/// The staged models-v3 files (`../staging/models/release-v3`) laid out as the
+/// app keeps them: `ensure` verifies every pinned size and sha256 (it would
+/// download otherwise, which a test must not), then Portuguese translates both
+/// ways and through English. Needs OCR's files in the data dir too (see the
+/// worker report); `XDG_DATA_HOME=<dir> cargo test --release
+/// mt::tests::real_portuguese -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn real_portuguese_translates() {
+    for (src, tgt, line, want) in [
+        (
+            "en",
+            "pt",
+            "Press E to interact",
+            Some("Pressione E para interagir"),
+        ),
+        (
+            "pt",
+            "en",
+            "Você encontrou uma espada rara!",
+            Some("You found a rare sword!"),
+        ),
+        ("pt", "ar", "Salvar e sair", None),
+        ("ar", "pt", "احفظ واخرج", None),
+    ] {
+        let mut text = vec![line.to_string()];
+        for p in route(src, tgt).unwrap() {
+            p.ensure(|_, _| {}).unwrap();
+            let mut tr = Translator::load(p, &text_reading::models_dir()).unwrap();
+            text = tr.translate(&text).unwrap();
+        }
+        println!("{src}->{tgt}: {line} -> {}", text[0]);
+        assert!(
+            !text[0].trim().is_empty() && text[0] != line,
+            "{src}->{tgt}"
+        );
+        if let Some(want) = want {
+            assert_eq!(text[0], want, "{src}->{tgt}");
+        }
+    }
+}

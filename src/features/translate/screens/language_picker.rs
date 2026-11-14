@@ -811,7 +811,7 @@ mod tests {
                     assert_eq!(p.list_at(), Some(at), "{q}");
                     assert_eq!(drawn(&p), first, "{q}");
                 }
-                p.update(Msg::Query("port".into()));
+                p.update(Msg::Query("turk".into()));
                 assert!(p.hint() || side == Side::Source, "the hint shows");
                 assert_eq!(drawn(&p), first, "with the hint");
             }
@@ -823,13 +823,13 @@ mod tests {
         let mut p = open(AUTO, "en", true, Side::Source);
         p.update(Msg::Query("korean".into()));
         assert!(p.picks().is_empty(), "no recognizer reads Korean yet");
-        // into English: Arabic, French, Japanese have offline models, Portuguese not
-        for (code, ai) in [("ar", false), ("ja", false), ("pt", true), ("en", false)] {
+        // into English: Arabic, French, Japanese have offline models, Turkish not
+        for (code, ai) in [("ar", false), ("ja", false), ("tr", true), ("en", false)] {
             assert_eq!(p.needs_ai(code), ai, "{code}");
         }
         // hovered or ringed, a needs-AI row shows the hint at the foot
         p.update(Msg::Query("".into()));
-        let pt = p.picks().iter().position(|c| c == "pt").unwrap();
+        let pt = p.picks().iter().position(|c| c == "tr").unwrap();
         assert!(!p.hint());
         p.update(Msg::Hover(Some(pt)));
         assert!(p.hint());

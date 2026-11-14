@@ -498,10 +498,10 @@ fn offline_pairs_and_the_not_available_path() {
     );
     for (real, t, target, from) in [
         (
-            &Real::new("pt", Via::Offline),
+            &Real::new("tr", Via::Offline),
             &["Olá"][..],
             "en",
-            "Portuguese",
+            "Turkish",
         ),
         (
             &Real::new("fr", Via::Offline),

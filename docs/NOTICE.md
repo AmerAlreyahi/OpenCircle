@@ -92,6 +92,17 @@ Apache-2.0):
 | ar-es | [Helsinki-NLP/opus-mt-ar-es](https://huggingface.co/Helsinki-NLP/opus-mt-ar-es) | da86e973e723 |
 | ar-de | [Helsinki-NLP/opus-mt-ar-de](https://huggingface.co/Helsinki-NLP/opus-mt-ar-de) | 8e6cbcce68fe |
 
+Portuguese (en-pt, pt-en) uses Helsinki-NLP's multi-language Romance models
+(Apache-2.0, https://www.apache.org/licenses/LICENSE-2.0), converted by
+OpenCircle the same way (weights unchanged, decoder lightened as above) and
+downloaded from the OpenCircle-models release (models-v3). en-pt asks the
+model for Brazilian Portuguese (`>>pt_br<<`).
+
+| Pair | Model | Helsinki-NLP commit |
+|---|---|---|
+| en-pt | [Helsinki-NLP/opus-mt-en-ROMANCE](https://huggingface.co/Helsinki-NLP/opus-mt-en-ROMANCE) | f8f3a28e8b62 |
+| pt-en | [Helsinki-NLP/opus-mt-ROMANCE-en](https://huggingface.co/Helsinki-NLP/opus-mt-ROMANCE-en) | e9ca9975e397 |
+
 ## Built into the app
 
 Short-line language detection: whichlang by Quickwit (MIT),

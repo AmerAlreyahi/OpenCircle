@@ -187,7 +187,7 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
     let _ = s.update(shown(Vec::new()));
     let calm = crate::shared::kit::testing::shot::render(s.view(size, at, false), 1280, 720);
     let why =
-        crate::features::translate::mt::unavailable(crate::features::translate::lang::AUTO, "pt");
+        crate::features::translate::mt::unavailable(crate::features::translate::lang::AUTO, "tr");
     for (message, setup) in [
         (format!("T{}.", &why[1..]), true),
         ("Already in English".into(), false),
@@ -213,7 +213,7 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         assert_eq!(texts.contains("Set up AI"), setup, "{texts}");
         if setup {
             assert!(
-                texts.contains("There is no local model into Portuguese yet |"),
+                texts.contains("There is no local model into Turkish yet |"),
                 "{texts}"
             );
             assert!(!texts.contains("Settings >"), "one line: {texts}");
@@ -948,10 +948,10 @@ fn every_picker_state_matches_its_golden_image() {
             }
             "p6-ai-picked" => {
                 p(P::Open(Side::Target));
-                p(P::Pick("pt".into()));
+                p(P::Pick("tr".into()));
                 let why = crate::features::translate::mt::unavailable(
                     crate::features::translate::lang::AUTO,
-                    "pt",
+                    "tr",
                 );
                 s.phase = Phase::Failed(problem(format!("T{}.", &why[1..]), true));
             }

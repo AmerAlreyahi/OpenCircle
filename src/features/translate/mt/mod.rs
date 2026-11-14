@@ -82,7 +82,7 @@ macro_rules! pair {
             // disk: a v1 decoder (another size) counts as missing, and its
             // download replaces it in place (`models::ensure`).
             decoder: release!(
-                "models-v2",
+                tag!($url),
                 $pair,
                 "decoder_model_merged_quantized.onnx",
                 $ds,
@@ -119,6 +119,25 @@ macro_rules! hf {
     };
 }
 
+/// The release holding a pair's decoder: models-v2 for the first 49 pairs,
+/// models-v3 for the pairs added since (`pair!(v3, ...)`, all four files).
+macro_rules! tag {
+    (v3) => {
+        "models-v3"
+    };
+    ($other:ident) => {
+        "models-v2"
+    };
+}
+
+/// A file of a pair added after models-v2 (`pair!(v3, ...)`): an asset of the
+/// models-v3 release, decoder included (it has no v1 file).
+macro_rules! v3 {
+    ($pair:literal, $rev:literal, $name:literal, $path:literal, $size:literal, $sha:literal) => {
+        release!("models-v3", $pair, $name, $size, $sha)
+    };
+}
+
 /// A file of a pair we converted (`pair!(own, ...)`): an asset of the
 /// models-v1 release.
 macro_rules! own {
@@ -130,7 +149,7 @@ macro_rules! own {
 /// An asset of the OpenCircle-models release `$tag`: `opus-mt-<pair>-<name>`
 /// (one flat release for every pair).
 macro_rules! release {
-    ($tag:literal, $pair:literal, $name:literal, $size:literal, $sha:literal) => {
+    ($tag:expr, $pair:literal, $name:literal, $size:literal, $sha:literal) => {
         ModelFile::plain(
             $name,
             $size,
@@ -151,7 +170,7 @@ macro_rules! release {
 /// `jap` is Bible-only, so Japanese uses `ja`). The Chinese model writes
 /// several Chinese scripts: `>>cmn_Hans<<` asks for Simplified.
 #[rustfmt::skip]
-pub static PAIRS: [Pair; 49] = [
+pub static PAIRS: [Pair; 51] = [
     // Helsinki-NLP/opus-mt-en-ar
     pair!("en", "ar", "en-ar", "034a684356c19021a187cda4d7f823298b913921",
         [51_773_854, "53c354d87ced44b39085fe8a46a25f09ea4578d442dbce9663f3977228f8a04e"],
@@ -498,6 +517,25 @@ pub static PAIRS: [Pair; 49] = [
         [902_787, "4ce7a1936b414ccb43fd8d411c556c9ea57ebe1eb50fd963b9eecaf1813eaad1"],
         [2_128_799, "af08b451ddd621880b739d077f05044e991dfe11ca49f0435cc03edff0e90146"],
         None, 63078),
+    // Portuguese (models-v3, owner 2026-11-14, #113): Helsinki-NLP's multi-language
+    // Romance models (Apache-2.0), same shape as the rest. en-ROMANCE takes the
+    // target first in the source: `>>pt_br<<` (Brazilian: the larger game
+    // audience, and one spelling throughout; `>>pt<<` mixed European and
+    // Brazilian forms in one page). ROMANCE-en reads any Romance source.
+    // Helsinki-NLP/opus-mt-en-ROMANCE
+    pair!(v3, "en", "pt", "en-pt", "f8f3a28e8b6272d0ccc0290b832f699e154ae431",
+        [52_899_863, "bf315c1ac219a2aa7b3e5ee9b9ef91fa730a3134e7a6a679281bc301177d152e"],
+        [60_213_000, "ee63024a7f5713486d979c83bd4ecb19acdcfd76777311e8451cc8978691cbe2"],
+        [779_155, "b1f89e7b05828846baf19109a61029a36838f1c4f3defc218e6aee0ee2787864"],
+        [1_457_360, "f2ce5a92734a7859cb4e91dc9ccd823e4a71585efbe4bbfe25e96e3d4bf48f34"],
+        Some(">>pt_br<<"), 65000),
+    // Helsinki-NLP/opus-mt-ROMANCE-en
+    pair!(v3, "pt", "en", "pt-en", "e9ca9975e3972afd80732f08ce01d3a1339f47f8",
+        [52_899_863, "0fdb46fbfe95d186c0499f2efc62fecc12ba7020eab60fa3a45a50a5e03ff5aa"],
+        [60_213_000, "2fa0b5491d1d179fd8624d40575722f1bc2fb7ff88d975b6a8c1285ac76da6b3"],
+        [800_087, "baeab21ec00d0b490382b82499ef0348235c5a8e75de28aec8290adf62b007c4"],
+        [1_460_304, "1ffaf15a0b51f0774c1dc24a1a675859dc18fc7705ebe6a0ac45a9c560457c29"],
+        None, 65000),
 ];
 
 /// models-v1's decoders (pair, size, sha256): the files the app downloaded

@@ -43,9 +43,15 @@ REVISIONS = {
     "ar-fr": "e507d7bc850855f060e6bbe4751bb03141b99b7d",
     "ar-es": "da86e973e723a8196adc90ed17119da2e096c776",
     "ar-de": "8e6cbcce68feaf4eed2b926eccd31bfca97fab05",
+    # Portuguese (models-v3): the multi-language Romance models, 6 layers, 512 wide like the rest
+    # (en-ROMANCE needs `>>pt<<` first in the source, see REPOS and `mt::PAIRS`).
+    "en-pt": "f8f3a28e8b6272d0ccc0290b832f699e154ae431",
+    "pt-en": "e9ca9975e3972afd80732f08ce01d3a1339f47f8",
     # Only to check this script against Xenova's export of the same model.
     "en-ar": "03087980e8ce753d64b3248ed0a912444545b840",
 }
+# Pairs whose Hugging Face repo is not opus-mt-<pair> (one model for several languages).
+REPOS = {"en-pt": "opus-mt-en-ROMANCE", "pt-en": "opus-mt-ROMANCE-en"}
 SOURCE_FILES = ["config.json", "generation_config.json", "pytorch_model.bin", "source.spm",
                 "target.spm", "vocab.json", "tokenizer_config.json"]
 
@@ -72,7 +78,7 @@ def quantize(src: Path, dst: Path) -> None:
 
 
 def convert(pair: str, out: Path) -> list[dict]:
-    repo = f"Helsinki-NLP/opus-mt-{pair}"
+    repo = f"Helsinki-NLP/{REPOS.get(pair, f'opus-mt-{pair}')}"
     rev = REVISIONS[pair]
     src = Path(snapshot_download(repo, revision=rev, allow_patterns=SOURCE_FILES))
     dst = out / pair
@@ -85,7 +91,7 @@ def convert(pair: str, out: Path) -> list[dict]:
         quantize(tmp / "decoder_model_merged.onnx", dst / "decoder_model_merged_quantized.onnx")
     for name in ("source.spm", "vocab.json"):
         shutil.copyfile(src / name, dst / name)
-    licence = "CC-BY-4.0 (OPUS-MT / Tatoeba-Challenge weights; Hugging Face card: Apache-2.0)"
+    licence = "Apache-2.0" if pair in REPOS else "CC-BY-4.0 (OPUS-MT / Tatoeba-Challenge weights; Hugging Face card: Apache-2.0)"
     return [
         {
             "pair": pair,

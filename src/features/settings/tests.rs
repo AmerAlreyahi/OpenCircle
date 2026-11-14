@@ -1436,7 +1436,7 @@ fn engine_choice_says_what_offline_means() {
     let gap =
         "No local model for this pair yet (coming in a future update): choose AI to translate it";
     assert!(!texts.iter().any(|t| t == gap));
-    update(&mut s, Message::Source(lang::find("pt").copied().unwrap()));
+    update(&mut s, Message::Source(lang::find("tr").copied().unwrap()));
     let texts = shot::texts(view(&s));
     assert!(
         texts.iter().any(|t| t == gap),
