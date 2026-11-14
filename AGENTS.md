@@ -1077,3 +1077,5 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   .claude/artifacts/design/newdesing/assets/logo-sapphire.svg/.png) everywhere the purple one is used today: exe/.ico,
   window and tray icons, Setup exe and installer screens, AppImage/deb/rpm icons, About, README/docs images. The owner sees a
   rendered sheet of every size (16..512, light and dark backgrounds, tray) before it merges.
+- OpenCircle-models stays unarchived (owner, 2026-11-14): models-v3 (Portuguese) uploaded there; future model releases go to
+  the same repo.
