@@ -1112,3 +1112,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   only where text sits on a held box/bar; back off if the game loses frames. Cutscene test (#82) pass lines: zero patches
   left after a change, removed within one frame, game frame rate unchanged; accuracy reported but not a gate. Run it early
   in Live translation (0.3.0), before the bulk of the build.
+- Default shortcuts (owner, 2026-11-14): Translate moves from Ctrl+Shift+T (browsers' "reopen closed tab") to Alt+Shift+T and
+  Live translate from Ctrl+Shift+L (Edge) to Alt+Shift+L, in v0.2.0, after a conflict check on Windows, GNOME and KDE; a
+  config still on the old default moves once (schema bump, backup); a key the user chose stays.
+- Runs on the owner's PC (2026-11-14 lesson): programs started from this session run inside the Claude desktop app's package,
+  whose AppData (and possibly registry) writes go to a private copy (%LOCALAPPDATA%\Packages\Claude_*\LocalCache): start
+  test builds through a scheduled task in his session and check the log shows the expected config before measuring.
