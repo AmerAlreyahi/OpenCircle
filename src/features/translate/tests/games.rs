@@ -91,6 +91,10 @@ fn a_garbled_read_is_told_from_text() {
 #[test]
 fn counters_are_read_and_kept_exactly() {
     assert_eq!(game_read("Invoquer XIO"), "Invoquer ×10");
+    // the skill tree's level, Ubuntu PP-OCR (Cyrillic reader)
+    let level = "ПЛАЗМЕННЫЙ ЩИТ - УРОВЕНЬ З";
+    assert_eq!(game_read(level), "ПЛАЗМЕННЫЙ ЩИТ - УРОВЕНЬ 3");
+    assert_eq!(game_read("З нами"), "З нами");
     assert_eq!(game_read("Invoquer xl"), "Invoquer ×1");
     assert_eq!(game_read("objet 4* ou"), "objet 4★ ou");
     // the key hint at 1080p (PP-OCR read its "]" as "I")
@@ -170,7 +174,8 @@ fn a_number_in_groups_of_three_is_kept_as_written() {
         Ok(t.iter()
             .map(|s| match s.as_str() {
                 "-3482 ¡Golpe crítico!" => "-3482 Critical hit!".to_string(),
-                "Recompensa: 500 monedas, 1200 XP" => "Reward: 500 coins, 1200 XP".to_string(),
+                // its unit too (pt-en-ar dropped "XP": "1 200 مهمة")
+                "Recompensa: 500 monedas, 1200" => "Reward: 500 coins, 1200".to_string(),
                 s => s.to_string(),
             })
             .collect())
@@ -184,7 +189,10 @@ fn a_number_in_groups_of_three_is_kept_as_written() {
     let out = through(&src, &route, "en", run).unwrap();
     assert_eq!(out, ["-3 482 Critical hit!", "Reward: 500 coins, 1 200 XP"]);
     assert!(
-        !sent.borrow().iter().any(|s| s.contains("3 482")),
+        !sent
+            .borrow()
+            .iter()
+            .any(|s| s.contains("3 482") || s.contains("XP")),
         "{:?}",
         sent.borrow()
     );
@@ -251,17 +259,31 @@ fn a_title_s_noun_is_not_kept_as_a_name() {
                     "Chevalier du givre éternel" => "Knight of eternal frost",
                     "Le chevalier Aldric" => "The knight Aldric",
                     "Le chevalier aldric" => "The knight aldric",
+                    // a word English has too ("dragon") is no name
+                    "Le Réveil du Dragon de Givre" => "The Revival of the Dragon of Givre",
+                    "Le réveil du dragon de givre" => "The waking up of the frost dragon",
                     s => s,
                 }
                 .to_string()
             })
             .collect())
     };
-    let src: Vec<String> = ["Chevalier du Givre Éternel", "Le chevalier Aldric"]
-        .map(String::from)
-        .into();
+    let src: Vec<String> = [
+        "Chevalier du Givre Éternel",
+        "Le chevalier Aldric",
+        "Le Réveil du Dragon de Givre",
+    ]
+    .map(String::from)
+    .into();
     let out = through(&src, &route, "en", run).unwrap();
-    assert_eq!(out, ["Knight of Eternal Frost", "The knight Aldric"]);
+    assert_eq!(
+        out,
+        [
+            "Knight of Eternal Frost",
+            "The knight Aldric",
+            "The Waking up of the Frost Dragon"
+        ]
+    );
 }
 
 #[test]
@@ -290,4 +312,37 @@ fn a_line_both_readers_read_is_kept_once() {
     let pp = vec![tb("Atacar", [98.0, 743.0, 117.0, 41.0], 0.99)];
     let got = reread(win, pp);
     assert_eq!(got.len(), 1, "{got:?}");
+}
+
+#[test]
+fn a_reading_pp_ocr_is_sure_of_replaces_a_quiet_misread() {
+    // the corpus (Win10 VM): Windows OCR misread game fonts with no sign of
+    // it; PP-OCR read them surely. Its star stays, two items stay two.
+    let tb = |t: &str, x: f32, confidence: f32| TextBlock {
+        bounds: [x, 100.0, 300.0, 40.0],
+        text: t.into(),
+        confidence,
+    };
+    for (win, pp, want) in [
+        (
+            "Sammter der Sterne —",
+            "Sammler der Sterne -",
+            "Sammler der Sterne -",
+        ),
+        ("0:49.172", "0:49.112", "0:49.112"),
+        ("Meil/eur tour", "Meilleur tour", "Meilleur tour"),
+        ("G61em Ancestral", "Gólem Ancestral", "Gólem Ancestral"),
+        (
+            "garantit au moins un objet 4* ou",
+            "garantit au moins un objet 4 ou",
+            "garantit au moins un objet 4* ou",
+        ),
+        ("Ausrüsten Verkaufen", "Verkaufen", "Ausrüsten Verkaufen"),
+    ] {
+        let got = reread(vec![tb(win, 0.0, 1.0)], vec![tb(pp, 0.0, 0.98)]);
+        assert_eq!(got[0].text, want);
+    }
+    // not sure enough: Windows OCR's stays ("PLAYER", PP-OCR "YER" at 0.8)
+    let got = reread(vec![tb("PLAYER", 0.0, 1.0)], vec![tb("YER", 0.0, 0.8)]);
+    assert_eq!(got[0].text, "PLAYER");
 }

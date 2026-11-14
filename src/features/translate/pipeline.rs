@@ -375,7 +375,7 @@ fn hops(
             break;
         }
         for (&i, r) in on.iter().zip(run(&sent, pair)?) {
-            t[i] = r;
+            t[i] = in_digits(&t[i], &r, pair.target);
         }
         // (German writes every noun capitalised: its labels go as they are)
         if k == 0 && script == Script::Latin && pair.source != "de" {
@@ -385,7 +385,7 @@ fn hops(
         on.retain(|&i| !echo(&src[i], &t[i]) || one_word(&src[i]));
     }
     for (s, t) in src.iter().zip(&mut t) {
-        *t = unquoted(s, t);
+        *t = names_kept(s, &unquoted(s, t), route[0].source);
         if echo(s, t) || made_up(s, t, target) || spelled_out(s, t, target) {
             *t = s.clone();
         }
@@ -444,7 +444,10 @@ fn lowered(
     };
     let sent: Vec<String> = again.iter().map(|&i| low(&src[i])).collect();
     for (&i, r) in again.iter().zip(run(&sent, pair)?) {
-        if caps(&src[i]).iter().any(|w| has(&r, w)) {
+        // fewer of them kept (a word English has too stays: "Dragon de
+        // Givre" -> "frost dragon")
+        let kept = |out: &str| caps(&src[i]).iter().filter(|w| has(out, w)).count();
+        if kept(&r) >= kept(&t[i]) {
             continue;
         }
         // Title Case: every word of 4+ letters capitalised
@@ -463,6 +466,93 @@ fn lowered(
         };
     }
     Ok(())
+}
+
+/// Number words, 2 to 12, of the languages models write into (one row per
+/// number; `/` = other forms).
+const NUMBER_WORDS: [(&str, &str); 7] = [
+    (
+        "en",
+        "two three four five six seven eight nine ten eleven twelve",
+    ),
+    (
+        "fr",
+        "deux trois quatre cinq six sept huit neuf dix onze douze",
+    ),
+    (
+        "es",
+        "dos tres cuatro cinco seis siete ocho nueve diez once doce",
+    ),
+    (
+        "de",
+        "zwei drei vier fünf sechs sieben acht neun zehn elf zwölf",
+    ),
+    (
+        "it",
+        "due tre quattro cinque sei sette otto nove dieci undici dodici",
+    ),
+    (
+        "pt",
+        "dois/duas três quatro cinco seis sete oito nove dez onze doze",
+    ),
+    (
+        "ar",
+        "اثنان/اثنين/اثنتين/اثنتان ثلاث/ثلاثة أربع/أربعة خمس/خمسة ست/ستة سبع/سبعة \
+         ثماني/ثمانية/ثمان تسع/تسعة عشر/عشرة",
+    ),
+];
+
+/// `out` (`src` translated into `target`) with a number of `src` the model
+/// wrote as a word written in digits again (ru-en: "в течение 8 секунд" ->
+/// "for eight seconds", ar-fr: "٣ نقاط" -> "Trois points"; a game's numbers
+/// are kept as the screen has them, else `made_up` drops the whole line).
+/// Only a number missing from `out`, whose word is in it once.
+fn in_digits(src: &str, out: &str, target: &str) -> String {
+    let Some((_, row)) = NUMBER_WORDS.iter().find(|(l, _)| *l == target) else {
+        return out.to_string();
+    };
+    let have: Vec<String> = numbers(out).collect();
+    let mut out = out.to_string();
+    for n in numbers(src) {
+        let Some(forms) = (n.parse::<usize>().ok())
+            .filter(|k| (2..=12).contains(k) && !have.contains(&n))
+            .and_then(|k| row.split_whitespace().nth(k - 2))
+        else {
+            continue;
+        };
+        // the word itself, any case, or (Arabic) after a joined "و", "ب",
+        // "ل": where the number word starts in it
+        let at = |w: &str| {
+            let low = w.to_lowercase();
+            (["", "و", "ب", "ل"].iter())
+                .find(|p| (forms.split('/')).any(|f| low.strip_prefix(**p) == Some(f)))
+                .map(|p| p.len())
+        };
+        let words: Vec<std::ops::Range<usize>> = (word_runs(&out).into_iter())
+            .filter_map(|r| at(&out[r.clone()]).map(|p| r.start + p..r.end))
+            .collect();
+        if let [r] = &words[..] {
+            out.replace_range(r.clone(), &n);
+        }
+    }
+    out
+}
+
+/// Where the words (runs of letters) of `s` are.
+fn word_runs(s: &str) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (i, c) in s.char_indices().chain([(s.len(), ' ')]) {
+        match (c.is_alphabetic(), start) {
+            (true, None) => start = Some(i),
+            (false, Some(a)) => {
+                runs.push(a..i);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
 }
 
 /// Quotes and brackets the model added ("إنبعاث التنين في \"جيفر\"" for "Le
@@ -493,6 +583,52 @@ pub(super) fn spelled_out(src: &str, out: &str, target: &str) -> bool {
     }
     let s = consonants(src);
     s.len() >= 2 && s == consonants(out)
+}
+
+/// `out` with the names of the sentence `src` (in `source`) as `src` writes
+/// them: a capitalised word inside a sentence of small words ("A antiga
+/// guardiã do farol, Irene, fala de uma") that the model wrote in Arabic
+/// letters ("ايرين") or with an accent of its own ("d'Irène"). Not German
+/// (its nouns are capitalised) nor a Title Case label.
+fn names_kept(src: &str, out: &str, source: &str) -> String {
+    let words: Vec<&str> = src.split_whitespace().collect();
+    // (a word of 4 letters or more after the first in small letters)
+    let sentence = (words.iter().skip(1))
+        .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()))
+        .any(|w| w.chars().count() >= 4 && w.starts_with(char::is_lowercase));
+    // ponytail: lines of 16 words at most (a game's quest line, a label; a
+    // web page's paragraph keeps the model's "جوبيتر"); a per-game name list
+    // (the glossary) decides better
+    let latin = lang::find(source).map(|l| l.script) == Some(Script::Latin);
+    if source == "de" || !sentence || !latin || words.len() > 16 {
+        return out.to_string();
+    }
+    let names: Vec<&str> = (1..words.len())
+        .filter(|&i| !words[i - 1].ends_with(['.', '!', '?', ':']))
+        .map(|i| words[i].trim_matches(|c: char| !c.is_alphabetic()))
+        .filter(|w| {
+            let mut c = w.chars();
+            w.chars().count() >= 3
+                && c.next().is_some_and(char::is_uppercase)
+                && c.all(char::is_lowercase)
+        })
+        .collect();
+    let plain = |w: &str| -> String { w.chars().map(lang::plain).collect() };
+    let mut out = out.to_string();
+    for name in names {
+        let spelled = |w: &str| {
+            let arabic = w.chars().all(|c| Script::Arabic.has(c));
+            (w != name && plain(w) == plain(name))
+                || (arabic && consonants(name).len() >= 2 && consonants(w) == consonants(name))
+        };
+        let runs: Vec<std::ops::Range<usize>> = (word_runs(&out).into_iter())
+            .filter(|r| spelled(&out[r.clone()]))
+            .collect();
+        for r in runs.into_iter().rev() {
+            out.replace_range(r, name);
+        }
+    }
+    out
 }
 
 /// The consonants of a word as a name sounds, Latin or Arabic letters alike
@@ -670,7 +806,14 @@ pub(super) fn reread(win: Vec<TextBlock>, pp: Vec<TextBlock>) -> Vec<TextBlock> 
             // the icon before or after the text, read as one letter
             let icon = kw.chars().count() == kp.chars().count() + 1
                 && (kw.ends_with(&kp) || kw.starts_with(&kp));
-            garbled(&w.text) || icon || (kw == kp && accents(&p.text) > accents(&w.text))
+            // a different reading PP-OCR is quite sure of, the line's most:
+            // Windows OCR misread game fonts without a sign of it ("Sammter
+            // der Sterne", "G61em", "Meil/eur tour", "0:49.172" for
+            // "0:49.112"; the corpus, Win10 VM); the same letters stay
+            // Windows OCR's (its "4*" star)
+            let surer =
+                kw != kp && p.confidence >= 0.9 && kp.chars().count() * 5 >= kw.chars().count() * 4;
+            garbled(&w.text) || icon || surer || (kw == kp && accents(&p.text) > accents(&w.text))
         });
         mine.iter().for_each(|&i| used[i] = true);
         out.push(better.map_or(w, |i| pp[i].clone()));
@@ -1133,10 +1276,21 @@ fn shield(s: &str) -> (String, Shielded) {
     };
     // a number in groups of three ("3 482", "1 200 XP") is one counter: the
     // model wrote "- 3.482" for "-3 482"
+    // and so is a number with its unit after a space ("1 200 XP", "500 HP":
+    // pt-en-ar dropped the "XP")
     let mut words: Vec<String> = Vec::new();
     for w in body.split(' ') {
         let group = w.len() == 3 && w.bytes().all(|b| b.is_ascii_digit());
+        let unit = w.len() >= 2 && UNITS.contains(&w.to_lowercase().as_str());
+        let number = |p: &str| {
+            let d = p.trim_start_matches(['-', '+']).replace(' ', "");
+            !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())
+        };
         match words.last_mut() {
+            Some(p) if unit && number(p) => {
+                p.push(' ');
+                p.push_str(w);
+            }
             Some(p)
                 if group
                     && p.rsplit(' ').next().is_some_and(|q| {
@@ -1154,7 +1308,7 @@ fn shield(s: &str) -> (String, Shielded) {
     for w in &words {
         let grouped = w.contains(' ').then(|| {
             let c = w.trim_start_matches(['-', '+']).to_string();
-            (c.replace(' ', ""), c)
+            (c.chars().filter(char::is_ascii_digit).collect(), c)
         });
         match grouped.or_else(|| counter(w)) {
             Some((n, c))
@@ -1603,7 +1757,13 @@ pub(crate) fn to_line(b: TextBlock, width: u32, height: u32) -> Line {
 /// "XI" and the word "Xo" stay).
 pub(super) fn game_read(text: &str) -> String {
     let words: Vec<String> = (text.split(' '))
-        .map(|w| {
+        .enumerate()
+        .map(|(i, w)| {
+            // a level's "3" read by the Cyrillic reader as "З" ("УРОВЕНЬ З"):
+            // never a word after the first (Ukrainian "з" is, in lower case)
+            if w == "З" && i > 0 {
+                return "3".to_string();
+            }
             let mut c = w.chars();
             let digits: String = c.clone().skip(1).collect();
             match c.next() {
@@ -1723,10 +1883,12 @@ pub(crate) fn translate_blocks(
                 .map(|(text, k)| match k.as_ref().map(|k| &found[k.as_str()]) {
                     Some(t) if !t.is_empty() => {
                         any = true;
-                        // sent capitalised (`sent`): back to its own case
-                        match latin && text.starts_with(char::is_lowercase) {
-                            true => lower_first(t),
-                            false => t.clone(),
+                        // sent capitalised or in sentence case (`sent`):
+                        // back to its own case
+                        match () {
+                            _ if capitals(text) => t.to_uppercase(),
+                            _ if latin && text.starts_with(char::is_lowercase) => lower_first(t),
+                            _ => t.clone(),
                         }
                     }
                     _ => text.clone(),
@@ -1739,12 +1901,25 @@ pub(crate) fn translate_blocks(
 
 /// What is sent for a piece: a short label in lower case ("modifier", a
 /// link) as a label starts ("Modifier"): alone, MT reads a lower-case word
-/// as a fragment ("modifier" -> "amend", "Modifier" -> "Edit").
+/// as a fragment ("modifier" -> "amend", "Modifier" -> "Edit"); a game's
+/// capitals in sentence case (ru-en: "СБРОСИТЬ" -> "FUEL", "ПЛАЗМЕННЫЙ ЩИТ"
+/// -> "PLAYING SHEAD"), drawn in capitals again.
 fn sent(piece: &str) -> String {
-    match piece.split(' ').count() <= 3 && piece.starts_with(char::is_lowercase) {
-        true => upper_first(piece),
-        false => piece.to_string(),
+    match () {
+        _ if capitals(piece) => upper_first(&piece.to_lowercase()),
+        _ if piece.split(' ').count() <= 3 && piece.starts_with(char::is_lowercase) => {
+            upper_first(piece)
+        }
+        _ => piece.to_string(),
     }
+}
+
+/// Written in capitals: every letter, and a word of 4 letters or more (not
+/// "FPS", "UP!").
+fn capitals(text: &str) -> bool {
+    let long = (text.split(|c: char| !c.is_alphabetic())).any(|w| w.chars().count() >= 4);
+    let mut letters = text.chars().filter(|c| c.is_alphabetic()).peekable();
+    long && letters.peek().is_some() && letters.all(char::is_uppercase)
 }
 
 fn upper_first(s: &str) -> String {

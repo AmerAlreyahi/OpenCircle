@@ -925,6 +925,87 @@ fn link_items_are_translated_one_by_one() {
     assert_eq!(tr[0], "ع7 [ ع8 | ع16]");
 }
 
+/// A number the model wrote as a word is a number again (the corpus' skill
+/// tree and card game: the whole line was dropped as "number lost").
+#[test]
+fn numbers_written_as_words_are_digits_again() {
+    let cases = [
+        (
+            "Поглощает 30% входящего урона в течение 8 секунд.",
+            "It takes 30% of the incoming damage for eight seconds.",
+            "en",
+            "It takes 30% of the incoming damage for 8 seconds.",
+        ),
+        (
+            "يُلحق ٣ نقاط ضرر بجميع",
+            "Trois points de dommages sont causés à tous",
+            "fr",
+            "3 points de dommages sont causés à tous",
+        ),
+        ("in 8 seconds", "خلال ثماني ثوان", "ar", "خلال 8 ثوان"),
+        ("3 and 3", "drei und drei", "de", "drei und drei"), // twice: unsure
+        ("Lv. 3", "Lv. 3", "en", "Lv. 3"),
+        ("eight", "eight", "en", "eight"), // no number in the source
+    ];
+    for (src, out, target, want) in cases {
+        assert_eq!(in_digits(src, out, target), want, "{src}");
+    }
+}
+
+/// A name inside a sentence stays as the source writes it (the corpus' quest
+/// log, pt-ar and pt-fr), never a Title Case label's word or a German noun.
+#[test]
+fn a_name_in_a_sentence_is_kept() {
+    let cases = [
+        (
+            "Fala com a guardiã Irene",
+            "تحدث مع حارس ايرين",
+            "pt",
+            "تحدث مع حارس Irene",
+        ),
+        (
+            "Fala com a guardiã Irene",
+            "Parlez au garde d'Irène.",
+            "pt",
+            "Parlez au garde d'Irene.",
+        ),
+        // Title Case: its words are no names
+        (
+            "Le Réveil du Dragon de Givre",
+            "إنبعاث التنين في جيفر",
+            "fr",
+            "إنبعاث التنين في جيفر",
+        ),
+        (
+            "Sprich mit der Wächterin Irene",
+            "تحدث مع حارسة ايرين",
+            "de",
+            "تحدث مع حارسة ايرين",
+        ),
+    ];
+    for (src, out, source, want) in cases {
+        assert_eq!(names_kept(src, out, source), want, "{src} -> {out}");
+    }
+}
+
+/// A game's labels in capitals go to MT in sentence case (ru-en read
+/// "СБРОСИТЬ" as "FUEL", "ПЛАЗМЕННЫЙ ЩИТ" as "PLAYING SHEAD"; the corpus'
+/// skill tree) and come back in capitals; short ones ("FPS") stay as they are.
+#[test]
+fn capitals_are_sent_in_sentence_case() {
+    let mut fake = Fake::new(|_, _, _| Vec::new());
+    fake.answer = |s| match s {
+        "Сбросить" => "Reset".into(),
+        "Плазменный щит - уровень 3" => "Plasma shield - level 3".into(),
+        "Événement" => "Event".into(),
+        other => format!("?{other}?"),
+    };
+    let blocks = blocks_of(&["СБРОСИТЬ", "ПЛАЗМЕННЫЙ ЩИТ - УРОВЕНЬ 3", "ÉVÉNEMENT"]);
+    let tr = translate_blocks(&blocks, "en", &Cache::new(64), &fake).unwrap();
+    assert_eq!(tr, ["RESET", "PLASMA SHIELD - LEVEL 3", "EVENT"]);
+    assert!(!capitals("FPS") && !capitals("UP!") && !capitals("Pause"));
+}
+
 /// Through English (here German -> Arabic; French was too): a label the first model gives
 /// back unchanged ("40 langues") never goes on to English -> Arabic,
 /// which made a name of it ("إيان غوس 40"); one plain word may be English
