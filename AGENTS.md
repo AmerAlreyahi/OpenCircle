@@ -1096,3 +1096,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   heavy full-screen browser 3D scene (no game); the owner tests real games himself and gives feedback. Never any automated
   input into a game, never a handle to a game process.
 - Sapphire icon approved (owner, 2026-11-14, on the before/after sheet): merge W6's icons (scripts/app-icon.py).
+- Live-translation model and research follow-ups (owner, 2026-11-14, after W8's run): (1) the GPU memory line for the live
+  model is raised to ~1.65 GB: Hy-MT2-1.8B 4-bit GGUF on llama.cpp Vulkan (Apache-2.0) is the pick for Live translation
+  (W8: COMET 0.872 vs 0.846, corpus 74.6 % vs 71.7 %, 74 vs 107 ms/line; reports-0.2.0/w8-gpu-research.md); the GPU rule
+  (free VRAM >= model + ~1 GB) still decides per PC. (2) #166 live layer cost: the owner quits his own OpenCircle for ~10 min
+  when asked (his folders backed up first and restored after). (3) Draft Arabic references: the owner checks a mixed sample
+  of ~30 lines; if they are fine, all 257 count. (4) Runs on the owner's PC never send keys with SendKeys or any input that
+  can reach another window (2026-11-14: two early attempts sent f / Esc / Ctrl+W to an unknown front window).
