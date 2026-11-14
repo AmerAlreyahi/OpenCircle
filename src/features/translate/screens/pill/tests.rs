@@ -862,6 +862,15 @@ fn every_translate_state_matches_its_golden_image() {
                 s.glossary =
                     glossary::Menu::sample(&["Ashen Tides", "Ruined Sky"], "ashen-tides", true);
             }
+            "word-names" => {
+                let blocks = vec![block(
+                    "Kaelith: We must reach Vyrnhold before nightfall, the tide is rising.",
+                    "كايليث: علينا أن نبلغ فيرن قبل حلول الليل.",
+                    [0.0, 0.0, 100.0, 40.0],
+                )];
+                let _ = s.update(shown(blocks));
+                s.click(Point::new(50.0, 20.0));
+            }
             "word-add" => {
                 let blocks = vec![block(
                     "Bring the Vyrnhold key",
@@ -890,6 +899,7 @@ fn every_translate_state_matches_its_golden_image() {
         "word-explained",
         "glossary",
         "word-add",
+        "word-names",
     ];
     golden::each_theme(|theme, failed| {
         for name in names {
@@ -1242,4 +1252,18 @@ fn the_word_card_adds_a_term_to_a_glossary() {
     assert!(g.terms[0].translations.is_empty(), "kept as is");
     assert!(again.save(&dir, "xx").is_ok(), "kept: no language needed");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The word card marks only names: capitalised words that don't start a
+/// sentence ("We" after "Kaelith:" does).
+#[test]
+fn the_word_card_marks_names_not_sentence_starts() {
+    let text = "Kaelith: We must reach Vyrnhold before nightfall. The Ash Warden waits";
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let marked: Vec<&str> = (super::glossary::names(&words).iter().zip(&words))
+        .filter(|(n, _)| **n)
+        .map(|(_, w)| *w)
+        .collect();
+    assert_eq!(marked, ["Vyrnhold", "Ash", "Warden"]);
+    assert_eq!(super::glossary::guess(text), "Vyrnhold");
 }

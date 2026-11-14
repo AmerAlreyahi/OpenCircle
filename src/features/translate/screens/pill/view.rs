@@ -1,7 +1,7 @@
 //! What translate in place shows over the frame (the design's "Translate
 //! screen" states), from kit parts only: the language pill (source → target,
 //! the status), and the result card for its prompts, errors and the word card.
-use iced::widget::{column, container, opaque, pin, row, stack};
+use iced::widget::{column, container, mouse_area, opaque, pin, row, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::glossary::{AddForm, AddMsg};
@@ -21,6 +21,7 @@ use crate::shared::kit::markdown;
 use crate::shared::kit::panel_frame::{self as frame, Header};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{muted, text as label};
+use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
@@ -328,6 +329,30 @@ fn add_form(form: &AddForm) -> Element<'_, Msg> {
     column![term, how, line].spacing(STACK).into()
 }
 
+/// The original text of the word card; the names a glossary could keep
+/// (`glossary::names`) wear the kit's dotted line and a click opens the
+/// Add to glossary form.
+fn original(text: &str) -> Element<'_, Msg> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let marked = super::glossary::names(&words);
+    if !marked.contains(&true) {
+        return note(text.to_string()).width(Fill).into();
+    }
+    let mut line = iced::widget::Row::new();
+    for (i, w) in words.iter().enumerate() {
+        let last = i + 1 == words.len();
+        let tail = if last { "" } else { " " };
+        if marked[i] {
+            let name = crate::shared::kit::dotted::dotted(note(w.to_string()).color(c().text));
+            line = line.push(mouse_area(name).on_press(Msg::AddStart));
+            line = line.push(note(tail));
+        } else {
+            line = line.push(note(format!("{w}{tail}")));
+        }
+    }
+    line.wrap().into()
+}
+
 /// The word card (the design's "Word explanation", titled "translation ·
 /// original"): its body (the translation, the AI's explanation) and actions
 /// (Explain = E, Ask AI = A).
@@ -342,7 +367,7 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
         }
     };
     let mut body = column![
-        note(card.block.original.clone()).width(Fill),
+        original(&card.block.original),
         side(label(Role::CHAT, card.block.translation.clone())),
     ]
     .spacing(STACK);

@@ -7,7 +7,7 @@
 //! change is written to the glossary's file at once (it is small).
 use std::path::PathBuf;
 
-use iced::widget::{Space, column, container};
+use iced::widget::{Space, column, container, mouse_area};
 use iced::{Element, Fill};
 
 use super::super::state::{Message, Named, State, TARGETS};
@@ -15,11 +15,13 @@ use crate::features::translate::glossary_store as store;
 use crate::features::translate::{Glossary, Term};
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::button::{Kind, button, label};
-use crate::shared::kit::dropdown::dropdown;
+use crate::shared::kit::dropdown::{dropdown, menu_button};
 use crate::shared::kit::field::{input, search};
+use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::table;
 use crate::shared::kit::text::{muted, sub};
-use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tokens::{Role, size, space};
 use crate::t;
 
 /// The Settings row's "New glossary" choice (never a file name).
@@ -49,8 +51,9 @@ pub enum Msg {
     Back,
     /// The editor's glossary dropdown.
     Pick(String),
-    More(bool),
     New,
+    /// The pointer is over this row of the table (`None` = left it).
+    Hover(Option<usize>),
     /// Rename: open the name field (true) / the field's text.
     Renaming(bool),
     Name(String),
@@ -133,7 +136,7 @@ pub struct Page {
     editing: Option<String>,
     shown: String,
     query: String,
-    more: bool,
+    hover: Option<usize>,
     /// The name field (Rename / New), its text.
     renaming: Option<String>,
     confirm_delete: bool,
@@ -159,7 +162,7 @@ impl Page {
             editing: None,
             shown: target.to_string(),
             query: String::new(),
-            more: false,
+            hover: None,
             renaming: None,
             confirm_delete: false,
             pending: None,
@@ -228,7 +231,7 @@ impl Page {
     fn open(&mut self, slug: &str) {
         self.editing = Some(slug.to_string());
         self.query.clear();
-        self.more = false;
+        self.hover = None;
         self.renaming = None;
         self.confirm_delete = false;
         self.undo = None;
@@ -275,11 +278,7 @@ impl Page {
                 self.reload();
             }
             Msg::Pick(slug) => self.open(&slug),
-            Msg::More(on) => {
-                self.more = on;
-                self.renaming = None;
-                self.confirm_delete = false;
-            }
+            Msg::Hover(row) => self.hover = row,
             Msg::New => {
                 let s = self.create(t!(gl_default_name));
                 self.open(&s);
@@ -287,9 +286,6 @@ impl Page {
             }
             Msg::Renaming(on) => {
                 self.renaming = on.then(|| self.cur().map(|g| g.name.clone()).unwrap_or_default());
-                if !on {
-                    self.more = false;
-                }
             }
             Msg::Name(name) => {
                 if let Some(g) = self.cur() {
@@ -299,7 +295,10 @@ impl Page {
                 self.renaming = Some(name);
                 self.save();
             }
-            Msg::AskDelete(on) => self.confirm_delete = on,
+            Msg::AskDelete(on) => {
+                self.confirm_delete = on;
+                self.renaming = None;
+            }
             Msg::Delete => {
                 if let Some(slug) = self.editing.take() {
                     store::delete(&self.dir, &slug);
@@ -311,7 +310,6 @@ impl Page {
                     // (a deleted glossary is none for the pill)
                     reply.active = Some(String::new());
                 }
-                self.more = false;
                 self.confirm_delete = false;
             }
             Msg::Import => reply.job = Some(Job::Import),
@@ -468,14 +466,19 @@ pub fn editor(state: &State) -> Element<'_, Message> {
         return column![].into();
     };
     let back = button(
-        label(crate::shared::app_language::tr(S::nav_translate)),
+        crate::dir_row![
+            icon(Icon::Back.directed(), size::ICON_SMALL),
+            label(crate::shared::app_language::tr(S::nav_translate))
+        ]
+        .spacing(space::GAP)
+        .align_y(iced::Center),
         Kind::Quiet,
         Some(m(Msg::Back)),
     );
     let crumb = crate::dir_row![
         back,
         sub(Role::ROW_DESC, "/"),
-        muted(Role::ROW_DESC, t!(gl_crumb))
+        crate::shared::kit::text::text(Role::ROW_TITLE, t!(gl_crumb))
     ]
     .spacing(space::GAP)
     .align_y(iced::Center);
@@ -487,20 +490,25 @@ pub fn editor(state: &State) -> Element<'_, Message> {
         "",
         move |c: Choice| m(Msg::Pick(c.slug)),
     );
-    let more = button(
-        label(t!(gl_more)),
-        Kind::Elevated,
-        Some(m(Msg::More(!page.more))),
+    let more = menu_button(
+        vec![
+            (t!(gl_new).into(), false, m(Msg::New)),
+            (t!(gl_rename).into(), false, m(Msg::Renaming(true))),
+            (t!(gl_import).into(), false, m(Msg::Import)),
+            (t!(gl_export).into(), false, m(Msg::Export)),
+            (t!(gl_delete_glossary).into(), true, m(Msg::AskDelete(true))),
+        ],
+        MENU_W,
     );
     rows = rows.push(setting_row::row(
         title(t!(gl_row)),
         "",
         setting_row::field_with(pick, [more]),
     ));
-    if page.more {
-        let b = |s: &'static str, on: Msg| button(label(s), Kind::Quiet, Some(m(on)));
-        let line: Element<'_, Message> = match (&page.renaming, page.confirm_delete) {
-            (Some(name), _) => crate::dir_row![
+    let b = |s: &'static str, on: Msg| button(label(s), Kind::Quiet, Some(m(on)));
+    let line: Option<Element<'_, Message>> = match (&page.renaming, page.confirm_delete) {
+        (Some(name), _) => Some(
+            crate::dir_row![
                 input(t!(gl_name), name, false, name.trim().is_empty())
                     .on_input(move |s| m(Msg::Name(s)))
                     .on_submit(m(Msg::Renaming(false)))
@@ -509,7 +517,9 @@ pub fn editor(state: &State) -> Element<'_, Message> {
             ]
             .spacing(space::GAP)
             .into(),
-            (None, true) => crate::dir_row![
+        ),
+        (None, true) => Some(
+            crate::dir_row![
                 sub(Role::ROW_DESC, fmt(S::gl_delete_q, &[&g.name])),
                 Space::new().width(Fill),
                 b(t!(c_cancel), Msg::AskDelete(false)),
@@ -518,22 +528,10 @@ pub fn editor(state: &State) -> Element<'_, Message> {
             .spacing(space::GAP)
             .align_y(iced::Center)
             .into(),
-            (None, false) => crate::dir_row![
-                b(t!(gl_rename), Msg::Renaming(true)),
-                b(t!(gl_new), Msg::New),
-                b(t!(gl_import), Msg::Import),
-                b(t!(gl_export), Msg::Export),
-                Space::new().width(Fill),
-                button(
-                    label(t!(gl_delete)),
-                    Kind::Remove,
-                    Some(m(Msg::AskDelete(true)))
-                )
-            ]
-            .spacing(space::GAP)
-            .align_y(iced::Center)
-            .into(),
-        };
+        ),
+        (None, false) => None,
+    };
+    if let Some(line) = line {
         rows = rows.push(container(line).padding([space::ROW_Y, 0.0]));
     }
     if let Some(pending) = &page.pending {
@@ -595,11 +593,10 @@ pub fn editor(state: &State) -> Element<'_, Message> {
             Msg::Lang(l)
         )))
         .width(Fill),
-        Space::new().width(CROSS)
+        Space::new().width(table::CROSS)
     ]
     .spacing(space::GAP)
     .align_y(iced::Center);
-    let mut table = column![header].spacing(space::GAP);
     let q = page.query.trim().to_lowercase();
     let code = code_of(&page.shown).unwrap_or("");
     let matching = g.terms.iter().enumerate().filter(|(_, t)| {
@@ -609,13 +606,13 @@ pub fn editor(state: &State) -> Element<'_, Message> {
                 .get(code)
                 .is_some_and(|x| x.to_lowercase().contains(&q))
     });
-    let (mut n, mut hidden) = (0, 0usize);
+    let mut cells: Vec<Element<'_, Message>> = Vec::new();
+    let mut hidden = 0usize;
     for (i, t) in matching {
-        if n >= SHOWN {
+        if cells.len() >= SHOWN {
             hidden += 1;
             continue;
         }
-        n += 1;
         let text = input("", &t.text, false, false)
             .on_input(move |s| m(Msg::Text(i, s)))
             .width(Fill);
@@ -627,25 +624,35 @@ pub fn editor(state: &State) -> Element<'_, Message> {
         )
         .on_input(move |s| m(Msg::Trans(i, s)))
         .width(Fill);
-        let x = button(label("×"), Kind::Quiet, Some(m(Msg::Remove(i))));
-        table = table.push(
-            crate::dir_row![text, tr, container(x).width(CROSS)]
+        let hot = page.hover == Some(i);
+        let x = container(table::cross(hot, m(Msg::Remove(i)))).width(table::CROSS);
+        let row = table::row(
+            crate::dir_row![text, tr, x]
                 .spacing(space::GAP)
                 .align_y(iced::Center),
+            hot,
+        );
+        cells.push(
+            mouse_area(row)
+                .on_enter(m(Msg::Hover(Some(i))))
+                .on_exit(m(Msg::Hover(None)))
+                .into(),
         );
     }
     if g.terms.is_empty() {
-        table = table.push(muted(Role::ROW_DESC, t!(gl_empty)));
+        cells.push(table::row(muted(Role::ROW_DESC, t!(gl_empty)), false));
     }
     if hidden > 0 {
-        table = table.push(muted(Role::ROW_DESC, fmt(S::gl_more_rows, &[&hidden])));
+        let more = muted(Role::ROW_DESC, fmt(S::gl_more_rows, &[&hidden]));
+        cells.push(table::row(more, false));
     }
-    rows.push(container(table).padding([space::ROW_Y, 0.0]))
+    rows.push(container(table::table(header.into(), cells)).padding([space::ROW_Y, 0.0]))
+        .push(muted(Role::ROW_DESC, t!(gl_hint)))
         .into()
 }
 
-/// The delete cross's column.
-const CROSS: f32 = 32.0;
+/// The "More" menu's width.
+const MENU_W: f32 = 220.0;
 
 /// The language table's code for `shown` (a config's "pt-BR" is "pt").
 fn code_of(shown: &str) -> Option<&'static str> {

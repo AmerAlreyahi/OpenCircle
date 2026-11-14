@@ -3818,7 +3818,7 @@ fn the_glossary_row_picks_the_active_glossary() {
     assert!(t.iter().any(|t| t == "Edit"), "{t:?}");
     assert_eq!(
         s.glossaries.labels(),
-        ["None", "Ashen Tides (2)", "New glossary"]
+        ["None", "Ashen Tides · 2 terms", "New glossary"]
     );
     assert_eq!(s.draft.translate.glossary, "");
     update(
@@ -3849,7 +3849,7 @@ fn the_glossary_editor_edits_the_file_as_you_type() {
     update(&mut s, Message::Glossaries(Msg::Edit));
     assert!(s.glossaries.is_editing());
     let t = shot::texts(view(&s));
-    for want in ["Translate", "On screen", "Add term", "More"] {
+    for want in ["Translate", "On screen", "Add term"] {
         assert!(t.iter().any(|t| t == want), "{want}: {t:?}");
     }
     let load = || store::load(&dir, "ashen-tides").unwrap();
@@ -3912,7 +3912,6 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
     // Edit with no glossary yet makes one
     update(&mut s, Message::Glossaries(Msg::Edit));
     assert_eq!(store::load_all(&dir).len(), 1);
-    update(&mut s, Message::Glossaries(Msg::More(true)));
     update(&mut s, Message::Glossaries(Msg::Renaming(true)));
     update(&mut s, Message::Glossaries(Msg::Name("Ashen Tides".into())));
     assert_eq!(store::load_all(&dir)[0].1.name, "Ashen Tides");
@@ -3963,7 +3962,6 @@ fn the_glossary_editor_creates_imports_exports_and_deletes() {
     // delete asks first, then removes the file and drops the active pick
     s.draft.translate.glossary = "other-2".into();
     update(&mut s, Message::Glossaries(Msg::Pick("other-2".into())));
-    update(&mut s, Message::Glossaries(Msg::More(true)));
     update(&mut s, Message::Glossaries(Msg::AskDelete(true)));
     assert!(
         shot::texts(view(&s))
@@ -4010,13 +4008,35 @@ fn the_glossary_screens_match_their_golden_images() {
             );
             themes::set(theme);
             let lang = if ar { "-ar" } else { "" };
-            for (name, open) in [("row", false), ("editor", true)] {
+            for (name, open) in [
+                ("row", false),
+                ("editor", true),
+                ("editor-hover", true),
+                ("editor-menu", true),
+            ] {
                 if open {
                     update(&mut s, Message::Glossaries(Msg::Edit));
                     update(&mut s, Message::Glossaries(Msg::Pick("ashen-tides".into())));
                 }
+                if name == "editor-hover" {
+                    update(&mut s, Message::Glossaries(Msg::Hover(Some(1))));
+                }
                 let file = format!("settings-glossary-{name}{lang}-{}", theme.id);
                 let size = Size::new(WINDOW_SIZE.width, 1080.0);
+                if name == "editor-menu" {
+                    // the More button (end of the Glossary row), clicked: its menu opens
+                    let row = (shot::texts_at(view(&s), size).into_iter())
+                        .find(|(_, t)| t == crate::t!(gl_row))
+                        .map(|(r, _)| r.center_y())
+                        .expect("the Glossary row");
+                    let end = if ar { 56.0 } else { size.width - 56.0 };
+                    let at = iced::Point::new(end, row);
+                    let px = shot::after_clicks(|| view(&s), size, &[at]);
+                    let (w, h) = (size.width as u32, size.height as u32);
+                    failed
+                        .extend(golden::compare("screens", &format!("{file}@1x"), w, h, &px).err());
+                    continue;
+                }
                 let lost = shot::out_of_reach(view(&s), size);
                 assert!(lost.is_empty(), "{file}: {lost:?}");
                 failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));

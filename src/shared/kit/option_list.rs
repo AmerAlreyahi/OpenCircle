@@ -540,7 +540,19 @@ pub fn option<'a, Message: Clone + 'a>(
     label: String,
     badge: Option<String>,
     active: bool,
+    size: (f32, f32),
+    on_press: Message,
+) -> Element<'a, Message> {
+    tinted(label, badge, active, size, None, on_press)
+}
+
+/// An `option` whose text is `tint` (a menu's Delete in the danger colour).
+pub fn tinted<'a, Message: Clone + 'a>(
+    label: String,
+    badge: Option<String>,
+    active: bool,
     (width, height): (f32, f32),
+    tint: Option<iced::Color>,
     on_press: Message,
 ) -> Element<'a, Message> {
     use button::Status;
@@ -585,7 +597,7 @@ pub fn option<'a, Message: Clone + 'a>(
                 };
                 button::Style {
                     background: fill.map(Into::into),
-                    text_color: c().text,
+                    text_color: tint.unwrap_or(c().text),
                     border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
                     ..button::Style::default()
                 }

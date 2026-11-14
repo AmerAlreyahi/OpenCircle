@@ -64,6 +64,58 @@ pub fn dropdown<'a, Message: Clone + 'a, T: ToString + PartialEq + Clone + 'a>(
         picks,
         at,
         rtl: super::dir::rtl(),
+        menu_width: None,
+    })
+}
+
+/// A menu button (the design's "···"): an elevated square with the ellipsis
+/// that opens a menu of `rows` (label, whether it removes, what it sends),
+/// `width` wide, hanging from the button's end edge; a removing row is in
+/// the danger colour and sits after a hairline. A press closes the menu.
+pub fn menu_button<'a, Message: Clone + 'a>(
+    rows: Vec<(String, bool, Message)>,
+    width: f32,
+) -> Element<'a, Message> {
+    use super::icon::{Icon, icon};
+    let inner = width - 2.0 * MENU_PAD - 2.0;
+    let mut list = column![];
+    for (label, removes, message) in rows {
+        if removes {
+            list = list.push(container(super::divider::divider()).padding([4.0, PAD[1]]));
+        }
+        let tint = removes.then_some(super::tokens::fixed::DANGER);
+        list = list.push(super::option_list::tinted(
+            label,
+            None,
+            false,
+            (inner, ROW_H),
+            tint,
+            message,
+        ));
+    }
+    let menu = super::option_list::frame(list)
+        .padding(MENU_PAD)
+        .width(width);
+    let opener = container(icon(Icon::More, size::ICON_SMALL).color(c().text))
+        .padding([7.0, 14.0])
+        .style(|_| container::Style {
+            background: Some(c().elevated.into()),
+            border: Border::default()
+                .rounded(radius::TRACK)
+                .width(1)
+                .color(c().elevated_border),
+            ..container::Style::default()
+        });
+    Element::new(Dropdown {
+        opener: opener.into(),
+        menu: menu.into(),
+        on_open: None,
+        foot: false,
+        id: None,
+        picks: Vec::new(),
+        at: None,
+        rtl: super::dir::rtl(),
+        menu_width: Some(width),
     })
 }
 
@@ -144,6 +196,7 @@ pub fn combo<'a, Message: Clone + 'a>(
         picks: Vec::new(),
         at: None,
         rtl: super::dir::rtl(),
+        menu_width: None,
     })
 }
 
@@ -226,6 +279,9 @@ struct Dropdown<'a, Message> {
     picks: Vec<Message>,
     at: Option<usize>,
     rtl: bool,
+    /// A menu wider than its opener (a menu button's): its width; it hangs
+    /// from the opener's end edge.
+    menu_width: Option<f32>,
 }
 
 /// Opens the combo whose search field is `id` (its `on_open` is not sent:
@@ -451,6 +507,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, iced::Theme, iced::Renderer>
             menu: &mut self.menu,
             opener,
             foot: self.foot,
+            wide: self.menu_width.map(|w| (w, self.rtl)),
         })))
     }
 }
@@ -466,6 +523,8 @@ struct Menu<'a, 'b, Message> {
     /// The opener's place in the window.
     opener: Rectangle,
     foot: bool,
+    /// A menu button's menu: its width and the direction it hangs.
+    wide: Option<(f32, bool)>,
 }
 
 impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_, '_, Message> {
@@ -475,7 +534,8 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
             true => COMBO_MAX + 2.0 * MENU_PAD + 2.0,
             false => MENU_MAX,
         };
-        let limits = layout::Limits::new(Size::ZERO, Size::new(self.opener.width, max));
+        let width = self.wide.map_or(self.opener.width, |(w, _)| w);
+        let limits = layout::Limits::new(Size::ZERO, Size::new(width, max));
         let node = (self.menu.as_widget_mut()).layout(self.tree, renderer, &limits);
         let h = node.size().height;
         let below = self.opener.y + self.opener.height + MENU_GAP;
@@ -484,7 +544,12 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
             true => self.opener.y - MENU_GAP - h,
             false => below,
         };
-        let node = node.move_to(Point::new(self.opener.x, y));
+        // a wide menu hangs from the opener's end edge (left edge in right-to-left)
+        let x = match self.wide {
+            Some((w, false)) => (self.opener.x + self.opener.width - w).max(0.0),
+            _ => self.opener.x,
+        };
+        let node = node.move_to(Point::new(x, y));
         if let (Some(at), false) = (self.keyed.take(), self.foot) {
             let mut nth = super::focus::nth(at);
             (self.menu.as_widget_mut()).operate(self.tree, Layout::new(&node), renderer, &mut nth);

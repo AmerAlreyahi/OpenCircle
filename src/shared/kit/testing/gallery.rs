@@ -1753,3 +1753,40 @@ fn menu_row(
         press: (!matches!(look, Look::Dimmed)).then_some(()),
     })
 }
+
+#[test]
+fn dotted_sheet() {
+    use crate::shared::kit::dotted::dotted;
+    let rows = vec![row("a name", Act::Rest, |_| {
+        iced::widget::row![
+            crate::shared::kit::text::sub(Role::NOTE, "We must reach "),
+            dotted(crate::shared::kit::text::text(Role::NOTE, "Vyrnhold")),
+            crate::shared::kit::text::sub(Role::NOTE, " now"),
+        ]
+        .into()
+    })];
+    sheet("dotted", Size::new(240.0, 36.0), &rows);
+}
+
+#[test]
+fn table_sheet() {
+    use crate::shared::kit::table;
+    let rows = vec![row("hot / rest", Act::Rest, |_| {
+        let cell = |hot| {
+            table::row(
+                iced::widget::row![
+                    crate::shared::kit::text::text(Role::NOTE, "Vyrnhold"),
+                    iced::widget::space::horizontal(),
+                    table::cross(hot, ())
+                ]
+                .align_y(iced::Center),
+                hot,
+            )
+        };
+        table::table(
+            crate::shared::kit::text::muted(Role::NOTE, "On screen").into(),
+            vec![cell(true), cell(false)],
+        )
+    })];
+    sheet("table", Size::new(240.0, 150.0), &rows);
+}

@@ -201,15 +201,25 @@ pub enum AddMsg {
     Save,
 }
 
-/// The first capitalised word of `original` that doesn't start it (a name:
-/// "the Vyrnhold gate"), else the whole text.
+/// Which of `words` may be names: capitalised, two letters or more, and not
+/// the start of a sentence (the first word, or one after . ! ? or :).
+pub fn names(words: &[&str]) -> Vec<bool> {
+    (0..words.len())
+        .map(|i| {
+            let starts = i == 0 || words[i - 1].ends_with(['.', '!', '?', ':']);
+            !starts
+                && words[i].starts_with(char::is_uppercase)
+                && words[i].chars().filter(|c| c.is_alphabetic()).count() > 1
+        })
+        .collect()
+}
+
+/// The first name of `original` ("the Vyrnhold gate"), else the whole text.
 pub fn guess(original: &str) -> String {
     let words: Vec<&str> = original.split_whitespace().collect();
-    let name = (words.iter().skip(1))
-        .find(|w| {
-            w.starts_with(char::is_uppercase) && w.chars().filter(|c| c.is_alphabetic()).count() > 1
-        })
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()));
+    let name = (names(&words).iter())
+        .position(|n| *n)
+        .map(|i| words[i].trim_matches(|c: char| !c.is_alphanumeric()));
     (name.unwrap_or(original.trim()).chars())
         .take(store::MAX_TERM_CHARS)
         .collect()

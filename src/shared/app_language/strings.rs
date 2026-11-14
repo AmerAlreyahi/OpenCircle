@@ -1873,8 +1873,10 @@ strings! {
         | "أسماء ومصطلحات لعبة، تبقى كما هي أو تُترجم دائمًا بالطريقة نفسها";
     gl_edit_btn: "Edit"
         | "تحرير";
-    gl_choice: "{} ({})"
-        | "{} ({})";
+    gl_choice: "{} · {} terms"
+        | "{} · {} مصطلحات";
+    gl_delete_glossary: "Delete glossary"
+        | "حذف القاموس";
     gl_crumb: "Glossaries"
         | "القواميس";
     gl_more: "More"
@@ -1915,6 +1917,8 @@ strings! {
         | "الاحتفاظ بالاثنين";
     gl_more_rows: "{} more terms: search to narrow the list"
         | "{} مصطلحات أخرى: ابحث لتضييق القائمة";
+    gl_hint: "Leave the translation empty to keep a name as it is."
+        | "اترك الترجمة فارغة لإبقاء الاسم كما هو.";
     gl_empty: "No terms yet"
         | "لا مصطلحات بعد";
     gl_default_name: "New glossary"

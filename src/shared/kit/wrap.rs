@@ -40,6 +40,22 @@ pub trait Hook<Message> {
             tree, event, layout, cursor, renderer, clipboard, shell, viewport,
         );
     }
+
+    /// Draws the content, then whatever the hook adds on top.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &self,
+        content: &Element<'_, Message>,
+        tree: &Tree,
+        renderer: &mut R,
+        theme: &T,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        (content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
+    }
 }
 
 /// `content` with `hook` in front of it.
@@ -90,7 +106,16 @@ impl<Message, H: Hook<Message>> Widget<Message, T, R> for Wrap<'_, Message, H> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        (self.content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
+        (self.hook).draw(
+            &self.content,
+            tree,
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
     }
     fn operate(
         &mut self,
