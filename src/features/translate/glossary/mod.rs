@@ -11,7 +11,6 @@
 //! Where the pipeline calls it: see REPORT.md ("Wiring").
 // The pipeline's calls (`apply`, `restore`, `stamp`, `ai_terms`, `store::active`) land with
 // pipeline.rs after W9's game-mode work: drop this allow with them.
-#![allow(dead_code)]
 
 mod menu;
 pub(crate) mod store;

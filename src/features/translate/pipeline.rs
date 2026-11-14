@@ -250,6 +250,15 @@ impl Real {
         let Via::Ai { ai, key } = &self.via else {
             return self.on_device(texts, target);
         };
+        // the per-game glossary's terms of this batch (guided, never forced)
+        let mine = super::glossary::store::current().unwrap_or_default();
+        let terms = mine.ai_terms(texts, target);
+        let markup = &[markup, terms.as_str()]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
         match ask_ai::translate_lines(ai, key.as_ref(), texts, &self.source, target, markup) {
             // A reply that isn't the array (a chatty model): on-device instead
             // of an error card, when a model exists for these lines.
@@ -257,7 +266,19 @@ impl Real {
                 crate::log!("[opencircle] AI translation unusable ({why}); on-device instead");
                 self.on_device(texts, target)
             }
-            done => done,
+            done => {
+                if let Ok(out) = &done {
+                    let missed: usize = (texts.iter().zip(out))
+                        .map(|(t, o)| mine.missed(t, o, target).len())
+                        .sum();
+                    if missed > 0 {
+                        crate::log!(
+                            "[opencircle] the AI left {missed} glossary term(s) as it chose"
+                        );
+                    }
+                }
+                done
+            }
         }
     }
 
@@ -280,7 +301,13 @@ impl Real {
         // menu words in their menu sense first (`glossed`); the rest to the models
         let mut out: Vec<String> = texts.to_vec();
         let mut rest = Vec::new();
+        let mine = super::glossary::store::current();
         for (i, t) in texts.iter().enumerate() {
+            // the user's glossary comes before the menu table and the model
+            if let Some(w) = mine.as_ref().and_then(|g| g.whole(t, target)) {
+                out[i] = w;
+                continue;
+            }
             match glossed(t, target) {
                 Some(g) => out[i] = g,
                 None => rest.push(i),
@@ -331,10 +358,50 @@ pub(super) fn through(
     target: &str,
     run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
 ) -> Result<Vec<String>, AiError> {
+    let mine = super::glossary::store::current().unwrap_or_default();
+    through_with(&mine, src, route, target, run)
+}
+
+/// `through` with the glossary given.
+pub(super) fn through_with(
+    mine: &super::Glossary,
+    src: &[String],
+    route: &[&'static mt::Pair],
+    target: &str,
+    run: impl Fn(&[String], &'static mt::Pair) -> Result<Vec<String>, AiError>,
+) -> Result<Vec<String>, AiError> {
     let (bodies, marks): (Vec<String>, Vec<String>) = src.iter().map(|s| footnotes(s)).unzip();
     let (bodies, kept): (Vec<String>, Vec<_>) = bodies.iter().map(|s| shield(s)).unzip();
-    let out = whole(&bodies, route, target, &run)?;
-    let out = (out.iter().zip(&bodies).zip(src).zip(&kept))
+    // the user's glossary: each term is a number the model copies, put back
+    // after (a lost number: that line again without, its terms fixed up);
+    // before `names_kept` can touch a term, which it never sees as a name
+    let applied: Vec<_> = bodies.iter().map(|b| mine.apply(b, target)).collect();
+    let sent: Vec<String> = applied.iter().map(|a| a.text.clone()).collect();
+    let mut out = whole(&sent, route, target, &run)?;
+    let lost: Vec<usize> = (0..out.len())
+        // (a line the guards gave up on, "made up" without its numbers, counts as lost)
+        .filter(|&i| {
+            !applied[i].is_empty()
+                && (out[i] == sent[i] || super::glossary::restore(&out[i], &applied[i]).is_none())
+        })
+        .collect();
+    if !lost.is_empty() {
+        let plain: Vec<String> = lost.iter().map(|&i| bodies[i].clone()).collect();
+        for (&i, p) in lost.iter().zip(whole(&plain, route, target, &run)?) {
+            // (echoed: the source stays, as below)
+            out[i] = match p == bodies[i] {
+                true => sent[i].clone(),
+                false => applied[i].fix(&p),
+            };
+        }
+    }
+    for i in 0..out.len() {
+        if out[i] != sent[i] {
+            out[i] =
+                super::glossary::restore(&out[i], &applied[i]).unwrap_or_else(|| out[i].clone());
+        }
+    }
+    let out = (out.iter().zip(&sent).zip(src).zip(&kept))
         // kept as it was: the source, its counters as they were
         .map(|(((t, b), s), k)| {
             if t == b {
@@ -1842,13 +1909,19 @@ pub(crate) fn translate_blocks(
                 .collect(),
         })
         .collect();
+    // editing a term only makes the lines that hold it new (`Glossary::stamp`)
+    let mine = super::glossary::store::current().unwrap_or_default();
+    let cached = |k: &str| match mine.stamp(k, target) {
+        s if s.is_empty() => target.to_string(),
+        s => format!("{target}\u{1}{s}"),
+    };
     let mut found: HashMap<&str, String> = HashMap::new();
     let mut todo: Vec<String> = Vec::new();
     for k in pieces.iter().flatten().filter_map(|(_, k)| k.as_ref()) {
         if found.contains_key(k.as_str()) || todo.contains(k) {
             continue;
         }
-        match cache.get(k, target) {
+        match cache.get(k, &cached(k)) {
             Some(t) => {
                 found.insert(k, t);
             }
@@ -1871,7 +1944,7 @@ pub(crate) fn translate_blocks(
             } else {
                 t
             };
-            cache.put(k, target, t.clone());
+            cache.put(k, &cached(k), t.clone());
             found.insert(k, t);
         }
     }

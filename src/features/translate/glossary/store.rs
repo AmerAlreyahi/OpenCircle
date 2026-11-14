@@ -233,3 +233,24 @@ pub fn active(dir: &Path, chosen: &str, title: Option<&str>) -> Option<Glossary>
     let slug = for_window(&all, title).unwrap_or(chosen).to_string();
     all.into_iter().find(|(s, _)| *s == slug).map(|(_, g)| g)
 }
+
+/// The glossary in use now (`translate.glossary`, or the one the window
+/// title the last capture started in picks), read at most every 2 s.
+pub fn current() -> Option<Glossary> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    type Cached = Option<(Instant, String, Option<Glossary>)>;
+    static CACHE: Mutex<Cached> = Mutex::new(None);
+    let chosen = crate::shared::config::current().translate.glossary;
+    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, slug, g)) = c.as_ref()
+        && *slug == chosen
+        && at.elapsed() < Duration::from_secs(2)
+    {
+        return g.clone();
+    }
+    let title = crate::shared::platform::capture::window_rect::captured_title();
+    let g = active(&dir(), &chosen, title.as_deref());
+    *c = Some((Instant::now(), chosen, g.clone()));
+    g
+}

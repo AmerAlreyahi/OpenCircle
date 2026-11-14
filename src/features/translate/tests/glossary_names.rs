@@ -59,7 +59,9 @@ fn run(lines: &[String], route: &[&'static mt::Pair]) -> Vec<String> {
 fn glossary_names_survive_the_real_models() {
     let g = game();
     let all = screens();
-    println!("src -> target | form | lines | plain keeps the name | placeholder back | fallback needed | consistent after");
+    println!(
+        "src -> target | form | lines | plain keeps the name | placeholder back | fallback needed | consistent after"
+    );
     let (mut total, mut good) = (0, 0);
     for (src, target) in [
         ("de", "en"),
@@ -97,7 +99,10 @@ fn glossary_names_survive_the_real_models() {
             ),
             (
                 "sentence",
-                names.iter().map(|n| (template.replace("{}", n), *n)).collect(),
+                names
+                    .iter()
+                    .map(|n| (template.replace("{}", n), *n))
+                    .collect(),
             ),
         ];
         forms.retain(|(_, l)| !l.is_empty());
@@ -110,7 +115,11 @@ fn glossary_names_survive_the_real_models() {
             let n = lines.len();
             let (mut kept, mut back, mut fallback, mut ok) = (0, 0, 0, 0);
             for (i, (_, name)) in lines.iter().enumerate() {
-                let fixed = g.terms.iter().find(|t| t.text == *name).and_then(|t| t.fixed(target));
+                let fixed = g
+                    .terms
+                    .iter()
+                    .find(|t| t.text == *name)
+                    .and_then(|t| t.fixed(target));
                 let want = fixed.unwrap_or(name).to_lowercase();
                 kept += plain[i].to_lowercase().contains(&want) as usize;
                 let (text, restored) = match restore(&out[i], &applied[i]) {
@@ -122,7 +131,10 @@ fn glossary_names_survive_the_real_models() {
                 let consistent = text.to_lowercase().contains(&want);
                 ok += consistent as usize;
                 if i < 3 || !consistent {
-                    println!("  [{src}->{target} {form}] {} | {} | {text}", src_lines[i], plain[i]);
+                    println!(
+                        "  [{src}->{target} {form}] {} | {} | {text}",
+                        src_lines[i], plain[i]
+                    );
                 }
             }
             total += n;
@@ -130,5 +142,8 @@ fn glossary_names_survive_the_real_models() {
             println!("{src} -> {target} | {form} | {n} | {kept} | {back} | {fallback} | {ok}");
         }
     }
-    println!("consistent after: {good} of {total} ({:.1} %)", 100.0 * good as f32 / total.max(1) as f32);
+    println!(
+        "consistent after: {good} of {total} ({:.1} %)",
+        100.0 * good as f32 / total.max(1) as f32
+    );
 }

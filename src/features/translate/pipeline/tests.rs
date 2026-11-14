@@ -1392,3 +1392,48 @@ fn a_page_windows_ocr_cannot_read_is_read_again() {
         ["File C:/oc/trn/ar.html", "Translate page from Arabic?"]
     );
 }
+
+/// The user's glossary through the offline path: a term goes through the
+/// model as a number and comes back as the term (kept, or its fixed
+/// translation); a model that loses the number gets the line again without
+/// it and its term fixed up after.
+#[test]
+fn glossary_terms_survive_the_offline_path() {
+    use crate::features::translate::{Glossary, Term};
+    let g = Glossary {
+        name: "T".into(),
+        windows: Vec::new(),
+        terms: vec![
+            Term {
+                text: "Vyrnhold".into(),
+                ..Term::default()
+            },
+            Term {
+                text: "Emberglass".into(),
+                translations: [("en".to_string(), "Glassember".to_string())].into(),
+                ..Term::default()
+            },
+        ],
+    };
+    let route = mt::route("fr", "en").unwrap();
+    // a model that keeps numbers and translates the words around them
+    let keeps = |t: &[String], _: &'static mt::Pair| {
+        Ok(t.iter()
+            .map(|s| s.replace("Va a", "Go to").replace(" et ", " and "))
+            .collect())
+    };
+    let src = vec!["Va a Vyrnhold et Emberglass".to_string()];
+    let out = through_with(&g, &src, &route, "en", keeps).unwrap();
+    assert_eq!(out, ["Go to Vyrnhold and Glassember"]);
+    // a model that loses the numbers but copies the names
+    let loses = |t: &[String], _: &'static mt::Pair| {
+        Ok(t.iter()
+            .map(|s| match s.contains("701") {
+                true => "Go to the keep and the glass".to_string(),
+                false => s.replace("Va a", "Go to").replace(" et ", " and "),
+            })
+            .collect())
+    };
+    let out = through_with(&g, &src, &route, "en", loses).unwrap();
+    assert_eq!(out, ["Go to Vyrnhold and Glassember"]);
+}
