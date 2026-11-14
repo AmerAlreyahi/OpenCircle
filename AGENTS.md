@@ -1133,3 +1133,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - v0.2.0 scope trim (owner, 2026-11-14): #134 (MeikiOCR Japanese spike), #135 (PP-OCRv6 spike) and #137 (models-v2 three-way
   measurement + README) move to Live translation (0.3.0). Japanese gets little effort in v0.2.0: no new Japanese reader work;
   the Japanese corpus screen (loading) is best effort, not held to the 90 % target. Russian/Cyrillic and Portuguese stay.
+- Glossaries made easier, all three ways (owner, 2026-11-14, "yes, use the 3 options"; refines "no starter glossaries" =
+  WE don't author them): (1) next version: a LOCAL name suggester (repeated capitalised words on the game's translated
+  screens -> a quiet "N names suggested" dot on the pill's glossary button; accept/reject in one click; never a pop-up during
+  play; no internet). (2) Later (with Reach, 0.6.0): a free community glossary repository on GitHub; players submit, we
+  review; the app offers "A glossary for <game> exists (N names) . Get" only as a quiet line the player may act on;
+  nothing downloads without that click. Names + the players' own translations only (never an official localisation copied).
+  (3) Models help (draft names from a game's wiki under its licence, attribution kept), never published without human review.
