@@ -1,5 +1,5 @@
-//! OCR: PP-OCRv5 mobile (detect lines, then read them) via oar-ocr on ONNX
-//! Runtime, CPU. Neither ORT nor the models ship with the app: `ensure_models`
+//! OCR: PP-OCRv5 mobile (detect lines, then read them) on ONNX Runtime, CPU
+//! (`ppocr`: the models' own pre- and post-processing, nothing between). Neither ORT nor the models ship with the app: `ensure_models`
 //! fetches them on first use (the only network access here). The app calls
 //! `recognize_in_child`, so ORT and its memory live only in an
 //! `opencircle ocr-worker` process that runs `Engine` (one per call, or one
@@ -8,8 +8,6 @@ pub(crate) mod app;
 #[cfg(all(test, target_os = "linux"))]
 mod bench;
 pub(crate) mod models;
-// beside oar-ocr until `Engine` switches to it (#61)
-#[cfg(test)]
 mod ppocr;
 pub mod screen;
 pub(crate) mod screens;
@@ -33,10 +31,6 @@ use crate::shared::config::TextReader;
 
 use image::RgbImage;
 use image::imageops::FilterType::Triangle;
-use oar_ocr::core::config::{OrtExecutionProvider, OrtSessionConfig};
-use oar_ocr::domain::tasks::TextDetectionConfig;
-use oar_ocr::predictors::{TextDetectionPredictor, TextRecognitionPredictor};
-use oar_ocr::processors::LimitType;
 
 /// Longest side the detector sees. 960 px read 35/36 lines at ~100 ms in spike
 /// S4 (native 1080p 36/36 at 3x the time), but on a 1716 px wide page it
@@ -352,10 +346,6 @@ impl From<std::io::Error> for OcrError {
     }
 }
 
-fn engine_err(e: impl fmt::Display) -> OcrError {
-    OcrError::Engine(e.to_string())
-}
-
 /// Loads ONNX Runtime from `dir` (once per process). A missing file is
 /// `Missing`, never a load attempt: on Windows that failed as
 /// `LoadLibraryExW` (read as a missing VC++ runtime) and a later ORT call
@@ -558,13 +548,12 @@ fn reverse_rtl(text: &str) -> String {
 /// ORT plus loaded models. Runs in the `ocr-worker` process only.
 pub struct Engine {
     dir: PathBuf,
-    det: TextDetectionPredictor,
-    ort: OrtSessionConfig,
+    det: ppocr::Detector,
     /// The loaded recognizer: one at a time (#169: a second one held a 3440
     /// helper 40-80 MB higher; loading one takes ~35 ms on 2 cores, and a
     /// part reads each script's lines together, so it switches once or
     /// twice per part at most).
-    recs: Vec<(usize, TextRecognitionPredictor)>,
+    recs: Vec<(usize, ppocr::Recognizer)>,
     /// `Auto`'s first try: the recognizer that read most lines last time.
     auto: usize,
     /// The last Latin and non-Latin recognizers that read most lines.
@@ -672,37 +661,10 @@ impl Engine {
         if !models.join(models::DET.name).is_file() {
             return Err(OcrError::Missing("the text-recognition model".into()));
         }
-        // Memory patterns cache a plan per input shape; every capture has a new
-        // shape, so they only add RAM (~100 MB measured).
-        // No spin-waiting threads after a run: in a warm helper they kept
-        // the CPU busy while the app rendered (a live step 0.6 s -> 0.2 s).
-        let ort = OrtSessionConfig::new()
-            .with_memory_pattern(false)
-            .add_config_entry("session.intra_op.allow_spinning", "0")
-            .add_config_entry("session.inter_op.allow_spinning", "0")
-            // The CPU EP registered as ours = no ORT memory arena: a warm
-            // helper kept every capture's peak (~210 MB more after one 1080p
-            // read) for about the same speed.
-            .with_execution_providers(vec![OrtExecutionProvider::CPU]);
-        let det = TextDetectionPredictor::builder()
-            .with_config(TextDetectionConfig {
-                score_threshold: 0.3,
-                box_threshold: 0.6,
-                unclip_ratio: 1.5,
-                max_candidates: 1000,
-                // `recognize` sizes the input itself (`detect_size`), so
-                // these never resize it.
-                limit_side_len: Some(u32::MAX),
-                limit_type: Some(LimitType::Max),
-                max_side_len: Some(u32::MAX),
-            })
-            .with_ort_config(ort.clone())
-            .build(models.join(models::DET.name))
-            .map_err(engine_err)?;
+        let det = ppocr::Detector::load(&models.join(models::DET.name))?;
         Ok(Engine {
             dir: models.into(),
             det,
-            ort,
             recs: Vec::new(),
             auto: 0,
             latin: 0,
@@ -713,7 +675,7 @@ impl Engine {
     }
 
     /// Recognizer `i`, loaded (`recs`).
-    fn recognizer(&mut self, i: usize) -> Result<&TextRecognitionPredictor, OcrError> {
+    fn recognizer(&mut self, i: usize) -> Result<&mut ppocr::Recognizer, OcrError> {
         if let Some(k) = self.recs.iter().position(|(n, _)| *n == i) {
             let rec = self.recs.remove(k);
             self.recs.push(rec);
@@ -724,14 +686,13 @@ impl Engine {
                 let what = format!("the {} text-recognition model", files.script);
                 return Err(OcrError::Missing(what));
             }
-            let rec = TextRecognitionPredictor::builder()
-                .dict_path(self.dir.join(files.dict.name))
-                .with_ort_config(self.ort.clone())
-                .build(self.dir.join(files.model.name))
-                .map_err(engine_err)?;
+            let rec = ppocr::Recognizer::load(
+                &self.dir.join(files.model.name),
+                &self.dir.join(files.dict.name),
+            )?;
             self.recs.push((i, rec));
         }
-        Ok(&self.recs.last().expect("just loaded").1)
+        Ok(&mut self.recs.last_mut().expect("just loaded").1)
     }
 
     /// Loads the recognizer `read` starts with (the engine is loaded): the
@@ -851,14 +812,13 @@ impl Engine {
         while !rest.is_empty() {
             let (chunk, tail) = rest.split_at(rec_batch_len(rest));
             rest = tail;
-            let crops = (chunk.iter())
+            let crops: Vec<RgbImage> = (chunk.iter())
                 .map(|b| {
                     let [x, y, w, h] = b.map(|v| v as u32);
                     image::imageops::crop_imm(img, x, y, w, h).to_image()
                 })
                 .collect();
-            let rec = rec.predict(crops).map_err(engine_err)?;
-            for (bounds, (text, confidence)) in chunk.iter().zip(rec.texts.iter().zip(rec.scores)) {
+            for (bounds, (text, confidence)) in chunk.iter().zip(rec.read(&crops)?) {
                 let text = text.trim();
                 if !text.is_empty() {
                     blocks.push(TextBlock {
@@ -1169,21 +1129,18 @@ impl Engine {
         height: u32,
         (dw, dh): (u32, u32),
     ) -> Result<Detected, OcrError> {
+        let resized;
         let small = if (dw, dh) == (width, height) {
-            img.clone()
+            img // (no copy: the detector reads it in place)
         } else {
-            image::imageops::resize(img, dw, dh, Triangle)
+            resized = image::imageops::resize(img, dw, dh, Triangle);
+            &resized
         };
-        let det = self.det.predict(vec![small]).map_err(engine_err)?;
+        let found = self.det.boxes(small)?;
         let (w, h) = (width as f32, height as f32);
         let (sx, sy) = (w / dw as f32, h / dh as f32);
-        let boxes: Vec<[f32; 4]> = det
-            .detections
-            .first()
-            .into_iter()
-            .flatten()
-            .map(|d| {
-                let (x0, y0, x1, y1) = d.bbox.aabb();
+        let boxes: Vec<[f32; 4]> = (found.into_iter())
+            .map(|[x0, y0, x1, y1]| {
                 let (x0, y0, x1, y1) = (x0 * sx, y0 * sy, x1 * sx, y1 * sy);
                 let (x0, y0) = (x0.clamp(0.0, w), y0.clamp(0.0, h));
                 [x0, y0, x1.min(w) - x0, y1.min(h) - y0]
@@ -1403,14 +1360,13 @@ impl Engine {
         let rec = self.recognizer(i)?;
         let mut read: Vec<Vec<TextBlock>> = vec![Vec::new(); boxes.len()];
         for run in runs(&pieces) {
-            let crops = (run.iter())
+            let crops: Vec<RgbImage> = (run.iter())
                 .map(|&j| {
                     let [x, y, w, h] = pieces[j].map(|v| v as u32);
                     image::imageops::crop_imm(img, x, y, w, h).to_image()
                 })
                 .collect();
-            let rec = rec.predict(crops).map_err(engine_err)?;
-            for (&j, (text, confidence)) in run.iter().zip(rec.texts.iter().zip(rec.scores)) {
+            for (&j, (text, confidence)) in run.iter().zip(rec.read(&crops)?) {
                 if !text.trim().is_empty() {
                     let text = text.trim();
                     read[owner[j]].push(TextBlock {

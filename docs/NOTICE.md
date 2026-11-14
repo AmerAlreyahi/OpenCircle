@@ -135,6 +135,11 @@ PaddleOCR PP-OCRv5 models (Apache-2.0): the text detector and one
 recognizer per script (English, Latin, Arabic, Cyrillic, Chinese/Japanese),
 ONNX export by oar-ocr (https://github.com/GreatV/oar-ocr, Apache-2.0),
 release v0.3.0.
+The app runs them with its own pre- and post-processing, which follows
+PaddleOCR's and oar-ocr's. Box growing: Clipper2 by Angus Johnson, Rust
+port clipper2-rust (BSL-1.0). Border following: Suzuki and Abe's
+algorithm as imageproc (MIT, https://github.com/image-rs/imageproc) runs
+it.
 
 ## ONNX Runtime
 
