@@ -1146,3 +1146,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   browser address bar is found on the frame (pipeline::without_chrome's detection, works on every OS) AND, where the OS tells
   the focused window (Windows, X11), that window is full-screen / borderless over its monitor and not a known browser; on
   Wayland (no focused-window info) the frame test alone decides. A glossary auto-picked by window title also marks a game.
+  Each game its own glossary (owner, 2026-11-14): a game's glossary applies only to that game. Where the OS gives the
+  window title (Windows, X11), the active glossary follows the game in front (its "Use for windows named" list); a game with
+  no glossary gets none (never the previous game's). On Wayland the player's pick on the pill stays until changed (the pill
+  shows which glossary is active, so a wrong one is visible at once).
