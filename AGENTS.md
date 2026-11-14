@@ -1073,3 +1073,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   cost measurement (#166) run on the owner's RTX 3090 PC only when he says so: ask right before the run. (3) Portuguese
   offline translation (#113): the lead may convert the model and upload it as a new release of OpenCircle-models (as the
   owner, no AI credit), sha256 pinned like the other pairs.
+- App icon (owner, 2026-11-14): v0.2.0 ships the new Sapphire icon (the design's official Sapphire logo,
+  .claude/artifacts/design/newdesing/assets/logo-sapphire.svg/.png) everywhere the purple one is used today: exe/.ico,
+  window and tray icons, Setup exe and installer screens, AppImage/deb/rpm icons, About, README/docs images. The owner sees a
+  rendered sheet of every size (16..512, light and dark backgrounds, tray) before it merges.
