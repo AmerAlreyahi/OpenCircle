@@ -1095,3 +1095,4 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   balanced conversation. Menus/settings screens are already covered by the 13-screen corpus. Frame cost is measured on a
   heavy full-screen browser 3D scene (no game); the owner tests real games himself and gives feedback. Never any automated
   input into a game, never a handle to a game process.
+- Sapphire icon approved (owner, 2026-11-14, on the before/after sheet): merge W6's icons (scripts/app-icon.py).
