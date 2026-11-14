@@ -467,6 +467,25 @@ fn editor_keys_and_snip_after_values_stay_as_written() {
     assert_eq!(Config::load_from(&path).0, c);
 }
 
+/// `[translate] glossary` (0.2.0, additive): "" by default and for a file
+/// from before it (no migration, no warning), written only when set, read back.
+#[test]
+fn the_active_glossary_is_one_additive_key() {
+    assert_eq!(Config::default().translate.glossary, "");
+    let (old, w) = Config::parse("[translate]\ntarget = \"fr\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(old.translate.glossary, "");
+    assert!(!toml::to_string(&old).unwrap().contains("glossary"));
+    let (c, w) = Config::parse("[translate]\nglossary = \"ashen-tides\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.translate.glossary, "ashen-tides");
+    assert!(
+        toml::to_string(&c)
+            .unwrap()
+            .contains("glossary = \"ashen-tides\"")
+    );
+}
+
 #[test]
 fn save_then_load_round_trips() {
     let dir = tmp_dir("rt");

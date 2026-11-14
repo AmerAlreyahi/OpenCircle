@@ -27,6 +27,7 @@ pub fn snapshot(
 ) -> Result<Snapshot, String> {
     let start = Instant::now();
     let foreground = window_rect::foreground();
+    window_rect::remember_focused();
     let widgets = window_rect::widgets_in_grab();
     let (grabbed, (windows, listed)) = std::thread::scope(|s| {
         let listing = s.spawn(|| (window_rect::list(), start.elapsed()));

@@ -46,6 +46,8 @@
 //!                                   # not just the foreground window (no taskbar, no browser bars)
 //! recent_sources = []               # the language picker's last picks, newest first
 //! recent_targets = []               #   (written only when not empty)
+//! glossary = ""                     # the active per-game glossary (its file name in glossaries/, "" = none;
+//!                                   #   written only when set)
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
@@ -402,6 +404,9 @@ pub struct TranslateConfig {
     pub recent_sources: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub recent_targets: Vec<String>,
+    /// The active glossary (`translate::glossary`): its slug, "" = none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub glossary: String,
 }
 
 /// What a finished snip does.
@@ -935,6 +940,7 @@ impl Default for TranslateConfig {
             whole_screen: false,
             recent_sources: Vec::new(),
             recent_targets: Vec::new(),
+            glossary: String::new(),
         }
     }
 }

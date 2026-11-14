@@ -215,6 +215,91 @@ pub fn foreground() -> Option<isize> {
     None
 }
 
+/// The title of the window the user is in, where the OS tells an app (Windows,
+/// X11); `None` on Wayland, which has no such API. The title only: no handle on
+/// the window's process is opened (a game's anti-cheat watches for that).
+pub fn focused_title() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+        // SAFETY: plain queries on the foreground window's handle.
+        let title = unsafe {
+            let h = GetForegroundWindow();
+            let mut buf = [0u16; 256];
+            let n = (!h.is_invalid()).then(|| GetWindowTextW(h, &mut buf).max(0) as usize)?;
+            String::from_utf16_lossy(&buf[..n])
+        };
+        (!title.is_empty()).then_some(title)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use xcb::{XidNew, x};
+        if super::wayland_session() || std::env::var_os("DISPLAY").is_none() {
+            return None;
+        }
+        let (conn, screen) = xcb::Connection::connect(None).ok()?;
+        let root = conn.get_setup().roots().nth(screen as usize)?.root();
+        let atom = |name: &str| {
+            conn.wait_for_reply(conn.send_request(&x::InternAtom {
+                only_if_exists: true,
+                name: name.as_bytes(),
+            }))
+            .ok()
+            .map(|r| r.atom())
+        };
+        let prop = |window, property, r#type| {
+            conn.wait_for_reply(conn.send_request(&x::GetProperty {
+                delete: false,
+                window,
+                property,
+                r#type,
+                long_offset: 0,
+                long_length: 256,
+            }))
+            .ok()
+        };
+        let active = prop(root, atom("_NET_ACTIVE_WINDOW")?, x::ATOM_WINDOW)?;
+        let id = *active.value::<u32>().first().filter(|&&w| w != 0)?;
+        let title = prop(
+            x::Window::new(id),
+            atom("_NET_WM_NAME")?,
+            atom("UTF8_STRING")?,
+        )?;
+        let title = String::from_utf8_lossy(title.value::<u8>()).into_owned();
+        (!title.is_empty()).then_some(title)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    None
+}
+
+/// Whether [`focused_title`] can answer here (Windows, X11): the glossary's
+/// "Use for windows named" is shown only then.
+pub fn titles_available() -> bool {
+    #[cfg(windows)]
+    return true;
+    #[cfg(target_os = "linux")]
+    return !super::wayland_session() && std::env::var_os("DISPLAY").is_some();
+    #[cfg(not(any(windows, target_os = "linux")))]
+    false
+}
+
+/// The title read when the last capture started (before the overlay took the
+/// focus): what the glossary picks a game by.
+static CAPTURED_TITLE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Reads [`focused_title`] now, for [`captured_title`].
+pub fn remember_focused() {
+    *CAPTURED_TITLE.lock().unwrap_or_else(|e| e.into_inner()) = focused_title();
+}
+
+/// The focused window's title as the last capture started.
+pub fn captured_title() -> Option<String> {
+    CAPTURED_TITLE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// Gives the focus back to `foreground()`'s window (the overlay shrank to a pill:
 /// the user goes on in their app, e.g. pastes into a chat).
 pub fn activate(window: Option<isize>) {

@@ -5,7 +5,7 @@
 //! goes to the model. Nouns and verbs only: an adjective ("Alta", "Activée")
 //! takes its noun's gender, which the model sees and a table doesn't.
 
-use super::lang;
+use crate::features::translate::lang;
 
 /// Languages of the columns, in order.
 const COLUMNS: [&str; 7] = ["en", "es", "fr", "de", "it", "pt", "ar"];

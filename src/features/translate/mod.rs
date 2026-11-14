@@ -11,6 +11,9 @@ pub(crate) mod action;
 mod draw;
 mod erase;
 mod glossary;
+// (the glossary: Settings' editor and the pill read it through here)
+pub(crate) use glossary::store as glossary_store;
+pub(crate) use glossary::{Glossary, Term};
 pub mod lang;
 pub(crate) mod mt;
 pub mod pipeline;
