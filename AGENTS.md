@@ -1063,3 +1063,13 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   (tray "Studio", Start menu / app grid shortcut, additive CLI `opencircle studio [file]`) or with any picture (Open
   Ctrl+O, drop a file, Paste Ctrl+V, "Open with" from Explorer / file managers); unsaved edits ask Save / Don't save /
   Cancel. Into the Studio design round first; version 0.5.0 (roadmap section 1, planning #162).
+
+- 0.2.0 decisions (owner, 2026-11-14): (1) Per-game glossary (#13): the design round (.claude/artifacts/design/
+  glossary-design.html, GLOSSARY_SPEC.md) is approved with every recommended default: a glossary button always on the
+  translate pill (the only quick switch on Wayland); the user picks the active glossary (remembered), a glossary's "Use for
+  windows named" list picks it by itself where the OS gives a window title; never a handle to the game process; empty
+  translation = keep as is; auto-suggest names later; TOML only (CSV later); no starter glossaries; the AI is guided, not
+  forced; matching ignores case. Built after the slim OCR pipeline (#61) lands. (2) The GPU spike (#136) and the live-layer
+  cost measurement (#166) run on the owner's RTX 3090 PC only when he says so: ask right before the run. (3) Portuguese
+  offline translation (#113): the lead may convert the model and upload it as a new release of OpenCircle-models (as the
+  owner, no AI credit), sha256 pinned like the other pairs.
