@@ -12,8 +12,8 @@ works on anything you can see.
 
 Three ways in, all from the same bar or keys:
 
-- **Translate** on a selection (the bar, or `Ctrl+Shift+T` for the whole screen).
-- **Live translate** (a Labs feature, unfinished; `Ctrl+Shift+L`, or the bar's button) keeps going as the screen changes.
+- **Translate** on a selection (the bar, or `Alt+Shift+T` for the whole screen).
+- **Live translate** (a Labs feature, unfinished; `Alt+Shift+L`, or the bar's button) keeps going as the screen changes.
 - **Select text**, then Translate, for only the words you picked.
 
 ## How it works
@@ -153,7 +153,7 @@ Explain on a word card always asks your AI provider.
 
 ## One-shot
 
-Press `Ctrl+Shift+T`. The whole screen is translated at once and shown in
+Press `Alt+Shift+T`. The whole screen is translated at once and shown in
 place. `Esc` closes it.
 
 - **Hold `Alt`** to peek at the original; release to see the translation again.
@@ -163,7 +163,7 @@ place. `Esc` closes it.
 
 ## Live
 
-Press `Ctrl+Shift+L` to turn live translate on or off. A click-through,
+Press `Alt+Shift+L` to turn live translate on or off. A click-through,
 always-on-top layer re-captures about once a second and re-translates only the
 text that changed, so game input is never blocked. A small status pill shows
 the language pair. If a model the languages need isn't on your PC yet, the

@@ -76,7 +76,7 @@ steps, Pin, Live pin, Share (Windows), Colour picker and Screen ruler:
   **Show original**. Copy, Save and drag-out give the translated picture.
 
 Each of the three shows your own shortcut for the same action (Settings >
-Shortcuts; by default `Ctrl+Shift+X`, `Ctrl+Shift+E`, `Ctrl+Shift+T`), and that
+Shortcuts; by default `Ctrl+Shift+X`, `Ctrl+Shift+E`, `Alt+Shift+T`), and that
 key acts on the area while Snip is open. The area is read once, when More opens.
 Copy text and Translate read the capture under your drawing and never the parts
 you hid with Blur or Redact (or that a Spotlight dims). During a long capture,

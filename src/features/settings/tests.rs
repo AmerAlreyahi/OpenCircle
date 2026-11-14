@@ -209,6 +209,13 @@ fn state(path: Option<PathBuf>) -> (State, Arc<MemoryStore>) {
     (s, store)
 }
 
+fn alt_shift(key: &str) -> Chord {
+    Chord {
+        alt: true,
+        ..chord(false, true, key)
+    }
+}
+
 fn chord(ctrl: bool, shift: bool, key: &str) -> Chord {
     Chord {
         ctrl,
@@ -270,22 +277,22 @@ fn invalid_keys_are_rejected_inline_and_escape_cancels() {
 fn conflicts_show_inline_and_do_not_assign() {
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
-    // Quick action 0 (Ctrl+Shift+T) vs the capture shortcut.
+    // Quick action 0 (Alt+Shift+T) vs the capture shortcut.
     update(&mut s, Message::Record(Slot::Quick(0)));
     press(&mut s, chord(true, true, "Space"));
     assert_eq!(
         s.shortcut_error,
         Some((Slot::Quick(0), "Already used by Open OpenCircle".into()))
     );
-    assert_eq!(s.draft.quick_actions[0].shortcut, "Ctrl+Shift+T");
-    // Quick vs quick: "Translate (live, Beta)" owns Ctrl+Shift+L.
-    press(&mut s, chord(true, true, "KeyL"));
+    assert_eq!(s.draft.quick_actions[0].shortcut, "Alt+Shift+T");
+    // Quick vs quick: "Translate (live, Beta)" owns Alt+Shift+L.
+    press(&mut s, alt_shift("KeyL"));
     assert_eq!(
         s.shortcut_error.as_ref().unwrap().1,
         "Already used by Translate (live, Beta)"
     );
     // Re-pressing its own combination is fine.
-    press(&mut s, chord(true, true, "KeyT"));
+    press(&mut s, alt_shift("KeyT"));
     assert_eq!(s.recording, None);
 }
 
@@ -1837,7 +1844,7 @@ fn every_shortcut_field_is_the_same_size() {
         ("Ctrl+Shift+Space", Field::Rest),
         ("Ctrl+Alt+Shift+K", Field::Rest),
         ("Ctrl+C", Field::Recording),
-        ("Ctrl+Shift+T", Field::Conflict),
+        ("Alt+Shift+T", Field::Conflict),
     ] {
         let e: Element<'_, Message> = shortcut_field(
             keys(shortcut),
@@ -3244,7 +3251,7 @@ fn privacy_cells_in_arabic_start_at_the_columns_right_edge() {
 fn reset_shortcuts_asks_resets_saves_and_undoes() {
     let path = tmp("reset-shortcuts");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "version = 11\n").unwrap();
+    std::fs::write(&path, "version = 12\n").unwrap();
     let (mut s, _) = state(Some(path.clone()));
     s.draft = Config::load_from(&path).0;
     // Song search is off in Labs: its entry holds a key of the user's own

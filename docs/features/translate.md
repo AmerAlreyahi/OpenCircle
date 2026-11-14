@@ -10,7 +10,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 
 1. The first-run setup asks for your language and makes it the target; change it in **Settings › Translate**. The picture shows English → Arabic.
 2. Leave the default setup for offline translation, or choose **Offline** under **Engine** to keep translation on your PC even if you have set up AI.
-3. Show the page you want to read and press `Ctrl+Shift+T`.
+3. Show the page you want to read and press `Alt+Shift+T`.
 4. On first use, accept the model download. It is downloaded once for that language direction and reused.
 5. Wait as translated blocks appear from the top of the screen. Press `Esc` when you are done.
 
@@ -18,7 +18,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 
 | Shortcut | What it does |
 |---|---|
-| `Ctrl+Shift+T` | Translate the whole screen |
+| `Alt+Shift+T` | Translate the whole screen |
 | `Ctrl+Shift+Space` | Open the overlay to select an area, then choose Translate |
 | Hold `Alt` | See the original while viewing the translation |
 | `Esc` | Close the translation overlay |

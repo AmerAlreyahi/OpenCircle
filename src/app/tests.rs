@@ -3115,7 +3115,7 @@ fn the_bottom_bar_has_every_main_action_on_any_screen() {
         // each names itself (icons) and its shortcut in its tooltip
         let tips = crate::shared::kit::tooltip::tests_support::shown();
         for want in [
-            "Live translate (Beta) · Ctrl+Shift+L",
+            "Live translate (Beta) · Alt+Shift+L",
             "Song search",
             "Snip the screen · E",
         ] {

@@ -329,6 +329,31 @@ impl Config {
                 }
             }
         }
+        // Schema 12: Translate / Live translate leave the browsers' Ctrl+Shift+T / L for
+        // Alt+Shift+T / L (owner, 2026-11-14), once, unless the new key is taken;
+        // a user's own key stays.
+        if file_version < Some(12) {
+            for (old, new, live) in [
+                ("Ctrl+Shift+T", "Alt+Shift+T", false),
+                ("Ctrl+Shift+L", "Alt+Shift+L", true),
+            ] {
+                if c.quick_actions
+                    .iter()
+                    .any(|q| q.shortcut.eq_ignore_ascii_case(new))
+                {
+                    continue;
+                }
+                for q in &mut c.quick_actions {
+                    if q.action == "translate"
+                        && q.target == Target::FullScreen
+                        && q.live == live
+                        && q.shortcut == old
+                    {
+                        q.shortcut = new.into();
+                    }
+                }
+            }
+        }
         // Schema 4: translate is on-device unless the user chose AI for it.
         // Before, "ai" was the default and only ever ran with an API provider
         // (the browser one fell back to on-device); kept that way, picking a

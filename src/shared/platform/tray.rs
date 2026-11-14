@@ -915,9 +915,9 @@ mod tests {
         let mut cfg = Config::default();
         assert_eq!(
             Entry::Translate.shortcut(&cfg).as_deref(),
-            Some("Ctrl+Shift+T")
+            Some("Alt+Shift+T")
         );
-        assert_eq!(Entry::Live.shortcut(&cfg).as_deref(), Some("Ctrl+Shift+L"));
+        assert_eq!(Entry::Live.shortcut(&cfg).as_deref(), Some("Alt+Shift+L"));
         assert_eq!(Entry::Song.shortcut(&cfg), None, "unbound: no hint");
         assert_eq!(Entry::Quit.shortcut(&cfg), None);
         cfg.shortcut = "Alt+Q".into();

@@ -1,9 +1,9 @@
 //! The one config reader/validator: `<user config dir>/opencircle/config.toml`.
 //!
-//! Schema (version 11). Every key is optional; a missing file means defaults.
+//! Schema (version 12). Every key is optional; a missing file means defaults.
 //!
 //! ```toml
-//! version = 11                      # schema version, written by save()
+//! version = 12                      # schema version, written by save()
 //! theme = "system"                  # system | light | dark
 //! glass_effect = true               # frost / graphite blur the screen behind them (false = solid tint)
 //!                                   # (both kept and written; unused until glass returns)
@@ -104,7 +104,7 @@
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
-//! shortcut = "Ctrl+Shift+T"         # "" = not bound
+//! shortcut = "Alt+Shift+T"         # "" = not bound
 //! target = "full_screen"            # full_screen | circle | last_region | window
 //! live = false                      # optional: repeat while shown
 //! ```
@@ -130,7 +130,9 @@
 //! entries of `[[quick_actions]]` (Snip has one shortcut); 10 makes "editor" (a pick copies nothing; Ctrl+C or Copy
 //! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). 11 stops writing the keys nothing
 //! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`) and the removed search history
-//! (`general.search_history`, `labs.history`); they still read without a warning. A file older than `VERSION` is copied to
+//! (`general.search_history`, `labs.history`); they still read without a warning.
+//! 12 moves the old default Translate / Live translate keys Ctrl+Shift+T / L to Alt+Shift+T / L (unless taken; a user's own
+//! key stays). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -155,7 +157,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 
 /// The OS's language as the language table has it, else English
@@ -962,8 +964,8 @@ impl Default for Config {
             snip: SnipConfig::default(),
             // DESIGN.md "Quick actions".
             quick_actions: vec![
-                qa("translate", "Ctrl+Shift+T", Target::FullScreen, false),
-                qa("translate", "Ctrl+Shift+L", Target::FullScreen, true),
+                qa("translate", "Alt+Shift+T", Target::FullScreen, false),
+                qa("translate", "Alt+Shift+L", Target::FullScreen, true),
                 qa("ai_explain", "Ctrl+Shift+E", Target::Circle, false),
                 qa("copy_text", "Ctrl+Shift+X", Target::Circle, false),
                 qa("lens", "", Target::Circle, false),

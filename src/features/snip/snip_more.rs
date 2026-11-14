@@ -314,8 +314,8 @@ mod tests {
         let k = caps_from(&cfg);
         assert_eq!(k[0], ["Ctrl", "Shift", "X"]);
         assert_eq!(k[1], ["Ctrl", "Shift", "E"]);
-        // the one-shot translate key, not the live one (Ctrl+Shift+L)
-        assert_eq!(k[2], ["Ctrl", "Shift", "T"]);
+        // the one-shot translate key, not the live one (Alt+Shift+L)
+        assert_eq!(k[2], ["Alt", "Shift", "T"]);
         // changed in Settings: the row follows; unbound: no caps
         let mut mine = Config::default();
         for q in &mut mine.quick_actions {

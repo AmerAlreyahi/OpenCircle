@@ -57,7 +57,7 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   are read line by line, each line by the reader that suits it; the Copy text
   button spins while the screen is still being read. Settings > Text reading >
   Engine chooses.
-- **Translate in place.** Press `Ctrl+Shift+T` to translate the whole screen. The
+- **Translate in place.** Press `Alt+Shift+T` to translate the whole screen. The
   original text is erased and the translation is drawn in its place, with
   matching colour and size; browser address bars and file names are left alone,
   and big outlined subtitles are erased and redrawn at their size. It runs
@@ -221,8 +221,8 @@ operating it. See the [Privacy](docs/privacy.md) page.
 | Action | Shortcut |
 |---|---|
 | Circle to search | `Ctrl+Shift+Space` |
-| Translate the whole screen | `Ctrl+Shift+T` |
-| Live translate on / off (Labs, unfinished) | `Ctrl+Shift+L` |
+| Translate the whole screen | `Alt+Shift+T` |
+| Live translate on / off (Labs, unfinished) | `Alt+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
 | Snip | `Alt+A` |

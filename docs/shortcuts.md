@@ -9,8 +9,8 @@ for a later release): its shortcut, tray item and bar button appear only when it
 | Action | Default | What it does |
 |---|---|---|
 | Circle to search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |
-| Translate full screen | `Ctrl+Shift+T` | Translate the whole screen at once |
-| Live translate (Labs) | `Ctrl+Shift+L` | Toggle continuous translation |
+| Translate full screen | `Alt+Shift+T` | Translate the whole screen at once |
+| Live translate (Labs) | `Alt+Shift+L` | Toggle continuous translation |
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search in browser | unset | Circle something; it opens in Google Lens in your browser |

@@ -84,7 +84,7 @@ then the rest:
 | Search in browser | Opens the selection in your default browser: a picture goes to Google Lens, selected text to a Google search | `L` |
 | Copy text | Copies the selection's text straight to the clipboard (there is no text panel) | `Ctrl+C` |
 | Translate | Translates the selection in place (no selection: the whole screen) | |
-| Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Ctrl+Shift+L` |
+| Live translate (Labs, unfinished) | Keeps translating the screen while you play | `Alt+Shift+L` |
 | Music | Finds a song from a short clip (Settings > Labs; see [Song search](song-search.md)) | |
 | Snip | Starts Snip over the frozen screen: pick an area or a window, then annotate | `E` |
 
@@ -157,8 +157,8 @@ on (the default) the selected area goes with it; off sends only your question.
 
 ## Translate and live translate
 
-- `Ctrl+Shift+T` translates the whole screen once, in place. `Esc` closes it.
-- `Ctrl+Shift+L` turns live translate on or off (a Labs feature: unfinished, off
+- `Alt+Shift+T` translates the whole screen once, in place. `Esc` closes it.
+- `Alt+Shift+L` turns live translate on or off (a Labs feature: unfinished, off
   until you switch it on in **Settings > Labs**). It keeps translating as the
   screen changes.
 - Hold `Alt` to see the original; release to see the translation again.

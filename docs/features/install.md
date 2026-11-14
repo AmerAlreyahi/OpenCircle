@@ -16,7 +16,7 @@ Install OpenCircle on Windows, or use the portable executable; Linux packages ar
 | Shortcut | What it does |
 |---|---|
 | `Ctrl+Shift+Space` | Open Circle to Search after launching |
-| `Ctrl+Shift+T` | Translate the whole screen |
+| `Alt+Shift+T` | Translate the whole screen |
 | `Esc` | Close the capture overlay; leave the question field first if focused |
 
 ## Tips

@@ -947,10 +947,10 @@ mod tests {
         let config = cfg(
             "Ctrl+Shift+Space",
             vec![
-                qa("translate", "Ctrl+Shift+T", Target::FullScreen, false),
+                qa("translate", "Alt+Shift+T", Target::FullScreen, false),
                 qa("lens", "", Target::Circle, false), // unbound: silent
                 qa("lens", "Ctrl+Banana", Target::Circle, false), // invalid
-                qa("copy_text", "ctrl+shift+t", Target::Circle, false), // same key, other spelling
+                qa("copy_text", "alt+shift+t", Target::Circle, false), // same key, other spelling
                 qa("save", "Control+Shift+Space", Target::Circle, false), // the capture key
                 qa("ai_explain", "Ctrl+Shift+E", Target::Circle, false),
             ],
@@ -976,16 +976,16 @@ mod tests {
         let (b, _) = plan(&all_labs());
         let at = Instant::now();
         let id = |s: &str| parse_shortcut(s).unwrap().id();
-        // Live translate is a Labs feature: off, Ctrl+Shift+L is not registered.
+        // Live translate is a Labs feature: off, Alt+Shift+L is not registered.
         let (off, _) = plan(&Config::default());
-        assert!(route_hotkey(&off, id("Ctrl+Shift+L"), at).is_none());
+        assert!(route_hotkey(&off, id("Alt+Shift+L"), at).is_none());
         assert!(!off.iter().any(|b| b.id.ends_with("-live")));
 
         assert!(matches!(
             route_hotkey(&b, id("Ctrl+Shift+Space"), at),
             Some(Trigger::Capture(_))
         ));
-        match route_hotkey(&b, id("Ctrl+Shift+L"), at) {
+        match route_hotkey(&b, id("Alt+Shift+L"), at) {
             Some(Trigger::Quick(_, q)) => {
                 assert_eq!(
                     (q.action.as_str(), q.target, q.live),

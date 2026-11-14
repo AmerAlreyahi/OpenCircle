@@ -1,4 +1,4 @@
-//! Live translate (DESIGN.md "Full-screen translate", Ctrl+Shift+L): a
+//! Live translate (DESIGN.md "Full-screen translate", Alt+Shift+L): a
 //! borderless, monitor-sized, always-on-top window made click-through (and,
 //! on Windows, invisible to capture) by `crate::features::live_translate::prepare_layer`. It shows
 //! only the translated patches; everything else is see-through. A thread at

@@ -484,8 +484,8 @@ mod tests {
         // our defaults are free
         for k in [
             "Ctrl+Shift+Space",
-            "Ctrl+Shift+T",
-            "Ctrl+Shift+L",
+            "Alt+Shift+T",
+            "Alt+Shift+L",
             "Ctrl+Shift+E",
             "Ctrl+Shift+X",
             "Alt+A",

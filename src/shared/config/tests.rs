@@ -38,7 +38,7 @@ fn a_v0_1_0_file_loads_without_warnings_and_gets_labs_defaults() {
     assert_eq!(
         quick,
         [
-            ("translate", "Ctrl+Shift+T"),
+            ("translate", "Alt+Shift+T"),
             ("snip", "Alt+A"),
             ("song_search", "Ctrl+Shift+M"),
         ]
@@ -56,7 +56,7 @@ fn migrating_backs_the_old_file_up_once_then_rewrites_it_as_the_new_schema() {
     // The file is the new schema now, with every old value and the Labs switches.
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
-        text.contains("version = 11") && text.contains("[labs]"),
+        text.contains("version = 12") && text.contains("[labs]"),
         "{text}"
     );
     let (again, w) = Config::load_from(&path);
@@ -93,13 +93,13 @@ fn a_backup_is_never_overwritten() {
 
 #[test]
 fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-    let (dir, path) = config_with("current", "version = 11\n[labs]\nsong = true\n");
+    let (dir, path) = config_with("current", "version = 12\n[labs]\nsong = true\n");
     let (c, w) = Config::load_from(&path);
     assert!(w.is_empty() && c.labs.song, "{w:?}");
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "version = 11\n[labs]\nsong = true\n"
+        "version = 12\n[labs]\nsong = true\n"
     );
     let gone = dir.join("none.toml");
     Config::load_from(&gone);
@@ -591,7 +591,7 @@ fn a_stored_target_is_kept_and_a_missing_one_follows_the_os() {
         let saved = toml::to_string_pretty(&c).unwrap();
         assert_eq!(Config::parse(&saved).0.translate.target, "ar");
     }
-    let (c, _) = Config::parse("version = 11\n[translate]\nengine = \"offline\"\n");
+    let (c, _) = Config::parse("version = 12\n[translate]\nengine = \"offline\"\n");
     assert_eq!(c.translate.target, os_language());
     assert_eq!(c.general.language, "", "the app language follows the OS");
     let (c, w) = Config::parse("[general]\nlanguage = \"not a code\"\n");
@@ -713,7 +713,7 @@ fn an_old_auto_search_migrates_to_wait_with_a_backup() {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 11") && !text.contains("search_with"),
+            text.contains("version = 12") && !text.contains("search_with"),
             "{text}"
         );
         assert!(!text.contains("[results]"), "{text}");
@@ -954,7 +954,7 @@ fn broken_toml_and_wrong_shapes_do_not_crash() {
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 1);
     assert!(w[0].contains("AI is off"), "{w:?}");
-    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 12\n");
+    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 13\n");
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 3, "{w:?}");
     assert!(
@@ -1064,7 +1064,7 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).unwrap()
 }
 
-/// The default file is byte-for-byte the frozen v11 one (the file format is
+/// The default file is byte-for-byte the frozen v12 one (the file format is
 /// frozen), but for the target: the OS language since 2026-11-10 (English
 /// in tests), no longer Arabic.
 #[test]
@@ -1073,7 +1073,7 @@ fn the_default_file_is_byte_for_byte_the_frozen_one() {
     let path = dir.join("config.toml");
     Config::default().save_to(&path).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
-    let frozen = fixture("default-v11.toml").replace("target = \"ar\"", "target = \"en\"");
+    let frozen = fixture("default-v12.toml").replace("target = \"ar\"", "target = \"en\"");
     assert_eq!(written, frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1112,7 +1112,7 @@ fn older_files_load_quietly_and_schema_9_drops_the_retired_keys() {
         assert_eq!(kept(&again), kept(&c), "v{n}");
         assert_eq!(c, Config::parse(text).0, "v{n}");
         let saved: Table = fs_text(&path).parse().unwrap();
-        assert_eq!(saved["version"].as_integer(), Some(11));
+        assert_eq!(saved["version"].as_integer(), Some(12));
         let labs = saved["labs"].as_table().unwrap();
         assert!(
             !labs.contains_key("snip") && !labs.contains_key("editor"),
@@ -1180,7 +1180,7 @@ fn a_v4_file_still_has_every_v3_key() {
     want.look.theme = LookTheme::Spectrum;
     want.translate.target = "ar".into(); // stored: kept
     assert_eq!(c, want);
-    let frozen = fixture("default-v11.toml").replace("sapphire_glow", "spectrum");
+    let frozen = fixture("default-v12.toml").replace("sapphire_glow", "spectrum");
     assert_eq!(fs_text(&path), frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1305,7 +1305,7 @@ fn a_v3_file_migrates_once_with_a_bak_v3() {
     assert_eq!(look(&fs_text(&path)), look(old));
     let text = fs_text(&path);
     for want in [
-        "version = 11",
+        "version = 12",
         "glass_effect = false",
         "theme = \"aurora\"",
         "[appearance]",
@@ -1345,7 +1345,7 @@ fn a_stored_copy_moves_to_both_once_editor_and_both_stay() {
             assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
             assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["version"].as_integer(), Some(11));
+            assert_eq!(saved["version"].as_integer(), Some(12));
             assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
             let (again, _) = Config::load_from(&path);
             assert_eq!(again.snip.after, want, "migrated once");
@@ -1369,11 +1369,56 @@ fn schema_10_moves_both_to_editor_once_with_a_backup() {
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.snip.after, SnipAfter::Editor);
     assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
-    assert_eq!(fs_text(&path), fixture("default-v11.toml"));
+    assert_eq!(fs_text(&path), fixture("default-v12.toml"));
     let _ = std::fs::remove_dir_all(dir);
     // a v10 file keeps a deliberate "both"
     let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
     assert_eq!((c.snip.after, w), (SnipAfter::Both, vec![]));
+}
+
+/// Schema 12 (owner, 2026-11-14): Translate / Live translate move off the browsers'
+/// Ctrl+Shift+T / L to Alt+Shift+T / L once, with a backup; a user's own key stays;
+/// a taken new key is not stolen.
+#[test]
+fn schema_12_moves_the_translate_keys_off_the_browsers_shortcuts() {
+    let key = |c: &Config, live: bool| {
+        (c.quick_actions.iter())
+            .find(|q| q.action == "translate" && q.live == live)
+            .map(|q| q.shortcut.clone())
+    };
+    assert_eq!(
+        key(&Config::default(), false).as_deref(),
+        Some("Alt+Shift+T")
+    );
+    assert_eq!(
+        key(&Config::default(), true).as_deref(),
+        Some("Alt+Shift+L")
+    );
+    // the old default file: both move, once, with a backup
+    let v11 = fixture("default-v11.toml");
+    let (dir, path) = config_with("v12-keys", &v11);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(key(&c, false).as_deref(), Some("Alt+Shift+T"));
+    assert_eq!(key(&c, true).as_deref(), Some("Alt+Shift+L"));
+    assert_eq!(fs_text(&dir.join("config.toml.bak-v11")), v11);
+    assert_eq!(fs_text(&path), fixture("default-v12.toml"));
+    let _ = std::fs::remove_dir_all(dir);
+    // a user's own key stays; a v12 file keeps even the old default
+    let own = v11.replace("Ctrl+Shift+T", "Ctrl+Alt+9");
+    assert_eq!(
+        key(&Config::parse(&own).0, false).as_deref(),
+        Some("Ctrl+Alt+9")
+    );
+    let (c, w) = Config::parse(&v11.replace("version = 11", "version = 12"));
+    assert_eq!(key(&c, false).as_deref(), Some("Ctrl+Shift+T"));
+    assert!(w.is_empty(), "{w:?}");
+    // the new key already someone else's: the old default stays
+    let taken = v11.replace("Ctrl+Shift+E", "Alt+Shift+T");
+    assert_eq!(
+        key(&Config::parse(&taken).0, false).as_deref(),
+        Some("Ctrl+Shift+T")
+    );
 }
 
 /// Schema 11 (clean-up before 0.1.4): the keys nothing reads stop being written.
@@ -1394,7 +1439,7 @@ fn schema_11_stops_writing_the_ignored_keys_with_a_backup() {
     for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {
         assert!(!text.contains(gone), "{gone}: {text}");
     }
-    assert!(text.contains("version = 11"), "{text}");
+    assert!(text.contains("version = 12"), "{text}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

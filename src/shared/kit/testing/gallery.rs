@@ -696,7 +696,7 @@ fn option_list_sheet() {
     use super::super::option_list::{Look, choice, item, opener, option};
     let menu_item = |focused, checked| {
         move |ar| {
-            let hint = Some("Ctrl+Shift+L".to_string());
+            let hint = Some("Alt+Shift+L".to_string());
             item(
                 s(ar, "Live translate", "ترجمة حية"),
                 checked,

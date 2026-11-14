@@ -530,7 +530,7 @@ impl App {
         }
     }
 
-    /// Ctrl+Shift+L (or the tray): live translate on, or off again.
+    /// Alt+Shift+L (or the tray): live translate on, or off again.
     pub(crate) fn toggle_live(&mut self, at: Instant) -> Task<Message> {
         if let Some(live) = self.live.take() {
             crate::log!("[opencircle] live translate off");
@@ -565,7 +565,7 @@ impl App {
         }
     }
 
-    /// The one-shot full-screen translate (Ctrl+Shift+T).
+    /// The one-shot full-screen translate (Alt+Shift+T).
     pub(crate) fn translate_once(&mut self, at: Instant) -> Task<Message> {
         let once = QuickAction {
             action: crate::features::translate::action::ACTION.id.into(),

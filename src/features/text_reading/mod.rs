@@ -330,7 +330,7 @@ impl fmt::Display for OcrError {
             Self::Io(e) => write!(f, "text model files: {e}"),
             Self::Missing(what) => write!(
                 f,
-                "{what} isn't downloaded yet. Translate once with Ctrl+Shift+T to download it"
+                "{what} isn't downloaded yet. Translate once with Alt+Shift+T to download it"
             ),
             Self::Engine(m) => write!(f, "text recognition failed: {m}"),
             Self::Stopped => f.write_str("the download was stopped"),
