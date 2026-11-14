@@ -1161,10 +1161,20 @@ pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
     let (n, latin) = letters.fold((0, 0), |(n, l), c| {
         (n + 1, l + Script::Latin.has(c) as usize)
     });
+    // (or: under 1 line in 5 with letters reads as words, `lang::real_lines`,
+    // and few common words: the Arabic page at 1280x800 on KDE Wayland was
+    // read surely enough to pass the quarter unsure (W18); its reads at both
+    // sizes have 1 real line of 20-23, the corpus' Latin battle 6-7 of 21-25)
+    let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+    let judged: Vec<bool> = (texts.iter().zip(lang::real_lines(&texts)))
+        .filter(|(t, _)| t.chars().any(char::is_alphabetic))
+        .map(|(_, r)| r)
+        .collect();
+    let real = judged.iter().filter(|r| **r).count();
     lines.len() >= 10
         && latin * 2 > n
-        && unsure * 4 >= lines.len()
-        && (words * 4 < tokens * 3 || common * 8 < all)
+        && ((unsure * 4 >= lines.len() && (words * 4 < tokens * 3 || common * 8 < all))
+            || (real * 5 < judged.len() && common * 8 < all))
 }
 
 impl Deps for Real {

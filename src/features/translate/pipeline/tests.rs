@@ -1340,6 +1340,49 @@ fn a_page_no_reader_reads_is_told_from_text() {
     ]);
     assert!(!unreadable(&french));
     assert!(!unreadable(&arabic[..8]), "too little to judge");
+    // W18, KDE Wayland 1280x800 (the English reader only, PP-OCR on Ubuntu):
+    // the Arabic page read surely enough to pass the unsure share; it was
+    // translated es -> de as noise
+    let kde_1280: Vec<(&str, f32)> = [
+        "al", "ca", "u Jicll", "Wallo", "Egall", "cluall", "jlyall", "acgwgall", "hail", "g",
+        "ull", "acj r", "i llo", "élo", "il", "llogleo", ".   !", "J", "1", "!",
+    ]
+    .into_iter()
+    .map(|t| (t, 0.8))
+    .collect();
+    assert!(unreadable(&read(&kde_1280)));
+    // the corpus' battle screen (French menu, Spanish names), as read on Ubuntu
+    let battle: Vec<(&str, f32)> = [
+        "Gólem Ancestral",
+        "40",
+        "CPPN",
+        "-3 482",
+        "Golpe crítico!",
+        "R",
+        ">",
+        "Attaquer",
+        "M",
+        "0",
+        "B",
+        "Compétences",
+        "Objets",
+        "A",
+        "Objets",
+        "Defender",
+        "I",
+        "Elena",
+        "PV 1 240/1 500",
+        "PM",
+        "80/120",
+        "Fuir",
+        "PV",
+        "980/1 100",
+        "Cadre",
+    ]
+    .into_iter()
+    .map(|t| (t, 0.8))
+    .collect();
+    assert!(!unreadable(&read(&battle)));
     // Ubuntu, Firefox: an Arabic page the Arabic reader read well (its
     // icons read unsurely) was taken for noise, and the readers offered
     let read_well = read(&[
