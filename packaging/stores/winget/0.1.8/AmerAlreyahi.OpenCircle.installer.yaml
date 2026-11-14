@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
 
 PackageIdentifier: AmerAlreyahi.OpenCircle
-PackageVersion: 0.1.7
+PackageVersion: 0.1.8
 InstallerType: exe
 Scope: machine
 InstallModes:
@@ -32,10 +32,10 @@ AppsAndFeaturesEntries:
   Publisher: Amer Alreyahi
   ProductCode: OpenCircle
 ElevationRequirement: elevationRequired
-ReleaseDate: 2026-11-12
+ReleaseDate: 2026-11-14
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.1.7/OpenCircle-Setup-0.1.7-x64.exe
-  InstallerSha256: E70BD70842A310A8C7ABCA0074BE8E05036F015D50E134D9DB07EE39A86D95F6
+  InstallerUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.1.8/OpenCircle-Setup-0.1.8-x64.exe
+  InstallerSha256: C8AAE9E7A33511EA405166F66CD3399227E43E59F6478AF971F79F7F98869AF9
 ManifestType: installer
 ManifestVersion: 1.28.0
