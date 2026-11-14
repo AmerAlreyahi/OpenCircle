@@ -4028,3 +4028,16 @@ fn the_glossary_screens_match_their_golden_images() {
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// The pill's New / Edit glossaries open Settings on Translate's glossary
+/// editor, from any page.
+#[test]
+fn the_pill_opens_the_glossary_editor_on_the_translate_page() {
+    let (mut s, dir) = glossary_state("goto");
+    update(&mut s, Message::Section(Section::General));
+    s.glossaries = pages::glossaries::Page::at(dir.clone(), "ar");
+    update(&mut s, Message::GlossaryEditor);
+    assert_eq!(s.section, Section::Translate);
+    assert!(s.glossaries.is_editing());
+    let _ = std::fs::remove_dir_all(&dir);
+}

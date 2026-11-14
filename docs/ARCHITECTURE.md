@@ -296,6 +296,17 @@ and tests, and the UI maps it to table keys (`general::answer_words`, `model_dow
 A pill text a backend names is `Said(S::key)` (`actions::copy::COPIED_PILL`). The release notes are the release's own
 English text: the What's new card keeps them as one left-to-right block (`update_card::quoted`).
 
+**Change the per-game glossary** (0.2.0): the data and the rules live in `features/translate/glossary/` (`mod.rs`: matching,
+`apply` / `restore` / `Applied::fix` number placeholders, `whole`, `stamp`, `ai_terms`; `store.rs`: one TOML per game in
+`<data>/glossaries/`, validated import, `current()` = the glossary in use, picked by `translate.glossary` or, where the OS gives
+a title, by the glossary's `windows` list). The pipeline calls it in ONE way each: `pipeline::through_with` (terms as numbers
+through the models, a lost number = that line again plain), `on_device_with` (a line that is a term, before the menu table),
+`translate_blocks` (the cache key carries `stamp`), `Real::lines` (AI terms, soft). Screens: Settings row + editor
+`settings/pages/glossaries.rs` (a sub-page of Translate; `Message::GlossaryEditor` opens it), the pill's button and list and the
+word card's form `translate/screens/pill/glossary.rs`. The focused window's title is `window_rect::focused_title()` (Windows,
+X11; Wayland none), remembered at capture start. Other features reach it only through `translate::{Glossary, Term,
+glossary_store}`. New file field = an optional key in `store::File` / `Entry`, never a breaking one (files are shared).
+
 **Add a colour**: a theme colour goes in every theme of `kit/themes.rs`; one
 that is the same in every theme in `kit::tokens::fixed`. Nowhere else.
 

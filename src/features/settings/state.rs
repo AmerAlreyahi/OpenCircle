@@ -705,6 +705,8 @@ impl fmt::Debug for State {
     }
 }
 
+static EDITOR_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Section(Section),
@@ -787,6 +789,8 @@ pub enum Message {
     ModelsUpdated(Result<(), String>),
     /// The Glossary row and its editor (`pages::glossaries`).
     Glossaries(super::pages::glossaries::Msg),
+    /// Open Translate's glossary editor (the pill's New / Edit glossaries).
+    GlossaryEditor,
     Look(LookTheme),
     /// The custom look's controls.
     Palette(PaletteChoice),
@@ -995,7 +999,16 @@ impl State {
         let (config, warnings) = Config::load();
         let mut s = Self::new(config, warnings, None, Box::new(Keyring));
         s.auto = true;
+        // asked for before the window existed (the pill's Edit glossaries)
+        if EDITOR_ASKED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            update(&mut s, Message::GlossaryEditor);
+        }
         s
+    }
+
+    /// The window about to open starts on the glossary editor.
+    pub fn ask_for_editor() {
+        EDITOR_ASKED.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// General's Updates row: the update waiting (version, how it installs) and
@@ -1720,6 +1733,13 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::KeepShortcuts => state.resetting = false,
         Message::UndoShortcuts => state.undo_reset(),
         Message::Kept(counts) => state.kept = Some(counts),
+        Message::GlossaryEditor => {
+            update(state, Message::Section(Section::Translate));
+            return update(
+                state,
+                Message::Glossaries(super::pages::glossaries::Msg::Edit),
+            );
+        }
         Message::Glossaries(msg) => {
             let reply = state.glossaries.update(msg, &state.draft.translate.target);
             if let Some(slug) = reply.active {

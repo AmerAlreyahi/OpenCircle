@@ -691,6 +691,11 @@ impl Windows {
         }
     }
 
+    /// The Settings window is open.
+    pub(crate) fn settings_open(&self) -> bool {
+        self.settings.is_some()
+    }
+
     /// The open window of this kind, if any.
     fn id(&self, kind: Kind) -> Option<window::Id> {
         match kind {

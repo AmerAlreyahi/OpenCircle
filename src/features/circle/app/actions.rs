@@ -495,7 +495,23 @@ impl App {
             // (the cards have no close button: Esc, or a click on the screen)
             pill::Msg::Close => self.close(),
             pill::Msg::Snip => self.snip_here(None),
-            pill::Msg::OpenSettings | pill::Msg::Glossary(pill::glossary::GlossaryMsg::Edit) => {
+            // New glossary / Edit glossaries…: Settings on Translate's glossary editor
+            pill::Msg::Glossary(pill::glossary::GlossaryMsg::Edit) => {
+                let closing = self.close();
+                let open = self.windows.settings_open();
+                if !open {
+                    crate::features::settings::State::ask_for_editor();
+                }
+                let settings = self.windows.open(windows::Kind::Settings);
+                let goto = match open {
+                    true => Task::done(Message::Windows(windows::Msg::Settings(
+                        crate::features::settings::Message::GlossaryEditor,
+                    ))),
+                    false => Task::none(),
+                };
+                closing.chain(settings.map(Message::Windows)).chain(goto)
+            }
+            pill::Msg::OpenSettings => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);
                 closing.chain(settings.map(Message::Windows))
