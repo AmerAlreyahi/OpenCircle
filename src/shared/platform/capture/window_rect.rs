@@ -215,21 +215,63 @@ pub fn foreground() -> Option<isize> {
     None
 }
 
-/// The title of the window the user is in, where the OS tells an app (Windows,
-/// X11); `None` on Wayland, which has no such API. The title only: no handle on
-/// the window's process is opened (a game's anti-cheat watches for that).
-pub fn focused_title() -> Option<String> {
+/// The window the user is in, as far as the OS tells an app (Windows, X11).
+/// Facts only: the title, the window class (the browser test) and whether it
+/// covers its whole screen (a game's full-screen or borderless window).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Focused {
+    pub title: String,
+    pub class: String,
+    pub covers_screen: bool,
+}
+
+/// The window the user is in; `None` on Wayland, which has no such API. Only
+/// its title, class and size are read: no handle on the window's process is
+/// opened (a game's anti-cheat watches for that).
+pub fn focused() -> Option<Focused> {
     #[cfg(windows)]
     {
-        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
-        // SAFETY: plain queries on the foreground window's handle.
-        let title = unsafe {
-            let h = GetForegroundWindow();
-            let mut buf = [0u16; 256];
-            let n = (!h.is_invalid()).then(|| GetWindowTextW(h, &mut buf).max(0) as usize)?;
-            String::from_utf16_lossy(&buf[..n])
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
         };
-        (!title.is_empty()).then_some(title)
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW,
+        };
+        // SAFETY: plain queries on the foreground window's handle.
+        unsafe {
+            let h = GetForegroundWindow();
+            if h.is_invalid() {
+                return None;
+            }
+            let mut buf = [0u16; 256];
+            let n = GetWindowTextW(h, &mut buf).max(0) as usize;
+            let title = String::from_utf16_lossy(&buf[..n]);
+            let n = GetClassNameW(h, &mut buf).max(0) as usize;
+            let class = String::from_utf16_lossy(&buf[..n]);
+            let mut win = RECT::default();
+            let mut info = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..MONITORINFO::default()
+            };
+            let covers_screen = GetWindowRect(h, &mut win).is_ok()
+                && GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut info)
+                    .as_bool()
+                && covers(
+                    [win.left, win.top, win.right, win.bottom],
+                    [
+                        info.rcMonitor.left,
+                        info.rcMonitor.top,
+                        info.rcMonitor.right,
+                        info.rcMonitor.bottom,
+                    ],
+                );
+            Some(Focused {
+                title,
+                class,
+                covers_screen,
+            })
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -238,7 +280,8 @@ pub fn focused_title() -> Option<String> {
             return None;
         }
         let (conn, screen) = xcb::Connection::connect(None).ok()?;
-        let root = conn.get_setup().roots().nth(screen as usize)?.root();
+        let root_info = conn.get_setup().roots().nth(screen as usize)?;
+        let root = root_info.root();
         let atom = |name: &str| {
             conn.wait_for_reply(conn.send_request(&x::InternAtom {
                 only_if_exists: true,
@@ -260,16 +303,44 @@ pub fn focused_title() -> Option<String> {
         };
         let active = prop(root, atom("_NET_ACTIVE_WINDOW")?, x::ATOM_WINDOW)?;
         let id = *active.value::<u32>().first().filter(|&&w| w != 0)?;
-        let title = prop(
-            x::Window::new(id),
-            atom("_NET_WM_NAME")?,
-            atom("UTF8_STRING")?,
-        )?;
+        let window = x::Window::new(id);
+        let title = prop(window, atom("_NET_WM_NAME")?, atom("UTF8_STRING")?)?;
         let title = String::from_utf8_lossy(title.value::<u8>()).into_owned();
-        (!title.is_empty()).then_some(title)
+        // WM_CLASS = "instance\0class\0": the class is the second name
+        let class = prop(window, x::ATOM_WM_CLASS, x::ATOM_STRING)?;
+        let class = (class.value::<u8>().split(|&b| b == 0))
+            .rfind(|n| !n.is_empty())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+            .unwrap_or_default();
+        // full-screen by the window manager's state, or a window as big as the
+        // screen (a borderless game)
+        let fullscreen = match (atom("_NET_WM_STATE"), atom("_NET_WM_STATE_FULLSCREEN")) {
+            (Some(state), Some(full)) => prop(window, state, x::ATOM_ATOM)
+                .is_some_and(|p| p.value::<x::Atom>().contains(&full)),
+            _ => false,
+        };
+        let big = conn
+            .wait_for_reply(conn.send_request(&x::GetGeometry {
+                drawable: x::Drawable::Window(window),
+            }))
+            .is_ok_and(|g| {
+                g.width() >= root_info.width_in_pixels()
+                    && g.height() >= root_info.height_in_pixels()
+            });
+        Some(Focused {
+            title,
+            class,
+            covers_screen: fullscreen || big,
+        })
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     None
+}
+
+/// `win` (left, top, right, bottom) covers all of `screen`.
+#[cfg(any(windows, test))]
+fn covers(win: [i32; 4], screen: [i32; 4]) -> bool {
+    win[0] <= screen[0] && win[1] <= screen[1] && win[2] >= screen[2] && win[3] >= screen[3]
 }
 
 // Tests pin the answer (per thread), so a screen drawn with it looks the same
@@ -277,7 +348,7 @@ pub fn focused_title() -> Option<String> {
 #[cfg(test)]
 thread_local!(pub static TITLES_FORCED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) });
 
-/// Whether [`focused_title`] can answer here (Windows, X11): the glossary's
+/// Whether [`focused`] can answer here (Windows, X11): the glossary's
 /// "Use for windows named" is shown only then.
 pub fn titles_available() -> bool {
     #[cfg(test)]
@@ -292,21 +363,18 @@ pub fn titles_available() -> bool {
     false
 }
 
-/// The title read when the last capture started (before the overlay took the
-/// focus): what the glossary picks a game by.
-static CAPTURED_TITLE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The window read when the last capture started (before the overlay took the
+/// focus): what the glossary tells a game, and which one, by.
+static CAPTURED: std::sync::Mutex<Option<Focused>> = std::sync::Mutex::new(None);
 
-/// Reads [`focused_title`] now, for [`captured_title`].
+/// Reads [`focused`] now, for [`captured`].
 pub fn remember_focused() {
-    *CAPTURED_TITLE.lock().unwrap_or_else(|e| e.into_inner()) = focused_title();
+    *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = focused();
 }
 
-/// The focused window's title as the last capture started.
-pub fn captured_title() -> Option<String> {
-    CAPTURED_TITLE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+/// The focused window as the last capture started.
+pub fn captured() -> Option<Focused> {
+    CAPTURED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Gives the focus back to `foreground()`'s window (the overlay shrank to a pill:
@@ -789,6 +857,16 @@ fn active(_: bool) -> Option<(WinRect, String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A game's window covers its screen (borderless or full-screen); a framed one doesn't.
+    #[test]
+    fn a_window_covers_its_screen_only_when_it_spans_all_of_it() {
+        let screen = [0, 0, 1920, 1080];
+        assert!(covers([0, 0, 1920, 1080], screen));
+        assert!(covers([-8, -8, 1928, 1088], screen));
+        assert!(!covers([0, 0, 1920, 1040], screen));
+        assert!(!covers([100, 100, 1500, 900], screen));
+    }
 
     /// Snip picks our own widgets (owner, 2026-11-10, #154): a floating window of
     /// ours (visible, kept out of captures as `keep_out` keeps it) is no target in

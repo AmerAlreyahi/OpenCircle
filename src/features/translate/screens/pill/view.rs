@@ -334,7 +334,11 @@ fn add_form(form: &AddForm) -> Element<'_, Msg> {
 /// Add to glossary form.
 fn original(text: &str) -> Element<'_, Msg> {
     let words: Vec<&str> = text.split_whitespace().collect();
-    let marked = super::glossary::names(&words);
+    // (the names are marked on a game screen only)
+    let marked = match crate::features::translate::glossary::screen::is_game() {
+        true => super::glossary::names(&words),
+        false => vec![false; words.len()],
+    };
     if !marked.contains(&true) {
         return note(text.to_string()).width(Fill).into();
     }
@@ -404,9 +408,11 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
         return (body.push(add_form(form)).into(), buttons);
     }
     let ask = &crate::features::ask_ai::ask::ACTION;
-    let buttons = actions(
-        (t!(tp_explain), Msg::Explain),
-        [(tr(ask.label), Msg::Ask), (t!(gl_add_card), Msg::AddStart)],
-    );
+    let mut others = vec![(tr(ask.label), Msg::Ask)];
+    // (Add to glossary: a game screen only)
+    if crate::features::translate::glossary::screen::is_game() {
+        others.push((t!(gl_add_card), Msg::AddStart));
+    }
+    let buttons = actions((t!(tp_explain), Msg::Explain), others);
     (body.into(), buttons)
 }

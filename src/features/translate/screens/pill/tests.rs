@@ -1282,3 +1282,23 @@ fn a_clicked_name_is_the_forms_term() {
     let form = s.card.as_ref().unwrap().add.clone().unwrap();
     assert_eq!(form.term, "Saltmarch");
 }
+
+/// The glossary shows only on a game screen (owner, 2026-11-14): on a browser
+/// page the word card's Add to glossary does nothing and no name is marked.
+#[test]
+fn off_a_game_screen_the_word_card_has_no_glossary() {
+    use crate::features::translate::glossary::screen;
+    let mut s = session(true);
+    let _ = s.update(shown(vec![block(
+        "Bring the Vyrnhold key",
+        "أحضر مفتاح",
+        [0.0, 0.0, 100.0, 40.0],
+    )]));
+    s.click(Point::new(50.0, 20.0));
+    screen::saw_frame(true); // an address bar on the frame
+    assert!(!screen::is_game());
+    let _ = s.update(Msg::AddStart);
+    assert!(!s.adding(), "no Add to glossary form off a game screen");
+    let _ = s.update(Msg::AddFor("Vyrnhold".into()));
+    assert!(!s.adding());
+}

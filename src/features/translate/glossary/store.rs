@@ -226,16 +226,8 @@ pub fn for_window<'a>(all: &'a [(String, Glossary)], title: Option<&str>) -> Opt
         .map(|(s, _)| s.as_str())
 }
 
-/// The glossary to use now: the one the window title picks, else the saved
-/// choice (`translate.glossary`).
-pub fn active(dir: &Path, chosen: &str, title: Option<&str>) -> Option<Glossary> {
-    let all = load_all(dir);
-    let slug = for_window(&all, title).unwrap_or(chosen).to_string();
-    all.into_iter().find(|(s, _)| *s == slug).map(|(_, g)| g)
-}
-
-/// The glossary in use now (`translate.glossary`, or the one the window
-/// title the last capture started in picks), read at most every 2 s.
+/// The glossary in use now (`screen::active`: none off a game screen), read at
+/// most every 2 s.
 pub fn current() -> Option<Glossary> {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -243,14 +235,17 @@ pub fn current() -> Option<Glossary> {
     static CACHE: Mutex<Cached> = Mutex::new(None);
     let chosen = crate::shared::config::current().translate.glossary;
     let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, slug, g)) = c.as_ref()
-        && *slug == chosen
+    // (the state the answer depends on, apart from the files)
+    let key = format!("{chosen}\u{1}{}", super::screen::key());
+    if let Some((at, k, g)) = c.as_ref()
+        && *k == key
         && at.elapsed() < Duration::from_secs(2)
     {
         return g.clone();
     }
-    let title = crate::shared::platform::capture::window_rect::captured_title();
-    let g = active(&dir(), &chosen, title.as_deref());
-    *c = Some((Instant::now(), chosen, g.clone()));
+    let all = load_all(&dir());
+    let slug = super::screen::active(&all, &chosen).map(str::to_string);
+    let g = slug.and_then(|s| all.into_iter().find(|(x, _)| *x == s).map(|(_, g)| g));
+    *c = Some((Instant::now(), key, g.clone()));
     g
 }

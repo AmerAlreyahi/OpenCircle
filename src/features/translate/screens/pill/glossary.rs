@@ -9,7 +9,7 @@ use iced::widget::tooltip::Position;
 use iced::{Element, Vector};
 
 use super::Msg;
-use crate::features::translate::glossary::store;
+use crate::features::translate::glossary::{screen, store};
 use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt};
 use crate::shared::kit::dir;
@@ -42,13 +42,12 @@ pub struct Menu {
 }
 
 impl Menu {
-    /// The files now, with the saved pick; the window title (where the OS
-    /// gives one) picks by itself.
-    pub fn load(chosen: &str, title: Option<&str>) -> Menu {
+    /// The files now, with the glossary this capture uses (`screen::resolved`:
+    /// the pick, the window in front's own, else the saved pick on Wayland).
+    pub fn load(chosen: &str) -> Menu {
         let all = store::load_all(&store::dir());
-        let active = store::for_window(&all, title).unwrap_or(chosen);
         // (a pick whose file is gone is none)
-        let active = all.iter().find(|(s, _)| s == active).map_or("", |(s, _)| s);
+        let active = screen::resolved(&all, chosen).unwrap_or("");
         let mut menu = Menu {
             open: false,
             active: active.to_string(),
@@ -83,6 +82,7 @@ impl Menu {
                 self.open = false;
                 let changed = slug != self.active;
                 if changed {
+                    screen::pick(&slug);
                     self.active = slug.clone();
                     self.words();
                     #[cfg(not(test))]
@@ -109,8 +109,13 @@ impl Menu {
             .map(|(_, n, _)| n.as_str())
     }
 
-    /// The pill's button: accent while a glossary is active.
+    /// The pill's button: accent while a glossary is active. Only on a game
+    /// screen; elsewhere its slot stays empty (the pill never changes size).
     pub fn button(&self) -> Element<'_, Msg> {
+        if !screen::is_game() {
+            let side = crate::shared::kit::tokens::size::ICON_BUTTON;
+            return iced::widget::Space::new().width(side).height(side).into();
+        }
         let on = self.name().is_some();
         let b = icon_button(
             Icon::Glossary.glyph(),
@@ -291,7 +296,8 @@ impl Menu {
     /// Reads the files again and makes `slug` the active glossary (after the
     /// card saved a term into it).
     pub fn activate(&mut self, slug: &str) {
-        let reloaded = Menu::load(slug, None);
+        screen::pick(slug);
+        let reloaded = Menu::load(slug);
         self.items = reloaded.items;
         self.active = reloaded.active;
         self.words();

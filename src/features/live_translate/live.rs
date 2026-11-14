@@ -106,6 +106,12 @@ impl Live {
         let start = Instant::now();
         check_frame(frame, width, height)?;
         let fresh = self.size != (width, height);
+        if fresh {
+            // live is for games (the glossary applies; no address bar is read here)
+            use crate::features::translate::glossary_screen as screen;
+            screen::begin();
+            screen::saw_frame(false);
+        }
         let mut frame = Cow::Borrowed(frame);
         if !fresh {
             self.unlayer(&mut frame, width);

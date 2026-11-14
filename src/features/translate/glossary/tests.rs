@@ -174,15 +174,119 @@ fn files_save_load_pick_by_window_and_stay_in_the_folder() {
         Some("ashen-tides")
     );
     assert_eq!(store::for_window(&all, None), None);
-    assert_eq!(store::active(&d, "other", None).unwrap().name, "Other");
-    assert_eq!(
-        store::active(&d, "other", Some("Ashen Tides"))
-            .unwrap()
-            .name,
-        "Ashen Tides"
-    );
-    assert_eq!(store::active(&d, "", Some("Notepad")), None);
     store::delete(&d, "other");
     assert_eq!(store::load_all(&d).len(), 1);
     let _ = std::fs::remove_dir_all(&d);
+}
+
+fn focus(
+    title: &str,
+    class: &str,
+    covers_screen: bool,
+) -> crate::shared::platform::capture::window_rect::Focused {
+    crate::shared::platform::capture::window_rect::Focused {
+        title: title.into(),
+        class: class.into(),
+        covers_screen,
+    }
+}
+
+/// One decision for every glossary place (owner, 2026-11-14): a game screen has
+/// no browser address bar and, where the OS names the window, a window that
+/// covers its screen and is no browser; a window a glossary names is a game.
+#[test]
+fn only_a_game_screen_uses_a_glossary() {
+    use screen::game;
+    // a browser frame (an address bar), full-screen or not: no
+    assert!(!game(
+        true,
+        Some(&focus("Wiki", "Chrome_WidgetWin_1", true)),
+        false
+    ));
+    assert!(!game(true, None, false));
+    // a full-screen game window: yes
+    assert!(game(
+        false,
+        Some(&focus("Ashen Tides", "UnityWndClass", true)),
+        false
+    ));
+    // a windowed app (a text editor, a viewer): no
+    assert!(!game(false, Some(&focus("Notes", "Notepad", false)), false));
+    // a browser window without a bar on the frame (kiosk, full screen): still a browser
+    assert!(!game(
+        false,
+        Some(&focus("Page", "MozillaWindowClass", true)),
+        false
+    ));
+    assert!(!game(
+        false,
+        Some(&focus("Page", "Google-chrome", true)),
+        false
+    ));
+    // Wayland tells no window: the frame alone decides
+    assert!(game(false, None, false));
+    // a glossary names the window: a game, whatever else
+    assert!(game(
+        true,
+        Some(&focus("Ashen Tides", "Chrome_WidgetWin_1", false)),
+        true
+    ));
+}
+
+/// Each game its own glossary: the window in front picks; a game with none gets
+/// none (never the previous game's); on Wayland the saved pick stays; the pill's
+/// pick wins, `""` = none.
+#[test]
+fn each_game_has_its_own_glossary() {
+    use screen::resolve;
+    let all: Vec<(String, Glossary)> = [("ashen-tides", "Ashen Tides"), ("star-sea", "Star Sea")]
+        .iter()
+        .map(|(s, n)| {
+            let g = Glossary {
+                name: (*n).into(),
+                windows: vec![(*n).into()],
+                ..Default::default()
+            };
+            ((*s).to_string(), g)
+        })
+        .collect();
+    // titles known (Windows, X11): game A -> game B -> a game with none
+    assert_eq!(
+        resolve(&all, "ashen-tides", Some("Star Sea"), true, None),
+        Some("star-sea")
+    );
+    assert_eq!(
+        resolve(&all, "star-sea", Some("Ashen Tides"), true, None),
+        Some("ashen-tides")
+    );
+    assert_eq!(
+        resolve(&all, "ashen-tides", Some("Other Game"), true, None),
+        None
+    );
+    assert_eq!(resolve(&all, "ashen-tides", None, true, None), None);
+    // the pill's pick for this game
+    assert_eq!(
+        resolve(&all, "", Some("Other Game"), true, Some("star-sea")),
+        Some("star-sea")
+    );
+    assert_eq!(
+        resolve(&all, "star-sea", Some("Star Sea"), true, Some("")),
+        None
+    );
+    // Wayland: the saved pick stays
+    assert_eq!(
+        resolve(&all, "star-sea", None, false, None),
+        Some("star-sea")
+    );
+    assert_eq!(resolve(&all, "gone", None, false, None), None);
+}
+
+/// Off a game screen the glossary has no effect at all.
+#[test]
+fn off_a_game_screen_no_glossary_is_in_use() {
+    let all = [("a".to_string(), Glossary::default())];
+    screen::begin();
+    assert!(!screen::is_game() && screen::active(&all, "a").is_none());
+    screen::saw_frame(true);
+    assert!(!screen::is_game() && screen::active(&all, "a").is_none());
 }

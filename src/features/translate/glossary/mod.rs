@@ -13,6 +13,7 @@
 // pipeline.rs after W9's game-mode work: drop this allow with them.
 
 mod menu;
+pub(crate) mod screen;
 pub(crate) mod store;
 
 use std::collections::BTreeMap;

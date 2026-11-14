@@ -1602,6 +1602,8 @@ pub fn translate_progressively(
         .filter(|l| !os_watermark(l, (width, height)))
         .collect();
     let ocr = start.elapsed();
+    // the glossary applies on a game screen only: decided on what the frame shows
+    super::glossary::screen::saw_frame(has_address_bar(&lines, height));
     let blocks = group_blocks(&without_chrome(lines, height));
     deps.read(&blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>());
     let mut tr = vec![String::new(); blocks.len()];
@@ -1748,19 +1750,7 @@ fn address(t: &str) -> bool {
 // address row a page's own header looks the same (Wikipedia's logo, search).
 pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
     let mid = |l: &Line| l.bounds[1] + l.bounds[3] / 2.0;
-    // per address line (a window title behind may read as one too): the
-    // band of lines above it, the lowest row in it (the tabs), its own row
-    let bars: Vec<(f32, f32, f32)> = (lines.iter())
-        .filter(|l| l.bounds[1] < height as f32 / 4.0 && address(&l.text))
-        .map(|b| {
-            let [_, top, _, h] = b.bounds;
-            let above = |l: &&Line| mid(l) > top - 2.2 * h && mid(l) < top;
-            let tabs = (lines.iter().filter(above))
-                .map(mid)
-                .fold(f32::MIN, f32::max);
-            (top, h, tabs)
-        })
-        .collect();
+    let bars = address_bars(&lines, height);
     let chrome = |l: &Line| {
         let m = mid(l);
         bars.iter().any(|&(top, h, tabs)| {
@@ -1776,6 +1766,29 @@ pub(super) fn without_chrome(lines: Vec<Line>, height: u32) -> Vec<Line> {
         );
     }
     kept
+}
+
+/// The frame shows a browser's address bar (`address_bars`): not a game's
+/// screen (`glossary::screen`).
+pub(super) fn has_address_bar(lines: &[Line], height: u32) -> bool {
+    !address_bars(lines, height).is_empty()
+}
+
+/// Per address line (a window title behind may read as one too): its top,
+/// its height and the lowest row of the band of lines above it (the tabs).
+fn address_bars(lines: &[Line], height: u32) -> Vec<(f32, f32, f32)> {
+    let mid = |l: &Line| l.bounds[1] + l.bounds[3] / 2.0;
+    (lines.iter())
+        .filter(|l| l.bounds[1] < height as f32 / 4.0 && address(&l.text))
+        .map(|b| {
+            let [_, top, _, h] = b.bounds;
+            let above = |l: &&Line| mid(l) > top - 2.2 * h && mid(l) < top;
+            let tabs = (lines.iter().filter(above))
+                .map(mid)
+                .fold(f32::MIN, f32::max);
+            (top, h, tabs)
+        })
+        .collect()
 }
 
 /// The OS's activation watermark ("Activate Windows" / "Go to Settings to

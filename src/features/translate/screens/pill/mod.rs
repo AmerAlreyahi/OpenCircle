@@ -228,6 +228,8 @@ impl Session {
         taskbar: u32,
     ) -> (Session, Task<Msg>) {
         let cfg = crate::shared::config::current().translate;
+        // a new capture: its screen is decided once its frame is read
+        crate::features::translate::glossary::screen::begin();
         let offline = crate::features::translate::action::will_be_offline();
         let size = match &frame {
             image::Handle::Rgba { width, height, .. } => (*width, *height),
@@ -253,10 +255,7 @@ impl Session {
             partial: None,
             readers: None,
             tag: None,
-            glossary: glossary::Menu::load(
-                &cfg.glossary,
-                crate::shared::platform::capture::window_rect::captured_title().as_deref(),
-            ),
+            glossary: glossary::Menu::load(&cfg.glossary),
             snip_keys: (crate::shared::config::current().quick_actions.into_iter())
                 .find(|q| q.action == crate::features::snip::action::ACTION.id)
                 .map(|q| q.shortcut)
@@ -942,7 +941,10 @@ impl Session {
     /// Opens the word card's Add to glossary form; `word` (a clicked name)
     /// is the term, else the first name of the original.
     fn start_add(&mut self, word: Option<String>) {
-        let title = crate::shared::platform::capture::window_rect::captured_title();
+        if !crate::features::translate::glossary::screen::is_game() {
+            return;
+        }
+        let title = crate::shared::platform::capture::window_rect::captured().map(|f| f.title);
         let picks = self.glossary.picks();
         let active = self.glossary.active.clone();
         if let Some(card) = self.card.as_mut().filter(|c| c.add.is_none()) {
