@@ -22,6 +22,7 @@ use crate::shared::kit::option_list::{MENU_WIDTH, group, item, menu, separator};
 use crate::shared::kit::text::text as label;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::platform::capture::window_rect;
 use crate::t;
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,9 @@ pub struct Menu {
     tip: String,
     /// Names seen on several screens, to review (`suggest::pending`).
     names: Vec<String>,
+    /// The focused window's title (Windows, X11): names the glossary a first
+    /// accepted name creates; `None` on Wayland.
+    pub title: Option<String>,
     /// The name whose translation is being typed, and what is typed.
     ask: Option<(String, String)>,
 }
@@ -76,16 +80,23 @@ impl Menu {
                 .collect(),
             tip: String::new(),
             names: Vec::new(),
+            title: window_rect::captured()
+                .map(|f| f.title)
+                .filter(|t| !t.trim().is_empty()),
             ask: None,
         };
-        menu.names = pending(&all, &menu.active);
+        menu.names = pending(&all, &menu.active, menu.title.as_deref());
         menu.words();
         menu
     }
 
     /// Reads the counted names again (a screen was just translated).
     pub fn refresh(&mut self) {
-        self.names = pending(&store::load_all(&store::dir()), &self.active);
+        self.names = pending(
+            &store::load_all(&store::dir()),
+            &self.active,
+            self.title.as_deref(),
+        );
         self.words();
     }
 
@@ -157,7 +168,11 @@ impl Menu {
                 Some(false)
             }
             GlossaryMsg::Reject(word) => {
-                if let Err(e) = suggest::reject(&store::dir(), &self.active, &word) {
+                if let Err(e) = suggest::reject(
+                    &store::dir(),
+                    &suggest::game_key(&self.active, self.title.as_deref()),
+                    &word,
+                ) {
                     crate::log!("[opencircle] could not remember the rejected name: {e}");
                 }
                 self.answered(&word);
@@ -301,11 +316,12 @@ impl Menu {
 /// The field of "Translate as…".
 pub const ASK: &str = "glossary-name-translation";
 
-/// The names to review for glossary `slug` of `all`.
-fn pending(all: &[(String, Glossary)], slug: &str) -> Vec<String> {
-    (all.iter().find(|(s, _)| s == slug))
-        .map(|(s, g)| suggest::pending(&store::dir(), s, g))
-        .unwrap_or_default()
+/// The names to review for glossary `slug` of `all`, or (none yet) for the
+/// game the window `title` names.
+fn pending(all: &[(String, Glossary)], slug: &str, title: Option<&str>) -> Vec<String> {
+    let g = all.iter().find(|(s, _)| s == slug).map(|(_, g)| g);
+    let key = suggest::game_key(slug, title);
+    suggest::pending(&store::dir(), &key, g.unwrap_or(&Glossary::default()))
 }
 
 /// A glossary of the card's "In" dropdown.
@@ -328,6 +344,8 @@ pub struct AddForm {
     /// The glossary's slug; "" = a new one named `name`.
     pub into: String,
     pub name: String,
+    /// The window a new glossary is for ("Use for windows named").
+    pub window: Option<String>,
     /// The glossaries to put it in (empty: a new one named `name`).
     pub picks: Vec<Pick>,
 }
@@ -365,6 +383,7 @@ impl AddForm {
             always: String::new(),
             into: into.to_string(),
             name: title.unwrap_or(t!(gl_default_name)).to_string(),
+            window: None,
         }
     }
 
@@ -388,6 +407,7 @@ impl AddForm {
                 };
                 let g = Glossary {
                     name: name.to_string(),
+                    windows: self.window.iter().cloned().collect(),
                     ..Glossary::default()
                 };
                 (store::free_slug(dir, name), g)
@@ -453,6 +473,7 @@ impl Menu {
             active: active.into(),
             tip: String::new(),
             names: Vec::new(),
+            title: None,
             ask: None,
         };
         m.words();

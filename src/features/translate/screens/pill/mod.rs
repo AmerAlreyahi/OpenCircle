@@ -659,12 +659,23 @@ impl Session {
             keep: fixed.as_deref().is_none_or(str::is_empty),
             always: fixed.unwrap_or_default(),
             into: self.glossary.active.clone(),
-            name: String::new(),
+            // (no glossary yet: the first accepted name creates the game's,
+            // named after its window; none known on Wayland: the default name)
+            name: self.glossary.title.clone().unwrap_or_default(),
+            window: self.glossary.title.clone(),
             picks: Vec::new(),
         };
+        let key = crate::features::translate::glossary::suggest::game_key(
+            &self.glossary.active,
+            self.glossary.title.as_deref(),
+        );
         let dir = crate::features::translate::glossary_store::dir();
         match form.save(&dir, &self.picker.target) {
-            Ok(_) => {
+            Ok((slug, _)) => {
+                if self.glossary.active.is_empty() {
+                    crate::features::translate::glossary::suggest::adopt(&dir, &key, &slug);
+                    self.glossary.activate(&slug);
+                }
                 self.glossary.answered(&word);
                 let models = models::installed(models::recognizer_for(&self.picker.source));
                 Some(self.begin(models))

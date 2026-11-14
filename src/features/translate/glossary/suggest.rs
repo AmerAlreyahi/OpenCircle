@@ -29,6 +29,10 @@ pub const MAX_REJECTED: usize = 500;
 struct Book {
     #[serde(default)]
     seen: BTreeMap<String, Seen>,
+    /// Rejections of a game that has no glossary yet (carried into the one
+    /// its first accepted name creates).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rejected: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -59,6 +63,8 @@ fn read(dir: &Path, slug: &str) -> Book {
 }
 
 fn write(dir: &Path, slug: &str, book: &Book) {
+    // (a game with no glossary yet may be the first thing in the folder)
+    let _ = std::fs::create_dir_all(dir);
     if let Ok(text) = serde_json::to_string(book) {
         let tmp = dir.join(format!("{slug}.names.tmp"));
         if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, path(dir, slug)).is_err() {
@@ -167,7 +173,7 @@ pub fn observe_in(dir: &Path, slug: &str, g: &Glossary, lines: &[String]) {
     }
     for name in candidates(lines) {
         let key = Term::key_of(&name);
-        if known(g, &key) {
+        if known(g, &key) || book.rejected.contains(&key) {
             continue;
         }
         if book.seen.len() >= MAX_CANDIDATES && !book.seen.contains_key(&key) {
@@ -191,18 +197,28 @@ fn known(g: &Glossary, key: &str) -> bool {
 
 /// The names to suggest for `g` (glossary `slug`), by name.
 pub fn pending(dir: &Path, slug: &str, g: &Glossary) -> Vec<String> {
-    (read(dir, slug).seen.into_iter())
-        .filter(|(k, s)| s.screens.len() >= NEEDED && !s.common && !known(g, k))
+    let book = read(dir, slug);
+    (book.seen.into_iter())
+        .filter(|(k, s)| {
+            s.screens.len() >= NEEDED && !s.common && !known(g, k) && !book.rejected.contains(k)
+        })
         .map(|(_, s)| s.text)
         .collect()
 }
 
-/// Rejects `name`: kept in the glossary file, never suggested again.
+/// Rejects `name`: kept in the glossary file (else, while the game has none,
+/// in its counts), never suggested again.
 pub fn reject(dir: &Path, slug: &str, name: &str) -> Result<(), store::Error> {
+    let key = Term::key_of(name);
     let Some(mut g) = store::load(dir, slug) else {
+        let mut book = read(dir, slug);
+        if !book.rejected.contains(&key) {
+            book.rejected.push(key);
+            book.rejected.truncate(MAX_REJECTED);
+            write(dir, slug, &book);
+        }
         return Ok(());
     };
-    let key = Term::key_of(name);
     if !g.rejected.contains(&key) {
         if g.rejected.len() >= MAX_REJECTED {
             g.rejected.remove(0);
@@ -212,12 +228,41 @@ pub fn reject(dir: &Path, slug: &str, name: &str) -> Result<(), store::Error> {
     store::save(dir, slug, &g)
 }
 
+/// What the counts of the game on screen are kept under: its glossary's slug,
+/// else (no glossary yet) its window's title as a file name where the OS
+/// tells it (Windows, X11: the glossary the first accepted name creates gets
+/// the same slug), else one "unnamed game" (Wayland).
+pub fn game_key(active: &str, title: Option<&str>) -> String {
+    match (active, title.map(str::trim)) {
+        ("", Some(t)) if !t.is_empty() => store::slug(t),
+        ("", _) => "unnamed-game".into(),
+        (slug, _) => slug.into(),
+    }
+}
+
+/// A glossary was just created for the game counted under `key`: it takes
+/// the rejections along, and the counts follow its slug.
+pub fn adopt(dir: &Path, key: &str, slug: &str) {
+    let book = read(dir, key);
+    if let Some(mut g) = store::load(dir, slug) {
+        for r in book.rejected {
+            if !g.rejected.contains(&r) && g.rejected.len() < MAX_REJECTED {
+                g.rejected.push(r);
+            }
+        }
+        let _ = store::save(dir, slug, &g);
+    }
+    if key != slug && !path(dir, slug).exists() {
+        let _ = std::fs::rename(path(dir, key), path(dir, slug));
+    }
+}
+
 #[cfg(test)]
 #[path = "suggest_tests.rs"]
 mod tests;
 
 /// A translated game screen's `lines`, counted off the pipeline's thread
-/// for the glossary in use (none: nothing to suggest into).
+/// for the glossary in use or, with none yet, for the game's window.
 pub fn observe(lines: Vec<String>) {
     if !screen::is_game() {
         return;
@@ -226,10 +271,11 @@ pub fn observe(lines: Vec<String>) {
         let dir = store::dir();
         let all = store::load_all(&dir);
         let chosen = crate::shared::config::current().translate.glossary;
-        if let Some(slug) = screen::active(&all, &chosen)
-            && let Some((_, g)) = all.iter().find(|(s, _)| s == slug)
-        {
-            observe_in(&dir, slug, g, &lines);
-        }
+        let slug = screen::active(&all, &chosen).unwrap_or("");
+        let title = crate::shared::platform::capture::window_rect::captured().map(|f| f.title);
+        // (no glossary yet: the game is counted under its window, see `game_key`)
+        let key = game_key(slug, title.as_deref());
+        let g = all.iter().find(|(s, _)| s == slug).map(|(_, g)| g.clone());
+        observe_in(&dir, &key, &g.unwrap_or_default(), &lines);
     });
 }

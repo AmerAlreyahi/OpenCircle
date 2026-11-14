@@ -182,3 +182,29 @@ fn old_glossary_files_have_no_rejections_and_new_ones_round_trip() {
     let back = store::parse(&store::render(&g)).unwrap();
     assert_eq!(back.rejected, ["kaelith"]);
 }
+
+#[test]
+fn a_game_without_a_glossary_is_counted_under_its_window_or_one_unnamed_game() {
+    assert_eq!(game_key("", Some("Ashen Tides")), "ashen-tides");
+    assert_eq!(game_key("", Some("  ")), "unnamed-game");
+    assert_eq!(game_key("", None), "unnamed-game");
+    assert_eq!(game_key("mine", Some("Ashen Tides")), "mine");
+}
+
+#[test]
+fn rejections_before_a_glossary_exists_move_into_it() {
+    let d = dir();
+    let key = game_key("", Some("Ashen Tides"));
+    for n in 0..3 {
+        observe_in(&d, &key, &glossary(), &screen_of("Kaelith", n));
+        observe_in(&d, &key, &glossary(), &screen_of("Vyrnhold", n));
+    }
+    assert_eq!(pending(&d, &key, &glossary()), ["Kaelith", "Vyrnhold"]);
+    reject(&d, &key, "Kaelith").unwrap();
+    assert_eq!(pending(&d, &key, &glossary()), ["Vyrnhold"]);
+    // the first accepted name creates the glossary; the rejection follows
+    store::save(&d, "ashen-tides", &glossary()).unwrap();
+    adopt(&d, &key, "ashen-tides");
+    let g = store::load(&d, "ashen-tides").unwrap();
+    assert_eq!(g.rejected, ["kaelith"]);
+}

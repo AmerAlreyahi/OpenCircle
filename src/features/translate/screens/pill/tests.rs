@@ -956,6 +956,58 @@ fn name_suggestions_match_their_golden_image() {
     });
 }
 
+/// The first accepted name of a game with no glossary creates its glossary: named
+/// after the window and listed in "Use for windows named" (Windows, X11), or with
+/// the default name where no title is known (Wayland); the name is saved as a
+/// term, and the dot showed before any glossary existed.
+#[test]
+fn the_first_accepted_name_creates_the_games_glossary() {
+    use crate::features::translate::glossary::{store, suggest};
+    for title in [Some("Ashen Tides"), None] {
+        let dir = std::env::temp_dir().join(format!(
+            "oc-first-{}-{}",
+            std::process::id(),
+            title.is_some()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = suggest::game_key("", title);
+        let g = crate::features::translate::Glossary::default();
+        for n in 0..3 {
+            let lines = vec![format!(
+                "We must reach Vyrnhold before the tide is rising, page {n}."
+            )];
+            suggest::observe_in(&dir, &key, &g, &lines);
+        }
+        assert_eq!(
+            suggest::pending(&dir, &key, &g),
+            ["Vyrnhold"],
+            "the dot shows"
+        );
+        let form = glossary::AddForm {
+            term: "Vyrnhold".into(),
+            keep: true,
+            always: String::new(),
+            into: String::new(),
+            name: title.unwrap_or_default().into(),
+            window: title.map(str::to_string),
+            picks: Vec::new(),
+        };
+        let (slug, name) = form.save(&dir, "ar").unwrap();
+        suggest::adopt(&dir, &key, &slug);
+        let made = store::load(&dir, &slug).unwrap();
+        assert_eq!(made.terms.len(), 1);
+        assert_eq!(made.terms[0].text, "Vyrnhold");
+        match title {
+            Some(t) => assert_eq!(
+                (name.as_str(), made.windows.clone()),
+                (t, vec![t.to_string()])
+            ),
+            None => assert!(made.windows.is_empty()),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// Picking another language leaves no part of the old name on screen: each
 /// change redrawn only where it differs, as the window does, equals the same
 /// view drawn whole, at 100 % and 150 %.
