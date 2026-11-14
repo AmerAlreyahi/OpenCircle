@@ -38,7 +38,7 @@ Select text from what you can see, even when the original app will not let you c
 - Recognition can miss small, stylised, or low-contrast text. Check the result before pasting it somewhere important.
 - Windows OCR depends on the recognition languages installed in Windows.
 - Latin words and digits inside an Arabic line are often missed, and a page that mixes English and Arabic takes longer to read.
-- On Linux, Arabic in the overlay is read the way it was before 0.1.7 (the line-by-line reading comes to Linux later).
+- Arabic and pages that mix languages are read part by part on Windows and on Linux; small Arabic text can still be read less well on Linux.
 - Linux is a preview. It uses the downloaded reader and is slower; the **Text reading** page is Windows-only.
 - `Ctrl+A` may wait while the rest of the screen is read.
 

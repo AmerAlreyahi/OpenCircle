@@ -106,8 +106,8 @@ Choose one in **Settings → Translate → Engine**.
 
   | From | Into |
   |---|---|
-  | English | Arabic, French, Spanish, German, Russian, Chinese (Simplified), Italian, Dutch, Ukrainian, Hindi, Indonesian, Vietnamese |
-  | Arabic, French, Spanish, German, Russian, Italian, Dutch, Ukrainian, Polish, Hindi, Indonesian, Vietnamese, Thai, Korean, Chinese, Japanese | English |
+  | English | Arabic, French, Spanish, German, Russian, Chinese (Simplified), Italian, Dutch, Ukrainian, Portuguese (Brazilian), Hindi, Indonesian, Vietnamese |
+  | Arabic, French, Spanish, German, Russian, Italian, Dutch, Ukrainian, Polish, Portuguese, Hindi, Indonesian, Vietnamese, Thai, Korean, Chinese, Japanese | English |
   | Spanish | French, German, Italian, Russian |
   | French | Spanish, German, Russian |
   | German | Spanish, French |
@@ -118,13 +118,14 @@ Choose one in **Settings → Translate → Engine**.
   | French, Spanish | Arabic |
   | Arabic | French, Spanish, German |
 
-  The last two rows are direct models we converted ourselves, so these pairs
-  take one model instead of two through English: about twice as fast, and as
+  The last two rows are direct models we converted ourselves (so are the two
+  Portuguese ones, from Helsinki-NLP's multi-language Romance models), so these
+  pairs take one model instead of two through English: about twice as fast, and as
   good as or better than going through English on our test pages.
   Other pairs go through English when both halves exist (for example Italian
   into Arabic: Italian to English, then English to Arabic): two models, a bit
   slower and a little looser. A pair with no way offline (for example into
-  Korean or from Portuguese) is not available offline: OpenCircle says so and
+  Korean) is not available offline: OpenCircle says so and
   offers AI (it never sends the text anywhere you didn't choose). With *Detect
   automatically*, the direction follows the script of the text it read; Latin
   text is told apart by its common words (English, Spanish, French or German).
@@ -141,6 +142,53 @@ model can't say which translated words are the name. A line drawn entirely
 in a highlight colour keeps it.
 
 Explain on a word card always asks your AI provider.
+
+## Game screens
+
+A game's menu, quest log or HUD reads differently from a web page, so on a
+screen that looks like a game (no browser address bar on it) Translate works
+to keep the screen usable:
+
+- **It fits.** A long translation shrinks (to about 70 %) to stay inside its
+  button or label; if it still does not fit, a one-line label is cut at a word
+  with "..." and a paragraph is never cut (the original stays instead).
+- **Names stay.** A character's or a place's name inside a short line is kept as
+  written, not translated into a common word ("Marco" does not become
+  "Framework").
+- **Counters survive.** `x10`, `Lv. 80`, `21ms` and the like keep their form.
+- A glossary you made for the game decides names better still (next section).
+
+Games must be borderless or windowed (see below).
+
+## Glossary for a game
+
+A glossary is a short list of terms for one game: a name to keep as written, or
+the translation you want for a word. It is guided into the offline translation
+and, with AI, offered to the provider as the names to use; it never changes a
+word outside the terms. Matching ignores case and accents.
+
+- **Where.** On a game screen only: the pill's book button, and the word card's
+  dotted names, appear there and never in a browser or a normal app. Each game
+  has its own glossary; a game without one gets none (never the last game's).
+- **Make one.** **Settings > Translate > Glossary** opens the editor: New,
+  Rename, Import, Export, Delete, and a table of terms (a term with an empty
+  translation is kept as it is). On the translated screen, click a dotted name
+  on the word card (or press `G`) to add it from there.
+- **Which game.** Where the system gives the focused window's title (Windows and
+  X11), a glossary's *Use for windows named* list picks it by itself when that
+  game is in front. On Wayland the desktop doesn't tell, so you pick the
+  glossary on the pill and it stays until you change it; the pill shows which one
+  is active. OpenCircle never looks into the game's process.
+- **Share.** A glossary is one TOML file in OpenCircle's `glossaries` data
+  folder; Export writes it, Import reads one (up to 1 MB and 5000 terms). Importing
+  into a game that already has a glossary merges: new terms are added, your own
+  translations win over the imported ones, and a summary tells you ("12 terms
+  added, 3 kept yours, 0 duplicates").
+- **Suggested names.** When the same name shows up on at least three different
+  translated screens of a game, a small dot with a count appears on the pill's
+  glossary button. Open the list and keep the name as it is, give it a translation,
+  or reject it (rejected names are not suggested again). Nothing appears
+  during play on its own, and nothing leaves your PC.
 
 ## Subtitles, addresses and small text
 

@@ -24,6 +24,12 @@ window and full-screen rows (older entries in a config still work: see below).
 Older configs that had Snip on `Print Screen` move to `Alt+A` once, unless a key
 of your own stays.
 
+Translate and Live translate keep clear of browser shortcuts: their defaults are
+`Alt+Shift+T` and `Alt+Shift+L`, not `Ctrl+Shift+T` / `Ctrl+Shift+L`. A config still on
+the old defaults moves to the new keys once (a backup of the file is kept); a key you
+chose yourself stays. On KDE Plasma, which remembers a key it already stored, check
+**System Settings > Shortcuts > OpenCircle** if the old key is still shown.
+
 **Settings > Shortcuts > Reset shortcuts** puts every shown shortcut back to the default in the table above (it asks first, and offers Undo until you change something else). Where your desktop owns the keys (GNOME and KDE settings, the shortcut portal), it asks for the defaults again and the desktop has the last word: the row shows the key it actually uses.
 
 Snip also opens from the tray menu (**Snip**), the bar's Snip button, and with

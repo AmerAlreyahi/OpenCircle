@@ -29,7 +29,8 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 - With the default setup and no AI provider configured, translation runs offline. No key or account is needed.
 - Choose the source language yourself if automatic detection reads the wrong script.
 - A browser's address bar, file names and e-mail addresses are left as they are, and big outlined subtitles (a film's, a game's) are erased and redrawn at their size. See [Translate](../translate.md).
-- Arabic to and from French and Spanish, and Arabic to German, have direct models: faster than going through English.
+- Arabic to and from French and Spanish, and Arabic to German, have direct models: faster than going through English. Portuguese (Brazilian) is offline too.
+- On a game screen, long labels shrink to fit their buttons and names stay as written; a per-game glossary (Settings > Translate > Glossary) fixes the names you care about. See [Translate](../translate.md#game-screens).
 - The translation replaces text in a captured image. It does not change the page or document underneath.
 - The Snip button in the translate pill takes the translated page into Snip, to mark it up, copy or save it.
 

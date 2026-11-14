@@ -53,17 +53,29 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 - **Select text like on a desktop.** Drag over words to copy, translate or
   search them. On Windows the text is readable at once with Windows' own text
   recognition; otherwise (and for Arabic or games) OpenCircle offers a one-time
-  download of about 30 MB. On Windows, Arabic and pages that mix two languages
-  are read line by line, each line by the reader that suits it; the Copy text
-  button spins while the screen is still being read. Settings > Text reading >
-  Engine chooses.
-- **Translate in place.** Press `Alt+Shift+T` to translate the whole screen. The
-  original text is erased and the translation is drawn in its place, with
-  matching colour and size; browser address bars and file names are left alone,
-  and big outlined subtitles are erased and redrawn at their size. It runs
-  offline by default after a one-time model download (49 direct models, and
-  other pairs go through English); the target is the language you pick at the
-  first start. Direct models into and out of Arabic make it faster. See [Translate](docs/translate.md).
+  download of about 30 MB. On Windows and Linux, Arabic and pages that mix two
+  languages are read part by part, each line by the reader that suits it; the
+  Copy text button spins while the screen is still being read. Settings > Text reading
+  > Engine chooses.
+- **Translate in place, built for games.** Press `Alt+Shift+T` to translate the
+  whole screen. The original text is erased and the translation is drawn in its
+  place, with matching colour and size. On a game screen (menus, quest logs,
+  HUDs) the translation is made to fit: a long label shrinks to its button and,
+  as a last resort, is cut at a word with "...", never spilling over; names and
+  numbers stay as written; counters like "x10" and "Lv. 80" survive. Browser
+  address bars and file names are left alone, and big outlined subtitles are
+  erased and redrawn at their size. It runs offline by default after a one-time
+  model download (51 direct models, including Portuguese, and other pairs go
+  through English); the target is the language you pick at the first start.
+  Direct models into and out of Arabic make it faster. See [Translate](docs/translate.md).
+- **A glossary for each game.** Keep a character's or a place's name exactly as
+  you want it translated, or kept as written: one small file per game, on this PC
+  only. It applies on game screens only (never in a browser), follows the game
+  in front where the system gives its window title, and importing a friend's
+  file merges into yours without losing your changes. OpenCircle also notices
+  names that keep coming back on a game's screens and offers them with one click
+  (a small dot on the pill's glossary button); nothing leaves your PC. See
+  [Translate](docs/translate.md#glossary-for-a-game).
 - **Snip and annotate.** Press `Alt+A`: the screen freezes, hover a window and
   click it (OpenCircle's own widgets too), or drag an area (`Enter` takes the
   full screen); `Ctrl+C` copies it at its original size. One grouped toolbar
@@ -96,6 +108,7 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 - **12 themes and Active Look.** Pick a card in Settings > Appearance (light and
   dark; until you do, it follows the system). Sapphire Glow, a soft glow round
   the screen edge, is the default look; its colours also outline the snip area.
+  The app, tray and installer icon is the Sapphire logo.
 - **Updates that check a signature.** Opt-in on first run. A new version
   downloads in the background and waits: a small pill above the tray offers
   **Restart now**, and What's new shows after the restart.
@@ -239,8 +252,9 @@ Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
   window is not offered (a click takes the screen), and Share is Windows only.
   See [Linux notes](docs/linux-notes.md).
 
-Games must run in borderless or windowed mode for live translate (Labs,
-unfinished). Linux text reading is slower than Windows OCR; on Wayland the
+Games must run in borderless or windowed mode for the translation to appear
+over them (and for live translate, Labs, unfinished). Linux reads text with
+OpenCircle's own reader, a little slower than Windows OCR; on Wayland the
 overlay can take about half a second to appear and popups are square.
 AI-provider translation can be slower than the offline engine and may show the
 whole result at once.
@@ -288,8 +302,9 @@ Settings > About lists the project, the licence, and every component OpenCircle
 uses that is made by others, with its licence. Text-reading and translation
 models are downloaded on first use under their own licences; see [NOTICE](docs/NOTICE.md).
 The translation models come from Hugging Face (Xenova's ONNX exports of the
-Helsinki-NLP OPUS-MT models) and, for the five direct Arabic models we
-converted ourselves, from
+Helsinki-NLP OPUS-MT models) and, for the five direct Arabic models and the two
+Portuguese ones (Helsinki-NLP's multi-language Romance models) we converted
+ourselves, from
 [AmerAlreyahi/OpenCircle-models](https://github.com/AmerAlreyahi/OpenCircle-models).
 Every decoder is the lighter OptimaMT build ([OptimaMT](https://huggingface.co/OptimaMT):
 OPUS-MT with the output layer built once; the same translations, less memory).
