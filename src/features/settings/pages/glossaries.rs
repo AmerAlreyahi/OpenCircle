@@ -36,6 +36,19 @@ pub struct Choice {
     label: String,
 }
 
+/// "1 term", "7 terms" (and Arabic's forms).
+fn terms(n: usize) -> String {
+    crate::shared::app_language::count(
+        n,
+        [
+            S::gl_terms_one,
+            S::gl_terms_two,
+            S::gl_terms_few,
+            S::gl_terms_many,
+        ],
+    )
+}
+
 impl std::fmt::Display for Choice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.label)
@@ -188,7 +201,7 @@ impl Page {
         }];
         c.extend(self.all.iter().map(|(s, g)| Choice {
             slug: s.clone(),
-            label: fmt(S::gl_choice, &[&g.name, &g.terms.len()]),
+            label: fmt(S::gl_choice, &[&g.name, &terms(g.terms.len())]),
         }));
         self.options = c.clone();
         self.options.push(Choice {

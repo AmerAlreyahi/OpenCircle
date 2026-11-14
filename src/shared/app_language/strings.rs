@@ -1873,8 +1873,16 @@ strings! {
         | "أسماء ومصطلحات لعبة، تبقى كما هي أو تُترجم دائمًا بالطريقة نفسها";
     gl_edit_btn: "Edit"
         | "تحرير";
-    gl_choice: "{} · {} terms"
-        | "{} · {} مصطلحات";
+    gl_choice: "{} · {}"
+        | "{} · {}";
+    gl_terms_one: "1 term"
+        | "مصطلح واحد";
+    gl_terms_two: "2 terms"
+        | "مصطلحان";
+    gl_terms_few: "{} terms"
+        | "{} مصطلحات";
+    gl_terms_many: "{} terms"
+        | "{} مصطلحًا";
     gl_delete_glossary: "Delete glossary"
         | "حذف القاموس";
     gl_crumb: "Glossaries"

@@ -39,6 +39,8 @@ pub enum Msg {
     Glossary(glossary::GlossaryMsg),
     /// The word card's Add to glossary (or its key, G), and its form.
     AddStart,
+    /// A dotted name of the card's original clicked: the form for that name.
+    AddFor(String),
     Add(glossary::AddMsg),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
@@ -407,21 +409,8 @@ impl Session {
                     return self.run(true);
                 }
             }
-            Msg::AddStart => {
-                let title = crate::shared::platform::capture::window_rect::captured_title();
-                let picks = self.glossary.picks();
-                let active = self.glossary.active.clone();
-                if let Some(card) = self.card.as_mut().filter(|c| c.add.is_none()) {
-                    let first = (picks.first().map(|p| p.0.clone())).unwrap_or_default();
-                    let into = if active.is_empty() { first } else { active };
-                    card.add = Some(glossary::AddForm::new(
-                        &card.block.original,
-                        &into,
-                        title.as_deref(),
-                        picks,
-                    ));
-                }
-            }
+            Msg::AddStart => self.start_add(None),
+            Msg::AddFor(word) => self.start_add(Some(word)),
             Msg::Add(msg) => return self.add(msg),
             Msg::Glossary(msg) => {
                 self.picker.close();
@@ -948,3 +937,23 @@ pub(crate) mod view;
 
 #[cfg(test)]
 mod tests;
+
+impl Session {
+    /// Opens the word card's Add to glossary form; `word` (a clicked name)
+    /// is the term, else the first name of the original.
+    fn start_add(&mut self, word: Option<String>) {
+        let title = crate::shared::platform::capture::window_rect::captured_title();
+        let picks = self.glossary.picks();
+        let active = self.glossary.active.clone();
+        if let Some(card) = self.card.as_mut().filter(|c| c.add.is_none()) {
+            let first = (picks.first().map(|p| p.0.clone())).unwrap_or_default();
+            let into = if active.is_empty() { first } else { active };
+            let mut form =
+                glossary::AddForm::new(&card.block.original, &into, title.as_deref(), picks);
+            if let Some(w) = word {
+                form.term = w;
+            }
+            card.add = Some(form);
+        }
+    }
+}

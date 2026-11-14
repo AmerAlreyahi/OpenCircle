@@ -160,6 +160,10 @@ pub struct Stop<'a, Message> {
     rtl: bool,
     id: Option<Id>,
     fill: Option<iced::Color>,
+    /// A glyph (icon font), its size and colour, drawn over the control only
+    /// while the keyboard leads and it is focused (a control whose content is
+    /// hidden until hover: the table row's x).
+    glyph: Option<(char, f32, iced::Color)>,
 }
 
 /// `content` as a stop of corner `radius`; Enter / Space send `press` (none
@@ -178,6 +182,7 @@ pub fn stop<'a, Message: 'a>(
         rtl: super::dir::rtl(),
         id: None,
         fill: None,
+        glyph: None,
     }
 }
 
@@ -206,6 +211,10 @@ impl<'a, Message: 'a> Stop<'a, Message> {
     /// is drawn to show on it.
     pub fn on_fill(mut self, fill: iced::Color) -> Self {
         self.fill = Some(fill);
+        self
+    }
+    pub fn glyph(mut self, glyph: char, px: f32, colour: iced::Color) -> Self {
+        self.glyph = Some((glyph, px, colour));
         self
     }
     pub fn id(mut self, id: &'static str) -> Self {
@@ -266,6 +275,26 @@ impl<Message: Clone> Widget<Message, T, R> for Stop<'_, Message> {
         );
         if tree.state.downcast_ref::<State>().focused {
             shade(renderer, layout.bounds(), self.radius, self.fill);
+            if let (true, Some((glyph, px, colour))) = (keyboard(), self.glyph) {
+                use iced::advanced::text::Renderer as _;
+                let b = layout.bounds();
+                renderer.fill_text(
+                    iced::advanced::Text {
+                        content: glyph.to_string(),
+                        bounds: b.size(),
+                        size: px.into(),
+                        line_height: iced::widget::text::LineHeight::default(),
+                        font: super::icon::FONT,
+                        align_x: iced::widget::text::Alignment::Center,
+                        align_y: iced::alignment::Vertical::Center,
+                        shaping: iced::widget::text::Shaping::Basic,
+                        wrapping: iced::widget::text::Wrapping::None,
+                    },
+                    b.center(),
+                    colour,
+                    b,
+                );
+            }
         }
     }
     fn operate(

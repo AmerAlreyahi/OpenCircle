@@ -4061,3 +4061,16 @@ fn the_pill_opens_the_glossary_editor_on_the_translate_page() {
     assert!(s.glossaries.is_editing());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The glossary dropdown counts terms in the singular too ("1 term").
+#[test]
+fn the_glossary_dropdown_counts_one_term_in_the_singular() {
+    let (mut s, dir) = glossary_state("one");
+    game_file(&dir, "ashen-tides", "Ashen Tides", &[("Vyrnhold", "")]);
+    update(&mut s, Message::Glossaries(pages::glossaries::Msg::Back));
+    assert_eq!(
+        s.glossaries.labels(),
+        ["None", "Ashen Tides · 1 term", "New glossary"]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -1267,3 +1267,18 @@ fn the_word_card_marks_names_not_sentence_starts() {
     assert_eq!(marked, ["Vyrnhold", "Ash", "Warden"]);
     assert_eq!(super::glossary::guess(text), "Vyrnhold");
 }
+
+/// Clicking a dotted name opens the form for THAT name, not the first one.
+#[test]
+fn a_clicked_name_is_the_forms_term() {
+    let mut s = session(true);
+    let _ = s.update(shown(vec![block(
+        "Take the Vyrnhold key to Saltmarch.",
+        "خذ المفتاح",
+        [0.0, 0.0, 100.0, 40.0],
+    )]));
+    s.click(Point::new(50.0, 20.0));
+    let _ = s.update(Msg::AddFor("Saltmarch".into()));
+    let form = s.card.as_ref().unwrap().add.clone().unwrap();
+    assert_eq!(form.term, "Saltmarch");
+}

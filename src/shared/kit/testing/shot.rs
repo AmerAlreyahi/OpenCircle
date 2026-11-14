@@ -315,6 +315,48 @@ pub fn after_clicks<'a, Message>(
         .collect()
 }
 
+/// `view` drawn (RGBA) with the keyboard's focus on its first stop (as after
+/// a Tab), the pointer away.
+pub fn after_focus<'a, Message>(view: impl Fn() -> Element<'a, Message>, size: Size) -> Vec<u8> {
+    use iced::advanced::widget::{Id, Operation, operation::Focusable};
+    struct First(bool);
+    impl Operation for First {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn focusable(&mut self, _: Option<&Id>, _: Rectangle, state: &mut dyn Focusable) {
+            if !std::mem::replace(&mut self.0, true) {
+                state.focus();
+            }
+        }
+    }
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view(), size, Cache::default(), &mut renderer);
+    ui.operate(&renderer, &mut First(false));
+    crate::shared::kit::focus::lead(true);
+    let cache = ui.into_cache();
+    let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+    let cursor = mouse::Cursor::Unavailable;
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    ui.draw(&mut renderer, &Theme::Dark, &style, cursor);
+    let (w, h) = (size.width as u32, size.height as u32);
+    let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    renderer.draw(
+        &mut pixmap.as_mut(),
+        &mut mask,
+        &Viewport::with_physical_size(Size::new(w, h), 1.0),
+        &[Rectangle::with_size(size)],
+        crate::shared::kit::themes::c().bg,
+    );
+    crate::shared::kit::focus::lead(false);
+    (pixmap.data().as_chunks::<4>().0.iter())
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect()
+}
+
 /// A clipboard that remembers what was written to it.
 #[derive(Default)]
 pub struct Clip(pub Vec<String>);

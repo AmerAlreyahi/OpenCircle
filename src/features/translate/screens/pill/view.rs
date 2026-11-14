@@ -344,7 +344,8 @@ fn original(text: &str) -> Element<'_, Msg> {
         let tail = if last { "" } else { " " };
         if marked[i] {
             let name = crate::shared::kit::dotted::dotted(note(w.to_string()).color(c().text));
-            line = line.push(mouse_area(name).on_press(Msg::AddStart));
+            let word = w.trim_matches(|c: char| !c.is_alphanumeric()).to_string();
+            line = line.push(mouse_area(name).on_press(Msg::AddFor(word)));
             line = line.push(note(tail));
         } else {
             line = line.push(note(format!("{w}{tail}")));
