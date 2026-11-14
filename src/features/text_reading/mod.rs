@@ -449,6 +449,13 @@ fn share(text: &str, script: Script) -> f32 {
     mine as f32 / all.max(1) as f32
 }
 
+/// Latin capitals only, 3 or more, each one Cyrillic writes too ("AEPEBO"
+/// for "ДЕРЕВО", "HOBOE"): a Latin reading another script may own.
+fn lookalike(text: &str) -> bool {
+    let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
+    letters.len() >= 3 && letters.iter().all(|c| "ABCEHKMOPTXY".contains(*c))
+}
+
 /// `b`'s middle is in `k` (boxes: x, y, w, h).
 fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
     let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
@@ -460,6 +467,16 @@ fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
 /// page in the user's language with a stray line or icon), themselves as
 /// found (an English page's second reader went 963 -> 1900 ms on the Win10
 /// VM re-finding three of them at full size).
+/// The Latin reader `per_line` reads with first: the one `loaded`, the one
+/// that kept most lines `last`, English, else any Latin one on disk (`ok`).
+/// A French-only user has the Latin reader and no English one: without it
+/// the game screen's Latin lines were never read (1 line of 27 kept).
+fn latin_choice(loaded: Option<usize>, last: usize, ok: impl Fn(usize) -> bool) -> Option<usize> {
+    ([loaded, Some(last), Some(0)].into_iter().flatten())
+        .chain(0..models::RECOGNIZERS.len())
+        .find(|&i| ok(i))
+}
+
 fn few(
     strips: Vec<(u32, u32)>,
     left: Vec<[f32; 4]>,
@@ -862,11 +879,10 @@ impl Engine {
         // French page read by the English one, then the Latin one, switched
         // twice a part), else the one that kept most lines last time
         let loaded = self.recs.last().map(|(i, _)| *i);
-        let latin_reader = [loaded, Some(self.latin), Some(0)]
-            .into_iter()
-            .flatten()
-            .find(|&i| installed(i) && script(i) == Script::Latin)
-            .filter(|_| latin);
+        let latin_reader = latin_choice(loaded, self.latin, |i| {
+            installed(i) && script(i) == Script::Latin
+        })
+        .filter(|_| latin);
         let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
         let mut kept: Vec<(usize, TextBlock)> = Vec::new();
         // Latin readings not kept: a line no other reader keeps keeps it
@@ -998,6 +1014,26 @@ impl Engine {
                 }
             }
             (boxes, last) = (rest, rest_last);
+        }
+        // capitals the Latin reader kept that are another script's letters
+        // too, on a screen another reader read most of ("ДЕРЕВО НАВЫКОВ" on a
+        // Russian skill tree: "AEPEBO"): read again by that reader
+        let most = |kept: &[(usize, TextBlock)]| {
+            let n = |o: usize| kept[first..].iter().filter(|(i, _)| *i == o).count();
+            others
+                .iter()
+                .copied()
+                .max_by_key(|&o| n(o))
+                .filter(|&o| n(o) * 2 > first)
+        };
+        if let Some(o) = most(&kept) {
+            let again: Vec<usize> = (0..first).filter(|&k| lookalike(&kept[k].1.text)).collect();
+            let boxes: Vec<[f32; 4]> = again.iter().map(|&k| kept[k].1.bounds).collect();
+            for (k, r) in again.into_iter().zip(self.read_each(o, &f.img, &boxes)?) {
+                if let Some(r) = r.filter(|r| share(&r.text, script(o)) >= 0.5) {
+                    kept[k] = (o, r);
+                }
+            }
         }
         let other = kept.len() - first;
         // Latin lines: the Latin reader's reading from before (its own
@@ -1441,6 +1477,26 @@ fn reading_order(mut blocks: Vec<TextBlock>, rtl: bool) -> Vec<TextBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_latin_reader_on_disk_reads_latin_lines_without_the_english_one() {
+        // only the Latin reader (1) on disk: a French-only user's
+        assert_eq!(latin_choice(None, 0, |i| i == 1), Some(1));
+        // the loaded one, then the last winner, then English
+        let latin = |i: usize| i <= 1;
+        assert_eq!(latin_choice(Some(1), 0, latin), Some(1));
+        assert_eq!(latin_choice(None, 1, latin), Some(1));
+        assert_eq!(latin_choice(Some(3), 0, latin), Some(0));
+        assert_eq!(latin_choice(None, 0, |_| false), None);
+    }
+
+    #[test]
+    fn latin_capitals_cyrillic_writes_too_are_told() {
+        assert!(lookalike("AEPEBO") && lookalike("HOBOE - 3"));
+        for latin in ["STAGE", "UP!", "Kaito", "OK"] {
+            assert!(!lookalike(latin), "{latin}");
+        }
+    }
 
     #[test]
     fn failed_dll_load_points_to_the_vc_redistributable() {
