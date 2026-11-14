@@ -1856,6 +1856,85 @@ strings! {
         | "تعمل الترجمة دون إنترنت بنماذج OptimaMT: نماذج OPUS-MT بمفكّك أخف (الترجمات نفسها بذاكرة أقل).";
     tr_optima_link: "OptimaMT on Hugging Face"
         | "OptimaMT على Hugging Face";
+    // the per-game glossary (0.2.0, planning #13)
+    gl_tip: "Glossary"
+        | "قاموس المصطلحات";
+    gl_tip_on: "Glossary: {}"
+        | "قاموس المصطلحات: {}";
+    gl_none: "None"
+        | "بدون";
+    gl_new: "New glossary"
+        | "قاموس جديد";
+    gl_edit: "Edit glossaries…"
+        | "تحرير القواميس…";
+    gl_row: "Glossary"
+        | "قاموس المصطلحات";
+    gl_row_desc: "A game's names and terms, kept as they are or always translated the same way"
+        | "أسماء ومصطلحات لعبة، تبقى كما هي أو تُترجم دائمًا بالطريقة نفسها";
+    gl_edit_btn: "Edit"
+        | "تحرير";
+    gl_choice: "{} ({})"
+        | "{} ({})";
+    gl_crumb: "Glossaries"
+        | "القواميس";
+    gl_more: "More"
+        | "المزيد";
+    gl_rename: "Rename"
+        | "إعادة تسمية";
+    gl_import: "Import…"
+        | "استيراد…";
+    gl_export: "Export…"
+        | "تصدير…";
+    gl_delete: "Delete"
+        | "حذف";
+    gl_delete_q: "Delete the glossary “{}”?"
+        | "حذف القاموس «{}»؟";
+    gl_name: "Glossary name"
+        | "اسم القاموس";
+    gl_windows: "Use for windows named"
+        | "استخدمه للنوافذ المسمّاة";
+    gl_windows_desc: "Window titles that pick this glossary by themselves, separated by commas"
+        | "عناوين نوافذ تختار هذا القاموس تلقائيًا، تفصل بينها فواصل";
+    gl_search: "Search terms"
+        | "ابحث في المصطلحات";
+    gl_add: "Add term"
+        | "إضافة مصطلح";
+    gl_col_screen: "On screen"
+        | "على الشاشة";
+    gl_kept: "Kept as is"
+        | "يبقى كما هو";
+    gl_removed: "Term removed"
+        | "أُزيل المصطلح";
+    gl_undo: "Undo"
+        | "تراجع";
+    gl_exists: "A glossary named “{}” already exists."
+        | "يوجد قاموس باسم «{}» بالفعل.";
+    gl_replace: "Replace"
+        | "استبدال";
+    gl_keep_both: "Keep both"
+        | "الاحتفاظ بالاثنين";
+    gl_more_rows: "{} more terms: search to narrow the list"
+        | "{} مصطلحات أخرى: ابحث لتضييق القائمة";
+    gl_empty: "No terms yet"
+        | "لا مصطلحات بعد";
+    gl_default_name: "New glossary"
+        | "قاموس جديد";
+    gl_failed: "Could not use the file: {}"
+        | "تعذّر استخدام الملف: {}";
+    dlg_gl_open: "Import a glossary"
+        | "استيراد قاموس";
+    dlg_gl_save: "Export the glossary"
+        | "تصدير القاموس";
+    gl_add_card: "Add to glossary"
+        | "إضافة إلى القاموس";
+    gl_keep: "Keep as is"
+        | "يبقى كما هو";
+    gl_always: "Always as"
+        | "دائمًا";
+    gl_in_glossary: "In"
+        | "في";
+    gl_save_tag: "“{}” saved · {}"
+        | "حُفظ «{}» · {}";
     // added in the Arabic finish (the backend sentences the UI shows, 2026-11-12)
     tx_not_rgba: "The captured picture could not be read."
         | "تعذّرت قراءة الصورة الملتقطة.";

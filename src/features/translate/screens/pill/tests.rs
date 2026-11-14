@@ -1,4 +1,5 @@
 //! Translate in place: its sessions, partials, cards and picker pill.
+use super::glossary::GlossaryMsg;
 use super::*;
 use crate::features::text_reading;
 use iced::widget::container as c;
@@ -92,6 +93,8 @@ fn session(models: bool) -> Session {
         scale: 1.0,
         partial: None,
         readers: None,
+        glossary: glossary::Menu::default(),
+        tag: None,
         snip_keys: String::new(),
         updating: None,
         update_work: None,
@@ -200,7 +203,8 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         let pill = view::pill_at(Rectangle::with_size(size));
         let (rows, cols) = (
             (view::PILL_TOP + picker::PILL.height) as usize,
-            (pill.x + picker::PILL.width) as usize - 40,
+            // (the Snip button and the glossary's, which never changes)
+            (pill.x + picker::PILL.width) as usize - 78,
         );
         for y in 0..rows {
             let at = y * 1280 * 4;
@@ -853,6 +857,23 @@ fn every_translate_state_matches_its_golden_image() {
                 let _ = s.update(shown(blocks));
                 s.click(Point::new(50.0, 20.0));
             }
+            "glossary" => {
+                let _ = s.update(shown(Vec::new()));
+                s.glossary =
+                    glossary::Menu::sample(&["Ashen Tides", "Ruined Sky"], "ashen-tides", true);
+            }
+            "word-add" => {
+                let blocks = vec![block(
+                    "Bring the Vyrnhold key",
+                    "أحضر المفتاح",
+                    [0.0, 0.0, 100.0, 40.0],
+                )];
+                let _ = s.update(shown(blocks));
+                s.glossary =
+                    glossary::Menu::sample(&["Ashen Tides", "Ruined Sky"], "ashen-tides", false);
+                s.click(Point::new(50.0, 20.0));
+                let _ = s.update(Msg::AddStart);
+            }
             _ => {} // translating
         }
         s
@@ -867,6 +888,8 @@ fn every_translate_state_matches_its_golden_image() {
         "readers",
         "word",
         "word-explained",
+        "glossary",
+        "word-add",
     ];
     golden::each_theme(|theme, failed| {
         for name in names {
@@ -1085,7 +1108,10 @@ fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
     let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
     // the button's centre: the pill's end, inside its padding
     let button = Point::new(
-        pill.x + pill.width - 6.0 - crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
+        pill.x + pill.width
+            - 6.0
+            - (2.0 * crate::shared::kit::tokens::size::ICON_BUTTON + picker::SPACING)
+            + crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
         pill.y + pill.height / 2.0,
     );
     let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };
@@ -1095,4 +1121,125 @@ fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
     let after = shot::render(s.view(size, at, false), 1280, 200);
     assert!(before != after, "the button wakes");
     assert!(matches!(press(&s)[..], [Msg::Snip]), "{:?}", press(&s));
+}
+
+/// The glossary button after Snip (always there, so the pill never changes)
+/// opens its list; a press on a row picks that glossary (translate again), a
+/// second press on the button closes it, another list closes it.
+#[test]
+fn the_glossary_button_opens_its_list_and_a_pick_translates_again() {
+    use crate::shared::kit::testing::shot;
+    let size = Size::new(1280.0, 400.0);
+    let at = card::place(size, None, None);
+    let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
+    let button = Point::new(
+        pill.x + pill.width - 6.0 - crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
+        pill.y + pill.height / 2.0,
+    );
+    let mut s = session(true);
+    s.glossary = glossary::Menu::sample(&["Ashen Tides", "Other"], "", false);
+    let sent = shot::click(s.view(size, at, false), size, button);
+    assert!(
+        matches!(&sent[..], [Msg::Glossary(GlossaryMsg::Toggle)]),
+        "{sent:?}"
+    );
+    let _ = s.update(sent.into_iter().next().unwrap());
+    assert!(s.glossary.is_open() && s.picker_open());
+    let texts = shot::texts(s.view(size, at, false));
+    for want in [
+        "None",
+        "Ashen Tides",
+        "Other",
+        "New glossary",
+        "Edit glossaries…",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    // a language list closes it
+    let _ = s.update(Msg::Picker(picker::Msg::Open(picker::Side::Target)));
+    assert!(!s.glossary.is_open());
+    let _ = s.update(Msg::Glossary(GlossaryMsg::Toggle));
+    assert!(s.glossary.is_open() && !s.picker.is_open());
+    // a pick: translates again (the phase restarts) and closes the list
+    s.phase = Phase::Shown(Shown {
+        image: frame(4, 4),
+        blocks: Vec::new(),
+        offer: None,
+        outdated: Vec::new(),
+    });
+    let _ = s.update(Msg::Glossary(GlossaryMsg::Pick("other".into())));
+    assert!(!s.glossary.is_open());
+    assert_eq!(s.glossary.active, "other");
+    assert!(
+        matches!(s.phase, Phase::Translating | Phase::Consent(_)),
+        "translates again"
+    );
+    // the same pick again changes nothing
+    s.phase = Phase::Failed(problem("x".into(), false));
+    let _ = s.update(Msg::Glossary(GlossaryMsg::Pick("other".into())));
+    assert!(matches!(s.phase, Phase::Failed(_)));
+    // Esc and a tap on the screen close the list
+    let _ = s.update(Msg::Glossary(GlossaryMsg::Toggle));
+    assert!(s.picker_open());
+    s.close_picker();
+    assert!(!s.glossary.is_open());
+}
+
+/// The word card's Add to glossary: G / the button opens the form on the
+/// capitalised name; Save writes the term into the glossary file (a new
+/// glossary when none exists), kept as is or always as the typed word.
+#[test]
+fn the_word_card_adds_a_term_to_a_glossary() {
+    use glossary::{AddForm, AddMsg, guess};
+    assert_eq!(guess("Bring the Vyrnhold key"), "Vyrnhold");
+    assert_eq!(guess("Go to Vyrnhold."), "Vyrnhold");
+    assert_eq!(guess("Quit game"), "Quit game", "no name: the whole text");
+    let mut s = session(true);
+    let _ = s.update(shown(vec![block(
+        "Bring the Vyrnhold key",
+        "أحضر مفتاح",
+        [0.0, 0.0, 100.0, 40.0],
+    )]));
+    s.click(Point::new(50.0, 20.0));
+    assert!(s.has_card() && !s.adding());
+    let _ = s.update(Msg::AddStart);
+    assert!(s.adding() && s.picker_open(), "Esc closes the form first");
+    let _ = s.update(Msg::Add(AddMsg::Term("Vyrnhold".into())));
+    let _ = s.update(Msg::Add(AddMsg::Always("فيرنهولد".into())));
+    let form = s.card.as_ref().unwrap().add.clone().unwrap();
+    assert_eq!((form.term.as_str(), form.keep), ("Vyrnhold", false));
+    s.close_picker();
+    assert!(!s.adding() && s.has_card());
+    // saving: a new glossary named for the window; the term fixed for Arabic
+    let dir = std::env::temp_dir().join(format!("oc-card-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let new = AddForm {
+        name: "Ashen Tides".into(),
+        into: String::new(),
+        ..form
+    };
+    let (slug, name) = new.save(&dir, "ar").unwrap();
+    assert_eq!(
+        (slug.as_str(), name.as_str()),
+        ("ashen-tides", "Ashen Tides")
+    );
+    let g = crate::features::translate::glossary_store::load(&dir, &slug).unwrap();
+    assert_eq!(g.terms.len(), 1);
+    assert_eq!(
+        g.terms[0].translations.get("ar").map(String::as_str),
+        Some("فيرنهولد")
+    );
+    // again, kept as is, into that glossary: the term is replaced, not doubled
+    let again = AddForm {
+        keep: true,
+        into: slug.clone(),
+        term: "VYRNHOLD".into(),
+        ..new
+    };
+    again.save(&dir, "ar").unwrap();
+    let g = crate::features::translate::glossary_store::load(&dir, &slug).unwrap();
+    assert_eq!(g.terms.len(), 1);
+    assert!(g.terms[0].translations.is_empty(), "kept as is");
+    assert!(again.save(&dir, "xx").is_ok(), "kept: no language needed");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -57,11 +57,13 @@ pub enum Icon {
     External,
     /// lucide "circle-alert" (the AI error card).
     Alert,
+    /// lucide "book-a" (the translate pill's glossary).
+    Glossary,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 27] = [
+    pub const ALL: [Icon; 28] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -89,6 +91,7 @@ impl Icon {
         Icon::Shield,
         Icon::External,
         Icon::Alert,
+        Icon::Glossary,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -130,6 +133,7 @@ impl Icon {
             Icon::Shield => '\u{e15b}',
             Icon::External => '\u{e0bd}',
             Icon::Alert => '\u{e07b}',
+            Icon::Glossary => '\u{e548}',
         }
     }
 }

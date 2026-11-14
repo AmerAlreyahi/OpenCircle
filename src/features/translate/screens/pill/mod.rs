@@ -35,6 +35,11 @@ pub enum Msg {
     Offline(&'static Pair, u64),
     /// The language picker; a new source or target translates again.
     Picker(picker::Msg),
+    /// The glossary button's list; another glossary translates again.
+    Glossary(glossary::GlossaryMsg),
+    /// The word card's Add to glossary (or its key, G), and its form.
+    AddStart,
+    Add(glossary::AddMsg),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
     /// The pill's Snip button: Snip takes the page as translated (the App
@@ -165,6 +170,10 @@ pub struct Session {
     partial: Option<Part>,
     /// The OCR download asked for is the readers for other scripts (bytes).
     readers: Option<(u64, String)>,
+    /// The glossary button and its list.
+    glossary: glossary::Menu,
+    /// What the last "Add to glossary" saved, a quiet tag beside the pill.
+    tag: Option<String>,
     /// Snip's own shortcut, for its button's tooltip.
     snip_keys: String,
     /// The used pairs' model update: its bytes and share so far; `None` =
@@ -194,6 +203,8 @@ struct Card {
     title: String,
     /// Its error card shows the whole detail.
     details: bool,
+    /// The Add to glossary form is open.
+    add: Option<glossary::AddForm>,
 }
 
 impl Session {
@@ -239,6 +250,11 @@ impl Session {
             scale,
             partial: None,
             readers: None,
+            tag: None,
+            glossary: glossary::Menu::load(
+                &cfg.glossary,
+                crate::shared::platform::capture::window_rect::captured_title().as_deref(),
+            ),
             snip_keys: (crate::shared::config::current().quick_actions.into_iter())
                 .find(|q| q.action == crate::features::snip::action::ACTION.id)
                 .map(|q| q.shortcut)
@@ -391,11 +407,37 @@ impl Session {
                     return self.run(true);
                 }
             }
+            Msg::AddStart => {
+                let title = crate::shared::platform::capture::window_rect::captured_title();
+                let picks = self.glossary.picks();
+                let active = self.glossary.active.clone();
+                if let Some(card) = self.card.as_mut().filter(|c| c.add.is_none()) {
+                    let first = (picks.first().map(|p| p.0.clone())).unwrap_or_default();
+                    let into = if active.is_empty() { first } else { active };
+                    card.add = Some(glossary::AddForm::new(
+                        &card.block.original,
+                        &into,
+                        title.as_deref(),
+                        picks,
+                    ));
+                }
+            }
+            Msg::Add(msg) => return self.add(msg),
+            Msg::Glossary(msg) => {
+                self.picker.close();
+                // (New / Edit open Settings: the App takes `Glossary(Edit)` first)
+                if let Some(true) = self.glossary.update(msg) {
+                    let source = &self.picker.source;
+                    let models = models::installed(models::recognizer_for(source));
+                    return self.begin(models);
+                }
+            }
             Msg::Picker(msg) => {
                 let opens = matches!(
                     msg,
                     picker::Msg::Open(_) | picker::Msg::Key(picker::Nav::Tab)
                 );
+                self.glossary.close();
                 if self.picker.update(msg) {
                     let source = &self.picker.source;
                     let models = models::installed(models::recognizer_for(source));
@@ -492,8 +534,10 @@ impl Session {
     /// anywhere else closes the card.
     pub fn click(&mut self, p: Point) {
         self.card = None;
-        if self.picker.is_open() {
+        self.tag = None;
+        if self.picker.is_open() || self.glossary.is_open() {
             self.picker.close();
+            self.glossary.close();
             return;
         }
         let (
@@ -528,17 +572,30 @@ impl Session {
                 work: None,
                 rtl: pipeline::is_rtl(&self.picker.target),
                 details: false,
+                add: None,
             });
         }
     }
 
-    /// A language list is open (Esc closes it first).
+    /// A list (the languages', the glossary's) or the Add to glossary form is
+    /// open: Esc closes it first.
     pub fn picker_open(&self) -> bool {
-        self.picker.is_open()
+        self.picker.is_open() || self.glossary.is_open() || self.adding()
     }
 
     pub fn close_picker(&mut self) {
-        self.picker.close();
+        match self.adding() {
+            true => self.card.iter_mut().for_each(|c| c.add = None),
+            false => {
+                self.picker.close();
+                self.glossary.close();
+            }
+        }
+    }
+
+    /// The Add to glossary form is open (the card's keys are typing).
+    pub fn adding(&self) -> bool {
+        self.card.as_ref().is_some_and(|c| c.add.is_some())
     }
 
     pub fn has_card(&self) -> bool {
@@ -549,6 +606,42 @@ impl Session {
     pub fn take_chat(&mut self) -> Option<(Crop, Chat)> {
         let card = self.card.take()?;
         Some((Arc::unwrap_or_clone(card.crop), card.chat))
+    }
+
+    /// The Add to glossary form: a field changes, Cancel closes it, Save
+    /// writes the term and translates again (the cache stamp makes only the
+    /// lines holding it new).
+    fn add(&mut self, msg: glossary::AddMsg) -> Task<Msg> {
+        use glossary::AddMsg;
+        let Some(form) = self.card.as_mut().and_then(|c| c.add.as_mut()) else {
+            return Task::none();
+        };
+        match msg {
+            AddMsg::Term(s) => form.term = s,
+            AddMsg::Keep(keep) => form.keep = keep,
+            AddMsg::Always(s) => {
+                form.always = s;
+                form.keep = false;
+            }
+            AddMsg::Into(p) => form.into = p.0,
+            AddMsg::Name(s) => form.name = s,
+            AddMsg::Cancel => self.card.iter_mut().for_each(|c| c.add = None),
+            AddMsg::Save => {
+                let form = form.clone();
+                let dir = crate::features::translate::glossary_store::dir();
+                match form.save(&dir, &self.picker.target) {
+                    Ok((slug, name)) => {
+                        self.glossary.activate(&slug);
+                        let models = models::installed(models::recognizer_for(&self.picker.source));
+                        let task = self.begin(models);
+                        self.tag = Some(fmt(S::gl_save_tag, &[&form.term.trim(), &name]));
+                        return task;
+                    }
+                    Err(e) => crate::log!("[opencircle] glossary term not saved: {e}"),
+                }
+            }
+        }
+        Task::none()
     }
 
     /// Explain: ONE streamed AI call with the block's text and image.
@@ -850,6 +943,7 @@ fn explain_question(block: &Translation, target: &str) -> String {
     )
 }
 
+pub(crate) mod glossary;
 pub(crate) mod view;
 
 #[cfg(test)]

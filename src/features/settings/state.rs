@@ -674,6 +674,8 @@ pub struct State {
     /// Translate's model row: the installed pairs still on the v1 decoder
     /// (counted at open and at each visit), and the update of them.
     pub(super) models: super::pages::translate::Models,
+    /// Translate's Glossary row and the editor behind its Edit button.
+    pub(super) glossaries: super::pages::glossaries::Page,
 }
 
 /// A segmented control's value before a pick (`State::thumb`).
@@ -783,6 +785,8 @@ pub enum Message {
     ModelsProgress(f32),
     StopModels,
     ModelsUpdated(Result<(), String>),
+    /// The Glossary row and its editor (`pages::glossaries`).
+    Glossaries(super::pages::glossaries::Msg),
     Look(LookTheme),
     /// The custom look's controls.
     Palette(PaletteChoice),
@@ -923,6 +927,9 @@ pub enum Outcome {
     /// thread (`mt::update`), answering `Message::ModelsProgress`, then
     /// `Message::ModelsUpdated`.
     UpdateModels,
+    /// Run this file dialog on a worker thread (`Job::run`) and answer
+    /// `Message::Glossaries` with its message.
+    Glossaries(super::pages::glossaries::Job),
 }
 
 /// A config write for a worker thread.
@@ -1083,6 +1090,7 @@ impl State {
             credits_open: false,
             made_by_all: false,
             models: super::pages::translate::Models::count(),
+            glossaries: super::pages::glossaries::Page::load(""),
         };
         s.refresh_models();
         s.revalidate();
@@ -1560,7 +1568,11 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                         crate::shared::platform::hotkey::windows_snips_print_screen()
                 }
                 Section::History => return Outcome::History(Vec::new()),
-                Section::Translate => state.models.recount(),
+                Section::Translate => {
+                    state.models.recount();
+                    state.glossaries =
+                        super::pages::glossaries::Page::load(&state.draft.translate.target);
+                }
                 _ => {}
             }
         }
@@ -1708,6 +1720,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::KeepShortcuts => state.resetting = false,
         Message::UndoShortcuts => state.undo_reset(),
         Message::Kept(counts) => state.kept = Some(counts),
+        Message::Glossaries(msg) => {
+            let reply = state.glossaries.update(msg, &state.draft.translate.target);
+            if let Some(slug) = reply.active {
+                state.draft.translate.glossary = slug;
+            }
+            if let Some(job) = reply.job {
+                return Outcome::Glossaries(job);
+            }
+        }
         Message::UpdateModels => {
             if state.models.start() {
                 return Outcome::UpdateModels;

@@ -4,6 +4,7 @@
 use iced::widget::{column, container, opaque, pin, row, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
+use super::glossary::{AddForm, AddMsg};
 use super::{Card, Msg, Phase, Session};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
@@ -13,13 +14,13 @@ use crate::features::text_reading::screens::model_download::{
 };
 use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt, tr};
-use crate::shared::kit::button::{Kind, button, label as button_label};
+use crate::shared::kit::button::{Kind, button, label as button_label, regular};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon_button::{State, icon_button};
 use crate::shared::kit::markdown;
 use crate::shared::kit::panel_frame::{self as frame, Header};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::text as label;
+use crate::shared::kit::text::{muted, text as label};
 use crate::shared::kit::tokens::{Role, radius};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
@@ -148,7 +149,7 @@ impl Session {
                 // (owned text: the tag's element slot)
                 None => {
                     let update = self.update_line().map(|l| note(l).into());
-                    self.pill(whole, None, update, None)
+                    self.pill(whole, self.tag.as_deref(), update, None)
                 }
             },
         }
@@ -191,6 +192,13 @@ impl Session {
         )
     }
 
+    /// The pill's buttons after the chips: Snip, then the glossary.
+    fn tail(&self) -> Element<'_, Msg> {
+        dir::row([self.snip_button(), self.glossary.button()])
+            .spacing(picker::SPACING)
+            .into()
+    }
+
     /// The pill with the offer beside it: "Spanish text found" and its Get.
     fn offer<'a>(&'a self, region: Rectangle, o: &'a super::Offer) -> Element<'a, Msg> {
         let get = button(button_label(&o.get), Kind::Elevated, Some(Msg::GetHeld));
@@ -212,7 +220,7 @@ impl Session {
         let rtl = dir::rtl();
         let at = pill_at(region);
         let mut layer =
-            stack![pin(opaque(self.picker.pill(Msg::Picker, self.snip_button()))).position(at)];
+            stack![pin(opaque(self.picker.pill(Msg::Picker, self.tail()))).position(at)];
         if status.is_some() || then.is_some() {
             let line = dir::row([status.map(|s| note(s).into()), then].into_iter().flatten());
             let tag = surface(
@@ -243,6 +251,9 @@ impl Session {
         if let (Some(list), Some(offset)) = (self.picker.list(), self.picker.list_at()) {
             layer = layer.push(pin(opaque(list.map(Msg::Picker))).position(at + offset));
         }
+        if let (Some(list), Some(offset)) = (self.glossary.list(), self.glossary.at()) {
+            layer = layer.push(pin(opaque(list)).position(at + offset));
+        }
         layer.into()
     }
 }
@@ -270,6 +281,51 @@ pub fn clear_of_pill(at: Rectangle, screen: Size) -> Rectangle {
     let bottom = at.y + at.height;
     let top = below.min(bottom - crate::shared::kit::panel_frame::MIN.height.min(at.height));
     Rectangle::new(Point::new(at.x, top), Size::new(at.width, bottom - top))
+}
+
+/// The Add to glossary form in the word card: the term, Keep as is | Always
+/// as [field], and In [glossary] (a name field when there is none yet).
+fn add_form(form: &AddForm) -> Element<'_, Msg> {
+    use crate::shared::kit::dropdown::dropdown;
+    use crate::shared::kit::field::input;
+    let term = input(
+        t!(gl_add_card),
+        &form.term,
+        false,
+        form.term.trim().is_empty(),
+    )
+    .on_input(|s| Msg::Add(AddMsg::Term(s)))
+    .on_submit(Msg::Add(AddMsg::Save))
+    .width(Fill);
+    let how = dir::row([
+        regular(t!(gl_keep), form.keep, Some(Msg::Add(AddMsg::Keep(true)))),
+        regular(
+            t!(gl_always),
+            !form.keep,
+            Some(Msg::Add(AddMsg::Keep(false))),
+        ),
+        input("", &form.always, false, false)
+            .on_input(|s| Msg::Add(AddMsg::Always(s)))
+            .on_submit(Msg::Add(AddMsg::Save))
+            .width(Fill)
+            .into(),
+    ])
+    .spacing(TAG_SPACING)
+    .align_y(Center);
+    let into: Element<'_, Msg> = match form.picks.is_empty() {
+        true => input(t!(gl_name), &form.name, false, false)
+            .on_input(|s| Msg::Add(AddMsg::Name(s)))
+            .width(Fill)
+            .into(),
+        false => {
+            let chosen = form.picks.iter().find(|p| p.0 == form.into).cloned();
+            dropdown(&form.picks, chosen, "", |p| Msg::Add(AddMsg::Into(p)))
+        }
+    };
+    let line = dir::row([muted(Role::NOTE, t!(gl_in_glossary)).into(), into])
+        .spacing(TAG_SPACING)
+        .align_y(Center);
+    column![term, how, line].spacing(STACK).into()
 }
 
 /// The word card (the design's "Word explanation", titled "translation ·
@@ -314,7 +370,17 @@ fn card_view(card: &Card, width: f32) -> (Element<'_, Msg>, Element<'_, Msg>) {
             on,
         ));
     }
+    if let Some(form) = &card.add {
+        let buttons = actions(
+            (t!(c_save), Msg::Add(AddMsg::Save)),
+            [(t!(c_cancel), Msg::Add(AddMsg::Cancel))],
+        );
+        return (body.push(add_form(form)).into(), buttons);
+    }
     let ask = &crate::features::ask_ai::ask::ACTION;
-    let buttons = actions((t!(tp_explain), Msg::Explain), [(tr(ask.label), Msg::Ask)]);
+    let buttons = actions(
+        (t!(tp_explain), Msg::Explain),
+        [(tr(ask.label), Msg::Ask), (t!(gl_add_card), Msg::AddStart)],
+    );
     (body.into(), buttons)
 }

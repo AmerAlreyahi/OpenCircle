@@ -38,12 +38,13 @@ const ARROW: f32 = 24.0;
 const PAD: f32 = 6.0;
 /// The chips and the arrow between them.
 pub const WIDTH: f32 = 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
-/// The Snip button's slot at the pill's end: a gap and the kit icon button.
-pub const SLOT: f32 = SPACING + size::ICON_BUTTON;
+/// The slot at the pill's end: a gap and the kit icon button, for Snip and for
+/// the glossary.
+pub const SLOT: f32 = 2.0 * (SPACING + size::ICON_BUTTON);
 /// The pill's vertical padding: the icon button (34) is 2 px taller than a
 /// chip, so the pill keeps its 44 px height.
 const PAD_Y: f32 = (CHIP.height + 2.0 * PAD - size::ICON_BUTTON) / 2.0;
-/// The pill: its size never changes (the Snip button's slot is always there).
+/// The pill: its size never changes (the Snip and glossary buttons' slot is always there).
 pub const PILL: Size = Size::new(WIDTH + 2.0 * PAD + SLOT, CHIP.height + 2.0 * PAD);
 /// The open list (fixed) and its gap under the pill.
 pub const LIST: Size = Size::new(248.0, 350.0);
@@ -469,7 +470,7 @@ impl Picker {
         .into()
     }
 
-    /// The pill (`PILL`): the chips, then `tail` (the Snip button, `SLOT`
+    /// The pill (`PILL`): the chips, then `tail` (the Snip and glossary buttons, `SLOT`
     /// wide; first when mirrored) on the widget surface, radius 18.
     pub fn pill<'a, M: Clone + 'a>(
         &'a self,

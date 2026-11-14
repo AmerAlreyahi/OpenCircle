@@ -164,6 +164,17 @@ impl App {
         if let Some((id, session)) = &mut o.translate {
             let id = *id;
             match event {
+                // (the Add to glossary form is typing: its keys are the field's)
+                overlay::Event::Enter if session.adding() => {
+                    return self.on_translate(id, pill::Msg::Add(pill::glossary::AddMsg::Save));
+                }
+                overlay::Event::Key { .. } if session.adding() => return Task::none(),
+                overlay::Event::Key {
+                    letter: 'g',
+                    ctrl: false,
+                } if session.has_card() => {
+                    return self.on_translate(id, pill::Msg::AddStart);
+                }
                 overlay::Event::Key {
                     letter: 'e',
                     ctrl: false,

@@ -12,6 +12,7 @@ mod ai;
 mod appearance;
 mod custom;
 mod general;
+pub(crate) mod glossaries;
 mod history;
 mod labs;
 mod look;

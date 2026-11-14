@@ -495,7 +495,7 @@ impl App {
             // (the cards have no close button: Esc, or a click on the screen)
             pill::Msg::Close => self.close(),
             pill::Msg::Snip => self.snip_here(None),
-            pill::Msg::OpenSettings => {
+            pill::Msg::OpenSettings | pill::Msg::Glossary(pill::glossary::GlossaryMsg::Edit) => {
                 let closing = self.close();
                 let settings = self.windows.open(windows::Kind::Settings);
                 closing.chain(settings.map(Message::Windows))

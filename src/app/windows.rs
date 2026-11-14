@@ -1289,6 +1289,15 @@ impl Windows {
                             });
                             return Task::batch([keys, done]);
                         }
+                        settings::Outcome::Glossaries(job) => {
+                            return Task::batch([
+                                keys,
+                                crate::app::background::background(move |tx| {
+                                    let _ = tx.unbounded_send(job.run());
+                                })
+                                .map(|m| Msg::Settings(settings::Message::Glossaries(m))),
+                            ]);
+                        }
                         settings::Outcome::UpdateModels => {
                             let update = crate::app::background::background(move |tx| {
                                 let (pairs, _) = crate::features::translate::mt::installed();

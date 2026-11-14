@@ -183,6 +183,10 @@ fn optima(m: &Models) -> Element<'_, Message> {
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    // the glossary editor is a sub-page of this page
+    if state.glossaries.is_editing() {
+        return super::glossaries::editor(state);
+    }
     let t = &state.draft.translate;
     let (from, glide) = state.thumb(t.engine, |p| match p {
         Pick::Engine(e) => Some(e),
@@ -224,6 +228,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         dropdown(&TARGETS, target, &t.target, |l: Named| Message::Target(l.0)),
         "translate.target",
     ));
+    rows = rows.push(super::glossaries::row(state));
     // Live translate is a Labs feature (until Live translation): its row only while on.
     if state.draft.labs.has(Feature::Live) {
         let problem = issue(&state.problems, "translate.live_interval_ms");

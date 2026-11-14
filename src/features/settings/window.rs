@@ -129,9 +129,13 @@ fn page(state: &State) -> Element<'_, Message> {
         title.push(sub(Role::ROW_DESC, tr(note)).into());
     }
     let title = crate::shared::kit::dir::row(title).align_y(Center);
-    let body = column![title, Space::new().height(TITLE_GAP),]
-        .push(previews::view(state))
-        .push((page.view)(state));
+    let body =
+        column![title, Space::new().height(TITLE_GAP),]
+            // (the glossary editor is a sub-page: no preview over it)
+            .push(previews::view(state).filter(|_| {
+                !(state.section == Section::Translate && state.glossaries.is_editing())
+            }))
+            .push((page.view)(state));
     // at most `PAGE_MAX` wide, at the start edge (a maximised window)
     let body = (container(body).id(PAGE_ID))
         .width(Fill)

@@ -3767,3 +3767,264 @@ fn a_question_focuses_its_cancel_and_esc_cancels() {
     update(&mut s, Message::Dismiss);
     assert!(!s.resetting);
 }
+
+/// A Translate page whose Glossary row and editor read a folder of their own.
+fn glossary_state(name: &str) -> (State, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("oc-gl-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Translate));
+    s.draft.translate.target = "ar".into();
+    s.glossaries = pages::glossaries::Page::at(dir.clone(), "ar");
+    (s, dir)
+}
+
+fn game_file(dir: &std::path::Path, slug: &str, name: &str, terms: &[(&str, &str)]) {
+    use crate::features::translate::{Glossary, Term, glossary_store};
+    let g = Glossary {
+        name: name.into(),
+        windows: vec![name.into()],
+        terms: terms
+            .iter()
+            .map(|(t, ar)| Term {
+                text: (*t).into(),
+                translations: (!ar.is_empty())
+                    .then(|| ("ar".to_string(), (*ar).to_string()))
+                    .into_iter()
+                    .collect(),
+                case: false,
+            })
+            .collect(),
+    };
+    glossary_store::save(dir, slug, &g).unwrap();
+}
+
+/// Translate's Glossary row: None, each glossary with its term count, New
+/// glossary; a pick sets `translate.glossary` (the frozen config's one
+/// additive key, written only when set).
+#[test]
+fn the_glossary_row_picks_the_active_glossary() {
+    use pages::glossaries::Msg;
+    let (mut s, dir) = glossary_state("row");
+    game_file(
+        &dir,
+        "ashen-tides",
+        "Ashen Tides",
+        &[("Vyrnhold", ""), ("Emberglass", "زجاج")],
+    );
+    update(&mut s, Message::Glossaries(Msg::Back)); // (reads the folder)
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|t| t == "Glossary"), "{t:?}");
+    assert!(t.iter().any(|t| t == "Edit"), "{t:?}");
+    assert_eq!(
+        s.glossaries.labels(),
+        ["None", "Ashen Tides (2)", "New glossary"]
+    );
+    assert_eq!(s.draft.translate.glossary, "");
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Active("ashen-tides".into())),
+    );
+    assert_eq!(s.draft.translate.glossary, "ashen-tides");
+    // saved, and written only when set
+    assert!(
+        toml::to_string(&s.draft)
+            .unwrap()
+            .contains("glossary = \"ashen-tides\"")
+    );
+    update(&mut s, Message::Glossaries(Msg::Active(String::new())));
+    assert!(!toml::to_string(&s.draft).unwrap().contains("glossary"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The editor: a term added, typed, translated for the shown language (an
+/// empty translation = kept), removed and brought back; every change is in
+/// the glossary's file at once.
+#[test]
+fn the_glossary_editor_edits_the_file_as_you_type() {
+    use crate::features::translate::glossary_store as store;
+    use pages::glossaries::Msg;
+    let (mut s, dir) = glossary_state("edit");
+    game_file(&dir, "ashen-tides", "Ashen Tides", &[("Vyrnhold", "")]);
+    update(&mut s, Message::Glossaries(Msg::Edit));
+    assert!(s.glossaries.is_editing());
+    let t = shot::texts(view(&s));
+    for want in ["Translate", "On screen", "Add term", "More"] {
+        assert!(t.iter().any(|t| t == want), "{want}: {t:?}");
+    }
+    let load = || store::load(&dir, "ashen-tides").unwrap();
+    update(&mut s, Message::Glossaries(Msg::Add));
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Text(1, "Emberglass".into())),
+    );
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Trans(1, "زجاج الجمر".into())),
+    );
+    let g = load();
+    assert_eq!(g.terms.len(), 2);
+    assert_eq!(
+        g.terms[1].translations.get("ar").map(String::as_str),
+        Some("زجاج الجمر")
+    );
+    // emptied again = kept as is
+    update(&mut s, Message::Glossaries(Msg::Trans(1, String::new())));
+    assert!(load().terms[1].translations.is_empty());
+    // another language's column
+    let fr = crate::features::translate::lang::find("fr")
+        .copied()
+        .unwrap();
+    update(&mut s, Message::Glossaries(Msg::Lang(Named(fr))));
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Trans(1, "Verbraise".into())),
+    );
+    assert_eq!(
+        load().terms[1].translations.get("fr").map(String::as_str),
+        Some("Verbraise")
+    );
+    // removed, then undone (to its place)
+    update(&mut s, Message::Glossaries(Msg::Remove(0)));
+    assert_eq!(load().terms.len(), 1);
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Term removed"));
+    update(&mut s, Message::Glossaries(Msg::Undo));
+    assert_eq!(load().terms[0].text, "Vyrnhold");
+    // windows named (Windows and X11 only)
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Windows("Ashen Tides, Other".into())),
+    );
+    assert_eq!(load().windows, ["Ashen Tides", "Other"]);
+    // back to Translate's rows
+    update(&mut s, Message::Glossaries(Msg::Back));
+    assert!(!s.glossaries.is_editing());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// New, rename, import (a taken name asks Replace / Keep both), export and
+/// delete: the file-level actions of More.
+#[test]
+fn the_glossary_editor_creates_imports_exports_and_deletes() {
+    use crate::features::translate::glossary_store as store;
+    use pages::glossaries::{Job, Msg};
+    let (mut s, dir) = glossary_state("files");
+    // Edit with no glossary yet makes one
+    update(&mut s, Message::Glossaries(Msg::Edit));
+    assert_eq!(store::load_all(&dir).len(), 1);
+    update(&mut s, Message::Glossaries(Msg::More(true)));
+    update(&mut s, Message::Glossaries(Msg::Renaming(true)));
+    update(&mut s, Message::Glossaries(Msg::Name("Ashen Tides".into())));
+    assert_eq!(store::load_all(&dir)[0].1.name, "Ashen Tides");
+    // import: a bad file says why; a new name is added; a taken one asks
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Imported(Some(Ok("not a file [".into())))),
+    );
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t.starts_with("Could not use the file"))
+    );
+    let file = "name = \"Other\"\n[[term]]\ntext = \"Zed\"\n";
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
+    );
+    assert_eq!(store::load_all(&dir).len(), 2);
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
+    );
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Keep both"));
+    update(&mut s, Message::Glossaries(Msg::KeepBoth));
+    let names: Vec<_> = store::load_all(&dir)
+        .into_iter()
+        .map(|(_, g)| g.name)
+        .collect();
+    assert_eq!(names, ["Ashen Tides", "Other", "Other 2"]);
+    update(
+        &mut s,
+        Message::Glossaries(Msg::Imported(Some(Ok(file.into())))),
+    );
+    update(&mut s, Message::Glossaries(Msg::Replace));
+    assert_eq!(store::load_all(&dir).len(), 3, "replaced, not added");
+    // export hands the file's text to the shell's dialog
+    match update(&mut s, Message::Glossaries(Msg::Export)) {
+        Outcome::Glossaries(Job::Export { name, text }) => {
+            assert!(text.contains(&format!("name = \"{name}\"")));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        update(&mut s, Message::Glossaries(Msg::Import)),
+        Outcome::Glossaries(Job::Import)
+    );
+    // delete asks first, then removes the file and drops the active pick
+    s.draft.translate.glossary = "other-2".into();
+    update(&mut s, Message::Glossaries(Msg::Pick("other-2".into())));
+    update(&mut s, Message::Glossaries(Msg::More(true)));
+    update(&mut s, Message::Glossaries(Msg::AskDelete(true)));
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t.starts_with("Delete the glossary"))
+    );
+    update(&mut s, Message::Glossaries(Msg::Delete));
+    assert_eq!(store::load_all(&dir).len(), 2);
+    assert_eq!(s.draft.translate.glossary, "");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The row and the editor in English and Arabic (mirrored), Sapphire and
+/// Daylight; nothing drawn past its box.
+#[test]
+fn the_glossary_screens_match_their_golden_images() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use pages::glossaries::Msg;
+    let mut failed = Vec::new();
+    for ar in [false, true] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, dir) = glossary_state("golden");
+            game_file(
+                &dir,
+                "ashen-tides",
+                "Ashen Tides",
+                &[
+                    ("Vyrnhold", ""),
+                    ("Emberglass", "زجاج الجمر"),
+                    ("Ash Warden", "حارس الرماد"),
+                ],
+            );
+            game_file(&dir, "ruined-sky", "Ruined Sky", &[("Skyhold", "")]);
+            if ar {
+                update(&mut s, Message::AppLanguage(Choice("ar")));
+            }
+            update(&mut s, Message::Section(Section::Translate));
+            s.glossaries = pages::glossaries::Page::at(dir.clone(), "ar");
+            update(
+                &mut s,
+                Message::Glossaries(Msg::Active("ashen-tides".into())),
+            );
+            themes::set(theme);
+            let lang = if ar { "-ar" } else { "" };
+            for (name, open) in [("row", false), ("editor", true)] {
+                if open {
+                    update(&mut s, Message::Glossaries(Msg::Edit));
+                    update(&mut s, Message::Glossaries(Msg::Pick("ashen-tides".into())));
+                }
+                let file = format!("settings-glossary-{name}{lang}-{}", theme.id);
+                let size = Size::new(WINDOW_SIZE.width, 1080.0);
+                let lost = shot::out_of_reach(view(&s), size);
+                assert!(lost.is_empty(), "{file}: {lost:?}");
+                failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
