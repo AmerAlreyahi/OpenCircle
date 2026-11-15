@@ -282,7 +282,13 @@ impl Painter for Paint<'_> {
         let mut out = src.clone();
         render(&mut out, ww, wh, &[block], &[text.to_string()], self.rtl);
         let count = |i: usize| self.found.lock().unwrap_or_else(|e| e.into_inner()).counts[i] += 1;
+        let why = |w: &str| {
+            if crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_LOG").is_some() {
+                crate::log!("[opencircle] live: declined {region:?}: {w}");
+            }
+        };
         let Some(changed) = changed_box(&src, &out, ww) else {
+            why("render changed nothing");
             count(3);
             return None;
         };
@@ -293,6 +299,7 @@ impl Painter for Paint<'_> {
             changed[3] - changed[1],
         );
         if over_blanked([at.x, at.y, at.w, at.h], self.blanked) {
+            why(&format!("patch {at:?} over a blanked part"));
             count(3);
             return None;
         }

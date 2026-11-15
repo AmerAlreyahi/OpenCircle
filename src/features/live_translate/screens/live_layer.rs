@@ -117,6 +117,9 @@ pub struct Live {
     ctl_at: Point,
     /// The controller is invisible to capture (else the step blanks it out).
     excluded: bool,
+    /// Captures show the layer and its edge glow (X11; Windows before 10
+    /// 2004; the capturable test hook): the step blanks the edge out.
+    layer_captured: bool,
     /// What the step thread reads each time: paused, the source and target
     /// languages, and where the controller is in a capture (monitor px;
     /// `None` = not in captures).
@@ -182,6 +185,7 @@ impl Live {
             ctl: Controller::new(source, target, offline),
             ctl_at: Point::ORIGIN,
             excluded: false,
+            layer_captured: true,
             paused: Arc::new(AtomicBool::new(false)),
             langs: Arc::new(Mutex::new((source.into(), target.into()))),
             mask: Arc::new(Mutex::new(None)),
@@ -405,6 +409,7 @@ impl Live {
                     monitor.height,
                     layer.excluded_from_capture
                 );
+                self.layer_captured = !layer.excluded_from_capture;
                 // Never a step without the models: ask first (in the controller).
                 let steps = match self.ask_if_missing() {
                     true => Task::none(),
@@ -519,6 +524,7 @@ impl Live {
             paused: self.paused.clone(),
             chosen: self.langs.clone(),
             mask: self.mask.clone(),
+            edge: self.layer_captured,
         };
         let cache = self.cache.clone();
         let (task, handle) = background(move |tx| {
@@ -597,6 +603,10 @@ struct Shared {
     chosen: Arc<Mutex<(String, String)>>,
     /// Where the controller is in a capture (monitor px; `None` = not in captures).
     mask: Arc<Mutex<Option<[u32; 4]>>>,
+    /// Captures show the edge glow (else it is never blanked: the black
+    /// strips, ~100 px deep, cost every patch near the screen's edges, where
+    /// games put subtitles).
+    edge: bool,
 }
 
 /// The layer as the live core sees it: each patch sent to the UI once, each
@@ -788,7 +798,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
         // the next frame (none new: the screen is as it was)
         match frames.next(FRAME_WAIT) {
             Ok(Some(mut rgba)) if rgba.len() == (w * h * 4) as usize => {
-                blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask);
+                blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, ui.edge);
                 last = Some(rgba);
                 stats.new_frames += 1;
             }
@@ -849,17 +859,22 @@ fn page_area(focused: Option<[u32; 4]>, (w, h): (u32, u32)) -> [u32; 4] {
     }
 }
 
-/// Blanks what is never read out of a frame (black): the edge glow, the
-/// controller, our own windows, everything outside the focused window's
-/// `area` (x0, y0, x1, y1). Returns the blanked parts (frame px, x, y, w, h).
+/// Blanks what is never read out of a frame (black): the edge glow where
+/// captures show it (`edge`), the controller, our own windows, everything
+/// outside the focused window's `area` (x0, y0, x1, y1). Returns the blanked
+/// parts (frame px, x, y, w, h).
 fn blank(
     rgba: &mut [u8],
     (m, area): (Monitor, [u32; 4]),
     own: &[[i32; 4]],
     mask: &Mutex<Option<[u32; 4]>>,
+    edge: bool,
 ) -> Vec<[u32; 4]> {
     let (w, h) = (m.width, m.height);
-    let mut blanked = border::mask(rgba, w, h, m.scale);
+    let mut blanked = match edge {
+        true => border::mask(rgba, w, h, m.scale),
+        false => Vec::new(),
+    };
     if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
         live_controller::mask(rgba, w, h, rect);
         blanked.push(rect);
@@ -1411,5 +1426,29 @@ mod tests {
         let want = |(x, y): (u32, u32)| (x < 10 && (2..10).contains(&y)) || (x >= 30 && y >= 15);
         assert_eq!(blanked.len(), 10 * 8 + 10 * 5);
         assert!(blanked.into_iter().all(want));
+    }
+
+    /// Where captures don't show the layer (Windows), its edge glow is never
+    /// blanked: a subtitle near the bottom keeps its patch (the Windows VM drew
+    /// 6 of 35 subtitles while the ~100 px edge strips were blanked anyway).
+    #[test]
+    fn the_edge_is_blanked_only_where_captures_show_it() {
+        let m = Monitor {
+            x: 0,
+            y: 0,
+            width: 1280,
+            height: 720,
+            scale: 1.0,
+        };
+        // the talk clip's subtitle patch on the VM (1280x720)
+        let subtitle = [348, 596, 580, 50];
+        let none = Mutex::new(None);
+        let mut rgba = vec![200u8; 1280 * 720 * 4];
+        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, false);
+        assert!(blanked.is_empty() && rgba.iter().all(|&v| v == 200));
+        assert!(!engines::over_blanked(subtitle, &blanked));
+        // X11: the glow is in the capture, so it is blanked (and patches over it declined)
+        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, true);
+        assert!(!blanked.is_empty() && rgba.contains(&0));
     }
 }
