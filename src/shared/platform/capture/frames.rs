@@ -296,6 +296,8 @@ fn the_front_window_is_read_without_what_lies_over_it() {
         [255, 0, 0, 255],
         "the patch is not in the frame"
     );
+    // (so live translate never blanks our edge glow out of it: it isn't there)
+    assert!(frames.of_window());
     for window in [patch, game] {
         conn.send_and_check_request(&x::DestroyWindow { window })
             .unwrap();
