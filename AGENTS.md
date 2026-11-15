@@ -1188,3 +1188,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   capitalised words / names on a game's translated screens become suggestions; a dot with a count on the pill's glossary button;
   accept ("keep as is" / a translation) or reject in one click; rejected names are remembered per game and never suggested
   again; never a pop-up during play; nothing leaves the PC. Built from the approved glossary design's parts (no new look).
+- Live translate screen border (owner, 2026-11-14, "approved", Claude Design canvas "Live translate border",
+  .claude/artifacts/design/live-border/): option B "Quiet glow": the Active Look glow in the look's own two colours at ~60 % of
+  main mode's depth (1080p: 14 px c1 at 0.36, 34 px c2 at 0.20; main mode 22 / 54 px at 0.42 / 0.26); static, drawn once,
+  fades in with Live and out on stop, near 0 % CPU; replaces today's thin solid line. Needs a per-pixel-alpha live layer
+  (Windows is colour-keyed today): the #123 capability table checks every platform first; a "no" goes to the owner.
