@@ -138,7 +138,6 @@ impl Session {
     }
 
     /// The running child's process id.
-    #[cfg(all(test, unix))]
     pub(crate) fn pid(&self) -> Option<u32> {
         self.helper.as_ref().map(|h| h.child.id())
     }

@@ -23,6 +23,7 @@ use crate::features::live_translate::screens::live::controller::{
 };
 use crate::features::live_translate::{self, LayerError};
 use crate::features::text_reading;
+use crate::features::translate::gpu;
 use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::Cache;
 use crate::live_core::{self as core, Done, Job, Rect};
@@ -665,6 +666,47 @@ fn core_config() -> core::Config {
 enum Work {
     Job(Job, Option<Arc<Vec<u8>>>, (u32, u32)),
     Langs((String, String)),
+    /// The graphics card's translator is ready (translations go there from now on).
+    Gpu(Box<dyn OnGpu>),
+}
+
+/// A translator on the graphics card (`translate::gpu::GpuTranslator`; a test's fake).
+pub(crate) trait OnGpu: core::Translator + Send {
+    /// Lines got ~2x slower (the GPU rule's back-off): the processor for the rest of the session.
+    fn slowed(&self) -> bool;
+    /// Into another language (the controller's picker).
+    fn set_target(&mut self, target: &str);
+}
+
+impl OnGpu for gpu::GpuTranslator {
+    fn slowed(&self) -> bool {
+        gpu::GpuTranslator::slowed(self)
+    }
+    fn set_target(&mut self, target: &str) {
+        gpu::GpuTranslator::set_target(self, target);
+    }
+}
+
+/// Where the GPU rule allows it, the graphics card's translator for the session, off every other
+/// thread: the probe takes ~0.3 s, the first time the helper and model download (~1.2 GB) while the
+/// processor translates; none (logged by `gpu::live`) = the processor all along.
+fn start_gpu(target: String, to_work: mpsc::Sender<Work>) {
+    if cfg!(test) {
+        return; // (a test never probes this machine's cards: it would set what Settings shows)
+    }
+    std::thread::spawn(move || {
+        let mut tenth = 0;
+        let got = gpu::live(&target, |done, total| {
+            let now = done * 10 / total.max(1);
+            if now > tenth {
+                tenth = now;
+                crate::log!("[opencircle] live: graphics card files {}0 %", now);
+            }
+        });
+        if let Some(t) = got {
+            let _ = to_work.send(Work::Gpu(Box::new(t)));
+        }
+    });
 }
 
 /// A job waiting on the work thread (as `Work::Job` carries it).
@@ -703,6 +745,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     };
     let mut langs = ui.chosen.lock().map(|l| l.clone()).unwrap_or_default();
     let _ = to_work.send(Work::Langs(langs.clone()));
+    start_gpu(langs.1.clone(), to_work.clone());
     let mut rtl = is_rtl(&langs.1);
     let region = (monitor.x, monitor.y, monitor.width, monitor.height);
     let (w, h) = (monitor.width, monitor.height);
@@ -716,6 +759,8 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     let mut looked: Option<Instant> = None;
     let mut glossary = None;
     let (mut was_away, mut idle, mut last_error) = (false, false, None);
+    // grabs in a row that showed the same screen (grabs come as fast as asked: no "nothing new")
+    let mut same = 0u32;
     let mut stats = Stats::default();
     let mut cpu = crate::shared::platform::sys::cpu::Load::default();
     let mut jobs: Vec<Job> = Vec::new();
@@ -760,7 +805,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 glossary = now;
             }
             // a busy PC (a game on the CPU): the core discovers less
-            if let Some(load) = cpu.sample(text_reading::helper_pid()) {
+            if let Some(load) = cpu.sample(&ours()) {
                 live.report_cpu(load, started.elapsed());
             }
             if stats.since.elapsed() >= STATS_EVERY {
@@ -806,8 +851,12 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 // game window's own pixels, not a capture that keeps us out)
                 let edge = (ui.edge && !frames.of_window()).then_some(&edge);
                 blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, edge);
-                last = Some(rgba);
-                stats.new_frames += 1;
+                if last.as_ref() == Some(&rgba) {
+                    same = same.saturating_add(1);
+                } else {
+                    (last, same) = (Some(rgba), 0);
+                    stats.new_frames += 1;
+                }
             }
             Ok(_) => {}
             Err(e) => {
@@ -822,6 +871,9 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 frames = Frames::front_window(region);
                 continue;
             }
+        }
+        if let Some(wait) = still_wait(same, frames.fast() || frames.of_window()) {
+            std::thread::sleep(wait);
         }
         let Some(rgba) = &last else { continue };
         let frame = core::Frame {
@@ -848,6 +900,23 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     stats.log(&layer, &live, frames.describe());
     drop(to_work);
     let _ = worker.join();
+}
+
+/// A screen grabbed again and again (`waits` = false: no window frames, no screen frames that
+/// come only on a change) that showed the same picture `same` times in a row is grabbed ~10 times a
+/// second instead of 60 (an idle Live took a quarter of a core on the X11 screen fallback); the
+/// first change brings 60 back.
+fn still_wait(same: u32, waits: bool) -> Option<Duration> {
+    (!waits && same >= 6).then_some(Duration::from_millis(84))
+}
+
+/// Our own helper processes (OCR, the graphics card's translator): their load is ours, not a
+/// busy PC's.
+fn ours() -> Vec<u32> {
+    [text_reading::helper_pid(), gpu::helper_pid()]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// The part of the monitor live translate reads (x0, y0, x1, y1): the
@@ -913,11 +982,16 @@ fn work(
 ) {
     text_reading::gently_here();
     let mut deps: Engines = Err(String::new());
+    let mut gpu: Option<Box<dyn OnGpu>> = None;
     let mut queue: VecDeque<Queued> = VecDeque::new();
-    let take = |w: Work, queue: &mut VecDeque<_>, deps: &mut Engines| match w {
+    let take = |w: Work, queue: &mut VecDeque<_>, deps: &mut Engines, gpu: &mut Option<_>| match w {
         Work::Job(job, frame, size) => queue.push_back((job, frame, size)),
+        Work::Gpu(t) => *gpu = Some(t),
         Work::Langs((source, target)) => {
             queue.clear(); // (the frame thread dropped those jobs)
+            if let Some(g) = gpu.as_mut() {
+                g.set_target(&target);
+            }
             *deps = crate::features::translate::action::deps_for(&source, &target).map(
                 |(mut real, target)| {
                     real.scale = scale;
@@ -929,12 +1003,12 @@ fn work(
     loop {
         if queue.is_empty() {
             match jobs.recv() {
-                Ok(w) => take(w, &mut queue, &mut deps),
+                Ok(w) => take(w, &mut queue, &mut deps, &mut gpu),
                 Err(_) => return,
             }
         }
         while let Ok(w) = jobs.try_recv() {
-            take(w, &mut queue, &mut deps);
+            take(w, &mut queue, &mut deps, &mut gpu);
         }
         let Some(next) = (0..queue.len()).min_by_key(|&i| rank(&queue[i].0)) else {
             continue;
@@ -944,7 +1018,15 @@ fn work(
         };
         let (t, kind) = (Instant::now(), rank(&job));
         let errors = Errors::default();
-        let done = run_job(job, frame.as_deref(), size, &deps, cache, found, &errors);
+        let done = run_job(
+            job,
+            frame.as_deref(),
+            size,
+            &deps,
+            (cache, &mut gpu),
+            found,
+            &errors,
+        );
         let error = errors.into_inner();
         let took = t.elapsed();
         let worked = Worked {
@@ -974,7 +1056,7 @@ fn run_job(
     frame: Option<&Vec<u8>>,
     size: (u32, u32),
     deps: &Engines,
-    cache: &Cache,
+    (cache, gpu): (&Cache, &mut Option<Box<dyn OnGpu>>),
     found: &Mutex<Found>,
     errors: &Errors,
 ) -> Vec<Done> {
@@ -991,7 +1073,12 @@ fn run_job(
         height: size.1,
         at: Duration::ZERO,
     };
-    job.run(
+    let mut cpu = engines::Translate {
+        deps,
+        cache,
+        target,
+    };
+    let done = job.run(
         &at,
         &mut engines::Detect {
             deps,
@@ -1004,12 +1091,32 @@ fn run_job(
             errors,
             size,
         },
-        &mut engines::Translate {
-            deps,
-            cache,
-            target,
-        },
-    )
+        translator(gpu, &mut cpu),
+    );
+    back_off(gpu);
+    done
+}
+
+/// The graphics card's translator while there is one, else the processor's.
+fn translator<'a>(
+    gpu: &'a mut Option<Box<dyn OnGpu>>,
+    cpu: &'a mut dyn core::Translator,
+) -> &'a mut dyn core::Translator {
+    match gpu.as_deref_mut() {
+        Some(g) => g,
+        None => cpu,
+    }
+}
+
+/// The GPU rule's back-off: a slowed graphics card translator is dropped (its helper ends), the
+/// processor translates for the rest of the session.
+fn back_off(gpu: &mut Option<Box<dyn OnGpu>>) {
+    if gpu.as_ref().is_some_and(|g| g.slowed()) {
+        *gpu = None;
+        crate::log!(
+            "[opencircle] live: the graphics card got ~2x slower; the processor translates from now on"
+        );
+    }
 }
 
 /// A job's results when it can't run (no engine for the languages): nothing
@@ -1473,5 +1580,63 @@ mod tests {
         let edge = border::EdgeMask::new(1280, 720, 1.0);
         let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, Some(&edge));
         assert!(!blanked.is_empty() && rgba.contains(&0));
+    }
+
+    /// The graphics card translates while it has one; once it slows ~2x the processor does, for
+    /// the rest of the session; a new language goes to the card too.
+    #[test]
+    fn the_graphics_card_translates_until_it_slows() {
+        struct Card(u32, Arc<Mutex<String>>);
+        impl core::Translator for Card {
+            fn translate(&mut self, text: &str) -> Result<String, String> {
+                self.0 += 1;
+                Ok(format!("gpu {text}"))
+            }
+        }
+        impl OnGpu for Card {
+            fn slowed(&self) -> bool {
+                self.0 >= 2
+            }
+            fn set_target(&mut self, target: &str) {
+                *self.1.lock().unwrap() = target.into();
+            }
+        }
+        struct Cpu;
+        impl core::Translator for Cpu {
+            fn translate(&mut self, text: &str) -> Result<String, String> {
+                Ok(format!("cpu {text}"))
+            }
+        }
+        let target = Arc::new(Mutex::new(String::new()));
+        let mut gpu: Option<Box<dyn OnGpu>> = None;
+        let line = |gpu: &mut Option<Box<dyn OnGpu>>| {
+            let got = translator(gpu, &mut Cpu).translate("a").unwrap();
+            back_off(gpu);
+            got
+        };
+        assert_eq!(line(&mut gpu), "cpu a", "none yet: the processor");
+        gpu = Some(Box::new(Card(0, target.clone())));
+        gpu.as_mut().unwrap().set_target("fr");
+        assert_eq!(*target.lock().unwrap(), "fr");
+        assert_eq!(line(&mut gpu), "gpu a");
+        assert_eq!(line(&mut gpu), "gpu a");
+        assert!(gpu.is_none(), "slowed: dropped");
+        assert_eq!(line(&mut gpu), "cpu a");
+    }
+
+    #[test]
+    fn a_still_screen_is_grabbed_less_often_only_where_grabs_never_wait() {
+        assert_eq!(still_wait(0, false), None, "it changes: every frame");
+        assert_eq!(still_wait(5, false), None);
+        assert!(still_wait(6, false).is_some(), "held still: fewer grabs");
+        assert_eq!(still_wait(60, true), None, "frames come only on a change");
+    }
+
+    #[test]
+    fn our_graphics_card_helper_is_not_a_busy_pc() {
+        gpu::pretend_helper(4242);
+        assert!(ours().contains(&4242));
+        gpu::pretend_helper(0);
+        assert!(!ours().contains(&4242));
     }
 }

@@ -23,6 +23,7 @@
 //! than at the start several times in a row: the caller goes back to the CPU.
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -182,12 +183,21 @@ pub fn start(
         let mut session = Session::new(path, &[], TIMEOUT);
         Box::new(move |req: &Value| {
             let reply = session.call(&[req.to_string().as_bytes()]);
+            HELPER_PID.store(session.pid().unwrap_or(0), Ordering::Relaxed);
             let reply = reply.map_err(|e| e.to_string())?;
             serde_json::from_slice(&reply).map_err(|e| format!("helper's reply: {e}"))
         })
     });
     decided(got.as_ref().ok().map(|t| t.card.as_str()));
     got
+}
+
+/// The running GPU helper's process (0 = none): live translate's CPU back-off leaves it out of
+/// "other processes", like the OCR helper.
+static HELPER_PID: AtomicU32 = AtomicU32::new(0);
+
+pub fn helper_pid() -> Option<u32> {
+    Some(HELPER_PID.load(Ordering::Relaxed)).filter(|&p| p != 0)
 }
 
 /// The one call (module doc): `None` = the CPU path, the reason logged.
@@ -338,6 +348,11 @@ impl GpuTranslator {
         Ok(())
     }
 
+    /// Into `target` from the next line on (the model knows every language Live offers).
+    pub fn set_target(&mut self, target: &str) {
+        self.target = target.into();
+    }
+
     /// Lines have been ~2x slower than at the start several times in a row
     /// (the GPU rule's back-off): the caller goes back to the CPU path.
     pub fn slowed(&self) -> bool {
@@ -359,6 +374,12 @@ impl GpuTranslator {
                 .note(reply["gen_ms"].as_f64().unwrap_or(0.0) / tokens);
         }
         Ok(reply["text"].as_str().unwrap_or_default().to_string())
+    }
+}
+
+impl Drop for GpuTranslator {
+    fn drop(&mut self) {
+        HELPER_PID.store(0, Ordering::Relaxed); // (its session, and so the helper, ends with it)
     }
 }
 
@@ -405,4 +426,10 @@ impl Pace {
         };
         self.slowed |= self.slow >= IN_A_ROW;
     }
+}
+
+/// A test's helper process (0 = none).
+#[cfg(test)]
+pub(crate) fn pretend_helper(pid: u32) {
+    HELPER_PID.store(pid, Ordering::Relaxed);
 }

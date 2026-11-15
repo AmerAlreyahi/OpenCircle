@@ -93,21 +93,22 @@ fn parse_pid_stat(stat: &str) -> Option<u64> {
 /// Samples the others' load since the last sample.
 #[derive(Default)]
 pub struct Load {
-    /// System busy, system total, ours (this process + `helper`), and
-    /// which helper that was.
-    last: Option<(u64, u64, u64, Option<u32>)>,
+    /// System busy, system total, ours (this process + `helpers`), and
+    /// which helpers those were.
+    last: Option<(u64, u64, u64, Vec<u32>)>,
 }
 
 impl Load {
     /// The share of all CPU time that OTHER processes used since the last
-    /// call (0..1), this process and `helper` (our OCR / translation
-    /// process) left out; none the first time or where the OS can't say.
-    pub fn sample(&mut self, helper: Option<u32>) -> Option<f32> {
+    /// call (0..1), this process and `helpers` (our OCR / translation
+    /// processes) left out; none the first time or where the OS can't say.
+    pub fn sample(&mut self, helpers: &[u32]) -> Option<f32> {
         let (busy, total) = system()?;
-        let ours = process(None)? + helper.and_then(|p| process(Some(p))).unwrap_or(0);
-        let last = self.last.replace((busy, total, ours, helper))?;
+        let theirs: u64 = (helpers.iter()).filter_map(|&p| process(Some(p))).sum();
+        let ours = process(None)? + theirs;
+        let last = self.last.replace((busy, total, ours, helpers.to_vec()))?;
         // (another helper since: its time so far isn't in the last sample)
-        let ours_then = if last.3 == helper { last.2 } else { ours };
+        let ours_then = if last.3 == helpers { last.2 } else { ours };
         let dt = total.saturating_sub(last.1);
         let others = busy
             .saturating_sub(last.0)
@@ -125,10 +126,30 @@ fn reads_the_cpu_lines_of_proc() {
     let pid = "4242 (open circle) S 1 2 3 4 5 6 7 8 9 10 30 12 0 0 20 0 9";
     assert_eq!(parse_pid_stat(pid), Some(42));
     let mut load = Load::default();
-    assert_eq!(load.sample(None), None, "nothing to compare with yet");
+    assert_eq!(load.sample(&[]), None, "nothing to compare with yet");
     #[cfg(any(windows, target_os = "linux"))]
     {
         std::thread::sleep(std::time::Duration::from_millis(30));
-        assert!(load.sample(None).is_some_and(|l| (0.0..=1.0).contains(&l)));
+        assert!(load.sample(&[]).is_some_and(|l| (0.0..=1.0).contains(&l)));
     }
+}
+
+/// Every helper of ours is left out (live translate: the OCR helper AND the
+/// graphics card's translator): a busy one never reads as a busy PC.
+#[cfg(target_os = "linux")]
+#[test]
+fn every_helper_of_ours_is_left_out() {
+    let mut busy = std::process::Command::new("sh")
+        .args(["-c", "while :; do :; done"])
+        .spawn()
+        .unwrap();
+    let helpers = [busy.id()];
+    let (mut theirs, mut ours) = (Load::default(), Load::default());
+    let _ = (theirs.sample(&[]), ours.sample(&helpers));
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let (with, without) = (theirs.sample(&[]).unwrap(), ours.sample(&helpers).unwrap());
+    let _ = busy.kill();
+    let _ = busy.wait();
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f32;
+    assert!(with - without > 0.5 / cores, "{with} vs {without}");
 }
