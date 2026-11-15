@@ -147,7 +147,7 @@ impl Recorder {
 impl Layer for Recorder {
     fn show(&mut self, id: RegionId, at: Rect, rgba: &[u8]) {
         let text: Vec<u8> = rgba.iter().take_while(|b| **b != 0).copied().collect();
-        let text = String::from_utf8(text).unwrap();
+        let text = String::from_utf8_lossy(&text).into_owned();
         self.shown.insert(id, (at, text.clone()));
         self.log.push((self.frame, at, text));
         self.shows += 1;
@@ -694,5 +694,84 @@ fn bench_on_frame_10_regions_1080p() {
         "on_frame, 10 shown regions (600x60) at 1080p: watch {watch:?} per frame ({:?} per region); \
          with discover at 4 Hz {all:?} per frame",
         watch / 10
+    );
+}
+
+/// Real video through a see-through box (the harness' talk clip at 720p): while the ring moves a bit,
+/// a few cells of an unchanged line move a lot (the scene behind, compression noise): the patch stays.
+/// The same few cells with the ring still are a new letter: hidden at once.
+#[test]
+fn a_moving_scene_through_the_box_is_no_new_text_a_new_letter_is() {
+    for ring_moves in [true, false] {
+        let (mut sim, mut img) = shown_sim("Open the gate");
+        let hides = sim.layer.hides;
+        if ring_moves {
+            // 20 of the ring's ~200 cells, a little
+            img.fill(Rect::new(52, 52, 80, 4), [24, 24, 28]);
+        }
+        // three 4x4 cells of the line, a lot
+        for x in [64, 100, 140] {
+            img.fill(Rect::new(x, 68, 4, 4), [90, 90, 90]);
+        }
+        sim.step(&img);
+        assert_eq!(
+            sim.layer.hides,
+            hides + usize::from(!ring_moves),
+            "ring moves: {ring_moves}"
+        );
+    }
+}
+
+/// A capture that shows our own patch (X11, Wayland, a capturable test layer) is unchanged text, also for a
+/// patch of fine glyph strokes: the watch samples every second pixel, and the patch's expected cells must
+/// be sampled the same way (a full average differed by ~120 here: every patch was hidden as soon as it
+/// showed in the capture, measured on the Ubuntu VM).
+#[test]
+fn our_own_fine_patch_in_the_capture_is_no_change() {
+    struct Fine;
+    impl Painter for Fine {
+        fn patch(&mut self, _: &Frame, region: Rect, _: &str) -> Option<(Rect, Vec<u8>)> {
+            let px = (0..region.area())
+                .flat_map(|i| match (i % region.w as u64) % 2 {
+                    0 => [250, 250, 250, 255],
+                    _ => [5, 5, 5, 255],
+                })
+                .collect();
+            Some((region, px))
+        }
+    }
+    let mut live = Live::new(Config {
+        fade_in: Duration::ZERO,
+        ..Config::default()
+    });
+    let (mut layer, mut tr) = (Recorder::default(), Tr::default());
+    let screen = vec![(LINE, "Open the gate".to_string())];
+    let mut img = scene("Open the gate", None);
+    let mut patch = None;
+    for n in 0..120 {
+        let f = img.frame(n);
+        let mut jobs = live.on_frame(&f, &mut Fine, &mut layer);
+        while let Some(job) = jobs.pop() {
+            for d in job.run(&f, &mut Screen(&screen), &mut Screen(&screen), &mut tr) {
+                jobs.extend(live.complete(d, &f, &mut Fine, &mut layer));
+            }
+        }
+        if layer.shows == 1 && patch.is_none() {
+            patch = Some(Fine.patch(&f, LINE, "").unwrap());
+        }
+        // from the next frame on, the capture shows the patch
+        if let Some((at, px)) = &patch {
+            for y in 0..at.h {
+                for x in 0..at.w {
+                    let i = ((y * at.w + x) * 4) as usize;
+                    img.put(at.x + x, at.y + y, [px[i], px[i + 1], px[i + 2]]);
+                }
+            }
+        }
+    }
+    assert_eq!(
+        (layer.shows, layer.hides),
+        (1, 0),
+        "shown once, never taken for new text"
     );
 }

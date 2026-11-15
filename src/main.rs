@@ -5,8 +5,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 pub(crate) mod app;
 mod features;
-// not wired into the app yet (0.3.0 build step 3)
-#[allow(dead_code)]
 mod live_core;
 mod shared;
 

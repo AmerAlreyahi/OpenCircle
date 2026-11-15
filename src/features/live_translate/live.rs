@@ -1,370 +1,434 @@
-//! Live translate, pure logic (no window, no capture): each new frame is
-//! diffed against the last one in tiles; only the changed regions are read
-//! again (their crops stacked into ONE OCR call), unchanged text keeps its
-//! translation from the [`Cache`], and the layer gets [`Patch`]es to show.
+//! Live translate's engines for the live core (`crate::live_core`, design:
+//! live-approach.md 5-6): OpenCircle's OCR, translation and erase-and-redraw
+//! behind the core's small traits. No window, no capture, no threads here
+//! (`screens::live_layer` runs the loop).
 //!
-//! Our own layer is never read back: the platform excludes it from capture
-//! (`crate::features::live_translate`, Windows), and as a second guard (X11 can't exclude) a
-//! patch region that shows our last patch is put back to what was under it
-//! before the diff.
+//! - [`Detect`]: the text in the areas the core saw change, found in ONE
+//!   call (crops stacked, `Deps::detect`: Windows OCR alone where it reads the
+//!   language), grouped into blocks: each block is a region.
+//! - [`Read`]: a region once it has settled. Where the detect read it as a
+//!   full read would, that text is used again while the crop still looks the
+//!   same (no second OCR); else the crops are read in one call.
+//! - [`Translate`]: one block through `translate_blocks` (its cache, the
+//!   glossary, the user's engine).
+//! - [`Paint`]: `translate::render` on a window around the block; the patch
+//!   is what it changed, every other pixel left see-through.
 
-use std::borrow::Cow;
-use std::hash::{DefaultHasher, Hasher};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Mutex;
 
 use crate::features::text_reading::TextBlock;
 use crate::features::translate::pipeline::{
-    Cache, Deps, Error, Timings, check_frame, cut_off, is_rtl, to_line, translate_blocks,
+    Cache, Deps, Error, cut_off, to_line, translate_blocks,
 };
-#[cfg(test)]
-use crate::features::translate::pipeline::{Translation, translations};
-use crate::features::translate::{Block, Drawn, Line, group_blocks, render};
+use crate::features::translate::{Block, Line, group_blocks, render};
+use crate::live_core::{Crop, Detector, Frame, Painter, Reader, Rect, Translator};
 
-/// Diff granularity in pixels.
-const TILE: u32 = 32;
 /// Rows between stacked crops in the OCR image.
 const GAP: u32 = 16;
-
-/// What the layer draws: `rgba` (w x h x 4) at `bounds` (x, y, w, h, frame pixels).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Patch {
-    pub bounds: [u32; 4],
-    pub rgba: Vec<u8>,
-    /// The frame's pixels under the patch, for the read-back guard.
-    under: Vec<u8>,
-}
-
-/// Live-mode state between frames. One per live session.
-#[derive(Default)]
-pub struct Live {
-    size: (u32, u32),
-    hashes: Vec<u64>,
-    lines: Vec<Line>,
-    #[cfg(test)]
-    blocks: Vec<Translation>,
-    patches: Vec<Patch>,
-    /// What the last render drew and left as it was (its rooms dropped).
-    drawn: Drawn,
-}
+/// Regions whose lines are kept for a later read / the paint.
+const FOUND_MAX: usize = 256;
+/// A crop reads as the one OCR saw while its gray samples differ less than
+/// this on average (0..255: video noise, a see-through box over a moving
+/// scene) and at most `SAME_STRONG` of them by more than 40 (a new letter).
+const SAME_CROP: f32 = 6.0;
+const SAME_STRONG: f32 = 0.01;
 
 /// x0, y0, x1, y1 in frame pixels.
-type Rect = [u32; 4];
+type Box4 = [u32; 4];
 
-impl Live {
-    pub fn new() -> Self {
-        Self::default()
-    }
+/// What OCR found where: each region's lines (frame px) and its gray cells
+/// then (`cells`), newest last, at most `FOUND_MAX`.
+#[derive(Default)]
+pub struct Found {
+    /// Lines, cells, and whether the lines were read in full (a reader may
+    /// use them as they are).
+    map: HashMap<Rect, (Vec<Line>, Vec<u8>, bool)>,
+    order: VecDeque<Rect>,
+    /// Since the last `take_counts`: reads answered by the detect's OCR,
+    /// reads OCR'd again, patches made, patches declined (render left the
+    /// block as it was: a busy background, no room; or over a blanked part).
+    pub counts: [u32; 4],
+}
 
-    /// Everything the layer shows now (all blocks, not just the changed ones).
-    pub fn patches(&self) -> &[Patch] {
-        &self.patches
-    }
-
-    /// What the last changed frame's render drew and left as it was.
-    pub fn drawn(&self) -> &Drawn {
-        &self.drawn
-    }
-
-    /// The blocks on screen, for "click a block -> explanation".
-    #[cfg(test)]
-    pub fn blocks(&self) -> &[Translation] {
-        &self.blocks
-    }
-
-    /// Feeds one captured frame. `Ok(None)`: nothing changed, keep the layer.
-    /// `Ok(Some)`: redraw the layer from [`Live::patches`]. On an error the
-    /// state is kept, so the next frame retries the same regions.
-    #[cfg(test)]
-    pub fn step(
-        &mut self,
-        frame: &[u8],
-        width: u32,
-        height: u32,
-        target: &str,
-        cache: &Cache,
-        deps: &impl Deps,
-    ) -> Result<Option<Timings>, Error> {
-        self.step_hiding(frame, width, height, target, cache, deps, |_| {})
-    }
-
-    /// [`Live::step`], and before the slow part (OCR, translation): where the
-    /// text under a patch changed, the patch goes at once and `hide` gets the
-    /// ones left, so the layer never shows a stale translation over new text
-    /// while the new one is read (#56).
-    #[allow(clippy::too_many_arguments)]
-    pub fn step_hiding(
-        &mut self,
-        frame: &[u8],
-        width: u32,
-        height: u32,
-        target: &str,
-        cache: &Cache,
-        deps: &impl Deps,
-        hide: impl FnOnce(&[Patch]),
-    ) -> Result<Option<Timings>, Error> {
-        let start = Instant::now();
-        check_frame(frame, width, height)?;
-        let fresh = self.size != (width, height);
-        if fresh {
-            // live is for games (the glossary applies; no address bar is read here)
-            use crate::features::translate::glossary_screen as screen;
-            screen::begin();
-            screen::saw_frame(false);
+impl Found {
+    fn put(&mut self, at: Rect, lines: Vec<Line>, cells: Vec<u8>, full: bool) {
+        if self.map.insert(at, (lines, cells, full)).is_none() {
+            self.order.push_back(at);
         }
-        let mut frame = Cow::Borrowed(frame);
-        if !fresh {
-            self.unlayer(&mut frame, width);
+        while self.order.len() > FOUND_MAX {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            }
         }
-        let hashes = tile_hashes(&frame, width, height);
-        let changed: Vec<bool> = if fresh {
-            vec![true; hashes.len()]
-        } else {
-            hashes
-                .iter()
-                .zip(&self.hashes)
-                .map(|(a, b)| a != b)
-                .collect()
-        };
-        if !changed.contains(&true) {
-            return Ok(None);
-        }
-        let tw = width.div_ceil(TILE);
-        let stale = |p: &Patch| {
-            let [x0, y0, x1, y1] = rect(p.bounds);
-            (y0 / TILE..y1.div_ceil(TILE))
-                .any(|ty| (x0 / TILE..x1.div_ceil(TILE)).any(|tx| changed[(ty * tw + tx) as usize]))
-        };
-        let before = self.patches.len();
-        self.patches.retain(|p| !fresh && !stale(p));
-        if self.patches.len() < before {
-            hide(&self.patches);
-        }
-        let old = if fresh { &[][..] } else { &self.lines[..] };
-        let regions = regions(&changed, width, height, old);
-        let mut lines: Vec<Line> = old
-            .iter()
-            .filter(|l| !regions.iter().any(|r| overlaps(r, &outer(l.bounds))))
-            .cloned()
-            .chain(read_regions(&frame, width, &regions, deps)?)
-            .collect();
-        let ocr = start.elapsed();
-        lines.sort_by(|a, b| {
-            (a.bounds[1].total_cmp(&b.bounds[1])).then(a.bounds[0].total_cmp(&b.bounds[0]))
-        });
-        let blocks = group_blocks(&lines);
-        let t = Instant::now();
-        let tr = translate_blocks(&blocks, target, cache, deps).map_err(Error::Ai)?;
-        let translate = t.elapsed();
-
-        let t = Instant::now();
-        let rtl = is_rtl(target);
-        let mut out = frame.to_vec();
-        let drawn = render(&mut out, width, height, &blocks, &tr, rtl);
-        let patches = (blocks.iter().zip(&tr).zip(&drawn.rooms))
-            .filter(|((_, t), _)| !t.trim().is_empty())
-            .filter_map(|((b, _), room)| {
-                patch(&frame, &out, width, window(b, *room, width, height))
-            })
-            .collect();
-        let render = t.elapsed();
-
-        *self = Live {
-            size: (width, height),
-            hashes,
-            #[cfg(test)]
-            blocks: translations(&blocks, &tr),
-            lines,
-            patches,
-            drawn: Drawn {
-                rooms: Vec::new(),
-                ink: Vec::new(),
-                ..drawn
-            },
-        };
-        Ok(Some(Timings {
-            ocr,
-            translate,
-            render,
-            total: start.elapsed(),
-            ..Timings::default()
-        }))
     }
 
-    /// Where the frame shows one of our patches (the layer was captured),
-    /// puts back what was under it, so our own text is never diffed or read.
-    fn unlayer(&self, frame: &mut Cow<[u8]>, width: u32) {
-        // decide on the frame as captured: patches can overlap
-        let shown: Vec<&Patch> = (self.patches.iter())
-            .filter(|p| {
-                let px = crop(frame, width, rect(p.bounds));
-                let (ours, theirs) = (mad(&px, &p.rgba), mad(&px, &p.under));
-                ours < 8.0 && ours < theirs
-            })
-            .collect();
-        for p in shown {
-            paste(frame.to_mut(), width, rect(p.bounds), &p.under);
-        }
+    fn lines(&self, at: &Rect) -> Option<&[Line]> {
+        self.map.get(at).map(|(l, _, _)| l.as_slice())
+    }
+
+    pub fn take_counts(&mut self) -> [u32; 4] {
+        std::mem::take(&mut self.counts)
     }
 }
 
-/// One hash per TILE x TILE tile, row-major.
-fn tile_hashes(rgba: &[u8], w: u32, h: u32) -> Vec<u64> {
-    let tw = w.div_ceil(TILE) as usize;
-    let mut hs = vec![DefaultHasher::new(); tw * h.div_ceil(TILE) as usize];
-    for (y, row) in rgba.chunks_exact(w as usize * 4).enumerate() {
-        for (tx, part) in row.chunks(TILE as usize * 4).enumerate() {
-            hs[y / TILE as usize * tw + tx].write(part);
-        }
-    }
-    hs.into_iter().map(|h| h.finish()).collect()
-}
-
-/// Changed tiles -> connected clusters -> their boxes padded by one tile,
-/// grown over any known line they touch (a line is always read whole) and
-/// merged where they overlap.
-fn regions(changed: &[bool], w: u32, h: u32, lines: &[Line]) -> Vec<Rect> {
-    let tw = w.div_ceil(TILE) as usize;
-    let th = changed.len() / tw;
-    let mut seen = vec![false; changed.len()];
-    let mut rects = Vec::new();
-    for start in 0..changed.len() {
-        if !changed[start] || seen[start] {
-            continue;
-        }
-        seen[start] = true;
-        let (mut stack, mut b) = (
-            vec![start],
-            [start % tw, start / tw, start % tw, start / tw],
-        );
-        while let Some(i) = stack.pop() {
-            let (x, y) = (i % tw, i / tw);
-            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
-            for ny in y.saturating_sub(1)..(y + 2).min(th) {
-                for nx in x.saturating_sub(1)..(x + 2).min(tw) {
-                    let j = ny * tw + nx;
-                    if changed[j] && !seen[j] {
-                        seen[j] = true;
-                        stack.push(j);
-                    }
-                }
-            }
-        }
-        let t = TILE as usize;
-        rects.push([
-            (b[0].saturating_sub(1) * t) as u32,
-            (b[1].saturating_sub(1) * t) as u32,
-            ((b[2] + 2) * t).min(w as usize) as u32,
-            ((b[3] + 2) * t).min(h as usize) as u32,
-        ]);
-    }
-    let boxes: Vec<Rect> = lines.iter().map(|l| outer(l.bounds)).collect();
-    let mut grew = true;
-    while grew {
-        grew = false;
-        for r in rects.iter_mut() {
-            for b in &boxes {
-                if overlaps(r, b) && union(r, b) != *r {
-                    *r = union(r, b);
-                    grew = true;
-                }
-            }
-        }
-        let mut i = 0;
-        while i < rects.len() {
-            match (i + 1..rects.len()).find(|&j| overlaps(&rects[i], &rects[j])) {
-                Some(j) => {
-                    let other = rects.swap_remove(j);
-                    rects[i] = union(&rects[i], &other);
-                    grew = true;
-                }
-                None => i += 1,
-            }
-        }
-    }
-    rects
-        .into_iter()
-        .map(|r| [r[0], r[1], r[2].min(w), r[3].min(h)])
+/// A gray value for every 4th pixel of every 4th row of an RGBA image.
+fn cells(rgba: &[u8], w: u32) -> Vec<u8> {
+    let row = w as usize * 4;
+    (rgba.chunks_exact(row.max(4)).step_by(4))
+        .flat_map(|r| r.as_chunks::<4>().0.iter().step_by(4))
+        .map(|p| ((77 * p[0] as u32 + 150 * p[1] as u32 + 29 * p[2] as u32) >> 8) as u8)
         .collect()
 }
 
-/// OCR of the regions in one call: crops stacked top to bottom, GAP rows of
-/// black between them; each line found is moved back to frame coordinates.
+fn same_cells(a: &[u8], b: &[u8]) -> bool {
+    let (mut sum, mut strong) = (0u32, 0u32);
+    for (x, y) in a.iter().zip(b) {
+        let d = x.abs_diff(*y) as u32;
+        sum += d;
+        strong += (d > 40) as u32;
+    }
+    let n = a.len().max(1) as f32;
+    a.len() == b.len() && sum as f32 <= SAME_CROP * n && strong as f32 <= SAME_STRONG * n
+}
+
+/// A block's text: its lines in reading order, joined.
+fn text_of(lines: &[Line]) -> String {
+    (group_blocks(lines).iter())
+        .map(|b| b.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The first error of a job, for the controller's notice.
+pub type Errors = RefCell<Option<String>>;
+
+fn note(errors: &Errors, e: impl std::fmt::Display) {
+    errors.borrow_mut().get_or_insert_with(|| e.to_string());
+}
+
+/// The core's detector: OCR of the changed areas, each block a region.
+pub struct Detect<'a, D: Deps> {
+    pub deps: &'a D,
+    pub found: &'a Mutex<Found>,
+    pub errors: &'a Errors,
+}
+
+impl<D: Deps> Detector for Detect<'_, D> {
+    fn detect(&mut self, frame: &Frame, areas: &[Rect]) -> Vec<Rect> {
+        let regions: Vec<Box4> = (areas.iter())
+            .map(|a| [a.x, a.y, a.right(), a.bottom()])
+            .collect();
+        let (mut lines, full) = match read_regions(frame.rgba, frame.width, &regions, self.deps) {
+            Ok(read) => read,
+            Err(e) => {
+                note(self.errors, e);
+                return Vec::new();
+            }
+        };
+        lines.sort_by(|a, b| {
+            (a.bounds[1].total_cmp(&b.bounds[1])).then(a.bounds[0].total_cmp(&b.bounds[0]))
+        });
+        if crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_LOG").is_some() {
+            let boxes: Vec<_> = lines.iter().map(|l| l.bounds.map(|v| v as i32)).collect();
+            crate::log!("[opencircle] live: detect {areas:?} -> {boxes:?} (full {full})");
+        }
+        let mut found = self.found.lock().unwrap_or_else(|e| e.into_inner());
+        (group_blocks(&lines).into_iter())
+            .filter_map(|b| {
+                let [x0, y0, x1, y1] = outer(b.bounds);
+                let at = Rect::new(x0, y0, x1.min(frame.width) - x0, y1.min(frame.height) - y0);
+                (at.area() > 0).then(|| {
+                    let crop = crop(frame.rgba, frame.width, [x0, y0, at.right(), at.bottom()]);
+                    found.put(at, b.lines, cells(&crop, at.w), full);
+                    at
+                })
+            })
+            .collect()
+    }
+}
+
+/// The core's reader: what the detect read, while the crop still looks the
+/// same; else the crops in one OCR call.
+pub struct Read<'a, D: Deps> {
+    pub deps: &'a D,
+    pub found: &'a Mutex<Found>,
+    pub errors: &'a Errors,
+    /// The frame's size (the lines' boxes are clamped to it).
+    pub size: (u32, u32),
+}
+
+impl<D: Deps> Reader for Read<'_, D> {
+    fn read(&mut self, crops: &[Crop]) -> Vec<String> {
+        let mut texts = vec![String::new(); crops.len()];
+        let mut todo = Vec::new();
+        {
+            let mut found = self.found.lock().unwrap_or_else(|e| e.into_inner());
+            for (i, c) in crops.iter().enumerate() {
+                match found.map.get(&c.at) {
+                    Some((lines, seen, true)) if same_cells(seen, &cells(&c.rgba, c.at.w)) => {
+                        texts[i] = text_of(lines);
+                    }
+                    _ => todo.push(i),
+                }
+            }
+            found.counts[0] += (crops.len() - todo.len()) as u32;
+            found.counts[1] += todo.len() as u32;
+        }
+        if todo.is_empty() {
+            return texts;
+        }
+        let parts: Vec<(&[u8], u32, u32)> = (todo.iter())
+            .map(|&i| (crops[i].rgba.as_slice(), crops[i].at.w, crops[i].at.h))
+            .collect();
+        let read = match read_stacked(&parts, self.deps, false) {
+            Ok((read, _)) => read,
+            Err(e) => {
+                note(self.errors, e);
+                return texts;
+            }
+        };
+        let mut found = self.found.lock().unwrap_or_else(|e| e.into_inner());
+        for (&i, blocks) in todo.iter().zip(read) {
+            let c = &crops[i];
+            let lines: Vec<Line> = (blocks.into_iter())
+                .map(|b| {
+                    let [x, y, w, h] = b.bounds;
+                    let bounds = [x + c.at.x as f32, y + c.at.y as f32, w, h];
+                    to_line(TextBlock { bounds, ..b }, self.size.0, self.size.1)
+                })
+                .collect();
+            texts[i] = text_of(&lines);
+            found.put(c.at, lines, cells(&c.rgba, c.at.w), true);
+        }
+        texts
+    }
+}
+
+/// The core's translator: one block into `target` (the shared cache, the
+/// glossary's terms on a game screen, the user's engine).
+pub struct Translate<'a, D: Deps> {
+    pub deps: &'a D,
+    pub cache: &'a Cache,
+    pub target: &'a str,
+}
+
+impl<D: Deps> Translator for Translate<'_, D> {
+    fn translate(&mut self, text: &str) -> Result<String, String> {
+        let line = Line {
+            bounds: [0.0, 0.0, 1.0, 1.0],
+            text: text.into(),
+        };
+        let block = Block {
+            lines: vec![line],
+            text: text.into(),
+            bounds: [0.0, 0.0, 1.0, 1.0],
+        };
+        translate_blocks(&[block], self.target, self.cache, self.deps)
+            .map(|t| t.into_iter().next().unwrap_or_default())
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// The core's painter: `render` on a window around the region (its lines
+/// as read), cut to what it changed. The rest of the patch is see-through
+/// (alpha 0, its colour the frame's: what a capture with our layer shows).
+pub struct Paint<'a> {
+    pub found: &'a Mutex<Found>,
+    pub rtl: bool,
+    /// Parts of the frame blanked out (black; frame px x, y, w, h): no patch
+    /// there (its erase would draw a black box).
+    pub blanked: &'a [[u32; 4]],
+}
+
+impl Painter for Paint<'_> {
+    fn patch(&mut self, frame: &Frame, region: Rect, text: &str) -> Option<(Rect, Vec<u8>)> {
+        let lines = {
+            let found = self.found.lock().unwrap_or_else(|e| e.into_inner());
+            found.lines(&region).map(<[Line]>::to_vec)
+        }
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| {
+            vec![Line {
+                bounds: [region.x, region.y, region.w, region.h].map(|v| v as f32),
+                text: String::new(),
+            }]
+        });
+        let win = window(region, lines[0].bounds[3], (frame.width, frame.height));
+        let (ww, wh) = (win[2] - win[0], win[3] - win[1]);
+        let src = crop(frame.rgba, frame.width, win);
+        let (dx, dy) = (win[0] as f32, win[1] as f32);
+        let lines: Vec<Line> = (lines.into_iter())
+            .map(|l| {
+                let [x, y, w, h] = l.bounds;
+                Line {
+                    bounds: [x - dx, y - dy, w, h],
+                    ..l
+                }
+            })
+            .collect();
+        let bounds = (lines.iter().skip(1)).fold(lines[0].bounds, |b, l| {
+            let [x0, y0] = [b[0].min(l.bounds[0]), b[1].min(l.bounds[1])];
+            let x1 = (b[0] + b[2]).max(l.bounds[0] + l.bounds[2]);
+            let y1 = (b[1] + b[3]).max(l.bounds[1] + l.bounds[3]);
+            [x0, y0, x1 - x0, y1 - y0]
+        });
+        let block = Block {
+            text: text_of(&lines),
+            lines,
+            bounds,
+        };
+        let mut out = src.clone();
+        render(&mut out, ww, wh, &[block], &[text.to_string()], self.rtl);
+        let count = |i: usize| self.found.lock().unwrap_or_else(|e| e.into_inner()).counts[i] += 1;
+        let Some(changed) = changed_box(&src, &out, ww) else {
+            count(3);
+            return None;
+        };
+        let at = Rect::new(
+            win[0] + changed[0],
+            win[1] + changed[1],
+            changed[2] - changed[0],
+            changed[3] - changed[1],
+        );
+        if over_blanked([at.x, at.y, at.w, at.h], self.blanked) {
+            count(3);
+            return None;
+        }
+        count(2);
+        let mut rgba = crop(&out, ww, changed);
+        let before = crop(&src, ww, changed);
+        for (p, b) in (rgba.as_chunks_mut::<4>().0.iter_mut()).zip(before.as_chunks::<4>().0) {
+            if p == b {
+                p[3] = 0;
+            }
+        }
+        Some((at, rgba))
+    }
+}
+
+/// Where `render` may draw for a region: one line height above and below
+/// it, two to each side (its room), clamped to the frame. x0, y0, x1, y1.
+fn window(r: Rect, line: f32, (w, h): (u32, u32)) -> Box4 {
+    let lh = line.max(1.0) as u32;
+    [
+        r.x.saturating_sub(2 * lh),
+        r.y.saturating_sub(lh),
+        (r.right() + 2 * lh).min(w),
+        (r.bottom() + lh).min(h),
+    ]
+}
+
+/// The box (x0, y0, x1, y1) around the pixels that differ between two
+/// images `width` wide; none if they are the same.
+fn changed_box(a: &[u8], b: &[u8], width: u32) -> Option<Box4> {
+    let mut found: Option<Box4> = None;
+    let (pa, pb) = (a.as_chunks::<4>().0, b.as_chunks::<4>().0);
+    for (i, (x, y)) in pa.iter().zip(pb).enumerate() {
+        if x != y {
+            let (px, py) = ((i as u32) % width, (i as u32) / width);
+            found = Some(found.map_or([px, py, px + 1, py + 1], |f| {
+                [
+                    f[0].min(px),
+                    f[1].min(py),
+                    f[2].max(px + 1),
+                    f[3].max(py + 1),
+                ]
+            }));
+        }
+    }
+    found
+}
+
+/// A patch at `bounds` (x, y, w, h) touches a part of the frame that was
+/// blanked out (black), so its erase and redraw would show black there.
+pub fn over_blanked([x, y, w, h]: [u32; 4], blanked: &[[u32; 4]]) -> bool {
+    (blanked.iter()).any(|&[bx, by, bw, bh]| x < bx + bw && bx < x + w && y < by + bh && by < y + h)
+}
+
+/// The text of the regions of a frame found in one call (`Deps::detect`):
+/// crops stacked, each line moved back to frame coordinates (lines an edge
+/// of the frame cuts through are left out); and whether they were read in full.
 fn read_regions(
     frame: &[u8],
     width: u32,
-    regions: &[Rect],
+    regions: &[Box4],
     deps: &impl Deps,
-) -> Result<Vec<Line>, Error> {
-    let cw = regions.iter().map(|r| r[2] - r[0]).max().unwrap_or(0);
+) -> Result<(Vec<Line>, bool), Error> {
+    let crops: Vec<Vec<u8>> = regions.iter().map(|r| crop(frame, width, *r)).collect();
+    let parts: Vec<(&[u8], u32, u32)> = (crops.iter().zip(regions))
+        .map(|(c, r)| (c.as_slice(), r[2] - r[0], r[3] - r[1]))
+        .collect();
+    let fh = (frame.len() / 4) as u32 / width.max(1);
+    let (read, full) = read_stacked(&parts, deps, true)?;
+    let lines = (read.into_iter().zip(regions))
+        .flat_map(|(blocks, r)| {
+            blocks.into_iter().filter_map(move |b| {
+                let [x, y, w, h] = b.bounds;
+                let b = TextBlock {
+                    bounds: [x + r[0] as f32, y + r[1] as f32, w, h],
+                    ..b
+                };
+                (!cut_off(&b, (width, fh))).then(|| to_line(b, width, fh))
+            })
+        })
+        .collect();
+    Ok((lines, full))
+}
+
+/// OCR of RGBA images (`rgba`, width, height) in ONE call (`detect`: only
+/// to find the lines, `Deps::detect`): stacked top to bottom, GAP black rows
+/// between them; each one's lines, in its own pixels, and whether they were
+/// read in full.
+fn read_stacked(
+    parts: &[(&[u8], u32, u32)],
+    deps: &impl Deps,
+    detect: bool,
+) -> Result<(Vec<Vec<TextBlock>>, bool), Error> {
+    let cw = parts.iter().map(|p| p.1).max().unwrap_or(0);
     let mut img = Vec::new();
     let mut tops = Vec::new();
-    for r in regions {
+    for (rgba, w, h) in parts {
         if !tops.is_empty() {
             img.extend([0, 0, 0, 255].repeat((GAP * cw) as usize));
         }
-        tops.push((img.len() / 4) as u32 / cw);
-        for row in crop(frame, width, *r).chunks_exact(((r[2] - r[0]) * 4) as usize) {
+        tops.push((img.len() / 4) as u32 / cw.max(1));
+        for row in rgba
+            .chunks_exact((*w * 4).max(4) as usize)
+            .take(*h as usize)
+        {
             img.extend_from_slice(row);
-            img.extend([0, 0, 0, 255].repeat((cw - (r[2] - r[0])) as usize));
+            img.extend([0, 0, 0, 255].repeat((cw - w) as usize));
         }
     }
-    if img.is_empty() {
-        return Ok(Vec::new());
+    let mut out = vec![Vec::new(); parts.len()];
+    if img.is_empty() || cw == 0 {
+        return Ok((out, true));
     }
     let ch = img.len() as u32 / 4 / cw;
-    let fh = (frame.len() / 4) as u32 / width;
-    let found = deps.recognize(&img, cw, ch).map_err(Error::Ocr)?;
-    Ok(found
-        .into_iter()
-        .filter_map(|b| {
-            let [x, y, w, h] = b.bounds;
-            let cy = y + h / 2.0;
-            let i = (0..regions.len()).find(|&i| {
-                let top = tops[i] as f32;
-                cy >= top && cy < top + (regions[i][3] - regions[i][1]) as f32
-            })?;
-            let (r, top) = (regions[i], tops[i] as f32);
-            let bounds = [x + r[0] as f32, y - top + r[1] as f32, w, h];
-            let b = TextBlock { bounds, ..b };
-            (!cut_off(&b, (width, fh))).then(|| to_line(b, width, fh))
-        })
-        .collect())
-}
-
-/// Where `render` may have drawn for block `b`: its box and its room (see
-/// `render`), one line height above and below, two to each side.
-fn window(b: &Block, room: [f32; 4], w: u32, h: u32) -> Rect {
-    let lh = b.lines[0].bounds[3];
-    let [x, y, bw, bh] = b.bounds;
-    let (x0, x1) = (x.min(room[0]), (x + bw).max(room[0] + room[2]));
-    let r = outer([x0 - 2.0 * lh, y - lh, x1 - x0 + 4.0 * lh, bh + 2.0 * lh]);
-    [r[0], r[1], r[2].min(w), r[3].min(h)]
-}
-
-/// The box around the pixels `render` changed inside `win`, cut from `out`.
-fn patch(frame: &[u8], out: &[u8], width: u32, win: Rect) -> Option<Patch> {
-    let mut b: Option<Rect> = None;
-    for y in win[1]..win[3] {
-        for x in win[0]..win[2] {
-            let i = ((y * width + x) * 4) as usize;
-            if frame[i..i + 4] != out[i..i + 4] {
-                b = Some(b.map_or([x, y, x + 1, y + 1], |b| {
-                    [b[0].min(x), b[1].min(y), b[2].max(x + 1), b[3].max(y + 1)]
-                }));
-            }
-        }
+    let (blocks, full) = match detect {
+        true => deps.detect(&img, cw, ch),
+        false => deps.recognize(&img, cw, ch).map(|b| (b, true)),
     }
-    let r = b?;
-    Some(Patch {
-        bounds: [r[0], r[1], r[2] - r[0], r[3] - r[1]],
-        rgba: crop(out, width, r),
-        under: crop(frame, width, r),
-    })
+    .map_err(Error::Ocr)?;
+    for b in blocks {
+        let [x, y, w, h] = b.bounds;
+        let cy = y + h / 2.0;
+        let Some(i) = (0..parts.len()).find(|&i| {
+            let top = tops[i] as f32;
+            cy >= top && cy < top + parts[i].2 as f32
+        }) else {
+            continue;
+        };
+        let bounds = [x, y - tops[i] as f32, w, h];
+        out[i].push(TextBlock { bounds, ..b });
+    }
+    Ok((out, full))
 }
 
 /// Bounds (x, y, w, h, may be fractional or negative) -> the pixel rect around them.
-fn outer(b: [f32; 4]) -> Rect {
+fn outer(b: [f32; 4]) -> Box4 {
     let px = |v: f32| v.max(0.0) as u32;
     [
         px(b[0].floor()),
@@ -374,107 +438,19 @@ fn outer(b: [f32; 4]) -> Rect {
     ]
 }
 
-fn rect(b: [u32; 4]) -> Rect {
-    [b[0], b[1], b[0] + b[2], b[1] + b[3]]
-}
-
-fn overlaps(a: &Rect, b: &Rect) -> bool {
-    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
-}
-
-fn union(a: &Rect, b: &Rect) -> Rect {
-    [
-        a[0].min(b[0]),
-        a[1].min(b[1]),
-        a[2].max(b[2]),
-        a[3].max(b[3]),
-    ]
-}
-
-fn crop(rgba: &[u8], width: u32, r: Rect) -> Vec<u8> {
+fn crop(rgba: &[u8], width: u32, r: Box4) -> Vec<u8> {
     (r[1]..r[3])
         .flat_map(|y| &rgba[((y * width + r[0]) * 4) as usize..((y * width + r[2]) * 4) as usize])
         .copied()
         .collect()
 }
 
-fn paste(rgba: &mut [u8], width: u32, r: Rect, src: &[u8]) {
-    let row = ((r[2] - r[0]) * 4) as usize;
-    for (y, s) in (r[1]..r[3]).zip(src.chunks_exact(row)) {
-        let i = ((y * width + r[0]) * 4) as usize;
-        rgba[i..i + row].copy_from_slice(s);
-    }
-}
-
-/// Mean absolute difference per byte.
-fn mad(a: &[u8], b: &[u8]) -> f32 {
-    let sum: u64 = a.iter().zip(b).map(|(x, y)| x.abs_diff(*y) as u64).sum();
-    sum as f32 / a.len().max(1) as f32
-}
-
-// ---- The beat loop (no window, no capture; the clock is a parameter) ----
-
-/// The loop's time source. `Wall` is the real one; a test advances its own.
-pub trait Clock {
-    /// Time since the clock started.
-    fn elapsed(&self) -> Duration;
-    fn sleep(&self, d: Duration);
-}
-
-/// The real clock.
-pub struct Wall(Instant);
-
-impl Wall {
-    pub fn new() -> Self {
-        Wall(Instant::now())
-    }
-}
-
-impl Clock for Wall {
-    fn elapsed(&self) -> Duration {
-        self.0.elapsed()
-    }
-    fn sleep(&self, d: Duration) {
-        std::thread::sleep(d);
-    }
-}
-
-/// Calls `tick` on a fixed beat of `interval` until `stop` is set or `send`
-/// fails (the layer is gone). One tick at a time, never piled up: a tick
-/// that runs over skips the beats it missed and the next starts on the next
-/// beat (#56), so a slow PC gets fewer steps, not back-to-back ones.
-pub fn pump<T>(
-    clock: &impl Clock,
-    stop: &AtomicBool,
-    interval: Duration,
-    mut tick: impl FnMut() -> Option<T>,
-    mut send: impl FnMut(T) -> bool,
-) {
-    while !stop.load(Ordering::Relaxed) {
-        if let Some(out) = tick()
-            && !send(out)
-        {
-            return;
-        }
-        let beats = (clock.elapsed().as_nanos())
-            .checked_div(interval.as_nanos())
-            .map_or(0, |n| n + 1);
-        let next = interval.saturating_mul(beats as u32);
-        while !stop.load(Ordering::Relaxed) && clock.elapsed() < next {
-            let left = next.saturating_sub(clock.elapsed());
-            clock.sleep(left.min(Duration::from_millis(50)));
-        }
-    }
-}
-
 /// A tick while the session is `away` (locked, switched, screen off: #56):
 /// `Some` = skip it, nothing captured; the `bool` says the layer must be
-/// cleared (the session just went away). Going away or coming back starts the
-/// steps afresh: everything is read again.
-pub fn away_gate(away: bool, was: &mut bool, steps: &mut Live) -> Option<bool> {
+/// cleared (the session just went away).
+pub fn away_gate(away: bool, was: &mut bool) -> Option<bool> {
     let changed = std::mem::replace(was, away) != away;
     if changed {
-        *steps = Live::new();
         crate::log!(
             "[opencircle] live translate {}",
             if away {
@@ -487,7 +463,7 @@ pub fn away_gate(away: bool, was: &mut bool, steps: &mut Live) -> Option<bool> {
     away.then_some(changed)
 }
 
-/// A step error once (not every second), then nothing until it changes.
+/// An error once (not every frame), then nothing until it changes.
 pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
     if last.as_ref() == Some(&e) {
         return None;
@@ -497,285 +473,377 @@ pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
     Some(e)
 }
 
+/// A live session run in step with its frames: each job runs at once on
+/// `deps` (tests and benches; the app runs them on its work thread).
+#[cfg(test)]
+pub struct InStep<'a, D: Deps> {
+    pub live: crate::live_core::Live,
+    pub found: Mutex<Found>,
+    pub deps: &'a D,
+    pub cache: &'a Cache,
+    pub target: &'a str,
+    /// The next frame's time (each frame is 1/60 s after the last).
+    pub at: std::time::Duration,
+}
+
+#[cfg(test)]
+impl<'a, D: Deps> InStep<'a, D> {
+    pub fn new(deps: &'a D, cache: &'a Cache, target: &'a str) -> Self {
+        let cfg = crate::live_core::Config {
+            fade_in: std::time::Duration::ZERO,
+            ..Default::default()
+        };
+        InStep {
+            live: crate::live_core::Live::new(cfg),
+            found: Mutex::default(),
+            deps,
+            cache,
+            target,
+            at: std::time::Duration::ZERO,
+        }
+    }
+
+    /// One frame through the core, then every job it starts (and the ones
+    /// they start) on this same frame.
+    pub fn frame(
+        &mut self,
+        rgba: &[u8],
+        (w, h): (u32, u32),
+        layer: &mut dyn crate::live_core::Layer,
+    ) {
+        let f = Frame {
+            rgba,
+            width: w,
+            height: h,
+            at: self.at,
+        };
+        self.at += std::time::Duration::from_micros(16_667);
+        let rtl = crate::features::translate::lang::is_rtl(self.target);
+        let mut paint = Paint {
+            found: &self.found,
+            rtl,
+            blanked: &[],
+        };
+        let mut jobs = self.live.on_frame(&f, &mut paint, layer);
+        while let Some(job) = jobs.pop() {
+            let errors = Errors::default();
+            let (deps, found, errors) = (self.deps, &self.found, &errors);
+            let done = job.run(
+                &f,
+                &mut Detect {
+                    deps,
+                    found,
+                    errors,
+                },
+                &mut Read {
+                    deps,
+                    found,
+                    errors,
+                    size: (w, h),
+                },
+                &mut Translate {
+                    deps,
+                    cache: self.cache,
+                    target: self.target,
+                },
+            );
+            for d in done {
+                jobs.extend(self.live.complete(d, &f, &mut paint, layer));
+            }
+        }
+    }
+}
+
+/// The layer's calls, in order (tests).
+#[cfg(test)]
+#[derive(Default)]
+pub struct Calls(pub Vec<String>);
+
+#[cfg(test)]
+impl crate::live_core::Layer for Calls {
+    fn show(&mut self, id: u64, _: Rect, _: &[u8]) {
+        self.0.push(format!("show {id}"));
+    }
+    fn alpha(&mut self, _: u64, _: f32) {}
+    fn hide(&mut self, id: u64) {
+        self.0.push(format!("hide {id}"));
+    }
+    fn clear(&mut self) {
+        self.0.push("clear".into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::features::translate::pipeline::tests::{Fake, frame, tb};
 
+    /// The whole host path on a real-sized frame: a line appears, is found,
+    /// read, translated and shown once; while it stays nothing is drawn
+    /// again (one OCR call in all: the read reuses the detect's); when its
+    /// text changes the patch goes in that same frame.
+    #[test]
+    fn a_line_is_shown_once_and_hidden_in_the_frame_its_text_changes() {
+        let (w, h) = (640u32, 360u32);
+        let line = [100.0, 200.0, 300.0, 28.0];
+        // OCR finds the "glyphs" (`frame`'s light bar) wherever they are
+        let fake = Fake::new(|rgba, w, _| {
+            let lit = (rgba.as_chunks::<4>().0.iter().enumerate())
+                .filter(|(_, p)| p[..3] == [240, 236, 226])
+                .map(|(i, _)| ((i as u32 % w) as f32, (i as u32 / w) as f32));
+            let b = lit.fold(None, |b: Option<[f32; 4]>, (x, y)| {
+                Some(b.map_or([x, y, x, y], |b| {
+                    [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)]
+                }))
+            });
+            (b.into_iter())
+                .map(|[x0, y0, x1, y1]| {
+                    tb(
+                        "Open the gate",
+                        [x0, y0 - 7.0, x1 - x0 + 1.0, y1 - y0 + 14.0],
+                    )
+                })
+                .collect()
+        });
+        let cache = Cache::new(16);
+        let mut s = InStep::new(&fake, &cache, "fr");
+        let mut layer = Calls::default();
+        let empty = frame(w, h, &[]);
+        let text = frame(w, h, &[line]);
+        for _ in 0..3 {
+            s.frame(&empty, (w, h), &mut layer);
+        }
+        for _ in 0..60 {
+            s.frame(&text, (w, h), &mut layer);
+        }
+        assert_eq!(layer.0, ["show 1"], "shown once, never redrawn");
+        assert_eq!(fake.ai_calls.borrow().len(), 1);
+        let ocr = fake.ocr_calls.borrow().len();
+        // another line in its place
+        let mut next = text.clone();
+        for y in 207..221 {
+            for x in 110..380 {
+                let i = ((y * w + x) * 4) as usize;
+                next[i..i + 3].copy_from_slice(&[20, 24, 32]);
+            }
+        }
+        s.frame(&next, (w, h), &mut layer);
+        assert_eq!(layer.0, ["show 1", "hide 1"], "hidden in the same frame");
+        assert!(fake.ocr_calls.borrow().len() >= ocr);
+    }
+
     const W: u32 = 320;
     const H: u32 = 192;
-    const OLD: [f32; 4] = [40.0, 40.0, 200.0, 24.0];
+    const LINE: [f32; 4] = [40.0, 40.0, 200.0, 24.0];
 
-    /// Full frame: one known line; any crop: one new line at (5, 40) in it.
-    fn fake() -> Fake {
-        Fake::new(|_, w, h| match (w, h) {
-            (W, H) => vec![tb("Open the gate", OLD)],
-            _ => vec![tb("New quest", [5.0, 40.0, 60.0, 20.0])],
-        })
+    fn at(f: &[u8]) -> Frame<'_> {
+        Frame {
+            rgba: f,
+            width: W,
+            height: H,
+            at: Default::default(),
+        }
     }
 
-    /// An OCR box in frame coordinates as the blocks report it (padded).
-    fn pad(text: &str, b: [f32; 4]) -> [f32; 4] {
-        to_line(tb(text, b), W, H).bounds
-    }
-
+    /// Two far-apart areas are read in ONE OCR call (stacked), and each line
+    /// lands back where it is in the frame, as one region per block.
     #[test]
-    fn same_frame_twice_reads_nothing_again() {
-        let (img, fake, cache) = (frame(W, H, &[OLD]), fake(), Cache::new(16));
-        let mut live = Live::new();
-        assert!(
-            live.step(&img, W, H, "ar", &cache, &fake)
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(*fake.ocr_calls.borrow(), [(W, H)]);
-        assert_eq!(live.blocks()[0].translation, "ترجمة Open the gate");
-        assert!(!live.patches().is_empty());
-        assert!(
-            live.step(&img, W, H, "ar", &cache, &fake)
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(fake.ocr_calls.borrow().len(), 1);
-        assert_eq!(fake.ai_calls.borrow().len(), 1);
-    }
-
-    #[test]
-    fn one_changed_tile_rereads_only_its_region() {
-        let (img, fake, cache) = (frame(W, H, &[OLD]), fake(), Cache::new(16));
-        let mut live = Live::new();
-        live.step(&img, W, H, "ar", &cache, &fake).unwrap();
-        // tile (7, 4) = x 224..256, y 128..160
-        let mut next = img.clone();
-        paste(&mut next, W, [230, 140, 250, 150], &[255; 20 * 10 * 4]);
-        live.step(&next, W, H, "ar", &cache, &fake)
-            .unwrap()
-            .unwrap();
-        // padded by one tile: x 192..288, y 96..192
-        assert_eq!(fake.ocr_calls.borrow()[1], (96, 96));
-        let texts: Vec<(&str, [f32; 4])> = live
-            .blocks()
-            .iter()
-            .map(|b| (b.original.as_str(), b.bounds))
-            .collect();
-        assert_eq!(
-            texts,
-            [
-                ("Open the gate", pad("x", OLD)),
-                ("New quest", pad("x", [197.0, 136.0, 60.0, 20.0]))
-            ]
-        );
-        // the unchanged line came from the cache
-        assert_eq!(fake.ai_calls.borrow()[1], ["New quest"]);
-    }
-
-    #[test]
-    fn a_change_touching_a_line_rereads_the_whole_line() {
-        let r = regions(
-            &tiles(&[(7, 1)]),
-            W,
-            H,
-            &[Line {
-                bounds: OLD,
-                text: "x".into(),
-            }],
-        );
-        assert_eq!(r, [[40, 0, 288, 96]]);
-        // two far-apart changes, two regions; stacked for one OCR call
-        let r = regions(&tiles(&[(0, 0), (9, 5)]), W, H, &[]);
-        assert_eq!(r, [[0, 0, 64, 64], [256, 128, 320, 192]]);
-        let mut fake = fake();
-        fake.lines = Box::new(|_, w, h| {
-            assert_eq!((w, h), (64, 64 + GAP + 64));
-            vec![tb("b", [1.0, 64.0 + 16.0 + 2.0, 9.0, 9.0])]
+    fn changed_areas_are_read_in_one_call_and_become_regions() {
+        let img = frame(W, H, &[LINE]);
+        let fake = Fake::new(|_, w, h| {
+            assert_eq!((w, h), (240, 64 + GAP + 64));
+            // in the first crop (x 0..240, y 20..84): the line at frame (40, 40)
+            vec![tb("Open the gate", [40.0, 20.0, 200.0, 24.0])]
         });
-        let got = read_regions(&frame(W, H, &[]), W, &r, &fake).unwrap();
-        assert_eq!(got[0].bounds, pad("b", [257.0, 130.0, 9.0, 9.0]));
-    }
-
-    fn tiles(on: &[(usize, usize)]) -> Vec<bool> {
-        let tw = W.div_ceil(TILE) as usize;
-        let mut t = vec![false; tw * H.div_ceil(TILE) as usize];
-        for (x, y) in on {
-            t[y * tw + x] = true;
-        }
-        t
-    }
-
-    #[test]
-    fn our_own_layer_in_the_capture_is_ignored() {
-        // two close lines: their patches overlap
-        const NEXT: [f32; 4] = [40.0, 72.0, 120.0, 24.0];
-        let (img, cache) = (frame(W, H, &[OLD, NEXT]), Cache::new(16));
-        let fake = Fake::new(|_, _, _| vec![tb("Open the gate.", OLD), tb("Run", NEXT)]);
-        let mut live = Live::new();
-        live.step(&img, W, H, "ar", &cache, &fake).unwrap();
-        let p = live.patches();
-        assert!(p.len() == 2 && overlaps(&rect(p[0].bounds), &rect(p[1].bounds)));
-        // X11: the capture shows the layer's patches over the game
-        let mut shown = img.clone();
-        for p in live.patches() {
-            paste(&mut shown, W, rect(p.bounds), &p.rgba);
-        }
-        assert!(shown != img);
-        assert!(
-            live.step(&shown, W, H, "ar", &cache, &fake)
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(fake.ocr_calls.borrow().len(), 1);
-    }
-
-    /// New text under a patch: the patch goes before the new text is read
-    /// (no stale translation over it meanwhile); one elsewhere stays.
-    #[test]
-    fn a_patch_whose_text_changed_is_hidden_before_the_reread() {
-        const FAR: [f32; 4] = [40.0, 140.0, 120.0, 24.0];
-        let (img, cache) = (frame(W, H, &[OLD, FAR]), Cache::new(16));
-        let fake = Fake::new(|_, _, _| vec![tb("Open the gate", OLD), tb("Run", FAR)]);
-        let mut live = Live::new();
-        live.step(&img, W, H, "ar", &cache, &fake).unwrap();
-        let [kept, gone] = [1, 0].map(|i| live.patches()[i].clone());
-        let mut next = img.clone();
-        paste(&mut next, W, [60, 44, 80, 54], &[255; 20 * 10 * 4]);
-        let (mut left, mut reads) = (None, 0);
-        let hide = |p: &[Patch]| {
-            left = Some(p.to_vec());
-            reads = fake.ocr_calls.borrow().len();
+        let (found, errors) = (Mutex::default(), Errors::default());
+        let mut d = Detect {
+            deps: &fake,
+            found: &found,
+            errors: &errors,
         };
-        live.step_hiding(&next, W, H, "ar", &cache, &fake, hide)
-            .unwrap();
-        assert_eq!(left, Some(vec![kept]), "only the far patch stays");
-        assert_eq!(reads, 1, "hidden before the new text is read");
-        assert!(!live.patches().contains(&gone));
-
-        // new text again, and its translation fails: still hidden
-        let mut fake = fake;
-        fake.fail_ai = true;
-        fake.lines = Box::new(|_: &[u8], _, _| vec![tb("Shut the gate", OLD)]);
-        let n = live.patches().len();
-        paste(&mut next, W, [60, 44, 80, 54], &[9; 20 * 10 * 4]);
-        let mut hidden = false;
-        assert!(
-            live.step_hiding(&next, W, H, "ar", &cache, &fake, |_| hidden = true)
-                .is_err()
+        let areas = [Rect::new(0, 20, 240, 64), Rect::new(0, 120, 100, 64)];
+        let got = d.detect(&at(&img), &areas);
+        assert_eq!(fake.ocr_calls.borrow().len(), 1);
+        let want = outer(to_line(tb("x", LINE), W, H).bounds);
+        assert_eq!(
+            got,
+            [Rect::new(
+                want[0],
+                want[1],
+                want[2] - want[0],
+                want[3] - want[1]
+            )]
         );
-        assert!(hidden && live.patches().len() < n);
-        // nothing new under a patch: nothing hidden
-        let mut called = false;
-        live.step_hiding(&next, W, H, "ar", &cache, &fake, |_| called = true)
-            .ok();
-        assert!(!called);
+        assert_eq!(
+            found.lock().unwrap().lines(&got[0]).unwrap()[0].text,
+            "Open the gate"
+        );
+        assert!(errors.borrow().is_none());
     }
 
+    /// The read of a settled region reuses what its detect read while the
+    /// crop looks the same (no second OCR); a crop that differs is read again.
     #[test]
-    fn ai_error_keeps_the_state_for_a_retry() {
-        let (img, mut fake, cache) = (frame(W, H, &[OLD]), fake(), Cache::new(16));
-        fake.fail_ai = true;
-        let mut live = Live::new();
-        assert!(live.step(&img, W, H, "ar", &cache, &fake).is_err());
-        assert!(live.patches().is_empty());
-        fake.fail_ai = false;
-        assert!(
-            live.step(&img, W, H, "ar", &cache, &fake)
-                .unwrap()
-                .is_some()
+    fn a_settled_region_is_read_again_only_if_its_crop_changed() {
+        let img = frame(W, H, &[LINE]);
+        // the detect's area (240 wide) or the region's own crop
+        let fake = Fake::new(|_, w, _| match w {
+            240 => vec![tb("Open the gate", [40.0, 20.0, 200.0, 24.0])],
+            _ => vec![tb("Open the gate", [4.0, 3.0, 200.0, 24.0])],
+        });
+        let (found, errors) = (Mutex::default(), Errors::default());
+        let region = Detect {
+            deps: &fake,
+            found: &found,
+            errors: &errors,
+        }
+        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0];
+        let b = [region.x, region.y, region.right(), region.bottom()];
+        let crop_of = |f: &[u8]| Crop {
+            id: 1,
+            job: 1,
+            at: region,
+            rgba: crop(f, W, b),
+        };
+        let mut r = Read {
+            deps: &fake,
+            found: &found,
+            errors: &errors,
+            size: (W, H),
+        };
+        assert_eq!(r.read(&[crop_of(&img)]), ["Open the gate"]);
+        assert_eq!(
+            fake.ocr_calls.borrow().len(),
+            1,
+            "the detect's read, reused"
         );
+        // the text under it changed: read again (in crop pixels)
+        let mut next = img.clone();
+        for y in 45..60 {
+            for x in 50..200 {
+                let i = ((y * W + x) * 4) as usize;
+                next[i..i + 3].copy_from_slice(&[255, 255, 255]);
+            }
+        }
+        assert_eq!(r.read(&[crop_of(&next)]), ["Open the gate"]);
         assert_eq!(fake.ocr_calls.borrow().len(), 2);
     }
 
-    /// A clock that only moves when asked to sleep.
-    #[derive(Default)]
-    struct Manual(std::cell::Cell<Duration>);
-
-    impl Clock for Manual {
-        fn elapsed(&self) -> Duration {
-            self.0.get()
+    /// A detect that only found the lines (Windows OCR alone): the settled
+    /// region is read in full, even with its crop unchanged.
+    #[test]
+    fn a_region_found_by_a_quick_detect_is_read_in_full() {
+        struct Quick(Fake);
+        impl Deps for Quick {
+            fn recognize(
+                &self,
+                rgba: &[u8],
+                w: u32,
+                h: u32,
+            ) -> Result<Vec<TextBlock>, crate::features::text_reading::OcrError> {
+                self.0.recognize(rgba, w, h)
+            }
+            fn translate(
+                &self,
+                texts: &[String],
+                target: &str,
+            ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
+                self.0.translate(texts, target)
+            }
+            fn detect(
+                &self,
+                rgba: &[u8],
+                w: u32,
+                h: u32,
+            ) -> Result<(Vec<TextBlock>, bool), crate::features::text_reading::OcrError>
+            {
+                self.0.recognize(rgba, w, h).map(|l| (l, false))
+            }
         }
-        fn sleep(&self, d: Duration) {
-            self.0.set(self.0.get() + d);
+        let img = frame(W, H, &[LINE]);
+        let quick = Quick(Fake::new(|_, w, _| match w {
+            240 => vec![tb("Open teh gate", [40.0, 20.0, 200.0, 24.0])],
+            _ => vec![tb("Open the gate", [4.0, 3.0, 200.0, 24.0])],
+        }));
+        let (found, errors) = (Mutex::default(), Errors::default());
+        let region = Detect {
+            deps: &quick,
+            found: &found,
+            errors: &errors,
         }
+        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0];
+        let b = [region.x, region.y, region.right(), region.bottom()];
+        let crop = Crop {
+            id: 1,
+            job: 1,
+            at: region,
+            rgba: crop(&img, W, b),
+        };
+        let mut r = Read {
+            deps: &quick,
+            found: &found,
+            errors: &errors,
+            size: (W, H),
+        };
+        assert_eq!(r.read(&[crop]), ["Open the gate"], "the full read's text");
+        assert_eq!(quick.0.ocr_calls.borrow().len(), 2);
     }
 
+    /// The patch is only what `render` changed: the frame's own pixels in its
+    /// box are see-through, and nothing is drawn over a blanked part.
     #[test]
-    fn steps_never_overlap_and_stop_when_asked() {
-        let clock = Manual::default();
-        let stop = AtomicBool::new(false);
-        let beat = Duration::from_millis(20);
-        let mut starts = Vec::new();
-        let tick = || {
-            starts.push(clock.elapsed());
-            clock.sleep(Duration::from_millis(5)); // the step's own time
-            if starts.len() == 4 {
-                stop.store(true, Ordering::SeqCst); // off, during a step
-            }
-            Some(())
+    fn the_patch_is_what_render_changed_and_the_rest_is_see_through() {
+        let img = frame(W, H, &[LINE]);
+        let found = Mutex::new(Found::default());
+        let region = Rect::new(36, 36, 210, 30);
+        found.lock().unwrap().put(
+            region,
+            vec![to_line(tb("Open the gate", LINE), W, H)],
+            Vec::new(),
+            true,
+        );
+        let mut p = Paint {
+            found: &found,
+            rtl: false,
+            blanked: &[],
         };
-        pump(&clock, &stop, beat, tick, |()| true);
-        assert_eq!(
-            starts,
-            [0, 20, 40, 60].map(Duration::from_millis),
-            "paced; the running step ends it"
-        );
-
-        // the layer went away: the loop ends at the next result
-        let stop = AtomicBool::new(false);
-        let mut sent = 0;
-        pump(
-            &clock,
-            &stop,
-            Duration::ZERO,
-            || Some(()),
-            |()| {
-                sent += 1;
-                sent < 3
-            },
-        );
-        assert_eq!(sent, 3);
+        let (at_, rgba) = p.patch(&at(&img), region, "Ouvre la porte").unwrap();
+        assert_eq!(rgba.len() as u64, at_.area() * 4);
+        let clear = rgba.as_chunks::<4>().0.iter().filter(|p| p[3] == 0).count();
+        assert!(clear > 0, "unchanged pixels are see-through");
+        assert!(clear < rgba.len() / 4, "and the redraw is not");
+        // over a blanked part: nothing
+        p.blanked = &[[0, 0, 60, 60]];
+        assert!(p.patch(&at(&img), region, "Ouvre la porte").is_none());
     }
 
-    /// #56: steps start on a fixed beat; one that runs over skips the beats
-    /// it missed (the next waits for the next beat, never back to back).
+    /// The translator sends one block and gets its translation (the cache
+    /// answers the second time).
     #[test]
-    fn a_slow_step_skips_beats_instead_of_piling_up() {
-        let clock = Manual::default();
-        let beat = Duration::from_millis(40);
-        let stop = AtomicBool::new(false);
-        let mut starts = Vec::new();
-        let tick = || {
-            starts.push(clock.elapsed());
-            if starts.len() == 1 {
-                clock.sleep(beat * 3 / 2); // busy until 60 ms, past beat 1
-            }
-            if starts.len() == 4 {
-                stop.store(true, Ordering::SeqCst);
-            }
-            Some(())
+    fn one_block_is_translated_through_the_cache() {
+        let fake = Fake::new(|_, _, _| Vec::new());
+        let cache = Cache::new(8);
+        let mut t = Translate {
+            deps: &fake,
+            cache: &cache,
+            target: "ar",
         };
-        pump(&clock, &stop, beat, tick, |()| true);
-        // the step ended at 60 ms: beat 1 (40 ms) is skipped, the next is at 80 ms
-        assert_eq!(starts, [0, 80, 120, 160].map(Duration::from_millis));
+        assert_eq!(t.translate("Open the gate").unwrap(), "ترجمة Open the gate");
+        assert_eq!(t.translate("Open the gate").unwrap(), "ترجمة Open the gate");
+        assert_eq!(fake.ai_calls.borrow().len(), 1);
     }
 
     /// #56: a locked (or switched, or dark) session captures nothing; the
-    /// layer clears once as it goes away, and steps run again once back.
+    /// layer clears once as it goes away, and frames are read again once back.
     #[test]
     fn live_stops_while_the_session_is_away_and_resumes_after() {
-        let (mut was, mut steps) = (false, Live::new());
-        assert_eq!(away_gate(false, &mut was, &mut steps), None, "steps run");
-        assert_eq!(
-            away_gate(true, &mut was, &mut steps),
-            Some(true),
-            "the layer clears as it goes"
-        );
+        let mut was = false;
+        assert_eq!(away_gate(false, &mut was), None, "frames are read");
+        assert_eq!(away_gate(true, &mut was), Some(true), "the layer clears");
         for _ in 0..3 {
-            assert_eq!(
-                away_gate(true, &mut was, &mut steps),
-                Some(false),
-                "nothing captured, nothing sent"
-            );
+            assert_eq!(away_gate(true, &mut was), Some(false), "nothing captured");
         }
-        assert_eq!(away_gate(false, &mut was, &mut steps), None, "resumed");
+        assert_eq!(away_gate(false, &mut was), None, "resumed");
     }
 
     #[test]
@@ -784,5 +852,217 @@ mod tests {
         assert!(report_once(&mut last, "HTTP 429".into()).is_some());
         assert!(report_once(&mut last, "HTTP 429".into()).is_none());
         assert!(report_once(&mut last, "HTTP 503".into()).is_some());
+    }
+
+    /// Replays a harness clip (`OC_CLIP=<clips>/<name>`: its .mp4 and .truth.json, from the internal
+    /// live-test harness) through the whole host path on the decoded video, as the Windows VM shows it
+    /// (1280x720, 30 fps): real OCR (the models in the data dir), a translator that reverses the line;
+    /// each job takes its own measured time of clip time (one at a time, translations first), so the
+    /// numbers are the core's on real frames: text shown -> drawn, patches left after their text
+    /// changed, redraws of unchanged text. Run:
+    /// `OC_CLIP=.../talk XDG_DATA_HOME=... cargo test --release replay_a_harness_clip -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn replay_a_harness_clip() {
+        use crate::features::ask_ai::AiError;
+        use crate::features::text_reading::{Engine, OcrError, Read as R, models_dir};
+        use std::time::{Duration, Instant};
+        struct Real(std::sync::Mutex<Engine>);
+        impl Deps for Real {
+            fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
+                self.0.lock().unwrap().recognize(rgba, w, h, R::One(0))
+            }
+            fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+                Ok(texts.iter().map(|t| t.chars().rev().collect()).collect())
+            }
+        }
+        #[derive(Default)]
+        struct Log(Vec<(u32, bool, u64, Rect)>, u32);
+        impl crate::live_core::Layer for Log {
+            fn show(&mut self, id: u64, at: Rect, _: &[u8]) {
+                self.0.push((self.1, true, id, at));
+            }
+            fn alpha(&mut self, _: u64, _: f32) {}
+            fn hide(&mut self, id: u64) {
+                self.0.push((self.1, false, id, Rect::default()));
+            }
+            fn clear(&mut self) {}
+        }
+        let Some(clip) = std::env::var_os("OC_CLIP") else {
+            return;
+        };
+        let clip = std::path::PathBuf::from(clip);
+        let truth: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(clip.with_extension("truth.json")).unwrap())
+                .unwrap();
+        let (w, h, k) = (1280u32, 720u32, 1280.0 / 1920.0);
+        let deps = Real(std::sync::Mutex::new(Engine::load(&models_dir()).unwrap()));
+        let cache = Cache::new(512);
+        let mut s = InStep::new(&deps, &cache, "fr");
+        let mut ffmpeg = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-i"])
+            .arg(clip.with_extension("mp4"))
+            .args([
+                "-vf",
+                "fps=30,scale=1280:720",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut out = ffmpeg.stdout.take().unwrap();
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        let mut layer = Log::default();
+        // jobs: (ready at frame, done); the worker is free at frame `free`
+        let (mut queue, mut running): (
+            Vec<crate::live_core::Job>,
+            Vec<(u32, Vec<crate::live_core::Done>)>,
+        ) = (Vec::new(), Vec::new());
+        let (mut free, mut busy) = (0u32, Duration::ZERO);
+        let rank = |j: &crate::live_core::Job| match j {
+            crate::live_core::Job::Translate { .. } => 0,
+            crate::live_core::Job::Read(_) => 1,
+            crate::live_core::Job::Detect { .. } => 2,
+        };
+        let mut n = 0u32;
+        while std::io::Read::read_exact(&mut out, &mut rgba).is_ok() {
+            layer.1 = n;
+            let f = Frame {
+                rgba: &rgba,
+                width: w,
+                height: h,
+                at: Duration::from_micros(33_333 * n as u64),
+            };
+            let mut paint = Paint {
+                found: &s.found,
+                rtl: false,
+                blanked: &[],
+            };
+            // finished jobs first, against this newest frame
+            let (done, left): (Vec<_>, Vec<_>) = running.drain(..).partition(|(at, _)| *at <= n);
+            running = left;
+            for (_, d) in done {
+                for d in d {
+                    queue.extend(s.live.complete(d, &f, &mut paint, &mut layer));
+                }
+            }
+            queue.extend(s.live.on_frame(&f, &mut paint, &mut layer));
+            while free <= n && !queue.is_empty() {
+                let i = (0..queue.len()).min_by_key(|&i| rank(&queue[i])).unwrap();
+                let job = queue.remove(i);
+                let errors = Errors::default();
+                let t = Instant::now();
+                let done = job.run(
+                    &f,
+                    &mut Detect {
+                        deps: &deps,
+                        found: &s.found,
+                        errors: &errors,
+                    },
+                    &mut Read {
+                        deps: &deps,
+                        found: &s.found,
+                        errors: &errors,
+                        size: (w, h),
+                    },
+                    &mut Translate {
+                        deps: &deps,
+                        cache: &cache,
+                        target: "fr",
+                    },
+                );
+                let took = t.elapsed();
+                busy += took;
+                free = n + (took.as_micros() as u32).div_ceil(33_333).max(1);
+                running.push((free, done));
+            }
+            n += 1;
+        }
+        let _ = ffmpeg.wait();
+        // per held event (clip frames at 60 fps; ours at 30)
+        let (mut lat, mut stale, mut redraws, mut flicker, mut drawn, mut held) =
+            (Vec::new(), 0, 0, 0, 0, 0);
+        let events = truth["events"].as_array().unwrap();
+        for e in events {
+            let goes_on = |x: &&serde_json::Value| {
+                x["off"].as_u64() == e["on"].as_u64()
+                    && x["text"] == e["text"]
+                    && x["kind"] == e["kind"]
+            };
+            // (a continued line is counted with its start)
+            if !e["held"].as_bool().unwrap() || events.iter().any(|x| goes_on(&x)) {
+                continue;
+            }
+            held += 1;
+            let b: Vec<f64> = e["box"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let r = Rect::new(
+                (b[0] * k) as u32,
+                (b[1] * k) as u32,
+                (b[2] * k) as u32,
+                (b[3] * k) as u32,
+            );
+            let (on, off) = (
+                e["on"].as_u64().unwrap() as u32 / 2,
+                e["off"].as_u64().unwrap() as u32 / 2,
+            );
+            // the same text again in the same place right after: not a change
+            let mut end = e["off"].as_u64().unwrap();
+            while let Some(next) = (events.iter()).find(|x| {
+                x["on"].as_u64() == Some(end) && x["text"] == e["text"] && x["kind"] == e["kind"]
+            }) {
+                end = next["off"].as_u64().unwrap();
+            }
+            let still = end as u32 / 2;
+            let mine: Vec<_> = (layer.0.iter())
+                .filter(|(f, show, _, at)| {
+                    *show && (on..off).contains(f) && 3 * at.overlap(&r) > r.area()
+                })
+                .collect();
+            let Some(first) = mine.first() else { continue };
+            drawn += 1;
+            lat.push((first.0 - on) as f64 * 33.3);
+            redraws += mine.len() - 1;
+            for (_, _, id, _) in &mine {
+                let gone = (layer.0.iter())
+                    .find(|(_, show, i, _)| !show && i == id)
+                    .map_or(n, |g| g.0);
+                if gone < off {
+                    flicker += 1;
+                }
+                if gone > still + 1 && still < n {
+                    stale += 1;
+                    eprintln!("stale: {:?} gone at {gone}, text off at {still}", e["text"]);
+                }
+            }
+        }
+        eprintln!(
+            "frames; held: reads reused / OCR'd, patches made / declined: {:?}",
+            s.found.lock().unwrap().counts
+        );
+        lat.sort_by(f64::total_cmp);
+        let p = |q: f64| {
+            lat.get(((lat.len() as f64 - 1.0) * q).round() as usize)
+                .copied()
+        };
+        eprintln!(
+            "{}: {n} frames; held texts drawn {drawn} of {held}; shown -> drawn median {:?} ms, p95 {:?} ms; \
+             stale > 1 frame {stale}; redraws of unchanged {redraws}; hidden while unchanged {flicker}; \
+             OCR / MT busy {:.0} % of clip time; {} shows, {} hides",
+            clip.display(),
+            p(0.5),
+            p(0.95),
+            busy.as_secs_f64() * 100.0 / (n as f64 / 30.0),
+            layer.0.iter().filter(|e| e.1).count(),
+            layer.0.iter().filter(|e| !e.1).count(),
+        );
     }
 }

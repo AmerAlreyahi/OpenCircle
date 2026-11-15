@@ -64,6 +64,18 @@ pub fn sample(f: &Frame, rect: Rect, s: u32, ring: u32) -> (Vec<u8>, Vec<u8>) {
 /// over `change`, or two cells or more moved over twice that (one new letter in a long line moves few cells
 /// a lot: the mean alone would miss it).
 pub fn changed(now: &[u8], a: &[u8], b: Option<(&[u8], f32)>, change: f32) -> bool {
+    changed_by(now, a, b, change, (2.0 * change, 2))
+}
+
+/// [`changed`] with its "few cells moved a lot" rule as (over, count): `count` cells or more moved
+/// more than `over`.
+pub fn changed_by(
+    now: &[u8],
+    a: &[u8],
+    b: Option<(&[u8], f32)>,
+    change: f32,
+    (over, count): (f32, u32),
+) -> bool {
     if now.is_empty() {
         return false;
     }
@@ -75,9 +87,9 @@ pub fn changed(now: &[u8], a: &[u8], b: Option<(&[u8], f32)>, change: f32) -> bo
         };
         let d = (now[i] as f32 - want).abs();
         sum += d;
-        strong += (d > 2.0 * change) as u32;
+        strong += (d > over) as u32;
     }
-    sum / now.len() as f32 > change || strong >= 2
+    sum / now.len() as f32 > change || strong >= count
 }
 
 /// The share (0..1) of `now`'s cells that moved more than `change` from `a` blended toward `b` by `t`.

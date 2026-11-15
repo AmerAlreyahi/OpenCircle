@@ -1,6 +1,7 @@
 //! OS plumbing with no UI: opening links and files, detached process start,
 //! the desktop session's kind, the user's language.
 
+pub mod cpu;
 pub mod locale;
 pub mod mem;
 pub mod open;
@@ -32,6 +33,11 @@ pub fn test_hook(name: &str) -> Option<OsString> {
     .then(|| std::env::var_os(name))
     .flatten()
 }
+
+/// Test hook: our floating windows (and live translate's layer and controller)
+/// show in screen captures (VM screenshots and recordings of them over the
+/// desktop; they then also show in the next capture's frozen frame).
+pub(crate) const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 
 fn hooks_on(debug_build: bool, opt_in: Option<OsString>) -> bool {
     debug_build || opt_in.is_some_and(|v| v == "1")

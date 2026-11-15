@@ -5,6 +5,7 @@
 //! `screencast.rs` where GNOME's screenshot portal would ask every time),
 //! `win.rs` (Windows, xcap). Scrolling capture: `stitch.rs` + `scroll.rs`.
 pub mod cursor;
+pub mod frames;
 #[cfg(target_os = "linux")]
 pub mod portal;
 #[cfg(target_os = "linux")]

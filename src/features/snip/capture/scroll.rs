@@ -12,8 +12,8 @@
 //! rotated one, a remote session) or stops, it grabs the area alone with GDI
 //! (`BitBlt`), ~15 times a second and only while the user is giving input or
 //! the area still moves (`GetLastInputInfo`). Our own windows are kept out
-//! with `hide_from_capture` either way. X11 grabs the monitor and cuts the
-//! area (no pacing). Wayland has no silent grab: there the frames come from a
+//! with `hide_from_capture` either way. X11 grabs the area through shared
+//! memory (no pacing). Wayland has no silent grab: there the frames come from a
 //! ScreenCast stream of the area's monitor (`screencast::Cast`, the restore
 //! token: no dialog once allowed), open only while the capture runs; no pacing
 //! (no input injection there). Without that portal or GStreamer's PipeWire
@@ -25,14 +25,12 @@ use std::time::{Duration, Instant};
 
 use super::stitch::{Push, Stitcher};
 use crate::shared::picture::Crop;
+use crate::shared::platform::capture::frames::Frames;
 
 /// Time between two GDI grabs (~15 fps).
 const PERIOD: Duration = Duration::from_millis(66);
-/// Longest wait for a duplicated frame (the stop flag is read in between).
-#[cfg(windows)]
-const FRAME_WAIT_MS: u32 = 100;
-#[cfg(target_os = "linux")]
-const CAST_WAIT: Duration = Duration::from_millis(100);
+/// Longest wait for a duplicated / streamed frame (the stop flag is read in between).
+const FRAME_WAIT: Duration = Duration::from_millis(100);
 /// Grabs go on this long after the last input or the last change in the area
 /// (a smooth scroll finishing, a page loading under it).
 const SETTLE: Duration = Duration::from_secs(1);
@@ -123,10 +121,10 @@ pub fn by_hand(
         .limit(max)
         .cover(cover.0, cover.1);
     let started = Instant::now();
-    let source = std::cell::RefCell::new(Source::open(region));
+    let source = std::cell::RefCell::new(Frames::open(region));
     // (unhooked when it goes, as this returns: what it held is replayed)
     let paced = super::pace::over(region);
-    let grab = || source.borrow_mut().next(region);
+    let grab = || source.borrow_mut().next(FRAME_WAIT);
     // duplication waits for frames itself: no input check, no period
     let idle = || match source.borrow().fast() {
         true => Duration::ZERO,
@@ -177,110 +175,6 @@ pub fn by_hand(
         height,
         rgba,
     })
-}
-
-/// Where frames come from: a Desktop Duplication (Windows) while it works,
-/// a screen cast (Wayland), else a grab of the area each time.
-struct Source {
-    #[cfg(windows)]
-    dup: Option<crate::shared::platform::capture::win::Duplication>,
-    #[cfg(target_os = "linux")]
-    cast: Option<crate::shared::platform::capture::screencast::Cast>,
-    /// Why there is no duplication (it never started, or stopped).
-    why: Option<String>,
-    first: bool,
-}
-
-impl Source {
-    fn open(region: (i32, i32, u32, u32)) -> Source {
-        #[cfg(windows)]
-        let (dup, why) = match crate::shared::platform::capture::win::Duplication::start(region) {
-            Ok(dup) => (Some(dup), None),
-            Err(e) => (None, Some(e)),
-        };
-        #[cfg(target_os = "linux")]
-        let (cast, why) = match crate::shared::platform::capture::wayland_session() {
-            true => match crate::shared::platform::capture::screencast::Cast::start(region) {
-                Ok(cast) => (Some(cast), None),
-                Err(e) => (None, Some(e)),
-            },
-            false => (None, None),
-        };
-        #[cfg(not(any(windows, target_os = "linux")))]
-        let (_, why) = (region, None);
-        Source {
-            #[cfg(windows)]
-            dup,
-            #[cfg(target_os = "linux")]
-            cast,
-            why,
-            first: true,
-        }
-    }
-
-    /// Frames come as the screen shows them (no input check, no period).
-    fn fast(&self) -> bool {
-        #[cfg(windows)]
-        return self.dup.is_some();
-        #[cfg(target_os = "linux")]
-        return self.cast.is_some();
-        #[cfg(not(any(windows, target_os = "linux")))]
-        false
-    }
-
-    /// The next frame; none when nothing new was shown. The first is a grab
-    /// (duplication only says what changes).
-    fn next(&mut self, region: (i32, i32, u32, u32)) -> io::Result<Option<Vec<u8>>> {
-        let first = std::mem::take(&mut self.first);
-        #[cfg(windows)]
-        if !first && let Some(dup) = &mut self.dup {
-            match dup.next(FRAME_WAIT_MS) {
-                Ok(frame) => return Ok(frame),
-                Err(e) => {
-                    crate::log!("[opencircle] long capture: screen frames stopped ({e}); grabs");
-                    (self.why, self.dup) = (Some(e), None);
-                }
-            }
-        }
-        let _ = first;
-        #[cfg(target_os = "linux")]
-        if let Some(cast) = &mut self.cast {
-            return cast.next(CAST_WAIT).map_err(io::Error::other);
-        }
-        #[cfg(target_os = "linux")]
-        if crate::shared::platform::capture::wayland_session() {
-            // (a screenshot each time would be a portal session each, or a dialog)
-            let why = self.why.as_deref().unwrap_or("no screen cast");
-            return Err(io::Error::other(why.to_string()));
-        }
-        grab_area(region).map(Some)
-    }
-
-    /// For the log line.
-    fn describe(&self) -> String {
-        #[cfg(windows)]
-        if let Some(dup) = &self.dup {
-            return format!("screen frames ({} read)", dup.frames);
-        }
-        #[cfg(target_os = "linux")]
-        if let Some(cast) = &self.cast {
-            return format!("screen cast ({} frames read)", cast.frames);
-        }
-        match &self.why {
-            Some(why) => format!("grabs (no screen frames: {why})"),
-            None => "grabs".into(),
-        }
-    }
-
-    /// Ms a frame took to read: the copy alone for duplicated frames (the
-    /// loop's time includes waiting for them).
-    fn ms_each(&self, total: Duration, n: u32) -> f64 {
-        #[cfg(windows)]
-        if let Some(dup) = &self.dup {
-            return dup.copy.as_secs_f64() * 1000.0 / f64::from(dup.frames.max(1));
-        }
-        total.as_secs_f64() * 1000.0 / f64::from(n.max(1))
-    }
 }
 
 /// How long the grabs and the stitching took (the log line).
@@ -439,39 +333,6 @@ fn dump_dir(value: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
     value
         .map(std::path::PathBuf::from)
         .filter(|p| p.is_absolute())
-}
-
-/// The area alone, from the screen as shown (GDI; windows that keep out of
-/// captures, ours among them, are not in it), RGBA.
-#[cfg(windows)]
-fn grab_area(region: (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
-    crate::shared::platform::capture::win::grab_rect(region)
-        .map_err(|_| io::Error::other("the area could not be grabbed"))
-}
-
-/// The area cut out of its monitor's capture.
-#[cfg(not(windows))]
-fn grab_area(region: (i32, i32, u32, u32)) -> io::Result<Vec<u8>> {
-    let (x, y, w, h) = region;
-    let frame =
-        crate::shared::platform::capture::monitor_of(Some(region)).map_err(io::Error::other)?;
-    cut(&frame.rgba, frame.width, (x - frame.x, y - frame.y), (w, h))
-        .ok_or_else(|| io::Error::other("the area left the monitor"))
-}
-
-/// `size` pixels at `at` out of a `width`-wide RGBA frame; `None` if not inside it.
-#[cfg(any(not(windows), test))]
-fn cut(rgba: &[u8], width: u32, at: (i32, i32), size: (u32, u32)) -> Option<Vec<u8>> {
-    let (x, y) = (u32::try_from(at.0).ok()?, u32::try_from(at.1).ok()?);
-    let height = rgba.len() as u32 / 4 / width.max(1);
-    if x + size.0 > width || y + size.1 > height {
-        return None;
-    }
-    let row = |r: u32| {
-        let start = (((y + r) * width + x) * 4) as usize;
-        &rgba[start..start + size.0 as usize * 4]
-    };
-    Some((0..size.1).flat_map(row).copied().collect())
 }
 
 #[cfg(test)]
@@ -824,19 +685,5 @@ mod tests {
         );
         assert_eq!(err.unwrap_err().to_string(), "gone");
         assert_eq!(st.height() as usize, rig.truth(200).h);
-    }
-
-    #[test]
-    fn cut_takes_an_area_inside_the_frame_only() {
-        // 3x2 frame, pixel (x, y) = [x, y, 0, 255].
-        let frame: Vec<u8> = (0..2u8)
-            .flat_map(|y| (0..3u8).flat_map(move |x| [x, y, 0, 255]))
-            .collect();
-        assert_eq!(
-            cut(&frame, 3, (1, 1), (2, 1)),
-            Some(vec![1, 1, 0, 255, 2, 1, 0, 255])
-        );
-        assert_eq!(cut(&frame, 3, (2, 0), (2, 1)), None);
-        assert_eq!(cut(&frame, 3, (-1, 0), (1, 1)), None);
     }
 }

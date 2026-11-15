@@ -188,6 +188,7 @@ impl Helper {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
+        LAST_PID.store(child.id(), Ordering::Relaxed);
         match (child.stdin.take(), child.stdout.take()) {
             (Some(stdin), Some(stdout)) => Ok(Helper {
                 child,
@@ -298,6 +299,14 @@ impl Drop for Helper {
 }
 
 static HOLDS: AtomicUsize = AtomicUsize::new(0);
+/// The newest helper process started (0: none yet).
+static LAST_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The newest helper process's id (it may have ended since): live
+/// translate leaves its CPU time out of "the PC is busy".
+pub fn helper_pid() -> Option<u32> {
+    Some(LAST_PID.load(Ordering::Relaxed)).filter(|&p| p != 0)
+}
 static SHARED: Mutex<Option<Session>> = Mutex::new(None);
 /// Unheld calls in flight (each its own child).
 static ALONE: AtomicUsize = AtomicUsize::new(0);
@@ -627,24 +636,30 @@ mod tests {
         }
     }
 
-    /// A fresh live session: the first frame, then `changed`; both timed.
+    /// A fresh live session: the first frame until its patches are up, then
+    /// `changed`; both timed.
     #[cfg(target_os = "linux")]
     fn live_steps(
         deps: &impl crate::features::translate::pipeline::Deps,
         frame: &[u8],
         changed: &[u8],
     ) -> String {
-        let mut live = crate::features::live_translate::live::Live::new();
+        use crate::features::live_translate::live::{Calls, InStep};
         let cache = crate::features::translate::pipeline::Cache::new(512);
+        let (mut s, mut layer) = (InStep::new(deps, &cache, "ar"), Calls::default());
         let t = Instant::now();
-        live.step(frame, 1920, 1080, "ar", &cache, deps).unwrap();
-        let first = t.elapsed();
+        for _ in 0..4 {
+            s.frame(frame, (1920, 1080), &mut layer);
+        }
+        let (first, shown) = (t.elapsed(), layer.0.len());
         let t = Instant::now();
-        let s = live.step(changed, 1920, 1080, "ar", &cache, deps);
-        let (step, s) = (t.elapsed(), s.unwrap().expect("two new lines"));
+        for _ in 0..4 {
+            s.frame(changed, (1920, 1080), &mut layer);
+        }
         format!(
-            "first frame {first:.0?}; step with 2 new lines {step:.0?} (ocr {:.0?}, translate {:.0?}, render {:.0?})",
-            s.ocr, s.translate, s.render
+            "first frames {first:.0?} ({shown} patches); the frames with 2 new lines {:.0?} ({} more)",
+            t.elapsed(),
+            layer.0.len() - shown
         )
     }
 

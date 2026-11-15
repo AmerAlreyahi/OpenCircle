@@ -26,6 +26,8 @@ use crate::shared::kit::tooltip::tip;
 
 /// The OptimaMT models (the lighter decoders) on Hugging Face.
 pub const OPTIMA_MT: &str = "https://huggingface.co/OptimaMT";
+/// Labs Live's "Live refresh" row (hidden: see where it is drawn).
+const LIVE_REFRESH_ROW: bool = false;
 
 /// The model row's state: the installed pairs and how many still have the
 /// v1 decoder (with the bytes their update fetches), and the update.
@@ -230,7 +232,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     ));
     rows = rows.push(super::glossaries::row(state));
     // Live translate is a Labs feature (until Live translation): its row only while on.
-    if state.draft.labs.has(Feature::Live) {
+    // Hidden (hide, don't delete): live translate reads every frame since 0.3.0,
+    // so the refresh beat (`translate.live_interval_ms`, still read) does nothing.
+    if LIVE_REFRESH_ROW && state.draft.labs.has(Feature::Live) {
         let problem = issue(&state.problems, "translate.live_interval_ms");
         let field =
             input("1500", &state.interval, true, problem.is_some()).on_input(Message::LiveInterval);

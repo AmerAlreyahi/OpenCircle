@@ -117,6 +117,14 @@ pub struct Config {
     pub ring: f32,
     /// The ring's width in frame pixels.
     pub ring_px: u32,
+    /// A read region's ring moved at all (more than this share of its cells, still within `ring`):
+    /// its box is see-through over a moving scene, and that seeps into the text area. A few cells
+    /// moving a lot then means no new text unless `seep_cells` or more moved more than 4x `change`
+    /// (measured on the harness' talk clip decoded at 720p: video noise through the subtitle box
+    /// moved 2-8 cells over 2x `change` on unchanged lines, 0-5 over 4x; a new letter moves several
+    /// over 4x with the ring still).
+    pub seep: f32,
+    pub seep_cells: u32,
     /// Settled = this many frames in a row without a change.
     pub settle_frames: u8,
     /// Read anyway after this long of changing (a patch still needs the text unchanged since the read).
@@ -139,6 +147,8 @@ impl Default for Config {
             change: 10.0,
             ring: 0.25,
             ring_px: 8,
+            seep: 0.02,
+            seep_cells: 6,
             settle_frames: 3,
             settle_max: Duration::from_millis(400),
             fade_in: Duration::from_millis(120),
@@ -592,13 +602,19 @@ impl Live {
     fn against_reference(&self, i: usize, sig: &[u8], ring: &[u8]) -> (bool, f32) {
         let r = &self.regions[i];
         let change = self.cfg.change;
-        let mut changed = pixels::changed(sig, &r.reference, None, change);
         let mut drift = pixels::moved(ring, &r.ring_ref, None, change);
+        // (with the ring moving, a few strong cells are the scene through the box)
+        let strong = match drift > self.cfg.seep {
+            true => (4.0 * change, self.cfg.seep_cells),
+            false => (2.0 * change, 2),
+        };
+        let mut changed = pixels::changed_by(sig, &r.reference, None, change, strong);
         if r.patch.is_some() && (changed || drift > self.cfg.ring) {
             let mut alphas = vec![1.0, r.alpha, r.prev_alpha];
             alphas.dedup();
             for t in alphas {
-                changed &= pixels::changed(sig, &r.reference, Some((&r.ours.0, t)), change);
+                changed &=
+                    pixels::changed_by(sig, &r.reference, Some((&r.ours.0, t)), change, strong);
                 drift = drift.min(pixels::moved(
                     ring,
                     &r.ring_ref,
@@ -684,16 +700,14 @@ impl Live {
             height: at.h,
             at: frame.at,
         };
-        pixels::walk(r.rect, s, ringc, self.size, |cx, cy, in_ring| {
-            let (px, py) = (cx * s + s / 2, cy * s + s / 2);
-            let inside = (at.x..at.right()).contains(&px) && (at.y..at.bottom()).contains(&py);
-            let v = if inside {
-                patch_cell(&patch, at, s, cx, cy)
-            } else if in_ring {
+        let size = self.size;
+        pixels::walk(r.rect, s, ringc, size, |cx, cy, in_ring| {
+            let read = if in_ring {
                 r.ring_ref[ri]
             } else {
                 r.reference[ti]
             };
+            let v = patch_cell(&patch, at, s, (cx, cy), size, read);
             if in_ring {
                 ring.push(v);
                 ri += 1;
@@ -797,22 +811,38 @@ impl Live {
     }
 }
 
-/// One cell of a patch image (`at` = where the patch sits in the frame).
-fn patch_cell(patch: &Frame, at: Rect, s: u32, cx: u32, cy: u32) -> u8 {
-    let (x0, y0) = ((cx * s).max(at.x) - at.x, (cy * s).max(at.y) - at.y);
-    let (x1, y1) = (
-        ((cx + 1) * s).min(at.right()) - at.x,
-        ((cy + 1) * s).min(at.bottom()) - at.y,
-    );
-    let (mut sum, mut n) = (0u32, 0u32);
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let p = &patch.rgba[((y * at.w + x) * 4) as usize..][..4];
-            sum += (77 * p[0] as u32 + 150 * p[1] as u32 + 29 * p[2] as u32) >> 8;
+/// Cell (cx, cy) as a capture with the patch in it shows it (`at` = where the patch sits in the
+/// frame): sampled exactly as `pixels::cell` samples a frame (the same pixels: a full average differs
+/// from the sampled one by tens on fine glyphs, so the watch took our own patch for new text), each
+/// sample under the patch from the patch, the others as the cell looked when read (`read`).
+fn patch_cell(
+    patch: &Frame,
+    at: Rect,
+    s: u32,
+    (cx, cy): (u32, u32),
+    (w, h): (u32, u32),
+    read: u8,
+) -> u8 {
+    let step = if s >= 4 { 2 } else { 1 };
+    let (x0, y0) = (cx * s, cy * s);
+    let (x1, y1) = ((x0 + s).min(w), (y0 + s).min(h));
+    let (mut sum, mut n, mut ours) = (0u32, 0u32, 0u32);
+    for y in (y0..y1).step_by(step) {
+        for x in (x0..x1).step_by(step) {
             n += 1;
+            if (at.x..at.right()).contains(&x) && (at.y..at.bottom()).contains(&y) {
+                let p = &patch.rgba[(((y - at.y) * at.w + (x - at.x)) * 4) as usize..][..4];
+                sum += 77 * p[0] as u32 + 150 * p[1] as u32 + 29 * p[2] as u32;
+                ours += 1;
+            } else {
+                sum += (read as u32) << 8;
+            }
         }
     }
-    (sum / n.max(1)) as u8
+    if ours == 0 {
+        return read;
+    }
+    ((sum / n.max(1)) >> 8) as u8
 }
 
 fn crop(f: &Frame, r: Rect) -> Vec<u8> {

@@ -1,12 +1,15 @@
 //! Live translate (DESIGN.md "Full-screen translate", Alt+Shift+L): a
 //! borderless, monitor-sized, always-on-top window made click-through (and,
 //! on Windows, invisible to capture) by `crate::features::live_translate::prepare_layer`. It shows
-//! only the translated patches; everything else is see-through. A thread at
-//! below-normal priority captures the monitor every 1.5 s (by default) and runs
-//! `translate::live::Live`, one step at a time, and sends what changed.
+//! only the translated patches; everything else is see-through. A frame thread
+//! feeds every frame the monitor shows to the live core (`crate::live_core`:
+//! a changed patch goes in that frame), a work thread runs its slow jobs (OCR,
+//! translation), both below normal priority; the layer gets each patch once
+//! (`Msg::Show`) and its removal (`Msg::Hide`).
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
@@ -14,7 +17,7 @@ use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
 
 use crate::app::{background::background, windows};
 use crate::features::circle::screens::edge as border;
-use crate::features::live_translate::live::{self as live_steps, Live as Steps, Patch};
+use crate::features::live_translate::live::{self as engines, Errors, Found};
 use crate::features::live_translate::screens::live::controller::{
     self as live_controller, Controller, Out,
 };
@@ -22,21 +25,19 @@ use crate::features::live_translate::{self, LayerError};
 use crate::features::text_reading;
 use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::Cache;
+use crate::live_core::{self as core, Done, Job, Rect};
 use crate::shared::config;
-use crate::shared::platform::capture::{self, window_rect};
+use crate::shared::platform::capture::{self, frames::Frames, window_rect};
 use crate::shared::theme;
 
-/// How often live mode re-captures (Settings > Translate > Live refresh;
-/// 1.5 s by default): steps start on this fixed beat, and a slow step skips
-/// the beats it ran over (`translate::live::pump`).
-fn interval() -> Duration {
-    Duration::from_millis(
-        crate::shared::config::current()
-            .translate
-            .live_interval_ms
-            .into(),
-    )
-}
+/// The longest wait for a new frame: a still screen is fed again this often
+/// (text that appeared and stays still settles), and the stop flag is read.
+const FRAME_WAIT: Duration = Duration::from_millis(16);
+/// Our own UI's place, the focused window's page and the glossary are looked
+/// at again this often.
+const LOOK_EVERY: Duration = Duration::from_millis(500);
+/// The session's numbers go to the log this often (the harness reads them).
+const STATS_EVERY: Duration = Duration::from_secs(10);
 /// The first live run's note, shown once.
 const NOTE_TIME: Duration = Duration::from_secs(6);
 /// Test hook: after the first patches (or error), the layer is saved here (PNG).
@@ -66,8 +67,11 @@ pub struct Shown {
 pub enum Msg {
     Monitor(Result<Monitor, String>),
     Prepared(Result<live_translate::Layer, LayerError>),
-    /// Everything the layer shows now.
-    Patches(Vec<Shown>),
+    /// A patch to show (drawn once; it stays until `Hide`).
+    Show(u64, Shown),
+    Hide(u64),
+    /// Every patch down.
+    Clear,
     /// The step failed (shown in the pill; the next step retries).
     Failed(String),
     NoteDone,
@@ -121,7 +125,7 @@ pub struct Live {
     mask: Arc<Mutex<Option<[u32; 4]>>>,
     note: bool,
     error: Option<String>,
-    patches: Vec<Shown>,
+    patches: Vec<(u64, Shown)>,
     cache: Arc<Cache>,
     /// Tells the step thread to end; set on `stop`.
     stop: Arc<AtomicBool>,
@@ -430,17 +434,20 @@ impl Live {
                 self.update_mask();
             }
             Msg::Moved(..) => {}
-            // A step that was running when Pause was pressed.
-            Msg::Patches(_) if self.ctl.paused => {}
+            // A patch from just before Pause was pressed.
+            Msg::Show(..) if self.ctl.paused => {}
             Msg::Prepared(Err(e)) => {
                 crate::log!("[opencircle] {e}; translating once instead");
                 return Outcome::OneShot;
             }
-            Msg::Patches(patches) => {
-                self.patches = patches;
+            Msg::Show(id, patch) => {
+                self.patches.retain(|(p, _)| *p != id);
+                self.patches.push((id, patch));
                 self.error = None;
                 return self.test_shot();
             }
+            Msg::Hide(id) => self.patches.retain(|(p, _)| *p != id),
+            Msg::Clear => self.patches.clear(),
             Msg::Failed(e) => {
                 self.error = Some(e);
                 return self.test_shot();
@@ -504,126 +511,20 @@ impl Live {
         Task::batch(ours.map(window::close)) // at once: its state goes now
     }
 
-    /// Captures and steps on a thread until `stop` (or the layer is dropped).
+    /// The live session on its threads until `stop` (or the layer is dropped).
     fn run(&mut self, monitor: Monitor) -> Task<Msg> {
         self.stepping = true;
-        let (stop, cache) = (self.stop.clone(), self.cache.clone());
-        let (paused, chosen, mask) = (self.paused.clone(), self.langs.clone(), self.mask.clone());
+        let ui = Shared {
+            stop: self.stop.clone(),
+            paused: self.paused.clone(),
+            chosen: self.langs.clone(),
+            mask: self.mask.clone(),
+        };
+        let cache = self.cache.clone();
         let (task, handle) = background(move |tx| {
-            // capture, OCR and translation after the game and the desktop
-            text_reading::gently_here();
-            // The languages are the controller's (they start as the config's).
-            let start = chosen.lock().map(|l| l.clone()).unwrap_or_default();
-            let deps_for = |(source, target): &(String, String)| {
-                crate::features::translate::action::deps_for(source, target).map(|(mut real, _)| {
-                    real.scale = monitor.scale;
-                    real
-                })
-            };
-            let mut deps = match deps_for(&start) {
-                Ok(deps) => deps,
-                Err(e) => {
-                    let first = e.lines().next().unwrap_or_default().to_string();
-                    let _ = tx.unbounded_send(Msg::Failed(first));
-                    return;
-                }
-            };
-            let mut steps = Steps::new();
-            let mut last_error = None;
-            let mut langs = start;
-            let mut was_away = false;
-            let tick = || {
-                if paused.load(Ordering::Relaxed) {
-                    return None;
-                }
-                if let Some(clear) = live_steps::away_gate(live_translate::away(), &mut was_away, &mut steps)
-                {
-                    return clear.then(|| Msg::Patches(Vec::new()));
-                }
-                let now = chosen.lock().map(|l| l.clone()).unwrap_or_default();
-                if now != langs {
-                    steps = Steps::new(); // another language: read everything again
-                    match deps_for(&now) {
-                        Ok(d) => deps = d,
-                        Err(e) => {
-                            let first = e.lines().next().unwrap_or_default().to_string();
-                            return report(&mut last_error, first);
-                        }
-                    }
-                    langs = now;
-                }
-                let target = &langs.1;
-                let mut frame = match capture::monitor_under_cursor() {
-                    Ok(f) => f,
-                    Err(e) => return report(&mut last_error, crate::shared::app_language::fmt(crate::shared::app_language::S::lv_capture_failed, &[&e])),
-                };
-                // ponytail: the cursor on another monitor pauses live mode;
-                // capture that monitor by its origin if people use two screens.
-                let here = (frame.x, frame.y, frame.width, frame.height);
-                if here != (monitor.x, monitor.y, monitor.width, monitor.height) {
-                    return None;
-                }
-                let (w, h) = (frame.width, frame.height);
-                // what is blanked out of the frame (black) is never shown as a patch
-                let mut blanked = border::mask(&mut frame.rgba, w, h, monitor.scale);
-                if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
-                    live_controller::mask(&mut frame.rgba, w, h, rect);
-                    blanked.push(rect);
-                }
-                // our own UI is never read (a menu, a card, a toast)
-                let own = live_translate::own_windows();
-                blanked.extend(blank_own(&mut frame.rgba, (frame.x, frame.y, w, h), &own));
-                // the foreground window's page (a full-screen game: all of
-                // it), unless the whole screen is asked for
-                let area = (!config::current().translate.whole_screen)
-                    .then(|| window_rect::region((frame.x, frame.y), (w, h), monitor.scale))
-                    .flatten()
-                    .unwrap_or([0, 0, w, h]);
-                let (cw, ch) = (area[2] - area[0], area[3] - area[1]);
-                let page = if (cw, ch) == (w, h) {
-                    frame.rgba
-                } else {
-                    (area[1]..area[3])
-                        .flat_map(|y| {
-                            let row = (y * w) as usize * 4;
-                            &frame.rgba[row + area[0] as usize * 4..row + area[2] as usize * 4]
-                        })
-                        .copied()
-                        .collect()
-                };
-                // new text under a patch: it goes now, not after the re-read
-                let hide = |left: &[Patch]| {
-                    crate::log!("[opencircle] live: stale patches hidden, {} left", left.len());
-                    let _ = tx.unbounded_send(Msg::Patches(shown(left, area, &blanked)));
-                };
-                match steps.step_hiding(&page, cw, ch, target, &cache, &deps, hide) {
-                    Ok(None) => None,
-                    Ok(Some(t)) => {
-                        last_error = None;
-                        let d = steps.drawn();
-                        crate::log!(
-                            "[opencircle] live step {cw}x{ch} at {},{}: ocr {} ms, translate {} ms, \
-                             render {} ms, total {} ms; {} patches, {} left (busy background {}, no room {})",
-                            area[0],
-                            area[1],
-                            t.ocr.as_millis(),
-                            t.translate.as_millis(),
-                            t.render.as_millis(),
-                            t.total.as_millis(),
-                            steps.patches().len(),
-                            d.busy + d.no_room,
-                            d.busy,
-                            d.no_room,
-                        );
-                        Some(Msg::Patches(shown(steps.patches(), area, &blanked)))
-                    }
-                    Err(e) => report(&mut last_error, e.to_string()),
-                }
-            };
-            live_steps::pump(&live_steps::Wall::new(), &stop, interval(), tick, |msg| tx.unbounded_send(msg).is_ok());
+            session(monitor, ui, cache, |msg| tx.unbounded_send(msg).is_ok());
             // Live off: its frames and patches are freed; give the memory
             // back (glibc keeps it: the app stayed ~80 MB, not ~30).
-            drop(steps);
             crate::shared::platform::sys::mem::trim_heap();
         })
         .abortable();
@@ -645,7 +546,7 @@ impl Live {
             1.0,
         )];
         // (Paused: `patches` is empty.)
-        for p in &self.patches {
+        for (_, p) in &self.patches {
             let [x, y, w, h] = p.bounds.map(|v| v as f32 / monitor.scale);
             let patch = image(p.image.clone())
                 .width(w)
@@ -688,32 +589,500 @@ fn blank_own(
     blanked
 }
 
-/// The step's patches (page px) as the layer shows them: moved by the
-/// page's top-left in the frame (`area`), none over a `blanked` part.
-fn shown(patches: &[Patch], area: [u32; 4], blanked: &[[u32; 4]]) -> Vec<Shown> {
-    (patches.iter())
-        .map(|p| {
-            let [px, py, pw, ph] = p.bounds;
-            ([px + area[0], py + area[1], pw, ph], p)
-        })
-        // its erase saw black there: it would draw a black box
-        .filter(|(bounds, _)| !over_blanked(*bounds, blanked))
-        .map(|(bounds, p)| Shown {
-            bounds,
-            image: image::Handle::from_rgba(bounds[2], bounds[3], p.rgba.clone()),
-        })
-        .collect()
+/// What the session's threads read from the UI each time.
+struct Shared {
+    stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
+    /// The source and target languages (the controller's).
+    chosen: Arc<Mutex<(String, String)>>,
+    /// Where the controller is in a capture (monitor px; `None` = not in captures).
+    mask: Arc<Mutex<Option<[u32; 4]>>>,
 }
 
-/// A patch at `bounds` (x, y, w, h) touches a part of the frame that was
-/// blanked out (black), so its erase and redraw would show black there.
-fn over_blanked([x, y, w, h]: [u32; 4], blanked: &[[u32; 4]]) -> bool {
-    (blanked.iter()).any(|&[bx, by, bw, bh]| x < bx + bw && bx < x + w && y < by + bh && by < y + h)
+/// The layer as the live core sees it: each patch sent to the UI once, each
+/// removal at once (logged: the harness times them).
+struct ToUi<S: FnMut(Msg) -> bool> {
+    send: S,
+    /// The UI is gone (the session ends).
+    gone: bool,
+    shows: u32,
+    hides: u32,
 }
 
-/// A step error once (not every second), then nothing until it changes.
-fn report(last: &mut Option<String>, e: String) -> Option<Msg> {
-    live_steps::report_once(last, e).map(Msg::Failed)
+impl<S: FnMut(Msg) -> bool> ToUi<S> {
+    fn send(&mut self, msg: Msg) {
+        self.gone |= !(self.send)(msg);
+    }
+}
+
+impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
+    fn show(&mut self, id: u64, at: Rect, rgba: &[u8]) {
+        self.shows += 1;
+        crate::log!(
+            "[opencircle] live: shown {id} at {},{} {}x{}",
+            at.x,
+            at.y,
+            at.w,
+            at.h
+        );
+        let image = image::Handle::from_rgba(at.w, at.h, rgba.to_vec());
+        let bounds = [at.x, at.y, at.w, at.h];
+        self.send(Msg::Show(id, Shown { bounds, image }));
+    }
+    // ponytail: today's layer shows a patch whole (`Config::fade_in` is 0 here);
+    // the per-pixel-alpha layer (build step 4) fades it in.
+    fn alpha(&mut self, _: u64, _: f32) {}
+    fn hide(&mut self, id: u64) {
+        self.hides += 1;
+        crate::log!("[opencircle] live: hidden {id}");
+        self.send(Msg::Hide(id));
+    }
+    fn clear(&mut self) {
+        self.send(Msg::Clear);
+    }
+}
+
+/// The core's thresholds here: its defaults, no fade (today's layer).
+fn core_config() -> core::Config {
+    core::Config {
+        fade_in: Duration::ZERO,
+        ..core::Config::default()
+    }
+}
+
+/// Work for the work thread: a core job (with the frame a detect needs, and
+/// the frame's size), or new languages.
+enum Work {
+    Job(Job, Option<Arc<Vec<u8>>>, (u32, u32)),
+    Langs((String, String)),
+}
+
+/// A job waiting on the work thread (as `Work::Job` carries it).
+type Queued = (Job, Option<Arc<Vec<u8>>>, (u32, u32));
+
+/// A finished job: its results, how long it ran, its first error.
+struct Worked {
+    done: Vec<Done>,
+    took: Duration,
+    error: Option<String>,
+}
+
+/// The frame thread: every frame the monitor shows, our own UI blanked out
+/// of it, through the live core; results from the work thread as they come.
+fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg) -> bool) {
+    use crate::features::translate::glossary_screen as screen;
+    use crate::features::translate::lang::is_rtl;
+    text_reading::gently_here();
+    // live is for games (the glossary applies; no address bar is read here)
+    screen::begin();
+    screen::saw_frame(false);
+    let found = Arc::new(Mutex::new(Found::default()));
+    let (to_work, work_rx) = mpsc::channel();
+    let (work_tx, from_work) = mpsc::channel();
+    let worker = {
+        let (cache, found, scale) = (cache.clone(), found.clone(), monitor.scale);
+        std::thread::spawn(move || work(work_rx, work_tx, &cache, &found, scale))
+    };
+    let mut layer = ToUi {
+        send,
+        gone: false,
+        shows: 0,
+        hides: 0,
+    };
+    let mut langs = ui.chosen.lock().map(|l| l.clone()).unwrap_or_default();
+    let _ = to_work.send(Work::Langs(langs.clone()));
+    let mut rtl = is_rtl(&langs.1);
+    let region = (monitor.x, monitor.y, monitor.width, monitor.height);
+    let (w, h) = (monitor.width, monitor.height);
+    let mut frames = Frames::open(region);
+    crate::log!("[opencircle] live: frames from {}", frames.describe());
+    let mut live = core::Live::new(core_config());
+    let started = Instant::now();
+    let (mut last, mut blanked): (Option<Vec<u8>>, Vec<[u32; 4]>) = (None, Vec::new());
+    let (mut own, mut area) = (Vec::new(), [0, 0, w, h]);
+    let mut looked: Option<Instant> = None;
+    let mut glossary = None;
+    let (mut was_away, mut idle, mut last_error) = (false, false, None);
+    let mut stats = Stats::default();
+    let mut cpu = crate::shared::platform::sys::cpu::Load::default();
+    let mut jobs: Vec<Job> = Vec::new();
+    while !ui.stop.load(Ordering::Relaxed) && !layer.gone {
+        let away = engines::away_gate(live_translate::away(), &mut was_away).is_some();
+        if away || ui.paused.load(Ordering::Relaxed) {
+            if !idle {
+                live.stop(&mut layer);
+                (idle, last) = (true, None);
+                jobs.clear();
+            }
+            while from_work.try_recv().is_ok() {}
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        idle = false;
+        let now = ui.chosen.lock().map(|l| l.clone()).unwrap_or_default();
+        if now != langs {
+            // another language: everything is read again
+            live.stop(&mut layer);
+            live.forget_translations();
+            jobs.clear();
+            rtl = is_rtl(&now.1);
+            langs = now;
+            let _ = to_work.send(Work::Langs(langs.clone()));
+        }
+        if looked.is_none_or(|t| t.elapsed() >= LOOK_EVERY) {
+            looked = Some(Instant::now());
+            own = live_translate::own_windows();
+            // the foreground window's page (a full-screen game: all of it),
+            // unless the whole screen is asked for
+            area = page_area(
+                (!config::current().translate.whole_screen)
+                    .then(|| window_rect::region((monitor.x, monitor.y), (w, h), monitor.scale))
+                    .flatten(),
+                (w, h),
+            );
+            // an edited glossary: its lines are translated again
+            let now = crate::features::translate::glossary_store::current();
+            if now != glossary {
+                live.forget_translations();
+                glossary = now;
+            }
+            // a busy PC (a game on the CPU): the core discovers less
+            if let Some(load) = cpu.sample(text_reading::helper_pid()) {
+                live.report_cpu(load, started.elapsed());
+            }
+            if stats.since.elapsed() >= STATS_EVERY {
+                stats.found = found
+                    .lock()
+                    .map(|mut f| f.take_counts())
+                    .unwrap_or_default();
+                stats.log(&layer, &live, frames.describe());
+            }
+        }
+        // finished jobs, against the newest frame
+        let at = started.elapsed();
+        while let Ok(r) = from_work.try_recv() {
+            if let Some(e) = r.error
+                && let Some(e) = engines::report_once(&mut last_error, e)
+            {
+                layer.send(Msg::Failed(e));
+            }
+            if live.report_burst(r.took, at) {
+                crate::log!("[opencircle] live: OCR / translation ran 2x slower; discovering less");
+            }
+            let Some(rgba) = &last else { continue };
+            let frame = core::Frame {
+                rgba,
+                width: w,
+                height: h,
+                at,
+            };
+            let mut paint = engines::Paint {
+                found: &found,
+                rtl,
+                blanked: &blanked,
+            };
+            for d in r.done {
+                jobs.extend(live.complete(d, &frame, &mut paint, &mut layer));
+            }
+        }
+        // the next frame (none new: the screen is as it was)
+        match frames.next(FRAME_WAIT) {
+            Ok(Some(mut rgba)) if rgba.len() == (w * h * 4) as usize => {
+                blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask);
+                last = Some(rgba);
+                stats.new_frames += 1;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let e = crate::shared::app_language::fmt(
+                    crate::shared::app_language::S::lv_capture_failed,
+                    &[&e.to_string()],
+                );
+                if let Some(e) = engines::report_once(&mut last_error, e) {
+                    layer.send(Msg::Failed(e));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+                frames = Frames::open(region);
+                continue;
+            }
+        }
+        let Some(rgba) = &last else { continue };
+        let frame = core::Frame {
+            rgba,
+            width: w,
+            height: h,
+            at: started.elapsed(),
+        };
+        let mut paint = engines::Paint {
+            found: &found,
+            rtl,
+            blanked: &blanked,
+        };
+        let t = Instant::now();
+        jobs.extend(live.on_frame(&frame, &mut paint, &mut layer));
+        (stats.frames, stats.watch) = (stats.frames + 1, stats.watch + t.elapsed());
+        for job in jobs.drain(..) {
+            let copy = matches!(job, Job::Detect { .. }).then(|| Arc::new(rgba.clone()));
+            stats.count(&job);
+            let _ = to_work.send(Work::Job(job, copy, (w, h)));
+        }
+    }
+    live.stop(&mut layer);
+    stats.log(&layer, &live, frames.describe());
+    drop(to_work);
+    let _ = worker.join();
+}
+
+/// The part of the monitor live translate reads (x0, y0, x1, y1): the
+/// focused window's page, unless that is a small window (under a quarter of
+/// the monitor: a browser's notification, a menu, a toast took the focus;
+/// on the Windows VM Firefox's toast did, and nothing of the game was read).
+fn page_area(focused: Option<[u32; 4]>, (w, h): (u32, u32)) -> [u32; 4] {
+    match focused {
+        Some(a)
+            if 4 * u64::from(a[2] - a[0]) * u64::from(a[3] - a[1])
+                >= u64::from(w) * u64::from(h) =>
+        {
+            a
+        }
+        _ => [0, 0, w, h],
+    }
+}
+
+/// Blanks what is never read out of a frame (black): the edge glow, the
+/// controller, our own windows, everything outside the focused window's
+/// `area` (x0, y0, x1, y1). Returns the blanked parts (frame px, x, y, w, h).
+fn blank(
+    rgba: &mut [u8],
+    (m, area): (Monitor, [u32; 4]),
+    own: &[[i32; 4]],
+    mask: &Mutex<Option<[u32; 4]>>,
+) -> Vec<[u32; 4]> {
+    let (w, h) = (m.width, m.height);
+    let mut blanked = border::mask(rgba, w, h, m.scale);
+    if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
+        live_controller::mask(rgba, w, h, rect);
+        blanked.push(rect);
+    }
+    // our own UI is never read (a menu, a card, a toast)
+    blanked.extend(blank_own(rgba, (m.x, m.y, w, h), own));
+    let [x0, y0, x1, y1] = area;
+    let outside = [
+        [0, 0, w, y0],
+        [0, y1, w, h.saturating_sub(y1)],
+        [0, y0, x0, y1.saturating_sub(y0)],
+        [x1, y0, w.saturating_sub(x1), y1.saturating_sub(y0)],
+    ];
+    for r in outside.into_iter().filter(|r| r[2] > 0 && r[3] > 0) {
+        live_controller::mask(rgba, w, h, r);
+        blanked.push(r);
+    }
+    blanked
+}
+
+/// The engines for the languages the frame thread last sent (`Err`: none).
+type Engines = Result<(crate::features::translate::pipeline::Real, String), String>;
+
+/// The work thread: the core's jobs one at a time, translations first, then
+/// reads, then detects (a new line shows sooner).
+fn work(
+    jobs: mpsc::Receiver<Work>,
+    out: mpsc::Sender<Worked>,
+    cache: &Cache,
+    found: &Mutex<Found>,
+    scale: f32,
+) {
+    text_reading::gently_here();
+    let mut deps: Engines = Err(String::new());
+    let mut queue: VecDeque<Queued> = VecDeque::new();
+    let take = |w: Work, queue: &mut VecDeque<_>, deps: &mut Engines| match w {
+        Work::Job(job, frame, size) => queue.push_back((job, frame, size)),
+        Work::Langs((source, target)) => {
+            queue.clear(); // (the frame thread dropped those jobs)
+            *deps = crate::features::translate::action::deps_for(&source, &target).map(
+                |(mut real, target)| {
+                    real.scale = scale;
+                    (real, target)
+                },
+            );
+        }
+    };
+    loop {
+        if queue.is_empty() {
+            match jobs.recv() {
+                Ok(w) => take(w, &mut queue, &mut deps),
+                Err(_) => return,
+            }
+        }
+        while let Ok(w) = jobs.try_recv() {
+            take(w, &mut queue, &mut deps);
+        }
+        let rank = |j: &Job| match j {
+            Job::Translate { .. } => 0,
+            Job::Read(_) => 1,
+            Job::Detect { .. } => 2,
+        };
+        let Some(next) = (0..queue.len()).min_by_key(|&i| rank(&queue[i].0)) else {
+            continue;
+        };
+        let Some((job, frame, size)) = queue.remove(next) else {
+            continue;
+        };
+        let t = Instant::now();
+        let errors = Errors::default();
+        let done = run_job(job, frame.as_deref(), size, &deps, cache, found, &errors);
+        let error = errors.into_inner();
+        let took = t.elapsed();
+        if out.send(Worked { done, took, error }).is_err() {
+            return;
+        }
+    }
+}
+
+/// One job on the engines (`frame`: the one a detect came with).
+fn run_job(
+    job: Job,
+    frame: Option<&Vec<u8>>,
+    size: (u32, u32),
+    deps: &Engines,
+    cache: &Cache,
+    found: &Mutex<Found>,
+    errors: &Errors,
+) -> Vec<Done> {
+    let (deps, target) = match deps {
+        Ok((real, target)) => (real, target),
+        Err(e) => {
+            errors.replace(Some(e.lines().next().unwrap_or_default().to_string()));
+            return nothing(job);
+        }
+    };
+    let at = core::Frame {
+        rgba: frame.map_or(&[][..], Vec::as_slice),
+        width: size.0,
+        height: size.1,
+        at: Duration::ZERO,
+    };
+    job.run(
+        &at,
+        &mut engines::Detect {
+            deps,
+            found,
+            errors,
+        },
+        &mut engines::Read {
+            deps,
+            found,
+            errors,
+            size,
+        },
+        &mut engines::Translate {
+            deps,
+            cache,
+            target,
+        },
+    )
+}
+
+/// A job's results when it can't run (no engine for the languages): nothing
+/// found, nothing read, no translation.
+fn nothing(job: Job) -> Vec<Done> {
+    match job {
+        Job::Detect { job, .. } => vec![Done::Detected {
+            job,
+            boxes: Vec::new(),
+        }],
+        Job::Read(crops) => (crops.into_iter())
+            .map(|c| Done::Read {
+                id: c.id,
+                job: c.job,
+                text: String::new(),
+            })
+            .collect(),
+        Job::Translate { id, job, .. } => vec![Done::Translated {
+            id,
+            job,
+            text: Err(String::new()),
+        }],
+    }
+}
+
+/// The session's numbers, for the log.
+struct Stats {
+    since: Instant,
+    /// Frames fed to the core (a still screen's again), new ones among them,
+    /// and the core's time on them.
+    frames: u32,
+    new_frames: u32,
+    watch: Duration,
+    detects: u32,
+    reads: u32,
+    translates: u32,
+    /// `Found::counts`: reads reused / OCR'd, patches made / declined.
+    found: [u32; 4],
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Stats {
+            since: Instant::now(),
+            frames: 0,
+            new_frames: 0,
+            watch: Duration::ZERO,
+            detects: 0,
+            reads: 0,
+            translates: 0,
+            found: [0; 4],
+        }
+    }
+}
+
+impl Stats {
+    fn count(&mut self, job: &Job) {
+        match job {
+            Job::Detect { .. } => self.detects += 1,
+            Job::Read(_) => self.reads += 1,
+            Job::Translate { .. } => self.translates += 1,
+        }
+    }
+
+    fn log<S: FnMut(Msg) -> bool>(&mut self, layer: &ToUi<S>, live: &core::Live, source: String) {
+        let secs = self.since.elapsed().as_secs_f64().max(0.001);
+        crate::log!(
+            "[opencircle] live stats {secs:.0} s ({source}): {} frames ({} new, {:.0}/s), \
+             core {:.0} us each; {} detects, {} reads ({} reused, {} OCR'd), {} translates; patches {} made, {} declined; \
+             {} shown, {} hidden in all; regions now {:?} (changing, reading, translating, shown, idle)",
+            self.frames,
+            self.new_frames,
+            f64::from(self.new_frames) / secs,
+            self.watch.as_secs_f64() * 1e6 / f64::from(self.frames.max(1)),
+            self.detects,
+            self.reads,
+            self.found[0],
+            self.found[1],
+            self.translates,
+            self.found[2],
+            self.found[3],
+            layer.shows,
+            layer.hides,
+            states(live),
+        );
+        *self = Stats::default();
+    }
+}
+
+/// How many regions are in each state (the stats line).
+fn states(live: &core::Live) -> [u32; 5] {
+    let mut n = [0; 5];
+    for (_, _, s) in live.regions() {
+        n[match s {
+            core::State::Changing => 0,
+            core::State::Reading { .. } => 1,
+            core::State::Translating { .. } => 2,
+            core::State::Shown { .. } => 3,
+            core::State::Idle => 4,
+        }] += 1;
+    }
+    n
 }
 
 fn layer_window(m: Monitor) -> window::Settings {
@@ -726,8 +1095,22 @@ fn layer_window(m: Monitor) -> window::Settings {
         transparent: cfg!(not(windows)),
         level: Level::AlwaysOnTop,
         exit_on_close_request: false,
+        platform_specific: layer_platform(),
         ..window::Settings::default()
     }
+}
+
+/// X11: override-redirect, so the window manager never stacks a focused
+/// full-screen window (the game) above the layer (GNOME X11 does that to an
+/// "always on top" window: no patch was ever seen over a full-screen player).
+fn layer_platform() -> window::settings::PlatformSpecific {
+    #[cfg(target_os = "linux")]
+    return window::settings::PlatformSpecific {
+        override_redirect: true,
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "linux"))]
+    window::settings::PlatformSpecific::default()
 }
 
 /// Test hook: shoot the layer once it has drawn its first patches.
@@ -855,12 +1238,18 @@ mod tests {
             bounds: [10, 10, 2, 2],
             image: image::Handle::from_rgba(2, 2, vec![0; 16]),
         };
-        let _ = l.update(Msg::Patches(vec![patch]));
+        let _ = l.update(Msg::Show(1, patch.clone()));
+        let _ = l.update(Msg::Show(2, patch.clone()));
+        let _ = l.update(Msg::Show(1, patch.clone()));
+        assert_eq!(l.patches.len(), 2, "one per region");
+        let _ = l.update(Msg::Hide(1));
         assert_eq!(l.patches.len(), 1);
         let _ = l.update(Msg::Failed("HTTP 503".into()));
         assert_eq!(l.error.as_deref(), Some("HTTP 503"));
-        let _ = l.update(Msg::Patches(vec![]));
-        assert_eq!(l.error, None, "the next good step clears it");
+        let _ = l.update(Msg::Show(3, patch));
+        assert_eq!(l.error, None, "the next patch clears it");
+        let _ = l.update(Msg::Clear);
+        assert!(l.patches.is_empty());
 
         let stop = l.stop.clone();
         let close = l.stop();
@@ -874,6 +1263,10 @@ mod tests {
     #[test]
     fn the_controller_pauses_switches_hides_and_stops() {
         use live_controller::Msg as C;
+        let patch = || Shown {
+            bounds: [10, 10, 2, 2],
+            image: image::Handle::from_rgba(2, 2, vec![0; 16]),
+        };
         let mut l = live();
         // before the layer is up there is no controller to act on
         assert!(matches!(
@@ -906,10 +1299,10 @@ mod tests {
         );
         let _ = l.update(Msg::Failed("no key".into()));
         assert_eq!(l.ctl.notice.as_deref(), Some("no key"));
-        let _ = l.update(Msg::Patches(vec![]));
+        let _ = l.update(Msg::Show(1, patch()));
         assert!(
             l.ctl.notice.is_none(),
-            "an error clears with the next good step"
+            "an error clears with the next patch"
         );
         assert_eq!(l.ctl_at.y + l.ctl.size().height, bottom);
         // the language list opens upward and closes back
@@ -934,15 +1327,11 @@ mod tests {
         let _ = l.update(Msg::Moved(id, Point::new(100.0, 200.0)));
         assert_eq!(l.mask.lock().unwrap().unwrap()[..2], [100, 200]);
 
-        // pause: the step thread skips, the patches go, late ones are dropped
-        let patch = || Shown {
-            bounds: [10, 10, 2, 2],
-            image: image::Handle::from_rgba(2, 2, vec![0; 16]),
-        };
-        let _ = l.update(Msg::Patches(vec![patch()]));
+        // pause: the session idles, the patches go, late ones are dropped
+        let _ = l.update(Msg::Show(2, patch()));
         let _ = l.update(Msg::Controller(C::Pause));
         assert!(l.paused.load(Ordering::Relaxed) && l.patches.is_empty());
-        let _ = l.update(Msg::Patches(vec![patch()]));
+        let _ = l.update(Msg::Show(3, patch()));
         assert!(l.patches.is_empty());
         let _ = l.update(Msg::Controller(C::Pause));
         assert!(!l.paused.load(Ordering::Relaxed));
@@ -984,6 +1373,19 @@ mod tests {
         assert!(l.stop().units() == 0, "no window to close");
     }
 
+    /// The focused window's page is read; a small focused window (a toast) is
+    /// not a game: the whole monitor is read then.
+    #[test]
+    fn a_small_focused_window_never_narrows_what_is_read() {
+        let (w, h) = (1280, 720);
+        assert_eq!(page_area(None, (w, h)), [0, 0, w, h]);
+        assert_eq!(
+            page_area(Some([0, 40, 1280, 720]), (w, h)),
+            [0, 40, 1280, 720]
+        );
+        assert_eq!(page_area(Some([832, 384, 1248, 704]), (w, h)), [0, 0, w, h]);
+    }
+
     /// Our own windows (a menu, a card) are blanked out of the capture the
     /// step reads, on whichever part of them lies on the monitor; the rest
     /// of the screen is read as it is.
@@ -998,9 +1400,9 @@ mod tests {
         assert_eq!(blanked, [[0, 2, 10, 8], [30, 15, 10, 5]]);
         // a patch over a blanked part is never shown (it would be a black
         // box); one beside it is
-        assert!(over_blanked([5, 0, 10, 3], &blanked));
-        assert!(over_blanked([35, 18, 2, 2], &blanked));
-        assert!(!over_blanked([10, 2, 20, 13], &blanked));
+        assert!(engines::over_blanked([5, 0, 10, 3], &blanked));
+        assert!(engines::over_blanked([35, 18, 2, 2], &blanked));
+        assert!(!engines::over_blanked([10, 2, 20, 13], &blanked));
         let black = |x: u32, y: u32| rgba[((y * w + x) * 4) as usize] == 0;
         let blanked: Vec<(u32, u32)> = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))

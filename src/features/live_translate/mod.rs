@@ -3,7 +3,7 @@
 //! The UI creates the window (borderless, transparent, monitor-sized,
 //! `Level::AlwaysOnTop`) and passes its raw handle, e.g.
 //! `window::run(id, |w| w.window_handle().map(|h| live::prepare_layer(h.as_raw())))`.
-//! What to draw comes from `translate::Live`.
+//! What to draw comes from the live core (`crate::live_core`, `live`).
 pub(crate) mod live;
 pub(crate) mod screens;
 
@@ -339,8 +339,15 @@ mod win {
             .map_err(os)?;
             // Not WDA_MONITOR as a fallback: it blacks the window out of
             // captures, and a monitor-sized layer would black out the frame.
-            let excluded = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok();
-            if !excluded {
+            // (Test hook: in captures, so recordings show the patches.)
+            let capturable =
+                crate::shared::platform::sys::test_hook(crate::shared::platform::sys::CAPTURABLE)
+                    .is_some();
+            let excluded =
+                !capturable && SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok();
+            if capturable {
+                crate::log!("[opencircle] live layer: in captures (test hook)");
+            } else if !excluded {
                 crate::log!(
                     "[opencircle] live layer: no capture exclusion (needs Windows 10 2004+); \
                      relying on the read-back guard"

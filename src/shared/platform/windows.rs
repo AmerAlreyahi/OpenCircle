@@ -121,10 +121,6 @@ fn floating_as(
     (id, open)
 }
 
-/// Test hook: our floating windows show in screen captures (VM screenshots of
-/// them over the desktop; they then also show in the next capture's frozen frame).
-const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
-
 /// A floating window of ours (Steps strip, pins, pills, the update card, the
 /// chat's, the tray menu) is never in what we capture or translate uninvited:
 /// Windows keeps it out of every capture (`hide_from_capture`, before it shows),
@@ -134,7 +130,9 @@ const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 /// (`window_rect::widgets_in_grab`; owner, 2026-11-10).
 /// `seen`: one that shows in captures (`floating_in_captures`).
 fn keep_out<T: Send + 'static>(id: window::Id, seen: bool) -> Task<T> {
-    let out = !seen && crate::shared::platform::sys::test_hook(CAPTURABLE).is_none();
+    let out = !seen
+        && crate::shared::platform::sys::test_hook(crate::shared::platform::sys::CAPTURABLE)
+            .is_none();
     hide_from_capture(id, out)
 }
 

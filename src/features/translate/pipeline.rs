@@ -30,6 +30,17 @@ pub trait Deps {
     fn batch(&self) -> usize {
         usize::MAX
     }
+    /// Where the text lines are, as fast as can be (live translate's
+    /// discovery, several times a second): the lines, and whether they were
+    /// read as `recognize` reads them (their texts can be used as they are).
+    fn detect(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<TextBlock>, bool), OcrError> {
+        self.recognize(rgba, width, height).map(|l| (l, true))
+    }
     /// Gets translation into `target` ready while the text is read.
     fn warm(&self, _target: &str) {}
     /// All the text read, before the first `translate` call: "auto" guesses
@@ -1178,6 +1189,26 @@ pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
 }
 
 impl Deps for Real {
+    /// Windows OCR alone where it reads the source (~70 ms for a 720p screen
+    /// on the VM, against ~1 s with PP-OCR's second read of a game's sparse
+    /// screen); each region found is then read in full (`recognize`).
+    fn detect(
+        &self,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<TextBlock>, bool), OcrError> {
+        if self.system() {
+            let k = *text_reading::system::passes(self.scale, width, height)
+                .last()
+                .unwrap_or(&1);
+            if let Ok(lines) = text_reading::system::recognize(rgba, width, height, k) {
+                return Ok((lines, false));
+            }
+        }
+        self.recognize(rgba, width, height).map(|l| (l, true))
+    }
+
     /// "auto": a page read as noise while readers for other scripts are
     /// missing stops here (nothing is drawn); the UI offers them, once.
     fn recognize(&self, rgba: &[u8], width: u32, height: u32) -> Result<Vec<TextBlock>, OcrError> {

@@ -731,7 +731,6 @@ fn cache_hit_miss_and_eviction() {
 #[ignore]
 fn e2e_real_ocr_fake_translator() {
     use super::super::tests::{ar, game_frame, save_png};
-    use crate::features::live_translate::live::Live;
 
     struct RealOcr(Mutex<text_reading::Engine>);
     impl Deps for RealOcr {
@@ -770,35 +769,18 @@ fn e2e_real_ocr_fake_translator() {
     let translated = out.blocks.iter().filter(|b| !b.translation.is_empty());
     assert!(translated.count() >= 10, "{:?}", out.blocks);
 
-    // live: first frame reads everything (translations from the cache)
-    let mut live = Live::new();
-    let t = live.step(&img, w, h, "ar", &cache, &deps).unwrap().unwrap();
-    crate::log!("live first frame: {t:?}, {} patches", live.patches().len());
+    // live: the core on the same frame again and again, every job at once
+    use crate::features::live_translate::live::{Calls, InStep};
+    let mut s = InStep::new(&deps, &cache, "ar");
+    let mut layer = Calls::default();
     let t = Instant::now();
-    assert!(
-        live.step(&img, w, h, "ar", &cache, &deps)
-            .unwrap()
-            .is_none()
-    );
-    crate::log!("live unchanged frame: {:?}", t.elapsed());
-    // X11: the capture shows our layer -> still nothing to do
-    let mut shown = img.clone();
-    let mut layer = img.clone();
-    for p in live.patches() {
-        let [x, y, pw, _] = p.bounds.map(|v| v as usize);
-        for (row, src) in p.rgba.chunks_exact(pw * 4).enumerate() {
-            let i = ((y + row) * 1920 + x) * 4;
-            shown[i..i + pw * 4].copy_from_slice(src);
-            layer[i..i + pw * 4].copy_from_slice(src);
-        }
+    for _ in 0..10 {
+        s.frame(&img, (w, h), &mut layer);
     }
-    save_png(&dir.join("live_layer.png"), (1920, 1080), &layer);
-    assert!(
-        live.step(&shown, w, h, "ar", &cache, &deps)
-            .unwrap()
-            .is_none()
-    );
-    // the prompt "Press E to interact" goes away: only its region is read
+    let shown = layer.0.len();
+    crate::log!("live, 10 frames: {:?}, {shown} patches", t.elapsed());
+    assert!(shown >= 5, "{:?}", layer.0);
+    // the prompt "Press E to interact" goes away: its patch goes in that frame
     let mut next = img.clone();
     for y in 590..640 {
         for x in 800..1120 {
@@ -807,20 +789,9 @@ fn e2e_real_ocr_fake_translator() {
             next.copy_within(src..src + 4, i);
         }
     }
-    let n = live.blocks().len();
-    let t = live
-        .step(&next, w, h, "ar", &cache, &deps)
-        .unwrap()
-        .unwrap();
-    crate::log!(
-        "live, one block gone: {t:?}; blocks {n} -> {}",
-        live.blocks().len()
-    );
-    assert!(
-        live.blocks()
-            .iter()
-            .all(|b| !b.original.starts_with("Press"))
-    );
+    s.frame(&next, (w, h), &mut layer);
+    crate::log!("live, one block gone: {:?}", &layer.0[shown..]);
+    assert!(layer.0[shown..].iter().any(|c| c.starts_with("hide")));
     crate::log!("PNGs in {}", dir.display());
 }
 
