@@ -1202,3 +1202,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   can't find changed TEXT; no library does the live core (per-region change check on text boxes, patch lifetime "nothing
   stale", draw once, translation cache, engine-agnostic) -> that core becomes the new library. Reference apps to study (approach
   only): Translumo (Apache-2.0), OverTranslate (MIT), RSTGameTranslation (MIT). Name and repo: the owner's.
+  Refined (owner, 2026-11-15, "better"): the live core is built INSIDE OpenCircle as one clean, engine-agnostic module (no
+  OpenCircle code in it: OCR, translator, UI and OS plug in through small traits), so it can be split into its own repo in an
+  hour or two; whether to publish it as a library is decided after 0.3.0, once it is proven on real games. No repo or name now.
