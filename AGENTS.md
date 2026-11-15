@@ -8,7 +8,7 @@ scrolling; arrows, text, blur, steps; copy, save, pin). Stack: **pure Rust,
 one binary, UI in `iced`** (no web view — lightweight is a hard
 requirement). Spikes live in `spikes/` (throwaway). The plan is the private
 master roadmap (see CLAUDE.local.md; older docs/internal plans are superseded), the UI/UX spec in `docs/internal/DESIGN.md`
-(both local only). Status: **v0.1.8 published (2026-11-14: Start menu fix, Settings keyboard navigation, RTL selection, feature-folder restructure); next: Game translation (0.2.0).**
+(both local only). Status: **v0.2.0 "Game translation" published (2026-11-15: game mode, per-game glossary + name suggester, Portuguese, Alt+Shift+T/L, Linux part read, Sapphire icon); next: Live translation (0.3.0).**
 
 **Start of every session: read `AGENTS.local.md`** (gitignored, beside this
 file): logins and machine-specific notes. Then `docs/internal/NEXT_SESSION.md`,
@@ -76,6 +76,14 @@ where they differ.
   first-time Arabic/Cyrillic/CJK page -> the translation-model card after the reader download doesn't start (pill
   `Msg::Offline` doesn't clear `readers`); fix first in the next version. NOT verified: Windows 11, the tray menu's look, KDE,
   rpm, winget/Scoop live repositories.
+  v0.2.0 "Game translation" published 2026-11-15 06:53 UTC on tag v0.2.0 (3d533c09), owner: "publish directly": CI green;
+  release gate on the draft (W22): UPDATE GATE PASS (v0.1.8 Setup + portable -> 0.2.0 through Restart now; What's new), Setup
+  /quiet + ManagedBy cases, About on the draft exe, keys Alt+Shift+T/L, Sapphire icon, #163, Portuguese (models-v3), Arabic
+  battle screen (no Chinese request), glossary (games only, suggester, merge on import), corpus 366/383 (no screen down),
+  Translate fr game screen 2072 -> 1322 ms (-36 %); Ubuntu AppImage (GNOME Wayland) + deb. Published assets re-downloaded:
+  SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.2.0", latest = v0.2.0. Known issue shipped: on Windows/X11 the
+  glossary is not picked by the game's window title (window_rect::remember_focused only called by Snip's capture, not
+  app/capture.rs): fix FIRST in the next version. NOT verified: Windows 11, wlroots, KDE 6 / GNOME 48 portal shortcut path.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment

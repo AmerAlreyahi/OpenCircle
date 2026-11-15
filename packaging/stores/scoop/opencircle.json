@@ -1,5 +1,5 @@
 {
-    "version": "0.1.8",
+    "version": "0.2.0",
     "description": "Circle anything on screen to search, read, translate or ask about it",
     "homepage": "https://github.com/AmerAlreyahi/OpenCircle",
     "license": "MIT",
@@ -10,8 +10,8 @@
     ],
     "architecture": {
         "64bit": {
-            "url": "https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.1.8/OpenCircle-0.1.8-x64-portable.exe#/opencircle.exe",
-            "hash": "1e231fc64582e1284b001f9c55d783adb74d0c686e1b286c6d02fe05af5240d8"
+            "url": "https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.2.0/OpenCircle-0.2.0-x64-portable.exe#/opencircle.exe",
+            "hash": "2e7a78958b9acce145d0b6e941e3b038ab32c31c36a8c8186f241945d00ccab5"
         }
     },
     "bin": "opencircle.exe",

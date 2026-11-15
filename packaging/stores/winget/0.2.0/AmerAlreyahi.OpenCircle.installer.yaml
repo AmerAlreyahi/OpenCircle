@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
+
+PackageIdentifier: AmerAlreyahi.OpenCircle
+PackageVersion: 0.2.0
+InstallerType: exe
+Scope: machine
+InstallModes:
+- silent
+- silentWithProgress
+InstallerSwitches:
+  Silent: /quiet
+  SilentWithProgress: /quiet
+  InstallLocation: /dir="<INSTALLPATH>"
+ExpectedReturnCodes:
+- InstallerReturnCode: 1618
+  ReturnResponse: installInProgress
+- InstallerReturnCode: 1602
+  ReturnResponse: cancelledByUser
+- InstallerReturnCode: 1603
+  ReturnResponse: contactSupport
+- InstallerReturnCode: 1638
+  ReturnResponse: downgrade
+- InstallerReturnCode: 1639
+  ReturnResponse: invalidParameter
+- InstallerReturnCode: 1641
+  ReturnResponse: rebootInitiated
+- InstallerReturnCode: 3010
+  ReturnResponse: rebootRequiredToFinish
+UpgradeBehavior: install
+AppsAndFeaturesEntries:
+- DisplayName: OpenCircle
+  Publisher: Amer Alreyahi
+  ProductCode: OpenCircle
+ElevationRequirement: elevationRequired
+ReleaseDate: 2026-11-15
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/AmerAlreyahi/OpenCircle/releases/download/v0.2.0/OpenCircle-Setup-0.2.0-x64.exe
+  InstallerSha256: 77B368C406819680D1833AD60FF8A7304680B95E317D5843052FF32B0FA20A70
+ManifestType: installer
+ManifestVersion: 1.28.0
