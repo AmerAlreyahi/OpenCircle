@@ -561,19 +561,23 @@ impl Live {
                     {
                         continue;
                     }
-                    let place = self.regions.iter().position(|r| r.rect.same_place(&b));
+                    // (the largest: a part of the line may still be tracked beside the whole)
+                    let place = (0..self.regions.len())
+                        .filter(|&i| self.regions[i].rect.same_place(&b))
+                        .max_by_key(|&i| self.regions[i].rect.area());
                     let line = || self.regions.iter().position(|r| r.rect.same_line(&b));
                     match (place, place.or_else(line)) {
                         // still changing (typewriter text growing), or the rest of a line found
                         // earlier in part (its other words settled later): one region for the line
                         (_, Some(i)) if self.regions[i].state == State::Changing => {
                             self.regions[i].rect = self.regions[i].rect.union(&b);
-                            self.reset_cells(i, frame);
+                            self.join_line(i, frame, layer);
                         }
                         (_, Some(i)) if self.regions[i].rect.grows_by(&b) => {
                             let line = self.regions[i].rect.union(&b);
                             self.retire(i, layer);
                             self.add(line, frame);
+                            self.join_line(self.regions.len() - 1, frame, layer);
                         }
                         (None, None) => self.add(b, frame),
                         _ => {}
@@ -726,6 +730,12 @@ impl Live {
                 drift = drift.min(pixels::moved(ring, ring_ref, Some((ours.1, t)), change));
             }
         }
+        // a shown patch the capture doesn't show (our layer kept out of it, the game window's own
+        // pixels): the text itself is seen, and it alone says it changed; a scene moving round its
+        // box (a fight round a banner) is no change
+        if r.patch.is_some() && !ours_seen {
+            drift = 0.0;
+        }
         (changed, drift)
     }
 
@@ -869,6 +879,27 @@ impl Live {
         self.reset_cells(self.regions.len() - 1, frame);
     }
 
+    /// Region `i` (changing) grew: the other parts of its line join it (a changing part on its line; a
+    /// read one it now covers, whose patch goes), so a line found in pieces is one region, drawn once.
+    fn join_line(&mut self, mut i: usize, frame: &Frame, layer: &mut dyn Layer) {
+        let part = |r: &Region, line: &Rect| match r.state {
+            State::Changing => r.rect.same_line(line),
+            _ => r.rect.same_line(line) && r.rect.overlap(line) > 0,
+        };
+        while let Some(j) = (0..self.regions.len())
+            .find(|&j| j != i && part(&self.regions[j], &self.regions[i].rect))
+        {
+            self.regions[i].rect = self.regions[i].rect.union(&self.regions[j].rect);
+            if self.regions[j].state == State::Changing {
+                self.regions.remove(j);
+            } else {
+                self.retire(j, layer);
+            }
+            i -= (j < i) as usize;
+        }
+        self.reset_cells(i, frame);
+    }
+
     fn reset_cells(&mut self, i: usize, frame: &Frame) {
         let (s, ringc) = (self.cfg.scale.max(1), self.ring_cells());
         let r = &mut self.regions[i];
@@ -962,8 +993,8 @@ impl Live {
 
 impl Region {
     /// What "unchanged" means from now on: the cells now, without the scene's. Of the text area (`cols`
-    /// cells wide): the edge cells (a detect box is padded past its text: PP-OCR's unclip; past a tight
-    /// HUD bar or banner they show the fight behind it) and, once the text `settled`, those that moved
+    /// cells wide): the outer cells, a quarter of its height deep (a detect box is padded past its text:
+    /// PP-OCR's unclip; past a tight HUD bar, a banner or a label's panel they show the scene behind it) and, once the text `settled`, those that moved
     /// in the last `frames` frames (it held still that long; read after `settle_max` it may still be
     /// typing); never most of it (text over a see-through box keeps every cell: `Config::seep`). Of the
     /// ring: every cell that moved while the text settled (and, from then on, while it holds: `on_frame`).
@@ -977,10 +1008,14 @@ impl Region {
         if 2 * text.iter().filter(|&&m| m).count() > n {
             text.fill(false);
         }
-        if rows >= 5 && cols >= 5 {
+        // (the padding: about a quarter of the box's height on every side, rounded up: a cell half on
+        // the panel moves with the scene too; a third of the rows and columns at least stay, round the
+        // text's middle)
+        let pad = rows.div_ceil(4).min(rows.saturating_sub(2) / 3);
+        if pad > 0 && cols >= 3 * pad + 2 {
             for (i, t) in text.iter_mut().enumerate() {
                 let (x, y) = (i % cols, i / cols);
-                *t |= x == 0 || y == 0 || x + 1 == cols || y + 1 == rows;
+                *t |= x < pad || y < pad || x + pad >= cols || y + pad >= rows;
             }
         }
         let ring = (0..self.ring.len())

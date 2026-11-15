@@ -855,6 +855,34 @@ fn the_rest_of_a_line_found_later_joins_it() {
     assert_eq!(rects, [left.union(&right)]);
 }
 
+/// The choices clip (local replay: "In the quiet valley" drawn 4 times): one detect finds a line in three
+/// pieces, its two ends first (too far apart to be one line) and then the middle that bridges them: one
+/// region, drawn once.
+#[test]
+fn a_line_found_in_pieces_in_one_detect_is_one_region() {
+    let (a, b, c) = (
+        Rect::new(60, 60, 60, 24),
+        Rect::new(160, 60, 60, 24),
+        Rect::new(110, 60, 60, 24),
+    );
+    let mut live = Live::new(Config::default());
+    let mut layer = Recorder::default();
+    let mut img = scene("", None);
+    img.text(a.union(&b), "In the quiet valley", Some(PANEL));
+    let mut found = vec![a, b, c];
+    for n in 0..60u64 {
+        let f = img.frame(n);
+        for job in live.on_frame(&f, &mut Paint, &mut layer) {
+            if let Job::Detect { job, .. } = job {
+                let boxes = std::mem::take(&mut found);
+                live.complete(Done::Detected { job, boxes }, &f, &mut Paint, &mut layer);
+            }
+        }
+    }
+    let rects: Vec<Rect> = live.regions().map(|(_, r, _)| r).collect();
+    assert_eq!(rects, [a.union(&b)]);
+}
+
 /// The fight clip's HUD label: a bar just as tall as its line, and a detect box padded a little past it
 /// (PP-OCR's unclip), so the box's edge cells and most of its ring show the fight moving behind the bar.
 /// The label never changes: drawn once, never hidden (it was hidden and drawn again every 1-2 s).
@@ -874,6 +902,34 @@ fn a_tight_bar_over_a_moving_fight_keeps_its_patch() {
     assert_eq!((sim.layer.shows, sim.layer.hides), (1, 0));
 }
 
+/// The fight clip's banners (local replay: 3 of 10 hidden and drawn again): read while the fight round
+/// the bar held still a moment, then the fight sweeps through most of its ring. The capture keeps our
+/// layer out (Windows, X11 window frames): the banner's own text is seen unchanged, so its patch stays;
+/// a new banner still goes at once.
+#[test]
+fn a_fight_sweeping_round_a_banner_read_in_a_calm_moment_keeps_its_patch() {
+    let mut sim = Sim::new(Config::default(), [2, 3, 3]);
+    let bar = Rect::new(30, 58, 260, 28);
+    let draw = |label: &str, n: u64| {
+        let mut img = Img::new(320, 180);
+        if n >= 60 {
+            img.stripes(n);
+        }
+        img.fill(bar, PANEL);
+        img.text(Rect::new(60, 62, 160, 20), label, Some(PANEL));
+        img
+    };
+    sim.screen = vec![(Rect::new(58, 54, 164, 36), "Storm Lance".into())];
+    for n in 0..240 {
+        sim.step(&draw("Storm Lance", n));
+    }
+    assert!(sim.layer.says("<Storm Lance>"));
+    assert_eq!((sim.layer.shows, sim.layer.hides), (1, 0));
+    let f = draw("Iron Bloom", 240);
+    sim.live.on_frame(&f.frame(240), &mut Paint, &mut sim.layer);
+    assert_eq!(sim.layer.hides, 1, "a new banner: hidden in that frame");
+}
+
 /// The talk clip's speaker name (W8, Windows): its box starts just inside its panel's top edge,
 /// so the ring's top side is the moving scene; the other three sides are the panel: the name is held
 /// (10 of 16 names were dropped as "text on a moving background").
@@ -890,4 +946,35 @@ fn a_name_whose_box_reaches_past_its_panel_on_one_side_is_held() {
         sim.step(&img);
     }
     assert!(sim.layer.says("<Old Tavi>"));
+}
+
+/// The talk clip's chapter label (local replay: hidden and drawn again 7 times in a minute): its detect box
+/// is padded two cells past its panel on the left, so the box's outer columns show the scene; a shape
+/// passing there long after the read is no change of the label. A new label still is.
+#[test]
+fn a_shape_passing_through_the_box_padding_past_its_panel_is_no_change() {
+    let mut sim = Sim::new(Config::default(), [2, 3, 3]);
+    let (panel, text, boxed) = (
+        Rect::new(28, 40, 180, 32),
+        Rect::new(40, 46, 140, 20),
+        Rect::new(20, 36, 180, 40),
+    );
+    let draw = |label: &str, n: u64| {
+        let mut img = Img::new(320, 180);
+        img.fill(panel, PANEL);
+        img.text(text, label, Some(PANEL));
+        if n >= 100 {
+            let v = (n * 37 % 200) as u8 + 40;
+            img.fill(Rect::new(16, 36, 12, 40), [v, 255 - v, v / 2]);
+        }
+        img
+    };
+    sim.screen = vec![(boxed, "Chapter Two".into())];
+    for n in 0..300 {
+        sim.step(&draw("Chapter Two", n));
+    }
+    assert!(sim.layer.says("<Chapter Two>"));
+    assert_eq!((sim.layer.shows, sim.layer.hides), (1, 0));
+    sim.screen = vec![(boxed, "Chapter Six".into())];
+    sim.until(&draw("Chapter Six", 300), |s| s.layer.says("<Chapter Six>"));
 }

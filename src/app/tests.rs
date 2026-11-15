@@ -3951,7 +3951,11 @@ fn the_selections_actions_wait_for_the_snap_to_finish() {
         assert!(app.o.drawing && !pill(&app));
     }
     event(&mut app, overlay::Event::Release);
-    assert!(app.o.selection.is_some() && app.settling(), "morphing");
+    assert!(app.o.selection.is_some() && app.o.morph.is_some());
+    // mid-morph, with the clock held at its start (a loaded machine took longer than MORPH to get here)
+    let (from, _) = app.o.morph.take().unwrap();
+    app.o.morph = Some((from, Instant::now() + std::time::Duration::from_secs(3600)));
+    assert!(app.settling(), "morphing");
     assert!(!pill(&app), "no actions mid-morph");
     // the morph ends: the actions are there
     let (from, _) = app.o.morph.take().unwrap();
