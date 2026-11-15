@@ -47,6 +47,9 @@ impl App {
     /// After `CAPTURE_TIMEOUT` the capture is given up (the next trigger works) and
     /// its answer, if it still comes, is dropped.
     pub(crate) fn capture(&mut self, at: Instant, snip: Option<pick::Kind>) -> Task<Message> {
+        // the window in front, before the overlay takes the focus: every capture
+        // (main, Translate, Live, Snip) tells the glossary which game it is
+        capture::window_rect::remember_focused();
         self.captures = self.captures.wrapping_add(1);
         let n = self.captures;
         self.capturing = Some(n);

@@ -405,3 +405,48 @@ fn a_merge_over_a_limit_is_refused_and_the_file_is_untouched() {
     );
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// #164: the main capture path (Circle to Search, Translate, Live; Snip's grab did already) remembers the
+/// window in front at its entry, so a glossary's "Use for windows named" picks it
+/// by itself; before, only Snip's grab did and the main path never knew the game.
+#[test]
+fn every_capture_remembers_the_window_in_front_for_the_glossary() {
+    use crate::app::App;
+    use crate::shared::platform::capture::window_rect::{
+        CAPTURED, FOCUSED_FORCED, Focused, TITLES_FORCED, captured,
+    };
+    use iced::window;
+    use std::time::Instant;
+    TITLES_FORCED.with(|c| c.set(Some(true)));
+    let all = vec![(
+        "ashen-tides".to_string(),
+        Glossary {
+            name: "Ashen Tides".into(),
+            windows: vec!["Ashen Tides".into()],
+            terms: Vec::new(),
+            removed: Vec::new(),
+            rejected: Vec::new(),
+        },
+    )];
+    let mut app = App::idle(window::Id::unique());
+    {
+        CAPTURED.with(|c| *c.borrow_mut() = None);
+        FOCUSED_FORCED.with(|f| {
+            *f.borrow_mut() = Some(Focused {
+                title: "Ashen Tides - v1.2".into(),
+                class: "UnityWndClass".into(),
+                covers_screen: true,
+            })
+        });
+        let _ = app.capture(Instant::now(), None);
+        let title = captured().map(|f| f.title);
+        assert_eq!(title.as_deref(), Some("Ashen Tides - v1.2"));
+        assert_eq!(
+            store::for_window(&all, title.as_deref()),
+            Some("ashen-tides")
+        );
+        assert_eq!(screen::resolved(&all, ""), Some("ashen-tides"));
+    }
+    TITLES_FORCED.with(|c| c.set(None));
+    FOCUSED_FORCED.with(|f| *f.borrow_mut() = None);
+}

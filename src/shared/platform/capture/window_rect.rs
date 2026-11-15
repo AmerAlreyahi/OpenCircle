@@ -228,6 +228,7 @@ pub struct Focused {
 /// The window the user is in; `None` on Wayland, which has no such API. Only
 /// its title, class and size are read: no handle on the window's process is
 /// opened (a game's anti-cheat watches for that).
+#[cfg_attr(test, allow(dead_code))] // (tests double it: `FOCUSED_FORCED`)
 pub fn focused() -> Option<Focused> {
     #[cfg(windows)]
     {
@@ -365,15 +366,34 @@ pub fn titles_available() -> bool {
 
 /// The window read when the last capture started (before the overlay took the
 /// focus): what the glossary tells a game, and which one, by.
+#[cfg(not(test))]
 static CAPTURED: std::sync::Mutex<Option<Focused>> = std::sync::Mutex::new(None);
+// Tests: per thread (parallel tests don't overwrite each other), and the OS call
+// is a test double.
+#[cfg(test)]
+thread_local!(pub static CAPTURED: std::cell::RefCell<Option<Focused>> = const { std::cell::RefCell::new(None) });
+#[cfg(test)]
+thread_local!(pub static FOCUSED_FORCED: std::cell::RefCell<Option<Focused>> = const { std::cell::RefCell::new(None) });
 
-/// Reads [`focused`] now, for [`captured`].
+/// Reads [`focused`] now, for [`captured`]. Called once at every capture's entry
+/// (`App::capture`), before the overlay takes the focus.
 pub fn remember_focused() {
-    *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = focused();
+    #[cfg(test)]
+    {
+        let now = FOCUSED_FORCED.with(|f| f.borrow().clone());
+        CAPTURED.with(|c| *c.borrow_mut() = now);
+    }
+    #[cfg(not(test))]
+    {
+        *CAPTURED.lock().unwrap_or_else(|e| e.into_inner()) = focused();
+    }
 }
 
 /// The focused window as the last capture started.
 pub fn captured() -> Option<Focused> {
+    #[cfg(test)]
+    return CAPTURED.with(|c| c.borrow().clone());
+    #[cfg(not(test))]
     CAPTURED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
