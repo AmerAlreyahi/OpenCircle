@@ -182,13 +182,19 @@ pub fn gently_here() {
 
 impl Helper {
     fn spawn(program: &Path, args: &[String]) -> Result<Helper, OcrError> {
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()?;
-        LAST_PID.store(child.id(), Ordering::Relaxed);
+            .stderr(Stdio::inherit());
+        // A console helper (the GPU one) gets no console window of its own.
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
+        let mut child = command.spawn()?;
+        if args.first().is_some_and(|a| a == WORKER_ARG) {
+            LAST_PID.store(child.id(), Ordering::Relaxed); // `helper_pid`: the OCR helper's
+        }
         match (child.stdin.take(), child.stdout.take()) {
             (Some(stdin), Some(stdout)) => Ok(Helper {
                 child,

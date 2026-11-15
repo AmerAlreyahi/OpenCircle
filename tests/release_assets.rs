@@ -32,3 +32,19 @@ fn the_msi_is_built_but_not_uploaded() {
         assert!(WORKFLOW.contains(name), "{name}");
     }
 }
+
+/// The GPU translation helper ships per OS under the names the app asks its
+/// own release for (src/features/translate/gpu `HELPER`), and goes into the
+/// signed SHA256SUMS.txt (the checksums job waits for it).
+#[test]
+fn the_gpu_helper_is_a_signed_release_asset() {
+    let app = include_str!("../src/features/translate/gpu/mod.rs");
+    for name in [
+        "opencircle-mt-gpu-windows-x86_64.exe",
+        "opencircle-mt-gpu-linux-x86_64",
+    ] {
+        assert!(WORKFLOW.contains(&format!("asset: {name}\n")), "{name}");
+        assert!(app.contains(&format!("Some(\"{name}\")")), "{name}");
+    }
+    assert!(WORKFLOW.contains("needs: [build, gpu-helper]"));
+}

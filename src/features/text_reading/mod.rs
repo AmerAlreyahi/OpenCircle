@@ -16,10 +16,17 @@ pub mod system;
 pub(crate) mod text;
 pub(crate) mod worker;
 
+#[cfg(test)]
+pub(crate) use models::{
+    LOCAL_FAKE,
+    tests::{Answer, fake_server, payload},
+};
+pub(crate) use models::{ModelFile, ensure, missing_bytes};
 pub use models::{download_size, ensure_models, models_dir, ready};
+pub(crate) use session::Session;
 pub use session::{Hold, gently_here, helper_pid, hold, keep_warm, when_idle};
 pub use worker::{
-    WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_except,
+    WORKER_ARG, gpus_in_child, read_screen, reads_other_scripts, recognize_as, recognize_except,
     recognize_in_child, translate_in_child, warm, worker_main,
 };
 

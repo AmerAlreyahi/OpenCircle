@@ -11,6 +11,9 @@ pub(crate) mod action;
 mod draw;
 mod erase;
 mod glossary;
+// `gpu::live` waits for live translate's one-line switch (the lead routes it): drop the allow with it.
+#[allow(dead_code)]
+pub(crate) mod gpu;
 // (the glossary: Settings' editor and the pill read it through here)
 pub(crate) use glossary::screen as glossary_screen;
 pub(crate) use glossary::store as glossary_store;

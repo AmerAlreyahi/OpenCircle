@@ -222,6 +222,20 @@ impl Glossary {
         format!("Glossary, use exactly: {}", list.join("; "))
     }
 
+    /// The terms in `text` as (term, what it becomes in `target`: the fixed
+    /// translation, else the term itself), each once: the GPU model's
+    /// terminology prompt (`translate::gpu`).
+    pub fn term_pairs(&self, text: &str, target: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        for h in self.hits(text) {
+            let t = &h.term.text;
+            if !out.iter().any(|(k, _)| k == t) {
+                out.push((t.clone(), h.term.fixed(target).unwrap_or(t).to_string()));
+            }
+        }
+        out
+    }
+
     /// Fixed translations the AI left out of `out` (for the log; never
     /// forced): the terms of `text` whose fixed translation isn't in `out`.
     pub fn missed<'a>(&'a self, text: &str, out: &str, target: &str) -> Vec<&'a str> {

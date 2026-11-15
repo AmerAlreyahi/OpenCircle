@@ -48,6 +48,8 @@
 //! recent_targets = []               #   (written only when not empty)
 //! glossary = ""                     # the active per-game glossary (its file name in glossaries/, "" = none;
 //!                                   #   written only when set)
+//! live_gpu = "auto"                 # live translate on the graphics card: auto (when it has the room) | off
+//!                                   #   (written only when off)
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
@@ -329,6 +331,22 @@ pub enum Engine {
     Offline,
 }
 
+/// Live translate on the graphics card (`translate::gpu`): Auto = when the
+/// PC has a discrete card with the room (the GPU rule), Off = the processor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveGpu {
+    #[default]
+    Auto,
+    Off,
+}
+
+impl LiveGpu {
+    fn is_auto(&self) -> bool {
+        *self == LiveGpu::Auto
+    }
+}
+
 /// What Enter does on the action bar. The serialized names are action-registry ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -407,6 +425,8 @@ pub struct TranslateConfig {
     /// The active glossary (`translate::glossary`): its slug, "" = none.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub glossary: String,
+    #[serde(skip_serializing_if = "LiveGpu::is_auto")]
+    pub live_gpu: LiveGpu,
 }
 
 /// What a finished snip does.
@@ -941,6 +961,7 @@ impl Default for TranslateConfig {
             recent_sources: Vec::new(),
             recent_targets: Vec::new(),
             glossary: String::new(),
+            live_gpu: LiveGpu::Auto,
         }
     }
 }

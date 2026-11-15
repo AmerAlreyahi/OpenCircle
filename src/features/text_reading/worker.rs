@@ -9,6 +9,8 @@
 //!   (u32 LE), width*height*4 RGBA bytes;
 //!   reply `[TextBlock...]`.
 //! - Translate: `t`, JSON `[source, target, [text...]]`; reply `[text...]` (same length).
+//! - Graphics cards: `g`; reply `[Gpu...]` (`platform::vulkan`: the driver
+//!   is mapped into the helper, never into the app).
 #[cfg(test)]
 use std::path::Path;
 use std::process::ExitCode;
@@ -44,6 +46,7 @@ const SCREEN: u8 = b's';
 /// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
 const WARM: u8 = b'w';
 const TRANSLATE: u8 = b't';
+const GPUS: u8 = b'g';
 /// Far more lines than any screen holds.
 const MAX_KNOWN: usize = 100_000;
 /// 1 MB of text is far beyond any screen.
@@ -277,6 +280,12 @@ pub(crate) fn translate_via(
     Ok(out)
 }
 
+/// The graphics cards Vulkan sees, asked in the helper (live translation's
+/// GPU rule; `platform::vulkan`).
+pub fn gpus_in_child() -> Result<Vec<crate::shared::platform::vulkan::Gpu>, OcrError> {
+    parse(session::call(&[&[GPUS]])?)
+}
+
 fn parse<T: serde::de::DeserializeOwned>(reply: Vec<u8>) -> Result<T, OcrError> {
     serde_json::from_slice::<Result<T, String>>(&reply)
         .map_err(|e| OcrError::Engine(format!("helper's reply is unreadable: {e}")))?
@@ -312,6 +321,7 @@ pub fn worker_main() -> ExitCode {
                 json(warm_here(body, &mut engine))
             }
             Some((&TRANSLATE, body)) => json(translate_here(body, &mut translator)),
+            Some((&GPUS, _)) => json(Ok(crate::shared::platform::vulkan::gpus())),
             _ => json::<()>(Err(OcrError::BadImage("unknown request".into()))),
         };
         drop(request);

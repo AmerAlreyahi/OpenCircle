@@ -25,6 +25,11 @@ pub fn mt() -> PathBuf {
     app_data().join("mt")
 }
 
+/// `<data>/OpenCircle/gpu`: the GPU translation helper and its model (live translation).
+pub fn gpu() -> PathBuf {
+    app_data().join("gpu")
+}
+
 /// `<data>/OpenCircle/ocr`: ORT and the OCR models.
 pub fn ocr() -> PathBuf {
     app_data().join("ocr")

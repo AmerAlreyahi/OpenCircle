@@ -33,12 +33,29 @@ pub use notes::{
     Line as NoteLine, Notes, Style as NoteStyle, parse as parse_notes, plain as plain_note,
 };
 use release::{CheckError, Http, Memo};
-pub use release::{Install, Manager, Staged, managed_by};
+pub use release::{Install, Manager, SignedAsset, Staged, managed_by};
 
 use crate::{Trigger, Triggers};
 
 /// GitHub's latest final release of the project (drafts and pre-releases never show here).
 pub const LATEST_URL: &str = "https://api.github.com/repos/AmerAlreyahi/OpenCircle/releases/latest";
+
+/// The project's releases by tag (`<this>v1.2.3`).
+const TAG_URL: &str = "https://api.github.com/repos/AmerAlreyahi/OpenCircle/releases/tags/";
+
+/// A file of THIS version's own release (e.g. the GPU translation helper,
+/// built with it), with the size GitHub gives and the SHA-256 the release's
+/// signed checksums list: checked exactly as an update is. The test hook
+/// `OPENCIRCLE_TEST_UPDATE_URL` serves that release (its key as `key` says).
+pub fn signed_asset(name: &str) -> Result<SignedAsset, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let hook = test_url();
+    let url = hook
+        .clone()
+        .unwrap_or_else(|| format!("{TAG_URL}v{current}"));
+    release::signed_asset(&release::Net, &url, current, name, key(hook.is_some()))
+        .map_err(|e| release::scrub(&e))
+}
 
 /// Hidden arguments: print the version and exit (the install's smoke test), and
 /// "started by an update" (wait for the old process to exit first).

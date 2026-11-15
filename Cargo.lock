@@ -3645,6 +3645,7 @@ dependencies = [
  "interprocess",
  "keyring",
  "libc",
+ "libloading 0.9.0",
  "minisign-verify",
  "ort",
  "png",

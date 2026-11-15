@@ -588,6 +588,59 @@ fn a_valid_change_saves_itself() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// "GPU for live translation": only while Live is on in Labs; Off is saved
+/// (`live_gpu = "off"`) and read back, Auto (the default) is not written; the
+/// row's line says what live translate last ran on.
+#[test]
+fn the_gpu_row_shows_with_live_and_round_trips_off() {
+    use crate::shared::config::LiveGpu;
+    use pages::translate::gpu_status;
+    let path = tmp("live-gpu");
+    let (mut s, _) = state(Some(path.clone()));
+    update(&mut s, Message::Section(Section::Translate));
+    let shown = |s: &State| {
+        shot::texts(view(s))
+            .iter()
+            .any(|t| t == "GPU for live translation")
+    };
+    assert!(!shown(&s), "Live is off in Labs");
+    s.draft.labs.live = true;
+    assert!(shown(&s));
+    assert_eq!(s.draft.translate.live_gpu, LiveGpu::Auto);
+    update(&mut s, Message::LiveGpu(LiveGpu::Off));
+    let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
+        panic!("not saved: {:?}", s.notice)
+    };
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("live_gpu = \"off\"")
+    );
+    assert_eq!(Config::load_from(&path).0, cfg);
+    assert_eq!(cfg.translate.live_gpu, LiveGpu::Off);
+    update(&mut s, Message::LiveGpu(LiveGpu::Auto));
+    let Outcome::Saved(_) = update(&mut s, Message::Save) else {
+        panic!("not saved")
+    };
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("live_gpu"));
+    assert_eq!(Config::load_from(&path).0.translate.live_gpu, LiveGpu::Auto);
+    let card = Some(Some("RTX".to_string()));
+    assert_eq!(
+        gpu_status(LiveGpu::Auto, card.clone()),
+        "Using the graphics card"
+    );
+    assert_eq!(
+        gpu_status(LiveGpu::Auto, Some(None)),
+        "This PC uses the processor"
+    );
+    assert_eq!(
+        gpu_status(LiveGpu::Off, card),
+        "Live translate uses the processor"
+    );
+    assert!(gpu_status(LiveGpu::Auto, None).starts_with("Auto: the graphics card"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
 #[test]
 fn save_round_trips_through_a_temp_config() {
     let path = tmp("roundtrip");
@@ -1411,6 +1464,37 @@ fn the_model_row_matches_its_golden_images() {
                 assert!(lost.is_empty(), "{file}: {lost:?}");
                 failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
             }
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Translate with Live on in Labs: the "GPU for live translation" row (Auto
+/// / Off), in English and Arabic, Sapphire and Daylight.
+#[test]
+fn the_gpu_row_matches_its_golden_images() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for ar in [false, true] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, _) = state(None);
+            if ar {
+                update(&mut s, Message::AppLanguage(Choice("ar")));
+            }
+            s.draft.labs.live = true;
+            update(&mut s, Message::Section(Section::Translate));
+            themes::set(theme);
+            let lang = if ar { "-ar" } else { "" };
+            let file = format!("settings-translate-live-gpu{lang}-{}", theme.id);
+            // (tall: the rows sit under the page's preview)
+            let size = Size::new(WINDOW_SIZE.width, 1180.0);
+            let lost = shot::out_of_reach(view(&s), size);
+            assert!(lost.is_empty(), "{file}: {lost:?}");
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
         }
     }
     themes::set(&SAPPHIRE);

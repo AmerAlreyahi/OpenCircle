@@ -62,6 +62,9 @@ whichlang = "=0.1.1"
 # Settings' preview clips (1080p AV1, downloaded on "Play preview"): dav1d's Rust
 # port, BSD-2. No asm (nothing to assemble on any build; 1080p ~3.5 ms a frame).
 rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8"] }
+# Live translation's GPU rule (`platform::vulkan`): the Vulkan loader opened at run time
+# (nothing linked); the same version ort already builds.
+libloading = "0.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

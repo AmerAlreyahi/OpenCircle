@@ -1,7 +1,9 @@
 //! `opencircle-mt-gpu`: the GPU translation helper (llama.cpp, Vulkan).
 //!
 //! A separate exe so `opencircle.exe` never links llama.cpp. It reads one JSON request per
-//! line on stdin and answers one JSON line on stdout (logs go to stderr, never stdout):
+//! frame on stdin and answers one JSON frame on stdout (logs go to stderr, never stdout). A frame
+//! is the app's helper framing (`text_reading::session`): u32 LE length of the rest, u64 LE
+//! request id, then the payload; a reply carries its request's id. A broken frame ends it.
 //!
 //! - `{"op":"probe","model_bytes":1133080448}`: the Vulkan devices (kind, name, free VRAM)
 //!   and whether the GPU rule holds: a discrete GPU with free VRAM >= model + 1 GiB.
@@ -12,7 +14,7 @@
 //!
 //! Replies: `{"ok":true,...}` or `{"ok":false,"error":"..."}`. Without a Vulkan driver the
 //! probe says `"gpu":false` and the app keeps the CPU path.
-use std::io::{BufRead, Write};
+use std::io::{Read, Write};
 use std::num::NonZeroU32;
 use std::time::Instant;
 
@@ -31,6 +33,8 @@ const HEADROOM: u64 = 1 << 30;
 /// Generated tokens are bounded (W8 measured with 160): a game line is short.
 const MAX_NEW: usize = 160;
 const DEFAULT_CTX: u32 = 1024;
+/// A request is a line of game text and a few glossary terms: far below this.
+const MAX_FRAME: usize = 1 << 20;
 
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "lowercase")]
@@ -151,9 +155,38 @@ fn probe(model_bytes: u64) -> Value {
         "fits": fits.is_some(), "device": fits.map(|d| d.index)})
 }
 
-fn reply(out: &mut impl Write, v: Value) {
-    let _ = writeln!(out, "{v}");
-    let _ = out.flush();
+/// The next request frame (id, payload); `None` = stdin ended or the frame is broken.
+fn read_frame(r: &mut impl Read) -> Option<(u64, Vec<u8>)> {
+    let mut head = [0; 12];
+    r.read_exact(&mut head).ok()?;
+    let len = u32::from_le_bytes(head[..4].try_into().ok()?) as usize;
+    if !(8..=MAX_FRAME).contains(&len) {
+        return None;
+    }
+    let id = u64::from_le_bytes(head[4..].try_into().ok()?);
+    let mut payload = vec![0; len - 8];
+    r.read_exact(&mut payload).ok()?;
+    Some((id, payload))
+}
+
+fn write_frame(w: &mut impl Write, id: u64, payload: &[u8]) -> std::io::Result<()> {
+    w.write_all(&(payload.len() as u32 + 8).to_le_bytes())?;
+    w.write_all(&id.to_le_bytes())?;
+    w.write_all(payload)?;
+    w.flush()
+}
+
+/// Requests in order: (id, the request or why it is unreadable).
+type Requests<'a> = dyn Iterator<Item = (u64, Result<Request, serde_json::Error>)> + 'a;
+
+fn requests(r: &mut impl Read) -> impl Iterator<Item = (u64, Result<Request, serde_json::Error>)> {
+    std::iter::from_fn(move || read_frame(r)).map(|(id, p)| (id, serde_json::from_slice(&p)))
+}
+
+fn reply(out: &mut impl Write, id: u64, v: Value) {
+    if write_frame(out, id, v.to_string().as_bytes()).is_err() {
+        std::process::exit(1); // the app is gone
+    }
 }
 
 fn err(msg: impl std::fmt::Display) -> Value {
@@ -161,22 +194,25 @@ fn err(msg: impl std::fmt::Display) -> Value {
 }
 
 fn main() {
+    let mut stdin = std::io::stdin().lock();
+    let mut out = std::io::stdout();
+    let mut requests = requests(&mut stdin);
     let mut backend = match LlamaBackend::init() {
         Ok(b) => b,
         Err(e) => {
-            reply(&mut std::io::stdout(), err(format!("backend init: {e}")));
+            // the first request learns why, then the app sees the helper end
+            if let Some((id, _)) = requests.next() {
+                reply(&mut out, id, err(format!("backend init: {e}")));
+            }
             std::process::exit(1);
         }
     };
     backend.void_logs(); // llama.cpp's own chatter stays out of the pipe
-    let stdin = std::io::stdin();
-    let mut out = std::io::stdout();
-    let mut lines = stdin.lock().lines();
     // Before a model is loaded: probe / load / quit. `load` moves into `serve`.
-    while let Some(Ok(line)) = lines.next() {
-        match serde_json::from_str::<Request>(&line) {
+    while let Some((id, request)) = requests.next() {
+        match request {
             Ok(Request::Quit) => return,
-            Ok(Request::Probe { model_bytes }) => reply(&mut out, probe(model_bytes)),
+            Ok(Request::Probe { model_bytes }) => reply(&mut out, id, probe(model_bytes)),
             Ok(Request::Load { path, n_ctx, gpu }) => {
                 let started = Instant::now();
                 let use_gpu = gpu.unwrap_or(true) && !devices().is_empty();
@@ -188,7 +224,7 @@ fn main() {
                 let model = match LlamaModel::load_from_file(&backend, &path, &params) {
                     Ok(m) => m,
                     Err(e) => {
-                        reply(&mut out, err(format!("load: {e}")));
+                        reply(&mut out, id, err(format!("load: {e}")));
                         continue;
                     }
                 };
@@ -199,35 +235,36 @@ fn main() {
                 let ctx = match model.new_context(&backend, cparams) {
                     Ok(c) => c,
                     Err(e) => {
-                        reply(&mut out, err(format!("context: {e}")));
+                        reply(&mut out, id, err(format!("context: {e}")));
                         continue;
                     }
                 };
                 reply(
                     &mut out,
+                    id,
                     json!({"ok": true, "backend": if use_gpu { "gpu" } else { "cpu" },
                         "load_ms": started.elapsed().as_millis() as u64, "n_ctx": n_ctx}),
                 );
-                serve(&mut lines, &mut out, &model, ctx, n_ctx as usize);
+                serve(&mut requests, &mut out, &model, ctx, n_ctx as usize);
                 return;
             }
-            Ok(Request::Translate { .. }) => reply(&mut out, err("no model loaded")),
-            Err(e) => reply(&mut out, err(format!("bad request: {e}"))),
+            Ok(Request::Translate { .. }) => reply(&mut out, id, err("no model loaded")),
+            Err(e) => reply(&mut out, id, err(format!("bad request: {e}"))),
         }
     }
 }
 
 /// With a model loaded: translate / probe / quit (a second `load` is refused: one model per process).
 fn serve(
-    lines: &mut impl Iterator<Item = std::io::Result<String>>,
+    requests: &mut Requests<'_>,
     out: &mut impl Write,
     model: &LlamaModel,
     mut ctx: llama_cpp_2::context::LlamaContext<'_>,
     n_ctx: usize,
 ) {
     let mut batch = LlamaBatch::new(n_ctx, 1);
-    while let Some(Ok(line)) = lines.next() {
-        let v = match serde_json::from_str::<Request>(&line) {
+    for (id, request) in requests {
+        let v = match request {
             Ok(Request::Quit) => return,
             Ok(Request::Probe { model_bytes }) => probe(model_bytes),
             Ok(Request::Load { .. }) => err("a model is already loaded; restart the helper"),
@@ -245,7 +282,7 @@ fn serve(
             .unwrap_or_else(err),
             Err(e) => err(format!("bad request: {e}")),
         };
-        reply(out, v);
+        reply(out, id, v);
     }
 }
 
@@ -355,5 +392,20 @@ mod tests {
             serde_json::from_str(r#"{"op":"translate","text":"a","target":"ar"}"#).unwrap();
         assert!(matches!(r, Request::Translate { .. }));
         assert!(serde_json::from_str::<Request>(r#"{"op":"nope"}"#).is_err());
+    }
+
+    #[test]
+    fn frames_are_the_apps_helper_frames() {
+        let mut wire = Vec::new();
+        write_frame(&mut wire, 7, br#"{"op":"quit"}"#).unwrap();
+        assert_eq!(&wire[..12], &[21, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0]);
+        let mut r = &wire[..];
+        let got: Vec<_> = requests(&mut r).collect();
+        assert!(matches!(got[..], [(7, Ok(Request::Quit))]));
+        // cut short, or over the limit: the stream ends
+        assert!(read_frame(&mut &wire[..15]).is_none());
+        let mut big = (MAX_FRAME as u32 + 1).to_le_bytes().to_vec();
+        big.extend([0; 8]);
+        assert!(read_frame(&mut &big[..]).is_none());
     }
 }
