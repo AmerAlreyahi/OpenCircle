@@ -176,7 +176,7 @@ jobs:
       - run: cargo clippy --release --features vulkan -- -D warnings
       - run: cargo test --release --features vulkan
       - run: cargo build --release --features vulkan
-      - name: Probe (no GPU on the runner: the helper must answer, not crash)
+      - name: Probe - no GPU on the runner, the helper must answer and not crash
         shell: bash
         run: |
           exe=$(ls "${CARGO_TARGET_DIR:-target}"/release/opencircle-mt-gpu*)
