@@ -1193,3 +1193,12 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   main mode's depth (1080p: 14 px c1 at 0.36, 34 px c2 at 0.20; main mode 22 / 54 px at 0.42 / 0.26); static, drawn once,
   fades in with Live and out on stop, near 0 % CPU; replaces today's thin solid line. Needs a per-pixel-alpha live layer
   (Windows is colour-keyed today): the #123 capability table checks every platform first; a "no" goes to the owner.
+- Ready libraries first, else our own reusable library (owner, 2026-11-15): for Live translation use an existing library where
+  one fits; where none does, build it as a standalone open-source library the owner can reuse and share (own repo and name,
+  MIT OR Apache-2.0, clean-room, like the glass library), OpenCircle only depends on it. Lead's search (2026-11-15): GPU runtime
+  = the `llama-cpp-2` crate (utilityai/llama-cpp-rs, Rust bindings to llama.cpp, `vulkan` feature) instead of our own bindings;
+  OS change hints exist (Windows DXGI duplication / WGC dirty regions, e.g. the `windows-capture` crate; PipeWire
+  SPA_META_VideoDamage, optional per compositor; X11 XDamage) but a 3D game redraws its whole window every frame, so they
+  can't find changed TEXT; no library does the live core (per-region change check on text boxes, patch lifetime "nothing
+  stale", draw once, translation cache, engine-agnostic) -> that core becomes the new library. Reference apps to study (approach
+  only): Translumo (Apache-2.0), OverTranslate (MIT), RSTGameTranslation (MIT). Name and repo: the owner's.
