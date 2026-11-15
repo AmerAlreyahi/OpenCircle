@@ -1216,3 +1216,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   backgrounds is never patched and not listed; an additive CLI `opencircle run live` for Wayland users to bind where no
   shortcut portal exists. Targets: text shown -> drawn <= 400 ms median / 800 ms p95 on the owner's PC class; 0 stale
   patches > 1 frame; 0 redraws of unchanged patches; game frame pacing unchanged.
+- Linux Live sees the game window, not the screen (owner, 2026-11-15, on W5's finding: a screen capture on X11 / Wayland
+  contains our own opaque patches, so text changing UNDER a patch goes unseen = stale patches, up to ~3 s on the choices clip):
+  Live captures the game's own window: X11 through XComposite (as OBS does; no prompt), KDE / wlroots Wayland through the
+  ScreenCast portal's window source (the system asks once which window). Windows keeps the screen capture (our layer is
+  excluded there). The cost to the game on X11 (redirected window) is measured with the harness. Rejected: see-through dots in
+  patches (visible holes), hiding patches briefly (flicker by design).
