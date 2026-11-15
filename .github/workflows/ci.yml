@@ -143,7 +143,7 @@ jobs:
         working-directory: gpu-helper
     steps:
       - uses: actions/checkout@v4
-      - name: Vulkan SDK (Linux: headers, loader, glslc)
+      - name: Vulkan SDK on Linux (headers, loader, glslc)
         if: runner.os == 'Linux'
         working-directory: .
         run: |
@@ -151,7 +151,7 @@ jobs:
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/1.4.309/lunarg-vulkan-1.4.309-jammy.list
           sudo apt-get update
           sudo apt-get install -y vulkan-sdk cmake clang libclang-dev
-      - name: Vulkan SDK (Windows: headers, vulkan-1.lib, glslc)
+      - name: Vulkan SDK on Windows (headers, vulkan-1.lib, glslc)
         if: runner.os == 'Windows'
         working-directory: .
         shell: pwsh
