@@ -1201,7 +1201,18 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   SPA_META_VideoDamage, optional per compositor; X11 XDamage) but a 3D game redraws its whole window every frame, so they
   can't find changed TEXT; no library does the live core (per-region change check on text boxes, patch lifetime "nothing
   stale", draw once, translation cache, engine-agnostic) -> that core becomes the new library. Reference apps to study (approach
-  only): Translumo (Apache-2.0), OverTranslate (MIT), RSTGameTranslation (MIT). Name and repo: the owner's.
+  only): Translumo (Apache-2.0), OverTranslate (MIT), RSTGameTranslation (GPL-3.0, approach only). Name and repo: the owner's.
   Refined (owner, 2026-11-15, "better"): the live core is built INSIDE OpenCircle as one clean, engine-agnostic module (no
   OpenCircle code in it: OCR, translator, UI and OS plug in through small traits), so it can be split into its own repo in an
   hour or two; whether to publish it as a library is decided after 0.3.0, once it is proven on real games. No repo or name now.
+- Live translation approach (owner, 2026-11-15, on W2's design docs/internal/reports-0.3.0/live-approach.md + baseline.md;
+  every recommended answer): (1) GNOME Wayland: Live stays one-shot per press (no click-through layer is possible for an app);
+  a GNOME Shell extension later only if GNOME users ask. (2) KDE Wayland + wlroots: a native wlr-layer-shell layer in 0.3.0,
+  built after Windows + X11 meet every pass line. (3) Windows: the option-B glow is its own alpha window and shows in screen
+  captures while Live runs (Windows refuses capture exclusion for alpha windows); the translated patches stay excluded;
+  DirectComposition only if the owner asks later. (4) GPU runtime: a separate GPU helper exe (llama-cpp-2 + Vulkan), downloaded
+  with the model on the first GPU Live (sha256 pinned); no GPU = nothing downloaded; prebuilt llama.cpp libs only as fallback.
+  Lead defaults (owner may reverse): X11 without a compositor = patches + a thin solid edge line (no glow); text over moving
+  backgrounds is never patched and not listed; an additive CLI `opencircle run live` for Wayland users to bind where no
+  shortcut portal exists. Targets: text shown -> drawn <= 400 ms median / 800 ms p95 on the owner's PC class; 0 stale
+  patches > 1 frame; 0 redraws of unchanged patches; game frame pacing unchanged.
