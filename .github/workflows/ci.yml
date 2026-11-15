@@ -128,6 +128,74 @@ jobs:
           $left = if (Test-Path $dir) { Get-ChildItem $dir -Recurse -Force } else { @() }
           if ($left) { $left | Format-Table FullName; throw "the uninstall left files behind" }
 
+  # GPU translation helper (opencircle-mt-gpu: llama.cpp + Vulkan), its own job so the gate's
+  # time does not grow. Built per OS and uploaded; opencircle.exe never links it.
+  gpu-helper:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      VULKAN_SDK_VERSION: 1.4.309.0
+    defaults:
+      run:
+        working-directory: gpu-helper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Vulkan SDK (Linux: headers, loader, glslc)
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/1.4.309/lunarg-vulkan-1.4.309-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk cmake clang libclang-dev
+      - name: Vulkan SDK (Windows: headers, vulkan-1.lib, glslc)
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanSDK-$env:VULKAN_SDK_VERSION-Installer.exe" -OutFile $exe
+          Start-Process $exe -Wait -ArgumentList '--accept-licenses --default-answer --confirm-command install'
+          $sdk = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          "VULKAN_SDK=$sdk" >> $env:GITHUB_ENV
+          "$sdk\Bin" >> $env:GITHUB_PATH
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+          # a short target dir: llama.cpp's Vulkan shader paths exceed MAX_PATH otherwise
+          "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gpu-helper
+      - run: cargo fmt --check
+      - run: cargo clippy --release --features vulkan -- -D warnings
+      - run: cargo test --release --features vulkan
+      - run: cargo build --release --features vulkan
+      - name: Probe (no GPU on the runner: the helper must answer, not crash)
+        shell: bash
+        run: |
+          exe=$(ls "${CARGO_TARGET_DIR:-target}"/release/opencircle-mt-gpu*)
+          exe=$(echo "$exe" | grep -v '\.d$' | head -1)
+          printf '{"op":"probe","model_bytes":1133080448}\n{"op":"quit"}\n' | "$exe"
+          ls -l "$exe"
+      - if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencircle-mt-gpu-windows
+          path: C:\t\release\opencircle-mt-gpu.exe
+          retention-days: 7
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencircle-mt-gpu-linux
+          path: gpu-helper/target/release/opencircle-mt-gpu
+          retention-days: 7
+
   audit:
     runs-on: ubuntu-22.04
     permissions:
