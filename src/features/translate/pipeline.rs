@@ -1191,7 +1191,11 @@ pub(super) fn unreadable(lines: &[TextBlock]) -> bool {
 impl Deps for Real {
     /// Windows OCR alone where it reads the source (~70 ms for a 720p screen
     /// on the VM, against ~1 s with PP-OCR's second read of a game's sparse
-    /// screen); each region found is then read in full (`recognize`).
+    /// screen), and its lines count as read: live translate uses them as they
+    /// are. (Read again, each region's crop went through `recognize`, whose
+    /// PP-OCR second read took 100-260 ms per crop on the Windows VM and up to
+    /// 1.3 s while the game took the CPU, one batch at a time: the slow tail
+    /// of "text shown -> drawn". Speed before accuracy in live mode.)
     fn detect(
         &self,
         rgba: &[u8],
@@ -1203,7 +1207,7 @@ impl Deps for Real {
                 .last()
                 .unwrap_or(&1);
             if let Ok(lines) = text_reading::system::recognize(rgba, width, height, k) {
-                return Ok((lines, false));
+                return Ok((lines, true));
             }
         }
         self.recognize(rgba, width, height).map(|l| (l, true))
