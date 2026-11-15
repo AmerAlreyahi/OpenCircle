@@ -401,13 +401,21 @@ impl Live {
         while i < self.regions.len() {
             let r = &mut self.regions[i];
             let (sig, ring) = pixels::sample(frame, r.rect, s, ringc);
-            // (the scene beside the box left out once known: `take_reference`)
-            let ring_moved = pixels::moved(
-                &keep(&ring, &r.scene.1),
-                &keep(&r.ring, &r.scene.1),
-                None,
-                self.cfg.change,
-            );
+            // (the scene beside the box left out once known: `take_reference`; before that, the
+            // side of the ring that moved most: a padded detect box reaches past its panel's edge on
+            // one side, as a speaker name's or a HUD label's often does)
+            let ring_moved = match r.scene.1.len() == ring.len() {
+                true => pixels::moved(
+                    &keep(&ring, &r.scene.1),
+                    &keep(&r.ring, &r.scene.1),
+                    None,
+                    self.cfg.change,
+                ),
+                false => {
+                    let sides = pixels::ring_sides(r.rect, s, ringc, (frame.width, frame.height));
+                    pixels::moved_but_one_side(&ring, &r.ring, &sides, self.cfg.change)
+                }
+            };
             r.ring_still = if ring_moved <= self.cfg.ring {
                 r.ring_still.saturating_add(1)
             } else {

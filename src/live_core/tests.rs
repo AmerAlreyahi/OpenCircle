@@ -873,3 +873,21 @@ fn a_tight_bar_over_a_moving_fight_keeps_its_patch() {
     assert!(sim.layer.says("<Party Status>"));
     assert_eq!((sim.layer.shows, sim.layer.hides), (1, 0));
 }
+
+/// The talk clip's speaker name (W8, Windows): its box starts just inside its panel's top edge,
+/// so the ring's top side is the moving scene; the other three sides are the panel: the name is held
+/// (10 of 16 names were dropped as "text on a moving background").
+#[test]
+fn a_name_whose_box_reaches_past_its_panel_on_one_side_is_held() {
+    let mut sim = Sim::new(Config::default(), [2, 3, 3]);
+    let (panel, name) = (Rect::new(30, 62, 260, 60), Rect::new(60, 66, 160, 24));
+    sim.screen = vec![(Rect::new(58, 64, 164, 30), "Old Tavi".into())];
+    for n in 0..200 {
+        let mut img = Img::new(320, 180);
+        img.stripes(n);
+        img.fill(panel, PANEL);
+        img.text(name, "Old Tavi", Some(PANEL));
+        sim.step(&img);
+    }
+    assert!(sim.layer.says("<Old Tavi>"));
+}

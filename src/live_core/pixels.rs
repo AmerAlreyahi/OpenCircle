@@ -49,6 +49,43 @@ pub fn walk(rect: Rect, s: u32, ring: u32, (w, h): (u32, u32), mut f: impl FnMut
     }
 }
 
+/// The side (0 top, 1 bottom, 2 left, 3 right; corners go with top / bottom) of each ring cell, in
+/// [`walk`]'s order.
+pub fn ring_sides(rect: Rect, s: u32, ring: u32, (w, h): (u32, u32)) -> Vec<u8> {
+    let (cw, ch) = (w.div_ceil(s), h.div_ceil(s));
+    let (x0, y0) = ((rect.x / s).min(cw), (rect.y / s).min(ch));
+    let y1 = rect.bottom().div_ceil(s).min(ch);
+    let mut sides = Vec::new();
+    walk(rect, s, ring, (w, h), |cx, cy, in_ring| {
+        if in_ring {
+            sides.push(match () {
+                _ if cy < y0 => 0,
+                _ if cy >= y1 => 1,
+                _ if cx < x0 => 2,
+                _ => 3,
+            });
+        }
+    });
+    sides
+}
+
+/// [`moved`] (`now` from `was`) without the side (`sides`: [`ring_sides`]) that moved most.
+pub fn moved_but_one_side(now: &[u8], was: &[u8], sides: &[u8], change: f32) -> f32 {
+    if now.len() != was.len() || now.len() != sides.len() {
+        return moved(now, was, None, change);
+    }
+    let (mut n, mut m) = ([0u32; 4], [0u32; 4]);
+    for i in 0..now.len() {
+        let k = sides[i] as usize;
+        n[k] += 1;
+        m[k] += (now[i].abs_diff(was[i]) as f32 > change) as u32;
+    }
+    let (total, all) = (n.iter().sum::<u32>(), m.iter().sum::<u32>());
+    (0..4)
+        .map(|k| (all - m[k]) as f32 / (total - n[k]).max(1) as f32)
+        .fold(all as f32 / total.max(1) as f32, f32::min)
+}
+
 /// A region's text-area and ring cells on `frame`.
 pub fn sample(f: &Frame, rect: Rect, s: u32, ring: u32) -> (Vec<u8>, Vec<u8>) {
     let (mut text, mut around) = (Vec::new(), Vec::new());
