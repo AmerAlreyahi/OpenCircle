@@ -780,68 +780,15 @@ fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
 
 #[cfg(target_os = "linux")]
 fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
-    use xcb::{Xid, XidNew, x};
+    use xcb::{Xid, x};
 
     if super::wayland_session() || std::env::var_os("DISPLAY").is_none() {
         return None;
     }
     let (conn, screen) = xcb::Connection::connect(None).ok()?;
     let root = conn.get_setup().roots().nth(screen as usize)?.root();
-    let atom = |name: &str| {
-        let a = conn
-            .wait_for_reply(conn.send_request(&x::InternAtom {
-                only_if_exists: true,
-                name: name.as_bytes(),
-            }))
-            .ok()?
-            .atom();
-        (a != x::ATOM_NONE).then_some(a)
-    };
-    let property = |window, property, r#type| {
-        conn.wait_for_reply(conn.send_request(&x::GetProperty {
-            delete: false,
-            window,
-            property,
-            r#type,
-            long_offset: 0,
-            long_length: 4096,
-        }))
-        .ok()
-    };
-    let words = |window, name: &str, r#type| -> Vec<u32> {
-        atom(name)
-            .and_then(|a| property(window, a, r#type))
-            .map(|r| r.value::<u32>().to_vec())
-            .unwrap_or_default()
-    };
-    let me = std::process::id();
-    let shell: Vec<u32> = ["_NET_WM_WINDOW_TYPE_DESKTOP", "_NET_WM_WINDOW_TYPE_DOCK"]
-        .iter()
-        .filter_map(|n| atom(n))
-        .map(|a| a.resource_id())
-        .collect();
-    let skip = |w: x::Window| {
-        let ours = words(w, "_NET_WM_PID", x::ATOM_CARDINAL).first() == Some(&me);
-        let kind = words(w, "_NET_WM_WINDOW_TYPE", x::ATOM_ATOM);
-        ours || kind.iter().any(|k| shell.contains(k))
-    };
-    // the active window, else (ours is active) the topmost of the rest
-    let active = words(root, "_NET_ACTIVE_WINDOW", x::ATOM_WINDOW);
-    let stacking: Vec<u32> = atom("_NET_CLIENT_LIST_STACKING")
-        .and_then(|a| property(root, a, x::ATOM_WINDOW))
-        .map(|r| r.value::<u32>().to_vec())
-        .unwrap_or_default();
-    let stacking = stacking.into_iter().rev().filter(|_| next_down);
-    let window = (active.into_iter().chain(stacking))
-        .filter(|&id| id != 0)
-        // (ids the window manager lists as client windows)
-        .map(x::Window::new)
-        .find(|&w| {
-            let viewable = conn
-                .wait_for_reply(conn.send_request(&x::GetWindowAttributes { window: w }))
-                .is_ok_and(|a| a.map_state() == x::MapState::Viewable);
-            viewable && !skip(w)
-        })?;
+    let window = x11_active(&conn, root, next_down)?;
+    let (atom, property, words) = x11_props(&conn);
     let geometry = conn
         .wait_for_reply(conn.send_request(&x::GetGeometry {
             drawable: x::Drawable::Window(window),
@@ -867,6 +814,89 @@ fn active(next_down: bool) -> Option<(WinRect, String, bool)> {
         u32::from(geometry.height()),
     );
     Some((rect, class, maximized))
+}
+
+/// Atom, property and 32-bit-words readers on `conn` (X11 window lookups).
+#[cfg(target_os = "linux")]
+#[allow(clippy::type_complexity)]
+fn x11_props(
+    conn: &xcb::Connection,
+) -> (
+    impl Fn(&str) -> Option<xcb::x::Atom> + '_,
+    impl Fn(xcb::x::Window, xcb::x::Atom, xcb::x::Atom) -> Option<xcb::x::GetPropertyReply> + '_,
+    impl Fn(xcb::x::Window, &str, xcb::x::Atom) -> Vec<u32> + '_,
+) {
+    use xcb::x;
+    let atom = move |name: &str| {
+        let a = conn
+            .wait_for_reply(conn.send_request(&x::InternAtom {
+                only_if_exists: true,
+                name: name.as_bytes(),
+            }))
+            .ok()?
+            .atom();
+        (a != x::ATOM_NONE).then_some(a)
+    };
+    let property = move |window, property, r#type| {
+        conn.wait_for_reply(conn.send_request(&x::GetProperty {
+            delete: false,
+            window,
+            property,
+            r#type,
+            long_offset: 0,
+            long_length: 4096,
+        }))
+        .ok()
+    };
+    let words = move |window, name: &str, r#type| -> Vec<u32> {
+        atom(name)
+            .and_then(|a| property(window, a, r#type))
+            .map(|r| r.value::<u32>().to_vec())
+            .unwrap_or_default()
+    };
+    (atom, property, words)
+}
+
+/// The window the user is in on X11 (`_NET_ACTIVE_WINDOW`; with `next_down`,
+/// when that is ours or none, the topmost of the rest): viewable, not ours,
+/// not the desktop or a dock.
+#[cfg(target_os = "linux")]
+pub(super) fn x11_active(
+    conn: &xcb::Connection,
+    root: xcb::x::Window,
+    next_down: bool,
+) -> Option<xcb::x::Window> {
+    use xcb::{Xid, XidNew, x};
+
+    let (atom, property, words) = x11_props(conn);
+    let me = std::process::id();
+    let shell: Vec<u32> = ["_NET_WM_WINDOW_TYPE_DESKTOP", "_NET_WM_WINDOW_TYPE_DOCK"]
+        .iter()
+        .filter_map(|n| atom(n))
+        .map(|a| a.resource_id())
+        .collect();
+    let skip = |w: x::Window| {
+        let ours = words(w, "_NET_WM_PID", x::ATOM_CARDINAL).first() == Some(&me);
+        let kind = words(w, "_NET_WM_WINDOW_TYPE", x::ATOM_ATOM);
+        ours || kind.iter().any(|k| shell.contains(k))
+    };
+    // the active window, else (ours is active) the topmost of the rest
+    let active = words(root, "_NET_ACTIVE_WINDOW", x::ATOM_WINDOW);
+    let stacking: Vec<u32> = atom("_NET_CLIENT_LIST_STACKING")
+        .and_then(|a| property(root, a, x::ATOM_WINDOW))
+        .map(|r| r.value::<u32>().to_vec())
+        .unwrap_or_default();
+    let stacking = stacking.into_iter().rev().filter(|_| next_down);
+    (active.into_iter().chain(stacking))
+        .filter(|&id| id != 0)
+        // (ids the window manager lists as client windows)
+        .map(x::Window::new)
+        .find(|&w| {
+            let viewable = conn
+                .wait_for_reply(conn.send_request(&x::GetWindowAttributes { window: w }))
+                .is_ok_and(|a| a.map_state() == x::MapState::Viewable);
+            viewable && !skip(w)
+        })
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]

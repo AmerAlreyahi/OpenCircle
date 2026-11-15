@@ -1034,10 +1034,21 @@ mod tests {
                     *show && (on..off).contains(f) && 3 * at.overlap(&r) > r.area()
                 })
                 .collect();
-            let Some(first) = mine.first() else { continue };
+            let Some(first) = mine.first() else {
+                if std::env::var_os("OC_DBG").is_some() {
+                    eprintln!(
+                        "DBG missed {:?} {:?} on {on} off {off} box {r:?}",
+                        e["text"], e["kind"]
+                    );
+                }
+                continue;
+            };
             drawn += 1;
             lat.push((first.0 - on) as f64 * 33.3);
             redraws += mine.len() - 1;
+            if mine.len() > 1 && std::env::var_os("OC_DBG").is_some() {
+                eprintln!("DBG redraw {:?} on {on} off {off}: {:?}", e["text"], mine);
+            }
             for (_, _, id, _) in &mine {
                 let gone = (layer.0.iter())
                     .find(|(_, show, i, _)| !show && i == id)

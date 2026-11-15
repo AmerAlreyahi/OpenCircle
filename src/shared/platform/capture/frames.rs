@@ -8,6 +8,13 @@
 //!   big monitor), else a grab of its monitor cut to the area.
 //! - Wayland: a ScreenCast stream of the area's monitor (`screencast::Cast`,
 //!   the restore token: no dialog once allowed).
+//!
+//! `Frames::front_window` (live translate) reads the window the user is in
+//! instead, where the OS gives a window's own pixels, so what lies over it
+//! (our own layer) is never in them: X11 through XComposite
+//! (`x11::FrontWindow`), else the area as above. Windows needs none (our
+//! layer keeps out of captures). KDE / wlroots Wayland: the ScreenCast
+//! portal's window source goes here (live translate's Wayland layer step).
 use std::io;
 use std::time::Duration;
 
@@ -20,6 +27,8 @@ pub struct Frames {
     cast: Option<super::screencast::Cast>,
     #[cfg(target_os = "linux")]
     shm: Option<super::x11::Shm>,
+    #[cfg(target_os = "linux")]
+    front: Option<super::x11::FrontWindow>,
     /// Why there is no duplication (it never started, or stopped).
     why: Option<String>,
     first: bool,
@@ -54,9 +63,27 @@ impl Frames {
             cast,
             #[cfg(target_os = "linux")]
             shm,
+            #[cfg(target_os = "linux")]
+            front: None,
             why,
             first: true,
         }
+    }
+
+    /// The window the user is in on the monitor at `monitor`, placed where it
+    /// sits on it (the rest black); the monitor as shown where no window's
+    /// own pixels can be read (logged once).
+    pub fn front_window(monitor: (i32, i32, u32, u32)) -> Frames {
+        #[allow(unused_mut)]
+        let mut frames = Frames::open(monitor);
+        #[cfg(target_os = "linux")]
+        if frames.shm.is_some() {
+            match super::x11::FrontWindow::start(monitor) {
+                Ok(front) => frames.front = Some(front),
+                Err(e) => crate::log!("[opencircle] no window frames ({e}); the screen"),
+            }
+        }
+        frames
     }
 
     /// Frames come as the screen shows them, none while it is still (no
@@ -97,6 +124,14 @@ impl Frames {
             return Err(io::Error::other(why.to_string()));
         }
         #[cfg(target_os = "linux")]
+        if let Some(front) = &mut self.front {
+            match front.next(wait) {
+                super::x11::Got::Frame(frame) => return Ok(Some(frame)),
+                super::x11::Got::Same => return Ok(None),
+                super::x11::Got::NoWindow => {} // (the screen, this time)
+            }
+        }
+        #[cfg(target_os = "linux")]
         if let Some(shm) = &mut self.shm {
             match shm.grab() {
                 Ok(frame) => return Ok(Some(frame)),
@@ -109,6 +144,15 @@ impl Frames {
         grab_area(self.region).map(Some)
     }
 
+    /// The frames are a window's own pixels (`front_window` on X11): what
+    /// lies over it, our own layer and edge glow among it, is never in them.
+    pub fn of_window(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        return self.front.as_ref().is_some_and(|f| f.window().is_some());
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
+
     /// For the log line.
     pub fn describe(&self) -> String {
         #[cfg(windows)]
@@ -118,6 +162,10 @@ impl Frames {
         #[cfg(target_os = "linux")]
         if let Some(cast) = &self.cast {
             return format!("screen cast ({} frames read)", cast.frames);
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(window) = self.front.as_ref().and_then(|f| f.window()) {
+            return format!("window {window:#x}");
         }
         #[cfg(target_os = "linux")]
         if self.shm.is_some() {
@@ -183,4 +231,78 @@ fn cut_takes_an_area_inside_the_frame_only() {
     );
     assert_eq!(cut(&frame, 3, (2, 0), (2, 1)), None);
     assert_eq!(cut(&frame, 3, (-1, 0), (1, 1)), None);
+}
+
+/// X11 (a test server: `xvfb-run`, never a real desktop's): live translate
+/// reads the game's own window, so our layer over it is never in a frame
+/// (a screen grab shows the layer: text changing under a patch went unseen).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_front_window_is_read_without_what_lies_over_it() {
+    use xcb::x;
+    if std::env::var_os("DISPLAY").is_none() || std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        crate::log!("no test X11 server: skipped");
+        return;
+    }
+    let (conn, screen) = xcb::Connection::connect(None).unwrap();
+    let root = conn.get_setup().roots().nth(screen as usize).unwrap();
+    let window = |at: (i16, i16, u16), pixel: u32, over: bool| {
+        let wid: x::Window = conn.generate_id();
+        conn.send_and_check_request(&x::CreateWindow {
+            depth: x::COPY_FROM_PARENT as u8,
+            wid,
+            parent: root.root(),
+            x: at.0,
+            y: at.1,
+            width: at.2,
+            height: at.2,
+            border_width: 0,
+            class: x::WindowClass::InputOutput,
+            visual: root.root_visual(),
+            value_list: &[x::Cw::BackPixel(pixel), x::Cw::OverrideRedirect(over)],
+        })
+        .unwrap();
+        conn.send_and_check_request(&x::MapWindow { window: wid })
+            .unwrap();
+        wid
+    };
+    // the game (red), then our patch over it (blue, override-redirect)
+    let game = window((0, 0, 64), 0xff0000, false);
+    let patch = window((16, 16, 16), 0x0000ff, true);
+    let active = conn
+        .wait_for_reply(conn.send_request(&x::InternAtom {
+            only_if_exists: false,
+            name: b"_NET_ACTIVE_WINDOW",
+        }))
+        .unwrap()
+        .atom();
+    conn.send_and_check_request(&x::ChangeProperty {
+        mode: x::PropMode::Replace,
+        window: root.root(),
+        property: active,
+        r#type: x::ATOM_WINDOW,
+        data: &[game],
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let mut frames = Frames::front_window((0, 0, 64, 64));
+    let frame = (0..60)
+        .find_map(|_| frames.next(Duration::from_millis(16)).ok().flatten())
+        .unwrap();
+    let px = |x: usize, y: usize| frame[(y * 64 + x) * 4..][..4].to_vec();
+    assert_eq!(px(2, 2), [255, 0, 0, 255]);
+    assert_eq!(
+        px(20, 20),
+        [255, 0, 0, 255],
+        "the patch is not in the frame"
+    );
+    for window in [patch, game] {
+        conn.send_and_check_request(&x::DestroyWindow { window })
+            .unwrap();
+    }
+    conn.send_and_check_request(&x::DeleteProperty {
+        window: root.root(),
+        property: active,
+    })
+    .unwrap();
 }

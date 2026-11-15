@@ -440,7 +440,12 @@ fn a_line_seen_before_skips_reading_and_translating() {
 
 #[test]
 fn back_off_slows_and_pauses_discover_never_the_watch() {
-    let mut sim = Sim::new(Config::default(), [0, 0, 0]);
+    // (a scene that moves all the time is looked at: the back-off alone paces it)
+    let cfg = Config {
+        tile_still: Duration::ZERO,
+        ..Config::default()
+    };
+    let mut sim = Sim::new(cfg, [0, 0, 0]);
     sim.screen = vec![(LINE, "x".into())];
     let detects_in = |sim: &mut Sim, frames: u64| {
         let d = sim.detects;
@@ -774,4 +779,97 @@ fn our_own_fine_patch_in_the_capture_is_no_change() {
         (1, 0),
         "shown once, never taken for new text"
     );
+}
+
+/// A background that moves all the time, fast or slowly, is never looked for text (on the fight and
+/// talk clips a detect over the whole moving frame ran back to back: most of the CPU); a line that
+/// appears on a box and holds still is, in an area around it alone.
+#[test]
+fn only_what_changed_and_held_still_is_looked_for_text() {
+    for slow in [false, true] {
+        let mut live = Live::new(Config::default());
+        let (mut layer, frame_px) = (Recorder::default(), 320 * 180);
+        let mut areas = Vec::new();
+        for n in 0..180u64 {
+            let mut img = scene(if n < 90 { "" } else { "Sky Rend" }, Some(n));
+            if slow {
+                // a ramp drifting half a pixel a frame
+                for y in 0..img.h {
+                    for x in 0..img.w {
+                        if !(BOX.x..BOX.right()).contains(&x) || !(BOX.y..BOX.bottom()).contains(&y)
+                        {
+                            let v = ((2 * x as u64 + n) % 128 * 2) as u8;
+                            img.put(x, y, [v, v, v]);
+                        }
+                    }
+                }
+            }
+            let f = img.frame(n);
+            for job in live.on_frame(&f, &mut Paint, &mut layer) {
+                if let Job::Detect { job, areas: a } = job {
+                    areas.push((n, a.iter().map(Rect::area).sum::<u64>()));
+                    // (nothing found: the next discover may run)
+                    let done = Done::Detected { job, boxes: vec![] };
+                    live.complete(done, &f, &mut Paint, &mut layer);
+                }
+            }
+        }
+        // the first look takes it all in; then only the line, once it held still
+        assert_eq!(areas[0], (0, frame_px));
+        let later: Vec<_> = areas[1..].to_vec();
+        assert!(
+            !later.is_empty(),
+            "the new line is looked for (slow: {slow})"
+        );
+        assert!(
+            later.iter().all(|&(n, a)| n >= 90 && a < frame_px),
+            "slow: {slow}, {later:?}"
+        );
+    }
+}
+
+/// A line found in two parts (its last words settled after the first detect, on the choices clip) is one
+/// region: one patch, never two side by side.
+#[test]
+fn the_rest_of_a_line_found_later_joins_it() {
+    let (left, right) = (Rect::new(60, 60, 70, 24), Rect::new(140, 60, 80, 24));
+    let mut live = Live::new(Config::default());
+    let mut layer = Recorder::default();
+    let mut img = scene("", None);
+    img.text(left, "Sky", Some(PANEL));
+    let mut found = vec![left];
+    for n in 0..60u64 {
+        if n == 1 {
+            img.text(right, "Rend", Some(PANEL));
+        }
+        let f = img.frame(n);
+        for job in live.on_frame(&f, &mut Paint, &mut layer) {
+            if let Job::Detect { job, .. } = job {
+                let boxes = std::mem::take(&mut found);
+                found = vec![right];
+                live.complete(Done::Detected { job, boxes }, &f, &mut Paint, &mut layer);
+            }
+        }
+    }
+    let rects: Vec<Rect> = live.regions().map(|(_, r, _)| r).collect();
+    assert_eq!(rects, [left.union(&right)]);
+}
+
+/// The fight clip's HUD label: a bar just as tall as its line, and a detect box padded a little past it
+/// (PP-OCR's unclip), so the box's edge cells and most of its ring show the fight moving behind the bar.
+/// The label never changes: drawn once, never hidden (it was hidden and drawn again every 1-2 s).
+#[test]
+fn a_tight_bar_over_a_moving_fight_keeps_its_patch() {
+    let mut sim = Sim::new(Config::default(), [2, 3, 3]);
+    let bar = Rect::new(30, 58, 260, 28);
+    sim.screen = vec![(Rect::new(58, 57, 164, 30), "Party Status".into())];
+    for n in 0..300 {
+        let mut img = Img::new(320, 180);
+        img.stripes(n / 4); // (a fight that moves in steps, as video does)
+        img.fill(bar, PANEL);
+        img.text(LINE, "Party Status", Some(PANEL));
+        sim.step(&img);
+    }
+    assert!(sim.layer.says("<Party Status>"));
+    assert_eq!((sim.layer.shows, sim.layer.hides), (1, 0));
 }

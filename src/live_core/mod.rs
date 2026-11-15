@@ -65,6 +65,21 @@ impl Rect {
     fn same_place(&self, o: &Rect) -> bool {
         2 * self.overlap(o) > self.area().min(o.area())
     }
+    /// `o` makes it wider by more than half its height (more of its line).
+    fn grows_by(&self, o: &Rect) -> bool {
+        2 * (self.union(o).w - self.w) > self.h
+    }
+    /// Parts of one line: they share at least half of the lower one's height and are at most that
+    /// height apart side by side (a word space is about a third of it).
+    fn same_line(&self, o: &Rect) -> bool {
+        let h = self.h.min(o.h);
+        let rows = self
+            .bottom()
+            .min(o.bottom())
+            .saturating_sub(self.y.max(o.y));
+        let gap = self.x.max(o.x).saturating_sub(self.right().min(o.right()));
+        h > 0 && 2 * rows >= h && gap <= h
+    }
 }
 
 /// One captured frame, RGBA, `width * height * 4` bytes. `at` = when it was captured (any fixed origin).
@@ -132,6 +147,13 @@ pub struct Config {
     pub fade_in: Duration,
     /// The discover step's period while frames arrive.
     pub discover_every: Duration,
+    /// A discover tile changed / held still: the mean gray difference of its cells above / at most this
+    /// (0..255; video noise moves a still tile by ~1, new text by tens).
+    pub tile_change: f32,
+    /// A changed tile is looked for text only once it held still over this long before the discover
+    /// (text settles, a moving background or effect never does: on the fight and talk clips a detect
+    /// over the whole moving frame ran back to back and took most of the CPU); 0 = never waits.
+    pub tile_still: Duration,
     /// Crops per read batch (one batch in flight at a time).
     pub read_batch: usize,
     /// Translation cache entries (text -> translation).
@@ -153,6 +175,8 @@ impl Default for Config {
             settle_max: Duration::from_millis(400),
             fade_in: Duration::from_millis(120),
             discover_every: Duration::from_millis(250),
+            tile_change: 3.0,
+            tile_still: Duration::from_millis(100),
             read_batch: 8,
             cache_texts: 2000,
             cache_signatures: 512,
@@ -272,6 +296,13 @@ struct Region {
     /// The text-area and ring cells when it was read (what "unchanged" means from then on).
     reference: Vec<u8>,
     ring_ref: Vec<u8>,
+    /// Frames since each text-area and ring cell last moved (while it settles), and from the read on
+    /// the cells that were still moving then: the scene beside or through the box (a detect box
+    /// reaches past a tight HUD bar or banner, so its edge cells and ring see the fight behind it),
+    /// left out of "unchanged" (`against_reference`).
+    age: (Vec<u8>, Vec<u8>),
+    ring_moved: Vec<bool>,
+    scene: (Vec<bool>, Vec<bool>),
     /// The shown patch: its bounds, and the cells as a capture that includes our layer shows them
     /// (X11, Wayland: "shows our patch" counts as unchanged).
     patch: Option<Rect>,
@@ -300,7 +331,10 @@ pub struct Live {
     next_job: u64,
     size: (u32, u32),
     start: Option<Duration>,
-    tiles: Vec<u64>,
+    /// The discover step's grid of cells (each tile as it last held still), and a grid taken
+    /// `tile_still` before the next discover (with its time).
+    tiles: Vec<u8>,
+    before: Option<(Duration, Vec<u8>)>,
     last_discover: Option<Duration>,
     detecting: Option<u64>,
     discover_now: bool,
@@ -327,6 +361,7 @@ impl Live {
             size: (0, 0),
             start: None,
             tiles: Vec::new(),
+            before: None,
             last_discover: None,
             detecting: None,
             discover_now: false,
@@ -366,7 +401,13 @@ impl Live {
         while i < self.regions.len() {
             let r = &mut self.regions[i];
             let (sig, ring) = pixels::sample(frame, r.rect, s, ringc);
-            let ring_moved = pixels::moved(&ring, &r.ring, None, self.cfg.change);
+            // (the scene beside the box left out once known: `take_reference`)
+            let ring_moved = pixels::moved(
+                &keep(&ring, &r.scene.1),
+                &keep(&r.ring, &r.scene.1),
+                None,
+                self.cfg.change,
+            );
             r.ring_still = if ring_moved <= self.cfg.ring {
                 r.ring_still.saturating_add(1)
             } else {
@@ -375,11 +416,34 @@ impl Live {
             if r.state == State::Changing {
                 let still = !pixels::changed(&sig, &r.sig, None, self.cfg.change);
                 r.still = if still { r.still.saturating_add(1) } else { 0 };
+                let change = self.cfg.change;
+                let older = |age: &mut Vec<u8>, now: &[u8], was: &[u8]| {
+                    age.resize(now.len(), 0);
+                    for ((a, n), w) in age.iter_mut().zip(now).zip(was) {
+                        *a = match (*n as f32 - *w as f32).abs() > change {
+                            true => 0,
+                            false => a.saturating_add(1),
+                        };
+                    }
+                };
+                older(&mut r.age.0, &sig, &r.sig);
+                older(&mut r.age.1, &ring, &r.ring);
+                for (m, a) in r.ring_moved.iter_mut().zip(&r.age.1) {
+                    *m |= *a == 0;
+                }
             } else {
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
                 if changed || drift > self.cfg.ring {
                     self.retire(i, layer);
                     continue;
+                }
+                // ring cells that keep moving while the text holds are the scene beside the box from
+                // now on (all at once, as a closing box, is a change: above)
+                let (r, change) = (&mut self.regions[i], self.cfg.change);
+                if r.scene.1.len() == ring.len() && r.ring.len() == ring.len() {
+                    for ((s, now), was) in r.scene.1.iter_mut().zip(&ring).zip(&r.ring) {
+                        *s |= now.abs_diff(*was) as f32 > change;
+                    }
                 }
             }
             let r = &mut self.regions[i];
@@ -419,8 +483,9 @@ impl Live {
             }
             let key = hash(&r.sig);
             if let Some(text) = self.signatures.get(&key) {
+                let cols = self.cols(self.regions[i].rect);
                 let r = &mut self.regions[i];
-                (r.reference, r.ring_ref) = (r.sig.clone(), r.ring.clone());
+                r.take_reference(settle, settled, cols);
                 match self.known_text(i, text, frame, painter, layer) {
                     Some(Some(job)) => jobs.push(job),
                     Some(None) => {}
@@ -437,11 +502,12 @@ impl Live {
                 (!settled, std::cmp::Reverse(born), area)
             });
             let crops = (queue.into_iter().take(self.cfg.read_batch))
-                .map(|(i, _, _, _, key)| {
+                .map(|(i, settled, _, _, key)| {
                     let job = self.job();
+                    let cols = self.cols(self.regions[i].rect);
                     let r = &mut self.regions[i];
                     r.state = State::Reading { job };
-                    (r.reference, r.ring_ref) = (r.sig.clone(), r.ring.clone());
+                    r.take_reference(settle, settled, cols);
                     self.reading.insert(job, key);
                     Crop {
                         id: r.id,
@@ -487,14 +553,22 @@ impl Live {
                     {
                         continue;
                     }
-                    match self.regions.iter().position(|r| r.rect.same_place(&b)) {
-                        // still changing (typewriter text growing): its newest box
-                        Some(i) if self.regions[i].state == State::Changing => {
-                            self.regions[i].rect = b;
+                    let place = self.regions.iter().position(|r| r.rect.same_place(&b));
+                    let line = || self.regions.iter().position(|r| r.rect.same_line(&b));
+                    match (place, place.or_else(line)) {
+                        // still changing (typewriter text growing), or the rest of a line found
+                        // earlier in part (its other words settled later): one region for the line
+                        (_, Some(i)) if self.regions[i].state == State::Changing => {
+                            self.regions[i].rect = self.regions[i].rect.union(&b);
                             self.reset_cells(i, frame);
                         }
-                        Some(_) => {}
-                        None => self.add(b, frame),
+                        (_, Some(i)) if self.regions[i].rect.grows_by(&b) => {
+                            let line = self.regions[i].rect.union(&b);
+                            self.retire(i, layer);
+                            self.add(line, frame);
+                        }
+                        (None, None) => self.add(b, frame),
+                        _ => {}
                     }
                 }
                 Vec::new()
@@ -543,6 +617,7 @@ impl Live {
         }
         self.regions.clear();
         self.tiles.clear();
+        self.before = None;
         (self.last_discover, self.detecting, self.discover_now) = (None, None, false);
         self.retired.clear();
         self.reading.clear();
@@ -592,6 +667,15 @@ impl Live {
         self.next_job
     }
 
+    /// How many cells wide a region's text area is (as `pixels::walk` clamps it).
+    fn cols(&self, r: Rect) -> usize {
+        let (s, cw) = (
+            self.cfg.scale.max(1),
+            self.size.0.div_ceil(self.cfg.scale.max(1)),
+        );
+        (r.right().div_ceil(s).min(cw) - (r.x / s).min(cw)) as usize
+    }
+
     fn ring_cells(&self) -> u32 {
         self.cfg.ring_px.div_ceil(self.cfg.scale.max(1))
     }
@@ -602,25 +686,36 @@ impl Live {
     fn against_reference(&self, i: usize, sig: &[u8], ring: &[u8]) -> (bool, f32) {
         let r = &self.regions[i];
         let change = self.cfg.change;
-        let mut drift = pixels::moved(ring, &r.ring_ref, None, change);
+        // where the capture shows our patch over the text (X11 without window frames, Wayland), a box
+        // closing under it shows in the ring alone: then at most 3/4 of the ring is the scene's
+        let ours_seen = r.patch.is_some()
+            && !pixels::changed(sig, &r.reference, Some((&r.ours.0, 1.0)), change)
+            && pixels::changed(sig, &r.reference, None, change);
+        let scene = r.scene.1.iter().filter(|&&s| s).count();
+        let none = Vec::new();
+        let ring_scene = match ours_seen && 4 * scene > 3 * r.scene.1.len() {
+            true => &none,
+            false => &r.scene.1,
+        };
+        let (sig, ring) = (&keep(sig, &r.scene.0), &keep(ring, ring_scene));
+        let (reference, ring_ref) = (
+            &keep(&r.reference, &r.scene.0),
+            &keep(&r.ring_ref, ring_scene),
+        );
+        let ours = (&keep(&r.ours.0, &r.scene.0), &keep(&r.ours.1, ring_scene));
+        let mut drift = pixels::moved(ring, ring_ref, None, change);
         // (with the ring moving, a few strong cells are the scene through the box)
         let strong = match drift > self.cfg.seep {
             true => (4.0 * change, self.cfg.seep_cells),
             false => (2.0 * change, 2),
         };
-        let mut changed = pixels::changed_by(sig, &r.reference, None, change, strong);
+        let mut changed = pixels::changed_by(sig, reference, None, change, strong);
         if r.patch.is_some() && (changed || drift > self.cfg.ring) {
             let mut alphas = vec![1.0, r.alpha, r.prev_alpha];
             alphas.dedup();
             for t in alphas {
-                changed &=
-                    pixels::changed_by(sig, &r.reference, Some((&r.ours.0, t)), change, strong);
-                drift = drift.min(pixels::moved(
-                    ring,
-                    &r.ring_ref,
-                    Some((&r.ours.1, t)),
-                    change,
-                ));
+                changed &= pixels::changed_by(sig, reference, Some((ours.0, t)), change, strong);
+                drift = drift.min(pixels::moved(ring, ring_ref, Some((ours.1, t)), change));
             }
         }
         (changed, drift)
@@ -755,6 +850,9 @@ impl Live {
             ring_still: 0,
             reference: Vec::new(),
             ring_ref: Vec::new(),
+            age: (Vec::new(), Vec::new()),
+            ring_moved: Vec::new(),
+            scene: (Vec::new(), Vec::new()),
             patch: None,
             ours: (Vec::new(), Vec::new()),
             alpha: 0.0,
@@ -768,6 +866,8 @@ impl Live {
         let r = &mut self.regions[i];
         (r.sig, r.ring) = pixels::sample(frame, r.rect, s, ringc);
         (r.still, r.ring_still) = (0, 0);
+        r.age = (vec![0; r.sig.len()], vec![0; r.ring.len()]);
+        r.ring_moved = vec![false; r.ring.len()];
     }
 
     /// The discover step (5.1): on its period (or at once after a retire), the frame's tiles at 1/scale
@@ -785,21 +885,62 @@ impl Live {
         let due = self
             .last_discover
             .is_none_or(|t| frame.at.saturating_sub(t) >= every);
+        let s = self.cfg.scale.max(1);
+        let masked = || -> Vec<Rect> {
+            (self.regions.iter())
+                .filter(|r| r.state != State::Changing)
+                .map(|r| r.patch.map_or(r.rect, |p| p.union(&r.rect)))
+                .collect()
+        };
         if !due && !(self.discover_now && !b.slow) {
             return None;
         }
-        let s = self.cfg.scale.max(1);
-        let masked: Vec<Rect> = (self.regions.iter())
-            .filter(|r| r.state != State::Changing)
-            .map(|r| r.patch.map_or(r.rect, |p| p.union(&r.rect)))
-            .collect();
-        let tiles = pixels::tile_hashes(frame, s, &masked);
-        let changed: Vec<bool> = if tiles.len() == self.tiles.len() {
-            tiles.iter().zip(&self.tiles).map(|(a, b)| a != b).collect()
+        let now = pixels::grid(frame, s, &masked());
+        // a look `tile_still` ago first (taken now when there is none: a detect that ran longer than
+        // the period left none, and then everything that moved was looked at)
+        if !self.tiles.is_empty() && !self.cfg.tile_still.is_zero() {
+            match &self.before {
+                None => {
+                    self.before = Some((frame.at, now));
+                    return None;
+                }
+                Some((at, _)) if frame.at.saturating_sub(*at) < self.cfg.tile_still => return None,
+                Some(_) => {}
+            }
+        }
+        let cw = frame.width.div_ceil(s);
+        let limit = self.cfg.tile_change;
+        let (tw, t) = (cw.div_ceil(pixels::TILE) as usize, pixels::TILE as usize);
+        let tile = |i: usize| i / cw as usize / t * tw + i % cw as usize / t;
+        let changed: Vec<bool> = if now.len() == self.tiles.len() {
+            let moved = pixels::tile_diffs(&now, &self.tiles, cw);
+            // how much each tile moved lately (since `before`), and the share of the time since the
+            // last discover that is
+            let (lately, share) = match self.before.take() {
+                Some((at, before)) if before.len() == now.len() => {
+                    let since = self.last_discover.map_or(Duration::ZERO, |t| frame.at - t);
+                    let lately = frame.at.saturating_sub(at).as_secs_f32().max(0.001);
+                    let share = (since.as_secs_f32() / lately).max(1.0);
+                    (pixels::tile_diffs(&now, &before, cw), share)
+                }
+                _ => (vec![0.0; moved.len()], 1.0),
+            };
+            // a tile that hasn't held still keeps its old cells: compared again next time
+            for (i, (old, now)) in self.tiles.iter_mut().zip(&now).enumerate() {
+                if lately[tile(i)] <= limit {
+                    *old = *now;
+                }
+            }
+            // new = changed, held still lately (within half of `tile_change`: a scene in part of a tile
+            // moves it a little), and by more than its slow motion explains (~that rate x time since)
+            (moved.iter().zip(&lately))
+                .map(|(&m, &l)| m > limit && 2.0 * l <= limit && m > 2.0 * l * share)
+                .collect()
         } else {
-            vec![true; tiles.len()]
+            self.tiles = now;
+            vec![true; tw * frame.height.div_ceil(s).div_ceil(pixels::TILE) as usize]
         };
-        (self.tiles, self.last_discover, self.discover_now) = (tiles, Some(frame.at), false);
+        (self.last_discover, self.discover_now) = (Some(frame.at), false);
         let areas = pixels::clusters(&changed, self.size, s);
         if areas.is_empty() {
             return None;
@@ -809,6 +950,50 @@ impl Live {
         self.retired.clear();
         Some(Job::Detect { job, areas })
     }
+}
+
+impl Region {
+    /// What "unchanged" means from now on: the cells now, without the scene's. Of the text area (`cols`
+    /// cells wide): the edge cells (a detect box is padded past its text: PP-OCR's unclip; past a tight
+    /// HUD bar or banner they show the fight behind it) and, once the text `settled`, those that moved
+    /// in the last `frames` frames (it held still that long; read after `settle_max` it may still be
+    /// typing); never most of it (text over a see-through box keeps every cell: `Config::seep`). Of the
+    /// ring: every cell that moved while the text settled (and, from then on, while it holds: `on_frame`).
+    fn take_reference(&mut self, frames: u8, settled: bool, cols: usize) {
+        (self.reference, self.ring_ref) = (self.sig.clone(), self.ring.clone());
+        let n = self.sig.len();
+        let rows = n / cols.max(1);
+        let mut text: Vec<bool> = (0..n)
+            .map(|i| settled && self.age.0.get(i).is_some_and(|&a| a < frames))
+            .collect();
+        if 2 * text.iter().filter(|&&m| m).count() > n {
+            text.fill(false);
+        }
+        if rows >= 5 && cols >= 5 {
+            for (i, t) in text.iter_mut().enumerate() {
+                let (x, y) = (i % cols, i / cols);
+                *t |= x == 0 || y == 0 || x + 1 == cols || y + 1 == rows;
+            }
+        }
+        let ring = (0..self.ring.len())
+            .map(|i| {
+                self.ring_moved.get(i).copied().unwrap_or(false)
+                    || self.age.1.get(i).is_some_and(|&a| a < frames)
+            })
+            .collect();
+        self.scene = (text, ring);
+    }
+}
+
+/// `cells` without the ones `scene` marks (all of them when `scene` is empty).
+fn keep(cells: &[u8], scene: &[bool]) -> Vec<u8> {
+    if scene.len() != cells.len() {
+        return cells.to_vec();
+    }
+    (cells.iter().zip(scene))
+        .filter(|(_, s)| !**s)
+        .map(|(c, _)| *c)
+        .collect()
 }
 
 /// Cell (cx, cy) as a capture with the patch in it shows it (`at` = where the patch sits in the

@@ -1,8 +1,6 @@
 //! Cheap pixel work: grayscale cells (a `scale` x `scale` pixel average), a region's text-area and ring
 //! signatures, their differences, and the discover step's tile hashes and change clusters.
 
-use std::hash::{DefaultHasher, Hasher};
-
 use super::{Frame, Rect};
 
 /// Discover tiles, in cells (8 cells = 32 px at scale 4: today's live tile).
@@ -109,10 +107,10 @@ pub fn moved(now: &[u8], a: &[u8], b: Option<(&[u8], f32)>, change: f32) -> f32 
     n as f32 / now.len() as f32
 }
 
-/// The whole frame as cells, `masked` rects (frame px) set to 0, and one hash per TILE x TILE cells.
-pub fn tile_hashes(f: &Frame, s: u32, masked: &[Rect]) -> Vec<u64> {
-    let (cw, ch) = (f.width.div_ceil(s), f.height.div_ceil(s));
-    let mut gray: Vec<u8> = (0..ch)
+/// The whole frame as cells, `masked` rects (frame px) set to 0 (the discover step's view).
+pub fn grid(f: &Frame, s: u32, masked: &[Rect]) -> Vec<u8> {
+    let cw = f.width.div_ceil(s);
+    let mut gray: Vec<u8> = (0..f.height.div_ceil(s))
         .flat_map(|cy| (0..cw).map(move |cx| (cx, cy)))
         .map(|(cx, cy)| cell(f, s, cx, cy))
         .collect();
@@ -121,14 +119,22 @@ pub fn tile_hashes(f: &Frame, s: u32, masked: &[Rect]) -> Vec<u64> {
             gray[(cy * cw + cx) as usize] = 0;
         });
     }
-    let tw = cw.div_ceil(TILE) as usize;
-    let mut hs = vec![DefaultHasher::new(); tw * ch.div_ceil(TILE) as usize];
-    for (cy, row) in gray.chunks_exact(cw as usize).enumerate() {
-        for (tx, part) in row.chunks(TILE as usize).enumerate() {
-            hs[cy / TILE as usize * tw + tx].write(part);
-        }
+    gray
+}
+
+/// The mean absolute difference of two grids (`cw` cells wide) per TILE x TILE tile, row-major.
+pub fn tile_diffs(a: &[u8], b: &[u8], cw: u32) -> Vec<f32> {
+    let cw = cw as usize;
+    let (tw, t) = (cw.div_ceil(TILE as usize), TILE as usize);
+    let ch = a.len() / cw.max(1);
+    let mut sums = vec![(0u32, 0u32); tw * ch.div_ceil(t)];
+    for (i, (x, y)) in a.iter().zip(b).enumerate() {
+        let tile = &mut sums[i / cw / t * tw + i % cw / t];
+        *tile = (tile.0 + x.abs_diff(*y) as u32, tile.1 + 1);
     }
-    hs.into_iter().map(|h| h.finish()).collect()
+    sums.into_iter()
+        .map(|(sum, n)| sum as f32 / n.max(1) as f32)
+        .collect()
 }
 
 /// Changed tiles -> 4-connected clusters -> their boxes padded by one tile (frame px, clamped), merged

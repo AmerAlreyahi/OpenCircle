@@ -673,6 +673,8 @@ type Queued = (Job, Option<Arc<Vec<u8>>>, (u32, u32));
 /// A finished job: its results, how long it ran, its first error.
 struct Worked {
     done: Vec<Done>,
+    /// `rank` of the job (translate, read, detect).
+    kind: usize,
     took: Duration,
     error: Option<String>,
 }
@@ -704,7 +706,8 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     let mut rtl = is_rtl(&langs.1);
     let region = (monitor.x, monitor.y, monitor.width, monitor.height);
     let (w, h) = (monitor.width, monitor.height);
-    let mut frames = Frames::open(region);
+    let mut frames = Frames::front_window(region);
+    let edge = border::EdgeMask::new(w, h, monitor.scale);
     crate::log!("[opencircle] live: frames from {}", frames.describe());
     let mut live = core::Live::new(core_config());
     let started = Instant::now();
@@ -776,6 +779,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
             {
                 layer.send(Msg::Failed(e));
             }
+            stats.busy[r.kind] += r.took;
             if live.report_burst(r.took, at) {
                 crate::log!("[opencircle] live: OCR / translation ran 2x slower; discovering less");
             }
@@ -798,7 +802,10 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
         // the next frame (none new: the screen is as it was)
         match frames.next(FRAME_WAIT) {
             Ok(Some(mut rgba)) if rgba.len() == (w * h * 4) as usize => {
-                blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, ui.edge);
+                // (the edge glow only where this frame shows our layer: not the
+                // game window's own pixels, not a capture that keeps us out)
+                let edge = (ui.edge && !frames.of_window()).then_some(&edge);
+                blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, edge);
                 last = Some(rgba);
                 stats.new_frames += 1;
             }
@@ -812,7 +819,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                     layer.send(Msg::Failed(e));
                 }
                 std::thread::sleep(Duration::from_millis(500));
-                frames = Frames::open(region);
+                frames = Frames::front_window(region);
                 continue;
             }
         }
@@ -860,7 +867,7 @@ fn page_area(focused: Option<[u32; 4]>, (w, h): (u32, u32)) -> [u32; 4] {
 }
 
 /// Blanks what is never read out of a frame (black): the edge glow where
-/// captures show it (`edge`), the controller, our own windows, everything
+/// the frame shows it (`edge`: its mask), the controller, our own windows, everything
 /// outside the focused window's `area` (x0, y0, x1, y1). Returns the blanked
 /// parts (frame px, x, y, w, h).
 fn blank(
@@ -868,13 +875,10 @@ fn blank(
     (m, area): (Monitor, [u32; 4]),
     own: &[[i32; 4]],
     mask: &Mutex<Option<[u32; 4]>>,
-    edge: bool,
+    edge: Option<&border::EdgeMask>,
 ) -> Vec<[u32; 4]> {
     let (w, h) = (m.width, m.height);
-    let mut blanked = match edge {
-        true => border::mask(rgba, w, h, m.scale),
-        false => Vec::new(),
-    };
+    let mut blanked = edge.map_or_else(Vec::new, |e| e.apply(rgba));
     if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
         live_controller::mask(rgba, w, h, rect);
         blanked.push(rect);
@@ -932,25 +936,35 @@ fn work(
         while let Ok(w) = jobs.try_recv() {
             take(w, &mut queue, &mut deps);
         }
-        let rank = |j: &Job| match j {
-            Job::Translate { .. } => 0,
-            Job::Read(_) => 1,
-            Job::Detect { .. } => 2,
-        };
         let Some(next) = (0..queue.len()).min_by_key(|&i| rank(&queue[i].0)) else {
             continue;
         };
         let Some((job, frame, size)) = queue.remove(next) else {
             continue;
         };
-        let t = Instant::now();
+        let (t, kind) = (Instant::now(), rank(&job));
         let errors = Errors::default();
         let done = run_job(job, frame.as_deref(), size, &deps, cache, found, &errors);
         let error = errors.into_inner();
         let took = t.elapsed();
-        if out.send(Worked { done, took, error }).is_err() {
+        let worked = Worked {
+            done,
+            kind,
+            took,
+            error,
+        };
+        if out.send(worked).is_err() {
             return;
         }
+    }
+}
+
+/// The work thread's order: translations, then reads, then detects.
+fn rank(job: &Job) -> usize {
+    match job {
+        Job::Translate { .. } => 0,
+        Job::Read(_) => 1,
+        Job::Detect { .. } => 2,
     }
 }
 
@@ -1034,6 +1048,8 @@ struct Stats {
     translates: u32,
     /// `Found::counts`: reads reused / OCR'd, patches made / declined.
     found: [u32; 4],
+    /// The work thread's time on translations, reads, detects.
+    busy: [Duration; 3],
 }
 
 impl Default for Stats {
@@ -1047,6 +1063,7 @@ impl Default for Stats {
             reads: 0,
             translates: 0,
             found: [0; 4],
+            busy: [Duration::ZERO; 3],
         }
     }
 }
@@ -1065,7 +1082,8 @@ impl Stats {
         crate::log!(
             "[opencircle] live stats {secs:.0} s ({source}): {} frames ({} new, {:.0}/s), \
              core {:.0} us each; {} detects, {} reads ({} reused, {} OCR'd), {} translates; patches {} made, {} declined; \
-             {} shown, {} hidden in all; regions now {:?} (changing, reading, translating, shown, idle)",
+             {} shown, {} hidden in all; regions now {:?} (changing, reading, translating, shown, idle); \
+             work busy {:.0} % (detect {:.0} ms, read {:.0} ms, translate {:.0} ms)",
             self.frames,
             self.new_frames,
             f64::from(self.new_frames) / secs,
@@ -1080,6 +1098,10 @@ impl Stats {
             layer.shows,
             layer.hides,
             states(live),
+            self.busy.iter().sum::<Duration>().as_secs_f64() * 100.0 / secs,
+            self.busy[2].as_secs_f64() * 1000.0,
+            self.busy[1].as_secs_f64() * 1000.0,
+            self.busy[0].as_secs_f64() * 1000.0,
         );
         *self = Stats::default();
     }
@@ -1444,11 +1466,12 @@ mod tests {
         let subtitle = [348, 596, 580, 50];
         let none = Mutex::new(None);
         let mut rgba = vec![200u8; 1280 * 720 * 4];
-        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, false);
+        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, None);
         assert!(blanked.is_empty() && rgba.iter().all(|&v| v == 200));
         assert!(!engines::over_blanked(subtitle, &blanked));
         // X11: the glow is in the capture, so it is blanked (and patches over it declined)
-        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, true);
+        let edge = border::EdgeMask::new(1280, 720, 1.0);
+        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, Some(&edge));
         assert!(!blanked.is_empty() && rgba.contains(&0));
     }
 }

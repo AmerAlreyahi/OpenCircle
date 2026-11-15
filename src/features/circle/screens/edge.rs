@@ -61,29 +61,48 @@ pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, opacity: f32) -> Ele
     .into()
 }
 
-/// Puts a fixed colour where the live edge is, in a capture (`rgba`, `w` x `h`)
-/// of the monitor it frames: a capture that shows the layer (X11) then never
-/// changes there, so live mode doesn't re-read the edges.
-/// Returns the strips (x, y, w, h) it may have blanked.
-pub fn mask(rgba: &mut [u8], w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
-    let cfg = config::look_config();
-    let Some((geo, paint)) = edge(&cfg, Mode::Live, w, h, scale, false) else {
-        return Vec::new();
-    };
-    let strips = geo.strips();
-    for &[x0, y0, sw, sh] in &strips {
-        for y in y0..y0 + sh {
-            for x in x0..x0 + sw {
-                let i = ((y * w + x) * 4) as usize;
-                if paint.table[geo.index(x, y)][3] > 0
-                    && let Some(px) = rgba.get_mut(i..i + 4)
-                {
-                    px.copy_from_slice(&[0, 0, 0, 255]);
+/// Where the live edge is in a capture of the monitor it frames (`w` x `h`):
+/// live mode puts a fixed colour there, so a capture that shows the layer
+/// (X11) never changes there and the edges are never re-read. Worked out
+/// once per session (live translate applies it to every frame).
+pub struct EdgeMask {
+    /// Pixel indices the edge paints, and the strips (x, y, w, h) they lie in.
+    pixels: Vec<u32>,
+    strips: Vec<[u32; 4]>,
+}
+
+impl EdgeMask {
+    pub fn new(w: u32, h: u32, scale: f32) -> EdgeMask {
+        let cfg = config::look_config();
+        let Some((geo, paint)) = edge(&cfg, Mode::Live, w, h, scale, false) else {
+            return EdgeMask {
+                pixels: Vec::new(),
+                strips: Vec::new(),
+            };
+        };
+        let strips = geo.strips();
+        let mut pixels = Vec::new();
+        for &[x0, y0, sw, sh] in &strips {
+            for y in y0..y0 + sh {
+                for x in x0..x0 + sw {
+                    if paint.table[geo.index(x, y)][3] > 0 {
+                        pixels.push(y * w + x);
+                    }
                 }
             }
         }
+        EdgeMask { pixels, strips }
     }
-    strips
+
+    /// Blanks the edge out of `rgba`; returns the strips it may have blanked.
+    pub fn apply(&self, rgba: &mut [u8]) -> Vec<[u32; 4]> {
+        for &i in &self.pixels {
+            if let Some(px) = rgba.get_mut(i as usize * 4..i as usize * 4 + 4) {
+                px.copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        self.strips.clone()
+    }
 }
 
 /// `mode`'s edge in `look`, laid over `rgba` (`w` x `h`, straight alpha) as if
