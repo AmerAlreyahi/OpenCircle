@@ -1,0 +1,39 @@
+# talk clip ground truth (docs/internal/live-test/gen_clips.py, 60 s): 1920x1080 @ 60 fps, 3600 frames
+# id kind held on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = no panel) text
+0 hud 1 0 3600 32 55 196 27 30 40 200 52 Chapter Two
+1 speaker 1 120 313 420 831 152 26 380 820 1160 210 Old Tavi
+2 subtitle 1 120 313 570 913 779 41 380 820 1160 210 That song again? You know only one.
+3 speaker 1 331 512 420 831 152 26 380 820 1160 210 Old Tavi
+4 subtitle 1 331 512 538 913 842 41 380 820 1160 210 There is bread in the cart, help yourself.
+5 speaker 1 542 718 420 831 233 33 380 820 1160 210 Captain Rho
+6 subtitle 1 542 718 532 913 856 41 380 820 1160 210 Keep your voice down, they can hear us.
+7 speaker 1 736 908 420 831 233 33 380 820 1160 210 Captain Rho
+8 subtitle 1 736 908 526 913 868 41 380 820 1160 210 My father built this tower stone by stone.
+9 speaker 1 908 1123 420 832 80 25 380 820 1160 210 Ines
+10 subtitle 1 908 1123 566 913 787 41 380 820 1160 210 The stars look different from up here.
+11 speaker 1 1141 1332 420 831 152 26 380 820 1160 210 Old Tavi
+12 subtitle 1 1141 1332 526 913 868 41 380 820 1160 210 The lighthouse keeper owes me a favour.
+13 speaker 1 1332 1492 420 831 233 33 380 820 1160 210 Captain Rho
+14 subtitle 1 1332 1492 485 913 950 41 380 820 1160 210 If we hurry, we can reach the camp by dawn.
+15 speaker 1 1492 1707 420 831 233 33 380 820 1160 210 Captain Rho
+16 subtitle 1 1492 1707 526 913 868 41 380 820 1160 210 The lighthouse keeper owes me a favour.
+17 speaker 1 1725 1943 420 831 152 26 380 820 1160 210 Old Tavi
+18 subtitle 1 1725 1943 566 913 787 41 380 820 1160 210 The stars look different from up here.
+19 speaker 1 1961 2081 420 831 233 33 380 820 1160 210 Captain Rho
+20 subtitle 1 1961 2081 523 913 874 41 380 820 1160 210 Promise me you will come back this time.
+21 speaker 1 2111 2280 420 831 152 26 380 820 1160 210 Old Tavi
+22 subtitle 1 2111 2280 526 913 868 41 380 820 1160 210 The lighthouse keeper owes me a favour.
+23 speaker 1 2280 2446 420 831 85 26 380 820 1160 210 Mira
+24 subtitle 1 2280 2446 532 913 856 41 380 820 1160 210 Keep your voice down, they can hear us.
+25 speaker 1 2446 2577 420 831 85 26 380 820 1160 210 Mira
+26 subtitle 1 2446 2577 538 913 842 41 380 820 1160 210 There is bread in the cart, help yourself.
+27 speaker 1 2577 2704 420 832 80 25 380 820 1160 210 Ines
+28 subtitle 1 2577 2704 566 913 787 41 380 820 1160 210 The stars look different from up here.
+29 speaker 1 2722 2867 420 831 152 26 380 820 1160 210 Old Tavi
+30 subtitle 1 2722 2867 625 913 671 41 380 820 1160 210 Look, the river is glowing again.
+31 speaker 1 2897 3093 420 832 80 25 380 820 1160 210 Ines
+32 subtitle 1 2897 3093 566 913 787 41 380 820 1160 210 I never wanted any of this, you know.
+33 speaker 1 3123 3343 420 831 233 33 380 820 1160 210 Captain Rho
+34 subtitle 1 3123 3343 526 913 868 41 380 820 1160 210 My father built this tower stone by stone.
+35 speaker 1 3343 3464 420 832 80 25 380 820 1160 210 Ines
+36 subtitle 1 3343 3464 625 913 671 41 380 820 1160 210 Look, the river is glowing again.

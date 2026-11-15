@@ -658,6 +658,110 @@ fn shared_never_imports_features_or_app() {
     );
 }
 
+/// Crates the live core may use besides std (none: it must stay movable to its own crate).
+const LIVE_CORE_CRATES: &[&str] = &[];
+
+/// The live core's files (path under `src`, source) that name something outside std and the core:
+/// a `crate::` path elsewhere, a `super::` that leaves the folder, or a dependency of Cargo.toml.
+fn live_core_reaching(files: &[(String, String)], deps: &[String]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (name, src) in files {
+        // how deep the file's module sits below `live_core` (mod.rs = the folder itself)
+        let depth = name.matches('/').count() - usize::from(name.ends_with("/mod.rs"));
+        let code: String = code(src).collect::<Vec<_>>().join("\n");
+        let head = |i: usize| {
+            i == 0 || !code[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == ':')
+        };
+        let mut bad: Vec<String> = named_paths(src)
+            .into_iter()
+            .filter(|p| p.starts_with("crate::") && !names_module(p, "crate::live_core"))
+            .collect();
+        for (i, _) in code.match_indices("super::").filter(|(i, _)| head(*i)) {
+            let chain = (0..)
+                .take_while(|k| code[i + k * 7..].starts_with("super::"))
+                .count();
+            if chain > depth {
+                bad.push("super::".repeat(chain));
+            }
+        }
+        for d in deps
+            .iter()
+            .filter(|d| !LIVE_CORE_CRATES.contains(&d.as_str()))
+        {
+            let named = code.match_indices(&format!("{d}::")).any(|(i, _)| head(i))
+                || code.contains(&format!("extern crate {d}"));
+            if named {
+                bad.push(d.clone());
+            }
+        }
+        out.extend(bad.into_iter().map(|p| (name.clone(), p)));
+    }
+    out
+}
+
+/// Every dependency name in Cargo.toml (all targets, dev and build too), as Rust names it.
+fn dependencies() -> Vec<String> {
+    let toml = std::fs::read_to_string("Cargo.toml").unwrap();
+    let (mut deps, mut in_deps) = (Vec::new(), false);
+    for line in toml.lines() {
+        if let Some(header) = line.strip_prefix('[') {
+            let header = header.trim_end_matches(']');
+            in_deps = header.ends_with("dependencies");
+            if let Some((_, name)) = header.split_once("dependencies.") {
+                deps.push(name.to_string());
+            }
+        } else if in_deps && line.starts_with(|c: char| c.is_ascii_alphanumeric()) {
+            let name: String = line
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            deps.push(name);
+        }
+    }
+    deps.iter().map(|d| d.replace('-', "_")).collect()
+}
+
+/// The live core (`src/live_core/`, docs/ARCHITECTURE.md) is engine-agnostic: std and itself only.
+#[test]
+fn live_core_uses_only_std_and_itself() {
+    let deps = dependencies();
+    assert!(
+        deps.iter().any(|d| d == "iced"),
+        "Cargo.toml read: {deps:?}"
+    );
+    let files = tree("live_core");
+    assert!(files.iter().any(|(n, _)| n == "live_core/mod.rs"));
+    let bad = live_core_reaching(&files, &deps);
+    assert!(
+        bad.is_empty(),
+        "the live core reaches outside std and itself: {bad:#?}"
+    );
+    // and the scan catches each kind (planted)
+    for planted in [
+        "use crate::features::translate::render;",
+        "fn f() { crate::shared::log::info(\"x\"); }",
+        "use super::super::app;",
+        "fn f() -> iced::Color { todo!() }",
+        "extern crate image;",
+    ] {
+        let files = [("live_core/pixels.rs".to_string(), planted.to_string())];
+        assert!(
+            !live_core_reaching(&files, &deps).is_empty(),
+            "missed: {planted}"
+        );
+    }
+    let fine = "use super::{Frame, Rect};\nuse crate::live_core::Live;\nuse std::time::Duration;";
+    assert!(live_core_reaching(&[("live_core/pixels.rs".into(), fine.into())], &deps).is_empty());
+    let root = [(
+        "live_core/mod.rs".to_string(),
+        "use super::shared;".to_string(),
+    )];
+    assert!(
+        !live_core_reaching(&root, &deps).is_empty(),
+        "mod.rs's super:: is the crate root"
+    );
+}
+
 /// Feature files that still reach into another feature's own files. A ratchet:
 /// the list only shrinks.
 const FEATURE_LEGACY: &[&str] = &[
