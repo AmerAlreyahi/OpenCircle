@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 pub use super::lang::is_rtl;
@@ -29,6 +30,13 @@ pub trait Deps {
     /// many); MAX = all in one call.
     fn batch(&self) -> usize {
         usize::MAX
+    }
+    /// More than 1: calls of this many equal parts (`batch` sentences each)
+    /// run at once and are drawn as they come back, and a part that fails
+    /// leaves only its own blocks as they were. 1: one call after the other,
+    /// each twice the last, the first error fails the whole.
+    fn parallel(&self) -> usize {
+        1
     }
     /// Where the text lines are, as fast as can be (live translate's
     /// discovery, several times a second): the lines, and whether they were
@@ -1248,7 +1256,16 @@ impl Deps for Real {
     fn batch(&self) -> usize {
         match self.via {
             Via::Offline => FIRST,
-            Via::Ai { .. } => usize::MAX,
+            Via::Ai { .. } => AI_BATCH,
+        }
+    }
+
+    /// A cloud model: small parts, a few in flight (a call is a round trip
+    /// of seconds; one call for the whole page showed nothing until its end).
+    fn parallel(&self) -> usize {
+        match self.via {
+            Via::Offline => 1,
+            Via::Ai { .. } => AI_IN_FLIGHT,
         }
     }
 
@@ -1636,6 +1653,9 @@ pub struct Translated {
     pub timings: Timings,
     /// Blocks redrawn, and left as they were (busy background, no room).
     pub drawn: Drawn,
+    /// Parallel parts only: the first error of a part that failed while the
+    /// others were drawn; its blocks stay as they were.
+    pub failed: Option<AiError>,
 }
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
@@ -1656,7 +1676,7 @@ pub fn translate_frame(
     height: u32,
     target: &str,
     cache: &Cache,
-    deps: &impl Deps,
+    deps: &(impl Deps + Sync),
 ) -> Result<Translated, Error> {
     translate_progressively(rgba, width, height, target, cache, deps, |_| {})
 }
@@ -1666,6 +1686,12 @@ pub fn translate_frame(
 /// decoding step costs about the same for 1 line or 32 (`mt::BATCH`), so a
 /// call per 8 made the page 1.7x slower, doubling 1.1x.
 const FIRST: usize = 8;
+
+/// An AI provider's parts: this many sentences each (#90: a free 550B model
+/// took 19.7 s for the whole screen and showed it at once), [`AI_IN_FLIGHT`]
+/// at a time.
+const AI_BATCH: usize = 6;
+const AI_IN_FLIGHT: usize = 3;
 
 /// A partial frame is shown at most this often (each is a whole render):
 /// the first one at once, then as the rest comes in, then the whole page.
@@ -1681,14 +1707,31 @@ const SHOW_EVERY: Duration = Duration::from_millis(300);
 /// or the network), so only the whole page's render adds to the total; a
 /// drawer behind skips to the newest part. An error after a partial frame
 /// still fails the whole (the caller goes back to the original).
+#[cfg(test)]
 pub fn translate_progressively(
     rgba: &[u8],
     width: u32,
     height: u32,
     target: &str,
     cache: &Cache,
-    deps: &impl Deps,
+    deps: &(impl Deps + Sync),
+    shown: impl FnMut(&Translated) + Send,
+) -> Result<Translated, Error> {
+    translate_until(rgba, width, height, target, cache, deps, shown, || false)
+}
+
+/// `translate_progressively`; `stop() == true` (the overlay closed) starts no
+/// more calls and drops the answers that are still on their way.
+#[allow(clippy::too_many_arguments)]
+pub fn translate_until(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    target: &str,
+    cache: &Cache,
+    deps: &(impl Deps + Sync),
     mut shown: impl FnMut(&Translated) + Send,
+    stop: impl Fn() -> bool + Sync,
 ) -> Result<Translated, Error> {
     let start = Instant::now();
     check_frame(rgba, width, height)?;
@@ -1718,8 +1761,9 @@ pub fn translate_progressively(
         ocr,
         ..Timings::default()
     };
-    let parts = parts(&blocks, deps.batch());
+    let parts = parts(&blocks, deps.batch(), deps.parallel() > 1);
     let (to_draw, todo) = std::sync::mpsc::channel::<Vec<String>>();
+    let (next, halt) = (AtomicUsize::new(0), AtomicBool::new(false));
     let drawn = std::thread::scope(|s| {
         let blocks = &blocks;
         let drawer = s.spawn(move || {
@@ -1738,33 +1782,82 @@ pub fn translate_progressively(
             t
         });
         let mut last_shown = None::<Instant>;
-        let translated = (|| {
-            for (k, part) in parts.iter().enumerate() {
-                let t = Instant::now();
-                let chunk: Vec<Block> = part.iter().map(|&i| blocks[i].clone()).collect();
-                let out = translate_blocks(&chunk, target, cache, deps).map_err(Error::Ai)?;
-                timings.translate += t.elapsed();
-                for (&i, t) in part.iter().zip(out) {
-                    tr[i] = t;
+        let workers = deps.parallel().clamp(1, parts.len().max(1));
+        let (done_tx, done) =
+            std::sync::mpsc::channel::<(usize, Duration, Result<Vec<String>, AiError>)>();
+        let (parts, stop) = (&parts, &stop);
+        for _ in 0..workers {
+            let done_tx = done_tx.clone();
+            let (next, halt) = (&next, &halt);
+            s.spawn(move || {
+                loop {
+                    let k = next.fetch_add(1, Relaxed);
+                    if k >= parts.len() || halt.load(Relaxed) || stop() {
+                        break;
+                    }
+                    let t = Instant::now();
+                    let chunk: Vec<Block> = parts[k].iter().map(|&i| blocks[i].clone()).collect();
+                    let out = translate_blocks(&chunk, target, cache, deps);
+                    if done_tx.send((k, t.elapsed(), out)).is_err() {
+                        break;
+                    }
                 }
-                let last = k + 1 == parts.len();
-                if last || last_shown.is_some_and(|at| at.elapsed() < SHOW_EVERY) {
+            });
+        }
+        drop(done_tx);
+        let (mut failed, mut ok) = (None::<AiError>, 0);
+        let mut translated = Ok(());
+        // in the order the answers arrive (`parts` is top first, a few in flight)
+        for (k, took, out) in done {
+            if stop() {
+                halt.store(true, Relaxed);
+                break;
+            }
+            let out = match out {
+                Ok(out) => out,
+                // one part of several in flight: its blocks stay as they were
+                Err(e) if workers > 1 => {
+                    crate::log!("[opencircle] one part of the translation failed: {e}");
+                    failed.get_or_insert(e);
                     continue;
                 }
-                last_shown = Some(Instant::now());
-                let _ = to_draw.send(tr.clone());
+                Err(e) => {
+                    halt.store(true, Relaxed);
+                    translated = Err(Error::Ai(e));
+                    break;
+                }
+            };
+            ok += 1;
+            timings.translate += took;
+            for (&i, t) in parts[k].iter().zip(out) {
+                tr[i] = t;
             }
-            Ok(())
-        })();
+            let last = ok + usize::from(failed.is_some()) >= parts.len();
+            if last || last_shown.is_some_and(|at| at.elapsed() < SHOW_EVERY) {
+                continue;
+            }
+            last_shown = Some(Instant::now());
+            let _ = to_draw.send(tr.clone());
+        }
+        // every part failed: nothing to show, the error card as before
+        if translated.is_ok()
+            && ok == 0
+            && let Some(e) = failed.take()
+        {
+            translated = Err(Error::Ai(e));
+        }
+        let translated = translated.map(|()| failed);
         drop(to_draw);
         let drawn = drawer.join().expect("the partial frames' drawer");
-        translated.map(|()| drawn)
+        translated.map(|failed| (drawn, failed))
     })?;
+    let (drawn, failed) = drawn;
     timings.render = drawn.render;
     timings.first = drawn.first;
     let mut out = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
     timings.total = start.elapsed();
     out.timings = timings;
+    out.failed = failed;
     Ok(out)
 }
 
@@ -1790,20 +1883,21 @@ fn draw(
             ..drawn
         },
         timings: *timings,
+        failed: None,
     }
 }
 
 /// The blocks (indices) in the order they are translated: top of the
 /// screen first, in parts of about `batch`, `2 batch`, `4 batch`...
 /// sentences (a block is never cut).
-fn parts(blocks: &[Block], batch: usize) -> Vec<Vec<usize>> {
+fn parts(blocks: &[Block], batch: usize, fixed: bool) -> Vec<Vec<usize>> {
     let mut order: Vec<usize> = (0..blocks.len()).collect();
     order.sort_by(|&a, &b| blocks[a].bounds[1].total_cmp(&blocks[b].bounds[1]));
     let mut out: Vec<Vec<usize>> = Vec::new();
     let (mut n, mut size) = (0, batch);
     for i in order {
         if out.is_empty() || n >= size {
-            if !out.is_empty() {
+            if !out.is_empty() && !fixed {
                 size = size.saturating_mul(2);
             }
             out.push(Vec::new());

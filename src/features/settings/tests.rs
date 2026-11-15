@@ -1512,13 +1512,13 @@ fn engine_choice_says_what_offline_means() {
         "Engine",
         "AI",
         "Local",
-        "Your AI provider; local when it isn't set up",
+        "Your AI provider; can be much slower than Local, free models especially; Local when it isn't set up",
     ] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
     update(&mut s, Message::Engine(Engine::Offline));
     let texts = shot::texts(view(&s));
-    let honest = "No key, nothing leaves your PC; more literal than AI";
+    let honest = "The fastest; no key, nothing leaves your PC; more literal than AI";
     assert!(texts.iter().any(|t| t == honest), "{texts:?}");
     // Source and Target; a pair with no offline model says so
     for want in ["Source language", "Target language"] {

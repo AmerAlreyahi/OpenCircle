@@ -594,7 +594,7 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
     // no key: the steps' first line, Settings offered
     let no_key: Result<(Fake, String), String> =
         Err("AI is not set up yet: no API key is saved.\n\n1. ...".into());
-    let e = translate(&original, area, &cache, &no_key, |_| {}).unwrap_err();
+    let e = translate(&original, area, &cache, &no_key, |_| {}, || false).unwrap_err();
     let first = "AI is not set up yet: no API key is saved.";
     assert_eq!(e, problem(first.into(), true));
     // the provider fails: an error, nothing painted; a rejected key: Settings
@@ -604,6 +604,7 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
         &cache,
         &ok(Err(AiError::Server(503, String::new()))),
         |_| {},
+        || false,
     )
     .unwrap_err();
     assert!(
@@ -616,11 +617,12 @@ fn the_result_is_pasted_in_place_or_nothing_is() {
         &cache,
         &ok(Err(AiError::Auth(401, String::new()))),
         |_| {},
+        || false,
     )
     .unwrap_err();
     assert!(e.setup);
 
-    let shown = translate(&original, area, &cache, &ok(Ok("خروج")), |_| {}).unwrap();
+    let shown = translate(&original, area, &cache, &ok(Ok("خروج")), |_| {}, || false).unwrap();
     // blocks in frame pixels: OCR saw the crop, offset by the area's corner
     let b = &shown.blocks[0];
     assert_eq!(
@@ -678,7 +680,15 @@ fn a_partial_is_the_area_only_and_matches_the_full_render() {
     let (cw, ch) = (area[2] - area[0], area[3] - area[1]);
     let mut parts = Vec::new();
     let deps: Result<(Two, String), String> = Ok((Two, "ar".into()));
-    let done = translate(&original, area, &Cache::new(8), &deps, |p| parts.push(p)).unwrap();
+    let done = translate(
+        &original,
+        area,
+        &Cache::new(8),
+        &deps,
+        |p| parts.push(p),
+        || false,
+    )
+    .unwrap();
     assert_eq!(parts.len(), 1, "the first line is shown before the second");
     let part = &parts[0];
     assert_eq!(part.area, area);

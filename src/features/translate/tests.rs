@@ -984,7 +984,7 @@ fn real_frames() {
     use super::pipeline::{Cache, Deps, translate_frame};
     use crate::features::ask_ai::AiError;
     use crate::features::text_reading::{self, OcrError, TextBlock};
-    use std::cell::RefCell;
+    use crate::features::translate::pipeline::tests::Log as RefCell;
     use std::collections::HashMap;
     let out = std::path::PathBuf::from(std::env::var("OC_REAL_OUT").unwrap());
     std::fs::create_dir_all(&out).unwrap();
@@ -1107,7 +1107,7 @@ fn real_matrix() {
     use super::pipeline::{Cache, Deps, Real, Via, translate_frame};
     use crate::features::ask_ai::AiError;
     use crate::features::text_reading::{self, OcrError, TextBlock};
-    use std::cell::RefCell;
+    use crate::features::translate::pipeline::tests::Log as RefCell;
     use std::collections::HashMap;
     struct M {
         real: Real,

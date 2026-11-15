@@ -383,8 +383,8 @@ strings! {
         | "اقرأ شاشتك بلغتك، في مكانها.";
     tr_engine: "Engine"
         | "المحرّك";
-    tr_engine_local: "No key, nothing leaves your PC; more literal than AI"
-        | "بلا مفتاح، ولا يغادر جهازك شيء؛ أكثر حرفية من الذكاء الاصطناعي";
+    tr_engine_local: "The fastest; no key, nothing leaves your PC; more literal than AI"
+        | "الأسرع؛ بلا مفتاح، ولا يغادر جهازك شيء؛ أكثر حرفية من الذكاء الاصطناعي";
     tr_ai: "AI"
         | "الذكاء الاصطناعي";
     tr_local: "Local"
@@ -831,8 +831,8 @@ strings! {
         | "«تلقائي» يختار الأنسب للغة الظاهرة على الشاشة. «سريع»: قارئ Windows نفسه؛ «دقيق»: PaddleOCR";
     t_note_lang: "Windows has no text recognition for {}. Using the downloaded reader."
         | "لا يتوفر في Windows تعرّف على نصوص {}. يُستخدم القارئ الذي نُزّل.";
-    tr_engine_ai: "Your AI provider; local when it isn't set up"
-        | "مزوّد الذكاء الاصطناعي لديك؛ وتُستخدم الترجمة المحلية إن لم يكن معدًّا";
+    tr_engine_ai: "Your AI provider; can be much slower than Local, free models especially; Local when it isn't set up"
+        | "مزوّد الذكاء الاصطناعي لديك؛ قد يكون أبطأ بكثير من المحلي، خاصةً النماذج المجانية؛ وتُستخدم الترجمة المحلية إن لم يكن معدًّا";
     tr_no_model: "No local model for this pair yet (coming in a future update): choose AI to translate it"
         | "لا يوجد نموذج محلي لهذا الزوج بعد (يأتي في تحديث قادم): اختر الذكاء الاصطناعي لترجمته";
     tr_live_tip: "Live translate refresh interval"

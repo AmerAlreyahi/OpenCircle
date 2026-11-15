@@ -794,16 +794,18 @@ impl Session {
             let partial = |shown| {
                 let _ = tx.unbounded_send(Msg::Partial(shown));
             };
-            let result = translate(&frame, area, &cache, &deps, partial).map(|mut shown| {
-                if let Ok((real, target)) = &deps {
-                    shown.offer = real.held().map(|h| {
-                        let source = h.0.source;
-                        Box::new(Offer::new(h, source, target))
-                    });
-                    shown.outdated = real.outdated();
-                }
-                shown
-            });
+            let result = translate(&frame, area, &cache, &deps, partial, || tx.is_closed()).map(
+                |mut shown| {
+                    if let Ok((real, target)) = &deps {
+                        shown.offer = real.held().map(|h| {
+                            let source = h.0.source;
+                            Box::new(Offer::new(h, source, target))
+                        });
+                        shown.outdated = real.outdated();
+                    }
+                    shown
+                },
+            );
             // "auto" read another language than expected: ask for its pair;
             // a page read as noise: the readers for other scripts
             if result.is_err()
@@ -845,8 +847,9 @@ fn translate(
     frame: &image::Handle,
     area: [u32; 4],
     cache: &Cache,
-    deps: &Result<(impl Deps, String), String>,
+    deps: &Result<(impl Deps + Sync, String), String>,
     mut partial: impl FnMut(Part) + Send,
+    stop: impl Fn() -> bool + Sync,
 ) -> Result<Shown, Problem> {
     let image::Handle::Rgba {
         width,
@@ -889,7 +892,7 @@ fn translate(
             outdated: Vec::new(),
         }
     };
-    let out = pipeline::translate_progressively(
+    let out = pipeline::translate_until(
         &crop.rgba,
         crop.width,
         crop.height,
@@ -902,6 +905,7 @@ fn translate(
                 area,
             })
         },
+        stop,
     )
     .map_err(|e| {
         // Offline can't do it (no model, not downloaded): AI is the other way.
@@ -921,6 +925,9 @@ fn translate(
         };
         problem(message, setup)
     })?;
+    if let Some(e) = &out.failed {
+        crate::log!("[opencircle] some blocks stay untranslated: {e}");
+    }
     let result = shown(&out);
     let t = out.timings;
     crate::log!(

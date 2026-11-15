@@ -1,7 +1,26 @@
 use super::*;
 use std::cell::RefCell;
 
-type OcrFn = Box<dyn Fn(&[u8], u32, u32) -> Vec<TextBlock>>;
+type OcrFn = Box<dyn Fn(&[u8], u32, u32) -> Vec<TextBlock> + Send + Sync>;
+
+/// A `RefCell` that can be shared with the translating threads.
+#[derive(Default)]
+pub struct Log<T>(std::sync::Mutex<T>);
+
+impl<T> Log<T> {
+    pub fn new(v: T) -> Self {
+        Log(std::sync::Mutex::new(v))
+    }
+    pub fn into_inner(self) -> T {
+        self.0.into_inner().unwrap_or_else(|e| e.into_inner())
+    }
+    pub fn borrow(&self) -> std::sync::MutexGuard<'_, T> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    pub fn borrow_mut(&self) -> std::sync::MutexGuard<'_, T> {
+        self.borrow()
+    }
+}
 
 /// Records every call; OCR answers with `lines`, AI with `answer` per text.
 pub struct Fake {
@@ -12,20 +31,20 @@ pub struct Fake {
     pub batch: usize,
     /// How long each translate call takes.
     pub delay: Duration,
-    pub ocr_calls: RefCell<Vec<(u32, u32)>>,
-    pub ai_calls: RefCell<Vec<Vec<String>>>,
+    pub ocr_calls: Log<Vec<(u32, u32)>>,
+    pub ai_calls: Log<Vec<Vec<String>>>,
 }
 
 impl Fake {
-    pub fn new(lines: impl Fn(&[u8], u32, u32) -> Vec<TextBlock> + 'static) -> Self {
+    pub fn new(lines: impl Fn(&[u8], u32, u32) -> Vec<TextBlock> + Send + Sync + 'static) -> Self {
         Fake {
             lines: Box::new(lines),
             answer: |s| format!("ترجمة {s}"),
             fail_ai: false,
             batch: usize::MAX,
             delay: Duration::ZERO,
-            ocr_calls: RefCell::default(),
-            ai_calls: RefCell::default(),
+            ocr_calls: Log::default(),
+            ai_calls: Log::default(),
         }
     }
 }
@@ -236,8 +255,7 @@ fn a_partial_frame_is_drawn_while_the_next_call_runs() {
     assert!(total < Duration::from_millis(1600), "{total:?}");
 }
 
-/// The one call of a cloud model (and of any `Deps` without a batch):
-/// nothing is shown early.
+/// Any `Deps` without a batch is one call: nothing is shown early.
 #[test]
 fn one_call_shows_nothing_early() {
     let fake = Fake::new(|_, _, _| screen());
@@ -252,7 +270,7 @@ fn one_call_shows_nothing_early() {
             key: None,
         },
     );
-    assert_eq!(ai.batch(), usize::MAX);
+    assert_eq!((ai.batch(), ai.parallel()), (AI_BATCH, AI_IN_FLIGHT));
     assert_eq!(Real::new("auto", Via::Offline).batch(), FIRST);
 }
 
@@ -1524,4 +1542,103 @@ fn arabic_set_through_the_real_pipeline() {
         );
     }
     std::fs::write(std::env::var("OC_AR_OUT").unwrap(), out).unwrap();
+}
+
+/// A provider with a delay per text, in flight three at a time; "Bad" fails.
+struct Slow {
+    lines: Vec<TextBlock>,
+    asked: Log<Vec<String>>,
+    parallel: usize,
+}
+
+impl Deps for Slow {
+    fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
+        Ok(self.lines.clone())
+    }
+    fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+        self.asked.borrow_mut().extend(texts.iter().cloned());
+        let ms = if texts[0] == "Slow" { 700 } else { 60 };
+        std::thread::sleep(Duration::from_millis(ms));
+        if texts.iter().any(|t| t == "Bad") {
+            return Err(AiError::Server(503, String::new()));
+        }
+        Ok(texts.iter().map(|t| format!("ترجمة {t}")).collect())
+    }
+    fn batch(&self) -> usize {
+        1
+    }
+    fn parallel(&self) -> usize {
+        self.parallel
+    }
+}
+
+fn slow(parallel: usize) -> (Slow, Vec<u8>) {
+    let names = ["Slow", "Fast", "Bad", "Late"];
+    let lines: Vec<TextBlock> = (names.iter().enumerate())
+        .map(|(i, t)| tb(t, [40.0, 40.0 + 70.0 * i as f32, 120.0, 30.0]))
+        .collect();
+    let boxes: Vec<[f32; 4]> = lines.iter().map(|b| b.bounds).collect();
+    let img = frame(400, 400, &boxes);
+    let asked = Log::default();
+    (
+        Slow {
+            lines,
+            asked,
+            parallel,
+        },
+        img,
+    )
+}
+
+/// #90: with an AI provider the page comes in small parts, a few in flight:
+/// the fast parts are drawn as they arrive (not after the slowest), the part
+/// that fails leaves only its own blocks as they were, the rest is done.
+#[test]
+fn ai_parts_are_drawn_as_they_arrive_and_one_failing_part_is_only_its_own() {
+    let (deps, img) = slow(3);
+    let mut shown: Vec<Vec<String>> = Vec::new();
+    let at = Instant::now();
+    let out = translate_progressively(&img, 400, 400, "ar", &Cache::new(8), &deps, |p| {
+        let done = (p.blocks.iter()).filter(|b| !b.translation.is_empty());
+        shown.push(done.map(|b| b.original.clone()).collect());
+    })
+    .unwrap();
+    let total = at.elapsed();
+    // the first picture has a fast block, not the slow top one
+    assert!(!shown[0].contains(&"Slow".to_string()), "{shown:?}");
+    // all parts were asked, in flight together: ~0.7 s, not the 0.9 s in turn
+    assert_eq!(deps.asked.borrow().len(), 4);
+    assert!(total < Duration::from_millis(1100), "{total:?}");
+    let got: Vec<(&str, bool)> = (out.blocks.iter())
+        .map(|b| (b.original.as_str(), !b.translation.is_empty()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("Slow", true),
+            ("Fast", true),
+            ("Bad", false),
+            ("Late", true)
+        ]
+    );
+    assert_eq!(out.failed, Some(AiError::Server(503, String::new())));
+}
+
+/// One call at a time (offline, or a Deps without `parallel`): the first
+/// error still fails the whole frame.
+#[test]
+fn one_call_at_a_time_still_fails_whole() {
+    let (deps, img) = slow(1);
+    let e = translate_progressively(&img, 400, 400, "ar", &Cache::new(8), &deps, |_| {});
+    assert!(matches!(e, Err(Error::Ai(AiError::Server(503, _)))));
+}
+
+/// The overlay closes: no call starts, nothing is drawn from late answers.
+#[test]
+fn closing_stops_the_calls() {
+    let (deps, img) = slow(3);
+    let out =
+        translate_until(&img, 400, 400, "ar", &Cache::new(8), &deps, |_| {}, || true).unwrap();
+    assert!(deps.asked.borrow().is_empty());
+    assert!(out.blocks.iter().all(|b| b.translation.is_empty()));
 }
