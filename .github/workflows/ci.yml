@@ -169,8 +169,13 @@ jobs:
           cmake --install "$env:RUNNER_TEMP\spirv-build"
           "CMAKE_PREFIX_PATH=C:\spirv" >> $env:GITHUB_ENV
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+          # the Visual Studio generator fails in ggml-vulkan's nested shader-generator build; llama.cpp's own CI uses Ninja
+          "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
           # a short target dir: llama.cpp's Vulkan shader paths exceed MAX_PATH otherwise
           "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
+      - name: MSVC environment for Ninja
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
