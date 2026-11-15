@@ -8,7 +8,7 @@
 //! - `{"op":"load","path":"model.gguf","n_ctx":1024,"gpu":true}`: load once per process
 //!   (`gpu` false forces the CPU backend; absent = use the GPU when there is one).
 //! - `{"op":"translate","text":"..","source":"en","target":"ar","glossary":[["term","term"]]}`
-//! - `{"op":"quit"}`.
+//! - `{"op":"quit"}`: no reply, the process exits (so does closing stdin).
 //!
 //! Replies: `{"ok":true,...}` or `{"ok":false,"error":"..."}`. Without a Vulkan driver the
 //! probe says `"gpu":false` and the app keeps the CPU path.
@@ -264,7 +264,8 @@ fn translate(
         .apply_chat_template(&template, &[msg], true)
         .map_err(|e| format!("template: {e}"))?;
     let vocab = model.vocab();
-    let tokens = vocab.tokenize(text.as_bytes(), vocab.should_add_bos(), true);
+    // The template text already begins with the begin-of-sentence token: no second BOS.
+    let tokens = vocab.tokenize(text.as_bytes(), false, true);
     if tokens.is_empty() || tokens.len() + 8 > n_ctx {
         return Err(format!(
             "prompt of {} tokens does not fit the context of {n_ctx}",

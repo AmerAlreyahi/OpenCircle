@@ -163,6 +163,11 @@ jobs:
           $sdk = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
           "VULKAN_SDK=$sdk" >> $env:GITHUB_ENV
           "$sdk\Bin" >> $env:GITHUB_PATH
+          # ggml-vulkan wants SPIRV-Headers as a CMake package; the SDK installer has none (header-only, built in seconds)
+          git clone --depth 1 --branch "vulkan-sdk-$env:VULKAN_SDK_VERSION" https://github.com/KhronosGroup/SPIRV-Headers.git "$env:RUNNER_TEMP\spirv-src"
+          cmake -S "$env:RUNNER_TEMP\spirv-src" -B "$env:RUNNER_TEMP\spirv-build" -DCMAKE_INSTALL_PREFIX=C:\spirv
+          cmake --install "$env:RUNNER_TEMP\spirv-build"
+          "CMAKE_PREFIX_PATH=C:\spirv" >> $env:GITHUB_ENV
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
           # a short target dir: llama.cpp's Vulkan shader paths exceed MAX_PATH otherwise
           "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
