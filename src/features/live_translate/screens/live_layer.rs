@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use iced::widget::{image, pin, space, stack};
 use iced::window::{self, Level, Position};
-use iced::{ContentFit, Element, Point, Size, Task, Vector, task};
+use iced::{ContentFit, Element, Fill, Point, Size, Task, Vector, task};
 
 use crate::app::{background::background, windows};
 use crate::features::circle::screens::edge as border;
@@ -741,7 +741,8 @@ impl Live {
         // strip), and at a fixed index, so new patches never restart it.
         let base: Element<'static, Msg> = match self.border {
             Some(keyed) => border::view(border::Mode::Live, monitor.scale, keyed, self.edge.1),
-            None => space().into(),
+            // (the window's size: the stack takes its first child's)
+            None => space().width(Fill).height(Fill).into(),
         };
         let mut layers = stack![base];
         // (Paused: `patches` is empty.) A slot each, empty ones too: a layer
@@ -826,10 +827,17 @@ impl Slot {
         if under.len() != pixels.len() {
             return;
         }
+        // only where the patch draws (its clear pixels stay clear: on the
+        // colour-keyed layer a part-clear one would show the key colour)
         let a = self.alpha;
-        let blend: Vec<u8> = (pixels.iter().zip(under.iter()))
-            .map(|(&p, &u)| (f32::from(u) + (f32::from(p) - f32::from(u)) * a).round() as u8)
-            .collect();
+        let mix = |p: u8, u: u8| (f32::from(u) + (f32::from(p) - f32::from(u)) * a).round() as u8;
+        let mut blend = vec![0u8; pixels.len()];
+        let px = (pixels.as_chunks::<4>().0.iter()).zip(under.as_chunks::<4>().0);
+        for ((p, u), out) in px.zip(blend.as_chunks_mut::<4>().0) {
+            if p[3] > 0 {
+                *out = [mix(p[0], u[0]), mix(p[1], u[1]), mix(p[2], u[2]), p[3]];
+            }
+        }
         self.drawn = image::Handle::from_rgba(*width, *height, blend);
     }
 }
@@ -1942,6 +1950,9 @@ mod tests {
             cut: false,
         };
         let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        // the layer draws no edge (the glow in its own window, Windows) for
+        // half the steps: patches are drawn and redrawn the same
+        let glow_window = |l: &mut Live, i: usize| l.border = (i < 4).then_some(false);
         let patch = |x: u32| Shown {
             bounds: [x, 600, 200, 40],
             image: image::Handle::from_rgba(200, 40, vec![255; 200 * 40 * 4]),
@@ -1963,6 +1974,7 @@ mod tests {
                 for msg in steps.get(i)?.clone() {
                     let _ = l.borrow_mut().update(msg);
                 }
+                glow_window(&mut l.borrow_mut(), i);
                 Some(l.borrow().view())
             },
             Size::new(1920.0, 1080.0),
@@ -1986,6 +1998,12 @@ mod tests {
         assert!(damage[6].is_empty(), "nothing new: {:?}", damage[6]);
         assert!(only(1300.0)(&damage[7]), "{:?}", damage[7]);
         let l = l.into_inner();
+        // drawn where they are (the window's size comes from its first layer)
+        let px = crate::shared::kit::testing::shot::render(l.view(), 1920, 1080);
+        for (x, y) in [(1310, 610), (510, 620), (910, 630)] {
+            let i = (y * 1920 + x) * 4;
+            assert_eq!(px[i..i + 3], [255, 255, 255], "a patch at ({x}, {y})");
+        }
         assert_eq!(l.shown(), 3);
         assert_eq!(
             l.patches[0].as_ref().map(|s| s.id),
@@ -2031,7 +2049,10 @@ mod tests {
             ui: &mut ui,
             frame: &frame,
         };
-        core::Layer::show(&mut over, 7, at, &[255; 4 * 2 * 4]);
+        // the patch: opaque white but its last pixel clear (unchanged there)
+        let mut patch = [255u8; 4 * 2 * 4];
+        patch[28..].fill(0);
+        core::Layer::show(&mut over, 7, at, &patch);
         core::Layer::alpha(&mut over, 7, 0.5);
         assert_eq!(ui.fades, 1);
 
@@ -2054,7 +2075,15 @@ mod tests {
             panic!("not pixels")
         };
         let half = |u: u8| (f32::from(u) + (255.0 - f32::from(u)) * 0.5).round() as u8;
-        assert_eq!(pixels[0], half(under[0]));
+        assert_eq!(
+            pixels[..4],
+            [half(under[0]), half(under[1]), half(under[2]), 255]
+        );
+        assert_eq!(
+            pixels[28..],
+            [0; 4],
+            "a clear pixel stays clear (never the key colour)"
+        );
         slot.fade(1.0);
         assert!(slot.shown.under.is_none());
         assert_eq!(slot.drawn, slot.shown.image);
