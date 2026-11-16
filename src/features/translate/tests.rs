@@ -2023,4 +2023,5 @@ mod game;
 mod games;
 mod glossary_names;
 mod glossary_suggest;
+mod lab;
 mod subtitles;
