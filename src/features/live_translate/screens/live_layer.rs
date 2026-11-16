@@ -1039,12 +1039,28 @@ impl OnGpu for gpu::GpuTranslator {
 /// thread: the probe takes ~0.3 s, the first time the helper and model download (~1.2 GB) while the
 /// processor translates; none (logged by `gpu::live`) = the processor all along.
 fn start_gpu(target: String, to_work: mpsc::Sender<Work>) {
-    if cfg!(test) {
-        return; // (a test never probes this machine's cards: it would set what Settings shows)
+    start_gpu_with(gpu_wanted(), target, to_work, |t, p| gpu::live(t, p));
+}
+
+/// The GPU path is built but off (owner, 2026-11-16: no real leap over the processor): only a test
+/// hook turns it on, so no probe, download or helper happens in normal use.
+fn gpu_wanted() -> bool {
+    crate::shared::platform::sys::test_hook(gpu::TEST_HOOK).is_some()
+}
+
+/// `start_gpu`'s body with the switch and the one GPU call (`gpu::live`) as arguments.
+fn start_gpu_with<T: OnGpu + 'static>(
+    wanted: bool,
+    target: String,
+    to_work: mpsc::Sender<Work>,
+    live: impl FnOnce(&str, &mut dyn FnMut(u64, u64)) -> Option<T> + Send + 'static,
+) {
+    if !wanted {
+        return;
     }
     std::thread::spawn(move || {
         let mut tenth = 0;
-        let got = gpu::live(&target, |done, total| {
+        let got = live(&target, &mut |done, total| {
             let now = done * 10 / total.max(1);
             if now > tenth {
                 tenth = now;
@@ -2210,6 +2226,36 @@ mod tests {
         let _ = l.update(Msg::Prepared(Ok((layer, None))));
         assert_eq!(l.border, Some(false));
         assert!(l.line.is_empty() && l.cut().units() == 0);
+    }
+
+    /// Live never asks the graphics card in normal use (owner, 2026-11-16): the switch is off by
+    /// default, so the probe / download call is never made; the test hook turns it on.
+    #[test]
+    fn live_never_probes_the_graphics_card_unless_the_test_hook_is_set() {
+        struct Never;
+        impl core::Translator for Never {
+            fn translate(&mut self, t: &str) -> Result<String, String> {
+                Ok(t.into())
+            }
+        }
+        impl OnGpu for Never {
+            fn slowed(&self) -> bool {
+                false
+            }
+            fn set_target(&mut self, _: &str) {}
+        }
+        assert!(!gpu_wanted(), "off without OPENCIRCLE_TEST_GPU");
+        let (tx, rx) = mpsc::channel();
+        let (called_tx, called) = mpsc::channel();
+        let probe = move |_: &str, _: &mut dyn FnMut(u64, u64)| {
+            let _ = called_tx.send(());
+            None::<Never>
+        };
+        start_gpu_with(gpu_wanted(), "fr".into(), tx.clone(), probe.clone());
+        assert!(called.recv_timeout(Duration::from_millis(300)).is_err());
+        start_gpu_with(true, "fr".into(), tx, probe);
+        assert!(called.recv_timeout(Duration::from_secs(5)).is_ok());
+        drop(rx);
     }
 
     /// The graphics card translates while it has one; once it slows ~2x the processor does, for

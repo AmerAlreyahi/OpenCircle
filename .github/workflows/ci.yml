@@ -128,9 +128,33 @@ jobs:
           $left = if (Test-Path $dir) { Get-ChildItem $dir -Recurse -Force } else { @() }
           if ($left) { $left | Format-Table FullName; throw "the uninstall left files behind" }
 
+  # Did the GPU helper (or this workflow) change? The helper is built but off (owner, 2026-11-16),
+  # so its job runs only when it is touched; a manual run always builds it.
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      gpu: ${{ steps.f.outputs.gpu }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null \
+            && ! git diff --name-only "$BASE" HEAD | grep -qE '^(gpu-helper/|scripts/gpu-helper-probe\.py|\.github/workflows/ci\.yml)'; then
+            echo "gpu=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "gpu=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # GPU translation helper (opencircle-mt-gpu: llama.cpp + Vulkan), its own job so the gate's
   # time does not grow. Built per OS and uploaded; opencircle.exe never links it.
   gpu-helper:
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.gpu == 'true'
+    needs: changes
     strategy:
       fail-fast: false
       matrix:

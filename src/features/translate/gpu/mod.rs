@@ -200,6 +200,9 @@ pub fn helper_pid() -> Option<u32> {
     Some(HELPER_PID.load(Ordering::Relaxed)).filter(|&p| p != 0)
 }
 
+/// The test hook that turns the GPU path on (it is off otherwise; owner, 2026-11-16).
+pub const TEST_HOOK: &str = "OPENCIRCLE_TEST_GPU";
+
 /// The one call (module doc): `None` = the CPU path, the reason logged.
 pub fn live(target: &str, progress: impl FnMut(u64, u64)) -> Option<GpuTranslator> {
     let got = plan().and_then(|p| start(p, target, progress));

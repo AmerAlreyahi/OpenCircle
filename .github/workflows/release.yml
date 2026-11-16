@@ -223,84 +223,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Live translation's GPU helper (gpu-helper/: llama.cpp, Vulkan), one per OS, as release
-  # assets listed in SHA256SUMS.txt (so signed with it). The app downloads its OWN version's
-  # helper only on a PC whose card passes the GPU rule and checks it against these signed
-  # checksums (src/features/translate/gpu). The steps are ci.yml's gpu-helper job's.
-  gpu-helper:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            artifact: build-gpu-windows
-            asset: opencircle-mt-gpu-windows-x86_64.exe
-          - os: ubuntu-22.04
-            artifact: build-gpu-linux
-            asset: opencircle-mt-gpu-linux-x86_64
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    env:
-      VULKAN_SDK_VERSION: 1.4.309.0
-    defaults:
-      run:
-        working-directory: gpu-helper
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Vulkan SDK on Linux (headers, loader, glslc)
-        if: runner.os == 'Linux'
-        working-directory: .
-        run: |
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/1.4.309/lunarg-vulkan-1.4.309-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk cmake clang libclang-dev
-      - name: Vulkan SDK on Windows (headers, vulkan-1.lib, glslc)
-        if: runner.os == 'Windows'
-        working-directory: .
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
-          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanSDK-$env:VULKAN_SDK_VERSION-Installer.exe" -OutFile $exe
-          Start-Process $exe -Wait -ArgumentList '--accept-licenses --default-answer --confirm-command install'
-          $sdk = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
-          "VULKAN_SDK=$sdk" >> $env:GITHUB_ENV
-          "$sdk\Bin" >> $env:GITHUB_PATH
-          git clone --depth 1 --branch "vulkan-sdk-$env:VULKAN_SDK_VERSION" https://github.com/KhronosGroup/SPIRV-Headers.git "$env:RUNNER_TEMP\spirv-src"
-          cmake -S "$env:RUNNER_TEMP\spirv-src" -B "$env:RUNNER_TEMP\spirv-build" -DCMAKE_INSTALL_PREFIX=C:\spirv
-          cmake --install "$env:RUNNER_TEMP\spirv-build"
-          "CMAKE_PREFIX_PATH=C:\spirv" >> $env:GITHUB_ENV
-          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
-          "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV
-          "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
-      - name: MSVC environment for Ninja
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-      - run: cargo build --release --locked --features vulkan
-      - name: Name the asset, prove it answers a framed probe
-        shell: bash
-        run: |
-          exe="${CARGO_TARGET_DIR:-target}/release/opencircle-mt-gpu$( [ "$RUNNER_OS" = Windows ] && echo .exe )"
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp "$exe" "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}"
-          "$(command -v python3 || command -v python)" ../scripts/gpu-helper-probe.py "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}"
-          ls -l "$GITHUB_WORKSPACE/dist"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-          retention-days: 14
+  # The GPU translation helper (gpu-helper/) is NOT built or attached here: the GPU path is built
+  # but off (owner, 2026-11-16). ci.yml's gpu-helper job still builds it when it changes.
 
   checksums:
-    needs: [build, gpu-helper]
+    needs: [build]
     runs-on: ubuntu-22.04
     permissions:
       contents: read

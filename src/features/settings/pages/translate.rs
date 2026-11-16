@@ -248,8 +248,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
             control,
         ));
     }
-    // GPU for live translation (hide, don't delete: only while Live is on in Labs)
-    if state.draft.labs.has(Feature::Live) {
+    // GPU for live translation: hidden, not deleted (owner, 2026-11-16: the GPU path is built but off)
+    if SHOW_GPU_ROW && state.draft.labs.has(Feature::Live) {
         let g = state.draft.translate.live_gpu;
         let (from, glide) = state.thumb(g, |p| match p {
             Pick::LiveGpu(g) => Some(g),
@@ -265,6 +265,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     }
     rows.push(optima(&state.models)).into()
 }
+
+/// The GPU row stays hidden while the GPU path is off (`live_layer::gpu_wanted`).
+pub(crate) const SHOW_GPU_ROW: bool = false;
 
 /// The GPU row's line: what live translate last ran on (`gpu::last_choice`:
 /// `Some(card)` / `None` = the processor), else what Auto does.
