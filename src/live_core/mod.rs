@@ -449,6 +449,8 @@ struct Front {
     flat: bool,
     /// Columns of the band on the panel (past them: the scene beyond its edge).
     reach: u32,
+    /// A letter lands at most this far (px) past the last one (or the band's start).
+    near: u32,
     /// The rightmost letter seen in it (frame px), 0 = none.
     right: u32,
 }
@@ -1396,17 +1398,20 @@ impl Live {
             // (the panel past the line is judged just above it, clear of its letters)
             Front::new(
                 frame,
-                right,
-                Rect {
-                    y: last.y.saturating_sub((last.h / 4).max(1)),
-                    h: (last.h / 4).max(1),
-                    ..right
-                },
+                (
+                    right,
+                    Rect {
+                        y: last.y.saturating_sub((last.h / 4).max(1)),
+                        h: (last.h / 4).max(1),
+                        ..right
+                    },
+                    line,
+                ),
                 s,
                 &r.ring,
                 &r.front[0],
             ),
-            Front::new(frame, under, under, s, &r.ring, &r.front[1]),
+            Front::new(frame, (under, under, 2 * line), s, &r.ring, &r.front[1]),
         ];
     }
 
@@ -1509,7 +1514,13 @@ impl Front {
     /// Band `at` (clamped by the caller; `probe`: the strip over its columns where the panel is judged);
     /// `ring` = the region's ring cells now (their median is the
     /// panel's gray); a cell `old` also watched keeps what it knew (a box that grows moves its band).
-    fn new(f: &Frame, at: Rect, probe: Rect, s: u32, ring: &[u8], old: &Front) -> Front {
+    fn new(
+        f: &Frame,
+        (at, probe, near): (Rect, Rect, u32),
+        s: u32,
+        ring: &[u8],
+        old: &Front,
+    ) -> Front {
         let now = match at.area() {
             0 => Vec::new(),
             _ => pixels::sample(f, at, s, 0).0,
@@ -1548,6 +1559,7 @@ impl Front {
             panel: median,
             flat: flat && !ring.is_empty(),
             reach,
+            near,
             right: 0,
         };
         let (ox, oy, oc) = old.cells;
@@ -1594,14 +1606,16 @@ impl Front {
                 (self.jump[k], self.counted[k]) = (f.at, false);
             }
             self.now[k] = v;
+            // (letters land at the front, next to the last one: a scene's shapes anywhere in it)
+            let x = (x0 + k as u32 % cols.max(1)) * s;
             if !self.counted[k]
                 && f.at.saturating_sub(self.jump[k]) >= HOLD
                 && self.inked(k, change)
+                && x <= self.right.max(self.at.x) + self.near
             {
                 self.counted[k] = true;
                 letters += 1;
-                let cx = x0 + k as u32 % cols.max(1);
-                self.right = self.right.max((cx + 1) * s);
+                self.right = self.right.max(x + s);
             }
         }
         letters
