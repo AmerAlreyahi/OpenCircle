@@ -12,7 +12,8 @@
 //! removed patch leaves its slot empty instead of moving the others up. A
 //! patch fades in over the core's `fade_in` (its opacity where the layer
 //! blends, else a blend with the pixels under it: Windows' colour-keyed layer);
-//! the layer fades out on Stop where the OS fades windows.
+//! the layer fades out on Stop where the OS fades windows (Windows), and where it
+//! blends its own pixels (X11 with a compositor) the glow and patches fade by their opacity.
 //! The edge: Live's Quiet glow (`border::live`), drawn once at the start and
 //! never again while Live runs: in a window of its own where the layer can't
 //! blend (`alpha_window`, Windows), on the layer where it can
@@ -102,6 +103,8 @@ pub enum Msg {
     Alpha(u64, f32),
     /// A step of the edge's fade-in (drawn on the layer).
     EdgeFade,
+    /// The fade-out on Stop is over: close for good.
+    Closed,
     Hide(u64),
     /// Every patch down.
     Clear,
@@ -164,6 +167,8 @@ pub struct Live {
     /// goes to it (`windows::present_changes_only`).
     _changes_only: Option<crate::shared::platform::windows::ChangesOnly>,
     edge: (motion::Shown, f32),
+    /// Stop is fading the glow and the patches out (the layer blends); `Closed` ends it.
+    leaving: bool,
     line: Vec<[u32; 4]>,
     /// What the step thread reads each time: paused, the source and target
     /// languages, and where the controller is in a capture (monitor px;
@@ -239,6 +244,7 @@ impl Live {
             border: None,
             _changes_only: None,
             edge: (motion::Shown::opening(motion::WIDGET, Instant::now()), 0.0),
+            leaving: false,
             line: Vec::new(),
             paused: Arc::new(AtomicBool::new(false)),
             langs: Arc::new(Mutex::new((source.into(), target.into()))),
@@ -392,7 +398,7 @@ impl Live {
         };
         let before = self.ctl.clone();
         let download = match self.ctl.update(msg) {
-            Some(Out::Stop) => return Outcome::Off,
+            Some(Out::Stop) => return self.leave(),
             Some(Out::Drag) => return Outcome::Task(window::drag(id)),
             Some(Out::Download) => self.start_download(),
             None => Task::none(),
@@ -537,6 +543,7 @@ impl Live {
                 }
             }
             Msg::EdgeFade => self.edge.1 = self.edge.0.at(Instant::now()),
+            Msg::Closed => return Outcome::Off,
             Msg::Hide(id) => {
                 self.take(id);
                 return Outcome::Task(self.cut());
@@ -598,6 +605,26 @@ impl Live {
             }
             _ => Outcome::Task(Task::none()),
         }
+    }
+
+    /// Stop pressed: where the layer blends (X11 with a compositor) the glow and the patches
+    /// fade out first (`Closed` then ends it as `Outcome::Off`), the rest goes at once (Windows
+    /// fades its windows in `stop`).
+    pub fn leave(&mut self) -> Outcome {
+        if self.leaving || !self.caps.is_some_and(|c| c.blends) || self.window().is_none() {
+            return Outcome::Off;
+        }
+        self.leaving = true;
+        self.stop.store(true, Ordering::Relaxed);
+        self.edge.0.close(Instant::now());
+        Outcome::Task(background(|tx| {
+            let end = Instant::now() + motion::WIDGET.close.0 + motion::FRAME;
+            while Instant::now() < end && tx.unbounded_send(Msg::EdgeFade).is_ok() {
+                std::thread::sleep(motion::FRAME);
+            }
+            let _ = tx.unbounded_send(Msg::EdgeFade);
+            let _ = tx.unbounded_send(Msg::Closed);
+        }))
     }
 
     /// Turns live mode off: the step thread ends (after a running step), the
@@ -756,6 +783,8 @@ impl Live {
             // a blend with what is under it is drawn whole; else its opacity
             let opacity = if s.shown.under.is_some() {
                 1.0
+            } else if self.leaving {
+                s.alpha * self.edge.1
             } else {
                 s.alpha
             };
@@ -1680,8 +1709,12 @@ mod tests {
             l.ctl.size().height < asked.height,
             "the controller shrinks back"
         );
-        // Cancel = Stop
-        assert!(matches!(l.update(Msg::Controller(C::Stop)), Outcome::Off));
+        // Cancel = Stop (this layer blends: it fades out first, then it is off)
+        assert!(matches!(
+            l.update(Msg::Controller(C::Stop)),
+            Outcome::Task(_)
+        ));
+        assert!(matches!(l.update(Msg::Closed), Outcome::Off));
     }
 
     const MONITOR: Monitor = Monitor {
@@ -1843,6 +1876,52 @@ mod tests {
             Outcome::Off
         ));
         assert!(l.stop().units() == 0, "no window to close");
+    }
+
+    /// Stop on a layer that blends (X11 with a compositor) fades the glow and the patches out
+    /// first: a frame clock of `EdgeFade`s, then `Closed` = off; a second Stop closes at once.
+    #[test]
+    fn stop_fades_a_blending_layer_out_before_it_closes() {
+        let mut l = live();
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let layer = crate::features::live_translate::Layer {
+            excluded_from_capture: false,
+            blends: true,
+            cut: false,
+        };
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        let _ = l.update(Msg::Show(1, solid_patch()));
+        let _ = l.update(Msg::Alpha(1, 1.0));
+        let _ = l.update(Msg::EdgeFade);
+        assert!(!l.leaving);
+        assert!(matches!(l.leave(), Outcome::Task(_)), "it fades first");
+        assert!(l.leaving && l.stop.load(Ordering::Relaxed));
+        // the clock steps it down; at the end the edge is out
+        l.edge.0 = motion::Shown::closing(motion::WIDGET, Instant::now() - Duration::from_secs(1));
+        let _ = l.update(Msg::EdgeFade);
+        assert_eq!(l.edge.1, 0.0, "the glow is out");
+        assert!(
+            matches!(l.leave(), Outcome::Off),
+            "a second Stop closes at once"
+        );
+        assert!(matches!(l.update(Msg::Closed), Outcome::Off));
+        // no blending (Windows' colour key, a cut layer): nothing to fade by hand
+        let mut l = live();
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let keyed = crate::features::live_translate::Layer {
+            blends: false,
+            ..layer
+        };
+        let _ = l.update(Msg::Prepared(Ok((keyed, None))));
+        assert!(matches!(l.leave(), Outcome::Off));
+    }
+
+    fn solid_patch() -> Shown {
+        Shown {
+            bounds: [10, 10, 2, 2],
+            image: image::Handle::from_rgba(2, 2, vec![255; 16]),
+            under: None,
+        }
     }
 
     /// The focused window's page is read; a small focused window (a toast) is

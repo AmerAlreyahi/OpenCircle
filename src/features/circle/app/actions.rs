@@ -548,9 +548,16 @@ impl App {
 
     /// Alt+Shift+L (or the tray): live translate on, or off again.
     pub(crate) fn toggle_live(&mut self, at: Instant) -> Task<Message> {
-        if let Some(live) = self.live.take() {
+        if let Some(live) = &mut self.live {
+            // fading out (X11): the shortcut again closes at once
+            if let live_layer::Outcome::Task(fade) = live.leave() {
+                return fade.map(Message::Live);
+            }
             crate::log!("[opencircle] live translate off");
-            return live.stop().map(Message::Live);
+            return self
+                .live
+                .take()
+                .map_or_else(Task::none, |l| l.stop().map(Message::Live));
         }
         if live_layer::unsupported() {
             crate::log!(
