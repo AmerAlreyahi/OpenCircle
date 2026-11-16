@@ -978,3 +978,39 @@ fn a_shape_passing_through_the_box_padding_past_its_panel_is_no_change() {
     sim.screen = vec![(boxed, "Chapter Six".into())];
     sim.until(&draw("Chapter Six", 300), |s| s.layer.says("<Chapter Six>"));
 }
+
+/// A detect over a changing scene finds no text and takes long (the fight clip: ~300 ms, ~60 % of the OCR's time
+/// back to back): the next discover waits `discover_rest` times as long, and a retire still asks at once.
+#[test]
+fn a_long_detect_is_followed_by_a_rest() {
+    let detects = |rest: u32| {
+        let cfg = Config {
+            discover_rest: rest,
+            ..Config::default()
+        };
+        let (mut live, mut layer) = (Live::new(cfg), Recorder::default());
+        let (mut pending, mut count): (Option<(u64, Done)>, usize) = (None, 0);
+        for n in 0..600u64 {
+            // a block of the picture changes every 20 frames and then holds still (an effect pausing)
+            let mut img = Img::new(320, 180);
+            let v = (40 + n / 20 * 53 % 200) as u8; // (never the same twice in a row)
+            img.fill(Rect::new(100, 100, 120, 60), [v, v, v]);
+            let f = img.frame(n);
+            for job in live.on_frame(&f, &mut Paint, &mut layer) {
+                if let Job::Detect { job, .. } = job {
+                    // (nothing found, 30 frames = 0.5 s later)
+                    pending = Some((n + 30, Done::Detected { job, boxes: vec![] }));
+                    count += 1;
+                }
+            }
+            if pending.as_ref().is_some_and(|(due, _)| *due <= n) {
+                let (_, done) = pending.take().unwrap();
+                live.complete(done, &f, &mut Paint, &mut layer);
+            }
+        }
+        count
+    };
+    let (old, new) = (detects(0), detects(Config::default().discover_rest));
+    assert!(old >= 12, "back to back: {old}");
+    assert!(new * 3 <= old * 2, "with a rest: {new} of {old}");
+}

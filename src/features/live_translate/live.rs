@@ -225,9 +225,16 @@ impl<D: Deps> Translator for Translate<'_, D> {
             text: text.into(),
             bounds: [0.0, 0.0, 1.0, 1.0],
         };
-        translate_blocks(&[block], self.target, self.cache, self.deps)
+        let out = translate_blocks(&[block], self.target, self.cache, self.deps)
             .map(|t| t.into_iter().next().unwrap_or_default())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string());
+        // the model keeping the text as it is (a name): nothing is drawn; the test harness counts those apart
+        if matches!(&out, Ok(t) if t.trim().is_empty())
+            && crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_LOG").is_some()
+        {
+            crate::log!("[opencircle] live: kept as is: {text}");
+        }
+        out
     }
 }
 

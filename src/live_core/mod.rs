@@ -147,6 +147,10 @@ pub struct Config {
     pub fade_in: Duration,
     /// The discover step's period while frames arrive.
     pub discover_every: Duration,
+    /// After a detect that took T the next discover waits this many T more (a detect over the moving
+    /// scene finds nothing and runs ~300 ms: back to back it kept the OCR busy 60 % of the time on the
+    /// fight clip). 0 = the period alone. A retire still asks for a discover at once.
+    pub discover_rest: u32,
     /// A discover tile changed / held still: the mean gray difference of its cells above / at most this
     /// (0..255; video noise moves a still tile by ~1, new text by tens).
     pub tile_change: f32,
@@ -175,6 +179,7 @@ impl Default for Config {
             settle_max: Duration::from_millis(400),
             fade_in: Duration::from_millis(120),
             discover_every: Duration::from_millis(250),
+            discover_rest: 1,
             tile_change: 3.0,
             tile_still: Duration::from_millis(100),
             read_batch: 8,
@@ -336,6 +341,8 @@ pub struct Live {
     tiles: Vec<u8>,
     before: Option<(Duration, Vec<u8>)>,
     last_discover: Option<Duration>,
+    /// How long the last detect took (from its start to its result).
+    took: Duration,
     detecting: Option<u64>,
     discover_now: bool,
     /// Rects of regions retired since the detect in flight was asked for (its boxes there are old).
@@ -363,6 +370,7 @@ impl Live {
             tiles: Vec::new(),
             before: None,
             last_discover: None,
+            took: Duration::ZERO,
             detecting: None,
             discover_now: false,
             retired: Vec::new(),
@@ -554,6 +562,9 @@ impl Live {
                     return Vec::new();
                 }
                 self.detecting = None;
+                self.took = frame
+                    .at
+                    .saturating_sub(self.last_discover.unwrap_or(frame.at));
                 let retired = std::mem::take(&mut self.retired);
                 for b in boxes {
                     let b = clamp(b, self.size);
@@ -631,6 +642,7 @@ impl Live {
         self.tiles.clear();
         self.before = None;
         (self.last_discover, self.detecting, self.discover_now) = (None, None, false);
+        self.took = Duration::ZERO;
         self.retired.clear();
         self.reading.clear();
         self.translating.clear();
@@ -920,7 +932,9 @@ impl Live {
             self.cfg.discover_every.max(Duration::from_secs(1))
         } else {
             self.cfg.discover_every
-        };
+        }
+        // (at most 1.5 s: the first detect also loads the engine)
+        .max((self.took * (1 + self.cfg.discover_rest)).min(Duration::from_millis(1500)));
         let due = self
             .last_discover
             .is_none_or(|t| frame.at.saturating_sub(t) >= every);
