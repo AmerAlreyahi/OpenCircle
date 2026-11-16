@@ -402,6 +402,8 @@ struct Region {
     letter_at: Duration,
     /// When its text area last changed (while it settles).
     moved_at: Duration,
+    /// Frames in a row (each soon after the last) with letters landing at its front.
+    hits: u8,
     /// Right of its last line, and under it (where the next line starts).
     front: [Front; 2],
     style: Style,
@@ -616,10 +618,16 @@ impl Live {
                     if r.typing && gap < Duration::from_millis(600) {
                         r.style.gap = gap_mean(r.style.gap, gap);
                     }
+                    // typing: letters on a panel (the ring round it held still a while) in several
+                    // frames close together, as a typewriter adds them; a scene's shape that holds a
+                    // moment now and then is no typing (the fight clip: one every ~0.5 s)
+                    if letters >= 2 && r.ring_still >= 2 * settle {
+                        let close =
+                            frame.at.saturating_sub(r.letter_at) <= Duration::from_millis(150);
+                        r.hits = if close { r.hits.saturating_add(1) } else { 1 };
+                        r.typing |= r.hits >= 4;
+                    }
                     r.letter_at = frame.at;
-                    // (letters on a panel: the ring round it held still a while; a scene moving in steps
-                    // moves the ring too)
-                    r.typing |= letters >= 2 && r.ring_still >= 2 * settle;
                 }
                 // a box re-read in place whose new text spills past it (or whose panel went): found
                 // by a detect like new text
@@ -1331,6 +1339,7 @@ impl Live {
             typing: false,
             letter_at: Duration::ZERO,
             moved_at: frame.at,
+            hits: 0,
             front: Default::default(),
             // (a box that left this place taught how it shows its text)
             style: (self.styles.iter().rev())
