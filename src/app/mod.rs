@@ -33,7 +33,9 @@ pub(crate) mod capture;
 #[cfg(test)]
 pub(crate) mod frame_times;
 pub(crate) mod monitors;
+pub(crate) mod offscreen;
 pub(crate) mod screens;
+pub(crate) mod seen;
 pub(crate) mod shell;
 #[cfg(test)]
 pub(crate) mod tests;

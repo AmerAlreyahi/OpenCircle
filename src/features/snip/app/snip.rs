@@ -208,6 +208,10 @@ impl App {
         let user = (windows.iter())
             .find(|w| w.label != "Window")
             .map(|w| w.window);
+        // the bar and the open chat as the user sees them: in the picture, and
+        // picks there (in front of the windows)
+        let own = self.draw_own_ui();
+        windows.splice(0..0, own);
         let start = self.place();
         let mut snip = pick::Snip::new(
             windows,

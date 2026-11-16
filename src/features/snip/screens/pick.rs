@@ -158,6 +158,10 @@ pub struct Pick {
     pub window: isize,
 }
 
+/// The `window` of a pick that is not an OS window: OpenCircle's own bar or
+/// chat drawn into the picture (`App::draw_own_ui`); no controls to read in it.
+pub const OWN: isize = -1;
+
 impl Pick {
     pub fn window(rect: Rectangle, title: &str, handle: isize) -> Self {
         let label = match title.trim() {
@@ -389,6 +393,7 @@ impl Snip {
     /// Asks once for the controls of `window`.
     fn ask(&mut self, window: isize) {
         if let Some(reader) = &self.reader
+            && window != OWN
             && !self.asked.contains(&window)
         {
             self.asked.push(window);

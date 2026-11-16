@@ -15,6 +15,8 @@ iced = { version = "0.14", default-features = false, features = [
     # the AI chat's answers (pulldown-cmark; never "highlighter": no syntect)
     "markdown",
 ] }
+# Widgets drawn off screen (`app::offscreen`; the tests' renders too): the version iced already builds.
+iced_runtime = "0.14"
 arboard = "3.7"
 base64 = "0.22"
 dirs = "7"
@@ -205,7 +207,6 @@ xdg-desktop-portal = "*"
 [dev-dependencies]
 # Headless renders of the UI screens in tests (the versions iced already builds).
 iced = { version = "0.14", default-features = false, features = ["advanced"] }
-iced_runtime = "0.14"
 # The window compositor's damage (frame-time tests): the version iced already builds.
 iced_tiny_skia = "0.14"
 qrcode = { version = "0.14.1", default-features = false }
