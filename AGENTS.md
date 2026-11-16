@@ -1258,3 +1258,13 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Lab test first (owner, 2026-11-17): before building anything that rests on an assumption, run a small lab test that
   measures whether it is worth it (where the cost / delay really is, what the best case could gain); only a measured leap gets
   built. Applies to every new idea, the owner's included.
+- #42 / #20 (owner, 2026-11-17): #42 (OpenVINO GPU reading) agreed as stated: lab test after box memory, built only if it halves
+  the remaining reading time on Intel hardware. #20 (learned inpainting) moves to a later version: first a measured lab test
+  with its pros and cons (quality on real game screens vs today's fill, download size, time per picture, one-shot only or
+  Live); today's erase-and-fill is "good enough, not great" and stays for now.
+- Later, not 0.3.0 (owner, 2026-11-17, "later is fine"): #51 (hotkey conflict detection + game-mode pause) and #43 (games:
+  watch area, battery, hints).
+- One click on the owner's PC (owner, 2026-11-17, going to sleep: "can I rely on you?"): for an OK'd test run, a worker may
+  send ONE left click into its OWN test window (the browser it started) to give it the foreground, only after
+  WindowFromPoint at the click point returns a window of a process the worker started (checked right before the click); never
+  a key press, never a click anywhere else; if the check fails, no click and the run stops. The mouse-move wake rule stays.
