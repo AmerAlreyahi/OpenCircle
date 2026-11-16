@@ -1248,3 +1248,13 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   rejected.
 - Honest value verdicts (owner, 2026-11-16; in the owner's general rules too): say plainly when data shows no value / no big
   leap / not worth it, and say "drop it"; measure end to end before building a piece; disagree with numbers, then follow him.
+- GPU translation dropped from OpenCircle (owner, 2026-11-17, "I agree for all"; SUPERSEDES "GPU translation skipped for
+  0.3.0"'s "hide, don't delete"): the 0.3.0 clean-up DELETES the GPU path (gpu-helper/ crate, translate::gpu, platform/vulkan.rs,
+  the CI gpu-helper job, the hidden setting row; the `live_gpu` config key is still read so older files load and is dropped on
+  save) and the models-v4 release on OpenCircle-models (no released version uses it). Using a GPU for AI stays the user's own AI
+  provider (Ollama, LM Studio ...), with no GPU code in OpenCircle.
+  0.3.0 list verdicts (same day): #86 dropped; #42 / #41 (GPU / int8 OCR) and #20 (learned inpainting) not built: measured
+  only if a lab test shows they could be a leap; #134 / #135 stay cheap measurements only; #137 skipped in 0.3.0.
+- Lab test first (owner, 2026-11-17): before building anything that rests on an assumption, run a small lab test that
+  measures whether it is worth it (where the cost / delay really is, what the best case could gain); only a measured leap gets
+  built. Applies to every new idea, the owner's included.
