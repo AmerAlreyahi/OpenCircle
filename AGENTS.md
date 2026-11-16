@@ -1268,3 +1268,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   send ONE left click into its OWN test window (the browser it started) to give it the foreground, only after
   WindowFromPoint at the click point returns a window of a process the worker started (checked right before the click); never
   a key press, never a click anywhere else; if the check fails, no click and the run stops. The mouse-move wake rule stays.
+- KDE / wlroots Live controller (lead default 2026-11-17, owner asleep; owner may reverse): option C, leave it: the controller
+  is a normal window under the layer-shell overlay; only a translated patch over text that happens to sit under the controller
+  can cover it (Wayland gives no window position to cut a hole). Known issue in the notes; a second layer surface for the
+  controller (~4-6 h) only if users report it. Windowed games on KDE: Live needs full screen / borderless there (plain message).
