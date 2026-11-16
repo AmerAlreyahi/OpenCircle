@@ -60,6 +60,11 @@ jobs:
       - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
         run: cargo test --release the_opening_stays_within_its_frame_budget -- --nocapture
 
+      # Live replay benchmark (#44): the harness clip's frames through the live core with fake engines;
+      # fails on a stale patch, a redraw, a missed line, or text -> drawn time past the margins (~1 min, shares the release test build).
+      - if: steps.crate.outputs.present == 'true' && runner.os == 'Linux'
+        run: sh scripts/live-replay-check.sh
+
       # OCR latency budget (#59): on Windows `cargo test` above reads the fixture with
       # the real Windows OCR (windows_ocr_reads_the_fixture: text + under 1.5 s).
       # PP-OCR needs downloaded models and CI downloads none: nothing to time here.

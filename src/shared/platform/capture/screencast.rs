@@ -241,9 +241,13 @@ impl Drop for Cast {
     }
 }
 
-/// A window stream's frame isn't the monitor's size: where it sits is unknown.
+/// A window stream's frame isn't the monitor's size: where it sits is unknown (neither the
+/// portal nor Wayland says), so Live can't place its patches over it. Said plainly, with the fix.
 fn not_full_screen((w, h): (u32, u32), (mw, mh): (u32, u32)) -> String {
-    format!("the shared window isn't full screen ({w}x{h} on a {mw}x{mh} screen)")
+    format!(
+        "Live needs the game full screen or borderless on this desktop (it can't tell where a window sits): \
+         the shared window is {w}x{h} on a {mw}x{mh} screen. Make it full screen, then start Live again"
+    )
 }
 
 /// Whether live translate can stream one window's own pixels here: the
@@ -913,6 +917,19 @@ fn rgba_rows(bytes: &[u8], width: u32, height: u32) -> Result<Frame, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A windowed game can't be placed (Wayland never says where a window sits): the user is told
+    /// plainly what to do, not "frame size mismatch".
+    #[test]
+    fn a_windowed_game_is_told_to_go_full_screen() {
+        let said = not_full_screen((1280, 720), (1920, 1080));
+        assert!(said.contains("full screen or borderless"), "{said}");
+        assert!(
+            said.contains("1280x720") && said.contains("1920x1080"),
+            "{said}"
+        );
+        assert!(said.ends_with("start Live again"), "{said}");
+    }
 
     #[test]
     fn only_gnome_before_46_with_a_persisting_screencast_portal() {
