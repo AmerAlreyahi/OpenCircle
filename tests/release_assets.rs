@@ -39,11 +39,13 @@ fn the_msi_is_built_but_not_uploaded() {
 #[test]
 fn the_gpu_helper_is_a_signed_release_asset() {
     let app = include_str!("../src/features/translate/gpu/mod.rs");
+    // a Windows checkout may have CRLF line endings
+    let workflow = WORKFLOW.replace("\r\n", "\n");
     for name in [
         "opencircle-mt-gpu-windows-x86_64.exe",
         "opencircle-mt-gpu-linux-x86_64",
     ] {
-        assert!(WORKFLOW.contains(&format!("asset: {name}\n")), "{name}");
+        assert!(workflow.contains(&format!("asset: {name}\n")), "{name}");
         assert!(app.contains(&format!("Some(\"{name}\")")), "{name}");
     }
     assert!(WORKFLOW.contains("needs: [build, gpu-helper]"));
