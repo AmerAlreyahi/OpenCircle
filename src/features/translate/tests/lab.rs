@@ -118,7 +118,6 @@ fn novel_buttons(tr: [&str; 3], light: bool) -> (Vec<u8>, (usize, usize), Drawn)
 /// (few round letters, a thin dense band) was drawn at 0.55 of the size of
 /// "Bien sür que oui." (the width of the same word: 78 / 43 / 64 px).
 #[test]
-#[ignore = "open finding (W22): relaxing the band clamp in draw::original_em fixed this but left the web page's paragraph untranslated"]
 fn buttons_of_one_size_get_translations_of_one_size() {
     let (_, _, d) = novel_buttons(["بالطبع"; 3], false);
     assert_eq!(d.drawn, 3);
@@ -157,4 +156,46 @@ fn arabic_on_latin_buttons_matches_its_golden_in_both_themes() {
             "{name}: {off} pixels differ from the golden"
         );
     }
+}
+
+/// The button frames are not text: erasing a label leaves the frame lines
+/// whole, also where a translucent button's faint inner line passes the
+/// threshold only in pieces (they were erased as dashes).
+#[test]
+fn a_buttons_broken_frame_line_stays_whole() {
+    let src =
+        crate::shared::platform::capture::from_png(format!("{DIR}novel_buttons.png").as_ref())
+            .unwrap();
+    let (out, (w, _), _) = novel_buttons(["بالطبع"; 3], false);
+    let changed = (60..=70usize)
+        .flat_map(|y| (0..w).map(move |x| (y * w + x) * 4))
+        .filter(|&i| (0..3).any(|k| out[i + k].abs_diff(src.rgba[i + k]) > 8))
+        .count();
+    // (375 pixels changed before, 92 now: the rest are anti-aliasing fringes)
+    assert!(changed < 120, "{changed} frame pixels erased");
+}
+
+/// A dark translucent panel's own shade beside the glyphs is no outline:
+/// "Bien sûr que oui." has none to redraw (drawn as one it greyed thin Arabic
+/// strokes).
+#[test]
+fn a_dark_panels_own_shade_is_no_outline() {
+    let src =
+        crate::shared::platform::capture::from_png(format!("{DIR}novel_buttons.png").as_ref())
+            .unwrap();
+    let mut px = src.rgba;
+    let b = [59.0, 15.0, 300.0, 42.0];
+    let (w, h) = (src.width as usize, src.height as usize);
+    let (st, _) = super::super::erase::erase_line(&mut px, w, h, b);
+    assert_eq!(st.shadow, None);
+}
+
+/// A one-line button's translation stays on one line: shrunk, then cut with
+/// an ellipsis, never wrapped into a second line below its frame.
+#[test]
+fn a_one_line_label_never_wraps() {
+    let long = "أنا لستُ متأكدًا من ذلك أبدًا ولا أعرف ماذا يجب أن أفعل الآن في هذا الموقف";
+    let (_, _, d) = novel_buttons([long, "بالطبع", "بالطبع"], false);
+    assert!(d.drawn >= 1);
+    assert!(d.ink[0][3] < 1.6 * 42.0, "wrapped: {:?}", d.ink[0]);
 }

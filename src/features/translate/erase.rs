@@ -434,7 +434,13 @@ fn erase_box(
         let (n, by) = (0..w * h)
             .filter(|&i| member[i] == 0)
             .fold((0, 0), |(n, by), i| (n + 1, by + near[i] as usize));
-        by * 5 >= n * 3
+        // and it is only there: a dark translucent panel's own colour, next
+        // to the glyphs too (the ring's plane is lighter), spreads over the box
+        let near_fill = dilate(&member.iter().map(|&m| m == 0).collect::<Vec<_>>(), w, r);
+        let (n2, by2) = (0..w * h)
+            .filter(|&i| member[i] == k)
+            .fold((0, 0), |(n, by), i| (n + 1, by + near_fill[i] as usize));
+        by * 5 >= n * 3 && by2 * 5 >= n2 * 3
     };
     // Dark text on a light page: thin strokes are mostly anti-aliasing
     // (ClearType fringes are orange, blue or near white), so the biggest
@@ -480,8 +486,12 @@ fn erase_box(
             // On a light page only light text has a dark outline (white on a
             // bright sky); dark text's darker "outline" is its own core
             // inside ClearType fringes.
+            // (On a dark panel it must be near black: a translucent panel's
+            // own darker colour beside the glyphs is no outline, and drawn
+            // as one it greys thin strokes.)
             Role::Shadow
                 if luma(c.color) < bg_luma - 15.0
+                    && (bg_luma >= 100.0 || luma(c.color) < 0.4 * bg_luma)
                     && (bg_luma <= 170.0 || luma(color) >= bg_luma - 40.0)
                     && hugs_fill(k) =>
             {
@@ -964,6 +974,26 @@ fn straight(m: &[bool], w: usize, col: f32, row: f32) -> (Vec<bool>, Vec<usize>)
     // stem of the text's own height does not)
     for (y, x0, x1) in runs(h, w, &|y, x| y * w + x, row) {
         (x0..x1).for_each(|x| out[y * w + x] = true);
+    }
+    // A frame line fades in and out with the picture behind it (a translucent
+    // button), so only pieces of it pass the threshold, none a run of `row`:
+    // one or two rows with a third of the width on them and (almost) nothing
+    // on the three rows either side of them (a stem's rows have more) are the
+    // same line, broken.
+    let inner = w - 2 * RING as usize;
+    let on = |y: usize| m[y * w..(y + 1) * w].iter().filter(|&&v| v).count();
+    let dense: Vec<bool> = (0..h).map(|y| on(y) * 3 >= inner).collect();
+    let quiet = |y: usize| y >= h || on(y) * 30 < inner;
+    let mut y = 0;
+    while y < h {
+        let end = (y..h).find(|&k| !dense[k]).unwrap_or(h);
+        let beside = (y.saturating_sub(3)..y).chain(end..end + 3);
+        if end > y && end - y <= 2 && beside.into_iter().all(quiet) {
+            for (r, x) in (y..end).flat_map(|r| (0..w).map(move |x| (r, x))) {
+                out[r * w + x] |= m[r * w + x];
+            }
+        }
+        y = end.max(y + 1);
     }
     let cols = runs(w, h, &|x, y| y * w + x, col);
     let near_col = |x: usize| cols.iter().any(|r| r.0.abs_diff(x) <= 1);

@@ -307,6 +307,7 @@ pub fn render(
     let mut fonts = draw::Fonts::new();
     let mut fits = Vec::new();
     let mut restore = Vec::new();
+    let mut placed = Vec::new();
     for (i, t, styles, undo) in todo {
         let b = &blocks[i];
         // never over an icon or a frame the erase left (a radio button, a
@@ -335,7 +336,39 @@ pub fn render(
             right: !rtl && rtl_text(&b.text),
             styles,
             rtl,
+            shared_em: None,
         };
+        placed.push((i, t, p, undo));
+    }
+    // buttons of one size (one line each, one height, one edge or centre)
+    // get one size: the middle reading (one thin-banded label reads small)
+    let sibling = |a: &draw::Placement, b: &draw::Placement| {
+        let [ax, _, aw, _] = a.bounds;
+        let [bx, _, bw, _] = b.bounds;
+        a.texts.len() == 1
+            && b.texts.len() == 1
+            && (a.line_h - b.line_h).abs() <= 0.08 * a.line_h
+            && [ax - bx, ax + aw - bx - bw, ax + aw / 2.0 - bx - bw / 2.0]
+                .iter()
+                .any(|d| d.abs() <= 3.0)
+    };
+    let shared: Vec<Option<f32>> = placed
+        .iter()
+        .map(|(_, _, a, _)| {
+            (a.texts.len() == 1).then(|| {
+                let mut v: Vec<f32> = (placed.iter().filter(|(_, _, b, _)| sibling(a, b)))
+                    .map(|(_, _, b, _)| draw::original_em(b))
+                    .collect();
+                v.sort_by(f32::total_cmp);
+                // (the lower median: one big outlier moves nobody, and a
+                // pair stays as read)
+                v[(v.len() - 1) / 2]
+            })
+        })
+        .collect();
+    for ((i, t, mut p, undo), shared_em) in placed.into_iter().zip(shared) {
+        p.shared_em = shared_em;
+        let b = &blocks[i];
         let busy = p.styles.iter().any(|s| s.residual > BUSY);
         match (!busy).then(|| draw::fit(&mut fonts, t, &p)).flatten() {
             Some(fit) => fits.push((i, t, p, fit, undo)),

@@ -266,6 +266,8 @@ pub struct Placement {
     /// original (an Arabic page in English keeps its lines' right edges).
     pub right: bool,
     pub centred: bool,
+    /// The size its one-line siblings read (`render`): never smaller than it.
+    pub shared_em: Option<f32>,
 }
 
 /// The laid-out translation: buffer, top-left, font size.
@@ -281,7 +283,7 @@ const MIN_SCALE: f32 = 0.7;
 /// much above what its dense band says (the
 /// x-height of mixed-case Latin, ~0.53 em): an icon or a stray mark in the
 /// window cannot blow it up.
-fn original_em(p: &Placement) -> f32 {
+pub fn original_em(p: &Placement) -> f32 {
     let s0 = &p.styles[0];
     let n = p.styles.len() as f32;
     let text = &p.texts[0];
@@ -309,6 +311,8 @@ fn original_em(p: &Placement) -> f32 {
     } else {
         em
     };
+    // (a sibling's reading, never above this line's own box)
+    let em = em.max(p.shared_em.unwrap_or(0.0).min(ocr_h));
     em.min(p.bounds[3] / n).max(6.0)
 }
 
@@ -383,7 +387,9 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
             align,
         );
         let (w, h) = extent(&buf);
-        (w <= bw + 0.5 && h <= bh.max(lh) + 0.5).then_some((buf, h))
+        // (a one-line label stays one line, though its box could hold two)
+        let one = n > 1 || buf.layout_runs().count() <= 1;
+        (one && w <= bw + 0.5 && h <= bh.max(lh) + 0.5).then_some((buf, h))
     };
     let floor = em * MIN_SCALE;
     let mut size = em;
@@ -400,7 +406,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     // does not fit: the last resort, the text cut at a word (or, with no
     // word fitting, inside the first one) and an ellipsis. A paragraph is
     // never cut: its original stays.
-    if found.is_none() && bh < 2.0 * size * 1.3 {
+    if found.is_none() && (n == 1 || bh < 2.0 * size * 1.3) {
         let chars: Vec<char> = spans.iter().flat_map(|(t, _)| t.chars()).collect();
         let words: Vec<usize> = (2..chars.len())
             .filter(|&k| chars[k].is_whitespace())
@@ -558,6 +564,7 @@ mod tests {
             rtl,
             right: false,
             centred: false,
+            shared_em: None,
         }
     }
 
