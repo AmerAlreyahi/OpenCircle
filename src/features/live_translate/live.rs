@@ -902,7 +902,14 @@ mod tests {
         let truth: serde_json::Value =
             serde_json::from_slice(&std::fs::read(clip.with_extension("truth.json")).unwrap())
                 .unwrap();
-        let (w, h, k) = (1280u32, 720u32, 1280.0 / 1920.0);
+        // `OC_PAD=1`: as the Ubuntu VM's 1280x813 window shows it (the video 46 px down); `OC_SLOW=2.5`:
+        // each job takes that many times its time (the VM's slower OCR)
+        let pad = std::env::var_os("OC_PAD").is_some();
+        let slow: f64 = std::env::var("OC_SLOW").map_or(1.0, |v| v.parse().unwrap());
+        let (w, h, k, dy) = match pad {
+            true => (1280u32, 813u32, 1280.0 / 1920.0, 46.0),
+            false => (1280u32, 720u32, 1280.0 / 1920.0, 0.0),
+        };
         let deps = Real(std::sync::Mutex::new(Engine::load(&models_dir()).unwrap()));
         let cache = Cache::new(512);
         let mut s = InStep::new(&deps, &cache, "fr");
@@ -911,7 +918,11 @@ mod tests {
             .arg(clip.with_extension("mp4"))
             .args([
                 "-vf",
-                "fps=30,scale=1280:720",
+                if pad {
+                    "fps=30,scale=1280:720,pad=1280:813:0:46"
+                } else {
+                    "fps=30,scale=1280:720"
+                },
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
@@ -984,7 +995,10 @@ mod tests {
                 );
                 let took = t.elapsed();
                 busy += took;
-                free = n + (took.as_micros() as u32).div_ceil(33_333).max(1);
+                free = n
+                    + ((took.as_micros() as f64 * slow) as u32)
+                        .div_ceil(33_333)
+                        .max(1);
                 running.push((free, done));
             }
             n += 1;
@@ -1013,7 +1027,7 @@ mod tests {
                 .collect();
             let r = Rect::new(
                 (b[0] * k) as u32,
-                (b[1] * k) as u32,
+                (b[1] * k + dy) as u32,
                 (b[2] * k) as u32,
                 (b[3] * k) as u32,
             );
