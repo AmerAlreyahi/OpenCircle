@@ -447,6 +447,8 @@ struct Front {
     /// none where the ring is no panel (`flat`: most of it within `FLAT` of that gray).
     panel: u8,
     flat: bool,
+    /// Columns of the band on the panel (past them: the scene beyond its edge).
+    reach: u32,
     /// The rightmost letter seen in it (frame px), 0 = none.
     right: u32,
 }
@@ -1391,8 +1393,20 @@ impl Live {
         let y = r.rect.bottom().min(fh);
         let under = Rect::new(r.rect.x, y, r.rect.w, line.min(fh - y));
         r.front = [
-            Front::new(frame, right, s, &r.ring, &r.front[0]),
-            Front::new(frame, under, s, &r.ring, &r.front[1]),
+            // (the panel past the line is judged just above it, clear of its letters)
+            Front::new(
+                frame,
+                right,
+                Rect {
+                    y: last.y.saturating_sub((last.h / 4).max(1)),
+                    h: (last.h / 4).max(1),
+                    ..right
+                },
+                s,
+                &r.ring,
+                &r.front[0],
+            ),
+            Front::new(frame, under, under, s, &r.ring, &r.front[1]),
         ];
     }
 
@@ -1492,9 +1506,10 @@ impl Live {
 }
 
 impl Front {
-    /// Band `at` (clamped by the caller); `ring` = the region's ring cells now (their median is the
+    /// Band `at` (clamped by the caller; `probe`: the strip over its columns where the panel is judged);
+    /// `ring` = the region's ring cells now (their median is the
     /// panel's gray); a cell `old` also watched keeps what it knew (a box that grows moves its band).
-    fn new(f: &Frame, at: Rect, s: u32, ring: &[u8], old: &Front) -> Front {
+    fn new(f: &Frame, at: Rect, probe: Rect, s: u32, ring: &[u8], old: &Front) -> Front {
         let now = match at.area() {
             0 => Vec::new(),
             _ => pixels::sample(f, at, s, 0).0,
@@ -1507,6 +1522,20 @@ impl Front {
         let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
         // (a panel: most of the ring shows one gray; round a tight bar it is the scene's)
         let flat = 5 * ring.iter().filter(|c| c.abs_diff(median) <= FLAT).count() >= 3 * ring.len();
+        // (the panel's extent: the band ends at the first column hardly any of whose cells show it,
+        // the scene past the panel's edge)
+        let seen = match probe.area() {
+            0 => Vec::new(),
+            _ => pixels::sample(f, probe, s, 0).0,
+        };
+        let rows = seen.len() / (cols as usize).max(1);
+        let reach = (0..cols as usize)
+            .find(|&c| {
+                let panel =
+                    (0..rows).filter(|&r| seen[r * cols as usize + c].abs_diff(median) <= FLAT);
+                3 * panel.count() < rows
+            })
+            .unwrap_or(cols as usize) as u32;
         let mut fr = Front {
             at,
             cells: (x0, y0, cols),
@@ -1518,6 +1547,7 @@ impl Front {
             now,
             panel: median,
             flat: flat && !ring.is_empty(),
+            reach,
             right: 0,
         };
         let (ox, oy, oc) = old.cells;
@@ -1540,6 +1570,7 @@ impl Front {
     fn inked(&self, k: usize, change: f32) -> bool {
         let far = |a: u8, b: u8| a.abs_diff(b) as f32 > change;
         self.flat
+            && (k as u32 % self.cells.2.max(1)) < self.reach
             && self.calm[k]
             && !far(self.first[k], self.panel)
             && far(self.now[k], self.first[k])
