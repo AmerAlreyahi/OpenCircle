@@ -13,7 +13,8 @@
 //! patch fades in over the core's `fade_in` (its opacity where the layer
 //! blends, else a blend with the pixels under it: Windows' colour-keyed layer);
 //! the layer fades out on Stop where the OS fades windows (Windows), and where it
-//! blends its own pixels (X11 with a compositor) the glow and patches fade by their opacity.
+//! blends its own pixels (X11 with a compositor) the glow and patches fade by their opacity;
+//! the view stays drawn while it does (`leave`).
 //! The edge: Live's Quiet glow (`border::live`), drawn once at the start and
 //! never again while Live runs: in a window of its own where the layer can't
 //! blend (`alpha_window`, Windows), on the layer where it can
@@ -46,6 +47,7 @@ use crate::shared::kit::motion;
 use crate::shared::on_screen::{self, Drawn};
 use crate::shared::platform::alpha_window::AlphaWindow;
 use crate::shared::platform::capture::{self, frames::Frames, window_rect};
+use crate::shared::platform::shape;
 use crate::shared::theme;
 
 /// The longest wait for a new frame: a still screen is fed again this often
@@ -607,15 +609,27 @@ impl Live {
         }
     }
 
-    /// Stop pressed: where the layer blends (X11 with a compositor) the glow and the patches
-    /// fade out first (`Closed` then ends it as `Outcome::Off`), the rest goes at once (Windows
-    /// fades its windows in `stop`).
+    /// Stop pressed: the layer fades out with its view still drawn (the window must not be
+    /// repainted without it: its default background is opaque, a white flash), then `Closed`
+    /// ends it as `Outcome::Off`. Where the layer blends (X11 with a compositor) the glow and
+    /// the patches fade by their opacity; where the OS fades windows (Windows) it fades the
+    /// window, and the glow's own window goes at once. Else (or pressed again) it closes at once.
     pub fn leave(&mut self) -> Outcome {
-        if self.leaving || !self.caps.is_some_and(|c| c.blends) || self.window().is_none() {
+        let blends = self.caps.is_some_and(|c| c.blends);
+        let Some(id) = self.window() else {
+            return Outcome::Off;
+        };
+        if self.leaving || !(blends || shape::can_fade()) {
             return Outcome::Off;
         }
         self.leaving = true;
         self.stop.store(true, Ordering::Relaxed);
+        if !blends {
+            self.glow = None; // fades out on its own thread, as it is dropped
+            return Outcome::Task(
+                windows::fade(id, false, windows::POPUP, true).chain(Task::done(Msg::Closed)),
+            );
+        }
         self.edge.0.close(Instant::now());
         Outcome::Task(background(|tx| {
             let end = Instant::now() + motion::WIDGET.close.0 + motion::FRAME;
@@ -628,15 +642,11 @@ impl Live {
     }
 
     /// Turns live mode off: the step thread ends (after a running step), the
-    /// window closes, the patches and the step state are freed.
+    /// window closes, the patches and the step state are freed (`leave` fades first).
     pub fn stop(self) -> Task<Msg> {
         self.stop.store(true, Ordering::Relaxed);
-        // the edge's own window fades out on its thread (dropped with `self`);
-        // the layer fades out where the OS fades windows, then closes (its
-        // state goes now: nothing of it is drawn again)
-        let layer = self
-            .window()
-            .map(|id| windows::fade(id, false, windows::POPUP, true).chain(window::close(id)));
+        // the edge's own window fades out on its thread (dropped with `self`)
+        let layer = self.window().map(window::close);
         let controller = self.controller.map(window::close);
         Task::batch(layer.into_iter().chain(controller))
     }
@@ -1913,7 +1923,11 @@ mod tests {
             ..layer
         };
         let _ = l.update(Msg::Prepared(Ok((keyed, None))));
-        assert!(matches!(l.leave(), Outcome::Off));
+        assert_eq!(
+            matches!(l.leave(), Outcome::Task(_)),
+            shape::can_fade(),
+            "the OS fades the window where it can, else it closes at once"
+        );
     }
 
     fn solid_patch() -> Shown {
