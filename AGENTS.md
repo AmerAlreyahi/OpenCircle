@@ -1230,3 +1230,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   remotely and is away): for an OK'd run on his PC, a worker may wake the display with a tiny mouse MOVE only (e.g. 1 px and
   back, SendInput relative move) and then hold it on (SetThreadExecutionState). Still never a click, key press or any input
   that can reach a window (the 2026-11-14 SendKeys rule stands).
+- First GPU download + AI part errors (owner, 2026-11-16, "i accept your 2 suggestions"): (1) the first GPU Live download
+  (helper + ~1.2 GB model) never blocks Live: Live starts on the processor at once, the download runs in the background with
+  the normal download card (progress, resume, retry), and Live switches to the graphics card by itself when it is ready.
+  (2) AI translate (#90): a failed part stays in the original language for 0.3.0 (logged); a per-part error card is a later
+  design round. "Offline first, AI only where offline can't" stays on hold until the owner says.
