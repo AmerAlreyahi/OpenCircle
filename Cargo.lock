@@ -3663,6 +3663,8 @@ dependencies = [
  "ttf-parser",
  "unicode-bidi",
  "ureq",
+ "wayland-client",
+ "wayland-protocols-wlr",
  "whichlang",
  "widestring",
  "windows",

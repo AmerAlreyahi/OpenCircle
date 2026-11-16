@@ -14,7 +14,8 @@
 //! (our own layer) is never in them: X11 through XComposite
 //! (`x11::FrontWindow`), else the area as above. Windows needs none (our
 //! layer keeps out of captures). KDE / wlroots Wayland: the ScreenCast
-//! portal's window source goes here (live translate's Wayland layer step).
+//! portal's window source (`screencast::Cast::window`: the user picks the
+//! game in the desktop's dialog), a full-screen window's own pixels.
 use std::io;
 use std::time::Duration;
 
@@ -32,6 +33,9 @@ pub struct Frames {
     /// Why there is no duplication (it never started, or stopped).
     why: Option<String>,
     first: bool,
+    /// The window the user picked in the desktop's dialog (Wayland): opening
+    /// the frames again asks again.
+    picked: bool,
 }
 
 impl Frames {
@@ -67,6 +71,7 @@ impl Frames {
             front: None,
             why,
             first: true,
+            picked: false,
         }
     }
 
@@ -74,6 +79,22 @@ impl Frames {
     /// sits on it (the rest black); the monitor as shown where no window's
     /// own pixels can be read (logged once).
     pub fn front_window(monitor: (i32, i32, u32, u32)) -> Frames {
+        #[cfg(target_os = "linux")]
+        if super::wayland_session() {
+            let (cast, why) = match super::screencast::Cast::window((monitor.2, monitor.3)) {
+                Ok(cast) => (Some(cast), None),
+                Err(e) => {
+                    crate::log!("[opencircle] no window frames ({e})");
+                    (None, Some(e))
+                }
+            };
+            return Frames {
+                cast,
+                why,
+                picked: true,
+                ..Frames::none(monitor)
+            };
+        }
         #[allow(unused_mut)]
         let mut frames = Frames::open(monitor);
         #[cfg(target_os = "linux")]
@@ -84,6 +105,27 @@ impl Frames {
             }
         }
         frames
+    }
+
+    /// Nothing opened yet (`front_window`'s Wayland window fills it in).
+    #[cfg(target_os = "linux")]
+    fn none(region: (i32, i32, u32, u32)) -> Frames {
+        Frames {
+            region,
+            cast: None,
+            shm: None,
+            front: None,
+            why: None,
+            first: true,
+            picked: false,
+        }
+    }
+
+    /// Opening these frames again would ask the user again (the window they
+    /// picked in the desktop's dialog): after an error they are kept, not
+    /// reopened (the user stopped sharing, or said no).
+    pub fn reopen_asks(&self) -> bool {
+        self.picked
     }
 
     /// Frames come as the screen shows them, none while it is still (no
@@ -148,7 +190,8 @@ impl Frames {
     /// lies over it, our own layer and edge glow among it, is never in them.
     pub fn of_window(&self) -> bool {
         #[cfg(target_os = "linux")]
-        return self.front.as_ref().is_some_and(|f| f.window().is_some());
+        return self.front.as_ref().is_some_and(|f| f.window().is_some())
+            || self.cast.as_ref().is_some_and(|c| c.is_window());
         #[cfg(not(target_os = "linux"))]
         false
     }
@@ -161,7 +204,8 @@ impl Frames {
         }
         #[cfg(target_os = "linux")]
         if let Some(cast) = &self.cast {
-            return format!("screen cast ({} frames read)", cast.frames);
+            let what = if cast.is_window() { "window" } else { "screen" };
+            return format!("{what} cast ({} frames read)", cast.frames);
         }
         #[cfg(target_os = "linux")]
         if let Some(window) = self.front.as_ref().and_then(|f| f.window()) {

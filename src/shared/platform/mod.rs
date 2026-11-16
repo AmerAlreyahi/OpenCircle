@@ -5,6 +5,7 @@ pub(crate) mod alpha_window;
 pub(crate) mod autostart;
 pub(crate) mod capture;
 pub(crate) mod hotkey;
+pub(crate) mod layer_shell;
 pub(crate) mod monitor;
 pub(crate) mod shape;
 pub(crate) mod sys;

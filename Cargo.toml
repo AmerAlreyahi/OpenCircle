@@ -82,8 +82,13 @@ iced_tiny_skia = { version = "0.14", default-features = false }
 # Song search's audio (src/features/song): the PulseAudio protocol in pure Rust (no libpulse;
 # PipeWire's pulse server speaks it). Opened only while listening.
 pulseaudio = "0.3"
+# The live layer on KDE / wlroots Wayland: a wlr-layer-shell overlay surface of our own
+# (`shared/platform/layer_shell.rs`; winit can't make one). Both already in the tree
+# through winit / smithay-client-toolkit: no new crate.
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # xfixes + shape: the live layer's empty input shape (click-through)
-xcb = { version = "1.7", features = ["randr", "xfixes", "shape", "shm", "composite", "damage"] }
+xcb ={ version = "1.7", features = ["randr", "xfixes", "shape", "shm", "composite", "damage"] }
 
 [target.'cfg(windows)'.dependencies]
 # Song search's audio (src/features/song): WASAPI loopback / microphone, only while listening.

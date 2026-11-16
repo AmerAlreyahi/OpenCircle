@@ -96,7 +96,7 @@ pub fn capture(conn: &DBusConnection) -> Result<Frame, CaptureError> {
             "Wayland screen cast: not allowed yet".into(),
         ));
     }
-    let session = Session::start(conn)?;
+    let session = Session::start(conn, Source::Monitors)?;
     if session.asked {
         // GNOME fades its dialog out for ~150 ms: not into the frozen frame.
         std::thread::sleep(DIALOG_FADE);
@@ -109,7 +109,7 @@ pub fn capture(conn: &DBusConnection) -> Result<Frame, CaptureError> {
 /// Onboarding's Allow: the dialog only (its "Share" is remembered); no frame taken.
 pub fn allow(conn: &DBusConnection) -> Result<(), CaptureError> {
     forget_token(&token_file());
-    Session::start(conn).map(drop)
+    Session::start(conn, Source::Monitors).map(drop)
 }
 
 /// Whether long capture can stream the screen here: a ScreenCast portal that can
@@ -140,6 +140,9 @@ pub struct Cast {
     fd: c_int,
     /// The area in the stream's px.
     area: (i32, i32, u32, u32),
+    /// A window's stream (`window`): the monitor size it must fill (a window
+    /// stream says nothing of where the window sits).
+    window: Option<(u32, u32)>,
     /// Frames read (the log line).
     pub frames: u32,
 }
@@ -150,7 +153,7 @@ impl Cast {
     pub fn start(region: (i32, i32, u32, u32)) -> Result<Cast, String> {
         let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
         let conn = super::portal::session_bus()?;
-        let session = Session::start(&conn)?;
+        let session = Session::start(&conn, Source::Monitors)?;
         let (stream, area) =
             holding(&session.streams, region).ok_or("the area is off the shared screens")?;
         let fd = session.remote()?;
@@ -167,8 +170,42 @@ impl Cast {
             _session: session,
             fd,
             area,
+            window: None,
             frames: 0,
         })
+    }
+
+    /// Streams the one window the user picks in the desktop's dialog (asked
+    /// at every start where the desktop keeps no token: Plasma before 5.27),
+    /// a `size` px monitor's full-screen window (a game): its own pixels,
+    /// never what lies over it.
+    pub fn window(size: (u32, u32)) -> Result<Cast, String> {
+        let gst = Gst::get().ok_or("GStreamer's PipeWire source is missing")?;
+        let conn = super::portal::session_bus()?;
+        let session = Session::start(&conn, Source::Window)?;
+        let node = session.streams.first().ok_or("no window shared")?.node;
+        let fd = session.remote()?;
+        let pipe = match gst.launch(&streaming(fd, node)) {
+            Ok(pipe) => pipe,
+            Err(e) => {
+                // SAFETY: our own duplicate, not handed on.
+                unsafe { libc::close(fd) };
+                return Err(e);
+            }
+        };
+        Ok(Cast {
+            pipe,
+            _session: session,
+            fd,
+            area: (0, 0, size.0, size.1),
+            window: Some(size),
+            frames: 0,
+        })
+    }
+
+    /// A window's own pixels (`window`), not a monitor's.
+    pub fn is_window(&self) -> bool {
+        self.window.is_some()
     }
 
     /// The area out of the newest frame within `wait`, RGBA; none when the
@@ -183,13 +220,13 @@ impl Cast {
             };
         }
         self.frames += 1;
-        let area = self.area;
+        let (area, window) = (self.area, self.window);
         // SAFETY: a live sample, unreffed after the read.
         let cut = unsafe {
-            let cut = self
-                .pipe
-                .gst
-                .read(sample, |b, w, h| cut_bgrx(b, w, h, area));
+            let cut = self.pipe.gst.read(sample, |b, w, h| match window {
+                Some(size) if (w, h) != size => Err(not_full_screen((w, h), size)),
+                _ => cut_bgrx(b, w, h, area),
+            });
             (self.pipe.gst.mini_object_unref)(sample);
             cut
         };
@@ -202,6 +239,32 @@ impl Drop for Cast {
         // SAFETY: our own duplicate from the fd list (pipewiresrc dups it again).
         unsafe { libc::close(self.fd) };
     }
+}
+
+/// A window stream's frame isn't the monitor's size: where it sits is unknown.
+fn not_full_screen((w, h): (u32, u32), (mw, mh): (u32, u32)) -> String {
+    format!("the shared window isn't full screen ({w}x{h} on a {mw}x{mh} screen)")
+}
+
+/// Whether live translate can stream one window's own pixels here: the
+/// ScreenCast portal offers the window source (KDE; xdg-desktop-portal-wlr
+/// only in newer versions) and GStreamer's PipeWire source is at hand.
+pub fn can_stream_window() -> bool {
+    static CAN: OnceLock<bool> = OnceLock::new();
+    *CAN.get_or_init(|| {
+        let Ok(conn) = super::portal::session_bus() else {
+            return false;
+        };
+        let types = property(&conn, DESKTOP, PATH, IFACE, "AvailableSourceTypes")
+            .and_then(|v| v.get::<u32>())
+            .unwrap_or(0);
+        let can = types & Source::Window.types() != 0 && Gst::get().is_some();
+        crate::log!(
+            "[opencircle] screen cast of one window: {}",
+            if can { "yes" } else { "no" }
+        );
+        can
+    })
 }
 
 /// The stream holding most of `region` and the region in its px.
@@ -270,6 +333,32 @@ pub(crate) fn cut_bgrx(
     Ok(rgba)
 }
 
+/// What a session shares: the monitors (captures, long capture) or the one
+/// window the user picks (live translate: the game's own pixels, never our
+/// layer over it). Each remembers its own "Share" (its token file).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Source {
+    Monitors,
+    Window,
+}
+
+impl Source {
+    /// The portal's `types` bits.
+    fn types(self) -> u32 {
+        match self {
+            Source::Monitors => 1,
+            Source::Window => 2,
+        }
+    }
+
+    fn token(self) -> PathBuf {
+        match self {
+            Source::Monitors => token_file(),
+            Source::Window => crate::shared::paths::app_data().join("screencast-window-token"),
+        }
+    }
+}
+
 /// A started ScreenCast session; closed on drop.
 struct Session {
     conn: DBusConnection,
@@ -293,16 +382,16 @@ struct Stream {
 }
 
 impl Session {
-    fn start(conn: &DBusConnection) -> Result<Self, CaptureError> {
+    fn start(conn: &DBusConnection, source: Source) -> Result<Self, CaptureError> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let err = |e: CaptureError| match e {
             // "Cancel" in the desktop's dialog: the user said no; ask again next time.
             CaptureError::Refused(_) => {
-                forget_token(&token_file());
+                forget_token(&source.token());
                 CaptureError::Refused("Wayland screen cast: refused".into())
             }
             CaptureError::Failed(why) if why.contains("cancelled") => {
-                forget_token(&token_file());
+                forget_token(&source.token());
                 CaptureError::Refused("Wayland screen cast: cancelled in the dialog".into())
             }
             CaptureError::Failed(why) => {
@@ -339,7 +428,7 @@ impl Session {
             asked: false,
         };
         let object = || ObjectPath::try_from(session.path.as_str()).expect("valid session path");
-        let token = read_token(&token_file());
+        let token = read_token(&source.token());
         request(
             conn,
             IFACE,
@@ -348,8 +437,9 @@ impl Session {
             |handle| {
                 let options = VariantDict::new(None);
                 options.insert("handle_token", handle);
-                options.insert("types", 1u32); // monitors
-                options.insert("multiple", true); // every screen the user shares
+                options.insert("types", source.types());
+                // every screen the user shares; one window
+                options.insert("multiple", source == Source::Monitors);
                 options.insert("cursor_mode", 1u32); // hidden, like the Screenshot portal
                 options.insert("persist_mode", 2u32); // until revoked
                 if let Some(token) = &token {
@@ -369,7 +459,7 @@ impl Session {
         .map_err(err)?;
         session.asked = asking.elapsed() > ASKED_AFTER;
         if let Some(token) = started.lookup::<String>("restore_token").ok().flatten() {
-            save_token(&token_file(), &token);
+            save_token(&source.token(), &token);
         }
         session.streams = started
             .lookup_value("streams", None)

@@ -47,7 +47,7 @@ pub fn show(
 /// `strips` (monitor px, RGBA straight alpha) into a `w`-wide BGRA picture,
 /// premultiplied (what `UpdateLayeredWindow` takes).
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
-fn premultiplied_bgra(px: &mut [u8], w: u32, strips: &[([u32; 4], Vec<u8>)]) {
+pub(super) fn premultiplied_bgra(px: &mut [u8], w: u32, strips: &[([u32; 4], Vec<u8>)]) {
     for ([x0, y0, sw, _], rgba) in strips {
         for (i, p) in rgba.as_chunks::<4>().0.iter().enumerate() {
             let (x, y) = (x0 + i as u32 % sw, y0 + i as u32 / sw);

@@ -21,7 +21,12 @@
 //! (X11 with a compositor), else a thin solid line (X11 without one: the layer
 //! is cut to its line and patches). Captures show it: `on_screen` takes it out
 //! of ours.
-use std::collections::VecDeque;
+//! KDE / wlroots Wayland: no window of ours can stay over a game there, so the
+//! layer is a native layer-shell surface (`layer_shell`, its own thread) and
+//! the game's frames come from the window the user picks in the desktop's
+//! dialog (`Frames::front_window`); the slots below are mirrored to it
+//! (`mirror`). GNOME (no layer-shell): one-shot per press.
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -47,6 +52,7 @@ use crate::shared::kit::motion;
 use crate::shared::on_screen::{self, Drawn};
 use crate::shared::platform::alpha_window::AlphaWindow;
 use crate::shared::platform::capture::{self, frames::Frames, window_rect};
+use crate::shared::platform::layer_shell::{self, LayerShell};
 use crate::shared::platform::shape;
 use crate::shared::theme;
 
@@ -141,7 +147,8 @@ enum Phase {
     /// Finding the monitor (one capture).
     Starting,
     Open {
-        window: window::Id,
+        /// The iced layer window (`None`: the native layer-shell surface).
+        window: Option<window::Id>,
         monitor: Monitor,
     },
 }
@@ -197,14 +204,49 @@ pub struct Live {
     /// The step thread runs (it starts only once the models are there).
     stepping: bool,
     download: Option<task::Handle>,
+    /// The native layer (KDE / wlroots Wayland) and what it was sent: per
+    /// patch, the picture's id and its opacity.
+    native: Option<LayerShell>,
+    sent: HashMap<u64, (iced::advanced::image::Id, f32)>,
 }
 
-/// No click-through layer over other apps: native Wayland.
-pub fn unsupported() -> bool {
+/// How live translate shows its patches on this desktop.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Here {
+    /// A layer window of ours (Windows, X11).
+    Window,
+    /// Wayland with layer-shell AND a window screen cast (KDE, wlroots): a
+    /// native layer over the game, whose own pixels are read.
+    LayerShell,
+    /// Wayland without them (GNOME): translate once per press.
+    OneShot,
+}
+
+fn here() -> Here {
     #[cfg(target_os = "linux")]
-    return capture::wayland_session();
-    #[cfg(not(target_os = "linux"))]
-    false
+    if capture::wayland_session() {
+        return choose(
+            true,
+            layer_shell::available(),
+            capture::screencast::can_stream_window(),
+        );
+    }
+    Here::Window
+}
+
+/// `here` from what the desktop can do.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn choose(wayland: bool, layer_shell: bool, window_cast: bool) -> Here {
+    match (wayland, layer_shell && window_cast) {
+        (false, _) => Here::Window,
+        (true, true) => Here::LayerShell,
+        (true, false) => Here::OneShot,
+    }
+}
+
+/// No click-through layer over other apps (GNOME Wayland).
+pub fn unsupported() -> bool {
+    here() == Here::OneShot
 }
 
 impl Live {
@@ -263,6 +305,8 @@ impl Live {
             pending: None,
             stepping: false,
             download: None,
+            native: None,
+            sent: HashMap::new(),
         }
     }
 
@@ -317,7 +361,7 @@ impl Live {
     /// The layer window, once open.
     pub fn window(&self) -> Option<window::Id> {
         match self.phase {
-            Phase::Open { window, .. } => Some(window),
+            Phase::Open { window, .. } => window,
             Phase::Starting => None,
         }
     }
@@ -437,6 +481,7 @@ impl Live {
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
         let out = self.update_inner(msg);
+        self.mirror();
         // the notice follows the layer's error / note: the window fits it
         let before = self.ctl.size();
         self.ctl.set_notice(self.notice());
@@ -449,12 +494,18 @@ impl Live {
     fn update_inner(&mut self, msg: Msg) -> Outcome {
         match msg {
             Msg::Monitor(Ok(monitor)) if matches!(self.phase, Phase::Starting) => {
-                let (window, open) = windows::screen(layer_window(monitor));
-                self.phase = Phase::Open { window, monitor };
                 // the glow, made once: for its own window if the layer gets one
                 let (w, h) = (monitor.width, monitor.height);
                 let (strips, drawn) = border::live(w, h, monitor.scale, false).unzip();
                 self.glow_drawn = drawn;
+                if here() == Here::LayerShell {
+                    return self.open_native(monitor, strips.unwrap_or_default());
+                }
+                let (window, open) = windows::screen(layer_window(monitor));
+                self.phase = Phase::Open {
+                    window: Some(window),
+                    monitor,
+                };
                 let at = (monitor.x, monitor.y, w, h);
                 let prepare = window::run(window, move |w| {
                     let handle = w
@@ -616,15 +667,16 @@ impl Live {
     /// window, and the glow's own window goes at once. Else (or pressed again) it closes at once.
     pub fn leave(&mut self) -> Outcome {
         let blends = self.caps.is_some_and(|c| c.blends);
-        let Some(id) = self.window() else {
+        let id = self.window();
+        if id.is_none() && self.native.is_none() {
             return Outcome::Off;
-        };
+        }
         if self.leaving || !(blends || shape::can_fade()) {
             return Outcome::Off;
         }
         self.leaving = true;
         self.stop.store(true, Ordering::Relaxed);
-        if !blends {
+        if let (false, Some(id)) = (blends, id) {
             self.glow = None; // fades out on its own thread, as it is dropped
             return Outcome::Task(
                 windows::fade(id, false, windows::POPUP, true).chain(Task::done(Msg::Closed)),
@@ -703,6 +755,67 @@ impl Live {
             None => Task::none(),
         };
         Task::batch([fade, self.cut()])
+    }
+
+    /// The native layer-shell surface over `monitor` (KDE / wlroots Wayland),
+    /// showing `strips` (the glow; it fades in like the layer's own): it blends
+    /// per pixel, captures show it (`on_screen` takes the glow out of ours).
+    fn open_native(&mut self, monitor: Monitor, strips: layer_shell::Strips) -> Outcome {
+        #[cfg(target_os = "linux")]
+        let opened = LayerShell::open((monitor.width, monitor.height), strips);
+        #[cfg(not(target_os = "linux"))]
+        let opened: Result<LayerShell, String> = Err(format!("{} strips", strips.len()));
+        match opened {
+            Ok(native) => {
+                self.native = Some(native);
+                self.phase = Phase::Open {
+                    window: None,
+                    monitor,
+                };
+                let layer = live_translate::Layer {
+                    excluded_from_capture: false,
+                    blends: true,
+                    cut: false,
+                };
+                Outcome::Task(Task::done(Msg::Prepared(Ok((layer, None)))))
+            }
+            Err(e) => {
+                crate::log!("[opencircle] live layer: {e}; translating once instead");
+                Outcome::OneShot
+            }
+        }
+    }
+
+    /// The native layer shows what the slots show (each change sent once):
+    /// the glow at its fade, each patch at its opacity (times the fade-out on
+    /// Stop), a patch gone from the slots hidden.
+    fn mirror(&mut self) {
+        let Some(native) = &self.native else {
+            return;
+        };
+        native.edge(self.edge.1);
+        let mut now = HashMap::new();
+        for s in self.patches.iter().flatten() {
+            let image::Handle::Rgba { id, pixels, .. } = &s.shown.image else {
+                continue;
+            };
+            let alpha = match self.leaving {
+                true => s.alpha * self.edge.1,
+                false => s.alpha,
+            };
+            let was = self.sent.remove(&s.id);
+            if was.is_none_or(|(i, _)| i != *id) {
+                native.show(s.id, s.shown.bounds, pixels.to_vec());
+            }
+            if was.is_none_or(|w| w != (*id, alpha)) {
+                native.alpha(s.id, alpha);
+            }
+            now.insert(s.id, (*id, alpha));
+        }
+        for gone in self.sent.keys() {
+            native.hide(*gone);
+        }
+        self.sent = now;
     }
 
     /// Takes the patch `id` out of its slot (the slot stays, empty; empty
@@ -1237,7 +1350,10 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                     layer.send(Msg::Failed(e));
                 }
                 std::thread::sleep(Duration::from_millis(500));
-                frames = Frames::front_window(region);
+                // (a window the user picked: never asked again by itself)
+                if !frames.reopen_asks() {
+                    frames = Frames::front_window(region);
+                }
                 continue;
             }
         }
@@ -1892,6 +2008,75 @@ mod tests {
             assert!(matches!(stopped, Outcome::Off));
         }
         assert!(l.stop().units() >= 2, "the layer and the controller close");
+    }
+
+    /// Windows and X11: a layer window; Wayland: the native layer only with
+    /// layer-shell AND a window screen cast (KDE, wlroots), else one-shot (GNOME).
+    #[test]
+    fn the_layer_follows_what_the_desktop_can_do() {
+        assert_eq!(choose(false, false, false), Here::Window);
+        assert_eq!(choose(false, true, true), Here::Window);
+        assert_eq!(choose(true, true, true), Here::LayerShell);
+        assert_eq!(choose(true, false, true), Here::OneShot, "GNOME");
+        assert_eq!(choose(true, true, false), Here::OneShot, "no window source");
+    }
+
+    /// The native layer (KDE / wlroots) gets each patch once, each change of its
+    /// opacity once, its removal, the glow's fade; Stop fades the patches with it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_native_layer_is_sent_each_change_once() {
+        use crate::shared::platform::layer_shell::Op;
+        let (native, rx) = LayerShell::recording();
+        let mut l = live();
+        l.native = Some(native);
+        l.phase = Phase::Open {
+            window: None,
+            monitor: MONITOR,
+        };
+        let layer = crate::features::live_translate::Layer {
+            excluded_from_capture: false,
+            blends: true,
+            cut: false,
+        };
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        let ops = |rx: &mpsc::Receiver<Op>| -> Vec<Op> {
+            rx.try_iter()
+                .filter(|o| !matches!(o, Op::Edge(_)))
+                .collect()
+        };
+        let _ = ops(&rx);
+        let patch = || Shown {
+            bounds: [10, 10, 2, 2],
+            image: image::Handle::from_rgba(2, 2, vec![0; 16]),
+            under: None,
+        };
+        let _ = l.update(Msg::Show(5, patch()));
+        assert!(matches!(ops(&rx)[..], [Op::Show(5, ..), Op::Alpha(5, 0.0)]));
+        let _ = l.update(Msg::Alpha(5, 0.5));
+        assert_eq!(ops(&rx), [Op::Alpha(5, 0.5)]);
+        let _ = l.update(Msg::Alpha(5, 0.5));
+        let _ = l.update(Msg::NoteDone);
+        assert_eq!(ops(&rx), [], "nothing changed: nothing sent");
+        let _ = l.update(Msg::Show(6, patch()));
+        let _ = l.update(Msg::Hide(5));
+        assert!(matches!(
+            ops(&rx)[..],
+            [Op::Show(6, ..), Op::Alpha(6, 0.0), Op::Hide(5)]
+        ));
+        let _ = l.update(Msg::Alpha(6, 1.0));
+        let _ = ops(&rx);
+        // Stop: the glow and the patch fade together, then it is off
+        assert!(matches!(l.leave(), Outcome::Task(_)), "fades first");
+        l.edge.0.close(Instant::now() - motion::WIDGET.close.0);
+        let _ = l.update(Msg::EdgeFade);
+        let all: Vec<Op> = rx.try_iter().collect();
+        assert!(
+            matches!(all[..], [Op::Edge(e), Op::Alpha(6, a)] if e == a && e < 0.1),
+            "{all:?}"
+        );
+        let _ = l.update(Msg::Clear);
+        assert_eq!(ops(&rx), [Op::Hide(6)]);
     }
 
     #[test]
