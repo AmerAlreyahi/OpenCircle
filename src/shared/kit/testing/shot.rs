@@ -180,6 +180,40 @@ pub fn redrawn<'a, Message: 'a>(
     (rgba(&window), fresh.unwrap_or_default())
 }
 
+/// What the window compositor would redraw for each of `views` after the one
+/// before (logical px, grouped as it groups them); the first: the whole window.
+pub fn damage<'a, Message: 'a>(
+    mut views: impl FnMut(usize) -> Option<Element<'a, Message>>,
+    size: Size,
+) -> Vec<Vec<Rectangle>> {
+    use iced::advanced::graphics::damage;
+    let mut renderer = renderer();
+    let all = Rectangle::with_size(size);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    let (mut last, mut out) = (None::<Vec<iced_tiny_skia::Layer>>, Vec::new());
+    let mut i = 0;
+    while let Some(view) = views(i) {
+        let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+        ui.draw(
+            &mut renderer,
+            &Theme::Dark,
+            &style,
+            mouse::Cursor::Unavailable,
+        );
+        let layers = renderer.layers().to_vec();
+        let changed = match &last {
+            Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
+            None => vec![all],
+        };
+        out.push(damage::group(changed, all));
+        last = Some(layers);
+        i += 1;
+    }
+    out
+}
+
 /// The messages one left click at `at` produces (press then release) in `view`.
 pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -> Vec<Message> {
     use iced::advanced::clipboard;

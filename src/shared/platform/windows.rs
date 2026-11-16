@@ -288,6 +288,28 @@ pub fn popup_shape<T: Send + 'static>(
     .discard()
 }
 
+/// While held, our CPU renderer sends a window only its redrawn rectangles on
+/// X11 too (as on Windows): a compositor keeps every window's pixels. Held by
+/// the live layer on a composited X11, so a new patch or a fade step goes to
+/// the X server as its own rectangle, not as the whole screen-sized window.
+#[derive(Debug)]
+pub struct ChangesOnly(());
+
+pub fn present_changes_only() -> ChangesOnly {
+    #[cfg(target_os = "linux")]
+    iced_tiny_skia::window::compositor::CHANGES_ONLY
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    ChangesOnly(())
+}
+
+impl Drop for ChangesOnly {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        iced_tiny_skia::window::compositor::CHANGES_ONLY
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// A screen-sized window (the capture overlay, the live layer): no frame, not
 /// cut to a shape; each sets its own transparency and level.
 /// Never a snip target (`no_pick`).

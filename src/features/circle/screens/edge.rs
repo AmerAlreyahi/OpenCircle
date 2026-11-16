@@ -18,8 +18,12 @@
 //! every later frame draws the same images and so redraws nothing. The
 //! overlay's own fade-in (`windows::fade`) moves it as a whole; nothing else
 //! does (owner, 2026-11-12: no breathing).
-//! On the colour-keyed live layer (Windows) there is no partial alpha: a thin
-//! solid line in c1 stands in for any look.
+//! Live translate: the "Quiet glow" (owner, 2026-11-14, option B): the look's
+//! two colours as a Glow at about 60 % of main mode's depth (at 1080p c1 in a
+//! 14 px blur at 0.36, c2 in a 34 px one at 0.20; main mode 22 / 54 px at 0.42
+//! / 0.26), scaled with the monitor's height, whatever the look's kind. Where
+//! the live layer has no partial alpha (X11 without a compositor) a thin solid
+//! line in c1 stands in (`keyed`).
 use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Action, Geometry};
 use iced::widget::image::{FilterMethod, Handle};
@@ -28,6 +32,7 @@ use iced::{Color, Element, Fill, Rectangle, Renderer, Theme, window};
 pub use crate::shared::config::EdgeMode as Mode;
 use crate::shared::config::{self, EdgeStyle, LookConfig};
 use crate::shared::kit::looks::Kind;
+use crate::shared::on_screen::Drawn;
 use crate::shared::theme;
 
 /// The screen's corner radius in the overlay, logical px (the design's 14).
@@ -42,6 +47,12 @@ const HUD: [f32; 5] = [12.0, 30.0, 2.5, 8.0, 8.0];
 /// How far inward the glow's strips reach, logical px (the depth the design's
 /// 85 px blur fades out at; the glow itself is gone well before it).
 const REACH: f32 = 102.0;
+/// Live's Quiet glow at 1080p: the two blurs, px, and each colour's alpha as a
+/// share of main mode's (0.36 of 0.42, 0.20 of 0.26), and its reach (the
+/// main reach as far in as the deeper blur: 102 x 34 / 54).
+const QUIET: [f32; 2] = [14.0, 34.0];
+const QUIET_ALPHA: [f32; 2] = [0.36 / 0.42, 0.20 / 0.26];
+const QUIET_REACH: f32 = 64.0;
 
 /// The edge over a window that shows a whole monitor at `scale` (physical px
 /// per logical px), in the active look. `keyed`: the window's background is a
@@ -61,48 +72,38 @@ pub fn view<'a, M: 'a>(mode: Mode, scale: f32, keyed: bool, opacity: f32) -> Ele
     .into()
 }
 
-/// Where the live edge is in a capture of the monitor it frames (`w` x `h`):
-/// live mode puts a fixed colour there, so a capture that shows the layer
-/// (X11) never changes there and the edges are never re-read. Worked out
-/// once per session (live translate applies it to every frame).
-pub struct EdgeMask {
-    /// Pixel indices the edge paints, and the strips (x, y, w, h) they lie in.
-    pixels: Vec<u32>,
-    strips: Vec<[u32; 4]>,
+/// Pictures in parts: each part's rectangle (x, y, w, h) and its RGBA (straight alpha).
+pub type Strips = Vec<([u32; 4], Vec<u8>)>;
+
+/// Live's edge on a `w` x `h` monitor in the active look, made once per
+/// session: its strips' rectangles and pixels (RGBA, straight alpha), and
+/// the same as a palette per pixel (`on_screen::Drawn`, taken back out of
+/// our own captures). `keyed`: the thin solid line (its thickness at `scale`,
+/// physical px per logical px). None: no edge.
+pub fn live(w: u32, h: u32, scale: f32, keyed: bool) -> Option<(Strips, Drawn)> {
+    let (geo, paint) = edge(&config::look_config(), Mode::Live, w, h, scale, keyed)?;
+    let strips = depths(geo);
+    let parts = (strips.iter()).map(|s| (s.rect, s.at.clone())).collect();
+    let drawn = Drawn::new((0, 0), parts, paint.table.clone());
+    Some((render(&strips, &paint), drawn))
 }
 
-impl EdgeMask {
-    pub fn new(w: u32, h: u32, scale: f32) -> EdgeMask {
-        let cfg = config::look_config();
-        let Some((geo, paint)) = edge(&cfg, Mode::Live, w, h, scale, false) else {
-            return EdgeMask {
-                pixels: Vec::new(),
-                strips: Vec::new(),
-            };
-        };
-        let strips = geo.strips();
-        let mut pixels = Vec::new();
-        for &[x0, y0, sw, sh] in &strips {
-            for y in y0..y0 + sh {
-                for x in x0..x0 + sw {
-                    if paint.table[geo.index(x, y)][3] > 0 {
-                        pixels.push(y * w + x);
-                    }
-                }
-            }
-        }
-        EdgeMask { pixels, strips }
+/// Live's solid line on a `w` x `h` monitor at `scale`: its four strips (x, y,
+/// w, h), as deep as the line (where a layer that can't blend is cut to it).
+pub fn live_line(w: u32, h: u32, scale: f32) -> Vec<[u32; 4]> {
+    let Some((geo, _)) = edge(&config::look_config(), Mode::Live, w, h, scale, true) else {
+        return Vec::new();
+    };
+    let t = geo.t;
+    if w <= 2 * t || h <= 2 * t {
+        return Vec::new();
     }
-
-    /// Blanks the edge out of `rgba`; returns the strips it may have blanked.
-    pub fn apply(&self, rgba: &mut [u8]) -> Vec<[u32; 4]> {
-        for &i in &self.pixels {
-            if let Some(px) = rgba.get_mut(i as usize * 4..i as usize * 4 + 4) {
-                px.copy_from_slice(&[0, 0, 0, 255]);
-            }
-        }
-        self.strips.clone()
-    }
+    vec![
+        [0, 0, w, t],
+        [0, h - t, w, t],
+        [0, t, t, h - 2 * t],
+        [w - t, t, t, h - 2 * t],
+    ]
 }
 
 /// `mode`'s edge in `look`, laid over `rgba` (`w` x `h`, straight alpha) as if
@@ -288,9 +289,16 @@ fn edge(
     if e.style == EdgeStyle::None || strength <= 0.0 {
         return None;
     }
+    // Live's quiet glow: a Glow whatever the kind, scaled with the monitor's height
+    let quiet = mode == Mode::Live && !keyed;
+    let scale = if quiet { h as f32 / 1080.0 } else { scale };
     let px = |v: f32| (v * scale).round() as u32;
     let (kind, [c1, c2]) = design(look);
-    let kind = if keyed { Kind::Glow } else { kind };
+    let kind = if keyed || quiet { Kind::Glow } else { kind };
+    let (blur, [s1, s2], reach) = match quiet {
+        true => (QUIET, QUIET_ALPHA, QUIET_REACH),
+        false => (BLUR, [1.0; 2], REACH),
+    };
     let mut marks = [[0; 4]; 2];
     let (t, table) = if keyed {
         let t = px(f32::from(e.thickness)).max(1);
@@ -301,10 +309,10 @@ fn edge(
             .collect();
         (t, table)
     } else {
-        let t = px(REACH).max(1);
+        let t = px(reach).max(1);
         // a CSS inset blur `b` at depth `d` (px from where it starts)
         let tail = |d: f32, b: f32| 0.5 * erfc(d / (b / 2.0 * scale * std::f32::consts::SQRT_2));
-        let (a1, a2) = (c1.a * strength, c2.a * strength);
+        let (a1, a2) = (c1.a * strength * s1, c2.a * strength * s2);
         let table = (0..=t)
             .map(|i| {
                 if i == t {
@@ -324,8 +332,8 @@ fn edge(
                 }
                 // c1's layer over c2's
                 over(&[
-                    (rgb(c2), a2 * tail(d, BLUR[1])),
-                    (rgb(c1), a1 * tail(d, BLUR[0])),
+                    (rgb(c2), a2 * tail(d, blur[1])),
+                    (rgb(c1), a1 * tail(d, blur[0])),
                 ])
             })
             .collect();
@@ -905,6 +913,124 @@ mod tests {
         let l = sapphire.active();
         assert_eq!((l.glow, l.dim), (100, 12));
         assert_eq!(image(&sapphire), image(&own));
+    }
+
+    /// Live's Quiet glow (option B): whatever the look's kind a Glow at about
+    /// 60 % of main mode's depth and a little fainter (Sapphire Glow at its
+    /// edge: 0.5 x 0.36 over 0.5 x 0.20 = 0.26, main mode 0.31), scaled with the
+    /// monitor's height (not its scale): 1440p reaches 4/3 as far as 1080p.
+    #[test]
+    fn live_is_the_quiet_glow_scaled_with_the_monitor() {
+        let sapphire = theme(LookTheme::SapphireGlow);
+        let live =
+            |look: &LookConfig, w, h, scale| edge(look, Mode::Live, w, h, scale, false).unwrap();
+        let (geo, paint) = live(&sapphire, 1920, 1080, 1.0);
+        let alpha: Vec<u8> = paint.table.iter().map(|p| p[3]).collect();
+        assert_eq!((geo.t, geo.kind), (64, Kind::Glow));
+        assert!((64..=70).contains(&alpha[0]), "{alpha:?}");
+        let main = table(&sapphire);
+        assert!(
+            alpha[0] < main[0][3],
+            "fainter than main mode's {}",
+            main[0][3]
+        );
+        // gone by ~60 % of main mode's depth: main is still lit there
+        let depth = |a: &[u8]| a.iter().position(|&v| v <= 1).unwrap();
+        let main_alpha: Vec<u8> = main.iter().map(|p| p[3]).collect();
+        let (d, dm) = (depth(&alpha), depth(&main_alpha));
+        assert!((d as f32 / dm as f32 - 0.62).abs() < 0.08, "{d} of {dm}");
+        // the monitor's height scales it, the DPI scale doesn't
+        assert_eq!(
+            live(&sapphire, 1920, 1080, 2.0),
+            live(&sapphire, 1920, 1080, 1.0)
+        );
+        let (g1440, p1440) = live(&sapphire, 2560, 1440, 1.0);
+        assert_eq!((g1440.t, g1440.r), (85, 19));
+        let a1440: Vec<u8> = p1440.table.iter().map(|p| p[3]).collect();
+        assert!(depth(&a1440).abs_diff(d * 4 / 3) <= 1, "{a1440:?}");
+        // a HUD look draws no brackets in Live: the glow alone, in its colours
+        let (hud, _) = live(&theme(LookTheme::Hud), 1920, 1080, 1.0);
+        assert_eq!(hud.kind, Kind::Glow);
+    }
+
+    /// Live's edge pixel for pixel (`tests/fixtures/edge-live-*.png`) at 1080p
+    /// and 1440p in Sapphire Glow (the default) and Spectrum, and its fade-in
+    /// (the bottom-left corner over a mid-grey screen at 0, 40, 80, 120 and
+    /// 210 ms of the widget fade it opens with, left to right). The edge has
+    /// no light and dark: the look's own two colours in both themes.
+    /// A change on purpose: `OPENCIRCLE_UPDATE_GOLDEN=1 cargo test edge::`.
+    #[test]
+    fn the_live_edge_matches_its_golden_images() {
+        use crate::shared::kit::motion::{Shown, WIDGET};
+        let check = |name: &str, w: u32, h: u32, img: &[u8]| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(name);
+            if std::env::var_os("OPENCIRCLE_UPDATE_GOLDEN").is_some() {
+                crate::shared::picture::write_png(&path, w, h, img).unwrap();
+            }
+            let want = crate::shared::platform::capture::decode_png(std::io::Cursor::new(
+                std::fs::read(&path).unwrap(),
+            ))
+            .unwrap();
+            assert_eq!((want.width, want.height), (w, h), "{name}");
+            assert!(
+                img == &want.rgba[..img.len()],
+                "{name} differs from the edge"
+            );
+        };
+        for (stored, look) in [
+            (LookTheme::SapphireGlow, "sapphire"),
+            (LookTheme::Spectrum, "spectrum"),
+        ] {
+            for (w, h) in [(1920, 1080), (2560, 1440)] {
+                let (geo, paint) = edge(&theme(stored), Mode::Live, w, h, 1.0, false).unwrap();
+                check(
+                    &format!("edge-live-{look}-{h}p.png"),
+                    w,
+                    h,
+                    &full(geo, &paint),
+                );
+            }
+        }
+        let (geo, paint) = edge(
+            &theme(LookTheme::SapphireGlow),
+            Mode::Live,
+            1920,
+            1080,
+            1.0,
+            false,
+        )
+        .unwrap();
+        let img = full(geo, &paint);
+        let (cw, ch, steps) = (160u32, 90u32, [0u64, 40, 80, 120, 210]);
+        let start = Instant::now();
+        let shown = Shown::opening(WIDGET, start);
+        let mut strip = vec![0u8; (cw * steps.len() as u32 * ch * 4) as usize];
+        let sw = cw * steps.len() as u32;
+        for (k, ms) in steps.iter().enumerate() {
+            let a = shown.at(start + Duration::from_millis(*ms));
+            for y in 0..ch {
+                for x in 0..cw {
+                    let p = at(&img, x, 1080 - ch + y);
+                    let o = f32::from(p[3]) / 255.0 * a;
+                    let j = ((y * sw + k as u32 * cw + x) * 4) as usize;
+                    for c in 0..3 {
+                        strip[j + c] = (128.0 + (f32::from(p[c]) - 128.0) * o).round() as u8;
+                    }
+                    strip[j + 3] = 255;
+                }
+            }
+        }
+        check("edge-live-fade.png", sw, ch, &strip);
+        // closed at the start, fully in by the end, rising in between
+        let corner = |k: usize| strip[(k as u32 * cw * 4) as usize + 2];
+        assert_eq!(corner(0), 128);
+        assert!(
+            corner(1) < corner(2) && corner(2) < corner(4),
+            "{:?}",
+            (0..5).map(corner).collect::<Vec<_>>()
+        );
     }
 
     /// Each kind's edge at 1080p, pixel for pixel (`tests/fixtures/edge-*.png`,

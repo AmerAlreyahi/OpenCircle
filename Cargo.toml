@@ -76,6 +76,9 @@ gtk = "0.18"
 # iced's own window shell (vendored, `[patch.crates-io]`): its `activate_next_window`
 # hands the desktop's activation token to the overlay's window (no new crate).
 iced_winit = { version = "0.14", default-features = false }
+# iced's CPU renderer (vendored, `[patch.crates-io]`): its `CHANGES_ONLY` switch
+# (the live layer on a composited X11; no new crate).
+iced_tiny_skia = { version = "0.14", default-features = false }
 # Song search's audio (src/features/song): the PulseAudio protocol in pure Rust (no libpulse;
 # PipeWire's pulse server speaks it). Opened only while listening.
 pulseaudio = "0.3"

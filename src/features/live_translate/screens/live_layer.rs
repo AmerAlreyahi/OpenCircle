@@ -6,6 +6,19 @@
 //! a changed patch goes in that frame), a work thread runs its slow jobs (OCR,
 //! translation), both below normal priority; the layer gets each patch once
 //! (`Msg::Show`) and its removal (`Msg::Hide`).
+//! Draw once (live-approach.md 5.5): the patches are a retained list of slots,
+//! each its own layer, so only a patch that is added, fading or removed is
+//! redrawn (the window compositor redraws and sends only its rectangle); a
+//! removed patch leaves its slot empty instead of moving the others up. A
+//! patch fades in over the core's `fade_in` (its opacity where the layer
+//! blends, else a blend with the pixels under it: Windows' colour-keyed layer);
+//! the layer fades out on Stop where the OS fades windows.
+//! The edge: Live's Quiet glow (`border::live`), drawn once at the start and
+//! never again while Live runs: in a window of its own where the layer can't
+//! blend (`alpha_window`, Windows), on the layer where it can
+//! (X11 with a compositor), else a thin solid line (X11 without one: the layer
+//! is cut to its line and patches). Captures show it: `on_screen` takes it out
+//! of ours.
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, mpsc};
@@ -28,6 +41,9 @@ use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::Cache;
 use crate::live_core::{self as core, Done, Job, Rect};
 use crate::shared::config;
+use crate::shared::kit::motion;
+use crate::shared::on_screen::{self, Drawn};
+use crate::shared::platform::alpha_window::AlphaWindow;
 use crate::shared::platform::capture::{self, frames::Frames, window_rect};
 use crate::shared::theme;
 
@@ -57,19 +73,35 @@ pub struct Monitor {
     scale: f32,
 }
 
-/// One patch, ready to draw at `bounds` (x, y, w, h, monitor pixels).
+/// One patch, ready to draw at `bounds` (x, y, w, h, monitor pixels); `under`:
+/// the pixels it covers (RGBA, same size), where it fades in as a blend with
+/// them (a layer that doesn't blend).
 #[derive(Debug, Clone)]
 pub struct Shown {
     bounds: [u32; 4],
     image: image::Handle,
+    under: Option<Arc<Vec<u8>>>,
+}
+
+/// A patch in its slot: how far it faded in, and what is drawn for that.
+#[derive(Debug, Clone)]
+struct Slot {
+    id: u64,
+    shown: Shown,
+    alpha: f32,
+    drawn: image::Handle,
 }
 
 #[derive(Debug, Clone)]
 pub enum Msg {
     Monitor(Result<Monitor, String>),
-    Prepared(Result<live_translate::Layer, LayerError>),
-    /// A patch to show (drawn once; it stays until `Hide`).
+    /// The layer is set up, with the edge glow's own window where it has one.
+    Prepared(Result<(live_translate::Layer, Option<Arc<AlphaWindow>>), LayerError>),
+    /// A patch to show (drawn once; it stays until `Hide`), faded in by `Alpha`.
     Show(u64, Shown),
+    Alpha(u64, f32),
+    /// A step of the edge's fade-in (drawn on the layer).
+    EdgeFade,
     Hide(u64),
     /// Every patch down.
     Clear,
@@ -118,9 +150,21 @@ pub struct Live {
     ctl_at: Point,
     /// The controller is invisible to capture (else the step blanks it out).
     excluded: bool,
-    /// Captures show the layer and its edge glow (X11; Windows before 10
-    /// 2004; the capturable test hook): the step blanks the edge out.
-    layer_captured: bool,
+    /// What the layer can do (once it is set up).
+    caps: Option<live_translate::Layer>,
+    /// The edge: its own window (Windows), what of it captures show (taken
+    /// out of ours while registered), whether the layer draws it (`Some(keyed)`:
+    /// the solid line) and how far it faded in there, and the line's strips
+    /// (x, y, w, h) where the layer is cut to it.
+    glow: Option<Arc<AlphaWindow>>,
+    glow_drawn: Option<Drawn>,
+    drawn: Option<on_screen::OnScreen>,
+    border: Option<bool>,
+    /// The layer blends (a compositor keeps its pixels): only what changed
+    /// goes to it (`windows::present_changes_only`).
+    _changes_only: Option<crate::shared::platform::windows::ChangesOnly>,
+    edge: (motion::Shown, f32),
+    line: Vec<[u32; 4]>,
     /// What the step thread reads each time: paused, the source and target
     /// languages, and where the controller is in a capture (monitor px;
     /// `None` = not in captures).
@@ -129,7 +173,9 @@ pub struct Live {
     mask: Arc<Mutex<Option<[u32; 4]>>>,
     note: bool,
     error: Option<String>,
-    patches: Vec<(u64, Shown)>,
+    /// The retained patches: a slot each, `None` once removed (the slots after
+    /// it stay where they are: their layers are not redrawn).
+    patches: Vec<Option<Slot>>,
     cache: Arc<Cache>,
     /// Tells the step thread to end; set on `stop`.
     stop: Arc<AtomicBool>,
@@ -186,7 +232,14 @@ impl Live {
             ctl: Controller::new(source, target, offline),
             ctl_at: Point::ORIGIN,
             excluded: false,
-            layer_captured: true,
+            caps: None,
+            glow: None,
+            glow_drawn: None,
+            drawn: None,
+            border: None,
+            _changes_only: None,
+            edge: (motion::Shown::opening(motion::WIDGET, Instant::now()), 0.0),
+            line: Vec::new(),
             paused: Arc::new(AtomicBool::new(false)),
             langs: Arc::new(Mutex::new((source.into(), target.into()))),
             mask: Arc::new(Mutex::new(None)),
@@ -390,9 +443,24 @@ impl Live {
             Msg::Monitor(Ok(monitor)) if matches!(self.phase, Phase::Starting) => {
                 let (window, open) = windows::screen(layer_window(monitor));
                 self.phase = Phase::Open { window, monitor };
-                let prepare = window::run(window, |w| match w.window_handle() {
-                    Ok(handle) => live_translate::prepare_layer(handle.as_raw()),
-                    Err(e) => Err(LayerError::Os(e.to_string())),
+                // the glow, made once: for its own window if the layer gets one
+                let (w, h) = (monitor.width, monitor.height);
+                let (strips, drawn) = border::live(w, h, monitor.scale, false).unzip();
+                self.glow_drawn = drawn;
+                let at = (monitor.x, monitor.y, w, h);
+                let prepare = window::run(window, move |w| {
+                    let handle = w
+                        .window_handle()
+                        .map_err(|e| LayerError::Os(e.to_string()))?;
+                    let layer = live_translate::prepare_layer(handle.as_raw())?;
+                    let glow = match (layer.blends, strips) {
+                        (false, Some(strips)) => {
+                            // (Windows: the layer is colour-keyed; the glow in an alpha window under it)
+                            crate::shared::platform::alpha_window::show(handle.as_raw(), at, strips)
+                        }
+                        _ => None,
+                    };
+                    Ok((layer, glow.map(Arc::new)))
                 });
                 return Outcome::Task(open.discard().chain(prepare).map(Msg::Prepared));
             }
@@ -400,17 +468,17 @@ impl Live {
                 crate::log!("[opencircle] live translate: capture failed: {e}");
                 return Outcome::Off;
             }
-            Msg::Prepared(Ok(layer)) => {
+            Msg::Prepared(Ok((layer, glow))) => {
                 let Phase::Open { monitor, .. } = self.phase else {
                     return Outcome::Off;
                 };
+                let fade = self.set_edge(monitor, layer, glow);
                 crate::log!(
                     "[opencircle] live translate on ({}x{}, excluded from capture: {})",
                     monitor.width,
                     monitor.height,
                     layer.excluded_from_capture
                 );
-                self.layer_captured = !layer.excluded_from_capture;
                 // Never a step without the models: ask first (in the controller).
                 let steps = match self.ask_if_missing() {
                     true => Task::none(),
@@ -425,7 +493,7 @@ impl Live {
                     Task::none()
                 };
                 let controller = self.open_controller(monitor);
-                return Outcome::Task(Task::batch([steps, note, controller]));
+                return Outcome::Task(Task::batch([steps, note, controller, fade]));
             }
             Msg::Controller(msg) => return self.on_controller(msg),
             Msg::ControllerReady(ready) => {
@@ -447,13 +515,36 @@ impl Live {
                 return Outcome::OneShot;
             }
             Msg::Show(id, patch) => {
-                self.patches.retain(|(p, _)| *p != id);
-                self.patches.push((id, patch));
+                self.take(id);
+                let slot = Slot {
+                    id,
+                    drawn: patch.image.clone(),
+                    shown: patch,
+                    alpha: 0.0,
+                };
+                match self.patches.iter_mut().find(|s| s.is_none()) {
+                    Some(free) => *free = Some(slot),
+                    None => self.patches.push(Some(slot)),
+                }
                 self.error = None;
-                return self.test_shot();
+                let shot = self.test_shot();
+                return Outcome::Task(Task::batch([into_task(shot), self.cut()]));
             }
-            Msg::Hide(id) => self.patches.retain(|(p, _)| *p != id),
-            Msg::Clear => self.patches.clear(),
+            Msg::Alpha(id, alpha) => {
+                let slot = self.patches.iter_mut().flatten().find(|s| s.id == id);
+                if let Some(slot) = slot {
+                    slot.fade(alpha);
+                }
+            }
+            Msg::EdgeFade => self.edge.1 = self.edge.0.at(Instant::now()),
+            Msg::Hide(id) => {
+                self.take(id);
+                return Outcome::Task(self.cut());
+            }
+            Msg::Clear => {
+                self.patches.clear();
+                return Outcome::Task(self.cut());
+            }
             Msg::Failed(e) => {
                 self.error = Some(e);
                 return self.test_shot();
@@ -513,8 +604,104 @@ impl Live {
     /// window closes, the patches and the step state are freed.
     pub fn stop(self) -> Task<Msg> {
         self.stop.store(true, Ordering::Relaxed);
-        let ours = self.window().into_iter().chain(self.controller);
-        Task::batch(ours.map(window::close)) // at once: its state goes now
+        // the edge's own window fades out on its thread (dropped with `self`);
+        // the layer fades out where the OS fades windows, then closes (its
+        // state goes now: nothing of it is drawn again)
+        let layer = self
+            .window()
+            .map(|id| windows::fade(id, false, windows::POPUP, true).chain(window::close(id)));
+        let controller = self.controller.map(window::close);
+        Task::batch(layer.into_iter().chain(controller))
+    }
+
+    /// The edge, once the layer is set up (`layer`, the glow's own window if
+    /// it got one): its own window, or on the layer as the glow or (no
+    /// blending) the solid line; what captures will show of it registered;
+    /// the fade-in on the layer.
+    fn set_edge(
+        &mut self,
+        m: Monitor,
+        layer: live_translate::Layer,
+        glow: Option<Arc<AlphaWindow>>,
+    ) -> Task<Msg> {
+        let glow_drawn = self.glow_drawn.take();
+        let keyed = glow.is_none() && !layer.blends;
+        let drawn = match keyed {
+            false => glow_drawn,
+            true => border::live(m.width, m.height, m.scale, true).map(|(_, d)| d),
+        };
+        let (w, h) = (m.width, m.height);
+        match (&glow, keyed) {
+            (Some(_), _) => {
+                crate::log!("[opencircle] live edge: its own window, drawn once ({w}x{h})")
+            }
+            (None, false) => {
+                crate::log!("[opencircle] live edge: on the layer, drawn once ({w}x{h})")
+            }
+            (None, true) => {
+                crate::log!("[opencircle] live edge: a solid line, drawn once ({w}x{h})")
+            }
+        }
+        self.line = match layer.cut {
+            true => border::live_line(m.width, m.height, m.scale),
+            false => Vec::new(),
+        };
+        self.drawn = drawn.map(|d| on_screen::show(d.at((m.x, m.y))));
+        self._changes_only = layer
+            .blends
+            .then(crate::shared::platform::windows::present_changes_only);
+        self.caps = Some(layer);
+        self.border = glow.is_none().then_some(keyed);
+        self.glow = glow;
+        self.edge = (motion::Shown::opening(motion::WIDGET, Instant::now()), 0.0);
+        let fade = match self.border {
+            // a step a frame till it is in (an `alpha_window` fades by itself)
+            Some(_) => background(|tx| {
+                let end = Instant::now() + motion::WIDGET.open.0 + motion::FRAME;
+                while Instant::now() < end && tx.unbounded_send(Msg::EdgeFade).is_ok() {
+                    std::thread::sleep(motion::FRAME);
+                }
+                let _ = tx.unbounded_send(Msg::EdgeFade);
+            }),
+            None => Task::none(),
+        };
+        Task::batch([fade, self.cut()])
+    }
+
+    /// Takes the patch `id` out of its slot (the slot stays, empty; empty
+    /// slots at the end go).
+    fn take(&mut self, id: u64) {
+        for slot in &mut self.patches {
+            if slot.as_ref().is_some_and(|s| s.id == id) {
+                *slot = None;
+            }
+        }
+        while self.patches.last().is_some_and(Option::is_none) {
+            self.patches.pop();
+        }
+    }
+
+    /// Where the layer is cut to what it shows (no compositor): cut it to its
+    /// edge line and patches again.
+    fn cut(&self) -> Task<Msg> {
+        let (Some(caps), Some(window)) = (self.caps, self.window()) else {
+            return Task::none();
+        };
+        if !caps.cut {
+            return Task::none();
+        }
+        let parts: Vec<(crate::shared::platform::shape::Px, u32)> = (self.line.iter())
+            .chain(self.patches.iter().flatten().map(|s| &s.shown.bounds))
+            .map(|&[x, y, w, h]| ((x as i32, y as i32, w, h), 0))
+            .collect();
+        window::run(window, move |w| {
+            if let Ok(handle) = w.window_handle()
+                && let Err(e) = crate::shared::platform::shape::parts(handle.as_raw(), &parts)
+            {
+                crate::log!("[opencircle] live layer cut: {e}");
+            }
+        })
+        .discard()
     }
 
     /// The live session on its threads until `stop` (or the layer is dropped).
@@ -525,7 +712,7 @@ impl Live {
             paused: self.paused.clone(),
             chosen: self.langs.clone(),
             mask: self.mask.clone(),
-            edge: self.layer_captured,
+            under: !self.caps.is_some_and(|c| c.blends),
         };
         let cache = self.cache.clone();
         let (task, handle) = background(move |tx| {
@@ -539,25 +726,42 @@ impl Live {
         task
     }
 
-    pub fn view(&self) -> Element<'_, Msg> {
+    /// Patches up now (tests).
+    #[cfg(test)]
+    fn shown(&self) -> usize {
+        self.patches.iter().flatten().count()
+    }
+
+    pub fn view(&self) -> Element<'static, Msg> {
         let Phase::Open { monitor, .. } = self.phase else {
             return space().into();
         };
         // The border first: in the window's base layer (each further stack
         // child is a layer, and each layer costs a clip-mask pass per changed
         // strip), and at a fixed index, so new patches never restart it.
-        let mut layers = stack![border::view(
-            border::Mode::Live,
-            monitor.scale,
-            cfg!(windows),
-            1.0,
-        )];
-        // (Paused: `patches` is empty.)
-        for (_, p) in &self.patches {
-            let [x, y, w, h] = p.bounds.map(|v| v as f32 / monitor.scale);
-            let patch = image(p.image.clone())
+        let base: Element<'static, Msg> = match self.border {
+            Some(keyed) => border::view(border::Mode::Live, monitor.scale, keyed, self.edge.1),
+            None => space().into(),
+        };
+        let mut layers = stack![base];
+        // (Paused: `patches` is empty.) A slot each, empty ones too: a layer
+        // keeps its index, so the others are never redrawn.
+        for slot in &self.patches {
+            let Some(s) = slot.as_ref().filter(|s| s.alpha > 0.0) else {
+                layers = layers.push(space());
+                continue;
+            };
+            let [x, y, w, h] = s.shown.bounds.map(|v| v as f32 / monitor.scale);
+            // a blend with what is under it is drawn whole; else its opacity
+            let opacity = if s.shown.under.is_some() {
+                1.0
+            } else {
+                s.alpha
+            };
+            let patch = image(s.drawn.clone())
                 .width(w)
                 .height(h)
+                .opacity(opacity)
                 .content_fit(ContentFit::Fill);
             layers = layers.push(pin(patch).position(Point::new(x, y)));
         }
@@ -596,6 +800,48 @@ fn blank_own(
     blanked
 }
 
+impl Slot {
+    /// The patch `alpha` of the way in: its opacity, or (`under` kept) a blend
+    /// with the pixels it covers; whole at 1 (`under` is let go then).
+    fn fade(&mut self, alpha: f32) {
+        self.alpha = alpha.clamp(0.0, 1.0);
+        let whole = self.alpha >= 1.0;
+        if whole {
+            self.shown.under = None;
+            self.drawn = self.shown.image.clone();
+            return;
+        }
+        let (
+            Some(under),
+            image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            },
+        ) = (&self.shown.under, &self.shown.image)
+        else {
+            return;
+        };
+        if under.len() != pixels.len() {
+            return;
+        }
+        let a = self.alpha;
+        let blend: Vec<u8> = (pixels.iter().zip(under.iter()))
+            .map(|(&p, &u)| (f32::from(u) + (f32::from(p) - f32::from(u)) * a).round() as u8)
+            .collect();
+        self.drawn = image::Handle::from_rgba(*width, *height, blend);
+    }
+}
+
+/// An `Outcome` that is a task, as a task (the rest: none).
+fn into_task(out: Outcome) -> Task<Msg> {
+    match out {
+        Outcome::Task(t) => t,
+        _ => Task::none(),
+    }
+}
+
 /// What the session's threads read from the UI each time.
 struct Shared {
     stop: Arc<AtomicBool>,
@@ -604,10 +850,9 @@ struct Shared {
     chosen: Arc<Mutex<(String, String)>>,
     /// Where the controller is in a capture (monitor px; `None` = not in captures).
     mask: Arc<Mutex<Option<[u32; 4]>>>,
-    /// Captures show the edge glow (else it is never blanked: the black
-    /// strips, ~100 px deep, cost every patch near the screen's edges, where
-    /// games put subtitles).
-    edge: bool,
+    /// Patches fade in as a blend with what they cover (the layer doesn't
+    /// blend): each is sent with those pixels.
+    under: bool,
 }
 
 /// The layer as the live core sees it: each patch sent to the UI once, each
@@ -616,8 +861,12 @@ struct ToUi<S: FnMut(Msg) -> bool> {
     send: S,
     /// The UI is gone (the session ends).
     gone: bool,
+    /// Patches go with the pixels they cover (`Shared::under`).
+    under: bool,
     shows: u32,
     hides: u32,
+    /// Fade-in steps sent (each redraws only its patch).
+    fades: u32,
 }
 
 impl<S: FnMut(Msg) -> bool> ToUi<S> {
@@ -626,8 +875,49 @@ impl<S: FnMut(Msg) -> bool> ToUi<S> {
     }
 }
 
-impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
+/// The layer with the frame the core works on: a patch shown takes the pixels
+/// it covers from it.
+struct Over<'a, S: FnMut(Msg) -> bool> {
+    ui: &'a mut ToUi<S>,
+    frame: &'a core::Frame<'a>,
+}
+
+impl<S: FnMut(Msg) -> bool> core::Layer for Over<'_, S> {
     fn show(&mut self, id: u64, at: Rect, rgba: &[u8]) {
+        let under = self.ui.under.then(|| Arc::new(crop(self.frame, at)));
+        self.ui.show_with(id, at, rgba, under);
+    }
+    fn alpha(&mut self, id: u64, alpha: f32) {
+        self.ui.alpha(id, alpha);
+    }
+    fn hide(&mut self, id: u64) {
+        self.ui.hide(id);
+    }
+    fn clear(&mut self) {
+        self.ui.clear();
+    }
+}
+
+/// `at` of `frame` (RGBA rows; outside the frame: clear).
+fn crop(frame: &core::Frame, at: Rect) -> Vec<u8> {
+    let mut out = vec![0; (at.w * at.h * 4) as usize];
+    for row in 0..at.h {
+        let y = at.y + row;
+        if y >= frame.height || at.x >= frame.width {
+            continue;
+        }
+        let w = at.w.min(frame.width - at.x) as usize * 4;
+        let from = ((y * frame.width + at.x) * 4) as usize;
+        let to = (row * at.w * 4) as usize;
+        if let Some(src) = frame.rgba.get(from..from + w) {
+            out[to..to + w].copy_from_slice(src);
+        }
+    }
+    out
+}
+
+impl<S: FnMut(Msg) -> bool> ToUi<S> {
+    fn show_with(&mut self, id: u64, at: Rect, rgba: &[u8], under: Option<Arc<Vec<u8>>>) {
         self.shows += 1;
         crate::log!(
             "[opencircle] live: shown {id} at {},{} {}x{}",
@@ -638,11 +928,25 @@ impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
         );
         let image = image::Handle::from_rgba(at.w, at.h, rgba.to_vec());
         let bounds = [at.x, at.y, at.w, at.h];
-        self.send(Msg::Show(id, Shown { bounds, image }));
+        self.send(Msg::Show(
+            id,
+            Shown {
+                bounds,
+                image,
+                under,
+            },
+        ));
     }
-    // ponytail: today's layer shows a patch whole (`Config::fade_in` is 0 here);
-    // the per-pixel-alpha layer (build step 4) fades it in.
-    fn alpha(&mut self, _: u64, _: f32) {}
+}
+
+impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
+    fn show(&mut self, id: u64, at: Rect, rgba: &[u8]) {
+        self.show_with(id, at, rgba, None);
+    }
+    fn alpha(&mut self, id: u64, alpha: f32) {
+        self.fades += 1;
+        self.send(Msg::Alpha(id, alpha));
+    }
     fn hide(&mut self, id: u64) {
         self.hides += 1;
         crate::log!("[opencircle] live: hidden {id}");
@@ -653,12 +957,9 @@ impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
     }
 }
 
-/// The core's thresholds here: its defaults, no fade (today's layer).
+/// The core's thresholds here: its defaults (a patch fades in over 120 ms).
 fn core_config() -> core::Config {
-    core::Config {
-        fade_in: Duration::ZERO,
-        ..core::Config::default()
-    }
+    core::Config::default()
 }
 
 /// Work for the work thread: a core job (with the frame a detect needs, and
@@ -740,8 +1041,10 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     let mut layer = ToUi {
         send,
         gone: false,
+        under: ui.under,
         shows: 0,
         hides: 0,
+        fades: 0,
     };
     let mut langs = ui.chosen.lock().map(|l| l.clone()).unwrap_or_default();
     let _ = to_work.send(Work::Langs(langs.clone()));
@@ -750,7 +1053,6 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     let region = (monitor.x, monitor.y, monitor.width, monitor.height);
     let (w, h) = (monitor.width, monitor.height);
     let mut frames = Frames::front_window(region);
-    let edge = border::EdgeMask::new(w, h, monitor.scale);
     crate::log!("[opencircle] live: frames from {}", frames.describe());
     let mut live = core::Live::new(core_config());
     let started = Instant::now();
@@ -841,15 +1143,19 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 blanked: &blanked,
             };
             for d in r.done {
-                jobs.extend(live.complete(d, &frame, &mut paint, &mut layer));
+                let mut over = Over {
+                    ui: &mut layer,
+                    frame: &frame,
+                };
+                jobs.extend(live.complete(d, &frame, &mut paint, &mut over));
             }
         }
         // the next frame (none new: the screen is as it was)
         match frames.next(FRAME_WAIT) {
             Ok(Some(mut rgba)) if rgba.len() == (w * h * 4) as usize => {
-                // (the edge glow only where this frame shows our layer: not the
-                // game window's own pixels, not a capture that keeps us out)
-                let edge = (ui.edge && !frames.of_window()).then_some(&edge);
+                // (our edge only where this frame shows the screen: not in the
+                // game window's own pixels)
+                let edge = !frames.of_window();
                 blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, edge);
                 if last.as_ref() == Some(&rgba) {
                     same = same.saturating_add(1);
@@ -888,7 +1194,11 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
             blanked: &blanked,
         };
         let t = Instant::now();
-        jobs.extend(live.on_frame(&frame, &mut paint, &mut layer));
+        let mut over = Over {
+            ui: &mut layer,
+            frame: &frame,
+        };
+        jobs.extend(live.on_frame(&frame, &mut paint, &mut over));
         (stats.frames, stats.watch) = (stats.frames + 1, stats.watch + t.elapsed());
         for job in jobs.drain(..) {
             let copy = matches!(job, Job::Detect { .. }).then(|| Arc::new(rgba.clone()));
@@ -935,19 +1245,23 @@ fn page_area(focused: Option<[u32; 4]>, (w, h): (u32, u32)) -> [u32; 4] {
     }
 }
 
-/// Blanks what is never read out of a frame (black): the edge glow where
-/// the frame shows it (`edge`: its mask), the controller, our own windows, everything
-/// outside the focused window's `area` (x0, y0, x1, y1). Returns the blanked
-/// parts (frame px, x, y, w, h).
+/// Blanks what is never read out of a frame (black): what we drew over the
+/// screen where the frame shows it (`edge`: taken out by `on_screen`, blended
+/// pixels worked back, solid ones blanked), the controller, our own windows,
+/// everything outside the focused window's `area` (x0, y0, x1, y1). Returns
+/// the blanked parts (frame px, x, y, w, h).
 fn blank(
     rgba: &mut [u8],
     (m, area): (Monitor, [u32; 4]),
     own: &[[i32; 4]],
     mask: &Mutex<Option<[u32; 4]>>,
-    edge: Option<&border::EdgeMask>,
+    edge: bool,
 ) -> Vec<[u32; 4]> {
     let (w, h) = (m.width, m.height);
-    let mut blanked = edge.map_or_else(Vec::new, |e| e.apply(rgba));
+    let mut blanked = match edge {
+        true => on_screen::take_out(rgba, (m.x, m.y, w, h)),
+        false => Vec::new(),
+    };
     if let Some(rect) = mask.lock().ok().and_then(|m| *m) {
         live_controller::mask(rgba, w, h, rect);
         blanked.push(rect);
@@ -1190,7 +1504,8 @@ impl Stats {
             "[opencircle] live stats {secs:.0} s ({source}): {} frames ({} new, {:.0}/s), \
              core {:.0} us each; {} detects, {} reads ({} reused, {} OCR'd), {} translates; patches {} made, {} declined; \
              {} shown, {} hidden in all; regions now {:?} (changing, reading, translating, shown, idle); \
-             work busy {:.0} % (detect {:.0} ms, read {:.0} ms, translate {:.0} ms)",
+             work busy {:.0} % (detect {:.0} ms, read {:.0} ms, translate {:.0} ms); \
+             {} fade steps",
             self.frames,
             self.new_frames,
             f64::from(self.new_frames) / secs,
@@ -1209,6 +1524,7 @@ impl Stats {
             self.busy[2].as_secs_f64() * 1000.0,
             self.busy[1].as_secs_f64() * 1000.0,
             self.busy[0].as_secs_f64() * 1000.0,
+            layer.fades,
         );
         *self = Stats::default();
     }
@@ -1309,8 +1625,10 @@ mod tests {
         let _ = l.update(Msg::Monitor(Ok(MONITOR)));
         let layer = crate::features::live_translate::Layer {
             excluded_from_capture: false,
+            blends: true,
+            cut: false,
         };
-        let _ = l.update(Msg::Prepared(Ok(layer)));
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
         assert!(l.controller().is_some(), "the controller opens to ask");
         assert!(
             !l.stepping && l.paused.load(Ordering::Relaxed),
@@ -1381,19 +1699,20 @@ mod tests {
         let patch = Shown {
             bounds: [10, 10, 2, 2],
             image: image::Handle::from_rgba(2, 2, vec![0; 16]),
+            under: None,
         };
         let _ = l.update(Msg::Show(1, patch.clone()));
         let _ = l.update(Msg::Show(2, patch.clone()));
         let _ = l.update(Msg::Show(1, patch.clone()));
-        assert_eq!(l.patches.len(), 2, "one per region");
+        assert_eq!(l.shown(), 2, "one per region");
         let _ = l.update(Msg::Hide(1));
-        assert_eq!(l.patches.len(), 1);
+        assert_eq!(l.shown(), 1);
         let _ = l.update(Msg::Failed("HTTP 503".into()));
         assert_eq!(l.error.as_deref(), Some("HTTP 503"));
         let _ = l.update(Msg::Show(3, patch));
         assert_eq!(l.error, None, "the next patch clears it");
         let _ = l.update(Msg::Clear);
-        assert!(l.patches.is_empty());
+        assert!(l.shown() == 0);
 
         let stop = l.stop.clone();
         let close = l.stop();
@@ -1410,6 +1729,7 @@ mod tests {
         let patch = || Shown {
             bounds: [10, 10, 2, 2],
             image: image::Handle::from_rgba(2, 2, vec![0; 16]),
+            under: None,
         };
         let mut l = live();
         // before the layer is up there is no controller to act on
@@ -1474,9 +1794,9 @@ mod tests {
         // pause: the session idles, the patches go, late ones are dropped
         let _ = l.update(Msg::Show(2, patch()));
         let _ = l.update(Msg::Controller(C::Pause));
-        assert!(l.paused.load(Ordering::Relaxed) && l.patches.is_empty());
+        assert!(l.paused.load(Ordering::Relaxed) && l.shown() == 0);
         let _ = l.update(Msg::Show(3, patch()));
-        assert!(l.patches.is_empty());
+        assert!(l.shown() == 0);
         let _ = l.update(Msg::Controller(C::Pause));
         assert!(!l.paused.load(Ordering::Relaxed));
 
@@ -1497,7 +1817,7 @@ mod tests {
         assert_eq!(*l.mask.lock().unwrap(), None);
 
         assert!(matches!(l.update(Msg::Controller(C::Stop)), Outcome::Off));
-        assert_eq!(l.stop().units(), 2, "the layer and the controller close");
+        assert!(l.stop().units() >= 2, "the layer and the controller close");
     }
 
     #[test]
@@ -1557,29 +1877,217 @@ mod tests {
         assert!(blanked.into_iter().all(want));
     }
 
-    /// Where captures don't show the layer (Windows), its edge glow is never
-    /// blanked: a subtitle near the bottom keeps its patch (the Windows VM drew
-    /// 6 of 35 subtitles while the ~100 px edge strips were blanked anyway).
+    /// What we drew over the screen (the edge) is taken back out of a frame
+    /// that shows it, where it is on screen (registered): the pixels under the
+    /// glow come back within a level or two and nothing is blanked, so a
+    /// subtitle near the bottom keeps its patch (black strips cost every patch
+    /// near the edges, where games put subtitles); a frame of the game's own
+    /// window (`edge` false) is left as it is.
     #[test]
-    fn the_edge_is_blanked_only_where_captures_show_it() {
+    fn the_edge_is_taken_out_of_the_frames_that_show_it() {
+        // (a monitor of its own: other tests register theirs at the origin)
         let m = Monitor {
-            x: 0,
+            x: 9000,
             y: 0,
             width: 1280,
             height: 720,
             scale: 1.0,
         };
-        // the talk clip's subtitle patch on the VM (1280x720)
         let subtitle = [348, 596, 580, 50];
         let none = Mutex::new(None);
-        let mut rgba = vec![200u8; 1280 * 720 * 4];
-        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, None);
-        assert!(blanked.is_empty() && rgba.iter().all(|&v| v == 200));
-        assert!(!engines::over_blanked(subtitle, &blanked));
-        // X11: the glow is in the capture, so it is blanked (and patches over it declined)
-        let edge = border::EdgeMask::new(1280, 720, 1.0);
-        let blanked = blank(&mut rgba, (m, [0, 0, 1280, 720]), &[], &none, Some(&edge));
-        assert!(!blanked.is_empty() && rgba.contains(&0));
+        let grey = vec![200u8; 1280 * 720 * 4];
+        let (strips, drawn) = border::live(1280, 720, 1.0, false).unwrap();
+        let mut shown = grey.clone();
+        for ([x0, y0, sw, _], px) in &strips {
+            for (i, p) in px.as_chunks::<4>().0.iter().enumerate() {
+                let j = (((y0 + i as u32 / sw) * 1280 + x0 + i as u32 % sw) * 4) as usize;
+                let a = f32::from(p[3]) / 255.0;
+                for c in 0..3 {
+                    let v = f32::from(shown[j + c]);
+                    shown[j + c] = (v + (f32::from(p[c]) - v) * a).round() as u8;
+                }
+            }
+        }
+        assert_ne!(shown, grey, "the glow shows");
+        let area = [0, 0, 1280, 720];
+        let mut rgba = shown.clone();
+        assert!(
+            blank(&mut rgba, (m, area), &[], &none, true).is_empty(),
+            "not on screen"
+        );
+        assert_eq!(rgba, shown);
+        let on = on_screen::show(drawn.at((m.x, m.y)));
+        let mut game = shown.clone();
+        assert!(blank(&mut game, (m, area), &[], &none, false).is_empty());
+        assert_eq!(game, shown, "the game's own window: nothing of ours in it");
+        let blanked = blank(&mut rgba, (m, area), &[], &none, true);
+        assert!(blanked.is_empty() && !engines::over_blanked(subtitle, &blanked));
+        let off = (rgba.iter().zip(&grey)).map(|(a, b)| a.abs_diff(*b)).max();
+        assert!(off <= Some(2), "{off:?}");
+        drop(on);
+    }
+
+    /// Draw once: each patch is a slot of its own, so a new patch, a fade
+    /// step or a removal redraws that patch's rectangle only, never another
+    /// patch or the edge; a removed patch's slot stays (the ones after it don't
+    /// move and aren't redrawn) and the next patch takes it; nothing changed =
+    /// nothing redrawn.
+    #[test]
+    fn only_a_patch_that_changes_is_redrawn() {
+        let mut l = live();
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let layer = crate::features::live_translate::Layer {
+            excluded_from_capture: false,
+            blends: true,
+            cut: false,
+        };
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        let patch = |x: u32| Shown {
+            bounds: [x, 600, 200, 40],
+            image: image::Handle::from_rgba(200, 40, vec![255; 200 * 40 * 4]),
+            under: None,
+        };
+        let steps: Vec<Vec<Msg>> = vec![
+            vec![],
+            vec![Msg::Show(1, patch(100)), Msg::Alpha(1, 1.0)],
+            vec![Msg::Show(2, patch(500)), Msg::Alpha(2, 0.3)],
+            vec![Msg::Alpha(2, 1.0)],
+            vec![Msg::Show(3, patch(900)), Msg::Alpha(3, 1.0)],
+            vec![Msg::Hide(1)],
+            vec![],
+            vec![Msg::Show(4, patch(1300)), Msg::Alpha(4, 1.0)],
+        ];
+        let l = std::cell::RefCell::new(l);
+        let damage = crate::shared::kit::testing::shot::damage(
+            |i| {
+                for msg in steps.get(i)?.clone() {
+                    let _ = l.borrow_mut().update(msg);
+                }
+                Some(l.borrow().view())
+            },
+            Size::new(1920.0, 1080.0),
+        );
+        let only = |x: f32| {
+            move |d: &Vec<iced::Rectangle>| {
+                !d.is_empty()
+                    && d.iter().all(|r| {
+                        r.x >= x - 2.0
+                            && r.x + r.width <= x + 202.0
+                            && r.y >= 598.0
+                            && r.y + r.height <= 642.0
+                    })
+            }
+        };
+        assert!(only(100.0)(&damage[1]), "{:?}", damage[1]);
+        assert!(only(500.0)(&damage[2]), "{:?}", damage[2]);
+        assert!(only(500.0)(&damage[3]), "the fade step: {:?}", damage[3]);
+        assert!(only(900.0)(&damage[4]), "{:?}", damage[4]);
+        assert!(only(100.0)(&damage[5]), "the removal only: {:?}", damage[5]);
+        assert!(damage[6].is_empty(), "nothing new: {:?}", damage[6]);
+        assert!(only(1300.0)(&damage[7]), "{:?}", damage[7]);
+        let l = l.into_inner();
+        assert_eq!(l.shown(), 3);
+        assert_eq!(
+            l.patches[0].as_ref().map(|s| s.id),
+            Some(4),
+            "the free slot"
+        );
+    }
+
+    /// A layer that doesn't blend (Windows' colour key, X11 without a
+    /// compositor): a patch fades in as a blend with the pixels it covers,
+    /// taken from the frame it is shown on, and is the patch itself once in
+    /// (the covered pixels let go); the core fades in over 120 ms (a step a
+    /// frame: about 7).
+    #[test]
+    fn a_patch_fades_in_over_what_it_covers() {
+        assert_eq!(core_config().fade_in, Duration::from_millis(120));
+        let rgba: Vec<u8> = (0..8 * 4 * 4).map(|i| (i % 256) as u8).collect();
+        let frame = core::Frame {
+            rgba: &rgba,
+            width: 8,
+            height: 4,
+            at: Duration::ZERO,
+        };
+        let sent = std::cell::RefCell::new(Vec::new());
+        let mut ui = ToUi {
+            send: |m| {
+                sent.borrow_mut().push(m);
+                true
+            },
+            gone: false,
+            under: true,
+            shows: 0,
+            hides: 0,
+            fades: 0,
+        };
+        let at = Rect {
+            x: 6,
+            y: 1,
+            w: 4,
+            h: 2,
+        };
+        let mut over = Over {
+            ui: &mut ui,
+            frame: &frame,
+        };
+        core::Layer::show(&mut over, 7, at, &[255; 4 * 2 * 4]);
+        core::Layer::alpha(&mut over, 7, 0.5);
+        assert_eq!(ui.fades, 1);
+
+        let mut sent = sent.into_inner().into_iter();
+        let Some(Msg::Show(7, shown)) = sent.next() else {
+            panic!("no patch")
+        };
+        // the covered pixels: row 1 from x 6 (two inside the frame, two past it)
+        let under = shown.under.clone().unwrap();
+        assert_eq!(under[..8], rgba[(8 + 6) * 4..(8 + 8) * 4]);
+        assert!(under[8..16].iter().all(|&v| v == 0));
+        let mut slot = Slot {
+            id: 7,
+            drawn: shown.image.clone(),
+            shown,
+            alpha: 0.0,
+        };
+        slot.fade(0.5);
+        let image::Handle::Rgba { pixels, .. } = &slot.drawn else {
+            panic!("not pixels")
+        };
+        let half = |u: u8| (f32::from(u) + (255.0 - f32::from(u)) * 0.5).round() as u8;
+        assert_eq!(pixels[0], half(under[0]));
+        slot.fade(1.0);
+        assert!(slot.shown.under.is_none());
+        assert_eq!(slot.drawn, slot.shown.image);
+    }
+
+    /// A layer cut to what it shows (X11 without a compositor) draws the solid
+    /// line and is cut to it and its patches whenever a patch comes or goes; a
+    /// layer that blends draws the glow and isn't cut.
+    #[test]
+    fn a_cut_layer_is_cut_to_its_line_and_patches() {
+        let mut l = live();
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let layer = crate::features::live_translate::Layer {
+            excluded_from_capture: false,
+            blends: false,
+            cut: true,
+        };
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        assert_eq!(l.border, Some(true), "the solid line");
+        assert_eq!(l.line.len(), 4);
+        let t = l.line[0][3];
+        assert_eq!(l.line[0], [0, 0, 1920, t]);
+        assert!(l.cut().units() > 0);
+        let mut l = live();
+        let _ = l.update(Msg::Monitor(Ok(MONITOR)));
+        let layer = crate::features::live_translate::Layer {
+            blends: true,
+            cut: false,
+            ..layer
+        };
+        let _ = l.update(Msg::Prepared(Ok((layer, None))));
+        assert_eq!(l.border, Some(false));
+        assert!(l.line.is_empty() && l.cut().units() == 0);
     }
 
     /// The graphics card translates while it has one; once it slows ~2x the processor does, for

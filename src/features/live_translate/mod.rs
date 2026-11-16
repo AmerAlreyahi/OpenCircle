@@ -40,6 +40,14 @@ pub struct Layer {
     /// False on X11 and on Windows before 10 2004: captures show the layer,
     /// and only `translate::Live`'s read-back guard keeps it from being read.
     pub excluded_from_capture: bool,
+    /// The layer blends per pixel (X11 with a compositor): a patch fades by
+    /// its opacity and the edge glow is drawn on it. Else a patch fades as a
+    /// blend with what is under it, and the glow needs a window of its own
+    /// (`shared::platform::alpha_window`, Windows; else a solid line stands in).
+    pub blends: bool,
+    /// The layer shows only where it is cut to (X11 without a compositor: its
+    /// see-through pixels would be black): cut it to its patches and edge.
+    pub cut: bool,
 }
 
 /// The live controller's small window: topmost, takes clicks without taking the
@@ -355,6 +363,8 @@ mod win {
             }
             Ok(Layer {
                 excluded_from_capture: excluded,
+                blends: false,
+                cut: false,
             })
         }
     }
@@ -369,7 +379,7 @@ mod x11 {
     /// capture exclusion; topmost comes from the window's `AlwaysOnTop` level.
     pub fn prepare(window: u32) -> Result<Layer, LayerError> {
         let os = |e: &dyn std::fmt::Debug| LayerError::Os(format!("X11: {e:?}"));
-        let (conn, _) = xcb::Connection::connect_with_extensions(
+        let (conn, screen) = xcb::Connection::connect_with_extensions(
             None,
             &[xcb::Extension::XFixes, xcb::Extension::Shape],
             &[],
@@ -395,9 +405,27 @@ mod x11 {
         });
         let _ = conn.send_and_check_request(&xfixes::DestroyRegion { region });
         set.map_err(|e| os(&e))?;
+        let blends = composited(&conn, screen);
         Ok(Layer {
             excluded_from_capture: false,
+            blends,
+            cut: !blends,
         })
+    }
+
+    /// A compositor runs on `screen` (it owns `_NET_WM_CM_S<n>`): windows
+    /// blend per pixel.
+    fn composited(conn: &xcb::Connection, screen: i32) -> bool {
+        let name = format!("_NET_WM_CM_S{screen}");
+        let atom = conn.wait_for_reply(conn.send_request(&x::InternAtom {
+            only_if_exists: false,
+            name: name.as_bytes(),
+        }));
+        let Ok(atom) = atom else { return false };
+        let owner = conn.wait_for_reply(conn.send_request(&x::GetSelectionOwner {
+            selection: atom.atom(),
+        }));
+        owner.is_ok_and(|o| !xcb::Xid::is_none(&o.owner()))
     }
 
     #[test]

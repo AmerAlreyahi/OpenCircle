@@ -83,7 +83,11 @@ impl App {
                         // isn't up yet): the bar's Snip outlines them (`snip_here`).
                         let mut listing = Some(std::thread::spawn(capture::window_rect::list));
                         let mut first = true;
-                        capture::mouse_first(all, |frame| {
+                        capture::mouse_first(all, |mut frame| {
+                            // our own edge glow (Live translate) is never frozen
+                            if let Ok(frame) = &mut frame {
+                                crate::shared::on_screen::take_out_of(frame);
+                            }
                             let grabbed = match (std::mem::take(&mut first), frame) {
                                 (true, frame) => Grabbed::Active(frame.map(|frame| {
                                     let (place, image) = pick::screen_of(frame);

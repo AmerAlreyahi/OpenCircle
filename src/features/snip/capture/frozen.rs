@@ -38,6 +38,10 @@ pub fn snapshot(
     });
     drop(widgets);
     let ((mut frames, on), grab) = grabbed?;
+    // our own edge glow (Live translate) is never in the picture
+    frames
+        .iter_mut()
+        .for_each(crate::shared::on_screen::take_out_of);
     if cursor {
         frames
             .iter_mut()

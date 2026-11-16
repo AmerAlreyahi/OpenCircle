@@ -7,6 +7,12 @@ use crate::{Layer, Renderer, Settings};
 
 use std::collections::VecDeque;
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// OpenCircle patch: only the redrawn rectangles go to the window on X11 too
+/// while this is set: with a compositor the X server keeps every window's
+/// pixels (OpenCircle sets it while its live layer runs on a composited X11).
+pub static CHANGES_ONLY: AtomicBool = AtomicBool::new(false);
 
 pub struct Compositor {
     context: softbuffer::Context<Box<dyn compositor::Display>>,
@@ -218,7 +224,7 @@ pub fn present(
             background_color,
         );
 
-        if cfg!(windows) {
+        if cfg!(windows) || CHANGES_ONLY.load(Ordering::Relaxed) {
             shown = Some(physical(&damage, viewport));
         }
     }
