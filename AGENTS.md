@@ -1222,3 +1222,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   ScreenCast portal's window source (the system asks once which window). Windows keeps the screen capture (our layer is
   excluded there). The cost to the game on X11 (redirected window) is measured with the harness. Rejected: see-through dots in
   patches (visible holes), hiding patches briefly (flicker by design).
+- Snip captures what you see (owner, 2026-11-16, after "snip couldn't capture the main widget or the AI widget when it is
+  unpinned"): Snip started while the overlay is open (bar's Snip, Alt+A, tray) takes the screen exactly as it looks then,
+  WITH the bar and an open (unpinned) AI chat in the picture, like "Snip the translated page"; the user then picks the bar,
+  the chat or anything else. Snip's own toolbar / hints are never in the picture. Floating widgets stay pickable as before.
