@@ -1235,3 +1235,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   the normal download card (progress, resume, retry), and Live switches to the graphics card by itself when it is ready.
   (2) AI translate (#90): a failed part stays in the original language for 0.3.0 (logged); a per-part error card is a later
   design round. "Offline first, AI only where offline can't" stays on hold until the owner says.
+- GPU translation skipped for 0.3.0 (owner, 2026-11-16, "if the GPU model didn't create a real leap ... skip it for now; a loss
+  for 6 GB VRAM users"; SUPERSEDES the GPU part of "Live translation approach" (4), "First GPU download" (1) and the 0.3.0
+  "GPU inference and CPU path together"): measured gain was modest (COMET 0.871 vs 0.846, ~80 vs 107 ms per line; translation
+  is a small part of Live's delay, OCR dominates) for ~1.6-1.8 GB of VRAM taken from the game and a 1.1 GB download. Live
+  ships on the processor (OptimaMT). Hide, don't delete: the code stays, the setting "GPU for live translation" is hidden and
+  Off, nothing downloads, the release workflow does not attach the helper. models-v4 stays uploaded. Revisit only if a
+  measured leap appears (e.g. a much better or much smaller model).
