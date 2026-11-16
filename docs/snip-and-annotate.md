@@ -27,6 +27,12 @@ count as windows here: hover one and click to take it. They never appear in any
 other capture. On Wayland there is no window list: a click takes the screen
 under the pointer, like `Enter`.
 
+**Snip with OpenCircle's own bar and chat in the picture.** When Snip starts over
+the open overlay, the picture shows the screen as you see it: the bar and the
+open AI chat are in it. Hover outlines them as windows, click picks them, and
+Copy and Save work as usual (the AI chat is excluded from OS captures, so only
+this route can take it).
+
 **Snip a translated page.** With a translation on screen, Snip (the Snip button
 in the translate pill, after the language chips, or `Alt+A`, or the tray) takes
 the screen as you see it, translation included. Drag an area, or click or press

@@ -68,6 +68,7 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   model download (51 direct models, including Portuguese, and other pairs go
   through English); the target is the language you pick at the first start.
   Direct models into and out of Arabic make it faster. See [Translate](docs/translate.md).
+- **Live translate that stays out of the way (Labs).** Subtitles, menus and quest text are translated as they appear and drawn once; when the text changes, the old translation is removed first, so nothing stale stays on screen. It reads only what changed, so a game keeps its frame rate. Works over borderless and full-screen games on Windows, X11, KDE Plasma and wlroots desktops; GNOME on Wayland translates once per press. See [Translate](docs/translate.md#live).
 - **A glossary for each game.** Keep a character's or a place's name exactly as
   you want it translated, or kept as written: one small file per game, on this PC
   only. It applies on game screens only (never in a browser), follows the game
@@ -119,9 +120,8 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
 
 ### Optional Labs features
 
-Song search, live pins and live translate are unfinished, off by
-default and hidden until enabled in **Settings > Labs**. Live translate is
-planned for a later release.
+Song search, live pins and live translate are off by default and hidden until
+enabled in **Settings > Labs**.
 
 ## Private by design
 
@@ -235,7 +235,7 @@ operating it. See the [Privacy](docs/privacy.md) page.
 |---|---|
 | Circle to search | `Ctrl+Shift+Space` |
 | Translate the whole screen | `Alt+Shift+T` |
-| Live translate on / off (Labs, unfinished) | `Alt+Shift+L` |
+| Live translate on / off (Labs) | `Alt+Shift+L` |
 | Circle, then explain with AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
 | Snip | `Alt+A` |
@@ -253,7 +253,7 @@ Settings. Full list and details: [Shortcuts](docs/shortcuts.md).
   See [Linux notes](docs/linux-notes.md).
 
 Games must run in borderless or windowed mode for the translation to appear
-over them (and for live translate, Labs, unfinished). Linux reads text with
+over them (and for live translate). Linux reads text with
 OpenCircle's own reader, a little slower than Windows OCR; on Wayland the
 overlay can take about half a second to appear and popups are square.
 AI-provider translation can be slower than the offline engine and may show the

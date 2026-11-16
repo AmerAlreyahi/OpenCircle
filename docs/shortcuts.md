@@ -3,8 +3,7 @@
 ## Defaults
 
 The Song search shortcut is hidden (not registered) until you turn Song search on in
-**Settings > Labs**. Live translate is a Labs feature too (unfinished, planned
-for a later release): its shortcut, tray item and bar button appear only when it is on.
+**Settings > Labs**. Live translate is a Labs feature too: its shortcut, tray item and bar button appear only when it is on.
 
 | Action | Default | What it does |
 |---|---|---|

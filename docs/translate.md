@@ -13,7 +13,7 @@ works on anything you can see.
 Three ways in, all from the same bar or keys:
 
 - **Translate** on a selection (the bar, or `Alt+Shift+T` for the whole screen).
-- **Live translate** (a Labs feature, unfinished; `Alt+Shift+L`, or the bar's button) keeps going as the screen changes.
+- **Live translate** (a Labs feature; `Alt+Shift+L`, or the bar's button) keeps going as the screen changes.
 - **Select text**, then Translate, for only the words you picked.
 
 ## How it works
@@ -211,24 +211,37 @@ place. `Esc` closes it.
 
 ## Live
 
-Press `Alt+Shift+L` to turn live translate on or off. A click-through,
-always-on-top layer re-captures about once a second and re-translates only the
-text that changed, so game input is never blocked. A small status pill shows
-the language pair. If a model the languages need isn't on your PC yet, the
-live controller asks first (with the download size) and live translate
-starts once it is downloaded.
+Switch it on once in **Settings > Labs**, then press `Alt+Shift+L` (or use the
+bar's or the tray's Live translate) to turn it on or off. Live translate keeps
+the screen translated as it changes, without ever blocking the game's input:
 
-- **Windows:** the layer is excluded from its own captures.
-- **Linux/X11:** supported; the layer is click-through, and OpenCircle guards
-  against reading its own output.
-- **Wayland:** compositors generally do not allow such an overlay, so each press
-  of the shortcut translates once instead.
+- It watches the screen for changes and reads only the parts that changed, and
+  only text that sits on a held box or bar (a subtitle, a menu, a quest panel).
+  Text over a moving background is left as it is.
+- A translation is drawn once and stays steady. When the text under it changes,
+  the old translation is removed first (the original shows for a moment), then
+  the new one fades in. Nothing stale is left on screen.
+- A soft glow at the screen edge, in your Active Look colours, shows Live is on.
+  A small controller shows the language pair and Pause / Stop; it uses the
+  same language picker as the translate pill. If a model the languages need
+  isn't on your PC yet, the controller asks first (with the download size).
+- Names the model leaves unchanged (a speaker's name, a place) stay as written.
+
+What each system does:
+
+| System | Live translate |
+|---|---|
+| Windows 10 / 11 | A click-through layer over the game, excluded from OpenCircle's own captures. The glow is its own window and does show in screen recordings. |
+| Linux, X11 | Reads the game's own window (so its own patches are never read back) under a compositor; a layer over it draws the translation and glow. Without a compositor the glow becomes a thin line. |
+| Linux, KDE Plasma and wlroots (Wayland) | A native layer over the game. Choose the game window once when Live starts (Plasma 5.24 asks every time). The game must be full screen or borderless; a windowed game gets a message to make it full screen. The controller can sit under the layer: drag it aside if a translation covers it. |
+| Linux, GNOME (Wayland) | No overlay can sit over a game there, so each press of the shortcut translates once. |
 
 ## The game must be borderless or windowed
 
 No application can draw over a game in exclusive fullscreen. Switch the game to
-borderless ("fullscreen windowed") or windowed mode for live translate and
-for the translation to appear over it.
+borderless ("fullscreen windowed") or windowed mode for the translation to
+appear over it. On KDE and wlroots, Live needs the game full screen or
+borderless (not a small window).
 
 ## Limits
 
