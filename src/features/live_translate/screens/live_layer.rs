@@ -1883,7 +1883,14 @@ mod tests {
         let _ = l.update(Msg::ControllerReady(Ok(true)));
         assert_eq!(*l.mask.lock().unwrap(), None);
 
-        assert!(matches!(l.update(Msg::Controller(C::Stop)), Outcome::Off));
+        // Stop: where the OS fades windows (Windows) it fades first and `Closed` ends it
+        let stopped = l.update(Msg::Controller(C::Stop));
+        if shape::can_fade() {
+            assert!(matches!(stopped, Outcome::Task(_)) && l.leaving);
+            assert!(matches!(l.update(Msg::Closed), Outcome::Off));
+        } else {
+            assert!(matches!(stopped, Outcome::Off));
+        }
         assert!(l.stop().units() >= 2, "the layer and the controller close");
     }
 
