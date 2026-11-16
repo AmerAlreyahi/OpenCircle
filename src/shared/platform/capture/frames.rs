@@ -196,6 +196,17 @@ impl Frames {
         false
     }
 
+    /// How long before `next` returned it the screen showed the last frame: its
+    /// present time where the OS gives it (Windows' duplication), else 0 (the
+    /// grab itself is the frame's time).
+    pub fn age(&self) -> Duration {
+        #[cfg(windows)]
+        if let Some(dup) = &self.dup {
+            return dup.age;
+        }
+        Duration::ZERO
+    }
+
     /// For the log line.
     pub fn describe(&self) -> String {
         #[cfg(windows)]

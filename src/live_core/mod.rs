@@ -80,6 +80,17 @@ impl Rect {
         let gap = self.x.max(o.x).saturating_sub(self.right().min(o.right()));
         h > 0 && 2 * rows >= h && gap <= h
     }
+    /// Grown by `p` on every side (from 0).
+    fn padded(&self, p: u32) -> Rect {
+        let (x, y) = (self.x.saturating_sub(p), self.y.saturating_sub(p));
+        Rect::new(x, y, self.right() + p - x, self.bottom() + p - y)
+    }
+    /// `o` is the next line under this one: side by side they overlap, and it starts below this one's
+    /// middle, at most two of its heights under it.
+    fn just_above(&self, o: &Rect) -> bool {
+        let side = self.right().min(o.right()) > self.x.max(o.x);
+        side && o.y >= self.y + self.h / 2 && o.y <= self.bottom() + 2 * self.h
+    }
 }
 
 /// One captured frame, RGBA, `width * height * 4` bytes. `at` = when it was captured (any fixed origin).
@@ -90,9 +101,64 @@ pub struct Frame<'a> {
     pub at: Duration,
 }
 
+/// A text box found: its bounds and its lines' (top to bottom; one line = `[at]`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextBox {
+    pub at: Rect,
+    pub lines: Vec<Rect>,
+}
+
+impl From<Rect> for TextBox {
+    fn from(at: Rect) -> Self {
+        TextBox {
+            at,
+            lines: vec![at],
+        }
+    }
+}
+
 /// Finds text boxes inside `areas` of `frame` (OpenCircle: PP-OCR detection).
 pub trait Detector {
-    fn detect(&mut self, frame: &Frame, areas: &[Rect]) -> Vec<Rect>;
+    fn detect(&mut self, frame: &Frame, areas: &[Rect]) -> Vec<TextBox>;
+}
+
+/// How a region's text was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum How {
+    /// In a new place: the discover step's detect.
+    New,
+    /// In a box read before, its panel still there: read again in place (no detect over it).
+    Box,
+    /// A box whose text was typed out letter by letter: read, translated and drawn once, as a whole,
+    /// when its last letter came (never a part of it: a part of a sentence misleads).
+    Typed,
+}
+
+/// What the host logs (the harness reads it): a patch drawn, with its text's way through the stages
+/// (frame times, `Frame::at`), or a text that left the screen.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Note {
+    Drawn {
+        id: RegionId,
+        how: How,
+        /// The change was seen (the discover that asked for the detect; a known box: the frame it changed).
+        seen: Duration,
+        detected: Option<Duration>,
+        /// It held still: read asked (or a cache answered).
+        settled: Duration,
+        read: Duration,
+        translated: Duration,
+        shown: Duration,
+    },
+    /// A text that was read left (changed, or went): it was on screen `life` (from `seen`), drawn or not;
+    /// its box's reveal (typed out or all at once) and the settle time it got.
+    Gone {
+        id: RegionId,
+        life: Duration,
+        drawn: bool,
+        typed: bool,
+        settle: Duration,
+    },
 }
 
 /// Reads each crop (one batch = one recognition call); one text per crop, same order, "" = no text.
@@ -164,6 +230,13 @@ pub struct Config {
     pub cache_texts: usize,
     /// Text-signature cache entries (signature -> recognized text).
     pub cache_signatures: usize,
+    /// A line being typed out is finished once no new letter came for its box's settle time: learned
+    /// per box from its pauses between letters (twice their mean, a quarter of its lines' lifetime at
+    /// most), within these bounds; the upper one until the box has shown how it types.
+    pub typed_settle: (Duration, Duration),
+    /// Where a box's next letters land is watched: this many line heights right of its last line, and
+    /// one line height under it.
+    pub front_lines: u32,
 }
 
 impl Default for Config {
@@ -185,6 +258,8 @@ impl Default for Config {
             read_batch: 8,
             cache_texts: 2000,
             cache_signatures: 512,
+            typed_settle: (Duration::from_millis(50), Duration::from_millis(300)),
+            front_lines: 4,
         }
     }
 }
@@ -239,7 +314,7 @@ pub enum Job {
 pub enum Done {
     Detected {
         job: u64,
-        boxes: Vec<Rect>,
+        boxes: Vec<TextBox>,
     },
     Read {
         id: RegionId,
@@ -314,6 +389,66 @@ struct Region {
     ours: (Vec<u8>, Vec<u8>),
     alpha: f32,
     prev_alpha: f32,
+    how: How,
+    stages: Stages,
+    /// Its lines as last found (frame px, top to bottom).
+    lines: Vec<Rect>,
+    /// A box read before whose text changed with its panel still there: read again in place, the
+    /// discover step leaves it alone (box memory).
+    known: bool,
+    /// Its text is being typed out: read once no new letter came for the box's settle time.
+    typing: bool,
+    /// When the last letter landed (while typing).
+    letter_at: Duration,
+    /// When its text area last changed (while it settles).
+    moved_at: Duration,
+    /// Right of its last line, and under it (where the next line starts).
+    front: [Front; 2],
+    style: Style,
+    /// A patch went up for it at least once (a text box: box memory keeps it).
+    boxed: bool,
+    /// Its patch went up for the current text.
+    drawn: bool,
+}
+
+/// The stage times of a region's current text (`Note::Drawn`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Stages {
+    seen: Duration,
+    detected: Option<Duration>,
+    settled: Option<Duration>,
+    read: Option<Duration>,
+    translated: Option<Duration>,
+}
+
+/// How a box shows its text, learned while Live runs (no game list, no setting): typed out or all at
+/// once, the longest pause between letters of its last typed line, its lines' lifetime.
+#[derive(Debug, Clone, Copy, Default)]
+struct Style {
+    typed: bool,
+    gap: Duration,
+    life: Option<Duration>,
+}
+
+/// Where the next letters of a box land (a band right of its last line, or under it), cell by cell:
+/// the gray at the start, now, when it last jumped (or the band started), whether it held still before
+/// that jump, and whether that jump was counted as a letter.
+#[derive(Debug, Clone, Default)]
+struct Front {
+    at: Rect,
+    /// Cell coordinates of `at` (x0, y0, columns).
+    cells: (u32, u32, u32),
+    first: Vec<u8>,
+    now: Vec<u8>,
+    jump: Vec<Duration>,
+    calm: Vec<bool>,
+    counted: Vec<bool>,
+    /// The panel's gray (the ring's median at the start): only cells that showed it can get a letter;
+    /// none where the ring is no panel (`flat`: most of it within `FLAT` of that gray).
+    panel: u8,
+    flat: bool,
+    /// The rightmost letter seen in it (frame px), 0 = none.
+    right: u32,
 }
 
 /// The host's reports, for the back-off (5.6): the core slows the discover step, never the watch.
@@ -354,11 +489,22 @@ pub struct Live {
     signatures: Lru<u64, String>,
     translations: Lru<String, String>,
     backoff: Backoff,
+    /// When the detect in flight was asked for.
+    asked: Duration,
+    notes: Vec<Note>,
+    /// The styles of boxes that left (a new region in the same place takes it over).
+    styles: Vec<(Rect, Style)>,
 }
+
+/// Styles of boxes that left, kept for a new region in their place.
+const STYLES_KEPT: usize = 32;
 
 impl Live {
     pub fn new(cfg: Config) -> Self {
         Self {
+            asked: Duration::ZERO,
+            notes: Vec::new(),
+            styles: Vec::new(),
             signatures: Lru::new(cfg.cache_signatures),
             translations: Lru::new(cfg.cache_texts),
             cfg,
@@ -447,10 +593,47 @@ impl Live {
                 for (m, a) in r.ring_moved.iter_mut().zip(&r.age.1) {
                     *m |= *a == 0;
                 }
+                // while it types, its pauses between changes teach its box's settle time
+                if !still {
+                    let gap = frame.at.saturating_sub(r.moved_at);
+                    if r.typing && gap < Duration::from_millis(600) {
+                        r.style.gap = gap_mean(r.style.gap, gap);
+                    }
+                    r.moved_at = frame.at;
+                    // (a new text typed into a box read before lands inside it, its panel still)
+                    if r.known && r.typing && r.ring_still > 0 {
+                        r.letter_at = frame.at;
+                    }
+                }
+                // the next letters of a box being typed out land right of its last line or under it
+                let letters = r.front[0].step(frame, s, change) + r.front[1].step(frame, s, change);
+                if letters > 0 {
+                    let gap = frame.at.saturating_sub(r.letter_at);
+                    if r.typing && gap < Duration::from_millis(600) {
+                        r.style.gap = gap_mean(r.style.gap, gap);
+                    }
+                    r.letter_at = frame.at;
+                    // (letters on a panel: the ring round it held still a while; a scene moving in steps
+                    // moves the ring too)
+                    r.typing |= letters >= 2 && r.ring_still >= 2 * settle;
+                }
+                // a box re-read in place whose new text spills past it (or whose panel went): found
+                // by a detect like new text
+                if r.known && !self.box_held(i, &ring) {
+                    self.regions[i].known = false;
+                }
             } else {
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
+                // (box memory only for a text box: one whose translation was drawn, a few lines;
+                // a detect box over a whole scene is looked for again)
+                let boxed = self.regions[i].boxed && self.regions[i].lines.len() <= 4;
+                if changed && boxed && self.box_held(i, &ring) {
+                    self.reuse(i, frame, layer);
+                    i += 1;
+                    continue;
+                }
                 if changed || drift > self.cfg.ring {
-                    self.retire(i, layer);
+                    self.retire(i, frame, layer);
                     continue;
                 }
                 // ring cells that keep moving while the text holds are the scene beside the box from
@@ -485,13 +668,31 @@ impl Live {
         let mut i = 0;
         while i < self.regions.len() {
             let r = &self.regions[i];
-            let settled = r.still >= settle;
-            if r.state != State::Changing
-                || !(settled || frame.at.saturating_sub(r.born) >= self.cfg.settle_max)
-            {
+            let since = |t: Duration| frame.at.saturating_sub(t);
+            // (typed out: no new letter for the box's settle time; a letter landing now: not yet)
+            let typed = self.typed_settle(&r.style);
+            let settled = r.still >= settle
+                && !r.front.iter().any(|f| f.landing(frame.at, self.cfg.change))
+                && match r.typing {
+                    // (a new text typed into a box read before lands inside it)
+                    true => since(r.letter_at) >= typed && since(r.moved_at) >= typed,
+                    // (letters landing beside it may be the start of typing: a few letter times)
+                    false => since(r.letter_at) >= QUIET,
+                };
+            let waited = since(r.born) >= self.cfg.settle_max
+                && (!r.typing
+                    || since(r.letter_at) >= self.cfg.settle_max
+                    // (a box that never stops changing is read in the end)
+                    || since(r.born) >= TYPED_MAX);
+            if r.state != State::Changing || !(settled || waited) {
                 i += 1;
                 continue;
             }
+            if r.typing && self.finish_typing(i, frame) {
+                i += 1; // (its box grew to its last letters: it settles again)
+                continue;
+            }
+            let r = &self.regions[i];
             if r.ring_still < settle {
                 // text on a moving background: never patched (live-approach.md 5.2)
                 self.regions.remove(i);
@@ -502,6 +703,7 @@ impl Live {
                 let cols = self.cols(self.regions[i].rect);
                 let r = &mut self.regions[i];
                 r.take_reference(settle, settled, cols);
+                (r.stages.settled, r.stages.read) = (Some(frame.at), Some(frame.at));
                 match self.known_text(i, text, frame, painter, layer) {
                     Some(Some(job)) => jobs.push(job),
                     Some(None) => {}
@@ -524,12 +726,19 @@ impl Live {
                     let r = &mut self.regions[i];
                     r.state = State::Reading { job };
                     r.take_reference(settle, settled, cols);
+                    r.stages.settled = Some(frame.at);
                     self.reading.insert(job, key);
+                    // (a box read again in place, or grown to its last letters, is no detect's box:
+                    // read with room round it, a recognizer finds no line cut tight at its edges)
+                    let at = match r.known || r.how != How::New {
+                        true => clamp(r.rect.padded(r.rect.h / 2), (frame.width, frame.height)),
+                        false => r.rect,
+                    };
                     Crop {
                         id: r.id,
                         job,
-                        at: r.rect,
-                        rgba: crop(frame, r.rect),
+                        at,
+                        rgba: crop(frame, at),
                     }
                 })
                 .collect();
@@ -566,33 +775,20 @@ impl Live {
                     .at
                     .saturating_sub(self.last_discover.unwrap_or(frame.at));
                 let retired = std::mem::take(&mut self.retired);
+                let size = self.size;
                 for b in boxes {
-                    let b = clamp(b, self.size);
-                    if b.area() == 0 || retired.iter().any(|r| r.same_place(&b) || b.same_place(r))
+                    let at = clamp(b.at, size);
+                    if at.area() == 0
+                        || retired
+                            .iter()
+                            .any(|r| r.same_place(&at) || at.same_place(r))
                     {
                         continue;
                     }
-                    // (the largest: a part of the line may still be tracked beside the whole)
-                    let place = (0..self.regions.len())
-                        .filter(|&i| self.regions[i].rect.same_place(&b))
-                        .max_by_key(|&i| self.regions[i].rect.area());
-                    let line = || self.regions.iter().position(|r| r.rect.same_line(&b));
-                    match (place, place.or_else(line)) {
-                        // still changing (typewriter text growing), or the rest of a line found
-                        // earlier in part (its other words settled later): one region for the line
-                        (_, Some(i)) if self.regions[i].state == State::Changing => {
-                            self.regions[i].rect = self.regions[i].rect.union(&b);
-                            self.join_line(i, frame, layer);
-                        }
-                        (_, Some(i)) if self.regions[i].rect.grows_by(&b) => {
-                            let line = self.regions[i].rect.union(&b);
-                            self.retire(i, layer);
-                            self.add(line, frame);
-                            self.join_line(self.regions.len() - 1, frame, layer);
-                        }
-                        (None, None) => self.add(b, frame),
-                        _ => {}
-                    }
+                    let lines: Vec<Rect> = (b.lines.iter().map(|l| clamp(*l, size)))
+                        .filter(|l| l.area() > 0)
+                        .collect();
+                    self.place(TextBox { at, lines }, frame, layer);
                 }
                 Vec::new()
             }
@@ -602,11 +798,12 @@ impl Live {
                 };
                 self.signatures.put(key, text.clone());
                 match self.current(id, &State::Reading { job }, frame) {
-                    Some(i) => self
-                        .known_text(i, text, frame, painter, layer)
-                        .flatten()
-                        .into_iter()
-                        .collect(),
+                    Some(i) => {
+                        self.regions[i].stages.read = Some(frame.at);
+                        (self.known_text(i, text, frame, painter, layer).flatten())
+                            .into_iter()
+                            .collect()
+                    }
                     None => Vec::new(),
                 }
             }
@@ -618,6 +815,7 @@ impl Live {
                     self.translations.put(source, t.clone());
                 }
                 if let Some(i) = self.current(id, &State::Translating { job }, frame) {
+                    self.regions[i].stages.translated = Some(frame.at);
                     match text {
                         Ok(t) => self.paint(i, &t, frame, painter, layer),
                         Err(_) => self.regions[i].state = State::Idle,
@@ -631,6 +829,213 @@ impl Live {
     /// The tracked regions (for the controller and tests).
     pub fn regions(&self) -> impl Iterator<Item = (RegionId, Rect, &State)> {
         self.regions.iter().map(|r| (r.id, r.rect, &r.state))
+    }
+
+    #[cfg(test)]
+    pub fn debug_regions(&self) -> String {
+        (self.regions.iter())
+            .map(|r| {
+                format!(
+                    "[{} {:?} {:?} {:?} typing {} known {} still {} ring {} letter {} born {}]",
+                    r.id,
+                    r.rect,
+                    r.state,
+                    r.how,
+                    r.typing,
+                    r.known,
+                    r.still,
+                    r.ring_still,
+                    r.letter_at.as_millis(),
+                    r.born.as_millis()
+                )
+            })
+            .collect()
+    }
+
+    /// What happened since the last call, for the host's log ([`Note`]).
+    pub fn take_notes(&mut self) -> Vec<Note> {
+        std::mem::take(&mut self.notes)
+    }
+
+    /// Box `b` found by a detect: joins the region at its place or on its line, or is a new one.
+    fn place(&mut self, b: TextBox, frame: &Frame, layer: &mut dyn Layer) {
+        // (the largest: a part of the line may still be tracked beside the whole)
+        let place = (0..self.regions.len())
+            .filter(|&i| self.regions[i].rect.same_place(&b.at))
+            .max_by_key(|&i| self.regions[i].rect.area());
+        let line = || self.regions.iter().position(|r| r.rect.same_line(&b.at));
+        match (place, place.or_else(line)) {
+            // still changing (typewriter text growing), or the rest of a line found earlier in part
+            // (its other words settled later): one region for the line (growth alone is no sign of
+            // typing: a banner found in pieces, a scene's shapes round it, grow it too; the letters
+            // landing at its front are: `Front`)
+            (_, Some(i)) if self.regions[i].state == State::Changing => {
+                let r = &mut self.regions[i];
+                r.rect = r.rect.union(&b.at);
+                // (the newest lines: the last one grows while it types)
+                if b.lines.len() >= r.lines.len() {
+                    r.lines = b.lines;
+                }
+                self.join_line(i, frame, layer);
+            }
+            (_, Some(i)) if self.regions[i].rect.grows_by(&b.at) => {
+                // (it grew after it was read: typed out)
+                let (line, style) = (self.regions[i].rect.union(&b.at), self.regions[i].style);
+                self.retire(i, frame, layer);
+                self.add(line, frame);
+                let k = self.regions.len() - 1;
+                (self.regions[k].typing, self.regions[k].style) = (true, style);
+                self.join_line(k, frame, layer);
+            }
+            (None, None) => {
+                // the next line of a box being typed out: the box grows (one text, read once whole)
+                let above = (0..self.regions.len()).find(|&j| {
+                    let t = &self.regions[j];
+                    let line = t.lines.iter().map(|l| l.h).min().unwrap_or(t.rect.h);
+                    t.typing
+                        && t.state == State::Changing
+                        && t.rect.just_above(&b.at)
+                        && 2 * b.at.h <= 3 * line
+                });
+                match above {
+                    Some(j) => {
+                        let r = &mut self.regions[j];
+                        r.rect = r.rect.union(&b.at);
+                        r.lines.extend(b.lines);
+                        r.lines.sort_by_key(|l| l.y);
+                        r.letter_at = frame.at;
+                        self.join_line(j, frame, layer);
+                    }
+                    None => {
+                        self.add(b.at, frame);
+                        let k = self.regions.len() - 1;
+                        if b.lines.len() > 1 {
+                            self.regions[k].lines = b.lines;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Region `i` was being typed out and is finished: it takes in the letters that landed right of
+    /// its last line or under it since it was last found. True when it grew (it settles again before
+    /// it is read).
+    fn finish_typing(&mut self, i: usize, frame: &Frame) -> bool {
+        let w = self.size.0;
+        let r = &mut self.regions[i];
+        (r.typing, r.style.typed) = (false, true);
+        if r.how == How::New {
+            r.how = How::Typed;
+        }
+        let line = r.lines.iter().map(|l| l.h).min().unwrap_or(r.rect.h).max(1);
+        // (right of its last line only: a line under it is found by a detect and joins it)
+        let right = r.front[0].right;
+        let grown = Rect::new(
+            r.rect.x,
+            r.rect.y,
+            (right + line / 4).min(w).max(r.rect.right()) - r.rect.x,
+            r.rect.h,
+        );
+        if grown == r.rect {
+            return false;
+        }
+        // (it settles again from now: read "anyway" only after `settle_max` more)
+        (r.rect, r.born) = (grown, frame.at);
+        if r.lines.len() <= 1 {
+            r.lines = vec![r.rect];
+        }
+        self.reset_cells(i, frame);
+        true
+    }
+
+    /// The settle time of a line typed out in a box of this style (`Config::typed_settle`).
+    fn typed_settle(&self, style: &Style) -> Duration {
+        let (lo, hi) = self.cfg.typed_settle;
+        let mut t = match style.gap.is_zero() {
+            true => hi,
+            false => 2 * style.gap + Duration::from_millis(17),
+        };
+        if let Some(life) = style.life {
+            t = t.min(life / 4);
+        }
+        t.clamp(lo, hi.max(lo))
+    }
+
+    /// Region `i`'s box (its panel) is still there and its text stays inside it: on every side of
+    /// its ring at most a sixth of the cells moved since it was read (where a patch is up, the patch
+    /// as a capture with our layer shows it counts as unmoved). A side that is all scene can't tell:
+    /// not held.
+    fn box_held(&self, i: usize, ring: &[u8]) -> bool {
+        let r = &self.regions[i];
+        let (s, ringc) = (self.cfg.scale.max(1), self.ring_cells());
+        let sides = pixels::ring_sides(r.rect, s, ringc, self.size);
+        if sides.len() != ring.len() || r.ring_ref.len() != ring.len() {
+            return false;
+        }
+        let (mut all, mut n, mut m) = ([0u32; 4], [0u32; 4], [0u32; 4]);
+        for k in 0..ring.len() {
+            let side = sides[k] as usize;
+            all[side] += 1;
+            if r.scene.1.get(k).copied().unwrap_or(false) {
+                continue;
+            }
+            let mut d = ring[k].abs_diff(r.ring_ref[k]);
+            if r.patch.is_some()
+                && let Some(o) = r.ours.1.get(k)
+            {
+                d = d.min(ring[k].abs_diff(*o));
+            }
+            n[side] += 1;
+            m[side] += (d as f32 > self.cfg.change) as u32;
+        }
+        (0..4).all(|k| all[k] == 0 || (n[k] > 0 && 6 * m[k] <= n[k]))
+    }
+
+    /// Region `i`'s text changed with its box still there (box memory): its patch goes now, and the
+    /// new text is read again in place once it settles, with no detect over it.
+    fn reuse(&mut self, i: usize, frame: &Frame, layer: &mut dyn Layer) {
+        self.note_gone(i, frame);
+        self.next_id += 1;
+        let id = self.next_id;
+        let r = &mut self.regions[i];
+        if r.patch.take().is_some() {
+            layer.hide(r.id);
+        }
+        (r.id, r.state, r.known, r.how, r.born, r.drawn) =
+            (id, State::Changing, true, How::Box, frame.at, false);
+        r.stages = Stages {
+            seen: frame.at,
+            ..Stages::default()
+        };
+        // (a box that typed its last text out will again: wait for its letters)
+        r.typing = r.style.typed;
+        r.letter_at = if r.typing { frame.at } else { Duration::ZERO };
+        (r.alpha, r.prev_alpha) = (0.0, 0.0);
+        self.reset_cells(i, frame);
+    }
+
+    /// Region `i`'s text leaves the screen: noted (its lifetime, drawn or not) and learned by its box.
+    fn note_gone(&mut self, i: usize, frame: &Frame) {
+        let settle = self.typed_settle(&self.regions[i].style);
+        let r = &mut self.regions[i];
+        if r.stages.settled.is_none() {
+            return;
+        }
+        let life = frame.at.saturating_sub(r.stages.seen);
+        r.style.life = Some(r.style.life.map_or(life, |l| (3 * l + life) / 4));
+        self.notes.push(Note::Gone {
+            id: r.id,
+            life,
+            drawn: r.drawn,
+            typed: r.style.typed,
+            settle: if r.style.typed {
+                settle
+            } else {
+                Duration::ZERO
+            },
+        });
     }
 
     /// Ends the session's regions: every patch down, jobs in flight forgotten. The caches stay.
@@ -753,11 +1158,16 @@ impl Live {
 
     /// Region `i`'s text changed after it was read: its patch goes now, it leaves the list, and the next
     /// discover runs at once (the new text's box may differ).
-    fn retire(&mut self, i: usize, layer: &mut dyn Layer) {
+    fn retire(&mut self, i: usize, frame: &Frame, layer: &mut dyn Layer) {
+        self.note_gone(i, frame);
         let r = self.regions.remove(i);
         if r.patch.is_some() {
             layer.hide(r.id);
         }
+        if self.styles.len() >= STYLES_KEPT {
+            self.styles.remove(0);
+        }
+        self.styles.push((r.rect, r.style));
         self.retired
             .push(r.patch.map_or(r.rect, |p| p.union(&r.rect)));
         self.discover_now = true;
@@ -774,6 +1184,11 @@ impl Live {
         layer: &mut dyn Layer,
     ) -> Option<Option<Job>> {
         if text.trim().is_empty() {
+            if self.regions[i].known {
+                // (an empty box read before: it waits for its next text)
+                self.regions[i].state = State::Idle;
+                return Some(None);
+            }
             self.regions.remove(i);
             return None;
         }
@@ -844,6 +1259,20 @@ impl Live {
         r.ours = (text, ring);
         r.patch = Some(at);
         r.state = State::Shown { since: frame.at };
+        (r.drawn, r.boxed) = (true, true);
+        let st = r.stages;
+        let read = st.read.unwrap_or(frame.at);
+        self.notes.push(Note::Drawn {
+            id: r.id,
+            how: r.how,
+            seen: st.seen,
+            detected: st.detected,
+            settled: st.settled.unwrap_or(read),
+            read,
+            translated: st.translated.unwrap_or(read),
+            shown: frame.at,
+        });
+        let r = &mut self.regions[i];
         (r.prev_alpha, r.alpha) = (0.0, 0.0);
         if self.cfg.fade_in.is_zero() {
             r.alpha = 1.0;
@@ -887,13 +1316,31 @@ impl Live {
             ours: (Vec::new(), Vec::new()),
             alpha: 0.0,
             prev_alpha: 0.0,
+            how: How::New,
+            stages: Stages {
+                seen: self.asked,
+                detected: Some(frame.at),
+                ..Stages::default()
+            },
+            lines: vec![rect],
+            known: false,
+            typing: false,
+            letter_at: Duration::ZERO,
+            moved_at: frame.at,
+            front: Default::default(),
+            // (a box that left this place taught how it shows its text)
+            style: (self.styles.iter().rev())
+                .find(|(at, _)| at.same_place(&rect))
+                .map_or(Style::default(), |(_, s)| *s),
+            drawn: false,
+            boxed: false,
         });
         self.reset_cells(self.regions.len() - 1, frame);
     }
 
     /// Region `i` (changing) grew: the other parts of its line join it (a changing part on its line; a
     /// read one it now covers, whose patch goes), so a line found in pieces is one region, drawn once.
-    fn join_line(&mut self, mut i: usize, frame: &Frame, layer: &mut dyn Layer) {
+    fn join_line(&mut self, mut i: usize, frame: &Frame, layer: &mut dyn Layer) -> usize {
         let part = |r: &Region, line: &Rect| match r.state {
             State::Changing => r.rect.same_line(line),
             _ => r.rect.same_line(line) && r.rect.overlap(line) > 0,
@@ -902,23 +1349,51 @@ impl Live {
             .find(|&j| j != i && part(&self.regions[j], &self.regions[i].rect))
         {
             self.regions[i].rect = self.regions[i].rect.union(&self.regions[j].rect);
+            self.regions[i].typing |= self.regions[j].typing;
             if self.regions[j].state == State::Changing {
                 self.regions.remove(j);
             } else {
-                self.retire(j, layer);
+                self.retire(j, frame, layer);
             }
             i -= (j < i) as usize;
         }
+        if self.regions[i].lines.len() <= 1 {
+            self.regions[i].lines = vec![self.regions[i].rect];
+        }
         self.reset_cells(i, frame);
+        i
     }
 
     fn reset_cells(&mut self, i: usize, frame: &Frame) {
         let (s, ringc) = (self.cfg.scale.max(1), self.ring_cells());
         let r = &mut self.regions[i];
         (r.sig, r.ring) = pixels::sample(frame, r.rect, s, ringc);
-        (r.still, r.ring_still) = (0, 0);
+        (r.still, r.ring_still, r.moved_at) = (0, 0, frame.at);
         r.age = (vec![0; r.sig.len()], vec![0; r.ring.len()]);
         r.ring_moved = vec![false; r.ring.len()];
+        let line = r.lines.iter().map(|l| l.h).min().unwrap_or(r.rect.h).max(1);
+        let last = r
+            .lines
+            .iter()
+            .max_by_key(|l| l.y)
+            .copied()
+            .unwrap_or(r.rect);
+        let (fw, fh) = (frame.width, frame.height);
+        let x = last.right().min(fw);
+        let right = Rect::new(
+            x,
+            last.y + last.h / 4,
+            (line * self.cfg.front_lines).min(fw - x),
+            (last.h / 2)
+                .max(1)
+                .min(fh.saturating_sub(last.y + last.h / 4)),
+        );
+        let y = r.rect.bottom().min(fh);
+        let under = Rect::new(r.rect.x, y, r.rect.w, line.min(fh - y));
+        r.front = [
+            Front::new(frame, right, s, &r.ring, &r.front[0]),
+            Front::new(frame, under, s, &r.ring, &r.front[1]),
+        ];
     }
 
     /// The discover step (5.1): on its period (or at once after a retire), the frame's tiles at 1/scale
@@ -941,14 +1416,25 @@ impl Live {
         let s = self.cfg.scale.max(1);
         let masked = || -> Vec<Rect> {
             (self.regions.iter())
-                .filter(|r| r.state != State::Changing)
+                .filter(|r| r.state != State::Changing || r.known)
                 .map(|r| r.patch.map_or(r.rect, |p| p.union(&r.rect)))
                 .collect()
         };
         if !due && !(self.discover_now && !b.slow) {
             return None;
         }
-        let now = pixels::grid(frame, s, &masked());
+        let masked = masked();
+        let now = pixels::grid(frame, s, &masked);
+        // (a region masked since the last look is no change: its cells go out of the old look too,
+        // else every text just read was looked for again once)
+        if self.tiles.len() == now.len() {
+            let cw = frame.width.div_ceil(s);
+            for m in &masked {
+                pixels::walk(*m, s, 0, (frame.width, frame.height), |cx, cy, _| {
+                    self.tiles[(cy * cw + cx) as usize] = 0;
+                });
+            }
+        }
         // a look `tile_still` ago first (taken now when there is none: a detect that ran longer than
         // the period left none, and then everything that moved was looked at)
         if !self.tiles.is_empty() && !self.cfg.tile_still.is_zero() {
@@ -999,11 +1485,122 @@ impl Live {
             return None;
         }
         let job = self.job();
-        self.detecting = Some(job);
+        (self.detecting, self.asked) = (Some(job), frame.at);
         self.retired.clear();
         Some(Job::Detect { job, areas })
     }
 }
+
+impl Front {
+    /// Band `at` (clamped by the caller); `ring` = the region's ring cells now (their median is the
+    /// panel's gray); a cell `old` also watched keeps what it knew (a box that grows moves its band).
+    fn new(f: &Frame, at: Rect, s: u32, ring: &[u8], old: &Front) -> Front {
+        let now = match at.area() {
+            0 => Vec::new(),
+            _ => pixels::sample(f, at, s, 0).0,
+        };
+        let (cw, ch) = (f.width.div_ceil(s), f.height.div_ceil(s));
+        let (x0, y0) = ((at.x / s).min(cw), (at.y / s).min(ch));
+        let cols = at.right().div_ceil(s).min(cw) - x0;
+        let mut sorted = ring.to_vec();
+        sorted.sort_unstable();
+        let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
+        // (a panel: most of the ring shows one gray; round a tight bar it is the scene's)
+        let flat = 5 * ring.iter().filter(|c| c.abs_diff(median) <= FLAT).count() >= 3 * ring.len();
+        let mut fr = Front {
+            at,
+            cells: (x0, y0, cols),
+            first: now.clone(),
+            // (still since before it was watched)
+            jump: vec![Duration::ZERO; now.len()],
+            calm: vec![true; now.len()],
+            counted: vec![false; now.len()],
+            now,
+            panel: median,
+            flat: flat && !ring.is_empty(),
+            right: 0,
+        };
+        let (ox, oy, oc) = old.cells;
+        for k in 0..fr.now.len() {
+            let (cx, cy) = (x0 + k as u32 % cols.max(1), y0 + k as u32 / cols.max(1));
+            if (ox..ox + oc).contains(&cx) && cy >= oy {
+                let j = ((cy - oy) * oc + cx - ox) as usize;
+                if j < old.now.len() {
+                    (fr.first[k], fr.jump[k], fr.calm[k], fr.counted[k]) =
+                        (old.first[j], old.jump[j], old.calm[j], old.counted[j]);
+                    fr.panel = old.panel;
+                }
+            }
+        }
+        fr
+    }
+
+    /// Cell `k` may hold a letter: it held still before its last jump, it showed the panel's gray at the
+    /// start, and it shows another gray now.
+    fn inked(&self, k: usize, change: f32) -> bool {
+        let far = |a: u8, b: u8| a.abs_diff(b) as f32 > change;
+        self.flat
+            && self.calm[k]
+            && !far(self.first[k], self.panel)
+            && far(self.now[k], self.first[k])
+    }
+
+    /// The next frame: how many cells got a letter now (a calm panel cell jumped to another gray and
+    /// held it `HOLD`: a moving scene's cells keep changing, or come back).
+    fn step(&mut self, f: &Frame, s: u32, change: f32) -> u32 {
+        if self.at.area() == 0 {
+            return 0;
+        }
+        let now = pixels::sample(f, self.at, s, 0).0;
+        if now.len() != self.now.len() {
+            return 0;
+        }
+        let (x0, _, cols) = self.cells;
+        let mut letters = 0;
+        for (k, v) in now.into_iter().enumerate() {
+            if v.abs_diff(self.now[k]) as f32 > change {
+                self.calm[k] = f.at.saturating_sub(self.jump[k]) >= CALM;
+                (self.jump[k], self.counted[k]) = (f.at, false);
+            }
+            self.now[k] = v;
+            if !self.counted[k]
+                && f.at.saturating_sub(self.jump[k]) >= HOLD
+                && self.inked(k, change)
+            {
+                self.counted[k] = true;
+                letters += 1;
+                let cx = x0 + k as u32 % cols.max(1);
+                self.right = self.right.max((cx + 1) * s);
+            }
+        }
+        letters
+    }
+
+    /// A letter is landing now (it jumped less than `HOLD` ago).
+    fn landing(&self, at: Duration, change: f32) -> bool {
+        (0..self.now.len()).any(|k| at.saturating_sub(self.jump[k]) < HOLD && self.inked(k, change))
+    }
+}
+
+/// A front cell held still this long before it jumped: a letter can land there (a scene moving in
+/// steps holds a few frames, then moves on).
+const CALM: Duration = Duration::from_millis(120);
+/// A letter holds its gray this long once it landed.
+const HOLD: Duration = Duration::from_millis(45);
+const FLAT: u8 = 12;
+/// Text that is not known to be typing settles only this long after a letter landed beside it.
+const QUIET: Duration = Duration::from_millis(150);
+
+/// A box's usual pause between letters: a running mean (a pause at a line's end or a comma moves it a
+/// little, not to its own length).
+fn gap_mean(mean: Duration, gap: Duration) -> Duration {
+    match mean.is_zero() {
+        true => gap,
+        false => (3 * mean + gap) / 4,
+    }
+}
+/// A box being typed out that never stops changing is read after this long anyway.
+const TYPED_MAX: Duration = Duration::from_secs(6);
 
 impl Region {
     /// What "unchanged" means from now on: the cells now, without the scene's. Of the text area (`cols`

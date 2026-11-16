@@ -23,7 +23,7 @@ use crate::features::translate::pipeline::{
     Cache, Deps, Error, cut_off, to_line, translate_blocks,
 };
 use crate::features::translate::{Block, Line, group_blocks, render};
-use crate::live_core::{Crop, Detector, Frame, Painter, Reader, Rect, Translator};
+use crate::live_core::{Crop, Detector, Frame, Painter, Reader, Rect, TextBox, Translator};
 
 /// Rows between stacked crops in the OCR image.
 const GAP: u32 = 16;
@@ -64,8 +64,20 @@ impl Found {
         }
     }
 
+    /// The lines found at `at`, or read round it (a crop with room round
+    /// the box: the smallest such read).
     fn lines(&self, at: &Rect) -> Option<&[Line]> {
-        self.map.get(at).map(|(l, _, _)| l.as_slice())
+        let holds = |r: &Rect| {
+            r.x <= at.x && r.y <= at.y && r.right() >= at.right() && r.bottom() >= at.bottom()
+        };
+        (self.map.get(at))
+            .or_else(|| {
+                (self.map.iter())
+                    .filter(|(r, (_, _, full))| *full && holds(r))
+                    .min_by_key(|(r, _)| r.area())
+                    .map(|(_, v)| v)
+            })
+            .map(|(l, _, _)| l.as_slice())
     }
 
     pub fn take_counts(&mut self) -> [u32; 4] {
@@ -116,7 +128,7 @@ pub struct Detect<'a, D: Deps> {
 }
 
 impl<D: Deps> Detector for Detect<'_, D> {
-    fn detect(&mut self, frame: &Frame, areas: &[Rect]) -> Vec<Rect> {
+    fn detect(&mut self, frame: &Frame, areas: &[Rect]) -> Vec<TextBox> {
         let regions: Vec<Box4> = (areas.iter())
             .map(|a| [a.x, a.y, a.right(), a.bottom()])
             .collect();
@@ -135,14 +147,23 @@ impl<D: Deps> Detector for Detect<'_, D> {
             crate::log!("[opencircle] live: detect {areas:?} -> {boxes:?} (full {full})");
         }
         let mut found = self.found.lock().unwrap_or_else(|e| e.into_inner());
+        let rect = |b: [f32; 4]| {
+            let [x0, y0, x1, y1] = outer(b);
+            let (x0, y0) = (x0.min(frame.width), y0.min(frame.height));
+            Rect::new(x0, y0, x1.min(frame.width) - x0, y1.min(frame.height) - y0)
+        };
         (group_blocks(&lines).into_iter())
             .filter_map(|b| {
-                let [x0, y0, x1, y1] = outer(b.bounds);
-                let at = Rect::new(x0, y0, x1.min(frame.width) - x0, y1.min(frame.height) - y0);
+                let at = rect(b.bounds);
                 (at.area() > 0).then(|| {
-                    let crop = crop(frame.rgba, frame.width, [x0, y0, at.right(), at.bottom()]);
+                    let crop = crop(
+                        frame.rgba,
+                        frame.width,
+                        [at.x, at.y, at.right(), at.bottom()],
+                    );
+                    let lines = b.lines.iter().map(|l| rect(l.bounds)).collect();
                     found.put(at, b.lines, cells(&crop, at.w), full);
-                    at
+                    TextBox { at, lines }
                 })
             })
             .collect()
@@ -679,17 +700,10 @@ mod tests {
         let got = d.detect(&at(&img), &areas);
         assert_eq!(fake.ocr_calls.borrow().len(), 1);
         let want = outer(to_line(tb("x", LINE), W, H).bounds);
+        let rect = Rect::new(want[0], want[1], want[2] - want[0], want[3] - want[1]);
+        assert_eq!(got, [TextBox::from(rect)]);
         assert_eq!(
-            got,
-            [Rect::new(
-                want[0],
-                want[1],
-                want[2] - want[0],
-                want[3] - want[1]
-            )]
-        );
-        assert_eq!(
-            found.lock().unwrap().lines(&got[0]).unwrap()[0].text,
+            found.lock().unwrap().lines(&got[0].at).unwrap()[0].text,
             "Open the gate"
         );
         assert!(errors.borrow().is_none());
@@ -711,7 +725,8 @@ mod tests {
             found: &found,
             errors: &errors,
         }
-        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0];
+        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0]
+            .at;
         let b = [region.x, region.y, region.right(), region.bottom()];
         let crop_of = |f: &[u8]| Crop {
             id: 1,
@@ -785,7 +800,8 @@ mod tests {
             found: &found,
             errors: &errors,
         }
-        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0];
+        .detect(&at(&img), &[Rect::new(0, 20, 240, 64)])[0]
+            .at;
         let b = [region.x, region.y, region.right(), region.bottom()];
         let crop = Crop {
             id: 1,
@@ -976,6 +992,9 @@ mod tests {
                 }
             }
             queue.extend(s.live.on_frame(&f, &mut paint, &mut layer));
+            if std::env::var_os("OC_DBG2").is_some() && n.is_multiple_of(15) {
+                eprintln!("R {n} {}", s.live.debug_regions());
+            }
             while free <= n && !queue.is_empty() {
                 let i = (0..queue.len()).min_by_key(|&i| rank(&queue[i])).unwrap();
                 let job = queue.remove(i);
@@ -1014,6 +1033,9 @@ mod tests {
         // per held event (clip frames at 60 fps; ours at 30)
         let (mut lat, mut stale, mut redraws, mut flicker, mut drawn, mut held) =
             (Vec::new(), 0, 0, 0, 0, 0);
+        // typed-out text (W19): drawn only once its whole box is complete, never in part; how long each
+        // translation was up before its text went, and the texts never drawn while up
+        let (mut early, mut visible, mut never) = (0, Vec::new(), 0);
         let events = truth["events"].as_array().unwrap();
         for e in events {
             let goes_on = |x: &&serde_json::Value| {
@@ -1038,10 +1060,27 @@ mod tests {
                 (b[2] * k) as u32,
                 (b[3] * k) as u32,
             );
-            let (on, off) = (
+            let (mut on, off) = (
                 e["on"].as_u64().unwrap() as u32 / 2,
                 e["off"].as_u64().unwrap() as u32 / 2,
             );
+            if let Some(from) = e["typing_from"].as_u64() {
+                // the box is complete when its last line is
+                let whole = (events.iter())
+                    .filter(|x| x["panel"] == e["panel"] && x["off"] == e["off"])
+                    .filter_map(|x| x["on"].as_u64())
+                    .max()
+                    .unwrap_or(0) as u32
+                    / 2;
+                early += (layer.0.iter())
+                    .filter(|(f, show, _, at)| {
+                        *show
+                            && (from as u32 / 2..whole).contains(f)
+                            && 3 * at.overlap(&r) > r.area()
+                    })
+                    .count();
+                on = whole;
+            }
             // the same text again in the same place right after: not a change
             let mut end = e["off"].as_u64().unwrap();
             while let Some(next) = (events.iter()).find(|x| {
@@ -1056,6 +1095,7 @@ mod tests {
                 })
                 .collect();
             let Some(first) = mine.first() else {
+                never += 1;
                 if std::env::var_os("OC_DBG").is_some() {
                     eprintln!(
                         "DBG missed {:?} {:?} on {on} off {off} box {r:?}",
@@ -1066,6 +1106,7 @@ mod tests {
             };
             drawn += 1;
             lat.push((first.0 - on) as f64 * 33.3);
+            visible.push((off - first.0) as f64 * 33.3);
             redraws += mine.len() - 1;
             if mine.len() > 1 && std::env::var_os("OC_DBG").is_some() {
                 eprintln!("DBG redraw {:?} on {on} off {off}: {:?}", e["text"], mine);
@@ -1081,6 +1122,11 @@ mod tests {
                     stale += 1;
                     eprintln!("stale: {:?} gone at {gone}, text off at {still}", e["text"]);
                 }
+            }
+        }
+        if std::env::var_os("OC_DBG2").is_some() {
+            for e in layer.0.iter().filter(|e| (50..140).contains(&e.0)) {
+                eprintln!("L {e:?}");
             }
         }
         eprintln!(
@@ -1102,6 +1148,12 @@ mod tests {
             busy.as_secs_f64() * 100.0 / (n as f64 / 30.0),
             layer.0.iter().filter(|e| e.1).count(),
             layer.0.iter().filter(|e| !e.1).count(),
+        );
+        visible.sort_by(f64::total_cmp);
+        eprintln!(
+            "drawn before its box was complete {early}; never drawn while up {never}; up before it went median {:?} ms, min {:?} ms",
+            visible.get(visible.len() / 2),
+            visible.first()
         );
     }
 }

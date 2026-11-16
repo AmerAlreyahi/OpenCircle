@@ -113,7 +113,8 @@ pub enum Msg {
     EdgeFade,
     /// The fade-out on Stop is over: close for good.
     Closed,
-    Hide(u64),
+    /// A patch down (sent at that instant: the log says how long it took to reach the layer).
+    Hide(u64, Instant),
     /// Every patch down.
     Clear,
     /// The step failed (shown in the pill; the next step retries).
@@ -597,7 +598,11 @@ impl Live {
             }
             Msg::EdgeFade => self.edge.1 = self.edge.0.at(Instant::now()),
             Msg::Closed => return Outcome::Off,
-            Msg::Hide(id) => {
+            Msg::Hide(id, sent) => {
+                crate::log!(
+                    "[opencircle] live: hide {id} reached the layer +{:.1} ms",
+                    sent.elapsed().as_secs_f64() * 1000.0
+                );
                 self.take(id);
                 return Outcome::Task(self.cut());
             }
@@ -1027,6 +1032,8 @@ struct ToUi<S: FnMut(Msg) -> bool> {
     hides: u32,
     /// Fade-in steps sent (each redraws only its patch).
     fades: u32,
+    /// When the screen showed the frame the core works on (its present time where the OS gives it).
+    shown_at: Instant,
 }
 
 impl<S: FnMut(Msg) -> bool> ToUi<S> {
@@ -1109,8 +1116,11 @@ impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
     }
     fn hide(&mut self, id: u64) {
         self.hides += 1;
-        crate::log!("[opencircle] live: hidden {id}");
-        self.send(Msg::Hide(id));
+        crate::log!(
+            "[opencircle] live: hidden {id} +{:.1} ms after the screen showed its frame",
+            self.shown_at.elapsed().as_secs_f64() * 1000.0
+        );
+        self.send(Msg::Hide(id, Instant::now()));
     }
     fn clear(&mut self) {
         self.send(Msg::Clear);
@@ -1221,6 +1231,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
         shows: 0,
         hides: 0,
         fades: 0,
+        shown_at: Instant::now(),
     };
     let mut langs = ui.chosen.lock().map(|l| l.clone()).unwrap_or_default();
     let _ = to_work.send(Work::Langs(langs.clone()));
@@ -1232,6 +1243,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     crate::log!("[opencircle] live: frames from {}", frames.describe());
     let mut live = core::Live::new(core_config());
     let started = Instant::now();
+    log_clock();
     let (mut last, mut blanked): (Option<Vec<u8>>, Vec<[u32; 4]>) = (None, Vec::new());
     let (mut own, mut area) = (Vec::new(), [0, 0, w, h]);
     let mut looked: Option<Instant> = None;
@@ -1325,6 +1337,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 };
                 jobs.extend(live.complete(d, &frame, &mut paint, &mut over));
             }
+            log_notes(live.take_notes());
         }
         // the next frame (none new: the screen is as it was)
         match frames.next(FRAME_WAIT) {
@@ -1338,6 +1351,9 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 } else {
                     (last, same) = (Some(rgba), 0);
                     stats.new_frames += 1;
+                    let age = frames.age();
+                    layer.shown_at = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
+                    stats.age += age;
                 }
             }
             Ok(_) => {}
@@ -1379,6 +1395,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
         };
         jobs.extend(live.on_frame(&frame, &mut paint, &mut over));
         (stats.frames, stats.watch) = (stats.frames + 1, stats.watch + t.elapsed());
+        log_notes(live.take_notes());
         for job in jobs.drain(..) {
             let copy = matches!(job, Job::Detect { .. }).then(|| Arc::new(rgba.clone()));
             stats.count(&job);
@@ -1389,6 +1406,55 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
     stats.log(&layer, &live, frames.describe());
     drop(to_work);
     let _ = worker.join();
+}
+
+/// The session clock (`Frame::at`, the notes' times) against the wall clock, once: the harness
+/// lines the notes up with the clip's frames by it.
+fn log_clock() {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    crate::log!("[opencircle] live: clock 0 = epoch {ms} ms");
+}
+
+/// The core's notes as log lines (the harness's stage timings and line lifetimes).
+fn log_notes(notes: Vec<core::Note>) {
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    for n in notes {
+        match n {
+            core::Note::Drawn {
+                id,
+                how,
+                seen,
+                detected,
+                settled,
+                read,
+                translated,
+                shown,
+            } => crate::log!(
+                "[opencircle] live: drawn {id} {how:?} seen {:.0} ms, detect +{}, settle +{:.0}, read +{:.0}, \
+                 translate +{:.0}, draw +{:.0} (total {:.0} ms)",
+                ms(seen),
+                detected.map_or("-".into(), |d| format!("{:.0}", ms(d.saturating_sub(seen)))),
+                ms(settled.saturating_sub(detected.unwrap_or(seen))),
+                ms(read.saturating_sub(settled)),
+                ms(translated.saturating_sub(read)),
+                ms(shown.saturating_sub(translated)),
+                ms(shown.saturating_sub(seen)),
+            ),
+            core::Note::Gone {
+                id,
+                life,
+                drawn,
+                typed,
+                settle,
+            } => crate::log!(
+                "[opencircle] live: gone {id} after {:.0} ms, drawn {drawn}, typed {typed} (settle {:.0} ms)",
+                ms(life),
+                ms(settle),
+            ),
+        }
+    }
 }
 
 /// A screen grabbed again and again (`waits` = false: no window frames, no screen frames that
@@ -1650,6 +1716,8 @@ struct Stats {
     found: [u32; 4],
     /// The work thread's time on translations, reads, detects.
     busy: [Duration; 3],
+    /// New frames' ages when read (from the screen showing them: `Frames::age`).
+    age: Duration,
 }
 
 impl Default for Stats {
@@ -1664,6 +1732,7 @@ impl Default for Stats {
             translates: 0,
             found: [0; 4],
             busy: [Duration::ZERO; 3],
+            age: Duration::ZERO,
         }
     }
 }
@@ -1684,7 +1753,7 @@ impl Stats {
              core {:.0} us each; {} detects, {} reads ({} reused, {} OCR'd), {} translates; patches {} made, {} declined; \
              {} shown, {} hidden in all; regions now {:?} (changing, reading, translating, shown, idle); \
              work busy {:.0} % (detect {:.0} ms, read {:.0} ms, translate {:.0} ms); \
-             {} fade steps",
+             {} fade steps; new frames {:.1} ms old when read",
             self.frames,
             self.new_frames,
             f64::from(self.new_frames) / secs,
@@ -1704,6 +1773,7 @@ impl Stats {
             self.busy[1].as_secs_f64() * 1000.0,
             self.busy[0].as_secs_f64() * 1000.0,
             layer.fades,
+            self.age.as_secs_f64() * 1000.0 / f64::from(self.new_frames.max(1)),
         );
         *self = Stats::default();
     }
@@ -1888,7 +1958,7 @@ mod tests {
         let _ = l.update(Msg::Show(2, patch.clone()));
         let _ = l.update(Msg::Show(1, patch.clone()));
         assert_eq!(l.shown(), 2, "one per region");
-        let _ = l.update(Msg::Hide(1));
+        let _ = l.update(Msg::Hide(1, Instant::now()));
         assert_eq!(l.shown(), 1);
         let _ = l.update(Msg::Failed("HTTP 503".into()));
         assert_eq!(l.error.as_deref(), Some("HTTP 503"));
@@ -2265,7 +2335,7 @@ mod tests {
             vec![Msg::Show(2, patch(500)), Msg::Alpha(2, 0.3)],
             vec![Msg::Alpha(2, 1.0)],
             vec![Msg::Show(3, patch(900)), Msg::Alpha(3, 1.0)],
-            vec![Msg::Hide(1)],
+            vec![Msg::Hide(1, Instant::now())],
             vec![],
             vec![Msg::Show(4, patch(1300)), Msg::Alpha(4, 1.0)],
         ];
@@ -2339,6 +2409,7 @@ mod tests {
             shows: 0,
             hides: 0,
             fades: 0,
+            shown_at: Instant::now(),
         };
         let at = Rect {
             x: 6,

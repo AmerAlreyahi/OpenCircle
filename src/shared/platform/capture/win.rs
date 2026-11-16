@@ -143,6 +143,22 @@ pub struct Duplication {
     /// Frames read and the time copying them took (the log line).
     pub frames: u32,
     pub copy: std::time::Duration,
+    /// How long before `next` returned it the screen showed the last frame read (its present time).
+    pub age: std::time::Duration,
+}
+
+/// Time since `present` (a QueryPerformanceCounter value: a duplicated frame's present time).
+fn since_present(present: i64) -> std::time::Duration {
+    use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+    let (mut now, mut freq) = (0i64, 0i64);
+    // SAFETY: each writes one i64 of ours.
+    let ok = unsafe {
+        QueryPerformanceCounter(&mut now).is_ok() && QueryPerformanceFrequency(&mut freq).is_ok()
+    };
+    match ok && freq > 0 && now >= present {
+        true => std::time::Duration::from_secs_f64((now - present) as f64 / freq as f64),
+        false => std::time::Duration::ZERO,
+    }
 }
 
 impl Duplication {
@@ -242,6 +258,7 @@ impl Duplication {
                         size: (w, h),
                         frames: 0,
                         copy: Default::default(),
+                        age: Default::default(),
                     });
                 }
             }
@@ -301,6 +318,7 @@ impl Duplication {
                 );
             }
             self.context.Unmap(&self.staging, 0);
+            self.age = since_present(info.LastPresentTime);
             self.frames += 1;
             self.copy += started.elapsed();
             Ok(Some(rgba))

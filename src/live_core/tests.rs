@@ -77,10 +77,10 @@ fn at(n: u64) -> Duration {
 struct Screen<'a>(&'a [(Rect, String)]);
 
 impl Detector for Screen<'_> {
-    fn detect(&mut self, _: &Frame, areas: &[Rect]) -> Vec<Rect> {
+    fn detect(&mut self, _: &Frame, areas: &[Rect]) -> Vec<TextBox> {
         (self.0.iter())
             .filter(|(r, _)| areas.iter().any(|a| a.overlap(r) > 0))
-            .map(|(r, _)| *r)
+            .map(|(r, _)| TextBox::from(*r))
             .collect()
     }
 }
@@ -177,6 +177,39 @@ struct Sim {
     n: u64,
     detects: usize,
     reads: Vec<String>,
+    /// The screen's lines are one box (`Block`: found and read as one), not one box each.
+    block: bool,
+}
+
+/// The screen's lines as ONE text box, as OCR groups a dialogue box's lines: found whole where any of
+/// it changed, and read as all its lines under the crop, top to bottom.
+struct Block<'a>(&'a [(Rect, String)]);
+
+impl Detector for Block<'_> {
+    fn detect(&mut self, _: &Frame, areas: &[Rect]) -> Vec<TextBox> {
+        let lines: Vec<Rect> = (self.0.iter())
+            .filter(|(r, _)| areas.iter().any(|a| a.overlap(r) > 0))
+            .map(|(r, _)| *r)
+            .collect();
+        let Some(at) = lines.iter().copied().reduce(|a, b| a.union(&b)) else {
+            return Vec::new();
+        };
+        vec![TextBox { at, lines }]
+    }
+}
+
+impl Reader for Block<'_> {
+    fn read(&mut self, crops: &[Crop]) -> Vec<String> {
+        (crops.iter())
+            .map(|c| {
+                (self.0.iter())
+                    .filter(|(r, _)| 2 * r.overlap(&c.at) > r.area())
+                    .map(|(_, t)| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
 }
 
 impl Sim {
@@ -191,6 +224,7 @@ impl Sim {
             n: 0,
             detects: 0,
             reads: Vec::new(),
+            block: false,
         }
     }
 
@@ -218,12 +252,21 @@ impl Sim {
                 Job::Translate { .. } => self.lat[2],
             };
             let read = matches!(job, Job::Read(_));
-            for done in job.run(
-                f,
-                &mut Screen(&self.screen),
-                &mut Screen(&self.screen),
-                &mut self.tr,
-            ) {
+            let done = match self.block {
+                true => job.run(
+                    f,
+                    &mut Block(&self.screen),
+                    &mut Block(&self.screen),
+                    &mut self.tr,
+                ),
+                false => job.run(
+                    f,
+                    &mut Screen(&self.screen),
+                    &mut Screen(&self.screen),
+                    &mut self.tr,
+                ),
+            };
+            for done in done {
                 if let (true, Done::Read { text, .. }) = (read, &done) {
                     self.reads.push(text.clone());
                 }
@@ -497,14 +540,18 @@ fn boxes_found_before_a_change_never_place_the_new_line() {
         sim.step(&draw("Short", short, n));
         assert!(sim.n < 300);
     }
-    // change it while a detect of the old screen is still out
+    // change it while a detect of the old screen is still out (a mark beside the box makes one look
+    // there: the box itself, read, is masked from the look)
     while !sim
         .pending
         .iter()
         .any(|(_, d)| matches!(d, Done::Detected { .. }))
     {
         let n = sim.n;
-        sim.step(&draw("Short", short, n));
+        let mut img = draw("Short", short, n);
+        img.fill(Rect::new(236, 64, 12, 12), [200, 60, 60]);
+        sim.step(&img);
+        assert!(sim.n < 600, "a detect is asked");
     }
     sim.screen = vec![(LINE, "A much longer line".into())];
     while !sim.layer.says("<A much longer line>") {
@@ -845,7 +892,10 @@ fn the_rest_of_a_line_found_later_joins_it() {
         let f = img.frame(n);
         for job in live.on_frame(&f, &mut Paint, &mut layer) {
             if let Job::Detect { job, .. } = job {
-                let boxes = std::mem::take(&mut found);
+                let boxes = std::mem::take(&mut found)
+                    .into_iter()
+                    .map(TextBox::from)
+                    .collect();
                 found = vec![right];
                 live.complete(Done::Detected { job, boxes }, &f, &mut Paint, &mut layer);
             }
@@ -874,7 +924,10 @@ fn a_line_found_in_pieces_in_one_detect_is_one_region() {
         let f = img.frame(n);
         for job in live.on_frame(&f, &mut Paint, &mut layer) {
             if let Job::Detect { job, .. } = job {
-                let boxes = std::mem::take(&mut found);
+                let boxes = std::mem::take(&mut found)
+                    .into_iter()
+                    .map(TextBox::from)
+                    .collect();
                 live.complete(Done::Detected { job, boxes }, &f, &mut Paint, &mut layer);
             }
         }
@@ -1013,4 +1066,122 @@ fn a_long_detect_is_followed_by_a_rest() {
     let (old, new) = (detects(0), detects(Config::default().discover_rest));
     assert!(old >= 12, "back to back: {old}");
     assert!(new * 3 <= old * 2, "with a rest: {new} of {old}");
+}
+
+/// Box memory: a box read before whose text changes with its panel still there: the patch goes in that
+/// frame and the new text is read again in place, with no detect over it.
+#[test]
+fn a_known_box_is_read_again_in_place_without_a_detect() {
+    let (mut sim, _) = shown_sim("Open the gate");
+    let detects = sim.detects;
+    let img = scene("Close the gate", None);
+    sim.screen = vec![(LINE, "Close the gate".into())];
+    let hides = sim.layer.hides;
+    sim.step(&img);
+    assert_eq!(sim.layer.hides, hides + 1, "hidden in the frame it changed");
+    sim.until(&img, |s| s.layer.says("<Close the gate>"));
+    assert_eq!(sim.detects, detects, "no detect over a known box");
+    assert_eq!(sim.reads.last().map(String::as_str), Some("Close the gate"));
+}
+
+const TYPE_PANEL: Rect = Rect::new(20, 136, 440, 120);
+/// (lighter than the test painter's black patch: an emptied box must not look like our patch)
+const TYPE_FILL: [u8; 3] = [40, 44, 60];
+const TYPE_ROWS: [Rect; 3] = [
+    Rect::new(40, 146, 360, 22),
+    Rect::new(40, 178, 360, 22),
+    Rect::new(40, 210, 360, 22),
+];
+
+/// The typed box's panel with `lines` on it, the last one typed `w` px so far (`w` = None: whole);
+/// sets the sim's screen to what OCR finds there.
+fn typed(sim: &mut Sim, lines: &[&str], w: Option<u32>) -> Img {
+    let mut img = Img::new(480, 270);
+    img.fill(TYPE_PANEL, TYPE_FILL);
+    sim.screen.clear();
+    for (k, (row, text)) in TYPE_ROWS.iter().zip(lines).enumerate() {
+        let part = match (w, k + 1 == lines.len()) {
+            (Some(w), true) => w,
+            _ => row.w,
+        };
+        let at = Rect::new(row.x, row.y, part, row.h);
+        img.text(at, text, Some(TYPE_FILL));
+        let shown = &text[..text.len() * part as usize / row.w as usize];
+        sim.screen.push((at, shown.to_string()));
+    }
+    img
+}
+
+/// Types `lines` out into the box, 6 px every 2 frames (~30 letters a second at this size), asserting
+/// nothing new is drawn meanwhile; returns the frame after the last letter.
+fn type_out(sim: &mut Sim, lines: &[&str]) -> u64 {
+    let shows = sim.layer.shows;
+    for k in 1..=lines.len() {
+        for w in (6..=TYPE_ROWS[0].w).step_by(6) {
+            let img = typed(sim, &lines[..k], Some(w));
+            for _ in 0..2 {
+                sim.step(&img);
+                assert_eq!(
+                    sim.layer.shows, shows,
+                    "nothing drawn while it types (line {k}, {w} px)"
+                );
+            }
+        }
+    }
+    sim.n
+}
+
+/// A dialogue box typed out letter by letter (3 lines, each starting under the last): OCR finds only
+/// what is typed so far. Nothing is drawn before the whole box is complete (a part of a sentence
+/// misleads); then its whole text is read, translated and drawn ONCE, soon after the last letter (the
+/// box's settle time is learned from its pauses between letters). Then auto-advance: the next
+/// speaker's line types into the SAME box: the old patch goes in the frame the text is replaced, and
+/// the new text is drawn once, whole, again soon after its last letter.
+#[test]
+fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
+    let texts = [
+        "The road north is closed",
+        "so the merchants wait",
+        "in the valley tonight",
+    ];
+    let mut sim = Sim::new(Config::default(), [3, 3, 3]);
+    sim.block = true;
+    let empty = typed(&mut sim, &[], None);
+    for _ in 0..30 {
+        sim.step(&empty);
+    }
+    let last = type_out(&mut sim, &texts);
+    let done = typed(&mut sim, &texts, None);
+    let whole = format!("<{}>", texts.join(" "));
+    sim.until(&done, |s| s.layer.says(&whole));
+    let ms = |frames: u64| frames * 1000 / 60;
+    assert!(
+        ms(sim.n - last) <= 300,
+        "drawn {} ms after the last letter",
+        ms(sim.n - last)
+    );
+    for _ in 0..60 {
+        sim.step(&done);
+    }
+    assert_eq!(sim.layer.shows, 1, "drawn once, whole");
+    // the next speaker's line types into the same box
+    let next = ["Then we leave at dawn, all of us"];
+    let hides = sim.layer.hides;
+    let img = typed(&mut sim, &next, Some(6));
+    sim.step(&img);
+    assert_eq!(
+        sim.layer.hides,
+        hides + 1,
+        "the old patch goes in the frame its text is replaced"
+    );
+    let last = type_out(&mut sim, &next);
+    let done = typed(&mut sim, &next, None);
+    let line = format!("<{}>", next[0]);
+    sim.until(&done, |s| s.layer.says(&line));
+    assert!(
+        ms(sim.n - last) <= 300,
+        "the next line drawn {} ms after its last letter",
+        ms(sim.n - last)
+    );
+    assert_eq!(sim.layer.shows, 2, "drawn once, whole");
 }
