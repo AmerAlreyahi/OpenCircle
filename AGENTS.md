@@ -1226,3 +1226,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   unpinned"): Snip started while the overlay is open (bar's Snip, Alt+A, tray) takes the screen exactly as it looks then,
   WITH the bar and an open (unpinned) AI chat in the picture, like "Snip the translated page"; the user then picks the bar,
   the chat or anything else. Snip's own toolbar / hints are never in the picture. Floating widgets stay pickable as before.
+- Waking the owner's PC screen (owner, 2026-11-16, "next time you can move the cursor to wake the screen"; he controls the PC
+  remotely and is away): for an OK'd run on his PC, a worker may wake the display with a tiny mouse MOVE only (e.g. 1 px and
+  back, SendInput relative move) and then hold it on (SetThreadExecutionState). Still never a click, key press or any input
+  that can reach a window (the 2026-11-14 SendKeys rule stands).
