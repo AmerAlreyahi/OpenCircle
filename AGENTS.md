@@ -1242,3 +1242,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   ships on the processor (OptimaMT). Hide, don't delete: the code stays, the setting "GPU for live translation" is hidden and
   Off, nothing downloads, the release workflow does not attach the helper. models-v4 stays uploaded. Revisit only if a
   measured leap appears (e.g. a much better or much smaller model).
+- Whole sentences only, no caption strip (owner, 2026-11-16): Live translates and draws only a COMPLETE sentence / box text,
+  once, when it has finished (a sentence over several lines is translated as one); no line-by-line translation (partial
+  sentences mislead). Reading the text while it types is allowed only as a hidden background speed-up. The caption strip idea is
+  rejected.
+- Honest value verdicts (owner, 2026-11-16; in the owner's general rules too): say plainly when data shows no value / no big
+  leap / not worth it, and say "drop it"; measure end to end before building a piece; disagree with numbers, then follow him.
