@@ -663,7 +663,19 @@ impl Live {
                     self.regions[i].known = false;
                 }
             } else {
+                // letters landing beside a box found and read: its line is still being typed out, so
+                // what was read is a part of it (drawn, it was left over the growing line, W31). Only
+                // with its ring still (a scene starting to move round a box isn't letters), and not
+                // for a box the typed-out path or box memory grew itself (its letters are taken in)
+                let change = self.cfg.change;
+                let r = &mut self.regions[i];
+                let grew = r.front.iter_mut().fold(false, |grew, f| {
+                    f.step(frame, s, change);
+                    grew | f.grew(change)
+                }) && r.how == How::New
+                    && r.ring_still > 0;
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
+                let changed = changed || grew;
                 // (box memory only for a text box: one whose translation was drawn, a few lines;
                 // a detect box over a whole scene is looked for again)
                 let boxed = self.cfg.box_memory
@@ -1685,6 +1697,18 @@ impl Front {
         letters
     }
 
+    /// A letter landed in it since it was set up (held or not): on a cell that showed the panel's own
+    /// gray (within `FLAT / 3`), clear of the panel's last column (a cell half over the scene past a
+    /// tight HUD panel, or the scene just under it, took a passing shape for a letter, W31).
+    fn grew(&self, change: f32) -> bool {
+        let cols = self.cells.2.max(1);
+        (0..self.now.len()).any(|k| {
+            k as u32 % cols + 1 < self.reach
+                && self.first[k].abs_diff(self.panel) <= FLAT / 3
+                && self.inked(k, change)
+        })
+    }
+
     /// A letter is landing now (it jumped less than `HOLD` ago).
     fn landing(&self, at: Duration, change: f32) -> bool {
         (0..self.now.len()).any(|k| at.saturating_sub(self.jump[k]) < HOLD && self.inked(k, change))
@@ -1738,10 +1762,16 @@ impl Region {
         if 2 * text.iter().filter(|&&m| m).count() > n {
             text.fill(false);
         }
-        // (the padding: about a quarter of the box's height on every side, rounded up: a cell half on
+        // (the padding: about a quarter of a line's height on every side, rounded up: a cell half on
         // the panel moves with the scene too; a third of the rows and columns at least stay, round the
-        // text's middle)
-        let pad = rows.div_ceil(4).min(rows.saturating_sub(2) / 3);
+        // text's middle. Of a LINE: a quarter of a three-line box's height left its first and last
+        // lines out, and the last one typed on under a patch for 2 s, W31)
+        let line = self.lines.iter().map(|l| l.h).min().unwrap_or(self.rect.h);
+        let line_rows =
+            (rows as u64 * line.min(self.rect.h) as u64).div_ceil(self.rect.h.max(1) as u64);
+        let pad = (line_rows as usize)
+            .div_ceil(4)
+            .min(rows.saturating_sub(2) / 3);
         if pad > 0 && cols >= 3 * pad + 2 {
             for (i, t) in text.iter_mut().enumerate() {
                 let (x, y) = (i % cols, i / cols);

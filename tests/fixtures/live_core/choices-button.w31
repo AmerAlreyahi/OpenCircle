@@ -1,0 +1,5 @@
+# choices-button: frames 600..900 of choices.mp4, crop 552,724 816x112 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 choice 1 0 0 53 56 10 92 10 2 2 200 24 The silver compass
+1 choice 1 53 53 224 58 10 89 8 2 2 200 24 Near the river ford
+2 choice 1 224 224 300 63 10 77 8 2 2 200 24 The silent monk

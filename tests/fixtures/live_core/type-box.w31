@@ -1,0 +1,5 @@
+# type-box: frames 100..480 of type.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 typed 1 20 98 352 17 9 185 10 3 3 290 53 The road north is closed until spring,
+1 typed 1 105 171 352 18 23 177 10 3 3 290 53 so the merchants wait in the valley
+2 typed 1 174 244 352 18 37 151 10 3 3 290 53 and the inn is full every night.

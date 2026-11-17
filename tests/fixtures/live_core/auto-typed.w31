@@ -1,0 +1,8 @@
+# auto-typed: frames 100..560 of auto.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 speaker 1 20 20 211 13 5 22 8 3 3 290 53 Mira
+1 typed 1 20 160 211 13 27 219 11 3 3 290 53 Promise me you will come back this time.
+2 speaker 1 211 211 429 13 6 20 7 3 3 290 53 Ines
+3 typed 1 211 358 429 13 27 219 11 3 3 290 53 Promise me you will come back this time.
+4 speaker 1 429 429 460 13 5 22 8 3 3 290 53 Mira
+5 typed 1 429 587 460 13 27 217 11 3 3 290 53 My father built this tower stone by stone.

@@ -3,7 +3,9 @@
 # (src/live_core/tests.rs, a fake clock: deterministic). Fails if a patch is stale, an unchanged line is
 # drawn again, a held line is missed, or the text -> drawn time (frames x 1000/60 ms) regresses past
 # the limits below (the measured numbers + a margin). Raise a limit only on purpose, in the commit that
-# changes the core's timing. Needs `cargo test` (release: a minute with the cache).
+# changes the core's timing. Then the recorded-frame cases (tests/fixtures/live_core/*.cells: the harness
+# clips' real decoded frames around the owner-PC failures, W31): none may leave a patch stale, draw unchanged
+# text again or draw a part of a typed sentence. Needs `cargo test` (release: a minute with the cache).
 set -eu
 MED_MAX=${MED_MAX:-500} P95_MAX=${P95_MAX:-800} MAX_MAX=${MAX_MAX:-800}
 out=$(cargo test --release replay_of_the_talk_clip -- --nocapture 2>&1) || { echo "$out"; exit 1; }
@@ -19,4 +21,6 @@ fail() { echo "FAIL: $1"; bad=1; }
 [ "$(num median)" -le "$MED_MAX" ] || fail "median $(num median) ms > $MED_MAX"
 [ "$(num p95)" -le "$P95_MAX" ] || fail "p95 $(num p95) ms > $P95_MAX"
 [ "$(num max)" -le "$MAX_MAX" ] || fail "max $(num max) ms > $MAX_MAX"
+rec=$(cargo test --release recorded_frames_leave_nothing_stale -- --nocapture 2>&1) || { echo "$rec"; exit 1; }
+echo "$rec" | grep '^recorded replay' || { echo "$rec"; echo "no 'recorded replay' lines"; exit 1; }
 exit $bad

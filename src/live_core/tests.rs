@@ -179,6 +179,20 @@ struct Sim {
     reads: Vec<String>,
     /// The screen's lines are one box (`Block`: found and read as one), not one box each.
     block: bool,
+    /// The text boxes as a detect finds them (their lines in `screen`; empty: each screen line a box).
+    boxes: Vec<TextBox>,
+}
+
+/// Boxes found where any of them changed (read by `Block`: the lines under the crop).
+struct Boxes<'a>(&'a [TextBox]);
+
+impl Detector for Boxes<'_> {
+    fn detect(&mut self, _: &Frame, areas: &[Rect]) -> Vec<TextBox> {
+        (self.0.iter())
+            .filter(|b| areas.iter().any(|a| a.overlap(&b.at) > 0))
+            .cloned()
+            .collect()
+    }
 }
 
 /// The screen's lines as ONE text box, as OCR groups a dialogue box's lines: found whole where any of
@@ -225,6 +239,7 @@ impl Sim {
             detects: 0,
             reads: Vec::new(),
             block: false,
+            boxes: Vec::new(),
         }
     }
 
@@ -253,6 +268,12 @@ impl Sim {
             };
             let read = matches!(job, Job::Read(_));
             let done = match self.block {
+                _ if !self.boxes.is_empty() => job.run(
+                    f,
+                    &mut Boxes(&self.boxes),
+                    &mut Block(&self.screen),
+                    &mut self.tr,
+                ),
                 true => job.run(
                     f,
                     &mut Block(&self.screen),
@@ -1264,4 +1285,401 @@ fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
         ms(sim.n - last)
     );
     assert_eq!(sim.layer.shows, 2, "drawn once, whole");
+}
+
+/// One text event of a recorded clip's ground truth (`docs/internal/live-test/gen_clips.py`): on screen
+/// from `from` (its first letter when typed out) to `off`, whole from `on`.
+#[derive(Debug, Clone)]
+struct Shot {
+    id: usize,
+    kind: String,
+    held: bool,
+    from: u64,
+    on: u64,
+    off: u64,
+    rect: Rect,
+    panel: Option<Rect>,
+    text: String,
+}
+
+/// `id kind held from on off bx by bw bh (px py pw ph | - - - -) text` a line, `#` = a comment.
+fn shots(src: &str) -> Vec<Shot> {
+    (src.lines().filter(|l| !l.starts_with('#') && !l.is_empty()))
+        .map(|l| {
+            let f: Vec<&str> = l.splitn(15, ' ').collect();
+            let n = |i: usize| f[i].parse::<u32>().unwrap();
+            Shot {
+                id: n(0) as usize,
+                kind: f[1].to_string(),
+                held: f[2] == "1",
+                from: n(3) as u64,
+                on: n(4) as u64,
+                off: n(5) as u64,
+                rect: Rect::new(n(6), n(7), n(8), n(9)),
+                panel: (f[10] != "-").then(|| Rect::new(n(10), n(11), n(12), n(13))),
+                text: f[14].to_string(),
+            }
+        })
+        .collect()
+}
+
+impl Shot {
+    /// Both typed into one box (the same panel, gone together): one text.
+    fn boxed_with(&self, o: &Shot) -> bool {
+        self.kind == "typed" && o.kind == "typed" && o.panel == self.panel && o.off == self.off
+    }
+
+    /// What it shows on frame `n` (typed out: its letters so far, as gen_clips.py draws them, its box as
+    /// wide as they are), None = not on screen.
+    fn at(&self, n: u64) -> Option<(Rect, String)> {
+        if !(self.from..self.off).contains(&n) {
+            return None;
+        }
+        if n >= self.on {
+            return Some((self.rect, self.text.clone()));
+        }
+        let all = self.text.chars().count() as u64;
+        let k = ((n - self.from + 1) * all / (self.on - self.from + 1)).max(1);
+        let text: String = self.text.chars().take(k as usize).collect();
+        let w = (self.rect.w as u64 * k / all).max(1) as u32;
+        Some((Rect::new(self.rect.x, self.rect.y, w, self.rect.h), text))
+    }
+}
+
+/// Replay knobs (`OC_BOXPAD`, `OC_LAT=detect,read,translate` frames) for the ignored whole-clip run.
+fn box_pad() -> u32 {
+    std::env::var("OC_BOXPAD").map_or(2, |v| v.parse().unwrap())
+}
+fn replay_lat() -> [u64; 3] {
+    std::env::var("OC_LAT").map_or([4, 1, 3], |v| {
+        let v: Vec<u64> = v.split(',').map(|x| x.parse().unwrap()).collect();
+        [v[0], v[1], v[2]]
+    })
+}
+
+/// A text on screen: its box, its text, the shots in it.
+type Seen = (Rect, String, Vec<usize>);
+
+/// What the screen holds on frame `n`, as OCR finds it: a line's box a little past its ink, the lines
+/// typed into one box (same panel, gone together) as one block read top to bottom.
+fn screen_at(all: &[Shot], n: u64, pad: u32) -> (Vec<Seen>, Vec<(Rect, String)>) {
+    let mut out: Vec<Seen> = Vec::new();
+    let mut lines = Vec::new();
+    for s in all {
+        let Some((r, t)) = s.at(n) else { continue };
+        let r = r.padded(pad);
+        lines.push((r, t.clone()));
+        match (out.iter_mut()).find(|(_, _, ids)| s.boxed_with(&all[ids[0]])) {
+            Some(b) => {
+                b.0 = b.0.union(&r);
+                b.1 = format!("{} {t}", b.1);
+                b.2.push(s.id);
+            }
+            None => out.push((r, t, vec![s.id])),
+        }
+    }
+    (out, lines)
+}
+
+/// A recorded clip's frames through the core with fake engines that know the ground truth: per text
+/// (the same text again in the same box right after counts as one) the frames its patch stayed over
+/// other text and how often it was drawn.
+#[derive(Debug, Default)]
+struct Replayed {
+    /// (shot id under it, what the patch said, frames it was up over other text) per stale patch.
+    stale: Vec<(usize, String, u64)>,
+    /// (shot id, text, draws) per text drawn more than once.
+    redraws: Vec<(usize, String, usize)>,
+    /// Patches drawn for a part of their text (typed out, drawn before its last letter).
+    partial: usize,
+    /// Held texts drawn, of all held; frames from whole to first drawn.
+    drawn: usize,
+    held: usize,
+    lat: Vec<u64>,
+}
+
+fn replay_frames(
+    all: &[Shot],
+    (w, h): (u32, u32),
+    frames: std::ops::Range<u64>,
+    mut next: impl FnMut(&mut Vec<u8>) -> bool,
+    pad: u32,
+    cfg: Config,
+) -> Replayed {
+    let mut chain: Vec<usize> = (0..all.len()).collect();
+    for (i, s) in all.iter().enumerate() {
+        if let Some(p) = (all[..i].iter()).rev().find(|p| {
+            p.text == s.text && s.from == s.on && p.rect.same_place(&s.rect) && p.off == s.from
+        }) {
+            chain[i] = chain[p.id];
+        }
+    }
+    let mut sim = Sim::new(cfg, replay_lat()); // detect 67 ms, read 17 ms, translate 50 ms
+    sim.n = frames.start;
+    let mut img = Img::new(w, h);
+    let mut stale: HashMap<RegionId, (usize, String, u64)> = HashMap::new();
+    let mut draws: HashMap<usize, usize> = HashMap::new();
+    let mut first: HashMap<usize, u64> = HashMap::new();
+    let (mut shows, mut partial) = (0, 0);
+    for n in frames.clone() {
+        if !next(&mut img.px) {
+            break;
+        }
+        let (screen, lines) = screen_at(all, n, pad);
+        // (a block's lines as OCR finds them: its box, each line; read as all of them under the crop)
+        sim.boxes = (screen.iter())
+            .map(|(at, _, _)| TextBox {
+                at: *at,
+                lines: (lines.iter())
+                    .filter(|(l, _)| 2 * l.overlap(at) > l.area())
+                    .map(|(l, _)| *l)
+                    .collect(),
+            })
+            .collect();
+        sim.screen = lines;
+        sim.step(&img);
+        if let Ok(t) = std::env::var("OC_TRACE")
+            && let Some((a, b)) = t.split_once('-')
+            && (a.parse::<u64>().unwrap()..b.parse().unwrap()).contains(&n)
+        {
+            let shows: Vec<_> = sim.layer.log[shows..]
+                .iter()
+                .map(|(_, r, t)| (r, t))
+                .collect();
+            eprintln!(
+                "T {n} {} shows {shows:?} hides {}",
+                sim.live.debug_regions(),
+                sim.layer.hides
+            );
+        }
+        let under = |r: &Rect| {
+            (screen.iter())
+                .filter(|(s, _, _)| s.overlap(r) > 0)
+                .max_by_key(|(s, _, _)| s.overlap(r))
+        };
+        for (id, (r, said)) in &sim.layer.shown {
+            match under(r) {
+                Some((_, t, _)) if *said == format!("<{t}>") => {}
+                u => {
+                    let who = u.map_or(usize::MAX, |(_, _, ids)| ids[0]);
+                    stale.entry(*id).or_insert((who, said.clone(), 0)).2 += 1;
+                }
+            }
+        }
+        for (_, r, said) in &sim.layer.log[shows..] {
+            if let Some((_, t, ids)) = under(r)
+                && *said == format!("<{t}>")
+            {
+                let c = chain[ids[0]];
+                *draws.entry(c).or_default() += 1;
+                // (from when it was whole: a typed box once its last line is)
+                let whole = (all.iter())
+                    .filter(|o| o.id == ids[0] || all[ids[0]].boxed_with(o))
+                    .map(|o| o.on)
+                    .max()
+                    .unwrap_or(0);
+                first.entry(c).or_insert(n.saturating_sub(whole));
+                // (typed into one box: whole once all its lines are)
+                let s = &all[ids[0]];
+                partial += (all.iter())
+                    .filter(|o| o.id == s.id || s.boxed_with(o))
+                    .any(|o| n < o.on) as usize;
+            }
+        }
+        shows = sim.layer.log.len();
+    }
+    let held: Vec<&Shot> = (all.iter())
+        .filter(|s| s.held && chain[s.id] == s.id && s.on < frames.end && s.off > frames.start)
+        .filter(|s| !all[..s.id].iter().any(|o| o.boxed_with(s)))
+        .filter(|s| s.off - s.on >= 30)
+        .collect();
+    let mut lat: Vec<u64> = held
+        .iter()
+        .filter_map(|s| first.get(&s.id).copied())
+        .collect();
+    lat.sort();
+    let mut out = Replayed {
+        drawn: lat.len(),
+        partial,
+        held: held.len(),
+        lat,
+        ..Default::default()
+    };
+    out.stale = stale.into_values().collect();
+    out.stale.sort();
+    out.redraws = (draws.into_iter())
+        .filter(|(_, d)| *d > 1)
+        .map(|(c, d)| (c, all[c].text.clone(), d))
+        .collect();
+    out.redraws.sort();
+    out
+}
+
+/// A whole recorded clip, decoded by ffmpeg at full size (`OC_CLIP=<dir>/<name>`: `<name>.mp4` and
+/// `<name>.w31` = its truth as `shots` reads it). Run: `OC_CLIP=... cargo test --release
+/// replay_a_recorded_clip -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn replay_a_recorded_clip() {
+    let Some(clip) = std::env::var_os("OC_CLIP") else {
+        return;
+    };
+    let clip = std::path::PathBuf::from(clip);
+    let all = shots(&std::fs::read_to_string(clip.with_extension("w31")).unwrap());
+    let mut ff = std::process::Command::new("ffmpeg")
+        .args(["-loglevel", "error", "-i"])
+        .arg(clip.with_extension("mp4"))
+        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = ff.stdout.take().unwrap();
+    let r = replay_frames(
+        &all,
+        (1920, 1080),
+        0..3600,
+        |px| std::io::Read::read_exact(&mut out, px).is_ok(),
+        box_pad(),
+        Config {
+            layer_seen: false,
+            ..Config::default()
+        },
+    );
+    let _ = ff.kill();
+    let _ = ff.wait();
+    for s in &r.stale {
+        println!("stale {s:?}");
+    }
+    for d in &r.redraws {
+        println!("redraw {d:?}");
+    }
+    let ms = |f: u64| f * 1000 / 60;
+    println!(
+        "{}: drawn {} of {} held, median {:?} ms; stale patches {} (> 1 frame {}), redraws {}, partial {}",
+        clip.display(),
+        r.drawn,
+        r.held,
+        r.lat.get(r.lat.len() / 2).map(|f| ms(*f)),
+        r.stale.len(),
+        r.stale.iter().filter(|s| s.2 > 1).count(),
+        r.redraws.iter().map(|d| d.2 - 1).sum::<usize>(),
+        r.partial
+    );
+}
+
+/// A recorded fixture's frames (tests/fixtures/live_core/*.cells, written by the cutscene harness'
+/// fixture_dump.py from a clip and its truth):
+/// the core's 1/4-scale cells of a crop, each frame as deltas from the one before: runs of
+/// (unchanged cells: a varint, changed cells: a count byte, then each delta as an i8; -128 = an i16
+/// follows). Returns the size in cells and the frames.
+fn recorded(data: &[u8]) -> ((u32, u32), Vec<Vec<u8>>) {
+    let mut i = 0;
+    let varint = |i: &mut usize| {
+        let (mut v, mut shift) = (0usize, 0);
+        loop {
+            let b = data[*i];
+            *i += 1;
+            v |= ((b & 127) as usize) << shift;
+            shift += 7;
+            if b < 128 {
+                return v;
+            }
+        }
+    };
+    let (w, h, n) = (varint(&mut i), varint(&mut i), varint(&mut i));
+    let mut now = vec![0i16; w * h];
+    let mut frames = Vec::with_capacity(n);
+    for _ in 0..n {
+        let mut k = 0;
+        while k < now.len() {
+            k += varint(&mut i);
+            let run = data[i] as usize;
+            i += 1;
+            for _ in 0..run {
+                let d = match data[i] as i8 {
+                    -128 => {
+                        i += 2;
+                        i16::from_le_bytes([data[i - 1], data[i]])
+                    }
+                    d => d as i16,
+                };
+                i += 1;
+                now[k] += d;
+                k += 1;
+            }
+        }
+        frames.push(now.iter().map(|&v| v as u8).collect());
+    }
+    ((w as u32, h as u32), frames)
+}
+
+/// The harness clips' real decoded frames around the owner-PC failures (W29: talk's subtitle -> blank
+/// panel, choices' text -> text in one button, auto's and type's typed-out lines), as the app's capture
+/// sees them (the layer never in them, as on Windows), through the core with fake engines that know the
+/// truth: no patch left over changed text, no unchanged text drawn again, none drawn for a part of a
+/// typed sentence, every held text drawn. `scripts/live-replay-check.sh` runs it in CI.
+#[test]
+fn recorded_frames_leave_nothing_stale_and_draw_each_text_once_whole() {
+    let cases: &[(&str, &[u8], &str)] = &[
+        (
+            "talk-blank",
+            include_bytes!("../../tests/fixtures/live_core/talk-blank.cells"),
+            include_str!("../../tests/fixtures/live_core/talk-blank.w31"),
+        ),
+        (
+            "choices-button",
+            include_bytes!("../../tests/fixtures/live_core/choices-button.cells"),
+            include_str!("../../tests/fixtures/live_core/choices-button.w31"),
+        ),
+        (
+            "auto-typed",
+            include_bytes!("../../tests/fixtures/live_core/auto-typed.cells"),
+            include_str!("../../tests/fixtures/live_core/auto-typed.w31"),
+        ),
+        (
+            "type-box",
+            include_bytes!("../../tests/fixtures/live_core/type-box.cells"),
+            include_str!("../../tests/fixtures/live_core/type-box.w31"),
+        ),
+    ];
+    let mut bad = Vec::new();
+    for (name, data, truth) in cases {
+        let ((w, h), frames) = recorded(data);
+        let all = shots(truth);
+        let mut it = frames.iter();
+        let r = replay_frames(
+            &all,
+            (w, h),
+            0..frames.len() as u64,
+            |px| {
+                let Some(f) = it.next() else { return false };
+                for (p, v) in px.as_chunks_mut::<4>().0.iter_mut().zip(f) {
+                    *p = [*v, *v, *v, 255];
+                }
+                true
+            },
+            1,
+            // (cells already: per pixel, the ring 2 cells as 8 px at full size)
+            Config {
+                scale: 1,
+                ring_px: 2,
+                layer_seen: false,
+                ..Config::default()
+            },
+        );
+        let ms = |f: u64| f * 1000 / 60;
+        let redraws: usize = r.redraws.iter().map(|d| d.2 - 1).sum();
+        println!(
+            "recorded replay {name}: {} of {} held drawn, median {} ms; stale {}, redraws {redraws}, partial {}",
+            r.drawn,
+            r.held,
+            r.lat.get(r.lat.len() / 2).map_or(0, |f| ms(*f)),
+            r.stale.len(),
+            r.partial
+        );
+        if !r.stale.is_empty() || redraws > 0 || r.partial > 0 || r.drawn < r.held {
+            bad.push((name, r));
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
 }

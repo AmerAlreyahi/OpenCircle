@@ -1,0 +1,8 @@
+# talk-blank: frames 2540..2760 of talk.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 speaker 1 0 0 37 13 5 22 8 3 3 290 53 Mira
+1 subtitle 1 0 0 37 42 26 211 11 3 3 290 53 There is bread in the cart, help yourself.
+2 speaker 1 37 37 164 13 6 20 7 3 3 290 53 Ines
+3 subtitle 1 37 37 164 49 26 198 11 3 3 290 53 The stars look different from up here.
+4 speaker 1 182 182 220 13 5 38 8 3 3 290 53 Old Tavi
+5 subtitle 1 182 182 220 64 26 168 11 3 3 290 53 Look, the river is glowing again.
