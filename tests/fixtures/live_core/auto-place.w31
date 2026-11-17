@@ -1,0 +1,10 @@
+# auto-place: frames 2180..2600 of auto.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 speaker 1 0 0 22 13 6 20 7 3 3 290 53 Ines
+1 typed 1 0 0 22 12 27 198 11 3 3 290 53 The stars look different from up here.
+2 speaker 1 22 22 201 13 5 59 9 3 3 290 53 Captain Rho
+3 typed 1 22 162 201 13 27 217 11 3 3 290 53 My father built this tower stone by stone.
+4 speaker 1 201 201 389 13 6 20 7 3 3 290 53 Ines
+5 typed 1 201 326 389 12 27 218 11 3 3 290 53 The lighthouse keeper owes me a favour.
+6 speaker 1 389 389 420 13 5 59 9 3 3 290 53 Captain Rho
+7 typed 1 389 521 420 13 27 217 11 3 3 290 53 My father built this tower stone by stone.

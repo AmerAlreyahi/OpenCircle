@@ -1257,9 +1257,10 @@ fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
     sim.until(&done, |s| s.layer.says(&whole));
     let ms = |frames: u64| frames * 1000 / 60;
     // (350: a letter landing beside the box after its read sends it back to wait for its last one,
-    // W31: what was read missed it)
+    // W31: what was read missed it; 400: a typed box waits at least 170 ms for its next letter, a
+    // line break's pause, W33)
     assert!(
-        ms(sim.n - last) <= 350,
+        ms(sim.n - last) <= 400,
         "drawn {} ms after the last letter",
         ms(sim.n - last)
     );
@@ -1287,6 +1288,100 @@ fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
         ms(sim.n - last)
     );
     assert_eq!(sim.layer.shows, 2, "drawn once, whole");
+}
+
+/// A line break's pause (150 ms: the next line's first letter comes a few letter times after the last)
+/// is no end of a typed box: nothing is drawn after its first line, its whole text once after the last
+/// letter. (A guard: the 50 ms lower settle bound's failure, the box read at a line's end and drawn in
+/// part, shows only in the whole-clip replay of the type clip, W33; this synthetic box passes with it.)
+#[test]
+fn a_pause_at_a_line_break_is_no_end_of_the_typed_box() {
+    let texts = ["The road north is closed", "so the merchants wait"];
+    // (quick engines: a box read at the line's end is drawn within the pause)
+    let mut sim = Sim::new(Config::default(), [1, 1, 1]);
+    sim.block = true;
+    let empty = typed(&mut sim, &[], None);
+    for _ in 0..30 {
+        sim.step(&empty);
+    }
+    type_out(&mut sim, &texts[..1]);
+    let first = typed(&mut sim, &texts[..1], None);
+    for _ in 0..9 {
+        sim.step(&first);
+        assert_eq!(
+            sim.layer.shows, 0,
+            "nothing drawn in the line break's pause"
+        );
+    }
+    for w in (6..=TYPE_ROWS[1].w).step_by(6) {
+        let img = typed(&mut sim, &texts, Some(w));
+        for _ in 0..2 {
+            sim.step(&img);
+            assert_eq!(
+                sim.layer.shows, 0,
+                "nothing drawn while the next line types ({w} px)"
+            );
+        }
+    }
+    let done = typed(&mut sim, &texts, None);
+    let whole = format!("<{}>", texts.join(" "));
+    sim.until(&done, |s| s.layer.says(&whole));
+    for _ in 0..60 {
+        sim.step(&done);
+    }
+    assert_eq!(sim.layer.shows, 1, "drawn once, whole");
+}
+
+/// A new text where a box typed its last one out waits for its letters from its first frame: its first
+/// word, found in the pause after it, is not read and drawn alone (W33: "Promise", then the line).
+#[test]
+fn a_new_text_where_a_box_typed_out_waits_for_its_letters() {
+    let mut live = Live::new(Config::default());
+    let img = Img::new(64, 64);
+    let f = img.frame(0);
+    let at = Rect::new(8, 8, 40, 12);
+    let typed = Style {
+        typed: true,
+        ..Style::default()
+    };
+    live.styles.push((at, typed));
+    live.add(at, &f);
+    assert!(live.regions[0].typing, "a box that typed out types again");
+    live.add(Rect::new(8, 40, 40, 12), &f);
+    assert!(
+        !live.regions[1].typing,
+        "elsewhere: not until its letters show it"
+    );
+}
+
+/// A box grown to its letters so far keeps the rightmost letter its front saw: the next letters land
+/// past it, more than `near` past the band's start (they were never counted, so the line typing on was
+/// read and drawn in part, W33).
+#[test]
+fn a_grown_box_keeps_its_rightmost_letter() {
+    let img = Img::new(200, 40);
+    let f = img.frame(0);
+    let old = Front {
+        at: Rect::new(100, 10, 80, 12),
+        right: 150,
+        ..Front::default()
+    };
+    let new = Front::new(
+        &f,
+        (Rect::new(100, 10, 90, 12), Rect::new(100, 6, 90, 3), 12),
+        4,
+        &[],
+        &old,
+    );
+    assert_eq!(new.right, 150);
+    let past = Front::new(
+        &f,
+        (Rect::new(160, 10, 40, 12), Rect::new(160, 6, 40, 3), 12),
+        4,
+        &[],
+        &old,
+    );
+    assert_eq!(past.right, 0, "a band past it starts afresh");
 }
 
 /// One text event of a recorded clip's ground truth (`docs/internal/live-test/gen_clips.py`): on screen
@@ -1555,8 +1650,10 @@ fn replay_a_recorded_clip() {
         0..3600,
         |px| std::io::Read::read_exact(&mut out, px).is_ok(),
         box_pad(),
+        // (`OC_TYPED=0` / `1`: the typed-out path off / on, for A/B runs)
         Config {
             layer_seen: false,
+            typed_out: std::env::var("OC_TYPED").map_or(Config::default().typed_out, |v| v == "1"),
             ..Config::default()
         },
     );
@@ -1631,6 +1728,66 @@ fn recorded(data: &[u8]) -> ((u32, u32), Vec<Vec<u8>>) {
     ((w as u32, h as u32), frames)
 }
 
+/// A recorded fixture through the core (`recorded_frames_leave_nothing_stale_...`), printed; Some = it left
+/// a patch stale, drew unchanged text again, drew a part of a typed sentence or missed a held text. A
+/// fixture at full size (its truth's first line says "full size") runs as full frames do (scale 4, the
+/// ring 8 px).
+fn replay_fixture(name: &str, data: &[u8], truth: &str) -> Option<Replayed> {
+    let ((w, h), frames) = recorded(data);
+    let all = shots(truth);
+    let full = truth
+        .lines()
+        .next()
+        .is_some_and(|l| l.contains("full size"));
+    let mut it = frames.iter();
+    let r = replay_frames(
+        &all,
+        (w, h),
+        0..frames.len() as u64,
+        |px| {
+            let Some(f) = it.next() else { return false };
+            for (p, v) in px.as_chunks_mut::<4>().0.iter_mut().zip(f) {
+                *p = [*v, *v, *v, 255];
+            }
+            true
+        },
+        if full { box_pad() } else { 1 },
+        // (cells already: per pixel, the ring 2 cells as 8 px at full size)
+        Config {
+            scale: if full { 4 } else { 1 },
+            ring_px: if full { 8 } else { 2 },
+            layer_seen: false,
+            ..Config::default()
+        },
+    );
+    let ms = |f: u64| f * 1000 / 60;
+    let redraws: usize = r.redraws.iter().map(|d| d.2 - 1).sum();
+    println!(
+        "recorded replay {name}: {} of {} held drawn, median {} ms; stale {}, redraws {redraws}, partial {}",
+        r.drawn,
+        r.held,
+        r.lat.get(r.lat.len() / 2).map_or(0, |f| ms(*f)),
+        r.stale.len(),
+        r.partial
+    );
+    (!r.stale.is_empty() || redraws > 0 || r.partial > 0 || r.drawn < r.held).then_some(r)
+}
+
+/// One fixture from disk (`OC_FIXTURE=<dir>/<name>`: `<name>.cells` + `<name>.w31`), for trying a new one.
+#[test]
+#[ignore]
+fn replay_a_recorded_fixture() {
+    let Some(f) = std::env::var_os("OC_FIXTURE") else {
+        return;
+    };
+    let f = std::path::PathBuf::from(f);
+    let data = std::fs::read(f.with_extension("cells")).unwrap();
+    let truth = std::fs::read_to_string(f.with_extension("w31")).unwrap();
+    if let Some(r) = replay_fixture(&f.display().to_string(), &data, &truth) {
+        println!("{r:#?}");
+    }
+}
+
 /// The harness clips' real decoded frames around the owner-PC failures (W29: talk's subtitle -> blank
 /// panel, choices' text -> text in one button, auto's and type's typed-out lines), as the app's capture
 /// sees them (the layer never in them, as on Windows), through the core with fake engines that know the
@@ -1664,45 +1821,26 @@ fn recorded_frames_leave_nothing_stale_and_draw_each_text_once_whole() {
             include_bytes!("../../tests/fixtures/live_core/type-box.cells"),
             include_str!("../../tests/fixtures/live_core/type-box.w31"),
         ),
+        // (W33, the typed-out path on: a block's last line typed under the block's width; a line typing
+        // on after its first word was read; a new speaker's line in a box that typed before)
+        (
+            "type-block",
+            include_bytes!("../../tests/fixtures/live_core/type-block.cells"),
+            include_str!("../../tests/fixtures/live_core/type-block.w31"),
+        ),
+        (
+            "auto-first-word",
+            include_bytes!("../../tests/fixtures/live_core/auto-first-word.cells"),
+            include_str!("../../tests/fixtures/live_core/auto-first-word.w31"),
+        ),
+        (
+            "auto-place",
+            include_bytes!("../../tests/fixtures/live_core/auto-place.cells"),
+            include_str!("../../tests/fixtures/live_core/auto-place.w31"),
+        ),
     ];
-    let mut bad = Vec::new();
-    for (name, data, truth) in cases {
-        let ((w, h), frames) = recorded(data);
-        let all = shots(truth);
-        let mut it = frames.iter();
-        let r = replay_frames(
-            &all,
-            (w, h),
-            0..frames.len() as u64,
-            |px| {
-                let Some(f) = it.next() else { return false };
-                for (p, v) in px.as_chunks_mut::<4>().0.iter_mut().zip(f) {
-                    *p = [*v, *v, *v, 255];
-                }
-                true
-            },
-            1,
-            // (cells already: per pixel, the ring 2 cells as 8 px at full size)
-            Config {
-                scale: 1,
-                ring_px: 2,
-                layer_seen: false,
-                ..Config::default()
-            },
-        );
-        let ms = |f: u64| f * 1000 / 60;
-        let redraws: usize = r.redraws.iter().map(|d| d.2 - 1).sum();
-        println!(
-            "recorded replay {name}: {} of {} held drawn, median {} ms; stale {}, redraws {redraws}, partial {}",
-            r.drawn,
-            r.held,
-            r.lat.get(r.lat.len() / 2).map_or(0, |f| ms(*f)),
-            r.stale.len(),
-            r.partial
-        );
-        if !r.stale.is_empty() || redraws > 0 || r.partial > 0 || r.drawn < r.held {
-            bad.push((name, r));
-        }
-    }
+    let bad: Vec<_> = (cases.iter())
+        .filter_map(|(name, data, truth)| replay_fixture(name, data, truth).map(|r| (name, r)))
+        .collect();
     assert!(bad.is_empty(), "{bad:#?}");
 }

@@ -1,0 +1,5 @@
+# type-block: frames 460..840 of type.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 typed 1 22 95 359 18 9 174 10 3 3 290 53 Bring the lantern and the old map,
+1 typed 1 102 183 359 18 23 177 10 3 3 290 53 we leave when the bells ring twice.
+2 typed 1 187 250 359 18 37 174 10 3 3 290 53 Nobody follows us past the bridge.

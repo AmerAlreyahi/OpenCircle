@@ -1,0 +1,8 @@
+# auto-first-word: frames 1560..1860 of auto.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 speaker 1 0 0 66 13 5 38 8 3 3 290 53 Old Tavi
+1 typed 1 0 11 66 12 27 212 11 3 3 290 53 There is bread in the cart, help yourself.
+2 speaker 1 66 66 278 13 5 38 8 3 3 290 53 Old Tavi
+3 typed 1 66 222 278 13 27 219 11 3 3 290 53 Promise me you will come back this time.
+4 speaker 1 278 278 300 13 5 59 9 3 3 290 53 Captain Rho
+5 typed 1 278 407 300 13 27 168 11 3 3 290 53 Look, the river is glowing again.

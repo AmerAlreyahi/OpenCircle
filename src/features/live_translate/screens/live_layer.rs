@@ -1131,11 +1131,15 @@ impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
 }
 
 /// The core's thresholds here: its defaults (a patch fades in over 120 ms).
-/// Box memory as the VMs' A/B test hook sets it (`engines::box_memory_hook`).
+/// Box memory and the typed-out path as the VMs' A/B test hooks set them (`engines::box_memory_hook`,
+/// `engines::typed_out_hook`).
 fn core_config() -> core::Config {
     let mut cfg = core::Config::default();
     if let Some(on) = engines::box_memory_hook() {
         cfg.box_memory = on;
+    }
+    if let Some(on) = engines::typed_out_hook() {
+        cfg.typed_out = on;
     }
     cfg
 }

@@ -232,14 +232,16 @@ pub struct Config {
     pub cache_signatures: usize,
     /// A line being typed out is finished once no new letter came for its box's settle time: learned
     /// per box from its pauses between letters (twice their mean, a quarter of its lines' lifetime at
-    /// most), within these bounds; the upper one until the box has shown how it types.
+    /// most), within these bounds; the upper one until the box has shown how it types. The lower one
+    /// spans a line break or a word space at 15 letters a second (a letter's time twice, ~130 ms, plus
+    /// its hold): at 50 ms a box was read at the end of a line and drawn without its next one (W33).
     pub typed_settle: (Duration, Duration),
     /// Where a box's next letters land is watched: this many line heights right of its last line, and
     /// one line height under it.
     pub front_lines: u32,
-    /// Tell a box typed out letter by letter from its front and read it only once whole. Off: on the
-    /// harness's fight clip a scene's shapes still passed for letters (3 of 10 banners lost in the
-    /// replay); the box memory and the rest work without it.
+    /// Tell a box typed out letter by letter from its front and read it only once whole (owner: whole
+    /// sentences only). On since W33: the fight clip's banners are all drawn with it (10 of 10 in the
+    /// replay; W19's loss was before the panel / front fixes), and typed text is drawn once, whole.
     pub typed_out: bool,
     /// Box memory: a text box whose text changes with its panel held is read again in place, with no
     /// detect over it. Off (lead, 2026-11-17): its in-place re-read pays a full OCR of the crop and lost
@@ -272,9 +274,9 @@ impl Default for Config {
             read_batch: 8,
             cache_texts: 2000,
             cache_signatures: 512,
-            typed_settle: (Duration::from_millis(50), Duration::from_millis(300)),
+            typed_settle: (Duration::from_millis(170), Duration::from_millis(300)),
             front_lines: 4,
-            typed_out: false,
+            typed_out: true,
             box_memory: false,
             layer_seen: true,
         }
@@ -1425,6 +1427,12 @@ impl Live {
 
     fn add(&mut self, rect: Rect, frame: &Frame) {
         self.next_id += 1;
+        // (a box that left this place taught how it shows its text; one that typed its text out will
+        // again: a new text there waits for its letters from the start, else its first word, found
+        // in a pause, was drawn alone, W33)
+        let style = (self.styles.iter().rev())
+            .find(|(at, _)| at.same_place(&rect))
+            .map_or(Style::default(), |(_, s)| *s);
         self.regions.push(Region {
             id: self.next_id,
             rect,
@@ -1452,15 +1460,15 @@ impl Live {
             },
             lines: vec![rect],
             known: false,
-            typing: false,
-            letter_at: Duration::ZERO,
+            typing: style.typed && self.cfg.typed_out,
+            letter_at: match style.typed {
+                true => frame.at,
+                false => Duration::ZERO,
+            },
             moved_at: frame.at,
             hits: 0,
             front: Default::default(),
-            // (a box that left this place taught how it shows its text)
-            style: (self.styles.iter().rev())
-                .find(|(at, _)| at.same_place(&rect))
-                .map_or(Style::default(), |(_, s)| *s),
+            style,
             drawn: false,
             boxed: false,
         });
@@ -1681,7 +1689,13 @@ impl Front {
             flat: flat && !ring.is_empty(),
             reach,
             near,
-            right: 0,
+            // (the rightmost letter so far, where the band stays: a box that grew kept the letters
+            // landed beyond it, and a next letter further than `near` past its start was never
+            // counted, so a line typing on after a retype was read and drawn in part, W33)
+            right: match old.right > at.x && old.right <= at.right() {
+                true => old.right,
+                false => 0,
+            },
         };
         let (ox, oy, oc) = old.cells;
         for k in 0..fr.now.len() {

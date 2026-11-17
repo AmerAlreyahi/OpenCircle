@@ -510,6 +510,11 @@ pub fn box_memory_hook() -> Option<bool> {
     crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_BOX").map(|v| v == "1")
 }
 
+/// Test hook `OPENCIRCLE_LIVE_TYPED=1` / `0`: the typed-out path on / off (the VMs' A/B runs).
+pub fn typed_out_hook() -> Option<bool> {
+    crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_TYPED").map(|v| v == "1")
+}
+
 /// An error once (not every frame), then nothing until it changes.
 pub fn report_once(last: &mut Option<String>, e: String) -> Option<String> {
     if last.as_ref() == Some(&e) {
