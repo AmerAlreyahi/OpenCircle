@@ -670,12 +670,17 @@ impl Live {
                 // word in a calm moment of the fight was drawn again and again), never where the frame shows our own patch (X11: a translation wider than its line),
                 // and not for a box that box memory reads itself
                 let change = self.cfg.change;
-                let ours = self.regions[i].patch.filter(|_| self.cfg.layer_seen);
+                let ours: Vec<Rect> = match self.cfg.layer_seen {
+                    true => self.regions.iter().filter_map(|r| r.patch).collect(),
+                    false => Vec::new(),
+                };
                 let r = &mut self.regions[i];
-                let grew = r.front.iter_mut().fold(false, |grew, f| {
-                    f.step(frame, s, change);
-                    grew | f.grew(change, s, ours)
-                }) && r.how != How::Box
+                // (right of its last line at once; under it, a new line, once a letter held there:
+                // the scene just under a tight HUD panel passed for letters on the VMs)
+                let under = r.front[1].step(frame, s, change) > 0;
+                r.front[0].step(frame, s, change);
+                let grew = (under || r.front[0].grew(change, s, &ours))
+                    && r.how != How::Box
                     && r.ring_still > 0
                     && r.on_panel();
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
@@ -1738,16 +1743,16 @@ impl Front {
     }
 
     /// A letter landed in it since it was set up (held or not): on a cell that showed the panel's own
-    /// gray (within `FLAT / 3`), clear of the panel's last column (a cell half over the scene past a
-    /// tight HUD panel, or the scene just under it, took a passing shape for a letter, W31), and of
-    /// `ours` (our patch, where the frame shows it).
-    fn grew(&self, change: f32, s: u32, ours: Option<Rect>) -> bool {
+    /// gray (within `FLAT / 3`), clear of the panel's last two columns (a cell half over the scene past a
+    /// tight HUD panel took a passing shape for a letter, W31), and of `ours` (our patches, where the
+    /// frame shows them: X11).
+    fn grew(&self, change: f32, s: u32, ours: &[Rect]) -> bool {
         let (x0, y0, cols) = (self.cells.0, self.cells.1, self.cells.2.max(1));
         (0..self.now.len()).any(|k| {
             let (cx, cy) = (x0 + k as u32 % cols, y0 + k as u32 / cols);
-            k as u32 % cols + 1 < self.reach
+            k as u32 % cols + 2 < self.reach
                 && self.first[k].abs_diff(self.panel) <= FLAT / 3
-                && ours.is_none_or(|p| p.overlap(&Rect::new(cx * s, cy * s, s, s)) == 0)
+                && (ours.iter()).all(|p| p.overlap(&Rect::new(cx * s, cy * s, s, s)) == 0)
                 && self.inked(k, change)
         })
     }
