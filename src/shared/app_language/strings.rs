@@ -1448,6 +1448,8 @@ strings! {
         | "تضمين الشاشة";
     chat_stop: "Stop"
         | "إيقاف";
+    chat_jump: "Jump to latest"
+        | "إلى الأحدث";
     chat_send: "Send"
         | "إرسال";
     chat_back: "Back to the chat"

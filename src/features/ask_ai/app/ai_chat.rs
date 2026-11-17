@@ -546,9 +546,17 @@ impl App {
     }
 
     /// A question sent now may end the tool (#170): not in Snip, never while
-    /// the user draws or drags the chat.
+    /// the user draws or drags the chat, nor while a menu or a download card is
+    /// open or a song is being searched: the overlay waits (the user closes it).
     pub(crate) fn ends_tool(&self) -> bool {
-        !self.o.drawing && self.o.chat_drag.is_none() && !matches!(self.o.purpose, Purpose::Snip(_))
+        let menu = (self.o.translate.as_ref()).is_some_and(|(_, s)| s.picker_open());
+        let downloading = matches!(self.o.reader, crate::app::Reader::Downloading(_));
+        !self.o.drawing
+            && self.o.chat_drag.is_none()
+            && !matches!(self.o.purpose, Purpose::Snip(_))
+            && !menu
+            && !downloading
+            && self.o.song.is_none()
     }
 
     /// The selection cut out of the frozen frame, in physical pixels; with the

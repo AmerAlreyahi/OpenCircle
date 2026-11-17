@@ -100,6 +100,11 @@ pub(super) fn starts_pinned(stays: StaysOpen) -> bool {
     stays == StaysOpen::Always
 }
 
+/// The log is at its end (within a few pixels): `content` tall, `view` shown, scrolled `y`.
+fn at_end(content: f32, view: f32, y: f32) -> bool {
+    content - view - y <= 24.0
+}
+
 /// A model id that names a safety / moderation classifier: it rates messages
 /// instead of answering them (the drawer warns).
 pub fn classifier(model: &str) -> bool {
@@ -125,6 +130,10 @@ pub enum Msg {
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
     Answered(Result<(), ask_ai::AiError>),
+    /// The log scrolled (#128).
+    Scrolled(iced::widget::scrollable::Viewport),
+    /// "Jump to latest": back to the end, following again.
+    JumpToLatest,
     /// The error card's Show / Hide details.
     Details,
     /// Search the crop with Lens (the chat's "Search the image with Lens").
@@ -213,6 +222,9 @@ pub struct AiChat {
     spin: Option<(Instant, f32)>,
     /// The error card shows its whole detail.
     details: bool,
+    /// The log shows its end: a growing answer is followed. Scrolled up, the
+    /// view stays put and "Jump to latest" shows (#128).
+    following: bool,
 }
 
 enum State {
@@ -325,6 +337,7 @@ impl AiChat {
             note: None,
             spin: None,
             details: false,
+            following: true,
         }
     }
 
@@ -630,7 +643,21 @@ impl AiChat {
             }
             (State::Ask { chat, .. }, Msg::Delta(piece)) => {
                 chat.delta(&piece);
-                // Follow the answer. (anchor_bottom() hid short content in iced 0.14.)
+                // Follow the answer while the view is at its end. (anchor_bottom() hid
+                // short content in iced 0.14, and would move text being read.)
+                if self.following {
+                    return operation::snap_to_end(LOG);
+                }
+            }
+            (_, Msg::Scrolled(v)) => {
+                self.following = at_end(
+                    v.content_bounds().height,
+                    v.bounds().height,
+                    v.absolute_offset().y,
+                )
+            }
+            (_, Msg::JumpToLatest) => {
+                self.following = true;
                 return operation::snap_to_end(LOG);
             }
             (_, Msg::Details) => self.details = !self.details,
@@ -685,6 +712,7 @@ impl AiChat {
 
     /// Asks `question`; the answer streams in on a thread. Nothing is sent before this.
     fn send(&mut self, question: &str) -> Task<Msg> {
+        self.following = true; // a new question always follows
         // a second question in the same chat pins it
         if let State::Ask { chat, .. } = &self.state
             && !chat.turns.is_empty()
@@ -877,3 +905,16 @@ fn open_in_browser_with(
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod follow_tests {
+    use super::at_end;
+
+    #[test]
+    fn follows_only_near_the_end() {
+        assert!(at_end(1000.0, 400.0, 600.0));
+        assert!(at_end(1000.0, 400.0, 580.0));
+        assert!(!at_end(1000.0, 400.0, 500.0));
+        assert!(at_end(300.0, 400.0, 0.0)); // short content
+    }
+}

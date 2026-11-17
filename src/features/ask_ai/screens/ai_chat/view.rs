@@ -274,8 +274,22 @@ impl AiChat {
                 self.composer(placeholder, include, attached, streaming)
             }
         };
-        let body = crate::shared::kit::scroll::quiet(log).id(LOG).height(Fill);
-        (body.into(), Some(input))
+        let log = crate::shared::kit::scroll::quiet(log)
+            .id(LOG)
+            .height(Fill)
+            .on_scroll(Msg::Scrolled);
+        let mut body = column![log].spacing(STACK).align_x(Center);
+        if streaming && !self.following {
+            let label = t!(chat_jump);
+            body = body.push(crate::shared::kit::button::compact(
+                Icon::ChevronDown.glyph(),
+                Some(label),
+                crate::shared::kit::button::labelled_width(label),
+                (false, false),
+                Some(Msg::JumpToLatest),
+            ));
+        }
+        (body.width(Fill).height(Fill).into(), Some(input))
     }
 
     /// The user's turn `i`: the selection's chip when it went along, the
