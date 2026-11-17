@@ -1330,3 +1330,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   Live acceptance tests on his PC tonight without asking again, under every standing owner-PC rule (backups + hash lists, Run
   value, scheduled-task start, no key presses, only the 1 px wake and at most one checked click into their own window, private
   window with YouTube captions off, check no other agent's test is running, restore byte-identical). Valid for this night only.
+- Live hidden, v0.3.0 = AI core (owner, 2026-11-17, "B, start the AI core, then the Studio, then come back and create this new
+  engine; v0.3.0 will be the AI core"; SUPERSEDES "Live page translation" as 0.3.0's scope and the version plan's order): Live
+  translate is HIDDEN entirely (Labs row, shortcut, bar/tray items; hide, don't delete: code and config keys stay). Order:
+  v0.3.0 AI core (AI online) -> Snip Studio -> the new Live engine (page mode per W38's design + game "watch area"). The page-mode
+  work (W40/W41/W42 branches, W37/W38 reports, the acceptance criteria) is kept for that later round. The v0.3.0 draft built on
+  85fde993 (old Live) is void.
