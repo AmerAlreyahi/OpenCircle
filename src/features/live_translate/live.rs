@@ -1224,4 +1224,416 @@ mod tests {
             visible.first()
         );
     }
+
+    /// W37 lab: still screens through the whole host path (real PP-OCR, a translator that reverses
+    /// the line), each the SAME picture for `OC_SECS` (60) at 30 fps, perturbed per `OC_NOISE`:
+    /// `still` (none), `lsb` (+-2 per channel, as a capture's noise), `cursor` (a blinking caret at
+    /// `OC_CURSOR=x,y`), `fire` (an animated fire glow in `OC_FIRE="x,y,w,h;..."` behind the text:
+    /// bright text pixels stay as they are, the see-through panel shows it). Per screen: shows,
+    /// hides, those after the first 10 s, places drawn with more than one text; coverage against
+    /// one-shot Translate on the same picture (lines / words) and why each line it translates is
+    /// not up at the end. Each job takes its measured time of frame time (one at a time).
+    /// `OC_STILL="a.png:de;b.png:en" OC_NOISE=fire XDG_DATA_HOME=... cargo test --release live_on_still_screens -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_on_still_screens() {
+        use crate::features::ask_ai::AiError;
+        use crate::features::text_reading::{Engine, OcrError, Read as R, models_dir};
+        use crate::features::translate::pipeline::translate_frame;
+        use crate::live_core::{Done, Job};
+        use std::time::{Duration, Instant};
+        struct Real(Mutex<Engine>, R);
+        impl Deps for Real {
+            fn recognize(&self, rgba: &[u8], w: u32, h: u32) -> Result<Vec<TextBlock>, OcrError> {
+                self.0.lock().unwrap().recognize(rgba, w, h, self.1)
+            }
+            // `OC_RTL=1`: letters as Arabic ones (an Arabic translation's length and direction)
+            fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+                let ar = std::env::var_os("OC_RTL").is_some();
+                Ok((texts.iter())
+                    .map(|t| match ar {
+                        true => (t.chars())
+                            .map(|c| match c.is_ascii_alphabetic() {
+                                true => char::from_u32(
+                                    0x0627 + (c.to_ascii_lowercase() as u32 - 97) % 26,
+                                )
+                                .unwrap(),
+                                false => c,
+                            })
+                            .collect(),
+                        false => t.chars().rev().collect(),
+                    })
+                    .collect())
+            }
+        }
+        #[derive(Default)]
+        struct Log(Vec<(u32, bool, u64, Rect)>, u32, HashMap<u64, Vec<u8>>);
+        impl crate::live_core::Layer for Log {
+            fn show(&mut self, id: u64, at: Rect, rgba: &[u8]) {
+                self.0.push((self.1, true, id, at));
+                self.2.insert(id, rgba.to_vec());
+            }
+            fn alpha(&mut self, _: u64, _: f32) {}
+            fn hide(&mut self, id: u64) {
+                self.0.push((self.1, false, id, Rect::default()));
+            }
+            fn clear(&mut self) {}
+        }
+        /// The painter, noting what it was asked (frame, region, text) and whether it drew.
+        struct Noted<'a>(Paint<'a>, Vec<(u32, Rect, String, bool, bool)>, u32);
+        impl Painter for Noted<'_> {
+            fn patch(&mut self, f: &Frame, r: Rect, t: &str) -> Option<(Rect, Vec<u8>)> {
+                let own = self.0.found.lock().unwrap().map.contains_key(&r);
+                let p = self.0.patch(f, r, t);
+                self.1.push((self.2, r, t.to_string(), p.is_some(), own));
+                p
+            }
+        }
+        let Some(list) = std::env::var_os("OC_STILL") else {
+            return;
+        };
+        let secs: u32 = std::env::var("OC_SECS").map_or(60, |v| v.parse().unwrap());
+        let noise = std::env::var("OC_NOISE").unwrap_or("still".into());
+        let rects = |v: &str| -> Vec<[u32; 4]> {
+            (std::env::var(v).unwrap_or_default().split(';'))
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    let n: Vec<u32> = s.split(',').map(|v| v.parse().unwrap()).collect();
+                    [
+                        n[0],
+                        n[1],
+                        *n.get(2).unwrap_or(&2),
+                        *n.get(3).unwrap_or(&18),
+                    ]
+                })
+                .collect()
+        };
+        let (fire, cursor) = (rects("OC_FIRE"), rects("OC_CURSOR"));
+        let rect = |a: [f32; 4]| {
+            let [x, y, w, h] = a.map(|v| v.max(0.0) as u32);
+            Rect::new(x, y, w, h)
+        };
+        let words = |s: &str| s.split_whitespace().count();
+        for item in list.to_string_lossy().split(';') {
+            let (path, src) = item.split_once(':').unwrap_or((item, "en"));
+            let mut base = crate::shared::platform::capture::from_png(path.as_ref()).unwrap();
+            // `scroll`: the picture is a tall page seen `OC_H` (1080) high, scrolled 0 -> 600 -> 1200 ->
+            // 600 -> 0 ... px, each place held 5 s, each scroll over 9 frames (0.3 s)
+            let tall = base.rgba.clone();
+            let view: u32 = std::env::var("OC_H").map_or(1080, |v| v.parse().unwrap());
+            if noise == "scroll" {
+                base.rgba.truncate((base.width * view * 4) as usize);
+                base.height = view;
+            }
+            let (w, h) = (base.width, base.height);
+            let top = |n: u32| {
+                let at = |seg: u32| [0, 600, 1200, 600][seg as usize % 4] as f32;
+                let (seg, k) = (n / 150, n % 150);
+                let t = (k.saturating_sub(141) as f32 / 9.0).min(1.0);
+                (at(seg) + (at(seg + 1) - at(seg)) * t) as u32
+            };
+            let deps = Real(
+                Mutex::new(Engine::load(&models_dir()).unwrap()),
+                R::for_source(src),
+            );
+            // one-shot Translate on the same picture
+            let t = Instant::now();
+            let one = translate_frame(&base.rgba, w, h, "xx", &Cache::new(512), &deps).unwrap();
+            let one_ms = t.elapsed().as_millis();
+            let want: Vec<_> = (one.blocks.iter())
+                .filter(|b| !b.translation.trim().is_empty())
+                .collect();
+            // Live, frame by frame
+            let cache = Cache::new(512);
+            let mut s = InStep::new(&deps, &cache, "xx");
+            let mut layer = Log::default();
+            let mut painted = Vec::new();
+            let (mut detected, mut reads) = (Vec::<Rect>::new(), Vec::<(Rect, String)>::new());
+            let mut ids: HashMap<u64, Rect> = HashMap::new();
+            let mut queue: Vec<Job> = Vec::new();
+            let mut running: Vec<(u32, Vec<Done>)> = Vec::new();
+            let (mut free, mut busy) = (0u32, Duration::ZERO);
+            let rank = |j: &Job| match j {
+                Job::Translate { .. } => 0,
+                Job::Read(_) => 1,
+                Job::Detect { .. } => 2,
+            };
+            let mut seed = 0x9e37_79b9u32;
+            let mut rgba = base.rgba.clone();
+            let text: Vec<bool> = (base.rgba.as_chunks::<4>().0.iter())
+                .map(|p| (77 * p[0] as u32 + 150 * p[1] as u32 + 29 * p[2] as u32) >> 8 > 150)
+                .collect();
+            for n in 0..secs * 30 {
+                let tt = n as f32 / 30.0;
+                match noise.as_str() {
+                    "scroll" => {
+                        let o = (top(n) * w * 4) as usize;
+                        let len = rgba.len();
+                        rgba.copy_from_slice(&tall[o..o + len]);
+                    }
+                    _ => rgba.copy_from_slice(&base.rgba),
+                }
+                match noise.as_str() {
+                    "lsb" => {
+                        for v in rgba.iter_mut() {
+                            seed ^= seed << 13;
+                            seed ^= seed >> 17;
+                            seed ^= seed << 5;
+                            *v = (*v as i32 + (seed % 5) as i32 - 2).clamp(0, 255) as u8;
+                        }
+                    }
+                    "cursor" if (n / 16) % 2 == 0 => {
+                        for &[x, y, cw, ch] in &cursor {
+                            for yy in y..(y + ch).min(h) {
+                                for xx in x..(x + cw).min(w) {
+                                    let i = ((yy * w + xx) * 4) as usize;
+                                    rgba[i..i + 3].copy_from_slice(&[240, 240, 240]);
+                                }
+                            }
+                        }
+                    }
+                    // the pointer resting on one row after another (2 s each): the row's
+                    // background lights up as a page's hover does
+                    "hover" if !cursor.is_empty() => {
+                        let [x, y, cw, ch] = cursor[(n / 60) as usize % cursor.len()];
+                        for yy in y..(y + ch).min(h) {
+                            for xx in x..(x + cw).min(w) {
+                                let i = ((yy * w + xx) * 4) as usize;
+                                if !text[i / 4] {
+                                    for c in &mut rgba[i..i + 3] {
+                                        *c = c.saturating_add(14);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "fire" => {
+                        // flames that flare and calm down (a calm moment lets text settle, a
+                        // flare comes after its read), and embers: sparks that come and go
+                        let flare = (0.5 + 0.5 * (tt * 1.3).sin()).powi(2);
+                        for &[x, y, fw, fh] in &fire {
+                            for _ in 0..(fw * fh / 4000) {
+                                seed ^= seed << 13;
+                                seed ^= seed >> 17;
+                                seed ^= seed << 5;
+                                let (ex, ey) = (x + seed % fw.max(1), y + (seed >> 12) % fh.max(1));
+                                for yy in ey..(ey + 3).min(h) {
+                                    for xx in ex..(ex + 3).min(w) {
+                                        let i = ((yy * w + xx) * 4) as usize;
+                                        if !text[i / 4] {
+                                            rgba[i..i + 3].copy_from_slice(&[255, 190, 90]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for &[x, y, fw, fh] in &fire {
+                            for yy in y..(y + fh).min(h) {
+                                for xx in x..(x + fw).min(w) {
+                                    let k = (yy * w + xx) as usize;
+                                    if text[k] {
+                                        continue;
+                                    }
+                                    let (fx, fy) = (xx as f32, yy as f32);
+                                    let a = flare
+                                        * (0.5 + 0.5 * (fx * 0.05 + fy * 0.11 + tt * 7.0).sin())
+                                        * (0.5 + 0.5 * (fx * 0.13 - fy * 0.07 - tt * 5.3).sin());
+                                    let i = k * 4;
+                                    rgba[i] = (rgba[i] as f32 + 70.0 * a).min(255.0) as u8;
+                                    rgba[i + 1] = (rgba[i + 1] as f32 + 35.0 * a).min(255.0) as u8;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                layer.1 = n;
+                let f = Frame {
+                    rgba: &rgba,
+                    width: w,
+                    height: h,
+                    at: Duration::from_micros(33_333 * n as u64),
+                };
+                let mut paint = Noted(
+                    Paint {
+                        found: &s.found,
+                        rtl: std::env::var_os("OC_RTL").is_some(),
+                        blanked: &[],
+                    },
+                    std::mem::take(&mut painted),
+                    n,
+                );
+                let (done, left): (Vec<_>, Vec<_>) =
+                    running.drain(..).partition(|(at, _)| *at <= n);
+                running = left;
+                for (_, d) in done {
+                    for d in d {
+                        match &d {
+                            Done::Detected { boxes, .. } => {
+                                detected.extend(boxes.iter().map(|b| b.at))
+                            }
+                            Done::Read { id, text, .. } => {
+                                reads.push((ids.get(id).copied().unwrap_or_default(), text.clone()))
+                            }
+                            Done::Translated { .. } => {}
+                        }
+                        queue.extend(s.live.complete(d, &f, &mut paint, &mut layer));
+                    }
+                }
+                queue.extend(s.live.on_frame(&f, &mut paint, &mut layer));
+                painted = paint.1;
+                while free <= n && !queue.is_empty() {
+                    let i = (0..queue.len()).min_by_key(|&i| rank(&queue[i])).unwrap();
+                    let job = queue.remove(i);
+                    if let Job::Read(crops) = &job {
+                        for c in crops {
+                            ids.insert(c.id, c.at);
+                        }
+                    }
+                    let errors = Errors::default();
+                    let t = Instant::now();
+                    let done = job.run(
+                        &f,
+                        &mut Detect {
+                            deps: &deps,
+                            found: &s.found,
+                            errors: &errors,
+                        },
+                        &mut Read {
+                            deps: &deps,
+                            found: &s.found,
+                            errors: &errors,
+                            size: (w, h),
+                        },
+                        &mut Translate {
+                            deps: &deps,
+                            cache: &cache,
+                            target: "xx",
+                        },
+                    );
+                    let took = t.elapsed();
+                    busy += took;
+                    free = n + (took.as_micros() as u32).div_ceil(33_333).max(1);
+                    running.push((free, done));
+                }
+            }
+            // what is up at the end
+            let mut up: HashMap<u64, Rect> = HashMap::new();
+            for &(_, show, id, at) in &layer.0 {
+                if show {
+                    up.insert(id, at);
+                } else {
+                    up.remove(&id);
+                }
+            }
+            let count = |show: bool, from: u32| {
+                (layer.0.iter())
+                    .filter(|e| e.1 == show && e.0 >= from)
+                    .count()
+            };
+            // texts drawn per place: a place drawn with two texts = its translation changed
+            let mut places: Vec<(Rect, Vec<String>)> = Vec::new();
+            for (_, r, t, _, _) in painted.iter().filter(|p| p.3) {
+                let same = |p: &Rect| 2 * p.overlap(r) > p.area().min(r.area());
+                match places.iter_mut().find(|(p, _)| same(p)) {
+                    Some((_, ts)) if !ts.contains(t) => ts.push(t.clone()),
+                    Some(_) => {}
+                    None => places.push((*r, vec![t.clone()])),
+                }
+            }
+            let changed = places.iter().filter(|p| p.1.len() > 1).count();
+            let (mut ever_n, mut end_n, mut w_all, mut w_end) = (0, 0, 0, 0);
+            let mut why = Vec::new();
+            for b in &want {
+                let a = rect(b.bounds);
+                let hit = |r: &Rect| 3 * a.overlap(r) > a.area();
+                let ever = layer.0.iter().any(|e| e.1 && hit(&e.3));
+                let wc = words(&b.original);
+                (w_all, ever_n) = (w_all + wc, ever_n + ever as usize);
+                if up.values().any(hit) {
+                    (end_n, w_end) = (end_n + 1, w_end + wc);
+                    continue;
+                }
+                let reason = if up.values().any(|r| a.overlap(r) > 0) {
+                    "covered in part (a patch over a piece of it)"
+                } else if !detected.iter().any(hit) {
+                    "never detected"
+                } else if !reads.iter().any(|(r, _)| hit(r)) {
+                    "detected, never read (ring moved / not settled)"
+                } else if !reads.iter().any(|(r, t)| hit(r) && !t.trim().is_empty()) {
+                    "read empty"
+                } else if !painted.iter().any(|p| hit(&p.1)) {
+                    "read, never painted (kept as is / ring not held / moving list / changed)"
+                } else if !painted.iter().any(|p| hit(&p.1) && p.3) {
+                    "painter declined"
+                } else {
+                    "drawn, then hidden"
+                };
+                why.push(format!(
+                    "{reason}{}: {:?}",
+                    if ever { " (was up)" } else { "" },
+                    b.original
+                ));
+            }
+            // `OC_SNAP=dir`: the picture with the patches up at the end, as the user sees it
+            if let Some(dir) = std::env::var_os("OC_SNAP") {
+                let mut out = rgba.clone();
+                let ups = (layer.0.iter()).filter(|e| e.1 && up.get(&e.2) == Some(&e.3));
+                for &(_, _, id, at) in ups {
+                    let p = &layer.2[&id];
+                    for y in 0..at.h {
+                        for x in 0..at.w {
+                            let (i, o) = (
+                                ((y * at.w + x) * 4) as usize,
+                                (((at.y + y) * w + at.x + x) * 4) as usize,
+                            );
+                            if p[i + 3] > 0 {
+                                out[o..o + 3].copy_from_slice(&p[i..i + 3]);
+                            }
+                        }
+                    }
+                }
+                let name = std::path::Path::new(path)
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string();
+                let file = std::path::Path::new(&dir).join(format!("{name}-{noise}.png"));
+                let mut e = png::Encoder::new(
+                    std::io::BufWriter::new(std::fs::File::create(file).unwrap()),
+                    w,
+                    h,
+                );
+                e.set_color(png::ColorType::Rgba);
+                e.set_depth(png::BitDepth::Eight);
+                e.write_header().unwrap().write_image_data(&out).unwrap();
+            }
+            eprintln!(
+                "STILL {path} [{noise}] {w}x{h}: one-shot {} lines / {w_all} words in {one_ms} ms; \
+                 live up at end {end_n} lines / {w_end} words ({:.0} %), ever up {ever_n}; shows {}, \
+                 hides {}, after 10 s: shows {} hides {}; places drawn with >1 text {changed}; \
+                 OCR busy {:.0} %; paints with lines not read at their own box {} of {}",
+                want.len(),
+                100.0 * w_end as f64 / w_all.max(1) as f64,
+                count(true, 0),
+                count(false, 0),
+                count(true, 300),
+                count(false, 300),
+                busy.as_secs_f64() * 100.0 / secs as f64,
+                painted.iter().filter(|p| p.3 && !p.4).count(),
+                painted.iter().filter(|p| p.3).count(),
+            );
+            for y in why {
+                eprintln!("  MISS {y}");
+            }
+            if std::env::var_os("OC_DBG").is_some() {
+                for (r, ts) in places.iter().filter(|p| p.1.len() > 1) {
+                    eprintln!("  CHANGED {r:?}: {ts:?}");
+                }
+                for e in &layer.0 {
+                    eprintln!("  EV {e:?}");
+                }
+            }
+        }
+    }
 }
