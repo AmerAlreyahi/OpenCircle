@@ -2393,7 +2393,12 @@ fn look_cards_write_the_stored_look_names() {
     let texts = shot::texts(view(&s));
     assert_eq!(looks::LOOKS[0].id, "sapphire_glow", "the first card");
     for l in looks::LOOKS {
-        assert!(texts.iter().any(|t| t == l.name), "{}: {texts:?}", l.name);
+        assert_eq!(
+            texts.iter().any(|t| t == l.name),
+            l.card(),
+            "{}: {texts:?}",
+            l.name
+        );
     }
     let of = |s: &State, id: &str| {
         let picks = pages::look_picks(s);
@@ -2405,7 +2410,12 @@ fn look_cards_write_the_stored_look_names() {
             .all(|(l, _)| *l != "frost" && *l != "prism"),
         "no card for Stealth Frost or Liquid Prism"
     );
-    assert_eq!(of(&s, "horizon"), Some(LookTheme::Horizon));
+    // Horizon Pulse and Optical HUD have no card while looks are Glow only
+    assert!(
+        pages::look_picks(&s)
+            .iter()
+            .all(|(l, _)| *l != "horizon" && *l != "hud")
+    );
     assert_eq!(of(&s, "aurora"), Some(LookTheme::Borealis));
     s.draft.look.theme = LookTheme::Spectrum;
     assert_eq!(of(&s, "sapphire_glow"), Some(LookTheme::SapphireGlow));

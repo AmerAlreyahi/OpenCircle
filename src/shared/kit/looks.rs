@@ -17,6 +17,11 @@ pub enum Kind {
     Bezel,
 }
 
+/// Owner, 2026-11-17: until the cosmetics version every look is drawn as a
+/// Glow in its own two colours, and the cards that differ only by a non-Glow
+/// style are hidden. Set to `false` to bring the style choice back.
+pub const GLOW_ONLY: bool = true;
+
 pub struct Look {
     pub id: &'static str,
     pub name: &'static str,
@@ -27,6 +32,15 @@ pub struct Look {
     pub glow: [Color; 2],
     /// The look card's gradient stops (`previewGrad`).
     pub preview: &'static [Color],
+}
+
+impl Look {
+    /// Whether Settings shows this look's card (Horizon Pulse and Optical HUD
+    /// are Glow plus a style: hidden while `GLOW_ONLY`; a config that has one
+    /// keeps it, drawn as Glow).
+    pub fn card(&self) -> bool {
+        !(GLOW_ONLY && matches!(self.id, "horizon" | "hud"))
+    }
 }
 
 const fn hex(rgb: u32) -> Color {

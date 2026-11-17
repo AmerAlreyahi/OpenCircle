@@ -31,7 +31,7 @@ use iced::{Color, Element, Fill, Rectangle, Renderer, Theme, window};
 
 pub use crate::shared::config::EdgeMode as Mode;
 use crate::shared::config::{self, EdgeStyle, LookConfig};
-use crate::shared::kit::looks::Kind;
+use crate::shared::kit::looks::{GLOW_ONLY, Kind};
 use crate::shared::on_screen::Drawn;
 use crate::shared::theme;
 
@@ -283,6 +283,20 @@ fn edge(
     scale: f32,
     keyed: bool,
 ) -> Option<(Geo, Paint)> {
+    edge_styled(look, mode, w, h, scale, keyed, !GLOW_ONLY)
+}
+
+/// `edge`, with `styled`: the look's own kind (Horizon, Hud, Bezel) instead of
+/// a Glow in its colours (`looks::GLOW_ONLY`).
+fn edge_styled(
+    look: &LookConfig,
+    mode: Mode,
+    w: u32,
+    h: u32,
+    scale: f32,
+    keyed: bool,
+    styled: bool,
+) -> Option<(Geo, Paint)> {
     let active = look.active();
     let e = active.edge(mode);
     let strength = f32::from(active.glow) / 100.0;
@@ -294,7 +308,11 @@ fn edge(
     let scale = if quiet { h as f32 / 1080.0 } else { scale };
     let px = |v: f32| (v * scale).round() as u32;
     let (kind, [c1, c2]) = design(look);
-    let kind = if keyed || quiet { Kind::Glow } else { kind };
+    let kind = if keyed || quiet || !styled {
+        Kind::Glow
+    } else {
+        kind
+    };
     let (blur, [s1, s2], reach) = match quiet {
         true => (QUIET, QUIET_ALPHA, QUIET_REACH),
         false => (BLUR, [1.0; 2], REACH),
@@ -618,6 +636,16 @@ mod tests {
         full(geo, &paint)
     }
 
+    /// The look in its own kind (Horizon, Hud, Bezel), what `GLOW_ONLY` hides.
+    fn styled(look: &LookConfig) -> (Geo, Paint) {
+        edge_styled(look, Mode::Overlay, 1920, 1080, 1.0, false, true).unwrap()
+    }
+
+    fn styled_image(look: &LookConfig) -> Vec<u8> {
+        let (geo, paint) = styled(look);
+        full(geo, &paint)
+    }
+
     fn at(img: &[u8], x: u32, y: u32) -> [u8; 4] {
         let i = ((y * 1920 + x) * 4) as usize;
         [img[i], img[i + 1], img[i + 2], img[i + 3]]
@@ -673,8 +701,11 @@ mod tests {
             let kit = theme::kit_look(*stored).unwrap();
             let look = theme(*stored);
             assert_eq!(design(&look), (kit.kind, kit.glow), "{stored:?}");
-            let (geo, _) = edge(&look, Mode::Overlay, 1920, 1080, 1.0, false).unwrap();
-            assert_eq!(geo.kind, kit.kind, "{stored:?}");
+            assert_eq!(styled(&look).0.kind, kit.kind, "{stored:?}");
+            let shown = edge(&look, Mode::Overlay, 1920, 1080, 1.0, false)
+                .unwrap()
+                .0;
+            assert_eq!(shown.kind == kit.kind, !GLOW_ONLY || kit.kind == Kind::Glow);
             if kit.kind != Kind::Bezel {
                 let [c1, c2] = kit.glow;
                 let t = table(&look);
@@ -767,7 +798,8 @@ mod tests {
                 (2560, 1440, 1.25, 128, 18),
                 (3840, 2160, 2.0, 204, 28),
             ] {
-                let (geo, paint) = edge(&look, Mode::Overlay, w, h, scale, false).unwrap();
+                let (geo, paint) =
+                    edge_styled(&look, Mode::Overlay, w, h, scale, false, true).unwrap();
                 assert_eq!((geo.t, geo.r), (t, r), "{w}x{h} @ {scale}");
                 assert_eq!(paint.table.len(), t as usize + 1);
                 let strips = geo.strips();
@@ -799,11 +831,35 @@ mod tests {
         assert!(small.strips().is_empty());
     }
 
+    /// While `GLOW_ONLY` (owner, 2026-11-17) a look of another kind is the
+    /// plain glow in its colours: the HUD has no brackets, Horizon Pulse lights
+    /// the sides too, Frost has no bezel line.
+    #[test]
+    fn a_look_of_another_kind_is_drawn_as_a_glow_in_its_colours() {
+        let hud = image(&theme(LookTheme::Hud));
+        assert!(
+            at(&hud, 13, 25)[3] < 150,
+            "no bracket: {:?}",
+            at(&hud, 13, 25)
+        );
+        assert_eq!(
+            at(&hud, 13, 25)[3],
+            at(&hud, 13, 80)[3],
+            "same glow down the side"
+        );
+        let horizon = image(&theme(LookTheme::Horizon));
+        assert!(at(&horizon, 0, 540)[3] > 0, "the sides glow too");
+        assert_ne!(
+            image(&theme(LookTheme::Mono)),
+            styled_image(&theme(LookTheme::Mono))
+        );
+    }
+
     /// Optical HUD: four 30 px brackets 12 px in, a line in c1 (white) along
     /// each bracket's two arms, the plain glow past their ends.
     #[test]
     fn the_hud_draws_four_corner_brackets_over_the_glow() {
-        let hud = image(&theme(LookTheme::Hud));
+        let hud = styled_image(&theme(LookTheme::Hud));
         for (x, y) in [
             (13, 25),
             (1906, 25),
@@ -826,7 +882,7 @@ mod tests {
     /// and right ends, nothing down the sides.
     #[test]
     fn the_horizon_lights_the_top_and_bottom_only() {
-        let img = image(&theme(LookTheme::Horizon));
+        let img = styled_image(&theme(LookTheme::Horizon));
         assert!(at(&img, 960, 0)[3] > 80 && at(&img, 960, 1079)[3] > 80);
         assert_eq!(at(&img, 960, 0), at(&img, 960, 1079));
         assert_eq!(at(&img, 0, 0)[3], 0);
@@ -839,7 +895,7 @@ mod tests {
     /// a soft glow inward.
     #[test]
     fn the_bezel_is_a_line_over_a_band_and_a_soft_glow() {
-        let t = table(&theme(LookTheme::Mono));
+        let t = styled(&theme(LookTheme::Mono)).1.table;
         assert!(t[0][3] > 100, "{:?}", t[0]);
         assert!(t[1][3] < t[0][3] && t[4][3] > 20, "{t:?}");
         assert!(t[12][3] < t[4][3] && t[12][3] > 0, "{t:?}");
@@ -1045,7 +1101,7 @@ mod tests {
             (LookTheme::Mono, "edge-bezel-1080p.png"),
             (LookTheme::Horizon, "edge-horizon-1080p.png"),
         ] {
-            let img = image(&theme(stored));
+            let img = styled_image(&theme(stored));
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures")
                 .join(name);

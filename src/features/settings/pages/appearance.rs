@@ -75,6 +75,7 @@ pub fn picks(state: &State) -> Vec<(&'static str, Option<LookTheme>)> {
     let shows = |t: LookTheme, look: &Look| theme::kit_look(t).is_some_and(|l| l.id == look.id);
     LOOKS
         .into_iter()
+        .filter(|l| l.card())
         .map(|look| {
             let pick = match shows(now, look) {
                 true => Some(now),
@@ -88,7 +89,7 @@ pub fn picks(state: &State) -> Vec<(&'static str, Option<LookTheme>)> {
 /// The design's looks, then the user's own.
 fn look_cards(state: &State) -> Vec<Element<'_, Message>> {
     let now = state.draft.look.theme;
-    let mut cards: Vec<_> = (LOOKS.into_iter().zip(picks(state)))
+    let mut cards: Vec<_> = (LOOKS.into_iter().filter(|l| l.card()).zip(picks(state)))
         .map(|(look, (_, pick))| {
             let chosen = pick == Some(now);
             let on = pick.map(Message::Look);
