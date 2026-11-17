@@ -133,7 +133,11 @@ pub(crate) struct Opening {
     pub(crate) origin: Point,
     /// A short status over the frame (copy text).
     pub(crate) toast: Option<Said>,
-    /// Wayland: the Copy / Save pill over the frame (its text, done or not,
+    /// Snip was started over a translation: its frame is the translated page.
+    /// A closed overlay shows the real, untranslated page, so Copy / Save keep
+    /// the frame up behind their pill (as on Wayland) instead of cutting to it.
+    pub(crate) over_translation: bool,
+    /// Wayland, or Snip over a translation: the Copy / Save pill over the frame (its text, done or not,
     /// where), held a moment before the overlay closes (`App::toast_for`).
     pub(crate) result: Option<(String, bool, Point)>,
     /// What the current selection holds (QR code, protected capture); `None` until scanned.
@@ -277,6 +281,7 @@ impl Default for Opening {
             origin: Point::ORIGIN,
             toast: None,
             result: None,
+            over_translation: false,
             scan: None,
             translate: None,
             helper: None,

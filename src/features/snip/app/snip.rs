@@ -198,6 +198,7 @@ impl App {
         let seen = (self.o.translate.as_ref()).and_then(|(_, s)| s.seen());
         if let Some(seen) = seen {
             self.o.frame = Some(seen);
+            self.o.over_translation = true;
             // the translated page's windows aren't the picture's: none outlined
             // (drag = an area; a click or Enter = the screen)
             windows.clear();

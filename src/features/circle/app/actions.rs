@@ -243,10 +243,17 @@ impl App {
             let _ = tx.unbounded_send(work());
         })
         .map(move |result| Message::Confirm(place, result));
-        if !self.can_hide {
+        if self.holds_frame() {
             return done;
         }
         Task::batch([self.close(), done])
+    }
+
+    /// The overlay stays up behind the Copy / Save pill (it draws the pill
+    /// itself, then closes): Wayland, which can't cut a window to the pill, and
+    /// Snip over a translation, whose closing would flash the untranslated page.
+    fn holds_frame(&self) -> bool {
+        !self.can_hide || self.o.over_translation
     }
 
     /// Where the Copy / Save pill goes (`pill_at`): beside the selection, else
@@ -300,7 +307,7 @@ impl App {
         // toolbar alone when both fill the screen). On another screen's
         // window, or once closed, the window as elsewhere.
         // ponytail: the starting screen's window only; the others' could draw it too.
-        if !self.can_hide && self.o.frame.is_some() && origin == self.o.origin {
+        if self.holds_frame() && self.o.frame.is_some() && origin == self.o.origin {
             let toolbar = (self.o.edit.as_ref().is_some_and(|e| e.is_open()))
                 .then(|| Rectangle::new(self.bar_at(), self.dock_size()));
             let local = |near| {

@@ -992,6 +992,34 @@ fn on_wayland_the_copied_pill_is_drawn_in_the_overlay() {
     }
 }
 
+/// Snip over a translated page (W39): its Copy keeps the translated frame up
+/// behind the pill, like Wayland; closing at once showed the real page, the
+/// untranslated one, for as long as the pill lived.
+#[test]
+fn snip_copy_over_a_translation_holds_the_translated_frame() {
+    let area = Rectangle::new(Point::new(100.0, 80.0), Size::new(300.0, 200.0));
+    for over in [false, true] {
+        let mut app = snipping(area);
+        assert!(app.can_hide);
+        app.o.over_translation = over;
+        app.select(area);
+        let _ = app.open_snip_toolbar();
+        let task = app.on_snip_toolbar(annotate::Message::Copy);
+        run_task(&mut app, task);
+        if !over {
+            assert!(app.o.frame.is_none(), "an ordinary Snip closes at once");
+            continue;
+        }
+        assert!(app.o.frame.is_some(), "the translated frame stays");
+        assert!(app.o.result.is_some() && app.windows.toasts().is_empty());
+        let _ = app.update(Message::ToastDone);
+        assert!(
+            app.o.frame.is_none() && app.o.result.is_none(),
+            "then it closes"
+        );
+    }
+}
+
 #[test]
 fn the_snip_timer_comes_from_settings_and_runs_once_per_snip() {
     let shot = || {
