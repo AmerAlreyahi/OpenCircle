@@ -28,8 +28,8 @@ use crate::features::song::{self, SERVICE, Service};
 use crate::features::translate::lang::{self, LANGUAGES, Language};
 use crate::shared::config::{
     self, BarStyle, BracketColour, BracketStyle, ColourSet, Config, DefaultAction, EdgeMode,
-    EdgeStyle, Engine, LiveGpu, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle,
-    SnipConfig, SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
+    EdgeStyle, Engine, Look, LookConfig, LookTheme, Provider, Rgb, SelectStyle, SnipConfig,
+    SongSource, StaysOpen, Target, TextReader, Theme, parse_shortcut,
 };
 use crate::shared::history::{Counts, Kind};
 use crate::shared::kit::header::Caption;
@@ -686,7 +686,6 @@ pub enum Pick {
     Update(bool),
     Lab(Feature, bool),
     Engine(Engine),
-    LiveGpu(LiveGpu),
     SongSource(SongSource),
     SongHistory(bool),
     ChatStays(StaysOpen),
@@ -763,7 +762,6 @@ pub enum Message {
     Source(Language),
     Target(Language),
     Engine(Engine),
-    LiveGpu(LiveGpu),
     /// What was typed in the live-interval field.
     LiveInterval(String),
     SelectStyle(SelectStyle),
@@ -1547,7 +1545,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::AutoUpdate(_) => Some(Pick::Update(state.draft.update.auto == Some(true))),
         Message::Labs(f, _) => Some(Pick::Lab(*f, state.draft.labs.has(*f))),
         Message::Engine(_) => Some(Pick::Engine(state.draft.translate.engine)),
-        Message::LiveGpu(_) => Some(Pick::LiveGpu(state.draft.translate.live_gpu)),
         Message::SongSource(_) => Some(Pick::SongSource(state.draft.song.source)),
         Message::SongHistory(_) => Some(Pick::SongHistory(state.draft.song.history)),
         Message::ChatStays(_) => Some(Pick::ChatStays(state.draft.chat.stays_open)),
@@ -1699,7 +1696,6 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Source(l) => state.draft.translate.source = l.code.to_string(),
         Message::Target(l) => state.draft.translate.target = l.code.to_string(),
         Message::Engine(e) => state.draft.translate.engine = e,
-        Message::LiveGpu(g) => state.draft.translate.live_gpu = g,
         Message::LiveInterval(s) => {
             // Not a number = 0, which the range check reports under the field.
             state.draft.translate.live_interval_ms = s.trim().parse().unwrap_or(0);

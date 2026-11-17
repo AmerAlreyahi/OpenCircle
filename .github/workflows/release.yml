@@ -223,9 +223,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The GPU translation helper (gpu-helper/) is NOT built or attached here: the GPU path is built
-  # but off (owner, 2026-11-16). ci.yml's gpu-helper job still builds it when it changes.
-
   checksums:
     needs: [build]
     runs-on: ubuntu-22.04

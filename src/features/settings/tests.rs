@@ -588,51 +588,6 @@ fn a_valid_change_saves_itself() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// "GPU for live translation" is hidden (the GPU path is built but off, owner 2026-11-16): never shown,
-/// even with Live on in Labs; Off is the default and not written; an existing value is read back and
-/// kept; the row's line helper still works.
-#[test]
-fn the_gpu_row_is_hidden_and_its_key_still_round_trips() {
-    use crate::shared::config::LiveGpu;
-    use pages::translate::gpu_status;
-    let path = tmp("live-gpu");
-    let (mut s, _) = state(Some(path.clone()));
-    update(&mut s, Message::Section(Section::Translate));
-    s.draft.labs.live = true;
-    assert!(
-        !shot::texts(view(&s))
-            .iter()
-            .any(|t| t == "GPU for live translation")
-    );
-    assert_eq!(s.draft.translate.live_gpu, LiveGpu::Off);
-    update(&mut s, Message::LiveGpu(LiveGpu::Auto));
-    let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
-        panic!("not saved: {:?}", s.notice)
-    };
-    assert!(
-        std::fs::read_to_string(&path)
-            .unwrap()
-            .contains("live_gpu = \"auto\"")
-    );
-    assert_eq!(Config::load_from(&path).0, cfg);
-    update(&mut s, Message::LiveGpu(LiveGpu::Off));
-    let Outcome::Saved(_) = update(&mut s, Message::Save) else {
-        panic!("not saved")
-    };
-    assert!(!std::fs::read_to_string(&path).unwrap().contains("live_gpu"));
-    assert_eq!(Config::load_from(&path).0.translate.live_gpu, LiveGpu::Off);
-    let card = Some(Some("RTX".to_string()));
-    assert_eq!(
-        gpu_status(LiveGpu::Auto, card.clone()),
-        "Using the graphics card"
-    );
-    assert_eq!(
-        gpu_status(LiveGpu::Off, card),
-        "Live translate uses the processor"
-    );
-    let _ = std::fs::remove_dir_all(path.parent().unwrap());
-}
-
 #[test]
 fn save_round_trips_through_a_temp_config() {
     let path = tmp("roundtrip");

@@ -236,7 +236,6 @@ impl Config {
             c.translate.live_note_shown = get(t, "translate.", "live_note_shown", false, &mut w);
             c.translate.whole_screen = get(t, "translate.", "whole_screen", false, &mut w);
             c.translate.glossary = get(t, "translate.", "glossary", String::new(), &mut w);
-            c.translate.live_gpu = get(t, "translate.", "live_gpu", d.translate.live_gpu, &mut w);
             for (key, slot) in [
                 ("recent_sources", &mut c.translate.recent_sources),
                 ("recent_targets", &mut c.translate.recent_targets),

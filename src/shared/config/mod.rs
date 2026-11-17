@@ -48,8 +48,6 @@
 //! recent_targets = []               #   (written only when not empty)
 //! glossary = ""                     # the active per-game glossary (its file name in glossaries/, "" = none;
 //!                                   #   written only when set)
-//! live_gpu = "auto"                 # live translate on the graphics card: off (default) | auto. Hidden and
-//!                                   #   ignored since 0.3.0 (the GPU path is built but off); written only when auto
 //!
 //! [selection]
 //! style = "snap"                    # snap (a rounded box with corner brackets) | shape (as drawn)
@@ -134,7 +132,7 @@
 //! entries of `[[quick_actions]]` (Snip has one shortcut); 10 makes "editor" (a pick copies nothing; Ctrl+C or Copy
 //! does) the default `snip.after`: every stored "both" moves to it once (0.1.3 wrote the old default). 11 stops writing the keys nothing
 //! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`) and the removed search history
-//! (`general.search_history`, `labs.history`); they still read without a warning.
+//! (`general.search_history`, `labs.history`); they still read without a warning. `translate.live_gpu` (the removed GPU path, never in a release) reads quietly and is dropped on save, with no schema bump.
 //! 12 moves the old default Translate / Live translate keys Ctrl+Shift+T / L to Alt+Shift+T / L (unless taken; a user's own
 //! key stays). A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
@@ -331,23 +329,6 @@ pub enum Engine {
     Offline,
 }
 
-/// Live translate on the graphics card (`translate::gpu`): Auto = when the
-/// PC has a discrete card with the room (the GPU rule), Off = the processor.
-/// Off is the default and Live ignores the value (owner, 2026-11-16: GPU skipped for 0.3.0).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LiveGpu {
-    Auto,
-    #[default]
-    Off,
-}
-
-impl LiveGpu {
-    fn is_off(&self) -> bool {
-        *self == LiveGpu::Off
-    }
-}
-
 /// What Enter does on the action bar. The serialized names are action-registry ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -426,8 +407,6 @@ pub struct TranslateConfig {
     /// The active glossary (`translate::glossary`): its slug, "" = none.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub glossary: String,
-    #[serde(skip_serializing_if = "LiveGpu::is_off")]
-    pub live_gpu: LiveGpu,
 }
 
 /// What a finished snip does.
@@ -962,7 +941,6 @@ impl Default for TranslateConfig {
             recent_sources: Vec::new(),
             recent_targets: Vec::new(),
             glossary: String::new(),
-            live_gpu: LiveGpu::Off,
         }
     }
 }

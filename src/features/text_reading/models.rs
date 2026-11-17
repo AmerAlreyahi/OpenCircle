@@ -282,16 +282,6 @@ impl ModelFile {
             source: Source::Plain(url),
         }
     }
-
-    /// A plain file's URL (tests).
-    #[cfg(test)]
-    pub(crate) fn url(&self) -> &'static str {
-        match self.source {
-            Source::Plain(url) => url,
-            #[allow(unreachable_patterns)]
-            _ => "",
-        }
-    }
 }
 
 /// Bytes still to download: files missing or of the wrong size (a cheap

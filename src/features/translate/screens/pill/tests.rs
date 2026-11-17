@@ -165,7 +165,7 @@ fn a_partial_redraw_leaves_the_rest_of_the_download_prompt() {
             s.view(size, at, false),
             w as u32,
             h as u32,
-            Some(damage),
+            damage,
         );
         let outside = |i: usize| {
             let p = Point::new((i % w as usize) as f32, (i / w as usize) as f32);

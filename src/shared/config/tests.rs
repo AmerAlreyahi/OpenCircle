@@ -1481,6 +1481,20 @@ fn the_removed_search_history_keys_load_quietly_and_are_not_written() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The GPU path is gone (0.3.0): a `translate.live_gpu` an older build wrote loads with no warning
+/// and a save drops it.
+#[test]
+fn the_removed_live_gpu_key_loads_quietly_and_is_not_written() {
+    let (c, w) = Config::parse(
+        "version = 12
+[translate]
+live_gpu = \"auto\"
+",
+    );
+    assert!(w.is_empty(), "{w:?}");
+    assert!(!toml::to_string_pretty(&c).unwrap().contains("live_gpu"));
+}
+
 fn fs_text(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap()
 }

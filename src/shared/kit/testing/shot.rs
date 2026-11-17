@@ -11,16 +11,22 @@ pub fn renderer() -> iced::Renderer {
 }
 
 pub fn render<Message>(view: Element<'_, Message>, width: u32, height: u32) -> Vec<u8> {
-    render_twice(view, width, height, None).0
+    crate::app::offscreen::paint(
+        view,
+        &mut renderer(),
+        (width, height),
+        1.0,
+        crate::shared::kit::themes::c().bg,
+    )
 }
 
-/// `view` drawn whole, then (if `damage`) drawn again over it within
+/// `view` drawn whole, then drawn again over it within
 /// `damage` only, as a window redraws what changed: (first, second).
 pub fn render_twice<Message>(
     view: Element<'_, Message>,
     width: u32,
     height: u32,
-    damage: Option<Rectangle>,
+    damage: Rectangle,
 ) -> (Vec<u8>, Vec<u8>) {
     let mut renderer = renderer();
     let size = Size::new(width as f32, height as f32);
@@ -53,9 +59,6 @@ pub fn render_twice<Message>(
         background,
     );
     let first = rgba(&pixmap);
-    let Some(damage) = damage else {
-        return (first, Vec::new());
-    };
     renderer.draw(
         &mut pixmap.as_mut(),
         &mut mask,

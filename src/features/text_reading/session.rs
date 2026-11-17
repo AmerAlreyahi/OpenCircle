@@ -138,6 +138,7 @@ impl Session {
     }
 
     /// The running child's process id.
+    #[cfg(all(test, unix))]
     pub(crate) fn pid(&self) -> Option<u32> {
         self.helper.as_ref().map(|h| h.child.id())
     }
@@ -187,7 +188,7 @@ impl Helper {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
-        // A console helper (the GPU one) gets no console window of its own.
+        // A console helper gets no console window of its own.
         #[cfg(windows)]
         std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
         let mut child = command.spawn()?;

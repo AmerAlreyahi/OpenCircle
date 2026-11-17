@@ -13,7 +13,7 @@ use super::super::state::{Message, Named, Pick, SOURCES, State, TARGETS, issue};
 use crate::features::settings::labs::Feature;
 use crate::features::text_reading::screens::model_download::mb;
 use crate::features::translate::mt;
-use crate::shared::config::{Engine, LiveGpu};
+use crate::shared::config::Engine;
 use crate::shared::kit::button::{Kind, button, label, regular};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
@@ -248,36 +248,10 @@ pub fn view(state: &State) -> Element<'_, Message> {
             control,
         ));
     }
-    // GPU for live translation: hidden, not deleted (owner, 2026-11-16: the GPU path is built but off)
-    if SHOW_GPU_ROW && state.draft.labs.has(Feature::Live) {
-        let g = state.draft.translate.live_gpu;
-        let (from, glide) = state.thumb(g, |p| match p {
-            Pick::LiveGpu(g) => Some(g),
-            _ => None,
-        });
-        let choices = [(LiveGpu::Auto, t!(t_auto)), (LiveGpu::Off, t!(c_off))];
-        let control = segmented(&choices, g, from, glide, Message::LiveGpu);
-        let desc = gpu_status(g, crate::features::translate::gpu::last_choice());
-        rows = rows.push(setting_row::row(title(t!(tr_gpu)), desc, control));
-    }
     if let Some(row) = models_row(&state.models) {
         rows = rows.push(row);
     }
     rows.push(optima(&state.models)).into()
-}
-
-/// The GPU row stays hidden while the GPU path is off (`live_layer::gpu_wanted`).
-pub(crate) const SHOW_GPU_ROW: bool = false;
-
-/// The GPU row's line: what live translate last ran on (`gpu::last_choice`:
-/// `Some(card)` / `None` = the processor), else what Auto does.
-pub(crate) fn gpu_status(g: LiveGpu, last: Option<Option<String>>) -> &'static str {
-    match (g, last) {
-        (LiveGpu::Off, _) => t!(tr_gpu_off_desc),
-        (LiveGpu::Auto, Some(Some(_))) => t!(tr_gpu_using),
-        (LiveGpu::Auto, Some(None)) => t!(tr_gpu_cpu),
-        (LiveGpu::Auto, None) => t!(tr_gpu_desc),
-    }
 }
 
 fn language_row<'a>(

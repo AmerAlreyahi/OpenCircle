@@ -614,8 +614,7 @@ fn a_pixel_for_pixel_image_is_drawn_as_tiny_skia_draws_it() {
         .filter_method(image::FilterMethod::Nearest);
     let view: Element<'_, Message> = container(picture).padding([7, 10]).into();
     let damage = Rectangle::new(Point::new(20.3, 9.6), Size::new(30.45, 20.5));
-    let (drawn, again) =
-        crate::shared::kit::testing::shot::render_twice(view, 100, 60, Some(damage));
+    let (drawn, again) = crate::shared::kit::testing::shot::render_twice(view, 100, 60, damage);
     assert_eq!(drawn, again, "a part redrawn is the same");
     // tiny-skia's own: the background, the image drawn over it
     let [r, g, b, a] = crate::shared::kit::themes::c().bg.into_rgba8();

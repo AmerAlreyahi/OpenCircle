@@ -11,7 +11,6 @@ pub(crate) mod action;
 mod draw;
 mod erase;
 mod glossary;
-pub(crate) mod gpu;
 // (the glossary: Settings' editor and the pill read it through here)
 pub(crate) use glossary::screen as glossary_screen;
 pub(crate) use glossary::store as glossary_store;

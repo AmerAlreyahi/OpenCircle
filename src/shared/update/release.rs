@@ -499,47 +499,6 @@ fn verified_sums(http: &dyn Http, release: &Release, key: &str) -> Result<String
     String::from_utf8(sums).map_err(|_| "bad checksums file".into())
 }
 
-/// A file of a release, as its signed checksums list it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignedAsset {
-    pub url: String,
-    pub size: u64,
-    pub sha256: [u8; 32],
-}
-
-/// Asset `name` of the release at `url` (GitHub's release JSON), which must
-/// be `version`'s, with the SHA-256 its signed checksums give it (checked
-/// exactly as an update: `verified_sums`). Nothing but the JSON, the
-/// checksums and the signature is downloaded here.
-pub fn signed_asset(
-    http: &dyn Http,
-    url: &str,
-    version: &str,
-    name: &str,
-    key: &str,
-) -> Result<SignedAsset, String> {
-    let release = latest(http, url, &mut Memo::default()).map_err(|e| match e {
-        CheckError::Wait(s) => format!("GitHub asks to wait {s} s"),
-        CheckError::Failed(e) => e,
-    })?;
-    if release.tag_name.trim_start_matches('v') != version {
-        return Err(format!(
-            "{} is not the release of {version}",
-            release.tag_name
-        ));
-    }
-    let sums = verified_sums(http, &release, key)?;
-    let asset = release
-        .asset(name)
-        .ok_or_else(|| format!("the release has no {name}"))?;
-    let sha256 = verify::sum_for(&sums, name).ok_or("the checksums do not list the download")?;
-    Ok(SignedAsset {
-        url: asset.browser_download_url.clone(),
-        size: asset.size,
-        sha256,
-    })
-}
-
 /// Makes `dir` new and private (0700 on Unix): a leftover of ours is removed
 /// first; anything else there (a symlink, a file, someone else's or an open
 /// folder) is refused. The folder is created, never reused, so nobody else can
@@ -1074,26 +1033,5 @@ pub(crate) mod tests {
             scrub("io: https://objects.example/x.exe?X-Amz-Signature=secret failed"),
             "io: https://objects.example/x.exe failed"
         );
-    }
-
-    /// A file of our own release (the GPU helper) is trusted exactly as an
-    /// update: the release's signed checksums, of THAT version, list it.
-    #[test]
-    fn an_own_release_asset_comes_with_its_signed_checksum() {
-        let r = release("v9.9.9");
-        let fake = server(&r, v::SIG);
-        let name = "OpenCircle_9.9.9_x64-portable.exe";
-        let got = signed_asset(&fake, LATEST, "9.9.9", name, TEST_KEY).unwrap();
-        assert_eq!(got.sha256, verify::sha256(EXE).unwrap());
-        assert_eq!((got.url, got.size), (format!("{BASE}{name}"), 1));
-        // only the JSON, the checksums and the signature: never the file itself
-        let asked = fake.asked.lock().unwrap().clone();
-        assert!(asked.iter().all(|(u, _)| !u.ends_with(name)), "{asked:?}");
-        // another version's release, a wrong key, a forged signature, a name not listed
-        assert!(signed_asset(&fake, LATEST, "9.9.8", name, TEST_KEY).is_err());
-        assert!(signed_asset(&fake, LATEST, "9.9.9", name, WRONG_KEY).is_err());
-        let forged = server(&r, &v::SIG.replace("RUSg", "RUSh"));
-        assert!(signed_asset(&forged, LATEST, "9.9.9", name, TEST_KEY).is_err());
-        assert!(signed_asset(&fake, LATEST, "9.9.9", "SHA256SUMS.txt", TEST_KEY).is_err());
     }
 }

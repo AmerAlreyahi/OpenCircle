@@ -10,5 +10,4 @@ pub(crate) mod monitor;
 pub(crate) mod shape;
 pub(crate) mod sys;
 pub(crate) mod tray;
-pub(crate) mod vulkan;
 pub(crate) mod windows;

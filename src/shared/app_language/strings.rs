@@ -841,16 +841,6 @@ strings! {
         | "التحديث الحي";
     tr_live_desc: "Milliseconds between updates in live translate"
         | "المدة بين تحديثات الترجمة الحية بالمللي ثانية";
-    tr_gpu: "GPU for live translation"
-        | "بطاقة الرسومات للترجمة الحية";
-    tr_gpu_desc: "Auto: the graphics card when it has the room, else the processor"
-        | "تلقائي: بطاقة الرسومات إن كانت سعتها تكفي، وإلا فالمعالج";
-    tr_gpu_using: "Using the graphics card"
-        | "تُستخدم بطاقة الرسومات";
-    tr_gpu_cpu: "This PC uses the processor"
-        | "يستخدم هذا الحاسوب المعالج";
-    tr_gpu_off_desc: "Live translate uses the processor"
-        | "تستخدم الترجمة الحية المعالج";
     s_prtsc: "Print Screen key"
         | "مفتاح Print Screen";
     s_prtsc_settings: "Open Windows settings"

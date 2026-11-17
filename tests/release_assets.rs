@@ -32,13 +32,3 @@ fn the_msi_is_built_but_not_uploaded() {
         assert!(WORKFLOW.contains(name), "{name}");
     }
 }
-
-/// The GPU translation helper is NOT a release asset (owner, 2026-11-16: the GPU path is built but
-/// off): no job builds it on a tag and the checksums job does not wait for it.
-#[test]
-fn the_gpu_helper_is_not_a_release_asset() {
-    let workflow = WORKFLOW.replace("\r\n", "\n");
-    assert!(!workflow.contains("opencircle-mt-gpu"));
-    assert!(!workflow.contains("\n  gpu-helper:"));
-    assert!(workflow.contains("needs: [build]\n"));
-}
