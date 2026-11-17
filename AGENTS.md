@@ -1336,3 +1336,12 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   v0.3.0 AI core (AI online) -> Snip Studio -> the new Live engine (page mode per W38's design + game "watch area"). The page-mode
   work (W40/W41/W42 branches, W37/W38 reports, the acceptance criteria) is kept for that later round. The v0.3.0 draft built on
   85fde993 (old Live) is void.
+- v0.3.x split + Linux first + lean testing (owner, 2026-11-17, "very logical"): v0.3.0 = AI chat widget polish (#126 select +
+  copy, code blocks with editor-like colours + previews, #127 Ctrl+= / Ctrl+- / Ctrl+0 scale, #128 no forced auto-scroll, #172
+  X11 composer focus + GNOME Wayland chat placement, #170 remainder) + the work already done since v0.2.0 (Live hidden); then one
+  small version per feature: v0.3.1 online translation (Google) in Labs, v0.3.2 one-click OpenRouter sign-in, v0.3.3 web search.
+  MCP (#129) and the other extras later. Development and testing: LINUX IS THE BASE (Ubuntu VM / local), WINDOWS ONLY FOR THE
+  FINAL TEST (the release gate incl. the update gate). Fewer tokens, faster work: the owner's own trying is the main evaluation;
+  agents run lean checks (gate, a short scripted smoke for obvious breakage), no long measurement rounds, no big harnesses,
+  unless the owner asks. SUPERSEDES the heavy parts of "No more failed features shown" (keep its spirit: never present
+  something agents already saw broken) and "Windows first (2026-10-24)".
