@@ -171,7 +171,7 @@ impl<D: Deps> Detector for Detect<'_, D> {
 }
 
 /// The core's reader: what the detect read, while the crop still looks the
-/// same; else the crops in one OCR call.
+/// same; else the crops in one OCR call (the quick one where it reads in full).
 pub struct Read<'a, D: Deps> {
     pub deps: &'a D,
     pub found: &'a Mutex<Found>,
@@ -203,7 +203,14 @@ impl<D: Deps> Reader for Read<'_, D> {
         let parts: Vec<(&[u8], u32, u32)> = (todo.iter())
             .map(|&i| (crops[i].rgba.as_slice(), crops[i].at.w, crops[i].at.h))
             .collect();
-        let read = match read_stacked(&parts, self.deps, false) {
+        // the quick read (`Deps::detect`: Windows OCR alone where it reads the language) where it
+        // reads in full, as a detect's lines count: a box read again in place paid Windows OCR AND a
+        // PP-OCR read of its crop (`read_page`'s sparse rule, 100-1700 ms on the Windows VM against
+        // 7-40 ms), which lost lines on 0.8 s subtitles (W27)
+        let read = match read_stacked(&parts, self.deps, true).and_then(|(read, full)| match full {
+            true => Ok((read, full)),
+            false => read_stacked(&parts, self.deps, false),
+        }) {
             Ok((read, _)) => read,
             Err(e) => {
                 note(self.errors, e);
@@ -496,6 +503,11 @@ pub fn away_gate(away: bool, was: &mut bool) -> Option<bool> {
         );
     }
     away.then_some(changed)
+}
+
+/// Test hook `OPENCIRCLE_LIVE_BOX=1` / `0`: box memory on / off (the VMs' A/B runs).
+pub fn box_memory_hook() -> Option<bool> {
+    crate::shared::platform::sys::test_hook("OPENCIRCLE_LIVE_BOX").map(|v| v == "1")
 }
 
 /// An error once (not every frame), then nothing until it changes.
@@ -816,7 +828,66 @@ mod tests {
             size: (W, H),
         };
         assert_eq!(r.read(&[crop]), ["Open the gate"], "the full read's text");
-        assert_eq!(quick.0.ocr_calls.borrow().len(), 2);
+        // (the quick read first: it says it found only the lines, so the full read reads)
+        assert_eq!(quick.0.ocr_calls.borrow().len(), 3);
+    }
+
+    /// A crop read again (a box read again in place: its new text) goes
+    /// through the quick read where it reads in full (Windows OCR alone),
+    /// never the full read with its PP-OCR pass (W27: 100-1700 ms a crop on
+    /// the Windows VM, it lost lines).
+    #[test]
+    fn a_crop_read_again_goes_through_the_quick_read() {
+        struct Counted(Fake, std::cell::Cell<u32>);
+        impl Deps for Counted {
+            fn recognize(
+                &self,
+                rgba: &[u8],
+                w: u32,
+                h: u32,
+            ) -> Result<Vec<TextBlock>, crate::features::text_reading::OcrError> {
+                self.0.recognize(rgba, w, h)
+            }
+            fn translate(
+                &self,
+                texts: &[String],
+                target: &str,
+            ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
+                self.0.translate(texts, target)
+            }
+            fn detect(
+                &self,
+                rgba: &[u8],
+                w: u32,
+                h: u32,
+            ) -> Result<(Vec<TextBlock>, bool), crate::features::text_reading::OcrError>
+            {
+                self.1.set(self.1.get() + 1);
+                Ok(((self.0.lines)(rgba, w, h), true))
+            }
+        }
+        let img = frame(W, H, &[LINE]);
+        let deps = Counted(
+            Fake::new(|_, _, _| vec![tb("Close the gate", [4.0, 3.0, 200.0, 24.0])]),
+            Default::default(),
+        );
+        let (found, errors) = (Mutex::default(), Errors::default());
+        let at = Rect::new(30, 30, 230, 40);
+        let crop = Crop {
+            id: 1,
+            job: 1,
+            at,
+            rgba: crop(&img, W, [at.x, at.y, at.right(), at.bottom()]),
+        };
+        let mut r = Read {
+            deps: &deps,
+            found: &found,
+            errors: &errors,
+            size: (W, H),
+        };
+        assert_eq!(r.read(&[crop]), ["Close the gate"]);
+        assert_eq!(deps.1.get(), 1, "the quick read");
+        assert!(deps.0.ocr_calls.borrow().is_empty(), "no full read");
     }
 
     /// The patch is only what `render` changed: the frame's own pixels in its
