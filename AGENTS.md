@@ -1326,3 +1326,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   placement after scroll, time to translated after navigation/scroll), plus a separate critic review that tries to break it. The
   lead gives the owner a harsh, honest verdict; synthetic clips alone never qualify a build. Live page translation must also
   handle navigation between pages (new page = old translations gone in the same frame), not only scrolling.
+- Owner's PC tonight (owner, 2026-11-17, going to sleep: "you can use the PC, I'm asleep and won't touch it"): workers may run
+  Live acceptance tests on his PC tonight without asking again, under every standing owner-PC rule (backups + hash lists, Run
+  value, scheduled-task start, no key presses, only the 1 px wake and at most one checked click into their own window, private
+  window with YouTube captions off, check no other agent's test is running, restore byte-identical). Valid for this night only.
