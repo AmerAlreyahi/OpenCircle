@@ -2129,7 +2129,7 @@ mod tests {
         let _ = l.update(Msg::NoteDone);
         assert_eq!(ops(&rx), [], "nothing changed: nothing sent");
         let _ = l.update(Msg::Show(6, patch()));
-        let _ = l.update(Msg::Hide(5));
+        let _ = l.update(Msg::Hide(5, Instant::now()));
         assert!(matches!(
             ops(&rx)[..],
             [Op::Show(6, ..), Op::Alpha(6, 0.0), Op::Hide(5)]
