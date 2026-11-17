@@ -1073,6 +1073,7 @@ fn a_long_detect_is_followed_by_a_rest() {
 #[test]
 fn a_known_box_is_read_again_in_place_without_a_detect() {
     let (mut sim, _) = shown_sim("Open the gate");
+    sim.live.cfg.box_memory = true;
     let detects = sim.detects;
     let img = scene("Close the gate", None);
     sim.screen = vec![(LINE, "Close the gate".into())];
@@ -1146,6 +1147,7 @@ fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
     ];
     let cfg = Config {
         typed_out: true,
+        box_memory: true,
         ..Config::default()
     };
     let mut sim = Sim::new(cfg, [3, 3, 3]);

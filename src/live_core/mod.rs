@@ -241,6 +241,10 @@ pub struct Config {
     /// harness's fight clip a scene's shapes still passed for letters (3 of 10 banners lost in the
     /// replay); the box memory and the rest work without it.
     pub typed_out: bool,
+    /// Box memory: a text box whose text changes with its panel held is read again in place, with no
+    /// detect over it. Off (lead, 2026-11-17): its in-place re-read pays a full OCR of the crop and lost
+    /// lines on the Windows VM (fast clip 56 -> 29 of 66 drawn); on once that read is cheap.
+    pub box_memory: bool,
 }
 
 impl Default for Config {
@@ -265,6 +269,7 @@ impl Default for Config {
             typed_settle: (Duration::from_millis(50), Duration::from_millis(300)),
             front_lines: 4,
             typed_out: false,
+            box_memory: false,
         }
     }
 }
@@ -643,7 +648,9 @@ impl Live {
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
                 // (box memory only for a text box: one whose translation was drawn, a few lines;
                 // a detect box over a whole scene is looked for again)
-                let boxed = self.regions[i].boxed && self.regions[i].lines.len() <= 4;
+                let boxed = self.cfg.box_memory
+                    && self.regions[i].boxed
+                    && self.regions[i].lines.len() <= 4;
                 if changed && boxed && self.box_held(i, &ring) {
                     self.reuse(i, frame, layer);
                     i += 1;
