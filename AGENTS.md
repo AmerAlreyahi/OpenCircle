@@ -1302,3 +1302,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   "google for now, it requires no config"), knowing it is unofficial and may stop or be blocked: on failure a plain message and
   the offline model, never a raw error. Text only, never the capture, and only after the user picks this engine. Which services
   ship for real (Microsoft / DeepL with the user's free key, Google ...) is the owner's later call.
+- Live stays Beta in v0.3.0 (owner, 2026-11-17, "Beta"): Live translate stays behind Settings > Labs (Beta) for v0.3.0; the
+  release notes list its measured limits (W34, owner's PC: old translation up to ~0.25 s after a change, typed text drawn line by
+  line then whole, a static line over a moving 3D scene redrawn every few seconds, short fight banners / streamed lines often
+  missed or late). The typed-out path stays OFF (W34: stale -48 % but partial draws and redraws not 0, and an unsettled player
+  frame drop in 5 of 6 ON runs). Next Live work starts from the engine timing (the PC's stales don't reproduce offline).
