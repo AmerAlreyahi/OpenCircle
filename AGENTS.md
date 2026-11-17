@@ -1286,3 +1286,19 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   all-round edge, fading in/out); every look keeps its own colours and Custom keeps the user's; the Horizon / HUD / Bezel styles
   are hidden (hide, don't delete: a config whose look uses them is drawn as Glow in that look's colours; the style choice
   returns in the cosmetics version with #183). The owner tries the Live border himself on a dev build and approves or rejects it.
+
+- Plugins (owner, 2026-11-17, "perfect, I absolutely like that"): community plugins, Raycast-like: any language compiled to one
+  .wasm (Extism candidate, sandboxed), the plugin DECLARES its UI and OpenCircle draws it with the kit, it gets the crop / OCR
+  text / translation / clipboard, declared permissions approved once at install, entry points (bar, Snip More, own shortcut, tray,
+  detected-things chips, a Ctrl+K command bar), an in-app store over a reviewed + signed community repository. A complete version
+  of its own with its patches (number given at release; right after Reach, owner 2026-11-17: it reuses Reach's community repository, upload and signing; the versions after it shift by one). First a lab test (runtime size + RAM
+  loaded only on use, cold start, a JS vs Python plugin's size); then the build. Design round now (W32: Jira, flashcards,
+  converter examples; with the Snip Studio v2 design and one shared Ctrl+K bar).
+  Reference to study (owner, 2026-11-17): github.com/kunkka19xx/look (Rust launcher, GPL-3.0: ideas and approach only, never
+  its code, per "Learn from open source"); ideas worth keeping go to the plugins/hub planning card.
+- Online translation service (owner, 2026-11-17): Translate gets a third engine beside the offline model and the AI provider: an
+  online translation service, one-shot Translate only (not Live). Study, lab test (quality vs OptimaMT on the Arabic sets) and
+  build start with AI online (0.4.0). The first prototype uses Google's free web endpoint (no key, no setup), in Labs only (owner:
+  "google for now, it requires no config"), knowing it is unofficial and may stop or be blocked: on failure a plain message and
+  the offline model, never a raw error. Text only, never the capture, and only after the user picks this engine. Which services
+  ship for real (Microsoft / DeepL with the user's free key, Google ...) is the owner's later call.
