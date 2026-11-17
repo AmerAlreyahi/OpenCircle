@@ -1272,3 +1272,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   is a normal window under the layer-shell overlay; only a translated patch over text that happens to sit under the controller
   can cover it (Wayland gives no window position to cut a hole). Known issue in the notes; a second layer surface for the
   controller (~4-6 h) only if users report it. Windowed games on KDE: Live needs full screen / borderless there (plain message).
+- Box memory off until it is cheap (lead default 2026-11-17, owner asleep; "nothing stale" first): W19's box memory halves the
+  replay's shown -> drawn time (choices 366 -> 166 ms) but on the Windows VM it lost lines (fast 56 -> 29 of 66) and left one
+  stale patch up to 2.24 s, because each in-place re-read paid a full OCR pass. It ships OFF; a follow-up makes the re-read
+  cheap and turns it on only when the VM shows no loss and 0 stale. The typed-out (whole sentence) path also stays off. W15's
+  85-120 ms "stale" on the owner's PC was a measurement offset (recording t0 130-180 ms early); in the app a patch hides
+  10-20 ms (median) after the changed frame: re-measured with the player's own t0 at the owner-PC re-test.
