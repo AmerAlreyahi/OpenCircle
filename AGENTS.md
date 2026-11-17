@@ -1345,3 +1345,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   agents run lean checks (gate, a short scripted smoke for obvious breakage), no long measurement rounds, no big harnesses,
   unless the owner asks. SUPERSEDES the heavy parts of "No more failed features shown" (keep its spirit: never present
   something agents already saw broken) and "Windows first (2026-10-24)".
+- v0.3.0 chat polish go (owner, 2026-11-17): new dependencies approved: `iced_selection` (MIT, per-block text selection in
+  answers) and `syntect` (MIT, code colours from the kit's tokens). No separate design round (existing kit parts), no long lab
+  or harness tests: gate + a short Linux smoke, dev build to the owner early; more than two workers allowed for this.
