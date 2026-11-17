@@ -1318,3 +1318,11 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   translation moves to a later version. Lab test first (scroll-offset accuracy on real pages, new-strip translate time, smoothness
   and CPU of moving patches, fixed headers, scrolling inside a box, late-loading content), then the build. The current live core's
   game heuristics (panel ring, typed-out, front bands) are not the base for it.
+- No more failed features shown (owner, 2026-11-17, firm, "never show me a failed feature again; criticise, give a real verdict"):
+  before the owner sees ANY Live build (dev build or draft), it must pass a REAL-USE ACCEPTANCE TEST: a scripted human session on
+  real pages / apps (read, click links, Back/Forward, switch tabs and apps, scroll fast and slow, menus/popups, hover, selection,
+  zoom, a video on the page), frames recorded, judged per moment by strict criteria (0 stale from a previous page or position, 0
+  flicker or redraw on still content, 0 leftover original text, 0 blank erases, coverage at one-shot Translate's level, correct
+  placement after scroll, time to translated after navigation/scroll), plus a separate critic review that tries to break it. The
+  lead gives the owner a harsh, honest verdict; synthetic clips alone never qualify a build. Live page translation must also
+  handle navigation between pages (new page = old translations gone in the same frame), not only scrolling.
