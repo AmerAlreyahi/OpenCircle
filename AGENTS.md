@@ -1307,3 +1307,14 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   line then whole, a static line over a moving 3D scene redrawn every few seconds, short fight banners / streamed lines often
   missed or late). The typed-out path stays OFF (W34: stale -48 % but partial draws and redraws not 0, and an unsettled player
   frame drop in 5 of 6 ON runs). Next Live work starts from the engine timing (the PC's stales don't reproduce offline).
+- v0.3.0 draft REJECTED (owner, 2026-11-17, after trying it himself): "not even Beta; no release": on a still screen with fixed
+  text the translations keep changing, and much of the text is not translated. The draft stays unpublished. Lesson: the synthetic
+  harness clips passed what the owner sees fail; Live is judged on still real screens and real use first (W37: corpus screens held
+  still = 0 changes, coverage vs one-shot Translate), then clips. No release until the owner tries Live himself and says it is good.
+- Live page translation (owner, 2026-11-17, "1 yes, 2 yes, 3 of course"; SUPERSEDES the game-first scope of 0.3.0): v0.3.0
+  becomes LIVE PAGE TRANSLATION for web pages and normal apps: the whole screen translated in one-shot Translate's quality (its
+  pipeline, blocks as units), drawn once and steady on a still page; when the user scrolls, every translation moves with its
+  original line (scroll offset measured like Long capture's stitcher) and only the newly shown strip is translated. Live GAME
+  translation moves to a later version. Lab test first (scroll-offset accuracy on real pages, new-strip translate time, smoothness
+  and CPU of moving patches, fixed headers, scrolling inside a box, late-loading content), then the build. The current live core's
+  game heuristics (panel ring, typed-out, front bands) are not the base for it.
