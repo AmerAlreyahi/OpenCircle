@@ -1068,9 +1068,6 @@ mod tests {
                 }
             }
             queue.extend(s.live.on_frame(&f, &mut paint, &mut layer));
-            if std::env::var_os("OC_DBG2").is_some() && n.is_multiple_of(15) {
-                eprintln!("R {n} {}", s.live.debug_regions());
-            }
             while free <= n && !queue.is_empty() {
                 let i = (0..queue.len()).min_by_key(|&i| rank(&queue[i])).unwrap();
                 let job = queue.remove(i);
@@ -1198,11 +1195,6 @@ mod tests {
                     stale += 1;
                     eprintln!("stale: {:?} gone at {gone}, text off at {still}", e["text"]);
                 }
-            }
-        }
-        if std::env::var_os("OC_DBG2").is_some() {
-            for e in layer.0.iter().filter(|e| (50..140).contains(&e.0)) {
-                eprintln!("L {e:?}");
             }
         }
         eprintln!(

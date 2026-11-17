@@ -336,6 +336,13 @@ outside it (the update gate runs published builds).
   window and a fresh onboarding speak it (VM runs in Arabic without changing Windows' display language).
 - With the editor open, its Esc (Back) takes the test shot (`OPENCIRCLE_TEST_SHOT`).
 - `OPENCIRCLE_TEST_LIVE_SHOT=<out.png>`: live translate saves its layer once the first patches (or the first error) are drawn.
+- `OPENCIRCLE_LIVE_LOG=1`: Live's log lines per stage (detect / read / translate / draw / hide, with times).
+- `OPENCIRCLE_LIVE_BOX=1|0` and `OPENCIRCLE_LIVE_TYPED=1|0`: box memory and the whole-sentence typed-out path on or off, for A/B
+  runs (the app runs both off in 0.3.0; the core's own default has typed-out on).
+- Live replay (ignored tests in `live_translate/live.rs` and `live_core/tests.rs`, run by `scripts/live-replay-check.sh`):
+  `OC_CLIP=<dir>/<clip>` (a harness clip + its truth), `OC_FIXTURE=<dir>/<name>` (a recorded fixture), `OC_TYPED=1|0`
+  (typed-out on / off), `OC_FPS` (frame rate), `OC_LAT` (engine latency), `OC_BOXPAD`, `OC_TRACE`, `OC_PAD` / `OC_SLOW`
+  (the Ubuntu VM's window and slower jobs), `OC_DBG` (list missed / redrawn texts).
 - `OPENCIRCLE_TEST_UPDATE_URL=<release JSON URL>`: the update check asks this URL (http allowed: a local fake
   release server) 3 s after start, also from a 0.0.0 build. Downloads still need a signature by `RELEASE_PUBLIC_KEY`,
   or, only with this hook, by a throwaway key baked in at BUILD time (`OPENCIRCLE_TEST_RELEASE_KEY`; release.yml never

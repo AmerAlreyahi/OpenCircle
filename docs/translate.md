@@ -227,6 +227,11 @@ the screen translated as it changes, without ever blocking the game's input:
   isn't on your PC yet, the controller asks first (with the download size).
 - Names the model leaves unchanged (a speaker's name, a place) stay as written.
 
+Live translate is a **Beta**. Known limits: when text changes, the old translation can stay up to about a
+quarter of a second before it is hidden; text that types out letter by letter can be drawn line by line and
+then again whole; short fight banners and streamed cutscene lines are often late or missed; a static line over a
+moving 3D scene can be drawn again every few seconds.
+
 What each system does:
 
 | System | Live translate |
