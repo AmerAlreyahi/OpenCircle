@@ -195,6 +195,17 @@ impl Config {
             c.ai.model = get_checked(t, "ai.", "model", d.ai.model, &mut w, |s: &String| {
                 check_model(s)
             });
+            c.ai.chat_zoom = get_checked(
+                t,
+                "ai.",
+                "chat_zoom",
+                d.ai.chat_zoom,
+                &mut w,
+                |z: &u16| match CHAT_ZOOM.contains(z) {
+                    true => Ok(()),
+                    false => Err(format!("expected one of {:?} (percent)", CHAT_ZOOM)),
+                },
+            );
         }
         if let Some(t) = section(&root, "translate", &mut w) {
             c.translate.source = get_checked(

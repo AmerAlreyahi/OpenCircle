@@ -31,10 +31,11 @@ use crate::shared::kit::panel_frame::{self as frame, Event, Header};
 use crate::shared::kit::scroll::scroll;
 use crate::shared::kit::segmented::{self, segmented};
 use crate::shared::kit::spinner;
-use crate::shared::kit::text::{error, sub};
+use crate::shared::kit::text::{self, error, sub};
 use crate::shared::kit::text_area::text_area;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::kit::wrap::{Hook, wrap};
 use crate::shared::kit::{chip, field};
 
 /// A card's body and its footer.
@@ -95,8 +96,17 @@ pub fn actions<'a, M: Clone + 'a>(
 
 impl AiChat {
     /// The panel as the floating result card at `at` on a `screen`;
-    /// `hover`: the pointer is on its resize edge.
+    /// `hover`: the pointer is on its resize edge. Its text at the chat's
+    /// zoom (Ctrl+= / Ctrl+- / Ctrl+0 while its window, or the overlay it is
+    /// drawn in, has the keyboard).
     pub fn view(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
+        let card = text::zoomed(f32::from(self.zoom) / 100.0, || {
+            self.card(at, screen, hover)
+        });
+        wrap(card, ZoomKeys)
+    }
+
+    fn card(&self, at: Rectangle, screen: Size, hover: bool) -> Element<'_, Msg> {
         let (glyph, title, (body, footer)) = match &self.state {
             State::Ask {
                 setup,
@@ -589,5 +599,50 @@ pub(super) fn ago(then: u64, now: u64) -> String {
         s if s < DAY => fmt(S::chat_hour_ago, &[&(s / HOUR)]),
         s if s < 2 * DAY => t!(chat_yesterday).into(),
         _ => crate::shared::log::date(then),
+    }
+}
+
+/// Ctrl+= (or +) / Ctrl+- / Ctrl+0 that no widget took: `Msg::Zoom`.
+struct ZoomKeys;
+
+impl Hook<Msg> for ZoomKeys {
+    fn update(
+        &mut self,
+        content: &mut Element<'_, Msg>,
+        tree: &mut iced::advanced::widget::Tree,
+        event: &iced::Event,
+        layout: iced::advanced::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, Msg>,
+        viewport: &Rectangle,
+    ) {
+        content.as_widget_mut().update(
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
+        if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) = event
+            && modifiers.command()
+            && !shell.is_event_captured()
+            && let Some(zoom) = zoom_key(key.to_latin(*physical_key))
+        {
+            shell.publish(Msg::Zoom(zoom));
+            shell.capture_event();
+        }
+    }
+}
+
+/// The zoom a key asks for (with Ctrl held), if any.
+pub(super) fn zoom_key(key: Option<char>) -> Option<super::Zoom> {
+    match key? {
+        '=' | '+' => Some(super::Zoom::In),
+        '-' => Some(super::Zoom::Out),
+        '0' => Some(super::Zoom::Reset),
+        _ => None,
     }
 }

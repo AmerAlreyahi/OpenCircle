@@ -108,6 +108,16 @@ model for Brazilian Portuguese (`>>pt_br<<`).
 Short-line language detection: whichlang by Quickwit (MIT),
 https://github.com/quickwit-oss/whichlang, built into the app.
 
+Selectable text in the AI chat's answers: iced_selection (MIT),
+https://git.sr.ht/~pml68/iced_selection, built from vendor/iced_selection with
+one fix; its licence is beside it.
+
+Code colours in the AI chat's answers: syntect (MIT), Copyright (c) 2016 Tristan
+Hume, Keith Hall, Google Inc and other contributors,
+https://github.com/trishume/syntect, with its default syntax definitions (from
+Sublime Text's Packages, permissive licences as shipped by syntect), built into
+the app.
+
 Preview video decoder: rav1d (BSD-2-Clause), https://github.com/memorysafety/rav1d,
 built into the app. Copyright (c) 2018-2019, VideoLAN and dav1d authors;
 Copyright (c) 2023-2024, VideoLAN, dav1d authors, and Internet Security Research

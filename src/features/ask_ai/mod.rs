@@ -1029,6 +1029,7 @@ mod tests {
             provider: Provider::OpenaiCompatible,
             base_url: url,
             model: "m".into(),
+            ..AiConfig::default()
         };
         let err = ask_stream(&cfg, Some(&key), &[Message::user("secret prompt")], |_| {
             ControlFlow::Continue(())
@@ -1058,6 +1059,7 @@ mod tests {
             provider: Provider::OpenaiCompatible,
             base_url: url,
             model: "m".into(),
+            ..AiConfig::default()
         };
         let go = |cfg: &AiConfig| {
             ask_stream(cfg, None, &[Message::user("q")], |_| {
@@ -1087,6 +1089,7 @@ mod tests {
             provider: Provider::OpenaiCompatible,
             base_url,
             model: "m".into(),
+            ..AiConfig::default()
         };
         let ask = |cfg: &AiConfig, pieces: &mut Vec<String>| {
             ask_stream(cfg, None, &[Message::user("q")], |p| {

@@ -151,6 +151,27 @@ pub mod fixed {
         Color::from_rgba8(15, 23, 42, 0.06),
         Color::from_rgb8(0x0f, 0x17, 0x2a),
     );
+    /// A code block's colours per `code_colors::Kind` (plain, keyword, string,
+    /// number, comment, function, type) on the dark and on the light surface
+    /// (each >= 4.5:1 on it: `code_kinds_read_on_their_surface`).
+    pub const CODE_DARK_KINDS: [Color; 7] = [
+        CODE_DARK.1,
+        Color::from_rgb8(0xff, 0x7b, 0x72),
+        Color::from_rgb8(0xa5, 0xd6, 0xff),
+        Color::from_rgb8(0x79, 0xc0, 0xff),
+        Color::from_rgb8(0x8b, 0x94, 0x9e),
+        Color::from_rgb8(0xd2, 0xa8, 0xff),
+        Color::from_rgb8(0xff, 0xa6, 0x57),
+    ];
+    pub const CODE_LIGHT_KINDS: [Color; 7] = [
+        CODE_LIGHT.1,
+        Color::from_rgb8(0xcf, 0x22, 0x2e),
+        Color::from_rgb8(0x0a, 0x30, 0x69),
+        Color::from_rgb8(0x05, 0x50, 0xae),
+        Color::from_rgb8(0x57, 0x60, 0x6a),
+        Color::from_rgb8(0x6f, 0x42, 0xc1),
+        Color::from_rgb8(0x95, 0x38, 0x00),
+    ];
 
     /// The overlay's own marks over the frozen frame (the same over any
     /// picture, so no theme): text found in select-text mode, every word and

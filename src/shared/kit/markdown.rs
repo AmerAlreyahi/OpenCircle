@@ -2,19 +2,25 @@
 //! 13 px paragraphs in `text`, headings, lists, tables, inline `code` on
 //! `hover`, links in `accent` that act only on a click, and code blocks on
 //! `.oc-code-surface` (radius 12) with a header strip (the language, Copy).
-//! iced's own parser and widgets (`markdown` feature) with no syntax
-//! highlighter. Every paragraph, list item and quote has the direction of its
-//! own first letter (an English answer stays left to right in an Arabic UI and
-//! the other way round: bullets and quote bars at the side the text starts);
-//! code is always left to right.
+//! iced's own parser (`markdown` feature); the text is selectable with the
+//! mouse block by block (`iced_selection`: drag, double-click a word,
+//! triple-click a line, Ctrl+C copies, in main mode's flat highlight) and code
+//! is coloured by `code_colors` from the kit's tokens. Every paragraph, list
+//! item and quote has the direction of its own first letter (an English answer
+//! stays left to right in an Arabic UI and the other way round: bullets and
+//! quote bars at the side the text starts); code is always left to right.
+//! Sizes follow the text zoom (`text::zoomed`, the chat's Ctrl+= / Ctrl+-).
 use iced::font::Weight;
 use iced::widget::markdown::{self, Bullet, HeadingLevel, Item, Settings, Style, Text, Viewer};
-use iced::widget::{column, container, rich_text, row, text};
+use iced::widget::text::Wrapping;
+use iced::widget::{column, container, row, text};
 use iced::{Border, Element, Fill, Padding, Pixels};
+use iced_selection::rich_text;
 
 use super::button::{Kind, button, label};
+use super::code_colors;
 use super::dir::{first_strong_rtl, rtl_letter};
-use super::text::{mono, ui_font, weight};
+use super::text::{mono, ui_font, weight, zoom};
 use super::themes::{c, current};
 use super::tokens::{Role, fixed, radius};
 
@@ -42,16 +48,17 @@ const INLINE_RADIUS: f32 = 4.0;
 
 fn settings() -> Settings {
     let size = Pixels(super::text::size(Role::CHAT));
+    let z = zoom();
     Settings {
         text_size: size,
-        h1_size: Pixels(HEADINGS[0]),
-        h2_size: Pixels(HEADINGS[1]),
-        h3_size: Pixels(HEADINGS[2]),
+        h1_size: Pixels(HEADINGS[0] * z),
+        h2_size: Pixels(HEADINGS[1] * z),
+        h3_size: Pixels(HEADINGS[2] * z),
         h4_size: size,
         h5_size: size,
         h6_size: size,
-        code_size: Pixels(CODE),
-        spacing: Pixels(SPACING),
+        code_size: Pixels(CODE * z),
+        spacing: Pixels(SPACING * z),
         style: Style {
             font: ui_font(),
             inline_code_highlight: markdown::Highlight {
@@ -107,6 +114,7 @@ impl<'a> Viewer<'a, Act> for Answer {
         columns: &'a [markdown::Column],
         rows: &'a [markdown::Row],
     ) -> Element<'a, Act> {
+        // (iced's own: columns as wide as their cells, a wide one scrolls across)
         markdown::table(&Cell, settings, columns, rows)
     }
 
@@ -169,30 +177,28 @@ impl<'a> Viewer<'a, Act> for Answer {
         code: &'a str,
         lines: &'a [Text],
     ) -> Element<'a, Act> {
-        let (fill, ink) = match current().light {
-            true => fixed::CODE_LIGHT,
-            false => fixed::CODE_DARK,
+        let (fill, kinds) = match current().light {
+            true => (fixed::CODE_LIGHT.0, fixed::CODE_LIGHT_KINDS),
+            false => (fixed::CODE_DARK.0, fixed::CODE_DARK_KINDS),
         };
         let name = text(language.filter(|l| !l.is_empty()).unwrap_or("code"))
-            .size(STRIP_TEXT)
+            .size(STRIP_TEXT * zoom())
             .font(mono(Weight::Normal))
             .color(c().text_sub);
         let copy = button(
-            label(self.copy).size(STRIP_TEXT),
+            label(self.copy).size(STRIP_TEXT * zoom()),
             Kind::Quiet,
             Some(Act::Copy(code.trim_end().to_string())),
         );
         let strip = container(row![container(name).width(Fill), copy])
             .padding(STRIP)
             .style(|_| container::Style::default().background(c().hover));
-        let code = column(lines.iter().map(|line| {
-            rich_text(line.spans(settings.style))
-                .font(settings.style.code_block_font)
-                .size(settings.code_size)
-                .color(ink)
-                .into()
-        }));
-        let code = super::scroll::across(container(code).padding(CODE_PAD));
+        let code = rich_text(code_spans(language, code, lines, settings.style, kinds))
+            .font(settings.style.code_block_font)
+            .size(settings.code_size)
+            .wrapping(Wrapping::None)
+            .style(selectable);
+        let code = super::scroll::across(container(code).padding(CODE_PAD * zoom()));
         container(column![strip, code])
             .width(Fill)
             .clip(true)
@@ -268,8 +274,48 @@ impl<'a> Viewer<'a, Act> for Cell {
         rich_text(upright(line, settings.style))
             .size(settings.text_size)
             .on_link_click(Self::on_link_click)
+            .style(selectable)
             .into()
     }
+}
+
+/// The selection's look: main mode's flat highlight, the text's own colour.
+fn selectable(_: &iced::Theme) -> iced_selection::text::Style {
+    iced_selection::text::Style {
+        color: None,
+        selection: fixed::TEXT_SELECTION,
+    }
+}
+
+/// A code block's spans: its lines coloured by kind when the language is
+/// known (`code_colors`), else iced's plain lines in the plain colour.
+fn code_spans(
+    language: Option<&str>,
+    code: &str,
+    lines: &[Text],
+    style: Style,
+    kinds: [iced::Color; 7],
+) -> Vec<iced::advanced::text::Span<'static, markdown::Uri>> {
+    use iced::advanced::text::Span;
+    let ink = kinds[code_colors::Kind::Plain as usize];
+    let Some(coloured) = language.and_then(|l| code_colors::highlight(l, code.trim_end())) else {
+        let plain = lines.iter().map(|line| {
+            let text: String = line.spans(style).iter().map(|s| s.text.as_ref()).collect();
+            text
+        });
+        return vec![Span::new(plain.collect::<Vec<_>>().join("\n")).color(ink)];
+    };
+    let mut spans = Vec::new();
+    for (i, line) in coloured.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::new("\n"));
+        }
+        spans.extend(
+            (line.iter())
+                .map(|(kind, piece)| Span::new(piece.clone()).color(kinds[*kind as usize])),
+        );
+    }
+    spans
 }
 
 /// A paragraph or heading: across the width, wrapped, and laid from the
@@ -282,7 +328,8 @@ fn block<'a>(line: &Text, style: Style, size: Pixels) -> Element<'a, Act> {
     let block = rich_text(spans)
         .size(size)
         .width(Fill)
-        .on_link_click(Answer::on_link_click);
+        .on_link_click(Answer::on_link_click)
+        .style(selectable);
     match rtl {
         true => block.align_x(iced::alignment::Horizontal::Right).into(),
         false => block.into(),
@@ -334,5 +381,169 @@ mod tests {
     fn right_to_left_letters_are_found() {
         assert!("مرحبا".chars().all(rtl_letter) && "שלום".chars().all(rtl_letter));
         assert!(!"Hello, 123 «»".chars().any(rtl_letter));
+    }
+
+    use crate::shared::kit::testing::shot::{self, Clip};
+    use iced::{Point, Size};
+
+    const SIZE: Size = Size::new(400.0, 120.0);
+
+    /// `md` rendered, after a drag (`clicks` presses first) and Ctrl+C:
+    /// what was copied, the acts, and which pixels the selection changed.
+    fn select(
+        md: &str,
+        from: Point,
+        to: Point,
+        clicks: usize,
+    ) -> (Vec<String>, Vec<Act>, Vec<usize>) {
+        let content = markdown::Content::parse(md);
+        let view = || markdown(content.items(), "Copy");
+        let mut clip = Clip::default();
+        let (acts, after) =
+            shot::drag(view, SIZE, (from, to, clicks), &shot::chord('c'), &mut clip);
+        let mut none = Clip::default();
+        let away = Point::new(1.0, SIZE.height - 1.0);
+        let (_, before) = shot::drag(view, SIZE, (away, away, 1), &[], &mut none);
+        let changed = (0..(SIZE.width * SIZE.height) as usize)
+            .filter(|i| after[i * 4..i * 4 + 3] != before[i * 4..i * 4 + 3])
+            .map(|i| i % SIZE.width as usize)
+            .collect();
+        (clip.0, acts, changed)
+    }
+
+    /// #126: a drag selects within a paragraph, Ctrl+C copies just that, and
+    /// the selection is drawn.
+    #[test]
+    fn a_drag_selects_and_ctrl_c_copies_it() {
+        let text = "Hello wide world of answers";
+        let (copied, _, changed) = select(text, Point::new(1.0, 8.0), Point::new(60.0, 8.0), 1);
+        assert_eq!(copied.len(), 1, "{copied:?}");
+        assert!(
+            text.starts_with(&copied[0]) && copied[0].len() < text.len(),
+            "{copied:?}"
+        );
+        assert!(
+            !changed.is_empty() && changed.iter().all(|&x| x <= 62),
+            "drawn where dragged"
+        );
+        // a code block's line too (left to right, its own block)
+        let (copied, ..) = select(
+            "```\nlet x = 1;\n```",
+            Point::new(14.0, 48.0),
+            Point::new(390.0, 48.0),
+            3,
+        );
+        assert_eq!(copied, ["let x = 1;"]);
+    }
+
+    /// Arabic: a line selects whole (triple click), and a drag from its start
+    /// (the right) selects its first words, drawn at the right; upstream drew
+    /// no highlight (grapheme counts against byte offsets, left-to-right glyphs).
+    #[test]
+    fn arabic_selects_in_its_own_order_and_is_drawn_where_it_is() {
+        let _ar = crate::shared::kit::testing::arabic();
+        let text = "مرحبا بالعالم الجميل اليوم";
+        let (copied, _, changed) = select(text, Point::new(398.0, 8.0), Point::new(398.0, 8.0), 3);
+        assert_eq!(copied, [text]);
+        let (lo, hi) = (changed.iter().min().copied(), changed.iter().max().copied());
+        assert!(
+            lo.is_some_and(|x| x < 300) && hi.is_some_and(|x| x > 380),
+            "{lo:?}..{hi:?}"
+        );
+        let (copied, _, changed) = select(text, Point::new(399.0, 8.0), Point::new(340.0, 8.0), 1);
+        assert_eq!(copied.len(), 1);
+        assert!(
+            text.starts_with(&copied[0]) && copied[0].len() < text.len(),
+            "{copied:?}"
+        );
+        assert!(
+            !changed.is_empty() && changed.iter().all(|&x| x >= 336),
+            "drawn at the right"
+        );
+    }
+
+    /// A link acts on a click, never at the end of a drag over it.
+    #[test]
+    fn a_link_opens_on_a_click_not_a_drag() {
+        let md = "[a link here](https://a.example) and more";
+        let at = Point::new(10.0, 8.0);
+        let (_, acts, _) = select(md, at, at, 1);
+        assert_eq!(acts, [Act::Link("https://a.example".into())]);
+        let (copied, acts, _) = select(md, at, Point::new(150.0, 8.0), 1);
+        assert!(acts.is_empty() && !copied.is_empty(), "{acts:?} {copied:?}");
+    }
+
+    /// Code is coloured by kind from the theme's tokens; an unknown language
+    /// is plain, every character kept.
+    #[test]
+    fn code_is_coloured_from_the_tokens() {
+        let kinds = fixed::CODE_DARK_KINDS;
+        let style = settings().style;
+        let code = "fn main() {}\n";
+        let spans = code_spans(Some("rust"), code, &[], style, kinds);
+        let text: String = spans.iter().map(|s| s.text.as_ref()).collect();
+        assert_eq!(text, code.trim_end());
+        let keyword = kinds[code_colors::Kind::Keyword as usize];
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.text == "fn" && s.color == Some(keyword)),
+            "{spans:?}"
+        );
+        let content = markdown::Content::parse("```nolang\na <b> c\n```");
+        let Item::CodeBlock { lines, code, .. } = &content.items()[0] else {
+            panic!("a code block");
+        };
+        let plain = code_spans(Some("nolang"), code, lines, style, kinds);
+        assert_eq!(plain.len(), 1);
+        assert_eq!(
+            (plain[0].text.as_ref(), plain[0].color),
+            ("a <b> c", Some(kinds[0]))
+        );
+    }
+
+    /// Code colours read on their surface in both themes (>= 4.5:1).
+    #[test]
+    fn code_kinds_read_on_their_surface() {
+        let over = |(fill, _): (iced::Color, iced::Color), page: iced::Color| {
+            let mix = |a: f32, b: f32| a * fill.a + b * (1.0 - fill.a);
+            iced::Color::from_rgb(
+                mix(fill.r, page.r),
+                mix(fill.g, page.g),
+                mix(fill.b, page.b),
+            )
+        };
+        for (surface, kinds) in [
+            (
+                over(fixed::CODE_DARK, iced::Color::from_rgb8(0x1e, 0x22, 0x2c)),
+                fixed::CODE_DARK_KINDS,
+            ),
+            (
+                over(fixed::CODE_LIGHT, iced::Color::WHITE),
+                fixed::CODE_LIGHT_KINDS,
+            ),
+        ] {
+            for k in kinds {
+                let ratio = crate::shared::kit::themes::contrast(k, surface);
+                assert!(ratio >= 4.5, "{k:?} on {surface:?}: {ratio:.2}");
+            }
+        }
+    }
+
+    /// The text zoom scales every size of an answer.
+    #[test]
+    fn the_zoom_scales_the_answer() {
+        let plain = settings();
+        let big = crate::shared::kit::text::zoomed(1.5, settings);
+        assert_eq!(big.text_size.0, plain.text_size.0 * 1.5);
+        assert_eq!(
+            (big.h1_size.0, big.code_size.0),
+            (plain.h1_size.0 * 1.5, plain.code_size.0 * 1.5)
+        );
+        assert_eq!(
+            settings().text_size,
+            plain.text_size,
+            "only inside the scope"
+        );
     }
 }

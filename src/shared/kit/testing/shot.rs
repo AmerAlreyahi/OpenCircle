@@ -394,6 +394,67 @@ pub fn after_focus<'a, Message>(view: impl Fn() -> Element<'a, Message>, size: S
         .collect()
 }
 
+/// A left-button drag in `view` from `from` to `to` (`clicks` > 1: that many
+/// presses at `from` first, a double / triple click), then `after` (keys)
+/// into `clip`: the messages and `view` drawn (RGBA), the pointer at `to`.
+pub fn drag<'a, Message>(
+    view: impl Fn() -> Element<'a, Message>,
+    size: Size,
+    (from, to, clicks): (iced::Point, iced::Point, usize),
+    after: &[iced::Event],
+    clip: &mut dyn iced::advanced::Clipboard,
+) -> (Vec<Message>, Vec<u8>) {
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut cache = Cache::default();
+    let mut messages = Vec::new();
+    let mut steps = vec![(from, Event::Mouse(Mouse::CursorMoved { position: from }))];
+    for i in 0..clicks.max(1) {
+        steps.push((from, Event::Mouse(Mouse::ButtonPressed(Button::Left))));
+        if i + 1 < clicks {
+            steps.push((from, Event::Mouse(Mouse::ButtonReleased(Button::Left))));
+        }
+    }
+    steps.push((to, Event::Mouse(Mouse::CursorMoved { position: to })));
+    steps.push((to, Event::Mouse(Mouse::ButtonReleased(Button::Left))));
+    steps.extend(after.iter().map(|e| (to, e.clone())));
+    for (at, e) in steps {
+        let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+        let _ = ui.update(
+            &[e],
+            mouse::Cursor::Available(at),
+            &mut renderer,
+            clip,
+            &mut messages,
+        );
+        cache = ui.into_cache();
+    }
+    let mut ui = UserInterface::build(view(), size, cache, &mut renderer);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    ui.draw(
+        &mut renderer,
+        &Theme::Dark,
+        &style,
+        mouse::Cursor::Available(to),
+    );
+    let (w, h) = (size.width as u32, size.height as u32);
+    let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    renderer.draw(
+        &mut pixmap.as_mut(),
+        &mut mask,
+        &Viewport::with_physical_size(Size::new(w, h), 1.0),
+        &[Rectangle::with_size(size)],
+        crate::shared::kit::themes::c().bg,
+    );
+    let pixels = (pixmap.data().as_chunks::<4>().0.iter())
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect();
+    (messages, pixels)
+}
+
 /// A clipboard that remembers what was written to it.
 #[derive(Default)]
 pub struct Clip(pub Vec<String>);

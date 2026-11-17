@@ -266,6 +266,8 @@ const EXEMPT_FILES: &[&str] = &[
     "src/shared/platform/monitor.rs",
     "src/shared/platform/windows.rs",
     "src/shared/kit/text.rs",
+    // TextMate scope names (syntax kinds, never shown)
+    "src/shared/kit/code_colors.rs",
     // the look and theme names: ids and English fallbacks; Settings shows them from the table
     "src/shared/kit/looks.rs",
     "src/shared/kit/themes.rs",

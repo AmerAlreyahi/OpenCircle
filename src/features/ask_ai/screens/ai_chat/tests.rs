@@ -77,11 +77,9 @@ fn unknown_provider_shows_the_fix_and_sends_nothing() {
         height: 1,
         rgba: vec![0; 4],
     };
-    let mut panel = AiChat {
-        input: text_editor::Content::with_text("Explain"), // e.g. the Lens follow-up, sent once ready
-        queued: true,
-        ..AiChat::new(Arc::new(crop), State::ask(Chat::default()))
-    };
+    let mut panel = AiChat::new(Arc::new(crop), State::ask(Chat::default()));
+    panel.input = text_editor::Content::with_text("Explain"); // e.g. the Lens follow-up, sent once ready
+    panel.queued = true;
     let msg = ask::tests::invalid_provider_error();
     let _ = panel.update(Msg::Ready(Err(msg.clone())));
     let _ = panel.update(Msg::Preset(0));
@@ -994,4 +992,46 @@ fn answered_chats_are_saved_as_text_only_and_off_writes_nothing() {
     let restored = Chat::from_saved(back);
     assert!(restored.turns[0].screen && restored.turns[0].shot.is_none());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #127: Ctrl+= / Ctrl+- / Ctrl+0 step the chat's zoom (80-160 %), its text
+/// drawn at that size; a step past either end stays there.
+#[test]
+fn the_zoom_keys_step_the_chat_text() {
+    use crate::shared::kit::testing::shot::{self, Clip, Focus};
+    assert_eq!(zoomed(100, Zoom::In), 110);
+    assert_eq!((zoomed(160, Zoom::In), zoomed(80, Zoom::Out)), (160, 80));
+    assert_eq!(
+        (zoomed(125, Zoom::Out), zoomed(140, Zoom::Reset)),
+        (110, 100)
+    );
+    let mut panel = api_chat();
+    ask(&mut panel, "What is this?");
+    answer(&mut panel, "Some words of an answer.");
+    let press = |panel: &AiChat, key: char| {
+        let (msgs, _) = shot::feed(
+            panel.view(at(SCREEN), SCREEN, false),
+            SCREEN,
+            Focus::Nothing,
+            &shot::chord(key),
+            &mut Clip::default(),
+        );
+        msgs.into_iter()
+            .filter(|m| matches!(m, Msg::Zoom(_)))
+            .collect::<Vec<_>>()
+    };
+    let before = shot::render(panel.view(at(SCREEN), SCREEN, false), 1000, 700);
+    for (key, zoom) in [('=', 110), ('+', 125), ('-', 110), ('0', 100), ('-', 90)] {
+        let msgs = press(&panel, key);
+        assert_eq!(msgs.len(), 1, "{key}");
+        for m in msgs {
+            let _ = panel.update(m);
+        }
+        assert_eq!(panel.zoom, zoom, "after {key}");
+    }
+    assert!(press(&panel, 'x').is_empty(), "other keys pass by");
+    assert_ne!(
+        before,
+        shot::render(panel.view(at(SCREEN), SCREEN, false), 1000, 700)
+    );
 }

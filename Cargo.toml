@@ -12,7 +12,7 @@ iced = { version = "0.14", default-features = false, features = [
     "tiny-skia", "x11", "wayland", "thread-pool", "canvas", "image-without-codecs",
     "linux-theme-detection", # System theme follows the OS (Linux; Windows is built in)
     "advanced", # font system + headless renderer for the editor (no extra code)
-    # the AI chat's answers (pulldown-cmark; never "highlighter": no syntect)
+    # the AI chat's answers (pulldown-cmark; not "highlighter": its theme is dark only)
     "markdown",
 ] }
 # Widgets drawn off screen (`app::offscreen`; the tests' renders too): the version iced already builds.
@@ -64,6 +64,10 @@ whichlang = "=0.1.1"
 # Settings' preview clips (1080p AV1, downloaded on "Play preview"): dav1d's Rust
 # port, BSD-2. No asm (nothing to assemble on any build; 1080p ~3.5 ms a frame).
 rav1d = { version = "1.1", default-features = false, features = ["bitdepth_8"] }
+# The AI chat's answers: selectable text (#126; MIT, vendored below) and code colours
+# (MIT; pure Rust: fancy-regex, the default syntaxes; colours from kit tokens).
+iced_selection = "0.5.0"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -244,3 +248,7 @@ iced_graphics = { path = "vendor/iced_graphics" }
 # stayed on a full line, past the width: Arabic descriptions drawn past their column. "OpenCircle
 # patch" in its src/shape.rs. Still in 0.19; drop once upstream wraps at run boundaries.
 cosmic-text = { path = "vendor/cosmic-text" }
+# iced_selection 0.5.0 (the AI chat's selectable answers) with one fix ("OpenCircle patch" in its
+# src/text.rs): the selection's highlight compared grapheme counts with byte offsets and assumed
+# left-to-right glyphs, so Arabic and mixed lines were highlighted wrongly or not at all.
+iced_selection = { path = "vendor/iced_selection" }

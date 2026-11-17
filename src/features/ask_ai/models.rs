@@ -316,6 +316,7 @@ mod tests {
             provider: Provider::OpenaiCompatible,
             base_url: url.into(),
             model: String::new(),
+            ..AiConfig::default()
         }
     }
 

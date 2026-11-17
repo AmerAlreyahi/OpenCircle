@@ -1,7 +1,8 @@
 //! The one UI kit: tokens, themes, looks and motion, and one implementation
 //! of each control (a component joins as its first screen uses it; each has a
-//! gallery sheet, `testing::gallery`). Depends only on `iced`, `std` and
-//! itself (`arch_tests::kit_depends_only_on_tokens`); components read no
+//! gallery sheet, `testing::gallery`). Depends only on `iced` (with
+//! `iced_selection` and `syntect` for the AI's answers), `std` and itself
+//! (`arch_tests::kit_depends_only_on_tokens`); components read no
 //! config and no clock (animation progress comes in as an `f32`).
 
 pub mod looks;
@@ -14,6 +15,7 @@ pub mod bubble;
 pub mod button;
 pub mod card;
 pub mod chip;
+pub mod code_colors;
 pub mod colour;
 pub mod dir;
 pub mod divider;

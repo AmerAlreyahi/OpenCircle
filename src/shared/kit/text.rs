@@ -315,10 +315,31 @@ fn run<'a>(role: Role, s: impl IntoFragment<'a>, base: bool) -> Text<'a> {
 /// The size `role` is drawn at: 1 px larger in Arabic (not the mono roles:
 /// paths, versions and key names stay Latin).
 pub fn size(role: Role) -> f32 {
-    match role.mono {
-        true => role.size,
-        false => super::dir::size(role.size),
-    }
+    zoom()
+        * match role.mono {
+            true => role.size,
+            false => super::dir::size(role.size),
+        }
+}
+
+thread_local! {
+    static ZOOM: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// The text zoom of the view being built (1 = none; `zoomed`).
+pub fn zoom() -> f32 {
+    ZOOM.get()
+}
+
+/// `view` built with every kit text size times `zoom` (the AI chat's Ctrl+=
+/// / Ctrl+-: one factor through its whole view, also where it is drawn inside
+/// the overlay, so no window scale). Sizes are read while a view is built,
+/// so the scope covers them all.
+pub fn zoomed<T>(zoom: f32, view: impl FnOnce() -> T) -> T {
+    let before = ZOOM.replace(zoom);
+    let built = view();
+    ZOOM.set(before);
+    built
 }
 
 /// `s` in `role`, in the secondary text colour (a description, a note).

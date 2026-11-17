@@ -888,6 +888,25 @@ fn browser_is_the_default_provider_and_old_configs_keep_theirs() {
     }
 }
 
+/// `[ai] chat_zoom` (#127): additive, a step or the default; written only
+/// when not 100, so an older file round-trips unchanged.
+#[test]
+fn chat_zoom_is_read_checked_and_written_only_when_set() {
+    let (c, w) = Config::parse("");
+    assert_eq!((c.ai.chat_zoom, w.len()), (100, 0));
+    assert!(!toml::to_string_pretty(&c).unwrap().contains("chat_zoom"));
+    let (c, w) = Config::parse("[ai]\nchat_zoom = 125\n");
+    assert_eq!((c.ai.chat_zoom, w.len()), (125, 0), "{w:?}");
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("chat_zoom = 125"), "{text}");
+    assert_eq!(Config::parse(&text).0, c);
+    for bad in ["7", "105", "\"big\""] {
+        let (c, w) = Config::parse(&format!("[ai]\nchat_zoom = {bad}\n"));
+        assert_eq!(c.ai.chat_zoom, 100, "{bad}");
+        assert!(w.len() == 1 && w[0].starts_with("ai.chat_zoom"), "{w:?}");
+    }
+}
+
 #[test]
 fn unknown_provider_fails_closed_and_keeps_the_users_value() {
     for (value, raw) in [

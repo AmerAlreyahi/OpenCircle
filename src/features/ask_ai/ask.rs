@@ -26,7 +26,8 @@ pub const ACTION: Action = Action {
 
 const SYSTEM: &str = "The image is part of the user's screen that they selected. \
 Answer their questions about it briefly and plainly, in the language they write in. \
-Use Markdown only where it helps: short lists, tables, fenced code blocks.";
+Use Markdown only where it helps: short lists, tables, fenced code blocks. \
+Write maths in plain Unicode (x², √2, ½, α, ≤), not LaTeX, unless the user asks for LaTeX.";
 
 /// A suggested question: a chip in the Ask panel. ONE list for every provider: the
 /// API providers send `prompt` with the picture, the browser provider puts it in
@@ -472,6 +473,7 @@ mod key_tests {
             provider,
             base_url: base_url.into(),
             model: "m".into(),
+            ..AiConfig::default()
         }
     }
 
@@ -833,6 +835,7 @@ pub(crate) mod tests {
                 provider: Provider::OpenaiCompatible,
                 base_url,
                 model: "stub".into(),
+                ..AiConfig::default()
             },
             key: None,
             png: b"png".to_vec(),
@@ -872,6 +875,7 @@ pub(crate) mod tests {
                 provider: Provider::Browser,
                 base_url: format!("http://{}/v1", api.local_addr().unwrap()),
                 model: "stub".into(),
+                ..AiConfig::default()
             },
             key: None,
             png: Vec::new(),

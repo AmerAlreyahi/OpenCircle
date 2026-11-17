@@ -293,6 +293,7 @@ mod tests {
             provider,
             base_url: base_url.into(),
             model: "m".into(),
+            ..AiConfig::default()
         }
     }
 

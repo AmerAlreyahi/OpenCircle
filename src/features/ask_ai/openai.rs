@@ -161,6 +161,7 @@ mod tests {
             provider: Provider::OpenaiCompatible,
             base_url: "https://api.example.com/v1/".into(),
             model: "gpt-x".into(),
+            ..AiConfig::default()
         }
     }
 

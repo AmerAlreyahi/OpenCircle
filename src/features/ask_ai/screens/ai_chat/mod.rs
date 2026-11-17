@@ -192,6 +192,30 @@ pub enum Msg {
     Summarized(usize, Result<String, String>),
     /// A setting was saved (redraws the drawer).
     Saved,
+    /// Ctrl+= / Ctrl+- / Ctrl+0: the text a step larger, smaller, or back to 100 %.
+    Zoom(Zoom),
+}
+
+/// A zoom key (`Msg::Zoom`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zoom {
+    In,
+    Out,
+    Reset,
+}
+
+/// The zoom step after `zoom` (percent) for `key` (`config::CHAT_ZOOM`).
+pub fn zoomed(zoom: u16, key: Zoom) -> u16 {
+    let steps = config::CHAT_ZOOM;
+    let at = steps
+        .iter()
+        .position(|&z| z >= zoom)
+        .unwrap_or(steps.len() - 1);
+    match key {
+        Zoom::In => steps[(at + 1).min(steps.len() - 1)],
+        Zoom::Out => steps[at.saturating_sub(1)],
+        Zoom::Reset => 100,
+    }
 }
 
 pub struct AiChat {
@@ -225,6 +249,16 @@ pub struct AiChat {
     /// The log shows its end: a growing answer is followed. Scrolled up, the
     /// view stays put and "Jump to latest" shows (#128).
     following: bool,
+    /// The text zoom, percent (`[ai] chat_zoom`).
+    zoom: u16,
+}
+
+/// A closed chat frees the code colours' syntaxes (loaded again by the next
+/// code block: lightweight at rest).
+impl Drop for AiChat {
+    fn drop(&mut self) {
+        crate::shared::kit::code_colors::release();
+    }
 }
 
 enum State {
@@ -247,11 +281,9 @@ impl AiChat {
     /// bar's AI field); `include`: its Include screen starts on.
     pub fn open(crop: Crop, question: Option<String>, include: bool) -> (AiChat, Task<Msg>) {
         let crop = Arc::new(crop);
-        let mut panel = AiChat {
-            input: text_editor::Content::with_text(question.as_deref().unwrap_or_default()),
-            queued: question.is_some(),
-            ..AiChat::new(crop, State::ask(Chat::default()))
-        };
+        let mut panel = AiChat::new(crop, State::ask(Chat::default()));
+        panel.input = text_editor::Content::with_text(question.as_deref().unwrap_or_default());
+        panel.queued = question.is_some();
         if let State::Ask { include: on, .. } = &mut panel.state {
             *on = include;
         }
@@ -338,6 +370,7 @@ impl AiChat {
             spin: None,
             details: false,
             following: true,
+            zoom: config::current().ai.chat_zoom,
         }
     }
 
@@ -510,6 +543,13 @@ impl AiChat {
                 );
             }
             (_, Msg::Saved) => self.models.refresh(&config::current().ai),
+            (_, Msg::Zoom(key)) => {
+                let zoom = zoomed(self.zoom, key);
+                if zoom != self.zoom {
+                    self.zoom = zoom;
+                    return save_config(move |c| c.ai.chat_zoom = zoom, None);
+                }
+            }
             (_, Msg::ModelsOpened) => return operation::focus(model_list::SEARCH),
             (_, Msg::ModelQuery(q)) => self.models.query = q,
             (State::Ask { .. }, Msg::ModelPick(id)) => {

@@ -34,6 +34,8 @@
 //! provider = "browser"              # browser | anthropic | openai_compatible (missing = browser)
 //! base_url = ""                     # "" = provider default (Anthropic only)
 //! model = "claude-sonnet-5-5"       # model id sent to the provider
+//! chat_zoom = 100                   # the AI chat's text zoom, % (80 | 90 | 100 | 110 | 125 | 140 | 160;
+//!                                   # written only when not 100)
 //!
 //! [translate]
 //! source = "auto"                   # language code the text is in; auto = detect
@@ -381,6 +383,16 @@ pub struct AiConfig {
     pub provider: Provider,
     pub base_url: String,
     pub model: String,
+    /// The AI chat's text zoom in percent (`CHAT_ZOOM`; Ctrl+= / Ctrl+- / Ctrl+0).
+    #[serde(skip_serializing_if = "default_chat_zoom")]
+    pub chat_zoom: u16,
+}
+
+/// The AI chat's zoom steps (percent; 100 = none).
+pub const CHAT_ZOOM: [u16; 7] = [80, 90, 100, 110, 125, 140, 160];
+
+fn default_chat_zoom(zoom: &u16) -> bool {
+    *zoom == 100
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -925,6 +937,7 @@ impl Default for AiConfig {
             provider: Provider::Browser,
             base_url: String::new(),
             model: crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL.to_string(),
+            chat_zoom: 100,
         }
     }
 }
