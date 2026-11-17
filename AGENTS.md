@@ -1278,3 +1278,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   cheap and turns it on only when the VM shows no loss and 0 stale. The typed-out (whole sentence) path also stays off. W15's
   85-120 ms "stale" on the owner's PC was a measurement offset (recording t0 130-180 ms early); in the app a patch hides
   10-20 ms (median) after the changed frame: re-measured with the player's own t0 at the owner-PC re-test.
+- Streamed test clips (owner, 2026-11-17, after seeing YouTube captions in W28's run): every test browser on his PC opens in a
+  private window (InPrivate / incognito) AND YouTube's captions (CC) are OFF (e.g. the embed / watch URL with cc_load_policy=0
+  and no auto-captions, checked in the first frame before measuring): only the game's own text may be on screen; a run with
+  YouTube captions visible is invalid.
