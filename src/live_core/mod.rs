@@ -664,17 +664,27 @@ impl Live {
                 }
             } else {
                 // letters landing beside a box found and read: its line is still being typed out, so
-                // what was read is a part of it (drawn, it was left over the growing line, W31). Only
-                // with its ring still (a scene starting to move round a box isn't letters), and not
-                // for a box the typed-out path or box memory grew itself (its letters are taken in)
+                // what was read is a part of it (drawn, it was left over the growing line, W31): it
+                // goes back to the typed-out path, its patch hidden in this frame. Only on a panel (its
+                // ring flat when read, still now, at most a quarter of it ever the scene's: a floating
+                // word in a calm moment of the fight was drawn again and again), never where the frame shows our own patch (X11: a translation wider than its line),
+                // and not for a box that box memory reads itself
                 let change = self.cfg.change;
+                let ours = self.regions[i].patch.filter(|_| self.cfg.layer_seen);
                 let r = &mut self.regions[i];
                 let grew = r.front.iter_mut().fold(false, |grew, f| {
                     f.step(frame, s, change);
-                    grew | f.grew(change)
-                }) && r.how == How::New
-                    && r.ring_still > 0;
+                    grew | f.grew(change, s, ours)
+                }) && r.how != How::Box
+                    && r.ring_still > 0
+                    && r.on_panel();
                 let (changed, drift) = self.against_reference(i, &sig, &ring);
+                // (its own text unchanged: typing on; changed too: another, longer text, retired)
+                if grew && !changed {
+                    self.retype(i, frame, layer);
+                    i += 1;
+                    continue;
+                }
                 let changed = changed || grew;
                 // (box memory only for a text box: one whose translation was drawn, a few lines;
                 // a detect box over a whole scene is looked for again)
@@ -688,8 +698,9 @@ impl Live {
                 }
                 if changed || drift > self.cfg.ring {
                     let r = &self.regions[i];
-                    // (no panel round it when it was read: a box going away is its text leaving)
-                    if r.patch.is_some() && !panel(&r.ring_ref).1 && !self.box_held(i, &ring) {
+                    // (no panel round it when it was read, or one the scene moved through: a box
+                    // going away is its text leaving)
+                    if r.patch.is_some() && !r.on_panel() && !self.box_held(i, &ring) {
                         if self.moving.len() >= MOVING_KEPT {
                             self.moving.remove(0);
                         }
@@ -1075,6 +1086,26 @@ impl Live {
         // (a box that typed its last text out will again: wait for its letters)
         r.typing = r.style.typed;
         r.letter_at = if r.typing { frame.at } else { Duration::ZERO };
+        (r.alpha, r.prev_alpha) = (0.0, 0.0);
+        self.reset_cells(i, frame);
+    }
+
+    /// Region `i` grew after it was read (`on_frame`): its patch goes now, and it is read and drawn
+    /// once, whole, when its last letter came (the typed-out path).
+    fn retype(&mut self, i: usize, frame: &Frame, layer: &mut dyn Layer) {
+        self.note_gone(i, frame);
+        self.next_id += 1;
+        let id = self.next_id;
+        let r = &mut self.regions[i];
+        if r.patch.take().is_some() {
+            layer.hide(r.id);
+        }
+        (r.id, r.state, r.born, r.drawn) = (id, State::Changing, frame.at, false);
+        (r.typing, r.letter_at) = (true, frame.at);
+        r.stages = Stages {
+            seen: frame.at,
+            ..Stages::default()
+        };
         (r.alpha, r.prev_alpha) = (0.0, 0.0);
         self.reset_cells(i, frame);
     }
@@ -1708,12 +1739,15 @@ impl Front {
 
     /// A letter landed in it since it was set up (held or not): on a cell that showed the panel's own
     /// gray (within `FLAT / 3`), clear of the panel's last column (a cell half over the scene past a
-    /// tight HUD panel, or the scene just under it, took a passing shape for a letter, W31).
-    fn grew(&self, change: f32) -> bool {
-        let cols = self.cells.2.max(1);
+    /// tight HUD panel, or the scene just under it, took a passing shape for a letter, W31), and of
+    /// `ours` (our patch, where the frame shows it).
+    fn grew(&self, change: f32, s: u32, ours: Option<Rect>) -> bool {
+        let (x0, y0, cols) = (self.cells.0, self.cells.1, self.cells.2.max(1));
         (0..self.now.len()).any(|k| {
+            let (cx, cy) = (x0 + k as u32 % cols, y0 + k as u32 / cols);
             k as u32 % cols + 1 < self.reach
                 && self.first[k].abs_diff(self.panel) <= FLAT / 3
+                && ours.is_none_or(|p| p.overlap(&Rect::new(cx * s, cy * s, s, s)) == 0)
                 && self.inked(k, change)
         })
     }
@@ -1755,6 +1789,13 @@ fn gap_mean(mean: Duration, gap: Duration) -> Duration {
 const TYPED_MAX: Duration = Duration::from_secs(6);
 
 impl Region {
+    /// It sits on a panel: its ring was flat when read, and at most a quarter of it was ever the
+    /// scene's (a calm moment of a fight round a floating word looked flat).
+    fn on_panel(&self) -> bool {
+        panel(&self.ring_ref).1
+            && 4 * self.scene.1.iter().filter(|&&m| m).count() <= self.scene.1.len()
+    }
+
     /// What "unchanged" means from now on: the cells now, without the scene's. Of the text area (`cols`
     /// cells wide): the outer cells, a quarter of its height deep (a detect box is padded past its text:
     /// PP-OCR's unclip; past a tight HUD bar, a banner or a label's panel they show the scene behind it) and, once the text `settled`, those that moved
