@@ -5625,12 +5625,88 @@ fn snip_over_a_translation_takes_the_translated_page() {
         let crop = app.crop().expect("picked");
         assert_eq!((crop.width, crop.height), (40, 20), "{entry}: full size");
         let page = [9, 9, 9, 255].repeat(40 * 20);
-        assert!(crop.rgba == page, "{entry}: the translated page");
+        assert!(
+            crop.rgba == page,
+            "{entry}: the translated page {:?}",
+            crop.rgba
+                .iter()
+                .zip(&page)
+                .position(|(a, b)| a != b)
+                .map(|i| (i / 4, crop.rgba[i], page[i]))
+        );
     }
     // no translation: the shortcut only brings the overlay to the front
     let mut app = open_app(40, 20, 1.0);
     let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), snip)));
     assert!(matches!(app.o.purpose, Purpose::Search));
+}
+
+/// A translated 40x20 page on screen, then Snip over it (Alt+A).
+fn snip_over_translation() -> App {
+    let mut app = open_app(40, 20, 1.0);
+    let frame = app.o.frame.clone().unwrap();
+    let (mut session, _) =
+        pill::Session::start(frame, [0, 0, 40, 20], 1.0, app.cache.clone(), false, 0);
+    session.show(image::Handle::from_rgba(
+        40,
+        20,
+        [9, 9, 9, 255].repeat(40 * 20),
+    ));
+    app.o.translate = Some((1, session));
+    let snip = QuickAction {
+        action: "snip".into(),
+        shortcut: String::new(),
+        target: Target::Circle,
+        live: false,
+    };
+    let _ = app.update(Message::Trigger(Trigger::Quick(Instant::now(), snip)));
+    assert!(matches!(app.o.purpose, Purpose::Snip(_)) && app.o.translate.is_none());
+    app
+}
+
+/// The translated view is back: the overlay is still up, with the untranslated frame under
+/// the same translation (no closing, so no untranslated frame ever shows alone).
+fn assert_back_on_the_translation(app: &App, what: &str) {
+    assert!(app.o.frame.is_some(), "{what}: the overlay stays");
+    assert!(
+        app.o
+            .translate
+            .as_ref()
+            .is_some_and(|(id, s)| *id == 1 && s.is_shown()),
+        "{what}: the same translation"
+    );
+    assert!(matches!(app.o.purpose, Purpose::Search), "{what}");
+    assert!(!app.o.over_translation && app.o.edit.is_none(), "{what}");
+}
+
+/// Snip over a translated page (W43, owner 2026-11-17): Esc at the pick step and the end of a
+/// Copy pill go back to the translated view; Esc there closes.
+#[test]
+fn snip_over_a_translation_goes_back_to_it_not_to_the_page() {
+    // Esc at the pick step
+    let mut app = snip_over_translation();
+    let _ = app.update(Message::Escape);
+    assert_back_on_the_translation(&app, "esc at the pick step");
+    let _ = app.update(Message::Escape);
+    assert!(app.o.frame.is_none(), "Esc in the translated view closes");
+
+    // a picked area: the first Esc is Snip's back to the pick step, the second returns
+    let mut app = snip_over_translation();
+    event(&mut app, overlay::Event::Enter);
+    assert!(app.o.edit.is_some());
+    let _ = app.on_snip_toolbar(annotate::Message::Back);
+    let _ = app.update(Message::Escape);
+    assert_back_on_the_translation(&app, "esc after back");
+
+    // Copy: the pill over the translated frame, then the translated view
+    let mut app = snip_over_translation();
+    event(&mut app, overlay::Event::Enter);
+    let task = app.on_snip_toolbar(annotate::Message::Copy);
+    run_task(&mut app, task);
+    assert!(app.o.frame.is_some() && app.o.result.is_some());
+    let _ = app.update(Message::ToastDone);
+    assert_back_on_the_translation(&app, "after Copy");
+    assert!(app.o.result.is_none());
 }
 
 /// The second reader (`text::needs_no_second_reader`).

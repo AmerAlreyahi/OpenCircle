@@ -15,7 +15,7 @@ use crate::shared::kit::tokens::space;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let labs = &state.draft.labs;
-    column(Feature::ALL.into_iter().map(|f| {
+    column(Feature::ALL.into_iter().filter(|f| f.shown()).map(|f| {
         let on = labs.has(f);
         let (from, glide) = state.thumb(on, |p| match p {
             Pick::Lab(g, v) if g == f => Some(v),

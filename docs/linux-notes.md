@@ -25,8 +25,7 @@ what it installed (your settings stay).
 Everything works the straightforward way: the screen is captured directly,
 shortcuts are real global key grabs (on KDE Plasma: KDE's shortcut service, see
 [KDE Plasma](#kde-plasma)), the window list is available so Snip can
-outline and pick windows, and Long capture works while you scroll. Live translate is
-supported: it reads the game's own window, and a layer over it draws the translation.
+outline and pick windows, and Long capture works while you scroll.
 
 ## Wayland
 
@@ -36,7 +35,6 @@ supported: it reads the game's own window, and a layer over it draws the transla
 | Global shortcuts | The GlobalShortcuts portal (GNOME 48+, KDE Plasma 6, Hyprland's portal). The desktop asks you once. On GNOME without the portal (before 48), OpenCircle adds its keys to GNOME's own custom shortcuts (named "OpenCircle: ..."), so they work with no dialog; a key GNOME keeps for itself (for example a `Super` shortcut) is refused in Settings with the reason. On KDE Plasma without the portal (Plasma 5), OpenCircle registers its keys with KDE's own shortcut service: see [KDE Plasma](#kde-plasma). Where there is no shortcut service at all, Settings names the command to bind yourself: see [Shortcuts](shortcuts.md#wayland-without-the-shortcut-portal). |
 | Snip | There is no window list: drag an area, or click (or press `Enter`) to take the screen under the pointer. Long capture works (see below). Copy, Save, the toolbar and its tools, Steps, the colour picker and the screen ruler all work. Share (Windows' share sheet) is Windows only. |
 | Search in browser, Ask AI (Browser) | The page that carries your picture to Google Lens is served once from 127.0.0.1, never written to a file, so snap and Flatpak browsers (for example Ubuntu's snap Firefox) open it too. |
-| Live translate | KDE Plasma and wlroots: a native layer over a full-screen or borderless game; the system asks which window to share when Live starts (Plasma 5.24: every time). GNOME: not available; each press of the shortcut translates once. See [Live](translate.md#live). |
 
 The portal paths and the Snip flow above are verified on GNOME 42 (Ubuntu 22.04,
 Wayland) and GNOME 50 (Ubuntu 26.04, Wayland); other desktops are not yet. If

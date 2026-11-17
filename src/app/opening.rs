@@ -27,6 +27,15 @@ use crate::shared::config::{BarAnchor, SelectStyle, SelectionConfig, TextReader}
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 
+/// What `App::end_snip` puts back: the translation on screen before Snip took its page.
+pub(crate) struct TranslatedView {
+    pub(crate) id: u32,
+    pub(crate) session: pill::Session,
+    /// The real (untranslated) frame the session draws its translation over.
+    pub(crate) frame: image::Handle,
+    pub(crate) purpose: Purpose,
+}
+
 pub(crate) struct Opening {
     /// The frozen frame while the overlay is open; `None` = hidden, frame freed.
     /// Its RGBA bytes are also what actions crop (shared, never copied whole).
@@ -137,6 +146,10 @@ pub(crate) struct Opening {
     /// A closed overlay shows the real, untranslated page, so Copy / Save keep
     /// the frame up behind their pill (as on Wayland) instead of cutting to it.
     pub(crate) over_translation: bool,
+    /// The translated view Snip started from (the page translated and shown): when Snip ends
+    /// without closing the overlay (a Copy / Save / Copy text pill, Esc at the pick step) the
+    /// overlay goes back to it: same window, same frame, same language pill (`App::end_snip`).
+    pub(crate) translated_view: Option<Box<TranslatedView>>,
     /// Wayland, or Snip over a translation: the Copy / Save pill over the frame (its text, done or not,
     /// where), held a moment before the overlay closes (`App::toast_for`).
     pub(crate) result: Option<(String, bool, Point)>,
@@ -282,6 +295,7 @@ impl Default for Opening {
             toast: None,
             result: None,
             over_translation: false,
+            translated_view: None,
             scan: None,
             translate: None,
             helper: None,

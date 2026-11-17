@@ -78,7 +78,12 @@ impl App {
             Message::Trigger(Trigger::Quick(_, qa))
                 if !labs::quick_on(&config::current().labs, &qa) =>
             {
-                crate::log!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action);
+                match qa.live && !crate::features::live_translate::available() {
+                    true => {
+                        crate::log!("[opencircle] Live translate is not available in this version")
+                    }
+                    false => crate::log!("[opencircle] \"{}\" is off (Settings > Labs)", qa.action),
+                }
                 Task::none()
             }
             Message::Trigger(Trigger::Update(event)) => self.on_update(event),
@@ -257,7 +262,7 @@ impl App {
                 self.o.esc_back = false;
                 Task::none()
             }
-            Message::Escape => self.close(),
+            Message::Escape => self.end_snip(),
             Message::EscapeTaken
                 if self.o.edit.is_some()
                     || self.o.esc_back
@@ -308,7 +313,9 @@ impl App {
             }
             Message::Qr(act) => self.on_qr(act),
             Message::OpenEntity(entity) => self.open_entity(entity),
-            Message::ToastDone if self.o.toast.is_some() || self.o.result.is_some() => self.close(),
+            Message::ToastDone if self.o.toast.is_some() || self.o.result.is_some() => {
+                self.end_snip()
+            }
             Message::ToastDone => Task::none(),
             Message::AiChat(id, msg) => self.on_ai_chat(id, msg),
             Message::ChatMoved(id, at) => self.chat_moved(id, at),

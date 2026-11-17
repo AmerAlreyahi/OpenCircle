@@ -307,6 +307,11 @@ impl Session {
         }
     }
 
+    /// The whole page is translated and shown (not still translating).
+    pub fn is_shown(&self) -> bool {
+        matches!(self.phase, Phase::Shown(_))
+    }
+
     /// The frame as the translation shows it (full frame px, never scaled):
     /// what Snip takes (owner, 2026-11-10). The translated page, or while
     /// translating the original with what is translated so far pasted in;

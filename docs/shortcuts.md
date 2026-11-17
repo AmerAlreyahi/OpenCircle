@@ -3,13 +3,12 @@
 ## Defaults
 
 The Song search shortcut is hidden (not registered) until you turn Song search on in
-**Settings > Labs**. Live translate is a Labs feature too: its shortcut, tray item and bar button appear only when it is on.
+**Settings > Labs**.
 
 | Action | Default | What it does |
 |---|---|---|
 | Circle to search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |
 | Translate full screen | `Alt+Shift+T` | Translate the whole screen at once |
-| Live translate (Labs) | `Alt+Shift+L` | Toggle continuous translation |
 | Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search in browser | unset | Circle something; it opens in Google Lens in your browser |
@@ -23,8 +22,8 @@ window and full-screen rows (older entries in a config still work: see below).
 Older configs that had Snip on `Print Screen` move to `Alt+A` once, unless a key
 of your own stays.
 
-Translate and Live translate keep clear of browser shortcuts: their defaults are
-`Alt+Shift+T` and `Alt+Shift+L`, not `Ctrl+Shift+T` / `Ctrl+Shift+L`. A config still on
+Translate keeps clear of browser shortcuts: its default is
+`Alt+Shift+T`, not `Ctrl+Shift+T`. A config still on
 the old defaults moves to the new keys once (a backup of the file is kept); a key you
 chose yourself stays. On KDE Plasma, which remembers a key it already stored, check
 **System Settings > Shortcuts > OpenCircle** if the old key is still shown.
@@ -93,7 +92,7 @@ closes it.
 
 **Keyboard path.** `Tab` / `Shift+Tab` move the focus through the bar in the
 order you see it: the logo, the AI field, the `AI ↵` badge, Search in browser,
-Copy text, Translate, Live translate (Labs), then the other round buttons (a dimmed
+Copy text, Translate, then the other round buttons (a dimmed
 button is skipped). `Enter` or `Space` presses the focused button; a click puts
 the focus back on the screen.
 

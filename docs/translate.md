@@ -10,10 +10,9 @@ works on anything you can see.
   <sub>Before (left) and after (right). The translation takes the original's place.</sub>
 </p>
 
-Three ways in, all from the same bar or keys:
+Two ways in, all from the same bar or keys:
 
 - **Translate** on a selection (the bar, or `Alt+Shift+T` for the whole screen).
-- **Live translate** (a Labs feature; `Alt+Shift+L`, or the bar's button) keeps going as the screen changes.
 - **Select text**, then Translate, for only the words you picked.
 
 ## How it works
@@ -39,8 +38,7 @@ While translating, the pill at the top shows the pair (*Detect → Arabic*);
 click either side to switch for this session, with your recent picks first
 and a search field for the rest. The pill's Snip button, after the language
 chips, takes the translated page into Snip (see
-[Snip and annotate](snip-and-annotate.md#take-a-snip)). Live translate's
-controller has the same picker.
+[Snip and annotate](snip-and-annotate.md#take-a-snip)). Copy, Save, Copy text or `Esc` in Snip bring you back to the translated screen.
 
 Reading the text (OCR) needs a model for the source's script. English is
 the default; the first time you pick a source in another script,
@@ -68,7 +66,7 @@ Choose one in **Settings → Translate → Engine**.
 - **Offline** (the default) needs no key and no account, and nothing leaves your PC. It is a
   small neural translation model (OPUS-MT, by the University of Helsinki) that
   runs on your CPU: about a third of a second for 20 game lines, fast enough
-  for live mode. It is more literal than AI, can miss the game meaning of a
+  for game text. It is more literal than AI, can miss the game meaning of a
   word ("Quit" as in leaving, "pelts"). One model per direction; the
   first time you use a direction, OpenCircle asks before downloading it
   (about 108-116 MB, plus the text-recognition files if they are missing,
@@ -134,7 +132,7 @@ Choose one in **Settings → Translate → Engine**.
 - **AI** uses the provider from [AI setup](ai-setup.md). It is best at context and
   at marking names in their highlight colour; with a local model it stays on your
   PC. Pick it in **Settings → Translate → Engine**. If no AI provider with a key
-  is set up, OpenCircle translates offline instead, so live translate works
+  is set up, OpenCircle translates offline instead, so translation works
   without a key.
 
 Offline, a highlighted name inside a line is drawn in the line's colour: the
@@ -209,44 +207,11 @@ place. `Esc` closes it.
   translation, and a one-line explanation in the context of the scene. Press
   `A` there to continue as an AI chat.
 
-## Live
-
-Switch it on once in **Settings > Labs**, then press `Alt+Shift+L` (or use the
-bar's or the tray's Live translate) to turn it on or off. Live translate keeps
-the screen translated as it changes, without ever blocking the game's input:
-
-- It watches the screen for changes and reads only the parts that changed, and
-  only text that sits on a held box or bar (a subtitle, a menu, a quest panel).
-  Text over a moving background is left as it is.
-- A translation is drawn once and stays steady. When the text under it changes,
-  the old translation is removed first (the original shows for a moment), then
-  the new one fades in. Nothing stale is left on screen.
-- A soft glow at the screen edge, in your Active Look colours, shows Live is on.
-  A small controller shows the language pair and Pause / Stop; it uses the
-  same language picker as the translate pill. If a model the languages need
-  isn't on your PC yet, the controller asks first (with the download size).
-- Names the model leaves unchanged (a speaker's name, a place) stay as written.
-
-Live translate is a **Beta**. Known limits: when text changes, the old translation can stay up to about a
-quarter of a second before it is hidden; text that types out letter by letter can be drawn line by line and
-then again whole; short fight banners and streamed cutscene lines are often late or missed; a static line over a
-moving 3D scene can be drawn again every few seconds.
-
-What each system does:
-
-| System | Live translate |
-|---|---|
-| Windows 10 / 11 | A click-through layer over the game, excluded from OpenCircle's own captures. The glow is its own window and does show in screen recordings. |
-| Linux, X11 | Reads the game's own window (so its own patches are never read back) under a compositor; a layer over it draws the translation and glow. Without a compositor the glow becomes a thin line. |
-| Linux, KDE Plasma and wlroots (Wayland) | A native layer over the game. Choose the game window once when Live starts (Plasma 5.24 asks every time). The game must be full screen or borderless; a windowed game gets a message to make it full screen. The controller can sit under the layer: drag it aside if a translation covers it. |
-| Linux, GNOME (Wayland) | No overlay can sit over a game there, so each press of the shortcut translates once. |
-
 ## The game must be borderless or windowed
 
 No application can draw over a game in exclusive fullscreen. Switch the game to
 borderless ("fullscreen windowed") or windowed mode for the translation to
-appear over it. On KDE and wlroots, Live needs the game full screen or
-borderless (not a small window).
+appear over it.
 
 ## Limits
 

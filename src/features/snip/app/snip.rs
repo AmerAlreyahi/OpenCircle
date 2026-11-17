@@ -17,6 +17,7 @@ use crate::shared::platform::capture;
 
 use crate::app::background::background;
 use crate::app::message::{Message, Purpose};
+use crate::app::opening::TranslatedView;
 use crate::features::snip::screens::long_capture::{self, Finish};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::{
@@ -196,7 +197,12 @@ impl App {
         // them), not now: a late list drifts from the frozen frames
         let mut windows = std::mem::take(&mut self.o.windows);
         let seen = (self.o.translate.as_ref()).and_then(|(_, s)| s.seen());
+        let mut keep = None; // the untranslated frame, when the translation is to come back
         if let Some(seen) = seen {
+            // a finished translation is kept to go back to when Snip ends (`end_snip`)
+            if (self.o.translate.as_ref()).is_some_and(|(_, s)| s.is_shown()) {
+                keep = self.o.frame.clone();
+            }
             self.o.frame = Some(seen);
             self.o.over_translation = true;
             // the translated page's windows aren't the picture's: none outlined
@@ -227,7 +233,16 @@ impl App {
             snip.read_later(reader, crate::app::UIA_WINDOWS);
             snip.start_reading(); // its first frame is long up
         }
+        let purpose = std::mem::replace(&mut self.o.purpose, Purpose::Search);
         let o = &mut *self.o;
+        if let (Some(frame), Some((id, session))) = (keep, o.translate.take()) {
+            o.translated_view = Some(Box::new(TranslatedView {
+                id,
+                session,
+                frame,
+                purpose,
+            }));
+        }
         (o.ai_chat, o.translate, o.song, o.toast) = (None, None, None, None);
         (o.word, o.text_mode, o.edit, o.morph) = (None, None, None, None);
         (o.bar_focus, o.grab, o.drawing) = (None, None, false);
@@ -248,6 +263,30 @@ impl App {
         // Snip pressed on a selection: its picked state (the live area and the
         // toolbar), whatever "After a capture" says a fresh pick does.
         Task::batch([self.snip_routed(crop, true, false), extras])
+    }
+
+    /// Snip is done and the overlay has nothing more to show for it: back to the translation it
+    /// started from (same window, same frame, same pill: no untranslated frame in between), else
+    /// the overlay closes. Esc at the pick step, the end of a Copy / Save / Copy text pill.
+    pub(crate) fn end_snip(&mut self) -> Task<Message> {
+        let Some(view) = self.o.translated_view.take() else {
+            return self.close();
+        };
+        let TranslatedView {
+            id,
+            session,
+            frame,
+            purpose,
+        } = *view;
+        self.more_reset();
+        self.o.edit = None;
+        self.o.stroke.clear();
+        let o = &mut *self.o;
+        (o.selection, o.toast, o.result, o.over_translation) = (None, None, None, false);
+        o.frame = Some(frame);
+        o.translate = Some((id, session));
+        o.purpose = purpose;
+        Task::none()
     }
 
     /// The window is only Snip's pill (scrolling, the timer).

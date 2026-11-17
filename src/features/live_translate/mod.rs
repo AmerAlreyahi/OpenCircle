@@ -11,6 +11,30 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use iced::window::raw_window_handle::RawWindowHandle;
 
+/// Live translate is hidden everywhere (owner, 2026-11-17: the new engine comes after the AI core):
+/// no Labs row, shortcut, bar / tray item or Settings row. The code and the config keys stay; flip
+/// this to bring it back. Tests run with it available (they exercise the code) unless they call
+/// `as_shipped`.
+pub const AVAILABLE: bool = false;
+
+#[cfg(test)]
+thread_local!(static AS_SHIPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+/// Is Live translate offered in this build?
+pub fn available() -> bool {
+    #[cfg(test)]
+    if !AS_SHIPPED.with(std::cell::Cell::get) {
+        return true;
+    }
+    AVAILABLE
+}
+
+/// A test that checks the build as it ships: Live hidden (this thread only).
+#[cfg(test)]
+pub fn as_shipped() {
+    AS_SHIPPED.with(|f| f.set(true));
+}
+
 /// Windows: the layer is colour-keyed. Paint every pixel that is not a patch
 /// in this colour; it becomes transparent (and click-through).
 pub const COLOUR_KEY: [u8; 3] = [255, 0, 255];

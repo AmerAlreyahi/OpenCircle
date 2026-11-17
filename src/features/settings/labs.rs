@@ -4,7 +4,7 @@
 //! has no shortcut, tray item, bar button or Settings row. Its own settings stay in
 //! the file untouched; turning it on brings them back.
 //!
-//! Live translate is hidden here until Live translation (owner, 2026-10-27). Snip and its
+//! Live translate is hidden everywhere until its new engine is built (owner, 2026-11-17: `live_translate::AVAILABLE`). Snip and its
 //! editor left Labs in 0.1.3 (N-41): on for everyone, with the colour picker,
 //! the ruler, long capture, share and still pins (owner, 2026-10-31); live pins
 //! stay here (`Pins`).
@@ -24,6 +24,11 @@ pub enum Feature {
 
 impl Feature {
     pub const ALL: [Feature; 3] = [Feature::Song, Feature::Pins, Feature::Live];
+
+    /// Is its Labs row shown? Live translate's is hidden (`live_translate::AVAILABLE`).
+    pub fn shown(self) -> bool {
+        self != Feature::Live || crate::features::live_translate::available()
+    }
 
     /// The switch's name in Settings and in messages.
     pub fn title(self) -> &'static str {
@@ -48,7 +53,7 @@ impl Labs {
         match f {
             Feature::Song => self.song,
             Feature::Pins => self.pins,
-            Feature::Live => self.live,
+            Feature::Live => self.live && crate::features::live_translate::available(),
         }
     }
 
@@ -92,7 +97,7 @@ pub fn action_on(labs: &Labs, id: &QuickId) -> bool {
 
 /// Is this quick action available? Live translate is its own Labs feature.
 pub fn quick_on(labs: &Labs, q: &crate::shared::config::QuickAction) -> bool {
-    action_on(labs, &q.action) && (!q.live || labs.live)
+    action_on(labs, &q.action) && (!q.live || labs.has(Feature::Live))
 }
 
 /// The CLI's answer for a hidden feature's target (`opencircle run snip`): this
@@ -177,6 +182,24 @@ mod tests {
             assert!(l.has(f));
             assert_eq!(Feature::ALL.iter().filter(|g| l.has(**g)).count(), 1);
         }
+    }
+
+    /// Live translate is hidden (`live_translate::AVAILABLE`): a config with Labs Live on shows and
+    /// binds nothing, the config key itself is kept.
+    #[test]
+    fn live_translate_is_hidden_even_when_the_config_has_it_on() {
+        crate::features::live_translate::as_shipped();
+        let mut l = Labs::default();
+        l.set(Feature::Live, true);
+        assert!(l.live && !l.has(Feature::Live) && !Feature::Live.shown());
+        assert!(!bar(&l).contains(&BarButton::Live));
+        let live = crate::shared::config::Config::default()
+            .quick_actions
+            .into_iter()
+            .find(|q| q.live)
+            .unwrap();
+        assert!(!quick_on(&Labs::all_on(), &live));
+        assert!(Feature::Song.shown());
     }
 
     #[test]
