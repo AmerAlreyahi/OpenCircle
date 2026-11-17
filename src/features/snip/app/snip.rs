@@ -270,8 +270,10 @@ impl App {
     /// the overlay closes. Esc at the pick step, the end of a Copy / Save / Copy text pill.
     pub(crate) fn end_snip(&mut self) -> Task<Message> {
         let Some(view) = self.o.translated_view.take() else {
+            crate::log!("[opencircle] Snip ended: overlay closed");
             return self.close();
         };
+        crate::log!("[opencircle] Snip ended: back to the translated view");
         let TranslatedView {
             id,
             session,
