@@ -211,8 +211,60 @@ pub fn foreground() -> Option<isize> {
         let h = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
         (!h.is_invalid()).then_some(h.0 as isize)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        x11_foreground()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     None
+}
+
+/// X11: the window the user is in (`x11_active`), as an id.
+#[cfg(target_os = "linux")]
+fn x11_foreground() -> Option<isize> {
+    use xcb::Xid;
+    if super::wayland_session() || std::env::var_os("DISPLAY").is_none() {
+        return None;
+    }
+    let (conn, screen) = xcb::Connection::connect(None).ok()?;
+    let root = conn.get_setup().roots().nth(screen as usize)?.root();
+    x11_active(&conn, root, false).map(|w| w.resource_id() as isize)
+}
+
+/// X11: asks the window manager to activate `window` (EWMH `_NET_ACTIVE_WINDOW`,
+/// source 2 = a pager-like tool, so it is honoured).
+#[cfg(target_os = "linux")]
+fn x11_activate(window: isize) {
+    use xcb::{XidNew, x};
+    let Ok((conn, screen)) = xcb::Connection::connect(None) else {
+        return;
+    };
+    let Some(root) = conn
+        .get_setup()
+        .roots()
+        .nth(screen as usize)
+        .map(|s| s.root())
+    else {
+        return;
+    };
+    let Ok(atom) = conn.wait_for_reply(conn.send_request(&x::InternAtom {
+        only_if_exists: true,
+        name: b"_NET_ACTIVE_WINDOW",
+    })) else {
+        return;
+    };
+    let event = x::ClientMessageEvent::new(
+        x::Window::new(window as u32),
+        atom.atom(),
+        x::ClientMessageData::Data32([2, 0, 0, 0, 0]),
+    );
+    conn.send_request(&x::SendEvent {
+        propagate: false,
+        destination: x::SendEventDest::Window(root),
+        event_mask: x::EventMask::SUBSTRUCTURE_REDIRECT | x::EventMask::SUBSTRUCTURE_NOTIFY,
+        event: &event,
+    });
+    let _ = conn.flush();
 }
 
 /// The window the user is in, as far as the OS tells an app (Windows, X11).
@@ -409,7 +461,11 @@ pub fn activate(window: Option<isize>) {
             )
         };
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    if let Some(w) = window {
+        x11_activate(w);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     let _ = window;
 }
 

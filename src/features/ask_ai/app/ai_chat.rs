@@ -324,6 +324,20 @@ impl App {
             if !hide && open {
                 tasks.push(windows::foreground(overlay));
             }
+            // Snip is over and the overlay with it: showing the window activates
+            // it and it would take the keyboard from the user's app (#170): hand
+            // the focus back to the window that had it.
+            if !hide && !open {
+                let prior = crate::shared::platform::capture::window_rect::foreground();
+                tasks.push(
+                    background(move |tx| {
+                        std::thread::sleep(Duration::from_millis(150));
+                        crate::shared::platform::capture::window_rect::activate(prior);
+                        let _ = tx.unbounded_send(());
+                    })
+                    .discard(),
+                );
+            }
         }
         if let Some((home, at, size, place)) = place.filter(|_| !hide)
             && w.placed != Some(place)
