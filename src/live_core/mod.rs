@@ -1240,8 +1240,17 @@ impl Live {
             self.styles.remove(0);
         }
         self.styles.push((r.rect, r.style));
-        self.retired
-            .push(r.patch.map_or(r.rect, |p| p.union(&r.rect)));
+        let at = r.patch.map_or(r.rect, |p| p.union(&r.rect));
+        self.retired.push(at);
+        // (and its place is looked at again: a detect in flight drops its boxes there, and its tiles
+        // already showed the text, so it was never found again: a typed line lost, W31)
+        let s = self.cfg.scale.max(1);
+        let cw = self.size.0.div_ceil(s);
+        if self.tiles.len() as u64 == cw as u64 * self.size.1.div_ceil(s) as u64 {
+            pixels::walk(at, s, 0, self.size, |cx, cy, _| {
+                self.tiles[(cy * cw + cx) as usize] = 0;
+            });
+        }
         self.discover_now = true;
     }
 

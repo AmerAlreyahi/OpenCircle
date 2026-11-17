@@ -1392,6 +1392,8 @@ struct Replayed {
     redraws: Vec<(usize, String, usize)>,
     /// Patches drawn for a part of their text (typed out, drawn before its last letter).
     partial: usize,
+    /// Held texts never drawn (id, text).
+    missed: Vec<(usize, String)>,
     /// Held texts drawn, of all held; frames from whole to first drawn.
     drawn: usize,
     held: usize,
@@ -1425,6 +1427,12 @@ fn replay_frames(
         if !next(&mut img.px) {
             break;
         }
+        // (`OC_FPS`: the frames a slower player shows, e.g. the Windows VM's ~24 a second)
+        let fps = std::env::var("OC_FPS").map_or(60, |v| v.parse().unwrap());
+        if n > 0 && n * fps / 60 == (n - 1) * fps / 60 {
+            continue;
+        }
+        sim.n = n;
         let (screen, lines) = screen_at(all, n, pad);
         // (a block's lines as OCR finds them: its box, each line; read as all of them under the crop)
         sim.boxes = (screen.iter())
@@ -1493,6 +1501,10 @@ fn replay_frames(
         .filter(|s| !all[..s.id].iter().any(|o| o.boxed_with(s)))
         .filter(|s| s.off - s.on >= 30)
         .collect();
+    let missed = (held.iter())
+        .filter(|s| !first.contains_key(&s.id))
+        .map(|s| (s.id, s.text.clone()))
+        .collect();
     let mut lat: Vec<u64> = held
         .iter()
         .filter_map(|s| first.get(&s.id).copied())
@@ -1501,6 +1513,7 @@ fn replay_frames(
     let mut out = Replayed {
         drawn: lat.len(),
         partial,
+        missed,
         held: held.len(),
         lat,
         ..Default::default()
@@ -1552,6 +1565,9 @@ fn replay_a_recorded_clip() {
     }
     for d in &r.redraws {
         println!("redraw {d:?}");
+    }
+    for m in &r.missed {
+        println!("missed {m:?}");
     }
     let ms = |f: u64| f * 1000 / 60;
     println!(
@@ -1635,6 +1651,11 @@ fn recorded_frames_leave_nothing_stale_and_draw_each_text_once_whole() {
             "auto-typed",
             include_bytes!("../../tests/fixtures/live_core/auto-typed.cells"),
             include_str!("../../tests/fixtures/live_core/auto-typed.w31"),
+        ),
+        (
+            "auto-relook",
+            include_bytes!("../../tests/fixtures/live_core/auto-relook.cells"),
+            include_str!("../../tests/fixtures/live_core/auto-relook.w31"),
         ),
         (
             "type-box",

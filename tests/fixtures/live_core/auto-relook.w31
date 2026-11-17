@@ -1,0 +1,8 @@
+# auto-relook: frames 500..780 of auto.mp4, crop 368,808 1184x232 at 1/4 scale (cells)
+# id kind held from on off box_x box_y box_w box_h panel_x panel_y panel_w panel_h (- = none) text
+0 speaker 1 0 0 29 13 6 20 7 3 3 290 53 Ines
+1 typed 1 0 0 29 13 27 219 11 3 3 290 53 Promise me you will come back this time.
+2 speaker 1 29 29 256 13 5 22 8 3 3 290 53 Mira
+3 typed 1 29 187 256 13 27 217 11 3 3 290 53 My father built this tower stone by stone.
+4 speaker 1 256 256 280 13 5 38 8 3 3 290 53 Old Tavi
+5 typed 1 256 382 280 13 27 214 11 3 3 290 53 Keep your voice down, they can hear us.
