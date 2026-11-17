@@ -347,6 +347,80 @@ fn unchanged_text_is_never_drawn_again() {
     assert_eq!(sim.reads.len(), 1);
 }
 
+/// W28: a line emptied under its patch where captures never show our layer (Windows): the emptied box
+/// looks like our erased patch, and taking it for our patch kept the patch up until the next line came.
+/// Hidden in the frame it changed.
+#[test]
+fn a_line_emptied_under_a_patch_the_capture_never_shows_is_hidden_at_once() {
+    let (mut sim, _) = shown_sim("Open the gate");
+    sim.live.layer_seen(false);
+    let mut img = scene("", None);
+    // (the test painter's patch is black: the box now looks just like it)
+    img.fill(LINE, [0, 0, 0]);
+    sim.screen.clear();
+    let hides = sim.layer.hides;
+    let f = img.frame(sim.n);
+    sim.live.on_frame(&f, &mut Paint, &mut sim.layer);
+    assert_eq!(sim.layer.hides, hides + 1, "hidden in the same on_frame");
+    assert!(sim.layer.shown.is_empty());
+}
+
+/// W28: a video's keyframe redraws the same text a little differently (4 cells of a question moved by
+/// up to 28 every 2 s): no change, its patch stays and nothing is drawn again.
+#[test]
+fn a_keyframe_redrawing_the_same_text_is_no_change() {
+    let (mut sim, mut img) = shown_sim("Open the gate");
+    let (shows, hides) = (sim.layer.shows, sim.layer.hides);
+    for k in 0..4 {
+        let (x, y) = (LINE.x + 8 + 32 * k, LINE.y + 8);
+        for py in y..y + 4 {
+            for px in x..x + 4 {
+                let i = ((py * img.w + px) * 4) as usize;
+                for c in 0..3 {
+                    img.px[i + c] = img.px[i + c].saturating_add(28);
+                }
+            }
+        }
+    }
+    for _ in 0..60 {
+        sim.step(&img);
+    }
+    assert_eq!((sim.layer.shows, sim.layer.hides), (shows, hides));
+}
+
+/// W28: a line with no box round it over a moving 3D scene: drawn while the scene held, taken down when
+/// it moved through the text (nothing stale), and never drawn again while the same text stays (it was
+/// drawn 27 times in 36 s: each a flicker).
+#[test]
+fn a_static_line_over_a_moving_scene_is_never_drawn_again() {
+    let mut sim = Sim::new(Config::default(), [0, 0, 0]);
+    sim.live.layer_seen(false);
+    sim.screen = vec![(LINE, "Open the gate".into())];
+    let at = |n: u64| {
+        let mut img = Img::new(320, 180);
+        img.stripes(n);
+        img.text(LINE, "Open the gate", None);
+        img
+    };
+    let still = at(0);
+    sim.until(&still, |s| s.layer.says("<Open the gate>"));
+    for round in 0..4 {
+        for n in 1..40 {
+            sim.step(&at(round * 100 + n));
+        }
+        // (the scene holds again, elsewhere in its motion: the line is found and read again)
+        let still = at(round * 100 + 40);
+        for _ in 0..60 {
+            sim.step(&still);
+        }
+    }
+    assert_eq!(sim.layer.shows, 1, "drawn once");
+    assert!(
+        sim.layer.shown.is_empty(),
+        "taken down when the scene moved through it"
+    );
+}
+
 #[test]
 fn late_results_for_changed_text_are_dropped() {
     for slow in [1, 2] {
@@ -761,9 +835,9 @@ fn a_moving_scene_through_the_box_is_no_new_text_a_new_letter_is() {
             // 20 of the ring's ~200 cells, a little
             img.fill(Rect::new(52, 52, 80, 4), [24, 24, 28]);
         }
-        // three 4x4 cells of the line, a lot
+        // three 4x4 cells of the line, as a letter moves them (by ~100-230 in the type clip)
         for x in [64, 100, 140] {
-            img.fill(Rect::new(x, 68, 4, 4), [90, 90, 90]);
+            img.fill(Rect::new(x, 68, 4, 4), [230, 230, 230]);
         }
         sim.step(&img);
         assert_eq!(

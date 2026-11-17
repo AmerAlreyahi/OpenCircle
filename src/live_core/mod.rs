@@ -245,6 +245,12 @@ pub struct Config {
     /// detect over it. Off (lead, 2026-11-17): its in-place re-read pays a full OCR of the crop and lost
     /// lines on the Windows VM (fast clip 56 -> 29 of 66 drawn); on once that read is cheap.
     pub box_memory: bool,
+    /// The frames show our layer (X11 screen capture, the capturable test hook): a shown patch's cells
+    /// count as unchanged. False where captures never show it (Windows, a game window's own pixels):
+    /// there "looks like our patch" is only the game's own pixels (an emptied panel looks like our
+    /// erased box), and taking it for our patch kept stale patches up (W28). Set per frame by the host
+    /// ([`Live::layer_seen`]).
+    pub layer_seen: bool,
 }
 
 impl Default for Config {
@@ -270,6 +276,7 @@ impl Default for Config {
             front_lines: 4,
             typed_out: false,
             box_memory: false,
+            layer_seen: true,
         }
     }
 }
@@ -421,6 +428,8 @@ struct Region {
     boxed: bool,
     /// Its patch went up for the current text.
     drawn: bool,
+    /// The translation its patch shows ("" = none).
+    said: String,
 }
 
 /// The stage times of a region's current text (`Note::Drawn`).
@@ -510,7 +519,15 @@ pub struct Live {
     notes: Vec<Note>,
     /// The styles of boxes that left (a new region in the same place takes it over).
     styles: Vec<(Rect, Style)>,
+    /// Places whose patch went because the scene moved through its text (no panel round it), with
+    /// what it said and when: the same text there again is not drawn again (a redraw of unchanged
+    /// text: a static line over a moving 3D scene was shown 27 times in 36 s, W28).
+    moving: Vec<(Rect, String, Duration)>,
 }
+
+/// Places of patches the scene moved through, kept; and for how long the same text there isn't drawn.
+const MOVING_KEPT: usize = 16;
+const MOVING_FOR: Duration = Duration::from_secs(10);
 
 /// Styles of boxes that left, kept for a new region in their place.
 const STYLES_KEPT: usize = 32;
@@ -536,6 +553,7 @@ impl Live {
             detecting: None,
             discover_now: false,
             retired: Vec::new(),
+            moving: Vec::new(),
             reading: HashMap::new(),
             translating: HashMap::new(),
             backoff: Backoff::default(),
@@ -657,6 +675,14 @@ impl Live {
                     continue;
                 }
                 if changed || drift > self.cfg.ring {
+                    let r = &self.regions[i];
+                    // (no panel round it when it was read: a box going away is its text leaving)
+                    if r.patch.is_some() && !panel(&r.ring_ref).1 && !self.box_held(i, &ring) {
+                        if self.moving.len() >= MOVING_KEPT {
+                            self.moving.remove(0);
+                        }
+                        self.moving.push((r.rect, r.said.clone(), frame.at));
+                    }
                     self.retire(i, frame, layer);
                     continue;
                 }
@@ -1007,6 +1033,7 @@ impl Live {
             }
             let mut d = ring[k].abs_diff(r.ring_ref[k]);
             if r.patch.is_some()
+                && self.cfg.layer_seen
                 && let Some(o) = r.ours.1.get(k)
             {
                 d = d.min(ring[k].abs_diff(*o));
@@ -1073,6 +1100,7 @@ impl Live {
         (self.last_discover, self.detecting, self.discover_now) = (None, None, false);
         self.took = Duration::ZERO;
         self.retired.clear();
+        self.moving.clear();
         self.reading.clear();
         self.translating.clear();
     }
@@ -1098,6 +1126,11 @@ impl Live {
         b.slow_run = if slow { b.slow_run + 1 } else { 0 };
         b.slow = b.slow_run >= 3;
         b.slow
+    }
+
+    /// Whether the frames show our layer from now on ([`Config::layer_seen`]).
+    pub fn layer_seen(&mut self, seen: bool) {
+        self.cfg.layer_seen = seen;
     }
 
     /// The host's total CPU load (0..1): above 85 % for 2 s pauses the discover step until it is under
@@ -1142,6 +1175,7 @@ impl Live {
         // where the capture shows our patch over the text (X11 without window frames, Wayland), a box
         // closing under it shows in the ring alone: then at most 3/4 of the ring is the scene's
         let ours_seen = r.patch.is_some()
+            && self.cfg.layer_seen
             && !pixels::changed(sig, &r.reference, Some((&r.ours.0, 1.0)), change)
             && pixels::changed(sig, &r.reference, None, change);
         let scene = r.scene.1.iter().filter(|&&s| s).count();
@@ -1157,13 +1191,15 @@ impl Live {
         );
         let ours = (&keep(&r.ours.0, &r.scene.0), &keep(&r.ours.1, ring_scene));
         let mut drift = pixels::moved(ring, ring_ref, None, change);
-        // (with the ring moving, a few strong cells are the scene through the box)
+        // (with the ring moving, a few strong cells are the scene through the box; else two cells moved
+        // a lot is a new letter: a stroke moves a cell by ~100, a video's keyframe redrawing the same
+        // text moved 4 cells of a choices question by up to 28 every 2 s, and it was drawn again, W28)
         let strong = match drift > self.cfg.seep {
             true => (4.0 * change, self.cfg.seep_cells),
-            false => (2.0 * change, 2),
+            false => (4.0 * change, 2),
         };
         let mut changed = pixels::changed_by(sig, reference, None, change, strong);
-        if r.patch.is_some() && (changed || drift > self.cfg.ring) {
+        if r.patch.is_some() && self.cfg.layer_seen && (changed || drift > self.cfg.ring) {
             let mut alphas = vec![1.0, r.alpha, r.prev_alpha];
             alphas.dedup();
             for t in alphas {
@@ -1242,6 +1278,15 @@ impl Live {
     ) {
         let (s, ringc) = (self.cfg.scale.max(1), self.ring_cells());
         let held = self.regions[i].ring_still >= self.cfg.settle_frames;
+        // (the same text where the scene moved through it before: not drawn again, nothing flickers)
+        let rect = self.regions[i].rect;
+        if let Some(m) = (self.moving.iter_mut()).find(|(at, said, when)| {
+            at.same_place(&rect) && said == t && frame.at.saturating_sub(*when) < MOVING_FOR
+        }) {
+            m.2 = frame.at;
+            self.regions[i].state = State::Idle;
+            return;
+        }
         let r = &mut self.regions[i];
         r.state = State::Idle;
         if t.trim().is_empty() || !held {
@@ -1281,6 +1326,7 @@ impl Live {
             }
         });
         r.ours = (text, ring);
+        r.said = t.to_string();
         r.patch = Some(at);
         r.state = State::Shown { since: frame.at };
         (r.drawn, r.boxed) = (true, true);
@@ -1338,6 +1384,7 @@ impl Live {
             scene: (Vec::new(), Vec::new()),
             patch: None,
             ours: (Vec::new(), Vec::new()),
+            said: String::new(),
             alpha: 0.0,
             prev_alpha: 0.0,
             how: How::New,
@@ -1549,11 +1596,7 @@ impl Front {
         let (cw, ch) = (f.width.div_ceil(s), f.height.div_ceil(s));
         let (x0, y0) = ((at.x / s).min(cw), (at.y / s).min(ch));
         let cols = at.right().div_ceil(s).min(cw) - x0;
-        let mut sorted = ring.to_vec();
-        sorted.sort_unstable();
-        let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
-        // (a panel: most of the ring shows one gray; round a tight bar it is the scene's)
-        let flat = 5 * ring.iter().filter(|c| c.abs_diff(median) <= FLAT).count() >= 3 * ring.len();
+        let (median, flat) = panel(ring);
         // (the panel's extent: the band ends at the first column hardly any of whose cells show it,
         // the scene past the panel's edge)
         let seen = match probe.area() {
@@ -1654,6 +1697,16 @@ const CALM: Duration = Duration::from_millis(120);
 /// A letter holds its gray this long once it landed.
 const HOLD: Duration = Duration::from_millis(45);
 const FLAT: u8 = 12;
+
+/// Ring cells' median gray, and whether they are a panel: most of them show that one gray (round a
+/// tight bar, or text with no box, they are the scene's).
+fn panel(ring: &[u8]) -> (u8, bool) {
+    let mut sorted = ring.to_vec();
+    sorted.sort_unstable();
+    let median = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
+    let flat = 5 * ring.iter().filter(|c| c.abs_diff(median) <= FLAT).count() >= 3 * ring.len();
+    (median, flat)
+}
 /// Text that is not known to be typing settles only this long after a letter landed beside it.
 const QUIET: Duration = Duration::from_millis(150);
 

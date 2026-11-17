@@ -867,6 +867,7 @@ impl Live {
             chosen: self.langs.clone(),
             mask: self.mask.clone(),
             under: !self.caps.is_some_and(|c| c.blends),
+            excluded: self.caps.is_some_and(|c| c.excluded_from_capture),
         };
         let cache = self.cache.clone();
         let (task, handle) = background(move |tx| {
@@ -1017,6 +1018,9 @@ struct Shared {
     /// Patches fade in as a blend with what they cover (the layer doesn't
     /// blend): each is sent with those pixels.
     under: bool,
+    /// Captures never show the layer (Windows 10 2004+): the core then never takes the game's own
+    /// pixels for our patch.
+    excluded: bool,
 }
 
 /// The layer as the live core sees it: each patch sent to the UI once, each
@@ -1127,8 +1131,13 @@ impl<S: FnMut(Msg) -> bool> core::Layer for ToUi<S> {
 }
 
 /// The core's thresholds here: its defaults (a patch fades in over 120 ms).
+/// Box memory as the VMs' A/B test hook sets it (`engines::box_memory_hook`).
 fn core_config() -> core::Config {
-    core::Config::default()
+    let mut cfg = core::Config::default();
+    if let Some(on) = engines::box_memory_hook() {
+        cfg.box_memory = on;
+    }
+    cfg
 }
 
 /// Work for the work thread: a core job (with the frame a detect needs, and
@@ -1286,6 +1295,7 @@ fn session(monitor: Monitor, ui: Shared, cache: Arc<Cache>, send: impl FnMut(Msg
                 // (our edge only where this frame shows the screen: not in the
                 // game window's own pixels)
                 let edge = !frames.of_window();
+                live.layer_seen(edge && !ui.excluded);
                 blanked = blank(&mut rgba, (monitor, area), &own, &ui.mask, edge);
                 if last.as_ref() == Some(&rgba) {
                     same = same.saturating_add(1);
