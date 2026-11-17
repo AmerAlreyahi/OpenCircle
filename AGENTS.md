@@ -1348,3 +1348,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - v0.3.0 chat polish go (owner, 2026-11-17): new dependencies approved: `iced_selection` (MIT, per-block text selection in
   answers) and `syntect` (MIT, code colours from the kit's tokens). No separate design round (existing kit parts), no long lab
   or harness tests: gate + a short Linux smoke, dev build to the owner early; more than two workers allowed for this.
+- Version plan (owner, 2026-11-17, approved; SUPERSEDES the order of every earlier version plan for what follows v0.2.0): ONE
+  FEATURE PER VERSION, each finished (tests, the owner's own trying, his OK) before the next; board cards planning #184-#196
+  (Order 1-13). v0.3.0 AI chat polish (+ work done since v0.2.0, Live hidden) -> v0.3.1 online translation engine (Labs) + Retry
+  pill -> v0.3.2 one-click OpenRouter sign-in -> v0.3.3 web search -> v0.4.0 Snip Studio window -> v0.4.1 Ctrl+K in the Studio ->
+  v0.4.2 Steps in the Studio + picture/steps export -> v0.4.3 animated steps export (GIF/MP4/WebM) -> v0.4.4 actions on the
+  picture -> v0.4.5 edit text in the picture -> v0.4.6 cut out (model test first) -> v0.5.0 Live page translation (new engine)
+  -> v0.5.1 game "watch area". After that the versions already planned (Reach, Plugins, ...), each split the same way.
