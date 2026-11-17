@@ -1282,3 +1282,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   private window (InPrivate / incognito) AND YouTube's captions (CC) are OFF (e.g. the embed / watch URL with cc_load_policy=0
   and no auto-captions, checked in the first frame before measuring): only the game's own text may be on screen; a run with
   YouTube captions visible is invalid.
+- Glow only until the cosmetics version (owner, 2026-11-17): in v0.3.0 main mode AND Live draw only the Glow style (the soft
+  all-round edge, fading in/out); every look keeps its own colours and Custom keeps the user's; the Horizon / HUD / Bezel styles
+  are hidden (hide, don't delete: a config whose look uses them is drawn as Glow in that look's colours; the style choice
+  returns in the cosmetics version with #183). The owner tries the Live border himself on a dev build and approves or rejects it.
