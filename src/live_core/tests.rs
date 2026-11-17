@@ -1144,7 +1144,11 @@ fn a_typed_out_box_is_drawn_once_whole_soon_after_its_last_letter() {
         "so the merchants wait",
         "in the valley tonight",
     ];
-    let mut sim = Sim::new(Config::default(), [3, 3, 3]);
+    let cfg = Config {
+        typed_out: true,
+        ..Config::default()
+    };
+    let mut sim = Sim::new(cfg, [3, 3, 3]);
     sim.block = true;
     let empty = typed(&mut sim, &[], None);
     for _ in 0..30 {

@@ -237,6 +237,10 @@ pub struct Config {
     /// Where a box's next letters land is watched: this many line heights right of its last line, and
     /// one line height under it.
     pub front_lines: u32,
+    /// Tell a box typed out letter by letter from its front and read it only once whole. Off: on the
+    /// harness's fight clip a scene's shapes still passed for letters (3 of 10 banners lost in the
+    /// replay); the box memory and the rest work without it.
+    pub typed_out: bool,
 }
 
 impl Default for Config {
@@ -260,6 +264,7 @@ impl Default for Config {
             cache_signatures: 512,
             typed_settle: (Duration::from_millis(50), Duration::from_millis(300)),
             front_lines: 4,
+            typed_out: false,
         }
     }
 }
@@ -625,7 +630,7 @@ impl Live {
                         let close =
                             frame.at.saturating_sub(r.letter_at) <= Duration::from_millis(150);
                         r.hits = if close { r.hits.saturating_add(1) } else { 1 };
-                        r.typing |= r.hits >= 4;
+                        r.typing |= r.hits >= 4 && self.cfg.typed_out;
                     }
                     r.letter_at = frame.at;
                 }
