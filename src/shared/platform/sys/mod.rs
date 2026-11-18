@@ -39,6 +39,10 @@ pub fn test_hook(name: &str) -> Option<OsString> {
 /// desktop; they then also show in the next capture's frozen frame).
 pub(crate) const CAPTURABLE: &str = "OPENCIRCLE_TEST_CAPTURABLE";
 
+/// Test hook (W72 prototype): a toast pill is drawn with per-pixel alpha
+/// (`alpha_window::show_top`, Windows) instead of a cut window.
+pub(crate) const CRISP_PILL: &str = "OPENCIRCLE_TEST_CRISP_PILL";
+
 fn hooks_on(debug_build: bool, opt_in: Option<OsString>) -> bool {
     debug_build || opt_in.is_some_and(|v| v == "1")
 }

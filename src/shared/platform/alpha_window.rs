@@ -35,12 +35,24 @@ pub fn show(
     match under_of {
         #[cfg(windows)]
         RawWindowHandle::Win32(h) => {
-            win::open(h.hwnd.get(), at, strips).map(|hwnd| AlphaWindow { hwnd })
+            win::open(Some(h.hwnd.get()), at, strips).map(|hwnd| AlphaWindow { hwnd })
         }
         _ => {
             let _ = (at, strips);
             None
         }
+    }
+}
+
+/// `show`, but over every window (no window to sit under): a notice pill
+/// (W72 prototype, `OPENCIRCLE_TEST_CRISP_PILL`). `None` off Windows.
+pub fn show_top(at: (i32, i32, u32, u32), strips: Vec<([u32; 4], Vec<u8>)>) -> Option<AlphaWindow> {
+    #[cfg(windows)]
+    return win::open(None, at, strips).map(|hwnd| AlphaWindow { hwnd });
+    #[cfg(not(windows))]
+    {
+        let _ = (at, strips);
+        None
     }
 }
 
@@ -75,7 +87,7 @@ mod win {
     /// `super::open`: the window on a thread of its own (it waits in its
     /// message loop for `close`); its handle once it is drawn.
     pub fn open(
-        layer: isize,
+        layer: Option<isize>,
         at: (i32, i32, u32, u32),
         strips: Vec<([u32; 4], Vec<u8>)>,
     ) -> Option<isize> {
@@ -105,7 +117,7 @@ mod win {
 
     /// The window, drawn once (still invisible: constant alpha 0), just under `under_of`.
     fn draw(
-        under_of: isize,
+        under_of: Option<isize>,
         (x, y, w, h): (i32, i32, u32, u32),
         strips: &[([u32; 4], Vec<u8>)],
     ) -> Result<HWND, String> {
@@ -210,18 +222,33 @@ mod win {
                 let _ = DestroyWindow(hwnd);
                 return Err(e);
             }
-            // just under `under_of`, topmost with it
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND(under_of as *mut _)),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            );
+            // just under `under_of`, topmost with it (else topmost over all)
+            if let Some(under_of) = under_of {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND(under_of as *mut _)),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             crate::shared::platform::capture::window_rect::no_pick(hwnd.0 as isize);
+            // W72: whether it can stay out of captures (W12 found it can't)
+            let seen =
+                crate::shared::platform::sys::test_hook(crate::shared::platform::sys::CAPTURABLE);
+            if under_of.is_none() && seen.is_none() {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+                };
+                let out = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+                crate::log!(
+                    "[opencircle] crisp pill: exclude from capture {:?}",
+                    out.is_ok()
+                );
+            }
             Ok(hwnd)
         }
     }
