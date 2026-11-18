@@ -227,11 +227,38 @@ fn read_picture(path: &std::path::Path) -> Result<Crop, String> {
     })
 }
 
+/// One key the editor left alone: Esc answers the unsaved question with Cancel (a no-op
+/// when none is open); the Ctrl keys are the Studio's own.
+fn key_msg(
+    key: &keyboard::Key,
+    physical_key: keyboard::key::Physical,
+    modifiers: keyboard::Modifiers,
+) -> Option<studio::Msg> {
+    use keyboard::key::{Code, Named, Physical};
+    if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
+        return Some(studio::Msg::Cancel);
+    }
+    if !modifiers.command() {
+        return None;
+    }
+    Some(match (physical_key, key.to_latin(physical_key)) {
+        (Physical::Code(Code::BracketLeft), _) => studio::Msg::Library,
+        (Physical::Code(Code::BracketRight), _) => studio::Msg::Panel,
+        (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
+        (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::ZoomIn,
+        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::ZoomOut,
+        (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::Fit,
+        (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
+        (_, Some('o')) => studio::Msg::Open,
+        (_, Some('v')) => studio::Msg::Paste,
+        _ => return None,
+    })
+}
+
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
 /// the panels (Ctrl+[ / Ctrl+] / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
 pub(super) fn studio_events() -> iced::Subscription<Msg> {
-    use keyboard::key::{Code, Physical};
     iced::event::listen_with(|event, status, id| {
         let m = match event {
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
@@ -245,22 +272,28 @@ pub(super) fn studio_events() -> iced::Subscription<Msg> {
                 physical_key,
                 modifiers,
                 ..
-            }) if modifiers.command() && status == iced::event::Status::Ignored => {
-                match (physical_key, key.to_latin(physical_key)) {
-                    (Physical::Code(Code::BracketLeft), _) => studio::Msg::Library,
-                    (Physical::Code(Code::BracketRight), _) => studio::Msg::Panel,
-                    (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
-                    (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::ZoomIn,
-                    (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::ZoomOut,
-                    (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::Fit,
-                    (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
-                    (_, Some('o')) => studio::Msg::Open,
-                    (_, Some('v')) => studio::Msg::Paste,
-                    _ => return None,
-                }
-            }
+            }) if status == iced::event::Status::Ignored => key_msg(&key, physical_key, modifiers)?,
             _ => return None,
         };
         Some(Msg::StudioEvent(id, m))
     })
+}
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+    use keyboard::key::{Code, Named, Physical};
+
+    /// Esc on the unsaved question = Cancel; Ctrl+Esc and other keys are not.
+    #[test]
+    fn esc_is_cancel() {
+        let esc = keyboard::Key::Named(Named::Escape);
+        let p = Physical::Code(Code::Escape);
+        assert!(matches!(
+            key_msg(&esc, p, keyboard::Modifiers::empty()),
+            Some(studio::Msg::Cancel)
+        ));
+        assert!(key_msg(&esc, p, keyboard::Modifiers::CTRL).is_none());
+        let f = keyboard::Key::Character("f".into());
+        assert!(key_msg(&f, Physical::Code(Code::KeyF), keyboard::Modifiers::empty()).is_none());
+    }
 }

@@ -66,3 +66,20 @@ fn the_wxs_has_the_start_menu_shortcut_and_open_with_entries() {
     assert!(!w.contains("Root=\"HKLM\" Key=\"Software\\Classes\\.png\">"));
     assert!(w.contains("<ComponentRef Id=\"StudioOpenWith\"/>"));
 }
+
+#[test]
+fn install_sh_ships_and_removes_the_studio_entry() {
+    let s = read_to_string("scripts/install.sh").unwrap();
+    let d = read_to_string("packaging/com.opencircle.app.studio.desktop").unwrap();
+    assert!(s.contains("$APP_ID.studio.desktop"));
+    assert!(s.contains("Exec=$BIN studio %f"));
+    for k in ["Name=", "Comment=", "Categories=", "MimeType="] {
+        let l = d.lines().find(|l| l.starts_with(k)).unwrap();
+        assert!(s.contains(l), "{l} differs from the packaged file");
+    }
+    assert!(
+        s.contains("\"$STUDIO\" \"$AUTOSTART\"; do"),
+        "uninstall removes it"
+    );
+    assert!(!s.contains("mimeapps"), "never touches the defaults");
+}

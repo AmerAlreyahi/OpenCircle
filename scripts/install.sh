@@ -49,6 +49,7 @@ BIN_DIR="$HOME_DIR/.local/bin"
 BIN="$BIN_DIR/opencircle"
 DATA="${XDG_DATA_HOME:-$HOME_DIR/.local/share}"
 DESKTOP="$DATA/applications/$APP_ID.desktop"
+STUDIO="$DATA/applications/$APP_ID.studio.desktop"
 ICON="$DATA/icons/hicolor/128x128/apps/$APP_ID.png"
 AUTOSTART="${XDG_CONFIG_HOME:-$HOME_DIR/.config}/autostart/$APP_ID.desktop"
 MARK="X-OpenCircle-Generated=true"
@@ -74,11 +75,11 @@ uninstall() {
   found=0
   stop_app
   forget_kde_keys
-  for f in "$BIN" "$ICON" "$DESKTOP" "$AUTOSTART"; do
+  for f in "$BIN" "$ICON" "$DESKTOP" "$STUDIO" "$AUTOSTART"; do
     [ -e "$f" ] || continue
     # A desktop entry we did not write (a package's, or the user's) stays.
     case $f in
-      "$DESKTOP" | "$AUTOSTART") grep -q -e "$MARK" -e "$BIN" "$f" 2>/dev/null || continue ;;
+      "$DESKTOP" | "$STUDIO" | "$AUTOSTART") grep -q -e "$MARK" -e "$BIN" "$f" 2>/dev/null || continue ;;
     esac
     rm -f "$f"
     say "Removed $f"
@@ -243,6 +244,19 @@ StartupWMClass=$APP_ID
 Terminal=false
 Categories=Utility;
 $MARK
+EOF
+# Snip Studio: an extra menu entry and "Open with" for pictures (never a default app).
+cat >"$STUDIO" <<EOF
+[Desktop Entry]
+$MARK
+Type=Application
+Name=Snip Studio
+Comment=Edit and annotate a picture
+Exec=$BIN studio %f
+Icon=$APP_ID
+Terminal=false
+Categories=Graphics;
+MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;
 EOF
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "${DESKTOP%/*}" >/dev/null 2>&1 || true
 
