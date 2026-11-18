@@ -50,6 +50,8 @@ pub enum Kind {
     Onboarding,
     /// Wayland, after a refused capture: "OpenCircle needs screenshot permission".
     Permission,
+    /// Snip Studio (`studio.rs`).
+    Studio,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +73,7 @@ pub enum Msg {
     /// From a normal window's header or edges.
     Chrome(window::Id, chrome::Event),
     /// A window was resized (any of ours; the overlay's is `app::App`'s).
-    Resized(window::Id, f32),
+    Resized(window::Id, Size),
     /// Whether a normal window is maximised now (asked after every resize).
     Maximised(window::Id, bool),
     /// Test hook step (see `test_hook`).
@@ -103,6 +105,15 @@ pub enum Msg {
     Moved(window::Id, Point),
     /// Edit the strip's `i`th step in Snip: `app::App` opens it ("Update step N").
     EditStep(usize),
+    /// From Snip Studio's window; its own keys and file drops (any window: only
+    /// the Studio's are kept).
+    Studio(crate::features::snip::screens::studio::Msg),
+    StudioEvent(window::Id, crate::features::snip::screens::studio::Msg),
+    /// A picture read for the Studio; a Save for it landed (`true`: what waited
+    /// on its question goes on); a Copy landed (its pill).
+    StudioRead(Result<Crop, String>),
+    StudioSaved(Result<String, String>, bool),
+    StudioToast(Result<String, String>),
 }
 
 #[derive(Default)]
@@ -128,6 +139,8 @@ pub struct Windows {
     steps: Option<(Option<window::Id>, Strip)>,
     /// Our floating windows taken out of a grab (Linux, `leave_frame`).
     out: Option<Out>,
+    /// Snip Studio, at most one.
+    studio: Option<(window::Id, crate::features::snip::screens::studio::Studio)>,
 }
 
 /// What `Windows::leave_frame` took out of capture number `capture`'s grab.
@@ -702,6 +715,7 @@ impl Windows {
             Kind::Settings => self.settings.as_ref().map(|(id, _)| *id),
             Kind::Onboarding => self.onboarding.as_ref().map(|(id, _)| *id),
             Kind::Permission => self.permission.as_ref().map(|(id, _)| *id),
+            Kind::Studio => self.studio_window(),
         }
     }
 
@@ -1162,10 +1176,14 @@ impl Windows {
             || !self.pins.is_empty()
             || self.steps.is_some()
             || self.out.is_some()
+            || self.studio.is_some()
     }
 
     /// Opens the window, or focuses it when it is already open.
     pub fn open(&mut self, kind: Kind) -> Task<Msg> {
+        if kind == Kind::Studio {
+            return self.open_studio(None);
+        }
         if let Some(id) = self.id(kind) {
             crate::log!("[opencircle] {kind:?} window is open: focusing it");
             return window::minimize(id, false).chain(window::gain_focus(id));
@@ -1184,6 +1202,7 @@ impl Windows {
             }
             Kind::Onboarding => self.onboarding = Some((id, onboarding::State::open())),
             Kind::Permission => self.permission = Some((id, onboarding::Access::Unasked)),
+            Kind::Studio => unreachable!(),
         }
         self.chrome.insert(id, Chrome::default());
         // the preview stage decodes at the px it is shown at
@@ -1369,6 +1388,18 @@ impl Windows {
                 }
             }
             Msg::StepKey(..) | Msg::Moved(..) | Msg::EditStep(_) => {}
+            Msg::Studio(msg) => return self.on_studio(msg),
+            Msg::StudioEvent(id, msg) if self.studio_window() == Some(id) => {
+                return self.on_studio(msg);
+            }
+            Msg::StudioEvent(..) => {}
+            Msg::StudioRead(read) => return self.studio_read(read),
+            Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
+            Msg::StudioToast(done) => {
+                let ok = done.is_ok();
+                let text = done.unwrap_or_else(|e| e);
+                return self.toast(&text, ok, None, TOAST_MS);
+            }
             Msg::UpdateStatus(status) => {
                 if let Some((_, state)) = &mut self.settings {
                     settings::update(state, settings::Message::UpdateStatus(status));
@@ -1471,9 +1502,14 @@ impl Windows {
             // `app::App` takes it before here.
             Msg::Run(_) => {}
             Msg::Chrome(id, event) => return self.on_chrome(id, event),
-            Msg::Resized(id, h) => {
+            Msg::Resized(id, size) => {
                 if self.id(Kind::Settings) == Some(id) {
+                    let h = size.height;
                     let _ = self.handle(Msg::Settings(settings::Message::Height(h)));
+                }
+                if self.studio_window() == Some(id) {
+                    let _ =
+                        self.on_studio(crate::features::snip::screens::studio::Msg::Resized(size));
                 }
                 if self.chrome.contains_key(&id) {
                     return window::is_maximized(id).map(move |on| Msg::Maximised(id, on));
@@ -1486,7 +1522,7 @@ impl Windows {
                 }
             }
             Msg::CloseRequest(id) => {
-                if self.id(Kind::Settings) == Some(id) {
+                if self.id(Kind::Settings) == Some(id) || self.studio_window() == Some(id) {
                     return self.close_window(id);
                 }
             }
@@ -1509,6 +1545,11 @@ impl Windows {
                 }
                 if self.id(Kind::Permission) == Some(id) {
                     self.permission = None;
+                }
+                if self.studio_window() == Some(id) {
+                    self.studio = None; // its picture and history are freed
+                    crate::shared::platform::sys::mem::trim_heap_soon();
+                    return Task::none();
                 }
                 let ours =
                     self.id(Kind::Settings) == Some(id) || self.id(Kind::Onboarding) == Some(id);
@@ -1537,6 +1578,9 @@ impl Windows {
 
     /// Closes `id`, except Settings with unsaved changes: it asks first (its footer).
     fn close_window(&mut self, id: window::Id) -> Task<Msg> {
+        if self.studio_window() == Some(id) {
+            return self.close_studio();
+        }
         if let Some((sid, state)) = &mut self.settings
             && *sid == id
             && !state.close_requested()
@@ -1575,7 +1619,7 @@ impl Windows {
     /// What the header offers this window.
     fn mode(&self, id: window::Id) -> chrome::Mode {
         chrome::Mode {
-            resizable: self.id(Kind::Settings) == Some(id),
+            resizable: self.id(Kind::Settings) == Some(id) || self.studio_window() == Some(id),
             maximised: self.chrome.get(&id).is_some_and(|c| c.maximised),
         }
     }
@@ -1701,6 +1745,14 @@ impl Windows {
                 Msg::Chrome(window, e)
             }));
         }
+        if let Some((_, studio)) = self.studio.as_ref().filter(|(s, _)| *s == window) {
+            let mode = self.mode(window);
+            let page = crate::features::snip::screens::studio::view(studio, mode.maximised)
+                .map(Msg::Studio);
+            return Some(chrome::with_edges(page, mode, move |e| {
+                Msg::Chrome(window, e)
+            }));
+        }
         if let Some((id, state)) = &self.onboarding
             && *id == window
         {
@@ -1731,6 +1783,9 @@ impl Windows {
         }
         if self.id(Kind::Permission) == Some(window) {
             return crate::t!(o_needs_shots);
+        }
+        if self.studio_window() == Some(window) {
+            return crate::t!(st_title);
         }
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
             return crate::t!(win_t_update);
@@ -1765,7 +1820,7 @@ impl Windows {
             welcome,
             window::close_events().map(Msg::Closed),
             window::close_requests().map(Msg::CloseRequest),
-            window::resize_events().map(|(id, size)| Msg::Resized(id, size.height)),
+            window::resize_events().map(|(id, size)| Msg::Resized(id, size)),
             iced::system::theme_changes().map(Msg::OsTheme),
             keys,
             match self.settings {
@@ -1783,6 +1838,10 @@ impl Windows {
             },
             match self.steps_window() {
                 Some(_) => steps_events(),
+                None => Subscription::none(),
+            },
+            match self.studio {
+                Some(_) => studio::studio_events(),
                 None => Subscription::none(),
             },
             // the Updating pill's logo turns (a frame clock only while it shows)
@@ -1943,6 +2002,10 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         }
         Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
+        Kind::Studio => {
+            use crate::features::snip::screens::studio::{MIN, SIZE};
+            (SIZE, Some(MIN), true)
+        }
     };
     let settings = window::Settings {
         size,
@@ -1951,7 +2014,7 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         decorations: false,
         position,
         // Settings asks about unsaved changes first (`Msg::CloseRequest`).
-        exit_on_close_request: kind != Kind::Settings,
+        exit_on_close_request: !matches!(kind, Kind::Settings | Kind::Studio),
         ..window::Settings::default()
     };
     #[cfg(windows)]
@@ -2124,5 +2187,6 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     }
 }
 
+mod studio;
 #[cfg(test)]
 mod tests;

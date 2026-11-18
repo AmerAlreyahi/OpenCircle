@@ -473,6 +473,33 @@ pub struct SnipConfig {
     /// Written only when changed: the default file stays as it was.
     #[serde(skip_serializing_if = "is_default_long_max")]
     pub long_max: u32,
+    /// Snip Studio's side panels (`[snip.studio]`), written only when changed.
+    #[serde(skip_serializing_if = "StudioConfig::is_default")]
+    pub studio: StudioConfig,
+}
+
+/// Snip Studio's side panels as the user last left them (both shown at first).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct StudioConfig {
+    /// The library (start side: Recent captures).
+    pub library: bool,
+    /// The picture panel (end side).
+    pub options: bool,
+}
+
+impl Default for StudioConfig {
+    fn default() -> Self {
+        StudioConfig {
+            library: true,
+            options: true,
+        }
+    }
+}
+
+impl StudioConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 fn is_default_long_max(px: &u32) -> bool {
@@ -490,6 +517,7 @@ impl Default for SnipConfig {
             history: false,
             delay: 0,
             long_max: DEFAULT_LONG_MAX,
+            studio: StudioConfig::default(),
         }
     }
 }
@@ -827,6 +855,11 @@ pub struct EditorConfig {
     /// Each toolbar group's last tool (the grouped toolbar shows it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_tools: Option<Vec<crate::features::snip::annotate::Tool>>,
+    /// The eraser's brush, display px, and its "Whole drawing".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eraser: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eraser_whole: Option<bool>,
 }
 
 /// `editor.text_size`'s range (display px).
@@ -851,6 +884,8 @@ impl Default for EditorConfig {
             text_bold: None,
             text_back: None,
             group_tools: None,
+            eraser: None,
+            eraser_whole: None,
         }
     }
 }

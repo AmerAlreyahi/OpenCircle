@@ -347,6 +347,18 @@ pub fn across<'a, Message: 'a>(
         .style(style)
 }
 
+/// Scrolls both ways (Snip Studio's canvas past fit).
+pub fn both<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    iced::widget::scrollable(content)
+        .direction(Direction::Both {
+            vertical: bar(),
+            horizontal: bar(),
+        })
+        .style(style)
+}
+
 /// The scroller alone, `length` tall (a list that scrolls by rows draws its
 /// own): the same 5 px round `rim` bar.
 pub fn thumb<'a, Message: 'a>(length: f32) -> Element<'a, Message> {

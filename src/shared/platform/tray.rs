@@ -25,6 +25,8 @@ pub enum Entry {
     Circle,
     Translate,
     Snip,
+    /// Snip Studio (opens it on nothing, or brings it forward).
+    Studio,
     Live,
     Song,
     /// Only while a live pin lets clicks pass through (`tray_menu::Menu::with_click_pins`;
@@ -35,11 +37,12 @@ pub enum Entry {
 }
 
 impl Entry {
-    const ALL: [Entry; 8] = [
+    const ALL: [Entry; 9] = [
         Entry::Update,
         Entry::Circle,
         Entry::Translate,
         Entry::Snip,
+        Entry::Studio,
         Entry::Live,
         Entry::Song,
         Entry::Settings,
@@ -54,6 +57,7 @@ impl Entry {
             Entry::Circle => t!(tray_circle),
             Entry::Translate => t!(tray_translate),
             Entry::Snip => t!(nav_snip),
+            Entry::Studio => t!(tray_studio),
             Entry::Live => t!(lb_live),
             Entry::Song => t!(lb_song),
             Entry::ClickPins => t!(tray_click_pins),
@@ -95,7 +99,9 @@ impl Entry {
             Entry::Snip => quick("snip", false, None),
             Entry::Live => quick("translate", true, None),
             Entry::Song => quick("song_search", false, None),
-            Entry::Update | Entry::ClickPins | Entry::Settings | Entry::Quit => None,
+            Entry::Update | Entry::Studio | Entry::ClickPins | Entry::Settings | Entry::Quit => {
+                None
+            }
         }
     }
 
@@ -103,7 +109,7 @@ impl Entry {
     pub fn captures(self) -> bool {
         !matches!(
             self,
-            Entry::Update | Entry::ClickPins | Entry::Settings | Entry::Quit
+            Entry::Update | Entry::Studio | Entry::ClickPins | Entry::Settings | Entry::Quit
         )
     }
 
@@ -122,6 +128,7 @@ impl Entry {
             // the one-shot translate, never the live one bound to the same action
             Entry::Translate => run("translate", Some(Target::FullScreen)),
             Entry::Snip => run("snip", None),
+            Entry::Studio => Trigger::OpenStudio(None),
             Entry::Live => Trigger::Quick(
                 at,
                 crate::shared::config::QuickAction {
@@ -858,18 +865,18 @@ mod tests {
         // Snip is out of Labs (N-41): always there
         assert_eq!(
             entries(&Labs::default(), false),
-            [Circle, Translate, Snip, Settings, Quit]
+            [Circle, Translate, Snip, Studio, Settings, Quit]
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
         assert_eq!(
             entries(&on, false),
-            [Circle, Translate, Snip, Live, Settings, Quit]
+            [Circle, Translate, Snip, Studio, Live, Settings, Quit]
         );
         on.set(Feature::Song, true);
         assert_eq!(
             entries(&on, false),
-            [Circle, Translate, Snip, Live, Song, Settings, Quit]
+            [Circle, Translate, Snip, Studio, Live, Song, Settings, Quit]
         );
         assert_eq!(
             Entry::ALL
@@ -887,7 +894,7 @@ mod tests {
         use Entry::*;
         assert_eq!(
             entries(&Labs::default(), true),
-            [Update, Circle, Translate, Snip, Settings, Quit]
+            [Update, Circle, Translate, Snip, Studio, Settings, Quit]
         );
         assert!(matches!(
             Update.trigger(std::time::Instant::now()),

@@ -99,6 +99,36 @@ pub fn step<'a, Message: Clone + 'a>(
     layers.width(WELL.width).height(WELL.height).into()
 }
 
+/// A picture to open (Snip Studio's Recent captures): `step`'s well without a
+/// badge; under the cursor (or the keyboard on it) its 1 px `accent` ring.
+pub fn picture<'a, Message: Clone + 'a>(
+    picture: image::Handle,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use button::Status;
+    let well = container(image(picture).content_fit(ContentFit::ScaleDown)).center(Fill);
+    super::focus::press(
+        button(well)
+            .width(WELL.width)
+            .height(WELL.height)
+            .padding(0)
+            .style(|_, status| button::Style {
+                background: Some(c().track.into()),
+                border: Border::default()
+                    .rounded(CORNER)
+                    .width(match status {
+                        Status::Hovered | Status::Pressed => 1,
+                        _ => 0,
+                    })
+                    .color(c().accent),
+                ..button::Style::default()
+            }),
+        CORNER,
+        Some(on_press),
+    )
+    .into()
+}
+
 /// The small x: a 20 px circle, a 12 px x in `text_muted` (`text` on `hover`
 /// under the cursor), on the widget surface with a `rim` edge (it reads over
 /// a thumbnail too).

@@ -235,6 +235,8 @@ pub enum Edit {
     /// Snip's live area (the crop) before and after, and how far every item
     /// moved with it (zero for a resize: the drawing stays on its pixels).
     Area(Rectangle, Rectangle, Vector),
+    /// Every item before and after (an eraser stroke: one undo brings back all it erased).
+    Items(Vec<Item>, Vec<Item>),
 }
 
 impl Edit {
@@ -245,6 +247,7 @@ impl Edit {
             Edit::Change(i, before, after) => Edit::Change(i, after, before),
             Edit::Crop(before, after) => Edit::Crop(after, before),
             Edit::Area(before, after, moved) => Edit::Area(after, before, -moved),
+            Edit::Items(before, after) => Edit::Items(after, before),
         }
     }
 
@@ -266,6 +269,10 @@ impl Edit {
             Edit::Area(_, after, moved) => {
                 doc.crop = Some(*after);
                 doc.shift(*moved);
+            }
+            Edit::Items(_, after) => {
+                doc.items = after.clone();
+                doc.selected = None;
             }
         }
     }

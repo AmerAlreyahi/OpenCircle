@@ -61,6 +61,9 @@ impl App {
                 .windows
                 .open(windows::Kind::Settings)
                 .map(Message::Windows),
+            Message::Trigger(Trigger::OpenStudio(file)) => {
+                self.windows.open_studio_file(file).map(Message::Windows)
+            }
             Message::Trigger(Trigger::NoTray) => self.windows.open_main().map(Message::Windows),
             Message::Trigger(Trigger::TrayMenu(icon)) => self
                 .windows

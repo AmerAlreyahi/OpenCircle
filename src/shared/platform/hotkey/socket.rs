@@ -19,8 +19,12 @@ use interprocess::local_socket::{ListenerOptions, Name};
 use crate::Triggers;
 use crate::shared::config::Target;
 
-/// Longest accepted command line; anything longer is dropped.
+/// Longest accepted command line; anything longer is dropped (but `studio`'s,
+/// which carries a file's path: `MAX_STUDIO_LINE`).
 const MAX_LINE: u64 = 64;
+/// The longest path `studio <file>` carries (bytes), and its line (hex: 2 per byte).
+const MAX_PATH: usize = 4096;
+const MAX_STUDIO_LINE: u64 = ("studio ".len() + 2 * MAX_PATH + 1) as u64;
 const MAX_ACTION: usize = 32;
 /// Longest accepted token line (`activate ` + token + newline); longer is dropped.
 const MAX_TOKEN_LINE: u64 = 256;
@@ -42,6 +46,8 @@ pub enum Command {
         action: String,
         target: Option<Target>,
     },
+    /// `opencircle studio [file]`: Snip Studio, on that picture (an absolute path).
+    Studio(Option<std::path::PathBuf>),
 }
 
 impl Command {
@@ -60,6 +66,15 @@ impl Command {
                 action,
                 target: Some(t),
             } => format!("run {action} {}", super::target_name(*t)),
+            Command::Studio(None) => "studio".into(),
+            // the path in hex: any bytes, one plain ASCII line
+            Command::Studio(Some(path)) => match path_bytes(path) {
+                Some(b) => format!(
+                    "studio {}",
+                    b.iter().map(|b| format!("{b:02x}")).collect::<String>()
+                ),
+                None => "studio".into(),
+            },
         }
     }
 
@@ -75,6 +90,15 @@ impl Command {
                 run(action, Some(&t["--target=".len()..]))
             }
             ["run"] => Err("run needs an action, like `opencircle run translate`".into()),
+            ["studio"] => Ok(Command::Studio(None)),
+            ["studio", file] => {
+                let path = std::fs::canonicalize(file)
+                    .map_err(|e| format!("cannot open \"{}\": {e}", printable(file)))?;
+                match path_bytes(&path).is_some_and(|b| b.len() <= MAX_PATH) {
+                    true => Ok(Command::Studio(Some(path))),
+                    false => Err("the file's path is too long".into()),
+                }
+            }
             _ => Err("unrecognised arguments".into()),
         }
     }
@@ -108,6 +132,37 @@ fn run(action: &str, target: Option<&str>) -> Result<Command, String> {
     })
 }
 
+/// A path's bytes for the wire (Windows: its UTF-8; a path that has none: `None`).
+fn path_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
+    #[cfg(unix)]
+    return Some(std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str()).to_vec());
+    #[cfg(not(unix))]
+    path.to_str().map(|s| s.as_bytes().to_vec())
+}
+
+/// `path_bytes` back to a path: absolute only (a relative one would resolve
+/// against the running app's folder, not the caller's).
+fn bytes_path(bytes: Vec<u8>) -> Option<std::path::PathBuf> {
+    #[cfg(unix)]
+    let path = std::path::PathBuf::from(
+        <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(bytes),
+    );
+    #[cfg(not(unix))]
+    let path = std::path::PathBuf::from(String::from_utf8(bytes).ok()?);
+    (path.is_absolute() && !path.as_os_str().is_empty()).then_some(path)
+}
+
+/// Lower-case hex (two digits a byte) to bytes; at most `MAX_PATH` of them.
+fn unhex(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) || hex.len() > 2 * MAX_PATH {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect()
+}
+
 /// Echo-safe copy of untrusted text for an error message.
 fn printable(s: &str) -> String {
     s.chars()
@@ -122,8 +177,16 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
     if !line.bytes().all(|b| b.is_ascii_graphic() || b == b' ') {
         return Err("not plain ASCII text".into());
     }
+    if line.len() > MAX_LINE as usize && !line.starts_with("studio ") {
+        return Err("line too long".into());
+    }
     let words: Vec<&str> = line.split(' ').collect();
     match words.as_slice() {
+        ["studio"] => Ok(Command::Studio(None)),
+        ["studio", hex] => unhex(hex)
+            .and_then(bytes_path)
+            .map(|p| Command::Studio(Some(p)))
+            .ok_or_else(|| "bad path".into()),
         ["capture"] => Ok(Command::Capture),
         [""] => Ok(Command::OpenSettings),
         ["quit"] => Ok(Command::Quit),
@@ -137,10 +200,10 @@ pub fn parse_command(line: &str) -> Result<Command, String> {
 /// Reads one command from a peer: at most `MAX_LINE` bytes, valid UTF-8, complete;
 /// then the optional activation token line (at most `MAX_TOKEN_LINE` bytes).
 fn read_command(peer: impl Read) -> Result<(Command, Option<String>), String> {
-    let mut peer = BufReader::new(peer.take(MAX_LINE + MAX_TOKEN_LINE));
+    let mut peer = BufReader::new(peer.take(MAX_STUDIO_LINE + MAX_TOKEN_LINE));
     let mut line = String::new();
     (&mut peer)
-        .take(MAX_LINE)
+        .take(MAX_STUDIO_LINE)
         .read_line(&mut line)
         .map_err(|e| e.to_string())?;
     let command = parse_command(&line)?;
@@ -510,6 +573,35 @@ mod tests {
 
     /// The token rides on a second line: a copy that reads one line (v0.1.x) still
     /// runs the command, and ours takes the token only from a well-formed line.
+    /// `opencircle studio [file]`: the file's absolute path rides in hex on one
+    /// line (any bytes, any length up to `MAX_PATH`); a relative or broken one is dropped.
+    #[test]
+    fn studio_carries_its_file_on_one_line() {
+        let read =
+            |bytes: &str| read_command(io::Cursor::new(bytes.as_bytes().to_vec())).map(|(c, _)| c);
+        assert_eq!(read("studio\n"), Ok(Command::Studio(None)));
+        let path = std::env::temp_dir()
+            .join("a folder of shots")
+            .join("Ünïcode shot ✓.png");
+        let line = Command::Studio(Some(path.clone())).line();
+        assert!(line.is_ascii() && line.len() > MAX_LINE as usize);
+        assert_eq!(read(&format!("{line}\n")), Ok(Command::Studio(Some(path))));
+        // relative, odd-length or not hex: dropped
+        let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+        assert!(read(&format!("studio {}\n", hex("shot.png"))).is_err());
+        assert!(read("studio abc\n").is_err());
+        assert!(read("studio zz\n").is_err());
+        // other commands keep their short limit
+        assert!(read(&format!("run translate {}\n", "x".repeat(100))).is_err());
+        // the CLI: a file that isn't there is an error, not a command
+        let missing = vec!["studio".to_string(), "/no/such/picture.png".to_string()];
+        assert!(Command::from_args(&missing).is_err());
+        assert_eq!(
+            Command::from_args(&["studio".to_string()]),
+            Ok(Command::Studio(None))
+        );
+    }
+
     #[test]
     fn the_activation_token_travels_on_a_second_line() {
         let read = |bytes: &str| read_command(io::Cursor::new(bytes.as_bytes().to_vec()));

@@ -16,6 +16,8 @@ mod chrome;
 mod crop;
 mod document;
 pub mod dragout;
+mod eraser;
+pub use eraser::SIZES as ERASER_SIZES;
 mod highlighter;
 mod input;
 mod label;
@@ -96,6 +98,8 @@ pub enum Tool {
     ArrowLabel,
     Pen,
     Highlighter,
+    /// Takes drawings off, never the picture (`eraser`).
+    Eraser,
     Text,
     /// Text on a rounded fill.
     Label,
@@ -187,7 +191,8 @@ pub fn fills_inside(tool: Tool) -> bool {
 /// Every tool, in toolbar order (its options right after it).
 pub const TOOLS: &[ToolInfo] = &[
     tool(Tool::Select, '\u{e1c2}', S::tl_select, 'v', Group::Select),
-    tool(Tool::Crop, '\u{e0af}', S::tl_crop, 'x', Group::Select),
+    // no key ('\0'): X is the Eraser's; the area's handles crop (Studio: its rail)
+    tool(Tool::Crop, '\u{e0af}', S::tl_crop, '\0', Group::Select),
     tool(Tool::Rect, '\u{e16a}', S::tl_rect, 'r', Group::Shapes),
     tool(Tool::Ellipse, '\u{e07a}', S::tl_ellipse, 'o', Group::Shapes),
     tool(Tool::Line, '\u{e521}', S::tl_line, 'l', Group::Shapes),
@@ -234,6 +239,8 @@ pub const TOOLS: &[ToolInfo] = &[
         Group::Hide,
     ),
     tool(Tool::Magnifier, '\u{e1b5}', S::tl_magnify, 'm', Group::Hide),
+    // last (Studio round 2): in the Draw group's panel after the highlighter
+    tool(Tool::Eraser, '\u{e28e}', S::tl_eraser, 'x', Group::Draw),
 ];
 
 const fn tool(tool: Tool, icon: char, name: S, key: char, group: Group) -> ToolInfo {
@@ -359,6 +366,9 @@ pub enum Message {
     BlurSize(Option<Width>),
     /// The blur's pixel size (its mosaic cells).
     BlurCell(Width),
+    /// The eraser's brush (display px, `ERASER_SIZES`) and "Whole drawing".
+    EraserSize(f32),
+    EraserWhole(bool),
     /// The Text tool's options (its button's strip): font px on screen, and
     /// font, weight, backdrop.
     TextSize(f32),
@@ -401,6 +411,8 @@ pub enum Message {
     LivePin,
     /// Snip's Share: the flattened image to the OS share sheet.
     Share,
+    /// More: this picture, its drawings still editable, into Snip Studio.
+    OpenStudio,
     /// The share sheet's user picked a target (the host's answer to
     /// `Output::Sharing`).
     Shared,
@@ -460,6 +472,8 @@ pub enum Output {
     /// The image was dragged into another app (the overlay is already hidden),
     /// or a share target took it: close, as after Copy.
     Dragged,
+    /// More's Open in Studio: the host moves this editor into the Studio.
+    OpenStudio,
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -563,6 +577,11 @@ pub struct Annotator {
     pub(crate) blur_size: Option<Width>,
     /// The blur's pixel size (its mosaic cells).
     pub(crate) blur_cell: Width,
+    /// The eraser's brush (display px) and "Whole drawing".
+    pub(crate) eraser: f32,
+    pub(crate) eraser_whole: bool,
+    /// An eraser stroke: the items before it and the pointer's last point.
+    erasing: Option<(Vec<Item>, Point)>,
     /// The image's text lines (Auto's), for the image they were found in.
     bands: Option<((u32, u32), Vec<lines::Band>)>,
     /// Snip's live area: the document is the whole frozen monitor (or every
@@ -651,6 +670,9 @@ impl Annotator {
             lock: None,
             blur_size: saved.blur_size,
             blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
+            eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
+            eraser_whole: saved.eraser_whole.unwrap_or(false),
+            erasing: None,
             bands: None,
             movable: false,
             edges: Vec::new(),
@@ -687,6 +709,8 @@ impl Annotator {
             text_bold: Some(self.text_style.bold),
             text_back: Some(self.text_style.back),
             group_tools: Some(self.last.to_vec()),
+            eraser: Some(self.eraser.round().clamp(1.0, 255.0) as u8),
+            eraser_whole: Some(self.eraser_whole),
         }
     }
 
@@ -793,6 +817,13 @@ impl Annotator {
             Message::BlurCell(cell) => {
                 self.blur_cell = cell;
                 self.restyle();
+            }
+            Message::EraserSize(px) => self.eraser = px,
+            Message::EraserWhole(on) => self.eraser_whole = on,
+            Message::OpenStudio => {
+                self.commit();
+                self.menu = None;
+                return Some(Output::OpenStudio);
             }
             Message::Outline(on) => {
                 self.outline = on;
@@ -1049,7 +1080,7 @@ impl Annotator {
     }
 
     /// Text or a callout is being typed into.
-    fn typing(&self) -> bool {
+    pub(crate) fn typing(&self) -> bool {
         matches!(
             self.pending,
             Some(Pending {
@@ -1180,6 +1211,11 @@ impl Annotator {
             && let Some(grip) = area::grip_at(self.doc.view(), p, area::REACH / self.zoom)
         {
             self.grab_area(grip, p);
+            return;
+        }
+        if self.tool == Tool::Eraser {
+            self.erasing = Some((self.doc.items.clone(), p));
+            self.erase_to(p);
             return;
         }
         // The selected item's handles work in every tool.
@@ -1374,6 +1410,10 @@ impl Annotator {
             self.cropping = Some((from, p));
             return;
         }
+        if self.erasing.is_some() {
+            self.erase_to(p);
+            return;
+        }
         if let Some(held) = &mut self.lock
             && !self.shift
         {
@@ -1419,7 +1459,10 @@ impl Annotator {
     /// the area and the pending item stay as they were before the press.
     fn cancel_press(&mut self) {
         self.lock = None;
-        if let Some(drag) = self.area_drag.take() {
+        if let Some((before, _)) = self.erasing.take() {
+            self.doc.items = before;
+            self.refresh();
+        } else if let Some(drag) = self.area_drag.take() {
             (self.doc.crop, self.doc.items) = (Some(drag.start), drag.items);
             self.refresh();
         } else if self.cropping.take().is_none()
@@ -1441,6 +1484,14 @@ impl Annotator {
             self.set_area(drag.start, to, drag.grip == area::Grip::Move);
             if to == drag.start {
                 self.refresh();
+            }
+            return;
+        }
+        if let Some((before, _)) = self.erasing.take() {
+            // one undo brings back all the stroke erased
+            if before != self.doc.items {
+                let after = std::mem::replace(&mut self.doc.items, before.clone());
+                self.doc.exec(Edit::Items(before, after));
             }
             return;
         }
@@ -1483,6 +1534,19 @@ impl Annotator {
             pending.item.shape = snapped;
         }
         self.commit();
+    }
+
+    /// The eraser stroke on to `p` (image px): what its brush passed over goes.
+    fn erase_to(&mut self, p: Point) {
+        let Some((_, last)) = &mut self.erasing else {
+            return;
+        };
+        let from = std::mem::replace(last, p);
+        let r = self.eraser / 2.0 / self.zoom;
+        if eraser::erase(&mut self.doc.items, from, p, r, self.eraser_whole) {
+            self.doc.selected = None;
+            self.refresh();
+        }
     }
 
     /// Ends the pending change: one undoable edit (or none if nothing changed).
@@ -1585,7 +1649,7 @@ impl Annotator {
                 head: self.tool != Tool::Line,
                 text: String::new(),
             },
-            Tool::Pen | Tool::Select | Tool::Crop => Shape::Pen(vec![p]),
+            Tool::Pen | Tool::Select | Tool::Crop | Tool::Eraser => Shape::Pen(vec![p]),
             Tool::Highlighter => Shape::Highlighter(vec![p]),
             Tool::Text => Shape::Text {
                 at: p,

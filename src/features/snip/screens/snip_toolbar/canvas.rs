@@ -469,7 +469,7 @@ mod tests {
     fn every_tool_matches_its_golden_images() {
         crate::shared::kit::text::load(); // the bundled faces the annotations use
         let mut cases: Vec<(String, Tool, &str)> = Vec::new();
-        for info in TOOLS.iter().filter(|t| t.tool != Tool::Select) {
+        for info in (TOOLS.iter()).filter(|t| !matches!(t.tool, Tool::Select | Tool::Eraser)) {
             let name = format!("{:?}", info.tool).to_lowercase();
             let texty = matches!(
                 info.tool,

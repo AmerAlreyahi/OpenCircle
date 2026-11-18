@@ -33,8 +33,8 @@ const SPACING: f32 = bar::SPACING;
 const CONTROL: f32 = size::ICON_BUTTON;
 /// The size chip's room (fits `[picture] 9999 × 9999`).
 const CHIP_W: f32 = 112.0;
-const UNDO: char = '\u{e2a0}'; // lucide "undo-2"
-const REDO: char = '\u{e29f}'; // lucide "redo-2"
+pub const UNDO: char = '\u{e2a0}'; // lucide "undo-2"
+pub const REDO: char = '\u{e29f}'; // lucide "redo-2"
 pub const COPY: char = '\u{e0a2}'; // lucide "copy"
 pub const SAVE: char = '\u{e0b6}'; // lucide "download"
 const PIN: char = '\u{e258}'; // lucide "pin"
@@ -43,6 +43,8 @@ const PIPETTE: char = crate::features::snip::screens::tools::picker::ICON;
 const SHARE: char = '\u{e158}'; // lucide "share"
 const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
 const LIST_PLUS: char = '\u{e23e}'; // lucide "list-plus"
+/// More's Open in Studio (and the Studio's own mark).
+pub const STUDIO: char = '\u{e42a}'; // lucide "app-window"
 /// A tool's keycap in its panel.
 const KEY_W: f32 = 22.0;
 /// The Text tool's size presets (display px).
@@ -62,6 +64,7 @@ pub const GLYPHS: &[char] = &[
     crate::features::snip::screens::tools::ruler::ICON,
     LIVE_PIN,
     LIST_PLUS,
+    STUDIO,
 ];
 
 /// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
@@ -182,6 +185,12 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         })
         .collect();
     rows.push(MoreRow::plain(
+        STUDIO,
+        S::sn_open_studio,
+        None,
+        live(Message::OpenStudio),
+    ));
+    rows.push(MoreRow::plain(
         SCROLL,
         S::sn_long_capture,
         None,
@@ -276,7 +285,7 @@ thread_local! {
 
 /// A tool's tooltip, `Name (K)`, in the app's language: built once per tool
 /// and language (a handful of short strings kept for the run).
-fn tip(t: &'static ToolInfo) -> &'static str {
+pub(crate) fn tip(t: &'static ToolInfo) -> &'static str {
     type Cache = std::collections::HashMap<(char, bool), &'static str>;
     thread_local!(static TIPS: std::cell::RefCell<Cache> = std::cell::RefCell::default());
     let key = (t.key, dir::rtl());
@@ -511,7 +520,7 @@ fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
 }
 
 /// `tool`'s options (one design for every tool).
-fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
+pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
     let width_at = Width::ALL.iter().position(|&w| w == e.width);
     let stroke = || {
         let px = e.stroke.round() as u8;
@@ -640,6 +649,20 @@ fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             ]
         }
         Tool::Redact => vec![muted(Role::META, t!(sn_uses_colour)).into()],
+        Tool::Eraser => {
+            use crate::features::snip::annotate::ERASER_SIZES;
+            let px = e.eraser.round() as u8;
+            let chosen = ERASER_SIZES.iter().position(|&s| s == e.eraser);
+            let presets = segmented::presets(chosen, None, false, |i| {
+                Message::EraserSize(ERASER_SIZES[i])
+            });
+            let whole = Message::EraserWhole(!e.eraser_whole);
+            vec![
+                sizes(t!(sn_size), format!("{px} px"), presets, None),
+                switch(t!(sn_whole_drawing), None, e.eraser_whole, Some(whole)),
+                muted(Role::META, t!(sn_eraser_undo)).into(),
+            ]
+        }
         _ => Vec::new(),
     }
 }

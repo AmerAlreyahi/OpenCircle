@@ -558,6 +558,7 @@ pub fn trigger(command: &Command, at: Instant) -> Trigger {
     match command {
         Command::Capture => Trigger::Capture(at),
         Command::OpenSettings => Trigger::OpenSettings,
+        Command::Studio(file) => Trigger::OpenStudio(file.clone()),
         Command::Quit => Trigger::Quit,
         Command::Version => unreachable!("answered by the socket, never a trigger"),
         Command::Run { action, target } => {

@@ -93,7 +93,7 @@ pub fn grab(items: &[Item], p: Point, reach: f32) -> Option<usize> {
     items.iter().rposition(|item| touches(item, p, reach))
 }
 
-fn touches(item: &Item, p: Point, reach: f32) -> bool {
+pub(super) fn touches(item: &Item, p: Point, reach: f32) -> bool {
     let near = reach + item.width / 2.0;
     let line = |points: &[Point], near: f32| match points {
         [one] => one.distance(p) <= near,

@@ -1740,6 +1740,64 @@ strings! {
         | "لقطة طويلة";
     sn_add_to_steps: "Add to steps"
         | "أضف إلى الخطوات";
+    tl_eraser: "Eraser"
+        | "ممحاة";
+    sn_whole_drawing: "Whole drawing"
+        | "الرسم كاملًا";
+    sn_eraser_undo: "Ctrl+Z brings them back"
+        | "Ctrl+Z يعيدها";
+    sn_open_studio: "Open in Studio"
+        | "افتح في الاستوديو";
+    tray_studio: "Studio"
+        | "الاستوديو";
+    st_title: "Snip Studio"
+        | "استوديو اللقطات";
+    st_empty_title: "No picture open"
+        | "لا توجد صورة مفتوحة";
+    st_empty_hint: "Drop a picture here, open one or paste one."
+        | "أفلت صورة هنا، أو افتح صورة أو الصقها.";
+    st_open: "Open…"
+        | "فتح…";
+    st_paste: "Paste"
+        | "لصق";
+    st_recent: "Recent captures"
+        | "اللقطات الأخيرة";
+    st_recent_off: "Turn on Recent captures in Settings > Snip to see your last captures here."
+        | "فعّل «اللقطات الأخيرة» في الإعدادات > لقطة الشاشة لترى آخر لقطاتك هنا.";
+    st_recent_none: "No recent captures yet."
+        | "لا توجد لقطات أخيرة بعد.";
+    st_picture: "Picture"
+        | "الصورة";
+    st_size: "Size"
+        | "الحجم";
+    st_drawings: "Drawings"
+        | "الرسومات";
+    st_show_library: "Show the library"
+        | "أظهر المكتبة";
+    st_hide_library: "Hide the library"
+        | "أخفِ المكتبة";
+    st_show_panel: "Show the picture panel"
+        | "أظهر لوحة الصورة";
+    st_hide_panel: "Hide the picture panel"
+        | "أخفِ لوحة الصورة";
+    st_zoom_in: "Zoom in"
+        | "تكبير";
+    st_zoom_out: "Zoom out"
+        | "تصغير";
+    st_fit: "Fit"
+        | "ملاءمة";
+    st_ask_close: "Save the changes to this picture?"
+        | "هل تحفظ التغييرات على هذه الصورة؟";
+    st_dont_save: "Don't save"
+        | "لا تحفظ";
+    st_unreadable: "Couldn't open this picture"
+        | "تعذّر فتح هذه الصورة";
+    st_no_picture: "The clipboard has no picture"
+        | "لا توجد صورة في الحافظة";
+    st_open_title: "Open a picture"
+        | "افتح صورة";
+    st_pictures: "Pictures"
+        | "الصور";
     sn_pin: "Pin to screen"
         | "تثبيت على الشاشة";
     sn_live_pin: "Live pin"

@@ -234,6 +234,16 @@ impl App {
                 Err(_) => Task::none(), // the sheet went without a target
             }),
             Some(Output::Dragged) => self.close(),
+            // the same editor, its drawings and history, moves into the Studio
+            Some(Output::OpenStudio) => {
+                let Some(edit) = self.o.edit.take() else {
+                    return Task::none();
+                };
+                use crate::features::snip::screens::studio::Picture;
+                let picture = Picture::Editor(Box::new(edit.annotator));
+                let open = self.windows.open_studio(Some(picture));
+                Task::batch([self.close(), open.map(Message::Windows)])
+            }
         }
     }
 
@@ -582,7 +592,7 @@ mod tests {
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
         // Down x6: the sixth live row (Copy text, Ask AI, Translate, Long
         // capture, Add to steps, Pin); Enter pins (the overlay closes)
-        for _ in 0..6 {
+        for _ in 0..7 {
             let _ = app.on_snip_toolbar(E::MenuStep(false));
         }
         let editor = &app.o.edit.as_ref().unwrap().annotator;

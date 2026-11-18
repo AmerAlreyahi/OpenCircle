@@ -175,6 +175,7 @@ mod tests {
         m.update(Msg::Key(Key::Down));
         m.update(Msg::Key(Key::Down));
         m.update(Msg::Key(Key::Down));
+        m.update(Msg::Key(Key::Down));
         assert_eq!(
             m.update(Msg::Key(Key::Enter)),
             Some(Outcome::Run(Entry::Quit))
@@ -200,15 +201,15 @@ mod tests {
         assert_eq!(m.update(Msg::Pick(9)), None);
     }
 
-    /// The window is as tall as its rows and the separator: 5 rows (Labs off:
-    /// Snip is out of Labs) or 7.
+    /// The window is as tall as its rows and the separator: 6 rows (Labs off:
+    /// Snip and Studio are out of Labs) or 8.
     #[test]
     fn the_window_fits_the_rows() {
         let off = Menu::new(&Labs::default(), &Config::default(), false);
-        assert_eq!(off.entries().len(), 5);
-        assert_eq!(off.size(), Size::new(240.0, 10.0 + 5.0 * 32.0 + 9.0));
+        assert_eq!(off.entries().len(), 6);
+        assert_eq!(off.size(), Size::new(240.0, 10.0 + 6.0 * 32.0 + 9.0));
         let on = Menu::new(&all_on(), &Config::default(), false);
-        assert_eq!(on.size().height, 10.0 + 7.0 * 32.0 + 9.0);
+        assert_eq!(on.size().height, 10.0 + 8.0 * 32.0 + 9.0);
     }
 
     /// Arabic: the same rows from the table, mirrored (✓ and hints at the left).
@@ -246,7 +247,7 @@ mod tests {
             // an update waits: its row first, a separator under it
             let m = Menu::new(&Labs::default(), &Config::default(), false)
                 .with_update("Restart to update (0.1.5)".into());
-            assert_eq!(m.size().height, 10.0 + 6.0 * 32.0 + 2.0 * 9.0);
+            assert_eq!(m.size().height, 10.0 + 7.0 * 32.0 + 2.0 * 9.0);
             let file = format!("tray-menu-update-{}", theme.id);
             failed.extend(golden::check(
                 "screens",

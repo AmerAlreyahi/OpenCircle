@@ -6,4 +6,5 @@ pub(crate) mod pick;
 pub(crate) mod snip_shots;
 pub(crate) mod snip_toolbar;
 pub(crate) mod steps;
+pub(crate) mod studio;
 pub(crate) mod tools;

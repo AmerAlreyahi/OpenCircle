@@ -21,6 +21,8 @@ pub enum Trigger {
     Quick(Instant, crate::shared::config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
+    /// Tray "Studio" or `opencircle studio [file]`: Snip Studio (on that picture).
+    OpenStudio(Option<std::path::PathBuf>),
     /// Linux: no tray icon can show (no host, library or GTK): open a window instead (first run: the onboarding).
     NoTray,
     /// Windows, a right-click on the tray icon: open our tray menu at the icon
@@ -40,7 +42,7 @@ pub enum Trigger {
 /// Where every trigger source (shortcut, tray, CLI socket) sends.
 pub type Triggers = mpsc::UnboundedSender<Trigger>;
 
-const USAGE: &str = "usage: opencircle [capture | quit | run <action> [--target full_screen|circle|last_region|window]]";
+const USAGE: &str = "usage: opencircle [capture | quit | studio [file] | run <action> [--target full_screen|circle|last_region|window]]";
 
 /// A GUI-subsystem exe has no stdout/stderr. When started from a terminal, attach
 /// to its console so `eprintln!` shows; a redirect (file, pipe) is already valid
@@ -168,14 +170,15 @@ fn main() -> ExitCode {
             );
             return ExitCode::SUCCESS;
         }
-        Some("capture" | "run") => match crate::shared::platform::hotkey::Command::from_args(&args)
-        {
-            Ok(command) => Some(command),
-            Err(e) => {
-                crate::log!("{e}\n{USAGE}");
-                return ExitCode::from(2);
+        Some("capture" | "run" | "studio") => {
+            match crate::shared::platform::hotkey::Command::from_args(&args) {
+                Ok(command) => Some(command),
+                Err(e) => {
+                    crate::log!("{e}\n{USAGE}");
+                    return ExitCode::from(2);
+                }
             }
-        },
+        }
         Some(_) => {
             crate::log!("{USAGE}");
             return ExitCode::from(2);

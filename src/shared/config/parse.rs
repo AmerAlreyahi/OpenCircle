@@ -182,6 +182,10 @@ impl Config {
                     false => Err("expected one tool per toolbar group, in order".into()),
                 }
             });
+            c.editor.eraser = get_checked(t, p, "eraser", None, &mut w, |n: &Option<u8>| {
+                n.map_or(Ok(()), |n| within(1..=64, " px")(&n))
+            });
+            c.editor.eraser_whole = get(t, p, "eraser_whole", None, &mut w);
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));
@@ -297,6 +301,11 @@ impl Config {
                     .then_some(())
                     .ok_or_else(|| "expected 5000, 10000 or 20000 px".to_string())
             });
+            if let Some(s) = sub_section(t, p, "studio", &mut w) {
+                let (p, d) = ("snip.studio.", d.snip.studio);
+                c.snip.studio.library = get(s, p, "library", d.library, &mut w);
+                c.snip.studio.options = get(s, p, "options", d.options, &mut w);
+            }
         }
         // `[labs] online`: read only for schema 13's engine step
         let mut labs_online = false;

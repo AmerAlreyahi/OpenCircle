@@ -867,7 +867,7 @@ fn draw_with_every_tool(e: &mut Annotator) -> usize {
         e.update(Message::Tool(info.tool));
         let base = pt(20.0 + 90.0 * made as f32, 30.0 + 25.0 * made as f32);
         match info.tool {
-            Tool::Select | Tool::Crop => continue,
+            Tool::Select | Tool::Crop | Tool::Eraser => continue,
             // Click, then type (a step's note, a label's text...).
             Tool::Text | Tool::Label | Tool::Callout | Tool::Step => {
                 drag(e, base, &[], base);
@@ -898,7 +898,7 @@ fn draw_with_every_tool(e: &mut Annotator) -> usize {
 fn every_tool_makes_one_undoable_item() {
     let mut e = editor(1500, 500);
     let made = draw_with_every_tool(&mut e);
-    assert_eq!(made, TOOLS.len() - 2);
+    assert_eq!(made, TOOLS.len() - 3);
     // Every tool but the variants of an existing shape (line, labelled arrow)
     // makes its own kind.
     let kinds: Vec<_> = (e.doc.items.iter().zip(TOOLS.iter().skip(2)))
@@ -1431,6 +1431,11 @@ fn every_icon_is_in_the_subset_font() {
         .iter()
         .map(|t| t.icon)
         .chain(toolbar::GLYPHS.iter().copied())
+        .chain(
+            crate::features::snip::screens::studio::GLYPHS
+                .iter()
+                .copied(),
+        )
         .chain(
             crate::features::snip::screens::tools::GLYPHS
                 .iter()
@@ -3371,4 +3376,69 @@ fn a_blur_hides_its_footprint_not_its_reach() {
         "a line 40 px above is not hidden"
     );
     assert!(!hidden.covers(100.0, 150.0), "nor text beside it");
+}
+
+// ---- the eraser ----------------------------------------------------------------------
+
+/// Erases with a drag from `from` to `to` (image px; the editor at zoom 1).
+fn erase(e: &mut Annotator, from: Point, to: Point) {
+    e.update(Message::Tool(Tool::Eraser));
+    drag(e, from, &[], to);
+}
+
+/// A highlighter stroke along y = `y` from x = `x0` to `x1` (no shape snapping).
+fn stroke_along(e: &mut Annotator, y: f32, x0: f32, x1: f32) {
+    e.update(Message::Tool(Tool::Highlighter));
+    let n = ((x1 - x0) / 10.0) as usize;
+    let line: Vec<Point> = (0..=n).map(|i| pt(x0 + 10.0 * i as f32, y)).collect();
+    drag(e, line[0], &line[1..n], line[n]);
+}
+
+#[test]
+fn the_eraser_cuts_a_stroke_where_it_passes_and_one_undo_brings_it_back() {
+    let mut e = editor(400, 200);
+    stroke_along(&mut e, 100.0, 20.0, 320.0);
+    assert_eq!(e.doc.items.len(), 1);
+    // across the middle of the stroke, top to bottom (a fast drag: two points)
+    erase(&mut e, pt(170.0, 20.0), pt(170.0, 180.0));
+    assert_eq!(e.doc.items.len(), 2, "two pieces are left");
+    let reach = e.eraser / 2.0 + e.doc.items[0].width / 2.0;
+    for piece in &e.doc.items {
+        let Shape::Highlighter(points) = &piece.shape else {
+            panic!("{:?}", piece.shape);
+        };
+        assert!(points.iter().all(|p| (p.x - 170.0).abs() > reach - 0.01));
+    }
+    assert_eq!(e.doc.depth(), 2, "the stroke, then ONE erase");
+    e.update(Message::Undo);
+    assert_eq!(e.doc.items.len(), 1, "the whole stroke is back");
+}
+
+#[test]
+fn whole_drawing_takes_the_stroke_and_other_drawings_always_go_whole() {
+    let mut e = editor(400, 200);
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(20.0, 20.0), &[], pt(120.0, 90.0));
+    stroke_along(&mut e, 150.0, 150.0, 350.0);
+    assert_eq!(e.doc.items.len(), 2);
+    // over the rectangle's edge: the rectangle goes whole
+    erase(&mut e, pt(20.0, 50.0), pt(20.0, 60.0));
+    assert_eq!(e.doc.items.len(), 1);
+    assert!(matches!(e.doc.items[0].shape, Shape::Highlighter(_)));
+    // Whole drawing: the highlighter goes whole too
+    e.update(Message::EraserWhole(true));
+    erase(&mut e, pt(250.0, 140.0), pt(250.0, 160.0));
+    assert!(e.doc.items.is_empty());
+    assert_eq!(e.remembered().eraser_whole, Some(true));
+    // over the bare picture: nothing to erase, no edit (the picture is never touched)
+    erase(&mut e, pt(10.0, 10.0), pt(390.0, 190.0));
+    assert_eq!(e.doc.depth(), 4);
+}
+
+#[test]
+fn x_picks_the_eraser_and_crop_keeps_no_key() {
+    assert_eq!(info(Tool::Eraser).key, 'x');
+    assert_eq!(info(Tool::Eraser).group, Group::Draw);
+    assert_eq!(TOOLS.iter().filter(|t| t.key == 'x').count(), 1);
+    assert!(Group::Draw.tools().any(|t| t.tool == Tool::Eraser));
 }

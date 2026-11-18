@@ -72,8 +72,9 @@ One bar, in groups: a grip to move it, the size chip, **Select**, **Shapes**,
 **Copy** and **Save**. Click a tool to turn it on; click the active tool again
 to open its options (outline, fill, size, and so on). `Esc` closes the toolbar.
 
-**More** holds three actions on the picked area, then Long capture, Add to
-steps, Pin, Live pin, Share (Windows), Colour picker and Screen ruler:
+**More** holds three actions on the picked area, then Open in Studio, Long
+capture, Add to steps, Pin, Live pin, Share (Windows), Colour picker and Screen
+ruler:
 
 - **Copy text** puts the text of the area on the clipboard.
 - **Ask AI** opens the AI chat with the picture, drawings included (with no AI
@@ -97,11 +98,11 @@ Every tool has a key:
 | Tool | Key |
 |---|---|
 | Select | `V` |
-| Crop | `X` |
 | Rectangle / Ellipse | `R` / `O` |
 | Arrow (drag the middle to curve it) | `A` |
 | Pen (rough shapes snap to clean ones) | `P` |
 | Highlighter | `H` |
+| Eraser (takes drawings off, never the picture) | `X` |
 | Text | `T` |
 | Callout | `C` |
 | Numbered step | `N` |
@@ -121,6 +122,38 @@ line (or set by hand in its options). It is a soft pixel mosaic that hides the
 text so it can't be recovered. **Redact** is a solid box, for when you want no
 trace at all. If the stroke overshoots, slide the pointer back and the blur
 follows it.
+
+**Eraser.** Drag over a pen or highlighter stroke to take off only the part
+under the brush; any other drawing it touches goes whole. Turn on **Whole
+drawing** in its options to take a whole stroke at once. One `Ctrl+Z` brings
+back everything one drag erased.
+
+## Snip Studio
+
+Snip Studio is a normal window for longer work on a picture: the same editor
+as the Snip toolbar, with a bigger canvas. Open it from the tray (**Studio**),
+from **More > Open in Studio** on a picked area (your drawings stay editable and
+`Ctrl+Z` still undoes them), or from a terminal with `opencircle studio
+[file]`. Only one Studio is open at a time: opening it again brings it to the
+front and opens the new picture in it.
+
+- **Open a picture:** `Ctrl+O`, drop a file on the window, `Ctrl+V` with a
+  picture on the clipboard, or click one of your Recent captures (Settings >
+  Snip > Recent captures).
+- **Tools:** every tool is on the rail at the side; the current tool's options
+  and colours are always shown in the bar above the canvas.
+- **Zoom:** the picture fits the window (never above 100 %); `Ctrl+=` /
+  `Ctrl+-` zoom, `Ctrl+0` fits, `Ctrl+1` shows 100 %. Scroll to move around a
+  zoomed picture.
+- **Side panels:** the library (Recent captures) and the picture panel each
+  hide with their button in the header, `Ctrl+[` and `Ctrl+]`; `Ctrl+\` hides
+  or shows both. The Studio remembers them.
+- **Copy and Save** are at the bottom right (`Ctrl+C`, `Ctrl+S`). Closing the
+  window or opening another picture with unsaved drawings asks first: Don't
+  save, Cancel or Save. `Esc` never closes the Studio.
+
+On Wayland a file can't be dropped on the window yet (use `Ctrl+O` or
+`Ctrl+V`).
 
 ## Long capture
 
