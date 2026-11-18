@@ -110,6 +110,14 @@ with the last 20 messages and one short summary of older ones. Chats are saved o
 this PC as text only (**Keep chat history** turns that off). With **Browser**,
 asking opens Google in your browser instead, with the picture (see above).
 
+**Web search**: a new chat asks once whether the AI may search the web
+(**Settings → Ask AI → Web search** changes it later). When on, the AI sends only
+search words to Bing (Wikipedia if Bing has no answer) and may open the result
+pages; the sources show under the answer. **Chat text size** (or `Ctrl+=`,
+`Ctrl+-`, `Ctrl+0` in the chat) zooms the chat's text. With OpenRouter,
+**Connect OpenRouter** signs in through your browser and saves the key for you;
+with a key saved it reads **Reconnect OpenRouter** and replaces that key.
+
 ## Config
 
 ```toml

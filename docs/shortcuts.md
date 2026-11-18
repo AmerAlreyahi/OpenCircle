@@ -17,6 +17,9 @@ The Song search shortcut is hidden (not registered) until you turn Song search o
 | Screen ruler | unset | Measure distances on screen |
 | Live pin (Labs) | unset | Pin a window's area, updating live |
 
+In the AI chat: `Ctrl+=` larger text, `Ctrl+-` smaller, `Ctrl+0` back to 100 %
+(also **Settings > Ask AI > Chat text size**); `Ctrl+C` copies selected text.
+
 Snip is one row in **Settings > Shortcuts**; there are no separate region,
 window and full-screen rows (older entries in a config still work: see below).
 Older configs that had Snip on `Print Screen` move to `Alt+A` once, unless a key

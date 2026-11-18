@@ -4175,3 +4175,25 @@ fn an_open_window_shows_what_the_chat_wrote() {
         "the unsaved edit stays"
     );
 }
+
+/// Settings audit (2026-11-18): the chat's zoom has its row on Ask AI, and
+/// web search, once on, its line on Privacy.
+#[test]
+fn chat_zoom_and_web_search_have_their_settings() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Provider(Provider::Anthropic));
+    update(&mut s, Message::Section(Section::Ai));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Chat text size"), "{texts:?}");
+    update(&mut s, Message::ChatZoom(super::state::ChatZoom(125)));
+    assert_eq!(s.draft().ai.chat_zoom, 125);
+    update(&mut s, Message::Section(Section::Privacy));
+    assert!(
+        !shot::texts(view(&s))
+            .iter()
+            .any(|t| t == "Ask AI web search")
+    );
+    update(&mut s, Message::WebSearch(true));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Ask AI web search"), "{texts:?}");
+}

@@ -146,6 +146,16 @@ pub enum KeyMessage {
     Done(u32, KeyDone),
 }
 
+/// A chat text size (`config::CHAT_ZOOM`, percent), shown as "N %".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChatZoom(pub u16);
+
+impl fmt::Display for ChatZoom {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} %", self.0)
+    }
+}
+
 /// What a keyring call answered: the status now, or why it failed. Never the key.
 #[derive(Debug, Clone)]
 pub enum KeyDone {
@@ -771,6 +781,8 @@ pub enum Message {
     KeepChats(bool),
     /// AI: "Web search" (`ai.web_search`).
     WebSearch(bool),
+    /// AI: "Chat text size" (`ai.chat_zoom`, also Ctrl+= / Ctrl+- / Ctrl+0 in the chat).
+    ChatZoom(ChatZoom),
     /// A Labs switch: saved and applied at once.
     Labs(Feature, bool),
     Source(Language),
@@ -1680,6 +1692,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SongHistory(on) => state.draft.song.history = on,
         Message::ChatStays(how) => state.draft.chat.stays_open = how,
         Message::WebSearch(on) => state.draft.ai.web_search = Some(on),
+        Message::ChatZoom(z) => state.draft.ai.chat_zoom = z.0,
         Message::KeepChats(on) => {
             state.draft.chat.keep_history = on;
             // off deletes them (`windows::apply` once saved)

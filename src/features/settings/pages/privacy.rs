@@ -28,6 +28,8 @@ const ROWS: [(S, S, S); 7] = [
 
 const SONG: (S, S, S) = (S::p_song_a, S::p_song_b, S::p_song_c);
 const ONLINE: (S, S, S) = (S::p_online_a, S::p_online_b, S::p_online_c);
+/// Ask AI's web search, while it is on (`ai.web_search`).
+const WEB: (S, S, S) = (S::p_web_a, S::p_web_b, S::p_web_c);
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let mut lines = ROWS.to_vec();
@@ -36,6 +38,9 @@ pub fn view(state: &State) -> Element<'_, Message> {
     }
     if state.draft.labs.has(Feature::Online) {
         lines.insert(lines.len() - 1, ONLINE);
+    }
+    if state.draft.ai.web_search == Some(true) {
+        lines.insert(lines.len() - 1, WEB);
     }
     let cells = |a: Element<'static, Message>, b, c| {
         container(

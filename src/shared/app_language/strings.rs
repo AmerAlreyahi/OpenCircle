@@ -363,6 +363,10 @@ strings! {
         | "بعد سؤال متابعة";
     ai_stays_always: "Always"
         | "دائمًا";
+    ai_zoom: "Chat text size"
+        | "حجم نص المحادثة";
+    ai_zoom_desc: "Also Ctrl+= larger, Ctrl+- smaller, Ctrl+0 back to 100 % in the chat"
+        | "أو Ctrl+= للتكبير وCtrl+- للتصغير وCtrl+0 للعودة إلى 100 % داخل المحادثة";
     ai_web: "Web search"
         | "البحث في الويب";
     ai_web_desc: "The AI can search Bing and Wikipedia for recent facts. Only the search words are sent, never your screen"
@@ -771,6 +775,12 @@ strings! {
         | "مقطع مدته 10 ثوانٍ تقريبًا، فقط عندما تضغط زر الموسيقى";
     p_song_c: "AudD (with your token)"
         | "AudD (برمزك الخاص)";
+    p_web_a: "Ask AI web search"
+        | "بحث الويب في «اسأل الذكاء الاصطناعي»";
+    p_web_b: "Only the search words the AI picks (never your screen), and the pages it opens"
+        | "كلمات البحث التي يختارها الذكاء الاصطناعي فقط (لا شاشتك أبدًا)، والصفحات التي يفتحها";
+    p_web_c: "Bing, then Wikipedia; the result pages' own sites"
+        | "Bing ثم Wikipedia؛ ومواقع صفحات النتائج نفسها";
     p_online_a: "Online translation (Labs)"
         | "الترجمة عبر الإنترنت (ميزة تجريبية)";
     p_online_b: "The text read from the screen (never the image), only when Online is the engine"
