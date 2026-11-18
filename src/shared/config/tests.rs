@@ -56,7 +56,7 @@ fn migrating_backs_the_old_file_up_once_then_rewrites_it_as_the_new_schema() {
     // The file is the new schema now, with every old value and the Labs switches.
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(
-        text.contains("version = 12") && text.contains("[labs]"),
+        text.contains("version = 13") && text.contains("[labs]"),
         "{text}"
     );
     let (again, w) = Config::load_from(&path);
@@ -93,13 +93,13 @@ fn a_backup_is_never_overwritten() {
 
 #[test]
 fn a_current_file_is_left_alone_and_a_missing_one_is_not_created() {
-    let (dir, path) = config_with("current", "version = 12\n[labs]\nsong = true\n");
+    let (dir, path) = config_with("current", "version = 13\n[labs]\nsong = true\n");
     let (c, w) = Config::load_from(&path);
     assert!(w.is_empty() && c.labs.song, "{w:?}");
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no backup");
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "version = 12\n[labs]\nsong = true\n"
+        "version = 13\n[labs]\nsong = true\n"
     );
     let gone = dir.join("none.toml");
     Config::load_from(&gone);
@@ -222,20 +222,31 @@ fn a_v0_1_2_file_keeps_its_snip_settings_and_snip_is_on_whatever_labs_says() {
     }
 }
 
-/// Online translation left Labs (0.3.0): a file with `[labs] online` loads
-/// without a warning, its Online choice stays, and a save drops the switch.
+/// Online translation left Labs (schema 13): a file with `[labs] online` on
+/// keeps its Online choice, loads without a warning, and a save drops the
+/// switch (Online stays on the next load). With the switch off or missing the
+/// file translated locally, so it stays Local: no text goes to Google unasked.
 #[test]
-fn an_online_choice_from_labs_keeps_working() {
-    let text = "version = 12\n[translate]\nengine = \"online\"\n[labs]\nonline = true\n";
-    let (dir, path) = config_with("labs-online", text);
-    let (c, w) = Config::load_from(&path);
-    assert!(w.is_empty(), "{w:?}");
-    assert_eq!(c.translate.engine, Engine::Online);
-    c.save_to(&path).unwrap();
-    let saved: Table = fs_text(&path).parse().unwrap();
-    assert!(saved.get("labs").and_then(|l| l.get("online")).is_none());
-    assert_eq!(saved["translate"]["engine"].as_str(), Some("online"));
-    let _ = std::fs::remove_dir_all(dir);
+fn an_online_choice_from_labs_stays_only_when_its_switch_was_on() {
+    let engine = "version = 12\n[translate]\nengine = \"online\"\n";
+    for (labs, want) in [
+        ("[labs]\nonline = true\n", Engine::Online),
+        ("[labs]\nonline = false\n", Engine::Offline),
+        ("", Engine::Offline),
+    ] {
+        let text = format!("{engine}{labs}");
+        let (dir, path) = config_with(&format!("labs-online-{}", labs.len()), &text);
+        let (c, w) = Config::load_from(&path);
+        assert!(w.is_empty(), "{labs}: {w:?}");
+        assert_eq!(c.translate.engine, want, "{labs}");
+        assert_eq!(fs_text(&dir.join("config.toml.bak-v12")), text, "backup");
+        c.save_to(&path).unwrap();
+        let saved: Table = fs_text(&path).parse().unwrap();
+        assert!(saved.get("labs").and_then(|l| l.get("online")).is_none());
+        let (again, _) = Config::load_from(&path);
+        assert_eq!(again.translate.engine, want, "{labs}: kept after a save");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[test]
@@ -748,7 +759,7 @@ fn an_old_auto_search_migrates_to_wait_with_a_backup() {
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), old, "{tag}");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
-            text.contains("version = 12") && !text.contains("search_with"),
+            text.contains("version = 13") && !text.contains("search_with"),
             "{text}"
         );
         assert!(!text.contains("[results]"), "{text}");
@@ -1024,7 +1035,7 @@ fn broken_toml_and_wrong_shapes_do_not_crash() {
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 1);
     assert!(w[0].contains("AI is off"), "{w:?}");
-    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 13\n");
+    let (c, w) = Config::parse("ai = 4\nquick_actions = \"x\"\nversion = 14\n");
     assert_eq!(c, Config::unreadable());
     assert_eq!(w.len(), 3, "{w:?}");
     assert!(
@@ -1134,7 +1145,7 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(dir.join(name)).unwrap()
 }
 
-/// The default file is byte-for-byte the frozen v12 one (the file format is
+/// The default file is byte-for-byte the frozen v13 one (the file format is
 /// frozen), but for the target: the OS language since 2026-11-10 (English
 /// in tests), no longer Arabic.
 #[test]
@@ -1143,7 +1154,7 @@ fn the_default_file_is_byte_for_byte_the_frozen_one() {
     let path = dir.join("config.toml");
     Config::default().save_to(&path).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();
-    let frozen = fixture("default-v12.toml").replace("target = \"ar\"", "target = \"en\"");
+    let frozen = fixture("default-v13.toml").replace("target = \"ar\"", "target = \"en\"");
     assert_eq!(written, frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1182,7 +1193,7 @@ fn older_files_load_quietly_and_schema_9_drops_the_retired_keys() {
         assert_eq!(kept(&again), kept(&c), "v{n}");
         assert_eq!(c, Config::parse(text).0, "v{n}");
         let saved: Table = fs_text(&path).parse().unwrap();
-        assert_eq!(saved["version"].as_integer(), Some(12));
+        assert_eq!(saved["version"].as_integer(), Some(13));
         let labs = saved["labs"].as_table().unwrap();
         assert!(
             !labs.contains_key("snip") && !labs.contains_key("editor"),
@@ -1250,7 +1261,7 @@ fn a_v4_file_still_has_every_v3_key() {
     want.look.theme = LookTheme::Spectrum;
     want.translate.target = "ar".into(); // stored: kept
     assert_eq!(c, want);
-    let frozen = fixture("default-v12.toml").replace("sapphire_glow", "spectrum");
+    let frozen = fixture("default-v13.toml").replace("sapphire_glow", "spectrum");
     assert_eq!(fs_text(&path), frozen);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -1375,7 +1386,7 @@ fn a_v3_file_migrates_once_with_a_bak_v3() {
     assert_eq!(look(&fs_text(&path)), look(old));
     let text = fs_text(&path);
     for want in [
-        "version = 12",
+        "version = 13",
         "glass_effect = false",
         "theme = \"aurora\"",
         "[appearance]",
@@ -1415,7 +1426,7 @@ fn a_stored_copy_moves_to_both_once_editor_and_both_stay() {
             assert_eq!(c.snip.after, want, "{name} (labs snip {snip})");
             assert_eq!(fs_text(&dir.join(format!("config.toml.bak-v{n}"))), text);
             let saved: Table = fs_text(&path).parse().unwrap();
-            assert_eq!(saved["version"].as_integer(), Some(12));
+            assert_eq!(saved["version"].as_integer(), Some(13));
             assert!(saved["labs"].get("snip").is_none(), "dropped (schema 9)");
             let (again, _) = Config::load_from(&path);
             assert_eq!(again.snip.after, want, "migrated once");
@@ -1439,7 +1450,7 @@ fn schema_10_moves_both_to_editor_once_with_a_backup() {
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.snip.after, SnipAfter::Editor);
     assert_eq!(fs_text(&dir.join("config.toml.bak-v9")), v9);
-    assert_eq!(fs_text(&path), fixture("default-v12.toml"));
+    assert_eq!(fs_text(&path), fixture("default-v13.toml"));
     let _ = std::fs::remove_dir_all(dir);
     // a v10 file keeps a deliberate "both"
     let (c, w) = Config::parse("version = 10\n[snip]\nafter = \"both\"\n");
@@ -1472,7 +1483,7 @@ fn schema_12_moves_the_translate_keys_off_the_browsers_shortcuts() {
     assert_eq!(key(&c, false).as_deref(), Some("Alt+Shift+T"));
     assert_eq!(key(&c, true).as_deref(), Some("Alt+Shift+L"));
     assert_eq!(fs_text(&dir.join("config.toml.bak-v11")), v11);
-    assert_eq!(fs_text(&path), fixture("default-v12.toml"));
+    assert_eq!(fs_text(&path), fixture("default-v13.toml"));
     let _ = std::fs::remove_dir_all(dir);
     // a user's own key stays; a v12 file keeps even the old default
     let own = v11.replace("Ctrl+Shift+T", "Ctrl+Alt+9");
@@ -1509,7 +1520,7 @@ fn schema_11_stops_writing_the_ignored_keys_with_a_backup() {
     for gone in ["widget_theme", "search_with", "activation_glow", "animate"] {
         assert!(!text.contains(gone), "{gone}: {text}");
     }
-    assert!(text.contains("version = 12"), "{text}");
+    assert!(text.contains("version = 13"), "{text}");
     let _ = std::fs::remove_dir_all(dir);
 }
 

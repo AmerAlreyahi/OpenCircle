@@ -137,7 +137,9 @@
 //! reads (`widget_theme`, `selection.after` / `search_with`, `activation_glow`, edge `animate`) and the removed search history
 //! (`general.search_history`, `labs.history`); they still read without a warning. `translate.live_gpu` (the removed GPU path, never in a release) reads quietly and is dropped on save, with no schema bump.
 //! 12 moves the old default Translate / Live translate keys Ctrl+Shift+T / L to Alt+Shift+T / L (unless taken; a user's own
-//! key stays). A file older than `VERSION` is copied to
+//! key stays). 13: Online translation left Labs; an older file's `translate.engine = "online"` stays Online only
+//! when its `[labs] online` was on (it translated locally while off: no text goes to Google unasked); `[labs] online`
+//! is then dropped on save. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -162,7 +164,7 @@ pub use store::{appearance, current, look, look_config, rebase, set_current, upd
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 
 /// The OS's language as the language table has it, else English

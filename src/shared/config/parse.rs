@@ -298,14 +298,17 @@ impl Config {
                     .ok_or_else(|| "expected 5000, 10000 or 20000 px".to_string())
             });
         }
+        // `[labs] online`: read only for schema 13's engine step
+        let mut labs_online = false;
         if let Some(t) = section(&root, "labs", &mut w) {
             let (p, d) = ("labs.", d.labs);
             // `snip` / `editor` (Snip's switches until 0.1.2) are ignored since schema 9.
             c.labs.song = get(t, p, "song", d.song, &mut w);
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
             c.labs.live = get(t, p, "live", d.live, &mut w);
-            // `online` (Online translation's switch until 0.3.0) is ignored:
-            // the engine is a normal choice now (`translate.engine = "online"`).
+            // `online` (Online translation's switch until 0.3.0): the engine is a
+            // normal choice now; the switch only decides schema 13's step below.
+            labs_online = get(t, p, "online", false, &mut w);
         }
         // Schema 6: "copy" (copy and close, a toast) is gone; a pick always shows
         // the Snip toolbar, so it reads as "both" (`SnipAfter`'s alias).
@@ -343,6 +346,11 @@ impl Config {
                     }
                 }
             }
+        }
+        // Schema 13: Online left Labs. With its switch off the file translated
+        // locally, so it stays Local (no text goes to Google unasked).
+        if file_version < Some(13) && c.translate.engine == Engine::Online && !labs_online {
+            c.translate.engine = Engine::Offline;
         }
         // Schema 12: Translate / Live translate leave the browsers' Ctrl+Shift+T / L for
         // Alt+Shift+T / L (owner, 2026-11-14), once, unless the new key is taken;

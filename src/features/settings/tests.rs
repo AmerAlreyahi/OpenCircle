@@ -3333,7 +3333,7 @@ fn privacy_cells_in_arabic_start_at_the_columns_right_edge() {
 fn reset_shortcuts_asks_resets_saves_and_undoes() {
     let path = tmp("reset-shortcuts");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "version = 12\n").unwrap();
+    std::fs::write(&path, "version = 13\n").unwrap();
     let (mut s, _) = state(Some(path.clone()));
     s.draft = Config::load_from(&path).0;
     // Song search is off in Labs: its entry holds a key of the user's own
