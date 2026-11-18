@@ -1370,3 +1370,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Online translation leaves Labs (owner, 2026-11-18, "it is stable"): the Online (Google) engine is a normal Translate engine
   choice (AI | Local | Online) in v0.3.0, no Labs switch; same rules (text only, one-shot only, offline fallback, plain message).
   The `[labs] online` key is still read (dropped on save, migrate never break).
+- Manual pin closes the overlay too (owner, 2026-11-18, "do it"): pinning the AI chat by hand (header pin button) behaves like
+  the follow-up pin: the overlay (frozen screen + main bar) closes by itself and the chat stays pinned above other apps; same
+  guards as the follow-up close (never while a menu / card / download / song search / drag / running action is open: it closes
+  right after).
