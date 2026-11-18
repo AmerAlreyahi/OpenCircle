@@ -1,6 +1,9 @@
 //! Snip Studio's packaging entries (Start menu, "Open with", desktop file): the name is the
 //! string table's English `st_title`, the entries are extra choices and never a default.
-use std::fs::read_to_string;
+// Windows checks text files out with CRLF: compare with LF.
+fn read_to_string(p: &str) -> std::io::Result<String> {
+    std::fs::read_to_string(p).map(|s| s.replace("\r\n", "\n"))
+}
 
 fn st_title() -> String {
     let t = read_to_string("src/shared/app_language/strings.rs").unwrap();
