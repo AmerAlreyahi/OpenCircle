@@ -133,6 +133,8 @@ pub enum Msg {
     Web(ask_ai::web::Web),
     /// The one-time question "Search the web?": on, or not now (both saved).
     WebSearch(bool),
+    /// A turn's card: web search on, and that question asked again with it.
+    WebAgain,
     Answered(Result<(), ask_ai::AiError>),
     /// The log scrolled (#128).
     Scrolled(iced::widget::scrollable::Viewport),
@@ -258,6 +260,10 @@ pub struct AiChat {
     following: bool,
     /// The text zoom, percent (`[ai] chat_zoom`).
     zoom: u16,
+    /// The turn count when "Not now" was clicked: no card under that turn.
+    web_hidden: usize,
+    /// The next `send` searches even before the saved setting is read back.
+    web_now: bool,
 }
 
 /// A closed chat frees the code colours' syntaxes (loaded again by the next
@@ -380,6 +386,8 @@ impl AiChat {
             details: false,
             following: true,
             zoom: config::current().ai.chat_zoom,
+            web_hidden: usize::MAX,
+            web_now: false,
         }
     }
 
@@ -713,7 +721,23 @@ impl AiChat {
                 return operation::snap_to_end(LOG);
             }
             (State::Ask { chat, .. }, Msg::Web(web)) => chat.web(web),
+            (State::Ask { chat, .. }, Msg::WebAgain) => {
+                self.web_now = true;
+                let save = save_config(|c| c.ai.web_search = Some(true), None);
+                let again = chat
+                    .turns
+                    .len()
+                    .checked_sub(1)
+                    .and_then(|i| chat.take_back(i));
+                return match again {
+                    Some(question) => Task::batch([save, self.send(&question)]),
+                    None => save,
+                };
+            }
             (_, Msg::WebSearch(on)) => {
+                if let State::Ask { chat, .. } = &self.state {
+                    self.web_hidden = chat.turns.len();
+                }
                 return save_config(move |c| c.ai.web_search = Some(on), None);
             }
             (_, Msg::Details) => self.details = !self.details,
@@ -804,7 +828,8 @@ impl AiChat {
         }
         let setup = setup.clone();
         // only once the user said yes (the chat asks once: `Msg::WebSearch`)
-        let web = config::current().ai.web_search == Some(true);
+        let web =
+            std::mem::take(&mut self.web_now) || config::current().ai.web_search == Some(true);
         let (task, handle) = background(move |tx| {
             let found = tx.clone();
             let mut on_web = move |w| {

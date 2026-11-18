@@ -508,6 +508,62 @@ pub fn stream_with(
     }
 }
 
+/// Whether a turn calls for the web: the user asked to search / look up /
+/// get the latest news, or the model said it cannot browse (W57). Words, EN + AR.
+pub fn wants_web(question: &str, answer: &str) -> bool {
+    let q = question.to_lowercase();
+    let asked = q.split(|c: char| !c.is_alphanumeric()).any(|t| {
+        matches!(
+            t,
+            "search"
+                | "searching"
+                | "google"
+                | "latest"
+                | "news"
+                | "lookup"
+                | "ابحث"
+                | "ابحثي"
+                | "دور"
+                | "دوّر"
+                | "بحث"
+        )
+    }) || [
+        "look up",
+        "find online",
+        "on the web",
+        "online",
+        "آخر الأخبار",
+        "آخر اخبار",
+        "اخر الاخبار",
+        "أخبار",
+    ]
+    .iter()
+    .any(|p| q.contains(p));
+    let a = answer.to_lowercase().replace('\u{2019}', "'");
+    let said = [
+        "can't browse",
+        "cannot browse",
+        "can't search",
+        "cannot search",
+        "unable to search",
+        "unable to browse",
+        "don't have access to the internet",
+        "no access to the internet",
+        "can't access the internet",
+        "cannot access the internet",
+        "real-time information",
+        "لا أستطيع البحث",
+        "لا يمكنني البحث",
+        "لا أستطيع تصفح",
+        "لا يمكنني تصفح",
+        "ليس لدي وصول إلى الإنترنت",
+        "لا أملك القدرة على البحث",
+    ]
+    .iter()
+    .any(|p| a.contains(p));
+    asked || said
+}
+
 #[cfg(test)]
 mod key_tests {
     use super::*;

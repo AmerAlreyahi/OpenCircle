@@ -1506,6 +1506,10 @@ strings! {
         | "ابحث في الويب";
     chat_web_no: "Not now"
         | "ليس الآن";
+    chat_web_off: "Web search is off in Settings. Turn it on to search for this?"
+        | "البحث في الويب متوقف في الإعدادات. هل تريد تشغيله للبحث عن هذا؟";
+    chat_web_turn_on: "Turn on"
+        | "تشغيل";
     chat_web_down: "Web search isn't available right now, so this answer doesn't use it."
         | "البحث في الويب غير متاح الآن، لذا لا تعتمد هذه الإجابة عليه.";
     chat_send: "Send"

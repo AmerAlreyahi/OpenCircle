@@ -234,6 +234,31 @@ impl AiChat {
             if turn.web_down {
                 answer = answer.push(note(t!(chat_web_down)));
             }
+            // the user asked to search, or the model said it can't: offer it (W57)
+            if last
+                && !busy
+                && !browser
+                && chat.status == Status::Done
+                && chat.turns.len() != self.web_hidden
+                && config::current().ai.web_search != Some(true)
+                && crate::features::ask_ai::ask::wants_web(&turn.question, &turn.answer)
+            {
+                let card = match config::current().ai.web_search {
+                    None => column![
+                        note(t!(chat_web_ask)),
+                        iced::widget::row([
+                            chip::action(t!(chat_web_on).to_string(), Msg::WebAgain),
+                            chip::action(t!(chat_web_no).to_string(), Msg::WebSearch(false)),
+                        ])
+                        .spacing(CHIPS_GAP)
+                    ],
+                    Some(_) => column![
+                        note(t!(chat_web_off)),
+                        chip::action(t!(chat_web_turn_on).to_string(), Msg::WebAgain)
+                    ],
+                };
+                answer = answer.push(card.spacing(STACK));
+            }
             if !turn.answer.is_empty() && !busy && !browser {
                 let mut tools =
                     dir::row([quiet(t!(c_copy), Msg::CopyTurn(i, true))]).spacing(ACTIONS_GAP);
