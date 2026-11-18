@@ -230,13 +230,12 @@ fn links<'a>(all: Vec<Element<'a, Message>>) -> Element<'a, Message> {
 }
 
 /// A tile, then its lines (start-aligned) beside it.
-fn headed<'a>(picture: Handle, lines: iced::widget::Column<'a, Message>) -> Element<'a, Message> {
+fn headed<'a>(
+    picture: Element<'a, Message>,
+    lines: iced::widget::Column<'a, Message>,
+) -> Element<'a, Message> {
     let lines = lines.spacing(space::GAP).align_x(dir::start()).width(Fill);
-    card(
-        dir_row![tile(picture), lines]
-            .spacing(TILE_GAP)
-            .align_y(Center),
-    )
+    card(dir_row![picture, lines].spacing(TILE_GAP).align_y(Center))
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
@@ -262,9 +261,9 @@ fn app<'a>() -> Element<'a, Message> {
         link(t!(ab_website), WEBSITE),
         link(t!(ab_licence), LICENSE),
     ]);
-    let tile = logo((TILE - 2.0 * TILE_PAD) as u32);
+    let mark = logo((TILE - 2.0 * TILE_PAD) as u32);
     headed(
-        tile,
+        tile(mark),
         column![name, paragraph(sub(Role::NOTE, t!(ab_what))), links],
     )
 }
@@ -313,7 +312,13 @@ fn developer<'a>() -> Element<'a, Message> {
     ]);
     // the profile's bio in English; the table's Arabic draft in Arabic
     let bio = paragraph(sub(Role::NOTE, fmt(S::ab_bio, &[&p.bio])));
-    headed(avatar(), column![name, bio, links])
+    // the photo fills its own frame as a circle: no tile or margin behind it
+    let photo = image(avatar())
+        .width(TILE)
+        .height(TILE)
+        .content_fit(ContentFit::Cover)
+        .border_radius(radius::FULL);
+    headed(photo.into(), column![name, bio, links])
 }
 
 /// Who made what we ship: one row each (what and its maker, the licence in
