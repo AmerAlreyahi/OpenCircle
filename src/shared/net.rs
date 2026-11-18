@@ -41,6 +41,15 @@ pub const UPDATE: Policy = Policy {
     status_as_error: false,
     user_agent: Some("OpenCircle"),
 };
+/// Online translation (Labs): short limits, a page waits on them and the
+/// local model still runs after a failure.
+pub const TRANSLATE: Policy = Policy {
+    connect_secs: Some(5),
+    global_secs: 15,
+    https_only: true,
+    status_as_error: false,
+    user_agent: None,
+};
 /// Song identification upload.
 pub const SONG: Policy = Policy {
     connect_secs: Some(10),
@@ -117,6 +126,7 @@ mod tests {
             (AI, d(10), d(300), false, false, false),
             (MODELS, d(30), d(600), true, false, false),
             (UPDATE, d(20), d(900), true, false, true),
+            (TRANSLATE, d(5), d(15), true, false, false),
             (SONG, d(10), d(30), false, false, false),
             (COVER, None, d(10), false, true, false),
         ];

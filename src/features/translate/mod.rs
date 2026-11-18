@@ -17,6 +17,7 @@ pub(crate) use glossary::store as glossary_store;
 pub(crate) use glossary::{Glossary, Term};
 pub mod lang;
 pub(crate) mod mt;
+mod online;
 pub mod pipeline;
 pub(crate) mod screens;
 #[cfg(test)]
