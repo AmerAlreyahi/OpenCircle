@@ -1390,3 +1390,27 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   random pages (~25 % relevant); v0.3.0 uses DuckDuckGo lite (POST, >= 2 s apart, 15 min rest when throttled) then Wikipedia,
   no key; Bing removed. ONNX Runtime mirror (2026-11-18): github.com/microsoft/onnxruntime returned 404; the exact pinned runtime
   files are mirrored on OpenCircle-models release runtime-1 (same sha256) and the app tries the mirror first, Microsoft second.
+- v0.4.0 = the first redesign (owner, 2026-11-18): the app grew complicated, so v0.4.0 redesigns it: Settings v2 and the Snip
+  Studio on ONE shared Windows 11 style frame, AND no pixelated / low-quality shapes anywhere (the Copied pill and every other
+  notice, pill and popup must be as smooth as inside a normal window, at every scale, on every OS). Work uses the SDLC Kit
+  (/home/az_work/MainHub/SDLC-Kit, RULES.md).
+- Settings v2, round 1 verdict (owner, 2026-11-18): the new title bar + collapsible icon sidebar are APPROVED; the selected
+  sidebar item keeps TODAY's selected effect (filled rounded accent-tinted item, no elevated card, no look-coloured bar) and
+  every colour stays ours (no new colours). The pages are NOT approved: "put more effort in the redesigning; simplify and make
+  it look way better": change the layout, order and organisation of pages and rows, never the colours.
+- Report a problem = a popup (owner, 2026-11-18): no "Something not working?" card on About; the sidebar foot item "Report a
+  problem" opens a small dialog (Copy diagnostics, Report a problem on GitHub, nothing is sent; X / Esc closes).
+- "AI and Search" (owner, 2026-11-18): the Settings page "Ask AI" is renamed "AI and Search" (same content: answers from,
+  provider, model, key, AI chat, web search). Round 2 pages: "more optimised and prettier" asked (round 3).
+- Settings = the owner's approved design logic (owner, 2026-11-18, "bro I gave you a design, this looks too far from it"):
+  rounds 2-4 strayed. Settings v2 follows his other project's approved Part 1 design logic exactly (Windows 11 frame around
+  web-admin pages: page header 28/36, cards with caps captions, label-above fields with hints, Windows On/Off toggles, segmented,
+  info bars, status pills, tables, section lists, empty states), in OpenCircle's colours. Reference: .claude/artifacts/design/
+  settings-v2-ref/REFERENCE_SPEC.md + part1-2026-11-18/.
+- Settings v2 = DRAFT, not scheduled (owner, 2026-11-18): round 5 "looks good"; the sidebar becomes exactly today's sidebar
+  (CORRECTED: round 1 sidebar with icons + collapse, today's selected effect); then the design is kept as a draft and NOT built: the owner decides
+  later when to apply it. All v0.4.0 work is paused until the owner says continue (W71 Studio branch and W72 notices paused).
+- v0.4.0 resumed (owner, 2026-11-18 night, after v0.3.0 was published): v0.4.0 = the Snip Studio window (W71's branch) + crisp
+  notices (W72, capability table first) + the Start menu / "Open with" entries once the Studio's name is chosen (the user-facing
+  name lives in ONE string-table entry). Settings v2 stays a draft: nothing of it is built. Then v0.4.1-v0.4.6 in order, the next
+  ones built in parallel on branches while the owner tries a build.
