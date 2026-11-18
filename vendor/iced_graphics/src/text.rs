@@ -18,6 +18,54 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock, RwLock, Weak};
 
+/// The glyphs of `glyphs` (a laid-out line, in visual order) whose
+/// cluster is `start..end`, as their left and right edge.
+fn cluster_edges(
+    glyphs: &[cosmic_text::LayoutGlyph],
+    start: usize,
+    end: usize,
+) -> (f32, f32) {
+    glyphs
+        .iter()
+        .filter(|g| g.start == start && g.end == end)
+        .fold((f32::MAX, f32::MIN), |(lo, hi), g| {
+            (lo.min(g.x), hi.max(g.x + g.w))
+        })
+}
+
+/// Where a caret before byte `index` sits on a laid-out line (`glyphs` in
+/// visual order): at a right-to-left glyph's right edge, a left-to-right one's
+/// left; after the line's last character, at its end side (OpenCircle: iced
+/// summed glyph widths from the left, so the caret of Arabic text stayed at
+/// the left of a right-aligned line).
+pub fn caret_x(glyphs: &[cosmic_text::LayoutGlyph], index: usize) -> f32 {
+    if let Some(g) = glyphs.iter().find(|g| g.start <= index && index < g.end)
+    {
+        let (lo, hi) = cluster_edges(glyphs, g.start, g.end);
+        let f = (index - g.start) as f32 / (g.end - g.start) as f32;
+        return match g.level.is_rtl() {
+            true => hi - (hi - lo) * f,
+            false => lo + (hi - lo) * f,
+        };
+    }
+    glyphs
+        .iter()
+        .filter(|g| g.end <= index)
+        .max_by_key(|g| g.end)
+        .map_or(0.0, |g| {
+            let (lo, hi) = cluster_edges(glyphs, g.start, g.end);
+            if g.level.is_rtl() { lo } else { hi }
+        })
+}
+
+/// The bytes a laid-out line covers (its glyphs are in visual order, so the
+/// first and last glyph are not its ends once right-to-left text is in it).
+pub fn line_span(glyphs: &[cosmic_text::LayoutGlyph]) -> (usize, usize) {
+    let start = glyphs.iter().map(|g| g.start).min().unwrap_or(0);
+    let end = glyphs.iter().map(|g| g.end).max().unwrap_or(0);
+    (start, end)
+}
+
 /// A text primitive.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Text {

@@ -211,16 +211,7 @@ impl editor::Editor for Editor {
 
                 let (visual_line, offset) = lines
                     .find_map(|(i, line)| {
-                        let start = line
-                            .glyphs
-                            .first()
-                            .map(|glyph| glyph.start)
-                            .unwrap_or(0);
-                        let end = line
-                            .glyphs
-                            .last()
-                            .map(|glyph| glyph.end)
-                            .unwrap_or(0);
+                        let (start, end) = text::line_span(&line.glyphs);
 
                         let is_cursor_before_start = start > cursor.index;
 
@@ -240,23 +231,21 @@ impl editor::Editor for Editor {
                             // i is guaranteed to be > 0 because `start` is always
                             // 0 for the first line, so there is no way for the
                             // cursor to be before it.
-                            Some((i - 1, layout[i - 1].w))
+                            Some((
+                                i - 1,
+                                text::caret_x(&layout[i - 1].glyphs, cursor.index),
+                            ))
                         } else if is_cursor_before_end {
-                            let offset = line
-                                .glyphs
-                                .iter()
-                                .take_while(|glyph| cursor.index > glyph.start)
-                                .map(|glyph| glyph.w)
-                                .sum();
-
-                            Some((i, offset))
+                            Some((i, text::caret_x(&line.glyphs, cursor.index)))
                         } else {
                             None
                         }
                     })
                     .unwrap_or((
                         layout.len().saturating_sub(1),
-                        layout.last().map(|line| line.w).unwrap_or(0.0),
+                        layout.last().map_or(0.0, |line| {
+                            text::caret_x(&line.glyphs, cursor.index)
+                        }),
                     ));
 
                 Selection::Caret(Point::new(
@@ -786,41 +775,23 @@ fn highlight_line(
     let layout = line.layout_opt().map(Vec::as_slice).unwrap_or_default();
 
     layout.iter().map(move |visual_line| {
-        let start = visual_line
-            .glyphs
-            .first()
-            .map(|glyph| glyph.start)
-            .unwrap_or(0);
-        let end = visual_line
-            .glyphs
-            .last()
-            .map(|glyph| glyph.end)
-            .unwrap_or(0);
+        let (start, end) = text::line_span(&visual_line.glyphs);
 
         let range = start.max(from)..end.min(to);
 
         if range.is_empty() {
             (0.0, 0.0)
-        } else if range.start == start && range.end == end {
-            (0.0, visual_line.w)
         } else {
-            let first_glyph = visual_line
+            // the glyphs in the range, wherever bidi put them on the line
+            let (lo, hi) = visual_line
                 .glyphs
                 .iter()
-                .position(|glyph| range.start <= glyph.start)
-                .unwrap_or(0);
+                .filter(|g| g.start < range.end && g.end > range.start)
+                .fold((f32::MAX, f32::MIN), |(lo, hi), g| {
+                    (lo.min(g.x), hi.max(g.x + g.w))
+                });
 
-            let mut glyphs = visual_line.glyphs.iter();
-
-            let x =
-                glyphs.by_ref().take(first_glyph).map(|glyph| glyph.w).sum();
-
-            let width: f32 = glyphs
-                .take_while(|glyph| range.end > glyph.start)
-                .map(|glyph| glyph.w)
-                .sum();
-
-            (x, width)
+            if lo > hi { (0.0, 0.0) } else { (lo, hi - lo) }
         }
     })
 }

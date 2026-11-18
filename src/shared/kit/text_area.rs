@@ -92,6 +92,12 @@ pub fn text_area<'a, M: Clone + 'a>(
         )
         .padding(PAD)
     });
+    // An empty line has no glyph to put the caret by, so iced draws it at the
+    // left: right to left it is moved to the right edge, where typing starts
+    // (once there is text the caret follows it: vendor/iced_graphics `caret_x`).
+    // Always wrapped, so the field's place in the tree stays (W52).
+    let at_right = super::dir::rtl() && content.is_empty();
+    let field = super::wrap::wrap(field, CaretAtRight(at_right));
     let field = stack![field].push(placeholder);
     let parts = iced::widget::keyed::Column::new()
         .push_maybe(0, top)
@@ -114,6 +120,36 @@ pub fn text_area<'a, M: Clone + 'a>(
         .on_press(on_focus) // mouse only: a click focuses the editor; Tab reaches it as a field
         .interaction(iced::mouse::Interaction::Text)
         .into()
+}
+
+/// true = the field is drawn moved to its right edge (an empty field in a
+/// right-to-left view: only its caret shows).
+struct CaretAtRight(bool);
+
+impl<M> super::wrap::Hook<M> for CaretAtRight {
+    fn draw(
+        &self,
+        content: &Element<'_, M>,
+        tree: &iced::advanced::widget::Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+        use iced::advanced::Renderer as _;
+        let draw = |r: &mut iced::Renderer| {
+            (content.as_widget()).draw(tree, r, theme, style, layout, cursor, viewport)
+        };
+        if self.0 {
+            // the caret is 1 px wide, at the text's left edge
+            let room = layout.bounds().width - 2.0 * PAD[1] - 1.0;
+            renderer.with_translation(iced::Vector::new(room.max(0.0), 0.0), draw);
+        } else {
+            draw(renderer);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +284,77 @@ mod tests {
             ui.operate(&renderer, &mut found);
             assert!(found.0, "step {i}: the field lost the focus");
         }
+    }
+
+    /// The focused field's caret column (the x of the leftmost and rightmost
+    /// ink in the text's row; an empty field without a placeholder shows only
+    /// its caret).
+    fn caret_of_empty(arabic: bool) -> (usize, usize) {
+        let _ar = arabic.then(crate::shared::kit::testing::arabic);
+        let content = Content::new();
+        let view = || {
+            let controls = iced::widget::space::horizontal().height(28).into();
+            text_area("t", "", &content, |_| (), (), None, controls, ())
+        };
+        let px =
+            crate::shared::kit::testing::shot::after_focus(view, iced::Size::new(400.0, 120.0));
+        let bg = px[(60 * 400 + 12) * 4];
+        let xs: Vec<usize> = (14..30)
+            .flat_map(|y| (12..388).map(move |x| (x, y)))
+            .filter(|&(x, y)| (px[(y * 400 + x) * 4] as i32 - bg as i32).abs() > 40)
+            .map(|(x, _)| x)
+            .collect();
+        (*xs.iter().min().unwrap(), *xs.iter().max().unwrap())
+    }
+
+    /// W64: right to left an empty field's caret waits at the right edge,
+    /// where typing starts; left to right at the left, as before.
+    #[test]
+    fn an_empty_fields_caret_is_at_the_start_edge() {
+        let (lo, hi) = caret_of_empty(true);
+        assert!(lo > 370 && hi - lo <= 2, "Arabic: at the right: {lo}..{hi}");
+        let (lo, hi) = caret_of_empty(false);
+        assert!(hi < 30 && hi - lo <= 2, "English: at the left: {lo}..{hi}");
+    }
+
+    /// W64: after typing, the caret is at the end of what was typed: the
+    /// left end of an Arabic line (laid out from the right), the right end
+    /// of an English one (iced summed widths from the left: Arabic's caret
+    /// stayed at the left edge, far from the text).
+    #[test]
+    fn the_caret_follows_the_typed_texts_direction() {
+        use iced::advanced::graphics::text::Editor;
+        use iced::advanced::text::editor::{Action, Editor as _, Motion, Selection};
+        use iced::advanced::text::highlighter::PlainText;
+        crate::shared::kit::text::load();
+        let caret = |text: &str, motion: Motion| {
+            let mut e = Editor::with_text(text);
+            let mut h = PlainText;
+            e.update(
+                iced::Size::new(300.0, 100.0),
+                super::super::text::font(Role::CHAT),
+                iced::Pixels(13.0),
+                iced::widget::text::LineHeight::Relative(1.5),
+                iced::widget::text::Wrapping::Word,
+                &mut h,
+            );
+            e.perform(Action::Move(motion));
+            match e.selection() {
+                Selection::Caret(p) => p.x,
+                Selection::Range(_) => panic!("a caret"),
+            }
+        };
+        let (end, start) = (Motion::DocumentEnd, Motion::DocumentStart);
+        let ar = "مرحبا بالعالم";
+        assert!(caret(ar, start) > 290.0, "Arabic starts at the right");
+        let x = caret(ar, end);
+        assert!(x > 150.0 && x < 260.0, "Arabic ends left of its start: {x}");
+        assert!(
+            caret("Hello world", start) < 1.0,
+            "English starts at the left"
+        );
+        let x = caret("Hello world", end);
+        assert!(x > 40.0 && x < 120.0, "English ends at its right: {x}");
     }
 
     #[test]
