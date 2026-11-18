@@ -54,6 +54,7 @@ pub(crate) struct ChatWindow {
     pub placed: Option<Place>,
     /// Hidden for now: Snip is open (its frozen screen holds the chat's
     /// picture, and nothing of ours covers Snip's outline), or `out`.
+    /// Windows: clear (opacity 0), not hidden, so it comes back at once.
     pub hidden: bool,
     /// X11: out of a capture's grab, until it is over (`App::grabbed`).
     pub out: bool,
@@ -340,6 +341,11 @@ impl App {
         }
         let open = self.o.is_some();
         let snip = open && matches!(self.o.purpose, Purpose::Snip(_));
+        // Where windows fade (Windows), the chat goes clear and back instead of hiding: no
+        // blank first frame on its return. It goes once the overlay is fully up over it (the
+        // frozen picture shows it there meanwhile, never the screen without it).
+        let fades = crate::shared::platform::shape::can_fade();
+        let up = self.o.reveal.is_none() && self.appeared() >= 1.0;
         if self.chat_win.is_none() {
             return match open && !snip {
                 true => self.open_chat_window(false),
@@ -356,8 +362,11 @@ impl App {
             w.out = false;
         }
         let mut tasks = Vec::new();
-        let hide = snip || w.out;
-        if hide != w.hidden {
+        let hide = (snip && (up || !fades || w.hidden)) || w.out;
+        if hide != w.hidden && fades {
+            w.hidden = hide;
+            windows::opacity_now(w.id, if hide { 0.0 } else { 1.0 });
+        } else if hide != w.hidden {
             w.hidden = hide;
             tasks.push(match hide {
                 true => window::set_mode(w.id, window::Mode::Hidden),

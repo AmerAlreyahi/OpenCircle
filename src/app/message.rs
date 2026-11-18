@@ -115,8 +115,6 @@ pub(crate) enum Message {
     OpenEntity(crate::features::circle::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, pill::Msg),
-    /// Alt went down / up (peek at the original under a translation).
-    Peek(bool),
     Live(live_layer::Msg),
     /// OCR for a tap or a text drag read these lines.
     Tapped(WordRead, Result<Vec<TextBlock>, String>),

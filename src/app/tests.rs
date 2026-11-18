@@ -404,7 +404,6 @@ fn a_translation_ends_with_its_overlay() {
         app.o.frame.is_some(),
         "a stale session's message is ignored"
     );
-    let _ = app.update(Message::Peek(true));
     // declining the download closes the overlay and drops the session
     let _ = app.update(Message::Translate(7, pill::Msg::Close));
     assert!(app.o.translate.is_none() && app.o.frame.is_none());
@@ -5748,8 +5747,8 @@ fn assert_back_on_the_translation(app: &App, what: &str) {
         app.o
             .translate
             .as_ref()
-            .is_some_and(|(id, s)| *id == 1 && s.is_shown()),
-        "{what}: the same translation"
+            .is_some_and(|(id, s)| *id == 1 && s.is_shown() && s.image().is_some()),
+        "{what}: the same translation, on screen"
     );
     assert!(matches!(app.o.purpose, Purpose::Search), "{what}");
     assert!(!app.o.over_translation && app.o.edit.is_none(), "{what}");

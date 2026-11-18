@@ -491,18 +491,6 @@ impl App {
         };
         if self.o.is_some() {
             let escape = escape();
-            // Alt held = the original under a translation.
-            let alt = iced::event::listen_with(|event, _, _| match event {
-                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                    Some(Message::Peek(m.alt()))
-                }
-                _ => None,
-            });
-            let alt = if self.o.translate.is_some() {
-                alt
-            } else {
-                Subscription::none()
-            };
             // Dragging the result card: the pointer anywhere, until let go.
             let card = match self.o.chat_drag {
                 Some(_) => iced::event::listen_with(|event, _, id| match touch::drag(&event) {
@@ -550,7 +538,7 @@ impl App {
                     touch::came_in(&event).then_some(Message::PointerOn(id))
                 }),
             };
-            Subscription::batch([triggers, escape, alt, card, shift, frames, bar, glow])
+            Subscription::batch([triggers, escape, card, shift, frames, bar, glow])
         } else if self.hiding != Hiding::No {
             // One stream for both, so a resize is always seen before the frames after it.
             // Every message makes iced redraw, so frames keep coming while this runs.

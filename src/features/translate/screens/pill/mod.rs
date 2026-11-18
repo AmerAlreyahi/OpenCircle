@@ -56,8 +56,6 @@ pub enum Msg {
     /// What is translated so far (the rest still shows the original).
     Partial(Part),
     Done(Result<Shown, Problem>),
-    /// Alt went down (true) or up.
-    Peek(bool),
     /// The word card's Explain (or its key, E).
     Explain,
     Delta(String),
@@ -157,7 +155,6 @@ pub struct Session {
     /// The whole frame was asked for (no selection to outline).
     whole: bool,
     phase: Phase,
-    peek: bool,
     card: Option<Card>,
     cache: Arc<Cache>,
     /// The download / translation; dropping it stops the thread's messages.
@@ -245,7 +242,6 @@ impl Session {
             area,
             whole,
             phase: Phase::Consent(None),
-            peek: false,
             card: None,
             cache,
             work: None,
@@ -297,11 +293,11 @@ impl Session {
         self.whole
     }
 
-    /// What to show instead of the original frame: the translation, unless
-    /// Alt is held or it isn't ready.
+    /// What to show instead of the original frame: the translation, once
+    /// it is ready. Alt changes nothing (owner, 2026-11-18: no frame of the
+    /// original until Esc).
     pub fn image(&self) -> Option<&image::Handle> {
         match &self.phase {
-            _ if self.peek => None,
             Phase::Shown(shown) => Some(&shown.image),
             _ => None,
         }
@@ -315,8 +311,7 @@ impl Session {
     /// The frame as the translation shows it (full frame px, never scaled):
     /// what Snip takes (owner, 2026-11-10). The translated page, or while
     /// translating the original with what is translated so far pasted in;
-    /// `None` = nothing translated on screen yet. Alt (the peek) doesn't
-    /// count: Alt+A's own Alt is down when Snip asks.
+    /// `None` = nothing translated on screen yet.
     pub fn seen(&self) -> Option<image::Handle> {
         match &self.phase {
             Phase::Shown(shown) => Some(shown.image.clone()),
@@ -357,7 +352,7 @@ impl Session {
     /// What is translated now and where it goes (frame px: x0, y0, x1, y1);
     /// `true`: the image is the whole frame (the finished translation), else
     /// only the area (what is ready so far). Snip's More pastes it into its
-    /// picture. Alt (the peek) doesn't count.
+    /// picture.
     pub fn translated(&self) -> Option<(&image::Handle, [u32; 4], bool)> {
         match &self.phase {
             Phase::Shown(shown) => Some((&shown.image, self.area, true)),
@@ -367,10 +362,9 @@ impl Session {
     }
 
     /// While translating: the area translated so far and where it goes in the
-    /// frame (px), to draw over the original frame, unless Alt is held.
+    /// frame (px), to draw over the original frame.
     pub fn part(&self) -> Option<(&image::Handle, [u32; 4])> {
         match &self.phase {
-            _ if self.peek => None,
             Phase::Translating => self.partial.as_ref().map(|p| (&p.image, p.area)),
             _ => None,
         }
@@ -485,7 +479,6 @@ impl Session {
                 self.update_paused =
                     !done && !PAUSE_SAID.swap(true, std::sync::atomic::Ordering::Relaxed);
             }
-            Msg::Peek(down) => self.peek = down,
             Msg::Explain => return self.explain(),
             Msg::Delta(piece) => {
                 if let Some(card) = &mut self.card {
