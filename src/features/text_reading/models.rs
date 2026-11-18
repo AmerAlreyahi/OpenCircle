@@ -16,7 +16,11 @@ pub(crate) struct ModelFile {
     pub(crate) name: &'static str,
     pub(crate) size: u64,
     pub(crate) sha256: &'static str,
+    /// Where to fetch it, tried first.
     source: Source,
+    /// Tried in order when `source` fails for good (a 404, a bad checksum) or
+    /// keeps failing; each is checked against the same size and SHA-256.
+    fallbacks: &'static [Source],
 }
 
 #[derive(Debug)]
@@ -35,30 +39,40 @@ enum Source {
     },
 }
 
-/// ONNX Runtime 1.28.0, CPU, from Microsoft's GitHub release (ort 2.0.0-rc.13
-/// targets 1.28; it accepts >= 1.17).
+/// Our copy of ORT's library, byte for byte (same pins): Microsoft's
+/// repository answered 404 for a while (2026-11-18), so it is tried first.
+macro_rules! ort_mirror {
+    () => {
+        "https://github.com/AmerAlreyahi/OpenCircle-models/releases/download/runtime-1/"
+    };
+}
+
+/// ONNX Runtime 1.28.0, CPU: our mirror, else cut out of Microsoft's GitHub
+/// release (ort 2.0.0-rc.13 targets 1.28; it accepts >= 1.17).
 #[cfg(not(windows))]
 pub(crate) const ORT: ModelFile = ModelFile {
     name: "libonnxruntime.so.1.28.0",
     size: 24_268_848,
     sha256: "1461ef7cc3d9e49982591721683cc3e3a55580aeca9a5254e7aac47b75ee4bab",
-    source: Source::Tgz {
+    source: Source::Plain(concat!(ort_mirror!(), "libonnxruntime.so.1.28.0")),
+    fallbacks: &[Source::Tgz {
         // 9,125,960 bytes; archive SHA-256 a3e1b79d...
         url: "https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-linux-x64-1.28.0.tgz",
         offset: 333_824,
-    },
+    }],
 };
 #[cfg(windows)]
 pub(crate) const ORT: ModelFile = ModelFile {
     name: "onnxruntime.dll",
     size: 15_809_848,
     sha256: "18370c375f07357fa5874344a9d9ac17e6b6fe1eb18b1dd209d79483b4470257",
-    source: Source::ZipRange {
+    source: Source::Plain(concat!(ort_mirror!(), "onnxruntime.dll")),
+    fallbacks: &[Source::ZipRange {
         // The zip is 78,796,801 bytes (mostly a .pdb); the dll is 5,659,543 of them.
         url: "https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-win-x64-1.28.0.zip",
         start: 209_109,
         end: 5_868_651,
-    },
+    }],
 };
 
 /// oar-ocr's official model release (PaddleOCR PP-OCRv5 exported to ONNX).
@@ -76,6 +90,7 @@ pub(super) const DET: ModelFile = ModelFile {
     size: 4_826_518,
     sha256: "1eb7b4f7ab657ebd1c66d5f79bca7497f29768a2e3c15e52daecbba1a8e4a039",
     source: oar!("pp-ocrv5_mobile_det.onnx"),
+    fallbacks: &[],
 };
 
 /// A text recognizer: one script's model plus its character list.
@@ -101,12 +116,14 @@ macro_rules! rec {
                 size: $msize,
                 sha256: $msha,
                 source: oar!($model),
+                fallbacks: &[],
             },
             dict: ModelFile {
                 name: $dict,
                 size: $dsize,
                 sha256: $dsha,
                 source: oar!($dict),
+                fallbacks: &[],
             },
         }
     };
@@ -280,6 +297,7 @@ impl ModelFile {
             size,
             sha256,
             source: Source::Plain(url),
+            fallbacks: &[],
         }
     }
 }
@@ -427,9 +445,12 @@ impl From<io::Error> for Fail {
     }
 }
 
-/// `fetch` until it works, with `BACKOFF` between attempts; a `Plain` file
-/// continues from its `.part` file. Each failure's detail is logged; the last
-/// one gives the user's text (`OcrError::Unreachable`).
+/// `fetch` until it works, with `BACKOFF` between rounds; a `Plain` file
+/// continues from its `.part` file. A round tries each of the file's sources
+/// in order: one that fails for good (a 404, a bad checksum) is dropped at
+/// once, one that fails for a moment waits for the next round. Each failure's
+/// detail is logged; the last one gives the user's text (`OcrError::Unreachable`
+/// when a source was only unreachable, else the last source's error).
 fn fetch_retrying(
     agent: &ureq::Agent,
     f: &ModelFile,
@@ -437,19 +458,48 @@ fn fetch_retrying(
     stop: &AtomicBool,
     mut progress: impl FnMut(u64),
 ) -> Result<(), OcrError> {
+    let mut sources: Vec<&Source> = std::iter::once(&f.source).chain(f.fallbacks).collect();
     let mut waits = BACKOFF.iter();
     loop {
-        if stop.load(Ordering::Relaxed) {
-            return Err(OcrError::Stopped);
+        let mut again = None;
+        let mut gone = None;
+        let mut i = 0;
+        while let Some(&source) = sources.get(i) {
+            if stop.load(Ordering::Relaxed) {
+                return Err(OcrError::Stopped);
+            }
+            let got = fetch(agent, f, source, dest, stop, &mut |n| {
+                RETRYING.store(false, Ordering::Relaxed);
+                progress(n)
+            });
+            match got {
+                Ok(()) => return Ok(()),
+                Err(Fail::Now(OcrError::Stopped)) => return Err(OcrError::Stopped),
+                Err(Fail::Now(e)) => {
+                    if sources.len() > 1 {
+                        crate::log!(
+                            "[opencircle] download of {} failed: {e}; next source",
+                            f.name
+                        );
+                    }
+                    sources.remove(i);
+                    gone = Some(e);
+                }
+                Err(Fail::Again { why, server, after }) => {
+                    if sources.len() > 1 {
+                        crate::log!(
+                            "[opencircle] download of {} failed: {why}; next source",
+                            f.name
+                        );
+                    }
+                    again = Some((why, server, after));
+                    i += 1;
+                }
+            }
         }
-        let got = fetch(agent, f, dest, stop, &mut |n| {
-            RETRYING.store(false, Ordering::Relaxed);
-            progress(n)
-        });
-        let (why, server, after) = match got {
-            Ok(()) => return Ok(()),
-            Err(Fail::Now(e)) => return Err(e),
-            Err(Fail::Again { why, server, after }) => (why, server, after),
+        let Some((why, server, after)) = again else {
+            // every source failed for good
+            return Err(gone.expect("a file has a source"));
         };
         let Some(&wait) = waits.next() else {
             crate::log!(
@@ -492,6 +542,7 @@ fn redirect(url: &str) -> Option<String> {
 fn fetch(
     agent: &ureq::Agent,
     f: &ModelFile,
+    source: &Source,
     dest: &Path,
     stop: &AtomicBool,
     progress: &mut dyn FnMut(u64),
@@ -521,7 +572,7 @@ fn fetch(
         }
         Ok(response)
     };
-    match f.source {
+    match *source {
         Source::Plain(url) => {
             // continue a cut-off attempt where it stopped
             let have = Some(part_len(dest)).filter(|&n| n < f.size).unwrap_or(0);
@@ -715,6 +766,7 @@ pub(crate) mod tests {
         size: 5,
         sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
         source: Source::Plain(""),
+        fallbacks: &[],
     };
 
     /// Every language's recognizer exists; ids and files are unique and pinned.
@@ -994,5 +1046,79 @@ pub(crate) mod tests {
         assert_eq!(seen.lock().unwrap().len(), BACKOFF.len() + 1);
         assert!(!dir.join("down.part").exists());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// One file with two sources: fake servers `a` (tried first) and `b`.
+    fn two_sources(name: &str, a: Vec<Answer>, b: Vec<Answer>) -> (&'static ModelFile, Seen, Seen) {
+        let data = payload();
+        let (fa, seen_a) = fake_server(&format!("{name}-a"), data, a);
+        let (fb, seen_b) = fake_server(&format!("{name}-b"), data, b);
+        let f = ModelFile {
+            name: Box::leak(format!("{name}.bin").into_boxed_str()),
+            fallbacks: Box::leak(Box::new([Source::Plain(url_of(fb))])),
+            ..ModelFile::plain(fa.name, fa.size, fa.sha256, url_of(fa))
+        };
+        (Box::leak(Box::new(f)), seen_a, seen_b)
+    }
+
+    fn url_of(f: &ModelFile) -> &'static str {
+        match f.source {
+            Source::Plain(url) => url,
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
+        }
+    }
+
+    /// The mirror answers 404 (the runtime's case, 2026-11-18): the next source
+    /// is asked at once, no retries on the first.
+    #[test]
+    fn a_missing_first_source_moves_to_the_next() {
+        let (f, a, b) = two_sources("two404", vec![Answer::Status(404)], vec![Answer::File]);
+        let (got, dir) = download(f, "two404");
+        got.unwrap();
+        assert_eq!(fs::read(dir.join(f.name)).unwrap(), payload());
+        assert_eq!((a.lock().unwrap().len(), b.lock().unwrap().len()), (1, 1));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A wrong body from the first source fails its checksum: the next one is
+    /// used and verified.
+    #[test]
+    fn a_bad_checksum_moves_to_the_next_source() {
+        let (f, a, b) = two_sources("twosha", vec![Answer::Wrong], vec![Answer::File]);
+        let (got, dir) = download(f, "twosha");
+        got.unwrap();
+        assert_eq!(fs::read(dir.join(f.name)).unwrap(), payload());
+        assert_eq!((a.lock().unwrap().len(), b.lock().unwrap().len()), (1, 1));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every source fails (one gone, one down): the down one is retried with
+    /// the usual backoff, then the user's plain text; no `.part` left.
+    #[test]
+    fn all_sources_failing_gives_the_plain_message() {
+        let (f, a, b) = two_sources(
+            "twodown",
+            vec![Answer::Status(404)],
+            vec![Answer::Status(504)],
+        );
+        let (got, dir) = download(f, "twodown");
+        let Err(e) = got else { panic!("downloaded") };
+        assert!(matches!(e, OcrError::Unreachable { server: true }), "{e:?}");
+        let said = e.to_string();
+        assert!(!said.contains("504") && !said.contains("404"), "{said}");
+        assert_eq!(a.lock().unwrap().len(), 1);
+        assert_eq!(b.lock().unwrap().len(), BACKOFF.len() + 1);
+        assert!(!dir.join("twodown.part").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The runtime is fetched from our mirror first, Microsoft's archive after.
+    #[test]
+    fn the_runtime_tries_the_mirror_first() {
+        let url = url_of(&ORT);
+        assert!(url.contains("/AmerAlreyahi/OpenCircle-models/releases/download/runtime-1/"));
+        assert!(url.ends_with(ORT.name));
+        assert_eq!(ORT.fallbacks.len(), 1);
     }
 }
