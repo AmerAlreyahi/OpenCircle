@@ -1367,3 +1367,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   polish, the online (Google) engine in Labs + Retry pill, Connect OpenRouter + LAN http + free-key links, and web search (Bing +
   Wikipedia) ship TOGETHER as v0.3.0 (one Windows final test + update gate + draft, publish on his word). Lesson: when the owner
   asks for "the final / whole thing", give him the build with EVERYTHING finished, never a partial "release candidate".
+- Online translation leaves Labs (owner, 2026-11-18, "it is stable"): the Online (Google) engine is a normal Translate engine
+  choice (AI | Local | Online) in v0.3.0, no Labs switch; same rules (text only, one-shot only, offline fallback, plain message).
+  The `[labs] online` key is still read (dropped on save, migrate never break).
