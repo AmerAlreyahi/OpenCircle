@@ -215,6 +215,9 @@ pub(crate) struct Opening {
     /// The chat was pinned before this overlay opened: a question sent into
     /// it closes the overlay (#170 C4c).
     pub(crate) chat_came_pinned: bool,
+    /// The chat was pinned by hand while a menu / download / song search was
+    /// busy: the overlay closes as soon as that ends (`App::update`).
+    pub(crate) close_when_idle: bool,
     /// The result card opening (`motion::WIDGET`): which panel, its motion,
     /// and how open it was at the latest frame (it grows from `OPEN_SCALE`).
     pub(crate) chat_open: Option<(u32, motion::Shown, f32)>,
@@ -329,6 +332,7 @@ impl Default for Opening {
             chat_hole: None,
             chat_fixed: None,
             chat_came_pinned: false,
+            close_when_idle: false,
             chat_open: None,
             chat_hover: false,
             chat_off: Vector::ZERO,

@@ -38,7 +38,11 @@ impl App {
     /// Every message, then the chat's own window brought in line with it
     /// (`sync_chat_window`).
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
-        let task = self.handle(message);
+        let mut task = self.handle(message);
+        if self.o.is_some() && self.o.close_when_idle && self.ends_tool() {
+            self.o.close_when_idle = false;
+            task = Task::batch([task, self.close()]);
+        }
         Task::batch([task, self.sync_chat_window()])
     }
 

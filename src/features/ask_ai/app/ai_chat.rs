@@ -763,7 +763,8 @@ impl App {
                             | ai_chat::Msg::Ready(_)
                     );
                 // the overlay's own chat, not pinned yet: this question may pin it
-                let pins = asks && !resident && !panel.pinned();
+                let by_hand = open && matches!(msg, ai_chat::Msg::Pin);
+                let pins = (asks || by_hand) && !resident && !panel.pinned();
                 // a chat pinned before this overlay opened (C4c)
                 let into_pinned = asks && resident && came_pinned;
                 let task = panel.update(msg);
@@ -779,6 +780,11 @@ impl App {
                 // not mid-drag; "Always" pinned it from the first question, no close.
                 if ((pins && self.chat.is_some()) || into_pinned) && ends {
                     return Task::batch([task, self.close()]);
+                }
+                // The header's pin takes the same path; if a menu, download or
+                // song search is busy, the overlay closes right after it ends.
+                if by_hand && pins && self.chat.is_some() {
+                    self.o.close_when_idle = true;
                 }
                 return task;
             }

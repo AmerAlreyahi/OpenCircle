@@ -203,10 +203,7 @@ mod tests {
         let crop = app.crop().unwrap();
         drop(app.open_chat(crop, None));
         let id = app.o.ai_chat.as_ref().unwrap().0;
-        let _ = app.update(Message::AiChat(
-            id,
-            crate::features::ask_ai::screens::ai_chat::Msg::Pin,
-        ));
+        crate::app::tests::pin_kept_open(&mut app, id);
         assert!(
             app.chat.is_some() && app.chat_win.is_some(),
             "pinned, in its window"
