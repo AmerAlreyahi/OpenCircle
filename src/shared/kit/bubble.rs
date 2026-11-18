@@ -2,15 +2,16 @@
 //! `elevated` with its edge, 10x14 px in, radius 16 with a 4 px corner at the
 //! bottom right (the side it comes from), laid at the right of its row; right
 //! to left, at the left of it with the corner at the bottom left. Its text has
-//! the direction of its own content (first strong letter).
+//! the direction of its own content (first strong letter) and selects with
+//! the mouse like an answer (Ctrl+C copies the selection).
 use iced::border::Radius;
 use iced::widget::container;
 use iced::{Border, Element, Fill};
 
 use super::dir;
-use super::text::own;
+use super::text::{font, size};
 use super::themes::c;
-use super::tokens::Role;
+use super::tokens::{Role, fixed};
 
 const RADIUS: f32 = 16.0;
 const TAIL: f32 = 4.0;
@@ -20,7 +21,13 @@ pub fn bubble<'a, Message: 'a>(line: &'a str) -> Element<'a, Message> {
         true => Radius::new(RADIUS).bottom_left(TAIL),
         false => Radius::new(RADIUS).bottom_right(TAIL),
     };
-    let line = own(Role::CHAT, line)
+    let line = iced_selection::text(line)
+        .size(size(Role::CHAT))
+        .font(font(Role::CHAT))
+        .style(|_| iced_selection::text::Style {
+            color: Some(c().text),
+            selection: fixed::TEXT_SELECTION,
+        })
         .line_height(1.45)
         .align_x(dir::content_start(line));
     let bubble = container(line)

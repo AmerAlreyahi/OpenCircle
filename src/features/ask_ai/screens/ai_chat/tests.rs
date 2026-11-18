@@ -1065,3 +1065,27 @@ fn the_zoom_keys_step_the_chat_text() {
         shot::render(panel.view(at(SCREEN), SCREEN, false), 1000, 700)
     );
 }
+
+/// The user's own message: the Copy under it asks for that question's text.
+#[test]
+fn the_copy_under_the_user_s_message_copies_it() {
+    use crate::shared::kit::testing::shot;
+    let mut panel = panel_in(State::ask(Chat::default()));
+    let setup = ask::tests::local_setup("http://127.0.0.1:1".into());
+    let _ = panel.update(Msg::Ready(Ok(Arc::new(setup))));
+    let State::Ask { chat, .. } = &mut panel.state else {
+        unreachable!()
+    };
+    chat.ask("who is this?", &[]);
+    let texts = shot::texts_at(panel.view(at(SCREEN), SCREEN, false), SCREEN);
+    let copy = texts.iter().find(|(_, t)| t == "Copy").expect("a Copy");
+    let msgs = shot::click(
+        panel.view(at(SCREEN), SCREEN, false),
+        SCREEN,
+        copy.0.center(),
+    );
+    assert!(
+        msgs.iter().any(|m| matches!(m, Msg::CopyTurn(0, false))),
+        "{msgs:?}"
+    );
+}
