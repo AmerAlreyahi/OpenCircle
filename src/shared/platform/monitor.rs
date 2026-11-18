@@ -78,6 +78,8 @@ pub fn resize<T: Send + 'static>(id: window::Id, size: Size) -> Task<T> {
 /// moves in logical px at the window's current scale, another monitor's when
 /// their scales differ.
 pub fn place_window<T: Send + 'static>(id: window::Id, place: Place) -> Task<T> {
+    #[cfg(test)]
+    PLACED.with(|p| p.borrow_mut().push((id, place)));
     #[cfg(windows)]
     return window::run(id, move |w| {
         use ::windows::Win32::Foundation::HWND;
@@ -262,6 +264,13 @@ fn over_band(class: &str, rect: [i32; 4], band: [i32; 4]) -> Option<bool> {
 #[cfg(not(windows))]
 pub fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
     0.0
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: every `place_window` asked (the window moved or sized).
+    pub static PLACED: std::cell::RefCell<Vec<(window::Id, Place)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]

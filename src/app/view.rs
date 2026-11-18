@@ -59,16 +59,28 @@ impl App {
             }
         }
         // the AI chat in its own window (`ai_chat::ChatWindow`)
-        if let Some(size) = (self.chat_win.as_ref())
+        if let Some((at, size)) = (self.chat_win.as_ref())
             .filter(|w| w.id == window)
-            .map(|w| w.size)
+            .map(|w| w.inside())
         {
             let hover = self.o.is_some() && self.o.chat_hover;
-            return match self.chat_shown() {
-                Some((id, panel)) => (panel.view(Rectangle::with_size(size), size, hover))
-                    .map(move |msg| Message::AiChat(id, msg)),
-                None => space().into(), // (closing)
+            let Some((id, panel)) = self.chat_shown() else {
+                return space().into(); // (closing)
             };
+            let card = (panel.view(Rectangle::with_size(at.size()), at.size(), hover))
+                .map(move |msg| Message::AiChat(id, msg));
+            if at.size() == size {
+                return card;
+            }
+            // its inner edge held (W61): the panel at its spot in the wide window,
+            // whose cut shows only the panel; the rest on the panel's surface, so
+            // a step the cut takes before this frame shows a solid panel
+            let card = pin(card).position(at.position());
+            let under = surface::surface(surface::Material::Widget, 0.0, space());
+            return stack![under.width(Fill).height(Fill), card]
+                .width(size.width)
+                .height(size.height)
+                .into();
         }
         if let Some(screen) = self.o.screens.iter().find(|s| s.window == window) {
             return self.screen_view(screen);

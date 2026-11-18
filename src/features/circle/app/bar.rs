@@ -240,7 +240,7 @@ impl App {
         // pointer on the desktop, never its px in a window still moving
         if let Some(placed) = (self.chat_win.as_ref())
             .filter(|w| w.id == window)
-            .and_then(|w| w.placed)
+            .and_then(|w| w.window_place())
         {
             let desk = crate::features::ask_ai::app::ai_chat::desk_pointer(placed, p);
             return (self.o.view)

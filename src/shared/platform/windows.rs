@@ -548,6 +548,37 @@ pub fn uncut<T: Send + 'static>(id: window::Id) -> Task<T> {
     .discard()
 }
 
+/// The floating window `id` shows only a panel against one edge
+/// (`super::shape::panel`), or all of it again (`None`). Nothing for any other window.
+pub fn panel_cut<T: Send + 'static>(id: window::Id, panel: super::shape::Panel) -> Task<T> {
+    #[cfg(test)]
+    PANEL_CUTS.with(|c| c.borrow_mut().push((id, panel)));
+    let radius = FLOATING
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(f, ..)| *f == id)
+        .map(|(_, r, _)| *r);
+    let Some(radius) = radius else {
+        return Task::none();
+    };
+    window::run(id, move |w| {
+        if let Ok(handle) = w.window_handle()
+            && let Err(e) = super::shape::panel(handle.as_raw(), radius, panel)
+        {
+            crate::log!("[opencircle] window shape: {e}");
+        }
+    })
+    .discard()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: every `panel_cut` asked.
+    pub static PANEL_CUTS: std::cell::RefCell<Vec<(window::Id, super::shape::Panel)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Cuts the floating window `id` to its content's shape again (it was resized).
 /// Nothing for any other window.
 pub fn reshape<T: Send + 'static>(id: window::Id) -> Task<T> {

@@ -63,6 +63,73 @@ pub fn clear(handle: RawWindowHandle) -> Result<(), String> {
     }
 }
 
+/// The edge of its window a panel sits against (`panel`): the window is wider
+/// (taller) than the panel on the other side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    Left,
+    Right,
+    Bottom,
+}
+
+/// A panel cut (`panel`): its anchor and extent (px), or `None` for the whole window.
+pub type Panel = Option<(Anchor, u32)>;
+
+thread_local! {
+    /// The windows showing only a panel (`panel`): window, anchor, panel extent (px).
+    static PANELS: std::cell::RefCell<Vec<(u64, Anchor, u32)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_os = "linux")]
+fn has_panel(id: u64) -> bool {
+    PANELS.with(|p| p.borrow().iter().any(|(i, ..)| *i == id))
+}
+
+/// The part of a `w` x `h` window (`id`) its cut shows: the panel `panel` set,
+/// else all of it.
+#[cfg(any(windows, target_os = "linux", test))]
+fn shown(id: u64, w: u32, h: u32) -> Px {
+    let spec = PANELS.with(|p| {
+        p.borrow()
+            .iter()
+            .find(|(i, ..)| *i == id)
+            .map(|(_, a, e)| (*a, *e))
+    });
+    match spec {
+        None => (0, 0, w, h),
+        Some((Anchor::Left, e)) => (0, 0, e.min(w), h),
+        Some((Anchor::Right, e)) => (w.saturating_sub(e) as i32, 0, e.min(w), h),
+        Some((Anchor::Bottom, e)) => (0, h.saturating_sub(e) as i32, w, e.min(h)),
+    }
+}
+
+/// The cut window behind `handle` shows only a panel `extent` px wide (tall
+/// for `Bottom`) against its `anchor` edge, rounded at `max_radius`; `None`:
+/// all of it again (W61). Kept through later size changes: an inner-edge drag
+/// sizes the window once to the widest the drag can reach, then only this
+/// cut follows the pointer (no window move or size per step: nothing shakes).
+pub fn panel(handle: RawWindowHandle, max_radius: f32, panel: Panel) -> Result<(), String> {
+    let id = match handle {
+        #[cfg(windows)]
+        RawWindowHandle::Win32(h) => h.hwnd.get() as u64,
+        // (the ids `x11::place` / `x11::apply` look it up by)
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => u64::from(h.window as u32),
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => u64::from(h.window.get()),
+        _ => return Ok(()),
+    };
+    PANELS.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|(i, ..)| *i != id);
+        if let Some((anchor, extent)) = panel {
+            p.push((id, anchor, extent));
+        }
+    });
+    apply(handle, max_radius)
+}
+
 /// Shapes the window behind `handle` to its rounded rectangle (`max_radius` in
 /// logical px, see `corner`). `Ok` also when this window system needs nothing.
 pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
@@ -906,12 +973,14 @@ mod win {
         unsafe {
             GetWindowRect(hwnd, &mut rect).map_err(|e| e.to_string())?;
             let (w, h) = (rect.right - rect.left, rect.bottom - rect.top);
+            let (x, y, w, h) = super::shown(hwnd.0 as u64, w.max(0) as u32, h.max(0) as u32);
+            let (w, h) = (w as i32, h as i32);
             let r = radius_px(max_radius, GetDpiForWindow(hwnd), w, h);
             let region = if r <= 0 {
-                CreateRectRgn(0, 0, w, h)
+                CreateRectRgn(x, y, x + w, y + h)
             } else {
                 // The ellipse is 2r wide; the +1 is GDI's exclusive far edge.
-                CreateRoundRectRgn(0, 0, w + 1, h + 1, 2 * r, 2 * r)
+                CreateRoundRectRgn(x, y, x + w + 1, y + h + 1, 2 * r, 2 * r)
             };
             if SetWindowRgn(hwnd, Some(region), true) == 0 {
                 return Err("SetWindowRgn failed".into());
@@ -984,10 +1053,16 @@ mod x11 {
                 window,
                 value_list: &[x::Cw::BackPixel(pixel)],
             });
-            let (cw, ch) = (w.max(was.width().into()), h.max(was.height().into()));
+            // (a panel cut, `super::panel`: its part of the new size)
+            let id = u64::from(xcb::Xid::resource_id(&window));
+            let (px, py, cw, ch) = match super::has_panel(id) {
+                true => super::shown(id, w, h),
+                false => (0, 0, w.max(was.width().into()), h.max(was.height().into())),
+            };
             let r = corner(max_radius, cw as f32, ch as f32).round() as u32;
             let rects: Vec<x::Rectangle> = round_rect(cw, ch, r)
                 .into_iter()
+                .map(|(x, y, w, h)| (x + px, y + py, w, h))
                 .map(|(x, y, w, h)| x::Rectangle {
                     x: x as i16,
                     y: y as i16,
@@ -1019,8 +1094,11 @@ mod x11 {
 
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
         rects(window, |w, h| {
+            let (px, py, w, h) = super::shown(window.into(), w, h);
             let r = corner(max_radius, w as f32, h as f32).round() as u32;
-            round_rect(w, h, r)
+            (round_rect(w, h, r).into_iter())
+                .map(|(x, y, w, h)| (x + px, y + py, w, h))
+                .collect()
         })
     }
 
@@ -1078,6 +1156,19 @@ mod x11 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W61: a panel cut shows the panel's part of its window, against its anchor.
+    #[test]
+    fn a_panel_cut_shows_the_panel_against_its_edge() {
+        let cut = |anchor| {
+            PANELS.with(|p| *p.borrow_mut() = vec![(7, anchor, 300)]);
+            shown(7, 1000, 800)
+        };
+        assert_eq!(cut(Anchor::Right), (700, 0, 300, 800));
+        assert_eq!(cut(Anchor::Left), (0, 0, 300, 800));
+        assert_eq!(cut(Anchor::Bottom), (0, 500, 1000, 300));
+        assert_eq!(shown(8, 1000, 800), (0, 0, 1000, 800), "no cut: all of it");
+    }
 
     /// W56: a chat docked right, sized by its left edge, keeps its old picture
     /// right-aligned; any other resize keeps the system's default.

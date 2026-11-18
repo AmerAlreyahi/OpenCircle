@@ -19,6 +19,7 @@ use crate::features::settings;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor::{self, Place, place_window};
+use crate::shared::platform::shape::Anchor;
 
 use crate::app::App;
 use crate::shared::picture::{Crop, stack_crops};
@@ -58,6 +59,91 @@ pub(crate) struct ChatWindow {
     pub hidden: bool,
     /// X11: out of a capture's grab, until it is over (`App::grabbed`).
     pub out: bool,
+    /// Its inner edge held (W61): its window, sized once to the widest the
+    /// drag can reach (`Wide`), shows only the panel (`windows::panel_cut`).
+    pub wide: Option<Wide>,
+}
+
+/// The chat's window during an inner-edge drag: its outer edge where the
+/// panel's is, its inner one as far as the drag can go. Each step only the
+/// cut and the panel inside change: the window neither moves nor resizes,
+/// so the outer edge, the border and the icons stay still (W61).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Wide {
+    /// The window (physical px).
+    pub place: Place,
+    /// Its top-left (logical desktop px) and size (logical px).
+    pub at: Point,
+    pub size: Size,
+    /// The panel's side of it (its outer edge).
+    pub anchor: Anchor,
+}
+
+impl ChatWindow {
+    /// Where its window really is (physical px): the wide one while its edge is held.
+    pub fn window_place(&self) -> Option<Place> {
+        self.wide.map(|w| w.place).or(self.placed)
+    }
+
+    /// The panel inside its window (that window's logical px), and the window's size.
+    pub fn inside(&self) -> (Rectangle, Size) {
+        match self.wide {
+            Some(wide) => (
+                Rectangle::new(Point::ORIGIN + (self.at - wide.at), self.size),
+                wide.size,
+            ),
+            None => (Rectangle::with_size(self.size), self.size),
+        }
+    }
+
+    /// Its window put where the panel is (`placed`): while its inner edge is
+    /// held (`resizing`) the window is made wide once, then only cut to the
+    /// panel; let go, it takes the panel's size once.
+    fn put(&mut self, resizing: bool) -> Task<Message> {
+        let Some(place) = self.placed else {
+            return Task::none();
+        };
+        if !resizing {
+            return match self.wide.take() {
+                // sized to the panel while still cut to it (the cut follows the
+                // size at once: the panel's part of the panel = all of it), then
+                // the panel cut dropped: no frame shows the wide window
+                Some(_) => place_window(self.id, place).chain(windows::panel_cut(self.id, None)),
+                None => place_window(self.id, place),
+            };
+        }
+        let first = self.wide.is_none();
+        let wide = *self.wide.get_or_insert_with(|| {
+            let (origin, screen, _) = self.home;
+            let here = Rectangle::new(self.at - (origin - Point::ORIGIN), self.size);
+            let (x0, y0, x1, y1) = (here.x, here.y, here.x + here.width, here.y + here.height);
+            let (r, anchor) = match card::side(here, screen) {
+                card::Side::Left => {
+                    let x = x0.min(card::GAP);
+                    ((x, y0, x1, y1), Anchor::Right)
+                }
+                card::Side::Right => ((x0, y0, x1.max(screen.width - card::GAP), y1), Anchor::Left),
+                card::Side::Top => ((x0, y0.min(card::GAP), x1, y1), Anchor::Bottom),
+            };
+            let at = origin + iced::Vector::new(r.0, r.1);
+            let size = Size::new(r.2 - r.0, r.3 - r.1);
+            Wide {
+                place: place_px(at, size, place.scale),
+                at,
+                size,
+                anchor,
+            }
+        });
+        let extent = match wide.anchor {
+            Anchor::Bottom => place.px.1,
+            _ => place.px.0,
+        };
+        let cut = windows::panel_cut(self.id, Some((wide.anchor, extent)));
+        match first {
+            true => cut.chain(place_window(self.id, wide.place)),
+            false => cut,
+        }
+    }
 }
 
 /// `t` (0..1, eased) of the way from `from` to `to`, on whole px; exactly
@@ -267,6 +353,7 @@ impl App {
             placed: Some(place),
             hidden: false,
             out: false,
+            wide: None,
         });
         let overlay = self.overlay;
         let shown = move |id| match handover {
@@ -363,6 +450,7 @@ impl App {
             };
         }
         let place = (open && self.o.chat_fixed.is_none()).then(|| self.chat_place());
+        let resizing = self.chat_resizing();
         let (overlay, capturing) = (self.overlay, self.capturing.is_some());
         let Some(w) = self.chat_win.as_mut() else {
             return Task::none();
@@ -404,7 +492,10 @@ impl App {
             && w.placed != Some(place)
         {
             (w.home, w.at, w.size, w.placed, w.glide) = (home, at, size, Some(place), None);
-            tasks.push(place_window(w.id, place));
+            tasks.push(w.put(resizing));
+        } else if !hide && w.wide.is_some() != resizing {
+            // its inner edge just picked up or let go (W61)
+            tasks.push(w.put(resizing));
         }
         Task::batch(tasks)
     }
@@ -437,7 +528,7 @@ impl App {
         let Some(w) = self.chat_win.as_ref().filter(|w| w.id == window) else {
             return Task::none();
         };
-        let (Some(placed), Some(started)) = (w.placed, self.chat_resize) else {
+        let (Some(placed), Some(started)) = (w.window_place(), self.chat_resize) else {
             return Task::none();
         };
         let desk = desk_pointer(placed, p);
@@ -471,6 +562,7 @@ impl App {
 
     /// The chat's own window put at `r` (its monitor's logical px).
     fn put_chat_window(&mut self, r: Rectangle) -> Task<Message> {
+        let resizing = self.chat_resizing();
         let Some(w) = self.chat_win.as_mut() else {
             return Task::none();
         };
@@ -482,7 +574,12 @@ impl App {
             return Task::none();
         }
         (w.at, w.size, w.placed, w.glide) = (at, r.size(), Some(place), None);
-        place_window(w.id, place)
+        w.put(resizing)
+    }
+
+    /// The chat's inner edge is held, on the overlay or in its own window.
+    pub(crate) fn chat_resizing(&self) -> bool {
+        self.chat_resize.is_some() || matches!(self.o.chat_drag, Some((card::Drag::Resize, _)))
     }
 
     /// The drag is over: its window's scale now says which monitor it is on.

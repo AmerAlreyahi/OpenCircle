@@ -4656,8 +4656,8 @@ fn a_pinned_chat_resized_keeps_its_outer_edge_still() {
         .iter()
         .enumerate()
     {
-        // the pointer, in the window's px where it is now
-        let placed = app.chat_win.as_ref().unwrap().placed.unwrap();
+        // the pointer, in the window's px where it is now (wide while held, W61)
+        let placed = app.chat_win.as_ref().unwrap().window_place().unwrap();
         let p = Point::new((start + dx - placed.origin.0 as f32) / placed.scale, 300.0);
         let _ = app.update(Message::ChatResizedOn(window, p));
         if i == 4 {
@@ -4673,6 +4673,94 @@ fn a_pinned_chat_resized_keeps_its_outer_edge_still() {
     }
     let _ = app.update(Message::ChatResizeEnd);
     assert_eq!(right(&app).0, edge, "still docked");
+}
+
+/// W61: the pinned chat's inner edge held: its window is sized ONCE, to the
+/// widest the drag can reach (its outer edge where the panel's is); every step
+/// after that only its cut and the panel inside change (no move, no resize),
+/// with the panel's outer edge on the same window px; let go, it takes the
+/// panel's size once.
+#[test]
+fn a_pinned_chat_resized_never_moves_its_window_mid_drag() {
+    use crate::shared::platform::monitor::PLACED;
+    use crate::shared::platform::shape::Anchor;
+    let mut app = open_app(1920, 1080, 1.25);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let w = app.chat_win.as_ref().expect("its own window");
+    let (window, first) = (w.id, w.placed.unwrap());
+    let outer = first.origin.0 + first.px.0 as i32;
+    PLACED.with(|p| p.borrow_mut().clear());
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::AiChat(id, grab));
+    let wide = app
+        .chat_win
+        .as_ref()
+        .unwrap()
+        .wide
+        .expect("made wide at once");
+    assert_eq!(
+        wide.anchor,
+        Anchor::Right,
+        "docked right: its outer edge right"
+    );
+    assert_eq!(
+        wide.place.origin.0 + wide.place.px.0 as i32,
+        outer,
+        "outer edge kept"
+    );
+    assert!(wide.place.px.0 > first.px.0, "as wide as the drag can go");
+    let placed = PLACED.with(|p| p.borrow().clone());
+    assert_eq!(
+        placed,
+        vec![(window, wide.place)],
+        "one move: the window made wide"
+    );
+    let start = first.origin.0 as f32 + 6.0;
+    for (i, dx) in [0.0f32, -1.0, -30.0, -120.0, -61.0, 40.0, 13.0]
+        .iter()
+        .enumerate()
+    {
+        // the pointer in the (wide) window's px
+        let p = Point::new(
+            (start + dx - wide.place.origin.0 as f32) / wide.place.scale,
+            300.0,
+        );
+        let _ = app.update(Message::ChatResizedOn(window, p));
+        let w = app.chat_win.as_ref().unwrap();
+        assert_eq!(w.wide, Some(wide), "the window stays as it is (step {i})");
+        let (at, size) = w.inside();
+        assert_eq!(size, wide.size, "(step {i})");
+        assert!(
+            (at.x + at.width - size.width).abs() < 0.01,
+            "the panel's outer edge on the window's (step {i}): {at:?} in {size:?}"
+        );
+        let placed = w.placed.unwrap();
+        assert_eq!(placed.origin.0 + placed.px.0 as i32, outer, "(step {i})");
+        assert!(
+            (placed.px.0 as i32 - first.px.0 as i32 + *dx as i32).abs() <= 1,
+            "the panel follows the pointer (step {i})"
+        );
+    }
+    let placed = PLACED.with(|p| p.borrow().clone());
+    assert_eq!(placed.len(), 1, "no move or resize mid-drag: {placed:?}");
+    let _ = app.update(Message::ChatResizeEnd);
+    let w = app.chat_win.as_ref().unwrap();
+    assert_eq!(w.wide, None, "let go: its own size again");
+    let placed = PLACED.with(|p| p.borrow().clone());
+    assert_eq!(placed.len(), 2, "one resize at the end");
+    assert_eq!(placed[1], (window, w.placed.unwrap()));
 }
 
 /// W56: with the overlay open, the chat's inner edge held at 125 %: its
@@ -4699,12 +4787,22 @@ fn the_chat_resized_on_the_overlay_keeps_its_outer_edge_still() {
     let (edge, width) = (first.origin.0 + first.px.0 as i32, first.px.0 as i32);
     let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
     let _ = app.update(Message::AiChat(id, grab));
+    // W61: its window made wide once, then never moved or sized mid-drag
+    let wide = app.chat_win.as_ref().unwrap().wide.expect("made wide");
+    crate::shared::platform::monitor::PLACED.with(|p| p.borrow_mut().clear());
     let start = app.chat_rect().x + 3.0;
     for (i, dx) in [0.0f32, -0.8, -2.4, -5.6, -20.8, -48.8, -32.0, -10.4]
         .iter()
         .enumerate()
     {
         let _ = app.update(Message::CardMoved(Point::new(start + dx, 300.0)));
+        assert_eq!(
+            app.chat_win.as_ref().unwrap().wide,
+            Some(wide),
+            "(step {i})"
+        );
+        let moved = crate::shared::platform::monitor::PLACED.with(|p| p.borrow().len());
+        assert_eq!(moved, 0, "no window move mid-drag (step {i})");
         let now = placed(&app);
         assert_eq!(
             now.origin.0 + now.px.0 as i32,
@@ -4720,6 +4818,11 @@ fn the_chat_resized_on_the_overlay_keeps_its_outer_edge_still() {
     let _ = app.update(Message::CardReleased);
     let now = placed(&app);
     assert_eq!(now.origin.0 + now.px.0 as i32, edge, "still docked");
+    assert_eq!(
+        app.chat_win.as_ref().unwrap().wide,
+        None,
+        "its own size again"
+    );
 }
 
 /// The pinned chat's own window, let go mid-screen, glides to its dock frame
