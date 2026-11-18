@@ -303,6 +303,7 @@ impl Config {
             c.labs.song = get(t, p, "song", d.song, &mut w);
             c.labs.pins = get(t, p, "pins", d.pins, &mut w);
             c.labs.live = get(t, p, "live", d.live, &mut w);
+            c.labs.online = get(t, p, "online", d.online, &mut w);
         }
         // Schema 6: "copy" (copy and close, a toast) is gone; a pick always shows
         // the Snip toolbar, so it reads as "both" (`SnipAfter`'s alias).

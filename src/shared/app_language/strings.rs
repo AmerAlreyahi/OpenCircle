@@ -389,6 +389,10 @@ strings! {
         | "الذكاء الاصطناعي";
     tr_local: "Local"
         | "محلي";
+    tr_online: "Online"
+        | "عبر الإنترنت";
+    tr_engine_online: "Google's free web translator: sends the text (never the picture) to Google. Unofficial; if it stops answering, Local translates"
+        | "مترجم Google المجاني على الويب: يُرسل النص (لا الصورة أبدًا) إلى Google. غير رسمي؛ إن توقّف عن الرد يترجم المحرّك المحلي";
     tr_source: "Source language"
         | "لغة المصدر";
     tr_source_desc: "What the text on screen is in; picks the text recognizer"
@@ -684,6 +688,10 @@ strings! {
         | "الترجمة الحيّة";
     lb_live_d: "Keep the screen translated as it changes. Unfinished; may change"
         | "أبقِ الشاشة مترجمة أثناء تغيّرها. غير مكتملة؛ قد تتغير";
+    lb_online: "Online translation"
+        | "الترجمة عبر الإنترنت";
+    lb_online_d: "Adds Online (Google) to Settings > Translate > Engine. Unofficial; may stop working"
+        | "تضيف «عبر الإنترنت (Google)» إلى الإعدادات > الترجمة > المحرّك. غير رسمية؛ قد تتوقف عن العمل";
     o_title: "Welcome to OpenCircle"
         | "مرحبًا بك في OpenCircle";
     // a step's number and name: the number isolated, so it reads first
@@ -759,6 +767,12 @@ strings! {
         | "مقطع مدته 10 ثوانٍ تقريبًا، فقط عندما تضغط زر الموسيقى";
     p_song_c: "AudD (with your token)"
         | "AudD (برمزك الخاص)";
+    p_online_a: "Online translation (Labs)"
+        | "الترجمة عبر الإنترنت (ميزة تجريبية)";
+    p_online_b: "The text read from the screen (never the image), only when Online is the engine"
+        | "النص المقروء من الشاشة (لا الصورة أبدًا)، فقط عندما يكون «عبر الإنترنت» هو المحرّك";
+    p_online_c: "Google (its free web translator)"
+        | "Google (مترجمه المجاني على الويب)";
     o_back_arrow: "← Back"
         | "→ رجوع";
     o_next_arrow: "Next →"
@@ -1117,6 +1131,10 @@ strings! {
         | "تعذّر إكمال التنزيل. حاول مرة أخرى.";
     md_read_names: "Read {} text"
         | "قراءة نص {}";
+    tp_online_local: "Online translation didn't answer; translated on this PC"
+        | "لم تستجب الترجمة عبر الإنترنت؛ تُرجم النص على هذا الجهاز";
+    tp_parts_failed: "{} parts not translated"
+        | "أجزاء لم تُترجم: {}";
     tp_found: "{} text found"
         | "عُثر على نص بلغة {}";
     tp_get: "Get {} → {}"

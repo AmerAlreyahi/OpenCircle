@@ -105,6 +105,7 @@
 //! song = false                      # song search
 //! pins = false                      # pinning a capture to the screen
 //! live = false                      # live translate (unfinished until Live translation): bar button, tray item, shortcut
+//! online = false                    # the online translate engine (Google's free web translator): `translate.engine = "online"`
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -329,6 +330,9 @@ pub enum Engine {
     /// default: AI only when the user picks it in Settings > Translate.
     #[default]
     Offline,
+    /// Labs (`labs.online`): Google's free web translator, one-shot Translate
+    /// only, the text only (never the picture). Off in Labs = `Offline`.
+    Online,
 }
 
 /// What Enter does on the action bar. The serialized names are action-registry ids.
