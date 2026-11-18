@@ -363,6 +363,10 @@ strings! {
         | "بعد سؤال متابعة";
     ai_stays_always: "Always"
         | "دائمًا";
+    ai_web: "Web search"
+        | "البحث في الويب";
+    ai_web_desc: "The AI can search Bing and Wikipedia for recent facts. Only the search words are sent, never your screen"
+        | "يمكن للذكاء الاصطناعي البحث في Bing وWikipedia عن أحدث المعلومات. تُرسل كلمات البحث فقط، ولا تُرسل شاشتك أبدًا";
     ai_hist: "Chat history"
         | "سجل المحادثات";
     ai_hist_on: "On: chats, text only, kept on this PC. Kept and cleared in History"
@@ -1450,6 +1454,14 @@ strings! {
         | "إيقاف";
     chat_jump: "Jump to latest"
         | "إلى الأحدث";
+    chat_web_ask: "Let the AI search the web for recent facts? Only the search words go to Bing and Wikipedia, never your screen."
+        | "هل تسمح للذكاء الاصطناعي بالبحث في الويب عن أحدث المعلومات؟ تُرسل كلمات البحث فقط إلى Bing وWikipedia، ولا تُرسل شاشتك أبدًا.";
+    chat_web_on: "Search the web"
+        | "ابحث في الويب";
+    chat_web_no: "Not now"
+        | "ليس الآن";
+    chat_web_down: "Web search isn't available right now, so this answer doesn't use it."
+        | "البحث في الويب غير متاح الآن، لذا لا تعتمد هذه الإجابة عليه.";
     chat_send: "Send"
         | "إرسال";
     chat_back: "Back to the chat"

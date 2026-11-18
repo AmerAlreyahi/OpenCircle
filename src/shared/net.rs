@@ -58,7 +58,94 @@ pub const COVER: Policy = Policy {
     user_agent: None,
 };
 
+/// Web search (Ask AI's `web_search`): the results pages of the search
+/// engines, with an honest name (never a disguised browser).
+pub const WEB: Policy = Policy {
+    connect_secs: Some(10),
+    global_secs: 15,
+    https_only: true,
+    status_as_error: false,
+    user_agent: Some("OpenCircle (desktop app; web search)"),
+};
+/// A page the AI opens (`open_page`): public hosts only (`public_agent`).
+pub const PAGE: Policy = Policy {
+    connect_secs: Some(10),
+    global_secs: 20,
+    https_only: false,
+    status_as_error: false,
+    user_agent: Some("OpenCircle (desktop app; web search)"),
+};
+
 pub fn agent(p: Policy) -> ureq::Agent {
+    config(p).into()
+}
+
+/// Like `agent`, but every address a host resolves to (redirects included)
+/// must be public: never this PC, the local network or link-local (SSRF).
+/// The check runs on the addresses actually connected to, so a name that
+/// later resolves elsewhere (DNS rebinding) is refused too.
+pub fn public_agent(p: Policy) -> ureq::Agent {
+    ureq::Agent::with_parts(
+        config(p),
+        ureq::unversioned::transport::DefaultConnector::default(),
+        PublicOnly,
+    )
+}
+
+#[derive(Debug)]
+struct PublicOnly;
+
+impl ureq::unversioned::resolver::Resolver for PublicOnly {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        use ureq::unversioned::resolver::DefaultResolver;
+        let all = DefaultResolver::default().resolve(uri, config, timeout)?;
+        let mut out = self.empty();
+        for a in all.iter().filter(|a| public(a.ip())) {
+            out.push(*a);
+        }
+        match out.is_empty() {
+            true => Err(ureq::Error::Io(std::io::Error::other(
+                "not a public internet address",
+            ))),
+            false => Ok(out),
+        }
+    }
+}
+
+/// A public internet address: not loopback, private, link-local, shared
+/// (100.64/10), documentation, broadcast or unspecified.
+pub fn public(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                || a == 0
+                || (a == 100 && (64..128).contains(&b)))
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => public(IpAddr::V4(v4)),
+            None => {
+                !(v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_unique_local()
+                    || v6.is_unicast_link_local())
+            }
+        },
+    }
+}
+
+fn config(p: Policy) -> ureq::config::Config {
     let mut b = ureq::Agent::config_builder()
         .https_only(p.https_only)
         .http_status_as_error(p.status_as_error)
@@ -67,7 +154,7 @@ pub fn agent(p: Policy) -> ureq::Agent {
     if let Some(ua) = p.user_agent {
         b = b.user_agent(ua);
     }
-    b.build().into()
+    b.build()
 }
 
 /// The connection broke before an answer came back: reset, aborted, closed
@@ -85,6 +172,38 @@ pub fn dropped(e: &ureq::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_public_addresses_pass() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "192.168.1.5",
+            "172.16.0.1",
+            "169.254.1.1",
+            "100.64.0.1",
+            "0.0.0.0",
+            "::1",
+            "fe80::1",
+            "fd00::1",
+            "::ffff:192.168.1.1",
+        ] {
+            assert!(!public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["93.184.216.34", "2606:4700::1111", "::ffff:8.8.8.8"] {
+            assert!(public(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn the_public_agent_refuses_this_pc() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", l.local_addr().unwrap());
+        let e = public_agent(PAGE).get(&url).call().unwrap_err();
+        assert!(e.to_string().contains("not a public"), "{e}");
+        let url = url.replace("127.0.0.1", "localhost");
+        assert!(public_agent(PAGE).get(&url).call().is_err());
+    }
 
     #[test]
     fn a_reset_is_dropped_but_offline_is_not() {

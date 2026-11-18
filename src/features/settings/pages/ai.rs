@@ -18,7 +18,7 @@ use crate::shared::config::{Provider, StaysOpen};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
-use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, sub};
 use crate::shared::kit::tokens::{Role, space};
@@ -58,7 +58,17 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
             false => t!(ai_hist_off),
         },
     );
-    column![stays, keep].into()
+    // an AI provider only (the browser has no tools); not asked yet = Off
+    let on = state.draft.ai.web_search == Some(true);
+    let web = setting_row::row(
+        title(t!(ai_web)),
+        t!(ai_web_desc),
+        boolean([t!(c_off), t!(c_on)], on, on, 1.0, Message::WebSearch),
+    );
+    match keyed(state) {
+        true => column![stays, web, keep].into(),
+        false => column![stays, keep].into(),
+    }
 }
 
 /// Who answers, and for an AI provider its server, model and key.

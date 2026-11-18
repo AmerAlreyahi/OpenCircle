@@ -888,6 +888,22 @@ fn browser_is_the_default_provider_and_old_configs_keep_theirs() {
     }
 }
 
+/// `[ai] web_search` (#187): missing = not asked yet (off, and not written);
+/// the user's answer round-trips.
+#[test]
+fn web_search_is_unasked_until_answered() {
+    let (c, w) = Config::parse("");
+    assert_eq!((c.ai.web_search, w.len()), (None, 0));
+    assert!(!toml::to_string_pretty(&c).unwrap().contains("web_search"));
+    for on in [true, false] {
+        let (c, w) = Config::parse(&format!("[ai]\nweb_search = {on}\n"));
+        assert_eq!((c.ai.web_search, w.len()), (Some(on), 0), "{w:?}");
+        assert_eq!(Config::parse(&toml::to_string_pretty(&c).unwrap()).0, c);
+    }
+    let (c, w) = Config::parse("[ai]\nweb_search = \"yes\"\n");
+    assert!(c.ai.web_search.is_none() && w.len() == 1, "{w:?}");
+}
+
 /// `[ai] chat_zoom` (#127): additive, a step or the default; written only
 /// when not 100, so an older file round-trips unchanged.
 #[test]

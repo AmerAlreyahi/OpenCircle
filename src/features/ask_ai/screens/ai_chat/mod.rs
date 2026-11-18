@@ -129,6 +129,10 @@ pub enum Msg {
     Stop,
     Ready(Result<Arc<Setup>, String>),
     Delta(String),
+    /// What web search found for the answer streaming in.
+    Web(ask_ai::web::Web),
+    /// The one-time question "Search the web?": on, or not now (both saved).
+    WebSearch(bool),
     Answered(Result<(), ask_ai::AiError>),
     /// The log scrolled (#128).
     Scrolled(iced::widget::scrollable::Viewport),
@@ -700,6 +704,10 @@ impl AiChat {
                 self.following = true;
                 return operation::snap_to_end(LOG);
             }
+            (State::Ask { chat, .. }, Msg::Web(web)) => chat.web(web),
+            (_, Msg::WebSearch(on)) => {
+                return save_config(move |c| c.ai.web_search = Some(on), None);
+            }
             (_, Msg::Details) => self.details = !self.details,
             (State::Ask { chat, .. }, Msg::Answered(result)) => {
                 self.details = false;
@@ -787,10 +795,23 @@ impl AiChat {
             turn.shot = Some(size);
         }
         let setup = setup.clone();
+        // only once the user said yes (the chat asks once: `Msg::WebSearch`)
+        let web = config::current().ai.web_search == Some(true);
         let (task, handle) = background(move |tx| {
-            let result = ask::stream(&setup, &messages, |piece| {
-                tx.unbounded_send(Msg::Delta(piece.into())).is_ok()
-            });
+            let found = tx.clone();
+            let mut on_web = move |w| {
+                let _ = found.unbounded_send(Msg::Web(w));
+            };
+            let on_web: Option<&mut dyn FnMut(ask_ai::web::Web)> = match web {
+                true => Some(&mut on_web),
+                false => None,
+            };
+            let result = ask::stream_with(
+                &setup,
+                &messages,
+                |piece| tx.unbounded_send(Msg::Delta(piece.into())).is_ok(),
+                on_web,
+            );
             let _ = tx.unbounded_send(Msg::Answered(result));
         })
         .abortable();

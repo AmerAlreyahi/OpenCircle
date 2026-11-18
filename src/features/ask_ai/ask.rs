@@ -216,6 +216,10 @@ pub struct Turn {
     /// The crop's size (physical px) when one went; `None` for a chat opened
     /// from History (its screenshots were not kept).
     pub shot: Option<(u32, u32)>,
+    /// The web pages the answer searched (web search on); not kept in History.
+    pub sources: Vec<ask_ai::web::Hit>,
+    /// Web search was on but no engine answered.
+    pub web_down: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -310,6 +314,8 @@ impl Chat {
             image: new.then(|| png.into()),
             thought: None,
             shot: None,
+            sources: Vec::new(),
+            web_down: false,
         });
         self.status = Status::Streaming;
         self.thinking = None;
@@ -371,6 +377,8 @@ impl Chat {
                     image: None,
                     thought: None,
                     shot: None,
+                    sources: Vec::new(),
+                    web_down: false,
                 })
                 .collect(),
             status: Status::Done,
@@ -389,6 +397,16 @@ impl Chat {
                 turn.thought = Some(since.elapsed());
             }
             turn.answer.push_str(piece);
+        }
+    }
+
+    /// What web search found (or that it was down) for the answer streaming in.
+    pub fn web(&mut self, web: ask_ai::web::Web) {
+        if let (Status::Streaming, Some(turn)) = (&self.status, self.turns.last_mut()) {
+            match web {
+                ask_ai::web::Web::Sources(hits) => turn.sources = hits,
+                ask_ai::web::Web::Unavailable => turn.web_down = true,
+            }
         }
     }
 
@@ -440,7 +458,18 @@ pub fn summarize(setup: &Setup, messages: &[ask_ai::Message]) -> Result<String, 
 pub fn stream(
     setup: &Setup,
     messages: &[ask_ai::Message],
+    on_delta: impl FnMut(&str) -> bool,
+) -> Result<(), ask_ai::AiError> {
+    stream_with(setup, messages, on_delta, None)
+}
+
+/// `stream`, with web search when `on_web` is given (`ask_ai::web::answer`):
+/// it gets the sources. Only the question's text goes to the search engines.
+pub fn stream_with(
+    setup: &Setup,
+    messages: &[ask_ai::Message],
     mut on_delta: impl FnMut(&str) -> bool,
+    on_web: Option<&mut dyn FnMut(ask_ai::web::Web)>,
 ) -> Result<(), ask_ai::AiError> {
     if setup.browser() {
         let question = messages.last().map_or("", |m| m.text.as_str());
@@ -448,14 +477,30 @@ pub fn stream(
         return Ok(());
     }
     let mut stopped = false;
-    let answer = ask_ai::ask_stream(&setup.cfg, setup.key.as_ref(), messages, |piece| {
+    let piece = |piece: &str| {
         if on_delta(piece) {
             ControlFlow::Continue(())
         } else {
             stopped = true;
             ControlFlow::Break(())
         }
-    });
+    };
+    let (cfg, key) = (&setup.cfg, setup.key.as_ref());
+    let answer = match on_web {
+        Some(on_web) => {
+            use ask_ai::web;
+            web::answer(
+                cfg,
+                key,
+                messages,
+                piece,
+                on_web,
+                web::search,
+                web::page::open,
+            )
+        }
+        None => ask_ai::ask_stream(cfg, key, messages, piece).map(|_| ()),
+    };
     match answer {
         Ok(_) if stopped => Err(ask_ai::AiError::Network("Stopped.".into())),
         Ok(_) => Ok(()),
