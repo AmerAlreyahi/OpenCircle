@@ -122,8 +122,9 @@ impl ureq::unversioned::resolver::Resolver for PublicOnly {
 /// documentation, benchmarking (198.18/15), 6to4 relay, multicast, reserved
 /// (240/4) or broadcast. IPv6: only 2000::/3 (no documentation, 2001::/23 or
 /// 3fff::/20), and every form that carries an IPv4 address (mapped,
-/// compatible, NAT64 64:ff9b::/96 and 64:ff9b:1::/48, 6to4 2002::/16) is
-/// judged by that IPv4 address.
+/// compatible, NAT64 64:ff9b::/96, 6to4 2002::/16) is judged by that IPv4
+/// address. The local-use NAT64 prefix 64:ff9b:1::/48 is refused whole: its
+/// IPv4 can sit at any RFC 6052 layout, so no one reading of it is safe.
 pub fn public(ip: std::net::IpAddr) -> bool {
     use std::net::{IpAddr, Ipv4Addr};
     match ip {
@@ -146,10 +147,12 @@ pub fn public(ip: std::net::IpAddr) -> bool {
         IpAddr::V6(v6) => {
             let seg = v6.segments();
             let o = v6.octets();
-            // compatible ::a.b.c.d (and ::, ::1), mapped ::ffff:a.b.c.d, NAT64
+            if seg[..3] == [0x64, 0xff9b, 1] {
+                return false; // local-use NAT64
+            }
+            // compatible ::a.b.c.d (and ::, ::1), mapped ::ffff:a.b.c.d, NAT64 /96
             let in_tail = (seg[..5] == [0; 5] && (seg[5] == 0 || seg[5] == 0xffff))
-                || seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0]
-                || seg[..3] == [0x64, 0xff9b, 1];
+                || seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0];
             let embedded = if in_tail {
                 Some(Ipv4Addr::new(o[12], o[13], o[14], o[15]))
             } else if seg[0] == 0x2002 {
@@ -265,6 +268,20 @@ mod tests {
         }
         for ip in ["64:ff9b::808:808", "2002:808:808::1", "2a00:1450::1"] {
             assert!(public(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    /// 64:ff9b:1::/48 may carry its IPv4 at any RFC 6052 layout: refused
+    /// whole. Here the /48 layout hides 10.0.0.1 and 127.0.0.1, with a public
+    /// IPv4 in the last 32 bits.
+    #[test]
+    fn local_nat64_is_refused_whatever_it_carries() {
+        for ip in [
+            "64:ff9b:1:a00:0:100:808:808",
+            "64:ff9b:1:7f00:0:100:808:808",
+            "64:ff9b:1::808:808",
+        ] {
+            assert!(!public(ip.parse().unwrap()), "{ip}");
         }
     }
 
