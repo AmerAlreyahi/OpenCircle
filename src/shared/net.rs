@@ -50,6 +50,14 @@ pub const TRANSLATE: Policy = Policy {
     status_as_error: false,
     user_agent: None,
 };
+/// Sign-in key exchange (Connect OpenRouter): https only, reads the status itself.
+pub const OAUTH: Policy = Policy {
+    connect_secs: Some(10),
+    global_secs: 30,
+    https_only: true,
+    status_as_error: false,
+    user_agent: None,
+};
 /// Song identification upload.
 pub const SONG: Policy = Policy {
     connect_secs: Some(10),
@@ -127,6 +135,7 @@ mod tests {
             (MODELS, d(30), d(600), true, false, false),
             (UPDATE, d(20), d(900), true, false, true),
             (TRANSLATE, d(5), d(15), true, false, false),
+            (OAUTH, d(10), d(30), true, false, false),
             (SONG, d(10), d(30), false, false, false),
             (COVER, None, d(10), false, true, false),
         ];

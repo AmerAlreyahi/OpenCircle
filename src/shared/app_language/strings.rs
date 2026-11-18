@@ -799,6 +799,34 @@ strings! {
         | "إزالة مفتاح API";
     ai_key_keep_tip: "Keep the saved API key"
         | "الإبقاء على مفتاح API المحفوظ";
+    ai_key_free: "Get a free key"
+        | "احصل على مفتاح مجاني";
+    ai_url_lan: "Plain http on your local network: the key travels unencrypted"
+        | "اتصال http عادي على شبكتك المحلية: يُرسل المفتاح دون تشفير";
+    signin: "Sign in"
+        | "تسجيل الدخول";
+    signin_desc: "Opens OpenRouter in your browser; the key is saved for you"
+        | "يفتح OpenRouter في متصفحك، ويُحفظ المفتاح تلقائيًا";
+    signin_connect: "Connect OpenRouter"
+        | "ربط OpenRouter";
+    signin_waiting: "Finish in your browser…"
+        | "أكمل في متصفحك…";
+    signin_page: "OpenCircle is connected. You can close this tab."
+        | "تم ربط OpenCircle. يمكنك إغلاق هذا التبويب.";
+    signin_mismatch: "The sign-in answer didn't match. Try again."
+        | "لم يتطابق رد تسجيل الدخول. حاول مرة أخرى.";
+    signin_denied: "OpenRouter didn't give access. Try again."
+        | "لم يمنح OpenRouter الإذن. حاول مرة أخرى.";
+    signin_offline: "No connection to OpenRouter. Check your internet and try again."
+        | "لا يوجد اتصال بـ OpenRouter. تحقّق من الإنترنت وحاول مرة أخرى.";
+    signin_refused: "OpenRouter refused the sign-in (it may have expired). Try again."
+        | "رفض OpenRouter تسجيل الدخول (ربما انتهت صلاحيته). حاول مرة أخرى.";
+    signin_busy: "OpenRouter isn't answering right now. Try again in a moment."
+        | "لا يستجيب OpenRouter الآن. حاول بعد قليل.";
+    signin_browser: "Couldn't open your browser."
+        | "تعذّر فتح المتصفح.";
+    signin_timeout: "The sign-in wasn't finished in 5 minutes. Try again."
+        | "لم يكتمل تسجيل الدخول خلال 5 دقائق. حاول مرة أخرى.";
     song_key_ph: "Paste your AudD API token"
         | "الصق رمز AudD API الخاص بك";
     song_key: "AudD API token"

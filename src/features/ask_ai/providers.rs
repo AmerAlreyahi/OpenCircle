@@ -47,6 +47,23 @@ impl Preset {
         *self == CUSTOM
     }
 
+    /// OpenRouter: the one with one-click sign-in (`sign_in`).
+    pub fn signs_in(&self) -> bool {
+        self.id == "openrouter"
+    }
+
+    /// The provider's own page for an API key on its free tier (A 1.7:
+    /// links instead of more sign-ins); `None` for the rest.
+    pub fn free_key_page(&self) -> Option<&'static str> {
+        Some(match self.id {
+            "openrouter" => "https://openrouter.ai/settings/keys",
+            "gemini" => "https://aistudio.google.com/apikey",
+            "groq" => "https://console.groq.com/keys",
+            "mistral" => "https://console.mistral.ai/api-keys",
+            _ => return None,
+        })
+    }
+
     /// The preset a stored `[ai]` shows as (`None`: the browser, or a value
     /// the file can't give): Anthropic; an OpenAI-compatible server by its
     /// URL (a trailing `/` or the letter case aside); any other URL is a
