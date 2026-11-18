@@ -291,6 +291,144 @@ fn a_refused_tool_round_falls_back_to_one_search() {
     assert_eq!(*searched.borrow(), ["x", "look for amer"]);
 }
 
+/// One turn with web search on, as the chat runs it: the answer text, the
+/// result, the web notes and every request body the server got.
+fn turn(
+    replies: Vec<String>,
+    found: Option<Vec<Hit>>,
+) -> (String, Result<(), AiError>, Vec<Web>, Vec<Value>) {
+    let (url, seen) = mock::serve(replies);
+    let (mut got, web) = (String::new(), RefCell::new(vec![]));
+    let done = answer(
+        &cfg(url),
+        None,
+        &[Message::user("who is amer alreyahi")],
+        |p| {
+            got.push_str(p);
+            ControlFlow::Continue(())
+        },
+        |w| web.borrow_mut().push(w),
+        |_| found.clone(),
+        |_| Err("no".into()),
+    );
+    let bodies = (seen.try_iter())
+        .map(|r| serde_json::from_str(r.split("\r\n\r\n").nth(1).unwrap()).unwrap())
+        .collect();
+    (got, done, web.into_inner(), bodies)
+}
+
+/// The system note right before the question in a request body.
+fn note(body: &Value) -> String {
+    let msgs = body["messages"].as_array().unwrap();
+    msgs[msgs.len() - 2]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Owner, 2026-11-18 (Gemini flash lite, "who is amer alreyahi"): the turn
+/// stayed empty. A turn never ends empty: when the search finds nothing and
+/// the model keeps searching until the rounds run out, or says nothing after
+/// a search, it is asked once more WITHOUT tools, told the web had nothing.
+#[test]
+fn nothing_found_still_gets_an_answer() {
+    let signed = r#"data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"SIG=="}},"function":{"arguments":"{\"query\":\"amer\"}","name":"web_search"},"id":"g1","type":"function"}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+"#;
+    let empty = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+    // the model keeps searching: the rounds run out
+    let mut searching: Vec<String> = (0..=ROUNDS)
+        .map(|i| mock::stream(&call(&format!("c{i}"), "web_search", r#"{"query":"amer"}"#)))
+        .collect();
+    searching.push(mock::stream(&text("The web had nothing relevant.")));
+    // Gemini-like: a signed call, then an empty reply
+    let silent = vec![
+        mock::stream(signed),
+        mock::stream(empty),
+        mock::stream(&text("The web had nothing relevant.")),
+    ];
+    for replies in [searching, silent] {
+        let n = replies.len();
+        let (got, done, web, bodies) = turn(replies, Some(vec![]));
+        done.unwrap();
+        assert_eq!(got, "The web had nothing relevant.");
+        assert!(web.is_empty(), "{web:?}");
+        assert_eq!(bodies.len(), n);
+        let last = bodies.last().unwrap();
+        assert!(last.get("tools").is_none(), "the last ask has no tools");
+        assert_eq!(note(last), NOTHING);
+    }
+}
+
+/// Search down, then the model says nothing: it answers without tools with
+/// the "search is down" note.
+#[test]
+fn search_down_still_gets_an_answer() {
+    let (got, done, web, bodies) = turn(
+        vec![
+            mock::stream(&call("c1", "web_search", r#"{"query":"x"}"#)),
+            mock::stream(&text("")),
+            mock::stream(&text("I could not search the web.")),
+        ],
+        None,
+    );
+    done.unwrap();
+    assert_eq!(got, "I could not search the web.");
+    assert_eq!(web, [Web::Unavailable]);
+    assert_eq!(note(&bodies[2]), DOWN);
+}
+
+/// A later tool round that fails (not a 400: that one searches once) is
+/// answered without tools with what search found, not an error card.
+#[test]
+fn a_failed_tool_round_answers_without_tools() {
+    let (got, done, web, bodies) = turn(
+        vec![
+            mock::stream(&call("c1", "web_search", r#"{"query":"x"}"#)),
+            mock::reply(422, r#"{"error":{"message":"bad turn"}}"#),
+            mock::stream(&text("Amer [1]")),
+        ],
+        Some(vec![hit("1")]),
+    );
+    done.unwrap();
+    assert_eq!(got, "Amer [1]");
+    assert_eq!(web, [Web::Sources(vec![hit("1")])]);
+    assert!(note(&bodies[2]).contains("https://example.org/1"));
+}
+
+/// The no-tools path (a refused round) when search finds nothing: the
+/// "nothing relevant" note (not "try other words": there are no tools).
+/// The model itself saying nothing = the error card (with Retry).
+#[test]
+fn an_empty_answer_is_an_error_with_retry() {
+    let (_, done, _, bodies) = turn(
+        vec![
+            mock::reply(
+                404,
+                r#"{"error":{"message":"No endpoints found that support tool use"}}"#,
+            ),
+            mock::stream(&text("")),
+        ],
+        Some(vec![]),
+    );
+    assert_eq!(note(&bodies[1]), NOTHING);
+    let e = done.unwrap_err();
+    assert!(matches!(e, AiError::Empty), "{e:?}");
+    assert_eq!(e.fix(), Some(crate::features::ask_ai::Fix::Retry));
+    // after a search: the plain ask empty too
+    let (_, done, _, _) = turn(
+        vec![
+            mock::stream(&call("c1", "web_search", r#"{"query":"x"}"#)),
+            mock::stream(&text("")),
+            mock::stream(&text("")),
+        ],
+        Some(vec![]),
+    );
+    assert!(matches!(done, Err(AiError::Empty)), "{done:?}");
+}
+
 /// The owner's search (2026-11-18): Bing mixed Chinese Outlook pages and
 /// pages without the name into an English name's results; only the pages
 /// about the name in its script reach the model.

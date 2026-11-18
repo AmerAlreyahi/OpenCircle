@@ -266,6 +266,8 @@ number, like [2]. When no result is about the question, say plainly that the sea
 relevant; never guess.";
 const DOWN: &str = "Web search isn't available right now. Answer from what you know and say \
 that you could not search the web.";
+const NOTHING: &str = "The web search found nothing relevant. Answer from what you know, and say \
+in one plain line that the web had nothing relevant; never guess.";
 
 /// The results as the model reads them, numbered as in `all` (this turn's results).
 fn listing(hits: &[Hit], all: &[Hit]) -> String {
@@ -320,7 +322,11 @@ fn links(text: &str) -> Vec<String> {
 
 /// Streams an answer to `messages` with web search: the model calls the
 /// tools (at most `ROUNDS` rounds); a model without tool calling (its server
-/// refuses the tools) gets one search with the question instead.
+/// refuses the tools) gets one search with the question instead. A turn never
+/// ends empty: when the rounds run out, a later round fails or the model
+/// says nothing, it answers once without tools (with what search found, or
+/// the note that it found nothing / was down); an empty answer then is
+/// `AiError::Empty` (the error card with Retry).
 /// `on_delta` as in `ask_ai::ask_stream`; `on_web` gets the sources.
 pub(crate) fn answer(
     cfg: &AiConfig,
@@ -338,7 +344,7 @@ pub(crate) fn answer(
     let at = convo.iter().take_while(|m| m.role == Role::System).count();
     convo.insert(at, Message::new(Role::System, GUIDE));
     let tools = tools();
-    let mut stopped = false;
+    let (mut stopped, mut down) = (false, false);
     for round in 0..=ROUNDS {
         let reply = super::ask_tools(cfg, key, &convo, &tools, |p| {
             said.push_str(p);
@@ -353,11 +359,27 @@ pub(crate) fn answer(
                 crate::log!("[web] tools refused ({why}); one search with the question");
                 return fallback(cfg, key, messages, on_delta, on_web, search);
             }
+            // a later round failed otherwise: answer without tools below
+            Err(e) if round > 0 && !stopped && !matches!(e, AiError::Auth(..)) => {
+                crate::log!("[web] tool round {round} failed ({e}); answering without tools");
+                break;
+            }
             Err(e) => return Err(e),
             Ok(r) => r,
         };
-        if reply.calls.is_empty() || stopped {
+        if stopped {
             break;
+        }
+        if reply.calls.is_empty() {
+            if reply.text.trim().is_empty() {
+                crate::log!("[web] the model said nothing after round {round}");
+                break;
+            }
+            let used = used(&sources, &opened, &said);
+            if !used.is_empty() {
+                on_web(Web::Sources(used));
+            }
+            return Ok(());
         }
         let mut results = Vec::new();
         for call in &reply.calls {
@@ -373,6 +395,7 @@ pub(crate) fn answer(
                             listing(&hits, &sources)
                         }
                         None => {
+                            down = true;
                             on_web(Web::Unavailable);
                             DOWN.to_string()
                         }
@@ -417,48 +440,71 @@ pub(crate) fn answer(
         back.results = results;
         convo.push(back);
     }
-    let used = used(&sources, &opened, &said);
-    if !used.is_empty() {
-        on_web(Web::Sources(used));
+    if stopped {
+        return Ok(());
     }
-    Ok(())
+    // no answer yet (rounds ran out, a round failed, the model said nothing)
+    let note = match (sources.is_empty(), down) {
+        (false, _) => with_results(&sources),
+        (true, true) => DOWN.to_string(),
+        (true, false) => NOTHING.to_string(),
+    };
+    plain(
+        cfg, key, messages, note, &sources, &opened, on_delta, on_web,
+    )
+}
+
+/// The note that carries search results to a model answering without tools.
+fn with_results(hits: &[Hit]) -> String {
+    format!(
+        "{}\n\nUse these results where they help; cite a result you used by its \
+         number, like [2].",
+        listing(hits, hits)
+    )
 }
 
 /// No tool calling: one search with the question; its results go with the
-/// question (or the note that search is down).
+/// question (or the note that it found nothing / is down).
 fn fallback(
     cfg: &AiConfig,
     key: Option<&Secret>,
     messages: &[Message],
-    mut on_delta: impl FnMut(&str) -> ControlFlow<()>,
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
     mut on_web: impl FnMut(Web),
     search: impl Fn(&str) -> Option<Vec<Hit>>,
 ) -> Result<(), AiError> {
     let question = messages.last().map_or("", |m| m.text.as_str());
-    let mut hits = Vec::new();
-    let note = match search(question) {
-        Some(found) => {
-            hits = found;
-            format!(
-                "{}\n\nUse these results where they help; cite a result you used by its \
-                 number, like [2].",
-                listing(&hits, &hits)
-            )
-        }
+    let hits = search(question);
+    let note = match &hits {
+        Some(found) if !found.is_empty() => with_results(found),
+        Some(_) => NOTHING.to_string(),
         None => {
             on_web(Web::Unavailable);
             DOWN.to_string()
         }
     };
+    let hits = hits.unwrap_or_default();
+    plain(cfg, key, messages, note, &hits, &[], on_delta, on_web)
+}
+
+/// One answer without tools: `note` goes right before the question; the
+/// sources are the `hits` it opened or cited. No text = `AiError::Empty`.
+#[allow(clippy::too_many_arguments)]
+fn plain(
+    cfg: &AiConfig,
+    key: Option<&Secret>,
+    messages: &[Message],
+    note: String,
+    hits: &[Hit],
+    opened: &[String],
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
+    mut on_web: impl FnMut(Web),
+) -> Result<(), AiError> {
     let mut convo = messages.to_vec();
     let at = convo.len().saturating_sub(1);
     convo.insert(at, Message::new(Role::System, note));
-    let mut said = String::new();
-    super::ask_stream(cfg, key, &convo, |p| {
-        said.push_str(p);
-        on_delta(p)
-    })?;
-    let used = used(&hits, &[], &said);
+    let said = super::ask_stream(cfg, key, &convo, on_delta)?;
+    let used = used(hits, opened, &said);
     if !used.is_empty() {
         on_web(Web::Sources(used));
     }

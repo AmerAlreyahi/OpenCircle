@@ -502,7 +502,10 @@ pub fn stream_with(
         None => ask_ai::ask_stream(cfg, key, messages, piece).map(|_| ()),
     };
     match answer {
-        Ok(_) if stopped => Err(ask_ai::AiError::Network("Stopped.".into())),
+        // stopped before any text: Stopped, not an empty answer
+        Ok(_) | Err(ask_ai::AiError::Empty) if stopped => {
+            Err(ask_ai::AiError::Network("Stopped.".into()))
+        }
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     }

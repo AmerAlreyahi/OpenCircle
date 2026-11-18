@@ -110,6 +110,8 @@ pub enum AiError {
     Rejected(u16, String),
     /// The model declined to answer (`stop_reason: refusal`).
     Refused,
+    /// The model's answer had no text at all (a turn never ends empty).
+    Empty,
     /// Could not reach the provider (offline, DNS, refused, unreachable).
     Network(String),
     /// The connection broke: before the answer and still after the silent
@@ -169,6 +171,7 @@ impl AiError {
             AiError::Rejected(404, _) => t!(err_no_model).into(),
             AiError::Rejected(..) => busy(S::err_turned_down),
             AiError::Refused => t!(err_blocked).into(),
+            AiError::Empty => busy(S::err_empty),
             AiError::Network(_) => t!(err_no_conn).into(),
             AiError::Dropped(_) => t!(err_dropped).into(),
             AiError::BadResponse(_) => busy(S::err_unreadable),
@@ -187,6 +190,7 @@ impl AiError {
             | AiError::Rejected(code, why) => http(*code, why),
             AiError::RateLimited(why) => http(429, why),
             AiError::Refused => crate::t!(err_declined).into(),
+            AiError::Empty => crate::t!(err_empty_detail).into(),
             AiError::NotConfigured(why)
             | AiError::Network(why)
             | AiError::Dropped(why)
@@ -240,6 +244,7 @@ impl fmt::Display for AiError {
                 http(*code, why)
             ),
             AiError::Refused => f.write_str("The AI model declined to answer this request."),
+            AiError::Empty => f.write_str("The AI model sent an empty answer."),
             AiError::Network(why) => write!(f, "Could not reach the AI provider: {why}"),
             AiError::Dropped(why) => {
                 write!(f, "The connection to the AI provider dropped: {why}")
@@ -332,14 +337,21 @@ pub(crate) enum Event {
 /// Streams the answer; `on_delta` gets each new piece of text and returns `Break`
 /// to stop (the connection is dropped). An empty piece means the model is
 /// thinking (the provider streams its reasoning, which is not shown). Returns
-/// the text so far.
+/// the text so far; an answer with no text is `AiError::Empty` (never an
+/// empty turn).
 pub fn ask_stream(
     cfg: &AiConfig,
     key: Option<&Secret>,
     messages: &[Message],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, None, &[], on_delta).map(|r| r.text)
+    let text = stream(cfg, key, messages, None, &[], on_delta)?.text;
+    if text.trim().is_empty() {
+        let e = AiError::Empty;
+        logged(cfg, &e);
+        return Err(e);
+    }
+    Ok(text)
 }
 
 /// Like `ask_stream`, with `tools` the model may call: the reply carries its calls.

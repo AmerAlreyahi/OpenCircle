@@ -1595,6 +1595,10 @@ strings! {
         | "انقطع الاتصال";
     err_unreadable: "{} sent an answer OpenCircle can't read"
         | "أرسل {} إجابة لا يستطيع OpenCircle قراءتها";
+    err_empty: "{} sent an empty answer"
+        | "أرسل {} إجابة فارغة";
+    err_empty_detail: "The model's reply had no text. Try again, or choose another model."
+        | "لم يكن في رد النموذج أي نص. أعد المحاولة أو اختر نموذجا آخر.";
     err_local: "Local translation failed"
         | "فشلت الترجمة على الجهاز";
     err_already: "Already in {}"
