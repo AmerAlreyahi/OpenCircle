@@ -92,6 +92,9 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 xcb ={ version = "1.7", features = ["randr", "xfixes", "shape", "shm", "composite", "damage"] }
 
 [target.'cfg(windows)'.dependencies]
+# iced's CPU renderer (vendored): its `WINDOW_SIZE` hook (no frame of a stale size
+# presented over a window we resized ourselves, W61; no new crate).
+iced_tiny_skia = { version = "0.14", default-features = false }
 # Song search's audio (src/features/song): WASAPI loopback / microphone, only while listening.
 cpal = { version = "0.18", default-features = false }
 widestring = "1"

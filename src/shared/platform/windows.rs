@@ -347,6 +347,9 @@ pub(crate) fn open(settings: window::Settings) -> (window::Id, Task<window::Id>)
     #[cfg(not(windows))]
     let no_taskbar = false;
     let transparent = settings.transparent;
+    #[cfg(windows)]
+    let _ =
+        iced_tiny_skia::window::compositor::WINDOW_SIZE.get_or_init(|| super::shape::client_size);
     let (id, opened) = window::open(app_window(settings));
     let caption_off = move |id| {
         window::run(id, move |w| {

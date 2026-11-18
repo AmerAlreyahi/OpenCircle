@@ -14,6 +14,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// pixels (OpenCircle sets it while its live layer runs on a composited X11).
 pub static CHANGES_ONLY: AtomicBool = AtomicBool::new(false);
 
+/// OpenCircle patch (W61): the window's client size now (physical px), where
+/// the app can tell (Windows: OpenCircle sets it). A window the app resized
+/// itself (`SetWindowPos`) shows the system's copy of its old picture until
+/// iced draws its new size; a frame of the OLD size presented meanwhile (only
+/// its changed rectangles, #23) lands at the top-left over that copy: the
+/// AI chat showed twice, half see-through, through a resize drag. Such a frame
+/// is not presented; the frame at the new size is drawn whole.
+pub static WINDOW_SIZE: std::sync::OnceLock<
+    fn(&dyn raw_window_handle::HasWindowHandle) -> Option<(u32, u32)>,
+> = std::sync::OnceLock::new();
+
 pub struct Compositor {
     context: softbuffer::Context<Box<dyn compositor::Display>>,
     settings: Settings,
@@ -160,6 +171,16 @@ pub fn present(
     on_pre_present: impl FnOnce(),
 ) -> Result<(), compositor::SurfaceError> {
     let physical_size = viewport.physical_size();
+
+    // OpenCircle patch (W61): drawn for a size the window no longer has
+    let window: &dyn raw_window_handle::HasWindowHandle =
+        &**surface.window.window();
+    if let Some(now) = WINDOW_SIZE.get().and_then(|size| size(window))
+        && now != (physical_size.width, physical_size.height)
+    {
+        surface.layer_stack.clear();
+        return Ok(());
+    }
 
     let mut buffer = surface
         .window

@@ -107,6 +107,46 @@ pub fn place(
     }
 }
 
+/// The floating widgets' surface colour (sRGB), set with the theme
+/// (`shared::theme`): what a cut window's grown part shows until it draws
+/// again (W61).
+static FILL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x14_17_21);
+
+pub fn set_fill(rgb: [u8; 3]) {
+    let [r, g, b] = rgb.map(u32::from);
+    FILL.store(r << 16 | g << 8 | b, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn fill() -> [u8; 3] {
+    let v = FILL.load(std::sync::atomic::Ordering::Relaxed);
+    [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+}
+
+/// Windows: the client size (physical px) of the window behind `window` now,
+/// for the CPU renderer (`iced_tiny_skia`'s `WINDOW_SIZE`, W61).
+#[cfg(windows)]
+pub fn client_size(
+    window: &dyn iced::window::raw_window_handle::HasWindowHandle,
+) -> Option<(u32, u32)> {
+    let RawWindowHandle::Win32(h) = window.window_handle().ok()?.as_raw() else {
+        return None;
+    };
+    let mut r = windows::Win32::Foundation::RECT::default();
+    // SAFETY: reading the client rect of a live window of this process.
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::GetClientRect(
+            windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _),
+            &mut r,
+        )
+    }
+    .ok()?;
+    Some((
+        (r.right - r.left).max(0) as u32,
+        (r.bottom - r.top).max(0) as u32,
+    ))
+}
+
 /// A window px rectangle: x, y, width, height.
 pub type Px = (i32, i32, u32, u32);
 
@@ -363,8 +403,8 @@ mod win {
         CallWindowProcW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW,
         GetWindowRect, NCCALCSIZE_PARAMS, RemovePropW, STYLESTRUCT, SWP_NOSIZE, SetPropW,
         SetWindowLongPtrW, WINDOWPOS, WM_DPICHANGED, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY,
-        WM_SETICON, WM_SETTEXT, WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WNDPROC, WS_EX_LAYERED,
-        WS_VISIBLE, WVR_VALIDRECTS,
+        WM_SETICON, WM_SETTEXT, WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING,
+        WNDPROC, WS_EX_LAYERED, WS_VISIBLE, WVR_VALIDRECTS,
     };
     use windows::core::{PCWSTR, w};
 
@@ -433,14 +473,23 @@ mod win {
             // as it happens: a move onto a monitor of another scale resizes the
             // window inside winit's WM_DPICHANGED, and iced's `Resized` (`reshape`)
             // can come late or not at all (no size change), leaving the old cut.
-            let resized = msg == WM_DPICHANGED
-                || (msg == WM_WINDOWPOSCHANGED
-                    && (*(l.0 as *const WINDOWPOS)).flags.0 & SWP_NOSIZE.0 == 0);
-            if resized && !GetPropW(h, SHAPE).is_invalid() {
+            let sized = |m| m == msg && (*(l.0 as *const WINDOWPOS)).flags.0 & SWP_NOSIZE.0 == 0;
+            let cut_window = !GetPropW(h, SHAPE).is_invalid();
+            if sized(WM_WINDOWPOSCHANGING) && cut_window {
+                let mut was = RECT::default();
+                if GetWindowRect(h, &mut was).is_ok() {
+                    BEFORE.set(Some((h.0 as isize, was)));
+                }
+            }
+            let resized = msg == WM_DPICHANGED || sized(WM_WINDOWPOSCHANGED);
+            if resized && cut_window {
                 let result = CallWindowProcW(next, h, msg, w, l);
                 let max_radius = (GetPropW(h, SHAPE).0 as usize - 1) as f32 / 100.0;
                 if let Err(e) = cut(h, max_radius) {
                     crate::log!("[opencircle] window shape: {e}");
+                }
+                if msg == WM_WINDOWPOSCHANGED {
+                    fill_grown(h);
                 }
                 return result;
             }
@@ -486,6 +535,87 @@ mod win {
     /// Undocumented: the theme engine asks the window to paint its caption / frame.
     pub(super) const WM_NCUAHDRAWCAPTION: u32 = 0x00AE;
     pub(super) const WM_NCUAHDRAWFRAME: u32 = 0x00AF;
+
+    thread_local! {
+        /// A cut window's rect as a size change of it began (`fill_grown`).
+        static BEFORE: std::cell::Cell<Option<(isize, RECT)>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// A cut window just grew (W61): the part its old picture doesn't cover is
+    /// painted in the widget's colour at once, opaque, so no frame shows the
+    /// desktop through it before iced draws the new size (a floating window is
+    /// transparent: its unpainted area is see-through). A 1 px 32-bit DIB
+    /// stretched over it: GDI's own fills leave alpha 0 there.
+    fn fill_grown(h: HWND) {
+        use windows::Win32::Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, GetDC, ReleaseDC, SRCCOPY,
+            StretchDIBits,
+        };
+        let Some((_, was)) = BEFORE.take().filter(|(w, _)| *w == h.0 as isize) else {
+            return;
+        };
+        let mut now = RECT::default();
+        // SAFETY: `h` is a live window of this thread.
+        if unsafe { GetWindowRect(h, &mut now) }.is_err() {
+            return;
+        }
+        let size = |r: RECT| (r.right - r.left, r.bottom - r.top);
+        let ((w, ht), (ow, oh)) = (size(now), size(was));
+        let apart = was.right <= now.left
+            || was.left >= now.right
+            || was.bottom <= now.top
+            || was.top >= now.bottom;
+        if (w, ht) == (ow, oh) || apart || w <= 0 || ht <= 0 {
+            return;
+        }
+        let hole = (was.left - now.left, was.top - now.top, ow as u32, oh as u32);
+        let bands = super::holed(w as u32, ht as u32, hole, &[]);
+        if bands.is_empty() {
+            return;
+        }
+        let [r, g, b] = super::fill();
+        let pixel = [b, g, r, 255u8];
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: 1,
+                biHeight: 1,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // SAFETY: `h` is a live window of this thread; its DC is released
+        // below; `pixel` is the 1x1 32-bit DIB `info` describes.
+        unsafe {
+            let dc = GetDC(Some(h));
+            if dc.is_invalid() {
+                return;
+            }
+            for (x, y, bw, bh) in bands {
+                let (bw, bh) = (bw as i32, bh as i32);
+                let bits = Some(pixel.as_ptr().cast());
+                StretchDIBits(
+                    dc,
+                    x,
+                    y,
+                    bw,
+                    bh,
+                    0,
+                    0,
+                    1,
+                    1,
+                    bits,
+                    &info,
+                    DIB_RGB_COLORS,
+                    SRCCOPY,
+                );
+            }
+            ReleaseDC(Some(h), dc);
+        }
+    }
 
     /// Set on a window `opacity` made layered (`wndproc` keeps it so).
     const LAYERED: PCWSTR = w!("OpenCircle.layered");
@@ -841,6 +971,19 @@ mod x11 {
                     drawable: x::Drawable::Window(window),
                 }))
                 .map_err(|e| os(&e))?;
+            // what the server paints a grown part with before we draw it: the
+            // widget's colour, opaque, not see-through (W61)
+            let [r, g, b] = super::fill().map(u32::from);
+            let rgb = r << 16 | g << 8 | b;
+            let pixel = if was.depth() == 32 {
+                0xff00_0000 | rgb
+            } else {
+                rgb
+            };
+            conn.send_request(&x::ChangeWindowAttributes {
+                window,
+                value_list: &[x::Cw::BackPixel(pixel)],
+            });
             let (cw, ch) = (w.max(was.width().into()), h.max(was.height().into()));
             let r = corner(max_radius, cw as f32, ch as f32).round() as u32;
             let rects: Vec<x::Rectangle> = round_rect(cw, ch, r)

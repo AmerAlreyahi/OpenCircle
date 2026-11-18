@@ -180,7 +180,7 @@ pub fn apply(theme: Theme) {
 /// `apply` with `[appearance]` picks not saved yet (Settings shows a pick at once).
 pub fn preview(theme: Theme, picks: &config::AppearanceConfig) {
     SETTING.with(|s| s.set(theme));
-    crate::shared::kit::themes::set(kit_theme(theme, os_dark(), picks));
+    set_kit(kit_theme(theme, os_dark(), picks));
 }
 
 /// The OS is in dark mode (or says nothing).
@@ -198,11 +198,20 @@ pub fn set_os(mode: iced::theme::Mode) {
 /// config, by the same mode choice and the `[appearance]` picks.
 fn to_kit() {
     let picks = config::appearance();
-    crate::shared::kit::themes::set(kit_theme(
+    set_kit(kit_theme(
         SETTING.with(Cell::get),
         OS_DARK.with(Cell::get),
         &picks,
     ));
+}
+
+/// The kit's theme set, and the OS layer told its widget colour (a floating
+/// window's grown part, `shape::set_fill`).
+fn set_kit(theme: &'static crate::shared::kit::themes::Theme) {
+    crate::shared::kit::themes::set(theme);
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let fill = theme.c.widget;
+    crate::shared::platform::shape::set_fill([byte(fill.r), byte(fill.g), byte(fill.b)]);
 }
 
 pub fn kit_theme(

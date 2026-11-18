@@ -110,6 +110,20 @@ pub fn place_window<T: Send + 'static>(id: window::Id, place: Place) -> Task<T> 
             if let Err(e) = moved {
                 crate::log!("[opencircle] overlay not moved: {e}");
             }
+            // landed (no scale change): a second call would only cost a frame of
+            // messages per step of a resize drag (W61)
+            let mut now = ::windows::Win32::Foundation::RECT::default();
+            // SAFETY: as above.
+            let read = unsafe {
+                ::windows::Win32::UI::WindowsAndMessaging::GetWindowRect(
+                    HWND(h.hwnd.get() as *mut _),
+                    &mut now,
+                )
+            };
+            let want = (x, y, x + width as i32, y + height as i32);
+            if read.is_ok() && (now.left, now.top, now.right, now.bottom) == want {
+                break;
+            }
         }
     })
     .discard();
