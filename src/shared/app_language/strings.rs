@@ -369,8 +369,8 @@ strings! {
         | "أو Ctrl+= للتكبير وCtrl+- للتصغير وCtrl+0 للعودة إلى 100 % داخل المحادثة";
     ai_web: "Web search"
         | "البحث في الويب";
-    ai_web_desc: "The AI can search Bing and Wikipedia for recent facts. Only the search words are sent, never your screen"
-        | "يمكن للذكاء الاصطناعي البحث في Bing وWikipedia عن أحدث المعلومات. تُرسل كلمات البحث فقط، ولا تُرسل شاشتك أبدًا";
+    ai_web_desc: "The AI can search DuckDuckGo and Wikipedia for recent facts. Only the search words are sent, never your screen"
+        | "يمكن للذكاء الاصطناعي البحث في DuckDuckGo وWikipedia عن أحدث المعلومات. تُرسل كلمات البحث فقط، ولا تُرسل شاشتك أبدًا";
     ai_hist: "Chat history"
         | "سجل المحادثات";
     ai_hist_on: "On: chats, text only, kept on this PC. Kept and cleared in History"
@@ -775,8 +775,8 @@ strings! {
         | "بحث الويب في «اسأل الذكاء الاصطناعي»";
     p_web_b: "Only the search words the AI picks (never your screen), and the pages it opens"
         | "كلمات البحث التي يختارها الذكاء الاصطناعي فقط (لا شاشتك أبدًا)، والصفحات التي يفتحها";
-    p_web_c: "Bing, then Wikipedia; the result pages' own sites"
-        | "Bing ثم Wikipedia؛ ومواقع صفحات النتائج نفسها";
+    p_web_c: "DuckDuckGo, then Wikipedia; the result pages' own sites"
+        | "DuckDuckGo ثم Wikipedia؛ ومواقع صفحات النتائج نفسها";
     p_online_a: "Online translation"
         | "الترجمة عبر الإنترنت";
     p_online_b: "The text read from the screen (never the image), only when Online is the engine"
@@ -1508,8 +1508,8 @@ strings! {
         | "إيقاف";
     chat_jump: "Jump to latest"
         | "إلى الأحدث";
-    chat_web_ask: "Let the AI search the web for recent facts? Only the search words go to Bing and Wikipedia, never your screen."
-        | "هل تسمح للذكاء الاصطناعي بالبحث في الويب عن أحدث المعلومات؟ تُرسل كلمات البحث فقط إلى Bing وWikipedia، ولا تُرسل شاشتك أبدًا.";
+    chat_web_ask: "Let the AI search the web for recent facts? Only the search words go to DuckDuckGo and Wikipedia, never your screen."
+        | "هل تسمح للذكاء الاصطناعي بالبحث في الويب عن أحدث المعلومات؟ تُرسل كلمات البحث فقط إلى DuckDuckGo وWikipedia، ولا تُرسل شاشتك أبدًا.";
     chat_web_on: "Search the web"
         | "ابحث في الويب";
     chat_web_no: "Not now"

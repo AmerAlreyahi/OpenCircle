@@ -4,17 +4,18 @@
 //! PC (never the capture), and only when the user turned web search on
 //! (`ai.web_search`).
 //!
-//! Sources: Bing's web results, then Wikipedia's official API (owner,
-//! 2026-11-18: no key, "I'll change it if we get blocked"). One honest
-//! client: no disguised browser, a captcha is never solved or dodged: that
-//! engine rests (`REST`) and the next one answers. A new engine = one file
-//! with its `Engine` and one entry in `ENGINES`.
+//! Sources: DuckDuckGo's lite page, then Wikipedia's official API (owner,
+//! 2026-11-18: no key, no account; W62's lab: Bing's results were ~25 %
+//! relevant). One honest client: no disguised browser, a captcha or
+//! throttle page is never solved or dodged: that engine rests (`REST`) and
+//! the next one answers. A new engine = one file with its `Engine` and one
+//! entry in `ENGINES`.
 //!
 //! `open_page` opens only pages from this turn's results or links the user
 //! wrote (a page's text could tell the model to open a URL carrying the
 //! chat), and only on public hosts (`net::public_agent`).
 
-mod bing;
+mod duckduckgo;
 pub(crate) mod page;
 mod wikipedia;
 
@@ -42,12 +43,19 @@ pub(crate) struct Engine {
     pub name: &'static str,
     /// The results page for a query (https).
     pub url: fn(&str) -> String,
+    /// The form POSTed to `url` for a query; `None` = a GET.
+    pub form: fn(&str) -> Option<String>,
     /// The hits on that page (query, page); none = no results, or not a results page.
     pub parse: fn(&str, &str) -> Vec<Hit>,
+    /// A page without hits that is a block (captcha, throttle), not "no results".
+    pub blocked: fn(&str) -> bool,
+    /// Requests to a paced engine (gap > 0) go one at a time process-wide,
+    /// at least this far apart.
+    pub gap: Duration,
 }
 
 /// In the order they are asked.
-const ENGINES: [Engine; 2] = [bing::ENGINE, wikipedia::ENGINE];
+const ENGINES: [Engine; 2] = [duckduckgo::ENGINE, wikipedia::ENGINE];
 /// How long an engine that blocked us rests before it is asked again.
 const REST: Duration = Duration::from_secs(15 * 60);
 /// Results given to the model per search (after `relevant`).
@@ -69,15 +77,18 @@ pub enum Web {
 
 /// The first engine (in order, skipping resting ones) with results for
 /// `query`; `Some(empty)` when an engine answered but found nothing, `None`
-/// when none answered. `get` fetches a page: (status, body). A block (a
-/// status other than 200, or a captcha page WITHOUT results: a result's own
-/// snippet may say "captcha") rests that engine. One log line per engine that
+/// when none answered. `get` fetches a page (url, form to POST): (status,
+/// body). A block (a status other than 200, or a page WITHOUT results that
+/// the engine calls `blocked`: a result's own snippet may say "captcha")
+/// rests that engine. One log line per engine that
 /// fails (never the query, only its length).
 pub(crate) fn search_with(
     engines: &[Engine],
     query: &str,
-    get: impl Fn(&str) -> Result<(u16, String), String>,
+    get: impl Fn(&str, Option<&str>) -> Result<(u16, String), String>,
 ) -> Option<Vec<Hit>> {
+    // the time of the last paced request; held during one
+    static PACED: Mutex<Option<Instant>> = Mutex::new(None);
     static RESTING: Mutex<Option<HashMap<&'static str, Instant>>> = Mutex::new(None);
     let mut answered = false;
     let len = query.chars().count();
@@ -94,7 +105,20 @@ pub(crate) fn search_with(
             crate::log!("[web] {}: resting after a block; skipped", e.name);
             continue;
         }
-        match get(&(e.url)(query)) {
+        let fetch = || get(&(e.url)(query), (e.form)(query).as_deref());
+        let page = match e.gap.is_zero() {
+            true => fetch(),
+            false => {
+                let mut last = PACED.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(wait) = last.and_then(|at| e.gap.checked_sub(at.elapsed())) {
+                    std::thread::sleep(wait);
+                }
+                let page = fetch();
+                *last = Some(Instant::now());
+                page
+            }
+        };
+        match page {
             Ok((200, body)) => {
                 let hits = (e.parse)(query, &body);
                 let found = hits.len();
@@ -105,8 +129,8 @@ pub(crate) fn search_with(
                 if found > 0 {
                     answered = true;
                     crate::log!("[web] {}: {found} results, none relevant", e.name);
-                } else if blocked(&body) {
-                    crate::log!("[web] {}: captcha page; resting it 15 min", e.name);
+                } else if (e.blocked)(&body) {
+                    crate::log!("[web] {}: blocked or empty page; resting it 15 min", e.name);
                     resting(Some(Instant::now()));
                 } else {
                     answered = true;
@@ -128,7 +152,7 @@ pub(crate) fn search_with(
 }
 
 /// A captcha / "unusual traffic" page instead of results.
-fn blocked(body: &str) -> bool {
+pub(crate) fn blocked(body: &str) -> bool {
     let b = body.to_ascii_lowercase();
     ["captcha", "unusual traffic", "/user/verify"]
         .iter()
@@ -137,15 +161,20 @@ fn blocked(body: &str) -> bool {
 
 /// `search_with` on the real engines.
 pub fn search(query: &str) -> Option<Vec<Hit>> {
-    search_with(&ENGINES, query, |url| {
+    search_with(&ENGINES, query, |url, form| {
         let agent = crate::shared::net::agent(crate::shared::net::WEB);
-        let mut resp = (agent.get(url))
-            .header(
-                "Accept-Language",
-                if arabic(url) { "ar,en;q=0.8" } else { "en" },
-            )
-            .call()
-            .map_err(|e| e.to_string())?;
+        let lang = match arabic(url) || form.is_some_and(arabic) {
+            true => "ar,en;q=0.8",
+            false => "en",
+        };
+        let resp = match form {
+            Some(form) => (agent.post(url))
+                .header("Accept-Language", lang)
+                .content_type("application/x-www-form-urlencoded")
+                .send(form),
+            None => agent.get(url).header("Accept-Language", lang).call(),
+        };
+        let mut resp = resp.map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
         let body = (resp.body_mut().with_config().limit(3_000_000))
             .read_to_string()
@@ -154,9 +183,9 @@ pub fn search(query: &str) -> Option<Vec<Hit>> {
     })
 }
 
-/// The language a query is searched in (Bing's market, Wikipedia's
+/// The language a query is searched in (DuckDuckGo's region, Wikipedia's
 /// edition): its script decides; a query without letters takes the app's
-/// language. ponytail: Latin = English (no French/Spanish market yet); add
+/// language. ponytail: Latin = English (no French/Spanish region yet); add
 /// the translate detector's guess when users search in those languages.
 pub(crate) fn lang(query: &str) -> &'static str {
     match script(query) {
@@ -219,7 +248,7 @@ fn words(query: &str) -> Vec<String> {
 }
 
 /// The hits about the query: their title + snippet share a word with it and
-/// are in its script (Bing answered an English name with Chinese pages,
+/// are in its script (Bing once answered an English name with Chinese pages,
 /// owner 2026-11-18). ponytail: "unless the user asked for that language"
 /// isn't detected; a query naming a language could keep other scripts.
 pub(crate) fn relevant(query: &str, hits: Vec<Hit>) -> Vec<Hit> {

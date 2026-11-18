@@ -14,7 +14,10 @@ pub(super) const ENGINE: Engine = Engine {
             "https://{lang}.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=10&srsearch={q}"
         )
     },
+    form: |_| None,
     parse,
+    blocked: super::blocked,
+    gap: std::time::Duration::ZERO,
 };
 
 fn parse(query: &str, body: &str) -> Vec<Hit> {

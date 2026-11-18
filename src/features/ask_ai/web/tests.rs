@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::sync::Arc;
 
 use super::*;
 use crate::features::ask_ai::{Pending, Reply, anthropic, mock, openai};
@@ -16,10 +17,13 @@ const fn engine(name: &'static str, url: fn(&str) -> String) -> Engine {
     Engine {
         name,
         url,
+        form: |_| None,
         parse: |_, body| match body {
             "results" => vec![hit("1"), hit("2")],
             _ => Vec::new(),
         },
+        blocked,
+        gap: Duration::ZERO,
     }
 }
 
@@ -33,7 +37,7 @@ fn a_blocked_engine_rests_and_the_next_answers() {
         engine("test-ok", |_| "https://c/".into()),
     ];
     let asked = RefCell::new(Vec::new());
-    let get = |url: &str| {
+    let get = |url: &str, _: Option<&str>| {
         asked.borrow_mut().push(url.to_string());
         Ok(match url {
             "https://a/" => (200, "<p>Please solve this CAPTCHA</p>".to_string()),
@@ -55,16 +59,16 @@ fn a_blocked_engine_rests_and_the_next_answers() {
         "the blocked engines rest"
     );
     let down = [engine("test-down", |_| "https://d/".into())];
-    assert_eq!(search_with(&down, "q", |_| Err("offline".into())), None);
+    assert_eq!(search_with(&down, "q", |_, _| Err("offline".into())), None);
     // a page without results is not a block (asked again next time), and not
     // "search unavailable" either: the engine answered, it found nothing
     let empty = [engine("test-empty", |_| "https://e/".into())];
     assert_eq!(
-        search_with(&empty, "q", |_| Ok((200, "none".into()))),
+        search_with(&empty, "q", |_, _| Ok((200, "none".into()))),
         Some(vec![])
     );
     assert_eq!(
-        search_with(&empty, "q", |_| Ok((200, "results".into()))).map(|h| h.len()),
+        search_with(&empty, "q", |_, _| Ok((200, "results".into()))).map(|h| h.len()),
         Some(2)
     );
 }
@@ -76,7 +80,7 @@ fn a_blocked_engine_rests_and_the_next_answers() {
 fn a_result_that_mentions_captcha_is_not_a_block() {
     let engines = [engine("test-name", |_| "https://n/".into())];
     let asked = RefCell::new(0);
-    let get = |_: &str| {
+    let get = |_: &str, _: Option<&str>| {
         *asked.borrow_mut() += 1;
         Ok((200, "results".to_string()))
     };
@@ -87,7 +91,7 @@ fn a_result_that_mentions_captcha_is_not_a_block() {
         },
         ..engines[0]
     }];
-    let page = |_: &str| {
+    let page = |_: &str, _: Option<&str>| {
         *asked.borrow_mut() += 1;
         Ok((
             200,
@@ -102,6 +106,74 @@ fn a_result_that_mentions_captcha_is_not_a_block() {
     }
     assert_eq!(search_with(&engines, "q", get).map(|h| h.len()), Some(2));
     assert_eq!(*asked.borrow(), 3, "never rested");
+}
+
+/// A paced engine (DuckDuckGo: 2 s) is asked one request at a time across
+/// threads, the next one starting at least `gap` after the last ended.
+#[test]
+fn paced_requests_go_one_at_a_time_and_apart() {
+    let paced = [Engine {
+        gap: Duration::from_millis(150),
+        ..engine("test-paced", |_| "https://p/".into())
+    }];
+    let spans = Arc::new(Mutex::new(Vec::new()));
+    std::thread::scope(|s| {
+        for _ in 0..2 {
+            let spans = spans.clone();
+            let paced = &paced;
+            s.spawn(move || {
+                search_with(paced, "q", |_, _| {
+                    let start = Instant::now();
+                    std::thread::sleep(Duration::from_millis(30));
+                    spans.lock().unwrap().push((start, Instant::now()));
+                    Ok((200, "results".into()))
+                })
+            });
+        }
+    });
+    let mut spans = spans.lock().unwrap().clone();
+    spans.sort();
+    assert_eq!(spans.len(), 2);
+    let apart = spans[1].0.duration_since(spans[0].1);
+    assert!(apart >= Duration::from_millis(150), "{apart:?}");
+}
+
+/// DuckDuckGo's empty (throttled) or anomaly page rests it 15 min and
+/// Wikipedia answers; "No results found" is an answer, not a block.
+#[test]
+fn an_empty_duckduckgo_page_rests_it() {
+    let pair = [
+        Engine {
+            name: "test-ddg-empty",
+            gap: Duration::ZERO,
+            ..duckduckgo::ENGINE
+        },
+        engine("test-wiki", |_| "https://w/".into()),
+    ];
+    let asked = RefCell::new(Vec::new());
+    let get = |url: &str, form: Option<&str>| {
+        asked.borrow_mut().push(form.is_some());
+        Ok(match url {
+            "https://w/" => (200, "results".to_string()),
+            _ => (
+                200,
+                "<html><body><!-- Web results are present --></body></html>".into(),
+            ),
+        })
+    };
+    for _ in 0..2 {
+        assert_eq!(search_with(&pair, "q", get).map(|h| h.len()), Some(2));
+    }
+    assert_eq!(*asked.borrow(), [true, false, false], "DuckDuckGo rests");
+    let none = [Engine {
+        name: "test-ddg-none",
+        gap: Duration::ZERO,
+        ..duckduckgo::ENGINE
+    }];
+    for _ in 0..2 {
+        let page = |_: &str, _: Option<&str>| Ok((200, "<h1>No results found for x</h1>".into()));
+        assert_eq!(search_with(&none, "q", page), Some(vec![]), "not resting");
+    }
 }
 
 fn call(id: &str, name: &str, args: &str) -> String {
@@ -431,12 +503,12 @@ fn an_empty_answer_is_an_error_with_retry() {
 
 /// The owner's search (2026-11-18): Bing mixed Chinese Outlook pages and
 /// pages without the name into an English name's results; only the pages
-/// about the name in its script reach the model.
+/// about the name in its script reach the model, from any engine.
 #[test]
-fn bing_results_off_the_query_or_in_another_script_are_dropped() {
+fn results_off_the_query_or_in_another_script_are_dropped() {
     let result = |href: &str, title: &str, snippet: &str| {
         format!(
-            r#"<li class="b_algo"><h2><a href="{href}">{title}</a></h2><div class="b_caption"><p>{snippet}</p></div></li>"#
+            r#"<tr><td><a rel="nofollow" href="{href}" class='result-link'>{title}</a></td></tr><tr><td class='result-snippet'>{snippet}</td></tr>"#
         )
     };
     let page = [
@@ -459,14 +531,19 @@ fn bing_results_off_the_query_or_in_another_script_are_dropped() {
     ]
     .concat();
     let asked = RefCell::new(String::new());
-    let hits = search_with(&ENGINES[..1], "search for Amer Alreyahi", |url| {
-        *asked.borrow_mut() = url.to_string();
+    let ddg = [Engine {
+        name: "test-ddg-filter",
+        gap: Duration::ZERO,
+        ..duckduckgo::ENGINE
+    }];
+    let hits = search_with(&ddg, "search for Amer Alreyahi", |_, form| {
+        *asked.borrow_mut() = form.unwrap_or_default().to_string();
         Ok((200, page.clone()))
     })
     .unwrap();
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0].url, "https://github.com/AmerAlreyahi");
-    assert!(asked.borrow().contains("mkt=en-US"), "{}", asked.borrow());
+    assert!(asked.borrow().ends_with("kl=us-en"), "{}", asked.borrow());
     // Arabic keeps Arabic pages
     let ar = |t: &str| Hit {
         title: t.into(),
@@ -621,8 +698,8 @@ fn page_text_drops_scripts_and_tags() {
 #[test]
 #[ignore]
 fn live_search_and_page() {
-    // the name: Bing's page for it had a result snippet saying "Captcha" (2026-11-18)
-    // the owner's query (W59): no Chinese / off-topic pages left
+    // the owner's queries (W59): no Chinese / off-topic pages left; DuckDuckGo
+    // answers each (paced 2 s apart), Wikipedia only if it rests
     for q in [
         "ubuntu 22.04 end of life",
         "عاصمة اليابان",
@@ -637,7 +714,7 @@ fn live_search_and_page() {
         }
         assert!(hits.iter().all(|h| h.url.starts_with("https://")));
     }
-    let wiki = search_with(&ENGINES[1..], "Rust programming language", |u| {
+    let wiki = search_with(&ENGINES[1..], "Rust programming language", |u, _| {
         let agent = crate::shared::net::agent(crate::shared::net::WEB);
         let mut r = agent.get(u).call().map_err(|e| e.to_string())?;
         let body = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
