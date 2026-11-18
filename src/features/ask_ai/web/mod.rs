@@ -207,8 +207,9 @@ pub(crate) fn answer(
             flow
         });
         let reply = match reply {
-            // no tool calling (OpenRouter 404, Ollama 400, ...): search once instead
-            Err(AiError::Rejected(400 | 404 | 422, why)) if round == 0 => {
+            // no tool calling (OpenRouter 404, Ollama 400, ...), or a later tool
+            // round refused (400, e.g. a provider rule on the turn sent back): search once
+            Err(AiError::Rejected(code @ (400 | 404 | 422), why)) if round == 0 || code == 400 => {
                 crate::log!("[web] tools refused ({why}); one search with the question");
                 return fallback(cfg, key, messages, on_delta, on_web, search);
             }

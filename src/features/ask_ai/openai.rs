@@ -202,6 +202,14 @@ pub(crate) fn parse_into(data: &str, pending: &mut Pending) -> Result<Event, AiE
                 append(&mut call["function"], key, more);
             }
         }
+        // Every other field goes back verbatim: Gemini's thinking models
+        // refuse the next round without `extra_content.google.thought_signature`.
+        keep_extra(call, piece, &["index", "id", "function"]);
+        keep_extra(
+            &mut call["function"],
+            &piece["function"],
+            &["name", "arguments"],
+        );
     }
     match delta["content"].as_str() {
         Some(text) if !text.is_empty() => Ok(Event::Delta(text.to_string())),
@@ -213,6 +221,15 @@ pub(crate) fn parse_into(data: &str, pending: &mut Pending) -> Result<Event, AiE
             Ok(Event::Thinking)
         }
         _ => Ok(Event::Skip),
+    }
+}
+
+/// Copies `from`'s fields other than `skip` into `into`, as they came.
+fn keep_extra(into: &mut Value, from: &Value, skip: &[&str]) {
+    for (k, v) in from.as_object().into_iter().flatten() {
+        if !skip.contains(&k.as_str()) && !v.is_null() {
+            into[k.as_str()] = v.clone();
+        }
     }
 }
 

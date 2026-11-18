@@ -177,6 +177,81 @@ fn a_model_without_tools_gets_one_search_with_the_question() {
     }
 }
 
+/// Gemini (OpenAI-compatible): a thinking model's tool call carries
+/// `extra_content.google.thought_signature`; the next round must send it back
+/// unchanged, or Google answers HTTP 400 (owner, 2026-11-18).
+#[test]
+fn gemini_gets_its_thought_signature_back() {
+    let signed = r#"data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"SIG=="}},"function":{"arguments":"{\"query\":\"amer\"}","name":"web_search"},"id":"g1","type":"function"}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+"#;
+    let (url, seen) = mock::serve(vec![mock::stream(signed), mock::stream(&text("Found"))]);
+    let mut got = String::new();
+    answer(
+        &cfg(url),
+        None,
+        &[Message::user("look for amer")],
+        |p| {
+            got.push_str(p);
+            ControlFlow::Continue(())
+        },
+        |_| {},
+        |_| Some(vec![hit("1")]),
+        |_| Err("no".into()),
+    )
+    .unwrap();
+    assert_eq!(got, "Found");
+    let second = seen.try_iter().nth(1).unwrap();
+    let body: Value = serde_json::from_str(second.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let echoed = &body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .nth(1)
+        .unwrap()["tool_calls"][0];
+    assert_eq!(
+        echoed["extra_content"],
+        json!({"google": {"thought_signature": "SIG=="}})
+    );
+    assert_eq!(echoed["id"], "g1");
+}
+
+/// A provider that still refuses a later tool round (HTTP 400) gets the
+/// no-tools path once (one search with the question), not an error card.
+#[test]
+fn a_refused_tool_round_falls_back_to_one_search() {
+    let (url, _) = mock::serve(vec![
+        mock::stream(&call("c1", "web_search", r#"{"query":"x"}"#)),
+        mock::reply(
+            400,
+            r#"{"error":{"message":"Function call is missing a thought_signature"}}"#,
+        ),
+        mock::stream(&text("Answer")),
+    ]);
+    let (searched, mut got) = (RefCell::new(vec![]), String::new());
+    answer(
+        &cfg(url),
+        None,
+        &[Message::user("look for amer")],
+        |p| {
+            got.push_str(p);
+            ControlFlow::Continue(())
+        },
+        |_| {},
+        |q| {
+            searched.borrow_mut().push(q.to_string());
+            Some(vec![hit("1")])
+        },
+        |_| Err("no".into()),
+    )
+    .unwrap();
+    assert_eq!(got, "Answer");
+    assert_eq!(*searched.borrow(), ["x", "look for amer"]);
+}
+
 #[test]
 fn the_user_s_own_links_may_be_opened() {
     assert_eq!(

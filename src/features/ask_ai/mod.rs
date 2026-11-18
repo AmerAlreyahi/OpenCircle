@@ -774,7 +774,7 @@ pub(crate) mod mock {
         )
     }
 
-    /// The base URL (`http://127.0.0.1:<port>/v1`) and the requests' heads.
+    /// The base URL (`http://127.0.0.1:<port>/v1`) and each request (head, a blank line, body).
     pub fn serve(replies: Vec<String>) -> (String, Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -799,7 +799,10 @@ pub(crate) mod mock {
                     }
                     head.push_str(&line);
                 }
-                let _ = reader.by_ref().take(length).read_to_end(&mut Vec::new());
+                let mut body = Vec::new();
+                let _ = reader.by_ref().take(length).read_to_end(&mut body);
+                head.push_str("\r\n");
+                head.push_str(&String::from_utf8_lossy(&body));
                 let _ = tx.send(head);
                 let mut out = reader.into_inner();
                 let _ = out.write_all(reply.as_bytes());
