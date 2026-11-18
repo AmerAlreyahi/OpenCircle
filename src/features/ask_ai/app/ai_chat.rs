@@ -601,6 +601,9 @@ impl App {
         if open && matches!(msg, ai_chat::Msg::Card(card::Event::Grab(_))) {
             self.adopt_chat(); // a chat found pinned there: the overlay docks it from now on
         }
+        if matches!(msg, ai_chat::Msg::Saved) {
+            self.windows.refresh_config(); // the chat wrote the config (web search, model)
+        }
         let ends = self.ends_tool();
         let came_pinned = self.o.chat_came_pinned;
         let Some(panel) = (match resident {

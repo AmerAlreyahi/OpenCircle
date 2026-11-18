@@ -65,14 +65,19 @@ pub enum Web {
 }
 
 /// The first engine (in order, skipping resting ones) with results for
-/// `query`. `get` fetches a page: (status, body). A block (a status other
-/// than 200, or a captcha page) rests that engine.
+/// `query`; `Some(empty)` when an engine answered but found nothing, `None`
+/// when none answered. `get` fetches a page: (status, body). A block (a
+/// status other than 200, or a captcha page WITHOUT results: a result's own
+/// snippet may say "captcha") rests that engine. One log line per engine that
+/// fails (never the query, only its length).
 pub(crate) fn search_with(
     engines: &[Engine],
     query: &str,
     get: impl Fn(&str) -> Result<(u16, String), String>,
 ) -> Option<Vec<Hit>> {
     static RESTING: Mutex<Option<HashMap<&'static str, Instant>>> = Mutex::new(None);
+    let mut answered = false;
+    let len = query.chars().count();
     for e in engines {
         let resting = |rest: Option<Instant>| {
             let mut map = RESTING.lock().unwrap_or_else(|p| p.into_inner());
@@ -83,24 +88,35 @@ pub(crate) fn search_with(
             map.get(e.name).is_some_and(|at| at.elapsed() < REST)
         };
         if resting(None) {
+            crate::log!("[web] {}: resting after a block; skipped", e.name);
             continue;
         }
         match get(&(e.url)(query)) {
-            Ok((200, body)) if !blocked(&body) => {
+            Ok((200, body)) => {
                 let hits = (e.parse)(query, &body);
                 if !hits.is_empty() {
                     return Some(hits.into_iter().take(TOP).collect());
                 }
-                crate::log!("[web] {}: no results", e.name);
+                if blocked(&body) {
+                    crate::log!("[web] {}: captcha page; resting it 15 min", e.name);
+                    resting(Some(Instant::now()));
+                } else {
+                    answered = true;
+                    crate::log!(
+                        "[web] {}: no results (query {len} chars, page {} bytes)",
+                        e.name,
+                        body.len()
+                    );
+                }
             }
             Ok((status, _)) => {
-                crate::log!("[web] {}: blocked (HTTP {status}); resting it", e.name);
+                crate::log!("[web] {}: HTTP {status}; resting it 15 min", e.name);
                 resting(Some(Instant::now()));
             }
-            Err(why) => crate::log!("[web] {}: {why}", e.name),
+            Err(why) => crate::log!("[web] {}: request failed: {why}", e.name),
         }
     }
-    None
+    answered.then(Vec::new)
 }
 
 /// A captcha / "unusual traffic" page instead of results.
@@ -161,6 +177,11 @@ that you could not search the web.";
 
 /// The results as the model reads them.
 fn listing(hits: &[Hit]) -> String {
+    if hits.is_empty() {
+        return "The web search found no results for that query. Try other words, or answer \
+            from what you know and say that the search found nothing."
+            .to_string();
+    }
     let lines: Vec<String> = (hits.iter().enumerate())
         .map(|(i, h)| format!("[{}] {}\n{}\n{}", i + 1, h.title, h.url, h.snippet))
         .collect();

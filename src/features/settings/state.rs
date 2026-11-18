@@ -1039,6 +1039,14 @@ impl State {
         self.update_checked = checked;
     }
 
+    /// Another part of the app wrote the config (the chat's "Search the web"
+    /// answer, its model pick): an open window shows it, and keeps the edits
+    /// made here that are not written yet.
+    pub fn adopt(&mut self, now: &Config) {
+        self.draft = config::rebase(now, &self.saved, &self.draft);
+        self.saved = now.clone();
+    }
+
     /// The keyring calls the last message started (`true` = song search's key).
     pub fn take_key_jobs(&mut self) -> Vec<(bool, KeyJob)> {
         std::mem::take(&mut self.key_jobs)

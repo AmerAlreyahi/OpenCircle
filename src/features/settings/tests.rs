@@ -4149,3 +4149,21 @@ fn the_glossary_dropdown_counts_one_term_in_the_singular() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The owner answered the chat's "Search the web" while Settings was open: the
+/// window showed Off. It now shows what the chat wrote, and keeps its own
+/// unsaved edits.
+#[test]
+fn an_open_window_shows_what_the_chat_wrote() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Provider(Provider::Anthropic));
+    let mut now = Config::default();
+    now.ai.web_search = Some(true);
+    s.adopt(&now);
+    assert_eq!(s.draft().ai.web_search, Some(true));
+    assert_eq!(
+        s.draft().ai.provider,
+        Provider::Anthropic,
+        "the unsaved edit stays"
+    );
+}

@@ -954,6 +954,13 @@ impl Windows {
         Task::batch([old.unwrap_or_else(Task::none), open])
     }
 
+    /// The config was written outside Settings: an open Settings window shows it.
+    pub fn refresh_config(&mut self) {
+        if let Some((_, s)) = &mut self.settings {
+            s.adopt(&crate::shared::config::current());
+        }
+    }
+
     /// The update's state changed (a check answered, an update now waits):
     /// Settings > General shows it.
     pub fn refresh_update(&mut self) {

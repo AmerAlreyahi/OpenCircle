@@ -56,13 +56,52 @@ fn a_blocked_engine_rests_and_the_next_answers() {
     );
     let down = [engine("test-down", |_| "https://d/".into())];
     assert_eq!(search_with(&down, "q", |_| Err("offline".into())), None);
-    // a page without results is not a block: asked again next time
+    // a page without results is not a block (asked again next time), and not
+    // "search unavailable" either: the engine answered, it found nothing
     let empty = [engine("test-empty", |_| "https://e/".into())];
-    assert_eq!(search_with(&empty, "q", |_| Ok((200, "none".into()))), None);
+    assert_eq!(
+        search_with(&empty, "q", |_| Ok((200, "none".into()))),
+        Some(vec![])
+    );
     assert_eq!(
         search_with(&empty, "q", |_| Ok((200, "results".into()))).map(|h| h.len()),
         Some(2)
     );
+}
+
+/// Bing's real page for a person's name (2026-11-18) had 10 results, one of
+/// them a login page whose snippet said "Captcha text cannot be empty": a
+/// page WITH results is never a block (the engine kept answering).
+#[test]
+fn a_result_that_mentions_captcha_is_not_a_block() {
+    let engines = [engine("test-name", |_| "https://n/".into())];
+    let asked = RefCell::new(0);
+    let get = |_: &str| {
+        *asked.borrow_mut() += 1;
+        Ok((200, "results".to_string()))
+    };
+    let engines_captcha = [Engine {
+        parse: |_, body| match body.contains("results") {
+            true => vec![hit("1")],
+            false => vec![],
+        },
+        ..engines[0]
+    }];
+    let page = |_: &str| {
+        *asked.borrow_mut() += 1;
+        Ok((
+            200,
+            "results <p>Captcha text cannot be empty.</p>".to_string(),
+        ))
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            search_with(&engines_captcha, "q", page),
+            Some(vec![hit("1")])
+        );
+    }
+    assert_eq!(search_with(&engines, "q", get).map(|h| h.len()), Some(2));
+    assert_eq!(*asked.borrow(), 3, "never rested");
 }
 
 fn call(id: &str, name: &str, args: &str) -> String {
@@ -366,7 +405,8 @@ fn page_text_drops_scripts_and_tags() {
 #[test]
 #[ignore]
 fn live_search_and_page() {
-    for q in ["ubuntu 22.04 end of life", "عاصمة اليابان"] {
+    // the name: Bing's page for it had a result snippet saying "Captcha" (2026-11-18)
+    for q in ["ubuntu 22.04 end of life", "عاصمة اليابان", "Amer Alreyahi"] {
         let hits = search(q).expect("an engine answers");
         println!("{q}: {} hits, first {:?}", hits.len(), hits[0]);
         assert!(hits.iter().all(|h| h.url.starts_with("https://")));
