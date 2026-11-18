@@ -11,7 +11,8 @@
 
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// The server closes this long after it starts, even if the page was never fetched.
@@ -28,8 +29,27 @@ const MAX_HEAD: usize = 8 * 1024;
 /// process could read the screen itself, so a full house just drops the new one.
 const MAX_OPEN: usize = 8;
 
-/// The page waiting for its one fetch (the full HTTP response), `None` once sent.
-type Page = Arc<Mutex<Option<Vec<u8>>>>;
+/// What a server answers to the one wanted request (its target: path and
+/// query; `None` = a 404), and when it is done.
+trait Handler: Send + Sync {
+    fn answer(&self, target: &str) -> Option<Vec<u8>>;
+    fn done(&self) -> bool;
+}
+
+/// A page waiting for its one fetch (the full HTTP response), `None` once sent.
+struct Page {
+    path: String,
+    response: Mutex<Option<Vec<u8>>>,
+}
+
+impl Handler for Page {
+    fn answer(&self, target: &str) -> Option<Vec<u8>> {
+        (target == self.path).then(|| self.response.lock().ok()?.take())?
+    }
+    fn done(&self) -> bool {
+        self.response.lock().map_or(true, |p| p.is_none())
+    }
+}
 
 /// Serves `html` once with this Content-Security-Policy; returns its URL
 /// (`http://127.0.0.1:<port>/<secret>`), already listening.
@@ -38,46 +58,126 @@ pub fn serve(html: &str, csp: &str) -> io::Result<String> {
 }
 
 fn serve_for(html: &str, csp: &str, life: Duration) -> io::Result<String> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?; // never 0.0.0.0
-    listener.set_nonblocking(true)?;
-    let port = listener.local_addr()?.port();
-    let mut secret = [0u8; 16];
-    getrandom::fill(&mut secret).map_err(|e| io::Error::other(e.to_string()))?;
-    let secret: String = secret.iter().map(|b| format!("{b:02x}")).collect();
-    let want = Want {
+    let secret = secret()?;
+    let page = Page {
         path: format!("/{secret}"),
-        host: format!("127.0.0.1:{port}"),
+        response: Mutex::new(Some(response(html, csp))),
     };
-    let page: Page = Arc::new(Mutex::new(Some(response(html, csp))));
-    std::thread::Builder::new()
-        .name("page server".into())
-        .spawn(move || run(&listener, &Arc::new(want), &page, life))?;
+    let port = start(Arc::new(page), &[], life)?;
     Ok(format!("http://127.0.0.1:{port}/{secret}"))
 }
 
-/// The one request that gets the page.
-struct Want {
-    path: String,
-    host: String,
+/// A sign-in's way back (OAuth loopback redirect, RFC 8252): ONE GET of
+/// `<url>?<query>` from our user's browser hands the query over and gets the
+/// page given to `receive`; then the port closes. Dropping it closes the port too.
+pub struct Callback {
+    /// `http://localhost:<port>/<secret>` (sign-in pages allow `localhost` on
+    /// any port; the server answers to it and to 127.0.0.1, bound on 127.0.0.1).
+    pub url: String,
+    query: mpsc::Receiver<String>,
+    stop: Arc<AtomicBool>,
 }
 
-fn run(listener: &TcpListener, want: &Arc<Want>, page: &Page, life: Duration) {
+impl Callback {
+    /// The callback's query string, if it came within `wait`.
+    pub fn wait(&self, wait: Duration) -> Option<String> {
+        self.query.recv_timeout(wait).ok()
+    }
+}
+
+impl Drop for Callback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+struct Receive {
+    path: String,
+    html: String,
+    tx: Mutex<Option<mpsc::Sender<String>>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Handler for Receive {
+    fn answer(&self, target: &str) -> Option<Vec<u8>> {
+        let query = target.strip_prefix(&self.path)?.strip_prefix('?')?;
+        let tx = self.tx.lock().ok()?.take()?;
+        let _ = tx.send(query.to_string());
+        Some(response(
+            &self.html,
+            "default-src 'none'; style-src 'unsafe-inline'",
+        ))
+    }
+    fn done(&self) -> bool {
+        self.stop.load(Ordering::Relaxed) || self.tx.lock().map_or(true, |t| t.is_none())
+    }
+}
+
+/// Waits at most `life` for one callback; `html` is what the browser shows
+/// after it ("you can close this tab").
+pub fn receive(html: &str, life: Duration) -> io::Result<Callback> {
+    let secret = secret()?;
+    let (tx, query) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let handler = Receive {
+        path: format!("/{secret}"),
+        html: html.to_string(),
+        tx: Mutex::new(Some(tx)),
+        stop: stop.clone(),
+    };
+    let port = start(Arc::new(handler), &["localhost"], life)?;
+    Ok(Callback {
+        url: format!("http://localhost:{port}/{secret}"),
+        query,
+        stop,
+    })
+}
+
+/// 128 random bits as hex: the unguessable path.
+fn secret() -> io::Result<String> {
+    let mut secret = [0u8; 16];
+    getrandom::fill(&mut secret).map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(secret.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Binds 127.0.0.1 on a random port and serves `handler` from its own thread;
+/// a request must name `127.0.0.1:<port>` (or one of `names` with the port) as Host.
+fn start(handler: Arc<dyn Handler>, names: &[&str], life: Duration) -> io::Result<u16> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?; // never 0.0.0.0
+    listener.set_nonblocking(true)?;
+    let port = listener.local_addr()?.port();
+    let hosts: Vec<String> = std::iter::once("127.0.0.1")
+        .chain(names.iter().copied())
+        .map(|h| format!("{h}:{port}"))
+        .collect();
+    std::thread::Builder::new()
+        .name("page server".into())
+        .spawn(move || run(&listener, &Arc::new(hosts), &handler, life))?;
+    Ok(port)
+}
+
+fn run(
+    listener: &TcpListener,
+    hosts: &Arc<Vec<String>>,
+    handler: &Arc<dyn Handler>,
+    life: Duration,
+) {
     let end = Instant::now() + life;
     let Ok(ours) = listener.local_addr() else {
         return;
     };
-    // ponytail: polls accept every 20 ms for at most `LIFE`; a wake-up socket if it ever matters.
-    while Instant::now() < end && page.lock().is_ok_and(|p| p.is_some()) {
+    // ponytail: polls accept every 20 ms for at most `life`; a wake-up socket if it ever matters.
+    while Instant::now() < end && !handler.done() {
         match listener.accept() {
             // One thread per connection, so a silent preconnect can't hold up the real one.
             Ok((stream, peer))
-                if Arc::strong_count(page) <= MAX_OPEN && admit(peer_is_ours(peer, ours)) =>
+                if Arc::strong_count(handler) <= MAX_OPEN && admit(peer_is_ours(peer, ours)) =>
             {
                 let deadline = Instant::now() + HEAD_WAIT;
-                let (want, page) = (want.clone(), page.clone());
+                let (hosts, handler) = (hosts.clone(), handler.clone());
                 let _ = std::thread::Builder::new()
                     .name("page request".into())
-                    .spawn(move || answer(stream, deadline, &want, &page));
+                    .spawn(move || answer(stream, deadline, &hosts, handler.as_ref()));
             }
             Ok(_) => {} // too many at once, or not our user: dropped, the page untouched
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
@@ -85,15 +185,14 @@ fn run(listener: &TcpListener, want: &Arc<Want>, page: &Page, life: Duration) {
     }
 } // the listener drops here: the port is closed
 
-fn answer(mut stream: TcpStream, deadline: Instant, want: &Want, page: &Page) {
+fn answer(mut stream: TcpStream, deadline: Instant, hosts: &[String], handler: &dyn Handler) {
     // An accepted socket can inherit the listener's non-blocking mode (Windows).
     let ready =
         stream.set_nonblocking(false).is_ok() && stream.set_write_timeout(Some(WRITE_WAIT)).is_ok();
     let sent = ready
         .then(|| read_head(&mut stream, deadline))
         .flatten()
-        .filter(|head| wanted(head, want))
-        .and_then(|_| page.lock().ok()?.take());
+        .and_then(|head| handler.answer(wanted(&head, hosts)?));
     let out = sent.as_deref().unwrap_or(NOT_FOUND);
     let _ = stream.write_all(out).and_then(|()| stream.flush());
 }
@@ -122,19 +221,21 @@ fn read_head(stream: &mut TcpStream, deadline: Instant) -> Option<String> {
     String::from_utf8(head).ok()
 }
 
-/// Exactly `GET <secret path> HTTP/1.x` with `Host: 127.0.0.1:<port>` (no other
-/// host: a page of another site can't reach it by a renamed DNS entry).
-fn wanted(head: &str, want: &Want) -> bool {
+/// The target of exactly `GET <target> HTTP/1.x` with `Host:` one of `hosts`
+/// (no other host: a page of another site can't reach it by a renamed DNS entry).
+fn wanted<'a>(head: &'a str, hosts: &[String]) -> Option<&'a str> {
     let mut lines = head.split("\r\n");
     let request: Vec<&str> = lines.next().unwrap_or("").split(' ').collect();
-    let line_ok = matches!(request[..], ["GET", path, version]
-        if path == want.path && version.starts_with("HTTP/1."));
+    let target = match request[..] {
+        ["GET", target, version] if version.starts_with("HTTP/1.") => target,
+        _ => return None,
+    };
     let host_ok = lines.any(|l| {
         l.split_once(':').is_some_and(|(name, value)| {
-            name.eq_ignore_ascii_case("host") && value.trim() == want.host
+            name.eq_ignore_ascii_case("host") && hosts.iter().any(|h| value.trim() == h)
         })
     });
-    line_ok && host_ok
+    host_ok.then_some(target)
 }
 
 fn response(html: &str, csp: &str) -> Vec<u8> {
@@ -471,6 +572,43 @@ mod tests {
         let started = Instant::now();
         assert!(fetch(&url, get).unwrap().ends_with("<p>page</p>"));
         assert!(started.elapsed() < Duration::from_secs(2));
+        closed(&url);
+    }
+
+    /// A sign-in's callback: only `<secret>?<query>` with our Host (127.0.0.1 or
+    /// localhost) hands the query over, once; then the port closes.
+    #[test]
+    fn a_callback_hands_its_query_over_once() {
+        let cb = receive("<p>done</p>", LIFE).unwrap();
+        let rest = cb.url.strip_prefix("http://localhost:").unwrap();
+        let (port, path) = rest.split_at(rest.find('/').unwrap());
+        assert_eq!(path.len(), 33, "a 128-bit secret path");
+        let url = format!("http://127.0.0.1:{port}{path}");
+        let with = |target: String, host: String| {
+            move |_: &str, _: &str| format!("GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n")
+        };
+        let ours = format!("localhost:{port}");
+        for (target, host) in [
+            (path.to_string(), ours.clone()),        // no query
+            ("/x?code=1".to_string(), ours.clone()), // another path
+            (format!("{path}x?code=1"), ours.clone()),
+            (format!("{path}?code=1"), format!("evil.test:{port}")), // DNS rebinding
+        ] {
+            let got = fetch(&url, with(target.clone(), host)).unwrap();
+            assert!(got.starts_with("HTTP/1.1 404"), "{target}: {got}");
+        }
+        assert_eq!(cb.wait(Duration::from_millis(50)), None);
+        let got = fetch(&url, with(format!("{path}?code=a&state=b"), ours.clone())).unwrap();
+        assert!(got.starts_with("HTTP/1.1 200 OK") && got.ends_with("<p>done</p>"));
+        assert_eq!(
+            cb.wait(Duration::from_secs(1)).as_deref(),
+            Some("code=a&state=b")
+        );
+        closed(&url);
+        // Cancel: dropping the callback closes the port while it waits.
+        let cb = receive("<p>done</p>", LIFE).unwrap();
+        let url = cb.url.replace("localhost", "127.0.0.1");
+        drop(cb);
         closed(&url);
     }
 

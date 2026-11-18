@@ -21,7 +21,9 @@ fn shown(blocks: Vec<Translation>) -> Msg {
         image: frame(4, 4),
         blocks,
         offer: None,
-        outdated: Vec::new(),
+        outdated: Box::default(),
+        failed: 0,
+        local: false,
     }))
 }
 
@@ -46,7 +48,9 @@ fn kept_lines_are_offered_without_holding_the_page() {
         image: frame(4, 4),
         blocks: vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])],
         offer: Some(Box::new(offer)),
-        outdated: Vec::new(),
+        outdated: Box::default(),
+        failed: 0,
+        local: false,
     })));
     assert!(s.image().is_some(), "the page is shown at once");
     let _ = s.update(Msg::GetHeld);
@@ -1263,7 +1267,9 @@ fn the_glossary_button_opens_its_list_and_a_pick_translates_again() {
         image: frame(4, 4),
         blocks: Vec::new(),
         offer: None,
-        outdated: Vec::new(),
+        outdated: Box::default(),
+        failed: 0,
+        local: false,
     });
     let _ = s.update(Msg::Glossary(GlossaryMsg::Pick("other".into())));
     assert!(!s.glossary.is_open());
@@ -1389,4 +1395,29 @@ fn off_a_game_screen_the_word_card_has_no_glossary() {
     assert!(!s.adding(), "no Add to glossary form off a game screen");
     let _ = s.update(Msg::AddFor("Vyrnhold".into()));
     assert!(!s.adding());
+}
+
+/// #90: parts an AI call lost leave the page shown with "N parts not
+/// translated"; Retry translates again (the parts that came back are cached).
+#[test]
+fn lost_parts_offer_retry() {
+    let mut s = session(true);
+    let _ = s.update(Msg::Done(Ok(Shown {
+        image: frame(4, 4),
+        blocks: vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])],
+        offer: None,
+        outdated: Box::default(),
+        failed: 2,
+        local: false,
+    })));
+    assert!(s.is_shown(), "the page is shown with what came back");
+    let size = Size::new(1280.0, 720.0);
+    let at = card::place(size, None, None);
+    let texts = crate::shared::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
+    assert!(
+        texts.contains("2 parts not translated") && texts.contains("Retry"),
+        "{texts}"
+    );
+    let _ = s.update(Msg::Retry);
+    assert!(!s.is_shown(), "translating again");
 }
