@@ -2,8 +2,11 @@
 //! toggles before the caption buttons) · library | rail | options bar, stage,
 //! status bar | picture panel. The editor's own canvas and option rows
 //! (`snip_toolbar`) are reused as they are: one editor, two placements.
+use iced::advanced::layout::Layout;
+use iced::advanced::widget::Tree;
+use iced::advanced::{Clipboard, Shell};
 use iced::widget::{Space, column, container, tooltip::Position};
-use iced::{Center, Element, Fill, Length};
+use iced::{Center, Element, Event, Fill, Length, Rectangle, Vector, mouse};
 
 use super::{Msg, Studio};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
@@ -17,6 +20,7 @@ use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
+use crate::shared::kit::wrap::{Hook, wrap};
 use crate::shared::kit::{chip, colour, dir, divider, keycap, scroll, thumb};
 use crate::t;
 
@@ -205,10 +209,50 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let content = container(drawn)
         .center_x((room.width - 2.0).max(shown.width))
         .center_y((room.height - 2.0).max(shown.height));
-    surface(Material::Recessed, 0.0, scroll::both(content))
+    let area = scroll::both(content)
+        .id(super::CANVAS)
+        .on_scroll(|v| Msg::Scrolled(Vector::new(v.absolute_offset().x, v.absolute_offset().y)));
+    surface(Material::Recessed, 0.0, wrap(area, CtrlWheel(s.ctrl)))
         .width(Fill)
         .height(Fill)
         .into()
+}
+
+/// Ctrl + wheel over the stage zooms round the pointer instead of scrolling
+/// (the area under it never sees that wheel).
+struct CtrlWheel(bool);
+
+/// One wheel notch in pixels (touchpads send pixels).
+const WHEEL_PX: f32 = 40.0;
+
+impl Hook<Msg> for CtrlWheel {
+    fn update(
+        &mut self,
+        content: &mut Element<'_, Msg>,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Msg>,
+        viewport: &Rectangle,
+    ) {
+        if let (true, Event::Mouse(mouse::Event::WheelScrolled { delta })) = (self.0, event)
+            && let Some(at) = cursor.position_in(layout.bounds())
+        {
+            let notches = match delta {
+                mouse::ScrollDelta::Lines { y, .. } => *y,
+                mouse::ScrollDelta::Pixels { y, .. } => *y / WHEEL_PX,
+            };
+            shell.publish(Msg::Wheel { at, notches });
+            shell.capture_event();
+            return;
+        }
+        content.as_widget_mut().update(
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
+    }
 }
 
 /// The size, the zoom, Fit, Save and Copy.

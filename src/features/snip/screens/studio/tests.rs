@@ -1,4 +1,4 @@
-use iced::{Point, Rectangle, Size};
+use iced::{Point, Rectangle, Size, Vector};
 
 use super::*;
 use crate::features::snip::annotate::{Message, Tool};
@@ -258,4 +258,49 @@ fn the_studio_matches_its_golden_images() {
             view(&s, false)
         }));
     });
+}
+
+/// The picture point under `at` for a scroll `offset` (display px from the picture's corner).
+fn under(s: &Studio, at: Point, offset: Vector) -> Vector {
+    let e = s.editor.as_ref().unwrap();
+    let (room, shown) = (s.stage(), e.size());
+    let corner = Vector::new(
+        ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
+        ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
+    );
+    (Vector::new(at.x, at.y) + offset - corner) * (1.0 / e.zoom)
+}
+
+#[test]
+fn ctrl_wheel_zooms_by_the_buttons_step_round_the_pointer() {
+    let mut s = studio_on(4000, 3000);
+    let _ = s.update(Msg::Resized(SIZE));
+    let _ = s.update(Msg::ZoomIn); // past fit: both ways scroll
+    let _ = s.update(Msg::ZoomIn);
+    let _ = s.update(Msg::ZoomIn);
+    let _ = s.update(Msg::Scrolled(Vector::new(300.0, 200.0)));
+    let (before, at) = (s.editor.as_ref().unwrap().zoom, Point::new(400.0, 250.0));
+    let point = under(&s, at, Vector::new(300.0, 200.0));
+    let Outcome::ScrollTo(to) = s.update(Msg::Wheel { at, notches: 1.0 }) else {
+        panic!("a zoom scrolls the stage");
+    };
+    let e = s.editor.as_ref().unwrap();
+    assert!(
+        (e.zoom - before * ZOOM_STEP).abs() < 1e-4,
+        "one notch = one step"
+    );
+    let after = under(&s, at, Vector::new(to.x, to.y));
+    assert!(
+        (after.x - point.x).abs() < 0.5 && (after.y - point.y).abs() < 0.5,
+        "the picture point under the pointer stays: {point:?} -> {after:?}"
+    );
+    // out again, and the range holds
+    let _ = s.update(Msg::Wheel { at, notches: -1.0 });
+    assert!((s.editor.as_ref().unwrap().zoom - before).abs() < 1e-4);
+    let _ = s.update(Msg::Wheel { at, notches: 100.0 });
+    assert!((s.editor.as_ref().unwrap().zoom - ZOOM_RANGE.end() / s.scale).abs() < 1e-4);
+    assert!(
+        matches!(s.update(Msg::Ctrl(true)), Outcome::None) && s.ctrl,
+        "Ctrl is tracked for the stage"
+    );
 }

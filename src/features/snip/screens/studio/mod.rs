@@ -11,7 +11,8 @@ mod view;
 use std::path::PathBuf;
 
 use iced::widget::image;
-use iced::{Point, Size};
+use iced::widget::scrollable::AbsoluteOffset;
+use iced::{Point, Size, Vector};
 
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
 use crate::shared::config::StudioConfig;
@@ -38,6 +39,8 @@ const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
 const ZOOM_STEP: f32 = 1.25;
 const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
+/// The canvas's scroll area (`operation::scroll_to`).
+pub const CANVAS: &str = "studio-canvas";
 
 /// What the Studio opens.
 pub enum Picture {
@@ -63,6 +66,16 @@ pub enum Msg {
     Both,
     ZoomIn,
     ZoomOut,
+    /// Ctrl+wheel over the stage: `notches` steps (up = in) round the pointer
+    /// `at` (in the stage).
+    Wheel {
+        at: Point,
+        notches: f32,
+    },
+    /// The stage's scroll offset (kept to zoom round the pointer) and whether
+    /// Ctrl is down (the stage then zooms instead of scrolling).
+    Scrolled(Vector),
+    Ctrl(bool),
     /// Ctrl+0: fit the stage; Ctrl+1: 100 %.
     Fit,
     Actual,
@@ -103,6 +116,8 @@ pub enum Outcome {
     Pin(Crop),
     /// The panels changed: remember them.
     Panels(StudioConfig),
+    /// Scroll the stage there (a zoom round the pointer).
+    ScrollTo(AbsoluteOffset),
 }
 
 pub struct Studio {
@@ -118,6 +133,9 @@ pub struct Studio {
     asking: Option<After>,
     pub(super) recent: Vec<(PathBuf, image::Handle)>,
     pub(super) hovered: bool,
+    /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
+    offset: Vector,
+    pub(super) ctrl: bool,
 }
 
 impl Studio {
@@ -133,6 +151,8 @@ impl Studio {
             asking: None,
             recent: Vec::new(),
             hovered: false,
+            offset: Vector::ZERO,
+            ctrl: false,
         }
     }
 
@@ -248,15 +268,25 @@ impl Studio {
                 let Some(e) = &self.editor else {
                     return Outcome::None;
                 };
-                let actual = 1.0 / self.scale;
                 let zoom = match msg {
                     Msg::ZoomIn => e.zoom * ZOOM_STEP,
                     Msg::ZoomOut => e.zoom / ZOOM_STEP,
-                    _ => actual,
+                    _ => 1.0 / self.scale,
                 };
-                let (lo, hi) = (ZOOM_RANGE.start() * actual, ZOOM_RANGE.end() * actual);
-                self.zoom = Some(zoom.clamp(lo, hi));
-                self.fit();
+                self.zoom_to(zoom, None)
+            }
+            Msg::Wheel { at, notches } => {
+                let Some(e) = &self.editor else {
+                    return Outcome::None;
+                };
+                self.zoom_to(e.zoom * ZOOM_STEP.powf(notches), Some(at))
+            }
+            Msg::Scrolled(offset) => {
+                self.offset = offset;
+                Outcome::None
+            }
+            Msg::Ctrl(down) => {
+                self.ctrl = down;
                 Outcome::None
             }
             Msg::Fit => {
@@ -335,6 +365,39 @@ impl Studio {
         if let Some(e) = &mut self.editor {
             e.zoom = zoom.unwrap_or_else(|| fit_zoom(e.doc.view().size(), stage, scale));
         }
+    }
+
+    /// The one zoom: `zoom` (display px per image px) kept in the range; with
+    /// `round` (a point in the stage) the picture point under it stays there.
+    fn zoom_to(&mut self, zoom: f32, round: Option<Point>) -> Outcome {
+        let actual = 1.0 / self.scale;
+        let (lo, hi) = (ZOOM_RANGE.start() * actual, ZOOM_RANGE.end() * actual);
+        let Some(old) = self.editor.as_ref().map(|e| (e.zoom, e.size())) else {
+            return Outcome::None;
+        };
+        self.zoom = Some(zoom.clamp(lo, hi));
+        self.fit();
+        let (Some(at), Some(e)) = (round, &self.editor) else {
+            return Outcome::None;
+        };
+        // the picture's corner in the scrolled content: centred when it is smaller
+        let room = self.stage();
+        let corner = |shown: Size| {
+            Vector::new(
+                ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
+                ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
+            )
+        };
+        let ratio = e.zoom / old.0;
+        let offset = (Vector::new(at.x, at.y) + self.offset - corner(old.1)) * ratio
+            + corner(e.size())
+            - Vector::new(at.x, at.y);
+        let offset = Vector::new(offset.x.max(0.0), offset.y.max(0.0));
+        self.offset = offset;
+        Outcome::ScrollTo(AbsoluteOffset {
+            x: offset.x,
+            y: offset.y,
+        })
     }
 
     /// The zoom as a percentage of 100 %.

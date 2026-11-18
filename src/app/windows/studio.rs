@@ -156,6 +156,7 @@ impl Windows {
             Outcome::Save(crop) => studio_save(crop, false),
             Outcome::SaveThen(crop) => studio_save(crop, true),
             Outcome::Pin(crop) => self.pin(crop, None, 1.0),
+            Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
@@ -209,6 +210,9 @@ pub(super) fn studio_events() -> iced::Subscription<Msg> {
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
             iced::Event::Window(window::Event::FilesHoveredLeft) => studio::Msg::Hovered(false),
             iced::Event::Window(window::Event::FileDropped(path)) => studio::Msg::Dropped(path),
+            iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+                studio::Msg::Ctrl(m.command())
+            }
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
                 physical_key,
