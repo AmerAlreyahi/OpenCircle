@@ -105,6 +105,9 @@ fn floating_as(
         },
         ..settings
     };
+    // Windows: per-pixel alpha through DirectComposition, still out of captures (`dcomp`)
+    #[cfg(windows)]
+    super::dcomp::prepare();
     let (id, open) = open(settings);
     FLOATING.lock().unwrap().push((id, radius, how));
     let open = open.then(move |id| {
@@ -419,6 +422,12 @@ fn forget_floating(id: window::Id) {
 /// A closed window: no longer floating, its handle dropped.
 pub fn forget(id: window::Id) {
     forget_floating(id);
+    #[cfg(windows)]
+    if let Some(raw) =
+        (HANDLES.lock().unwrap().iter()).find_map(|(w, raw)| (*w == id).then_some(*raw))
+    {
+        super::dcomp::forget(raw);
+    }
     HANDLES.lock().unwrap().retain(|(w, _)| *w != id);
 }
 

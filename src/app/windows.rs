@@ -854,12 +854,6 @@ impl Windows {
         at: Option<platform::monitor::Place>,
         ms: u64,
     ) -> Task<Msg> {
-        let tone = tone.into();
-        if platform::sys::test_hook(platform::sys::CRISP_PILL).is_some()
-            && crisp_toast(text, tone, at, ms)
-        {
-            return Task::none();
-        }
         let size = toast_size(text);
         let (id, open) = floating(
             window::Settings {
@@ -887,7 +881,7 @@ impl Windows {
                 .discard(),
             None => open.discard(),
         };
-        self.toasts.push((id, text.to_string(), tone));
+        self.toasts.push((id, text.to_string(), tone.into()));
         // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
@@ -2131,63 +2125,6 @@ fn pill_place(
         px: (px.0 as u32, px.1 as u32),
         scale: s,
     }
-}
-
-/// W72 prototype: the toast pill drawn off screen with its alpha and shown in
-/// a per-pixel-alpha window (`alpha_window::show_top`) at `at` or centred on
-/// the main screen, gone after `ms`. `false` where there is none (not Windows).
-fn crisp_toast(text: &str, tone: Tone, at: Option<platform::monitor::Place>, ms: u64) -> bool {
-    let size = toast_size(text);
-    let place = at.or_else(|| {
-        let list = platform::capture::monitor_list();
-        let m = list.iter().find(|m| m.primary).or(list.first())?;
-        let px = (
-            (size.width * m.scale).ceil() as u32,
-            (size.height * m.scale).ceil() as u32,
-        );
-        Some(platform::monitor::Place {
-            origin: (
-                m.rect.0 + (m.rect.2 as i32 - px.0 as i32) / 2,
-                m.rect.1 + (m.rect.3 as i32 - px.1 as i32) / 2,
-            ),
-            px,
-            scale: m.scale,
-        })
-    });
-    let Some(place) = place else { return false };
-    let (w, h) = (
-        (size.width * place.scale).ceil() as u32,
-        (size.height * place.scale).ceil() as u32,
-    );
-    crate::shared::kit::text::load();
-    let mut renderer = iced::Renderer::new(crate::shared::kit::text::ui_font(), iced::Pixels(16.0));
-    let mut px = spoken(|| {
-        crate::app::offscreen::paint(
-            toast::view::<Msg>(text, tone, toast::RADIUS),
-            &mut renderer,
-            (w, h),
-            place.scale,
-            iced::Color::TRANSPARENT,
-        )
-    });
-    // premultiplied -> straight alpha (what `show_top` takes)
-    for p in px.as_chunks_mut::<4>().0 {
-        let a = u32::from(p[3]);
-        if a > 0 && a < 255 {
-            for c in &mut p[..3] {
-                *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
-            }
-        }
-    }
-    let at = (place.origin.0, place.origin.1, w, h);
-    let Some(window) = platform::alpha_window::show_top(at, vec![([0, 0, w, h], px)]) else {
-        return false;
-    };
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(ms));
-        drop(window);
-    });
-    true
 }
 
 /// A toast's window size (logical px): the pill's (`screens::toast::size`).

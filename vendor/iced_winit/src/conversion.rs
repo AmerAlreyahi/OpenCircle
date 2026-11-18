@@ -99,6 +99,17 @@ pub fn window_attributes(
         attributes = attributes
             .with_drag_and_drop(settings.platform_specific.drag_and_drop);
 
+        // OpenCircle patch: a floating widget (transparent, off the taskbar)
+        // has no redirection bitmap while the app draws it through
+        // DirectComposition (`NO_REDIRECTION`): per-pixel alpha, and still
+        // out of screen captures.
+        attributes = attributes.with_no_redirection_bitmap(
+            settings.transparent
+                && settings.platform_specific.skip_taskbar
+                && crate::NO_REDIRECTION
+                    .load(std::sync::atomic::Ordering::Relaxed),
+        );
+
         attributes = attributes
             .with_skip_taskbar(settings.platform_specific.skip_taskbar);
 

@@ -95,6 +95,9 @@ xcb ={ version = "1.7", features = ["randr", "xfixes", "shape", "shm", "composit
 # iced's CPU renderer (vendored): its `WINDOW_SIZE` hook (no frame of a stale size
 # presented over a window we resized ourselves, W61; no new crate).
 iced_tiny_skia = { version = "0.14", default-features = false }
+# iced's window shell (vendored): `NO_REDIRECTION`, floating widgets drawn through DirectComposition
+# (`shared/platform/dcomp.rs`; no new crate).
+iced_winit = { version = "0.14", default-features = false }
 # Song search's audio (src/features/song): WASAPI loopback / microphone, only while listening.
 cpal = { version = "0.18", default-features = false }
 widestring = "1"
@@ -102,7 +105,7 @@ xcap = "0.9"
 # Media_Ocr + Graphics_Imaging + Storage_Streams + Globalization: Windows OCR (src/features/text_reading/system.rs).
 # ApplicationModel_DataTransfer + Storage (+ windows-collections, already in the tree via windows):
 # the share sheet (src/features/circle/actions/share.rs).
-windows = { version = "0.62", features = ["ApplicationModel_DataTransfer", "Storage", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "System_UserProfile", "Foundation", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics", "Win32_System_WinRT_Graphics_Capture", "Win32_System_ApplicationInstallationAndServicing", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Performance", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["ApplicationModel_DataTransfer", "Storage", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "System_UserProfile", "Foundation", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics", "Win32_System_WinRT_Graphics_Capture", "Win32_System_ApplicationInstallationAndServicing", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Performance", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 windows-collections = "0.3"
 
 [profile.release]
@@ -256,3 +259,7 @@ cosmic-text = { path = "vendor/cosmic-text" }
 # src/text.rs): the selection's highlight compared grapheme counts with byte offsets and assumed
 # left-to-right glyphs, so Arabic and mixed lines were highlighted wrongly or not at all.
 iced_selection = { path = "vendor/iced_selection" }
+# softbuffer 0.4.8 (iced's CPU renderer's window surface) with one addition ("OpenCircle patch" in
+# src/lib.rs + src/backends/wayland/buffer.rs): `set_alpha`, so a Wayland window can be ARGB, not XRGB
+# (per-pixel alpha: floating widgets with smooth rounded corners). Drop once upstream has it.
+softbuffer = { path = "vendor/softbuffer" }

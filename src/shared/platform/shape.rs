@@ -19,7 +19,21 @@ pub fn available() -> bool {
 /// The corner radius a floating window's content should draw: `r` where the window
 /// is cut to match, else 0 (square: a rounded corner would leave stray pixels).
 pub fn radius(r: f32) -> f32 {
-    if available() { r } else { 0.0 }
+    if available() || smooth() { r } else { 0.0 }
+}
+
+/// Whether a floating window has real per-pixel alpha here, so its rounded corners are
+/// anti-aliased by the renderer and nothing is cut: every Wayland compositor (the
+/// window is ARGB: vendored softbuffer's `set_alpha`), X11 with a compositor. Windows
+/// and X11 without one cut the window (`available`): a 1-bit edge. Asked once.
+// ponytail: a compositor that starts or stops while we run is not noticed (restart).
+pub fn smooth() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        !available() || x11::compositing()
+    }
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 /// The corner radius a `w` x `h` window can take: `max`, but never more than half
@@ -81,7 +95,7 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(windows, target_os = "linux"))]
 fn has_panel(id: u64) -> bool {
     PANELS.with(|p| p.borrow().iter().any(|(i, ..)| *i == id))
 }
@@ -967,6 +981,15 @@ mod win {
     }
 
     fn cut(hwnd: HWND, max_radius: f32) -> Result<(), String> {
+        // per-pixel alpha (DirectComposition, `super::super::dcomp`): the renderer draws the
+        // rounded corners and nothing is cut, except a panel's edge
+        if crate::shared::platform::dcomp::is_dcomp(hwnd.0 as isize)
+            && !super::has_panel(hwnd.0 as u64)
+        {
+            // SAFETY: removing the region of a live window of this process.
+            unsafe { SetWindowRgn(hwnd, None, true) };
+            return Ok(());
+        }
         let mut rect = RECT::default();
         // SAFETY: `hwnd` is a live window of this process (the UI's raw handle). The
         // region is handed to the system, which owns it after a successful call.
@@ -1060,6 +1083,8 @@ mod x11 {
                 false => (0, 0, w.max(was.width().into()), h.max(was.height().into())),
             };
             let r = corner(max_radius, cw as f32, ch as f32).round() as u32;
+            // (alpha instead of a cut: `super::smooth`, no panel)
+            let smooth = compositing() && !super::has_panel(id);
             let rects: Vec<x::Rectangle> = round_rect(cw, ch, r)
                 .into_iter()
                 .map(|(x, y, w, h)| (x + px, y + py, w, h))
@@ -1070,15 +1095,17 @@ mod x11 {
                     height: h as u16,
                 })
                 .collect();
-            conn.send_request(&shape::Rectangles {
-                operation: shape::So::Set,
-                destination_kind: shape::Sk::Bounding,
-                ordering: x::ClipOrdering::Unsorted,
-                destination_window: window,
-                x_offset: 0,
-                y_offset: 0,
-                rectangles: &rects,
-            });
+            if !smooth {
+                conn.send_request(&shape::Rectangles {
+                    operation: shape::So::Set,
+                    destination_kind: shape::Sk::Bounding,
+                    ordering: x::ClipOrdering::Unsorted,
+                    destination_window: window,
+                    x_offset: 0,
+                    y_offset: 0,
+                    rectangles: &rects,
+                });
+            }
         }
         conn.send_and_check_request(&x::ConfigureWindow {
             window,
@@ -1092,7 +1119,34 @@ mod x11 {
         .map_err(|e| os(&e))
     }
 
+    /// A compositing manager owns the screen (EWMH `_NET_WM_CM_S<n>`): ARGB windows blend.
+    pub fn compositing() -> bool {
+        static CM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *CM.get_or_init(probe)
+    }
+
+    fn probe() -> bool {
+        let Ok((conn, n)) = xcb::Connection::connect(None) else {
+            return false;
+        };
+        let name = format!("_NET_WM_CM_S{n}");
+        let Ok(atom) = conn.wait_for_reply(conn.send_request(&x::InternAtom {
+            only_if_exists: true,
+            name: name.as_bytes(),
+        })) else {
+            return false;
+        };
+        conn.wait_for_reply(conn.send_request(&x::GetSelectionOwner {
+            selection: atom.atom(),
+        }))
+        .is_ok_and(|o| xcb::Xid::resource_id(&o.owner()) != 0)
+    }
+
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
+        // alpha: no cut, the renderer draws the rounded corners (a panel still needs its cut)
+        if compositing() && !super::has_panel(window.into()) {
+            return clear(window);
+        }
         rects(window, |w, h| {
             let (px, py, w, h) = super::shown(window.into(), w, h);
             let r = corner(max_radius, w as f32, h as f32).round() as u32;
@@ -1498,6 +1552,20 @@ mod tests {
     }
 
     #[test]
+    fn a_window_with_alpha_or_a_cut_draws_rounded_corners() {
+        // (W74) Wayland has alpha, Windows and X11 cut: every platform but a compositor-less
+        // X11 draws the corner; there `radius` is 0 only when neither holds.
+        assert_eq!(
+            radius(12.0),
+            if available() || smooth() { 12.0 } else { 0.0 }
+        );
+        assert!(
+            !cfg!(target_os = "linux") || available() || smooth(),
+            "Wayland is always smooth"
+        );
+    }
+
+    #[test]
     fn corner_is_capped_by_the_shorter_side() {
         assert_eq!(
             corner(999.0, 300.0, 36.0),
@@ -1563,6 +1631,11 @@ mod tests {
         .unwrap();
         x11::apply(window.resource_id(), 999.0).unwrap();
         let got = x11::bounding(window.resource_id());
+        if x11::compositing() {
+            // (W74) a compositor blends the window's alpha: nothing is cut
+            assert_eq!(area(&got), 120 * 40, "{got:?}");
+            return;
+        }
         let want = round_rect(120, 40, 20);
         assert_eq!(area(&got), area(&want), "{got:?}");
         // A corner pixel is outside every band, the centre inside one.

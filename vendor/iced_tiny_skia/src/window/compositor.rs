@@ -25,6 +25,21 @@ pub static WINDOW_SIZE: std::sync::OnceLock<
     fn(&dyn raw_window_handle::HasWindowHandle) -> Option<(u32, u32)>,
 > = std::sync::OnceLock::new();
 
+/// OpenCircle patch: a window drawn with per-pixel alpha that the system's
+/// own present can't show (Windows: a floating widget through DirectComposition):
+/// gets the frame instead of softbuffer. Arguments: the window's handle, the whole
+/// picture (premultiplied BGRA, `width` x `height`), the redrawn rectangles
+/// (`None`: all). `true`: shown, softbuffer presents nothing.
+pub use softbuffer::Rect as DamageRect;
+pub type AlphaPresent = fn(
+    raw_window_handle::RawWindowHandle,
+    &[u32],
+    (u32, u32),
+    Option<&[DamageRect]>,
+) -> bool;
+pub static ALPHA_PRESENT: std::sync::OnceLock<AlphaPresent> =
+    std::sync::OnceLock::new();
+
 pub struct Compositor {
     context: softbuffer::Context<Box<dyn compositor::Display>>,
     settings: Settings,
@@ -182,6 +197,10 @@ pub fn present(
         return Ok(());
     }
 
+    // OpenCircle patch: a window with a see-through background (a floating
+    // widget) gets per-pixel alpha on Wayland (softbuffer's ARGB format).
+    let raw = window.window_handle().ok().map(|h| h.as_raw());
+    softbuffer::set_alpha(background_color.a < 1.0);
     let mut buffer = surface
         .window
         .buffer_mut()
@@ -251,6 +270,18 @@ pub fn present(
     }
 
     on_pre_present();
+    if background_color.a < 1.0
+        && let Some(show) = ALPHA_PRESENT.get()
+        && let Some(raw) = raw
+        && show(
+            raw,
+            &buffer,
+            (physical_size.width, physical_size.height),
+            shown.as_deref(),
+        )
+    {
+        return Ok(());
+    }
     match shown {
         Some(rects) => buffer.present_with_damage(&rects),
         None => buffer.present(),

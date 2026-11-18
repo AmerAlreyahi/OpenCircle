@@ -71,6 +71,11 @@ use std::sync::Arc;
 static NEXT_ACTIVATION_TOKEN: std::sync::Mutex<Option<String>> =
     std::sync::Mutex::new(None);
 
+/// OpenCircle patch: windows made from now on that are transparent and off the
+/// taskbar get no redirection bitmap (Windows; see `conversion::window_attributes`).
+pub static NO_REDIRECTION: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// OpenCircle patch: the next window opened is activated with `token`.
 pub fn activate_next_window(token: String) {
     *NEXT_ACTIVATION_TOKEN
