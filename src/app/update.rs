@@ -23,7 +23,7 @@ use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor;
 use crate::{
     app::windows,
-    features::{circle::screens::overlay, snip::screens::pick, translate::screens::pill},
+    features::{circle::screens::overlay, snip::screens::pick},
 };
 
 use super::capture::{TEST_SHOT, save_test_shot};
@@ -98,12 +98,6 @@ impl App {
             }
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
-            Message::Peek(down) => {
-                if let Some((_, session)) = &mut self.o.translate {
-                    let _ = session.update(pill::Msg::Peek(down));
-                }
-                Task::none()
-            }
             // Wayland: a long capture going on with its overlay gone ends by its
             // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
             Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
@@ -322,6 +316,11 @@ impl App {
             Message::ChatSettle(moves) => self.chat_settle(moves),
             Message::ChatHandedOver => self.close(),
             Message::ChatDocked(moves, k) => self.chat_docked(moves, k, &monitor::places()),
+            Message::ChatResizedOn(id, p) => self.chat_resized(id, p),
+            Message::ChatResizeEnd => {
+                self.chat_resize = None;
+                Task::none()
+            }
             Message::ChatFrame(now) => {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);
@@ -860,6 +859,8 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::ChatSettle(_)
             | Message::ChatHandedOver
             | Message::ChatDocked(..)
+            | Message::ChatResizedOn(..)
+            | Message::ChatResizeEnd
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)

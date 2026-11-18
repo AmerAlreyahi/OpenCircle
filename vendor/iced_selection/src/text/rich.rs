@@ -294,6 +294,26 @@ impl<Link> State<Link> {
         ))
     }
 
+    /// OpenCircle patch (`group`): the selection's end for a drag end at
+    /// `point`: above the glyphs = the text's start, below = its end (its
+    /// logical ends, whatever its direction), else the grapheme there.
+    fn end_at(&self, point: Point, text: core::Rectangle) -> SelectionEnd {
+        if point.y < text.y {
+            return SelectionEnd::new(0, 0);
+        }
+        let lines = &self.paragraph.buffer().lines;
+        if point.y > text.y + text.height || lines.is_empty() {
+            let line = lines.len().saturating_sub(1);
+            let index = lines.get(line).map_or(0, |l| {
+                iced_widget::text_input::Value::new(l.text()).len()
+            });
+            return SelectionEnd::new(line, index);
+        }
+        let (line, index) =
+            self.grapheme_line_and_index(point, text).unwrap_or((0, 0));
+        SelectionEnd::new(line, index)
+    }
+
     fn selection(&self) -> Vec<core::Rectangle> {
         let Selection { start, end, .. } = self.selection;
         // OpenCircle patch: the shared, bidi-aware `selected_spans` (see text.rs).
@@ -529,9 +549,11 @@ where
             state.paragraph.min_bounds(),
         );
 
+        let group = crate::group::anchor(); // OpenCircle patch
         if viewport.intersection(&bounds).is_none()
             && state.selection.is_empty()
             && state.dragging.is_none()
+            && group.is_none()
         {
             return;
         }
@@ -584,6 +606,9 @@ where
                                 state.selection.change_selection(new_end);
                             } else {
                                 state.selection.select_range(new_end, new_end);
+                                // OpenCircle patch: the drag may go on into
+                                // the other texts of its group
+                                let _ = crate::group::start(position);
                             }
 
                             state.dragging = Some(Dragging::Grapheme);
@@ -639,7 +664,14 @@ where
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                if let Some(position) = cursor.land().position()
+                // OpenCircle patch: a drag in the group: this text's part of it
+                if let Some(anchor) = group
+                    && let Some(position) = cursor.land().position()
+                {
+                    let (from, to) =
+                        (state.end_at(anchor, text), state.end_at(position, text));
+                    state.selection.select_range(from, to);
+                } else if let Some(position) = cursor.land().position()
                     && let Some(dragging) = state.dragging
                 {
                     let (line, index) = state
@@ -675,10 +707,11 @@ where
                         if state.keyboard_modifiers.command()
                             && !state.selection.is_empty() =>
                     {
-                        clipboard.write(
-                            clipboard::Kind::Standard,
-                            state.selection.text(&state.paragraph),
-                        );
+                        // OpenCircle patch: in a group, one text for all
+                        let copied = state.selection.text(&state.paragraph);
+                        if let Err(copied) = crate::group::copy(copied) {
+                            clipboard.write(clipboard::Kind::Standard, copied);
+                        }
 
                         shell.capture_event();
                     }

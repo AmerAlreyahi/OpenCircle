@@ -242,17 +242,7 @@ impl App {
             .filter(|w| w.id == window)
             .and_then(|w| w.placed)
         {
-            #[cfg(not(test))]
-            let pointer = crate::shared::platform::capture::pointer();
-            #[cfg(test)]
-            let pointer = None::<(i32, i32)>; // (not the test machine's)
-            let desk = pointer.map_or_else(
-                || {
-                    let (x, y) = placed.origin;
-                    Point::new(x as f32 + p.x * placed.scale, y as f32 + p.y * placed.scale)
-                },
-                |(x, y)| Point::new(x as f32, y as f32),
-            );
+            let desk = crate::features::ask_ai::app::ai_chat::desk_pointer(placed, p);
             return (self.o.view)
                 .to_screen(crate::app::monitors::from_desktop(self.o.place(), desk));
         }

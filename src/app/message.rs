@@ -73,6 +73,10 @@ pub(crate) enum Message {
     ChatHandedOver,
     /// The same with its window's scale: dock on the monitor it is on.
     ChatDocked(u32, f32),
+    /// The overlay closed: the pinned chat's inner edge dragged (in its
+    /// window's px), and let go (`App::chat_resized`).
+    ChatResizedOn(iced::window::Id, iced::Point),
+    ChatResizeEnd,
     ChatFrame(std::time::Instant),
     /// Run an action on the selection (action bar button or its key).
     Run(&'static Action),
@@ -111,8 +115,6 @@ pub(crate) enum Message {
     OpenEntity(crate::features::circle::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, pill::Msg),
-    /// Alt went down / up (peek at the original under a translation).
-    Peek(bool),
     Live(live_layer::Msg),
     /// OCR for a tap or a text drag read these lines.
     Tapped(WordRead, Result<Vec<TextBlock>, String>),

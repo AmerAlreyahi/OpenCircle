@@ -202,7 +202,6 @@ word outside the terms. Matching ignores case and accents.
 Press `Alt+Shift+T`. The whole screen is translated at once and shown in
 place. `Esc` closes it.
 
-- **Hold `Alt`** to peek at the original; release to see the translation again.
 - **Click a translated block** to open a card with the meaning, the
   translation, and a one-line explanation in the context of the scene. Press
   `A` there to continue as an AI chat.

@@ -36,11 +36,11 @@ use crate::shared::app_language::S;
 use crate::shared::config::{self, Config, Theme};
 use crate::shared::picture::Crop;
 #[cfg(test)]
-pub use crate::shared::platform::windows::CLEARED;
+pub use crate::shared::platform::windows::{ALPHA_NOW, CLEARED};
 pub use crate::shared::platform::windows::{
     POPUP, TOAST, activate_next, appear, clear_now, clear_theme, close, cut, fade, floating,
     floating_in_captures, foreground, forget, hide_from_capture, hole, is_floating, keep_above,
-    no_backdrop, opacity, reshape, screen, setup_window, show, uncut,
+    no_backdrop, opacity, opacity_now, reshape, screen, setup_window, show, uncut,
 };
 use crate::t;
 

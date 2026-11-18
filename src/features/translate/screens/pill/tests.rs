@@ -88,7 +88,6 @@ fn session(models: bool) -> Session {
         } else {
             Phase::Consent(None)
         },
-        peek: false,
         card: None,
         cache: Arc::new(Cache::new(8)),
         work: None,
@@ -317,7 +316,7 @@ fn the_prompts_are_short_cards_on_small_screens() {
 }
 
 #[test]
-fn translating_then_shown_then_peek() {
+fn translating_then_shown() {
     let mut s = session(true);
     assert!(s.full());
     assert!(matches!(&s.phase, Phase::Translating));
@@ -325,10 +324,6 @@ fn translating_then_shown_then_peek() {
     let _ = s.update(shown(vec![block("Quit", "خروج", [10.0, 10.0, 50.0, 20.0])]));
     assert!(matches!(&s.phase, Phase::Shown(_)));
     let translated = s.image().cloned().unwrap();
-    let _ = s.update(Msg::Peek(true));
-    assert!(s.image().is_none(), "Alt: the original");
-    let _ = s.update(Msg::Peek(false));
-    assert_eq!(s.image(), Some(&translated));
     // a late result changes nothing
     let _ = s.update(Msg::Done(Err(problem("late".into(), false))));
     assert_eq!(s.image(), Some(&translated));
@@ -349,9 +344,6 @@ fn parts_show_while_translating() {
         "the frame stays; the part goes over it"
     );
     assert_eq!(s.part(), Some((&part.image, [1, 1, 3, 3])));
-    let _ = s.update(Msg::Peek(true));
-    assert!(s.part().is_none(), "Alt: the original");
-    let _ = s.update(Msg::Peek(false));
     let _ = s.update(Msg::Done(Err(problem("helper stopped".into(), false))));
     assert!(s.part().is_none(), "failed: the original");
     let _ = s.update(Msg::Partial(part));
@@ -1180,7 +1172,7 @@ fn the_word_card_never_covers_the_pill() {
 }
 
 /// Snip takes what the translation shows: the translated page, or the
-/// original with the part done so far; Alt (peek) doesn't change it.
+/// original with the part done so far.
 #[test]
 fn seen_is_the_frame_as_the_translation_shows_it() {
     let mut s = session(true);
@@ -1193,7 +1185,6 @@ fn seen_is_the_frame_as_the_translation_shows_it() {
         image: image::Handle::from_rgba(1, 1, vec![200u8; 4]),
         area: [1, 1, 2, 2],
     });
-    let _ = s.update(Msg::Peek(true));
     let Some(image::Handle::Rgba { pixels, .. }) = s.seen() else {
         panic!("the partial page")
     };

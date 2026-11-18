@@ -215,16 +215,17 @@ pub fn no_caption(handle: RawWindowHandle) {
     let _ = handle;
 }
 
-/// Windows: the window `fadeable` gave, clear at once, from the calling thread,
-/// its fade (if any) stopped: nothing it draws shows until its opacity is set
-/// again. The overlay's close: its last frames (the empty view, the restore from
-/// full-screen) are drawn before it hides, and none of them may show. Nothing
+/// Windows: the window `fadeable` gave at `alpha` at once, from the calling thread,
+/// its fade (if any) stopped. 0 = clear: nothing it draws shows until its opacity
+/// is set again (the overlay's close: its last frames, the empty view and the
+/// restore from full-screen, are drawn before it hides, and none of them may
+/// show); back up, it shows the picture it last drew, nothing redrawn. Nothing
 /// where windows can't fade.
-pub fn clear_now(window: isize) {
+pub fn opacity_now(window: isize, alpha: f32) {
     #[cfg(windows)]
-    win::clear_now(window);
+    win::opacity_now(window, alpha);
     #[cfg(not(windows))]
-    let _ = window;
+    let _ = (window, alpha);
 }
 
 /// Windows: the window behind `handle` never gets a taskbar button: a tool
@@ -530,11 +531,11 @@ mod win {
         }
     }
 
-    pub fn clear_now(hwnd: isize) {
+    pub fn opacity_now(hwnd: isize, alpha: f32) {
         // under the lock: no fade step lands after it (`fade`)
         let mut latest = LATEST.lock().unwrap();
         latest.retain(|(w, _)| *w != hwnd);
-        if let Err(e) = opacity(hwnd, 0.0) {
+        if let Err(e) = opacity(hwnd, alpha) {
             crate::log!("[opencircle] window clear: {e}");
         }
     }
@@ -1031,7 +1032,7 @@ mod tests {
             crate::shared::kit::motion::Shown::opening(crate::shared::kit::motion::WIDGET, now),
             0.0,
         );
-        clear_now(raw);
+        opacity_now(raw, 0.0);
         fade_in(); // its thread, late
         let mut alpha = 255u8;
         // SAFETY: the test's own window, destroyed at the end.

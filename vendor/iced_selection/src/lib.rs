@@ -4,6 +4,7 @@
 //! [`Paragraph`]: https://docs.iced.rs/iced_graphics/text/paragraph/struct.Paragraph.html
 
 mod click;
+pub mod group;
 #[cfg(feature = "markdown")]
 pub mod markdown;
 pub mod selection;

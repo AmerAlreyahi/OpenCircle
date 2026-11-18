@@ -378,9 +378,19 @@ static HANDLES: Mutex<Vec<(window::Id, isize)>> = Mutex::new(Vec::new());
 pub fn clear_now(id: window::Id) {
     #[cfg(test)]
     CLEARED.with(|c| c.borrow_mut().push(id));
+    opacity_now(id, 0.0);
+}
+
+/// The window `id` at `alpha` NOW, on the UI thread (`super::shape::opacity_now`):
+/// it hides or comes back in the same frame, with the picture it last drew (no
+/// blank first frame, as a hidden window's show has). Nothing where windows
+/// can't fade.
+pub fn opacity_now(id: window::Id, alpha: f32) {
+    #[cfg(test)]
+    ALPHA_NOW.with(|c| c.borrow_mut().push((id, alpha)));
     let raw = (HANDLES.lock().unwrap().iter()).find_map(|(w, raw)| (*w == id).then_some(*raw));
     if let Some(raw) = raw {
-        super::shape::clear_now(raw);
+        super::shape::opacity_now(raw, alpha);
     }
 }
 
@@ -388,6 +398,8 @@ pub fn clear_now(id: window::Id) {
 thread_local! {
     /// The windows `clear_now` was called on (this test's thread).
     pub static CLEARED: std::cell::RefCell<Vec<window::Id>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// `opacity_now`'s calls (this test's thread).
+    pub static ALPHA_NOW: std::cell::RefCell<Vec<(window::Id, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Floating windows and their corner radius (see `floating`).

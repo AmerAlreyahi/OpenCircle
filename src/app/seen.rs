@@ -95,6 +95,16 @@ impl App {
             let card = panel.view(at, size, self.o.chat_hover);
             layers.push(card.map(move |msg| Message::AiChat(id, msg)));
             parts.push(at);
+        } else if let Some(chat) = (self.chat.as_ref())
+            .filter(|_| self.o.chat_fixed.is_none() && self.chat_window() == window)
+        {
+            // the pinned chat where the overlay docked it (one it found pinned is in the grab
+            // already, where it was): Snip's picture keeps it while its window is away
+            let id = chat.id;
+            let at = to_screen(self.chat_rect());
+            let card = chat.panel.view(at, size, self.o.chat_hover);
+            layers.push(card.map(move |msg| Message::AiChat(id, msg)));
+            parts.push(at);
         }
         if layers.is_empty() {
             return None;
@@ -174,6 +184,64 @@ mod tests {
             }
         }
         themes::set(&SAPPHIRE);
+    }
+
+    /// W53 (owner, 2026-11-18: the chat flashed at Snip and at Snip's Copy): a chat pinned in
+    /// this overlay (docked by it, so not in the grab) is in Snip's picture where it was; its
+    /// window goes away under Snip and comes back before the overlay goes, never hidden and
+    /// shown again where windows fade (Windows: clear and back, no blank first frame).
+    #[test]
+    fn a_pinned_chat_stays_on_screen_through_snip() {
+        let mut app = open_app(1280, 800, 1.0);
+        app.can_hide = true; // its own window, as on Windows and X11
+        crate::app::tests::drag(
+            &mut app,
+            Point::new(50.0, 50.0),
+            Point::new(150.0, 120.0),
+            false,
+        );
+        let crop = app.crop().unwrap();
+        drop(app.open_chat(crop, None));
+        let id = app.o.ai_chat.as_ref().unwrap().0;
+        let _ = app.update(Message::AiChat(
+            id,
+            crate::features::ask_ai::screens::ai_chat::Msg::Pin,
+        ));
+        assert!(
+            app.chat.is_some() && app.chat_win.is_some(),
+            "pinned, in its window"
+        );
+        let card = app.chat_rect();
+        let before = pixels(&app.o.frame);
+        let _ = app.snip_here(None);
+        let after = pixels(&app.o.frame);
+        assert!(
+            differing(&before, &after, 1280, &[card], true) > 100,
+            "the chat in Snip's picture"
+        );
+        crate::app::windows::ALPHA_NOW.with(|c| c.borrow_mut().clear());
+        let _ = app.sync_chat_window();
+        assert!(
+            app.chat_win.as_ref().unwrap().hidden,
+            "its window away under Snip"
+        );
+        let _ = app.update(Message::Escape); // Snip ends, the overlay closes
+        assert!(app.o.is_none(), "closed");
+        assert!(
+            !app.chat_win.as_ref().unwrap().hidden,
+            "back with the overlay's close"
+        );
+        let win = app.chat_win.as_ref().unwrap().id;
+        let now: Vec<_> = crate::app::windows::ALPHA_NOW
+            .with(|c| std::mem::take(&mut *c.borrow_mut()))
+            .into_iter()
+            .filter(|(w, _)| *w == win)
+            .collect();
+        let want = match crate::shared::platform::shape::can_fade() {
+            true => vec![(win, 0.0), (win, 1.0)],
+            false => Vec::new(),
+        };
+        assert_eq!(now, want);
     }
 
     /// The entry every Snip start goes through (`snip_here`) starts from the

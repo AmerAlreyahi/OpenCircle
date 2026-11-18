@@ -54,6 +54,7 @@ pub(crate) struct ChatWindow {
     pub placed: Option<Place>,
     /// Hidden for now: Snip is open (its frozen screen holds the chat's
     /// picture, and nothing of ours covers Snip's outline), or `out`.
+    /// Windows: clear (opacity 0), not hidden, so it comes back at once.
     pub hidden: bool,
     /// X11: out of a capture's grab, until it is over (`App::grabbed`).
     pub out: bool,
@@ -64,6 +65,23 @@ pub(crate) struct ChatWindow {
 pub(crate) fn glided(from: Point, to: Point, t: f32) -> Point {
     let at = from + (to - from) * t;
     Point::new(at.x.round(), at.y.round())
+}
+
+/// The pointer on the desktop (physical px) while it drags in the chat's own
+/// window placed at `placed` (`p`: in that window's px): never its px in a
+/// window that moves under it.
+pub(crate) fn desk_pointer(placed: Place, p: Point) -> Point {
+    #[cfg(not(test))]
+    let pointer = crate::shared::platform::capture::pointer();
+    #[cfg(test)]
+    let pointer = None::<(i32, i32)>; // (not the test machine's)
+    pointer.map_or_else(
+        || {
+            let (x, y) = placed.origin;
+            Point::new(x as f32 + p.x * placed.scale, y as f32 + p.y * placed.scale)
+        },
+        |(x, y)| Point::new(x as f32, y as f32),
+    )
 }
 
 /// A dragged widget's top-left `at` (`size`) held inside the `screen`: 6 px
@@ -287,6 +305,31 @@ impl App {
     /// overlay docks it while the overlay holds it (not one it found pinned
     /// there, `Opening::chat_fixed`, until it is picked up).
     pub(crate) fn sync_chat_window(&mut self) -> Task<Message> {
+        let task = self.sync_chat_place();
+        // its inner edge, on the side the screen holds it: the width is set
+        // by that edge, as on the overlay (W52)
+        let edge = (self.chat_win.as_ref())
+            .filter(|_| self.own_window())
+            .map(|w| {
+                let (origin, screen, _) = w.home;
+                card::side(
+                    Rectangle::new(w.at - (origin - Point::ORIGIN), w.size),
+                    screen,
+                )
+            });
+        if let Some(c) = self.chat.as_mut() {
+            c.panel.edge = edge;
+        }
+        if self.o.is_some()
+            && let Some((_, panel)) = self.o.ai_chat.as_mut()
+        {
+            panel.edge = edge;
+        }
+        task
+    }
+
+    /// `sync_chat_window`'s window: opened, hidden, shown and placed.
+    fn sync_chat_place(&mut self) -> Task<Message> {
         if self.chat_shown().is_none() {
             return match self.chat_win.take() {
                 Some(w) => windows::close(w.id),
@@ -298,6 +341,11 @@ impl App {
         }
         let open = self.o.is_some();
         let snip = open && matches!(self.o.purpose, Purpose::Snip(_));
+        // Where windows fade (Windows), the chat goes clear and back instead of hiding: no
+        // blank first frame on its return. It goes once the overlay is fully up over it (the
+        // frozen picture shows it there meanwhile, never the screen without it).
+        let fades = crate::shared::platform::shape::can_fade();
+        let up = self.o.reveal.is_none() && self.appeared() >= 1.0;
         if self.chat_win.is_none() {
             return match open && !snip {
                 true => self.open_chat_window(false),
@@ -314,8 +362,11 @@ impl App {
             w.out = false;
         }
         let mut tasks = Vec::new();
-        let hide = snip || w.out;
-        if hide != w.hidden {
+        let hide = (snip && (up || !fades || w.hidden)) || w.out;
+        if hide != w.hidden && fades {
+            w.hidden = hide;
+            windows::opacity_now(w.id, if hide { 0.0 } else { 1.0 });
+        } else if hide != w.hidden {
             w.hidden = hide;
             tasks.push(match hide {
                 true => window::set_mode(w.id, window::Mode::Hidden),
@@ -364,6 +415,65 @@ impl App {
             std::thread::sleep(SETTLE);
             let _ = tx.unbounded_send(Message::ChatSettle(moves));
         })
+    }
+
+    /// The overlay closed, the pinned chat's inner edge dragged (`p` in its
+    /// window's px): its window takes the new width, as the overlay's card does
+    /// (`card::drag`, kept on its screen), and the next chat keeps it.
+    pub(crate) fn chat_resized(&mut self, window: window::Id, p: Point) -> Task<Message> {
+        let Some(w) = self.chat_win.as_ref().filter(|w| w.id == window) else {
+            return Task::none();
+        };
+        let (Some(placed), Some(last)) = (w.placed, self.chat_resize) else {
+            return Task::none();
+        };
+        let desk = desk_pointer(placed, p);
+        self.chat_resize = Some(Some(desk));
+        let Some(from) = last else {
+            return Task::none(); // (the first move: where the drag starts)
+        };
+        let (origin, screen, _) = w.home;
+        let here = Rectangle::new(w.at - (origin - Point::ORIGIN), w.size);
+        let by = (desk - from) * (1.0 / placed.scale);
+        let to = card::drag(here, card::Drag::Resize, by, screen);
+        self.chat_width = Some(to.width);
+        self.put_chat_window(to)
+    }
+
+    /// Its inner edge double-clicked, the overlay closed: back to its dock at
+    /// the design's width.
+    fn redock_chat_window(&mut self) -> Task<Message> {
+        let Some(w) = self.chat_win.as_ref() else {
+            return Task::none();
+        };
+        let (origin, screen, inset) = w.home;
+        let here = Rectangle::new(w.at - (origin - Point::ORIGIN), w.size);
+        let side = self.chat_side.unwrap_or(card::dock_side(here, screen));
+        let dock = self.chat_dock(screen, side, inset);
+        self.put_chat_window(dock)
+    }
+
+    /// The chat's own window put at `r` (its monitor's logical px).
+    fn put_chat_window(&mut self, r: Rectangle) -> Task<Message> {
+        let Some(w) = self.chat_win.as_mut() else {
+            return Task::none();
+        };
+        let scale = w.placed.map_or(1.0, |p| p.scale);
+        let (origin, _, _) = w.home;
+        let at = origin + (r.position() - Point::ORIGIN);
+        let place = Place {
+            origin: ((at.x * scale).round() as i32, (at.y * scale).round() as i32),
+            px: (
+                (r.width * scale).round() as u32,
+                (r.height * scale).round() as u32,
+            ),
+            scale,
+        };
+        if w.placed == Some(place) {
+            return Task::none();
+        }
+        (w.at, w.size, w.placed, w.glide) = (at, r.size(), Some(place), None);
+        place_window(w.id, place)
     }
 
     /// The drag is over: its window's scale now says which monitor it is on.
@@ -502,9 +612,16 @@ impl App {
                 self.o.chat_docks = true;
                 self.frame_times.borrow_mut().clear();
             }
+            // the overlay closed: the chat's own window takes the width (`chat_resized`)
+            ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize)) if floating.is_some() => {
+                self.chat_resize = Some(None);
+            }
             ai_chat::Msg::Card(card::Event::Hover(on)) if open => self.o.chat_hover = on,
             ai_chat::Msg::Card(card::Event::Reset) => {
                 (self.card, self.chat_width) = (None, None);
+                if !open {
+                    return self.redock_chat_window();
+                }
                 self.o.chat_fixed = None; // (to its dock, at the design's width)
             }
             ai_chat::Msg::Card(card::Event::Grab(_) | card::Event::Hover(_)) => {}

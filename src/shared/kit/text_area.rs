@@ -7,7 +7,7 @@
 //! nothing round the box (the caret shows it).
 use iced::keyboard::{self, key::Named};
 use iced::widget::text_editor::{self, Action, Binding, Content, KeyPress, Status};
-use iced::widget::{column, container, mouse_area, stack};
+use iced::widget::{container, mouse_area, stack};
 use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
@@ -78,25 +78,25 @@ pub fn text_area<'a, M: Clone + 'a>(
             value: c().text,
             selection: c().accent_soft,
         });
-    // the field, with the placeholder over it from the start edge while it is empty (right to left)
-    let field: Element<'a, M> = match super::dir::rtl() && content.is_empty() {
-        true => stack![
-            field,
-            container(
-                super::text::paragraph(
-                    super::text::muted(Role::CHAT, placeholder).line_height(LINE_HEIGHT)
-                )
-                .width(Fill)
+    // The field's place in the widget tree never changes, so it keeps the
+    // keyboard's focus while typing (W52): the placeholder's layer is pushed
+    // only right to left while empty, after the field (a stack keeps its first
+    // child's state), and the parts are keyed (the chip over the field comes
+    // and goes: the attached screen is sent with the first answer).
+    let placeholder = (super::dir::rtl() && content.is_empty()).then(|| {
+        container(
+            super::text::paragraph(
+                super::text::muted(Role::CHAT, placeholder).line_height(LINE_HEIGHT),
             )
-            .padding(PAD)
-        ]
-        .into(),
-        false => field.into(),
-    };
-    let parts = column![]
-        .push(top)
-        .push(field)
-        .push(controls)
+            .width(Fill),
+        )
+        .padding(PAD)
+    });
+    let field = stack![field].push(placeholder);
+    let parts = iced::widget::keyed::Column::new()
+        .push_maybe(0, top)
+        .push(1, field)
+        .push(2, controls)
         .spacing(GAP)
         .width(Fill);
     let boxed = container(parts)
@@ -204,6 +204,50 @@ mod tests {
         };
         let (lo, hi) = ink();
         assert!(lo > 200 && hi > 360, "at the right: {lo}..{hi}");
+    }
+
+    /// W52: the field keeps the keyboard's focus while its box changes round
+    /// it: the first letter typed right to left (the placeholder's layer goes)
+    /// and the attached screen's chip leaving (the first answer took it).
+    #[test]
+    fn the_field_keeps_the_focus_while_the_box_changes() {
+        use iced::advanced::widget::{Id, Operation, operation::Focusable, operation::focusable};
+        use iced_runtime::user_interface::{Cache, UserInterface};
+        struct Focused(bool);
+        impl Operation for Focused {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn focusable(&mut self, _: Option<&Id>, _: iced::Rectangle, s: &mut dyn Focusable) {
+                self.0 |= s.is_focused();
+            }
+        }
+        let _ar = crate::shared::kit::testing::arabic();
+        let (empty, typed) = (Content::new(), Content::with_text("م"));
+        let view = |content: &'static Content, chip: bool| {
+            let controls = iced::widget::space::horizontal().height(28).into();
+            let top = chip.then(|| iced::widget::text("chip").into());
+            text_area("t", "اسأل", content, |_| (), (), top, controls, ())
+        };
+        let (empty, typed): (&'static Content, &'static Content) =
+            (Box::leak(Box::new(empty)), Box::leak(Box::new(typed)));
+        let size = iced::Size::new(400.0, 160.0);
+        let mut renderer = crate::shared::kit::testing::shot::renderer();
+        let steps = [(empty, true), (typed, true), (typed, false), (empty, false)];
+        let mut ui = UserInterface::build(
+            view(steps[0].0, steps[0].1),
+            size,
+            Cache::default(),
+            &mut renderer,
+        );
+        ui.operate(&renderer, &mut focusable::focus::<()>(Id::new("t")));
+        for (i, (content, chip)) in steps.into_iter().enumerate().skip(1) {
+            let cache = ui.into_cache();
+            ui = UserInterface::build(view(content, chip), size, cache, &mut renderer);
+            let mut found = Focused(false);
+            ui.operate(&renderer, &mut found);
+            assert!(found.0, "step {i}: the field lost the focus");
+        }
     }
 
     #[test]

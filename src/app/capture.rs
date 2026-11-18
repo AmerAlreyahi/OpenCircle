@@ -567,6 +567,14 @@ impl App {
         // hidden or closed alike: the editor's glyphs go with the opening
         crate::features::snip::annotate::free_glyphs();
         if self.can_hide {
+            // a chat kept clear under Snip is back first, over the picture of it (one frame,
+            // no screen without it)
+            if let Some(w) = self.chat_win.as_mut().filter(|w| w.hidden && !w.out)
+                && crate::shared::platform::shape::can_fade()
+            {
+                w.hidden = false;
+                windows::opacity_now(w.id, 1.0);
+            }
             // Gone at once: the hide steps draw the empty view (the theme's
             // background) full-screen, then restore the window from full-screen,
             // all while it is still shown. Unseen, at opacity 0 (`show` clears
