@@ -1378,3 +1378,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   asking again once the release steps pass: notes + docs + clean-up (W66), CI green, tag -> draft, the update gate on the Windows
   VM (v0.2.0 Setup + portable -> the draft), About on the draft exe, signed assets re-downloaded + verified. A broken updater
   blocks; other findings ship as known issues.
+- Web search source changed (2026-11-18, SUPERSEDES the Bing part of "Web search source"): W62's lab showed keyless Bing returns
+  random pages (~25 % relevant); v0.3.0 uses DuckDuckGo lite (POST, >= 2 s apart, 15 min rest when throttled) then Wikipedia,
+  no key; Bing removed. ONNX Runtime mirror (2026-11-18): github.com/microsoft/onnxruntime returned 404; the exact pinned runtime
+  files are mirrored on OpenCircle-models release runtime-1 (same sha256) and the app tries the mirror first, Microsoft second.
