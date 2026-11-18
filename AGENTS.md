@@ -1358,3 +1358,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Never idle waiting for the owner (owner, 2026-11-18, angry that work stopped after the v0.3.0 dev build): while the owner tries
   a build (or sleeps), the next versions in the plan are BUILT IN PARALLEL on their own branches; his trying gates the RELEASE of
   each version, not the start of the next one's work. Stop only for a decision only he can make (and then notify him).
+- Web search source (owner, 2026-11-18, "search with Bing; I will change it if we get blocked; users must not bother with APIs"):
+  v0.3.3 web search uses Bing's web results with no key (W49: 40/40 OK with an honest client; DuckDuckGo, Brave, Startpage and
+  Mojeek blocked every query), plus Wikipedia's official API as the keyless fallback for facts. Honest client only: never pose as
+  a browser, never solve or dodge a captcha; when blocked, a plain message and the answer without search. One small source
+  interface so the owner can switch the engine later.
