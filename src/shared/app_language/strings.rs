@@ -399,8 +399,8 @@ strings! {
         | "محلي";
     tr_online: "Online"
         | "عبر الإنترنت";
-    tr_engine_online: "Google's free web translator: sends the text (never the picture) to Google. Unofficial; if it stops answering, Local translates"
-        | "مترجم Google المجاني على الويب: يُرسل النص (لا الصورة أبدًا) إلى Google. غير رسمي؛ إن توقّف عن الرد يترجم المحرّك المحلي";
+    tr_engine_online: "Google Translate, free, needs internet; only the text is sent"
+        | "Google Translate، مجاني ويحتاج إلى الإنترنت؛ يُرسل النص فقط";
     tr_source: "Source language"
         | "لغة المصدر";
     tr_source_desc: "What the text on screen is in; picks the text recognizer"
@@ -696,10 +696,6 @@ strings! {
         | "الترجمة الحيّة";
     lb_live_d: "Keep the screen translated as it changes. Unfinished; may change"
         | "أبقِ الشاشة مترجمة أثناء تغيّرها. غير مكتملة؛ قد تتغير";
-    lb_online: "Online translation"
-        | "الترجمة عبر الإنترنت";
-    lb_online_d: "Adds Online (Google) to Settings > Translate > Engine. Unofficial; may stop working"
-        | "تضيف «عبر الإنترنت (Google)» إلى الإعدادات > الترجمة > المحرّك. غير رسمية؛ قد تتوقف عن العمل";
     o_title: "Welcome to OpenCircle"
         | "مرحبًا بك في OpenCircle";
     // a step's number and name: the number isolated, so it reads first
@@ -781,8 +777,8 @@ strings! {
         | "كلمات البحث التي يختارها الذكاء الاصطناعي فقط (لا شاشتك أبدًا)، والصفحات التي يفتحها";
     p_web_c: "Bing, then Wikipedia; the result pages' own sites"
         | "Bing ثم Wikipedia؛ ومواقع صفحات النتائج نفسها";
-    p_online_a: "Online translation (Labs)"
-        | "الترجمة عبر الإنترنت (ميزة تجريبية)";
+    p_online_a: "Online translation"
+        | "الترجمة عبر الإنترنت";
     p_online_b: "The text read from the screen (never the image), only when Online is the engine"
         | "النص المقروء من الشاشة (لا الصورة أبدًا)، فقط عندما يكون «عبر الإنترنت» هو المحرّك";
     p_online_c: "Google (its free web translator)"

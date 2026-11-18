@@ -36,9 +36,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     if state.draft.labs.has(Feature::Song) {
         lines.insert(lines.len() - 1, SONG);
     }
-    if state.draft.labs.has(Feature::Online) {
-        lines.insert(lines.len() - 1, ONLINE);
-    }
+    lines.insert(lines.len() - 1, ONLINE);
     if state.draft.ai.web_search == Some(true) {
         lines.insert(lines.len() - 1, WEB);
     }

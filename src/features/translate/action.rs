@@ -101,11 +101,10 @@ pub fn readers_bytes() -> u64 {
     models::missing_bytes(&models::other_scripts_files())
 }
 
-/// The engine in effect: Online only while its Labs switch is on, and only
-/// for one-shot Translate; else it is Offline (hide, don't delete).
+/// The engine in effect: Online only for one-shot Translate; Live uses Offline.
 fn engine(cfg: &config::Config, one_shot: bool) -> Engine {
     match cfg.translate.engine {
-        Engine::Online if one_shot && cfg.labs.online => Engine::Online,
+        Engine::Online if one_shot => Engine::Online,
         Engine::Online => Engine::Offline,
         e => e,
     }
@@ -226,13 +225,11 @@ mod tests {
         );
     }
 
-    /// Online is one-shot Translate's, and only while its Labs switch is on.
+    /// Online is one-shot Translate's (no Labs switch since 0.3.0).
     #[test]
-    fn online_needs_labs_and_one_shot() {
+    fn online_is_one_shot_only() {
         let mut cfg = config::Config::default();
         cfg.translate.engine = Engine::Online;
-        assert_eq!(super::engine(&cfg, true), Engine::Offline, "Labs off");
-        cfg.labs.online = true;
         assert_eq!(super::engine(&cfg, true), Engine::Online);
         assert_eq!(super::engine(&cfg, false), Engine::Offline, "never Live");
         cfg.translate.engine = Engine::Ai;

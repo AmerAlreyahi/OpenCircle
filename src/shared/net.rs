@@ -41,7 +41,7 @@ pub const UPDATE: Policy = Policy {
     status_as_error: false,
     user_agent: Some("OpenCircle"),
 };
-/// Online translation (Labs): short limits, a page waits on them and the
+/// Online translation: short limits, a page waits on them and the
 /// local model still runs after a failure.
 pub const TRANSLATE: Policy = Policy {
     connect_secs: Some(5),

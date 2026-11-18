@@ -222,6 +222,22 @@ fn a_v0_1_2_file_keeps_its_snip_settings_and_snip_is_on_whatever_labs_says() {
     }
 }
 
+/// Online translation left Labs (0.3.0): a file with `[labs] online` loads
+/// without a warning, its Online choice stays, and a save drops the switch.
+#[test]
+fn an_online_choice_from_labs_keeps_working() {
+    let text = "version = 12\n[translate]\nengine = \"online\"\n[labs]\nonline = true\n";
+    let (dir, path) = config_with("labs-online", text);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.translate.engine, Engine::Online);
+    c.save_to(&path).unwrap();
+    let saved: Table = fs_text(&path).parse().unwrap();
+    assert!(saved.get("labs").and_then(|l| l.get("online")).is_none());
+    assert_eq!(saved["translate"]["engine"].as_str(), Some("online"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn the_long_capture_limit_is_one_of_three_heights() {
     let (c, w) = Config::parse("version = 4\n[snip]\nlong_max = 10000\n");

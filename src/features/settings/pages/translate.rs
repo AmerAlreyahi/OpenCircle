@@ -190,21 +190,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
         return super::glossaries::editor(state);
     }
     let t = &state.draft.translate;
-    // Online is a Labs engine: its choice only while the switch is on (off,
-    // a file's "online" translates as Local and shows so)
-    let online = state.draft.labs.has(Feature::Online);
-    let chosen = match t.engine {
-        Engine::Online if !online => Engine::Offline,
-        e => e,
-    };
+    let chosen = t.engine;
     let (from, glide) = state.thumb(chosen, |p| match p {
         Pick::Engine(e) => Some(e),
         _ => None,
     });
-    let mut engines = vec![(Engine::Ai, t!(tr_ai)), (Engine::Offline, t!(tr_local))];
-    if online {
-        engines.push((Engine::Online, t!(tr_online)));
-    }
+    let engines = [
+        (Engine::Ai, t!(tr_ai)),
+        (Engine::Offline, t!(tr_local)),
+        (Engine::Online, t!(tr_online)),
+    ];
     let engine = segmented(&engines, chosen, from, glide, Message::Engine);
     let mut rows = column![setting_row::row(
         title(t!(tr_engine)),
