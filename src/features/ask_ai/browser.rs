@@ -80,7 +80,7 @@ fn cut_words(s: &str, max: usize) -> (&str, bool) {
 }
 
 /// Percent-encoding of the UTF-8 bytes; only RFC 3986 unreserved characters stay.
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {

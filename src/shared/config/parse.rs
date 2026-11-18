@@ -206,6 +206,7 @@ impl Config {
                     false => Err(format!("expected one of {:?} (percent)", CHAT_ZOOM)),
                 },
             );
+            c.ai.web_search = get(t, "ai.", "web_search", d.ai.web_search, &mut w);
         }
         if let Some(t) = section(&root, "translate", &mut w) {
             c.translate.source = get_checked(

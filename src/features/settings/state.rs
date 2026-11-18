@@ -769,6 +769,8 @@ pub enum Message {
     /// AI: "AI chat stays open" and "Keep chat history".
     ChatStays(StaysOpen),
     KeepChats(bool),
+    /// AI: "Web search" (`ai.web_search`).
+    WebSearch(bool),
     /// A Labs switch: saved and applied at once.
     Labs(Feature, bool),
     Source(Language),
@@ -1669,6 +1671,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SongSource(source) => state.draft.song.source = source,
         Message::SongHistory(on) => state.draft.song.history = on,
         Message::ChatStays(how) => state.draft.chat.stays_open = how,
+        Message::WebSearch(on) => state.draft.ai.web_search = Some(on),
         Message::KeepChats(on) => {
             state.draft.chat.keep_history = on;
             // off deletes them (`windows::apply` once saved)

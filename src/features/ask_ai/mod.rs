@@ -18,6 +18,7 @@ pub mod openai;
 pub mod providers;
 pub(crate) mod screens;
 pub mod sign_in;
+pub(crate) mod web;
 
 use std::fmt;
 use std::io::BufRead;
@@ -48,6 +49,11 @@ pub struct Message {
     pub text: String,
     /// A PNG, sent inline (base64). Only the caller decides to attach one.
     pub image_png: Option<Vec<u8>>,
+    /// An assistant turn that called tools, exactly as the provider sent it
+    /// (`Reply::native`): sent back unchanged (Anthropic's thinking blocks must be).
+    pub native: Option<Value>,
+    /// Tool results (call id, text): a user turn answering the turn before.
+    pub results: Vec<(String, String)>,
 }
 
 impl Message {
@@ -56,6 +62,8 @@ impl Message {
             role,
             text: text.into(),
             image_png: None,
+            native: None,
+            results: Vec::new(),
         }
     }
 
@@ -80,6 +88,8 @@ impl fmt::Debug for Message {
             .field("role", &self.role)
             .field("text", &self.text)
             .field("image_png", &image)
+            .field("native", &self.native.is_some())
+            .field("results", &self.results.len())
             .finish()
     }
 }
@@ -260,6 +270,55 @@ pub(crate) struct HttpRequest {
     pub body: Value,
 }
 
+/// A tool the model may call (`web`): its name, what it does, and its JSON
+/// Schema for the arguments.
+pub(crate) struct Tool {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub schema: Value,
+}
+
+/// One tool call the model asked for: its id, the tool's name and the raw
+/// JSON arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub args: String,
+}
+
+/// A whole answer: its text and, when the model called tools, the calls and
+/// the assistant turn to send back with their results.
+#[derive(Debug, Default)]
+pub(crate) struct Reply {
+    pub text: String,
+    pub calls: Vec<ToolCall>,
+    pub native: Option<Value>,
+}
+
+/// The pieces of an answer a parser keeps besides its text: tool calls
+/// (OpenAI) or content blocks (Anthropic), by stream index.
+#[derive(Debug, Default)]
+pub(crate) struct Pending {
+    pub blocks: Vec<Value>,
+}
+
+impl Pending {
+    /// The block at `index`, created as `empty` when new.
+    pub fn at(&mut self, index: usize, empty: impl Fn() -> Value) -> &mut Value {
+        while self.blocks.len() <= index {
+            self.blocks.push(empty());
+        }
+        &mut self.blocks[index]
+    }
+}
+
+/// Appends `piece` to the string at `v[key]`.
+pub(crate) fn append(v: &mut Value, key: &str, piece: &str) {
+    let old = v[key].as_str().unwrap_or_default();
+    v[key] = Value::String(format!("{old}{piece}"));
+}
+
 /// What one SSE event means.
 pub(crate) enum Event {
     Delta(String),
@@ -279,7 +338,18 @@ pub fn ask_stream(
     messages: &[Message],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, None, on_delta)
+    stream(cfg, key, messages, None, &[], on_delta).map(|r| r.text)
+}
+
+/// Like `ask_stream`, with `tools` the model may call: the reply carries its calls.
+pub(crate) fn ask_tools(
+    cfg: &AiConfig,
+    key: Option<&Secret>,
+    messages: &[Message],
+    tools: &[Tool],
+    on_delta: impl FnMut(&str) -> ControlFlow<()>,
+) -> Result<Reply, AiError> {
+    stream(cfg, key, messages, None, tools, on_delta)
 }
 
 /// Like `ask_stream`, for short mechanical answers (translation): the answer is capped
@@ -291,9 +361,10 @@ pub(crate) fn ask_fast(
     messages: &[Message],
     max_tokens: u32,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, Some(max_tokens), |_| {
+    stream(cfg, key, messages, Some(max_tokens), &[], |_| {
         ControlFlow::Continue(())
     })
+    .map(|r| r.text)
 }
 
 fn stream(
@@ -301,8 +372,9 @@ fn stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
+    tools: &[Tool],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
-) -> Result<String, AiError> {
+) -> Result<Reply, AiError> {
     let answer = match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
             "this needs an AI provider with an API key (Settings, Ask AI); Google AI Mode in your \
@@ -315,8 +387,8 @@ fn stream(
         Provider::Unreadable => Err(AiError::NotConfigured(
             "the settings file couldn't be read, so AI is off (Settings, Ask AI)".into(),
         )),
-        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, on_delta),
-        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, on_delta),
+        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, tools, on_delta),
+        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, tools, on_delta),
     };
     if let Err(e) = &answer {
         logged(cfg, e);
@@ -432,8 +504,8 @@ pub(crate) fn run_stream(
     req: &HttpRequest,
     key: Option<&Secret>,
     mut on_delta: impl FnMut(&str) -> ControlFlow<()>,
-    parse: fn(&str) -> Result<Event, AiError>,
-) -> Result<String, AiError> {
+    parse: fn(&str, &mut Pending) -> Result<Event, AiError>,
+) -> Result<(String, Pending), AiError> {
     let body = serde_json::to_string(&req.body).map_err(|e| AiError::BadResponse(e.to_string()))?;
     let post = || {
         send(key, |agent| {
@@ -457,9 +529,10 @@ pub(crate) fn run_stream(
     }
 
     let mut full = String::new();
+    let mut pending = Pending::default();
     let mut failure = None;
     let reader = std::io::BufReader::new(resp.into_body().into_reader());
-    read_sse(reader, |data| match parse(data) {
+    read_sse(reader, |data| match parse(data, &mut pending) {
         Ok(Event::Delta(piece)) => {
             full.push_str(&piece);
             on_delta(&piece).is_continue()
@@ -476,7 +549,7 @@ pub(crate) fn run_stream(
     .map_err(|e| AiError::Dropped(scrub(&e.to_string(), key)))?;
     match failure {
         Some(e) => Err(e),
-        None => Ok(full),
+        None => Ok((full, pending)),
     }
 }
 
