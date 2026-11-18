@@ -112,8 +112,9 @@ pub struct Studio {
     scale: f32,
     window: Size,
     pub(super) panels: StudioConfig,
-    /// The history (`Document::steps`) when last saved: other = unsaved.
-    saved: (usize, usize),
+    /// The history's state (`Document::state`) when last saved: other = unsaved;
+    /// `None` = never saved with what it holds.
+    saved: Option<u64>,
     asking: Option<After>,
     pub(super) recent: Vec<(PathBuf, image::Handle)>,
     pub(super) hovered: bool,
@@ -128,7 +129,7 @@ impl Studio {
             scale: 1.0,
             window: SIZE,
             panels,
-            saved: (0, 0),
+            saved: Some(0),
             asking: None,
             recent: Vec::new(),
             hovered: false,
@@ -159,10 +160,7 @@ impl Studio {
         (editor.steps, editor.updating, editor.focus, editor.menu) = (None, None, None, None);
         editor.edges.clear();
         // what came from Snip with no drawing is nothing to lose
-        self.saved = match editor.doc.items.is_empty() {
-            true => editor.doc.steps(),
-            false => (usize::MAX, 0),
-        };
+        self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
         self.zoom = None;
         self.editor = Some(editor);
         self.fit();
@@ -173,7 +171,7 @@ impl Studio {
 
     /// Unsaved drawings: closing or opening another picture asks first.
     pub fn dirty(&self) -> bool {
-        (self.editor.as_ref()).is_some_and(|e| e.doc.steps() != self.saved)
+        (self.editor.as_ref()).is_some_and(|e| Some(e.doc.state()) != self.saved)
     }
 
     /// A picture is open.
@@ -200,7 +198,7 @@ impl Studio {
     /// The last Save landed: what is shown now is saved.
     pub fn saved(&mut self) {
         if let Some(e) = &self.editor {
-            self.saved = e.doc.steps();
+            self.saved = Some(e.doc.state());
         }
     }
 
@@ -209,7 +207,7 @@ impl Studio {
         match self.asking.take() {
             Some(After::Close) => Outcome::Close,
             Some(After::Open(picture)) => {
-                self.saved = (self.editor.as_ref()).map_or((0, 0), |e| e.doc.steps());
+                self.saved = self.editor.as_ref().map(|e| e.doc.state());
                 self.open(picture);
                 Outcome::None
             }

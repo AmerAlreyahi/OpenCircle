@@ -111,6 +111,25 @@ fn closing_with_unsaved_drawings_asks_first() {
     assert!(s.dirty());
 }
 
+/// Undo past the save, then a new edit: the history is as long as when saved
+/// but holds other edits, so it is unsaved (it read as saved before).
+#[test]
+fn undo_past_the_save_then_a_new_edit_is_unsaved() {
+    let mut s = studio_on(300, 200);
+    draw(&mut s);
+    s.saved();
+    assert!(!s.dirty());
+    let _ = s.update(Msg::Editor(Message::Undo));
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert!(!s.dirty(), "undo then redo: the saved picture again");
+    let _ = s.update(Msg::Editor(Message::Undo));
+    draw(&mut s);
+    assert!(
+        s.dirty(),
+        "a different drawing in the same place of the history"
+    );
+}
+
 #[test]
 fn another_picture_over_unsaved_drawings_asks_then_opens() {
     let mut s = studio_on(300, 200);

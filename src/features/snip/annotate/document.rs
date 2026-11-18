@@ -288,8 +288,11 @@ pub struct Document {
     pub crop: Option<Rectangle>,
     /// The steps' notes show in a legend.
     pub legend: bool,
-    done: Vec<Edit>,
-    undone: Vec<Edit>,
+    /// The history, each edit with its number (`state`).
+    done: Vec<(u64, Edit)>,
+    undone: Vec<(u64, Edit)>,
+    /// Edits numbered so far.
+    made: u64,
 }
 
 impl Document {
@@ -302,6 +305,7 @@ impl Document {
             legend: true,
             done: Vec::new(),
             undone: Vec::new(),
+            made: 0,
         }
     }
 
@@ -361,8 +365,15 @@ impl Document {
     // its points), so memory only matters after thousands of edits.
     pub fn exec(&mut self, edit: Edit) {
         edit.apply(self);
-        self.done.push(edit);
+        self.made += 1;
+        self.done.push((self.made, edit));
         self.undone.clear();
+    }
+
+    /// Which state of the history this is: the same number only for the same
+    /// edits (undo then redo comes back to it; undo then a new edit never does).
+    pub fn state(&self) -> u64 {
+        self.done.last().map_or(0, |(n, _)| *n)
     }
 
     /// Where the history is: (steps done, all steps).
@@ -376,20 +387,20 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(edit) = self.done.pop() else {
+        let Some((n, edit)) = self.done.pop() else {
             return false;
         };
         edit.inverse().apply(self);
-        self.undone.push(edit);
+        self.undone.push((n, edit));
         true
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(edit) = self.undone.pop() else {
+        let Some((n, edit)) = self.undone.pop() else {
             return false;
         };
         edit.apply(self);
-        self.done.push(edit);
+        self.done.push((n, edit));
         true
     }
 
