@@ -25,15 +25,30 @@ pub fn radius(r: f32) -> f32 {
 /// Whether a floating window has real per-pixel alpha here, so its rounded corners are
 /// anti-aliased by the renderer and nothing is cut: every Wayland compositor (the
 /// window is ARGB: vendored softbuffer's `set_alpha`), X11 with a compositor. Windows
-/// and X11 without one cut the window (`available`): a 1-bit edge. Asked once.
-// ponytail: a compositor that starts or stops while we run is not noticed (restart).
+/// and X11 without one cut the window (`available`): a 1-bit edge.
 pub fn smooth() -> bool {
     #[cfg(target_os = "linux")]
     {
-        !available() || x11::compositing()
+        smooth_for(available(), x11::compositing)
     }
     #[cfg(not(target_os = "linux"))]
     false
+}
+
+/// `smooth` for a window system that can (`cut`) or can't cut windows; `compositing` is
+/// asked only where windows are cut (X11).
+#[cfg(any(target_os = "linux", test))]
+fn smooth_for(cut: bool, compositing: impl FnOnce() -> bool) -> bool {
+    !cut || compositing()
+}
+
+/// Asks the X server again whether a compositor runs (one may start or stop while we do):
+/// called before each floating widget opens; windows opened from now on follow the answer.
+pub fn recheck_compositor() {
+    #[cfg(target_os = "linux")]
+    if available() {
+        x11::recheck();
+    }
 }
 
 /// The corner radius a `w` x `h` window can take: `max`, but never more than half
@@ -1121,8 +1136,19 @@ mod x11 {
 
     /// A compositing manager owns the screen (EWMH `_NET_WM_CM_S<n>`): ARGB windows blend.
     pub fn compositing() -> bool {
-        static CM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *CM.get_or_init(probe)
+        match CM.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => recheck(),
+            n => n == 2,
+        }
+    }
+
+    /// 0 = not asked yet, 1 = no compositor, 2 = a compositor.
+    static CM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+    pub fn recheck() -> bool {
+        let on = probe();
+        CM.store(if on { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed);
+        on
     }
 
     fn probe() -> bool {
@@ -1552,17 +1578,14 @@ mod tests {
     }
 
     #[test]
-    fn a_window_with_alpha_or_a_cut_draws_rounded_corners() {
-        // (W74) Wayland has alpha, Windows and X11 cut: every platform but a compositor-less
-        // X11 draws the corner; there `radius` is 0 only when neither holds.
-        assert_eq!(
-            radius(12.0),
-            if available() || smooth() { 12.0 } else { 0.0 }
-        );
-        assert!(
-            !cfg!(target_os = "linux") || available() || smooth(),
-            "Wayland is always smooth"
-        );
+    fn alpha_is_asked_of_x11_only_where_windows_are_cut() {
+        // Wayland (no cut): always alpha, X11 never asked
+        assert!(smooth_for(false, || unreachable!(
+            "Wayland has no X11 to ask"
+        )));
+        // X11: alpha only with a compositor, else the SHAPE cut stays
+        assert!(smooth_for(true, || true));
+        assert!(!smooth_for(true, || false));
     }
 
     #[test]

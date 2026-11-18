@@ -91,11 +91,6 @@ x11-dlopen = [
 name = "softbuffer"
 path = "src/lib.rs"
 
-[[bench]]
-name = "buffer_mut"
-path = "benches/buffer_mut.rs"
-harness = false
-
 [dependencies.raw_window_handle]
 version = "0.6"
 features = ["std"]
@@ -107,11 +102,6 @@ default-features = false
 
 [dev-dependencies.colorous]
 version = "1.0.12"
-
-[dev-dependencies.criterion]
-version = "0.8.1"
-features = ["cargo_bench_support"]
-default-features = false
 
 [dev-dependencies.image]
 version = "0.25.0"

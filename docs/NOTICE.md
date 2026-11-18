@@ -112,6 +112,10 @@ Selectable text in the AI chat's answers: iced_selection (MIT),
 https://git.sr.ht/~pml68/iced_selection, built from vendor/iced_selection with
 one fix; its licence is beside it.
 
+Window surface of the CPU renderer: softbuffer (MIT OR Apache-2.0),
+https://github.com/rust-windowing/softbuffer, built from vendor/softbuffer with one
+addition (ARGB buffers on Wayland); its licences are beside it.
+
 Code colours in the AI chat's answers: syntect (MIT), Copyright (c) 2016 Tristan
 Hume, Keith Hall, Google Inc and other contributors,
 https://github.com/trishume/syntect, with its default syntax definitions (from

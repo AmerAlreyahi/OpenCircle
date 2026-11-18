@@ -108,6 +108,8 @@ fn floating_as(
     // Windows: per-pixel alpha through DirectComposition, still out of captures (`dcomp`)
     #[cfg(windows)]
     super::dcomp::prepare();
+    // X11: a compositor may have started or stopped since the last widget
+    super::shape::recheck_compositor();
     let (id, open) = open(settings);
     FLOATING.lock().unwrap().push((id, radius, how));
     let open = open.then(move |id| {
