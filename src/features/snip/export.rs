@@ -209,6 +209,63 @@ fn pdf(crop: &Crop) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// The walkthrough's choices (STUDIO_V2_SPEC "Export dialog": Size, Frame time, Loop).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Walkthrough {
+    /// The long edge at most (0 = each frame's own size).
+    pub max_edge: u32,
+    /// Seconds each frame shows, in milliseconds.
+    pub frame_ms: u32,
+    pub repeat: bool,
+}
+
+impl Default for Walkthrough {
+    fn default() -> Self {
+        Walkthrough {
+            max_edge: 1280,
+            frame_ms: 2000,
+            repeat: true,
+        }
+    }
+}
+
+/// The frames (in order) as one animated GIF. Frames of different sizes sit
+/// centred on white in a canvas as big as the biggest.
+/// ponytail: a GIF has 256 colours a frame (NeuQuant, speed 10); MP4 / WebM wait for the owner's pick.
+pub fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String> {
+    let frames: Vec<Crop> = frames
+        .into_iter()
+        .map(|f| fit_long_edge(f, how.max_edge))
+        .collect();
+    let width = frames.iter().map(|f| f.width).max().ok_or("no frames")?;
+    let height = frames.iter().map(|f| f.height).max().ok_or("no frames")?;
+    let (w16, h16) = (
+        u16::try_from(width).map_err(|_| "too wide for a GIF")?,
+        u16::try_from(height).map_err(|_| "too tall for a GIF")?,
+    );
+    let mut out = Vec::new();
+    let mut enc = gif::Encoder::new(&mut out, w16, h16, &[]).map_err(|e| e.to_string())?;
+    if how.repeat {
+        enc.set_repeat(gif::Repeat::Infinite)
+            .map_err(|e| e.to_string())?;
+    }
+    for f in &frames {
+        let mut canvas = vec![255u8; (width * height * 4) as usize];
+        let (dx, dy) = ((width - f.width) / 2, (height - f.height) / 2);
+        for y in 0..f.height {
+            let from = (y * f.width * 4) as usize;
+            let to = (((y + dy) * width + dx) * 4) as usize;
+            canvas[to..to + (f.width * 4) as usize]
+                .copy_from_slice(&f.rgba[from..from + (f.width * 4) as usize]);
+        }
+        let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut canvas, 10);
+        frame.delay = (how.frame_ms / 10).clamp(1, u16::MAX as u32) as u16;
+        enc.write_frame(&frame).map_err(|e| e.to_string())?;
+    }
+    drop(enc);
+    Ok(out)
+}
+
 /// The Steps' exports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Steps {
@@ -325,6 +382,47 @@ mod tests {
             height,
             rgba,
         }
+    }
+
+    #[test]
+    fn walkthrough_gif_has_every_frame_its_time_and_the_loop_flag() {
+        let frames = || vec![crop(300, 100), crop(200, 150), crop(300, 100)];
+        let bytes = encode_gif(frames(), Walkthrough::default()).unwrap();
+        let mut d = gif::DecodeOptions::new();
+        d.set_color_output(gif::ColorOutput::RGBA);
+        let mut r = d.clone().read_info(&bytes[..]).unwrap();
+        assert_eq!(
+            (r.width(), r.height()),
+            (300, 150),
+            "canvas = the biggest frame"
+        );
+        let mut n = 0;
+        while let Some(f) = r.read_next_frame().unwrap() {
+            assert_eq!(f.delay, 200);
+            n += 1;
+        }
+        assert_eq!(n, 3);
+        assert!(bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "loops");
+        let once = Walkthrough {
+            repeat: false,
+            ..Walkthrough::default()
+        };
+        assert!(
+            !encode_gif(frames(), once)
+                .unwrap()
+                .windows(11)
+                .any(|w| w == b"NETSCAPE2.0")
+        );
+        // the size cap scales the frames down
+        let small = Walkthrough {
+            max_edge: 150,
+            ..Walkthrough::default()
+        };
+        let r = d
+            .read_info(&encode_gif(frames(), small).unwrap()[..])
+            .map(|r| (r.width(), r.height()));
+        assert_eq!(r.unwrap(), (150, 113));
+        assert!(encode_gif(vec![], Walkthrough::default()).is_err());
     }
 
     #[test]

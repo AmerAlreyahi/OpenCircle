@@ -414,3 +414,12 @@ fn export_asks_for_the_choices_then_hands_over_the_drawn_picture() {
     assert_eq!(how, want);
     assert!(s.dirty(), "an export is not a Save");
 }
+
+#[test]
+fn walkthrough_export_is_handed_to_the_host() {
+    let mut s = Studio::new(StudioConfig::default());
+    assert!(matches!(
+        s.update(Msg::ExportWalkthrough),
+        Outcome::ExportWalkthrough
+    ));
+}

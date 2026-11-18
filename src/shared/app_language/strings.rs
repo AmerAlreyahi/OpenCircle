@@ -1816,6 +1816,10 @@ strings! {
         | "صفحة HTML";
     st_export_images: "Images folder"
         | "مجلد صور";
+    st_export_gif: "Walkthrough (animated GIF)"
+        | "عرض متحرك (GIF)";
+    st_gif_kind: "GIF"
+        | "GIF";
     st_export_where: "Export the picture"
         | "تصدير الصورة";
     st_export_folder: "Choose a folder for the steps"

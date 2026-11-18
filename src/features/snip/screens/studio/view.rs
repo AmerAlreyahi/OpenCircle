@@ -423,8 +423,13 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         (export::Steps::Html, t!(st_export_html)),
         (export::Steps::Images, t!(st_export_images)),
     ];
-    let rows = (rows.into_iter())
-        .map(|(how, words)| (words.to_string(), false, Msg::ExportSteps(how)))
+    // the walkthrough first (STUDIO_V2_SPEC); one step is no walkthrough
+    let walk = (n > 1).then(|| (t!(st_export_gif).to_string(), false, Msg::ExportWalkthrough));
+    let rows = (walk.into_iter())
+        .chain(
+            rows.into_iter()
+                .map(|(how, words)| (words.to_string(), false, Msg::ExportSteps(how))),
+        )
         .collect();
     let export = dropdown::labelled_menu(t!(st_export), rows, half);
     let foot = crate::dir_row![copy, export].spacing(space::GAP);

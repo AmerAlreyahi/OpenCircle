@@ -216,6 +216,16 @@ impl Windows {
                 })
                 .map(Msg::StudioToast)
             }
+            Outcome::ExportWalkthrough => {
+                let steps: Vec<_> =
+                    (self.steps.as_ref()).map_or(Vec::new(), |(_, s)| s.steps().to_vec());
+                background(move |tx| {
+                    if let Some(done) = export_walkthrough(&steps) {
+                        let _ = tx.unbounded_send(done);
+                    }
+                })
+                .map(Msg::StudioToast)
+            }
             Outcome::ExportPicture(crop, how) => background(move |tx| {
                 if let Some(done) = export_picture(crop, how) {
                     let _ = tx.unbounded_send(done);
@@ -274,6 +284,32 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
         }
         Err(e) => {
             crate::log!("[opencircle] export failed: {e}");
+            Err(crate::t!(pill_not_saved).to_string())
+        }
+    })
+}
+
+/// Blocking: where to put the walkthrough GIF, then the file; `None`: cancelled.
+fn export_walkthrough(steps: &[Arc<Step>]) -> Option<Result<String, String>> {
+    let mut dialog = rfd::FileDialog::new()
+        .set_title(crate::t!(st_export_where))
+        .set_file_name(format!("{}.gif", save::stamped_name("steps-")))
+        .add_filter(crate::t!(st_gif_kind), &["gif"]);
+    let config = crate::shared::config::current();
+    if let Some(folder) = save::start_folder(&config.general.save_folder) {
+        dialog = dialog.set_directory(folder);
+    }
+    let path = dialog.save_file()?.with_extension("gif");
+    let frames: Vec<Crop> = steps.iter().filter_map(|s| s.crop()).collect();
+    let written = export::encode_gif(frames, export::Walkthrough::default())
+        .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
+    Some(match written {
+        Ok(()) => Ok(fmt(
+            S::pill_saved,
+            &[&save::short_path(path.parent().unwrap_or(&path))],
+        )),
+        Err(e) => {
+            crate::log!("[opencircle] walkthrough export failed: {e}");
             Err(crate::t!(pill_not_saved).to_string())
         }
     })

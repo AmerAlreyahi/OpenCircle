@@ -123,6 +123,8 @@ pub enum Msg {
     StepDelete(usize),
     CopyAllSteps,
     ExportSteps(export::Steps),
+    /// The steps as one animated GIF.
+    ExportWalkthrough,
     /// The export bar: open, its choices, Export…, Cancel.
     Export,
     ExportFormat(export::Format),
@@ -162,6 +164,8 @@ pub enum Outcome {
     OpenStep(usize),
     /// Export the steps (the host asks for a folder).
     ExportSteps(export::Steps),
+    /// Export the steps as a walkthrough GIF (the host asks where).
+    ExportWalkthrough,
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
 }
@@ -453,6 +457,7 @@ impl Studio {
             }
             Msg::CopyAllSteps => Outcome::Steps(steps::Msg::CopyAll),
             Msg::ExportSteps(how) => Outcome::ExportSteps(how),
+            Msg::ExportWalkthrough => Outcome::ExportWalkthrough,
             Msg::Export => {
                 self.exporting = self.editor.is_some();
                 Outcome::None
