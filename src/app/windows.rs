@@ -112,6 +112,8 @@ pub enum Msg {
     /// A picture read for the Studio; a Save for it landed (`true`: what waited
     /// on its question goes on); a Copy landed (its pill).
     StudioRead(Result<Crop, String>),
+    /// The clipboard read for Ctrl+V (a picture, or none) and where to paste text.
+    StudioPasted(Option<Crop>, Option<iced::Point>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
 }
@@ -1392,8 +1394,13 @@ impl Windows {
             Msg::StudioEvent(id, msg) if self.studio_window() == Some(id) => {
                 return self.on_studio(msg);
             }
+            // Ctrl released in any window: the Studio's flag must not stick
+            Msg::StudioEvent(_, msg @ crate::features::snip::screens::studio::Msg::Ctrl(_)) => {
+                return self.on_studio(msg);
+            }
             Msg::StudioEvent(..) => {}
             Msg::StudioRead(read) => return self.studio_read(read),
+            Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
@@ -1497,6 +1504,10 @@ impl Windows {
             // A click outside it (or Alt+Tab): the menu goes, like the OS's.
             Msg::Unfocused(id) if self.tray_menu.as_ref().is_some_and(|(m, _)| *m == id) => {
                 return self.leave_tray_menu(None);
+            }
+            // focus left the Studio: a Ctrl release may have gone elsewhere
+            Msg::Unfocused(id) if self.studio_window() == Some(id) => {
+                return self.on_studio(crate::features::snip::screens::studio::Msg::Ctrl(false));
             }
             Msg::Unfocused(_) => {}
             // `app::App` takes it before here.

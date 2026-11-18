@@ -80,10 +80,16 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
         parts.push(divider::vertical(Fill));
         parts.push(picture_panel(s));
     }
-    let mut main = column![header, divider::divider(), dir::row(parts).height(Fill)];
-    if s.asking() {
-        main = main.push(divider::divider()).push(question());
-    }
+    let main = column![header, divider::divider(), dir::row(parts).height(Fill)];
+    // the question is a card over the window: the picture under it takes no press
+    let main: Element<'_, Msg> = match s.asking() {
+        true => iced::widget::stack![
+            main,
+            iced::widget::opaque(container(question()).center(Fill))
+        ]
+        .into(),
+        false => main.into(),
+    };
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
         surface(Material::Window, 0.0, main)
@@ -392,18 +398,21 @@ fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
 /// Closing or opening another picture with unsaved drawings: Don't save /
 /// Cancel / Save.
 fn question<'a>() -> Element<'a, Msg> {
+    container(crate::shared::kit::card::card(question_row()))
+        .width(Length::Fixed(560.0))
+        .into()
+}
+
+fn question_row<'a>() -> Element<'a, Msg> {
     let b = |s, kind, m| button::button(label(s), kind, Some(m));
-    container(
-        crate::dir_row![
-            text(Role::ROW_TITLE, t!(st_ask_close)),
-            Space::new().width(Fill),
-            b(t!(st_dont_save), Kind::Elevated, Msg::DontSave),
-            cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel),
-            b(t!(c_save), Kind::Accent, Msg::SaveFirst),
-        ]
-        .spacing(space::GAP)
-        .align_y(Center),
-    )
-    .padding(space::PAGE)
+    crate::dir_row![
+        text(Role::ROW_TITLE, t!(st_ask_close)),
+        Space::new().width(Fill),
+        b(t!(st_dont_save), Kind::Elevated, Msg::DontSave),
+        cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel),
+        b(t!(c_save), Kind::Accent, Msg::SaveFirst),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center)
     .into()
 }

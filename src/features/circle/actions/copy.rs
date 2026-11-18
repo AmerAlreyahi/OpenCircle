@@ -59,31 +59,32 @@ pub fn read_text() -> Option<String> {
     #[cfg(test)]
     return copied::pasted();
     #[cfg(not(test))]
-    {
-        let mut slot = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
-        let clipboard = match &mut *slot {
-            Some(clipboard) => clipboard,
-            None => slot.insert(arboard::Clipboard::new().ok()?),
-        };
-        clipboard.get_text().ok()
-    }
+    return read_with(|c| c.get_text().ok());
 }
 
-/// The clipboard's picture, if it holds one (Ctrl+V in Snip Studio).
-pub fn read_image() -> Option<Crop> {
-    if cfg!(test) {
-        return None; // never the machine's clipboard
-    }
+/// Runs `read` on the shared clipboard handle (opened on first use).
+#[cfg(not(test))]
+fn read_with<T>(read: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Option<T> {
     let mut slot = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
     let clipboard = match &mut *slot {
         Some(clipboard) => clipboard,
         None => slot.insert(arboard::Clipboard::new().ok()?),
     };
-    let picture = clipboard.get_image().ok()?;
-    Some(Crop {
-        width: u32::try_from(picture.width).ok()?,
-        height: u32::try_from(picture.height).ok()?,
-        rgba: picture.bytes.into_owned(),
+    read(clipboard)
+}
+
+/// The clipboard's picture, if it holds one (Ctrl+V in Snip Studio).
+pub fn read_image() -> Option<Crop> {
+    #[cfg(test)]
+    return None; // never the machine's clipboard
+    #[cfg(not(test))]
+    read_with(|c| {
+        let picture = c.get_image().ok()?;
+        Some(Crop {
+            width: u32::try_from(picture.width).ok()?,
+            height: u32::try_from(picture.height).ok()?,
+            rgba: picture.bytes.into_owned(),
+        })
     })
 }
 

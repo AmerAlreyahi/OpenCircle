@@ -58,6 +58,20 @@ impl Windows {
         Task::batch([open, read])
     }
 
+    /// Unsaved drawings in the Studio (an update or a quit must not drop them).
+    pub fn studio_dirty(&self) -> bool {
+        self.studio.as_ref().is_some_and(|(_, s)| s.dirty())
+    }
+
+    /// The app is quitting: with unsaved drawings the Studio comes forward and
+    /// asks (the same question as its close); `None` = nothing to ask, go.
+    pub fn quit_studio(&mut self) -> Option<Task<Msg>> {
+        let (id, s) = self.studio.as_mut().filter(|(_, s)| s.dirty())?;
+        let id = *id;
+        s.quit_requested();
+        Some(window::minimize(id, false).chain(window::gain_focus(id)))
+    }
+
     pub(super) fn studio_window(&self) -> Option<window::Id> {
         self.studio.as_ref().map(|(id, _)| *id)
     }
@@ -94,6 +108,23 @@ impl Windows {
         }
     }
 
+    /// The clipboard was read for Ctrl+V: a picture opens; else the editor
+    /// pastes its text at `at`; else the pill says there is none.
+    pub(super) fn studio_pasted(
+        &mut self,
+        image: Option<Crop>,
+        at: Option<iced::Point>,
+    ) -> Task<Msg> {
+        match (image, &mut self.studio) {
+            (Some(crop), _) => self.studio_read(Ok(crop)),
+            (None, Some((_, s))) if s.editor_open() => {
+                let next = s.paste_text(at);
+                self.studio_outcome(next)
+            }
+            (None, _) => self.toast(crate::t!(st_no_picture), false, None, TOAST_MS),
+        }
+    }
+
     /// A Save for the Studio landed: on success what is shown is saved, and
     /// (`then`) what waited on the question goes on.
     pub(super) fn studio_saved(&mut self, saved: Result<String, String>, then: bool) -> Task<Msg> {
@@ -121,6 +152,8 @@ impl Windows {
         match outcome {
             Outcome::None => Task::none(),
             Outcome::Close => window::close(id),
+            // answered: the quit goes on (the app asks the Studio again, now clean)
+            Outcome::Quit => Task::done(Msg::Run(crate::Trigger::Quit)),
             Outcome::Caption(c) => self.on_chrome(id, chrome::Event::from(c)),
             Outcome::PickFile => background(|tx| {
                 let picked = rfd::FileDialog::new()
@@ -139,16 +172,10 @@ impl Windows {
                 let _ = tx.unbounded_send(read_picture(&path));
             })
             .map(Msg::StudioRead),
-            Outcome::Paste(at) => match copy::read_image() {
-                Some(crop) => self.studio_read(Ok(crop)),
-                None => match &mut self.studio {
-                    Some((_, s)) if s.editor_open() => {
-                        let next = s.paste_text(at);
-                        self.studio_outcome(next)
-                    }
-                    _ => self.toast(crate::t!(st_no_picture), false, None, TOAST_MS),
-                },
-            },
+            Outcome::Paste(at) => background(move |tx| {
+                let _ = tx.unbounded_send(copy::read_image());
+            })
+            .map(move |image| Msg::StudioPasted(image, at)),
             Outcome::Copy(crop) => background(move |tx| {
                 let _ = tx.unbounded_send(run(&copy::ACTION, crop));
             })

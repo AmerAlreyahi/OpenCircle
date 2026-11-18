@@ -53,6 +53,11 @@ impl App {
             return Task::none();
         }
         match message {
+            // unsaved Studio drawings ask first (Save / Don't save / Cancel); the
+            // answer sends Quit again
+            Message::Trigger(Trigger::Quit) if let Some(ask) = self.windows.quit_studio() => {
+                ask.map(Message::Windows)
+            }
             Message::Trigger(Trigger::Quit) => {
                 self.on_quit();
                 iced::exit()

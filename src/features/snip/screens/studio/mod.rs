@@ -53,6 +53,8 @@ pub enum Picture {
 /// What waits on the unsaved-changes question.
 enum After {
     Close,
+    /// Quit (the tray, `opencircle quit`): the app goes after it.
+    Quit,
     Open(Picture),
 }
 
@@ -101,6 +103,8 @@ pub enum Outcome {
     None,
     /// The window goes (asked first when there were unsaved drawings).
     Close,
+    /// Quit went through the question: the app may go.
+    Quit,
     Caption(Caption),
     /// The open-file dialog, then `Msg::Dropped` with the file.
     PickFile,
@@ -194,6 +198,12 @@ impl Studio {
         (self.editor.as_ref()).is_some_and(|e| Some(e.doc.state()) != self.saved)
     }
 
+    /// The shown picture's size, and whether Ctrl is held (the host's tests).
+    #[cfg(test)]
+    pub fn probe(&self) -> (Option<Size>, bool) {
+        (self.editor.as_ref().map(|e| e.doc.view().size()), self.ctrl)
+    }
+
     /// A picture is open.
     pub fn editor_open(&self) -> bool {
         self.editor.is_some()
@@ -215,6 +225,17 @@ impl Studio {
         }
     }
 
+    /// The app is quitting: unsaved drawings ask first (`Outcome::Quit` after).
+    pub fn quit_requested(&mut self) -> Outcome {
+        match self.dirty() {
+            true => {
+                self.asking = Some(After::Quit);
+                Outcome::None
+            }
+            false => Outcome::Quit,
+        }
+    }
+
     /// The last Save landed: what is shown now is saved.
     pub fn saved(&mut self) {
         if let Some(e) = &self.editor {
@@ -226,6 +247,10 @@ impl Studio {
     pub fn proceed(&mut self) -> Outcome {
         match self.asking.take() {
             Some(After::Close) => Outcome::Close,
+            Some(After::Quit) => {
+                self.saved = self.editor.as_ref().map(|e| e.doc.state()); // nothing left to ask
+                Outcome::Quit
+            }
             Some(After::Open(picture)) => {
                 self.saved = self.editor.as_ref().map(|e| e.doc.state());
                 self.open(picture);
@@ -241,6 +266,20 @@ impl Studio {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        // the question blocks the picture: nothing changes it until answered
+        if self.asking()
+            && matches!(
+                msg,
+                Msg::Editor(_)
+                    | Msg::Open
+                    | Msg::Paste
+                    | Msg::Dropped(_)
+                    | Msg::OpenRecent(_)
+                    | Msg::Wheel { .. }
+            )
+        {
+            return Outcome::None;
+        }
         match msg {
             Msg::Editor(annotate::Message::Paste(at))
                 if self.editor.as_ref().is_some_and(|e| !e.typing()) =>

@@ -304,3 +304,43 @@ fn ctrl_wheel_zooms_by_the_buttons_step_round_the_pointer() {
         "Ctrl is tracked for the stage"
     );
 }
+
+/// Quit with unsaved drawings asks (Save / Don't save / Cancel); answered, it goes.
+#[test]
+fn quitting_with_unsaved_drawings_asks_first() {
+    let mut s = studio_on(400, 300);
+    assert!(matches!(s.quit_requested(), Outcome::Quit), "clean: goes");
+    draw(&mut s);
+    assert!(matches!(s.quit_requested(), Outcome::None) && s.asking());
+    // Cancel: stays, still unsaved
+    assert!(matches!(s.update(Msg::Cancel), Outcome::None));
+    assert!(!s.asking() && s.dirty());
+    // Don't save: the quit goes on
+    let _ = s.quit_requested();
+    assert!(matches!(s.update(Msg::DontSave), Outcome::Quit));
+    assert!(!s.dirty());
+    // Save: the Save runs, then the quit goes on
+    let mut s = studio_on(400, 300);
+    draw(&mut s);
+    let _ = s.quit_requested();
+    assert!(matches!(s.update(Msg::SaveFirst), Outcome::SaveThen(_)));
+    s.saved();
+    assert!(matches!(s.proceed(), Outcome::Quit));
+}
+
+/// The question blocks the picture: no drawing, open or paste while it is up.
+#[test]
+fn the_question_blocks_editing() {
+    let mut s = studio_on(400, 300);
+    draw(&mut s);
+    let _ = s.close_requested();
+    let before = s.editor.as_ref().unwrap().doc.state();
+    draw(&mut s);
+    assert!(matches!(s.update(Msg::Open), Outcome::None));
+    assert!(matches!(s.update(Msg::Paste), Outcome::None));
+    assert!(matches!(
+        s.update(Msg::Dropped("/x.png".into())),
+        Outcome::None
+    ));
+    assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
+}

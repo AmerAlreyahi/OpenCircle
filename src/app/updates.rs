@@ -70,6 +70,7 @@ impl App {
             && self.live.is_none()
             && self.hiding == Hiding::No
             && !self.windows.busy()
+            && !self.windows.studio_dirty() // (busy() holds for an open Studio too)
     }
 
     /// The update clock: the pills wait while the user is away and fade on time;

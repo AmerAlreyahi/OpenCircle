@@ -571,8 +571,6 @@ mod tests {
         assert!(read(just_over.as_bytes()).is_err());
     }
 
-    /// The token rides on a second line: a copy that reads one line (v0.1.x) still
-    /// runs the command, and ours takes the token only from a well-formed line.
     /// `opencircle studio [file]`: the file's absolute path rides in hex on one
     /// line (any bytes, any length up to `MAX_PATH`); a relative or broken one is dropped.
     #[test]
@@ -602,6 +600,8 @@ mod tests {
         );
     }
 
+    /// The token rides on a second line: a copy that reads one line (v0.1.x) still
+    /// runs the command, and ours takes the token only from a well-formed line.
     #[test]
     fn the_activation_token_travels_on_a_second_line() {
         let read = |bytes: &str| read_command(io::Cursor::new(bytes.as_bytes().to_vec()));

@@ -758,3 +758,121 @@ fn os_theme_message_reaches_the_palette() {
     let _ = windows.update(Msg::OsTheme(iced::theme::Mode::Dark));
     assert_ne!(crate::shared::kit::themes::c().text, light);
 }
+
+mod studio_window {
+    use super::*;
+    use crate::features::snip::annotate::{Message, Tool};
+    use crate::features::snip::screens::studio as st;
+
+    fn crop() -> Crop {
+        Crop {
+            width: 40,
+            height: 30,
+            rgba: vec![255; 40 * 30 * 4],
+        }
+    }
+
+    fn open() -> Windows {
+        let mut w = Windows::default();
+        let _ = w.open_studio(Some(st::Picture::Crop(crop())));
+        w
+    }
+
+    fn draw(w: &mut Windows) {
+        let _ = w.on_studio(st::Msg::Editor(Message::Tool(Tool::Pen)));
+        for m in [
+            Message::Press(iced::Point::new(2.0, 2.0)),
+            Message::Move(iced::Point::new(30.0, 20.0)),
+            Message::Release,
+        ] {
+            let _ = w.on_studio(st::Msg::Editor(m));
+        }
+    }
+
+    fn size(w: &Windows) -> (u32, u32) {
+        let s = w.studio.as_ref().unwrap().1.probe().0.unwrap();
+        (s.width as u32, s.height as u32)
+    }
+
+    #[test]
+    fn opening_twice_keeps_one_studio_and_loads_the_new_picture() {
+        let mut w = open();
+        let id = w.studio_window().unwrap();
+        let _ = w.open_studio(Some(st::Picture::Crop(Crop {
+            width: 80,
+            height: 20,
+            rgba: vec![0; 80 * 20 * 4],
+        })));
+        assert_eq!(w.studio_window(), Some(id), "the same window");
+        assert_eq!(size(&w), (80, 20));
+    }
+
+    #[test]
+    fn save_then_continue_opens_what_waited() {
+        let mut w = open();
+        draw(&mut w);
+        assert!(w.studio_dirty());
+        let _ = w.open_studio(Some(st::Picture::Crop(Crop {
+            width: 80,
+            height: 20,
+            rgba: vec![0; 80 * 20 * 4],
+        })));
+        assert_eq!(size(&w), (40, 30), "asks first: the old one stays");
+        let _ = w.studio_saved(Ok("Saved".into()), true);
+        assert_eq!(size(&w), (80, 20));
+        assert!(!w.studio_dirty());
+        // a failed Save goes nowhere
+        let mut w = open();
+        draw(&mut w);
+        let _ = w.close_studio();
+        let _ = w.studio_saved(Err("disk full".into()), true);
+        assert!(w.studio_dirty() && w.studio.as_ref().unwrap().1.asking());
+    }
+
+    #[test]
+    fn a_close_request_asks_when_unsaved() {
+        let mut w = open();
+        let id = w.studio_window().unwrap();
+        let _ = w.update(Msg::CloseRequest(id));
+        assert!(!w.studio.as_ref().unwrap().1.asking(), "clean: no question");
+        draw(&mut w);
+        let _ = w.update(Msg::CloseRequest(id));
+        assert!(w.studio.as_ref().unwrap().1.asking());
+        assert!(w.busy());
+    }
+
+    #[test]
+    fn quit_asks_while_dirty_and_goes_when_clean() {
+        let mut w = open();
+        assert!(w.quit_studio().is_none(), "clean: the app may quit");
+        draw(&mut w);
+        assert!(w.quit_studio().is_some());
+        assert!(w.studio.as_ref().unwrap().1.asking());
+        let _ = w.on_studio(st::Msg::Cancel);
+        assert!(!w.studio.as_ref().unwrap().1.asking() && w.studio_dirty());
+        let _ = w.quit_studio();
+        let _ = w.on_studio(st::Msg::DontSave);
+        assert!(w.quit_studio().is_none(), "answered: nothing left to ask");
+    }
+
+    #[test]
+    fn an_unreadable_file_says_so_and_changes_nothing() {
+        let mut w = open();
+        let _ = w.studio_read(Err("bad".into()));
+        assert_eq!(size(&w), (40, 30));
+        assert!(!w.toasts.is_empty(), "the error pill");
+    }
+
+    #[test]
+    fn ctrl_is_cleared_when_the_studio_loses_focus() {
+        let mut w = open();
+        let id = w.studio_window().unwrap();
+        let _ = w.update(Msg::StudioEvent(window::Id::unique(), st::Msg::Ctrl(true)));
+        assert!(
+            w.studio.as_ref().unwrap().1.probe().1,
+            "any window's Ctrl counts"
+        );
+        let _ = w.update(Msg::Unfocused(id));
+        assert!(!w.studio.as_ref().unwrap().1.probe().1);
+    }
+}
