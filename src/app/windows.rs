@@ -1303,6 +1303,15 @@ impl Windows {
                                 .map(|m| Msg::Settings(settings::Message::Glossaries(m))),
                             ]);
                         }
+                        settings::Outcome::SignIn(job) => {
+                            let run = crate::app::background::background(move |tx| {
+                                let _ = tx.unbounded_send(job.run());
+                            });
+                            let done = run.map(|(id, got)| {
+                                Msg::Settings(settings::Message::SignedIn(id, got))
+                            });
+                            return Task::batch([keys, done]);
+                        }
                         settings::Outcome::UpdateModels => {
                             let update = crate::app::background::background(move |tx| {
                                 let (pairs, _) = crate::features::translate::mt::installed();

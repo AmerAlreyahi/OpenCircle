@@ -311,12 +311,13 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
             "http://127.0.0.1:1234/v1",
             "http://[::1]:8080/v1",
             "HTTP://LocalHost:1234/v1",
+            "http://192.168.1.5:1234/v1", // the local network (#56)
         ] {
             c.base_url = local.into();
             assert!(build_request(&c, Some(&key), &[], None).is_ok(), "{local}");
         }
         for remote in [
-            "http://192.168.1.5:1234/v1",
+            "http://8.8.8.8:1234/v1",
             "http://example.com/v1",
             "http://localhost@evil.com/v1",
             "HTTP://example.com/v1",

@@ -17,6 +17,7 @@ pub mod models;
 pub mod openai;
 pub mod providers;
 pub(crate) mod screens;
+pub mod sign_in;
 
 use std::fmt;
 use std::io::BufRead;
@@ -590,39 +591,71 @@ pub(crate) fn scrub(text: &str, key: Option<&Secret>) -> String {
 /// The one transport check, run by both clients before any key header exists.
 /// Scheme is matched case-insensitively. `https://` always passes; `http://`
 /// only for this machine (host `localhost` / `*.localhost`, or an IP literal
-/// that `is_loopback()`), unless there is no key to leak; any other scheme fails.
+/// that `is_loopback()`) or the local network (`lan_http`), unless there is
+/// no key to leak; any other scheme fails.
 pub(crate) fn check_endpoint(url: &str, has_key: bool) -> Result<(), AiError> {
     let bad = |why: &str| Err(AiError::NotConfigured(why.to_string()));
-    let Some((scheme, rest)) = url.split_once("://") else {
+    let Some((scheme, _)) = url.split_once("://") else {
         return bad("the endpoint must be an http(s):// URL");
     };
     if scheme.eq_ignore_ascii_case("https") || (!has_key && scheme.eq_ignore_ascii_case("http")) {
         return Ok(());
     }
+    match http_host(url) {
+        None => bad("the endpoint must be an http(s):// URL"),
+        Some(HttpHost::ThisPc | HttpHost::Lan) => Ok(()),
+        Some(HttpHost::Public) => bad(
+            "the endpoint uses plain http:// with an API key; use https:// (http is allowed only on this PC or your local network)",
+        ),
+    }
+}
+
+/// A plain `http://` server on the local network (not this PC): allowed with
+/// a key, with a warning under the URL (#56).
+pub(crate) fn lan_http(url: &str) -> bool {
+    http_host(url) == Some(HttpHost::Lan)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HttpHost {
+    ThisPc,
+    /// A private IP literal (10/8, 172.16/12, 192.168/16, fc00::/7) or an
+    /// mDNS `*.local` name.
+    Lan,
+    Public,
+}
+
+/// Where an `http://` URL's host is (`None`: not http).
+fn http_host(url: &str) -> Option<HttpHost> {
+    let (scheme, rest) = url.split_once("://")?;
     if !scheme.eq_ignore_ascii_case("http") {
-        return bad("the endpoint must be an http(s):// URL");
+        return None;
     }
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    // Backslashes and spaces are parsed differently by different URL parsers: refuse.
     let host_port = authority.rsplit('@').next().unwrap_or_default();
     let host = match host_port.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or_default(),
         None => host_port.split(':').next().unwrap_or_default(),
     };
     let host_lc = host.to_ascii_lowercase();
-    let local = !authority.contains(['\\', ' '])
-        && (host_lc == "localhost"
-            || host_lc.ends_with(".localhost")
-            || host
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|ip| ip.is_loopback()));
-    if local {
-        Ok(())
+    let ip = host.parse::<std::net::IpAddr>().ok();
+    // Backslashes and spaces are parsed differently by different URL parsers: refuse.
+    Some(if authority.contains(['\\', ' ']) {
+        HttpHost::Public
+    } else if host_lc == "localhost"
+        || host_lc.ends_with(".localhost")
+        || ip.is_some_and(|ip| ip.is_loopback())
+    {
+        HttpHost::ThisPc
+    } else if ip.is_some_and(|ip| match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private(),
+        std::net::IpAddr::V6(v6) => v6.segments()[0] & 0xfe00 == 0xfc00,
+    }) || (ip.is_none() && host_lc.len() > ".local".len() && host_lc.ends_with(".local"))
+    {
+        HttpHost::Lan
     } else {
-        bad(
-            "the endpoint uses plain http:// with an API key; use https:// (http is allowed only for localhost)",
-        )
-    }
+        HttpHost::Public
+    })
 }
 
 /// `base` without trailing slashes.
@@ -825,15 +858,43 @@ mod tests {
             "http://localhost@evil.com/v1",
             "http://127.0.0.1@evil.com/v1",
             "http://127.0.0.1\\@evil.com/v1",
-            "http://192.168.1.5:1234/v1",
             "http://[2001:db8::1]/v1",
             "http://0.0.0.0:1234",
+            "http://192.168.1.1.evil.com/v1",
+            "http://10.0.0.1.nip.io/v1",
+            "http://192.168.1.5@evil.com/v1",
+            "http://evil.local.com/v1",
+            "http://.local/v1",
+            "http://8.8.8.8/v1",
+            "http://172.32.0.1/v1",
+            "http://192.168.1.5\\@evil.com/v1",
             "ftp://x",
             "file:///etc/passwd",
             "api.anthropic.com",
             "",
         ] {
             assert!(check_endpoint(bad, true).is_err(), "{bad}");
+            assert!(!lan_http(bad), "{bad}");
+        }
+    }
+
+    /// #56: a server on the local network over plain http, with a warning.
+    #[test]
+    fn endpoint_check_allows_the_local_network_and_says_so() {
+        for lan in [
+            "http://192.168.1.5:1234/v1",
+            "HTTP://10.0.0.7/v1",
+            "http://172.16.0.1:8080",
+            "http://172.31.255.254/v1",
+            "http://[fd00::12]:11434/v1",
+            "http://gpu-box.local:11434/v1",
+            "http://user@192.168.1.5/v1",
+        ] {
+            assert!(check_endpoint(lan, true).is_ok(), "{lan}");
+            assert!(lan_http(lan), "{lan}");
+        }
+        for not_lan in ["http://localhost:11434/v1", "https://192.168.1.5/v1"] {
+            assert!(!lan_http(not_lan), "{not_lan}");
         }
     }
 
