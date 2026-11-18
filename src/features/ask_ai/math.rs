@@ -139,10 +139,29 @@ fn formulas(text: &str) -> String {
     out
 }
 
+/// Groups, arguments and commands nested deeper than this, or a formula
+/// longer than `MAX_LEN` characters: the formula is left as written (a model's
+/// answer is untrusted: no stack overflow, no runaway work).
+const MAX_DEPTH: usize = 64;
+const MAX_LEN: usize = 20_000;
+
 /// A formula's LaTeX as Unicode lines (one, unless it has rows).
 pub fn latex(source: &str) -> Vec<String> {
+    latex_in(source, 0)
+}
+
+/// `latex`, `depth` levels down already (a formula inside `\text{}`).
+fn latex_in(source: &str, depth: usize) -> Vec<String> {
     let cs: Vec<char> = source.chars().collect();
-    let mut p = Parser { s: &cs, i: 0 };
+    if cs.len() > MAX_LEN {
+        return vec![source.to_string()];
+    }
+    let mut p = Parser {
+        s: &cs,
+        i: 0,
+        depth,
+        too_deep: false,
+    };
     let mut rows = Vec::new();
     loop {
         rows.push(p.seq(false));
@@ -157,6 +176,9 @@ pub fn latex(source: &str) -> Vec<String> {
         if p.i >= cs.len() {
             break;
         }
+    }
+    if p.too_deep {
+        return vec![source.to_string()];
     }
     let lines: Vec<String> = rows
         .into_iter()
@@ -257,6 +279,10 @@ impl Block {
 struct Parser<'a> {
     s: &'a [char],
     i: usize,
+    /// How deep in groups / arguments / commands it is (`MAX_DEPTH`).
+    depth: usize,
+    /// Past `MAX_DEPTH`: the formula stays as written.
+    too_deep: bool,
 }
 
 impl Parser<'_> {
@@ -337,8 +363,25 @@ impl Parser<'_> {
         out
     }
 
+    /// `step` one level deeper; past `MAX_DEPTH` nothing more is read.
+    fn nested(&mut self, step: fn(&mut Self) -> Block) -> Block {
+        if self.depth >= MAX_DEPTH {
+            self.too_deep = true;
+            self.i = self.s.len();
+            return Block::default();
+        }
+        self.depth += 1;
+        let block = step(self);
+        self.depth -= 1;
+        block
+    }
+
     /// One piece: a group, a script, a command or a character.
     fn atom(&mut self) -> Block {
+        self.nested(Self::atom_here)
+    }
+
+    fn atom_here(&mut self) -> Block {
         let Some(c) = self.peek() else {
             return Block::default();
         };
@@ -365,6 +408,10 @@ impl Parser<'_> {
 
     /// A command's argument: a group or one piece.
     fn arg(&mut self) -> Block {
+        self.nested(Self::arg_here)
+    }
+
+    fn arg_here(&mut self) -> Block {
         self.skip_spaces();
         match self.peek() {
             Some('{') => self.atom(),
@@ -380,8 +427,12 @@ impl Parser<'_> {
         }
     }
 
-    /// After a `\`: the command's text.
+    /// After a `\`: the command's text (an environment too).
     fn command(&mut self) -> Block {
+        self.nested(Self::command_here)
+    }
+
+    fn command_here(&mut self) -> Block {
         let from = self.i;
         while self.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
             self.i += 1;
@@ -468,7 +519,7 @@ impl Parser<'_> {
         }
         for (k, part) in parts.enumerate() {
             match k % 2 {
-                0 => out.push_str(&latex(part).concat()),
+                0 => out.push_str(&latex_in(part, self.depth + 1).concat()),
                 _ => out.push_str(part),
             }
         }
@@ -920,6 +971,27 @@ mod tests {
         );
         let three = latex(r"\begin{cases} a & x \\ b & y \\ c & z \end{cases}");
         assert_eq!(three, ["⎧ a   x", "⎨ b   y", "⎩ c   z"]);
+    }
+
+    /// A model's answer is untrusted: braces or commands nested past the
+    /// limit, or a huge formula, come back as written, never a stack overflow.
+    #[test]
+    fn deep_or_huge_formulas_stay_as_written() {
+        // (under the length cap: the depth limit stops it)
+        let braces = format!("{}x{}", "{".repeat(5_000), "}".repeat(5_000));
+        assert_eq!(latex(&braces), std::slice::from_ref(&braces));
+        let ten = format!("{}x{}", "{".repeat(10_000), "}".repeat(10_000));
+        assert_eq!(latex(&ten), std::slice::from_ref(&ten));
+        let fracs = format!("{}1{}", r"\frac{".repeat(5_000), "}{2}".repeat(5_000));
+        assert_eq!(latex(&fracs), std::slice::from_ref(&fracs));
+        let begins = r"\begin{cases}".repeat(5_000);
+        assert_eq!(latex(&begins), std::slice::from_ref(&begins));
+        let md = format!("$${braces}$$");
+        assert!(readable(&md).contains(&braces));
+        let long = "x+".repeat(MAX_LEN);
+        assert_eq!(latex(&long), std::slice::from_ref(&long));
+        // shallow nesting still converts
+        assert_eq!(one(r"\frac{\frac{1}{2}}{3}"), "(1/2)/3");
     }
 
     #[test]
