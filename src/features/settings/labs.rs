@@ -20,13 +20,10 @@ pub enum Feature {
     Pins,
     /// Live translate: bar button, tray item, shortcut and its Settings rows.
     Live,
-    /// The online translate engine (Google's free web translator): a third
-    /// choice on Settings > Translate's Engine row.
-    Online,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 4] = [Feature::Song, Feature::Pins, Feature::Live, Feature::Online];
+    pub const ALL: [Feature; 3] = [Feature::Song, Feature::Pins, Feature::Live];
 
     /// Is its Labs row shown? Live translate's is hidden (`live_translate::AVAILABLE`).
     pub fn shown(self) -> bool {
@@ -39,7 +36,6 @@ impl Feature {
             Feature::Song => "Song search",
             Feature::Pins => "Pins",
             Feature::Live => "Live translate",
-            Feature::Online => "Online translation",
         }
     }
 }
@@ -50,9 +46,6 @@ pub struct Labs {
     pub song: bool,
     pub pins: bool,
     pub live: bool,
-    /// (written only when on: the default file stays as it was)
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub online: bool,
 }
 
 impl Labs {
@@ -61,7 +54,6 @@ impl Labs {
             Feature::Song => self.song,
             Feature::Pins => self.pins,
             Feature::Live => self.live && crate::features::live_translate::available(),
-            Feature::Online => self.online,
         }
     }
 
@@ -70,7 +62,6 @@ impl Labs {
             Feature::Song => self.song = on,
             Feature::Pins => self.pins = on,
             Feature::Live => self.live = on,
-            Feature::Online => self.online = on,
         }
     }
 
@@ -80,7 +71,6 @@ impl Labs {
             song: true,
             pins: true,
             live: true,
-            online: true,
         }
     }
 }

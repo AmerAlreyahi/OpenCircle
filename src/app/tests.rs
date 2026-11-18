@@ -4623,6 +4623,105 @@ fn a_pinned_chat_window_is_resized_by_its_inner_edge() {
     assert_eq!(w.size.width, before.width, "the design's width again");
 }
 
+/// W56: the pinned chat's inner edge held at 125 %: every step its window's
+/// outer edge stays on the same physical px (also when the system reports an
+/// earlier spot of the window meanwhile), and its width follows the pointer 1:1.
+#[test]
+fn a_pinned_chat_resized_keeps_its_outer_edge_still() {
+    let mut app = open_app(1920, 1080, 1.25);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let w = app.chat_win.as_ref().expect("its own window");
+    let (window, first, at) = (w.id, w.placed.unwrap(), w.at);
+    let right = |app: &App| {
+        let p = app.chat_win.as_ref().unwrap().placed.unwrap();
+        (p.origin.0 + p.px.0 as i32, p.px.0 as i32)
+    };
+    let (edge, width) = right(&app);
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::AiChat(id, grab));
+    let start = first.origin.0 as f32 + 6.0;
+    for (i, dx) in [0.0f32, -1.0, -3.0, -7.0, -26.0, -61.0, -40.0, -13.0]
+        .iter()
+        .enumerate()
+    {
+        // the pointer, in the window's px where it is now
+        let placed = app.chat_win.as_ref().unwrap().placed.unwrap();
+        let p = Point::new((start + dx - placed.origin.0 as f32) / placed.scale, 300.0);
+        let _ = app.update(Message::ChatResizedOn(window, p));
+        if i == 4 {
+            // the system reports where an earlier size put it
+            let _ = app.update(Message::ChatMoved(window, at));
+        }
+        let (now, w) = right(&app);
+        assert_eq!(now, edge, "the outer edge stays put (step {i})");
+        assert!(
+            (w - width + *dx as i32).abs() <= 1,
+            "the width follows the pointer (step {i}: {w} vs {width} - {dx})"
+        );
+    }
+    let _ = app.update(Message::ChatResizeEnd);
+    assert_eq!(right(&app).0, edge, "still docked");
+}
+
+/// W56: with the overlay open, the chat's inner edge held at 125 %: its
+/// window's outer edge stays on the same physical px every step, and its
+/// width follows the pointer.
+#[test]
+fn the_chat_resized_on_the_overlay_keeps_its_outer_edge_still() {
+    let mut app = open_app(1920, 1080, 1.25);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    let placed = |app: &App| {
+        let w = app.chat_win.as_ref().expect("its own window");
+        w.placed.unwrap()
+    };
+    let first = placed(&app);
+    let (edge, width) = (first.origin.0 + first.px.0 as i32, first.px.0 as i32);
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::AiChat(id, grab));
+    let start = app.chat_rect().x + 3.0;
+    for (i, dx) in [0.0f32, -0.8, -2.4, -5.6, -20.8, -48.8, -32.0, -10.4]
+        .iter()
+        .enumerate()
+    {
+        let _ = app.update(Message::CardMoved(Point::new(start + dx, 300.0)));
+        let now = placed(&app);
+        assert_eq!(
+            now.origin.0 + now.px.0 as i32,
+            edge,
+            "the outer edge stays put (step {i})"
+        );
+        let grown = now.px.0 as i32 - width;
+        assert!(
+            (grown as f32 + dx * 1.25).abs() <= 1.5,
+            "the width follows the pointer (step {i}: +{grown} px for {dx})"
+        );
+    }
+    let _ = app.update(Message::CardReleased);
+    let now = placed(&app);
+    assert_eq!(now.origin.0 + now.px.0 as i32, edge, "still docked");
+}
+
 /// The pinned chat's own window, let go mid-screen, glides to its dock frame
 /// by frame (`motion::DOCK`, standard-out) and ends exactly on it.
 #[test]

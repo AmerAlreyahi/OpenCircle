@@ -22,13 +22,13 @@ pub const ACTION: Action = Action {
     run: Run::Translate,
 };
 
-/// The pipeline's OCR + translation engine and the target for `source` -> `target`;
-/// `one_shot` = Translate (Live never goes online). Blocking (keyring): call off
-/// the UI thread. `Err` = what to tell the user: its first line is the short reason.
-pub fn deps_for(source: &str, target: &str, one_shot: bool) -> Result<(Real, String), String> {
+/// The pipeline's OCR + translation engine and the target for `source` -> `target`.
+/// Blocking (keyring): call off the UI thread. `Err` = what to tell the user: its
+/// first line is the short reason.
+pub fn deps_for(source: &str, target: &str) -> Result<(Real, String), String> {
     let cfg = config::current();
     let via = choose(
-        engine(&cfg, one_shot),
+        cfg.translate.engine,
         &cfg.ai.provider,
         source,
         target,
@@ -101,25 +101,10 @@ pub fn readers_bytes() -> u64 {
     models::missing_bytes(&models::other_scripts_files())
 }
 
-/// The engine in effect: Online only while its Labs switch is on, and only
-/// for one-shot Translate; else it is Offline (hide, don't delete).
-fn engine(cfg: &config::Config, one_shot: bool) -> Engine {
-    match cfg.translate.engine {
-        Engine::Online if one_shot && cfg.labs.online => Engine::Online,
-        Engine::Online => Engine::Offline,
-        e => e,
-    }
-}
-
 /// Offline is chosen, or the provider is the browser (which can't translate).
-/// (One-shot Translate's view: online is not offline.)
 pub fn will_be_offline() -> bool {
     let cfg = config::current();
-    match engine(&cfg, true) {
-        Engine::Offline => true,
-        Engine::Online => false,
-        Engine::Ai => cfg.ai.provider == Provider::Browser,
-    }
+    cfg.translate.engine == Engine::Offline || cfg.ai.provider == Provider::Browser
 }
 
 /// Offline when chosen, or when AI isn't set up (the browser provider, no
@@ -136,9 +121,6 @@ fn choose(
     credentials: impl FnOnce() -> Result<(AiConfig, Option<Secret>), String>,
 ) -> Result<Via, String> {
     let offline = mt::available(source, target);
-    if engine == Engine::Online {
-        return Ok(Via::Online);
-    }
     if engine == Engine::Offline {
         return match offline {
             true => Ok(Via::Offline),
@@ -174,7 +156,6 @@ mod tests {
         match r {
             Ok(Via::Ai { .. }) => "ai",
             Ok(Via::Offline) => "offline",
-            Ok(Via::Online) => "online",
             Err(_) => "error",
         }
     }
@@ -219,23 +200,5 @@ mod tests {
             "{e}"
         );
         assert!(e.contains("Choose AI"), "offers AI: {e}");
-        // Online: any pair, and the keyring isn't read
-        assert_eq!(
-            engine(choose(Engine::Online, &anthropic, "ko", "th", never)),
-            "online"
-        );
-    }
-
-    /// Online is one-shot Translate's, and only while its Labs switch is on.
-    #[test]
-    fn online_needs_labs_and_one_shot() {
-        let mut cfg = config::Config::default();
-        cfg.translate.engine = Engine::Online;
-        assert_eq!(super::engine(&cfg, true), Engine::Offline, "Labs off");
-        cfg.labs.online = true;
-        assert_eq!(super::engine(&cfg, true), Engine::Online);
-        assert_eq!(super::engine(&cfg, false), Engine::Offline, "never Live");
-        cfg.translate.engine = Engine::Ai;
-        assert_eq!(super::engine(&cfg, true), Engine::Ai);
     }
 }

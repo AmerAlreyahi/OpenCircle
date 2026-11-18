@@ -1363,7 +1363,3 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   Mojeek blocked every query), plus Wikipedia's official API as the keyless fallback for facts. Honest client only: never pose as
   a browser, never solve or dodge a captcha; when blocked, a plain message and the answer without search. One small source
   interface so the owner can switch the engine later.
-- All of v0.3.x in v0.3.0 (owner, 2026-11-18, after testing the combined build; SUPERSEDES the 0.3.1-0.3.3 split): the chat
-  polish, the online (Google) engine in Labs + Retry pill, Connect OpenRouter + LAN http + free-key links, and web search (Bing +
-  Wikipedia) ship TOGETHER as v0.3.0 (one Windows final test + update gate + draft, publish on his word). Lesson: when the owner
-  asks for "the final / whole thing", give him the build with EVERYTHING finished, never a partial "release candidate".

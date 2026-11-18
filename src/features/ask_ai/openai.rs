@@ -6,10 +6,7 @@
 use serde_json::{Value, json};
 use std::ops::ControlFlow;
 
-use super::{
-    AiError, Event, HttpRequest, Message, Pending, Reply, Role, Tool, ToolCall, append, join_url,
-    png_b64, run_stream,
-};
+use super::{AiError, Event, HttpRequest, Message, Role, join_url, png_b64, run_stream};
 use crate::shared::config::AiConfig;
 use crate::shared::secrets::Secret;
 
@@ -19,45 +16,10 @@ pub fn ask_stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    tools: &[Tool],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
-) -> Result<Reply, AiError> {
-    let mut req = build_request(cfg, key, messages, fast)?;
-    if !tools.is_empty() {
-        req.body["tools"] = tools
-            .iter()
-            .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.schema}}))
-            .collect();
-    }
-    let (text, pending) = run_stream(&req, key, on_delta, parse_into)?;
-    Ok(reply(text, pending))
-}
-
-/// The answer and its tool calls; the assistant turn to send back with their results.
-pub(crate) fn reply(text: String, pending: Pending) -> Reply {
-    let calls: Vec<ToolCall> = (pending.blocks.iter())
-        .map(|c| ToolCall {
-            id: c["id"].as_str().unwrap_or_default().into(),
-            name: c["function"]["name"].as_str().unwrap_or_default().into(),
-            args: c["function"]["arguments"]
-                .as_str()
-                .unwrap_or_default()
-                .into(),
-        })
-        .collect();
-    let native = (!calls.is_empty()).then(|| {
-        let content = if text.is_empty() {
-            Value::Null
-        } else {
-            json!(text)
-        };
-        json!({"role": "assistant", "content": content, "tool_calls": pending.blocks})
-    });
-    Reply {
-        text,
-        calls,
-        native,
-    }
+) -> Result<String, AiError> {
+    let req = build_request(cfg, key, messages, fast)?;
+    run_stream(&req, key, on_delta, parse_event)
 }
 
 pub(crate) fn build_request(
@@ -79,15 +41,7 @@ pub(crate) fn build_request(
 
     let msgs: Vec<Value> = messages
         .iter()
-        .flat_map(|m| -> Vec<Value> {
-            if let Some(native) = &m.native {
-                return vec![native.clone()];
-            }
-            if !m.results.is_empty() {
-                return (m.results.iter())
-                    .map(|(id, text)| json!({"role": "tool", "tool_call_id": id, "content": text}))
-                    .collect();
-            }
+        .map(|m| {
             let role = match m.role {
                 Role::System => "system",
                 Role::User => "user",
@@ -104,7 +58,7 @@ pub(crate) fn build_request(
                     json!(parts)
                 }
             };
-            vec![json!({"role": role, "content": content})]
+            json!({"role": role, "content": content})
         })
         .collect();
 
@@ -164,13 +118,7 @@ fn host_of(url: &str) -> String {
 }
 
 /// One SSE `data:` payload: `[DONE]`, an error object, or a chunk with `choices[0].delta.content`.
-#[cfg(test)]
 pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
-    parse_into(data, &mut Pending::default())
-}
-
-/// `parse_event`, keeping streamed tool calls (`delta.tool_calls`) in `pending`.
-pub(crate) fn parse_into(data: &str, pending: &mut Pending) -> Result<Event, AiError> {
     if data.trim() == "[DONE]" {
         return Ok(Event::Done);
     }
@@ -188,21 +136,6 @@ pub(crate) fn parse_into(data: &str, pending: &mut Pending) -> Result<Event, AiE
         return Err(AiError::Refused);
     }
     let delta = &choice["delta"];
-    for piece in delta["tool_calls"].as_array().into_iter().flatten() {
-        let index = piece["index"].as_u64().unwrap_or(0) as usize;
-        let call = pending.at(
-            index,
-            || json!({"id": "", "type": "function", "function": {"name": "", "arguments": ""}}),
-        );
-        if let Some(id) = piece["id"].as_str() {
-            append(call, "id", id);
-        }
-        for key in ["name", "arguments"] {
-            if let Some(more) = piece["function"][key].as_str() {
-                append(&mut call["function"], key, more);
-            }
-        }
-    }
     match delta["content"].as_str() {
         Some(text) if !text.is_empty() => Ok(Event::Delta(text.to_string())),
         // DeepSeek / Ollama / LM Studio: `reasoning_content`; OpenRouter: `reasoning`
@@ -378,13 +311,12 @@ data: {"id":"never read","choices":[{"delta":{"content":"X"}}]}
             "http://127.0.0.1:1234/v1",
             "http://[::1]:8080/v1",
             "HTTP://LocalHost:1234/v1",
-            "http://192.168.1.5:1234/v1", // the local network (#56)
         ] {
             c.base_url = local.into();
             assert!(build_request(&c, Some(&key), &[], None).is_ok(), "{local}");
         }
         for remote in [
-            "http://8.8.8.8:1234/v1",
+            "http://192.168.1.5:1234/v1",
             "http://example.com/v1",
             "http://localhost@evil.com/v1",
             "HTTP://example.com/v1",

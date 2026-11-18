@@ -1621,7 +1621,7 @@ fn ai_parts_are_drawn_as_they_arrive_and_one_failing_part_is_only_its_own() {
             ("Late", true)
         ]
     );
-    assert_eq!(out.failed, 1, "one part lost (#90: the pill offers Retry)");
+    assert_eq!(out.failed, Some(AiError::Server(503, String::new())));
 }
 
 /// One call at a time (offline, or a Deps without `parallel`): the first

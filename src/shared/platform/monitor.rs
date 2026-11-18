@@ -113,8 +113,32 @@ pub fn place_window<T: Send + 'static>(id: window::Id, place: Place) -> Task<T> 
         }
     })
     .discard();
+    // X11: one request (`shape::place`); else moved, then sized
     #[cfg(not(windows))]
-    window::move_to(id, place.logical_origin()).chain(resize(id, place.size()))
+    {
+        let radius = crate::shared::platform::windows::FLOATING
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(f, ..)| *f == id)
+            .map(|(_, r, _)| *r);
+        window::run(id, move |w| {
+            let handle = w.window_handle().ok()?;
+            let placed = crate::shared::platform::shape::place(
+                handle.as_raw(),
+                place.origin,
+                place.px,
+                radius,
+            );
+            placed
+                .inspect_err(|e| crate::log!("[opencircle] window not placed: {e}"))
+                .ok()
+        })
+        .then(move |done| match done {
+            Some(true) => Task::none(),
+            _ => window::move_to(id, place.logical_origin()).chain(resize(id, place.size())),
+        })
+    }
 }
 
 /// How much of the bottom of the monitor at `origin` (`size`, logical px at

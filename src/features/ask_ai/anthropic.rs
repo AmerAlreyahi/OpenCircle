@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use std::ops::ControlFlow;
 
 use super::{
-    ANTHROPIC_API_VERSION, AiError, DEFAULT_ANTHROPIC_MODEL, Event, HttpRequest, Message, Pending,
-    Reply, Role, Tool, ToolCall, append, join_url, png_b64, run_stream,
+    ANTHROPIC_API_VERSION, AiError, DEFAULT_ANTHROPIC_MODEL, Event, HttpRequest, Message, Role,
+    join_url, png_b64, run_stream,
 };
 use crate::shared::config::AiConfig;
 use crate::shared::secrets::Secret;
@@ -20,39 +20,10 @@ pub fn ask_stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    tools: &[Tool],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
-) -> Result<Reply, AiError> {
-    let mut req = build_request(cfg, key, messages, fast)?;
-    if !tools.is_empty() {
-        req.body["tools"] = tools
-            .iter()
-            .map(
-                |t| json!({"name": t.name, "description": t.description, "input_schema": t.schema}),
-            )
-            .collect();
-    }
-    let (text, pending) = run_stream(&req, key, on_delta, parse_into)?;
-    Ok(reply(text, pending))
-}
-
-/// The answer and its `tool_use` calls. The assistant turn goes back with
-/// EVERY block as it came (thinking blocks and their signatures included).
-pub(crate) fn reply(text: String, pending: Pending) -> Reply {
-    let calls: Vec<ToolCall> = (pending.blocks.iter())
-        .filter(|b| b["type"] == "tool_use")
-        .map(|b| ToolCall {
-            id: b["id"].as_str().unwrap_or_default().into(),
-            name: b["name"].as_str().unwrap_or_default().into(),
-            args: b["input"].to_string(),
-        })
-        .collect();
-    let native = (!calls.is_empty()).then_some(Value::Array(pending.blocks));
-    Reply {
-        text,
-        calls,
-        native,
-    }
+) -> Result<String, AiError> {
+    let req = build_request(cfg, key, messages, fast)?;
+    run_stream(&req, key, on_delta, parse_event)
 }
 
 /// `fast` (translate calls): the answer is capped at that many tokens and the
@@ -97,23 +68,10 @@ pub(crate) fn build_request(
         .map(|m| m.text.as_str())
         .collect::<Vec<_>>()
         .join("\n\n");
-    let mut turns: Vec<Value> = Vec::new();
-    for m in messages.iter().filter(|m| m.role != Role::System) {
-        if let Some(native) = &m.native {
-            turns.push(json!({"role": "assistant", "content": native}));
-            continue;
-        }
-        if !m.results.is_empty() {
-            // every result of one turn in ONE user message
-            let results: Vec<Value> = (m.results.iter())
-                .map(
-                    |(id, text)| json!({"type": "tool_result", "tool_use_id": id, "content": text}),
-                )
-                .collect();
-            turns.push(json!({"role": "user", "content": results}));
-            continue;
-        }
-        turns.push({
+    let turns: Vec<Value> = messages
+        .iter()
+        .filter(|m| m.role != Role::System)
+        .map(|m| {
             let mut content = Vec::new();
             // Image first, then text.
             if let Some(png) = &m.image_png {
@@ -123,8 +81,8 @@ pub(crate) fn build_request(
                 content.push(json!({"type": "text", "text": m.text}));
             }
             json!({"role": if m.role == Role::User { "user" } else { "assistant" }, "content": content})
-        });
-    }
+        })
+        .collect();
 
     let mut body = json!({"model": model, "max_tokens": fast.unwrap_or(MAX_TOKENS), "stream": true, "messages": turns});
     if fast.is_some() {
@@ -153,52 +111,9 @@ pub(crate) fn build_request(
 
 /// One SSE `data:` payload. Text deltas are the answer, thinking deltas only
 /// say the model is thinking; pings and block markers are skipped. `stop_reason: refusal` and `error` events fail.
-#[cfg(test)]
 pub(crate) fn parse_event(data: &str) -> Result<Event, AiError> {
-    parse_into(data, &mut Pending::default())
-}
-
-/// `parse_event`, keeping every content block in `pending` as it streams
-/// (text, thinking + signature, tool_use with its input).
-pub(crate) fn parse_into(data: &str, pending: &mut Pending) -> Result<Event, AiError> {
     let v: Value = serde_json::from_str(data)
         .map_err(|_| AiError::BadResponse("unreadable stream event".into()))?;
-    let index = v["index"].as_u64().unwrap_or(0) as usize;
-    match v["type"].as_str() {
-        Some("content_block_start") => {
-            *pending.at(index, || Value::Null) = v["content_block"].clone();
-        }
-        Some("content_block_delta") => {
-            let block = pending.at(index, || json!({}));
-            let d = &v["delta"];
-            match d["type"].as_str() {
-                Some("text_delta") => append(block, "text", d["text"].as_str().unwrap_or_default()),
-                Some("thinking_delta") => append(
-                    block,
-                    "thinking",
-                    d["thinking"].as_str().unwrap_or_default(),
-                ),
-                Some("signature_delta") => block["signature"] = d["signature"].clone(),
-                Some("input_json_delta") => append(
-                    block,
-                    "partial",
-                    d["partial_json"].as_str().unwrap_or_default(),
-                ),
-                _ => {}
-            }
-        }
-        Some("content_block_stop") => {
-            let block = pending.at(index, || json!({}));
-            if block["type"] == "tool_use" {
-                let partial = block["partial"].as_str().unwrap_or_default().to_string();
-                block["input"] = serde_json::from_str(&partial).unwrap_or_else(|_| json!({}));
-                if let Some(o) = block.as_object_mut() {
-                    o.remove("partial");
-                }
-            }
-        }
-        _ => {}
-    }
     match v["type"].as_str() {
         Some("content_block_delta") if v["delta"]["type"] == "text_delta" => Ok(Event::Delta(
             v["delta"]["text"].as_str().unwrap_or_default().to_string(),

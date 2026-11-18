@@ -27,15 +27,11 @@ const ROWS: [(S, S, S); 7] = [
 ];
 
 const SONG: (S, S, S) = (S::p_song_a, S::p_song_b, S::p_song_c);
-const ONLINE: (S, S, S) = (S::p_online_a, S::p_online_b, S::p_online_c);
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let mut lines = ROWS.to_vec();
     if state.draft.labs.has(Feature::Song) {
         lines.insert(lines.len() - 1, SONG);
-    }
-    if state.draft.labs.has(Feature::Online) {
-        lines.insert(lines.len() - 1, ONLINE);
     }
     let cells = |a: Element<'static, Message>, b, c| {
         container(

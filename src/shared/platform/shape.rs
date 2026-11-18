@@ -80,8 +80,58 @@ pub fn apply(handle: RawWindowHandle, max_radius: f32) -> Result<(), String> {
     }
 }
 
+/// X11: moves and sizes the window behind `handle` in ONE request (`origin`,
+/// `px`: physical desktop px), so no frame shows it moved at its old size
+/// (one edge would jump with the other). A cut window (`max_radius`) is cut
+/// first to the larger of its old and new size: its held edge never shows
+/// clipped meanwhile (the exact cut follows its `Resized`). `Ok(false)`: not
+/// an X11 window (the caller moves and sizes it itself).
+#[cfg(not(windows))]
+pub fn place(
+    handle: RawWindowHandle,
+    origin: (i32, i32),
+    px: (u32, u32),
+    max_radius: Option<f32>,
+) -> Result<bool, String> {
+    match handle {
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xlib(h) => {
+            x11::place(h.window as u32, origin, px, max_radius).map(|_| true)
+        }
+        #[cfg(target_os = "linux")]
+        RawWindowHandle::Xcb(h) => x11::place(h.window.get(), origin, px, max_radius).map(|_| true),
+        _ => {
+            let _ = (origin, px, max_radius);
+            Ok(false)
+        }
+    }
+}
+
 /// A window px rectangle: x, y, width, height.
 pub type Px = (i32, i32, u32, u32);
+
+/// Edges: left, top, right, bottom.
+#[cfg(any(windows, test))]
+pub type Edges = (i32, i32, i32, i32);
+
+/// A window resized from `old` to `new` (its client area, desktop px) by its
+/// LEFT edge, its right one held (a chat docked right, sized by its inner
+/// edge): the part of its old picture to keep, right-aligned, as the
+/// destination and source rectangles (W56). The system keeps the old picture
+/// top-left aligned, so until the window draws again its docked right edge
+/// would jump with the left one. `None`: the default is right.
+#[cfg(any(windows, test))]
+pub fn kept_right(old: Edges, new: Edges) -> Option<(Edges, Edges)> {
+    if new.2 != old.2 || new.0 == old.0 {
+        return None;
+    }
+    let width = (new.2 - new.0).min(old.2 - old.0);
+    let height = (new.3 - new.1).min(old.3 - old.1);
+    (width > 0 && height > 0).then_some((
+        (new.2 - width, new.1, new.2, new.1 + height),
+        (old.2 - width, old.1, old.2, old.1 + height),
+    ))
+}
 
 /// A `w` x `h` window less `hole`, but with `keep` (bars over the hole) as
 /// rectangles: the bands above, below, left and right of the hole, then `keep`.
@@ -311,9 +361,10 @@ mod win {
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GetPropW, GetWindowLongPtrW,
-        GetWindowRect, RemovePropW, STYLESTRUCT, SWP_NOSIZE, SetPropW, SetWindowLongPtrW,
-        WINDOWPOS, WM_DPICHANGED, WM_NCACTIVATE, WM_NCDESTROY, WM_SETICON, WM_SETTEXT,
-        WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WNDPROC, WS_EX_LAYERED, WS_VISIBLE,
+        GetWindowRect, NCCALCSIZE_PARAMS, RemovePropW, STYLESTRUCT, SWP_NOSIZE, SetPropW,
+        SetWindowLongPtrW, WINDOWPOS, WM_DPICHANGED, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY,
+        WM_SETICON, WM_SETTEXT, WM_STYLECHANGING, WM_WINDOWPOSCHANGED, WNDPROC, WS_EX_LAYERED,
+        WS_VISIBLE, WVR_VALIDRECTS,
     };
     use windows::core::{PCWSTR, w};
 
@@ -356,6 +407,27 @@ mod win {
                 let _ = RemovePropW(h, LAYERED);
                 let _ = RemovePropW(h, TOOL);
                 let _ = RemovePropW(h, SHAPE);
+            }
+            // Resized by its left edge, its right one held: the old picture kept
+            // right-aligned until the window draws again, so the held edge stays
+            // put (`kept_right`), as a docked side panel does.
+            if msg == WM_NCCALCSIZE && w.0 != 0 {
+                let params = l.0 as *mut NCCALCSIZE_PARAMS;
+                let edges = |r: RECT| (r.left, r.top, r.right, r.bottom);
+                let old = edges((*params).rgrc[2]);
+                let result = CallWindowProcW(next, h, msg, w, l);
+                let kept = super::kept_right(old, edges((*params).rgrc[0]));
+                if let (0, Some((to, from))) = (result.0, kept) {
+                    let rect = |(left, top, right, bottom)| RECT {
+                        left,
+                        top,
+                        right,
+                        bottom,
+                    };
+                    ((*params).rgrc[1], (*params).rgrc[2]) = (rect(to), rect(from));
+                    return LRESULT(WVR_VALIDRECTS as isize);
+                }
+                return result;
             }
             // A cut window's shape follows every change of its size or DPI here,
             // as it happens: a move onto a monitor of another scale resizes the
@@ -752,6 +824,56 @@ mod x11 {
         .map_err(|e| format!("X11: {e:?}"))
     }
 
+    pub fn place(
+        window: u32,
+        (x, y): (i32, i32),
+        (w, h): (u32, u32),
+        max_radius: Option<f32>,
+    ) -> Result<(), String> {
+        let os = |e: &dyn std::fmt::Debug| format!("X11: {e:?}");
+        let (conn, _) =
+            xcb::Connection::connect_with_extensions(None, &[xcb::Extension::Shape], &[])
+                .map_err(|e| os(&e))?;
+        let window = x::Window::new(window);
+        if let Some(max_radius) = max_radius {
+            let was = conn
+                .wait_for_reply(conn.send_request(&x::GetGeometry {
+                    drawable: x::Drawable::Window(window),
+                }))
+                .map_err(|e| os(&e))?;
+            let (cw, ch) = (w.max(was.width().into()), h.max(was.height().into()));
+            let r = corner(max_radius, cw as f32, ch as f32).round() as u32;
+            let rects: Vec<x::Rectangle> = round_rect(cw, ch, r)
+                .into_iter()
+                .map(|(x, y, w, h)| x::Rectangle {
+                    x: x as i16,
+                    y: y as i16,
+                    width: w as u16,
+                    height: h as u16,
+                })
+                .collect();
+            conn.send_request(&shape::Rectangles {
+                operation: shape::So::Set,
+                destination_kind: shape::Sk::Bounding,
+                ordering: x::ClipOrdering::Unsorted,
+                destination_window: window,
+                x_offset: 0,
+                y_offset: 0,
+                rectangles: &rects,
+            });
+        }
+        conn.send_and_check_request(&x::ConfigureWindow {
+            window,
+            value_list: &[
+                x::ConfigWindow::X(x),
+                x::ConfigWindow::Y(y),
+                x::ConfigWindow::Width(w),
+                x::ConfigWindow::Height(h),
+            ],
+        })
+        .map_err(|e| os(&e))
+    }
+
     pub fn apply(window: u32, max_radius: f32) -> Result<(), String> {
         rects(window, |w, h| {
             let r = corner(max_radius, w as f32, h as f32).round() as u32;
@@ -813,6 +935,29 @@ mod x11 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W56: a chat docked right, sized by its left edge, keeps its old picture
+    /// right-aligned; any other resize keeps the system's default.
+    #[test]
+    fn a_window_sized_by_its_left_edge_keeps_its_picture_on_the_right() {
+        let old = (1000, 10, 1500, 900);
+        let wider = (900, 10, 1500, 900);
+        assert_eq!(
+            kept_right(old, wider),
+            Some(((1000, 10, 1500, 900), (1000, 10, 1500, 900)))
+        );
+        let thinner = (1100, 10, 1500, 900);
+        assert_eq!(
+            kept_right(old, thinner),
+            Some(((1100, 10, 1500, 900), (1100, 10, 1500, 900)))
+        );
+        assert_eq!(
+            kept_right(old, (1000, 10, 1600, 900)),
+            None,
+            "by its right edge"
+        );
+        assert_eq!(kept_right(old, (1100, 10, 1600, 900)), None, "moved");
+    }
 
     fn area(bands: &[(i32, i32, u32, u32)]) -> u32 {
         bands.iter().map(|b| b.2 * b.3).sum()

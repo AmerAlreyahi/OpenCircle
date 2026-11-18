@@ -1497,7 +1497,7 @@ fn work(
         Work::Job(job, frame, size) => queue.push_back((job, frame, size)),
         Work::Langs((source, target)) => {
             queue.clear(); // (the frame thread dropped those jobs)
-            *deps = crate::features::translate::action::deps_for(&source, &target, false).map(
+            *deps = crate::features::translate::action::deps_for(&source, &target).map(
                 |(mut real, target)| {
                     real.scale = scale;
                     (real, target)

@@ -43,6 +43,5 @@ fn words(f: Feature) -> (S, S) {
         Feature::Song => (S::lb_song, S::lb_song_d),
         Feature::Pins => (S::lb_pins, S::lb_pins_d),
         Feature::Live => (S::lb_live, S::lb_live_d),
-        Feature::Online => (S::lb_online, S::lb_online_d),
     }
 }

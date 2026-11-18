@@ -1089,35 +1089,3 @@ fn the_copy_under_the_user_s_message_copies_it() {
         "{msgs:?}"
     );
 }
-
-/// W57: the card shows when the user asks to search or the model says it
-/// can't, in English and Arabic; its "Search the web" asks that question again.
-#[test]
-fn search_card_offers_the_web_on_either_trigger_and_asks_again() {
-    use crate::features::ask_ai::ask::wants_web;
-    assert!(wants_web("now search for Amer", "Sure."));
-    assert!(wants_web("What is the latest news?", ""));
-    assert!(wants_web("ابحث عن عامر", "حسنا"));
-    assert!(wants_web("ما آخر الأخبار؟", ""));
-    assert!(wants_web("Who won?", "I can\u{2019}t browse the internet."));
-    assert!(wants_web("من فاز؟", "لا يمكنني البحث في الإنترنت."));
-    assert!(!wants_web("Explain research methods", "Here you go."));
-
-    let mut panel = api_chat();
-    ask(&mut panel, "now search for Amer");
-    let _ = panel.update(Msg::Delta("I cannot search the web.".into()));
-    let _ = panel.update(Msg::Answered(Ok(())));
-    let texts = crate::shared::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    let on = crate::t!(chat_web_on);
-    assert_eq!(texts.iter().filter(|t| *t == on).count(), 1, "{texts:?}");
-    let _ = panel.update(Msg::WebAgain);
-    assert_eq!(chat(&panel).turns.len(), 1);
-    assert_eq!(chat(&panel).turns[0].question, "now search for Amer");
-    assert_eq!(chat(&panel).status, Status::Streaming);
-    assert!(!panel.web_now, "the one-off flag is used up by that send");
-    // Not now hides the card for this turn
-    let _ = panel.update(Msg::Answered(Ok(())));
-    let _ = panel.update(Msg::WebSearch(false));
-    let texts = crate::shared::kit::testing::shot::texts(panel.view(at(SCREEN), SCREEN, false));
-    assert!(!texts.iter().any(|t| t == on), "{texts:?}");
-}

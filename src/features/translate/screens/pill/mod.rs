@@ -70,9 +70,6 @@ pub enum Msg {
     OpenSettings,
     /// Get the pair of the lines kept in their own language (`Offer`).
     GetHeld,
-    /// "N parts not translated · Retry": translate again (the parts that
-    /// came back are cached; only the lost ones are sent).
-    Retry,
     /// The page read as noise: offer the readers for other scripts (bytes).
     Readers(u64, String),
     /// The card's frame (`kit::panel_frame`): the App moves, resizes and
@@ -103,12 +100,7 @@ pub struct Shown {
     offer: Option<Box<Offer>>,
     /// The pairs it used whose decoder is still the older v1 one: updated
     /// now, in the background (`Session::update_models`).
-    outdated: Box<[&'static Pair]>,
-    /// "N parts not translated": parts an AI (or online) call lost, kept as
-    /// they were; the pill offers Retry (#90).
-    failed: u32,
-    /// Online didn't answer and this PC translated: said quietly.
-    local: bool,
+    outdated: Vec<&'static Pair>,
 }
 
 #[derive(Debug, Clone)]
@@ -353,9 +345,7 @@ impl Session {
             image,
             blocks,
             offer: None,
-            outdated: Box::default(),
-            failed: 0,
-            local: false,
+            outdated: Vec::new(),
         });
     }
 
@@ -417,10 +407,6 @@ impl Session {
                     return self.run(true);
                 }
             }
-            Msg::Retry if matches!(self.phase, Phase::Shown(_)) => {
-                let models = models::installed(models::recognizer_for(&self.picker.source));
-                return self.begin(models);
-            }
             Msg::AddStart => self.start_add(None),
             Msg::AddFor(word) => self.start_add(Some(word)),
             Msg::Add(msg) => return self.add(msg),
@@ -470,7 +456,7 @@ impl Session {
             Msg::Done(result) if matches!(self.phase, Phase::Translating) => {
                 self.work = None;
                 self.partial = None;
-                let update = (result.as_ref().ok()).map(|s| s.outdated.to_vec());
+                let update = (result.as_ref().ok()).map(|s| s.outdated.clone());
                 // (the names counted on this screen may now be suggestions)
                 self.glossary.refresh();
                 self.phase = match result {
@@ -765,79 +751,79 @@ impl Session {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
         let (agreed, scale, readers) = (self.offline, self.scale, self.readers.is_some());
-        let (task, handle) =
-            background(move |tx| {
-                let deps = crate::features::translate::action::deps_for(&source, &target, true)
-                    .map(|(mut real, target)| {
-                        real.scale = scale;
-                        (real, target)
-                    });
-                let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
-                if download {
-                    let progress = |done: u64, total: u64| {
-                        let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
-                    };
-                    let got = match readers {
-                        true => crate::features::translate::action::download_readers(progress),
-                        false => {
-                            crate::features::translate::action::download(&source, agreed, progress)
-                        }
-                    };
-                    if let Err(e) = got {
-                        let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
-                        return;
-                    }
-                    let _ = tx.unbounded_send(Msg::Translating);
-                }
-                let ask = |pair: &'static Pair| {
-                    let missing = pair.missing_bytes();
-                    (missing > 0).then(|| {
-                        crate::log!(
-                            "[opencircle] translate asks for {} ({missing} bytes)",
-                            pair.label()
-                        );
-                        tx.unbounded_send(Msg::Offline(pair, missing))
-                    })
+        let (task, handle) = background(move |tx| {
+            let deps = crate::features::translate::action::deps_for(&source, &target).map(
+                |(mut real, target)| {
+                    real.scale = scale;
+                    (real, target)
+                },
+            );
+            let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
+            if download {
+                let progress = |done: u64, total: u64| {
+                    let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
-                let expected = offline.then(|| asked_first(&source, &target)).flatten();
-                if expected.and_then(ask).is_some() {
+                let got = match readers {
+                    true => crate::features::translate::action::download_readers(progress),
+                    false => {
+                        crate::features::translate::action::download(&source, agreed, progress)
+                    }
+                };
+                if let Err(e) = got {
+                    let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
                     return;
                 }
-                let partial = |shown| {
-                    let _ = tx.unbounded_send(Msg::Partial(shown));
-                };
-                let result = translate(&frame, area, &cache, &deps, partial, || tx.is_closed())
-                    .map(|mut shown| {
-                        if let Ok((real, target)) = &deps {
-                            shown.offer = real.held().map(|h| {
-                                let source = h.0.source;
-                                Box::new(Offer::new(h, source, target))
-                            });
-                            shown.outdated = real.outdated().into();
-                            shown.local = real.fell_back();
-                        }
-                        shown
-                    });
-                // "auto" read another language than expected: ask for its pair;
-                // a page read as noise: the readers for other scripts
-                if result.is_err()
-                    && let Ok((real, _)) = &deps
-                {
-                    if real.missing().and_then(ask).is_some() {
-                        return;
+                let _ = tx.unbounded_send(Msg::Translating);
+            }
+            let ask = |pair: &'static Pair| {
+                let missing = pair.missing_bytes();
+                (missing > 0).then(|| {
+                    crate::log!(
+                        "[opencircle] translate asks for {} ({missing} bytes)",
+                        pair.label()
+                    );
+                    tx.unbounded_send(Msg::Offline(pair, missing))
+                })
+            };
+            let expected = offline.then(|| asked_first(&source, &target)).flatten();
+            if expected.and_then(ask).is_some() {
+                return;
+            }
+            let partial = |shown| {
+                let _ = tx.unbounded_send(Msg::Partial(shown));
+            };
+            let result = translate(&frame, area, &cache, &deps, partial, || tx.is_closed()).map(
+                |mut shown| {
+                    if let Ok((real, target)) = &deps {
+                        shown.offer = real.held().map(|h| {
+                            let source = h.0.source;
+                            Box::new(Offer::new(h, source, target))
+                        });
+                        shown.outdated = real.outdated();
                     }
-                    if real.wants_readers() {
-                        let (bytes, names) = (
-                            crate::features::translate::action::readers_bytes(),
-                            crate::features::text_reading::models::missing_other_scripts(),
-                        );
-                        let _ = tx.unbounded_send(Msg::Readers(bytes, names));
-                        return;
-                    }
+                    shown
+                },
+            );
+            // "auto" read another language than expected: ask for its pair;
+            // a page read as noise: the readers for other scripts
+            if result.is_err()
+                && let Ok((real, _)) = &deps
+            {
+                if real.missing().and_then(ask).is_some() {
+                    return;
                 }
-                let _ = tx.unbounded_send(Msg::Done(result));
-            })
-            .abortable();
+                if real.wants_readers() {
+                    let (bytes, names) = (
+                        crate::features::translate::action::readers_bytes(),
+                        crate::features::text_reading::models::missing_other_scripts(),
+                    );
+                    let _ = tx.unbounded_send(Msg::Readers(bytes, names));
+                    return;
+                }
+            }
+            let _ = tx.unbounded_send(Msg::Done(result));
+        })
+        .abortable();
         self.work = Some(handle.abort_on_drop());
         task
     }
@@ -901,9 +887,7 @@ fn translate(
             image: image::Handle::from_rgba(*width, *height, full),
             blocks,
             offer: None,
-            outdated: Box::default(),
-            failed: 0,
-            local: false,
+            outdated: Vec::new(),
         }
     };
     let out = pipeline::translate_until(
@@ -939,11 +923,10 @@ fn translate(
         };
         problem(message, setup)
     })?;
-    let mut result = shown(&out);
-    if out.failed > 0 {
-        crate::log!("[opencircle] {} part(s) stay untranslated", out.failed);
-        result.failed = out.failed as u32;
+    if let Some(e) = &out.failed {
+        crate::log!("[opencircle] some blocks stay untranslated: {e}");
     }
+    let result = shown(&out);
     let t = out.timings;
     crate::log!(
         "[opencircle] translate {}x{} at {x0},{y0}: ocr {} ms, translate {} ms, render {} ms, \

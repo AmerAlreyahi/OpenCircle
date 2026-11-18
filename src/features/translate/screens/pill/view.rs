@@ -143,18 +143,7 @@ impl Session {
             Phase::Shown(shown) if self.card.is_none() && shown.offer.is_some() => {
                 self.offer(whole, shown.offer.as_ref().expect("just checked"))
             }
-            // parts an AI (or online) call lost: "N parts not translated · Retry" (#90)
-            Phase::Shown(shown) if self.card.is_none() && shown.failed > 0 => {
-                let lost = fmt(S::tp_parts_failed, &[&shown.failed]);
-                let retry = button(
-                    button_label(t!(fix_retry)),
-                    Kind::Elevated,
-                    Some(Msg::Retry),
-                );
-                let line = dir::row([note(lost).into(), retry]).spacing(TAG_SPACING);
-                self.pill(whole, None, Some(line.align_y(Center).into()), None)
-            }
-            Phase::Shown(shown) => match &self.card {
+            Phase::Shown(_) => match &self.card {
                 Some(word) => {
                     let (body, footer) = card_view(word, at.width - frame::PADDING * 2.0);
                     with_pill(card(body, Some(footer), Some(&word.title)))
@@ -162,12 +151,7 @@ impl Session {
                 // (owned text: the tag's element slot)
                 None => {
                     let update = self.update_line().map(|l| note(l).into());
-                    // (online didn't answer: said quietly, after any saved tag)
-                    let status = self
-                        .tag
-                        .as_deref()
-                        .or(shown.local.then(|| t!(tp_online_local)));
-                    self.pill(whole, status, update, None)
+                    self.pill(whole, self.tag.as_deref(), update, None)
                 }
             },
         }

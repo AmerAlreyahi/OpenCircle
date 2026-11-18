@@ -67,6 +67,21 @@ pub(crate) fn glided(from: Point, to: Point, t: f32) -> Point {
     Point::new(at.x.round(), at.y.round())
 }
 
+/// A window at `at` (logical desktop px), `size` big, in physical px at
+/// `scale`: each EDGE rounded, so an edge that stays put in logical px stays
+/// put on the screen while the other one moves (rounding the size would move
+/// it by a px every other step at 125 %).
+pub(crate) fn place_px(at: Point, size: Size, scale: f32) -> Place {
+    let px = |v: f32| (v * scale).round();
+    let (x0, y0) = (px(at.x), px(at.y));
+    let (x1, y1) = (px(at.x + size.width), px(at.y + size.height));
+    Place {
+        origin: (x0 as i32, y0 as i32),
+        px: ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32),
+        scale,
+    }
+}
+
 /// The pointer on the desktop (physical px) while it drags in the chat's own
 /// window placed at `placed` (`p`: in that window's px): never its px in a
 /// window that moves under it.
@@ -217,12 +232,7 @@ impl App {
                 ),
             };
         let desk = origin + iced::Vector::new(at.x, at.y);
-        let px = |v: f32| (v * scale).round();
-        let place = Place {
-            origin: (px(desk.x) as i32, px(desk.y) as i32),
-            px: (px(at.width) as u32, px(at.height) as u32),
-            scale,
-        };
+        let place = place_px(desk, at.size(), scale);
         ((origin, screen, inset), desk, at.size(), place)
     }
 
@@ -402,8 +412,11 @@ impl App {
     /// The chat's window moved (dragged by the OS, the overlay closed): it
     /// docks once it stops.
     pub(crate) fn chat_moved(&mut self, window: window::Id, at: Point) -> Task<Message> {
-        if self.o.is_some() {
-            return Task::none(); // the overlay put it there (`sync_chat_window`)
+        // the overlay put it there (`sync_chat_window`), or its inner edge is
+        // held and we size it: that is no drag, and a report of an earlier
+        // size's spot must not move the edge the user isn't holding (W56)
+        if self.o.is_some() || self.chat_resize.is_some() {
+            return Task::none();
         }
         let Some(chat) = self.chat_win.as_mut().filter(|c| c.id == window) else {
             return Task::none();
@@ -424,18 +437,21 @@ impl App {
         let Some(w) = self.chat_win.as_ref().filter(|w| w.id == window) else {
             return Task::none();
         };
-        let (Some(placed), Some(last)) = (w.placed, self.chat_resize) else {
+        let (Some(placed), Some(started)) = (w.placed, self.chat_resize) else {
             return Task::none();
         };
         let desk = desk_pointer(placed, p);
-        self.chat_resize = Some(Some(desk));
-        let Some(from) = last else {
-            return Task::none(); // (the first move: where the drag starts)
-        };
         let (origin, screen, _) = w.home;
-        let here = Rectangle::new(w.at - (origin - Point::ORIGIN), w.size);
+        // sized from where the drag started, on whole px: the width follows the
+        // pointer 1:1 and only the inner edge moves (W56)
+        let (from, start) = started.unwrap_or_else(|| {
+            let here = Rectangle::new(w.at - (origin - Point::ORIGIN), w.size);
+            (desk, here)
+        });
+        self.chat_resize = Some(Some((from, start)));
         let by = (desk - from) * (1.0 / placed.scale);
-        let to = card::drag(here, card::Drag::Resize, by, screen);
+        let by = iced::Vector::new(by.x.round(), by.y.round());
+        let to = card::drag(start, card::Drag::Resize, by, screen);
         self.chat_width = Some(to.width);
         self.put_chat_window(to)
     }
@@ -461,14 +477,7 @@ impl App {
         let scale = w.placed.map_or(1.0, |p| p.scale);
         let (origin, _, _) = w.home;
         let at = origin + (r.position() - Point::ORIGIN);
-        let place = Place {
-            origin: ((at.x * scale).round() as i32, (at.y * scale).round() as i32),
-            px: (
-                (r.width * scale).round() as u32,
-                (r.height * scale).round() as u32,
-            ),
-            scale,
-        };
+        let place = place_px(at, r.size(), scale);
         if w.placed == Some(place) {
             return Task::none();
         }
@@ -609,6 +618,7 @@ impl App {
             ai_chat::Msg::Card(card::Event::Grab(how)) if open => {
                 panel.held = how == card::Drag::Move; // picked up (design 3.4)
                 self.o.chat_drag = Some((how, None));
+                self.o.chat_sized = None;
                 self.o.chat_docks = true;
                 self.frame_times.borrow_mut().clear();
             }

@@ -86,8 +86,6 @@ pub struct Real {
     /// The target `warm` was given (a page read twice warms its pair again,
     /// from the first read's language).
     target: Mutex<Option<String>>,
-    /// Online: some text was translated on this PC instead (the pill says so).
-    fell_back: std::sync::atomic::AtomicBool,
 }
 
 /// The other scripts' readers are offered once per run (declined: the next
@@ -102,9 +100,6 @@ pub enum Via {
     /// No key, nothing leaves the PC. The pair follows the source and the
     /// target; its models may still be missing (`Real::missing`).
     Offline,
-    /// Labs: Google's free web translator (`super::online`), the text only;
-    /// when it fails, `Offline` translates (`Real::fell_back`).
-    Online,
 }
 
 impl Real {
@@ -119,7 +114,6 @@ impl Real {
             readers: Default::default(),
             used: Mutex::default(),
             target: Mutex::default(),
-            fell_back: Default::default(),
         }
     }
 
@@ -162,11 +156,6 @@ impl Real {
     pub fn outdated(&self) -> Vec<&'static mt::Pair> {
         let used = self.used.lock().unwrap_or_else(|e| e.into_inner());
         used.iter().copied().filter(|p| p.outdated()).collect()
-    }
-
-    /// Online: the engine didn't answer and some text was translated on this PC.
-    pub fn fell_back(&self) -> bool {
-        self.fell_back.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The page read as noise; readers for other scripts would read it.
@@ -293,10 +282,8 @@ impl Real {
         target: &str,
         markup: &str,
     ) -> Result<Vec<String>, AiError> {
-        let (ai, key) = match &self.via {
-            Via::Ai { ai, key } => (ai, key),
-            Via::Online => return self.online(texts, target),
-            Via::Offline => return self.on_device(texts, target),
+        let Via::Ai { ai, key } = &self.via else {
+            return self.on_device(texts, target);
         };
         // the per-game glossary's terms of this batch (guided, never forced)
         let mine = super::glossary::store::current().unwrap_or_default();
@@ -326,20 +313,6 @@ impl Real {
                     }
                 }
                 done
-            }
-        }
-    }
-
-    /// Online, else (it failed, or rests after a refusal) on this PC.
-    // ponytail: no glossary online (the endpoint takes no instructions); the
-    // fallback's offline path still applies it.
-    fn online(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        match super::online::translate(texts, &self.source, target) {
-            Ok(out) => Ok(out),
-            Err(why) => {
-                crate::log!("[opencircle] online translation failed ({why}); on this PC instead");
-                (self.fell_back).store(true, std::sync::atomic::Ordering::Relaxed);
-                self.on_device(texts, target)
             }
         }
     }
@@ -1282,7 +1255,7 @@ impl Deps for Real {
     /// round trip each).
     fn batch(&self) -> usize {
         match self.via {
-            Via::Offline | Via::Online => FIRST,
+            Via::Offline => FIRST,
             Via::Ai { .. } => AI_BATCH,
         }
     }
@@ -1291,8 +1264,7 @@ impl Deps for Real {
     /// of seconds; one call for the whole page showed nothing until its end).
     fn parallel(&self) -> usize {
         match self.via {
-            // (online: one request at a time, politely)
-            Via::Offline | Via::Online => 1,
+            Via::Offline => 1,
             Via::Ai { .. } => AI_IN_FLIGHT,
         }
     }
@@ -1681,9 +1653,9 @@ pub struct Translated {
     pub timings: Timings,
     /// Blocks redrawn, and left as they were (busy background, no room).
     pub drawn: Drawn,
-    /// Parallel parts only: how many parts failed while the others were
-    /// drawn (each logged); their blocks stay as they were (#90: Retry).
-    pub failed: usize,
+    /// Parallel parts only: the first error of a part that failed while the
+    /// others were drawn; its blocks stay as they were.
+    pub failed: Option<AiError>,
 }
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
@@ -1833,7 +1805,7 @@ pub fn translate_until(
             });
         }
         drop(done_tx);
-        let (mut failed, mut ok, mut missed) = (None::<AiError>, 0, 0);
+        let (mut failed, mut ok) = (None::<AiError>, 0);
         let mut translated = Ok(());
         // in the order the answers arrive (`parts` is top first, a few in flight)
         for (k, took, out) in done {
@@ -1847,7 +1819,6 @@ pub fn translate_until(
                 Err(e) if workers > 1 => {
                     crate::log!("[opencircle] one part of the translation failed: {e}");
                     failed.get_or_insert(e);
-                    missed += 1;
                     continue;
                 }
                 Err(e) => {
@@ -1875,7 +1846,7 @@ pub fn translate_until(
         {
             translated = Err(Error::Ai(e));
         }
-        let translated = translated.map(|()| missed);
+        let translated = translated.map(|()| failed);
         drop(to_draw);
         let drawn = drawer.join().expect("the partial frames' drawer");
         translated.map(|failed| (drawn, failed))
@@ -1912,7 +1883,7 @@ fn draw(
             ..drawn
         },
         timings: *timings,
-        failed: 0,
+        failed: None,
     }
 }
 

@@ -18,8 +18,6 @@ pub mod models;
 pub mod openai;
 pub mod providers;
 pub(crate) mod screens;
-pub mod sign_in;
-pub(crate) mod web;
 
 use std::fmt;
 use std::io::BufRead;
@@ -50,11 +48,6 @@ pub struct Message {
     pub text: String,
     /// A PNG, sent inline (base64). Only the caller decides to attach one.
     pub image_png: Option<Vec<u8>>,
-    /// An assistant turn that called tools, exactly as the provider sent it
-    /// (`Reply::native`): sent back unchanged (Anthropic's thinking blocks must be).
-    pub native: Option<Value>,
-    /// Tool results (call id, text): a user turn answering the turn before.
-    pub results: Vec<(String, String)>,
 }
 
 impl Message {
@@ -63,8 +56,6 @@ impl Message {
             role,
             text: text.into(),
             image_png: None,
-            native: None,
-            results: Vec::new(),
         }
     }
 
@@ -89,8 +80,6 @@ impl fmt::Debug for Message {
             .field("role", &self.role)
             .field("text", &self.text)
             .field("image_png", &image)
-            .field("native", &self.native.is_some())
-            .field("results", &self.results.len())
             .finish()
     }
 }
@@ -271,55 +260,6 @@ pub(crate) struct HttpRequest {
     pub body: Value,
 }
 
-/// A tool the model may call (`web`): its name, what it does, and its JSON
-/// Schema for the arguments.
-pub(crate) struct Tool {
-    pub name: &'static str,
-    pub description: &'static str,
-    pub schema: Value,
-}
-
-/// One tool call the model asked for: its id, the tool's name and the raw
-/// JSON arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub args: String,
-}
-
-/// A whole answer: its text and, when the model called tools, the calls and
-/// the assistant turn to send back with their results.
-#[derive(Debug, Default)]
-pub(crate) struct Reply {
-    pub text: String,
-    pub calls: Vec<ToolCall>,
-    pub native: Option<Value>,
-}
-
-/// The pieces of an answer a parser keeps besides its text: tool calls
-/// (OpenAI) or content blocks (Anthropic), by stream index.
-#[derive(Debug, Default)]
-pub(crate) struct Pending {
-    pub blocks: Vec<Value>,
-}
-
-impl Pending {
-    /// The block at `index`, created as `empty` when new.
-    pub fn at(&mut self, index: usize, empty: impl Fn() -> Value) -> &mut Value {
-        while self.blocks.len() <= index {
-            self.blocks.push(empty());
-        }
-        &mut self.blocks[index]
-    }
-}
-
-/// Appends `piece` to the string at `v[key]`.
-pub(crate) fn append(v: &mut Value, key: &str, piece: &str) {
-    let old = v[key].as_str().unwrap_or_default();
-    v[key] = Value::String(format!("{old}{piece}"));
-}
-
 /// What one SSE event means.
 pub(crate) enum Event {
     Delta(String),
@@ -339,18 +279,7 @@ pub fn ask_stream(
     messages: &[Message],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, None, &[], on_delta).map(|r| r.text)
-}
-
-/// Like `ask_stream`, with `tools` the model may call: the reply carries its calls.
-pub(crate) fn ask_tools(
-    cfg: &AiConfig,
-    key: Option<&Secret>,
-    messages: &[Message],
-    tools: &[Tool],
-    on_delta: impl FnMut(&str) -> ControlFlow<()>,
-) -> Result<Reply, AiError> {
-    stream(cfg, key, messages, None, tools, on_delta)
+    stream(cfg, key, messages, None, on_delta)
 }
 
 /// Like `ask_stream`, for short mechanical answers (translation): the answer is capped
@@ -362,10 +291,9 @@ pub(crate) fn ask_fast(
     messages: &[Message],
     max_tokens: u32,
 ) -> Result<String, AiError> {
-    stream(cfg, key, messages, Some(max_tokens), &[], |_| {
+    stream(cfg, key, messages, Some(max_tokens), |_| {
         ControlFlow::Continue(())
     })
-    .map(|r| r.text)
 }
 
 fn stream(
@@ -373,9 +301,8 @@ fn stream(
     key: Option<&Secret>,
     messages: &[Message],
     fast: Option<u32>,
-    tools: &[Tool],
     on_delta: impl FnMut(&str) -> ControlFlow<()>,
-) -> Result<Reply, AiError> {
+) -> Result<String, AiError> {
     let answer = match &cfg.provider {
         Provider::Browser => Err(AiError::NotConfigured(
             "this needs an AI provider with an API key (Settings, Ask AI); Google AI Mode in your \
@@ -388,8 +315,8 @@ fn stream(
         Provider::Unreadable => Err(AiError::NotConfigured(
             "the settings file couldn't be read, so AI is off (Settings, Ask AI)".into(),
         )),
-        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, tools, on_delta),
-        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, tools, on_delta),
+        Provider::Anthropic => anthropic::ask_stream(cfg, key, messages, fast, on_delta),
+        Provider::OpenaiCompatible => openai::ask_stream(cfg, key, messages, fast, on_delta),
     };
     if let Err(e) = &answer {
         logged(cfg, e);
@@ -505,8 +432,8 @@ pub(crate) fn run_stream(
     req: &HttpRequest,
     key: Option<&Secret>,
     mut on_delta: impl FnMut(&str) -> ControlFlow<()>,
-    parse: fn(&str, &mut Pending) -> Result<Event, AiError>,
-) -> Result<(String, Pending), AiError> {
+    parse: fn(&str) -> Result<Event, AiError>,
+) -> Result<String, AiError> {
     let body = serde_json::to_string(&req.body).map_err(|e| AiError::BadResponse(e.to_string()))?;
     let post = || {
         send(key, |agent| {
@@ -530,10 +457,9 @@ pub(crate) fn run_stream(
     }
 
     let mut full = String::new();
-    let mut pending = Pending::default();
     let mut failure = None;
     let reader = std::io::BufReader::new(resp.into_body().into_reader());
-    read_sse(reader, |data| match parse(data, &mut pending) {
+    read_sse(reader, |data| match parse(data) {
         Ok(Event::Delta(piece)) => {
             full.push_str(&piece);
             on_delta(&piece).is_continue()
@@ -550,7 +476,7 @@ pub(crate) fn run_stream(
     .map_err(|e| AiError::Dropped(scrub(&e.to_string(), key)))?;
     match failure {
         Some(e) => Err(e),
-        None => Ok((full, pending)),
+        None => Ok(full),
     }
 }
 
@@ -665,71 +591,39 @@ pub(crate) fn scrub(text: &str, key: Option<&Secret>) -> String {
 /// The one transport check, run by both clients before any key header exists.
 /// Scheme is matched case-insensitively. `https://` always passes; `http://`
 /// only for this machine (host `localhost` / `*.localhost`, or an IP literal
-/// that `is_loopback()`) or the local network (`lan_http`), unless there is
-/// no key to leak; any other scheme fails.
+/// that `is_loopback()`), unless there is no key to leak; any other scheme fails.
 pub(crate) fn check_endpoint(url: &str, has_key: bool) -> Result<(), AiError> {
     let bad = |why: &str| Err(AiError::NotConfigured(why.to_string()));
-    let Some((scheme, _)) = url.split_once("://") else {
+    let Some((scheme, rest)) = url.split_once("://") else {
         return bad("the endpoint must be an http(s):// URL");
     };
     if scheme.eq_ignore_ascii_case("https") || (!has_key && scheme.eq_ignore_ascii_case("http")) {
         return Ok(());
     }
-    match http_host(url) {
-        None => bad("the endpoint must be an http(s):// URL"),
-        Some(HttpHost::ThisPc | HttpHost::Lan) => Ok(()),
-        Some(HttpHost::Public) => bad(
-            "the endpoint uses plain http:// with an API key; use https:// (http is allowed only on this PC or your local network)",
-        ),
-    }
-}
-
-/// A plain `http://` server on the local network (not this PC): allowed with
-/// a key, with a warning under the URL (#56).
-pub(crate) fn lan_http(url: &str) -> bool {
-    http_host(url) == Some(HttpHost::Lan)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum HttpHost {
-    ThisPc,
-    /// A private IP literal (10/8, 172.16/12, 192.168/16, fc00::/7) or an
-    /// mDNS `*.local` name.
-    Lan,
-    Public,
-}
-
-/// Where an `http://` URL's host is (`None`: not http).
-fn http_host(url: &str) -> Option<HttpHost> {
-    let (scheme, rest) = url.split_once("://")?;
     if !scheme.eq_ignore_ascii_case("http") {
-        return None;
+        return bad("the endpoint must be an http(s):// URL");
     }
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // Backslashes and spaces are parsed differently by different URL parsers: refuse.
     let host_port = authority.rsplit('@').next().unwrap_or_default();
     let host = match host_port.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or_default(),
         None => host_port.split(':').next().unwrap_or_default(),
     };
     let host_lc = host.to_ascii_lowercase();
-    let ip = host.parse::<std::net::IpAddr>().ok();
-    // Backslashes and spaces are parsed differently by different URL parsers: refuse.
-    Some(if authority.contains(['\\', ' ']) {
-        HttpHost::Public
-    } else if host_lc == "localhost"
-        || host_lc.ends_with(".localhost")
-        || ip.is_some_and(|ip| ip.is_loopback())
-    {
-        HttpHost::ThisPc
-    } else if ip.is_some_and(|ip| match ip {
-        std::net::IpAddr::V4(v4) => v4.is_private(),
-        std::net::IpAddr::V6(v6) => v6.segments()[0] & 0xfe00 == 0xfc00,
-    }) || (ip.is_none() && host_lc.len() > ".local".len() && host_lc.ends_with(".local"))
-    {
-        HttpHost::Lan
+    let local = !authority.contains(['\\', ' '])
+        && (host_lc == "localhost"
+            || host_lc.ends_with(".localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback()));
+    if local {
+        Ok(())
     } else {
-        HttpHost::Public
-    })
+        bad(
+            "the endpoint uses plain http:// with an API key; use https:// (http is allowed only for localhost)",
+        )
+    }
 }
 
 /// `base` without trailing slashes.
@@ -932,43 +826,15 @@ mod tests {
             "http://localhost@evil.com/v1",
             "http://127.0.0.1@evil.com/v1",
             "http://127.0.0.1\\@evil.com/v1",
+            "http://192.168.1.5:1234/v1",
             "http://[2001:db8::1]/v1",
             "http://0.0.0.0:1234",
-            "http://192.168.1.1.evil.com/v1",
-            "http://10.0.0.1.nip.io/v1",
-            "http://192.168.1.5@evil.com/v1",
-            "http://evil.local.com/v1",
-            "http://.local/v1",
-            "http://8.8.8.8/v1",
-            "http://172.32.0.1/v1",
-            "http://192.168.1.5\\@evil.com/v1",
             "ftp://x",
             "file:///etc/passwd",
             "api.anthropic.com",
             "",
         ] {
             assert!(check_endpoint(bad, true).is_err(), "{bad}");
-            assert!(!lan_http(bad), "{bad}");
-        }
-    }
-
-    /// #56: a server on the local network over plain http, with a warning.
-    #[test]
-    fn endpoint_check_allows_the_local_network_and_says_so() {
-        for lan in [
-            "http://192.168.1.5:1234/v1",
-            "HTTP://10.0.0.7/v1",
-            "http://172.16.0.1:8080",
-            "http://172.31.255.254/v1",
-            "http://[fd00::12]:11434/v1",
-            "http://gpu-box.local:11434/v1",
-            "http://user@192.168.1.5/v1",
-        ] {
-            assert!(check_endpoint(lan, true).is_ok(), "{lan}");
-            assert!(lan_http(lan), "{lan}");
-        }
-        for not_lan in ["http://localhost:11434/v1", "https://192.168.1.5/v1"] {
-            assert!(!lan_http(not_lan), "{not_lan}");
         }
     }
 

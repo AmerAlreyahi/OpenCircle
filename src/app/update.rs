@@ -397,16 +397,24 @@ impl App {
             }
             Message::CardMoved(p) => {
                 if let Some((how, last)) = self.o.chat_drag {
-                    if let (Some(from), true, card::Drag::Resize) = (last, self.o.chat_docks, how) {
-                        // (in the docked screen's own px)
+                    if let (true, card::Drag::Resize) = (self.o.chat_docks, how) {
+                        // (in the docked screen's own px) from where it started, on
+                        // whole px: only the inner edge moves, the outer one stays put
                         let (screen, _, origin, k) = self.chat_room();
-                        let r = self.chat_rect();
-                        let local = Rectangle::new(
-                            Point::ORIGIN + (r.position() - origin) * k,
-                            r.size() * k,
-                        );
-                        let at = card::drag(local, how, (p - from) * k, screen);
-                        self.chat_width = Some(at.width);
+                        let (from, start) = match self.o.chat_sized {
+                            Some(started) => started,
+                            None => {
+                                let r = self.chat_rect();
+                                let local = Rectangle::new(
+                                    Point::ORIGIN + (r.position() - origin) * k,
+                                    r.size() * k,
+                                );
+                                *self.o.chat_sized.insert((p, local))
+                            }
+                        };
+                        let by = (p - from) * k;
+                        let by = Vector::new(by.x.round(), by.y.round());
+                        self.chat_width = Some(card::drag(start, how, by, screen).width);
                     } else if let (Some(from), true) = (last, self.o.chat_docks) {
                         self.o.chat_off += p - from;
                         self.o.chat_glide = None;
@@ -427,6 +435,7 @@ impl App {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.held = false;
                 }
+                self.o.chat_sized = None;
                 match self.o.chat_drag.take() {
                     Some((card::Drag::Move, _)) if self.o.chat_docks => {
                         self.dock_chat(Instant::now());

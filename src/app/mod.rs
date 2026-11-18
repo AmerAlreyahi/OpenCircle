@@ -219,9 +219,10 @@ pub(crate) struct App {
     pub(crate) chat_side: Option<crate::shared::kit::panel_frame::Side>,
     /// The AI chat's width the user set by its inner edge (this run of the app).
     pub(crate) chat_width: Option<f32>,
-    /// The overlay closed, the pinned chat's inner edge held: the pointer's
-    /// last spot on the desktop (physical px; `None` before its first move).
-    pub(crate) chat_resize: Option<Option<Point>>,
+    /// The overlay closed, the pinned chat's inner edge held: where the drag
+    /// started, the pointer on the desktop (physical px) and the chat (its
+    /// screen's logical px); `None` before its first move.
+    pub(crate) chat_resize: Option<Option<(Point, iced::Rectangle)>>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
     pub(crate) chat: Option<crate::features::ask_ai::app::ai_chat::Resident>,
     /// The AI chat's own window (`ai_chat::ChatWindow`).

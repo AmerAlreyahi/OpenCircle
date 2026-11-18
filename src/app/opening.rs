@@ -200,6 +200,10 @@ pub(crate) struct Opening {
     pub(crate) work_inset: f32,
     /// The card's grip or corner is held, and the pointer's last position.
     pub(crate) chat_drag: Option<(card::Drag, Option<Point>)>,
+    /// The docked AI chat's inner edge held: where the drag started (the
+    /// pointer, and the chat in its screen's px). Each move sizes it from
+    /// there, so its width follows the pointer 1:1, never drifting.
+    pub(crate) chat_sized: Option<(Point, Rectangle)>,
     /// The card held is the AI chat (it docks when let go).
     pub(crate) chat_docks: bool,
     /// Where the pinned chat's own window was when this frame was captured
@@ -320,6 +324,7 @@ impl Default for Opening {
             bar_glide: None,
             work_inset: 0.0,
             chat_drag: None,
+            chat_sized: None,
             chat_docks: false,
             chat_hole: None,
             chat_fixed: None,
