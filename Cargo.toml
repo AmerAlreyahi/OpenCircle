@@ -178,7 +178,7 @@ depends = [
 # it gets our entry as the template, and release.yml renames the .deb's files to
 # com.opencircle.app.desktop / com.opencircle.app.png.
 desktop-template = "packaging/com.opencircle.app.desktop"
-files = { "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
+files = { "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml", "packaging/com.opencircle.app.studio.desktop" = "usr/share/applications/com.opencircle.app.studio.desktop" }
 
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
 # libwayland-client is on the AppImage excludelist (the system's must be used, a bundled one
@@ -190,7 +190,7 @@ excludedLibs = ["libwayland-client*"]
 # winit dlopens these on X11 (linuxdeploy only follows linked libs): a minimal system lacks them
 # and the app panicked at start (xkbcommon-dl).
 libs = ["libxkbcommon-x11.so*", "libxcb-xkb.so*"]
-files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
+files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml", "packaging/com.opencircle.app.studio.desktop" = "usr/share/applications/com.opencircle.app.studio.desktop" }
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
 [package.metadata.generate-rpm]
@@ -198,6 +198,7 @@ auto-req = "disabled"
 assets = [
     { source = "target/release/opencircle", dest = "/usr/bin/opencircle", mode = "755" },
     { source = "packaging/com.opencircle.app.desktop", dest = "/usr/share/applications/com.opencircle.app.desktop", mode = "644" },
+    { source = "packaging/com.opencircle.app.studio.desktop", dest = "/usr/share/applications/com.opencircle.app.studio.desktop", mode = "644" },
     { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", mode = "644" },
     { source = "packaging/com.opencircle.app.metainfo.xml", dest = "/usr/share/metainfo/com.opencircle.app.metainfo.xml", mode = "644" },
     { source = "LICENSE.md", dest = "/usr/share/licenses/opencircle/LICENSE", mode = "644", doc = true },

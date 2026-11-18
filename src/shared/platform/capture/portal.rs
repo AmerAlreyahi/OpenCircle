@@ -290,16 +290,16 @@ fn write_desktop_file(
     if system.iter().any(|d| installed(d)) {
         return Ok(None);
     }
-    let path = data_home.join("applications").join(&name);
-    let wanted = desktop_entry(exe);
-    match std::fs::read_to_string(&path) {
-        Ok(have) if have == wanted || !have.contains(GENERATED) => return Ok(None),
-        Ok(_) => {} // ours, naming another path (a moved AppImage): rewrite
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
+    let apps = data_home.join("applications");
+    // Snip Studio's entry (an extra "Open with" choice for pictures, never the default).
+    write_generated(
+        &apps.join(format!("{STUDIO_ID}.desktop")),
+        &studio_entry(exe),
+    )?;
+    let path = apps.join(&name);
+    if !write_generated(&path, &desktop_entry(exe))? {
+        return Ok(None);
     }
-    std::fs::create_dir_all(data_home.join("applications"))?;
-    std::fs::write(&path, wanted)?;
     // Its icon, for the desktop's app list (where GNOME manages our shortcuts).
     let icons = data_home.join(ICON_DIR);
     if !icons.join(format!("{APP_ID}.png")).exists() {
@@ -307,6 +307,19 @@ fn write_desktop_file(
         std::fs::write(icons.join(format!("{APP_ID}.png")), ICON)?;
     }
     Ok(Some(path))
+}
+
+/// Writes `wanted` to `path` unless it is already there or is not ours. True = written.
+fn write_generated(path: &Path, wanted: &str) -> std::io::Result<bool> {
+    match std::fs::read_to_string(path) {
+        Ok(have) if have == wanted || !have.contains(GENERATED) => return Ok(false),
+        Ok(_) => {} // ours, naming another path (a moved AppImage): rewrite
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+    std::fs::write(path, wanted)?;
+    Ok(true)
 }
 
 const ICON_DIR: &str = "icons/hicolor/128x128/apps";
@@ -329,6 +342,27 @@ fn desktop_entry(exe: &Path) -> String {
          Terminal=false\n\
          Categories=Utility;\n\
          {GENERATED}\n",
+        exec_quote(&exe.to_string_lossy())
+    )
+}
+
+const STUDIO_ID: &str = "com.opencircle.app.studio";
+
+/// Snip Studio's entry: same program, `studio %f`, picture types only as an extra choice.
+/// The name is the string table's English `st_title` (packaging/ has a test that agrees).
+fn studio_entry(exe: &Path) -> String {
+    format!(
+        "[Desktop Entry]\n\
+         # Written by OpenCircle; delete it to remove it.\n\
+         Type=Application\n\
+         Name={}\n\
+         Exec={} studio %f\n\
+         Icon={APP_ID}\n\
+         Terminal=false\n\
+         Categories=Graphics;\n\
+         MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;\n\
+         {GENERATED}\n",
+        crate::shared::app_language::english(crate::shared::app_language::S::st_title),
         exec_quote(&exe.to_string_lossy())
     )
 }
@@ -536,6 +570,21 @@ mod tests {
         assert_eq!(exec_quote("/home/a b/oc"), r#""/home/a b/oc""#);
         assert_eq!(exec_quote("/x/$y%"), r#""/x/\\$y%%""#);
         assert_eq!(exec_quote(r"/x\y"), r#""/x\\\\y""#);
+    }
+
+    #[test]
+    fn the_studio_entry_is_an_extra_choice_for_pictures() {
+        let entry = studio_entry(Path::new("/opt/oc/opencircle"));
+        assert!(entry.contains("Name=Snip Studio\n"));
+        assert!(entry.contains("Exec=/opt/oc/opencircle studio %f\n"));
+        assert!(entry.contains("MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;\n"));
+        let dir = crate::shared::paths::test_dir("portal-studio");
+        let home = dir.join("home");
+        write_desktop_file(&home, &[], Path::new("/opt/oc/opencircle")).unwrap();
+        assert!(
+            home.join("applications/com.opencircle.app.studio.desktop")
+                .exists()
+        );
     }
 
     #[test]

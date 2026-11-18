@@ -161,6 +161,42 @@
                     <RegistryValue Name="NoRepair" Type="integer" Value="1" />
                 </RegistryKey>
             </Component>
+            <!-- Snip Studio in Explorer's "Open with" for pictures: an extra choice only. No
+                 default association is touched (no user choice, no default value on the extensions):
+                 each extension only lists our ProgID under OpenWithProgids. Removed on uninstall.
+                 The name must equal the app's English st_title (a test checks it). -->
+            <Component Id="StudioOpenWith" Guid="*" Win64="$(var.Win64)">
+                <RegistryKey Root="HKLM" Key="Software\Classes\Applications\opencircle.exe">
+                    <RegistryValue Name="FriendlyAppName" Type="string" Value="Snip Studio" KeyPath="yes" />
+                    <RegistryKey Key="shell\open\command">
+                        <RegistryValue Type="string" Value="&quot;[!Path]&quot; studio &quot;%1&quot;" />
+                    </RegistryKey>
+                    <RegistryKey Key="SupportedTypes">
+                        <RegistryValue Name=".png" Type="string" Value="" />
+                        <RegistryValue Name=".jpg" Type="string" Value="" />
+                        <RegistryValue Name=".jpeg" Type="string" Value="" />
+                        <RegistryValue Name=".webp" Type="string" Value="" />
+                        <RegistryValue Name=".bmp" Type="string" Value="" />
+                        <RegistryValue Name=".gif" Type="string" Value="" />
+                    </RegistryKey>
+                </RegistryKey>
+                <RegistryKey Root="HKLM" Key="Software\Classes\OpenCircle.Image">
+                    <RegistryValue Type="string" Value="Snip Studio" />
+                    <RegistryValue Name="FriendlyTypeName" Type="string" Value="Snip Studio" />
+                    <RegistryKey Key="shell\open">
+                        <RegistryValue Name="FriendlyAppName" Type="string" Value="Snip Studio" />
+                        <RegistryKey Key="command">
+                            <RegistryValue Type="string" Value="&quot;[!Path]&quot; studio &quot;%1&quot;" />
+                        </RegistryKey>
+                    </RegistryKey>
+                </RegistryKey>
+                <RegistryValue Root="HKLM" Key="Software\Classes\.png\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="Software\Classes\.jpg\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="Software\Classes\.jpeg\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="Software\Classes\.webp\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="Software\Classes\.bmp\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="Software\Classes\.gif\OpenWithProgids" Name="OpenCircle.Image" Type="string" Value="" />
+            </Component>
             <Component Id="Path" Guid="{{path_component_guid}}" Win64="$(var.Win64)">
                 <File Id="Path" Source="{{app_exe_source}}" KeyPath="yes" Checksum="yes"/>
                 {{#each file_associations as |association| ~}}
@@ -205,6 +241,18 @@
                     WorkingDirectory="INSTALLDIR">
                     <ShortcutProperty Key="System.AppUserModel.ID" Value="{{identifier}}"/>
                 </Shortcut>
+                <!-- Findable by typing its name in Start; the same exe, started as `studio`.
+                     The name must equal the app's English st_title (a test checks it). -->
+                <Shortcut Id="StudioStartMenuShortcut"
+                    Name="Snip Studio"
+                    Description="Edit and annotate a picture"
+                    Target="[!Path]"
+                    Arguments="studio"
+                    {{#if icon_path}}
+                    Icon="ProductIcon"
+                    {{/if}}
+                    WorkingDirectory="INSTALLDIR">
+                </Shortcut>
                 <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
                 <RegistryValue Root="HKCU" Key="Software\opencircle\\{{product_name}}" Name="Start Menu Shortcut" Type="integer" Value="1" KeyPath="yes"/>
            </Component>
@@ -233,6 +281,7 @@
             <ComponentRef Id="RegistryEntries"/>
             <ComponentRef Id="ArpEntry"/>
             <ComponentRef Id="ManagedBy"/>
+            <ComponentRef Id="StudioOpenWith"/>
 
             {{#each resource_file_ids as |resource_file_id| ~}}
                 <ComponentRef Id="{{ resource_file_id }}"/>

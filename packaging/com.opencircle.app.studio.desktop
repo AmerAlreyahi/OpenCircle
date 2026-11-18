@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Snip Studio
+Comment=Edit and annotate a picture
+Exec=opencircle studio %f
+Icon=com.opencircle.app
+Terminal=false
+Categories=Graphics;
+MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;
