@@ -5,13 +5,16 @@
 use iced::advanced::layout::Layout;
 use iced::advanced::widget::Tree;
 use iced::advanced::{Clipboard, Shell};
-use iced::widget::{Space, column, container, tooltip::Position};
+use iced::widget::{Space, column, container, mouse_area, tooltip::Position};
 use iced::{Center, Element, Event, Fill, Length, Rectangle, Vector, mouse};
+use std::sync::Arc;
 
-use super::{Msg, Studio};
+use super::{Msg, Studio, Tab};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
+use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
 use crate::features::snip::screens::snip_toolbar::toolbar;
+use crate::features::snip::screens::steps::Step;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon::Icon;
@@ -21,7 +24,9 @@ use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
-use crate::shared::kit::{chip, colour, dir, divider, keycap, scroll, thumb};
+use crate::shared::kit::{
+    chip, colour, dir, divider, dropdown, keycap, scroll, segmented, slider, thumb,
+};
 use crate::t;
 
 const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
@@ -40,7 +45,8 @@ const OPTION_W: f32 = size::PANEL - 2.0 * space::PANEL;
 /// The colour swatches on the options bar (the editor's first ones).
 const SWATCHES: usize = 8;
 
-pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
+/// `steps`: the Steps strip's steps (the library's Steps tab shows them).
+pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<'a, Msg> {
     let _dir = dir::scope(crate::shared::app_language::rtl());
     let p = s.panels;
     let toggles = crate::dir_row![
@@ -58,7 +64,7 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
     );
     let mut parts: Vec<Element<'_, Msg>> = Vec::new();
     if p.library {
-        parts.push(library(s));
+        parts.push(library(s, steps));
         parts.push(divider::vertical(Fill));
     }
     match &s.editor {
@@ -80,7 +86,10 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
         parts.push(divider::vertical(Fill));
         parts.push(picture_panel(s));
     }
-    let main = column![header, divider::divider(), dir::row(parts).height(Fill)];
+    let mut main = column![header, divider::divider(), dir::row(parts).height(Fill)];
+    if s.exporting && !s.asking() {
+        main = main.push(divider::divider()).push(export_bar(s));
+    }
     // the question is a card over the window: the picture under it takes no press
     let main: Element<'_, Msg> = match s.asking() {
         true => iced::widget::stack![
@@ -299,6 +308,7 @@ fn status_bar<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             Position::Top,
         ),
         divider::vertical(size::ICON_BUTTON - 10.0),
+        button::button(label(t!(st_export)), Kind::Quiet, Some(Msg::Export)),
         hint(save, t!(c_save), Why::Keys("Ctrl+S"), Position::Top),
         hint(copy, t!(c_copy), Why::Keys("Ctrl+C"), Position::Top),
     ]
@@ -347,9 +357,87 @@ fn empty(s: &Studio) -> Element<'_, Msg> {
     .into()
 }
 
-/// The library: Recent captures (two to a row), or why there are none.
-fn library(s: &Studio) -> Element<'_, Msg> {
-    let mut list = column![text(Role::SECTION, t!(st_recent))].spacing(space::PAGE[0]);
+/// The library: Recent | Steps (Steps first while there are some).
+fn library<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+    let tab = s.tab.unwrap_or(match steps.is_empty() {
+        true => Tab::Recent,
+        false => Tab::Steps,
+    });
+    let tabs = segmented::spread(
+        super::LIBRARY - 2.0 * space::PAGE[1],
+        &[(Tab::Recent, t!(st_tab_recent)), (Tab::Steps, t!(st_steps))],
+        tab,
+        tab,
+        1.0,
+        Msg::Tab,
+    );
+    let tabs = container(tabs).padding([space::PAGE[0], space::PAGE[1]]);
+    let body = match tab {
+        Tab::Recent => recent(s),
+        Tab::Steps => steps_list(s, steps),
+    };
+    container(column![tabs, body])
+        .width(Length::Fixed(super::LIBRARY))
+        .height(Fill)
+        .into()
+}
+
+/// The Steps strip's steps, one under the other: click = open on the canvas,
+/// drag = reorder, x = delete; Copy all and Export at the foot.
+fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+    let pad = space::PAGE[1];
+    if steps.is_empty() {
+        let none = muted(Role::ROW_DESC, t!(st_steps_none));
+        return container(none).padding([0.0, pad]).into();
+    }
+    let n = steps.len();
+    let shots = s.pick.order(n).into_iter().enumerate().map(|(place, i)| {
+        let look = thumb::Look {
+            hover: s.step_hover == Some(i) && !s.pick.dragging(),
+            lifted: s.pick.lifted() == Some(i),
+            focused: false,
+            rtl: dir::rtl(),
+        };
+        let shot = thumb::step(steps[i].thumb(), place + 1, look, Some(Msg::StepDelete(i)));
+        let shot = mouse_area(shot)
+            .on_press(Msg::StepPress(i))
+            .on_enter(Msg::StepHover(i, true))
+            .on_exit(Msg::StepHover(i, false));
+        hint(shot, t!(st_step_tip), Why::Icon, Position::Right)
+    });
+    let list = mouse_area(column(shots).spacing(space::GAP))
+        .on_move(move |at| Msg::StepMove(at, n))
+        .on_release(Msg::StepRelease);
+    let list = container(list).center_x(Fill);
+    let half = (super::LIBRARY - 2.0 * pad - space::GAP) / 2.0;
+    let copy = button::labelled(
+        toolbar::COPY,
+        t!(sn_step_copy_all),
+        half,
+        Kind::Accent,
+        false,
+        Some(Msg::CopyAllSteps),
+    );
+    let rows = [
+        (export::Steps::Markdown, t!(st_export_md)),
+        (export::Steps::Html, t!(st_export_html)),
+        (export::Steps::Images, t!(st_export_images)),
+    ];
+    let rows = (rows.into_iter())
+        .map(|(how, words)| (words.to_string(), false, Msg::ExportSteps(how)))
+        .collect();
+    let export = dropdown::labelled_menu(t!(st_export), rows, half);
+    let foot = crate::dir_row![copy, export].spacing(space::GAP);
+    column![
+        scroll::scroll(container(list).padding([0.0, pad])).height(Fill),
+        container(foot).padding(pad),
+    ]
+    .into()
+}
+
+/// Recent captures (two to a row), or why there are none.
+fn recent(s: &Studio) -> Element<'_, Msg> {
+    let mut list = column![].spacing(space::PAGE[0]);
     if !crate::shared::config::current().snip.history {
         list = list.push(muted(Role::ROW_DESC, t!(st_recent_off)));
     } else if s.recent.is_empty() {
@@ -361,7 +449,8 @@ fn library(s: &Studio) -> Element<'_, Msg> {
             .map(|(path, picture)| thumb::picture(picture.clone(), Msg::OpenRecent(path.clone())));
         list = list.push(dir::row(shots).spacing(space::GAP));
     }
-    side(list, super::LIBRARY)
+    let list = container(list).padding([0.0, space::PAGE[1]]).width(Fill);
+    scroll::scroll(list).height(Fill).into()
 }
 
 /// The picture panel: what the open picture is.
@@ -394,6 +483,46 @@ fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
         .height(Fill)
         .into()
 }
+
+/// Export picture: the format, the JPG quality, the size; Cancel / Export…
+/// (then the host's save dialog).
+fn export_bar(s: &Studio) -> Element<'_, Msg> {
+    let how = s.export;
+    let formats: Vec<_> = (export::Format::ALL.iter())
+        .map(|&f| (f, f.name()))
+        .collect();
+    let format = segmented::inline(&formats, how.format, how.format, 1.0, Msg::ExportFormat);
+    let sizes: Vec<_> = (export::SIZES.iter())
+        .map(|&px| match px {
+            0 => (px, t!(st_original)),
+            2048 => (px, "2048"),
+            1568 => (px, "1568"),
+            _ => (px, "1024"),
+        })
+        .collect();
+    let size = segmented::inline(&sizes, how.max_edge, how.max_edge, 1.0, Msg::ExportSize);
+    let mut items: Vec<Element<'_, Msg>> = vec![format];
+    if how.format.has_quality() {
+        let quality = crate::dir_row![
+            sub(Role::ROW_DESC, t!(st_quality)),
+            slider::bare(1..=100, how.quality, QUALITY_W, false, Msg::ExportQuality),
+            container(sub(Role::KEYCAP, format!("{} %", how.quality))).width(QUALITY_VALUE_W),
+        ];
+        items.push(quality.spacing(space::GAP).align_y(Center).into());
+    }
+    items.extend([
+        size,
+        Space::new().width(Fill).into(),
+        button::regular(t!(c_cancel), false, Some(Msg::ExportCancel)),
+        button::regular(t!(st_export_go), true, Some(Msg::ExportGo)),
+    ]);
+    let line = dir::row(items).spacing(space::PAGE[1]).align_y(Center);
+    container(line).padding(space::PAGE).width(Fill).into()
+}
+
+/// The export bar's quality slider.
+const QUALITY_W: f32 = 120.0;
+const QUALITY_VALUE_W: f32 = 40.0;
 
 /// Closing or opening another picture with unsaved drawings: Don't save /
 /// Cancel / Save.

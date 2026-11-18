@@ -4,6 +4,10 @@
 //! over the canvas, the canvas with zoom, Save / Copy in the status bar. Side
 //! panels: the library (Recent captures) and the picture panel, each hidden by
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
+//! The library's Steps tab (v0.4.2) shows the Steps strip's own steps (one
+//! store, the host's): click = open on the canvas, drag = reorder, x = delete,
+//! Copy all, Export (Markdown / HTML / images). Export picture: PNG / JPG /
+//! WebP / PDF at a size (`features::snip::export`).
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
 mod view;
@@ -14,7 +18,9 @@ use iced::widget::image;
 use iced::widget::scrollable::AbsoluteOffset;
 use iced::{Point, Size, Vector};
 
+use super::steps::{self, Released, Reorder};
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
+use crate::features::snip::export;
 use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
@@ -41,6 +47,17 @@ const ZOOM_STEP: f32 = 1.25;
 const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 /// The canvas's scroll area (`operation::scroll_to`).
 pub const CANVAS: &str = "studio-canvas";
+
+/// One step's row in the Steps list: its thumbnail and the gap under it.
+const STEP_PITCH: f32 =
+    crate::shared::kit::thumb::WELL.height + crate::shared::kit::tokens::space::GAP;
+
+/// The library's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Recent,
+    Steps,
+}
 
 /// What the Studio opens.
 pub enum Picture {
@@ -96,6 +113,23 @@ pub enum Msg {
     DontSave,
     Cancel,
     SaveFirst,
+    Tab(Tab),
+    /// The Steps list: a press on a step, the pointer over the list (list px,
+    /// with the steps' count), the press ends, the pointer on / off a step.
+    StepPress(usize),
+    StepMove(Point, usize),
+    StepRelease,
+    StepHover(usize, bool),
+    StepDelete(usize),
+    CopyAllSteps,
+    ExportSteps(export::Steps),
+    /// The export bar: open, its choices, Export…, Cancel.
+    Export,
+    ExportFormat(export::Format),
+    ExportQuality(u8),
+    ExportSize(u32),
+    ExportGo,
+    ExportCancel,
 }
 
 /// What the host does after a message.
@@ -122,6 +156,14 @@ pub enum Outcome {
     Panels(StudioConfig),
     /// Scroll the stage there (a zoom round the pointer).
     ScrollTo(AbsoluteOffset),
+    /// For the Steps strip (delete, reorder, Copy all): the steps are its.
+    Steps(steps::Msg),
+    /// Open the `i`th step on the canvas.
+    OpenStep(usize),
+    /// Export the steps (the host asks for a folder).
+    ExportSteps(export::Steps),
+    /// Export the picture so (the host asks where).
+    ExportPicture(Crop, export::Picture),
 }
 
 pub struct Studio {
@@ -140,6 +182,14 @@ pub struct Studio {
     /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
     offset: Vector,
     pub(super) ctrl: bool,
+    /// The library's tab the user picked (`None`: Steps while there are some).
+    pub(super) tab: Option<Tab>,
+    /// The Steps list: a press or drag, and the step under the pointer.
+    pub(super) pick: Reorder,
+    pub(super) step_hover: Option<usize>,
+    /// The export bar's choices, and whether it shows.
+    pub(super) export: export::Picture,
+    pub(super) exporting: bool,
 }
 
 impl Studio {
@@ -157,6 +207,11 @@ impl Studio {
             hovered: false,
             offset: Vector::ZERO,
             ctrl: false,
+            tab: None,
+            pick: Reorder::default(),
+            step_hover: None,
+            export: export::Picture::default(),
+            exporting: false,
         }
     }
 
@@ -367,6 +422,64 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
+            Msg::Tab(tab) => {
+                self.tab = Some(tab);
+                Outcome::None
+            }
+            Msg::StepPress(i) => {
+                self.pick.press(i);
+                Outcome::None
+            }
+            Msg::StepMove(at, n) => {
+                self.pick.moved(at, 0.0, STEP_PITCH, n);
+                Outcome::None
+            }
+            Msg::StepRelease => match self.pick.release() {
+                Some(Released::Moved(from, to)) => Outcome::Steps(steps::Msg::Reorder(from, to)),
+                Some(Released::Click(i)) => Outcome::OpenStep(i),
+                None => Outcome::None,
+            },
+            Msg::StepHover(i, on) => {
+                self.step_hover = match on {
+                    true => Some(i),
+                    false => self.step_hover.filter(|&h| h != i),
+                };
+                Outcome::None
+            }
+            Msg::StepDelete(i) => {
+                self.pick.cancel();
+                self.step_hover = None;
+                Outcome::Steps(steps::Msg::Delete(i))
+            }
+            Msg::CopyAllSteps => Outcome::Steps(steps::Msg::CopyAll),
+            Msg::ExportSteps(how) => Outcome::ExportSteps(how),
+            Msg::Export => {
+                self.exporting = self.editor.is_some();
+                Outcome::None
+            }
+            Msg::ExportFormat(format) => {
+                self.export.format = format;
+                Outcome::None
+            }
+            Msg::ExportQuality(quality) => {
+                self.export.quality = quality;
+                Outcome::None
+            }
+            Msg::ExportSize(max_edge) => {
+                self.export.max_edge = max_edge;
+                Outcome::None
+            }
+            Msg::ExportCancel => {
+                self.exporting = false;
+                Outcome::None
+            }
+            Msg::ExportGo => {
+                self.exporting = false;
+                match &self.editor {
+                    Some(e) => Outcome::ExportPicture(annotate::render(&e.doc), self.export),
+                    None => Outcome::None,
+                }
+            }
         }
     }
 

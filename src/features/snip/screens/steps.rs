@@ -75,6 +75,16 @@ impl Step {
         })
     }
 
+    /// The capture as PNG (an export writes it as it is).
+    pub fn png(&self) -> &[u8] {
+        &self.png
+    }
+
+    /// Its thumbnail (cheap to clone: shared pixels).
+    pub fn thumb(&self) -> image::Handle {
+        self.thumb.clone()
+    }
+
     /// What it holds in memory (PNG + thumbnail pixels).
     pub fn bytes(&self) -> usize {
         let thumb = match &self.thumb {
@@ -125,6 +135,8 @@ pub enum Msg {
     /// A double-click: edit the step in Snip.
     Edit(usize),
     Delete(usize),
+    /// Snip Studio's Steps list moved a step (`to` past the end = the last).
+    Reorder(usize, usize),
     Key(Key),
     /// A step is packed and joins the strip, or takes the `i`th's place
     /// (`Windows::add_step`).
@@ -184,11 +196,8 @@ pub struct Strip {
     hover: Option<usize>,
     /// The keyboard's step.
     focus: Option<usize>,
-    /// A press on a step: which, and where.
-    press: Option<(usize, Point)>,
-    /// A step being dragged: from, to.
-    drag: Option<(usize, usize)>,
-    cursor: Point,
+    /// A press on a step, or one being dragged.
+    pick: Reorder,
     /// "Steps cleared · Undo" shows instead of the strip.
     pub cleared: bool,
     /// Clears so far (an old clear's expiry does nothing).
@@ -215,9 +224,7 @@ impl Strip {
             undo: None,
             hover: None,
             focus: None,
-            press: None,
-            drag: None,
-            cursor: Point::ORIGIN,
+            pick: Reorder::default(),
             cleared: false,
             clears: 0,
             moves: 0,
@@ -252,6 +259,11 @@ impl Strip {
         if let Some(s) = self.steps.get_mut(i) {
             *s = step;
         }
+    }
+
+    /// The steps, in order (Snip Studio shows and exports the same ones).
+    pub fn steps(&self) -> &[Arc<Step>] {
+        &self.steps
     }
 
     /// The `i`th step's capture.
@@ -317,7 +329,8 @@ impl Strip {
         }
         self.cleared = true;
         self.clears += 1;
-        (self.hover, self.focus, self.press, self.drag) = (None, None, None, None);
+        (self.hover, self.focus) = (None, None);
+        self.pick.cancel();
         Some(Do::Cleared)
     }
 
@@ -326,12 +339,6 @@ impl Strip {
         self.steps = before;
         self.cleared = false;
         Some(Do::Resize)
-    }
-
-    /// The step under `y` (window px) while dragging.
-    fn slot_at(&self, y: f32) -> usize {
-        let i = ((y - TOP) / (WELL.height + PAD)).floor().max(0.0) as usize;
-        i.min(self.steps.len().saturating_sub(1))
     }
 
     pub fn update(&mut self, msg: Msg) -> Option<Do> {
@@ -347,35 +354,31 @@ impl Strip {
                 }
             }
             Msg::Press(i) => {
-                self.press = Some((i, self.cursor));
+                self.pick.press(i);
                 self.focus = Some(i);
             }
-            Msg::Move(at) => {
-                self.cursor = at;
-                if let Some((i, from)) = self.press {
-                    let far = (at.x - from.x).hypot(at.y - from.y) >= DRAG;
-                    if self.drag.is_some() || far {
-                        self.drag = Some((i, self.slot_at(at.y)));
-                    }
-                }
-            }
-            Msg::Release => {
-                let press = self.press.take();
-                if let Some((from, to)) = self.drag.take() {
+            Msg::Move(at) => self
+                .pick
+                .moved(at, TOP, WELL.height + PAD, self.steps.len()),
+            Msg::Release => match self.pick.release()? {
+                Released::Moved(from, to) => {
                     self.move_step(from, to);
                     self.focus = Some(to);
-                    return None;
                 }
-                return press.map(|(i, _)| Do::Copy(i));
-            }
+                Released::Click(i) => return Some(Do::Copy(i)),
+            },
             Msg::Edit(i) => {
                 // the press before the double-click copied it already; no second copy
-                (self.press, self.drag) = (None, None);
+                self.pick.cancel();
                 return (i < self.steps.len()).then_some(Do::Edit(i));
             }
             Msg::Delete(i) => {
-                self.press = None;
+                self.pick.cancel();
                 return self.remove(i);
+            }
+            Msg::Reorder(from, to) => {
+                self.move_step(from, to.min(self.steps.len().saturating_sub(1)));
+                self.focus = None;
             }
             Msg::Key(key) => return self.key(key),
             Msg::Moved(at) => {
@@ -424,12 +427,7 @@ impl Strip {
 
     /// The steps in the order shown (a dragged one at its new place).
     fn shown(&self) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..self.steps.len()).collect();
-        if let Some((from, to)) = self.drag {
-            let i = order.remove(from);
-            order.insert(to, i);
-        }
-        order
+        self.pick.order(self.steps.len())
     }
 
     /// The window's size (logical px): the strip, or the cleared pill.
@@ -539,9 +537,9 @@ impl Strip {
             .height(TOP);
         let thumbs = self.shown().into_iter().enumerate().map(|(place, i)| {
             let look = Look {
-                hover: self.hover == Some(i) && self.drag.is_none(),
-                lifted: self.drag.is_some_and(|(from, _)| from == i),
-                focused: self.focus == Some(i) && self.drag.is_none(),
+                hover: self.hover == Some(i) && !self.pick.dragging(),
+                lifted: self.pick.lifted() == Some(i),
+                focused: self.focus == Some(i) && !self.pick.dragging(),
                 rtl: dir::rtl(),
             };
             let picture = thumb::step(
@@ -588,6 +586,78 @@ impl Strip {
             clear: t!(sn_step_clear),
             step: t!(sn_step_tip),
         }
+    }
+}
+
+/// A press on a step of a column of thumbnails, and dragging it to another
+/// place: the strip's and Snip Studio's Steps list's one logic.
+#[derive(Debug, Default)]
+pub struct Reorder {
+    /// The pressed step, and where.
+    press: Option<(usize, Point)>,
+    /// A step being dragged: from, to.
+    drag: Option<(usize, usize)>,
+    cursor: Point,
+}
+
+/// How a press ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Released {
+    /// Not moved: a click on this step.
+    Click(usize),
+    /// Dragged from, to.
+    Moved(usize, usize),
+}
+
+impl Reorder {
+    /// A press on step `i` (at the pointer's last place).
+    pub fn press(&mut self, i: usize) {
+        self.press = Some((i, self.cursor));
+    }
+
+    /// The pointer at `at` over a column of `n` steps that starts at `top`,
+    /// one every `pitch` px: past `DRAG` a press drags its step.
+    pub fn moved(&mut self, at: Point, top: f32, pitch: f32, n: usize) {
+        self.cursor = at;
+        if let Some((i, from)) = self.press {
+            let far = (at.x - from.x).hypot(at.y - from.y) >= DRAG;
+            if self.drag.is_some() || far {
+                let slot = ((at.y - top) / pitch).floor().max(0.0) as usize;
+                self.drag = Some((i, slot.min(n.saturating_sub(1))));
+            }
+        }
+    }
+
+    /// The press ends (`None`: there was none).
+    pub fn release(&mut self) -> Option<Released> {
+        let press = self.press.take();
+        match self.drag.take() {
+            Some((from, to)) => Some(Released::Moved(from, to)),
+            None => press.map(|(i, _)| Released::Click(i)),
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        (self.press, self.drag) = (None, None);
+    }
+
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// The step being dragged.
+    pub fn lifted(&self) -> Option<usize> {
+        self.drag.map(|(from, _)| from)
+    }
+
+    /// `n` steps in the order shown (a dragged one at its new place).
+    pub fn order(&self, n: usize) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..n).collect();
+        if let Some((from, to)) = self.drag.filter(|&(f, t)| f < n && t < n) {
+            let i = order.remove(from);
+            order.insert(to, i);
+        }
+        order
     }
 }
 
@@ -886,15 +956,27 @@ mod tests {
         s.update(Msg::Move(Point::new(50.0, y3)));
         s.update(Msg::Press(2));
         s.update(Msg::Move(Point::new(50.0, y3 - 2.0)));
-        assert!(s.drag.is_none(), "under the threshold: still a click");
+        assert!(!s.pick.dragging(), "under the threshold: still a click");
         s.update(Msg::Move(Point::new(50.0, TOP + 10.0)));
-        assert_eq!(s.drag, Some((2, 0)));
+        assert_eq!(s.pick.drag, Some((2, 0)));
         assert_eq!(s.shown(), vec![2, 0, 1], "renumbered live");
         assert_eq!(s.update(Msg::Release), None, "a drag copies nothing");
         assert_eq!(order(&s), vec![480, 400, 440]);
         // Ctrl+Z puts it back
         s.update(Msg::Key(Key::Undo));
         assert_eq!(order(&s), vec![400, 440, 480]);
+    }
+
+    #[test]
+    fn the_studios_reorder_moves_the_same_steps_with_undo() {
+        let mut s = strip(3);
+        assert_eq!(s.update(Msg::Reorder(0, 2)), None);
+        assert_eq!(order(&s), vec![440, 480, 400]);
+        // past the end: the last place
+        s.update(Msg::Reorder(0, 99));
+        assert_eq!(order(&s), vec![480, 400, 440]);
+        s.update(Msg::Key(Key::Undo));
+        assert_eq!(order(&s), vec![440, 480, 400]);
     }
 
     #[test]

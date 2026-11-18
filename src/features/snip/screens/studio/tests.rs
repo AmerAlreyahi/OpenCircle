@@ -2,6 +2,7 @@ use iced::{Point, Rectangle, Size, Vector};
 
 use super::*;
 use crate::features::snip::annotate::{Message, Tool};
+use crate::features::snip::screens::steps::Step;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -238,7 +239,7 @@ fn the_studio_matches_its_golden_images() {
         let empty = Studio::new(StudioConfig::default());
         let file = format!("studio-empty-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
-            view(&empty, false)
+            view(&empty, &[], false)
         }));
         let rgba = (0..640 * 400)
             .flat_map(|i| match (i % 640 / 40 + i / 640 / 40) % 2 {
@@ -255,7 +256,17 @@ fn the_studio_matches_its_golden_images() {
         draw(&mut s);
         let file = format!("studio-picture-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
-            view(&s, false)
+            view(&s, &[], false)
+        }));
+        // the Steps tab with three steps, the export bar open on JPG
+        let steps: Vec<_> = [(300, 200), (200, 300), (400, 120)]
+            .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
+            .into();
+        let _ = s.update(Msg::Export);
+        let _ = s.update(Msg::ExportFormat(export::Format::Jpg));
+        let file = format!("studio-steps-export-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &steps, false)
         }));
     });
 }
@@ -343,4 +354,63 @@ fn the_question_blocks_editing() {
         Outcome::None
     ));
     assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
+}
+
+#[test]
+fn the_steps_list_opens_reorders_and_deletes_the_strips_own_steps() {
+    let mut s = studio_on(200, 100);
+    let at = |y: f32| Point::new(40.0, y);
+    // a click: open that step on the canvas
+    let _ = s.update(Msg::StepMove(at(5.0), 3));
+    let _ = s.update(Msg::StepPress(1));
+    assert!(matches!(s.update(Msg::StepRelease), Outcome::OpenStep(1)));
+    // a drag of the first to the third row: the strip reorders (no copy here)
+    let _ = s.update(Msg::StepMove(at(5.0), 3));
+    let _ = s.update(Msg::StepPress(0));
+    let _ = s.update(Msg::StepMove(at(2.0 * STEP_PITCH + 5.0), 3));
+    assert_eq!(
+        s.pick.order(3),
+        [1, 2, 0],
+        "shown at its new place while dragged"
+    );
+    assert!(matches!(
+        s.update(Msg::StepRelease),
+        Outcome::Steps(steps::Msg::Reorder(0, 2))
+    ));
+    assert!(matches!(
+        s.update(Msg::StepDelete(2)),
+        Outcome::Steps(steps::Msg::Delete(2))
+    ));
+    assert!(matches!(
+        s.update(Msg::CopyAllSteps),
+        Outcome::Steps(steps::Msg::CopyAll)
+    ));
+}
+
+#[test]
+fn export_asks_for_the_choices_then_hands_over_the_drawn_picture() {
+    // nothing open: no export bar
+    let mut s = Studio::new(StudioConfig::default());
+    let _ = s.update(Msg::Export);
+    assert!(!s.exporting);
+    let mut s = studio_on(300, 200);
+    draw(&mut s);
+    let _ = s.update(Msg::Export);
+    assert!(s.exporting);
+    let _ = s.update(Msg::ExportFormat(export::Format::Jpg));
+    let _ = s.update(Msg::ExportQuality(60));
+    let _ = s.update(Msg::ExportSize(1024));
+    let Outcome::ExportPicture(picture, how) = s.update(Msg::ExportGo) else {
+        panic!("no export");
+    };
+    assert!(!s.exporting);
+    assert_eq!((picture.width, picture.height), (300, 200));
+    assert_ne!(picture.rgba, crop(300, 200).rgba, "with the drawing");
+    let want = export::Picture {
+        format: export::Format::Jpg,
+        quality: 60,
+        max_edge: 1024,
+    };
+    assert_eq!(how, want);
+    assert!(s.dirty(), "an export is not a Save");
 }

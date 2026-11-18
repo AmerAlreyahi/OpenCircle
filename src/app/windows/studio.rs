@@ -6,8 +6,12 @@ use iced::{Task, keyboard, window};
 use super::{Kind, Msg, TOAST_MS, Windows, chrome};
 use crate::app::background::background;
 use crate::features::circle::actions::{Action, Run, copy, save};
+use crate::features::snip::export;
+use crate::features::snip::screens::steps::Step;
 use crate::features::snip::screens::studio::{self, Outcome, Picture, Studio};
+use crate::shared::app_language::{S, fmt};
 use crate::shared::picture::Crop;
+use std::sync::Arc;
 
 impl Windows {
     /// Opens the Studio (empty, or on `picture`), or brings the open one forward
@@ -184,6 +188,40 @@ impl Windows {
             Outcome::SaveThen(crop) => studio_save(crop, true),
             Outcome::Pin(crop) => self.pin(crop, None, 1.0),
             Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
+            Outcome::Steps(m) => self.on_steps(m),
+            Outcome::OpenStep(i) => {
+                let Some(step) = self
+                    .steps
+                    .as_ref()
+                    .and_then(|(_, s)| s.steps().get(i).cloned())
+                else {
+                    return Task::none();
+                };
+                background(move |tx| {
+                    let _ = tx
+                        .unbounded_send(step.crop().ok_or_else(|| crate::t!(st_unreadable).into()));
+                })
+                .map(Msg::StudioRead)
+            }
+            Outcome::ExportSteps(how) => {
+                let steps: Vec<_> =
+                    (self.steps.as_ref()).map_or(Vec::new(), |(_, s)| s.steps().to_vec());
+                if steps.is_empty() {
+                    return Task::none();
+                }
+                background(move |tx| {
+                    if let Some(done) = export_steps(&steps, how) {
+                        let _ = tx.unbounded_send(done);
+                    }
+                })
+                .map(Msg::StudioToast)
+            }
+            Outcome::ExportPicture(crop, how) => background(move |tx| {
+                if let Some(done) = export_picture(crop, how) {
+                    let _ = tx.unbounded_send(done);
+                }
+            })
+            .map(Msg::StudioToast),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
@@ -202,6 +240,70 @@ fn studio_save(crop: Crop, then: bool) -> Task<Msg> {
         let _ = tx.unbounded_send(run(&save::ACTION, crop));
     })
     .map(move |saved| Msg::StudioSaved(saved, then))
+}
+
+/// Blocking: where to put the exported picture (the save dialog, in Save's
+/// folder), then the file; `None`: the dialog was cancelled. Ok / Err = the pill.
+fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, String>> {
+    let ext = how.format.ext();
+    // a size the format can't hold: say so before asking where, never a bare "Not saved"
+    match export::problem(crop.width, crop.height, how) {
+        Some(export::Problem::WebpTooBig) => {
+            return Some(Err(crate::t!(st_export_webp_big).into()));
+        }
+        Some(export::Problem::PdfTooWide) => {
+            return Some(Err(crate::t!(st_export_pdf_wide).into()));
+        }
+        None => {}
+    }
+    let mut dialog = rfd::FileDialog::new()
+        .set_title(crate::t!(st_export_where))
+        .set_file_name(format!("{}.{ext}", save::stamped_name("")))
+        .add_filter(how.format.name(), &[ext]);
+    let config = crate::shared::config::current();
+    if let Some(folder) = save::start_folder(&config.general.save_folder) {
+        dialog = dialog.set_directory(folder);
+    }
+    let path = export::with_ext(dialog.save_file()?, how.format);
+    let written = export::encode(crop, how)
+        .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
+    Some(match written {
+        Ok(()) => {
+            let folder = path.parent().unwrap_or(&path);
+            Ok(fmt(S::pill_saved, &[&save::short_path(folder)]))
+        }
+        Err(e) => {
+            crate::log!("[opencircle] export failed: {e}");
+            Err(crate::t!(pill_not_saved).to_string())
+        }
+    })
+}
+
+/// Blocking: a folder for the steps (the folder dialog, from Save's folder),
+/// then a new folder in it with the steps; `None`: cancelled.
+fn export_steps(steps: &[Arc<Step>], how: export::Steps) -> Option<Result<String, String>> {
+    let mut dialog = rfd::FileDialog::new().set_title(crate::t!(st_export_folder));
+    let config = crate::shared::config::current();
+    if let Some(folder) = save::start_folder(&config.general.save_folder) {
+        dialog = dialog.set_directory(folder);
+    }
+    let parent = dialog.pick_folder()?;
+    let pngs: Vec<&[u8]> = steps.iter().map(|s| s.png()).collect();
+    let words = export::Words {
+        title: crate::t!(st_steps),
+        step: crate::t!(st_step),
+        rtl: crate::shared::app_language::rtl(),
+    };
+    let name = save::stamped_name("steps-");
+    Some(
+        match export::write_steps(&parent, &name, &pngs, how, &words) {
+            Ok(folder) => Ok(exported_steps(steps.len(), &save::short_path(&folder))),
+            Err(e) => {
+                crate::log!("[opencircle] steps export failed: {e}");
+                Err(crate::t!(pill_not_saved).to_string())
+            }
+        },
+    )
 }
 
 /// A finishing action of the registry (Copy, Save): its pill's text or error.
@@ -263,4 +365,35 @@ pub(super) fn studio_events() -> iced::Subscription<Msg> {
         };
         Some(Msg::StudioEvent(id, m))
     })
+}
+
+/// "Exported 1 step to <folder>" (and Arabic's forms).
+fn exported_steps(n: usize, folder: &str) -> String {
+    let count = crate::shared::app_language::count(
+        n,
+        [
+            S::st_steps_one,
+            S::st_steps_two,
+            S::st_steps_few,
+            S::st_steps_many,
+        ],
+    );
+    fmt(S::st_exported_steps, &[&count, &folder])
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::shared::app_language::{Lang, set};
+
+    #[test]
+    fn the_exported_steps_message_counts_in_the_apps_language() {
+        set(Lang::En);
+        assert_eq!(super::exported_steps(1, "d"), "Exported 1 step to d");
+        assert_eq!(super::exported_steps(5, "d"), "Exported 5 steps to d");
+        set(Lang::Ar);
+        let ar = |n| super::exported_steps(n, "d");
+        assert!(ar(1).contains("خطوة واحدة") && ar(2).contains("خطوتان"));
+        assert!(ar(5).contains("5 خطوات") && ar(12).contains("12 خطوة"));
+        set(Lang::En);
+    }
 }

@@ -1760,8 +1760,6 @@ strings! {
         | "فتح…";
     st_paste: "Paste"
         | "لصق";
-    st_recent: "Recent captures"
-        | "اللقطات الأخيرة";
     st_recent_off: "Turn on Recent captures in Settings > Snip to see your last captures here."
         | "فعّل «اللقطات الأخيرة» في الإعدادات > لقطة الشاشة لترى آخر لقطاتك هنا.";
     st_recent_none: "No recent captures yet."
@@ -1798,6 +1796,48 @@ strings! {
         | "افتح صورة";
     st_pictures: "Pictures"
         | "الصور";
+    st_tab_recent: "Recent"
+        | "الأخيرة";
+    st_steps: "Steps"
+        | "الخطوات";
+    st_step: "Step"
+        | "الخطوة";
+    st_steps_none: "No steps yet. In Snip, More > Add to steps puts a capture here."
+        | "لا توجد خطوات بعد. في لقطة الشاشة، «المزيد» > «أضف إلى الخطوات» يضع اللقطة هنا.";
+    st_step_tip: "Open on the canvas · drag to reorder"
+        | "افتحها على اللوحة · اسحب لتغيير الترتيب";
+    st_export: "Export"
+        | "تصدير";
+    st_export_go: "Export…"
+        | "تصدير…";
+    st_export_md: "Markdown (.md + images)"
+        | "Markdown (.md مع الصور)";
+    st_export_html: "HTML page"
+        | "صفحة HTML";
+    st_export_images: "Images folder"
+        | "مجلد صور";
+    st_export_where: "Export the picture"
+        | "تصدير الصورة";
+    st_export_folder: "Choose a folder for the steps"
+        | "اختر مجلدًا للخطوات";
+    st_quality: "Quality"
+        | "الجودة";
+    st_original: "Original"
+        | "الأصلي";
+    st_exported_steps: "Exported {} to {}"
+        | "صُدّرت {} إلى {}";
+    st_steps_one: "1 step"
+        | "خطوة واحدة";
+    st_steps_two: "2 steps"
+        | "خطوتان";
+    st_steps_few: "{} steps"
+        | "{} خطوات";
+    st_steps_many: "{} steps"
+        | "{} خطوة";
+    st_export_webp_big: "WebP can't hold a picture over 16,384 px on a side. Pick a smaller size, or another format."
+        | "لا يتّسع WebP لصورة يتجاوز ضلعها 16384 بكسل. اختر حجمًا أصغر أو صيغة أخرى.";
+    st_export_pdf_wide: "A PDF page can't be wider than 19,200 px. Pick a smaller size."
+        | "لا يمكن أن يتجاوز عرض صفحة PDF 19200 بكسل. اختر حجمًا أصغر.";
     sn_pin: "Pin to screen"
         | "تثبيت على الشاشة";
     sn_live_pin: "Live pin"

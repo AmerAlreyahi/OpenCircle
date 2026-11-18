@@ -1758,7 +1758,11 @@ impl Windows {
         }
         if let Some((_, studio)) = self.studio.as_ref().filter(|(s, _)| *s == window) {
             let mode = self.mode(window);
-            let page = crate::features::snip::screens::studio::view(studio, mode.maximised)
+            let steps = self
+                .steps
+                .as_ref()
+                .map_or(&[][..], |(_, strip)| strip.steps());
+            let page = crate::features::snip::screens::studio::view(studio, steps, mode.maximised)
                 .map(Msg::Studio);
             return Some(chrome::with_edges(page, mode, move |e| {
                 Msg::Chrome(window, e)

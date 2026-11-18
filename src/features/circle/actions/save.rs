@@ -69,7 +69,7 @@ fn write_new(folder: &Path, stamp: &str, ext: &str, bytes: &[u8]) -> std::io::Re
 const NOT_SAVED: Said = Said(S::pill_not_saved);
 
 /// `folder` for a pill: all of it, or its tail after an ellipsis.
-fn short_path(folder: &Path) -> String {
+pub fn short_path(folder: &Path) -> String {
     const MAX: usize = 36;
     let full = folder.display().to_string();
     let n = full.chars().count();
@@ -95,7 +95,7 @@ pub fn default_folder() -> Option<PathBuf> {
 
 /// The folder saves go to: the configured one if set and existing, else the
 /// default folder, created on first use.
-fn start_folder(configured: &str) -> Option<PathBuf> {
+pub fn start_folder(configured: &str) -> Option<PathBuf> {
     start_in(configured, default_folder())
 }
 
@@ -107,6 +107,12 @@ fn start_in(configured: &str, default: Option<PathBuf>) -> Option<PathBuf> {
     let folder = default?;
     std::fs::create_dir_all(&folder).ok()?;
     Some(folder)
+}
+
+/// `OpenCircle-<infix><date and time>`: a name for an exported file or folder.
+pub fn stamped_name(infix: &str) -> String {
+    let stamp = timestamp();
+    format!("OpenCircle-{infix}{stamp}")
 }
 
 /// Local time as `YYYY-MM-DD_HH-MM-SS` (sorts by name, valid on every filesystem).

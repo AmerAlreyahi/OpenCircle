@@ -77,6 +77,37 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     width: f32,
 ) -> Element<'a, Message> {
     use super::icon::{Icon, icon};
+    let opener = container(icon(Icon::More, size::ICON_SMALL).color(c().text)).padding([7.0, 14.0]);
+    menu(opener, rows, width)
+}
+
+/// `menu_button` opened by a labelled button ("Export ▾"), `width` wide; its
+/// menu as wide, hanging from it.
+pub fn labelled_menu<'a, Message: Clone + 'a>(
+    words: &'a str,
+    rows: Vec<(String, bool, Message)>,
+    width: f32,
+) -> Element<'a, Message> {
+    let role = Role::CONTROL;
+    let size = super::text::size(role);
+    let opener = container(
+        crate::dir_row![
+            text(words).size(size).font(font(role)).color(c().text),
+            text("▾").size(size).font(MONO).color(c().text),
+        ]
+        .spacing(6.0)
+        .align_y(Center),
+    )
+    .center_x(width)
+    .padding([7.0, 0.0]);
+    menu(opener, rows, width)
+}
+
+fn menu<'a, Message: Clone + 'a>(
+    opener: container::Container<'a, Message>,
+    rows: Vec<(String, bool, Message)>,
+    width: f32,
+) -> Element<'a, Message> {
     let inner = width - 2.0 * MENU_PAD - 2.0;
     let mut list = column![];
     for (label, removes, message) in rows {
@@ -96,16 +127,14 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     let menu = super::option_list::frame(list)
         .padding(MENU_PAD)
         .width(width);
-    let opener = container(icon(Icon::More, size::ICON_SMALL).color(c().text))
-        .padding([7.0, 14.0])
-        .style(|_| container::Style {
-            background: Some(c().elevated.into()),
-            border: Border::default()
-                .rounded(radius::TRACK)
-                .width(1)
-                .color(c().elevated_border),
-            ..container::Style::default()
-        });
+    let opener = opener.style(|_| container::Style {
+        background: Some(c().elevated.into()),
+        border: Border::default()
+            .rounded(radius::TRACK)
+            .width(1)
+            .color(c().elevated_border),
+        ..container::Style::default()
+    });
     Element::new(Dropdown {
         opener: opener.into(),
         menu: menu.into(),

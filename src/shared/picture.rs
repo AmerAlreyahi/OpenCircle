@@ -49,16 +49,24 @@ pub fn crop_bounds(width: u32, height: u32, scale: f32, area: Rectangle) -> Opti
     (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
 }
 
-/// `crop` scaled down (bicubic, so text stays sharp) until its long edge is at
-/// most `max_edge` px; as it is when it already fits or `max_edge` is 0.
-pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
-    let long = crop.width.max(crop.height);
+/// The size `fit_long_edge` gives a `width` x `height` picture.
+pub fn fitted_size(width: u32, height: u32, max_edge: u32) -> (u32, u32) {
+    let long = width.max(height);
     if max_edge == 0 || long <= max_edge {
-        return crop;
+        return (width, height);
     }
     let shrink =
         |v: u32| ((u64::from(v) * u64::from(max_edge)).div_ceil(u64::from(long)) as u32).max(1);
-    let (width, height) = (shrink(crop.width), shrink(crop.height));
+    (shrink(width), shrink(height))
+}
+
+/// `crop` scaled down (bicubic, so text stays sharp) until its long edge is at
+/// most `max_edge` px; as it is when it already fits or `max_edge` is 0.
+pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
+    let (width, height) = fitted_size(crop.width, crop.height, max_edge);
+    if (width, height) == (crop.width, crop.height) {
+        return crop;
+    }
     let Some(source) = image::RgbaImage::from_raw(crop.width, crop.height, crop.rgba) else {
         unreachable!("a Crop's buffer is width * height * 4 bytes");
     };
@@ -74,21 +82,33 @@ pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
 pub fn encode(crop: &Crop, format: crate::shared::config::Format) -> Result<Vec<u8>, String> {
     match format {
         crate::shared::config::Format::Png => encode_png(crop.width, crop.height, &crop.rgba),
-        crate::shared::config::Format::Jpeg => {
-            let (pixels, _) = crop.rgba.as_chunks::<4>();
-            let rgb: Vec<u8> = pixels.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
-            let mut out = Vec::new();
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
-                .encode(
-                    &rgb,
-                    crop.width,
-                    crop.height,
-                    image::ExtendedColorType::Rgb8,
-                )
-                .map_err(|e| e.to_string())?;
-            Ok(out)
-        }
+        crate::shared::config::Format::Jpeg => encode_jpeg(crop, 85),
     }
+}
+
+/// `crop`'s pixels as RGB with its alpha blended onto white (no black where it
+/// is see-through), for the formats without alpha (JPEG, PDF).
+pub fn rgb_on_white(crop: &Crop) -> Vec<u8> {
+    let (pixels, _) = crop.rgba.as_chunks::<4>();
+    let over = |c: u8, a: u16| ((u16::from(c) * a + 255 * (255 - a) + 127) / 255) as u8;
+    (pixels.iter())
+        .flat_map(|&[r, g, b, a]| [over(r, a.into()), over(g, a.into()), over(b, a.into())])
+        .collect()
+}
+
+/// `crop` as a JPEG of `quality` (1..=100); its alpha is blended onto white.
+pub fn encode_jpeg(crop: &Crop, quality: u8) -> Result<Vec<u8>, String> {
+    let rgb = rgb_on_white(crop);
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+        .encode(
+            &rgb,
+            crop.width,
+            crop.height,
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 /// Between stacked crops (several selections sent as one image).
