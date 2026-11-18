@@ -100,6 +100,8 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   overlay closes by itself, and the chat stays. While the chat is open on the
   overlay, the bar stays beside it. Errors say plainly
   what went wrong and offer one fix. History is text only and stays on this PC.
+  Optional web search (DuckDuckGo, then Wikipedia; no key, asked once) and
+  one-click **Connect OpenRouter** sign-in.
 - **Shortcuts for everything.** Give any action its own key and skip the bar.
   Settings > Shortcuts can put them all back to the defaults.
 - **In English or Arabic.** The whole app, its setup and Settings speak Arabic

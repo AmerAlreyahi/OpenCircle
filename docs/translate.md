@@ -135,6 +135,11 @@ Choose one in **Settings → Translate → Engine**.
   is set up, OpenCircle translates offline instead, so translation works
   without a key.
 
+- **Online** sends only the text it read (never the picture) to Google's free web
+  translator, one-shot Translate only. It is unofficial: when it doesn't answer, OpenCircle
+  translates offline instead. Nothing is sent unless you pick it in
+  **Settings → Translate → Engine**.
+
 Offline, a highlighted name inside a line is drawn in the line's colour: the
 model can't say which translated words are the name. A line drawn entirely
 in a highlight colour keeps it.

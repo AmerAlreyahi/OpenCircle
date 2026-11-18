@@ -1,8 +1,8 @@
-//! The online engine (Labs, owner 2026-11-17): Google's free web translator
+//! The online engine (owner 2026-11-17; a normal engine choice since 0.3.0): Google's free web translator
 //! (`translate_a/single`, client "gtx"): no key, no setup. Unofficial: it may
 //! stop or refuse (429) at any time, and then the caller translates on this
 //! PC. Only the text goes out (never the picture), only for one-shot
-//! Translate (never Live), and only once the user picked this engine.
+//! Translate, and only once the user picked this engine.
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
