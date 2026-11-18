@@ -191,7 +191,8 @@ impl<'a> Viewer<'a, Act> for Answer {
             .font(settings.style.code_block_font)
             .size(settings.text_size)
             .wrapping(Wrapping::None)
-            .style(selectable);
+            .style(selectable)
+            .click_interval(CLICK_GAP);
             let maths = super::scroll::across(container(maths).padding(CODE_PAD * zoom()));
             return container(maths)
                 .width(Fill)
@@ -219,7 +220,8 @@ impl<'a> Viewer<'a, Act> for Answer {
             .font(settings.style.code_block_font)
             .size(settings.code_size)
             .wrapping(Wrapping::None)
-            .style(selectable);
+            .style(selectable)
+            .click_interval(CLICK_GAP);
         let code = super::scroll::across(container(code).padding(CODE_PAD * zoom()));
         container(column![strip, code])
             .width(Fill)
@@ -297,9 +299,15 @@ impl<'a> Viewer<'a, Act> for Cell {
             .size(settings.text_size)
             .on_link_click(Self::on_link_click)
             .style(selectable)
+            .click_interval(CLICK_GAP)
             .into()
     }
 }
+
+/// How soon a second click counts as a double click (iced's own 300 ms). A test builds
+/// the whole window between its clicks, which on a loaded machine takes longer.
+const CLICK_GAP: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 60_000 } else { 300 });
 
 /// The selection's look: main mode's flat highlight, the text's own colour.
 fn selectable(_: &iced::Theme) -> iced_selection::text::Style {
@@ -351,7 +359,8 @@ fn block<'a>(line: &Text, style: Style, size: Pixels) -> Element<'a, Act> {
         .size(size)
         .width(Fill)
         .on_link_click(Answer::on_link_click)
-        .style(selectable);
+        .style(selectable)
+        .click_interval(CLICK_GAP);
     match rtl {
         true => block.align_x(iced::alignment::Horizontal::Right).into(),
         false => block.into(),

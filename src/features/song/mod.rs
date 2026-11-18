@@ -232,11 +232,31 @@ impl fmt::Display for Error {
 const UNKNOWN: u8 = 0;
 const NO: u8 = 1;
 const YES: u8 = 2;
+#[cfg(not(test))]
 static HAS_KEY: AtomicU8 = AtomicU8::new(UNKNOWN);
+// A test thread's own flag: tests that save or remove a key don't race each other's.
+#[cfg(test)]
+thread_local! {
+    static HAS_KEY: AtomicU8 = const { AtomicU8::new(UNKNOWN) };
+}
+
+fn load() -> u8 {
+    #[cfg(not(test))]
+    return HAS_KEY.load(Ordering::Relaxed);
+    #[cfg(test)]
+    HAS_KEY.with(|k| k.load(Ordering::Relaxed))
+}
+
+fn store(v: u8) {
+    #[cfg(not(test))]
+    HAS_KEY.store(v, Ordering::Relaxed);
+    #[cfg(test)]
+    HAS_KEY.with(|k| k.store(v, Ordering::Relaxed));
+}
 
 /// `None` until `check_key` ran once.
 pub fn key_known() -> Option<bool> {
-    match HAS_KEY.load(Ordering::Relaxed) {
+    match load() {
         UNKNOWN => None,
         v => Some(v == YES),
     }
@@ -244,7 +264,7 @@ pub fn key_known() -> Option<bool> {
 
 /// Settings saved or removed the key.
 pub fn remember_key(saved: bool) {
-    HAS_KEY.store(if saved { YES } else { NO }, Ordering::Relaxed);
+    store(if saved { YES } else { NO });
 }
 
 /// Asks the keyring whether a key is saved (blocking, no unlock prompt) and remembers it.

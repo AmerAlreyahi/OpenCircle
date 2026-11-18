@@ -2052,7 +2052,8 @@ mod tests {
         let _ = ops(&rx);
         // Stop: the glow and the patch fade together, then it is off
         assert!(matches!(l.leave(), Outcome::Task(_)), "fades first");
-        l.edge.0.close(Instant::now() - motion::WIDGET.close.0);
+        // `leave` began closing from however far the glow had opened (the clock); closed for sure
+        l.edge.0 = motion::Shown::closing(motion::WIDGET, Instant::now() - motion::WIDGET.close.0);
         let _ = l.update(Msg::EdgeFade);
         let all: Vec<Op> = rx.try_iter().collect();
         assert!(

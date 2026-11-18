@@ -433,8 +433,9 @@ mod tests {
 
     #[test]
     fn a_full_download_is_being_checked() {
-        assert_eq!(Stage::at(0.4), Stage::Downloading(0.4));
-        assert_eq!(Stage::at(1.0), Stage::Verifying);
+        // `of`, not `at`: `at` reads the process-wide retry flag other tests set
+        assert_eq!(Stage::of(0.4, false), Stage::Downloading(0.4));
+        assert_eq!(Stage::of(1.0, false), Stage::Verifying);
         assert_eq!(Stage::of(0.4, true), Stage::Retrying(0.4));
         assert_eq!(Stage::of(1.0, true), Stage::Verifying);
     }
