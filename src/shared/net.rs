@@ -86,7 +86,7 @@ pub fn agent(p: Policy) -> ureq::Agent {
 /// later resolves elsewhere (DNS rebinding) is refused too.
 pub fn public_agent(p: Policy) -> ureq::Agent {
     ureq::Agent::with_parts(
-        config(p),
+        public_config(builder(p)),
         ureq::unversioned::transport::DefaultConnector::default(),
         PublicOnly,
     )
@@ -117,35 +117,70 @@ impl ureq::unversioned::resolver::Resolver for PublicOnly {
     }
 }
 
-/// A public internet address: not loopback, private, link-local, shared
-/// (100.64/10), documentation, broadcast or unspecified.
+/// A public internet address: global unicast only. IPv4: not this-network
+/// (0/8), private, shared (100.64/10), loopback, link-local, IETF (192.0.0/24),
+/// documentation, benchmarking (198.18/15), 6to4 relay, multicast, reserved
+/// (240/4) or broadcast. IPv6: only 2000::/3 (no documentation, 2001::/23 or
+/// 3fff::/20), and every form that carries an IPv4 address (mapped,
+/// compatible, NAT64 64:ff9b::/96 and 64:ff9b:1::/48, 6to4 2002::/16) is
+/// judged by that IPv4 address.
 pub fn public(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
+    use std::net::{IpAddr, Ipv4Addr};
     match ip {
         IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_unspecified()
-                || a == 0
-                || (a == 100 && (64..128).contains(&b)))
+            let [a, b, c, _] = v4.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || a >= 224 // multicast, reserved, broadcast
+                || (a == 100 && (64..128).contains(&b))
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..32).contains(&b))
+                || (a == 192 && b == 168)
+                || (a == 192 && b == 0 && (c == 0 || c == 2))
+                || (a == 192 && b == 88 && c == 99)
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113))
         }
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(v4) => public(IpAddr::V4(v4)),
-            None => {
-                !(v6.is_loopback()
-                    || v6.is_unspecified()
-                    || v6.is_unique_local()
-                    || v6.is_unicast_link_local())
+        IpAddr::V6(v6) => {
+            let seg = v6.segments();
+            let o = v6.octets();
+            // compatible ::a.b.c.d (and ::, ::1), mapped ::ffff:a.b.c.d, NAT64
+            let in_tail = (seg[..5] == [0; 5] && (seg[5] == 0 || seg[5] == 0xffff))
+                || seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0]
+                || seg[..3] == [0x64, 0xff9b, 1];
+            let embedded = if in_tail {
+                Some(Ipv4Addr::new(o[12], o[13], o[14], o[15]))
+            } else if seg[0] == 0x2002 {
+                Some(Ipv4Addr::new(o[2], o[3], o[4], o[5])) // 6to4
+            } else {
+                None
+            };
+            if let Some(v4) = embedded {
+                return public(IpAddr::V4(v4));
             }
-        },
+            (seg[0] & 0xe000) == 0x2000 // global unicast 2000::/3
+                && !(seg[0] == 0x2001 && seg[1] < 0x200) // 2001::/23 (Teredo, ...)
+                && !(seg[0] == 0x2001 && seg[1] == 0xdb8)
+                && (seg[0] & 0xfff0) != 0x3ff0 // 3fff::/20 documentation
+        }
     }
 }
 
+/// The public agent's config: no proxy, ever (an environment proxy would
+/// connect for us, past `PublicOnly`'s check).
+fn public_config(
+    b: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>,
+) -> ureq::config::Config {
+    b.proxy(None).build()
+}
+
 fn config(p: Policy) -> ureq::config::Config {
+    builder(p).build()
+}
+
+fn builder(p: Policy) -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
     let mut b = ureq::Agent::config_builder()
         .https_only(p.https_only)
         .http_status_as_error(p.status_as_error)
@@ -154,7 +189,7 @@ fn config(p: Policy) -> ureq::config::Config {
     if let Some(ua) = p.user_agent {
         b = b.user_agent(ua);
     }
-    b.build()
+    b
 }
 
 /// The connection broke before an answer came back: reset, aborted, closed
@@ -193,6 +228,56 @@ mod tests {
         for ip in ["93.184.216.34", "2606:4700::1111", "::ffff:8.8.8.8"] {
             assert!(public(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    /// Every way an IPv6 address can carry a private IPv4 one, and the
+    /// special IPv4 / IPv6 ranges: only global unicast passes.
+    #[test]
+    fn no_special_range_passes_in_any_form() {
+        for ip in [
+            "::127.0.0.1",
+            "::192.168.1.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::c0a8:101",
+            "2002:7f00:1::",
+            "2002:c0a8:101::1",
+            "fec0::1",
+            "ff02::1",
+            "ff0e::1",
+            "2001:db8::1",
+            "3fff::1",
+            "2001::1",
+            "224.0.0.1",
+            "239.255.255.250",
+            "240.0.0.1",
+            "255.255.255.255",
+            "0.1.2.3",
+            "100.127.255.254",
+            "192.0.0.8",
+            "192.0.2.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "::",
+        ] {
+            assert!(!public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["64:ff9b::808:808", "2002:808:808::1", "2a00:1450::1"] {
+            assert!(public(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    /// A proxy from the environment would connect for us, past the
+    /// resolver's check: the public agent never uses one.
+    #[test]
+    fn the_public_agent_uses_no_proxy() {
+        let proxy = ureq::Proxy::new("http://127.0.0.1:1").unwrap();
+        let with_proxy = builder(PAGE).proxy(Some(proxy));
+        assert!(with_proxy.build().proxy().is_some());
+        let with_proxy = builder(PAGE).proxy(Some(ureq::Proxy::new("http://127.0.0.1:1").unwrap()));
+        assert!(public_config(with_proxy).proxy().is_none());
+        assert!(public_agent(PAGE).config().proxy().is_none());
     }
 
     #[test]
