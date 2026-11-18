@@ -84,6 +84,14 @@ where they differ.
   SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.2.0", latest = v0.2.0. Known issue shipped: on Windows/X11 the
   glossary is not picked by the game's window title (window_rect::remember_focused only called by Snip's capture, not
   app/capture.rs): fix FIRST in the next version. NOT verified: Windows 11, wlroots, KDE 6 / GNOME 48 portal shortcut path.
+  v0.3.0 "AI core" published 2026-11-18 18:46 UTC on tag v0.3.0 (638ebb67), owner: "publish": CI green; gate on the first draft
+  (W67) PASS (assets + minisig, v0.2.0 Setup + portable -> 0.3.0, schema 13, Setup /quiet + ManagedBy, About, Ubuntu AppImage);
+  microsoft/onnxruntime returned 404, so the exact runtime files were mirrored (OpenCircle-models runtime-1) and the app tries the
+  mirror first; re-gate on the final draft (W71): UPDATE GATE PASS, fresh install translates with the runtime from the mirror.
+  Published assets re-downloaded: SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.3.0", latest = v0.3.0. Known issues
+  shipped (fix first in the next version): on a fresh Windows install, Copy text on an Arabic page with the PP-OCR reader copied
+  nothing in W71's runs (not yet confirmed app vs test click); the About avatar still drew as a square tile at 1280x720 (W69's
+  circle radius did not take effect on the CPU renderer). Live translate hidden in this version.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
