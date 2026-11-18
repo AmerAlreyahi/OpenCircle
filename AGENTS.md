@@ -1355,3 +1355,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   v0.4.2 Steps in the Studio + picture/steps export -> v0.4.3 animated steps export (GIF/MP4/WebM) -> v0.4.4 actions on the
   picture -> v0.4.5 edit text in the picture -> v0.4.6 cut out (model test first) -> v0.5.0 Live page translation (new engine)
   -> v0.5.1 game "watch area". After that the versions already planned (Reach, Plugins, ...), each split the same way.
+- Never idle waiting for the owner (owner, 2026-11-18, angry that work stopped after the v0.3.0 dev build): while the owner tries
+  a build (or sleeps), the next versions in the plan are BUILT IN PARALLEL on their own branches; his trying gates the RELEASE of
+  each version, not the start of the next one's work. Stop only for a decision only he can make (and then notify him).
