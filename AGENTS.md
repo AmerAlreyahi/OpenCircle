@@ -1374,3 +1374,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   the follow-up pin: the overlay (frozen screen + main bar) closes by itself and the chat stays pinned above other apps; same
   guards as the follow-up close (never while a menu / card / download / song search / drag / running action is open: it closes
   right after).
+- v0.3.0 publish (owner, 2026-11-18, "publish, and on VM, I will start it now"): the lead publishes v0.3.0 (the AI core) without
+  asking again once the release steps pass: notes + docs + clean-up (W66), CI green, tag -> draft, the update gate on the Windows
+  VM (v0.2.0 Setup + portable -> the draft), About on the draft exe, signed assets re-downloaded + verified. A broken updater
+  blocks; other findings ship as known issues.
