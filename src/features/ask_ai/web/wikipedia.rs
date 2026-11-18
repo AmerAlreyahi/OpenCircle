@@ -1,24 +1,21 @@
 //! Wikipedia's official search API (keyless, never a captcha): the fallback
-//! for facts. A query in Arabic asks the Arabic Wikipedia.
+//! for facts. A query in Arabic asks the Arabic Wikipedia (`super::lang`).
 
 use super::page::text_of;
-use super::{Engine, Hit, arabic};
+use super::{Engine, Hit, lang};
 use serde_json::Value;
 
 pub(super) const ENGINE: Engine = Engine {
     name: "Wikipedia",
     url: |q| {
         let (lang, q) = (lang(q), crate::features::ask_ai::browser::encode(q));
+        // 10: `relevant` keeps the top 5 that are about the query
         format!(
-            "https://{lang}.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=5&srsearch={q}"
+            "https://{lang}.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=10&srsearch={q}"
         )
     },
     parse,
 };
-
-fn lang(query: &str) -> &'static str {
-    if arabic(query) { "ar" } else { "en" }
-}
 
 fn parse(query: &str, body: &str) -> Vec<Hit> {
     let Ok(v) = serde_json::from_str::<Value>(body) else {

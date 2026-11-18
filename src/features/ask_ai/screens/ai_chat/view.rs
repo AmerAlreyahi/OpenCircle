@@ -75,6 +75,44 @@ fn quiet<'a>(name: &'a str, msg: Msg) -> Element<'a, Msg> {
     button(label(name), Kind::Quiet, Some(msg))
 }
 
+/// The pages an answer used, as one quiet line ("Sources: a.org · b.com
+/// +2"): each domain opens its page; "+N" shows the rest (W59).
+fn sources<'a>(
+    turn: usize,
+    hits: &[crate::features::ask_ai::web::Hit],
+    all: bool,
+) -> Element<'a, Msg> {
+    use crate::features::ask_ai::web::SHOWN;
+    let shown = if all {
+        hits.len()
+    } else {
+        hits.len().min(SHOWN)
+    };
+    let mut line: Vec<Element<'a, Msg>> = vec![note(t!(chat_sources)).into()];
+    for (n, h) in hits[..shown].iter().enumerate() {
+        if n > 0 {
+            line.push(note("\u{b7}").into());
+        }
+        let host = crate::shared::platform::sys::open::web_host(&h.url).unwrap_or_default();
+        let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+        let open = Msg::Answer(Act::Link(h.url.clone()));
+        line.push(button(label(host), Kind::Quiet, Some(open)));
+    }
+    if shown < hits.len() {
+        let more = format!("+{}", hits.len() - shown);
+        line.push(button(
+            label(more),
+            Kind::Quiet,
+            Some(Msg::AllSources(turn)),
+        ));
+    }
+    (iced::widget::row(dir::order(line)))
+        .spacing(CHIPS_GAP)
+        .align_y(Center)
+        .wrap()
+        .into()
+}
+
 /// A card's note (`.as-note`): 12 px secondary text.
 pub fn note<'a>(line: impl iced::widget::text::IntoFragment<'a>) -> iced::widget::Text<'a> {
     sub(Role::NOTE, line).line_height(1.65)
@@ -227,9 +265,7 @@ impl AiChat {
                 });
             }
             if !turn.sources.is_empty() {
-                let chips = (turn.sources.iter())
-                    .map(|h| chip::action(h.title.clone(), Msg::Answer(Act::Link(h.url.clone()))));
-                answer = answer.push(iced::widget::row(chips).spacing(CHIPS_GAP).wrap());
+                answer = answer.push(sources(i, &turn.sources, self.all_sources == Some(i)));
             }
             if turn.web_down {
                 answer = answer.push(note(t!(chat_web_down)));

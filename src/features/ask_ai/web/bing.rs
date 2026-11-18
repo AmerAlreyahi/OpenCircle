@@ -6,11 +6,43 @@ use super::{Engine, Hit};
 pub(super) const ENGINE: Engine = Engine {
     name: "Bing",
     url: |q| {
-        let q = crate::features::ask_ai::browser::encode(q);
-        format!("https://www.bing.com/search?q={q}")
+        // the market from the query's language: an English name got Chinese pages without it
+        let (lang, cc) = match super::lang(q) {
+            "ar" => ("ar", "SA"),
+            _ => ("en", "US"),
+        };
+        let q = crate::features::ask_ai::browser::encode(&quoted(q));
+        format!("https://www.bing.com/search?q={q}&setlang={lang}&mkt={lang}-{cc}&cc={cc}")
     },
     parse,
 };
+
+/// A full name (two or more capitalised words in a row) in quotes, so Bing
+/// keeps it together; a query that already has quotes stays as it is.
+fn quoted(query: &str) -> String {
+    if query.contains('"') {
+        return query.to_string();
+    }
+    let name = |w: &&&str| {
+        w.chars().next().is_some_and(char::is_uppercase) && w.chars().all(char::is_alphabetic)
+    };
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        match words[i..].iter().take_while(name).count() {
+            run @ 2.. => {
+                out.push(format!("\"{}\"", words[i..i + run].join(" ")));
+                i += run;
+            }
+            _ => {
+                out.push(words[i].to_string());
+                i += 1;
+            }
+        }
+    }
+    out.join(" ")
+}
 
 /// Each `<li class="b_algo">`: its `<h2><a href>` title and link, the first
 /// `<p>` after it as the snippet. Bing's own redirect links
@@ -73,5 +105,20 @@ mod tests {
         assert_eq!(hits[1].title, "Plain \"link\"");
         assert_eq!(hits[1].url, "https://example.org/a?b=1");
         assert!(parse("", "<html>no results</html>").is_empty());
+    }
+
+    #[test]
+    fn names_are_quoted_and_the_market_follows_the_query() {
+        assert_eq!(
+            quoted("search for Amer Alreyahi"),
+            "search for \"Amer Alreyahi\""
+        );
+        assert_eq!(quoted("\"Amer\" Alreyahi"), "\"Amer\" Alreyahi");
+        assert_eq!(quoted("What's new in Rust"), "What's new in Rust");
+        let en = (ENGINE.url)("Amer Alreyahi");
+        assert!(en.ends_with("&setlang=en&mkt=en-US&cc=US"), "{en}");
+        assert!(en.contains("q=%22Amer"), "{en}");
+        let ar = (ENGINE.url)("عاصمة اليابان");
+        assert!(ar.ends_with("&setlang=ar&mkt=ar-SA&cc=SA"), "{ar}");
     }
 }

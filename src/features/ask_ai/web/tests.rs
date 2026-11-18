@@ -195,7 +195,7 @@ fn a_model_without_tools_gets_one_search_with_the_question() {
                 404,
                 r#"{"error":{"message":"No endpoints found that support tool use"}}"#,
             ),
-            mock::stream(&text("Answer")),
+            mock::stream(&text("Answer [1]")),
         ]);
         let (searched, web) = (RefCell::new(vec![]), RefCell::new(vec![]));
         answer(
@@ -289,6 +289,84 @@ fn a_refused_tool_round_falls_back_to_one_search() {
     .unwrap();
     assert_eq!(got, "Answer");
     assert_eq!(*searched.borrow(), ["x", "look for amer"]);
+}
+
+/// The owner's search (2026-11-18): Bing mixed Chinese Outlook pages and
+/// pages without the name into an English name's results; only the pages
+/// about the name in its script reach the model.
+#[test]
+fn bing_results_off_the_query_or_in_another_script_are_dropped() {
+    let result = |href: &str, title: &str, snippet: &str| {
+        format!(
+            r#"<li class="b_algo"><h2><a href="{href}">{title}</a></h2><div class="b_caption"><p>{snippet}</p></div></li>"#
+        )
+    };
+    let page = [
+        result(
+            "https://zhihu.com/q/1",
+            "Outlook 邮箱怎么登录 - 知乎",
+            "Amer 微软 Outlook 登录问题",
+        ),
+        result(
+            "https://gov.example/",
+            "Ministry portal",
+            "Official services and forms",
+        ),
+        result(
+            "https://github.com/AmerAlreyahi",
+            "Amer Alreyahi - GitHub",
+            "OpenCircle author",
+        ),
+        result("https://baidu.com/x", "百度一下", "你就知道"),
+    ]
+    .concat();
+    let asked = RefCell::new(String::new());
+    let hits = search_with(&ENGINES[..1], "search for Amer Alreyahi", |url| {
+        *asked.borrow_mut() = url.to_string();
+        Ok((200, page.clone()))
+    })
+    .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].url, "https://github.com/AmerAlreyahi");
+    assert!(asked.borrow().contains("mkt=en-US"), "{}", asked.borrow());
+    // Arabic keeps Arabic pages
+    let ar = |t: &str| Hit {
+        title: t.into(),
+        url: "https://ar.example/".into(),
+        snippet: String::new(),
+    };
+    let kept = relevant(
+        "عاصمة اليابان",
+        vec![ar("طوكيو عاصمة اليابان"), ar("Tokyo")],
+    );
+    assert_eq!(kept, [ar("طوكيو عاصمة اليابان")]);
+}
+
+/// Under the answer: only the results it used (a page it opened, a result
+/// it cited by number), not every result it was given.
+#[test]
+fn the_sources_are_only_the_pages_the_answer_used() {
+    let (url, _) = mock::serve(vec![
+        mock::stream(&call("c1", "web_search", r#"{"query":"q"}"#)),
+        mock::stream(&call(
+            "c2",
+            "open_page",
+            r#"{"url":"https://example.org/3"}"#,
+        )),
+        mock::stream(&text("See [2].")),
+    ]);
+    let web = RefCell::new(vec![]);
+    answer(
+        &cfg(url),
+        None,
+        &[Message::user("q")],
+        |_| ControlFlow::Continue(()),
+        |w| web.borrow_mut().push(w),
+        |_| Some(vec![hit("1"), hit("2"), hit("3"), hit("4")]),
+        |_| Ok("text".into()),
+    )
+    .unwrap();
+    assert_eq!(*web.borrow(), [Web::Sources(vec![hit("2"), hit("3")])]);
 }
 
 #[test]
@@ -406,9 +484,19 @@ fn page_text_drops_scripts_and_tags() {
 #[ignore]
 fn live_search_and_page() {
     // the name: Bing's page for it had a result snippet saying "Captcha" (2026-11-18)
-    for q in ["ubuntu 22.04 end of life", "عاصمة اليابان", "Amer Alreyahi"] {
+    // the owner's query (W59): no Chinese / off-topic pages left
+    for q in [
+        "ubuntu 22.04 end of life",
+        "عاصمة اليابان",
+        "Amer Alreyahi",
+        "search for Amer Alreyahi",
+        "Linus Torvalds",
+    ] {
         let hits = search(q).expect("an engine answers");
-        println!("{q}: {} hits, first {:?}", hits.len(), hits[0]);
+        println!("{q}: {} hits", hits.len());
+        for h in &hits {
+            println!("  {} | {}", h.title, h.url);
+        }
         assert!(hits.iter().all(|h| h.url.starts_with("https://")));
     }
     let wiki = search_with(&ENGINES[1..], "Rust programming language", |u| {

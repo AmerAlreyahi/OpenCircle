@@ -142,6 +142,8 @@ pub enum Msg {
     JumpToLatest,
     /// The error card's Show / Hide details.
     Details,
+    /// A turn's sources line: "+N" shows the rest.
+    AllSources(usize),
     /// Search the crop with Lens (the chat's "Search the image with Lens").
     Search,
     /// What a link's click did (its note).
@@ -255,6 +257,8 @@ pub struct AiChat {
     spin: Option<(Instant, f32)>,
     /// The error card shows its whole detail.
     details: bool,
+    /// The turn whose sources line shows all its sources ("+N" pressed).
+    all_sources: Option<usize>,
     /// The log shows its end: a growing answer is followed. Scrolled up, the
     /// view stays put and "Jump to latest" shows (#128).
     following: bool,
@@ -384,6 +388,7 @@ impl AiChat {
             note: None,
             spin: None,
             details: false,
+            all_sources: None,
             following: true,
             zoom: config::current().ai.chat_zoom,
             web_hidden: usize::MAX,
@@ -741,6 +746,7 @@ impl AiChat {
                 return save_config(move |c| c.ai.web_search = Some(on), None);
             }
             (_, Msg::Details) => self.details = !self.details,
+            (_, Msg::AllSources(i)) => self.all_sources = Some(i),
             (State::Ask { chat, .. }, Msg::Answered(result)) => {
                 self.details = false;
                 chat.finish(result);

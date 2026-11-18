@@ -1524,6 +1524,8 @@ strings! {
         | "تشغيل";
     chat_web_down: "Web search isn't available right now, so this answer doesn't use it."
         | "البحث في الويب غير متاح الآن، لذا لا تعتمد هذه الإجابة عليه.";
+    chat_sources: "Sources:"
+        | "المصادر:";
     chat_send: "Send"
         | "إرسال";
     chat_back: "Back to the chat"
