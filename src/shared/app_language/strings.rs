@@ -813,6 +813,8 @@ strings! {
         | "يفتح OpenRouter في متصفحك، ويُحفظ المفتاح تلقائيًا";
     signin_connect: "Connect OpenRouter"
         | "ربط OpenRouter";
+    signin_reconnect: "Reconnect OpenRouter"
+        | "إعادة ربط OpenRouter";
     signin_waiting: "Finish in your browser…"
         | "أكمل في متصفحك…";
     signin_page: "OpenCircle is connected. You can close this tab."

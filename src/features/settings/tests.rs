@@ -1129,7 +1129,7 @@ fn a_failed_save_shows_the_error_and_keeps_the_field() {
     );
 }
 
-/// Connect OpenRouter: the row shows only for OpenRouter without a key; the
+/// Connect OpenRouter: the row shows for OpenRouter (Reconnect with a key); the
 /// sign-in's key lands in OpenRouter's keyring entry; Cancel, an old sign-in
 /// and a provider changed meanwhile save nothing; a failure is shown.
 #[test]
@@ -1173,9 +1173,10 @@ fn connect_openrouter_saves_the_key_it_gets() {
     update(&mut s, Message::SignedIn(job.id, key()));
     assert_eq!(store.get("openrouter").as_deref(), Some(FAKE_KEY));
     assert_eq!(*s.key.status(), KeyStatus::Saved);
+    // with a key saved the row stays (the owner couldn't find it): Reconnect
     let texts = shot::texts(view(&s));
     assert!(
-        !texts.iter().any(|t| t == "Connect OpenRouter"),
+        texts.iter().any(|t| t == "Reconnect OpenRouter"),
         "{texts:?}"
     );
     assert!(!texts.iter().any(|t| t == "Get a free key"), "{texts:?}");
@@ -1183,6 +1184,13 @@ fn connect_openrouter_saves_the_key_it_gets() {
         !format!("{s:?}{texts:?}").contains("FAKE"),
         "the key leaked"
     );
+    // Reconnect replaces the saved key
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!("no sign-in job with a key saved")
+    };
+    let second = format!("{FAKE_KEY}-2");
+    update(&mut s, Message::SignedIn(job.id, Ok(Secret::new(&second))));
+    assert_eq!(store.get("openrouter"), Some(second));
     // Disconnect = Remove; another provider never gets the key
     update(&mut s, Message::ApiKey(KeyMessage::Remove));
     let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {

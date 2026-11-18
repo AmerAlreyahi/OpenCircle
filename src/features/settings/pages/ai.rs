@@ -80,8 +80,9 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
     };
     rows = rows.push(preset_row(state)).push(url_row(state));
     let saved = state.key.status == KeyStatus::Saved;
-    if preset.signs_in() && !saved {
-        rows = rows.push(sign_in_row(state));
+    // with a key saved too: "Reconnect" replaces it
+    if preset.signs_in() {
+        rows = rows.push(sign_in_row(state, saved));
     }
     // a free tier's key page (A 1.7), while no key is saved
     let free = preset.free_key_page().filter(|_| !saved).map(|url| {
@@ -102,7 +103,13 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
 
 /// Connect OpenRouter (one click, PKCE in the browser): the button, or while
 /// the browser is open "Finish in your browser" with Cancel; a failure under it.
-fn sign_in_row(state: &State) -> Element<'_, Message> {
+/// With a key saved (`saved`) the button reads "Reconnect" and a success
+/// replaces that key.
+fn sign_in_row(state: &State, saved: bool) -> Element<'_, Message> {
+    let connect = match saved {
+        true => t!(signin_reconnect),
+        false => t!(signin_connect),
+    };
     let (desc, control) = match state.sign_in {
         Some(_) => (
             t!(signin_waiting),
@@ -110,7 +117,7 @@ fn sign_in_row(state: &State) -> Element<'_, Message> {
         ),
         None => (
             t!(signin_desc),
-            setting_row::action(t!(signin_connect), Kind::Elevated, Some(Message::SignIn)),
+            setting_row::action(connect, Kind::Elevated, Some(Message::SignIn)),
         ),
     };
     let mut control = column![control].spacing(space::GAP);
