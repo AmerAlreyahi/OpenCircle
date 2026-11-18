@@ -229,6 +229,9 @@ pub struct AiChat {
     pinned: bool,
     /// Picked up and dragged by its header (the App sets it).
     pub held: bool,
+    /// In its own window: the side its inner edge (the width) is on (the App
+    /// sets it where the window docks; `None` drawn by the overlay).
+    pub edge: Option<panel_frame::Side>,
     /// The drawer's open tab, its History list (and what it was searched
     /// for) and its Model list.
     drawer: Option<Tab>,
@@ -266,8 +269,9 @@ enum State {
         /// `None` while loading the config and key.
         setup: Option<Result<Arc<Setup>, String>>,
         chat: Chat,
-        /// Each turn's answer parsed as Markdown, and how much of it.
-        answers: Vec<(usize, markdown::Content)>,
+        /// Each turn's answer parsed as Markdown, and the text parsed so far
+        /// (its formulas made readable, `ask_ai::math`).
+        answers: Vec<(String, markdown::Content)>,
         /// The selection goes with the next question (on by default).
         include: bool,
         /// The question being edited (its turn).
@@ -360,6 +364,7 @@ impl AiChat {
             queued: false,
             pinned: false,
             held: false,
+            edge: None,
             drawer: None,
             listed: Vec::new(),
             find: String::new(),
@@ -431,8 +436,9 @@ impl AiChat {
         task
     }
 
-    /// The answers' Markdown follows the chat: new text parsed on, a turn
-    /// taken back or replaced parsed anew.
+    /// The answers' Markdown follows the chat: new text parsed on; a turn
+    /// taken back or replaced, or a formula that just closed (its LaTeX made
+    /// readable, `ask_ai::math`), parsed anew.
     fn sync(&mut self) {
         let State::Ask { chat, answers, .. } = &mut self.state else {
             return;
@@ -440,14 +446,16 @@ impl AiChat {
         answers.truncate(chat.turns.len());
         for (i, turn) in chat.turns.iter().enumerate() {
             if answers.len() == i {
-                answers.push((0, markdown::Content::new()));
+                answers.push((String::new(), markdown::Content::new()));
             }
             let (parsed, md) = &mut answers[i];
-            if turn.answer.len() < *parsed {
-                (*parsed, *md) = (0, markdown::Content::new());
+            let text = ask_ai::math::readable(&turn.answer);
+            if !text.starts_with(parsed.as_str()) {
+                (*parsed, *md) = (String::new(), markdown::Content::new());
             }
-            md.push_str(&turn.answer[*parsed..]);
-            *parsed = turn.answer.len();
+            let new = &text[parsed.len()..];
+            md.push_str(new);
+            parsed.push_str(new);
         }
     }
 

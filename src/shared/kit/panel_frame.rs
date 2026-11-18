@@ -289,6 +289,9 @@ pub struct Header<'a> {
     /// Picked up and dragged: the widget's accent edge (`Material::Held`,
     /// the solid stand-in for the design's dragging ring).
     pub held: bool,
+    /// A card filling its own window (the AI chat's): the side of that window
+    /// its inner edge is on, where the screen holds it (`None`: no edge).
+    pub edge: Option<Side>,
 }
 
 /// The result card at `at` on a `screen` (`.as-card`: the widget surface,
@@ -359,8 +362,14 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
         .padding(PAD)
         .width(at.width)
         .height(at.height);
-    // the inner edge: a thin strip, its grip only while hovered
-    let side = side(at, screen);
+    // the inner edge: a thin strip, its grip only while hovered (a card
+    // filling its own window: the side its owner says, W52)
+    let own = at.size() == screen;
+    let side = match own {
+        true => header.edge,
+        false => Some(side(at, screen)),
+    };
+    let side = side.unwrap_or(Side::Left);
     let (strip, grip, cursor, place) = match side {
         Side::Left | Side::Right => (
             Size::new(EDGE, at.height - 2.0 * CARD_RADIUS),
@@ -401,8 +410,8 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
     // In layers of its own bounds (an empty first child: a stack draws the
     // rest in layers clipped to its container): dragged, the card redraws as
     // its old and new place, not as each of its parts.
-    // a card filling its window (the pinned chat's own) is not resized there
-    let edge = (at.size() != screen).then(|| pin(edge).position(place));
+    // a card filling a window of its own has an edge only where it is told
+    let edge = (!own || header.edge.is_some()).then(|| pin(edge).position(place));
     let layers = stack![Space::new(), opaque(card)]
         .push(edge)
         .width(at.width)

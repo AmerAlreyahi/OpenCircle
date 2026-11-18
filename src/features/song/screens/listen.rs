@@ -180,6 +180,7 @@ impl Session {
             chip: None,
             menu: false,
             held: false,
+            edge: None,
             logo: None,
         };
         crate::features::ask_ai::screens::ai_chat::card(

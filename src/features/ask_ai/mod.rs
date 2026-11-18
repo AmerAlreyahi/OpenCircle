@@ -13,6 +13,7 @@ pub(crate) mod app;
 pub(crate) mod ask;
 pub mod browser;
 pub(crate) mod chats;
+pub(crate) mod math;
 pub mod models;
 pub mod openai;
 pub mod providers;

@@ -659,6 +659,7 @@ fn panel_frame_card_sheet() {
                 chip: Some("model"),
                 menu: false,
                 held: false,
+                edge: None,
                 logo: None,
             };
             let body =

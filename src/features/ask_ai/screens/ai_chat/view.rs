@@ -139,6 +139,7 @@ impl AiChat {
             logo: chatting.then(|| crate::shared::kit::logo::logo(16)),
             menu: chatting,
             held: self.held,
+            edge: self.edge,
         };
         if chatting {
             // the header's end: a new chat and the pin (no close button: Esc
@@ -186,7 +187,7 @@ impl AiChat {
         &'a self,
         setup: Option<&'a Result<Arc<Setup>, String>>,
         chat: &'a Chat,
-        answers: &'a [(usize, md::Content)],
+        answers: &'a [(String, md::Content)],
         include: bool,
         width: f32,
     ) -> Part<'a> {
@@ -284,7 +285,8 @@ impl AiChat {
                 self.composer(placeholder, include, attached, streaming)
             }
         };
-        let log = crate::shared::kit::scroll::quiet(log)
+        // one selection over every answer (W52)
+        let log = crate::shared::kit::scroll::quiet(markdown::selection(log))
             .id(LOG)
             .height(Fill)
             .on_scroll(Msg::Scrolled);

@@ -322,6 +322,11 @@ impl App {
             Message::ChatSettle(moves) => self.chat_settle(moves),
             Message::ChatHandedOver => self.close(),
             Message::ChatDocked(moves, k) => self.chat_docked(moves, k, &monitor::places()),
+            Message::ChatResizedOn(id, p) => self.chat_resized(id, p),
+            Message::ChatResizeEnd => {
+                self.chat_resize = None;
+                Task::none()
+            }
             Message::ChatFrame(now) => {
                 if let Some(chat) = &mut self.chat {
                     chat.panel.tick(now);
@@ -860,6 +865,8 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::ChatSettle(_)
             | Message::ChatHandedOver
             | Message::ChatDocked(..)
+            | Message::ChatResizedOn(..)
+            | Message::ChatResizeEnd
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)

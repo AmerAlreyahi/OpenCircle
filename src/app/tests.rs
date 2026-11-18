@@ -4548,6 +4548,82 @@ fn the_chats_inner_edge_sets_its_width() {
     assert_eq!(app.chat_rect(), before);
 }
 
+/// W52: the chat in its own window (Windows, X11) has its inner edge again:
+/// a press there resizes it (the edge faces the screen: left when docked right).
+#[test]
+fn the_chat_windows_inner_edge_takes_a_press() {
+    let mut app = open_app(1920, 1080, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    drop(app.sync_chat_window());
+    let w = app.chat_win.as_ref().expect("its own window");
+    let (window, size) = (w.id, w.size);
+    let edge = Point::new(4.0, size.height / 2.0);
+    let msgs = crate::shared::kit::testing::shot::click(app.view(window), size, edge);
+    assert!(
+        msgs.iter().any(|m| matches!(
+            m,
+            Message::AiChat(_, ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize)))
+        )),
+        "the inner edge resizes"
+    );
+    let far = Point::new(size.width - 4.0, size.height / 2.0);
+    let msgs = crate::shared::kit::testing::shot::click(app.view(window), size, far);
+    assert!(
+        !msgs.iter().any(|m| matches!(
+            m,
+            Message::AiChat(_, ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize)))
+        )),
+        "only the inner edge"
+    );
+}
+
+/// W52: the pinned chat alone (the overlay closed) is made wider by its inner
+/// edge: its window follows, its outer side stays docked; a double-click there
+/// takes it back to the design's width.
+#[test]
+fn a_pinned_chat_window_is_resized_by_its_inner_edge() {
+    let mut app = open_app(1920, 1080, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    let crop = app.crop().unwrap();
+    drop(app.open_chat(crop, None));
+    let id = app.o.ai_chat.as_ref().unwrap().0;
+    api_ready(&mut app, id, b"first");
+    chat_turn(&mut app, id, "What is this?", "A chart.");
+    chat_turn(&mut app, id, "And the trend?", "Up.");
+    let _ = app.update(Message::Escape);
+    let w = app.chat_win.as_ref().expect("its own window");
+    let (window, before) = (w.id, Rectangle::new(w.at, w.size));
+    let grab = ai_chat::Msg::Card(card::Event::Grab(card::Drag::Resize));
+    let _ = app.update(Message::AiChat(id, grab));
+    let _ = app.update(Message::ChatResizedOn(window, Point::new(5.0, 300.0)));
+    let _ = app.update(Message::ChatResizedOn(window, Point::new(-95.0, 300.0)));
+    let _ = app.update(Message::ChatResizeEnd);
+    let w = app.chat_win.as_ref().unwrap();
+    assert_eq!(w.size.width, before.width + 100.0, "wider by the drag");
+    assert_eq!(w.size.height, before.height, "only the width");
+    assert_eq!(
+        w.at.x + w.size.width,
+        before.x + before.width,
+        "still docked"
+    );
+    assert_eq!(app.chat_width, Some(w.size.width), "the next chat keeps it");
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Card(card::Event::Reset)));
+    let w = app.chat_win.as_ref().unwrap();
+    assert_eq!(w.size.width, before.width, "the design's width again");
+}
+
 /// The pinned chat's own window, let go mid-screen, glides to its dock frame
 /// by frame (`motion::DOCK`, standard-out) and ends exactly on it.
 #[test]

@@ -219,6 +219,9 @@ pub(crate) struct App {
     pub(crate) chat_side: Option<crate::shared::kit::panel_frame::Side>,
     /// The AI chat's width the user set by its inner edge (this run of the app).
     pub(crate) chat_width: Option<f32>,
+    /// The overlay closed, the pinned chat's inner edge held: the pointer's
+    /// last spot on the desktop (physical px; `None` before its first move).
+    pub(crate) chat_resize: Option<Option<Point>>,
     /// The AI chat once pinned: it outlives the overlay (`ai_chat::Resident`).
     pub(crate) chat: Option<crate::features::ask_ai::app::ai_chat::Resident>,
     /// The AI chat's own window (`ai_chat::ChatWindow`).
@@ -315,6 +318,7 @@ impl App {
             card: None,
             chat_side: None,
             chat_width: None,
+            chat_resize: None,
             chat: None,
             chat_win: None,
             songs: 0,
@@ -447,6 +451,15 @@ impl App {
                 match panel.spinning() || window.glide.is_some() {
                     true => motion::frames().map(Message::ChatFrame),
                     false => Subscription::none(),
+                },
+                // its inner edge held while the overlay is closed: the pointer anywhere
+                match self.chat_resize {
+                    Some(_) => iced::event::listen_with(|event, _, id| match touch::drag(&event) {
+                        Some(touch::Drag::Moved(p)) => Some(Message::ChatResizedOn(id, p)),
+                        Some(touch::Drag::Released) => Some(Message::ChatResizeEnd),
+                        None => None,
+                    }),
+                    None => Subscription::none(),
                 },
             ]),
             None => Subscription::none(),

@@ -3,7 +3,7 @@
 //! `hover`, links in `accent` that act only on a click, and code blocks on
 //! `.oc-code-surface` (radius 12) with a header strip (the language, Copy).
 //! iced's own parser (`markdown` feature); the text is selectable with the
-//! mouse block by block (`iced_selection`: drag, double-click a word,
+//! mouse across its blocks (`iced_selection`, `selection`: drag, double-click a word,
 //! triple-click a line, Ctrl+C copies, in main mode's flat highlight) and code
 //! is coloured by `code_colors` from the kit's tokens. Every paragraph, list
 //! item and quote has the direction of its own first letter (an English answer
@@ -33,6 +33,8 @@ pub enum Act {
     Copy(String),
 }
 
+/// The code block language of a formula made readable (the chat's maths).
+pub const MATH: &str = "math";
 /// Between blocks (`space-y-2.5`).
 const SPACING: f32 = 10.0;
 /// Code (`text-[11.5px]`) and its padding (`p-3`); the header strip (`px-3 py-1.5`).
@@ -181,6 +183,26 @@ impl<'a> Viewer<'a, Act> for Answer {
             true => (fixed::CODE_LIGHT.0, fixed::CODE_LIGHT_KINDS),
             false => (fixed::CODE_DARK.0, fixed::CODE_DARK_KINDS),
         };
+        // a formula (`ask_ai::math`): a quiet monospace block, no strip
+        if language == Some(MATH) {
+            let maths = rich_text([iced::advanced::text::Span::<markdown::Uri>::new(
+                code.trim_end().to_string(),
+            )])
+            .font(settings.style.code_block_font)
+            .size(settings.text_size)
+            .wrapping(Wrapping::None)
+            .style(selectable);
+            let maths = super::scroll::across(container(maths).padding(CODE_PAD * zoom()));
+            return container(maths)
+                .width(Fill)
+                .clip(true)
+                .style(|_| container::Style {
+                    background: Some(c().hover.into()),
+                    border: Border::default().rounded(radius::CARD),
+                    ..container::Style::default()
+                })
+                .into();
+        }
         let name = text(language.filter(|l| !l.is_empty()).unwrap_or("code"))
             .size(STRIP_TEXT * zoom())
             .font(mono(Weight::Normal))
@@ -352,12 +374,52 @@ fn upright(line: &Text, style: Style) -> Vec<iced::advanced::text::Span<'static,
         .collect()
 }
 
-/// `items` (parsed with `markdown::Content`) in the theme's text colour.
+/// `items` (parsed with `markdown::Content`) in the theme's text colour, one
+/// selection over all its blocks (`selection`).
 pub fn markdown<'a>(items: &'a [Item], copy: &'static str) -> Element<'a, Act> {
-    container(markdown::view_with(items, settings(), &Answer { copy }))
+    let answer = container(markdown::view_with(items, settings(), &Answer { copy }))
         .width(Fill)
-        .style(|_| container::Style::default().color(c().text))
-        .into()
+        .style(|_| container::Style::default().color(c().text));
+    selection(answer)
+}
+
+/// `content`'s selectable texts as one selection (W52): a drag selects across
+/// paragraphs, list items, headings and code blocks, and Ctrl+C copies all of
+/// it at once, in order (`iced_selection::group`). Nested: the outermost writes.
+pub fn selection<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
+    super::wrap::wrap(content, Selection)
+}
+
+struct Selection;
+
+impl<M> super::wrap::Hook<M> for Selection {
+    fn update(
+        &mut self,
+        content: &mut Element<'_, M>,
+        tree: &mut iced::advanced::widget::Tree,
+        event: &iced::Event,
+        layout: iced::advanced::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, M>,
+        viewport: &iced::Rectangle,
+    ) {
+        use iced::{Event, mouse, touch};
+        iced_selection::group::enter();
+        content.as_widget_mut().update(
+            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
+        let released = matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
+        );
+        if let Some(text) = iced_selection::group::leave(released) {
+            clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
+            shell.capture_event();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -460,6 +522,51 @@ mod tests {
             !changed.is_empty() && changed.iter().all(|&x| x >= 336),
             "drawn at the right"
         );
+    }
+
+    /// W52: a drag selects across paragraphs, a list and a code block, and
+    /// Ctrl+C copies all of it once, in order, the code as written.
+    #[test]
+    fn a_drag_selects_across_blocks_and_copies_them_once() {
+        let md = "First para here\n\n- item one\n- item two\n\n```\nlet x = 1;\n```\n\nLast para";
+        let size = Size::new(400.0, 260.0);
+        let content = markdown::Content::parse(md);
+        let view = || markdown(content.items(), "Copy");
+        let mut clip = Clip::default();
+        let _ = shot::drag(
+            view,
+            size,
+            (Point::new(1.0, 8.0), Point::new(390.0, 255.0), 1),
+            &shot::chord('c'),
+            &mut clip,
+        );
+        assert_eq!(clip.0.len(), 1, "one write: {:?}", clip.0);
+        let copied = &clip.0[0];
+        for part in [
+            "First para here",
+            "item one",
+            "item two",
+            "let x = 1;",
+            "Last para",
+        ] {
+            assert!(copied.contains(part), "{part:?} in {copied:?}");
+        }
+        assert!(copied.find("item one") < copied.find("let x"), "{copied:?}");
+        // a drag from the middle of one paragraph to the middle of the next
+        let content = markdown::Content::parse("alpha beta gamma\n\ndelta epsilon zeta");
+        let view = || markdown(content.items(), "Copy");
+        let mut clip = Clip::default();
+        let _ = shot::drag(
+            view,
+            SIZE,
+            (Point::new(45.0, 8.0), Point::new(45.0, 34.0), 1),
+            &shot::chord('c'),
+            &mut clip,
+        );
+        assert_eq!(clip.0.len(), 1, "{:?}", clip.0);
+        let (a, b) = clip.0[0].split_once('\n').expect("two parts");
+        assert!(!a.starts_with("alpha") && a.ends_with("gamma"), "{a:?}");
+        assert!(b.starts_with("delta") && !b.ends_with("zeta"), "{b:?}");
     }
 
     /// A link acts on a click, never at the end of a drag over it.

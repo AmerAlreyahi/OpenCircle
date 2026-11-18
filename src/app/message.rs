@@ -73,6 +73,10 @@ pub(crate) enum Message {
     ChatHandedOver,
     /// The same with its window's scale: dock on the monitor it is on.
     ChatDocked(u32, f32),
+    /// The overlay closed: the pinned chat's inner edge dragged (in its
+    /// window's px), and let go (`App::chat_resized`).
+    ChatResizedOn(iced::window::Id, iced::Point),
+    ChatResizeEnd,
     ChatFrame(std::time::Instant),
     /// Run an action on the selection (action bar button or its key).
     Run(&'static Action),
