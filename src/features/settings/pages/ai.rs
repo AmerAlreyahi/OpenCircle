@@ -18,7 +18,7 @@ use crate::shared::config::{Provider, StaysOpen};
 use crate::shared::kit::button::{Kind, button, label};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::input;
-use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, sub};
 use crate::shared::kit::tokens::{Role, space};
@@ -58,7 +58,17 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
             false => t!(ai_hist_off),
         },
     );
-    column![stays, keep].into()
+    // an AI provider only (the browser has no tools); not asked yet = Off
+    let on = state.draft.ai.web_search == Some(true);
+    let web = setting_row::row(
+        title(t!(ai_web)),
+        t!(ai_web_desc),
+        boolean([t!(c_off), t!(c_on)], on, on, 1.0, Message::WebSearch),
+    );
+    match keyed(state) {
+        true => column![stays, web, keep].into(),
+        false => column![stays, keep].into(),
+    }
 }
 
 /// Who answers, and for an AI provider its server, model and key.
@@ -69,9 +79,45 @@ fn provider_rows(state: &State) -> Element<'_, Message> {
         return rows.into(); // no model, server or key: the browser, or nothing chosen yet
     };
     rows = rows.push(preset_row(state)).push(url_row(state));
-    rows.push(model_row(state, preset))
-        .push(key_row(state))
+    let saved = state.key.status == KeyStatus::Saved;
+    if preset.signs_in() && !saved {
+        rows = rows.push(sign_in_row(state));
+    }
+    // a free tier's key page (A 1.7), while no key is saved
+    let free = preset.free_key_page().filter(|_| !saved).map(|url| {
+        crate::dir_row![
+            Space::new().width(Fill),
+            button(
+                label(t!(ai_key_free)),
+                Kind::Quiet,
+                Some(Message::OpenLink(url.into()))
+            )
+        ]
         .into()
+    });
+    rows.push(model_row(state, preset))
+        .push(key_row_with(state, free))
+        .into()
+}
+
+/// Connect OpenRouter (one click, PKCE in the browser): the button, or while
+/// the browser is open "Finish in your browser" with Cancel; a failure under it.
+fn sign_in_row(state: &State) -> Element<'_, Message> {
+    let (desc, control) = match state.sign_in {
+        Some(_) => (
+            t!(signin_waiting),
+            setting_row::cancel(t!(c_cancel), Message::SignInCancel),
+        ),
+        None => (
+            t!(signin_desc),
+            setting_row::action(t!(signin_connect), Kind::Elevated, Some(Message::SignIn)),
+        ),
+    };
+    let mut control = column![control].spacing(space::GAP);
+    if let Some(e) = &state.sign_in_error {
+        control = control.push(error(Role::ROW_DESC, e.clone()));
+    }
+    setting_row::row(title(t!(signin)), desc, control)
 }
 
 /// The model: a list of the provider's models with a search; a typed id
@@ -164,9 +210,14 @@ pub fn preset_row(state: &State) -> Element<'_, Message> {
 pub fn url_row(state: &State) -> Option<Element<'_, Message>> {
     let ai = &state.draft.ai;
     Preset::of(ai).filter(Preset::custom)?;
+    // #56: plain http on the local network works, and says what it costs
+    let desc = match crate::features::ask_ai::lan_http(&ai.base_url) {
+        true => t!(ai_url_lan),
+        false => t!(ai_url_desc),
+    };
     Some(text_row(
         state,
-        (t!(ai_url), t!(ai_url_desc)),
+        (t!(ai_url), desc),
         (t!(ai_url_ph), &ai.base_url, "ai.base_url"),
         Message::BaseUrl,
     ))
@@ -174,6 +225,11 @@ pub fn url_row(state: &State) -> Option<Element<'_, Message>> {
 
 /// The write-only key (Settings, and onboarding's AI step).
 pub fn key_row(state: &State) -> Element<'_, Message> {
+    key_row_with(state, None)
+}
+
+/// The key row with `extra` under the field (Settings: the free-key link).
+fn key_row_with<'a>(state: &'a State, extra: Option<Element<'a, Message>>) -> Element<'a, Message> {
     let local = Preset::of(&state.draft.ai).is_some_and(|p| p.local);
     setting_row::row(
         title(t!(ai_key)),
@@ -181,7 +237,9 @@ pub fn key_row(state: &State) -> Element<'_, Message> {
             true => t!(ai_key_local),
             false => t!(ai_key_desc),
         },
-        state.key.view().map(Message::ApiKey),
+        column![state.key.view().map(Message::ApiKey)]
+            .push(extra)
+            .spacing(space::GAP),
     )
 }
 

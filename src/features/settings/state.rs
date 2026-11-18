@@ -585,6 +585,11 @@ pub struct State {
     /// (the keyring is asked only then).
     pub(super) song_store: Arc<dyn KeyStore<Service>>,
     pub(super) song_key: Option<KeyField>,
+    /// Connect OpenRouter: the sign-in waiting in the browser (its Cancel flag),
+    /// the number of the latest one, and why the last one failed.
+    pub(super) sign_in: Option<crate::features::ask_ai::sign_in::Job>,
+    pub(super) sign_in_job: u32,
+    pub(super) sign_in_error: Option<String>,
     /// Keyring calls started by the last message; the shell runs them off the UI
     /// thread (`take_key_jobs`) and sends each answer back as a `KeyMessage::Done`.
     pub(super) key_jobs: Vec<(bool, KeyJob)>,
@@ -752,11 +757,20 @@ pub enum Message {
     ModelsLoaded(config::AiConfig, Result<usize, String>),
     ApiKey(KeyMessage),
     SongKey(KeyMessage),
+    /// Connect OpenRouter: start, Cancel, and the sign-in's answer (by number).
+    SignIn,
+    SignInCancel,
+    SignedIn(
+        u32,
+        Result<Secret, crate::features::ask_ai::sign_in::SignInError>,
+    ),
     SongSource(SongSource),
     SongHistory(bool),
     /// AI: "AI chat stays open" and "Keep chat history".
     ChatStays(StaysOpen),
     KeepChats(bool),
+    /// AI: "Web search" (`ai.web_search`).
+    WebSearch(bool),
     /// A Labs switch: saved and applied at once.
     Labs(Feature, bool),
     Source(Language),
@@ -934,6 +948,9 @@ pub enum Outcome {
     /// Run this file dialog on a worker thread (`Job::run`) and answer
     /// `Message::Glossaries` with its message.
     Glossaries(super::pages::glossaries::Job),
+    /// Run this sign-in on a worker thread (`sign_in::Job::run`) and answer
+    /// `Message::SignedIn`.
+    SignIn(crate::features::ask_ai::sign_in::Job),
 }
 
 /// A config write for a worker thread.
@@ -1027,6 +1044,49 @@ impl State {
         std::mem::take(&mut self.key_jobs)
     }
 
+    /// Connect OpenRouter: a new sign-in (any earlier one is cancelled).
+    fn sign_in(&mut self) -> Outcome {
+        self.sign_in_cancel();
+        self.sign_in_job += 1;
+        let job = crate::features::ask_ai::sign_in::Job {
+            id: self.sign_in_job,
+            cancel: Default::default(),
+        };
+        self.sign_in = Some(job.clone());
+        Outcome::SignIn(job)
+    }
+
+    fn sign_in_cancel(&mut self) {
+        if let Some(job) = self.sign_in.take() {
+            job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.sign_in_error = None;
+    }
+
+    /// The sign-in's key goes to OpenRouter's keyring entry through the key
+    /// field's own Save (the same job, status and errors as a pasted key).
+    fn signed_in(
+        &mut self,
+        id: u32,
+        got: Result<Secret, crate::features::ask_ai::sign_in::SignInError>,
+    ) {
+        use crate::features::ask_ai::sign_in::SignInError;
+        if id != self.sign_in_job || self.sign_in.take().is_none() {
+            return; // cancelled, or an older one
+        }
+        let owner = self.key_owner.filter(|o| o.0 == "openrouter");
+        match (got, owner) {
+            (Ok(key), Some(owner)) => {
+                let slot = bind(&self.store, owner);
+                self.key.update(slot.clone(), KeyMessage::Input(key));
+                let job = self.key.update(slot, KeyMessage::Save);
+                self.key_jobs.extend(job.map(|j| (false, j)));
+            }
+            (Ok(_), None) | (Err(SignInError::Cancelled), _) => {} // the provider changed meanwhile
+            (Err(SignInError::Failed(why)), _) => self.sign_in_error = Some(why),
+        }
+    }
+
     /// `path: None` = `Config::path()`. `warnings` come from `Config::load`.
     pub fn new(
         config: Config,
@@ -1062,6 +1122,9 @@ impl State {
             key_owner,
             song_store: song_keyring(),
             song_key: None,
+            sign_in: None,
+            sign_in_job: 0,
+            sign_in_error: None,
             key_jobs: Vec::new(),
             quick_text,
             interval,
@@ -1523,6 +1586,9 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::CloseSave
             | Message::CloseDiscard
             | Message::CloseKeep
+            | Message::SignIn
+            | Message::SignInCancel
+            | Message::SignedIn(..)
     );
     let out = apply(state, message);
     if change {
@@ -1605,6 +1671,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::SongSource(source) => state.draft.song.source = source,
         Message::SongHistory(on) => state.draft.song.history = on,
         Message::ChatStays(how) => state.draft.chat.stays_open = how,
+        Message::WebSearch(on) => state.draft.ai.web_search = Some(on),
         Message::KeepChats(on) => {
             state.draft.chat.keep_history = on;
             // off deletes them (`windows::apply` once saved)
@@ -1693,6 +1760,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     .extend(state.key.update(slot, k).map(|j| (false, j)));
             }
         }
+        Message::SignIn => return state.sign_in(),
+        Message::SignInCancel => state.sign_in_cancel(),
+        Message::SignedIn(id, got) => state.signed_in(id, got),
         Message::Source(l) => state.draft.translate.source = l.code.to_string(),
         Message::Target(l) => state.draft.translate.target = l.code.to_string(),
         Message::Engine(e) => state.draft.translate.engine = e,

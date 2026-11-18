@@ -36,6 +36,7 @@
 //! model = "claude-sonnet-5-5"       # model id sent to the provider
 //! chat_zoom = 100                   # the AI chat's text zoom, % (80 | 90 | 100 | 110 | 125 | 140 | 160;
 //!                                   # written only when not 100)
+//! web_search = true                 # Ask AI may search the web (missing = not asked yet: off)
 //!
 //! [translate]
 //! source = "auto"                   # language code the text is in; auto = detect
@@ -105,6 +106,7 @@
 //! song = false                      # song search
 //! pins = false                      # pinning a capture to the screen
 //! live = false                      # live translate (unfinished until Live translation): bar button, tray item, shortcut
+//! online = false                    # the online translate engine (Google's free web translator): `translate.engine = "online"`
 //!
 //! [[quick_actions]]                 # one direct shortcut per action
 //! action = "translate"              # id from the action registry
@@ -329,6 +331,9 @@ pub enum Engine {
     /// default: AI only when the user picks it in Settings > Translate.
     #[default]
     Offline,
+    /// Labs (`labs.online`): Google's free web translator, one-shot Translate
+    /// only, the text only (never the picture). Off in Labs = `Offline`.
+    Online,
 }
 
 /// What Enter does on the action bar. The serialized names are action-registry ids.
@@ -386,6 +391,10 @@ pub struct AiConfig {
     /// The AI chat's text zoom in percent (`CHAT_ZOOM`; Ctrl+= / Ctrl+- / Ctrl+0).
     #[serde(skip_serializing_if = "default_chat_zoom")]
     pub chat_zoom: u16,
+    /// Ask AI may search the web (`ask_ai::web`): `None` = not asked yet
+    /// (off; the chat asks once), then the user's answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
 }
 
 /// The AI chat's zoom steps (percent; 100 = none).
@@ -938,6 +947,7 @@ impl Default for AiConfig {
             base_url: String::new(),
             model: crate::features::ask_ai::DEFAULT_ANTHROPIC_MODEL.to_string(),
             chat_zoom: 100,
+            web_search: None,
         }
     }
 }

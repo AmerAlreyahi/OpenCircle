@@ -1129,6 +1129,70 @@ fn a_failed_save_shows_the_error_and_keeps_the_field() {
     );
 }
 
+/// Connect OpenRouter: the row shows only for OpenRouter without a key; the
+/// sign-in's key lands in OpenRouter's keyring entry; Cancel, an old sign-in
+/// and a provider changed meanwhile save nothing; a failure is shown.
+#[test]
+fn connect_openrouter_saves_the_key_it_gets() {
+    use crate::features::ask_ai::sign_in::SignInError;
+    let (mut s, store) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preset(PRESETS[0]));
+    assert!(PRESETS[0].signs_in());
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Connect OpenRouter"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Get a free key"), "{texts:?}");
+    let key = || Ok(Secret::new(FAKE_KEY));
+    // Cancel: the answer that still comes is dropped
+    let Outcome::SignIn(first) = update(&mut s, Message::SignIn) else {
+        panic!("no sign-in job")
+    };
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t == "Finish in your browser…")
+    );
+    update(&mut s, Message::SignInCancel);
+    assert!(first.cancel.load(std::sync::atomic::Ordering::Relaxed));
+    update(&mut s, Message::SignedIn(first.id, key()));
+    assert!(store.is_empty(), "cancelled");
+    // a failure, then an old sign-in's late answer, then the real one
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!()
+    };
+    update(
+        &mut s,
+        Message::SignedIn(job.id, Err(SignInError::Failed("Try again.".into()))),
+    );
+    assert!(shot::texts(view(&s)).iter().any(|t| t == "Try again."));
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!()
+    };
+    update(&mut s, Message::SignedIn(job.id - 1, key()));
+    assert!(store.is_empty(), "an older sign-in");
+    update(&mut s, Message::SignedIn(job.id, key()));
+    assert_eq!(store.get("openrouter").as_deref(), Some(FAKE_KEY));
+    assert_eq!(*s.key.status(), KeyStatus::Saved);
+    let texts = shot::texts(view(&s));
+    assert!(
+        !texts.iter().any(|t| t == "Connect OpenRouter"),
+        "{texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t == "Get a free key"), "{texts:?}");
+    assert!(
+        !format!("{s:?}{texts:?}").contains("FAKE"),
+        "the key leaked"
+    );
+    // Disconnect = Remove; another provider never gets the key
+    update(&mut s, Message::ApiKey(KeyMessage::Remove));
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!()
+    };
+    update(&mut s, Message::Provider(Provider::Anthropic));
+    update(&mut s, Message::SignedIn(job.id, key()));
+    assert!(store.is_empty(), "the provider changed meanwhile");
+}
+
 #[test]
 fn the_api_key_is_write_only() {
     let (mut s, store) = state(None);

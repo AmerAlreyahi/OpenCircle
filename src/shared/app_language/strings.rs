@@ -363,6 +363,10 @@ strings! {
         | "بعد سؤال متابعة";
     ai_stays_always: "Always"
         | "دائمًا";
+    ai_web: "Web search"
+        | "البحث في الويب";
+    ai_web_desc: "The AI can search Bing and Wikipedia for recent facts. Only the search words are sent, never your screen"
+        | "يمكن للذكاء الاصطناعي البحث في Bing وWikipedia عن أحدث المعلومات. تُرسل كلمات البحث فقط، ولا تُرسل شاشتك أبدًا";
     ai_hist: "Chat history"
         | "سجل المحادثات";
     ai_hist_on: "On: chats, text only, kept on this PC. Kept and cleared in History"
@@ -389,6 +393,10 @@ strings! {
         | "الذكاء الاصطناعي";
     tr_local: "Local"
         | "محلي";
+    tr_online: "Online"
+        | "عبر الإنترنت";
+    tr_engine_online: "Google's free web translator: sends the text (never the picture) to Google. Unofficial; if it stops answering, Local translates"
+        | "مترجم Google المجاني على الويب: يُرسل النص (لا الصورة أبدًا) إلى Google. غير رسمي؛ إن توقّف عن الرد يترجم المحرّك المحلي";
     tr_source: "Source language"
         | "لغة المصدر";
     tr_source_desc: "What the text on screen is in; picks the text recognizer"
@@ -684,6 +692,10 @@ strings! {
         | "الترجمة الحيّة";
     lb_live_d: "Keep the screen translated as it changes. Unfinished; may change"
         | "أبقِ الشاشة مترجمة أثناء تغيّرها. غير مكتملة؛ قد تتغير";
+    lb_online: "Online translation"
+        | "الترجمة عبر الإنترنت";
+    lb_online_d: "Adds Online (Google) to Settings > Translate > Engine. Unofficial; may stop working"
+        | "تضيف «عبر الإنترنت (Google)» إلى الإعدادات > الترجمة > المحرّك. غير رسمية؛ قد تتوقف عن العمل";
     o_title: "Welcome to OpenCircle"
         | "مرحبًا بك في OpenCircle";
     // a step's number and name: the number isolated, so it reads first
@@ -759,6 +771,12 @@ strings! {
         | "مقطع مدته 10 ثوانٍ تقريبًا، فقط عندما تضغط زر الموسيقى";
     p_song_c: "AudD (with your token)"
         | "AudD (برمزك الخاص)";
+    p_online_a: "Online translation (Labs)"
+        | "الترجمة عبر الإنترنت (ميزة تجريبية)";
+    p_online_b: "The text read from the screen (never the image), only when Online is the engine"
+        | "النص المقروء من الشاشة (لا الصورة أبدًا)، فقط عندما يكون «عبر الإنترنت» هو المحرّك";
+    p_online_c: "Google (its free web translator)"
+        | "Google (مترجمه المجاني على الويب)";
     o_back_arrow: "← Back"
         | "→ رجوع";
     o_next_arrow: "Next →"
@@ -785,6 +803,34 @@ strings! {
         | "إزالة مفتاح API";
     ai_key_keep_tip: "Keep the saved API key"
         | "الإبقاء على مفتاح API المحفوظ";
+    ai_key_free: "Get a free key"
+        | "احصل على مفتاح مجاني";
+    ai_url_lan: "Plain http on your local network: the key travels unencrypted"
+        | "اتصال http عادي على شبكتك المحلية: يُرسل المفتاح دون تشفير";
+    signin: "Sign in"
+        | "تسجيل الدخول";
+    signin_desc: "Opens OpenRouter in your browser; the key is saved for you"
+        | "يفتح OpenRouter في متصفحك، ويُحفظ المفتاح تلقائيًا";
+    signin_connect: "Connect OpenRouter"
+        | "ربط OpenRouter";
+    signin_waiting: "Finish in your browser…"
+        | "أكمل في متصفحك…";
+    signin_page: "OpenCircle is connected. You can close this tab."
+        | "تم ربط OpenCircle. يمكنك إغلاق هذا التبويب.";
+    signin_mismatch: "The sign-in answer didn't match. Try again."
+        | "لم يتطابق رد تسجيل الدخول. حاول مرة أخرى.";
+    signin_denied: "OpenRouter didn't give access. Try again."
+        | "لم يمنح OpenRouter الإذن. حاول مرة أخرى.";
+    signin_offline: "No connection to OpenRouter. Check your internet and try again."
+        | "لا يوجد اتصال بـ OpenRouter. تحقّق من الإنترنت وحاول مرة أخرى.";
+    signin_refused: "OpenRouter refused the sign-in (it may have expired). Try again."
+        | "رفض OpenRouter تسجيل الدخول (ربما انتهت صلاحيته). حاول مرة أخرى.";
+    signin_busy: "OpenRouter isn't answering right now. Try again in a moment."
+        | "لا يستجيب OpenRouter الآن. حاول بعد قليل.";
+    signin_browser: "Couldn't open your browser."
+        | "تعذّر فتح المتصفح.";
+    signin_timeout: "The sign-in wasn't finished in 5 minutes. Try again."
+        | "لم يكتمل تسجيل الدخول خلال 5 دقائق. حاول مرة أخرى.";
     song_key_ph: "Paste your AudD API token"
         | "الصق رمز AudD API الخاص بك";
     song_key: "AudD API token"
@@ -1117,6 +1163,10 @@ strings! {
         | "تعذّر إكمال التنزيل. حاول مرة أخرى.";
     md_read_names: "Read {} text"
         | "قراءة نص {}";
+    tp_online_local: "Online translation didn't answer; translated on this PC"
+        | "لم تستجب الترجمة عبر الإنترنت؛ تُرجم النص على هذا الجهاز";
+    tp_parts_failed: "{} parts not translated"
+        | "أجزاء لم تُترجم: {}";
     tp_found: "{} text found"
         | "عُثر على نص بلغة {}";
     tp_get: "Get {} → {}"
@@ -1450,6 +1500,18 @@ strings! {
         | "إيقاف";
     chat_jump: "Jump to latest"
         | "إلى الأحدث";
+    chat_web_ask: "Let the AI search the web for recent facts? Only the search words go to Bing and Wikipedia, never your screen."
+        | "هل تسمح للذكاء الاصطناعي بالبحث في الويب عن أحدث المعلومات؟ تُرسل كلمات البحث فقط إلى Bing وWikipedia، ولا تُرسل شاشتك أبدًا.";
+    chat_web_on: "Search the web"
+        | "ابحث في الويب";
+    chat_web_no: "Not now"
+        | "ليس الآن";
+    chat_web_off: "Web search is off in Settings. Turn it on to search for this?"
+        | "البحث في الويب متوقف في الإعدادات. هل تريد تشغيله للبحث عن هذا؟";
+    chat_web_turn_on: "Turn on"
+        | "تشغيل";
+    chat_web_down: "Web search isn't available right now, so this answer doesn't use it."
+        | "البحث في الويب غير متاح الآن، لذا لا تعتمد هذه الإجابة عليه.";
     chat_send: "Send"
         | "إرسال";
     chat_back: "Back to the chat"
