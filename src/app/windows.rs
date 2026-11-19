@@ -1563,6 +1563,10 @@ impl Windows {
                     self.permission = None;
                 }
                 if self.studio_window() == Some(id) {
+                    // an encode that runs stops, and writes no file
+                    if let Some(stop) = &self.walk_cancel {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     self.studio = None; // its picture and history are freed
                     crate::shared::platform::sys::mem::trim_heap_soon();
                     return Task::none();

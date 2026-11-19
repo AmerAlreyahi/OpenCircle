@@ -426,7 +426,13 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         (export::Steps::Images, t!(st_export_images)),
     ];
     // the walkthrough first (STUDIO_V2_SPEC); one step is no walkthrough
-    let walk = (n > 1).then(|| (t!(st_export_gif).to_string(), false, Msg::ExportWalkthrough));
+    let walk = (n > 1).then(|| {
+        (
+            t!(st_export_walkthrough).to_string(),
+            false,
+            Msg::ExportWalkthrough,
+        )
+    });
     let rows = (walk.into_iter())
         .chain(
             rows.into_iter()
@@ -615,7 +621,7 @@ fn walk_tab<'a>(
 ) -> (Element<'a, Msg>, Option<Msg>, Option<(usize, usize)>) {
     let edits = s.editor.as_ref().map_or(0, |e| e.doc.depth());
     let n = if w.edits {
-        (edits + 1).min(super::EDIT_FRAMES)
+        (edits + 1).min(export::EDIT_FRAMES)
     } else {
         steps.len()
     };
@@ -684,16 +690,20 @@ fn walk_tab<'a>(
         button::toggle(w.how.repeat, looped),
     ]
     .align_y(Center);
+    let mut notes = column![
+        sub(Role::ROW_DESC, walk_estimate(s, w, steps, n)).width(Fill),
+        sub(Role::META, t!(st_walk_note)).width(Fill),
+    ];
+    if w.how.movie != export::Movie::Gif {
+        notes = notes.push(sub(Role::META, t!(st_walk_cap)).width(Fill));
+    }
     let body = column![
         field(t!(st_walk_from), from),
         strip,
         grid,
         field(t!(st_walk_frame), time.into()),
         switches,
-        column![
-            sub(Role::ROW_DESC, walk_estimate(s, w, steps, n)).width(Fill),
-            sub(Role::META, t!(st_walk_note)).width(Fill)
-        ],
+        notes,
     ]
     .spacing(space::PAGE[1]);
     let go = (n > 0).then_some(Msg::WalkGo);

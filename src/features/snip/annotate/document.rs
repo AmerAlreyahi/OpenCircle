@@ -13,6 +13,7 @@ use super::{
 use crate::shared::picture::Crop;
 
 /// The captured image: RGBA, straight alpha, `width * height * 4` bytes.
+#[derive(Clone)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
@@ -278,6 +279,7 @@ impl Edit {
     }
 }
 
+#[derive(Clone)]
 pub struct Document {
     /// The capture.
     pub image: Image,

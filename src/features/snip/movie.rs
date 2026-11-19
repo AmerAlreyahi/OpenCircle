@@ -10,14 +10,25 @@ use crate::shared::picture::Crop;
 /// screenshot stays sharp, a flat screen costs little.
 const QUANTIZER: usize = 100;
 
+/// One frame's data and whether it is a key frame (a place a player can seek to).
+pub struct Sample {
+    pub data: Vec<u8>,
+    pub key: bool,
+}
+
 /// The `av1C` record and one sample a frame.
-pub type Encoded = (Vec<u8>, Vec<Vec<u8>>);
+pub type Encoded = (Vec<u8>, Vec<Sample>);
+
+/// A key frame at least this often (frames); a walkthrough is far shorter, so
+/// one key frame at its start.
+pub const KEY_EVERY: u64 = 240;
 
 /// `frames` (same size, even sides) as AV1: the `av1C` record and one sample
 /// each. `progress(done, total)` after every sample: false = cancel (`None`).
 pub fn encode_av1(
     frames: &[Crop],
     frame_ms: u32,
+    key_every: u64,
     progress: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Result<Option<Encoded>, String> {
     let first = frames.first().ok_or("no frames")?;
@@ -27,21 +38,30 @@ pub fn encode_av1(
     enc.height = h;
     enc.time_base = Rational::new(u64::from(frame_ms), 1000);
     enc.low_latency = true;
+    enc.min_key_frame_interval = key_every;
+    enc.max_key_frame_interval = key_every;
     enc.quantizer = QUANTIZER;
     enc.color_description = Some(ColorDescription {
         color_primaries: ColorPrimaries::BT709,
         transfer_characteristics: TransferCharacteristics::BT709,
         matrix_coefficients: MatrixCoefficients::BT709,
     });
-    let cfg = Config::new().with_encoder_config(enc).with_threads(0);
+    // about half the cores: the app stays quick while a video is made
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get() / 2)
+        .max(1);
+    let cfg = Config::new().with_encoder_config(enc).with_threads(threads);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| e.to_string())?;
     let mut samples = Vec::new();
     let total = frames.len();
-    let mut take = |ctx: &mut Context<u8>, samples: &mut Vec<Vec<u8>>| -> Result<bool, String> {
+    let mut take = |ctx: &mut Context<u8>, samples: &mut Vec<Sample>| -> Result<bool, String> {
         loop {
             match ctx.receive_packet() {
                 Ok(p) => {
-                    samples.push(strip_delimiter(p.data));
+                    samples.push(Sample {
+                        key: p.frame_type == FrameType::KEY,
+                        data: strip_delimiter(p.data),
+                    });
                     if !progress(samples.len(), total) {
                         return Ok(false);
                     }
@@ -141,13 +161,32 @@ fn full(name: &[u8; 4], flags: u32, body: &[u8]) -> Vec<u8> {
 
 /// The samples in an MP4 (ISO BMFF): `ftyp`, `moov` (one `av01` track; the
 /// time unit is a millisecond) and one `mdat` chunk.
-pub fn mp4(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> Vec<u8> {
+pub fn mp4(
+    w: u32,
+    h: u32,
+    frame_ms: u32,
+    av1c: &[u8],
+    samples: &[Sample],
+) -> Result<Vec<u8>, String> {
+    let too_big = || "the video is too big for an MP4".to_string();
+    let n = u32::try_from(samples.len()).map_err(|_| too_big())?;
+    let total = n.checked_mul(frame_ms).ok_or_else(too_big)?;
+    let (w16, h16) = (
+        u16::try_from(w).map_err(|_| too_big())?,
+        u16::try_from(h).map_err(|_| too_big())?,
+    );
+    let (w_fixed, h_fixed) = (
+        w.checked_shl(16)
+            .filter(|_| w < 1 << 16)
+            .ok_or_else(too_big)?,
+        h.checked_shl(16)
+            .filter(|_| h < 1 << 16)
+            .ok_or_else(too_big)?,
+    );
     let ftyp = mp4_box(
         b"ftyp",
         &[b"isom".as_slice(), &be32(0), b"isomiso2av01mp41"].concat(),
     );
-    let n = samples.len() as u32;
-    let total = n * frame_ms;
     let moov = |chunk_at: u32| {
         let mvhd = full(
             b"mvhd",
@@ -179,8 +218,8 @@ pub fn mp4(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> V
                 &[0; 4],
                 &[0, 0, 0, 0],
                 &UNITY,
-                &be32(w << 16),
-                &be32(h << 16),
+                &be32(w_fixed),
+                &be32(h_fixed),
             ]
             .concat(),
         );
@@ -209,8 +248,8 @@ pub fn mp4(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> V
         let mut av01 = vec![0u8; 6];
         av01.extend_from_slice(&[0, 1, 0, 0, 0, 0]);
         av01.extend_from_slice(&[0; 12]);
-        av01.extend_from_slice(&(w as u16).to_be_bytes());
-        av01.extend_from_slice(&(h as u16).to_be_bytes());
+        av01.extend_from_slice(&w16.to_be_bytes());
+        av01.extend_from_slice(&h16.to_be_bytes());
         av01.extend_from_slice(&[0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0, 1]);
         av01.extend_from_slice(&[0; 32]);
         av01.extend_from_slice(&[0, 0x18, 0xff, 0xff]);
@@ -232,21 +271,32 @@ pub fn mp4(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> V
         );
         let mut sizes = be32(0).to_vec();
         sizes.extend_from_slice(&be32(n));
-        samples
-            .iter()
-            .for_each(|s| sizes.extend_from_slice(&be32(s.len() as u32)));
+        for x in samples {
+            sizes.extend_from_slice(&be32(u32::try_from(x.data.len()).unwrap_or(u32::MAX)));
+        }
         let stsz = full(b"stsz", 0, &sizes);
         let stco = full(b"stco", 0, &[&be32(1)[..], &be32(chunk_at)].concat());
-        let stss = full(b"stss", 0, &[&be32(1)[..], &be32(1)].concat());
+        // the key frames, by sample number (from 1)
+        let keys: Vec<u32> = (1..=n)
+            .zip(samples)
+            .filter(|(_, x)| x.key)
+            .map(|(i, _)| i)
+            .collect();
+        let mut stss = be32(u32::try_from(keys.len()).unwrap_or(0)).to_vec();
+        keys.iter().for_each(|k| stss.extend_from_slice(&be32(*k)));
+        let stss = full(b"stss", 0, &stss);
         let stbl = mp4_box(b"stbl", &[stsd, stts, stss, stsc, stsz, stco].concat());
         let minf = mp4_box(b"minf", &[vmhd, dinf, stbl].concat());
         let mdia = mp4_box(b"mdia", &[mdhd, hdlr, minf].concat());
         let trak = mp4_box(b"trak", &[tkhd, mdia].concat());
         mp4_box(b"moov", &[mvhd, trak].concat())
     };
-    let at = (ftyp.len() + moov(0).len() + 8) as u32;
-    let data: Vec<u8> = samples.concat();
-    [ftyp, moov(at), mp4_box(b"mdat", &data)].concat()
+    let at = u32::try_from(ftyp.len() + moov(0).len() + 8).map_err(|_| too_big())?;
+    let data: Vec<u8> = samples
+        .iter()
+        .flat_map(|x| x.data.iter().copied())
+        .collect();
+    Ok([ftyp, moov(at), mp4_box(b"mdat", &data)].concat())
 }
 
 /// An EBML element: id, size (shortest vint), body.
@@ -260,6 +310,19 @@ fn ebml(id: &[u8], body: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A signed integer element (two's complement, the fewest bytes).
+fn sint(id: &[u8], v: i64) -> Vec<u8> {
+    let bytes = v.to_be_bytes();
+    let mut skip = 0;
+    while skip < 7
+        && ((bytes[skip] == 0 && bytes[skip + 1] < 0x80)
+            || (bytes[skip] == 0xFF && bytes[skip + 1] >= 0x80))
+    {
+        skip += 1;
+    }
+    ebml(id, &bytes[skip..])
+}
+
 fn uint(id: &[u8], v: u64) -> Vec<u8> {
     let bytes = v.to_be_bytes();
     let skip = bytes.iter().take_while(|&&b| b == 0).count().min(7);
@@ -269,7 +332,13 @@ fn uint(id: &[u8], v: u64) -> Vec<u8> {
 /// The samples in a WebM: the EBML header, then one segment: info, the track
 /// (`V_AV1`, the `av1C` as its private data) and a cluster a frame (so no
 /// block's time needs more than the cluster's own).
-pub fn webm(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> Vec<u8> {
+pub fn webm(
+    w: u32,
+    h: u32,
+    frame_ms: u32,
+    av1c: &[u8],
+    samples: &[Sample],
+) -> Result<Vec<u8>, String> {
     let header = ebml(
         &[0x1A, 0x45, 0xDF, 0xA3],
         &[
@@ -283,7 +352,8 @@ pub fn webm(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> 
         ]
         .concat(),
     );
-    let total = f64::from(frame_ms) * samples.len() as f64;
+    let ms = u64::from(frame_ms);
+    let total = (ms * samples.len() as u64) as f64; // a few seconds: exact in an f64
     let info = ebml(
         &[0x15, 0x49, 0xA9, 0x66],
         &[
@@ -304,6 +374,7 @@ pub fn webm(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> 
             uint(&[0xD7], 1),
             uint(&[0x73, 0xC5], 1),
             uint(&[0x83], 1),
+            uint(&[0x23, 0xE3, 0x83], ms * 1_000_000), // DefaultDuration, ns
             ebml(&[0x86], b"V_AV1"),
             ebml(&[0x63, 0xA2], av1c),
             video,
@@ -311,25 +382,41 @@ pub fn webm(w: u32, h: u32, frame_ms: u32, av1c: &[u8], samples: &[Vec<u8>]) -> 
         .concat(),
     );
     let tracks = ebml(&[0x16, 0x54, 0xAE, 0x6B], &track);
-    let clusters: Vec<u8> = (samples.iter().enumerate())
-        .flat_map(|(i, s)| {
-            // track 1, time 0 in the cluster, flags: the first frame is a key frame
-            let block = [&[0x81, 0, 0, if i == 0 { 0x80 } else { 0 }][..], s].concat();
-            ebml(
-                &[0x1F, 0x43, 0xB6, 0x75],
-                &[
-                    uint(&[0xE7], i as u64 * u64::from(frame_ms)),
-                    ebml(&[0xA3], &block),
-                ]
-                .concat(),
-            )
-        })
-        .collect();
+    // a cluster a frame (so no block's time needs more than the cluster's own)
+    let (mut clusters, mut cues) = (Vec::new(), Vec::new());
+    let before = (info.len() + tracks.len()) as u64; // the segment's data starts at info
+    for (i, x) in samples.iter().enumerate() {
+        let time = i as u64 * ms;
+        // track 1, time 0 in the cluster; the last frame carries its duration
+        // (a block group: a key frame has no reference, another one the frame before)
+        let block = |flags: u8| [&[0x81, 0, 0, flags][..], &x.data].concat();
+        let body = match i + 1 == samples.len() {
+            false => ebml(&[0xA3], &block(if x.key { 0x80 } else { 0 })),
+            true => {
+                let mut group = ebml(&[0xA1], &block(0));
+                group.extend(uint(&[0x9B], ms));
+                if !x.key {
+                    group.extend(sint(&[0xFB], -(ms as i64)));
+                }
+                ebml(&[0xA0], &group)
+            }
+        };
+        if x.key {
+            let at = before + clusters.len() as u64;
+            let place = ebml(&[0xB7], &[uint(&[0xF7], 1), uint(&[0xF1], at)].concat());
+            cues.extend(ebml(&[0xBB], &[uint(&[0xB3], time), place].concat()));
+        }
+        clusters.extend(ebml(
+            &[0x1F, 0x43, 0xB6, 0x75],
+            &[uint(&[0xE7], time), body].concat(),
+        ));
+    }
+    let cues = ebml(&[0x1C, 0x53, 0xBB, 0x6B], &cues);
     let segment = ebml(
         &[0x18, 0x53, 0x80, 0x67],
-        &[info, tracks, clusters].concat(),
+        &[info, tracks, clusters, cues].concat(),
     );
-    [header, segment].concat()
+    Ok([header, segment].concat())
 }
 
 #[cfg(test)]
@@ -466,6 +553,118 @@ mod tests {
         b.iter().fold(0, |a, &x| a << 8 | u64::from(x))
     }
 
+    /// Each cluster's time, its block (track, time and flags, then data), and
+    /// whether it is a key frame.
+    fn webm_blocks<'a>(segment: &[(u32, &'a [u8])]) -> (Vec<u64>, Vec<&'a [u8]>, Vec<bool>) {
+        let (mut times, mut blocks, mut keys) = (Vec::new(), Vec::new(), Vec::new());
+        for (id, body) in segment.iter().filter(|(i, _)| *i == 0x1F43B675) {
+            let _ = id;
+            let c = elements(body);
+            times.push(uint_of(find(&c, 0xE7).unwrap()));
+            match find(&c, 0xA3) {
+                Some(b) => {
+                    keys.push(b[3] & 0x80 != 0);
+                    blocks.push(b);
+                }
+                None => {
+                    let g = elements(find(&c, 0xA0).unwrap());
+                    blocks.push(find(&g, 0xA1).unwrap());
+                    keys.push(find(&g, 0xFB).is_none());
+                }
+            }
+        }
+        (times, blocks, keys)
+    }
+
+    /// Where each cluster starts, from the segment's data start.
+    fn cluster_offsets(segment: &[(u32, &[u8])]) -> Vec<u64> {
+        let mut at = 0u64;
+        let mut out = Vec::new();
+        for (id, body) in segment {
+            let head = match id {
+                0x1F43B675 | 0x1549A966 | 0x1654AE6B | 0x1C53BB6B => 4,
+                _ => 0,
+            };
+            if *id == 0x1F43B675 {
+                out.push(at);
+            }
+            // id bytes + the size's bytes + the body
+            let size_len = (1..=8)
+                .find(|l| (body.len() as u64) < (1u64 << (7 * l)) - 1)
+                .unwrap();
+            at += (head + size_len + body.len()) as u64;
+        }
+        out
+    }
+
+    /// A cue point's cluster position.
+    fn cue_position(cue: &(u32, &[u8])) -> u64 {
+        let point = elements(cue.1);
+        let place = elements(find(&point, 0xB7).unwrap());
+        uint_of(find(&place, 0xF1).unwrap())
+    }
+
+    #[test]
+    fn key_frames_are_marked_in_both_containers_and_the_webm_cues_list_them() {
+        let five: Vec<Crop> = frames().into_iter().cycle().take(5).collect();
+        let (av1c, samples) = encode_av1(&five, 500, 2, &mut |_, _| true)
+            .unwrap()
+            .unwrap();
+        let keys: Vec<bool> = samples.iter().map(|s| s.key).collect();
+        assert_eq!(
+            keys,
+            [true, false, true, false, true],
+            "a key frame every 2"
+        );
+        // MP4: the sync sample table lists samples 1, 3, 5
+        let f = mp4(64, 48, 500, &av1c, &samples).unwrap();
+        let stbl = child(
+            child(
+                child(child(&f[..], b"moov").unwrap(), b"trak").unwrap(),
+                b"mdia",
+            )
+            .unwrap(),
+            b"minf",
+        )
+        .and_then(|m| child(m, b"stbl"))
+        .unwrap();
+        let stss = child(stbl, b"stss").unwrap();
+        assert_eq!(be(stss, 4), 3);
+        assert_eq!((be(stss, 8), be(stss, 12), be(stss, 16)), (1, 3, 5));
+        // WebM: the key flag on the blocks, and one cue a key frame at the right place
+        let f = webm(64, 48, 500, &av1c, &samples).unwrap();
+        let top = elements(&f);
+        let segment = elements(find(&top, 0x18538067).unwrap());
+        let (times, _, flags) = webm_blocks(&segment);
+        assert_eq!(flags, keys);
+        let cues = elements(find(&segment, 0x1C53BB6B).unwrap());
+        assert_eq!(cues.len(), 3);
+        let offsets = cluster_offsets(&segment);
+        for (cue, k) in cues.iter().zip([0usize, 2, 4]) {
+            assert_eq!(cue_position(cue), offsets[k]);
+            assert_eq!(uint_of(find(&elements(cue.1), 0xB3).unwrap()), times[k]);
+        }
+    }
+
+    #[test]
+    fn a_video_too_big_for_its_container_is_an_error_not_a_wrap() {
+        let s = [Sample {
+            data: vec![1],
+            key: true,
+        }];
+        assert!(mp4(70_000, 48, 500, &[], &s).is_err());
+        assert!(
+            mp4(
+                64,
+                48,
+                u32::MAX,
+                &[],
+                &[s[0].data.clone(), s[0].data.clone()].map(|data| Sample { data, key: true })
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn a_webm_has_every_frame_its_time_its_size_and_decodable_samples() {
         let f = make(Movie::Webm);
@@ -488,16 +687,28 @@ mod tests {
             ),
             (64, 48)
         );
-        let (mut times, mut samples) = (Vec::new(), Vec::new());
-        for (id, body) in &segment {
-            if *id == 0x1F43B675 {
-                let c = elements(body);
-                times.push(uint_of(find(&c, 0xE7).unwrap()));
-                samples.push(&find(&c, 0xA3).unwrap()[4..]);
-            }
-        }
+        assert_eq!(uint_of(find(&track, 0x23E383).unwrap()), 500_000_000);
+        let (times, samples, keys) = webm_blocks(&segment);
         assert_eq!(times, [0, 500, 1000]);
+        assert_eq!(keys, [true, false, false]);
+        let samples: Vec<&[u8]> = samples.iter().map(|b| &b[4..]).collect();
         check_samples(&samples);
+        // the last frame is a block group with its duration (and, not a key, its reference)
+        let last = elements(
+            segment
+                .iter()
+                .rev()
+                .find(|(i, _)| *i == 0x1F43B675)
+                .unwrap()
+                .1,
+        );
+        let group = elements(find(&last, 0xA0).unwrap());
+        assert_eq!(uint_of(find(&group, 0x9B).unwrap()), 500);
+        assert!(find(&group, 0xFB).is_some());
+        // one cue, for the one key frame, pointing at its cluster
+        let cues = elements(find(&segment, 0x1C53BB6B).unwrap());
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cluster_offsets(&segment)[0], cue_position(&cues[0]));
     }
 
     #[test]

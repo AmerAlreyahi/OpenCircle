@@ -1816,8 +1816,12 @@ strings! {
         | "صفحة HTML";
     st_export_images: "Images folder"
         | "مجلد صور";
-    st_export_gif: "Walkthrough: GIF, MP4, WebM…"
+    st_export_walkthrough: "Walkthrough: GIF, MP4, WebM…"
         | "شرح متحرك: GIF وMP4 وWebM…";
+    st_walk_where: "Export the walkthrough"
+        | "تصدير الشرح المتحرك";
+    st_walk_cap: "A video is 4096 px on its long edge at most."
+        | "الفيديو بطول 4096 بكسل على أطول ضلع كحد أقصى.";
     st_export_pic: "Picture"
         | "الصورة";
     st_export_walk: "Walkthrough"
@@ -1830,7 +1834,7 @@ strings! {
         | "PDF: صفحة واحدة بحجم الصورة";
     st_lossless: "Lossless"
         | "بلا فقد";
-        st_walk_from: "From"
+    st_walk_from: "From"
         | "من";
     st_walk_steps: "Steps"
         | "الخطوات";

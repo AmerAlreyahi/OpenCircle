@@ -272,6 +272,49 @@ pub struct Walkthrough {
     pub numbered: bool,
 }
 
+/// A video's long edge at most (what a player and an MP4's 16-bit sizes hold).
+pub const VIDEO_MAX_EDGE: u32 = 4096;
+
+/// The edits walkthrough's frames at most (a longer history is sampled evenly).
+pub const EDIT_FRAMES: usize = 30;
+
+impl Walkthrough {
+    /// The long edge the frames are fitted to: the pick, but a video never
+    /// above `VIDEO_MAX_EDGE` ("Original" is that, at most).
+    pub fn edge(self) -> u32 {
+        match (self.movie, self.max_edge) {
+            (Movie::Gif, edge) => edge,
+            (_, 0) => VIDEO_MAX_EDGE,
+            (_, edge) => edge.min(VIDEO_MAX_EDGE),
+        }
+    }
+}
+
+/// The document's history as pictures, the first state to the current one
+/// (at most `EDIT_FRAMES`), each fitted to the walkthrough's size as it is
+/// drawn: only small frames are ever held. The document ends as it was.
+pub fn edit_frames(
+    doc: &mut crate::features::snip::annotate::Document,
+    how: Walkthrough,
+) -> Vec<Crop> {
+    let total = doc.depth() + 1;
+    let want = |i: usize| match total <= EDIT_FRAMES {
+        true => true,
+        false => (0..EDIT_FRAMES).any(|j| j * (total - 1) / (EDIT_FRAMES - 1) == i),
+    };
+    let (mut i, mut out) = (0, Vec::new());
+    doc.replay(|d| {
+        if want(i) {
+            out.push(fit_long_edge(
+                crate::features::snip::annotate::render(d),
+                how.edge(),
+            ));
+        }
+        i += 1;
+    });
+    out
+}
+
 impl Default for Walkthrough {
     fn default() -> Self {
         Walkthrough {
@@ -297,12 +340,14 @@ pub fn encode_walkthrough(
     if how.movie == Movie::Gif {
         return gif_of(width, height, &frames, how, progress);
     }
-    let Some((av1c, samples)) = movie::encode_av1(&frames, how.frame_ms, progress)? else {
+    let Some((av1c, samples)) =
+        movie::encode_av1(&frames, how.frame_ms, movie::KEY_EVERY, progress)?
+    else {
         return Ok(None);
     };
     Ok(Some(match how.movie {
-        Movie::Mp4 => movie::mp4(width, height, how.frame_ms, &av1c, &samples),
-        _ => movie::webm(width, height, how.frame_ms, &av1c, &samples),
+        Movie::Mp4 => movie::mp4(width, height, how.frame_ms, &av1c, &samples)?,
+        _ => movie::webm(width, height, how.frame_ms, &av1c, &samples)?,
     }))
 }
 
@@ -315,9 +360,12 @@ fn on_canvas(
 ) -> Result<(u32, u32, Vec<Crop>), String> {
     let frames: Vec<Crop> = (frames.into_iter().enumerate())
         .map(|(i, f)| {
-            let f = fit_long_edge(f, how.max_edge);
+            let f = fit_long_edge(f, how.edge());
             match how.numbered {
-                true => crate::features::snip::annotate::step::badge(f, i as u32 + 1),
+                true => crate::features::snip::annotate::step::badge(
+                    f,
+                    u32::try_from(i + 1).unwrap_or(u32::MAX),
+                ),
                 false => f,
             }
         })
@@ -328,12 +376,12 @@ fn on_canvas(
     let placed = frames
         .into_iter()
         .map(|f| {
-            let mut canvas = vec![255u8; (width * height * 4) as usize];
+            let mut canvas = vec![255u8; width as usize * height as usize * 4];
             let (dx, dy) = ((width - f.width) / 2, (height - f.height) / 2);
-            let row = (f.width * 4) as usize;
-            for y in 0..f.height {
-                let from = (y * f.width * 4) as usize;
-                let to = (((y + dy) * width + dx) * 4) as usize;
+            let row = f.width as usize * 4;
+            for y in 0..f.height as usize {
+                let from = y * row;
+                let to = ((y + dy as usize) * width as usize + dx as usize) * 4;
                 canvas[to..to + row].copy_from_slice(&f.rgba[from..from + row]);
             }
             Crop {
@@ -367,7 +415,7 @@ fn gif_of(
     for (i, f) in frames.iter().enumerate() {
         let mut rgba = f.rgba.clone();
         let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut rgba, 10);
-        frame.delay = (how.frame_ms / 10).clamp(1, u16::MAX as u32) as u16;
+        frame.delay = u16::try_from(how.frame_ms / 10).unwrap_or(u16::MAX).max(1);
         enc.write_frame(&frame).map_err(|e| e.to_string())?;
         if !progress(i + 1, frames.len()) {
             return Ok(None);

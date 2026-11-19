@@ -473,7 +473,10 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
             numbered: true
         }
     );
-    assert!(frames.is_none(), "from the Steps: the host has them");
+    assert!(
+        matches!(frames, Frames::Steps),
+        "from the Steps: the host has them"
+    );
     assert_eq!(s.walk.busy, Some((0, 0)));
     // while it runs: progress shows, a second Export does nothing, Cancel stops it
     let _ = s.update(Msg::WalkProgress(2, 5));
@@ -495,16 +498,23 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
     assert_eq!(again.walk.how.movie, export::Movie::Mp4);
 }
 
+/// The edits frames the host draws for `s`'s walkthrough, from the document copy the Studio hands over.
+fn edit_frames_of(s: &mut Studio, how: export::Walkthrough) -> Vec<Crop> {
+    let _ = s.update(Msg::ExportWalkthrough);
+    let _ = s.update(Msg::WalkEdits(true));
+    let Outcome::ExportWalkthrough(_, Frames::Edits(mut doc)) = s.update(Msg::WalkGo) else {
+        panic!("no edits");
+    };
+    export::edit_frames(&mut doc, how)
+}
+
 #[test]
 fn walkthrough_from_edits_replays_the_history_and_leaves_the_document_as_it_was() {
     let mut s = drawn(3);
     let before = s.editor.as_ref().unwrap().doc.steps();
     let state = s.editor.as_ref().unwrap().doc.state();
-    let _ = s.update(Msg::ExportWalkthrough);
-    let _ = s.update(Msg::WalkEdits(true));
-    let Outcome::ExportWalkthrough(_, Some(frames)) = s.update(Msg::WalkGo) else {
-        panic!("no frames");
-    };
+    let shown = annotate::render(&s.editor.as_ref().unwrap().doc);
+    let frames = edit_frames_of(&mut s, export::Walkthrough::default());
     assert_eq!(frames.len(), 4, "the start and each of the 3 edits");
     assert_eq!(
         frames[0].rgba,
@@ -515,17 +525,48 @@ fn walkthrough_from_edits_replays_the_history_and_leaves_the_document_as_it_was(
     assert_ne!(frames[1].rgba, frames[0].rgba);
     let e = s.editor.as_ref().unwrap();
     assert_eq!((e.doc.steps(), e.doc.state()), (before, state));
+    assert_eq!(
+        annotate::render(&e.doc).rgba,
+        shown.rgba,
+        "the picture is byte for byte what it was"
+    );
+    // the replay itself leaves a document as it was, redo list included
+    let mut doc = e.doc.clone();
+    doc.undo();
+    let (steps, before) = (doc.steps(), annotate::render(&doc));
+    doc.replay(|_| ());
+    assert_eq!(doc.steps(), steps);
+    assert_eq!(annotate::render(&doc).rgba, before.rgba);
+}
+
+#[test]
+fn edit_frames_are_fitted_to_the_chosen_size_as_they_are_drawn() {
+    let mut s = drawn(2);
+    let how = export::Walkthrough {
+        max_edge: 150,
+        ..export::Walkthrough::default()
+    };
+    let frames = edit_frames_of(&mut s, how);
+    assert!(frames.iter().all(|f| (f.width, f.height) == (150, 100)));
+    // a video's Original is at most 4096 on its long edge
+    let video = export::Walkthrough {
+        movie: export::Movie::Mp4,
+        max_edge: 0,
+        ..how
+    };
+    assert_eq!(video.edge(), export::VIDEO_MAX_EDGE);
+    assert_eq!(
+        export::Walkthrough { max_edge: 0, ..how }.edge(),
+        0,
+        "a GIF keeps its size"
+    );
 }
 
 #[test]
 fn a_long_history_is_sampled_to_at_most_the_frame_limit_keeping_both_ends() {
     let mut s = drawn(45);
-    let _ = s.update(Msg::ExportWalkthrough);
-    let _ = s.update(Msg::WalkEdits(true));
-    let Outcome::ExportWalkthrough(_, Some(frames)) = s.update(Msg::WalkGo) else {
-        panic!("no frames");
-    };
-    assert_eq!(frames.len(), EDIT_FRAMES);
+    let frames = edit_frames_of(&mut s, export::Walkthrough::default());
+    assert_eq!(frames.len(), export::EDIT_FRAMES);
     assert_eq!(frames[0].rgba, crop(300, 200).rgba);
     let now = annotate::render(&s.editor.as_ref().unwrap().doc);
     assert_eq!(

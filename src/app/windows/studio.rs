@@ -248,14 +248,17 @@ impl Windows {
                 .map(Msg::StudioToast)
             }
             Outcome::ExportWalkthrough(how, frames) => {
+                // one encode at a time: a second one never takes the first's stop flag
+                if self.walk_cancel.is_some() {
+                    return Task::none();
+                }
                 let steps: Vec<_> =
                     (self.steps.as_ref()).map_or(Vec::new(), |(_, s)| s.steps().to_vec());
                 let cancel = std::sync::Arc::new(AtomicBool::new(false));
                 self.walk_cancel = Some(cancel.clone());
                 background(move |tx| {
-                    let frames =
-                        frames.unwrap_or_else(|| steps.iter().filter_map(|s| s.crop()).collect());
-                    let done = export_walkthrough(frames, how, &cancel, tx);
+                    // where to put it first: the frames are drawn only for a file that is wanted
+                    let done = export_walkthrough(frames, steps, how, &cancel, tx);
                     let _ = tx.unbounded_send(Walked::End(done));
                 })
                 .map(Msg::StudioWalk)
@@ -333,14 +336,15 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
 /// folder), then the file, encoded with a `Walked::Progress` after each frame.
 /// `None`: cancelled (the dialog or the encoder). Ok / Err = the pill.
 fn export_walkthrough(
-    frames: Vec<Crop>,
+    frames: studio::Frames,
+    steps: Vec<Arc<Step>>,
     how: export::Walkthrough,
     cancel: &AtomicBool,
     tx: &iced::futures::channel::mpsc::UnboundedSender<Walked>,
 ) -> Option<Result<String, String>> {
     let ext = how.movie.ext();
     let mut dialog = rfd::FileDialog::new()
-        .set_title(crate::t!(st_export_where))
+        .set_title(crate::t!(st_walk_where))
         .set_file_name(format!("{}.{ext}", save::stamped_name("steps-")))
         .add_filter(how.movie.name(), &[ext]);
     let config = crate::shared::config::current();
@@ -348,13 +352,20 @@ fn export_walkthrough(
         dialog = dialog.set_directory(folder);
     }
     let path = dialog.save_file()?.with_extension(ext);
+    let frames: Vec<Crop> = match frames {
+        studio::Frames::Steps => steps.iter().filter_map(|s| s.crop()).collect(),
+        studio::Frames::Edits(mut doc) => export::edit_frames(&mut doc, how),
+    };
     let encoded = export::encode_walkthrough(frames, how, &mut |done, total| {
         let _ = tx.unbounded_send(Walked::Progress(done, total));
         !cancel.load(Ordering::Relaxed)
     });
+    // stopped (the Cancel, or the Studio closed) while it ran: no file
     let written = match encoded {
-        Ok(Some(bytes)) => std::fs::write(&path, bytes).map_err(|e| e.to_string()),
-        Ok(None) => return None,
+        Ok(Some(bytes)) if !cancel.load(Ordering::Relaxed) => {
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())
+        }
+        Ok(_) => return None,
         Err(e) => Err(e),
     };
     Some(match written {

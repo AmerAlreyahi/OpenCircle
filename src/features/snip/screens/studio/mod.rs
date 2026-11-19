@@ -148,6 +148,15 @@ pub enum Msg {
     ExportGo,
 }
 
+/// Where a walkthrough's frames come from.
+pub enum Frames {
+    /// The Steps strip's steps.
+    Steps,
+    /// The picture's edits: a copy of the document, replayed by the host's
+    /// worker (one picture, not a copy of every frame).
+    Edits(Box<annotate::Document>),
+}
+
 /// What the host does after a message.
 pub enum Outcome {
     None,
@@ -178,9 +187,9 @@ pub enum Outcome {
     OpenStep(usize),
     /// Export the steps (the host asks for a folder).
     ExportSteps(export::Steps),
-    /// Export a walkthrough GIF (the host asks where): the picture's edits
-    /// replayed (`Some`), else the Steps' pictures.
-    ExportWalkthrough(export::Walkthrough, Option<Vec<Crop>>),
+    /// Export a walkthrough (the host asks where, then draws the frames and
+    /// encodes them off the UI thread).
+    ExportWalkthrough(export::Walkthrough, Frames),
     /// Stop the encoder that runs.
     CancelWalkthrough,
     /// Export the picture so (the host asks where).
@@ -229,9 +238,6 @@ pub(super) struct Walk {
     pub busy: Option<(usize, usize)>,
 }
 
-/// Frames of an edits walkthrough at most (a long history is sampled evenly).
-pub(super) const EDIT_FRAMES: usize = 30;
-
 impl Walk {
     fn how(self) -> export::Walkthrough {
         export::Walkthrough {
@@ -239,23 +245,6 @@ impl Walk {
             ..self.how
         }
     }
-}
-
-/// The document's history as pictures, first state to current.
-fn edit_frames(doc: &mut annotate::Document) -> Vec<Crop> {
-    let total = doc.depth() + 1;
-    let want = |i: usize| match total <= EDIT_FRAMES {
-        true => true,
-        false => (0..EDIT_FRAMES).any(|j| j * (total - 1) / (EDIT_FRAMES - 1) == i),
-    };
-    let (mut i, mut out) = (0, Vec::new());
-    doc.replay(|d| {
-        if want(i) {
-            out.push(annotate::render(d));
-        }
-        i += 1;
-    });
-    out
 }
 
 impl Studio {
@@ -569,12 +558,12 @@ impl Studio {
                 match (w.edits, &mut self.editor) {
                     (true, Some(e)) => {
                         self.walk.busy = Some((0, 0));
-                        Outcome::ExportWalkthrough(w.how(), Some(edit_frames(&mut e.doc)))
+                        Outcome::ExportWalkthrough(w.how(), Frames::Edits(Box::new(e.doc.clone())))
                     }
                     (true, None) => Outcome::None,
                     (false, _) => {
                         self.walk.busy = Some((0, 0));
-                        Outcome::ExportWalkthrough(w.how(), None)
+                        Outcome::ExportWalkthrough(w.how(), Frames::Steps)
                     }
                 }
             }
