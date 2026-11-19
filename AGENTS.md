@@ -1431,3 +1431,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   container size for every options-bar control, panel toggles in a familiar place (not beside the caption buttons), no empty
   side panels, and real Studio settings (export defaults, behaviour, import ...). Research established editors first, then a
   design round on the canvas, then one complete build.
+- Studio v3 design approved (owner, 2026-11-19, "approved", canvas https://claude.ai/artifact/3x4ShGjBgD5TNZBXSMCRPu,
+  .claude/artifacts/design/STUDIO_V3_SPEC.md): build it as drawn, with both lead defaults: (A) Ctrl+C / Ctrl+X act on the
+  selected object(s), nothing selected = Ctrl+C copies the whole picture, Ctrl+Shift+C always the whole picture, the Copy
+  button always the whole picture (narrows "Copy = button AND Ctrl+C" for the Studio only); (B) "Keep unsaved work if
+  OpenCircle closes unexpectedly" is a Settings > Studio switch, OFF by default. Group / lock / align / print stay later.
+  The owner gets ONE complete build (v3 + steps export + walkthrough + picture actions + edit text + cut out) to try.
