@@ -502,6 +502,9 @@ impl Studio {
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
         editor.copy_picture_when_empty = prefs.ctrl_c_picture;
+        editor.paste_movable = prefs.paste_movable;
+        editor.grow_canvas = prefs.grow_canvas;
+        editor.drag_jpeg = prefs.drag_type == crate::shared::config::Format::Jpeg;
         (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
         (editor.snap, editor.grid) = (self.snap, self.grid);
         self.zoom = match prefs.zoom_on_open {
@@ -1020,6 +1023,7 @@ impl Studio {
             }
             Msg::Scrolled(offset) => {
                 self.offset = offset;
+                self.sync_view();
                 Outcome::None
             }
             Msg::Ctrl(down) => {
@@ -1497,6 +1501,20 @@ impl Studio {
         let (stage, scale, zoom) = (self.stage(), self.scale, self.zoom);
         if let Some(e) = &mut self.editor {
             e.zoom = zoom.unwrap_or_else(|| fit_zoom(e.doc.view().size(), stage, scale));
+        }
+        self.sync_view();
+    }
+
+    /// Tells the editor which part of the picture the stage shows (its pixel
+    /// grid draws only that).
+    fn sync_view(&mut self) {
+        let (stage, off) = (self.stage(), self.offset);
+        if let Some(e) = &mut self.editor {
+            let pad = STAGE_PAD + 8.0;
+            e.viewport = Some(iced::Rectangle::new(
+                Point::new(off.x - pad, off.y - pad),
+                Size::new(stage.width + 2.0 * pad, stage.height + 2.0 * pad),
+            ));
         }
     }
 

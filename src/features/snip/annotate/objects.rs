@@ -14,6 +14,16 @@ use crate::shared::picture::Crop;
 /// Where a pasted copy lands, per paste (image px).
 const OFFSET: f32 = 10.0;
 
+/// What the Studio's key table says about a key.
+pub(crate) enum StudioKey {
+    /// This editor message.
+    Do(Message),
+    /// Not the editor's: leave the key for the window.
+    Ignore,
+    /// Not a Studio editing key: the editor's own table goes on.
+    Pass,
+}
+
 /// A z-order move (Ctrl+] / Ctrl+[, with Shift = to the front / back).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Order {
@@ -107,28 +117,39 @@ pub(super) struct GroupDrag {
 }
 
 impl Annotator {
-    /// What a Studio key does in the editor (typing and open menus are handled
-    /// before this): `None` = not a Studio editing key, the editor's own table
-    /// goes on. Esc ladder here: selection -> tool back to Select -> nothing.
+    /// The editor message of a Studio key, if it has one.
+    #[cfg(test)]
     pub(crate) fn studio_key(
         &self,
         key: &Key,
         latin: Option<char>,
         m: Modifiers,
     ) -> Option<Message> {
-        let e = self;
+        match self.studio_keys(key, latin, m) {
+            StudioKey::Do(message) => Some(message),
+            _ => None,
+        }
+    }
+
+    /// What a Studio key does in the editor (typing and open menus are
+    /// handled before this). Esc ladder here: selection, then the tool back
+    /// to Select, then the key is left to the window (its menus, sheets).
+    pub(crate) fn studio_keys(&self, key: &Key, latin: Option<char>, m: Modifiers) -> StudioKey {
         let ch = latin.or(match key {
             Key::Character(s) => s.chars().next(),
             _ => None,
         });
         let ch = ch.map(|c| c.to_ascii_lowercase());
-        let sel = !e.selection().is_empty();
+        let sel = !self.selection().is_empty();
+        let go = |m: Message| StudioKey::Do(m);
         if let Key::Named(named) = key {
             return match named {
-                Named::Escape if e.picking || e.menu.is_some() => None,
-                Named::Escape if sel => Some(Message::Deselect),
-                Named::Escape if e.tool != Tool::Select => Some(Message::Tool(Tool::Select)),
-                Named::Escape => Some(Message::Deselect),
+                Named::Escape if self.picking || self.menu.is_some() => StudioKey::Pass,
+                Named::Escape if sel => go(Message::Deselect),
+                Named::Escape if self.tool != Tool::Select => go(Message::Tool(Tool::Select)),
+                Named::Escape => StudioKey::Ignore,
+                // the window's Save and Add to steps
+                Named::Enter if m.command() => go(Message::AddToSteps),
                 Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown
                     if sel && !m.command() =>
                 {
@@ -138,31 +159,29 @@ impl Annotator {
                         Named::ArrowUp => (0, -1),
                         _ => (0, 1),
                     };
-                    Some(Message::Shove(arrow, m.shift()))
+                    go(Message::Shove(arrow, m.shift()))
                 }
-                _ => None,
+                _ => StudioKey::Pass,
             };
         }
         if !m.command() {
-            return None;
+            return StudioKey::Pass;
         }
-        match (ch?, m.shift()) {
-            ('c', false) => Some(Message::CopySelection),
-            ('c', true) => Some(Message::Copy),
-            ('x', false) => Some(Message::CutSelection),
-            ('d', false) => Some(Message::Duplicate),
-            ('a', false) => Some(Message::SelectAll),
-            (']' | '}', shift) => Some(Message::Order(if shift {
-                Order::Front
-            } else {
-                Order::Forward
-            })),
-            ('[' | '{', shift) => Some(Message::Order(if shift {
-                Order::Back
-            } else {
-                Order::Backward
-            })),
-            _ => None,
+        let order = |front: bool, shift: bool, fwd: Order, to: Order| {
+            let _ = front;
+            go(Message::Order(if shift { to } else { fwd }))
+        };
+        match (ch, m.shift()) {
+            (Some('c'), false) => go(Message::CopySelection),
+            (Some('c'), true) => go(Message::Copy),
+            (Some('x'), false) => go(Message::CutSelection),
+            (Some('d'), false) => go(Message::Duplicate),
+            (Some('a'), false) => go(Message::SelectAll),
+            // Save as is the window's (it opens the Picture sheet)
+            (Some('s'), true) => StudioKey::Ignore,
+            (Some(']' | '}'), shift) => order(true, shift, Order::Forward, Order::Front),
+            (Some('[' | '{'), shift) => order(false, shift, Order::Backward, Order::Back),
+            _ => StudioKey::Pass,
         }
     }
 
@@ -215,7 +234,15 @@ impl Annotator {
         self.commit();
         if after != self.doc.items {
             let before = self.doc.items.clone();
-            self.doc.exec(Edit::Items(before, after));
+            let frames: Vec<Rectangle> = (after.iter().filter(|i| !i.hidden))
+                .map(Item::frame)
+                .collect();
+            let grow = self.grow_for(&frames);
+            let edit = Edit::Items(before, after);
+            self.doc.exec(match grow {
+                Some(grow) => Edit::Seq(vec![edit, grow]),
+                None => edit,
+            });
         }
         self.doc.select(sel);
         self.refresh();
@@ -295,7 +322,20 @@ impl Annotator {
                     fill: false,
                     hidden: false,
                 };
-                self.append(vec![item]);
+                if self.paste_movable {
+                    self.append(vec![item]);
+                } else {
+                    // "Pasted pictures stay movable" off: into the picture at once
+                    // (centred in the view, so it never needs the canvas to grow)
+                    let edits: Vec<Edit> = (self.bake(&[&item]))
+                        .map(|p| Edit::Pixels(Box::new(p)))
+                        .into_iter()
+                        .collect();
+                    if !edits.is_empty() {
+                        self.doc.exec(Edit::Seq(edits));
+                        self.refresh();
+                    }
+                }
             }
         }
         true
@@ -385,6 +425,71 @@ impl Annotator {
         true
     }
 
+    /// "Grow the canvas past the edge" (on): the edit that makes the picture
+    /// big enough for `frames` (new pixels see-through), `None` when they fit,
+    /// the setting is off or the picture is cropped. To the left or top it
+    /// grows the other way and the drawings move with the picture.
+    // ponytail: the whole picture is kept per growth step in the history.
+    pub(super) fn grow_for(&self, frames: &[Rectangle]) -> Option<Edit> {
+        if !self.grow_canvas || self.doc.crop.is_some() {
+            return None;
+        }
+        let img = &self.doc.image;
+        let (w, h) = (img.width as f32, img.height as f32);
+        let (mut x0, mut y0, mut x1, mut y1) = (0.0f32, 0.0f32, w, h);
+        for f in frames {
+            (x0, y0) = (x0.min(f.x.floor()), y0.min(f.y.floor()));
+            (x1, y1) = (
+                x1.max((f.x + f.width).ceil()),
+                y1.max((f.y + f.height).ceil()),
+            );
+        }
+        if (x0, y0, x1, y1) == (0.0, 0.0, w, h) {
+            return None;
+        }
+        // never beyond a sane picture
+        let (nw, nh) = (
+            (x1 - x0).min(16384.0) as usize,
+            (y1 - y0).min(16384.0) as usize,
+        );
+        let (dx, dy) = ((-x0) as usize, (-y0) as usize);
+        let mut rgba = vec![0u8; nw * nh * 4];
+        for row in 0..img.height as usize {
+            if row + dy >= nh {
+                break;
+            }
+            let n = (img.width as usize).min(nw.saturating_sub(dx)) * 4;
+            let to = ((row + dy) * nw + dx) * 4;
+            rgba[to..to + n].copy_from_slice(&img.rgba[row * img.width as usize * 4..][..n]);
+        }
+        let after = Image {
+            width: nw as u32,
+            height: nh as u32,
+            rgba,
+        };
+        Some(Edit::Canvas(
+            Box::new(img.clone()),
+            Box::new(after),
+            Vector::new(dx as f32, dy as f32),
+        ))
+    }
+
+    /// The patch that bakes `layers` (in order) into the picture.
+    fn bake(&self, layers: &[&Item]) -> Option<super::document::Patch> {
+        let img = &self.doc.image;
+        let layers: Vec<_> = layers.iter().map(|i| (*i, true)).collect();
+        let whole = tiny_skia::IntRect::from_xywh(0, 0, img.width, img.height)?;
+        let rgba: Vec<u8> = super::document::paint(img, &layers, whole)
+            .pixels()
+            .iter()
+            .flat_map(|p| {
+                let c = p.demultiply();
+                [c.red(), c.green(), c.blue(), c.alpha()]
+            })
+            .collect();
+        self.doc.rows_patch(0, &rgba)
+    }
+
     /// Ctrl+D.
     pub(super) fn duplicate(&mut self) {
         let by = Vector::new(OFFSET, OFFSET);
@@ -464,21 +569,10 @@ impl Annotator {
         else {
             return;
         };
-        let img = &self.doc.image;
-        let layers: Vec<_> = (0..=top).map(|i| (&self.doc.items[i], true)).collect();
-        let whole = tiny_skia::IntRect::from_xywh(0, 0, img.width, img.height);
-        let rgba: Option<Vec<u8>> = whole.map(|r| {
-            super::document::paint(img, &layers, r)
-                .pixels()
-                .iter()
-                .flat_map(|p| {
-                    let c = p.demultiply();
-                    [c.red(), c.green(), c.blue(), c.alpha()]
-                })
-                .collect()
-        });
+        let layers: Vec<&Item> = self.doc.items[..=top].iter().collect();
+        let patch = self.bake(&layers);
         let mut edits = Vec::new();
-        if let Some(patch) = rgba.and_then(|rows| self.doc.rows_patch(0, &rows)) {
+        if let Some(patch) = patch {
             edits.push(Edit::Pixels(Box::new(patch)));
         }
         for i in (0..=top).rev() {

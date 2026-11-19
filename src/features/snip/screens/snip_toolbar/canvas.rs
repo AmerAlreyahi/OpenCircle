@@ -125,8 +125,79 @@ struct Pointer {
     ctrl: bool,
     /// Alt is held (Studio): a press moves a copy (`Message::PressCopy`).
     alt: bool,
+    /// Studio's pixel grid, drawn once per zoom / scroll / size (`grid_key`).
+    grid: canvas::Cache,
+    grid_key: std::cell::Cell<Option<[u32; 6]>>,
     /// The finger held (touch or pen acts as the left button: `shared::touch`).
     finger: Option<iced::touch::Finger>,
+}
+
+/// The picture pixel columns and rows whose lines cross `seen` (display px).
+fn grid_span(seen: Rectangle, z: f32) -> ((i32, i32), (i32, i32)) {
+    (
+        (
+            (seen.x / z).floor() as i32,
+            ((seen.x + seen.width) / z).ceil() as i32,
+        ),
+        (
+            (seen.y / z).floor() as i32,
+            ((seen.y + seen.height) / z).ceil() as i32,
+        ),
+    )
+}
+
+impl Input<'_> {
+    /// Studio's pixel grid: a hairline round every picture pixel from 800 %,
+    /// only in the part the stage shows, kept until the zoom, the scroll or
+    /// the size changes.
+    fn pixel_grid(
+        &self,
+        pointer: &Pointer,
+        renderer: &Renderer,
+        bounds: Rectangle,
+        margin: f32,
+    ) -> Option<Geometry> {
+        let e = self.editor;
+        if !e.grid || e.zoom < GRID_FROM {
+            return None;
+        }
+        let size = e.size();
+        let all = Rectangle::with_size(size);
+        let seen = match e.viewport {
+            Some(v) => all.intersection(&v)?,
+            None => all,
+        };
+        let key = [
+            e.zoom.to_bits(),
+            seen.x.to_bits(),
+            seen.y.to_bits(),
+            seen.width.to_bits(),
+            seen.height.to_bits(),
+            self.map.k.to_bits(),
+        ];
+        if pointer.grid_key.get() != Some(key) {
+            pointer.grid.clear();
+            pointer.grid_key.set(Some(key));
+        }
+        let z = e.zoom;
+        Some(pointer.grid.draw(renderer, bounds.size(), |frame| {
+            frame.scale(self.map.k);
+            frame.translate(Vector::new(margin, margin));
+            let line = Stroke::default().with_color(GRID).with_width(1.0);
+            let ((c0, c1), (r0, r1)) = grid_span(seen, z);
+            let path = Path::new(|p| {
+                for i in c0..=c1 {
+                    p.move_to(Point::new(i as f32 * z, seen.y));
+                    p.line_to(Point::new(i as f32 * z, seen.y + seen.height));
+                }
+                for i in r0..=r1 {
+                    p.move_to(Point::new(seen.x, i as f32 * z));
+                    p.line_to(Point::new(seen.x + seen.width, i as f32 * z));
+                }
+            });
+            frame.stroke(&path, line);
+        }))
+    }
 }
 
 impl canvas::Program<Message> for Input<'_> {
@@ -247,25 +318,6 @@ impl canvas::Program<Message> for Input<'_> {
             area::handles(&mut frame, r, look, hot, self.grown);
         }
 
-        // Studio's pixel grid: a hairline round every picture pixel from 800 %
-        if e.grid && e.zoom >= GRID_FROM {
-            let size = e.size();
-            let line = Stroke::default().with_color(GRID).with_width(1.0);
-            let cols = (size.width / e.zoom).round() as usize;
-            let rows = (size.height / e.zoom).round() as usize;
-            let path = Path::new(|p| {
-                for i in 0..=cols {
-                    p.move_to(Point::new(i as f32 * e.zoom, 0.0));
-                    p.line_to(Point::new(i as f32 * e.zoom, size.height));
-                }
-                for i in 0..=rows {
-                    p.move_to(Point::new(0.0, i as f32 * e.zoom));
-                    p.line_to(Point::new(size.width, i as f32 * e.zoom));
-                }
-            });
-            frame.stroke(&path, line);
-        }
-
         // Studio's rubber band (Select tool): a soft box in the look's colour.
         if let Some(band) = e.band_rect() {
             frame.fill_rectangle(
@@ -326,7 +378,12 @@ impl canvas::Program<Message> for Input<'_> {
                 area::handle(&mut frame, at, (1, 1), area::Handle::Rest, look.0);
             }
         }
-        vec![frame.into_geometry()]
+        let mut out = Vec::with_capacity(2);
+        if let Some(grid) = self.pixel_grid(pointer, renderer, bounds, m) {
+            out.push(grid);
+        }
+        out.push(frame.into_geometry());
+        out
     }
 
     fn mouse_interaction(
@@ -348,6 +405,9 @@ impl canvas::Program<Message> for Input<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod key_tests;
 
 #[cfg(test)]
 mod tests {

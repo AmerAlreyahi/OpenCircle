@@ -49,6 +49,8 @@ mod objects_api_tests;
 #[cfg(test)]
 mod objects_more_tests;
 #[cfg(test)]
+mod objects_settings_tests;
+#[cfg(test)]
 mod objects_tests;
 #[cfg(test)]
 mod tests;
@@ -421,6 +423,8 @@ pub enum Message {
     /// Studio (right-click, Library rows): select what is at a point / at an
     /// index in `doc.items` (`true`: add to the selection), hide / show an
     /// item, move item `from` to place `to`.
+    /// Ctrl+Enter in the Studio: the picture goes to the Steps (`Output::AddStep`).
+    AddToSteps,
     SelectAt(Point, bool),
     SelectIndex(usize, bool),
     ToggleHidden(usize),
@@ -601,6 +605,18 @@ pub struct Annotator {
     /// The Studio's magnet (Settings > Studio > Snap): moving and drawing land
     /// on the picture's edges and other objects' edges, within `SNAP`.
     pub snap: bool,
+    /// A menu, sheet or narrow overlay of the Studio window is up: the canvas
+    /// takes no key at all (the window has them).
+    pub keys_blocked: bool,
+    /// Studio settings (`[studio]`): a pasted picture stays a movable object;
+    /// a paste or move past the edge grows the canvas; the file a drag-out
+    /// writes is a JPEG.
+    pub paste_movable: bool,
+    pub grow_canvas: bool,
+    pub drag_jpeg: bool,
+    /// The part of the picture the stage shows (display px from its top-left),
+    /// so the pixel grid draws only that; `None` = all of it.
+    pub viewport: Option<Rectangle>,
     /// The Studio's pixel grid (drawn by the canvas at 800 % and over).
     pub grid: bool,
     /// Scrolling capture can run for this editor (the host sets it; the
@@ -720,6 +736,11 @@ impl Annotator {
             shared: None,
             assist: saved.line_assist,
             snap: false,
+            keys_blocked: false,
+            paste_movable: true,
+            grow_canvas: false,
+            drag_jpeg: false,
+            viewport: None,
             grid: false,
             scroll: false,
             capturing: false,
@@ -964,12 +985,17 @@ impl Annotator {
                 return Some(Output::AddStep(render(&self.doc)));
             }
             Message::AddStep => {}
+            Message::AddToSteps => {
+                self.commit();
+                self.menu = None;
+                return Some(Output::AddStep(render(&self.doc)));
+            }
             Message::DragOut => {
                 self.commit();
                 let flat = render(&self.doc);
                 // The previous drag's file goes first (one temp file at a time).
                 self.dragged = None;
-                match dragout::DragFile::write(&flat) {
+                match dragout::DragFile::write_as(&flat, self.drag_jpeg) {
                     Ok(mut file) => {
                         // The overlay hides for the drag; dropped = done, like Copy.
                         let dropped = dragout::start(&mut file, &flat, true);
@@ -1773,7 +1799,14 @@ impl Annotator {
         };
         let repaint = edit.is_some() || pending.hidden;
         if let Some(edit) = edit {
-            self.doc.exec(edit);
+            let grown = match &edit {
+                Edit::Insert(_, item) | Edit::Change(_, _, item) => self.grow_for(&[item.frame()]),
+                _ => None,
+            };
+            self.doc.exec(match grown {
+                Some(grow) => Edit::Seq(vec![edit, grow]),
+                None => edit,
+            });
         }
         if repaint {
             self.refresh();
