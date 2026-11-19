@@ -1416,3 +1416,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   ones built in parallel on branches while the owner tries a build.
 - Walkthrough video formats (owner, 2026-11-19, "ok for 3 types"): v0.4.3 exports GIF, MP4 and WebM; MP4 and WebM are AV1 through
   rav1e (BSD-2, ~+1 MB), H.264 is not used (licence). GIF stays the format that opens everywhere.
+- Studio name (owner, 2026-11-19, SUPERSEDES the name in "Snip Studio name and behaviour"): the Studio is "OpenCircle Studio"
+  everywhere users see it (window title, Start menu / Windows search, "Open with", Linux desktop entry); Arabic «استوديو
+  OpenCircle» (lead's default under the Arabic rules; the owner may correct). Code names stay "Studio". One string (st_title).
