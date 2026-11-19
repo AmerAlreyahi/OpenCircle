@@ -437,6 +437,12 @@ mod tests {
         let _ = app.studio_act(Row::AskAi);
         let first = app.chat.as_ref().map(|c| (c.id, c.panel.pinned()));
         assert!(matches!(first, Some((_, true))), "pinned from the start");
+        // Where the pointer is known the window opens at once; where it is not (Wayland,
+        // a machine with no display, CI) the asking window's monitor answers first
+        // (`Message::ChatHome`): the test plays that answer, so both ways are one path.
+        if app.chat_win.is_none() {
+            let _ = app.chat_home(iced::Size::new(1920.0, 1080.0));
+        }
         assert!(app.chat_win.is_some(), "its own window");
         let _ = app.studio_act(Row::AskAi);
         assert_eq!(app.chat.as_ref().map(|c| c.id), first.map(|f| f.0));

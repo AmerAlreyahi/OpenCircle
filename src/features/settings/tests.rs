@@ -356,8 +356,18 @@ fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
         window_limits(work(3440.0, 1440.0, 1.0)).0,
         Size::new(WINDOW_SIZE.width, WINDOW_SIZE.height.max(FIT_HEIGHT))
     );
-    // The header and every sidebar page are what FIT_HEIGHT counts.
-    const { assert!(FIT_HEIGHT > 400.0 && FIT_HEIGHT <= WINDOW_SIZE.height + 40.0) };
+    // The header and every sidebar page are what FIT_HEIGHT counts. On Windows
+    // (Text reading, then Studio) the list is two pages past what the design's 560
+    // holds: the window opens that much taller (two nav items), never a scrolling
+    // sidebar or tighter spacing (the design's).
+    const {
+        assert!(
+            FIT_HEIGHT > 400.0
+                && FIT_HEIGHT
+                    <= WINDOW_SIZE.height
+                        + 2.0 * (crate::shared::kit::tokens::size::NAV_ITEM + 2.0)
+        )
+    };
 }
 
 #[test]
