@@ -828,23 +828,23 @@ mod key_tests {
             };
             key_msg(&keyboard::Key::Character(c.into()), Physical::Code(code), m)
         };
-        let is = |name: &str, want: &str| {
-            let got = format!("{:?}", chord(name));
-            assert!(got.contains(want), "{name}: {got}");
+        let is = |name: &str, ok: fn(&studio::Msg) -> bool| {
+            let got = chord(name);
+            assert!(got.as_ref().is_some_and(ok), "{name:?} {got:?}");
         };
-        is(k::OPEN, "Open");
-        is(k::SAVE_AS, "Export");
-        is(k::PASTE, "Paste");
-        is(k::CLOSE, "Close");
-        is(k::LEFT_PANEL, "Library");
-        is(k::RIGHT_PANEL, "Panel");
-        is(k::ALL_PANELS, "Both");
-        is(k::SETTINGS, "Settings");
-        is(k::SHORTCUTS, "Shortcuts(true)");
-        is(k::ZOOM_IN, "ZoomIn");
-        is(k::ZOOM_OUT, "ZoomOut");
-        is(k::FIT, "Fit");
-        is(k::ACTUAL, "Actual");
+        is(k::OPEN, |m| matches!(m, studio::Msg::Open));
+        is(k::SAVE_AS, |m| matches!(m, studio::Msg::Export));
+        is(k::PASTE, |m| matches!(m, studio::Msg::Paste));
+        is(k::CLOSE, |m| matches!(m, studio::Msg::Caption(_)));
+        is(k::LEFT_PANEL, |m| matches!(m, studio::Msg::Library));
+        is(k::RIGHT_PANEL, |m| matches!(m, studio::Msg::Panel));
+        is(k::ALL_PANELS, |m| matches!(m, studio::Msg::Both));
+        is(k::SETTINGS, |m| matches!(m, studio::Msg::Settings));
+        is(k::SHORTCUTS, |m| matches!(m, studio::Msg::Shortcuts(true)));
+        is(k::ZOOM_IN, |m| matches!(m, studio::Msg::ZoomIn));
+        is(k::ZOOM_OUT, |m| matches!(m, studio::Msg::ZoomOut));
+        is(k::FIT, |m| matches!(m, studio::Msg::Fit));
+        is(k::ACTUAL, |m| matches!(m, studio::Msg::Actual));
     }
 }
 

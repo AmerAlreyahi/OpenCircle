@@ -120,7 +120,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
     let main: Element<'_, Msg> = match s.shortcuts {
         true => iced::widget::stack![
             main,
-            iced::widget::opaque(container(super::sheets::shortcuts()).center(Fill))
+            iced::widget::opaque(container(super::sheets::shortcuts(s)).center(Fill))
         ]
         .into(),
         false => main,

@@ -68,7 +68,7 @@ fn shortcut_column<'a>(title: &'a str, rows: Vec<Row<'a>>) -> Element<'a, Msg> {
 /// The shortcuts sheet (board 9): three columns (the tools, editing, view and
 /// files, every key from `keys` and the tool table), a foot note, Edit
 /// shortcuts… (Settings) and Close.
-pub fn shortcuts<'a>() -> Element<'a, Msg> {
+pub fn shortcuts<'a>(s: &super::Studio) -> Element<'a, Msg> {
     use super::keys as k;
     use crate::features::snip::annotate::{Group, Tool, info};
     let mut tools: Vec<Row<'a>> = Vec::new();
@@ -97,6 +97,15 @@ pub fn shortcuts<'a>() -> Element<'a, Msg> {
         ),
         row(tr(S::st_sc_steps), &[k::ADD_STEPS]),
     ];
+    // the quick actions run on the user's own keys (Settings > Shortcuts)
+    let acts = s.info();
+    let quick = super::properties::ACTS.iter().map(|r| {
+        let at = crate::features::snip::snip_more::Row::ALL
+            .iter()
+            .position(|x| x == r)
+            .unwrap_or(0);
+        row(tr(r.label(false)), &[&acts.caps[at].join("+")])
+    });
     let view = vec![
         row(
             tr(S::st_sc_panels),
@@ -111,6 +120,7 @@ pub fn shortcuts<'a>() -> Element<'a, Msg> {
         row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::SETTINGS]),
         row(tr(S::st_shortcuts), &[k::SHORTCUTS]),
     ];
+    let view: Vec<Row<'a>> = view.into_iter().chain(quick).collect();
     let columns = crate::dir_row![
         shortcut_column(t!(st_sc_g_tools), tools),
         shortcut_column(t!(st_sc_g_edit), editing),

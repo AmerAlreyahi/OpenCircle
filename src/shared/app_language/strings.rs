@@ -2518,8 +2518,6 @@ strings! {
         | "تحريك الصورة";
     st_sc_steps: "Add to steps"
         | "إضافة إلى الخطوات";
-    st_sc_quick: "Copy text, Translate, Ask AI"
-        | "نسخ النص والترجمة وسؤال الذكاء الاصطناعي";
     st_sc_g_tools: "Tools"
         | "الأدوات";
     st_sc_g_edit: "Editing"
