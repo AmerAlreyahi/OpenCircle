@@ -1,4 +1,4 @@
-//! Snip Studio's window, from kit parts only (layout v2): header (the panel
+//! OpenCircle Studio's window, from kit parts only (layout v2): header (the panel
 //! toggles before the caption buttons) · library | rail | options bar, stage,
 //! status bar | picture panel. The editor's own canvas and option rows
 //! (`snip_toolbar`) are reused as they are: one editor, two placements.

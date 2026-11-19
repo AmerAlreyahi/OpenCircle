@@ -347,7 +347,7 @@ pub fn across<'a, Message: 'a>(
         .style(style)
 }
 
-/// Scrolls both ways (Snip Studio's canvas past fit).
+/// Scrolls both ways (OpenCircle Studio's canvas past fit).
 pub fn both<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> scrollable::Scrollable<'a, Message> {

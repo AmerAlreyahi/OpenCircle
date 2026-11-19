@@ -291,7 +291,7 @@ fn write_desktop_file(
         return Ok(None);
     }
     let apps = data_home.join("applications");
-    // Snip Studio's entry (an extra "Open with" choice for pictures, never the default).
+    // OpenCircle Studio's entry (an extra "Open with" choice for pictures, never the default).
     write_generated(
         &apps.join(format!("{STUDIO_ID}.desktop")),
         &studio_entry(exe),
@@ -348,7 +348,7 @@ fn desktop_entry(exe: &Path) -> String {
 
 const STUDIO_ID: &str = "com.opencircle.app.studio";
 
-/// Snip Studio's entry: same program, `studio %f`, picture types only as an extra choice.
+/// OpenCircle Studio's entry: same program, `studio %f`, picture types only as an extra choice.
 /// The name is the string table's English `st_title` (packaging/ has a test that agrees).
 fn studio_entry(exe: &Path) -> String {
     format!(
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn the_studio_entry_is_an_extra_choice_for_pictures() {
         let entry = studio_entry(Path::new("/opt/oc/opencircle"));
-        assert!(entry.contains("Name=Snip Studio\n"));
+        assert!(entry.contains("Name=OpenCircle Studio\n"));
         assert!(entry.contains("Exec=/opt/oc/opencircle studio %f\n"));
         assert!(entry.contains("MimeType=image/png;image/jpeg;image/webp;image/bmp;image/gif;\n"));
         let dir = crate::shared::paths::test_dir("portal-studio");

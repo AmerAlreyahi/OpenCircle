@@ -156,7 +156,7 @@ opencircle run snip
 opencircle run copy_text --target circle
 opencircle run lens --target circle   # "lens" is the command name for Search in browser
 opencircle run song_search          # needs your key: see song-search.md
-opencircle studio                   # Snip Studio; `opencircle studio shot.png` opens a picture in it
+opencircle studio                   # OpenCircle Studio; `opencircle studio shot.png` opens a picture in it
 ```
 
 Targets are `full_screen`, `circle`, `last_region`, `window`; without

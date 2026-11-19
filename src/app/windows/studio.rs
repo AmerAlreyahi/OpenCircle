@@ -1,4 +1,4 @@
-//! Snip Studio's window (`features::snip::screens::studio`): one at a time;
+//! OpenCircle Studio's window (`features::snip::screens::studio`): one at a time;
 //! opening again brings it forward and opens the picture in it. What its
 //! state asks for (a file, the clipboard, Save / Copy, the config) runs here.
 use iced::{Task, keyboard, window};
@@ -20,7 +20,7 @@ impl Windows {
             }
             return window::minimize(id, false).chain(window::gain_focus(id));
         }
-        crate::log!("[opencircle] opening Snip Studio");
+        crate::log!("[opencircle] opening OpenCircle Studio");
         #[cfg(target_os = "linux")]
         crate::shared::platform::sys::shell::leave_overview();
         super::activate_next();

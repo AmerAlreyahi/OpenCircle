@@ -99,7 +99,7 @@ pub fn step<'a, Message: Clone + 'a>(
     layers.width(WELL.width).height(WELL.height).into()
 }
 
-/// A picture to open (Snip Studio's Recent captures): `step`'s well without a
+/// A picture to open (OpenCircle Studio's Recent captures): `step`'s well without a
 /// badge; under the cursor (or the keyboard on it) its 1 px `accent` ring.
 pub fn picture<'a, Message: Clone + 'a>(
     picture: image::Handle,

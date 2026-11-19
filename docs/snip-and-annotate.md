@@ -128,9 +128,9 @@ under the brush; any other drawing it touches goes whole. Turn on **Whole
 drawing** in its options to take a whole stroke at once. One `Ctrl+Z` brings
 back everything one drag erased.
 
-## Snip Studio
+## OpenCircle Studio
 
-Snip Studio is a normal window for longer work on a picture: the same editor
+OpenCircle Studio is a normal window for longer work on a picture: the same editor
 as the Snip toolbar, with a bigger canvas. Open it from the tray (**Studio**),
 from **More > Open in Studio** on a picked area (your drawings stay editable and
 `Ctrl+Z` still undoes them), or from a terminal with `opencircle studio

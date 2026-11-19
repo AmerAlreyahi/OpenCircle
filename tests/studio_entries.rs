@@ -1,4 +1,4 @@
-//! Snip Studio's packaging entries (Start menu, "Open with", desktop file): the name is the
+//! OpenCircle Studio's packaging entries (Start menu, "Open with", desktop file): the name is the
 //! string table's English `st_title`, the entries are extra choices and never a default.
 // Windows checks text files out with CRLF: compare with LF.
 fn read_to_string(p: &str) -> std::io::Result<String> {

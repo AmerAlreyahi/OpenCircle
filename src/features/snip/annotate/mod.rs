@@ -411,7 +411,7 @@ pub enum Message {
     LivePin,
     /// Snip's Share: the flattened image to the OS share sheet.
     Share,
-    /// More: this picture, its drawings still editable, into Snip Studio.
+    /// More: this picture, its drawings still editable, into OpenCircle Studio.
     OpenStudio,
     /// The share sheet's user picked a target (the host's answer to
     /// `Output::Sharing`).

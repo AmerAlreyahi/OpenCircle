@@ -1,4 +1,4 @@
-//! Snip Studio (v0.4.0, STUDIO_V2_SPEC): a normal window for longer work on a
+//! OpenCircle Studio (v0.4.0, STUDIO_V2_SPEC): a normal window for longer work on a
 //! picture. The SAME editor as the Snip widget (`annotate::Annotator`), shown
 //! another way: every tool on a rail, the tool's options always visible in a bar
 //! over the canvas, the canvas with zoom, Save / Copy in the status bar. Side

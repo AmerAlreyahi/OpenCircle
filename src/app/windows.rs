@@ -50,7 +50,7 @@ pub enum Kind {
     Onboarding,
     /// Wayland, after a refused capture: "OpenCircle needs screenshot permission".
     Permission,
-    /// Snip Studio (`studio.rs`).
+    /// OpenCircle Studio (`studio.rs`).
     Studio,
 }
 
@@ -105,7 +105,7 @@ pub enum Msg {
     Moved(window::Id, Point),
     /// Edit the strip's `i`th step in Snip: `app::App` opens it ("Update step N").
     EditStep(usize),
-    /// From Snip Studio's window; its own keys and file drops (any window: only
+    /// From OpenCircle Studio's window; its own keys and file drops (any window: only
     /// the Studio's are kept).
     Studio(crate::features::snip::screens::studio::Msg),
     StudioEvent(window::Id, crate::features::snip::screens::studio::Msg),
@@ -141,7 +141,7 @@ pub struct Windows {
     steps: Option<(Option<window::Id>, Strip)>,
     /// Our floating windows taken out of a grab (Linux, `leave_frame`).
     out: Option<Out>,
-    /// Snip Studio, at most one.
+    /// OpenCircle Studio, at most one.
     studio: Option<(window::Id, crate::features::snip::screens::studio::Studio)>,
 }
 

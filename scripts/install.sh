@@ -245,12 +245,12 @@ Terminal=false
 Categories=Utility;
 $MARK
 EOF
-# Snip Studio: an extra menu entry and "Open with" for pictures (never a default app).
+# OpenCircle Studio: an extra menu entry and "Open with" for pictures (never a default app).
 cat >"$STUDIO" <<EOF
 [Desktop Entry]
 $MARK
 Type=Application
-Name=Snip Studio
+Name=OpenCircle Studio
 Comment=Edit and annotate a picture
 Exec=$BIN studio %f
 Icon=$APP_ID

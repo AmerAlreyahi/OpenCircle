@@ -1750,8 +1750,8 @@ strings! {
         | "افتح في الاستوديو";
     tray_studio: "Studio"
         | "الاستوديو";
-    st_title: "Snip Studio"
-        | "استوديو اللقطات";
+    st_title: "OpenCircle Studio"
+        | "استوديو OpenCircle";
     st_empty_title: "No picture open"
         | "لا توجد صورة مفتوحة";
     st_empty_hint: "Drop a picture here, open one or paste one."

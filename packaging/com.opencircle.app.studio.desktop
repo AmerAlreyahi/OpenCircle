@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Snip Studio
+Name=OpenCircle Studio
 Comment=Edit and annotate a picture
 Exec=opencircle studio %f
 Icon=com.opencircle.app

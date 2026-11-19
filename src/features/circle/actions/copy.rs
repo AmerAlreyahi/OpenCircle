@@ -73,7 +73,7 @@ fn read_with<T>(read: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Opti
     read(clipboard)
 }
 
-/// The clipboard's picture, if it holds one (Ctrl+V in Snip Studio).
+/// The clipboard's picture, if it holds one (Ctrl+V in OpenCircle Studio).
 pub fn read_image() -> Option<Crop> {
     #[cfg(test)]
     return None; // never the machine's clipboard

@@ -46,7 +46,7 @@ pub enum Command {
         action: String,
         target: Option<Target>,
     },
-    /// `opencircle studio [file]`: Snip Studio, on that picture (an absolute path).
+    /// `opencircle studio [file]`: OpenCircle Studio, on that picture (an absolute path).
     Studio(Option<std::path::PathBuf>),
 }
 

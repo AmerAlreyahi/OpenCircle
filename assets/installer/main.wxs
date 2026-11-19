@@ -161,13 +161,13 @@
                     <RegistryValue Name="NoRepair" Type="integer" Value="1" />
                 </RegistryKey>
             </Component>
-            <!-- Snip Studio in Explorer's "Open with" for pictures: an extra choice only. No
+            <!-- OpenCircle Studio in Explorer's "Open with" for pictures: an extra choice only. No
                  default association is touched (no user choice, no default value on the extensions):
                  each extension only lists our ProgID under OpenWithProgids. Removed on uninstall.
                  The name must equal the app's English st_title (a test checks it). -->
             <Component Id="StudioOpenWith" Guid="*" Win64="$(var.Win64)">
                 <RegistryKey Root="HKLM" Key="Software\Classes\Applications\opencircle.exe">
-                    <RegistryValue Name="FriendlyAppName" Type="string" Value="Snip Studio" KeyPath="yes" />
+                    <RegistryValue Name="FriendlyAppName" Type="string" Value="OpenCircle Studio" KeyPath="yes" />
                     <RegistryKey Key="shell\open\command">
                         <RegistryValue Type="string" Value="&quot;[!Path]&quot; studio &quot;%1&quot;" />
                     </RegistryKey>
@@ -181,10 +181,10 @@
                     </RegistryKey>
                 </RegistryKey>
                 <RegistryKey Root="HKLM" Key="Software\Classes\OpenCircle.Image">
-                    <RegistryValue Type="string" Value="Snip Studio" />
-                    <RegistryValue Name="FriendlyTypeName" Type="string" Value="Snip Studio" />
+                    <RegistryValue Type="string" Value="OpenCircle Studio" />
+                    <RegistryValue Name="FriendlyTypeName" Type="string" Value="OpenCircle Studio" />
                     <RegistryKey Key="shell\open">
-                        <RegistryValue Name="FriendlyAppName" Type="string" Value="Snip Studio" />
+                        <RegistryValue Name="FriendlyAppName" Type="string" Value="OpenCircle Studio" />
                         <RegistryKey Key="command">
                             <RegistryValue Type="string" Value="&quot;[!Path]&quot; studio &quot;%1&quot;" />
                         </RegistryKey>
@@ -244,7 +244,7 @@
                 <!-- Findable by typing its name in Start; the same exe, started as `studio`.
                      The name must equal the app's English st_title (a test checks it). -->
                 <Shortcut Id="StudioStartMenuShortcut"
-                    Name="Snip Studio"
+                    Name="OpenCircle Studio"
                     Description="Edit and annotate a picture"
                     Target="[!Path]"
                     Arguments="studio"

@@ -473,12 +473,12 @@ pub struct SnipConfig {
     /// Written only when changed: the default file stays as it was.
     #[serde(skip_serializing_if = "is_default_long_max")]
     pub long_max: u32,
-    /// Snip Studio's side panels (`[snip.studio]`), written only when changed.
+    /// OpenCircle Studio's side panels (`[snip.studio]`), written only when changed.
     #[serde(skip_serializing_if = "StudioConfig::is_default")]
     pub studio: StudioConfig,
 }
 
-/// Snip Studio's side panels as the user last left them (both shown at first).
+/// OpenCircle Studio's side panels as the user last left them (both shown at first).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct StudioConfig {
     /// The library (start side: Recent captures).

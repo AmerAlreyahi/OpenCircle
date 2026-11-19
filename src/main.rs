@@ -21,7 +21,7 @@ pub enum Trigger {
     Quick(Instant, crate::shared::config::QuickAction),
     /// Tray "Settings…": open the Settings window, or focus it if it is open.
     OpenSettings,
-    /// Tray "Studio" or `opencircle studio [file]`: Snip Studio (on that picture).
+    /// Tray "Studio" or `opencircle studio [file]`: OpenCircle Studio (on that picture).
     OpenStudio(Option<std::path::PathBuf>),
     /// Linux: no tray icon can show (no host, library or GTK): open a window instead (first run: the onboarding).
     NoTray,

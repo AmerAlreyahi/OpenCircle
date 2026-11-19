@@ -25,7 +25,7 @@ pub enum Entry {
     Circle,
     Translate,
     Snip,
-    /// Snip Studio (opens it on nothing, or brings it forward).
+    /// OpenCircle Studio (opens it on nothing, or brings it forward).
     Studio,
     Live,
     Song,
