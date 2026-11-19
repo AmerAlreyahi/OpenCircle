@@ -269,6 +269,51 @@ impl Config {
             c.chat.stays_open = get(t, "chat.", "stays_open", d.chat.stays_open, &mut w);
             c.chat.keep_history = get(t, "chat.", "keep_history", d.chat.keep_history, &mut w);
         }
+        if let Some(t) = section(&root, "studio", &mut w) {
+            let (p, d) = ("studio.", &d.studio);
+            let s = &mut c.studio;
+            s.open_in = get(t, p, "open_in", d.open_in, &mut w);
+            s.reopen_last = get(t, p, "reopen_last", d.reopen_last, &mut w);
+            s.ask_unsaved = get(t, p, "ask_unsaved", d.ask_unsaved, &mut w);
+            s.keep_unsaved = get(t, p, "keep_unsaved", d.keep_unsaved, &mut w);
+            s.recent_files = get_checked(t, p, "recent_files", d.recent_files, &mut w, |n: &u8| {
+                STUDIO_RECENT
+                    .contains(n)
+                    .then_some(())
+                    .ok_or_else(|| "expected 0, 10 or 20".to_string())
+            });
+            s.folder = get(t, p, "folder", d.folder.clone(), &mut w);
+            s.file_name = get_checked(
+                t,
+                p,
+                "file_name",
+                d.file_name.clone(),
+                &mut w,
+                |n: &String| {
+                    (!n.trim().is_empty() && !n.contains(['/', '\\']))
+                        .then_some(())
+                        .ok_or_else(|| "expected a file name without folders".to_string())
+                },
+            );
+            s.format = get(t, p, "format", d.format, &mut w);
+            s.quality = get_checked(t, p, "quality", d.quality, &mut w, |n: &u8| {
+                STUDIO_QUALITY
+                    .contains(n)
+                    .then_some(())
+                    .ok_or_else(|| "expected 70, 85 or 95".to_string())
+            });
+            s.ask_where = get(t, p, "ask_where", d.ask_where, &mut w);
+            s.copy_path = get(t, p, "copy_path", d.copy_path, &mut w);
+            s.ctrl_c_picture = get(t, p, "ctrl_c_picture", d.ctrl_c_picture, &mut w);
+            s.paste_movable = get(t, p, "paste_movable", d.paste_movable, &mut w);
+            s.grow_canvas = get(t, p, "grow_canvas", d.grow_canvas, &mut w);
+            s.drag_type = get(t, p, "drag_type", d.drag_type, &mut w);
+            s.snap = get(t, p, "snap", d.snap, &mut w);
+            s.pixel_grid = get(t, p, "pixel_grid", d.pixel_grid, &mut w);
+            s.background = get(t, p, "background", d.background, &mut w);
+            s.zoom_on_open = get(t, p, "zoom_on_open", d.zoom_on_open, &mut w);
+            s.wheel = get(t, p, "wheel", d.wheel, &mut w);
+        }
         if let Some(t) = section(&root, "update", &mut w) {
             c.update.auto = get(t, "update.", "auto", None, &mut w);
         }

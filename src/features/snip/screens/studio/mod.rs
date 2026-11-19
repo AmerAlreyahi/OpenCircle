@@ -6,6 +6,8 @@
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
+#[allow(dead_code)] // the Studio window wires it (W88 gives the API)
+pub mod recovery;
 mod view;
 
 use std::path::PathBuf;

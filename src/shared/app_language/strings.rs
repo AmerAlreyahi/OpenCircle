@@ -2152,4 +2152,122 @@ strings! {
         | "قراءة النص السيريلي";
     md_read_cjk: "Read Chinese and Japanese text"
         | "قراءة النص الصيني والياباني";
+    nav_studio: "Studio"
+        | "الاستوديو";
+    ss_quick: "Quick widget"
+        | "الأداة السريعة";
+    ss_studio: "Studio"
+        | "الاستوديو";
+    ss_open_in: "Open pictures in"
+        | "فتح الصور في";
+    ss_open_in_d: "Where a picture opens when you choose Edit"
+        | "المكان الذي تُفتح فيه الصورة";
+    ss_reopen: "Reopen the last picture on start"
+        | "إعادة فتح آخر صورة عند البدء";
+    ss_reopen_d: "The Studio opens with the picture you were editing"
+        | "يفتح الاستوديو بالصورة التي كنت تعدّلها";
+    ss_ask_unsaved: "Ask before closing with unsaved changes"
+        | "السؤال قبل الإغلاق مع تغييرات غير محفوظة";
+    ss_ask_unsaved_d: "Save, Don't save or Cancel"
+        | "حفظ أو عدم الحفظ أو إلغاء";
+    ss_keep: "Keep unsaved work if OpenCircle closes unexpectedly"
+        | "الاحتفاظ بالعمل غير المحفوظ عند الإغلاق المفاجئ";
+    ss_keep_d: "A private copy stays on this PC while a picture is unsaved. Restore or discard it at the next start"
+        | "تبقى نسخة خاصة على هذا الجهاز ما دامت الصورة غير محفوظة. يمكنك استعادتها أو حذفها عند البدء التالي";
+    ss_recent: "Recent files shown"
+        | "الملفات الأخيرة المعروضة";
+    ss_recent_d: "0 hides the list"
+        | "القيمة 0 تخفي القائمة";
+    ss_folder: "Default folder"
+        | "المجلد الافتراضي";
+    ss_folder_d: "Where Save starts. Empty uses Pictures/OpenCircle"
+        | "يبدأ الحفظ من هنا. وإن كان فارغا فمجلد الصور/OpenCircle";
+    ss_name: "File name"
+        | "اسم الملف";
+    ss_name_d: "{date} and {time} are filled in when you save"
+        | "يُملأ {date} و{time} عند الحفظ";
+    ss_format: "Default format"
+        | "الصيغة الافتراضية";
+    ss_format_d: "The file Save writes"
+        | "الملف الذي يكتبه الحفظ";
+    ss_quality: "Quality"
+        | "الجودة";
+    ss_quality_d: "For JPEG; higher is larger"
+        | "لصيغة JPEG؛ الأعلى أكبر حجما";
+    ss_size: "Size"
+        | "الحجم";
+    ss_size_d: "The long edge of a saved or copied picture; Original keeps it whole"
+        | "الضلع الأطول للصورة المحفوظة أو المنسوخة؛ الأصلي يبقيها كاملة";
+    ss_ask_where: "Ask where to save every time"
+        | "السؤال عن مكان الحفظ كل مرة";
+    ss_ask_where_d: "Always show the Save dialog"
+        | "عرض نافذة الحفظ دائما";
+    ss_copy_path: "Copy the file path after saving"
+        | "نسخ مسار الملف بعد الحفظ";
+    ss_copy_path_d: "Paste it into a chat or a message"
+        | "الصقه في محادثة أو رسالة";
+    ss_ctrlc: "Ctrl+C with nothing selected copies the picture"
+        | "Ctrl+C دون تحديد ينسخ الصورة";
+    ss_ctrlc_d: "Ctrl+Shift+C always copies the whole picture"
+        | "Ctrl+Shift+C ينسخ الصورة كاملة دائما";
+    ss_paste_obj: "Pasted pictures stay movable objects"
+        | "الصور الملصوقة تبقى عناصر قابلة للتحريك";
+    ss_paste_obj_d: "Off merges a pasted picture into the picture at once"
+        | "عند الإيقاف تُدمج الصورة الملصوقة فورا";
+    ss_grow: "Grow the canvas past the edge"
+        | "توسيع اللوحة خارج الحافة";
+    ss_grow_d: "A pasted or moved object may reach beyond the picture"
+        | "قد يتجاوز العنصر الملصوق أو المنقول حدود الصورة";
+    ss_drag: "Drag-out file type"
+        | "نوع الملف عند السحب للخارج";
+    ss_drag_d: "The file made when you drag the picture to another app"
+        | "الملف الناتج عند سحب الصورة إلى تطبيق آخر";
+    ss_tool_styles: "Reset tool styles"
+        | "إعادة ضبط أنماط الأدوات";
+    ss_tool_styles_d: "Colours and sizes go back to the defaults"
+        | "تعود الألوان والأحجام إلى الافتراضي";
+    ss_tool_styles_done: "Tool styles are at the defaults"
+        | "أنماط الأدوات على الوضع الافتراضي";
+    ss_snap: "Snap to edges and objects"
+        | "الالتصاق بالحواف والعناصر";
+    ss_snap_d: "Guides help you line things up"
+        | "خطوط إرشاد تساعدك على المحاذاة";
+    ss_grid: "Pixel grid at high zoom"
+        | "شبكة البكسل عند التكبير";
+    ss_grid_d: "Shows each pixel when zoomed in far"
+        | "تُظهر كل بكسل عند التكبير الشديد";
+    ss_bg: "Background around the picture"
+        | "الخلفية حول الصورة";
+    ss_bg_d: "What shows past the picture's edge"
+        | "ما يظهر خلف حافة الصورة";
+    ss_bg_theme: "Theme"
+        | "السمة";
+    ss_bg_check: "Checkerboard"
+        | "رقعة الشطرنج";
+    ss_bg_dark: "Dark"
+        | "داكن";
+    ss_zoom: "Zoom on open"
+        | "التكبير عند الفتح";
+    ss_zoom_d: "How big a picture first shows"
+        | "حجم الصورة عند الفتح";
+    ss_zoom_fit: "Fit"
+        | "ملاءمة";
+    ss_zoom_100: "100 %"
+        | "100%";
+    ss_wheel: "Mouse wheel"
+        | "عجلة الفأرة";
+    ss_wheel_d: "Ctrl+wheel does the other"
+        | "Ctrl مع العجلة يفعل الآخر";
+    ss_wheel_scroll: "Scrolls"
+        | "تمرير";
+    ss_wheel_zoom: "Zooms"
+        | "تكبير";
+    ss_left: "Show left panel"
+        | "إظهار اللوحة اليسرى";
+    ss_left_d: "The library: recent files, drawings, steps"
+        | "المكتبة: الملفات الأخيرة والرسومات والخطوات";
+    ss_right: "Show right panel"
+        | "إظهار اللوحة اليمنى";
+    ss_right_d: "The picture panel and its actions"
+        | "لوحة الصورة وإجراءاتها";
 }

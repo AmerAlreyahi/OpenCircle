@@ -75,6 +75,10 @@
 //! history = false                   # keep recent songs on this PC
 //! [update]
 //! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
+//! [studio]                          # OpenCircle Studio (Settings > Studio); written only once changed, additive (no schema bump)
+//! # open_in, reopen_last, ask_unsaved, keep_unsaved, recent_files, folder, file_name, format, quality, ask_where,
+//! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel
+//!
 //! [snip]
 //! after = "both"                    # both (copy when picked) | editor; an old "copy" reads as both
 //! max_edge = 0                      # Copy / Save scale the long edge down to this; 0 = original (default)
@@ -502,6 +506,124 @@ impl StudioConfig {
     }
 }
 
+/// Where OpenCircle Studio opens a picture (`studio.open_in`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioOpenIn {
+    #[default]
+    Quick,
+    Studio,
+}
+
+/// What shows around the picture (`studio.background`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioBackdrop {
+    #[default]
+    Theme,
+    Checkerboard,
+    Dark,
+}
+
+/// The zoom a picture opens at (`studio.zoom_on_open`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioZoom {
+    #[default]
+    Fit,
+    /// 100 %.
+    Actual,
+}
+
+/// What the mouse wheel does on the canvas (`studio.wheel`); Ctrl+wheel is the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioWheel {
+    #[default]
+    Scroll,
+    Zoom,
+}
+
+/// Quality steps of a saved JPEG (`studio.quality`, percent).
+pub const STUDIO_QUALITY: [u8; 3] = [70, 85, 95];
+/// "Recent files shown" (`studio.recent_files`); 0 hides them.
+pub const STUDIO_RECENT: [u8; 3] = [0, 10, 20];
+/// The default file name; `{date}` and `{time}` are filled in when saving.
+pub const STUDIO_FILE_NAME: &str = "OpenCircle {date} {time}";
+
+/// `[studio]`: OpenCircle Studio's settings (Settings > Studio, STUDIO_V3_SPEC section 8),
+/// written only once something changed. The window reads these; the panels' two
+/// switches stay in `snip.studio` ([`StudioConfig`]) and the picture size is `snip.max_edge`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StudioPrefs {
+    pub open_in: StudioOpenIn,
+    /// Reopen the last picture when the Studio starts.
+    pub reopen_last: bool,
+    /// Ask Save / Don't save / Cancel when closing with unsaved changes.
+    pub ask_unsaved: bool,
+    /// Keep a private copy of unsaved work for a crash (`recovery`); off = nothing written.
+    pub keep_unsaved: bool,
+    /// Recent files listed (`STUDIO_RECENT`).
+    pub recent_files: u8,
+    /// Where Save starts; "" = Pictures/OpenCircle.
+    pub folder: String,
+    /// Name pattern with `{date}` / `{time}`.
+    pub file_name: String,
+    pub format: Format,
+    /// JPEG quality (`STUDIO_QUALITY`).
+    pub quality: u8,
+    /// Always show the Save dialog.
+    pub ask_where: bool,
+    /// Put the saved file's path on the clipboard.
+    pub copy_path: bool,
+    /// Ctrl+C with nothing selected copies the picture.
+    pub ctrl_c_picture: bool,
+    /// A pasted picture stays a movable object.
+    pub paste_movable: bool,
+    /// Pasting or moving past the edge grows the canvas.
+    pub grow_canvas: bool,
+    /// The file type of a picture dragged out of the Studio.
+    pub drag_type: Format,
+    pub snap: bool,
+    pub pixel_grid: bool,
+    pub background: StudioBackdrop,
+    pub zoom_on_open: StudioZoom,
+    pub wheel: StudioWheel,
+}
+
+impl Default for StudioPrefs {
+    fn default() -> Self {
+        StudioPrefs {
+            open_in: StudioOpenIn::Quick,
+            reopen_last: false,
+            ask_unsaved: true,
+            keep_unsaved: false,
+            recent_files: 10,
+            folder: String::new(),
+            file_name: STUDIO_FILE_NAME.into(),
+            format: Format::Png,
+            quality: 85,
+            ask_where: false,
+            copy_path: false,
+            ctrl_c_picture: true,
+            paste_movable: true,
+            grow_canvas: false,
+            drag_type: Format::Png,
+            snap: true,
+            pixel_grid: true,
+            background: StudioBackdrop::Theme,
+            zoom_on_open: StudioZoom::Fit,
+            wheel: StudioWheel::Scroll,
+        }
+    }
+}
+
+impl StudioPrefs {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 fn is_default_long_max(px: &u32) -> bool {
     *px == DEFAULT_LONG_MAX
 }
@@ -909,6 +1031,9 @@ pub struct Config {
     pub chat: ChatConfig,
     pub translate: TranslateConfig,
     pub snip: SnipConfig,
+    /// Written only once changed (the default file stays as frozen).
+    #[serde(skip_serializing_if = "StudioPrefs::is_default")]
+    pub studio: StudioPrefs,
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
     pub update: UpdateConfig,
@@ -1027,6 +1152,7 @@ impl Default for Config {
             chat: ChatConfig::default(),
             translate: TranslateConfig::default(),
             snip: SnipConfig::default(),
+            studio: StudioPrefs::default(),
             // DESIGN.md "Quick actions".
             quick_actions: vec![
                 qa("translate", "Alt+Shift+T", Target::FullScreen, false),

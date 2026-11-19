@@ -542,6 +542,7 @@ pub enum Section {
     Look,
     Shortcuts,
     Snip,
+    Studio,
     Ai,
     TextReading,
     Translate,
@@ -672,6 +673,8 @@ pub struct State {
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
     /// at each visit of the Snip page.
     pub(super) print_screen_taken: bool,
+    /// The folder picker was opened by Studio's Default folder.
+    studio_folder_pick: bool,
     /// History: what is kept (`None` = being counted), and whether Clear all
     /// is asking to be sure.
     pub(super) kept: Option<Counts>,
@@ -731,6 +734,13 @@ pub enum Message {
     /// General's App language: "" = your language (the onboarding pick), else en | ar.
     AppLanguage(crate::shared::app_language::Choice),
     Autostart(bool),
+    /// Settings > Studio: the Studio's settings with one changed.
+    Studio(crate::shared::config::StudioPrefs),
+    /// Studio's Default folder: Browse… (the answer is a `Folder`) / Reset.
+    BrowseStudioFolder,
+    ClearStudioFolder,
+    /// Studio's Reset tool styles: the editor's remembered options go back to the defaults.
+    ResetToolStyles,
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -1178,6 +1188,7 @@ impl State {
             fetching: Vec::new(),
             failed: Vec::new(),
             print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
+            studio_folder_pick: false,
             kept: None,
             clearing_all: false,
             resetting: false,
@@ -1905,11 +1916,30 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
             state.draft.snip = snip;
         }
-        Message::BrowseFolder => return Outcome::Browse,
-        Message::Folder(Some(dir)) => {
-            state.draft.general.save_folder = dir.to_string_lossy().into_owned();
+        Message::Studio(prefs) => state.draft.studio = prefs,
+        Message::BrowseStudioFolder => {
+            state.studio_folder_pick = true;
+            return Outcome::Browse;
         }
-        Message::Folder(None) => {}
+        Message::ClearStudioFolder => state.draft.studio.folder.clear(),
+        Message::ResetToolStyles => {
+            let line_assist = state.draft.editor.line_assist;
+            state.draft.editor = crate::shared::config::EditorConfig {
+                line_assist,
+                ..Default::default()
+            };
+        }
+        Message::BrowseFolder => return Outcome::Browse,
+        Message::Folder(dir) => {
+            let studio = std::mem::take(&mut state.studio_folder_pick);
+            if let Some(dir) = dir {
+                let dir = dir.to_string_lossy().into_owned();
+                match studio {
+                    true => state.draft.studio.folder = dir,
+                    false => state.draft.general.save_folder = dir,
+                }
+            }
+        }
         Message::ClearFolder => state.draft.general.save_folder.clear(),
         Message::OpenLink(url) => return Outcome::OpenLink(url),
         Message::CopyDiagnostics => return Outcome::CopyDiagnostics,

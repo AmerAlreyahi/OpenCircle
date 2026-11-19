@@ -1637,3 +1637,50 @@ fn borealis_is_stored_only_when_picked() {
     assert_eq!(old.look.theme, LookTheme::SapphireGlow);
     assert_eq!(w.len(), 1, "{w:?}");
 }
+
+#[test]
+fn studio_settings_default_off_round_trip_and_are_not_written_until_changed() {
+    let d = Config::default();
+    assert!(!d.studio.keep_unsaved && d.studio.ask_unsaved && d.studio.recent_files == 10);
+    let dir = tmp_dir("studio-roundtrip");
+    let path = dir.join("config.toml");
+    d.save_to(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text.contains("[studio]"),
+        "the default file stays as it was"
+    );
+    let mut c = d.clone();
+    c.studio = StudioPrefs {
+        open_in: StudioOpenIn::Studio,
+        keep_unsaved: true,
+        recent_files: 20,
+        folder: "pics".into(),
+        file_name: "shot {date}".into(),
+        format: Format::Jpeg,
+        quality: 95,
+        background: StudioBackdrop::Checkerboard,
+        zoom_on_open: StudioZoom::Actual,
+        wheel: StudioWheel::Zoom,
+        ..StudioPrefs::default()
+    };
+    c.save_to(&path).unwrap();
+    let (back, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.studio, c.studio);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn an_older_file_without_studio_loads_clean_and_bad_studio_values_take_defaults() {
+    let (c, w) = Config::parse(V010_USED);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.studio, StudioPrefs::default());
+    let (c, w) = Config::parse(
+        "version = 13\n[studio]\nquality = 12\nrecent_files = 7\nfile_name = \"a/b\"\nsnap = false\n",
+    );
+    assert_eq!((c.studio.quality, c.studio.recent_files), (85, 10));
+    assert_eq!(c.studio.file_name, STUDIO_FILE_NAME);
+    assert!(!c.studio.snap, "the valid key is kept");
+    assert_eq!(w.len(), 3, "{w:?}");
+}
