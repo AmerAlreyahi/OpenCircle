@@ -632,6 +632,7 @@ impl Studio {
     /// The download card up (`None`: gone).
     pub fn set_card(&mut self, card: Option<Fetching>) {
         self.card = card;
+        self.sync_blocked();
     }
 
     pub fn card(&self) -> Option<&Fetching> {
@@ -678,7 +679,14 @@ impl Studio {
 
     /// The cut's answer for the picture `epoch`: applied as one undoable edit
     /// (the compare view opens), or the model's card, or a pill.
+    /// (the host's answer can raise a card: the keys are the card's)
     pub fn set_cut(&mut self, epoch: u32, done: cut::Done) -> Outcome {
+        let out = self.set_cut_inner(epoch, done);
+        self.sync_blocked();
+        out
+    }
+
+    fn set_cut_inner(&mut self, epoch: u32, done: cut::Done) -> Outcome {
         if epoch != self.epoch || self.cutting != cut::Phase::Working {
             return Outcome::None;
         }
@@ -891,7 +899,14 @@ impl Studio {
     }
 
     /// The OS (or the header's x) asked to close.
+    /// (the question it raises has the keys)
     pub fn close_requested(&mut self) -> Outcome {
+        let out = self.close_requested_inner();
+        self.sync_blocked();
+        out
+    }
+
+    fn close_requested_inner(&mut self) -> Outcome {
         match self.asks() {
             true => {
                 self.asking = Some(After::Close);
@@ -905,7 +920,14 @@ impl Studio {
     }
 
     /// The app is quitting: unsaved drawings ask first (`Outcome::Quit` after).
+    /// (the question it raises has the keys)
     pub fn quit_requested(&mut self) -> Outcome {
+        let out = self.quit_requested_inner();
+        self.sync_blocked();
+        out
+    }
+
+    fn quit_requested_inner(&mut self) -> Outcome {
         match self.asks() {
             true => {
                 self.asking = Some(After::Quit);
@@ -921,13 +943,21 @@ impl Studio {
     /// The last Save landed: what is shown now is saved.
     pub fn saved(&mut self) {
         self.drop_copy();
+        self.sync_blocked();
         if let Some(e) = &self.editor {
             self.saved = Some(e.doc.state());
         }
     }
 
     /// After the question's Save landed (or Don't save): what waited goes on.
+    /// (the question is answered: the keys are the canvas's again)
     pub fn proceed(&mut self) -> Outcome {
+        let out = self.proceed_inner();
+        self.sync_blocked();
+        out
+    }
+
+    fn proceed_inner(&mut self) -> Outcome {
         match self.asking.take() {
             Some(After::Close) => {
                 self.drop_copy();

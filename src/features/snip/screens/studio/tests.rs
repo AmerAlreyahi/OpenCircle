@@ -2120,3 +2120,30 @@ fn v3_a_requested_file_always_wins_over_reopen_last() {
         assert_eq!(s.reopen(true), None);
     }
 }
+
+/// The canvas's keys follow every state change the host makes without a message:
+/// a card, the unsaved question and its answer.
+#[test]
+fn v3_blocked_keys_follow_the_hosts_calls_too() {
+    let blocked = |s: &Studio| s.editor.as_ref().unwrap().keys_blocked;
+    let mut s = studio_on(64, 64);
+    draw(&mut s);
+    assert!(!blocked(&s));
+    s.set_card(Some(Fetching::cutout()));
+    assert!(blocked(&s), "a download card is up");
+    s.set_card(None);
+    assert!(!blocked(&s));
+    let _ = s.close_requested();
+    assert!(
+        s.asking() && blocked(&s),
+        "the unsaved question has the keys"
+    );
+    let _ = s.proceed();
+    assert!(!blocked(&s), "answered");
+    draw(&mut s);
+    let _ = s.quit_requested();
+    assert!(blocked(&s));
+    s.saved();
+    let _ = s.proceed();
+    assert!(!blocked(&s));
+}
