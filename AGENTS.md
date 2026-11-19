@@ -1419,3 +1419,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Studio name (owner, 2026-11-19, SUPERSEDES the name in "Snip Studio name and behaviour"): the Studio is "OpenCircle Studio"
   everywhere users see it (window title, Start menu / Windows search, "Open with", Linux desktop entry); Arabic «استوديو
   OpenCircle» (lead's default under the Arabic rules; the owner may correct). Code names stay "Studio". One string (st_title).
+- Cut out (owner, 2026-11-19, "go with recommended", on W80's lab reports-0.4.x/w80-cutout-lab.md): v0.4.6 Cut out = a quick
+  no-model fill for plain backgrounds always (instant, nothing downloaded) + IS-Net general-use (Apache-2.0, 179 MB, ~0.7-1 s and
+  ~830 MB RAM per cut on the CPU, freed after) for other backgrounds, downloaded only after the user confirms it on first need
+  (size shown), sha256 pinned, hosted on OpenCircle-models. Before shipping: a check on ~5 real CC0 photos.
