@@ -400,6 +400,7 @@ fn with_redact(px: [u8; 4]) -> Studio {
         width: 4.0,
         outline: false,
         fill: false,
+        hidden: false,
     });
     s
 }

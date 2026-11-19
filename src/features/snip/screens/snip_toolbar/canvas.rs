@@ -11,7 +11,7 @@ use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector}
 
 use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
-    DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
+    BAND_ALPHA, DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
 };
 use crate::features::snip::annotate::{Annotator, Message};
 
@@ -246,12 +246,12 @@ impl canvas::Program<Message> for Input<'_> {
 
         // Studio's rubber band (Select tool): a soft box in the look's colour.
         if let Some(band) = e.band_rect() {
-            let look = crate::shared::theme::accent_of(&crate::shared::config::look());
-            frame.fill_rectangle(band.position(), band.size(), look.0.scale_alpha(0.12));
-            frame.stroke(
-                &Path::rectangle(band.position(), band.size()),
-                accent.with_color(look.0),
+            frame.fill_rectangle(
+                band.position(),
+                band.size(),
+                c().accent.scale_alpha(BAND_ALPHA),
             );
+            frame.stroke(&Path::rectangle(band.position(), band.size()), accent);
         }
         if let Some(keep) = e.crop_preview() {
             let outside = Path::new(|p| {

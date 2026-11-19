@@ -23,7 +23,7 @@ pub fn line_height(size: f32) -> f32 {
 }
 
 /// How a text annotation is set (the Text tool's options).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Style {
     pub font: Font,
     pub bold: bool,

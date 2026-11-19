@@ -561,6 +561,7 @@ mod tests {
             width: 1.0,
             outline: false,
             fill: false,
+            hidden: false,
         };
         let editor = &mut app.o.edit.as_mut().unwrap().annotator;
         let n = editor.doc.items.len();

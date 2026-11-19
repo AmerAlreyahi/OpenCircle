@@ -45,6 +45,10 @@ fn clean_paste(t: &str) -> String {
 }
 
 #[cfg(test)]
+mod objects_api_tests;
+#[cfg(test)]
+mod objects_more_tests;
+#[cfg(test)]
 mod objects_tests;
 #[cfg(test)]
 mod tests;
@@ -55,7 +59,7 @@ pub use document::{
     Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
 };
 #[allow(unused_imports)] // API for the Studio's bar (W87)
-pub use objects::{Order, SelectionStyle};
+pub use objects::{Order, SelectionStyle, clear_clipboard};
 pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
@@ -415,6 +419,20 @@ pub enum Message {
     PressCopy(Point),
     #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
     Merge,
+    /// Studio (right-click, Library rows): select what is at a point / at an
+    /// index in `doc.items` (`true`: add to the selection), hide / show an
+    /// item, move item `from` to place `to`.
+    #[allow(dead_code)] // wired by the Studio view (W87)
+    SelectAt(Point, bool),
+    #[allow(dead_code)]
+    SelectIndex(usize, bool),
+    #[allow(dead_code)]
+    ToggleHidden(usize),
+    #[allow(dead_code)]
+    Reorder {
+        from: usize,
+        to: usize,
+    },
     /// Studio's Properties: the selection's box (image px), a pasted
     /// picture's opacity (0-255) and ratio lock.
     #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
@@ -643,8 +661,8 @@ pub struct Annotator {
     band: Option<(Point, Point)>,
     /// The next drawing's style while a selection shows its own values.
     stash: Option<objects::DrawStyle>,
-    /// The values the options bar shows (to tell what the user changed).
-    shown: Option<objects::DrawStyle>,
+    /// What the options message being handled changes (`objects::touch`).
+    touch: u8,
 }
 
 impl Annotator {
@@ -727,7 +745,7 @@ impl Annotator {
             group: None,
             band: None,
             stash: None,
-            shown: None,
+            touch: 0,
             saved,
         };
         editor.refresh();
@@ -774,7 +792,9 @@ impl Annotator {
         let picked = self
             .studio
             .then(|| (self.doc.selected, self.doc.extra.clone()));
+        self.touch = objects::touch::of(&message);
         let out = self.handle(message);
+        self.touch = 0;
         if let Some(picked) = picked
             && picked != (self.doc.selected, self.doc.extra.clone())
         {
@@ -1020,6 +1040,10 @@ impl Annotator {
             Message::Shove(arrow, far) => self.shove(arrow, far),
             Message::Order(how) => self.reorder(how),
             Message::Merge => self.merge(),
+            Message::SelectAt(p, add) => self.select_at(p, add),
+            Message::SelectIndex(i, add) => self.select_index(i, add),
+            Message::ToggleHidden(i) => self.toggle_hidden(i),
+            Message::Reorder { from, to } => self.reorder_to(from, to),
             Message::Bounds(r) => self.set_selection_bounds(r),
             Message::Opacity(o) => self.set_picture(Some(o), None),
             Message::LockRatio(on) => self.set_picture(None, Some(on)),
@@ -1823,6 +1847,7 @@ impl Annotator {
             width,
             outline: self.outline,
             fill: self.fill,
+            hidden: false,
         }
     }
 

@@ -57,9 +57,49 @@ struct Copied {
     items: Vec<Item>,
     png: Crop,
     pastes: u32,
+    /// Copied by Ctrl+X: the first paste goes back in place.
+    cut: bool,
+}
+
+/// The pixels the process holds for pasting (the last Studio window closed).
+pub fn clear_clipboard() {
+    *CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 static CLIPBOARD: Mutex<Option<Copied>> = Mutex::new(None);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)] // crash recovery (W87)
+struct Saved {
+    v: u32,
+    items: Vec<Item>,
+}
+
+/// What an options message changes (see `Annotator::touch`).
+pub(super) mod touch {
+    pub const COLOUR: u8 = 1;
+    pub const STROKE: u8 = 2;
+    pub const TEXT: u8 = 4;
+    pub const BLUR: u8 = 8;
+    pub const OUTLINE: u8 = 16;
+    pub const FILL: u8 = 32;
+
+    use super::super::Message as M;
+
+    pub fn of(m: &M) -> u8 {
+        match m {
+            M::Colour(_) | M::Hex(_) => COLOUR,
+            M::Width(_) => STROKE | TEXT,
+            M::Stroke(_) => STROKE,
+            M::TextSize(_) | M::TextStyle(_) => TEXT,
+            M::BlurSize(_) | M::BlurCell(_) => BLUR,
+            M::Outline(_) => OUTLINE,
+            M::Fill(_) => FILL,
+            M::Preset(_) => COLOUR | STROKE | TEXT,
+            _ => 0,
+        }
+    }
+}
 
 /// A group drag: the items as they were, and which move.
 pub(super) struct GroupDrag {
@@ -186,6 +226,7 @@ impl Annotator {
     fn picked(&self) -> Vec<Item> {
         (self.doc.selection().iter())
             .map(|&i| self.doc.items[i].clone())
+            .filter(|i| !i.hidden)
             .collect()
     }
 
@@ -204,6 +245,7 @@ impl Annotator {
             items,
             png: png.clone(),
             pastes: 0,
+            cut,
         });
         if cut {
             self.delete_selection();
@@ -223,10 +265,11 @@ impl Annotator {
             let mut held = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
             held.as_mut().filter(|c| similar(&c.png, &clip)).map(|c| {
                 c.pastes += 1;
-                (c.items.clone(), c.pastes)
+                // after Ctrl+X the first paste lands where they were
+                (c.items.clone(), c.pastes - u32::from(c.cut))
             })
         };
-        self.tool = Tool::Select;
+        self.pick_tool(Tool::Select);
         match ours {
             Some((items, n)) => {
                 let by = Vector::new(OFFSET, OFFSET) * n as f32;
@@ -252,6 +295,7 @@ impl Annotator {
                     width: 0.0,
                     outline: false,
                     fill: false,
+                    hidden: false,
                 };
                 self.append(vec![item]);
             }
@@ -266,6 +310,83 @@ impl Annotator {
         after.extend(new);
         let sel: Vec<usize> = (first..after.len()).collect();
         self.set_items(after, &sel);
+    }
+
+    /// A right-click or an Objects row: select what is at `p` (`add`: Shift,
+    /// toggles it); an empty spot deselects unless `add`. Right-clicking one
+    /// of several selected keeps them all.
+    pub(super) fn select_at(&mut self, p: Point, add: bool) {
+        self.commit();
+        let hit = select::hit(&self.doc.items, p, super::REACH / self.zoom);
+        match hit {
+            Some(i) => self.select_index(i, add),
+            None if !add => self.doc.deselect(),
+            None => {}
+        }
+    }
+
+    pub(super) fn select_index(&mut self, i: usize, add: bool) {
+        if i >= self.doc.items.len() {
+            return;
+        }
+        self.commit();
+        self.pick_tool(Tool::Select);
+        if add {
+            self.toggle_selected(i);
+        } else if !self.doc.selection().contains(&i) {
+            self.doc.select_one(Some(i));
+        }
+    }
+
+    /// The Objects list's eye: shows / hides item `i` (one undo step).
+    pub(super) fn toggle_hidden(&mut self, i: usize) {
+        self.commit();
+        let Some(before) = self.doc.items.get(i).cloned() else {
+            return;
+        };
+        let after = Item {
+            hidden: !before.hidden,
+            ..before.clone()
+        };
+        self.doc.exec(Edit::Change(i, before, after));
+        self.refresh();
+    }
+
+    /// Dragging an Objects row: item `from` goes to place `to` (one undo step;
+    /// it stays selected).
+    pub(super) fn reorder_to(&mut self, from: usize, to: usize) {
+        let n = self.doc.items.len();
+        if from >= n || to >= n || from == to {
+            return;
+        }
+        let mut after = self.doc.items.clone();
+        let moved = after.remove(from);
+        after.insert(to, moved);
+        self.set_items(after, &[to]);
+    }
+
+    /// The drawings as JSON (crash recovery keeps these, not a flat picture).
+    #[allow(dead_code)] // crash recovery (W87)
+    pub fn annotations_json(&self) -> String {
+        serde_json::to_string(&Saved {
+            v: 1,
+            items: self.doc.items.clone(),
+        })
+        .unwrap_or_default()
+    }
+
+    /// Puts the saved drawings on the picture (one undo step). `false`: the
+    /// text is not ours (nothing changes).
+    #[allow(dead_code)] // crash recovery (W87)
+    pub fn restore_annotations(&mut self, json: &str) -> bool {
+        let Ok(saved) = serde_json::from_str::<Saved>(json) else {
+            return false;
+        };
+        if saved.v != 1 {
+            return false;
+        }
+        self.set_items(saved.items, &[]);
+        true
     }
 
     /// Ctrl+D.
@@ -339,14 +460,16 @@ impl Annotator {
     /// picture's own pixels (one undo step).
     pub(super) fn merge(&mut self) {
         self.commit();
-        let sel: Vec<usize> = (self.doc.selection().into_iter())
+        // what the user saw: everything under the topmost merged picture goes
+        // into the picture with it (drawings above it stay objects)
+        let Some(top) = (self.doc.selection().into_iter())
             .filter(|&i| matches!(self.doc.items[i].shape, Shape::Picture { .. }))
-            .collect();
-        if sel.is_empty() {
+            .max()
+        else {
             return;
-        }
+        };
         let img = &self.doc.image;
-        let layers: Vec<_> = sel.iter().map(|&i| (&self.doc.items[i], true)).collect();
+        let layers: Vec<_> = (0..=top).map(|i| (&self.doc.items[i], true)).collect();
         let whole = tiny_skia::IntRect::from_xywh(0, 0, img.width, img.height);
         let rgba: Option<Vec<u8>> = whole.map(|r| {
             super::document::paint(img, &layers, r)
@@ -362,7 +485,7 @@ impl Annotator {
         if let Some(patch) = rgba.and_then(|rows| self.doc.rows_patch(0, &rows)) {
             edits.push(Edit::Pixels(Box::new(patch)));
         }
-        for &i in sel.iter().rev() {
+        for i in (0..=top).rev() {
             edits.push(Edit::Delete(i, self.doc.items[i].clone()));
         }
         self.doc.exec(Edit::Seq(edits));
@@ -571,7 +694,6 @@ impl Annotator {
                 }
             }
         }
-        self.shown = Some(self.current_style());
     }
 
     /// The options bar's values for the selection (`None`: nothing selected).
@@ -595,54 +717,62 @@ impl Annotator {
         })
     }
 
-    /// An options change with a selection: the values that CHANGED since the
-    /// bar showed them go to every selected item (one undo step); mixed
-    /// values the user did not touch stay as they are.
+    /// An options change with a selection: only what the user touched
+    /// (`touch`) goes to every selected item, in one undo step; everything
+    /// else, mixed values included, stays as it is.
     pub(super) fn restyle_selection(&mut self, styled: &dyn Fn(&Item, &Annotator) -> Item) {
         let sel = self.doc.selection();
-        let now = self.current_style();
-        let old = self.shown.clone().unwrap_or_else(|| now.clone());
-        if sel.is_empty() || old == now {
+        let t = std::mem::take(&mut self.touch);
+        if sel.is_empty() || t == 0 {
             return;
         }
-        let sizes = (
-            old.stroke,
-            old.width,
-            old.text_size,
-            old.text_style,
-            old.blur_size,
-            old.blur_cell,
-        ) != (
-            now.stroke,
-            now.width,
-            now.text_size,
-            now.text_style,
-            now.blur_size,
-            now.blur_cell,
-        );
+        let now = self.current_style();
         let mut after = self.doc.items.clone();
         for &i in &sel {
             let before = &self.doc.items[i];
-            let mut item = if sizes && !matches!(before.shape, Shape::Picture { .. }) {
-                styled(before, self)
-            } else {
-                before.clone()
-            };
-            item.colour =
-                if old.colour != now.colour && !matches!(before.shape, Shape::Picture { .. }) {
-                    now.colour
-                } else {
-                    before.colour
-                };
-            if old.outline == now.outline {
-                item.outline = before.outline;
+            if matches!(before.shape, Shape::Picture { .. }) {
+                continue; // its colour is its opacity (Properties)
             }
-            if old.fill == now.fill {
-                item.fill = before.fill;
+            let full = styled(before, self);
+            let mut item = before.clone();
+            if t & touch::COLOUR != 0 {
+                item.colour = now.colour;
+            }
+            if t & touch::OUTLINE != 0 {
+                item.outline = now.outline;
+            }
+            if t & touch::FILL != 0 {
+                item.fill = now.fill;
+            }
+            // sizes: each shape takes only the size its own option sets
+            match &before.shape {
+                Shape::Text { .. } | Shape::Callout { .. } | Shape::Label { .. }
+                    if t & touch::TEXT != 0 =>
+                {
+                    item.shape = full.shape.clone();
+                }
+                Shape::Blur { .. } if t & touch::BLUR != 0 => item.shape = full.shape.clone(),
+                Shape::Step { .. } | Shape::Pointer { .. } if t & touch::STROKE != 0 => {
+                    item.shape = full.shape.clone();
+                    if matches!(before.shape, Shape::Pointer { .. }) {
+                        item.width = full.width;
+                    }
+                }
+                _ => {}
+            }
+            let has_line = !matches!(
+                before.shape,
+                Shape::Text { .. }
+                    | Shape::Label { .. }
+                    | Shape::Step { .. }
+                    | Shape::Pointer { .. }
+                    | Shape::Blur { .. }
+            );
+            if t & touch::STROKE != 0 && has_line {
+                item.width = full.width;
             }
             after[i] = item;
         }
-        self.shown = Some(now);
         self.set_items(after, &sel);
     }
 }
@@ -667,16 +797,43 @@ fn objects_png(items: &[Item]) -> Option<Crop> {
     Some(super::render(&doc))
 }
 
-/// `a` and `b` are the same picture, give or take what a trip through the
-/// system clipboard changes (same size, sampled pixels within a few levels).
-fn similar(a: &Crop, b: &Crop) -> bool {
-    if (a.width, a.height) != (b.width, b.height) || a.rgba.len() != b.rgba.len() {
+/// Is `got` (read back from the system clipboard) the PNG `ours` that went
+/// out? Same size, and either the pixels agree (sampled, alpha too) or the
+/// clipboard dropped the alpha and `ours` on white or black gives `got`.
+/// Needs enough opaque samples in `ours` to tell pictures apart: an all
+/// see-through picture proves nothing.
+pub(super) fn similar(ours: &Crop, got: &Crop) -> bool {
+    if (ours.width, ours.height) != (got.width, got.height) || ours.rgba.len() != got.rgba.len() {
         return false;
     }
-    let n = a.rgba.len() / 4;
-    (0..64.min(n)).all(|k| {
-        let i = (k * n / 64.min(n)) * 4;
-        let (p, q) = (&a.rgba[i..i + 4], &b.rgba[i..i + 4]);
-        p[3].abs_diff(q[3]) <= 2 && (p[3] < 200 || (0..3).all(|c| p[c].abs_diff(q[c]) <= 4))
-    })
+    const SAMPLES: usize = 256;
+    let n = ours.rgba.len() / 4;
+    let at = |k: usize| (k * n / SAMPLES.min(n)) * 4;
+    let ks = 0..SAMPLES.min(n);
+    let (solid, to) = (|p: &[u8]| p[3] >= 200, |c: u8, d: u8| c.abs_diff(d));
+    if ks
+        .clone()
+        .filter(|&k| solid(&ours.rgba[at(k)..at(k) + 4]))
+        .count()
+        < 4
+    {
+        return false;
+    }
+    let same = ks.clone().all(|k| {
+        let (p, q) = (&ours.rgba[at(k)..at(k) + 4], &got.rgba[at(k)..at(k) + 4]);
+        to(p[3], q[3]) <= 2 && (!solid(p) || (0..3).all(|c| to(p[c], q[c]) <= 4))
+    });
+    // alpha dropped: ours over white / black
+    let flat = |bg: u32| {
+        ks.clone().all(|k| {
+            let (p, q) = (&ours.rgba[at(k)..at(k) + 4], &got.rgba[at(k)..at(k) + 4]);
+            let a = u32::from(p[3]);
+            q[3] >= 253
+                && (0..3).all(|c| {
+                    let v = (u32::from(p[c]) * a + bg * (255 - a)) / 255;
+                    v.abs_diff(u32::from(q[c])) <= 6
+                })
+        })
+    };
+    same || flat(255) || flat(0)
 }

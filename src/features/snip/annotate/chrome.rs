@@ -13,12 +13,13 @@ impl Annotator {
 
     /// Where the framed item's handles are (none while it is typed into).
     pub fn handle_marks(&self) -> Vec<Point> {
-        // Several selected: each one's own small corner handles (none drag).
+        // Several selected: each one's own small handles (none drag): an
+        // arrow or line its two ends, a box its corners, a pen, highlighter
+        // or blur stroke the corners of its box.
         if !self.doc.extra.is_empty() && self.pending.is_none() {
             return (self.doc.selection().iter())
-                .flat_map(|&i| select::handles(&self.doc.items[i]))
-                .filter(|(h, _)| matches!(h, select::Handle::Corner(_)))
-                .map(|(_, at)| self.to_display_point(at))
+                .flat_map(|&i| select::marks(&self.doc.items[i]))
+                .map(|at| self.to_display_point(at))
                 .collect();
         }
         let Some(item) = self.framed().filter(|_| !self.typing()) else {
