@@ -310,6 +310,8 @@ pub enum Outcome {
     CancelWalkthrough,
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
+    /// Add to steps: the picture as drawn joins the Steps strip.
+    AddStep(Crop),
     /// Write the unsaved copy (the host encodes and writes it off the UI thread).
     KeepCopy(Box<KeepCopy>),
     /// File > New snip: the Snip capture starts.
@@ -547,6 +549,7 @@ impl Studio {
         self.editor = Some(editor);
         self.fit();
         self.opened = true;
+        self.sync_blocked();
         if let Some(e) = &mut self.editor {
             if let Some(r) = self.restoring.take() {
                 e.restore_annotations(&r.notes);
@@ -939,6 +942,32 @@ impl Studio {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        let out = self.update_inner(msg);
+        self.sync_blocked();
+        out
+    }
+
+    /// A menu, the right-click menu, a sheet, the narrow overlay or a dialog is up:
+    /// it has the keys, the canvas takes none (Esc closes it first, the arrows walk it).
+    pub(super) fn blocked(&self) -> bool {
+        self.menu.is_some()
+            || self.context.is_some()
+            || self.shortcuts
+            || (self.overlay && self.narrow())
+            || self.asking()
+            || self.exporting
+            || self.card.is_some()
+            || self.restorable.as_ref().is_some_and(|_| !self.later)
+    }
+
+    fn sync_blocked(&mut self) {
+        let blocked = self.blocked();
+        if let Some(e) = &mut self.editor {
+            e.keys_blocked = blocked;
+        }
+    }
+
+    fn update_inner(&mut self, msg: Msg) -> Outcome {
         let quiet_msg = matches!(
             msg,
             Msg::AltDown
@@ -1545,8 +1574,10 @@ impl Studio {
             return Outcome::None;
         };
         let history = matches!(m, annotate::Message::Undo | annotate::Message::Redo);
+        let size = (e.doc.image.width, e.doc.image.height);
         let out = e.update(m);
-        if history {
+        // (undo / redo, or the canvas grew: a paste or a move past the edge)
+        if history || size != (e.doc.image.width, e.doc.image.height) {
             self.transparent = cut::has_alpha(&e.doc.image.rgba);
         }
         self.fit(); // a crop changes what is shown
@@ -1555,6 +1586,7 @@ impl Studio {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
             Some(Output::Save(crop)) => Outcome::Save(crop),
             Some(Output::Pin(crop)) => Outcome::Pin(crop),
+            Some(Output::AddStep(crop)) => Outcome::AddStep(crop),
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
             // the widget's toolbar asks for is on the Studio
             _ => Outcome::None,

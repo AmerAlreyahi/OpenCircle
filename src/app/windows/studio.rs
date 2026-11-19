@@ -352,6 +352,23 @@ impl Windows {
                 },
             ))),
             Outcome::Settings => self.open(super::Kind::Settings),
+            Outcome::AddStep(crop) => {
+                // the strip opens on the first screen when there is none yet
+                let place = crate::shared::platform::monitor::places()
+                    .into_iter()
+                    .next();
+                match place {
+                    Some(place) => {
+                        let inset = crate::shared::platform::monitor::taskbar_inset(
+                            place.logical_origin(),
+                            place.size(),
+                            place.scale,
+                        );
+                        self.add_step(crop, None, place, inset)
+                    }
+                    None => Task::none(),
+                }
+            }
             Outcome::KeepCopy(job) => {
                 // encode and write off the UI thread; a discard in between voids it
                 std::thread::spawn(move || {

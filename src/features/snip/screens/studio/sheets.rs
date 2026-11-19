@@ -9,7 +9,7 @@ use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, space};
-use crate::shared::kit::{card, dir, divider, keycap, option_list};
+use crate::shared::kit::{card, divider, option_list};
 use crate::t;
 
 const LEAD: f32 = 2.0;
@@ -29,20 +29,26 @@ fn row<'a>(what: &'a str, keys: &[&str]) -> Row<'a> {
 /// One shortcut row: the name, then its keys as key caps (a key name's parts
 /// are one cap each), wrapping when there are many.
 fn shortcut_row<'a>((what, chords): Row<'a>) -> Element<'a, Msg> {
-    let caps = chords.into_iter().map(|c| {
-        let parts = c
-            .split('+')
-            .map(|k| keycap::keycap(k.to_string()))
-            .collect::<Vec<_>>();
-        Element::from(dir::row(parts).spacing(CAP_GAP / 2.0))
-    });
-    let caps = iced::widget::row(caps.collect::<Vec<_>>())
-        .spacing(CAP_GAP * 2.0)
-        .wrap();
-    column![sub(Role::ROW_DESC, what), caps]
+    let mut caps: Vec<Element<'a, Msg>> = chords
+        .iter()
+        .map(|c| {
+            let parts: Vec<String> = c.split('+').map(String::from).collect();
+            option_list::caps(&parts, false)
+        })
+        .collect();
+    // one key set: on the name's line; several: under it, wrapping
+    let row: Element<'a, Msg> = match caps.len() {
+        1 => crate::dir_row![sub(Role::ROW_DESC, what).width(Fill), caps.remove(0)]
+            .align_y(Center)
+            .into(),
+        _ => column![
+            sub(Role::ROW_DESC, what),
+            iced::widget::row(caps).spacing(CAP_GAP * 2.0).wrap()
+        ]
         .spacing(CAP_GAP)
-        .padding([ROW_PAD, 0.0])
-        .into()
+        .into(),
+    };
+    container(row).padding([ROW_PAD, 0.0]).into()
 }
 
 const ROW_PAD: f32 = 5.0;
@@ -72,6 +78,10 @@ pub fn shortcuts<'a>() -> Element<'a, Msg> {
             shown.push(info(Tool::Crop));
         }
         for t in shown {
+            // (Crop has no letter)
+            if !t.key.is_alphanumeric() {
+                continue;
+            }
             tools.push(row(tr(t.name), &[&t.key.to_ascii_uppercase().to_string()]));
         }
     }

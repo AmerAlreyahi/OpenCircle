@@ -1923,3 +1923,61 @@ fn v3_key_names_have_one_source() {
         );
     }
 }
+
+/// While a menu, the right-click menu, a sheet or the narrow overlay is up the
+/// canvas takes no key (the real path: the editor's `key` answers nothing, so the
+/// window's own key map sees the arrows and Esc); closing it gives the keys back.
+#[test]
+fn v3_open_menus_and_sheets_block_the_canvas_keys() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let arrow = |s: &Studio| {
+        s.editor.as_ref().unwrap().key(
+            &Key::Named(Named::ArrowLeft),
+            None,
+            Modifiers::empty(),
+            None,
+        )
+    };
+    assert!(arrow(&s).is_some(), "an open canvas nudges the selection");
+    let ups: [(Msg, Msg); 4] = [
+        (Msg::Menu(Some(Menu::Edit)), Msg::Menu(None)),
+        (Msg::Shortcuts(true), Msg::Shortcuts(false)),
+        (Msg::ContextOpen, Msg::Cancel),
+        (Msg::Resized(Size::new(900.0, 600.0)), Msg::Resized(SIZE)),
+    ];
+    for (up, down) in ups {
+        let narrow = matches!(up, Msg::Resized(_));
+        let _ = s.update(up);
+        if narrow {
+            let _ = s.update(Msg::Overlay);
+        }
+        assert!(s.editor.as_ref().unwrap().keys_blocked, "{:?}", s.menu);
+        assert!(
+            arrow(&s).is_none(),
+            "the canvas takes no key while it is up"
+        );
+        if narrow {
+            let _ = s.update(Msg::Overlay);
+        }
+        let _ = s.update(down);
+        assert!(!s.editor.as_ref().unwrap().keys_blocked);
+    }
+    // the menu's own Esc: closes the menu, never touches the selection
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let _ = s.update(Msg::Menu(Some(Menu::File)));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.menu.is_none());
+    assert_eq!(s.editor.as_ref().unwrap().selection(), vec![1]);
+}
+
+/// Add to steps (the Properties button, Ctrl+Enter) hands the host the picture.
+#[test]
+fn v3_add_to_steps_reaches_the_host() {
+    let mut s = two_boxes();
+    assert!(matches!(
+        s.update(Msg::Editor(Message::AddStep)),
+        Outcome::AddStep(c) if (c.width, c.height) == (640, 400)
+    ));
+}
