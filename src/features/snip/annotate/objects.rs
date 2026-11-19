@@ -4,10 +4,11 @@
 //! (`Annotator::studio`) uses it; Snip's quick widget keeps one selected item.
 use std::sync::Mutex;
 
+use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::document::{Image, Item, Pic, Shape, span};
-use super::{Annotator, Document, Edit, Output, TextStyle, Tool, Width, select, style};
+use super::{Annotator, Document, Edit, Message, Output, TextStyle, Tool, Width, select, style};
 use crate::shared::picture::Crop;
 
 /// Where a pasted copy lands, per paste (image px).
@@ -68,6 +69,65 @@ pub(super) struct GroupDrag {
 }
 
 impl Annotator {
+    /// What a Studio key does in the editor (typing and open menus are handled
+    /// before this): `None` = not a Studio editing key, the editor's own table
+    /// goes on. Esc ladder here: selection -> tool back to Select -> nothing.
+    pub(super) fn studio_key(
+        &self,
+        key: &Key,
+        latin: Option<char>,
+        m: Modifiers,
+    ) -> Option<Message> {
+        let e = self;
+        let ch = latin.or(match key {
+            Key::Character(s) => s.chars().next(),
+            _ => None,
+        });
+        let ch = ch.map(|c| c.to_ascii_lowercase());
+        let sel = !e.selection().is_empty();
+        if let Key::Named(named) = key {
+            return match named {
+                Named::Escape if e.picking || e.menu.is_some() => None,
+                Named::Escape if sel => Some(Message::Deselect),
+                Named::Escape if e.tool != Tool::Select => Some(Message::Tool(Tool::Select)),
+                Named::Escape => Some(Message::Deselect),
+                Named::ArrowLeft | Named::ArrowRight | Named::ArrowUp | Named::ArrowDown
+                    if sel && !m.command() =>
+                {
+                    let arrow = match named {
+                        Named::ArrowLeft => (-1, 0),
+                        Named::ArrowRight => (1, 0),
+                        Named::ArrowUp => (0, -1),
+                        _ => (0, 1),
+                    };
+                    Some(Message::Shove(arrow, m.shift()))
+                }
+                _ => None,
+            };
+        }
+        if !m.command() {
+            return None;
+        }
+        match (ch?, m.shift()) {
+            ('c', false) => Some(Message::CopySelection),
+            ('c', true) => Some(Message::Copy),
+            ('x', false) => Some(Message::CutSelection),
+            ('d', false) => Some(Message::Duplicate),
+            ('a', false) => Some(Message::SelectAll),
+            (']' | '}', shift) => Some(Message::Order(if shift {
+                Order::Front
+            } else {
+                Order::Forward
+            })),
+            ('[' | '{', shift) => Some(Message::Order(if shift {
+                Order::Back
+            } else {
+                Order::Backward
+            })),
+            _ => None,
+        }
+    }
+
     /// Selected items' indices, ascending.
     pub fn selection(&self) -> Vec<usize> {
         self.doc.selection()
