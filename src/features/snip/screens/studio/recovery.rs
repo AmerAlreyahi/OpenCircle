@@ -43,7 +43,9 @@ pub fn discard() {
     discard_in(&dir());
 }
 
-/// The leftover copy of a crashed session, if a whole one exists.
+/// The leftover copy of a crashed session, if a whole one exists. The caller checks
+/// `studio.keep_unsaved` first: with the switch off nothing is offered (Settings
+/// deletes the copy when the switch is turned off).
 pub fn pending() -> Option<Pending> {
     pending_in(&dir())
 }
@@ -53,9 +55,16 @@ pub fn write_in(dir: &Path, on: bool, png: &[u8], notes: &str) -> io::Result<boo
         return Ok(false);
     }
     std::fs::create_dir_all(dir)?;
-    // the notes go last: a copy counts only when both files are whole
-    put(&dir.join(PICTURE), png)?;
-    put(&dir.join(NOTES), notes.as_bytes())?;
+    // Both temp files exist before anything is swapped; the old notes go first and the
+    // new notes are renamed LAST, so a crash at any point leaves either no copy or a
+    // whole new one, never a picture with another generation's notes.
+    let (pic, note) = (dir.join(PICTURE), dir.join(NOTES));
+    let (pic_tmp, note_tmp) = (pic.with_extension("tmp"), note.with_extension("tmp"));
+    std::fs::write(&pic_tmp, png)?;
+    std::fs::write(&note_tmp, notes.as_bytes())?;
+    let _ = std::fs::remove_file(&note);
+    std::fs::rename(pic_tmp, pic)?;
+    std::fs::rename(note_tmp, note)?;
     Ok(true)
 }
 
@@ -72,13 +81,6 @@ pub fn pending_in(dir: &Path) -> Option<Pending> {
         notes,
         saved_at,
     })
-}
-
-/// Write to a side file and rename, so a crash mid-write leaves the old copy whole.
-fn put(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(tmp, path)
 }
 
 /// The "quiet for [`QUIET`]" rule: call `changed` on every edit and `due` on a timer;
@@ -133,6 +135,16 @@ mod tests {
         let d = tmp("rec-off");
         assert!(!write_in(&d, false, b"x", "[]").unwrap());
         assert!(!d.exists());
+    }
+
+    #[test]
+    fn a_crash_between_the_swaps_never_offers_a_mixed_copy() {
+        let d = tmp("rec-mixed");
+        write_in(&d, true, b"old", "[old]").unwrap();
+        // the state after the new picture landed but before its notes did
+        std::fs::remove_file(d.join(NOTES)).unwrap();
+        std::fs::write(d.join(PICTURE), b"new").unwrap();
+        assert!(pending_in(&d).is_none());
     }
 
     #[test]

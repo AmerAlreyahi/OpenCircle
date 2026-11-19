@@ -282,18 +282,16 @@ impl Config {
                     .then_some(())
                     .ok_or_else(|| "expected 0, 10 or 20".to_string())
             });
-            s.folder = get(t, p, "folder", d.folder.clone(), &mut w);
+            s.folder = get_checked(t, p, "folder", d.folder.clone(), &mut w, |f: &String| {
+                check_folder(f)
+            });
             s.file_name = get_checked(
                 t,
                 p,
                 "file_name",
                 d.file_name.clone(),
                 &mut w,
-                |n: &String| {
-                    (!n.trim().is_empty() && !n.contains(['/', '\\']))
-                        .then_some(())
-                        .ok_or_else(|| "expected a file name without folders".to_string())
-                },
+                |n: &String| check_file_name(n),
             );
             s.format = get(t, p, "format", d.format, &mut w);
             s.quality = get_checked(t, p, "quality", d.quality, &mut w, |n: &u8| {
@@ -539,6 +537,15 @@ pub(super) fn check_folder(s: &str) -> Result<(), String> {
     (s.is_empty() || Path::new(s).is_absolute())
         .then_some(())
         .ok_or_else(|| "expected empty or an absolute folder path".into())
+}
+
+/// A file name pattern: not empty, none of the characters Windows refuses in a name.
+pub(super) fn check_file_name(s: &str) -> Result<(), String> {
+    (!s.trim().is_empty() && !s.contains([':', '*', '?', '"', '<', '>', '|', '/', '\\']))
+        .then_some(())
+        .ok_or_else(|| {
+            "expected a file name that is not empty and has none of : * ? \" < > | / \\".into()
+        })
 }
 
 pub(super) fn check_model(s: &str) -> Result<(), String> {

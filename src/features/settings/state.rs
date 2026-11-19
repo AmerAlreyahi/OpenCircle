@@ -1916,7 +1916,13 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
             state.draft.snip = snip;
         }
-        Message::Studio(prefs) => state.draft.studio = prefs,
+        Message::Studio(prefs) => {
+            if state.draft.studio.keep_unsaved && !prefs.keep_unsaved {
+                // off deletes the private copy, as with chats and captures
+                crate::features::snip::screens::studio::recovery::discard();
+            }
+            state.draft.studio = prefs;
+        }
         Message::BrowseStudioFolder => {
             state.studio_folder_pick = true;
             return Outcome::Browse;

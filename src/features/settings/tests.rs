@@ -4199,15 +4199,15 @@ fn chat_zoom_and_web_search_have_their_settings() {
     assert!(texts.iter().any(|t| t == "Ask AI web search"), "{texts:?}");
 }
 
-/// Settings > Studio in English and Arabic (mirrored), Sapphire and Daylight: tall, so
-/// every row shows; nothing drawn past its box.
+/// Settings > Studio in Arabic (mirrored; English is in the every-page goldens), tall, so
+/// every row shows, Sapphire and Daylight; nothing drawn past its box.
 #[test]
 fn the_studio_page_matches_its_golden_images() {
     use crate::shared::app_language::{self, Choice, Lang};
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     let mut failed = Vec::new();
-    for ar in [false, true] {
+    for ar in [true] {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             let (mut s, _) = state(None);
             if ar {
@@ -4245,6 +4245,19 @@ fn the_studio_page_edits_its_own_settings() {
     };
     update(&mut s, Message::Studio(p.clone()));
     assert_eq!(s.draft.studio, p);
+    // an empty or forbidden file name is refused and the row says why
+    for bad in ["", "a:b", "x/y"] {
+        let wrong = StudioPrefs {
+            file_name: bad.into(),
+            ..StudioPrefs::default()
+        };
+        update(&mut s, Message::Studio(wrong));
+        assert!(
+            crate::features::settings::state::issue(s.problems(), "studio.file_name").is_some(),
+            "{bad:?}"
+        );
+    }
+    update(&mut s, Message::Studio(p.clone()));
     assert_eq!(update(&mut s, Message::BrowseStudioFolder), Outcome::Browse);
     update(&mut s, Message::Folder(Some("pics".into())));
     assert_eq!(s.draft.studio.folder, "pics");
