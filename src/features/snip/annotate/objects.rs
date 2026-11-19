@@ -68,7 +68,6 @@ pub fn clear_clipboard() {
 static CLIPBOARD: Mutex<Option<Copied>> = Mutex::new(None);
 
 #[derive(serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)] // crash recovery (W87)
 struct Saved {
     v: u32,
     items: Vec<Item>,
@@ -365,7 +364,6 @@ impl Annotator {
     }
 
     /// The drawings as JSON (crash recovery keeps these, not a flat picture).
-    #[allow(dead_code)] // crash recovery (W87)
     pub fn annotations_json(&self) -> String {
         serde_json::to_string(&Saved {
             v: 1,
@@ -376,7 +374,6 @@ impl Annotator {
 
     /// Puts the saved drawings on the picture (one undo step). `false`: the
     /// text is not ours (nothing changes).
-    #[allow(dead_code)] // crash recovery (W87)
     pub fn restore_annotations(&mut self, json: &str) -> bool {
         let Ok(saved) = serde_json::from_str::<Saved>(json) else {
             return false;

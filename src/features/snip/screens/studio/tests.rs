@@ -1491,27 +1491,41 @@ fn v3_the_frame_matches_its_golden_images() {
 /// picture's); a row acts through the editor; Esc closes it first.
 #[test]
 fn v3_right_click_menu_acts_on_the_selection() {
-    let mut s = studio_on(640, 400);
+    let mut s = two_boxes();
+    // empty picture: the picture's rows
+    let _ = s.update(Msg::Pointer(Point::new(600.0, 40.0)));
     let _ = s.update(Msg::ContextOpen);
     let picture_rows = s.context.as_ref().unwrap().entries.len();
     let _ = s.update(Msg::Cancel);
     assert!(s.context.is_none());
-    draw(&mut s);
-    s.editor.as_mut().unwrap().doc.selected = Some(0);
+    // on the second box (select it first, as a click would): the object's rows
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
     let _ = s.update(Msg::ContextOpen);
-    let entries = &s.context.as_ref().unwrap().entries;
+    // (the pointer is over nothing, so the menu is the picture's again)
+    assert_eq!(s.context.as_ref().unwrap().entries.len(), picture_rows);
+    let _ = s.update(Msg::Cancel);
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let entries = editing::object_menu(s.editor.as_ref().unwrap());
     assert_ne!(
         entries.len(),
         picture_rows,
         "object rows, not the picture's"
     );
-    let at = entries
+    s.context = Some(Context {
+        at: Point::ORIGIN,
+        entries,
+    });
+    let at = s
+        .context
+        .as_ref()
+        .unwrap()
+        .entries
         .iter()
         .position(|r| r.action == editing::Action::Delete)
         .unwrap();
     let _ = s.update(Msg::ContextPick(at));
     assert!(s.context.is_none());
-    assert!(s.editor.as_ref().unwrap().doc.items.is_empty());
+    assert_eq!(s.editor.as_ref().unwrap().doc.items.len(), 1);
 }
 
 /// Board 20: Discard drops the kept copy; Restore with none is nothing.
@@ -1667,4 +1681,91 @@ fn v3_snap_lands_drawing_and_moving_on_edges() {
         (draw_rect(false) - 637.0).abs() < 1.0,
         "off: where the pointer was"
     );
+}
+
+/// Two rectangles on a 640 x 400 picture (the first at the back).
+fn two_boxes() -> Studio {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Resized(SIZE));
+    let _ = s.update(Msg::Actual);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    for (a, b) in [
+        ((20.0, 20.0), (120.0, 90.0)),
+        ((300.0, 200.0), (400.0, 280.0)),
+    ] {
+        for m in [
+            Message::Press(Point::new(a.0, a.1)),
+            Message::Move(Point::new(b.0 - 20.0, b.1 - 20.0)),
+            Message::Move(Point::new(b.0, b.1)),
+            Message::Release,
+        ] {
+            let _ = s.update(Msg::Editor(m));
+        }
+    }
+    let _ = s.update(Msg::Editor(Message::Deselect));
+    assert_eq!(s.editor.as_ref().unwrap().doc.items.len(), 2);
+    s
+}
+
+/// The Objects list: a click selects (top row = front), the eye hides, a drag
+/// moves a row (the list shows the front first).
+#[test]
+fn v3_objects_list_selects_hides_and_reorders() {
+    let mut s = two_boxes();
+    // row 0 is the front object = item 1
+    let _ = s.update(Msg::ObjPress(0));
+    let _ = s.update(Msg::ObjRelease);
+    assert_eq!(s.editor.as_ref().unwrap().selection(), vec![1]);
+    let _ = s.update(Msg::Editor(Message::ToggleHidden(1)));
+    assert!(s.editor.as_ref().unwrap().doc.items[1].hidden);
+    // drag the front row to the bottom: the back object comes forward
+    let _ = s.update(Msg::ObjMove(Point::new(10.0, 5.0), 2));
+    let _ = s.update(Msg::ObjPress(0));
+    let _ = s.update(Msg::ObjMove(Point::new(10.0, 50.0), 2));
+    let _ = s.update(Msg::ObjRelease);
+    let order: Vec<bool> = s
+        .editor
+        .as_ref()
+        .unwrap()
+        .doc
+        .items
+        .iter()
+        .map(|i| i.hidden)
+        .collect();
+    assert_eq!(order, vec![true, false], "the hidden one went to the back");
+}
+
+/// A right-click selects the object under the pointer first.
+#[test]
+fn v3_right_click_selects_under_the_pointer() {
+    let mut s = two_boxes();
+    // over the second box's edge (its stroke), then over empty picture
+    let corner = |s: &Studio, p: Point| {
+        let e = s.editor.as_ref().unwrap();
+        let (room, shown) = (s.stage(), e.size());
+        let c = Vector::new(
+            ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
+            ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
+        );
+        Point::new(p.x * e.zoom + c.x, p.y * e.zoom + c.y)
+    };
+    let on = corner(&s, Point::new(300.0, 240.0));
+    let _ = s.update(Msg::Pointer(on));
+    let _ = s.update(Msg::ContextOpen);
+    assert_eq!(s.editor.as_ref().unwrap().selection(), vec![1]);
+    let _ = s.update(Msg::Cancel);
+    let off = corner(&s, Point::new(600.0, 40.0));
+    let _ = s.update(Msg::Pointer(off));
+    let _ = s.update(Msg::ContextOpen);
+    assert!(s.editor.as_ref().unwrap().selection().is_empty());
+}
+
+/// Recovery keeps the drawings: the JSON round-trips onto the picture.
+#[test]
+fn v3_recovery_notes_restore_the_drawings() {
+    let s = two_boxes();
+    let json = s.editor.as_ref().unwrap().annotations_json();
+    let mut t = studio_on(640, 400);
+    assert!(t.editor.as_mut().unwrap().restore_annotations(&json));
+    assert_eq!(t.editor.as_ref().unwrap().doc.items.len(), 2);
 }

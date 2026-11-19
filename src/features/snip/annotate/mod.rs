@@ -421,13 +421,9 @@ pub enum Message {
     /// Studio (right-click, Library rows): select what is at a point / at an
     /// index in `doc.items` (`true`: add to the selection), hide / show an
     /// item, move item `from` to place `to`.
-    #[allow(dead_code)] // wired by the Studio view (W87)
     SelectAt(Point, bool),
-    #[allow(dead_code)]
     SelectIndex(usize, bool),
-    #[allow(dead_code)]
     ToggleHidden(usize),
-    #[allow(dead_code)]
     Reorder {
         from: usize,
         to: usize,
