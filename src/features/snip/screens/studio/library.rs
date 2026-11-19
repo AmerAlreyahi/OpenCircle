@@ -68,12 +68,15 @@ fn note(words: &str) -> Element<'_, Msg> {
 
 fn recent(s: &Studio) -> Element<'_, Msg> {
     let mut col = column![];
-    if !crate::shared::config::current().snip.history {
+    let shown = usize::from(crate::shared::config::current().studio.recent_files);
+    if shown == 0 {
+        col = col.push(note(t!(st_recent_zero)));
+    } else if !crate::shared::config::current().snip.history {
         col = col.push(note(t!(st_recent_off)));
     } else if s.recent.is_empty() {
         col = col.push(note(t!(st_recent_none)));
     }
-    for (path, picture) in &s.recent {
+    for (path, picture) in s.recent.iter().take(shown) {
         let name = path
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
