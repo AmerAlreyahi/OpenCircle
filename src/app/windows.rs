@@ -116,6 +116,8 @@ pub enum Msg {
     StudioPasted(Option<Crop>, Option<iced::Point>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
+    /// A walkthrough's encoder: a frame done, or its end.
+    StudioWalk(studio::Walked),
 }
 
 #[derive(Default)]
@@ -143,6 +145,8 @@ pub struct Windows {
     out: Option<Out>,
     /// Snip Studio, at most one.
     studio: Option<(window::Id, crate::features::snip::screens::studio::Studio)>,
+    /// The walkthrough encoder that runs: set to stop it.
+    walk_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// What `Windows::leave_frame` took out of capture number `capture`'s grab.
@@ -1402,6 +1406,7 @@ impl Windows {
             Msg::StudioRead(read) => return self.studio_read(read),
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
+            Msg::StudioWalk(walked) => return self.on_walked(walked),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);

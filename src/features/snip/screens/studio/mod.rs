@@ -123,22 +123,29 @@ pub enum Msg {
     StepDelete(usize),
     CopyAllSteps,
     ExportSteps(export::Steps),
-    /// The walkthrough dialog: open, its choices, Export…, Cancel.
+    /// The Export sheet's Walkthrough tab (the Steps menu's first row), its
+    /// choices, and the encoder's progress (done, total) and end.
     ExportWalkthrough,
+    /// The sheet's tab: the picture's (`false`) or the walkthrough's.
+    ExportTab(bool),
+    WalkFormat(export::Movie),
+    WalkProgress(usize, usize),
+    /// The encoder ended (`true`: the file is written: the sheet closes).
+    WalkEnded(bool),
     WalkEdits(bool),
     WalkSize(u32),
     WalkTime(u8),
     WalkNumbered(bool),
     WalkLoop(bool),
     WalkGo,
+    /// The sheet's Cancel: stops the encoder when one runs, else closes.
     WalkCancel,
-    /// The export bar: open, its choices, Export…, Cancel.
+    /// The Export sheet: open (Picture tab), its choices, Export…, Cancel.
     Export,
     ExportFormat(export::Format),
     ExportQuality(u8),
     ExportSize(u32),
     ExportGo,
-    ExportCancel,
 }
 
 /// What the host does after a message.
@@ -174,6 +181,8 @@ pub enum Outcome {
     /// Export a walkthrough GIF (the host asks where): the picture's edits
     /// replayed (`Some`), else the Steps' pictures.
     ExportWalkthrough(export::Walkthrough, Option<Vec<Crop>>),
+    /// Stop the encoder that runs.
+    CancelWalkthrough,
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
 }
@@ -202,8 +211,10 @@ pub struct Studio {
     /// The export bar's choices, and whether it shows.
     pub(super) export: export::Picture,
     pub(super) exporting: bool,
-    /// The walkthrough dialog's choices while it shows.
-    pub(super) walk: Option<Walk>,
+    /// The walkthrough tab's choices.
+    pub(super) walk: Walk,
+    /// The sheet shows the Walkthrough tab.
+    pub(super) walk_tab: bool,
 }
 
 /// The walkthrough dialog's choices (STUDIO_V2_SPEC "Export dialog").
@@ -214,6 +225,8 @@ pub(super) struct Walk {
     /// Frame time in tenths of a second.
     pub tenths: u8,
     pub how: export::Walkthrough,
+    /// The encoder runs: frames done and all (0 of 0 while the file is asked for).
+    pub busy: Option<(usize, usize)>,
 }
 
 /// Frames of an edits walkthrough at most (a long history is sampled evenly).
@@ -265,7 +278,16 @@ impl Studio {
             step_hover: None,
             export: export::Picture::default(),
             exporting: false,
-            walk: None,
+            walk: Walk {
+                edits: false,
+                tenths: 20,
+                how: export::Walkthrough {
+                    movie: export::Movie::from_index(panels.walk_format),
+                    ..export::Walkthrough::default()
+                },
+                busy: None,
+            },
+            walk_tab: false,
         }
     }
 
@@ -508,11 +530,27 @@ impl Studio {
             Msg::CopyAllSteps => Outcome::Steps(steps::Msg::CopyAll),
             Msg::ExportSteps(how) => Outcome::ExportSteps(how),
             Msg::ExportWalkthrough => {
-                self.walk = Some(Walk {
-                    edits: false,
-                    tenths: 20,
-                    how: export::Walkthrough::default(),
-                });
+                self.exporting = true;
+                self.walk_tab = true;
+                self.walk.edits = false;
+                Outcome::None
+            }
+            Msg::ExportTab(walk) => {
+                self.walk_tab = walk;
+                Outcome::None
+            }
+            Msg::WalkFormat(movie) => {
+                self.walk.how.movie = movie;
+                self.panels.walk_format = movie.index();
+                Outcome::Panels(self.panels)
+            }
+            Msg::WalkProgress(done, total) => {
+                self.walk.busy = self.walk.busy.map(|_| (done, total));
+                Outcome::None
+            }
+            Msg::WalkEnded(done) => {
+                self.walk.busy = None;
+                self.exporting = self.exporting && !done;
                 Outcome::None
             }
             Msg::WalkEdits(on) => self.walk_set(|w| w.edits = on),
@@ -520,20 +558,29 @@ impl Studio {
             Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
             Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
             Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
-                self.walk = None;
+                self.exporting = false;
                 Outcome::None
             }
-            Msg::WalkGo => match self.walk.take() {
-                Some(w) if w.edits => match &mut self.editor {
-                    Some(e) => Outcome::ExportWalkthrough(w.how(), Some(edit_frames(&mut e.doc))),
-                    None => Outcome::None,
-                },
-                Some(w) => Outcome::ExportWalkthrough(w.how(), None),
-                None => Outcome::None,
-            },
+            Msg::WalkGo if self.walk.busy.is_some() => Outcome::None,
+            Msg::WalkGo => {
+                let w = self.walk;
+                match (w.edits, &mut self.editor) {
+                    (true, Some(e)) => {
+                        self.walk.busy = Some((0, 0));
+                        Outcome::ExportWalkthrough(w.how(), Some(edit_frames(&mut e.doc)))
+                    }
+                    (true, None) => Outcome::None,
+                    (false, _) => {
+                        self.walk.busy = Some((0, 0));
+                        Outcome::ExportWalkthrough(w.how(), None)
+                    }
+                }
+            }
             Msg::Export => {
-                self.exporting = self.editor.is_some();
+                self.exporting = true;
+                self.walk_tab = false;
                 Outcome::None
             }
             Msg::ExportFormat(format) => {
@@ -548,10 +595,6 @@ impl Studio {
                 self.export.max_edge = max_edge;
                 Outcome::None
             }
-            Msg::ExportCancel => {
-                self.exporting = false;
-                Outcome::None
-            }
             Msg::ExportGo => {
                 self.exporting = false;
                 match &self.editor {
@@ -563,8 +606,8 @@ impl Studio {
     }
 
     fn walk_set(&mut self, f: impl FnOnce(&mut Walk)) -> Outcome {
-        if let Some(w) = &mut self.walk {
-            f(w);
+        if self.walk.busy.is_none() {
+            f(&mut self.walk);
         }
         Outcome::None
     }

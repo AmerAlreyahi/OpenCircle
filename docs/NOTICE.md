@@ -118,6 +118,10 @@ https://github.com/trishume/syntect, with its default syntax definitions (from
 Sublime Text's Packages, permissive licences as shipped by syntect), built into
 the app.
 
+Walkthrough video encoder (MP4 / WebM, AV1): rav1e (BSD-2-Clause), https://github.com/xiph/rav1e,
+built into the app. Copyright (c) 2017-2023, the rav1e contributors, the Alliance for
+Open Media and the Xiph.Org Foundation. Same BSD 2-clause conditions as below.
+
 Preview video decoder: rav1d (BSD-2-Clause), https://github.com/memorysafety/rav1d,
 built into the app. Copyright (c) 2018-2019, VideoLAN and dav1d authors;
 Copyright (c) 2023-2024, VideoLAN, dav1d authors, and Internet Security Research

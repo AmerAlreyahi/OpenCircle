@@ -269,7 +269,6 @@ fn the_studio_matches_its_golden_images() {
             view(&s, &steps, false)
         }));
         // the walkthrough dialog over it: from the Steps, then from the edits, then in Arabic
-        let _ = s.update(Msg::ExportCancel);
         let _ = s.update(Msg::ExportWalkthrough);
         let file = format!("studio-walkthrough-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
@@ -277,16 +276,21 @@ fn the_studio_matches_its_golden_images() {
         }));
         let _ = s.update(Msg::WalkEdits(true));
         let _ = s.update(Msg::WalkNumbered(true));
+        let _ = s.update(Msg::WalkFormat(export::Movie::Webm));
         let file = format!("studio-walkthrough-edits-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
             view(&s, &steps, false)
         }));
+        // encoding, in Arabic
+        let _ = s.update(Msg::WalkGo);
+        let _ = s.update(Msg::WalkProgress(2, 3));
         crate::shared::app_language::set(crate::shared::app_language::Lang::Ar);
         let file = format!("studio-walkthrough-ar-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
             view(&s, &steps, false)
         }));
         crate::shared::app_language::set(crate::shared::app_language::Lang::En);
+        let _ = s.update(Msg::WalkEnded(true));
     });
 }
 
@@ -408,10 +412,10 @@ fn the_steps_list_opens_reorders_and_deletes_the_strips_own_steps() {
 
 #[test]
 fn export_asks_for_the_choices_then_hands_over_the_drawn_picture() {
-    // nothing open: no export bar
+    // nothing open: the sheet opens, but there is no picture to export
     let mut s = Studio::new(StudioConfig::default());
     let _ = s.update(Msg::Export);
-    assert!(!s.exporting);
+    assert!(matches!(s.update(Msg::ExportGo), Outcome::None));
     let mut s = studio_on(300, 200);
     draw(&mut s);
     let _ = s.update(Msg::Export);
@@ -447,7 +451,11 @@ fn drawn(n: usize) -> Studio {
 fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());
     let _ = s.update(Msg::ExportWalkthrough);
-    assert!(s.walk.is_some());
+    assert!(s.exporting && s.walk_tab);
+    let Outcome::Panels(panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
+        panic!("the format is remembered");
+    };
+    assert_eq!(panels.walk_format, 1);
     let _ = s.update(Msg::WalkTime(35));
     let _ = s.update(Msg::WalkSize(960));
     let _ = s.update(Msg::WalkNumbered(true));
@@ -458,6 +466,7 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
     assert_eq!(
         how,
         export::Walkthrough {
+            movie: export::Movie::Mp4,
             max_edge: 960,
             frame_ms: 3500,
             repeat: false,
@@ -465,10 +474,25 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
         }
     );
     assert!(frames.is_none(), "from the Steps: the host has them");
-    assert!(s.walk.is_none());
-    let _ = s.update(Msg::ExportWalkthrough);
+    assert_eq!(s.walk.busy, Some((0, 0)));
+    // while it runs: progress shows, a second Export does nothing, Cancel stops it
+    let _ = s.update(Msg::WalkProgress(2, 5));
+    assert_eq!(s.walk.busy, Some((2, 5)));
+    assert!(matches!(s.update(Msg::WalkGo), Outcome::None));
+    assert!(matches!(
+        s.update(Msg::WalkCancel),
+        Outcome::CancelWalkthrough
+    ));
+    let _ = s.update(Msg::WalkEnded(false));
+    assert!(
+        s.exporting && s.walk.busy.is_none(),
+        "cancelled: the sheet stays"
+    );
     let _ = s.update(Msg::WalkCancel);
-    assert!(s.walk.is_none());
+    assert!(!s.exporting, "Cancel closes the idle sheet");
+    // the last format is the next Studio's
+    let again = Studio::new(panels);
+    assert_eq!(again.walk.how.movie, export::Movie::Mp4);
 }
 
 #[test]

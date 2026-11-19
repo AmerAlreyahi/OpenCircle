@@ -12,8 +12,39 @@ use crate::features::snip::screens::studio::{self, Outcome, Picture, Studio};
 use crate::shared::app_language::{S, fmt};
 use crate::shared::picture::Crop;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// What a walkthrough's encoder tells the window.
+#[derive(Debug, Clone)]
+pub enum Walked {
+    Progress(usize, usize),
+    /// Done: the pill's text; `None`: cancelled.
+    End(Option<Result<String, String>>),
+}
 
 impl Windows {
+    /// A frame encoded, or the end: the sheet's progress, then the pill.
+    pub(super) fn on_walked(&mut self, walked: Walked) -> Task<Msg> {
+        match walked {
+            Walked::Progress(done, total) => self.on_studio(studio::Msg::WalkProgress(done, total)),
+            Walked::End(done) => {
+                self.walk_cancel = None;
+                let closes = matches!(done, Some(Ok(_)));
+                let ended = self.on_studio(studio::Msg::WalkEnded(closes));
+                match done {
+                    Some(done) => Task::batch([ended, self.toast_of(done)]),
+                    None => ended,
+                }
+            }
+        }
+    }
+
+    fn toast_of(&mut self, done: Result<String, String>) -> Task<Msg> {
+        let ok = done.is_ok();
+        let text = done.unwrap_or_else(|e| e);
+        self.toast(&text, ok, None, TOAST_MS)
+    }
+
     /// Opens the Studio (empty, or on `picture`), or brings the open one forward
     /// and opens `picture` there (unsaved drawings ask first).
     pub fn open_studio(&mut self, picture: Option<Picture>) -> Task<Msg> {
@@ -219,14 +250,21 @@ impl Windows {
             Outcome::ExportWalkthrough(how, frames) => {
                 let steps: Vec<_> =
                     (self.steps.as_ref()).map_or(Vec::new(), |(_, s)| s.steps().to_vec());
+                let cancel = std::sync::Arc::new(AtomicBool::new(false));
+                self.walk_cancel = Some(cancel.clone());
                 background(move |tx| {
                     let frames =
                         frames.unwrap_or_else(|| steps.iter().filter_map(|s| s.crop()).collect());
-                    if let Some(done) = export_walkthrough(frames, how) {
-                        let _ = tx.unbounded_send(done);
-                    }
+                    let done = export_walkthrough(frames, how, &cancel, tx);
+                    let _ = tx.unbounded_send(Walked::End(done));
                 })
-                .map(Msg::StudioToast)
+                .map(Msg::StudioWalk)
+            }
+            Outcome::CancelWalkthrough => {
+                if let Some(c) = &self.walk_cancel {
+                    c.store(true, Ordering::Relaxed);
+                }
+                Task::none()
             }
             Outcome::ExportPicture(crop, how) => background(move |tx| {
                 if let Some(done) = export_picture(crop, how) {
@@ -291,22 +329,34 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
     })
 }
 
-/// Blocking: where to put the walkthrough GIF, then the file; `None`: cancelled.
+/// Blocking: where to put the walkthrough (the save dialog, in Save's
+/// folder), then the file, encoded with a `Walked::Progress` after each frame.
+/// `None`: cancelled (the dialog or the encoder). Ok / Err = the pill.
 fn export_walkthrough(
     frames: Vec<Crop>,
     how: export::Walkthrough,
+    cancel: &AtomicBool,
+    tx: &iced::futures::channel::mpsc::UnboundedSender<Walked>,
 ) -> Option<Result<String, String>> {
+    let ext = how.movie.ext();
     let mut dialog = rfd::FileDialog::new()
         .set_title(crate::t!(st_export_where))
-        .set_file_name(format!("{}.gif", save::stamped_name("steps-")))
-        .add_filter(crate::t!(st_gif_kind), &["gif"]);
+        .set_file_name(format!("{}.{ext}", save::stamped_name("steps-")))
+        .add_filter(how.movie.name(), &[ext]);
     let config = crate::shared::config::current();
     if let Some(folder) = save::start_folder(&config.general.save_folder) {
         dialog = dialog.set_directory(folder);
     }
-    let path = dialog.save_file()?.with_extension("gif");
-    let written = export::encode_gif(frames, how)
-        .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
+    let path = dialog.save_file()?.with_extension(ext);
+    let encoded = export::encode_walkthrough(frames, how, &mut |done, total| {
+        let _ = tx.unbounded_send(Walked::Progress(done, total));
+        !cancel.load(Ordering::Relaxed)
+    });
+    let written = match encoded {
+        Ok(Some(bytes)) => std::fs::write(&path, bytes).map_err(|e| e.to_string()),
+        Ok(None) => return None,
+        Err(e) => Err(e),
+    };
     Some(match written {
         Ok(()) => Ok(fmt(
             S::pill_saved,

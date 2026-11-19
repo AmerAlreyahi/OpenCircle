@@ -86,23 +86,20 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
         parts.push(divider::vertical(Fill));
         parts.push(picture_panel(s));
     }
-    let mut main = column![header, divider::divider(), dir::row(parts).height(Fill)];
-    if s.exporting && !s.asking() {
-        main = main.push(divider::divider()).push(export_bar(s));
-    }
+    let main = column![header, divider::divider(), dir::row(parts).height(Fill)];
     // the question and the walkthrough dialog are cards over the window: the picture under them takes no press
-    let main: Element<'_, Msg> = match (s.asking(), &s.walk) {
+    let main: Element<'_, Msg> = match (s.asking(), s.exporting) {
         (true, _) => iced::widget::stack![
             main,
             iced::widget::opaque(container(question()).center(Fill))
         ]
         .into(),
-        (false, Some(w)) => iced::widget::stack![
+        (false, true) => iced::widget::stack![
             main,
-            iced::widget::opaque(container(walk_dialog(s, *w, steps)).center(Fill))
+            iced::widget::opaque(container(export_sheet(s, steps)).center(Fill))
         ]
         .into(),
-        (false, None) => main.into(),
+        (false, false) => main.into(),
     };
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
@@ -496,51 +493,133 @@ fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
 
 /// Export picture: the format, the JPG quality, the size; Cancel / Export…
 /// (then the host's save dialog).
-fn export_bar(s: &Studio) -> Element<'_, Msg> {
-    let how = s.export;
-    let formats: Vec<_> = (export::Format::ALL.iter())
-        .map(|&f| (f, f.name()))
-        .collect();
-    let format = segmented::inline(&formats, how.format, how.format, 1.0, Msg::ExportFormat);
-    let sizes: Vec<_> = (export::SIZES.iter())
+/// The Export sheet (STUDIO_V2_SPEC "Export dialog", boards S14 / S15 / S17):
+/// a title and the Picture | Walkthrough tabs, then the tab's choices, a note
+/// that it is made on this PC, Cancel and Export.
+fn export_sheet<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+    let tabs = [(false, t!(st_export_pic)), (true, t!(st_export_walk))];
+    let head = crate::dir_row![
+        text(Role::ROW_TITLE, t!(st_export)).width(Fill),
+        segmented::inline(&tabs, s.walk_tab, s.walk_tab, 1.0, Msg::ExportTab),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    let (body, go, busy) = match s.walk_tab {
+        true => walk_tab(s, s.walk, steps),
+        false => picture_tab(s),
+    };
+    let progress: Element<'_, Msg> = match busy {
+        Some((done, total)) => column![
+            sub(
+                Role::ROW_DESC,
+                crate::shared::app_language::fmt(
+                    crate::shared::app_language::S::st_walk_busy,
+                    &[&done, &total]
+                )
+            ),
+            crate::shared::kit::progress::bar(done as f32 / total.max(1) as f32),
+        ]
+        .into(),
+        None => Space::new().into(),
+    };
+    let foot = crate::dir_row![
+        sub(Role::META, t!(st_walk_pc)).width(Fill),
+        button::regular(t!(c_cancel), false, Some(Msg::WalkCancel)),
+        button::regular(t!(st_export_go), true, go),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    let column = column![head, body, progress, foot].spacing(space::PAGE[1]);
+    surface(
+        Material::Widget,
+        radius::CARD,
+        container(column).padding(space::PAGE),
+    )
+    .width(Length::Fixed(540.0))
+    .into()
+}
+
+/// A labelled field.
+fn field<'a>(words: &'a str, body: Element<'a, Msg>) -> Element<'a, Msg> {
+    column![sub(Role::ROW_DESC, words), body]
+        .spacing(space::GAP)
+        .into()
+}
+
+/// The Size row's options.
+fn sizes<'a>(list: &[u32], chosen: u32, pick: impl Fn(u32) -> Msg + 'a) -> Element<'a, Msg> {
+    let list: Vec<_> = (list.iter())
         .map(|&px| match px {
             0 => (px, t!(st_original)),
             2048 => (px, "2048"),
             1568 => (px, "1568"),
-            _ => (px, "1024"),
+            1280 => (px, "1280"),
+            1024 => (px, "1024"),
+            960 => (px, "960"),
+            _ => (px, "640"),
         })
         .collect();
-    let size = segmented::inline(&sizes, how.max_edge, how.max_edge, 1.0, Msg::ExportSize);
-    let mut items: Vec<Element<'_, Msg>> = vec![format];
+    segmented::inline(&list, chosen, chosen, 1.0, pick)
+}
+
+/// The Picture tab: Format, Quality (JPG), Size, and what the file will be.
+fn picture_tab(s: &Studio) -> (Element<'_, Msg>, Option<Msg>, Option<(usize, usize)>) {
+    let how = s.export;
+    let formats: Vec<_> = (export::Format::ALL.iter())
+        .map(|&f| (f, f.name()))
+        .collect();
+    let mut items = vec![field(
+        t!(st_walk_format),
+        segmented::inline(&formats, how.format, how.format, 1.0, Msg::ExportFormat),
+    )];
     if how.format.has_quality() {
         let quality = crate::dir_row![
-            sub(Role::ROW_DESC, t!(st_quality)),
             slider::bare(1..=100, how.quality, QUALITY_W, false, Msg::ExportQuality),
             container(sub(Role::KEYCAP, format!("{} %", how.quality))).width(QUALITY_VALUE_W),
         ];
-        items.push(quality.spacing(space::GAP).align_y(Center).into());
+        items.push(field(
+            t!(st_quality),
+            quality.spacing(space::GAP).align_y(Center).into(),
+        ));
     }
-    items.extend([
-        size,
-        Space::new().width(Fill).into(),
-        button::regular(t!(c_cancel), false, Some(Msg::ExportCancel)),
-        button::regular(t!(st_export_go), true, Some(Msg::ExportGo)),
-    ]);
-    let line = dir::row(items).spacing(space::PAGE[1]).align_y(Center);
-    container(line).padding(space::PAGE).width(Fill).into()
+    items.push(field(
+        t!(st_size),
+        sizes(&export::SIZES, how.max_edge, Msg::ExportSize),
+    ));
+    let note = match how.format {
+        export::Format::Pdf => t!(st_pdf_note),
+        export::Format::Jpg => "",
+        _ => t!(st_lossless),
+    };
+    if let Some(e) = &s.editor {
+        let v = e.doc.view().size();
+        let (w, h) =
+            crate::shared::picture::fitted_size(v.width as u32, v.height as u32, how.max_edge);
+        let size = [w.to_string(), h.to_string()].join(" × ");
+        let line = match note.is_empty() {
+            true => size,
+            false => [size, note.to_string()].join(" · "),
+        };
+        items.push(sub(Role::ROW_DESC, line).into());
+    }
+    let go = s.editor.is_some().then_some(Msg::ExportGo);
+    (column(items).spacing(space::PAGE[1]).into(), go, None)
 }
 
-/// The walkthrough dialog (STUDIO_V2_SPEC "Export dialog", boards S15 / S17):
-/// where the frames come from, the strip, Size, Frame time, the two switches,
-/// the estimate. GIF only for now (MP4 / WebM wait for the owner: a row with
-/// one choice is not shown).
-fn walk_dialog<'a>(s: &'a Studio, w: Walk, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+/// The Walkthrough tab: From, the frames with each one's time, Format and
+/// Size, Frame time, the two switches, the estimate.
+fn walk_tab<'a>(
+    s: &'a Studio,
+    w: Walk,
+    steps: &'a [Arc<Step>],
+) -> (Element<'a, Msg>, Option<Msg>, Option<(usize, usize)>) {
     let edits = s.editor.as_ref().map_or(0, |e| e.doc.depth());
-    let n_edits = (edits + 1).min(super::EDIT_FRAMES);
-    let n = if w.edits { n_edits } else { steps.len() };
+    let n = if w.edits {
+        (edits + 1).min(super::EDIT_FRAMES)
+    } else {
+        steps.len()
+    };
     let label = |words: &'a str| sub(Role::ROW_DESC, words);
-    let field =
-        |words: &'a str, body: Element<'a, Msg>| column![label(words), body].spacing(space::GAP);
     // From: the Steps, or the picture's edits (none to replay: not offered)
     let sources = [(false, t!(st_walk_steps)), (true, t!(st_walk_edits))];
     let sources: Vec<_> = if edits > 0 {
@@ -576,70 +655,62 @@ fn walk_dialog<'a>(s: &'a Studio, w: Walk, steps: &'a [Arc<Step>]) -> Element<'a
     if n > WALK_SHOWN {
         strip = strip.push(sub(Role::ROW_DESC, format!("+{}", n - WALK_SHOWN)));
     }
-    let sizes = [
-        (0, t!(st_original)),
-        (1280, "1280"),
-        (960, "960"),
-        (640, "640"),
-    ];
-    let size = segmented::inline(&sizes, w.how.max_edge, w.how.max_edge, 1.0, Msg::WalkSize);
+    let movies: Vec<_> = (export::Movie::ALL.iter())
+        .map(|&m| (m, m.name()))
+        .collect();
+    let format = segmented::inline(&movies, w.how.movie, w.how.movie, 1.0, Msg::WalkFormat);
+    let size = sizes(&[0, 1280, 960, 640], w.how.max_edge, Msg::WalkSize);
+    let grid = crate::dir_row![
+        field(t!(st_walk_format), format),
+        Space::new().width(Fill),
+        field(t!(st_size), size)
+    ]
+    .spacing(space::PAGE[1]);
     let time = crate::dir_row![
         slider::bare(5..=60, w.tenths, WALK_SLIDER_W, false, Msg::WalkTime),
         sub(Role::ROW_DESC, secs.clone()),
     ]
     .spacing(space::GAP)
     .align_y(Center);
+    // a video plays once or loops as its player decides: Loop is the GIF's
+    let looped = (w.how.movie == export::Movie::Gif).then_some(Msg::WalkLoop(!w.how.repeat));
     let switches = crate::dir_row![
         label(t!(st_walk_number)),
         Space::new().width(space::GAP),
         button::toggle(w.how.numbered, Some(Msg::WalkNumbered(!w.how.numbered))),
         Space::new().width(Fill),
         label(t!(st_walk_loop)),
-        button::toggle(w.how.repeat, Some(Msg::WalkLoop(!w.how.repeat))),
+        Space::new().width(space::GAP),
+        button::toggle(w.how.repeat, looped),
     ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    let estimate = walk_estimate(s, w, steps, n);
-    let go = (n > 0).then_some(Msg::WalkGo);
-    let foot = crate::dir_row![
-        sub(Role::META, t!(st_walk_pc)).width(Fill),
-        button::regular(t!(c_cancel), false, Some(Msg::WalkCancel)),
-        button::regular(t!(st_export_go), true, go),
-    ]
-    .spacing(space::GAP)
     .align_y(Center);
     let body = column![
-        text(Role::ROW_TITLE, t!(st_walk_title)),
         field(t!(st_walk_from), from),
         strip,
-        field(t!(st_size), size),
+        grid,
         field(t!(st_walk_frame), time.into()),
         switches,
         column![
-            sub(Role::ROW_DESC, estimate).width(Fill),
+            sub(Role::ROW_DESC, walk_estimate(s, w, steps, n)).width(Fill),
             sub(Role::META, t!(st_walk_note)).width(Fill)
         ],
-        foot,
     ]
     .spacing(space::PAGE[1]);
-    surface(
-        Material::Widget,
-        radius::CARD,
-        container(body).padding(space::PAGE),
-    )
-    .width(Length::Fixed(540.0))
-    .into()
+    let go = (n > 0).then_some(Msg::WalkGo);
+    (body.into(), go, w.busy)
 }
 
-/// "4 frames · 8 s · about 1.1 MB".
-// ponytail: a GIF is guessed at a quarter byte a pixel (steps: their PNG's size); the real size shows in the file.
+/// "Frames 4 · 8 s · about 1.1 MB".
 fn walk_estimate(s: &Studio, w: Walk, steps: &[Arc<Step>], n: usize) -> String {
     let bytes: usize = match (w.edits, &s.editor) {
         (true, Some(e)) => {
             let size = e.doc.view().size();
-            (size.width * size.height * 0.25) as usize * n
+            w.how
+                .movie
+                .guess((size.width * size.height * 0.25) as usize)
+                * n
         }
-        _ => steps.iter().map(|x| x.png().len()).sum(),
+        _ => steps.iter().map(|x| w.how.movie.guess(x.png().len())).sum(),
     };
     let secs = n as f32 * f32::from(w.tenths) / 10.0;
     let size = match bytes >= 1_048_576 {
@@ -654,14 +725,12 @@ fn walk_estimate(s: &Studio, w: Walk, steps: &[Arc<Step>], n: usize) -> String {
     .join(" · ")
 }
 
-/// The frames the dialog's strip shows at most.
+/// The frames the sheet's strip shows at most.
 const WALK_SHOWN: usize = 6;
 const WALK_SLIDER_W: f32 = 240.0;
-
-/// The export bar's quality slider.
+/// The Picture tab's quality slider.
 const QUALITY_W: f32 = 120.0;
 const QUALITY_VALUE_W: f32 = 40.0;
-
 /// Closing or opening another picture with unsaved drawings: Don't save /
 /// Cancel / Save.
 fn question<'a>() -> Element<'a, Msg> {

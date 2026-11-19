@@ -209,13 +209,64 @@ fn pdf(crop: &Crop) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// The walkthrough's choices (STUDIO_V2_SPEC "Export dialog": Size, Frame time, Loop).
+/// The walkthrough's file kinds. MP4 and WebM are AV1 (`movie`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Movie {
+    Gif,
+    Mp4,
+    Webm,
+}
+
+impl Movie {
+    pub const ALL: [Movie; 3] = [Movie::Gif, Movie::Mp4, Movie::Webm];
+
+    pub fn ext(self) -> &'static str {
+        match self {
+            Movie::Gif => "gif",
+            Movie::Mp4 => "mp4",
+            Movie::Webm => "webm",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Movie::Gif => "GIF",
+            Movie::Mp4 => "MP4",
+            Movie::Webm => "WebM",
+        }
+    }
+
+    /// The config's number for it (`snip.studio.walk_format`).
+    pub fn index(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_index(i: u8) -> Movie {
+        Movie::ALL
+            .get(usize::from(i))
+            .copied()
+            .unwrap_or(Movie::Gif)
+    }
+
+    /// About how many bytes a frame of `png` bytes adds (a guess, for the estimate line).
+    // ponytail: ratios from the lab's flat screenshots (GIF ~ the PNG, AV1 ~ a third); the real size shows in the file.
+    pub fn guess(self, png: usize) -> usize {
+        match self {
+            Movie::Gif => png,
+            Movie::Mp4 | Movie::Webm => png / 3,
+        }
+    }
+}
+
+/// The walkthrough's choices (STUDIO_V2_SPEC "Export dialog": Format, Size, Frame time, Loop).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Walkthrough {
+    pub movie: Movie,
     /// The long edge at most (0 = each frame's own size).
     pub max_edge: u32,
     /// Seconds each frame shows, in milliseconds.
     pub frame_ms: u32,
+    /// GIF only (a video file plays once; the player decides).
     pub repeat: bool,
     /// Each frame's place among them, in a badge at its corner.
     pub numbered: bool,
@@ -224,6 +275,7 @@ pub struct Walkthrough {
 impl Default for Walkthrough {
     fn default() -> Self {
         Walkthrough {
+            movie: Movie::Gif,
             max_edge: 1280,
             frame_ms: 2000,
             repeat: true,
@@ -232,10 +284,35 @@ impl Default for Walkthrough {
     }
 }
 
-/// The frames (in order) as one animated GIF. Frames of different sizes sit
-/// centred on white in a canvas as big as the biggest.
-/// ponytail: a GIF has 256 colours a frame (NeuQuant, speed 10); MP4 / WebM wait for the owner's pick.
-pub fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String> {
+/// The frames (in order) as the file `how.movie` asks for: `None` when
+/// `progress(done, total)` said stop. Frames of different sizes sit centred
+/// on white in a canvas as big as the biggest.
+pub fn encode_walkthrough(
+    frames: Vec<Crop>,
+    how: Walkthrough,
+    progress: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<Option<Vec<u8>>, String> {
+    use crate::features::snip::movie;
+    let (width, height, frames) = on_canvas(frames, how, how.movie != Movie::Gif)?;
+    if how.movie == Movie::Gif {
+        return gif_of(width, height, &frames, how, progress);
+    }
+    let Some((av1c, samples)) = movie::encode_av1(&frames, how.frame_ms, progress)? else {
+        return Ok(None);
+    };
+    Ok(Some(match how.movie {
+        Movie::Mp4 => movie::mp4(width, height, how.frame_ms, &av1c, &samples),
+        _ => movie::webm(width, height, how.frame_ms, &av1c, &samples),
+    }))
+}
+
+/// Every frame fitted, numbered, and centred on white in one canvas (`even`: a
+/// video wants even sides).
+fn on_canvas(
+    frames: Vec<Crop>,
+    how: Walkthrough,
+    even: bool,
+) -> Result<(u32, u32, Vec<Crop>), String> {
     let frames: Vec<Crop> = (frames.into_iter().enumerate())
         .map(|(i, f)| {
             let f = fit_long_edge(f, how.max_edge);
@@ -245,8 +322,38 @@ pub fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String
             }
         })
         .collect();
-    let width = frames.iter().map(|f| f.width).max().ok_or("no frames")?;
-    let height = frames.iter().map(|f| f.height).max().ok_or("no frames")?;
+    let up = |n: u32| if even { n + n % 2 } else { n };
+    let width = up(frames.iter().map(|f| f.width).max().ok_or("no frames")?);
+    let height = up(frames.iter().map(|f| f.height).max().ok_or("no frames")?);
+    let placed = frames
+        .into_iter()
+        .map(|f| {
+            let mut canvas = vec![255u8; (width * height * 4) as usize];
+            let (dx, dy) = ((width - f.width) / 2, (height - f.height) / 2);
+            let row = (f.width * 4) as usize;
+            for y in 0..f.height {
+                let from = (y * f.width * 4) as usize;
+                let to = (((y + dy) * width + dx) * 4) as usize;
+                canvas[to..to + row].copy_from_slice(&f.rgba[from..from + row]);
+            }
+            Crop {
+                width,
+                height,
+                rgba: canvas,
+            }
+        })
+        .collect();
+    Ok((width, height, placed))
+}
+
+/// ponytail: a GIF has 256 colours a frame (NeuQuant, speed 10).
+fn gif_of(
+    width: u32,
+    height: u32,
+    frames: &[Crop],
+    how: Walkthrough,
+    progress: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<Option<Vec<u8>>, String> {
     let (w16, h16) = (
         u16::try_from(width).map_err(|_| "too wide for a GIF")?,
         u16::try_from(height).map_err(|_| "too tall for a GIF")?,
@@ -257,21 +364,17 @@ pub fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String
         enc.set_repeat(gif::Repeat::Infinite)
             .map_err(|e| e.to_string())?;
     }
-    for f in &frames {
-        let mut canvas = vec![255u8; (width * height * 4) as usize];
-        let (dx, dy) = ((width - f.width) / 2, (height - f.height) / 2);
-        for y in 0..f.height {
-            let from = (y * f.width * 4) as usize;
-            let to = (((y + dy) * width + dx) * 4) as usize;
-            canvas[to..to + (f.width * 4) as usize]
-                .copy_from_slice(&f.rgba[from..from + (f.width * 4) as usize]);
-        }
-        let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut canvas, 10);
+    for (i, f) in frames.iter().enumerate() {
+        let mut rgba = f.rgba.clone();
+        let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut rgba, 10);
         frame.delay = (how.frame_ms / 10).clamp(1, u16::MAX as u32) as u16;
         enc.write_frame(&frame).map_err(|e| e.to_string())?;
+        if !progress(i + 1, frames.len()) {
+            return Ok(None);
+        }
     }
     drop(enc);
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// The Steps' exports.
@@ -390,6 +493,10 @@ mod tests {
             height,
             rgba,
         }
+    }
+
+    fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String> {
+        encode_walkthrough(frames, how, &mut |_, _| true).map(Option::unwrap)
     }
 
     #[test]

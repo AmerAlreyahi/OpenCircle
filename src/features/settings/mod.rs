@@ -13,5 +13,8 @@ mod window;
 #[cfg(test)]
 pub use pages::START_LABEL;
 pub use pages::rows;
+/// rav1d behind its safe API, for the Studio walkthrough tests (they decode what they encode).
+#[cfg(test)]
+pub(crate) use previews::av1::Decoder as Av1Decoder;
 pub use state::*;
 pub use window::view;

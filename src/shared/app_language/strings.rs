@@ -1816,13 +1816,21 @@ strings! {
         | "صفحة HTML";
     st_export_images: "Images folder"
         | "مجلد صور";
-    st_export_gif: "Walkthrough (animated GIF)"
-        | "عرض متحرك (GIF)";
-    st_gif_kind: "GIF"
-        | "GIF";
-    st_walk_title: "Export walkthrough"
-        | "تصدير شرح متحرك";
-    st_walk_from: "From"
+    st_export_gif: "Walkthrough: GIF, MP4, WebM…"
+        | "شرح متحرك: GIF وMP4 وWebM…";
+    st_export_pic: "Picture"
+        | "الصورة";
+    st_export_walk: "Walkthrough"
+        | "شرح متحرك";
+    st_walk_format: "Format"
+        | "الصيغة";
+    st_walk_busy: "Encoding {} of {}…"
+        | "جارٍ الترميز {} من {}…";
+    st_pdf_note: "PDF: one page the picture's size"
+        | "PDF: صفحة واحدة بحجم الصورة";
+    st_lossless: "Lossless"
+        | "بلا فقد";
+        st_walk_from: "From"
         | "من";
     st_walk_steps: "Steps"
         | "الخطوات";

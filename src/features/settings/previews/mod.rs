@@ -19,7 +19,7 @@ use crate::shared::config::{Config, Provider};
 use crate::shared::kit::hero::{self, hero};
 use crate::shared::platform::hotkey::QuickId;
 
-mod av1;
+pub(crate) mod av1;
 pub mod online;
 pub mod player;
 
