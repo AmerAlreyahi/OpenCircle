@@ -1440,11 +1440,13 @@ fn v3_the_frame_matches_its_golden_images() {
             view(&n, &[], false)
         }));
         // the panels' other states, and the small sheets
-        let s = studio_on(640, 400);
+        // two boxes selected: the panel's style groups are the shared ones
+        let mut s = two_boxes();
+        let _ = s.update(Msg::Editor(Message::SelectAll));
         let panel = Size::new(super::PANEL, 700.0);
         let name = format!("studio3-props-many-{}", theme.id);
         failed.extend(golden::check("screens", &name, panel, &[1.0], || {
-            properties::view(&s, properties::Subject::Many { count: 3 })
+            properties::view(&s, properties::Subject::Many { count: 2 })
         }));
         let name = format!("studio3-props-pasted-{}", theme.id);
         failed.extend(golden::check("screens", &name, panel, &[1.0], || {
@@ -1980,4 +1982,65 @@ fn v3_add_to_steps_reaches_the_host() {
         s.update(Msg::Editor(Message::AddStep)),
         Outcome::AddStep(c) if (c.width, c.height) == (640, 400)
     ));
+}
+
+/// A typed X / Y / W / H is made on Enter or when the user moves on to something
+/// that is not typing: the key the field took (`AltBreak` follows every key) must
+/// not commit it on each keystroke.
+#[test]
+fn v3_typed_box_is_not_committed_by_the_keys_it_is_typed_with() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let depth = s.editor.as_ref().unwrap().doc.depth();
+    for typed in ["1", "12", "120"] {
+        let _ = s.update(Msg::BoundsEdit(2, typed.into()));
+        let _ = s.update(Msg::AltBreak); // (the key the field took)
+    }
+    let _ = s.update(Msg::BoundsEdit(2, String::new()));
+    let _ = s.update(Msg::AltBreak);
+    assert_eq!(
+        s.editor.as_ref().unwrap().doc.depth(),
+        depth,
+        "nothing made while typing"
+    );
+    assert!(s.bounds_draft.is_some());
+    let _ = s.update(Msg::BoundsEdit(2, "150".into()));
+    let _ = s.update(Msg::BoundsCommit);
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!(e.doc.depth(), depth + 1, "one undo step");
+    assert_eq!(e.selection_bounds().unwrap().width.round(), 150.0);
+    // moving on to another action also commits
+    let _ = s.update(Msg::BoundsEdit(3, "90".into()));
+    let _ = s.update(Msg::Editor(Message::Deselect));
+    assert_eq!(s.editor.as_ref().unwrap().doc.depth(), depth + 2);
+}
+
+/// Properties' style groups (several objects selected) show the whole swatch row,
+/// not one swatch per selected object.
+#[test]
+fn v3_several_selected_objects_show_every_swatch() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Editor(Message::SelectAll));
+    assert_eq!(s.editor.as_ref().unwrap().selection().len(), 2);
+    let e = s.editor.as_ref().unwrap();
+    let colours = options_bar::selection_groups(e, 6).remove(0);
+    let picked = (0..8)
+        .filter(|i| {
+            let at = Point::new(2.0 + 14.0 + 30.0 * *i as f32, 16.0);
+            let clicked = crate::shared::kit::testing::shot::click(
+                colours_again(e),
+                Size::new(400.0, 40.0),
+                at,
+            );
+            clicked
+                .iter()
+                .any(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+        })
+        .count();
+    let _ = colours;
+    assert_eq!(picked, 6, "six swatches, however many objects");
+}
+
+fn colours_again(e: &annotate::Annotator) -> iced::Element<'_, Msg> {
+    options_bar::selection_groups(e, 6).remove(0)
 }

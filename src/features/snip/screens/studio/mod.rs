@@ -983,8 +983,10 @@ impl Studio {
         if !quiet_msg {
             self.alt_clean = false;
         }
-        // a typed X / Y / W / H is one edit, made when the user moves on
-        if !matches!(msg, Msg::BoundsEdit(..) | Msg::BoundsCommit) && !quiet_msg {
+        // a typed X / Y / W / H is one edit, made on Enter or when the user moves on
+        // to something that is not typing: a key the field took (`AltBreak`, sent for
+        // every key) is typing, not moving on
+        if !matches!(msg, Msg::BoundsEdit(..) | Msg::BoundsCommit | Msg::AltBreak) && !quiet_msg {
             let out = self.commit_bounds();
             if !matches!(out, Outcome::None) {
                 return out;

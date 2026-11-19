@@ -163,8 +163,8 @@ fn subject(e: &Annotator, n: usize) -> (String, Option<char>, Vec<El<'_>>) {
             let t = info(info(super::library::tool_of(&item.shape)).slot);
             (tr(t.name).to_string(), None, groups(e, t.tool, n))
         }
-        (n, None) => (
-            fmt(crate::shared::app_language::S::st_n_objects, &[&n]),
+        (count, None) => (
+            fmt(crate::shared::app_language::S::st_n_objects, &[&count]),
             None,
             vec![colours(e, n), stroke(e)],
         ),
