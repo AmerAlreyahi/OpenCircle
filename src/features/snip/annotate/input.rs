@@ -5,6 +5,7 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::mouse;
 use iced::{Point, Rectangle};
 
+use super::objects::StudioKey;
 use super::{
     Annotator, Drag, Menu, Message, PRESETS, Shape, TOOLS, Tool, area, callout, label, select, text,
 };
@@ -129,6 +130,10 @@ impl Annotator {
         modifiers: Modifiers,
         text: Option<&str>,
     ) -> Option<Message> {
+        // a menu, sheet or narrow overlay of the window is up: it has the keys
+        if self.keys_blocked {
+            return None;
+        }
         if self.typing() {
             return match key {
                 Key::Named(Named::Escape) => Some(Message::Finish),
@@ -136,6 +141,16 @@ impl Annotator {
                 Key::Named(Named::Enter) => Some(Message::Type("\n".into())),
                 _ if modifiers.command() && latin.map(|c| c.to_ascii_lowercase()) == Some('v') => {
                     Some(Message::Paste(None))
+                }
+                // Ctrl+B = Bold for the text being typed
+                _ if self.studio
+                    && modifiers.command()
+                    && latin.map(|c| c.to_ascii_lowercase()) == Some('b') =>
+                {
+                    Some(Message::TextStyle(text::Style {
+                        bold: !self.text_style.bold,
+                        ..self.text_style
+                    }))
                 }
                 // (Ctrl+Z ends the typing and undoes it: `Message::Undo`)
                 _ if modifiers.command() => (latin.map(|c| c.to_ascii_lowercase()) == Some('z')
@@ -160,10 +175,12 @@ impl Annotator {
                 _ => {}
             }
         }
-        if self.studio
-            && let Some(message) = self.studio_key(key, latin, modifiers)
-        {
-            return Some(message);
+        if self.studio {
+            match self.studio_keys(key, latin, modifiers) {
+                StudioKey::Do(message) => return Some(message),
+                StudioKey::Ignore => return None,
+                StudioKey::Pass => {}
+            }
         }
         let arrow = match key {
             Key::Named(Named::ArrowLeft) => Some((-1, 0)),

@@ -153,6 +153,13 @@ impl Pic {
     }
 }
 
+/// Its size only (not megabytes of pixels).
+impl std::fmt::Debug for Image {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Image({}x{})", self.width, self.height)
+    }
+}
+
 impl PartialEq for Pic {
     fn eq(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
@@ -313,6 +320,10 @@ pub enum Edit {
     Pixels(Box<Patch>),
     /// Several edits that undo together (applied in order).
     Seq(Vec<Edit>),
+    /// The canvas grew (Studio, "Grow the canvas past the edge"): the picture
+    /// before and after, and how far every drawing moved (zero unless it grew
+    /// to the left or the top).
+    Canvas(Box<Image>, Box<Image>, Vector),
 }
 
 /// A changed box of the image: `x, y, w, h` (image px), RGBA rows before and after.
@@ -350,6 +361,7 @@ impl Edit {
                 after: p.before,
             })),
             Edit::Seq(all) => Edit::Seq(all.iter().rev().map(Edit::inverse).collect()),
+            Edit::Canvas(before, after, by) => Edit::Canvas(after, before, -by),
         }
     }
 
@@ -379,6 +391,10 @@ impl Edit {
             }
             Edit::Pixels(p) => p.write(&mut doc.image, &p.after),
             Edit::Seq(all) => all.iter().for_each(|e| e.apply(doc)),
+            Edit::Canvas(_, after, by) => {
+                doc.image = (**after).clone();
+                doc.shift(*by);
+            }
         }
     }
 }

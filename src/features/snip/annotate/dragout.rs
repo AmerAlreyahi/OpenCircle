@@ -41,6 +41,26 @@ impl DragFile {
         Self::temp(crop, "drag")
     }
 
+    /// The drag-out file as a PNG, or a JPEG (`[studio] drag_type`).
+    pub fn write_as(crop: &Crop, jpeg: bool) -> Result<Self, String> {
+        if !jpeg {
+            return Self::write(crop);
+        }
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "opencircle-drag-{}-{}.jpg",
+            std::process::id(),
+            n + 1_000_000
+        ));
+        let bytes = crate::shared::picture::encode_jpeg(crop, 90)?;
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(DragFile {
+            path,
+            dropped: false,
+        })
+    }
+
     /// `crop` as `opencircle-<what>-<pid>-<n>.png` in the temp folder (the
     /// share sheet's file too: same life, same grace).
     pub fn temp(crop: &Crop, what: &str) -> Result<Self, String> {
