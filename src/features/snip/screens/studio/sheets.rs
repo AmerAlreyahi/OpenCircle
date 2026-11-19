@@ -89,7 +89,7 @@ pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg) -> Element<'a,
     card::card(body)
 }
 
-fn words(a: editing::Action) -> S {
+pub(super) fn words(a: editing::Action) -> S {
     use editing::Action as A;
     match a {
         A::Cut => S::st_cut,
@@ -106,6 +106,11 @@ fn words(a: editing::Action) -> S {
         A::Fit => S::st_fit,
         A::Shortcuts => S::st_shortcuts,
     }
+}
+
+/// A row's key as text ("Ctrl+Shift+C").
+pub(super) fn chord_text(k: editing::Chord) -> String {
+    caps(k).join("+")
 }
 
 /// A row's key as key caps.

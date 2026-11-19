@@ -628,6 +628,26 @@ impl Reorder {
         }
     }
 
+    /// `moved` over a grid of `cols` cells (`cell` = a cell and its gap) that
+    /// starts at the origin; `rtl` counts columns from the right (the grid is
+    /// `width` wide then).
+    pub fn moved_grid(&mut self, at: Point, cell: iced::Size, cols: usize, n: usize, rtl: bool) {
+        self.cursor = at;
+        if let Some((i, from)) = self.press {
+            let far = (at.x - from.x).hypot(at.y - from.y) >= DRAG;
+            if self.drag.is_some() || far {
+                let x = if rtl {
+                    cell.width * cols as f32 - at.x
+                } else {
+                    at.x
+                };
+                let col = ((x / cell.width).floor().max(0.0) as usize).min(cols - 1);
+                let row = (at.y / cell.height).floor().max(0.0) as usize;
+                self.drag = Some((i, (row * cols + col).min(n.saturating_sub(1))));
+            }
+        }
+    }
+
     /// The press ends (`None`: there was none).
     pub fn release(&mut self) -> Option<Released> {
         let press = self.press.take();

@@ -50,7 +50,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
     let header = crate::shared::kit::header::with_menu(
         crate::shared::kit::logo::logo(16),
         Some(super::menu_bar::bar(s)),
-        t!(st_title),
+        &s.title,
         Space::new(),
         Some(maximised),
         Msg::Caption,
@@ -369,12 +369,26 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         _ => area.into(),
     };
     let material = match prefs.background {
-        StudioBackdrop::Dark => Material::Window,
+        StudioBackdrop::Dark => Material::Stage,
         _ => Material::Recessed,
     };
-    let stage = mouse_area(wrap(area, CtrlWheel(zooms)))
+    let stage: Element<'a, Msg> = mouse_area(wrap(area, CtrlWheel(zooms)))
         .on_right_press(Msg::ContextOpen)
-        .on_move(Msg::Pointer);
+        .on_move(Msg::Pointer)
+        .into();
+    // Space held: a layer over the picture takes the drag (a pan), not the tools
+    let stage: Element<'a, Msg> = match s.space {
+        true => iced::widget::stack![
+            stage,
+            mouse_area(Space::new().width(Fill).height(Fill))
+                .on_press(Msg::PanStart)
+                .on_release(Msg::PanEnd)
+                .on_move(Msg::Pointer)
+                .interaction(mouse::Interaction::Grab)
+        ]
+        .into(),
+        false => stage,
+    };
     surface(material, 0.0, stage)
         .width(Fill)
         .height(Fill)
@@ -457,30 +471,42 @@ fn empty(s: &Studio) -> Element<'_, Msg> {
 /// The Steps strip's steps, one under the other: click = open on the canvas,
 /// drag = reorder, x = delete; Copy all and Export at the foot.
 pub(super) fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
-    let pad = space::PAGE[1];
+    let pad = super::library::PAD;
     if steps.is_empty() {
         let none = muted(Role::ROW_DESC, t!(st_steps_none));
         return container(none).padding([0.0, pad]).into();
     }
     let n = steps.len();
-    let shots = s.pick.order(n).into_iter().enumerate().map(|(place, i)| {
-        let look = thumb::Look {
-            hover: s.step_hover == Some(i) && !s.pick.dragging(),
-            lifted: s.pick.lifted() == Some(i),
-            focused: false,
-            rtl: dir::rtl(),
-        };
-        let shot = thumb::step(steps[i].thumb(), place + 1, look, Some(Msg::StepDelete(i)));
-        let shot = mouse_area(shot)
-            .on_press(Msg::StepPress(i))
-            .on_enter(Msg::StepHover(i, true))
-            .on_exit(Msg::StepHover(i, false));
-        hint(shot, t!(st_step_tip), Why::Icon, Position::Right)
+    let order = s.pick.order(n);
+    let cells: Vec<Element<'a, Msg>> = order
+        .into_iter()
+        .enumerate()
+        .map(|(place, i)| {
+            let look = thumb::Look {
+                hover: s.step_hover == Some(i) && !s.pick.dragging(),
+                lifted: s.pick.lifted() == Some(i),
+                focused: false,
+                rtl: dir::rtl(),
+            };
+            let shot = thumb::mini(steps[i].thumb(), place + 1, look, Some(Msg::StepDelete(i)));
+            let shot = mouse_area(shot)
+                .on_press(Msg::StepPress(i))
+                .on_enter(Msg::StepHover(i, true))
+                .on_exit(Msg::StepHover(i, false));
+            hint(shot, t!(st_step_tip), Why::Icon, Position::Right)
+        })
+        .collect();
+    // four to a row
+    let mut cells = cells;
+    let rows = cells.chunks_mut(super::STEP_COLS).map(|chunk| {
+        let line = chunk
+            .iter_mut()
+            .map(|c| std::mem::replace(c, Space::new().into()));
+        Element::from(dir::row(line.collect::<Vec<_>>()).spacing(super::STEP_GAP))
     });
-    let list = mouse_area(column(shots).spacing(space::GAP))
+    let list = mouse_area(column(rows.collect::<Vec<_>>()).spacing(super::STEP_GAP))
         .on_move(move |at| Msg::StepMove(at, n))
         .on_release(Msg::StepRelease);
-    let list = container(list).center_x(Fill);
     let half = (super::LIBRARY - 2.0 * pad - space::GAP) / 2.0;
     let copy = button::labelled(
         toolbar::COPY,
@@ -513,7 +539,7 @@ pub(super) fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'
     let foot = crate::dir_row![copy, export].spacing(space::GAP);
     column![
         container(list).padding([0.0, pad]),
-        container(foot).padding(pad)
+        container(foot).padding([space::GAP, pad])
     ]
     .into()
 }

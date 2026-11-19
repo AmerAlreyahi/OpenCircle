@@ -87,6 +87,9 @@ impl Windows {
         let Some(path) = file else {
             return open;
         };
+        if let Some((_, s)) = &mut self.studio {
+            s.next_name(&path);
+        }
         let read = background(move |tx| {
             let _ = tx.unbounded_send(read_picture(&path));
         })
@@ -346,6 +349,18 @@ impl Windows {
                 },
             ))),
             Outcome::Settings => self.open(super::Kind::Settings),
+            Outcome::ClearRecent => {
+                std::thread::spawn(crate::shared::history::recent::clear);
+                Task::none()
+            }
+            Outcome::Prefs(p) => {
+                std::thread::spawn(move || {
+                    if let Err(e) = crate::shared::config::update(|c| c.studio = p) {
+                        crate::log!("[opencircle] config: {e}");
+                    }
+                });
+                Task::none()
+            }
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
@@ -527,6 +542,9 @@ fn key_msg(
             return Some(studio::Msg::MenuKey(n));
         }
     }
+    if *key == keyboard::Key::Named(Named::Space) && modifiers.is_empty() {
+        return Some(studio::Msg::Space(true));
+    }
     if !modifiers.command() {
         return None;
     }
@@ -558,6 +576,10 @@ pub(super) fn studio_events() -> iced::Subscription<Msg> {
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
             iced::Event::Window(window::Event::FilesHoveredLeft) => studio::Msg::Hovered(false),
             iced::Event::Window(window::Event::FileDropped(path)) => studio::Msg::Dropped(path),
+            iced::Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(keyboard::key::Named::Space),
+                ..
+            }) => studio::Msg::Space(false),
             iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 studio::Msg::Ctrl(m.command())
             }

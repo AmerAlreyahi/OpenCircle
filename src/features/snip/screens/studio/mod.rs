@@ -39,7 +39,7 @@ use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
 
 pub use cut::{Done as CutDone, Phase as CutPhase};
-pub use menu_bar::{Menu, Nav};
+pub use menu_bar::{Menu, Nav, Sub};
 pub use sheets::Restorable;
 #[cfg(test)]
 pub use view::GLYPHS;
@@ -78,9 +78,10 @@ pub const CANVAS: &str = "studio-canvas";
 /// Edit text's inline field.
 pub const FIELD: &str = "studio-edit-field";
 
-/// One step's row in the Steps list: its thumbnail and the gap under it.
-const STEP_PITCH: f32 =
-    crate::shared::kit::thumb::WELL.height + crate::shared::kit::tokens::space::GAP;
+/// The Steps grid: four to a row, the cell and the gap round it.
+const STEP_COLS: usize = 4;
+const STEP_CELL: Size = crate::shared::kit::thumb::MINI;
+const STEP_GAP: f32 = 8.0;
 
 /// What the Studio opens.
 pub enum Picture {
@@ -176,6 +177,15 @@ pub enum Msg {
     Pointer(Point),
     /// Properties: the ratio lock; a typed number that isn't one.
     Lock(bool),
+    /// Space held: the stage pans on a drag; the drag starts / ends.
+    Space(bool),
+    PanStart,
+    PanEnd,
+    /// A second menu's row; View > Snap / Pixel grid; Recent > Clear.
+    SubPick(Sub, usize),
+    Snap,
+    Grid,
+    ClearRecent,
     Nothing,
     /// Board 20: bring the kept copy back / throw it away.
     Restore,
@@ -283,6 +293,10 @@ pub enum Outcome {
     ExportPicture(Crop, export::Picture),
     /// File > New snip: the Snip capture starts.
     NewSnip,
+    /// Settings > Studio changed from the View menu.
+    Prefs(crate::shared::config::StudioPrefs),
+    /// Recent > Clear.
+    ClearRecent,
     /// File > Settings…
     Settings,
 }
@@ -332,6 +346,20 @@ pub struct Studio {
     pub(super) context: Option<Context>,
     pub(super) pointer: Point,
     pub(super) lock: bool,
+    /// Space is held (the stage pans), the pointer where a pan last was, the
+    /// open second menu, the document's name and the name of the next picture.
+    pub(super) space: bool,
+    pan: Option<Point>,
+    pub(super) sub: Option<Sub>,
+    /// Snap and the pixel grid (Settings > Studio; the View menu flips them here).
+    pub(super) snap: bool,
+    pub(super) grid: bool,
+    name: Option<String>,
+    next_name: Option<String>,
+    /// The window's title: "<name> - OpenCircle Studio".
+    pub(super) title: String,
+    /// The Recent rows' second line (size, when), made when the list arrives.
+    pub(super) recent_info: Vec<String>,
     /// A copy kept after a crash, waiting for Restore / Discard (board 20).
     pub(super) restorable: Option<Restorable>,
     /// When the unsaved copy was last written (`recovery`).
@@ -401,6 +429,15 @@ impl Studio {
             context: None,
             pointer: Point::ORIGIN,
             lock: true,
+            space: false,
+            pan: None,
+            sub: None,
+            snap: crate::shared::config::current().studio.snap,
+            grid: crate::shared::config::current().studio.pixel_grid,
+            name: None,
+            next_name: None,
+            title: title_of(None),
+            recent_info: Vec::new(),
             restorable: pending_copy(),
             kept_at: None,
             pick: Reorder::default(),
@@ -453,15 +490,24 @@ impl Studio {
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
         editor.copy_picture_when_empty = prefs.ctrl_c_picture;
+        (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
+        (editor.snap, editor.grid) = (self.snap, self.grid);
         self.zoom = match prefs.zoom_on_open {
             crate::shared::config::StudioZoom::Actual => Some(1.0 / self.scale),
             crate::shared::config::StudioZoom::Fit => None,
         };
+        self.name = self.next_name.take();
+        self.title = title_of(self.name.as_deref());
         self.editor = Some(editor);
         self.fit();
         if let Some(e) = &mut self.editor {
             e.refresh();
         }
+    }
+
+    /// The next picture opened is this file's (its name shows in the title).
+    pub fn next_name(&mut self, path: &std::path::Path) {
+        self.next_name = file_name(path);
     }
 
     /// Unsaved drawings: closing or opening another picture asks first.
@@ -981,10 +1027,15 @@ impl Studio {
             }
             Msg::Dropped(path) => {
                 self.hovered = false;
+                self.next_name = file_name(&path);
                 Outcome::Read(path)
             }
-            Msg::OpenRecent(path) => Outcome::Read(path),
+            Msg::OpenRecent(path) => {
+                self.next_name = file_name(&path);
+                Outcome::Read(path)
+            }
             Msg::Recent(recent) => {
+                self.recent_info = recent.iter().map(|(p, _)| recent_line(p)).collect();
                 self.recent = recent;
                 Outcome::None
             }
@@ -1025,7 +1076,8 @@ impl Studio {
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
                 // Esc ladder: menu, sheet, overlay, the question, Edit text
-                let closed = self.context.take().is_some()
+                let closed = self.sub.take().is_some()
+                    || self.context.take().is_some()
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
                     || std::mem::take(&mut self.overlay);
@@ -1045,7 +1097,61 @@ impl Studio {
             }
             Msg::Pointer(p) => {
                 self.pointer = p;
+                let Some(last) = self.pan else {
+                    return Outcome::None;
+                };
+                self.pan = Some(p);
+                let off = Vector::new(
+                    (self.offset.x - (p.x - last.x)).max(0.0),
+                    (self.offset.y - (p.y - last.y)).max(0.0),
+                );
+                self.offset = off;
+                Outcome::ScrollTo(AbsoluteOffset { x: off.x, y: off.y })
+            }
+            Msg::Space(on) => {
+                // (typing a text on the picture keeps its spaces)
+                self.space = on && !self.editor.as_ref().is_some_and(|e| e.typing());
+                self.pan = self.pan.filter(|_| self.space);
                 Outcome::None
+            }
+            Msg::PanStart => {
+                self.pan = Some(self.pointer);
+                Outcome::None
+            }
+            Msg::PanEnd => {
+                self.pan = None;
+                Outcome::None
+            }
+            Msg::Snap | Msg::Grid => {
+                let mut p = crate::shared::config::current().studio;
+                match msg {
+                    Msg::Snap => self.snap = !self.snap,
+                    _ => self.grid = !self.grid,
+                }
+                (p.snap, p.pixel_grid) = (self.snap, self.grid);
+                if let Some(e) = &mut self.editor {
+                    (e.snap, e.grid) = (self.snap, self.grid);
+                }
+                self.menu = None;
+                self.sub = None;
+                Outcome::Prefs(p)
+            }
+            Msg::ClearRecent => {
+                self.recent.clear();
+                self.recent_info.clear();
+                Outcome::ClearRecent
+            }
+            Msg::SubPick(sub, i) => {
+                self.menu = None;
+                self.sub = None;
+                match menu_bar::sub_items(sub, self)
+                    .into_iter()
+                    .nth(i)
+                    .map(|r| r.press)
+                {
+                    Some(press) => self.update(press),
+                    None => Outcome::None,
+                }
             }
             Msg::ContextOpen => {
                 let Some(e) = &self.editor else {
@@ -1066,13 +1172,7 @@ impl Studio {
                     return Outcome::None;
                 };
                 match c.entries.get(i).filter(|r| r.enabled).map(|r| r.action) {
-                    Some(editing::Action::Paste) => Outcome::Paste(None),
-                    Some(editing::Action::Fit) => self.update(Msg::Fit),
-                    Some(editing::Action::Shortcuts) => self.update(Msg::Shortcuts(true)),
-                    Some(a) => match a.message() {
-                        Some(m) => self.update(Msg::Editor(m)),
-                        None => Outcome::None,
-                    },
+                    Some(a) => self.update(menu_bar::action_msg(a)),
                     None => Outcome::None,
                 }
             }
@@ -1100,13 +1200,23 @@ impl Studio {
                 Outcome::None
             }
             Msg::Menu(m) => {
+                self.sub = None;
                 self.menu = m.map(|m| (m, 0));
                 Outcome::None
             }
             Msg::MenuPick(menu, i) => {
+                let row = menu_bar::items(menu, self)
+                    .into_iter()
+                    .nth(i)
+                    .map(|r| (r.press, r.sub));
+                if let Some(sub) = row.as_ref().and_then(|r| r.1) {
+                    self.sub = Some(sub);
+                    return Outcome::None;
+                }
                 self.menu = None;
-                match menu_bar::items(menu, self).into_iter().nth(i) {
-                    Some(row) => self.update(row.press),
+                self.sub = None;
+                match row {
+                    Some((press, _)) => self.update(press),
                     None => Outcome::None,
                 }
             }
@@ -1139,7 +1249,9 @@ impl Studio {
                 Outcome::None
             }
             Msg::StepMove(at, n) => {
-                self.pick.moved(at, 0.0, STEP_PITCH, n);
+                let cell = iced::Size::new(STEP_CELL.width + STEP_GAP, STEP_CELL.height + STEP_GAP);
+                self.pick
+                    .moved_grid(at, cell, STEP_COLS, n, crate::shared::app_language::rtl());
                 Outcome::None
             }
             Msg::StepRelease => match self.pick.release() {
@@ -1404,6 +1516,43 @@ fn pending_copy() -> Option<Restorable> {
         size,
         png: p.png,
     })
+}
+
+/// The window's title: the document's name, else "Untitled", then the app's.
+fn title_of(name: Option<&str>) -> String {
+    format!(
+        "{} - {}",
+        name.unwrap_or(crate::t!(st_untitled)),
+        crate::t!(st_title)
+    )
+}
+
+fn file_name(path: &std::path::Path) -> Option<String> {
+    path.file_name().map(|n| n.to_string_lossy().into_owned())
+}
+
+/// "2.1 MB · 3 min ago" for a recent file (blank where the OS says nothing).
+fn recent_line(path: &std::path::Path) -> String {
+    use crate::shared::app_language::{S, fmt, tr};
+    let Ok(meta) = std::fs::metadata(path) else {
+        return String::new();
+    };
+    let size = match meta.len() {
+        n if n >= 1_048_576 => format!("{:.1} MB", n as f64 / 1_048_576.0),
+        n => format!("{} KB", n.div_ceil(1024)),
+    };
+    let secs = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .map_or(0, |d| d.as_secs());
+    let when = match secs {
+        0..=59 => tr(S::st_ago_now).to_string(),
+        60..=3599 => fmt(S::st_ago_min, &[&(secs / 60)]),
+        3600..=86399 => fmt(S::st_ago_h, &[&(secs / 3600)]),
+        _ => fmt(S::st_ago_d, &[&(secs / 86400)]),
+    };
+    format!("{size} · {when}")
 }
 
 #[cfg(test)]

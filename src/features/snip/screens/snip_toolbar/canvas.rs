@@ -9,9 +9,12 @@ use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, Path, Stroke, fi
 use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
+/// The pixel grid shows from this zoom (800 %).
+const GRID_FROM: f32 = 8.0;
+
 use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
-    DIM_OUTSIDE, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
+    DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
 };
 use crate::features::snip::annotate::{Annotator, Message};
 
@@ -242,6 +245,25 @@ impl canvas::Program<Message> for Input<'_> {
                 None => pointer.hot.map(|edges| (edges, area::Handle::Hot)),
             };
             area::handles(&mut frame, r, look, hot, self.grown);
+        }
+
+        // Studio's pixel grid: a hairline round every picture pixel from 800 %
+        if e.grid && e.zoom >= GRID_FROM {
+            let size = e.size();
+            let line = Stroke::default().with_color(GRID).with_width(1.0);
+            let cols = (size.width / e.zoom).round() as usize;
+            let rows = (size.height / e.zoom).round() as usize;
+            let path = Path::new(|p| {
+                for i in 0..=cols {
+                    p.move_to(Point::new(i as f32 * e.zoom, 0.0));
+                    p.line_to(Point::new(i as f32 * e.zoom, size.height));
+                }
+                for i in 0..=rows {
+                    p.move_to(Point::new(0.0, i as f32 * e.zoom));
+                    p.line_to(Point::new(size.width, i as f32 * e.zoom));
+                }
+            });
+            frame.stroke(&path, line);
         }
 
         // Studio's rubber band (Select tool): a soft box in the look's colour.

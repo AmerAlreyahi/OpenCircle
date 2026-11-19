@@ -1124,10 +1124,11 @@ fn the_steps_list_opens_reorders_and_deletes_the_strips_own_steps() {
     let _ = s.update(Msg::StepMove(at(5.0), 3));
     let _ = s.update(Msg::StepPress(1));
     assert!(matches!(s.update(Msg::StepRelease), Outcome::OpenStep(1)));
-    // a drag of the first to the third row: the strip reorders (no copy here)
+    // a drag of the first to the third cell: the strip reorders (no copy here)
     let _ = s.update(Msg::StepMove(at(5.0), 3));
     let _ = s.update(Msg::StepPress(0));
-    let _ = s.update(Msg::StepMove(at(2.0 * STEP_PITCH + 5.0), 3));
+    let third = Point::new(2.0 * (STEP_CELL.width + STEP_GAP) + 5.0, 5.0);
+    let _ = s.update(Msg::StepMove(third, 3));
     assert_eq!(
         s.pick.order(3),
         [1, 2, 0],
@@ -1523,4 +1524,144 @@ fn v3_restore_sheet_buttons() {
     });
     let _ = s.update(Msg::DiscardCopy);
     assert!(s.restorable.is_none());
+}
+
+/// §7: Space + drag pans the stage (the scroll moves against the drag); the
+/// drag ends with the button; a text being typed keeps its spaces.
+#[test]
+fn v3_space_drag_pans_the_stage() {
+    let mut s = studio_on(3840, 2160);
+    let _ = s.update(Msg::Scale(1.0));
+    let _ = s.update(Msg::Actual);
+    let _ = s.update(Msg::Scrolled(Vector::new(300.0, 200.0)));
+    let _ = s.update(Msg::Space(true));
+    assert!(s.space);
+    // moving without a press scrolls nothing
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(50.0, 50.0))),
+        Outcome::None
+    ));
+    let _ = s.update(Msg::PanStart);
+    let Outcome::ScrollTo(to) = s.update(Msg::Pointer(Point::new(30.0, 20.0))) else {
+        panic!("a drag scrolls");
+    };
+    assert_eq!((to.x, to.y), (320.0, 230.0));
+    let _ = s.update(Msg::PanEnd);
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(0.0, 0.0))),
+        Outcome::None
+    ));
+    let _ = s.update(Msg::Space(false));
+    assert!(!s.space);
+}
+
+/// §7: Ctrl+Shift+C copies the WHOLE picture, even with an object selected
+/// (Ctrl+C then copies the object); the keys come from the editor's table.
+#[test]
+fn v3_ctrl_shift_c_copies_the_whole_picture() {
+    use iced::keyboard::{Key, Modifiers};
+    let mut s = studio_on(640, 400);
+    draw(&mut s);
+    s.editor.as_mut().unwrap().doc.selected = Some(0);
+    let e = s.editor.as_ref().unwrap();
+    let key = Key::Character("c".into());
+    let both = Modifiers::CTRL | Modifiers::SHIFT;
+    let whole = e.studio_key(&key, Some('c'), both);
+    assert!(matches!(whole, Some(Message::Copy)));
+    assert!(matches!(
+        e.studio_key(&key, Some('c'), Modifiers::CTRL),
+        Some(Message::CopySelection)
+    ));
+    let Outcome::Copy(crop) = s.update(Msg::Editor(whole.unwrap())) else {
+        panic!("copies");
+    };
+    assert_eq!((crop.width, crop.height), (640, 400));
+}
+
+/// §6: the Edit menu has every row (its keys are the editor's own) and Arrange
+/// opens a second menu; View has the Snap and Pixel grid checks.
+#[test]
+fn v3_edit_and_view_menus_are_complete() {
+    let mut s = studio_on(640, 400);
+    draw(&mut s);
+    s.editor.as_mut().unwrap().doc.selected = Some(0);
+    let edit = menu_bar::items(Menu::Edit, &s);
+    let names: Vec<_> = edit.iter().map(|r| r.label).collect();
+    for want in [
+        "Undo",
+        "Redo",
+        "Cut",
+        "Copy",
+        "Paste",
+        "Duplicate",
+        "Delete",
+        "Select all",
+        "Deselect",
+        "Arrange",
+    ] {
+        assert!(names.contains(&want), "{want} in {names:?}");
+    }
+    let cut = edit.iter().find(|r| r.label == "Cut").unwrap();
+    assert_eq!(cut.keys, "Ctrl+X");
+    let arrange = edit.iter().position(|r| r.label == "Arrange").unwrap();
+    assert_eq!(edit[arrange].sub, Some(Sub::Arrange));
+    let _ = s.update(Msg::Menu(Some(Menu::Edit)));
+    let _ = s.update(Msg::MenuPick(Menu::Edit, arrange));
+    assert_eq!(s.sub, Some(Sub::Arrange));
+    assert!(s.menu.is_some(), "the menu stays open for its second menu");
+    assert_eq!(menu_bar::sub_items(Sub::Arrange, &s).len(), 4);
+    let _ = s.update(Msg::Cancel);
+    assert!(
+        s.sub.is_none() && s.menu.is_some(),
+        "Esc closes the second menu first"
+    );
+    let view = menu_bar::items(Menu::View, &s);
+    assert!(view.iter().any(|r| r.label == "Snap to edges and objects"));
+    assert!(view.iter().any(|r| r.label == "Pixel grid at high zoom"));
+}
+
+/// §5: Open recent lists the recent files; the title carries the document name;
+/// Clear empties the list.
+#[test]
+fn v3_recent_menu_title_and_clear() {
+    let mut s = studio_on(64, 64);
+    assert_eq!(s.title, "Untitled - OpenCircle Studio");
+    s.next_name(std::path::Path::new("/x/holiday.png"));
+    s.open(Picture::Crop(crop(8, 8)));
+    assert_eq!(s.title, "holiday.png - OpenCircle Studio");
+    let h = image::Handle::from_rgba(1, 1, vec![0; 4]);
+    let _ = s.update(Msg::Recent(vec![(PathBuf::from("/x/a.png"), h)]));
+    let rows = menu_bar::sub_items(Sub::Recent, &s);
+    assert_eq!(rows[0].label, "a.png");
+    assert!(matches!(s.update(Msg::ClearRecent), Outcome::ClearRecent));
+    assert!(s.recent.is_empty());
+}
+
+/// §6: with Snap on, a rectangle drawn up to the picture's edge lands on it, a
+/// moved one lands its edge on another's; with Snap off nothing moves.
+#[test]
+fn v3_snap_lands_drawing_and_moving_on_edges() {
+    let draw_rect = |snap: bool| {
+        let mut s = studio_on(640, 400);
+        if s.snap != snap {
+            let _ = s.update(Msg::Snap);
+        }
+        assert_eq!(s.snap, snap);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+        for m in [
+            Message::Press(Point::new(100.0, 100.0)),
+            Message::Move(Point::new(300.0, 200.0)),
+            Message::Move(Point::new(637.0, 200.0)),
+            Message::Release,
+        ] {
+            let _ = s.update(Msg::Editor(m));
+        }
+        let f = s.editor.as_ref().unwrap().doc.items[0].frame();
+        f.x + f.width
+    };
+    assert!((draw_rect(true) - 640.0).abs() < 1.0, "lands on the edge");
+    assert!(
+        (draw_rect(false) - 637.0).abs() < 1.0,
+        "off: where the pointer was"
+    );
 }

@@ -17,6 +17,9 @@ use super::tokens::{Role, radius};
 
 /// A thumbnail's well.
 pub const WELL: Size = Size::new(96.0, 60.0);
+/// The grid cell's well and its badge.
+pub const MINI: Size = Size::new(48.0, 36.0);
+const MINI_BADGE: f32 = 14.0;
 /// The strip's padding and the gap between its parts.
 pub const PAD: f32 = 4.0;
 /// The strip's top row (grip, x).
@@ -53,11 +56,33 @@ pub fn step<'a, Message: Clone + 'a>(
     look: Look,
     on_delete: Option<Message>,
 ) -> Element<'a, Message> {
+    build(picture, number, look, on_delete, WELL, BADGE)
+}
+
+/// The Studio Library's Steps grid cell (four to a row): `step` at 48 x 36 with
+/// a 14 px badge.
+pub fn mini<'a, Message: Clone + 'a>(
+    picture: image::Handle,
+    number: usize,
+    look: Look,
+    on_delete: Option<Message>,
+) -> Element<'a, Message> {
+    build(picture, number, look, on_delete, MINI, MINI_BADGE)
+}
+
+fn build<'a, Message: Clone + 'a>(
+    picture: image::Handle,
+    number: usize,
+    look: Look,
+    on_delete: Option<Message>,
+    well_size: Size,
+    badge_side: f32,
+) -> Element<'a, Message> {
     let ring = look.hover || look.lifted || look.focused;
     let well = container(image(picture).content_fit(ContentFit::ScaleDown))
         .center(Fill)
-        .width(WELL.width)
-        .height(WELL.height)
+        .width(well_size.width)
+        .height(well_size.height)
         .style(move |_| container::Style {
             background: Some(
                 match look.focused {
@@ -78,25 +103,28 @@ pub fn step<'a, Message: Clone + 'a>(
             .font(font(Role::BADGE))
             .color(super::themes::on(c().accent)),
     )
-    .center(BADGE)
-    .style(|_| container::Style {
+    .center(badge_side)
+    .style(move |_| container::Style {
         background: Some(c().accent.into()),
         border: Border::default()
-            .rounded(BADGE / 2.0)
+            .rounded(badge_side / 2.0)
             .width(RING)
             .color(c().widget),
         ..container::Style::default()
     });
     let corner = |x: f32, side: f32| match look.rtl {
-        true => WELL.width - INSET - side - x,
+        true => well_size.width - INSET - side - x,
         false => INSET + x,
     };
-    let mut layers = stack![well, pin(badge).x(corner(0.0, BADGE)).y(INSET)];
+    let mut layers = stack![well, pin(badge).x(corner(0.0, badge_side)).y(INSET)];
     if let Some(delete) = on_delete.filter(|_| look.hover) {
-        let end = WELL.width - 2.0 * INSET - X;
+        let end = well_size.width - 2.0 * INSET - X;
         layers = layers.push(pin(close(delete)).x(corner(end, X)).y(INSET));
     }
-    layers.width(WELL.width).height(WELL.height).into()
+    layers
+        .width(well_size.width)
+        .height(well_size.height)
+        .into()
 }
 
 /// The small x: a 20 px circle, a 12 px x in `text_muted` (`text` on `hover`

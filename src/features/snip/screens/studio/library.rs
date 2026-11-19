@@ -20,7 +20,7 @@ use crate::t;
 const FILE_ROW: f32 = 44.0;
 const OBJECT_ROW: f32 = 30.0;
 const THUMB: (f32, f32) = (40.0, 28.0);
-const PAD: f32 = 12.0;
+pub(super) const PAD: f32 = 12.0;
 const ROW_GAP: f32 = 10.0;
 
 /// The three sections, in order (also the indexes of `Studio::shut`).
@@ -76,20 +76,18 @@ fn recent(s: &Studio) -> Element<'_, Msg> {
     } else if s.recent.is_empty() {
         col = col.push(note(t!(st_recent_none)));
     }
-    for (path, picture) in s.recent.iter().take(shown) {
+    for (at, (path, picture)) in s.recent.iter().take(shown).enumerate() {
         let name = path
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let ext = path
-            .extension()
-            .map_or_else(String::new, |e| e.to_string_lossy().to_uppercase());
+        let info = s.recent_info.get(at).cloned().unwrap_or_default();
         let thumb = image(picture.clone())
             .width(THUMB.0)
             .height(THUMB.1)
             .content_fit(ContentFit::Cover);
         let words = column![
             text(Role::CONTROL, name).wrapping(iced::widget::text::Wrapping::None),
-            muted(Role::META, ext),
+            muted(Role::META, info),
         ];
         let line = crate::dir_row![thumb, words.width(Fill)]
             .spacing(ROW_GAP)
@@ -102,7 +100,13 @@ fn recent(s: &Studio) -> Element<'_, Msg> {
         button::Kind::Elevated,
         Some(Msg::Open),
     );
-    col.push(container(open).padding([space::GAP, PAD])).into()
+    let clear = button::button(
+        button::label(t!(st_clear)),
+        button::Kind::Quiet,
+        (!s.recent.is_empty()).then_some(Msg::ClearRecent),
+    );
+    let foot = crate::dir_row![open, clear].spacing(space::GAP);
+    col.push(container(foot).padding([space::GAP, PAD])).into()
 }
 
 fn objects(e: Option<&Annotator>) -> Element<'_, Msg> {

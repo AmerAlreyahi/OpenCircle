@@ -22,6 +22,8 @@ pub enum Material {
     /// A floating widget while it is held and dragged (`.oc-dragging`): the
     /// widget with an `accent` edge.
     Held,
+    /// The Studio's dark stage (`canvas_dark`, divider edge).
+    Stage,
 }
 
 /// `content` on `material` with corners of `radius` and a 1 px edge. The
@@ -35,6 +37,7 @@ pub fn surface<'a, Message: 'a>(
         let (fill, edge) = match material {
             Material::Window => (c().bg, c().rim),
             Material::Recessed => (c().track_glass, c().divider),
+            Material::Stage => (c().canvas_dark, c().divider),
             Material::Widget => (c().widget, c().rim),
             Material::Tile => (c().hover, c().rim),
             Material::Held => (c().widget, c().accent),

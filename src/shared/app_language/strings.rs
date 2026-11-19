@@ -2488,4 +2488,26 @@ strings! {
         | "تحديد الكل";
     st_lock_ratio: "Lock ratio"
         | "قفل النسبة";
+    st_deselect: "Deselect"
+        | "إلغاء التحديد";
+    st_clear: "Clear"
+        | "مسح";
+    st_open_recent: "Open recent"
+        | "فتح الأخيرة";
+    st_arrange: "Arrange"
+        | "ترتيب";
+    st_snap: "Snap to edges and objects"
+        | "الالتصاق بالحواف والكائنات";
+    st_grid: "Pixel grid at high zoom"
+        | "شبكة البكسل عند التكبير";
+    st_untitled: "Untitled"
+        | "بدون عنوان";
+    st_ago_now: "just now"
+        | "الآن";
+    st_ago_min: "{} min ago"
+        | "قبل {} د";
+    st_ago_h: "{} h ago"
+        | "قبل {} س";
+    st_ago_d: "{} d ago"
+        | "قبل {} ي";
 }

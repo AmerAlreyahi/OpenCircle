@@ -584,6 +584,11 @@ pub struct Annotator {
     /// Line help: a blur stroke keeps to the line it started on (config
     /// `editor.line_assist`).
     pub(crate) assist: bool,
+    /// The Studio's magnet (Settings > Studio > Snap): moving and drawing land
+    /// on the picture's edges and other objects' edges, within `SNAP`.
+    pub snap: bool,
+    /// The Studio's pixel grid (drawn by the canvas at 800 % and over).
+    pub grid: bool,
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
@@ -700,6 +705,8 @@ impl Annotator {
             dragged: None,
             shared: None,
             assist: saved.line_assist,
+            snap: false,
+            grid: false,
             scroll: false,
             capturing: false,
             lock: None,
@@ -1546,14 +1553,30 @@ impl Annotator {
             let item = self.create(start);
             self.begin(None, item, Drag::Draw, start);
         }
+        // the magnet: a drawn corner or a moved item's edges land on the picture's
+        // and the other items' edges
+        let (drawn_to, moved_by) = match (&self.pending, self.snap) {
+            (Some(pd), true) => match &pd.drag {
+                Drag::Draw => (self.snap_point(p, pd.index), None),
+                Drag::Move { from, .. } => (p, Some(self.snap_move(from, p - pd.start, pd.index))),
+                _ => (p, None),
+            },
+            _ => (p, None),
+        };
         let Some(pending) = &mut self.pending else {
             return;
         };
         pending.item = match &pending.drag {
-            Drag::Draw => grow(&pending.item, pending.start, p, self.zoom, self.shift),
+            Drag::Draw => grow(
+                &pending.item,
+                pending.start,
+                drawn_to,
+                self.zoom,
+                self.shift,
+            ),
             // A click that wobbles a pixel is not a move.
             Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => from.clone(),
-            Drag::Move { from, .. } => select::moved(from, p - pending.start),
+            Drag::Move { from, .. } => select::moved(from, moved_by.unwrap_or(p - pending.start)),
             Drag::Handle(handle, original) => select::dragged(original, *handle, p),
             Drag::Type => return,
         };
@@ -1562,6 +1585,48 @@ impl Annotator {
         } else {
             self.hide();
         }
+    }
+
+    /// What a snap lands on: the picture and every item but `skip`.
+    fn snap_targets(&self, skip: Option<usize>) -> Vec<Rectangle> {
+        let mut all = vec![self.doc.view()];
+        all.extend(
+            (self.doc.items.iter().enumerate())
+                .filter(|(i, _)| Some(*i) != skip)
+                .map(|(_, it)| it.frame()),
+        );
+        all
+    }
+
+    /// `p` on the nearest target edge within the snap reach.
+    fn snap_point(&self, p: Point, skip: Option<usize>) -> Point {
+        let reach = crate::features::snip::SNAP / self.zoom.max(0.01);
+        crate::features::snip::snap(p, &self.snap_targets(skip), reach)
+    }
+
+    /// `by` (a moved item's offset) nudged so the item's left / right and top /
+    /// bottom edges land on a target edge within the reach.
+    fn snap_move(&self, from: &Item, by: Vector, skip: Option<usize>) -> Vector {
+        let reach = crate::features::snip::SNAP / self.zoom.max(0.01);
+        let f = from.frame();
+        let targets = self.snap_targets(skip);
+        let best = |mine: [f32; 2], theirs: Vec<f32>| {
+            let mut best: Option<f32> = None;
+            for m in mine {
+                for t in &theirs {
+                    let d = t - m;
+                    if d.abs() <= reach && best.is_none_or(|b| d.abs() < b.abs()) {
+                        best = Some(d);
+                    }
+                }
+            }
+            best.unwrap_or(0.0)
+        };
+        let xs = targets.iter().flat_map(|r| [r.x, r.x + r.width]).collect();
+        let ys = targets.iter().flat_map(|r| [r.y, r.y + r.height]).collect();
+        let dx = best([f.x + by.x, f.x + f.width + by.x], xs);
+        let dy = best([f.y + by.y, f.y + f.height + by.y], ys);
+        Vector::new(by.x + dx, by.y + dy)
     }
 
     /// A cancelled press (a lost touch) ends like a release that completes nothing:

@@ -1,9 +1,12 @@
 //! The header's File / Edit / View menu bar (STUDIO_V3_SPEC §6, boards 6, 7,
 //! 7b): a bar of three openers and the menu under the opened one, from the
-//! kit's menu rows. Alt opens File, arrows walk, Enter picks, Esc closes.
+//! kit's menu rows; Open recent and Arrange open a second menu beside it. Alt
+//! opens File, arrows walk, Enter picks, Esc closes. The Edit rows are the
+//! editor's own entries (`editing`), the same ones the right-click menu uses.
 use iced::widget::{container, pin, stack};
 use iced::{Center, Element, Fill, Padding};
 
+use super::editing::{self, Action};
 use super::{Msg, Studio};
 use crate::features::snip::annotate::Message;
 use crate::shared::app_language::{S, tr};
@@ -15,6 +18,13 @@ pub enum Menu {
     File,
     Edit,
     View,
+}
+
+/// A second menu beside a row of the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sub {
+    Recent,
+    Arrange,
 }
 
 impl Menu {
@@ -47,32 +57,67 @@ pub enum Nav {
 }
 
 /// One menu row.
-pub struct Item {
-    pub label: &'static str,
-    pub keys: &'static str,
+pub struct Item<'a> {
+    pub label: &'a str,
+    pub keys: String,
     pub checked: bool,
     pub press: Msg,
     /// A hairline above it.
     pub sep: bool,
+    /// It opens this second menu instead of acting.
+    pub sub: Option<Sub>,
 }
 
-fn item(label: S, keys: &'static str, press: Msg, sep: bool) -> Item {
+fn item<'a>(label: S, keys: &str, press: Msg, sep: bool) -> Item<'a> {
     Item {
         label: tr(label),
-        keys,
+        keys: keys.to_string(),
         checked: false,
         press,
         sep,
+        sub: None,
     }
 }
 
-/// The menu's rows (the panels' checks follow the Studio's state).
-pub fn items(menu: Menu, s: &Studio) -> Vec<Item> {
-    let ed = |m| Msg::Editor(m);
+fn opens<'a>(label: S, sub: Sub, sep: bool) -> Item<'a> {
+    Item {
+        sub: Some(sub),
+        ..item(label, "", Msg::Menu(None), sep)
+    }
+}
+
+/// The message of an editor menu action (Paste, Fit and the shortcuts sheet are
+/// the Studio's own).
+pub fn action_msg(a: Action) -> Msg {
+    match a {
+        Action::Paste => Msg::Paste,
+        Action::Fit => Msg::Fit,
+        Action::Shortcuts => Msg::Shortcuts(true),
+        a => a.message().map_or(Msg::Menu(None), Msg::Editor),
+    }
+}
+
+/// An editor action as a menu row.
+fn action<'a>(s: &Studio, a: Action, sep: bool) -> Item<'a> {
+    // the key is the editor's entry's own: one source for both menus
+    let keys = s.editor.as_ref().map_or_else(String::new, |e| {
+        let entries = editing::object_menu(e)
+            .into_iter()
+            .chain(editing::picture_menu(e));
+        let found = entries.into_iter().find(|r| r.action == a);
+        found.map_or_else(String::new, |r| super::sheets::chord_text(r.keys))
+    });
+    item(super::sheets::words(a), &keys, action_msg(a), sep)
+}
+
+/// The menu's rows (the panels' and preferences' checks follow the state).
+pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
+    let ed = Msg::Editor;
     match menu {
         Menu::File => vec![
             item(S::st_new_snip, "Alt+A", Msg::NewSnip, false),
             item(S::st_open, "Ctrl+O", Msg::Open, false),
+            opens(S::st_open_recent, Sub::Recent, false),
             item(S::c_save, "Ctrl+S", ed(Message::Save), true),
             item(S::st_save_as, "Ctrl+Shift+S", Msg::Export, false),
             item(S::st_export_walkthrough, "", Msg::ExportWalkthrough, false),
@@ -89,8 +134,14 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item> {
         Menu::Edit => vec![
             item(S::sn_undo, "Ctrl+Z", ed(Message::Undo), false),
             item(S::sn_redo, "Ctrl+Y", ed(Message::Redo), false),
-            item(S::st_paste, "Ctrl+V", Msg::Paste, true),
-            item(S::st_delete, "Delete", ed(Message::Delete), true),
+            action(s, Action::Cut, true),
+            action(s, Action::Copy, false),
+            action(s, Action::Paste, false),
+            action(s, Action::Duplicate, false),
+            action(s, Action::Delete, false),
+            action(s, Action::SelectAll, true),
+            item(S::st_deselect, "Esc", ed(Message::Deselect), false),
+            opens(S::st_arrange, Sub::Arrange, true),
         ],
         Menu::View => {
             let p = s.panels;
@@ -102,21 +153,59 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item> {
                 item(S::st_zoom_out, "Ctrl+-", Msg::ZoomOut, false),
                 item(S::st_fit, "Ctrl+0", Msg::Fit, false),
                 item(S::st_actual, "Ctrl+1", Msg::Actual, false),
+                item(S::st_snap, "", Msg::Snap, true),
+                item(S::st_grid, "", Msg::Grid, false),
             ];
             v[0].checked = p.library;
             v[1].checked = p.options;
             v[2].checked = p.library && p.options;
+            v[7].checked = s.snap;
+            v[8].checked = s.grid;
             v
         }
     }
 }
 
-/// The menu hangs under the header and its hairline.
-const HEADER_BELOW: f32 = 41.0;
+/// The second menu's rows.
+pub fn sub_items(sub: Sub, s: &Studio) -> Vec<Item<'_>> {
+    match sub {
+        Sub::Arrange => [
+            Action::Forward,
+            Action::Backward,
+            Action::Front,
+            Action::Back,
+        ]
+        .into_iter()
+        .map(|a| action(s, a, false))
+        .collect(),
+        Sub::Recent => s
+            .recent
+            .iter()
+            .take(usize::from(
+                crate::shared::config::current().studio.recent_files,
+            ))
+            .map(|(path, _)| Item {
+                label: path.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+                keys: String::new(),
+                checked: false,
+                press: Msg::OpenRecent(path.clone()),
+                sep: false,
+                sub: None,
+            })
+            .collect(),
+    }
+}
 
 /// An opener's side padding in all (as the kit draws it), and the gap between openers.
 const OPENER_PAD: f32 = 22.0;
 const OPENER_GAP: f32 = 2.0;
+/// The menu hangs under the header and its hairline; a second menu sits this far
+/// from the first.
+const HEADER_BELOW: f32 = 41.0;
+const SUB_GAP: f32 = 4.0;
+/// The menu's padding and a separator's height (as `option_list` draws them).
+const MENU_PAD: f32 = 5.0;
+const SEPARATOR_H: f32 = 9.0;
 
 /// The three openers.
 pub fn bar(s: &Studio) -> Element<'_, Msg> {
@@ -142,41 +231,68 @@ fn offset(menu: Menu) -> f32 {
     x
 }
 
-/// `base` with the opened menu under its opener.
-pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
-    let Some((menu, focus)) = s.menu else {
-        return base;
-    };
-    let rows = items(menu, s);
+/// A menu's rows as the kit draws them.
+fn panel<'a>(
+    rows: Vec<Item<'a>>,
+    focus: Option<usize>,
+    pick: impl Fn(usize) -> Msg,
+) -> Element<'a, Msg> {
     let mut list: Vec<Element<'a, Msg>> = Vec::new();
     for (i, r) in rows.into_iter().enumerate() {
         if r.sep {
             list.push(option_list::separator());
         }
         // the keys read left to right inside a right-to-left menu
-        let hint = (!r.keys.is_empty()).then(|| format!("\u{2066}{}\u{2069}", r.keys));
+        let hint = match (r.sub, r.keys.is_empty()) {
+            (Some(_), _) => Some(if dir::rtl() { "‹" } else { "›" }.to_string()),
+            (None, false) => Some(format!("\u{2066}{}\u{2069}", r.keys)),
+            (None, true) => None,
+        };
         list.push(option_list::item(
             r.label,
             r.checked,
             hint,
-            i == focus,
-            Msg::MenuPick(menu, i),
+            focus == Some(i),
+            pick(i),
         ));
     }
-    let panel = option_list::menu(list);
-    let x = offset(menu);
-    let placed: Element<'a, Msg> = match dir::rtl() {
-        false => pin(panel).x(x).y(HEADER_BELOW).into(),
-        true => container(panel)
-            .padding(Padding {
-                top: 41.0,
-                right: x,
-                ..Padding::ZERO
-            })
-            .align_right(Fill)
-            .into(),
+    option_list::menu(list)
+}
+
+/// `base` with the opened menu under its opener (and the second menu beside it).
+pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
+    let Some((menu, focus)) = s.menu else {
+        return base;
     };
-    stack![base, placed].into()
+    let rows = items(menu, s);
+    // where the row that opens the second menu starts, down the first
+    let sub_at = s.sub.and_then(|sub| {
+        let at = rows.iter().position(|r| r.sub == Some(sub))?;
+        let seps = rows[..=at].iter().filter(|r| r.sep).count() as f32;
+        Some(MENU_PAD + at as f32 * option_list::ITEM_H + seps * SEPARATOR_H)
+    });
+    let first = panel(rows, Some(focus), move |i| Msg::MenuPick(menu, i));
+    let x = offset(menu);
+    let place = |panel: Element<'a, Msg>, x: f32, y: f32| -> Element<'a, Msg> {
+        match dir::rtl() {
+            false => pin(panel).x(x).y(y).into(),
+            true => container(panel)
+                .padding(Padding {
+                    top: y,
+                    right: x,
+                    ..Padding::ZERO
+                })
+                .align_right(Fill)
+                .into(),
+        }
+    };
+    let mut layers = vec![base, place(first, x, HEADER_BELOW)];
+    if let (Some(sub), Some(y)) = (s.sub, sub_at) {
+        let second = panel(sub_items(sub, s), None, move |i| Msg::SubPick(sub, i));
+        let beside = x + option_list::MENU_WIDTH + SUB_GAP;
+        layers.push(place(second, beside, HEADER_BELOW + y));
+    }
+    stack(layers).into()
 }
 
 /// The keyboard on the bar: the new state and, for Enter, the row picked.

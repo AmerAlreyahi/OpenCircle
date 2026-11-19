@@ -27,6 +27,8 @@ pub const ANNOTATION: [Color; 12] = [
 /// the dim outside a crop, the handles and crop edge, a step's note pill.
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 pub const HANDLE: Color = Color::WHITE;
+/// The Studio's pixel grid hairlines (any picture, any theme).
+pub const GRID: Color = Color::from_rgba(0.5, 0.5, 0.5, 0.35);
 pub const NOTE_FILL: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.94);
 pub const NOTE_INK: Color = Color::from_rgb8(28, 28, 36);
 pub const NOTE_HINT: Color = Color::from_rgb8(120, 120, 130);

@@ -71,7 +71,7 @@ impl Annotator {
     /// What a Studio key does in the editor (typing and open menus are handled
     /// before this): `None` = not a Studio editing key, the editor's own table
     /// goes on. Esc ladder here: selection -> tool back to Select -> nothing.
-    pub(super) fn studio_key(
+    pub(crate) fn studio_key(
         &self,
         key: &Key,
         latin: Option<char>,
