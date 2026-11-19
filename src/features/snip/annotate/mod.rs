@@ -47,6 +47,8 @@ fn clean_paste(t: &str) -> String {
 #[cfg(test)]
 mod objects_api_tests;
 #[cfg(test)]
+mod objects_grow_tests;
+#[cfg(test)]
 mod objects_more_tests;
 #[cfg(test)]
 mod objects_settings_tests;
@@ -61,7 +63,7 @@ pub use document::{
     Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
 };
 #[allow(unused_imports)] // API for the Studio's bar (W87)
-pub use objects::{Order, SelectionStyle, clear_clipboard};
+pub use objects::{GrowRefusal, Order, SelectionStyle, clear_clipboard};
 pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
@@ -614,6 +616,8 @@ pub struct Annotator {
     pub paste_movable: bool,
     pub grow_canvas: bool,
     pub drag_jpeg: bool,
+    /// Why the last "grow the canvas" was refused (`take_grow_refusal`).
+    grow_refused: Option<GrowRefusal>,
     /// The part of the picture the stage shows (display px from its top-left),
     /// so the pixel grid draws only that; `None` = all of it.
     pub viewport: Option<Rectangle>,
@@ -740,6 +744,7 @@ impl Annotator {
             paste_movable: true,
             grow_canvas: false,
             drag_jpeg: false,
+            grow_refused: None,
             viewport: None,
             grid: false,
             scroll: false,
@@ -1801,12 +1806,13 @@ impl Annotator {
         if let Some(edit) = edit {
             let grown = match &edit {
                 Edit::Insert(_, item) | Edit::Change(_, _, item) => self.grow_for(&[item.frame()]),
-                _ => None,
+                _ => Ok(None),
             };
-            self.doc.exec(match grown {
-                Some(grow) => Edit::Seq(vec![edit, grow]),
-                None => edit,
-            });
+            match grown {
+                Ok(Some(grow)) => self.doc.exec(Edit::Seq(vec![edit, grow])),
+                Ok(None) => self.doc.exec(edit),
+                Err(()) => {} // refused: the change is dropped, the reason is kept
+            }
         }
         if repaint {
             self.refresh();

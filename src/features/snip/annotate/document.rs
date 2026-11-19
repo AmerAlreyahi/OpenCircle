@@ -321,9 +321,18 @@ pub enum Edit {
     /// Several edits that undo together (applied in order).
     Seq(Vec<Edit>),
     /// The canvas grew (Studio, "Grow the canvas past the edge"): the picture
-    /// before and after, and how far every drawing moved (zero unless it grew
-    /// to the left or the top).
-    Canvas(Box<Image>, Box<Image>, Vector),
+    /// as it was (the only copy kept), the new size, how far every drawing
+    /// moved (zero unless it grew to the left or the top) and whether this is
+    /// the undo (back to the old picture) rather than the growth.
+    // Undo happens only after every later edit was undone, so the grown
+    // picture is always the old one placed in a see-through canvas: it is
+    // rebuilt, never stored.
+    Canvas {
+        old: Box<Image>,
+        size: (u32, u32),
+        by: Vector,
+        undo: bool,
+    },
 }
 
 /// A changed box of the image: `x, y, w, h` (image px), RGBA rows before and after.
@@ -361,7 +370,17 @@ impl Edit {
                 after: p.before,
             })),
             Edit::Seq(all) => Edit::Seq(all.iter().rev().map(Edit::inverse).collect()),
-            Edit::Canvas(before, after, by) => Edit::Canvas(after, before, -by),
+            Edit::Canvas {
+                old,
+                size,
+                by,
+                undo,
+            } => Edit::Canvas {
+                old,
+                size,
+                by: -by,
+                undo: !undo,
+            },
         }
     }
 
@@ -391,8 +410,16 @@ impl Edit {
             }
             Edit::Pixels(p) => p.write(&mut doc.image, &p.after),
             Edit::Seq(all) => all.iter().for_each(|e| e.apply(doc)),
-            Edit::Canvas(_, after, by) => {
-                doc.image = (**after).clone();
+            Edit::Canvas {
+                old,
+                size,
+                by,
+                undo,
+            } => {
+                doc.image = match undo {
+                    true => (**old).clone(),
+                    false => placed(old, *size, *by),
+                };
                 doc.shift(*by);
             }
         }
@@ -574,6 +601,12 @@ impl Document {
     /// Where the history is: (steps done, all steps).
     pub fn steps(&self) -> (usize, usize) {
         (self.done.len(), self.done.len() + self.undone.len())
+    }
+
+    /// The newest edit done (tests).
+    #[cfg(test)]
+    pub fn last_edit(&self) -> Option<&(u64, Edit)> {
+        self.done.last()
     }
 
     /// How many edits can be undone.
@@ -968,5 +1001,24 @@ impl<'de> serde::Deserialize<'de> for Pic {
             return Err(serde::de::Error::custom("picture size"));
         }
         Ok(Pic(std::sync::Arc::new((w, h, data))))
+    }
+}
+
+/// `old` in a see-through canvas of `size`, its top-left at `at`.
+fn placed(old: &Image, (w, h): (u32, u32), at: Vector) -> Image {
+    let (w, h) = (w as usize, h as usize);
+    let (dx, dy) = (at.x as usize, at.y as usize);
+    let mut rgba = vec![0u8; w * h * 4];
+    let row = old.width as usize * 4;
+    for y in 0..old.height as usize {
+        let to = ((y + dy) * w + dx) * 4;
+        if let Some(dst) = rgba.get_mut(to..to + row) {
+            dst.copy_from_slice(&old.rgba[y * row..][..row]);
+        }
+    }
+    Image {
+        width: w as u32,
+        height: h as u32,
+        rgba,
     }
 }
