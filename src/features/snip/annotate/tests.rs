@@ -64,6 +64,7 @@ pub(super) fn item(shape: Shape) -> Item {
         width: 4.0,
         outline: false,
         fill: false,
+        hidden: false,
     }
 }
 
@@ -760,6 +761,7 @@ fn redact_is_a_solid_box() {
         width: 4.0,
         outline: false,
         fill: false,
+        hidden: false,
     };
     let out = render(&doc_with(field("hunter2"), vec![redact]));
     for y in 10..30 {
@@ -1577,6 +1579,7 @@ fn label_text_contrasts_with_its_fill() {
             width: 4.0,
             outline: false,
             fill: false,
+            hidden: false,
         };
         let out = render(&doc_with(image_of(160, 60, |_, _| SLATE), vec![label]));
         let origin = label::text_origin(at, 24.0);

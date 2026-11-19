@@ -9,9 +9,9 @@ use super::tests::{RED, image_of, item, px};
 use super::*;
 
 /// The object clipboard is one per process: tests that use it take turns.
-static CLIP: Mutex<()> = Mutex::new(());
+pub(super) static CLIP: Mutex<()> = Mutex::new(());
 
-fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Item {
+pub(super) fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Item {
     item(Shape::Rect {
         a: Point::new(x0, y0),
         b: Point::new(x1, y1),
@@ -19,7 +19,7 @@ fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Item {
 }
 
 /// A Studio editor on a white 400x300 picture with three boxes.
-fn studio() -> Annotator {
+pub(super) fn studio() -> Annotator {
     let mut e = Annotator::new(image_of(400, 300, |_, _| [255, 255, 255, 255]), 1.0);
     e.studio = true;
     e.tool = Tool::Select;
@@ -35,7 +35,7 @@ fn studio() -> Annotator {
     e
 }
 
-fn click(e: &mut Annotator, x: f32, y: f32) {
+pub(super) fn click(e: &mut Annotator, x: f32, y: f32) {
     e.update(Message::Press(Point::new(x, y)));
     e.update(Message::Release);
 }
@@ -208,7 +208,10 @@ fn s1_2_a_foreign_picture_is_a_movable_object_that_merges() {
     // Merge: the pixels become the picture's, the object goes, ONE undo step
     let depth = e.doc.depth();
     e.update(Message::Merge);
-    assert_eq!(e.doc.items.len(), 3);
+    assert!(
+        e.doc.items.is_empty(),
+        "the three boxes under it went into the picture too"
+    );
     assert_eq!(e.doc.depth(), depth + 1);
     let spot = (after.x + 5.0) as u32 + (after.y + 5.0) as u32 * 400;
     assert_eq!(e.doc.image.rgba[spot as usize * 4 + 1], 200);

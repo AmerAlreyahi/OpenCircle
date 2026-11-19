@@ -45,6 +45,28 @@ pub fn handles(item: &Item) -> Vec<(Handle, Point)> {
     }
 }
 
+/// Where a selected item shows its small markers when several are selected:
+/// its own handles' places, but only ends / corners (no bend), and the
+/// corners of the frame for strokes that have no handles.
+pub fn marks(item: &Item) -> Vec<Point> {
+    let own: Vec<Point> = handles(item)
+        .into_iter()
+        .filter(|(h, _)| matches!(h, Handle::Corner(_) | Handle::End(_)))
+        .map(|(_, at)| at)
+        .collect();
+    if !own.is_empty() {
+        return own;
+    }
+    let f = item.frame();
+    let (x1, y1) = (f.x + f.width, f.y + f.height);
+    vec![
+        f.position(),
+        Point::new(x1, f.y),
+        Point::new(x1, y1),
+        Point::new(f.x, y1),
+    ]
+}
+
 /// The box its corner handles are on: a callout's bubble (not its tail), else
 /// its frame.
 fn body(item: &Item) -> Rectangle {
@@ -78,6 +100,9 @@ pub fn handle_at(item: &Item, p: Point, reach: f32) -> Option<Handle> {
 // test against the path if that picks the wrong item in practice.
 pub fn hit(items: &[Item], p: Point, reach: f32) -> Option<usize> {
     items.iter().rposition(|item| {
+        if item.hidden {
+            return false;
+        }
         // A blur's bounds include the far area its blur reads; its stroke is the frame.
         let area = match item.shape {
             Shape::Blur { .. } => item.frame(),
@@ -90,7 +115,9 @@ pub fn hit(items: &[Item], p: Point, reach: f32) -> Option<usize> {
 /// The topmost item painted at `p` (strokes, outlines and arrow lines within
 /// `reach`; solid items anywhere on them).
 pub fn grab(items: &[Item], p: Point, reach: f32) -> Option<usize> {
-    items.iter().rposition(|item| touches(item, p, reach))
+    items
+        .iter()
+        .rposition(|item| !item.hidden && touches(item, p, reach))
 }
 
 pub(super) fn touches(item: &Item, p: Point, reach: f32) -> bool {

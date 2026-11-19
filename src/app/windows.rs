@@ -1601,6 +1601,7 @@ impl Windows {
                         stop.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     self.studio = None; // its picture and history are freed
+                    crate::features::snip::annotate::clear_clipboard();
                     crate::shared::platform::sys::mem::trim_heap_soon();
                     return Task::none();
                 }

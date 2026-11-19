@@ -9,12 +9,9 @@ use iced::widget::canvas::{self, Action, Fill, Frame, Geometry, Path, Stroke, fi
 use iced::widget::{image, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector};
 
-/// The pixel grid shows from this zoom (800 %).
-const GRID_FROM: f32 = 8.0;
-
 use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
-    DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
+    BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
 };
 use crate::features::snip::annotate::{Annotator, Message};
 
@@ -26,6 +23,9 @@ pub fn margin(e: &Annotator) -> f32 {
 use crate::shared::kit::area;
 use crate::shared::kit::themes::c;
 use crate::shared::touch::Touched;
+
+/// The pixel grid shows from this zoom (800 %).
+const GRID_FROM: f32 = 8.0;
 
 /// How a window shows Snip's live area (`app::screens`' one unit): its px =
 /// the starting screen's px * `k` + `at`; the image's top-left pixel is at
@@ -268,12 +268,12 @@ impl canvas::Program<Message> for Input<'_> {
 
         // Studio's rubber band (Select tool): a soft box in the look's colour.
         if let Some(band) = e.band_rect() {
-            let look = crate::shared::theme::accent_of(&crate::shared::config::look());
-            frame.fill_rectangle(band.position(), band.size(), look.0.scale_alpha(0.12));
-            frame.stroke(
-                &Path::rectangle(band.position(), band.size()),
-                accent.with_color(look.0),
+            frame.fill_rectangle(
+                band.position(),
+                band.size(),
+                c().accent.scale_alpha(BAND_ALPHA),
             );
+            frame.stroke(&Path::rectangle(band.position(), band.size()), accent);
         }
         if let Some(keep) = e.crop_preview() {
             let outside = Path::new(|p| {

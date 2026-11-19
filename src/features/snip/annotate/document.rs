@@ -21,30 +21,38 @@ pub struct Image {
 }
 
 /// What an annotation is. Points are in image pixels.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Shape {
     Rect {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
     },
     Ellipse {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
     },
     /// Quadratic curve a → b pulled toward `bend` (straight when `bend` is the
     /// midpoint). `head: false` = a plain line. `text` (if any) is a label on
     /// its tail `a`.
     Arrow {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
+        #[serde(with = "pt")]
         bend: Point,
         head: bool,
         text: String,
     },
-    Pen(Vec<Point>),
-    Highlighter(Vec<Point>),
+    Pen(#[serde(with = "pts")] Vec<Point>),
+    Highlighter(#[serde(with = "pts")] Vec<Point>),
     /// `at` = top-left, `size` = font px, `style` = font, weight, backdrop.
     Text {
+        #[serde(with = "pt")]
         at: Point,
         text: String,
         size: f32,
@@ -53,24 +61,28 @@ pub enum Shape {
     /// A numbered badge; its number is its place among the steps. Its `note`
     /// shows in the legend.
     Step {
+        #[serde(with = "pt")]
         at: Point,
         radius: f32,
         note: String,
     },
     /// Text on a rounded fill of the colour; `at` = top-left, `size` = font px.
     Label {
+        #[serde(with = "pt")]
         at: Point,
         text: String,
         size: f32,
     },
     /// A ring around `at` with a short arrow into it.
     Pointer {
+        #[serde(with = "pt")]
         at: Point,
         radius: f32,
     },
     /// A blur brush stroke: a pixel mosaic `size` px tall, of `cell` px cells.
     /// `seed`: OS-random per item, never shown: its jitter makes it irreversible.
     Blur {
+        #[serde(with = "pts")]
         points: Vec<Point>,
         size: f32,
         cell: f32,
@@ -78,23 +90,30 @@ pub enum Shape {
     },
     /// A solid box of the colour (passwords, keys: nothing left to recover).
     Redact {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
     },
     /// Everything outside the union of all spotlights is dimmed.
     Spotlight {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
     },
     /// Bubble centred on `at` with its text, tail pointing at `tip`.
     Callout {
+        #[serde(with = "pt")]
         tip: Point,
+        #[serde(with = "pt")]
         at: Point,
         text: String,
         size: f32,
     },
     /// Round lens over `at`: what is under it, zoomed.
     Magnifier {
+        #[serde(with = "pt")]
         at: Point,
         radius: f32,
     },
@@ -102,7 +121,9 @@ pub enum Shape {
     /// and `b`; its opacity is the item colour's alpha; `lock` keeps its
     /// ratio when resized. "Merge" bakes it into the picture.
     Picture {
+        #[serde(with = "pt")]
         a: Point,
+        #[serde(with = "pt")]
         b: Point,
         pic: Pic,
         lock: bool,
@@ -134,7 +155,7 @@ impl Pic {
 
 impl PartialEq for Pic {
     fn eq(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.0, &other.0)
+        std::sync::Arc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
     }
 }
 
@@ -144,7 +165,7 @@ impl std::fmt::Debug for Pic {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Item {
     pub shape: Shape,
     /// RGBA. Annotations keep their colour in both themes.
@@ -156,6 +177,9 @@ pub struct Item {
     pub outline: bool,
     /// A rectangle or ellipse is filled with a see-through tint of its colour.
     pub fill: bool,
+    /// Hidden in the Studio's Objects list: not drawn, exported or copied.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 impl Shape {
@@ -636,7 +660,7 @@ pub fn clean(doc: &Document) -> Crop {
 /// text there must never leave the app.
 pub fn hidden(doc: &Document) -> crate::features::snip::snip_more::Hidden {
     let mut out = crate::features::snip::snip_more::Hidden::default();
-    for item in &doc.items {
+    for item in doc.items.iter().filter(|i| !i.hidden) {
         match item.shape {
             Shape::Blur { .. } | Shape::Redact { .. } => out.boxes.push(item.frame()),
             Shape::Spotlight { .. } => out.lit.push(item.frame()),
@@ -783,7 +807,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
         .iter()
         .filter(|(_, visible)| *visible)
         .filter_map(|(item, _)| match item.shape {
-            Shape::Spotlight { a, b } => Some(span(&[a, b])),
+            Shape::Spotlight { a, b } if !item.hidden => Some(span(&[a, b])),
             _ => None,
         })
         .collect();
@@ -796,7 +820,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
         if matches!(item.shape, Shape::Step { .. }) {
             steps += 1;
         }
-        if !visible {
+        if !visible || item.hidden {
             continue;
         }
         let (c, w, ring) = (item.colour, item.width, item.outline);
@@ -874,4 +898,59 @@ fn paint_picture(layer: &mut Layer, to: Rectangle, pic: &Pic, opacity: u8) {
     let t = Transform::from_translate(to.x - layer.origin.x, to.y - layer.origin.y)
         .pre_scale(to.width / *w as f32, to.height / *h as f32);
     layer.pm.draw_pixmap(0, 0, src, &paint, t, None);
+}
+
+/// serde for iced's `Point` (no serde feature there): `[x, y]`.
+mod pt {
+    use iced::Point;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(p: &Point, s: S) -> Result<S::Ok, S::Error> {
+        [p.x, p.y].serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Point, D::Error> {
+        let [x, y] = <[f32; 2]>::deserialize(d)?;
+        Ok(Point::new(x, y))
+    }
+}
+
+mod pts {
+    use iced::Point;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(p: &[Point], s: S) -> Result<S::Ok, S::Error> {
+        p.iter()
+            .map(|p| [p.x, p.y])
+            .collect::<Vec<_>>()
+            .serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Point>, D::Error> {
+        let all = Vec::<[f32; 2]>::deserialize(d)?;
+        Ok(all.into_iter().map(|[x, y]| Point::new(x, y)).collect())
+    }
+}
+
+/// A pasted picture is saved as its size and the premultiplied pixels in base64.
+impl serde::Serialize for Pic {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use base64::Engine as _;
+        let (w, h, data) = &*self.0;
+        (w, h, base64::engine::general_purpose::STANDARD.encode(data)).serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Pic {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use base64::Engine as _;
+        let (w, h, text) = <(u32, u32, String)>::deserialize(d)?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map_err(serde::de::Error::custom)?;
+        if data.len() != w as usize * h as usize * 4 {
+            return Err(serde::de::Error::custom("picture size"));
+        }
+        Ok(Pic(std::sync::Arc::new((w, h, data))))
+    }
 }
