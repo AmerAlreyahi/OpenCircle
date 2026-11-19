@@ -2370,8 +2370,8 @@ strings! {
         | "الاستوديو";
     ss_open_in: "Open pictures in"
         | "فتح الصور في";
-    ss_open_in_d: "Where a picture opens when you choose Edit"
-        | "المكان الذي تُفتح فيه الصورة";
+    ss_open_in_d: "Where a picture opens after a snip"
+        | "المكان الذي تُفتح فيه الصورة بعد اللقطة";
     ss_reopen: "Reopen the last picture on start"
         | "إعادة فتح آخر صورة عند البدء";
     ss_reopen_d: "The Studio opens with the picture you were editing"
@@ -2463,7 +2463,7 @@ strings! {
     ss_zoom_fit: "Fit"
         | "ملاءمة";
     ss_zoom_100: "100 %"
-        | "100%";
+        | "100 %";
     ss_wheel: "Mouse wheel"
         | "عجلة الفأرة";
     ss_wheel_d: "Ctrl+wheel does the other"
@@ -2472,12 +2472,12 @@ strings! {
         | "تمرير";
     ss_wheel_zoom: "Zooms"
         | "تكبير";
-    ss_left: "Show left panel"
-        | "إظهار اللوحة اليسرى";
+    ss_left: "Show Library panel"
+        | "إظهار لوحة المكتبة";
     ss_left_d: "The library: recent files, drawings, steps"
         | "المكتبة: الملفات الأخيرة والرسومات والخطوات";
-    ss_right: "Show right panel"
-        | "إظهار اللوحة اليمنى";
+    ss_right: "Show Properties panel"
+        | "إظهار لوحة الخصائص";
     ss_right_d: "The picture panel and its actions"
         | "لوحة الصورة وإجراءاتها";
     st_unsaved_picture: "Unsaved picture"

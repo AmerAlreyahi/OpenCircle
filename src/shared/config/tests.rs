@@ -1668,7 +1668,7 @@ fn studio_settings_default_off_round_trip_and_are_not_written_until_changed() {
         open_in: StudioOpenIn::Studio,
         keep_unsaved: true,
         recent_files: 20,
-        folder: "pics".into(),
+        folder: "/pics".into(),
         file_name: "shot {date}".into(),
         format: Format::Jpeg,
         quality: 95,
@@ -1690,10 +1690,16 @@ fn an_older_file_without_studio_loads_clean_and_bad_studio_values_take_defaults(
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(c.studio, StudioPrefs::default());
     let (c, w) = Config::parse(
-        "version = 13\n[studio]\nquality = 12\nrecent_files = 7\nfile_name = \"a/b\"\nsnap = false\n",
+        "version = 13\n[studio]\nquality = 12\nrecent_files = 7\nfile_name = \"a:b\"\nfolder = \"rel\"\nsnap = false\n",
     );
     assert_eq!((c.studio.quality, c.studio.recent_files), (85, 10));
     assert_eq!(c.studio.file_name, STUDIO_FILE_NAME);
     assert!(!c.studio.snap, "the valid key is kept");
-    assert_eq!(w.len(), 3, "{w:?}");
+    assert_eq!(c.studio.folder, "");
+    assert_eq!(w.len(), 4, "{w:?}");
+    let (c, w) = Config::parse("version = 13\n[studio]\nfile_name = \"\"\n");
+    assert_eq!(
+        (c.studio.file_name.as_str(), w.len()),
+        (STUDIO_FILE_NAME, 1)
+    );
 }

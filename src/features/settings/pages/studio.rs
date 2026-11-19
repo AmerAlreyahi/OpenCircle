@@ -8,16 +8,18 @@ use iced::Element;
 use iced::widget::{column, container};
 use iced::{Fill, widget::tooltip::Position};
 
-use super::super::state::{Message, Slot, State};
-use super::{general, shortcuts};
+use super::super::state::{Message, Slot, State, issue};
+use super::{general, shortcuts, snip};
 use crate::shared::config::{
-    EditorConfig, Format, STUDIO_QUALITY, STUDIO_RECENT, SnipConfig, StudioBackdrop, StudioOpenIn,
-    StudioPrefs, StudioWheel, StudioZoom,
+    EditorConfig, Format, SnipConfig, StudioBackdrop, StudioOpenIn, StudioPrefs, StudioWheel,
+    StudioZoom,
 };
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::field::field;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::text::error;
+use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
 
 fn off_on() -> [&'static str; 2] {
@@ -45,12 +47,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
             boolean(off_on(), on, on, 1.0, move |v| edit(&|s| set(s, v))),
         )
     };
-    let name = container(field(
+    let name_field = container(field(
         &p.file_name,
-        Some(move |v: String| edit(&|s| s.file_name = v.replace(['/', '\\'], ""))),
+        Some(move |v: String| edit(&|s| s.file_name = v.clone())),
         Message::Studio(p.clone()),
     ))
     .width(Fill);
+    let mut name = column![tip(name_field, t!(ss_name), Position::Top)];
+    if let Some(e) = issue(&state.problems, "studio.file_name") {
+        name = name.push(error(Role::ROW_DESC, e));
+    }
     let tool_styles_set = state.draft.editor
         != EditorConfig {
             line_assist: state.draft.editor.line_assist,
@@ -110,7 +116,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             t!(ss_recent),
             t!(ss_recent_d),
             segmented(
-                &STUDIO_RECENT.map(|n| (n, n_label(n))),
+                &[(0, t!(c_off)), (10, "10"), (20, "20")],
                 p.recent_files,
                 p.recent_files,
                 1.0,
@@ -129,18 +135,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 Message::ClearStudioFolder,
             ),
         ),
-        row(
-            t!(ss_name),
-            t!(ss_name_d),
-            tip(name, t!(ss_name), Position::Top)
-        ),
+        row(t!(ss_name), t!(ss_name_d), name.spacing(space::GAP).into()),
         format_row(t!(ss_format), t!(ss_format_d), p.format, |s, f| s.format =
             f),
         row(
             t!(ss_quality),
             t!(ss_quality_d),
             segmented(
-                &STUDIO_QUALITY.map(|q| (q, n_label(q))),
+                &[(70, "70 %"), (85, "85 %"), (95, "95 %")],
                 p.quality,
                 p.quality,
                 1.0,
@@ -151,12 +153,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             t!(ss_size),
             t!(ss_size_d),
             segmented(
-                &[
-                    (1024, "1024"),
-                    (1568, "1568"),
-                    (2048, "2048"),
-                    (0, t!(s_original)),
-                ],
+                &snip::size_choices(),
                 sn.max_edge,
                 sn.max_edge,
                 1.0,
@@ -267,16 +264,4 @@ pub fn view(state: &State) -> Element<'_, Message> {
         rows = rows.push(shortcuts::row(state, slot));
     }
     rows.push(shortcuts::reset(state)).into()
-}
-
-/// A number as the segment shows it ("10", "85 %" reads as the number alone).
-fn n_label(n: u8) -> &'static str {
-    match n {
-        0 => t!(c_off),
-        10 => "10",
-        20 => "20",
-        70 => "70 %",
-        85 => "85 %",
-        _ => "95 %",
-    }
 }
