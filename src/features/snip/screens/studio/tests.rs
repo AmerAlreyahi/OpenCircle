@@ -2091,3 +2091,32 @@ fn v3_a_copy_that_cannot_be_restored_is_kept_and_says_so() {
     assert!(s.restorable.is_some() && s.restore_failed);
     assert!(recovery::pending().is_some());
 }
+
+/// Reopen last stands down for any picture that was asked for, even before it has
+/// been read (a file from the command line, a drop, a recent file, Open, Paste).
+#[test]
+fn v3_a_requested_file_always_wins_over_reopen_last() {
+    let h = image::Handle::from_rgba(1, 1, vec![0; 4]);
+    let recent = || vec![(PathBuf::from("/x/last.png"), h.clone())];
+    let mut fresh = Studio::new(StudioConfig::default());
+    let _ = fresh.update(Msg::Recent(recent(), vec![String::new()]));
+    assert_eq!(fresh.reopen(true), Some(PathBuf::from("/x/last.png")));
+    assert_eq!(fresh.reopen(false), None, "the setting off");
+    let asks: [Box<dyn Fn(&mut Studio)>; 5] = [
+        Box::new(|s| s.next_name(std::path::Path::new("/x/asked.png"))),
+        Box::new(|s| drop(s.update(Msg::Dropped(PathBuf::from("/x/d.png"))))),
+        Box::new(|s| drop(s.update(Msg::OpenRecent(PathBuf::from("/x/r.png"))))),
+        Box::new(|s| drop(s.update(Msg::Open))),
+        Box::new(|s| drop(s.update(Msg::Paste))),
+    ];
+    for ask in asks {
+        let mut s = Studio::new(StudioConfig::default());
+        ask(&mut s);
+        let out = s.update(Msg::Recent(recent(), vec![String::new()]));
+        assert!(
+            matches!(out, Outcome::None),
+            "the list arriving brings nothing back"
+        );
+        assert_eq!(s.reopen(true), None);
+    }
+}

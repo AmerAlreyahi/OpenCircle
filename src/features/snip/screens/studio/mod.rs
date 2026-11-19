@@ -374,8 +374,9 @@ pub struct Studio {
     restoring: Option<Restorable>,
     /// Properties' X / Y / W / H while typed (committed on Enter or the next action).
     pub(super) bounds_draft: Option<[String; 4]>,
-    /// A picture was opened (Reopen last waits for none).
-    opened: bool,
+    /// A picture was asked for (a file from the command line or "Open with", the
+    /// Open button, a drop, a recent file, a paste) or opened: Reopen last stands down.
+    asked: bool,
     pub(super) lock: bool,
     /// Space is held (the stage pans), the pointer where a pan last was, the
     /// open second menu, the document's name and the name of the next picture.
@@ -468,7 +469,7 @@ impl Studio {
             alt_clean: false,
             restoring: None,
             bounds_draft: None,
-            opened: false,
+            asked: false,
             lock: true,
             space: false,
             shift: false,
@@ -548,7 +549,7 @@ impl Studio {
         self.title = title_of(self.name.as_deref());
         self.editor = Some(editor);
         self.fit();
-        self.opened = true;
+        self.asked = true;
         self.sync_blocked();
         if let Some(e) = &mut self.editor {
             if let Some(r) = self.restoring.take() {
@@ -572,8 +573,17 @@ impl Studio {
         }
     }
 
+    /// The picture Reopen last brings back (`on`: the setting): the newest recent
+    /// file, but never when any picture was asked for or is open: a requested
+    /// file always wins.
+    fn reopen(&self, on: bool) -> Option<PathBuf> {
+        let first = self.recent.first().map(|(p, _)| p.clone());
+        first.filter(|_| on && self.editor.is_none() && !self.asked)
+    }
+
     /// The next picture opened is this file's (its name shows in the title).
     pub fn next_name(&mut self, path: &std::path::Path) {
+        self.asked = true; // (the request is here before its picture is)
         self.next_name = file_name(path);
     }
 
@@ -1148,18 +1158,26 @@ impl Studio {
                 self.fit();
                 Outcome::None
             }
-            Msg::Open => Outcome::PickFile,
-            Msg::Paste => Outcome::Paste(None),
+            Msg::Open => {
+                self.asked = true;
+                Outcome::PickFile
+            }
+            Msg::Paste => {
+                self.asked = true;
+                Outcome::Paste(None)
+            }
             Msg::Hovered(on) => {
                 self.hovered = on;
                 Outcome::None
             }
             Msg::Dropped(path) => {
+                self.asked = true;
                 self.hovered = false;
                 self.next_name = file_name(&path);
                 Outcome::Read(path)
             }
             Msg::OpenRecent(path) => {
+                self.asked = true;
                 self.next_name = file_name(&path);
                 Outcome::Read(path)
             }
@@ -1167,13 +1185,13 @@ impl Studio {
                 self.recent_info = info;
                 self.recent = recent;
                 // Settings > Studio > Reopen the last picture: the newest, when none is open
-                let first = self.recent.first().map(|(p, _)| p.clone());
-                match (first, crate::shared::config::current().studio.reopen_last) {
-                    (Some(p), true) if self.editor.is_none() && !self.opened => {
+                match self.reopen(crate::shared::config::current().studio.reopen_last) {
+                    Some(p) => {
+                        self.asked = true;
                         self.next_name = file_name(&p);
                         Outcome::Read(p)
                     }
-                    _ => Outcome::None,
+                    None => Outcome::None,
                 }
             }
             Msg::Scale(s) => {
