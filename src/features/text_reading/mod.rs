@@ -17,6 +17,7 @@ pub(crate) mod text;
 pub(crate) mod worker;
 
 pub use models::{download_size, ensure_models, models_dir, ready};
+pub(crate) use screens::model_download;
 pub use session::{Hold, gently_here, helper_pid, hold, keep_warm, when_idle};
 pub use worker::{
     WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_except,

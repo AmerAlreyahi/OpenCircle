@@ -35,6 +35,16 @@ const OPTIONS: f32 = 76.0;
 const STATUS: f32 = 44.0;
 const LIBRARY: f32 = 240.0;
 const PANEL: f32 = 260.0;
+/// Arabic's picture panel is wider (its names are longer; spec §2).
+const PANEL_AR: f32 = 288.0;
+
+/// The picture panel's width in the app's language.
+fn panel_width() -> f32 {
+    match crate::shared::app_language::rtl() {
+        true => PANEL_AR,
+        false => PANEL,
+    }
+}
 /// Room kept around a fitted picture.
 const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
@@ -49,6 +59,31 @@ pub enum Picture {
     Crop(Crop),
     /// The Snip widget's editor, its drawings still editable and its undo kept.
     Editor(Box<Annotator>),
+}
+
+/// The download card inside the Studio: what is missing for the row that was
+/// pressed, and where the download is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Card {
+    pub what: What,
+    pub bytes: u64,
+    pub step: Step,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum What {
+    Reader,
+    Pair,
+    /// The readers for other scripts (their names).
+    Scripts(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    Ask,
+    /// Fetching, 0..1.
+    At(f32),
+    Failed(String),
 }
 
 /// What waits on the unsaved-changes question.
@@ -99,6 +134,9 @@ pub enum Msg {
     SaveFirst,
     /// A picture-panel row (Copy text, Translate, Ask AI).
     Act(Row),
+    /// The download card's buttons (Download / Try again, Not now / Cancel).
+    Download,
+    DismissCard,
     /// The window has / lost the keyboard (the quick-action keys act on it).
     Focus(bool),
 }
@@ -130,6 +168,10 @@ pub enum Outcome {
     /// A picture action: the host (the App) runs main mode's own work on the
     /// pictures `read_picture` / `annotated` / `translate_frame` give.
     Act(Row),
+    /// The card's Download: the host fetches what the row needs.
+    Download,
+    /// The card was dismissed: the host drops what waited on it.
+    Dismissed,
 }
 
 pub struct Studio {
@@ -157,6 +199,9 @@ pub struct Studio {
     focused: bool,
     /// Ask AI opens the browser (no AI key): the host says (`set_browser`).
     browser: bool,
+    /// The row that is working (its icon spins), and the download card up.
+    busy: Option<Row>,
+    card: Option<Card>,
 }
 
 impl Studio {
@@ -178,6 +223,8 @@ impl Studio {
             epoch: 0,
             focused: false,
             browser: false,
+            busy: None,
+            card: None,
         }
     }
 
@@ -206,7 +253,7 @@ impl Studio {
         editor.edges.clear();
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
-        self.original = None;
+        (self.original, self.busy, self.card) = (None, None, None);
         self.epoch = self.epoch.wrapping_add(1);
         self.zoom = None;
         self.editor = Some(editor);
@@ -233,7 +280,7 @@ impl Studio {
         more::Info {
             caps: more::caps_from(&crate::shared::config::current()),
             browser: self.browser,
-            translated: self.original.is_some(),
+            translated: self.original.is_some() && self.card.is_none(),
             ..more::Info::default()
         }
     }
@@ -242,6 +289,24 @@ impl Studio {
     /// keys of Copy text / Ask AI / Translate act here.
     pub fn takes_quick_keys(&self) -> bool {
         self.focused && self.editor.is_some() && !self.asking()
+    }
+
+    /// The row that is reading or translating (`None`: none).
+    pub fn set_busy(&mut self, row: Option<Row>) {
+        self.busy = row;
+    }
+
+    pub fn busy(&self) -> Option<Row> {
+        self.busy
+    }
+
+    /// The download card up (`None`: gone).
+    pub fn set_card(&mut self, card: Option<Card>) {
+        self.card = card;
+    }
+
+    pub fn card(&self) -> Option<&Card> {
+        self.card.as_ref()
     }
 
     pub fn set_browser(&mut self, on: bool) {
@@ -405,6 +470,7 @@ impl Studio {
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
+                    | Msg::Download
             )
         {
             return Outcome::None;
@@ -487,7 +553,21 @@ impl Studio {
                 self.fit();
                 Outcome::None
             }
-            Msg::Act(_) if self.editor.is_none() => Outcome::None,
+            Msg::Act(_) if self.editor.is_none() || self.card.is_some() => Outcome::None,
+            // a second Copy text while it reads would only read twice
+            Msg::Act(Row::CopyText) if self.busy == Some(Row::CopyText) => Outcome::None,
+            Msg::Download if self.card.is_some() => {
+                if let Some(c) = &mut self.card {
+                    c.step = Step::At(0.0);
+                }
+                Outcome::Download
+            }
+            Msg::Download => Outcome::None,
+            Msg::DismissCard => {
+                self.card = None;
+                self.busy = None;
+                Outcome::Dismissed
+            }
             Msg::Act(row) => Outcome::Act(row),
             Msg::Focus(on) => {
                 self.focused = on;
@@ -525,7 +605,7 @@ impl Studio {
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
         let side = (self.panels.library as u8 as f32) * (LIBRARY + 1.0)
-            + (self.panels.options as u8 as f32) * (PANEL + 1.0);
+            + (self.panels.options as u8 as f32) * (panel_width() + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),

@@ -88,6 +88,9 @@ impl Windows {
 
     /// Copy text's words, read: on the clipboard off the UI thread, then the pill.
     pub(super) fn studio_copy_text(&mut self, read: Result<String, String>) -> Task<Msg> {
+        if let Some(s) = self.studio_mut() {
+            s.set_busy(None);
+        }
         match read {
             Ok(text) => background(move |tx| {
                 let _ = tx.unbounded_send(copy::text(text).map(|()| copy::COPIED_PILL.to_string()));
@@ -216,6 +219,8 @@ impl Windows {
             Outcome::Pin(crop) => self.pin(crop, None, 1.0),
             Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
             Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
+            Outcome::Download => Task::done(Msg::StudioDownload),
+            Outcome::Dismissed => Task::done(Msg::StudioDismiss),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {

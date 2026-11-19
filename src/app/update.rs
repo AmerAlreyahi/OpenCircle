@@ -85,6 +85,8 @@ impl App {
                 }
             }
             Message::Windows(windows::Msg::StudioAct(row)) => self.studio_act(row),
+            Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
+            Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),
             Message::Windows(windows::Msg::UpdatePill(msg)) => self.on_update_pill(msg),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
@@ -113,6 +115,7 @@ impl App {
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
             Message::StudioTranslate(id, msg) => self.on_studio_translate(id, msg),
+            Message::StudioReader(epoch, step) => self.on_studio_reader(epoch, step),
             // Wayland: a long capture going on with its overlay gone ends by its
             // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
             Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
@@ -898,6 +901,7 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::ChatFrame(_)
             | Message::Windows(_)
             | Message::StudioTranslate(..)
+            | Message::StudioReader(..)
             | Message::Live(_)
             | Message::Drawn
             | Message::Resized(_)

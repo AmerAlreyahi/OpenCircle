@@ -91,6 +91,15 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
         .into(),
         false => main.into(),
     };
+    // the download card (Copy text / Translate need models): over the window
+    let main: Element<'_, Msg> = match &s.card() {
+        Some(card) => iced::widget::stack![
+            main,
+            iced::widget::opaque(container(download(card)).center(Fill))
+        ]
+        .into(),
+        None => main,
+    };
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
         surface(Material::Window, 0.0, main)
@@ -98,6 +107,42 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
             .width(Fill)
             .height(Fill),
     )
+}
+
+/// The download card, the overlay's own (`model_download`).
+fn download(card: &super::Card) -> Element<'_, Msg> {
+    use super::{Step, What};
+    use crate::features::text_reading::model_download::{
+        self as md, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION,
+    };
+    let stage = match &card.step {
+        Step::Ask => Stage::Ask,
+        Step::At(share) => Stage::at(*share),
+        Step::Failed(why) => Stage::Failed(why),
+    };
+    let on = md::On {
+        download: Msg::Download,
+        dismiss: Some(Msg::DismissCard),
+        provider: None,
+    };
+    let does;
+    let scripts;
+    let model = match &card.what {
+        What::Reader => &OCR,
+        What::Pair => &TRANSLATION,
+        What::Scripts(names) => {
+            does = crate::shared::app_language::fmt(
+                crate::shared::app_language::S::md_read_names,
+                &[names],
+            );
+            scripts = Model {
+                does: Does::Text(&does),
+                ..SCRIPTS
+            };
+            &scripts
+        }
+    };
+    md::card(model, card.bytes, stage, on)
 }
 
 /// A panel's toggle: raised while its panel shows.
@@ -383,7 +428,7 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
                 label: tr(row.label(info.translated)),
                 external: row == Row::AskAi && info.browser,
                 caps: info.caps[at].clone(),
-                reading: false,
+                reading: s.busy() == Some(row),
                 focused: false,
                 press: Some(Msg::Act(row)),
             }));
@@ -406,7 +451,7 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
             ))
             .push(line(t!(st_drawings), e.doc.items.len().to_string()));
     }
-    side(list, super::PANEL)
+    side(list, super::panel_width())
 }
 
 /// The panel's rows, in the design's order (Edit text and Cut out come with

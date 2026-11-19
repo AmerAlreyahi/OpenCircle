@@ -120,6 +120,9 @@ pub enum Msg {
     StudioAct(crate::features::snip::snip_more::Row),
     /// Copy text's text, read (the Studio): the clipboard, then the pill.
     StudioText(Result<String, String>),
+    /// The Studio's download card: Download / Try again, and dismissed.
+    StudioDownload,
+    StudioDismiss,
 }
 
 #[derive(Default)]
@@ -1408,6 +1411,7 @@ impl Windows {
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
             Msg::StudioAct(_) => {}
+            Msg::StudioDownload | Msg::StudioDismiss => {}
             Msg::StudioText(read) => return self.studio_copy_text(read),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();

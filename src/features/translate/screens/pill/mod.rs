@@ -141,6 +141,27 @@ pub struct Problem {
     pub setup: bool,
 }
 
+/// What a session waits for the user to download (or is downloading): for a
+/// host that draws the download card itself (`Session::fetching`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fetching {
+    pub what: Fetch,
+    pub bytes: u64,
+    /// `None`: asks; `Some(share)`: fetching.
+    pub share: Option<f32>,
+    pub failed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Fetch {
+    /// A pair's translation models.
+    Pair,
+    /// The readers for other scripts (their names).
+    Scripts(String),
+    /// The text reader.
+    Reader,
+}
+
 /// What stops a session that has no card (`Session::stuck`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stuck {
@@ -326,6 +347,31 @@ impl Session {
             Phase::Failed(p) => Some(Stuck::Failed(p.message.clone())),
             _ => None,
         }
+    }
+
+    /// What the session asks or fetches now (the same the pill's card shows).
+    pub fn fetching(&self) -> Option<Fetching> {
+        let (share, failed, asked) = match &self.phase {
+            Phase::Consent(ask) => (None, None, ask.map(|(_, b)| b)),
+            Phase::Downloading(done) => (Some(*done), None, None),
+            Phase::DownloadFailed(why) => (None, Some(why.clone()), None),
+            _ => return None,
+        };
+        let (what, bytes) = match (asked, self.offline, &self.readers) {
+            (Some(bytes), _, _) => (Fetch::Pair, bytes),
+            (None, Some(pair), _) => (Fetch::Pair, pair.full_size()),
+            (None, None, Some((bytes, names))) => (Fetch::Scripts(names.clone()), *bytes),
+            (None, None, None) => (
+                Fetch::Reader,
+                crate::features::text_reading::models::full_size(),
+            ),
+        };
+        Some(Fetching {
+            what,
+            bytes,
+            share,
+            failed,
+        })
     }
 
     /// The whole page is translated and shown (not still translating).

@@ -477,3 +477,56 @@ fn the_rows_show_the_users_keys() {
     let _ = s.translate_frame();
     assert!(s.info().translated);
 }
+
+/// The download card: Download starts it, Not now drops it, and no row acts
+/// while it is up; a reading Copy text is not read twice.
+#[test]
+fn the_download_card_blocks_rows_and_answers_its_buttons() {
+    let mut s = studio_on(100, 60);
+    s.set_card(Some(Card {
+        what: What::Reader,
+        bytes: 9_000_000,
+        step: Step::Ask,
+    }));
+    assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
+    assert!(matches!(s.update(Msg::Download), Outcome::Download));
+    assert_eq!(s.card().map(|c| c.step.clone()), Some(Step::At(0.0)));
+    assert!(matches!(s.update(Msg::DismissCard), Outcome::Dismissed));
+    assert!(s.card().is_none());
+    s.set_busy(Some(Row::CopyText));
+    assert!(matches!(s.update(Msg::Act(Row::CopyText)), Outcome::None));
+    assert!(matches!(
+        s.update(Msg::Act(Row::Translate)),
+        Outcome::Act(_)
+    ));
+}
+
+/// The panel with a spinning row, and the card, in English and Arabic.
+#[test]
+fn the_panel_and_card_match_their_golden_images() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let mut s = studio_on(640, 400);
+        s.set_busy(Some(Row::Translate));
+        let file = format!("studio-busy-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let mut asking = studio_on(640, 400);
+        asking.set_card(Some(Card {
+            what: What::Pair,
+            bytes: 78_000_000,
+            step: Step::Ask,
+        }));
+        let file = format!("studio-card-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&asking, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-panel-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
+}

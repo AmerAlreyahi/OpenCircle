@@ -16,9 +16,12 @@ use crate::features::text_reading::text;
 // (the Studio's `studio_acts` reaches the reader's models through here)
 pub(crate) use crate::features::ask_ai::app::ai_chat::hands_off;
 pub(crate) use crate::features::ask_ai::screens::ai_chat::hand_off;
+pub(crate) use crate::features::text_reading::screens::model_download::why_key;
 #[cfg(test)]
 pub(crate) use crate::features::text_reading::text::MODELS_HERE;
-pub(crate) use crate::features::text_reading::text::models_present;
+pub(crate) use crate::features::text_reading::text::{
+    Progress as text_progress, download as text_download, models_present,
+};
 use crate::features::text_reading::{self, TextBlock};
 pub(crate) use crate::features::translate::screens::pill;
 use crate::shared::config;

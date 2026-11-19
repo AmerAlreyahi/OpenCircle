@@ -1772,12 +1772,8 @@ strings! {
         | "الحجم";
     st_drawings: "Drawings"
         | "الرسومات";
-    st_no_models: "Text reading needs its models: use Copy text from the main bar once to download them."
-        | "قراءة النص تحتاج إلى نماذجها: استخدم «نسخ النص» من الشريط الرئيسي مرة واحدة لتنزيلها.";
     st_read_failed: "Couldn't read the text in this picture"
         | "تعذّرت قراءة النص في هذه الصورة";
-    st_ask_chat: "Ask AI with an AI provider opens from the main bar for now."
-        | "السؤال عبر مزوّد الذكاء الاصطناعي يُفتح من الشريط الرئيسي حاليًا.";
     st_show_library: "Show the library"
         | "أظهر المكتبة";
     st_hide_library: "Hide the library"
