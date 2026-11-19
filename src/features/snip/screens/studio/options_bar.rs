@@ -8,7 +8,7 @@ use super::Msg;
 use crate::features::snip::annotate::{
     Annotator, ERASER_SIZES, Message, TextStyle, Tool, Width, info, style,
 };
-use crate::shared::app_language::tr;
+use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::option_bar::{
     GROUP_GAP, accent_cell, caption, dot, group, hairline, swatch, text_cell, value,
 };
@@ -48,9 +48,9 @@ fn shown(e: &Annotator) -> Shown {
     }
 }
 
-fn colours(e: &Annotator) -> El<'_> {
+fn colours(e: &Annotator, n: usize) -> El<'_> {
     let now = shown(e).colour;
-    let cells = style::ANNOTATION.iter().take(SWATCHES).map(|c| {
+    let cells = style::ANNOTATION.iter().take(n).map(|c| {
         let rgba = c.into_rgba8();
         swatch(*c, Some(rgba) == now, Some(Message::Colour(rgba)))
     });
@@ -85,7 +85,7 @@ fn font_size(e: &Annotator) -> El<'_> {
 }
 
 /// The groups of `tool`, in the order of STUDIO_V3_SPEC §4.
-fn groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
+fn groups(e: &Annotator, tool: Tool, n: usize) -> Vec<El<'_>> {
     let now = shown(e);
     let outline = || {
         toggle(
@@ -99,13 +99,13 @@ fn groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
             let fills = crate::features::snip::annotate::fills_inside(tool);
             let fill = fills.then_some(Message::Fill(!now.fill));
             vec![
-                colours(e),
+                colours(e, n),
                 stroke(e),
                 outline(),
                 toggle(t!(sn_fill), now.fill && fills, fill),
             ]
         }
-        Tool::Pen | Tool::Highlighter | Tool::Step => vec![colours(e), stroke(e)],
+        Tool::Pen | Tool::Highlighter | Tool::Step => vec![colours(e, n), stroke(e)],
         Tool::Text => {
             let st = e.text_style;
             let bold = TextStyle {
@@ -113,13 +113,13 @@ fn groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
                 ..st
             };
             vec![
-                colours(e),
+                colours(e, n),
                 font_size(e),
                 toggle(t!(sn_bold), st.bold, Some(Message::TextStyle(bold))),
             ]
         }
-        Tool::Callout => vec![colours(e), font_size(e), outline()],
-        Tool::Redact => vec![colours(e)],
+        Tool::Callout => vec![colours(e, n), font_size(e), outline()],
+        Tool::Redact => vec![colours(e, n)],
         Tool::Blur => {
             let at = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let px = e.blur_cell.cell();
@@ -145,20 +145,57 @@ fn groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
     }
 }
 
+/// What the groups are for: the tool's (nothing selected), the selected
+/// object's own (by its type), or what several objects share.
+fn subject(e: &Annotator, n: usize) -> (String, Option<char>, Vec<El<'_>>) {
+    let sel = e.selection();
+    let item = (sel.len() == 1).then(|| e.doc.items.get(sel[0])).flatten();
+    match (sel.len(), item) {
+        (0, _) => {
+            let base = info(info(e.tool).slot);
+            (
+                tr(base.name).to_string(),
+                Some(base.key),
+                groups(e, base.tool, n),
+            )
+        }
+        (_, Some(item)) => {
+            let t = info(info(super::library::tool_of(&item.shape)).slot);
+            (tr(t.name).to_string(), None, groups(e, t.tool, n))
+        }
+        (n, None) => (
+            fmt(crate::shared::app_language::S::st_n_objects, &[&n]),
+            None,
+            vec![colours(e, n), stroke(e)],
+        ),
+    }
+}
+
+/// The selection's own style groups, for Properties (none: nothing selected).
+pub fn selection_groups(e: &Annotator, swatches: usize) -> Vec<Element<'_, Msg>> {
+    match e.selection().is_empty() {
+        true => Vec::new(),
+        false => subject(e, swatches)
+            .2
+            .into_iter()
+            .map(|g| g.map(Msg::Editor))
+            .collect(),
+    }
+}
+
 /// The bar (48 high).
 pub fn view(e: &Annotator) -> Element<'_, Msg> {
-    let base = info(info(e.tool).slot);
-    let name: El<'_> = crate::dir_row![
-        text(Role::ROW_TITLE, tr(base.name)),
-        container(keycap::keycap(base.key.to_ascii_uppercase().to_string())).width(size::KEYCAP_H),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center)
-    .into();
+    let (title, key, g) = subject(e, SWATCHES);
+    let mut head: Vec<El<'_>> = vec![text(Role::ROW_TITLE, title).into()];
+    head.extend(key.map(|k| {
+        let cap = keycap::keycap(k.to_ascii_uppercase().to_string());
+        container(cap).width(size::KEYCAP_H).into()
+    }));
+    let name: El<'_> = dir::row(head).spacing(space::GAP).align_y(Center).into();
     let mut items: Vec<El<'_>> = vec![name];
-    let selected = e.doc.selected.is_some();
-    let g = groups(e, base.tool);
-    if g.is_empty() || matches!(base.tool, Tool::Select | Tool::Crop) {
+    let selected = !e.selection().is_empty();
+    let tool = info(e.tool).slot;
+    if !selected && (g.is_empty() || matches!(tool, Tool::Select | Tool::Crop)) {
         let hint = muted(Role::ROW_DESC, t!(st_hint_select));
         items.push(hairline());
         items.push(hint.into());

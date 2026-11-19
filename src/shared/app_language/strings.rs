@@ -2330,8 +2330,6 @@ strings! {
         | "انقر كائنًا لتحريره";
     st_sc_title: "Keyboard shortcuts"
         | "اختصارات لوحة المفاتيح";
-    st_sc_tools: "Choose a tool"
-        | "اختيار أداة";
     st_sc_copy: "Copy, cut, paste the selection"
         | "نسخ المحدد وقصه ولصقه";
     st_sc_whole: "Copy the whole picture"
@@ -2510,4 +2508,24 @@ strings! {
         | "قبل {} س";
     st_ago_d: "{} d ago"
         | "قبل {} ي";
+    st_sc_sub: "Change them in Settings > Studio"
+        | "غيّرها من الإعدادات > الاستوديو";
+    st_sc_foot: "Ctrl+C copies the selected object; with nothing selected it copies the picture. Ctrl+Shift+C always copies the picture."
+        | "Ctrl+C ينسخ العنصر المحدد؛ بلا تحديد ينسخ الصورة. Ctrl+Shift+C ينسخ الصورة دائمًا.";
+    st_sc_edit: "Edit shortcuts…"
+        | "تعديل الاختصارات…";
+    st_sc_pan: "Pan the picture"
+        | "تحريك الصورة";
+    st_sc_steps: "Add to steps"
+        | "إضافة إلى الخطوات";
+    st_sc_quick: "Copy text, Translate, Ask AI"
+        | "نسخ النص والترجمة وسؤال الذكاء الاصطناعي";
+    st_sc_g_tools: "Tools"
+        | "الأدوات";
+    st_sc_g_edit: "Editing"
+        | "التحرير";
+    st_sc_g_view: "View and files"
+        | "العرض والملفات";
+    st_later: "Later"
+        | "لاحقًا";
 }

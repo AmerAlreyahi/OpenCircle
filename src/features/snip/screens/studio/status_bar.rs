@@ -6,7 +6,7 @@ use iced::widget::{Space, container};
 use iced::{Center, Element, Fill};
 
 use super::view::{MINUS, PANEL_LEFT, PANEL_RIGHT, PLUS};
-use super::{Msg, Studio};
+use super::{Msg, Studio, keys};
 use crate::features::snip::annotate::{Annotator, Message};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::shared::kit::button::{self, Kind};
@@ -62,29 +62,40 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         ],
         false,
     );
-    let save = button::tool(
+    let (save_words, copy_words) = (t!(c_save), t!(c_copy));
+    let save = button::labelled(
         toolbar::SAVE,
+        save_words,
+        button::labelled_width(save_words),
         Kind::Elevated,
         false,
         Some(Msg::Editor(Message::Save)),
     );
-    let copy = button::tool(
+    let copy = button::labelled(
         toolbar::COPY,
+        copy_words,
+        button::labelled_width(copy_words),
         Kind::Accent,
         false,
         Some(Msg::Editor(Message::Copy)),
     );
     let line = crate::dir_row![
-        toggle(PANEL_LEFT, left_shown, left_press, left_words, "Ctrl+B"),
+        toggle(
+            PANEL_LEFT,
+            left_shown,
+            left_press,
+            left_words,
+            keys::LEFT_PANEL
+        ),
         chip::size_handle(size_label, false, Msg::Editor(Message::DragOut)),
         Space::new().width(Fill),
         zoom,
         Space::new().width(Fill),
-        hint(save, t!(c_save), Why::Keys("Ctrl+S"), Position::Top),
+        hint(save, t!(c_save), Why::Keys(keys::SAVE), Position::Top),
         hint(
             copy,
             t!(st_copy_picture),
-            Why::Keys("Ctrl+Shift+C"),
+            Why::Keys(keys::COPY_PICTURE),
             Position::Top
         ),
         toggle(
@@ -92,7 +103,7 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             s.panels.options && !s.narrow(),
             Msg::Panel,
             right_words,
-            "Ctrl+Alt+B"
+            keys::RIGHT_PANEL
         ),
     ]
     .spacing(space::GAP)

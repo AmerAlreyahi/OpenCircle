@@ -5,7 +5,7 @@
 //! object row, hover shade, `accent_soft` while selected) and the menu bar's
 //! opener (28 px).
 use iced::widget::{button, column, container, text};
-use iced::{Border, Center, Color, Element, Fill, Length, Padding};
+use iced::{Border, Center, Element, Fill, Length, Padding};
 
 use super::icon::{FONT, Icon};
 use super::icon_button::{self, State};
@@ -130,16 +130,14 @@ pub fn lead<'a, Message: 'a>(glyph: char, selected: bool) -> Element<'a, Message
         .into()
 }
 
-/// A row's visibility mark (the Objects list's eye): a check while the object
-/// shows, nothing while it is hidden; a press flips it.
+/// A row's visibility mark (the Objects list's eye), drawn as a small vector: an
+/// open eye while the object shows, struck through while it is hidden; a press
+/// flips it.
 pub fn visible_mark<'a, Message: Clone + 'a>(shown: bool, press: Message) -> Element<'a, Message> {
-    let glyph = text(Icon::Check.glyph()).font(FONT).size(12);
-    let mark = glyph.color(if shown {
-        c().text_sub
-    } else {
-        Color::TRANSPARENT
-    });
-    let b = button(container(mark).center(Fill))
+    let eye = iced::widget::canvas(Eye { shown })
+        .width(EYE.0)
+        .height(EYE.1);
+    let b = button(container(eye).center(Fill))
         .width(MARK)
         .height(MARK)
         .padding(0)
@@ -149,6 +147,58 @@ pub fn visible_mark<'a, Message: Clone + 'a>(shown: bool, press: Message) -> Ele
             ..button::Style::default()
         });
     super::focus::press(b, OPENER_R, Some(press)).into()
+}
+
+/// The eye's size.
+const EYE: (f32, f32) = (14.0, 10.0);
+
+struct Eye {
+    shown: bool,
+}
+
+impl<Message> iced::widget::canvas::Program<Message> for Eye {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &iced::Renderer,
+        _: &iced::Theme,
+        bounds: iced::Rectangle,
+        _: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::widget::canvas::{Frame, Path, Stroke};
+        let mut frame = Frame::new(renderer, bounds.size());
+        let (w, h) = (bounds.width, bounds.height);
+        let ink = if self.shown {
+            c().text_sub
+        } else {
+            c().text_muted
+        };
+        let lid = Path::new(|p| {
+            p.move_to(iced::Point::new(1.0, h / 2.0));
+            p.quadratic_curve_to(
+                iced::Point::new(w / 2.0, -h * 0.3),
+                iced::Point::new(w - 1.0, h / 2.0),
+            );
+            p.quadratic_curve_to(
+                iced::Point::new(w / 2.0, h * 1.3),
+                iced::Point::new(1.0, h / 2.0),
+            );
+        });
+        frame.stroke(&lid, Stroke::default().with_color(ink).with_width(1.3));
+        match self.shown {
+            true => frame.fill(
+                &Path::circle(iced::Point::new(w / 2.0, h / 2.0), h * 0.2),
+                ink,
+            ),
+            false => frame.stroke(
+                &Path::line(iced::Point::new(2.0, h), iced::Point::new(w - 2.0, 0.0)),
+                Stroke::default().with_color(ink).with_width(1.3),
+            ),
+        }
+        vec![frame.into_geometry()]
+    }
 }
 
 /// A menu bar's opener: 28 high, radius 8, raised while its menu is `open`.

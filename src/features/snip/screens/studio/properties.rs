@@ -23,12 +23,21 @@ pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 /// A read-out row's height, the panel's side padding.
 const KV_H: f32 = 22.0;
 const FIELD_LABEL: f32 = 14.0;
+/// Colours in Properties (the panel is narrower than the bar).
+const SWATCHES: usize = 6;
 const SLIDER_W: f32 = 140.0;
 const PAD: f32 = 12.0;
 
 /// A heading line (the object's name).
 fn title<'a>(words: impl iced::widget::text::IntoFragment<'a>) -> Element<'a, Msg> {
     text(Role::ROW_TITLE, words).into()
+}
+
+/// The box fields: what is being typed, else the selection's numbers.
+fn fields(s: &Studio, frame: [i32; 4]) -> [String; 4] {
+    s.bounds_draft
+        .clone()
+        .unwrap_or_else(|| frame.map(|n| n.to_string()))
 }
 
 /// What the panel is about.
@@ -72,22 +81,13 @@ fn head<'a>(words: &'a str) -> Element<'a, Msg> {
         .into()
 }
 
-/// X, Y, W, H (picture pixels): typed numbers move and resize the selection.
-fn frame<'a>(f: [i32; 4]) -> Element<'a, Msg> {
+/// X, Y, W, H (picture pixels): typed numbers move and resize the selection,
+/// made one edit on Enter or when the user moves on; a field can be emptied.
+fn frame<'a>(f: [String; 4]) -> Element<'a, Msg> {
     let field = |k: &'a str, at: usize| {
-        let input = crate::shared::kit::field::input("", &f[at].to_string(), true, false).on_input(
-            move |typed: String| {
-                let mut v = f.map(|n| n as f32);
-                match typed.trim().parse::<f32>() {
-                    Ok(n) => v[at] = n.max(if at >= 2 { 1.0 } else { f32::MIN }),
-                    Err(_) => return Msg::Nothing,
-                }
-                Msg::Editor(Message::Bounds(iced::Rectangle::new(
-                    iced::Point::new(v[0], v[1]),
-                    iced::Size::new(v[2], v[3]),
-                )))
-            },
-        );
+        let input = crate::shared::kit::field::input("", &f[at], true, false)
+            .on_input(move |typed: String| Msg::BoundsEdit(at, typed))
+            .on_submit(Msg::BoundsCommit);
         crate::dir_row![sub(Role::ROW_DESC, k).width(FIELD_LABEL), input.width(Fill)]
             .spacing(space::GAP)
             .align_y(Center)
@@ -98,6 +98,14 @@ fn frame<'a>(f: [i32; 4]) -> Element<'a, Msg> {
     ]
     .spacing(space::GAP)
     .into()
+}
+
+/// The selection's own style groups (colour, size, outline ... by its type), wrapping.
+fn style<'a>(s: &'a Studio) -> Element<'a, Msg> {
+    let groups = s.editor.as_ref().map_or_else(Vec::new, |e| {
+        super::options_bar::selection_groups(e, SWATCHES)
+    });
+    iced::widget::row(groups).spacing(space::GAP).wrap().into()
 }
 
 /// The order buttons.
@@ -270,7 +278,8 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
             let t = info(o.tool);
             body = body
                 .push(title(tr(t.name)))
-                .push(frame(o.frame))
+                .push(frame(fields(s, o.frame)))
+                .push(style(s))
                 .push(head(t!(st_order)))
                 .push(order())
                 .push(duplicate_delete())
@@ -283,6 +292,7 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
                     crate::shared::app_language::S::st_n_objects,
                     &[count],
                 )))
+                .push(style(s))
                 .push(head(t!(st_order)))
                 .push(order())
                 .push(duplicate_delete());
@@ -290,7 +300,7 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
         Subject::Pasted(p) => {
             body = body
                 .push(title(t!(st_pasted)))
-                .push(frame(p.frame))
+                .push(frame(fields(s, p.frame)))
                 .push(picture_rows(p.opacity, s.lock))
                 .push(head(t!(st_order)))
                 .push(order())

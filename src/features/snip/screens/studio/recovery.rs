@@ -32,15 +32,30 @@ pub fn dir() -> PathBuf {
     crate::shared::paths::app_data().join("studio-recovery")
 }
 
-/// Writes the copy when `on` (Settings > Studio > Keep unsaved work); returns whether it
-/// wrote. Off writes nothing.
-pub fn write(on: bool, png: &[u8], notes: &str) -> io::Result<bool> {
-    write_in(&dir(), on, png, notes)
-}
-
 /// Deletes the copy (saved, discarded, or closed cleanly). Nothing there is fine.
 pub fn discard() {
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     discard_in(&dir());
+}
+
+/// Counts the discards: a write made off the UI thread (`write_if_current`) that
+/// finishes after a discard is dropped, so a copy never outlives what it kept.
+static GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The discard count now (a writer takes it before it starts).
+pub fn generation() -> u32 {
+    GEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// `write`, unless a `discard` came after `generation` was taken.
+pub fn write_if_current(generation: u32, on: bool, png: &[u8], notes: &str) -> io::Result<bool> {
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if GEN.load(std::sync::atomic::Ordering::SeqCst) != generation {
+        return Ok(false);
+    }
+    write_in(&dir(), on, png, notes)
 }
 
 /// The leftover copy of a crashed session, if a whole one exists. The caller checks
@@ -89,6 +104,11 @@ pub fn pending_in(dir: &Path) -> Option<Pending> {
 pub struct Debounce(Option<Instant>);
 
 impl Debounce {
+    /// An edit is waiting for its quiet time (the clock only runs then).
+    pub fn waiting(&self) -> bool {
+        self.0.is_some()
+    }
+
     pub fn changed(&mut self, now: Instant) {
         self.0 = Some(now);
     }

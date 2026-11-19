@@ -51,6 +51,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
         crate::shared::kit::logo::logo(16),
         Some(super::menu_bar::bar(s)),
         &s.title,
+        s.dirty(),
         Space::new(),
         Some(maximised),
         Msg::Caption,
@@ -125,11 +126,17 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
         false => main,
     };
     // after a crash: the kept copy
-    let main: Element<'_, Msg> = match &s.restorable {
+    let main: Element<'_, Msg> = match s.restorable.as_ref().filter(|_| !s.later) {
         Some(r) => iced::widget::stack![
             main,
             iced::widget::opaque(
-                container(super::sheets::restore(r, Msg::Restore, Msg::DiscardCopy)).center(Fill)
+                container(super::sheets::restore(
+                    r,
+                    Msg::Restore,
+                    Msg::DiscardCopy,
+                    Msg::Later
+                ))
+                .center(Fill)
             )
         ]
         .into(),
@@ -206,13 +213,13 @@ fn rail(e: &Annotator) -> Element<'_, Msg> {
         hint(
             icon_button::square(toolbar::UNDO, State::default(), undo),
             t!(sn_undo),
-            Why::Keys("Ctrl+Z"),
+            Why::Keys(super::keys::UNDO),
             Position::Right,
         ),
         hint(
             icon_button::square(toolbar::REDO, State::default(), redo),
             t!(sn_redo),
-            Why::Keys("Ctrl+Y"),
+            Why::Keys(super::keys::REDO),
             Position::Right,
         ),
     ]
@@ -372,9 +379,8 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         StudioBackdrop::Dark => Material::Stage,
         _ => Material::Recessed,
     };
-    let stage: Element<'a, Msg> = mouse_area(wrap(area, CtrlWheel(zooms)))
+    let stage: Element<'a, Msg> = mouse_area(wrap(area, CtrlWheel(zooms, s.pointer.clone())))
         .on_right_press(Msg::ContextOpen)
-        .on_move(Msg::Pointer)
         .into();
     // Space held: a layer over the picture takes the drag (a pan), not the tools
     let stage: Element<'a, Msg> = match s.space {
@@ -397,7 +403,7 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
 
 /// Ctrl + wheel over the stage zooms round the pointer instead of scrolling
 /// (the area under it never sees that wheel).
-struct CtrlWheel(bool);
+struct CtrlWheel(bool, super::PointerCell);
 
 /// One wheel notch in pixels (touchpads send pixels).
 const WHEEL_PX: f32 = 40.0;
@@ -415,6 +421,9 @@ impl Hook<Msg> for CtrlWheel {
         shell: &mut Shell<'_, Msg>,
         viewport: &Rectangle,
     ) {
+        if let Some(at) = cursor.position_in(layout.bounds()) {
+            self.1.set(at); // (kept for the right-click menu: no message per move)
+        }
         if let (true, Event::Mouse(mouse::Event::WheelScrolled { delta })) = (self.0, event)
             && let Some(at) = cursor.position_in(layout.bounds())
         {
@@ -446,8 +455,18 @@ fn empty(s: &Studio) -> Element<'_, Msg> {
         text(Role::CARD_HEADING, t!(st_empty_title)),
         sub(Role::ROW_DESC, t!(st_empty_hint)),
         crate::dir_row![
-            hint(open, t!(st_open), Why::Keys("Ctrl+O"), Position::Bottom),
-            hint(paste, t!(st_paste), Why::Keys("Ctrl+V"), Position::Bottom),
+            hint(
+                open,
+                t!(st_open),
+                Why::Keys(super::keys::OPEN),
+                Position::Bottom
+            ),
+            hint(
+                paste,
+                t!(st_paste),
+                Why::Keys(super::keys::PASTE),
+                Position::Bottom
+            ),
         ]
         .spacing(space::GAP),
     ]

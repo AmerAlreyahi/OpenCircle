@@ -114,12 +114,12 @@ fn objects(e: Option<&Annotator>) -> Element<'_, Msg> {
     if items.is_empty() {
         return note(t!(st_objects_empty));
     }
-    let selected = e.and_then(|e| e.doc.selected);
+    let selected = e.map_or_else(Vec::new, |e| e.selection());
     let n = items.len();
     // top = front: the list runs top to bottom
     let rows = items.iter().enumerate().rev().map(|(i, item)| {
         let t = info(tool_of(&item.shape));
-        let on = selected == Some(i);
+        let on = selected.contains(&i);
         let line = crate::dir_row![
             lead(t.icon, on),
             text(Role::CONTROL, tr(t.name)).width(Fill)

@@ -12,47 +12,126 @@ use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::{card, dir, divider, keycap, option_list};
 use crate::t;
 
-const ROW_H: f32 = 30.0;
 const LEAD: f32 = 2.0;
 const CAP_GAP: f32 = 4.0;
-const SHEET_W: f32 = 560.0;
+/// Board 9: 1000 wide, three columns.
+const SHEET_W: f32 = 1000.0;
+const COLUMN_GAP: f32 = 32.0;
+const RESTORE_BUTTON: f32 = 96.0;
 
-/// The rows of the shortcuts sheet (STUDIO_V3_SPEC §7): what, and its keys.
-const ROWS: [(S, &[&str]); 11] = [
-    (S::st_sc_tools, &["V R O L A P H X T C N B K S M"]),
-    (S::st_sc_copy, &["Ctrl+C", "Ctrl+X", "Ctrl+V"]),
-    (S::st_sc_whole, &["Ctrl+Shift+C"]),
-    (S::st_sc_dup, &["Ctrl+D", "Delete", "Ctrl+A"]),
-    (S::st_sc_undo, &["Ctrl+Z", "Ctrl+Y"]),
-    (S::st_sc_nudge, &["←↑→↓", "Shift+←↑→↓"]),
-    (S::st_sc_order, &["Ctrl+]", "Ctrl+["]),
-    (S::st_sc_panels, &["Ctrl+B", "Ctrl+Alt+B", "Ctrl+\\"]),
-    (S::st_sc_zoom, &["Ctrl+=", "Ctrl+-", "Ctrl+0", "Ctrl+1"]),
-    (S::st_sc_file, &["Ctrl+O", "Ctrl+S", "Ctrl+Shift+S"]),
-    (S::st_sc_misc, &["Alt+A", "Ctrl+W", "Ctrl+,"]),
-];
+/// A row: what, and its key names (`keys`).
+type Row<'a> = (&'a str, Vec<String>);
 
-/// The shortcuts sheet: a card over the window, Close at its foot.
-pub fn shortcuts<'a>() -> Element<'a, Msg> {
-    let rows = ROWS.iter().map(|(what, keys)| {
-        let caps = dir::row(keys.iter().map(|k| keycap::keycap(*k))).spacing(CAP_GAP);
-        crate::dir_row![sub(Role::ROW_DESC, tr(*what)).width(Fill), caps]
-            .align_y(Center)
-            .height(ROW_H)
-            .into()
+fn row<'a>(what: &'a str, keys: &[&str]) -> Row<'a> {
+    (what, keys.iter().map(|k| k.to_string()).collect())
+}
+
+/// One shortcut row: the name, then its keys as key caps (a key name's parts
+/// are one cap each), wrapping when there are many.
+fn shortcut_row<'a>((what, chords): Row<'a>) -> Element<'a, Msg> {
+    let caps = chords.into_iter().map(|c| {
+        let parts = c
+            .split('+')
+            .map(|k| keycap::keycap(k.to_string()))
+            .collect::<Vec<_>>();
+        Element::from(dir::row(parts).spacing(CAP_GAP / 2.0))
     });
-    let body = column![
-        text(Role::CARD_HEADING, t!(st_sc_title)),
+    let caps = iced::widget::row(caps.collect::<Vec<_>>())
+        .spacing(CAP_GAP * 2.0)
+        .wrap();
+    column![sub(Role::ROW_DESC, what), caps]
+        .spacing(CAP_GAP)
+        .padding([ROW_PAD, 0.0])
+        .into()
+}
+
+const ROW_PAD: f32 = 5.0;
+
+fn shortcut_column<'a>(title: &'a str, rows: Vec<Row<'a>>) -> Element<'a, Msg> {
+    let rows = rows.into_iter().map(shortcut_row);
+    column![
+        muted(Role::SECTION, title),
         divider::divider(),
-        column(rows),
-        container(button::button(
+        column(rows.collect::<Vec<_>>())
+    ]
+    .spacing(space::GAP)
+    .width(Fill)
+    .into()
+}
+
+/// The shortcuts sheet (board 9): three columns (the tools, editing, view and
+/// files, every key from `keys` and the tool table), a foot note, Edit
+/// shortcuts… (Settings) and Close.
+pub fn shortcuts<'a>() -> Element<'a, Msg> {
+    use super::keys as k;
+    use crate::features::snip::annotate::{Group, Tool, info};
+    let mut tools: Vec<Row<'a>> = Vec::new();
+    for g in Group::ALL {
+        let mut shown: Vec<_> = g.tools().collect();
+        if g == Group::Select {
+            shown.push(info(Tool::Crop));
+        }
+        for t in shown {
+            tools.push(row(tr(t.name), &[&t.key.to_ascii_uppercase().to_string()]));
+        }
+    }
+    let editing = vec![
+        row(tr(S::st_sc_copy), &[k::COPY, k::CUT, k::PASTE]),
+        row(tr(S::st_sc_whole), &[k::COPY_PICTURE]),
+        row(tr(S::st_sc_dup), &[k::DUPLICATE, k::DELETE, k::SELECT_ALL]),
+        row(tr(S::st_sc_undo), &[k::UNDO, k::REDO]),
+        row(tr(S::st_sc_nudge), &[k::NUDGE, k::NUDGE_FAR]),
+        row(
+            tr(S::st_sc_order),
+            &[k::FORWARD, k::BACKWARD, k::FRONT, k::BACK],
+        ),
+        row(tr(S::st_sc_steps), &[k::ADD_STEPS]),
+    ];
+    let view = vec![
+        row(
+            tr(S::st_sc_panels),
+            &[k::LEFT_PANEL, k::RIGHT_PANEL, k::ALL_PANELS],
+        ),
+        row(
+            tr(S::st_sc_zoom),
+            &[k::ZOOM_IN, k::ZOOM_OUT, k::FIT, k::ACTUAL],
+        ),
+        row(tr(S::st_sc_pan), &[k::PAN]),
+        row(tr(S::st_sc_file), &[k::OPEN, k::SAVE, k::SAVE_AS]),
+        row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::SETTINGS]),
+        row(tr(S::st_shortcuts), &[k::SHORTCUTS]),
+    ];
+    let columns = crate::dir_row![
+        shortcut_column(t!(st_sc_g_tools), tools),
+        shortcut_column(t!(st_sc_g_edit), editing),
+        shortcut_column(t!(st_sc_g_view), view),
+    ]
+    .spacing(COLUMN_GAP);
+    let head = crate::dir_row![
+        column![
+            text(Role::CARD_HEADING, t!(st_sc_title)),
+            sub(Role::ROW_DESC, t!(st_sc_sub)),
+        ]
+        .width(Fill),
+        button::button(
             label(t!(st_close)),
             Kind::Elevated,
             Some(Msg::Shortcuts(false))
-        ))
-        .align_right(Fill),
+        ),
     ]
-    .spacing(space::GAP);
+    .align_y(Center);
+    let foot = crate::dir_row![
+        sub(Role::META, t!(st_sc_foot)).width(Fill),
+        button::button(
+            label(t!(st_sc_edit)),
+            Kind::Elevated,
+            Some(Msg::EditShortcuts)
+        ),
+    ]
+    .spacing(space::PAGE[1])
+    .align_y(Center);
+    let body = column![head, divider::divider(), columns, divider::divider(), foot]
+        .spacing(space::PAGE[1]);
     surface(
         Material::Widget,
         radius::CARD,
@@ -72,7 +151,8 @@ pub struct Restorable {
 }
 
 /// The restore sheet.
-pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg) -> Element<'a, Msg> {
+pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg, later: Msg) -> Element<'a, Msg> {
+    let sized = |b: Element<'a, Msg>| container(b).width(RESTORE_BUTTON);
     let body = column![
         text(Role::CARD_HEADING, t!(st_restore_title)),
         sub(Role::ROW_DESC, t!(st_restore_hint)),
@@ -82,8 +162,21 @@ pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg) -> Element<'a,
         ),
         crate::dir_row![
             iced::widget::Space::new().width(Fill),
-            button::button(label(t!(st_discard)), Kind::Elevated, Some(discard)),
-            button::button(label(t!(st_restore)), Kind::Accent, Some(restore)),
+            sized(button::button(
+                label(t!(st_later)),
+                Kind::Quiet,
+                Some(later)
+            )),
+            sized(button::button(
+                label(t!(st_discard)),
+                Kind::Elevated,
+                Some(discard)
+            )),
+            sized(button::button(
+                label(t!(st_restore)),
+                Kind::Accent,
+                Some(restore)
+            )),
         ]
         .spacing(space::GAP),
     ]

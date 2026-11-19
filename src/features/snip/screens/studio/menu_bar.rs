@@ -7,6 +7,7 @@ use iced::widget::{container, pin, stack};
 use iced::{Center, Element, Fill, Padding};
 
 use super::editing::{self, Action};
+use super::keys;
 use super::{Msg, Studio};
 use crate::features::snip::annotate::Message;
 use crate::shared::app_language::{S, tr};
@@ -115,44 +116,54 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
     let ed = Msg::Editor;
     match menu {
         Menu::File => vec![
-            item(S::st_new_snip, "Alt+A", Msg::NewSnip, false),
-            item(S::st_open, "Ctrl+O", Msg::Open, false),
+            item(S::st_new_snip, keys::NEW_SNIP, Msg::NewSnip, false),
+            item(S::st_open, keys::OPEN, Msg::Open, false),
             opens(S::st_open_recent, Sub::Recent, false),
-            item(S::c_save, "Ctrl+S", ed(Message::Save), true),
-            item(S::st_save_as, "Ctrl+Shift+S", Msg::Export, false),
+            item(S::c_save, keys::SAVE, ed(Message::Save), true),
+            item(S::st_save_as, keys::SAVE_AS, Msg::Export, false),
             item(S::st_export_walkthrough, "", Msg::ExportWalkthrough, false),
-            item(S::st_copy_picture, "Ctrl+Shift+C", ed(Message::Copy), true),
-            item(S::st_settings, "Ctrl+,", Msg::Settings, true),
-            item(S::st_shortcuts, "Ctrl+/", Msg::Shortcuts(true), false),
+            item(
+                S::st_copy_picture,
+                keys::COPY_PICTURE,
+                ed(Message::Copy),
+                true,
+            ),
+            item(S::st_settings, keys::SETTINGS, Msg::Settings, true),
+            item(
+                S::st_shortcuts,
+                keys::SHORTCUTS,
+                Msg::Shortcuts(true),
+                false,
+            ),
             item(
                 S::st_close,
-                "Ctrl+W",
+                keys::CLOSE,
                 Msg::Caption(crate::shared::kit::header::Caption::Close),
                 true,
             ),
         ],
         Menu::Edit => vec![
-            item(S::sn_undo, "Ctrl+Z", ed(Message::Undo), false),
-            item(S::sn_redo, "Ctrl+Y", ed(Message::Redo), false),
+            item(S::sn_undo, keys::UNDO, ed(Message::Undo), false),
+            item(S::sn_redo, keys::REDO, ed(Message::Redo), false),
             action(s, Action::Cut, true),
             action(s, Action::Copy, false),
             action(s, Action::Paste, false),
             action(s, Action::Duplicate, false),
             action(s, Action::Delete, false),
             action(s, Action::SelectAll, true),
-            item(S::st_deselect, "Esc", ed(Message::Deselect), false),
+            item(S::st_deselect, keys::DESELECT, ed(Message::Deselect), false),
             opens(S::st_arrange, Sub::Arrange, true),
         ],
         Menu::View => {
             let p = s.panels;
             let mut v = vec![
-                item(S::st_left_panel, "Ctrl+B", Msg::Library, false),
-                item(S::st_right_panel, "Ctrl+Alt+B", Msg::Panel, false),
-                item(S::st_all_panels, "Ctrl+\\", Msg::Both, false),
-                item(S::st_zoom_in, "Ctrl+=", Msg::ZoomIn, true),
-                item(S::st_zoom_out, "Ctrl+-", Msg::ZoomOut, false),
-                item(S::st_fit, "Ctrl+0", Msg::Fit, false),
-                item(S::st_actual, "Ctrl+1", Msg::Actual, false),
+                item(S::st_left_panel, keys::LEFT_PANEL, Msg::Library, false),
+                item(S::st_right_panel, keys::RIGHT_PANEL, Msg::Panel, false),
+                item(S::st_all_panels, keys::ALL_PANELS, Msg::Both, false),
+                item(S::st_zoom_in, keys::ZOOM_IN, Msg::ZoomIn, true),
+                item(S::st_zoom_out, keys::ZOOM_OUT, Msg::ZoomOut, false),
+                item(S::st_fit, keys::FIT, Msg::Fit, false),
+                item(S::st_actual, keys::ACTUAL, Msg::Actual, false),
                 item(S::st_snap, "", Msg::Snap, true),
                 item(S::st_grid, "", Msg::Grid, false),
             ];
@@ -220,7 +231,7 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
 /// Where the opener of `menu` starts, from the header's start edge.
 fn offset(menu: Menu) -> f32 {
     let role = Role::NAV;
-    let mut x = 14.0 + 16.0 + 10.0 + 14.0; // pad, logo, gap, pad
+    let mut x = crate::shared::kit::header::MENU_X;
     for m in Menu::ALL {
         if m == menu {
             return x;

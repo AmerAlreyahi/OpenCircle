@@ -13,6 +13,7 @@
 mod cut;
 mod edit_text;
 pub(crate) mod editing;
+pub(crate) mod keys;
 mod library;
 mod menu_bar;
 mod options_bar;
@@ -26,7 +27,7 @@ use std::path::PathBuf;
 
 use iced::widget::image;
 use iced::widget::scrollable::AbsoluteOffset;
-use iced::{Point, Size, Vector};
+use iced::{Point, Rectangle, Size, Vector};
 
 use super::steps::{self, Released, Reorder};
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
@@ -135,7 +136,7 @@ pub enum Msg {
     Hovered(bool),
     Dropped(PathBuf),
     OpenRecent(PathBuf),
-    Recent(Vec<(PathBuf, image::Handle)>),
+    Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
     Scale(f32),
     Resized(Size),
@@ -171,6 +172,9 @@ pub enum Msg {
     Overlay,
     /// The shortcuts sheet.
     Shortcuts(bool),
+    /// The shortcuts sheet's Edit shortcuts… (Settings); the restore sheet's Later.
+    EditShortcuts,
+    Later,
     /// Right-click on the stage; the menu's row; the pointer over the stage.
     ContextOpen,
     ContextPick(usize),
@@ -182,6 +186,14 @@ pub enum Msg {
     /// Ctrl and Shift as the keyboard holds them; the recovery timer.
     Mods(bool, bool),
     Tick,
+    /// Alt down / up (the menu bar opens on the release, Windows' way).
+    AltDown,
+    AltUp,
+    /// Another key went down: Alt's release is no longer a menu key.
+    AltBreak,
+    /// Properties' box fields: a typed value (axis, text), Enter.
+    BoundsEdit(usize, String),
+    BoundsCommit,
     /// The Objects list: a press on a row (display slot, top = front), the
     /// pointer over the list (with the rows' count), the press ends, the eye.
     ObjPress(usize),
@@ -194,7 +206,6 @@ pub enum Msg {
     Snap,
     Grid,
     ClearRecent,
-    Nothing,
     /// Board 20: bring the kept copy back / throw it away.
     Restore,
     DiscardCopy,
@@ -299,6 +310,8 @@ pub enum Outcome {
     CancelWalkthrough,
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
+    /// Write the unsaved copy (the host encodes and writes it off the UI thread).
+    KeepCopy(Box<KeepCopy>),
     /// File > New snip: the Snip capture starts.
     NewSnip,
     /// Settings > Studio changed from the View menu.
@@ -352,7 +365,17 @@ pub struct Studio {
     pub(super) shortcuts: bool,
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
-    pub(super) pointer: Point,
+    pub(super) pointer: PointerCell,
+    /// Alt went down with nothing since: its release opens the menu bar.
+    alt_clean: bool,
+    /// A kept copy of this picture is on disk (a clean state removes it).
+    copy_on_disk: bool,
+    /// A restore that waits for the unsaved question (Cancel gives the sheet back).
+    restoring: Option<Restorable>,
+    /// Properties' X / Y / W / H while typed (committed on Enter or the next action).
+    pub(super) bounds_draft: Option<[String; 4]>,
+    /// A picture was opened (Reopen last waits for none).
+    opened: bool,
     pub(super) lock: bool,
     /// Space is held (the stage pans), the pointer where a pan last was, the
     /// open second menu, the document's name and the name of the next picture.
@@ -373,6 +396,8 @@ pub struct Studio {
     pub(super) recent_info: Vec<String>,
     /// A copy kept after a crash, waiting for Restore / Discard (board 20).
     pub(super) restorable: Option<Restorable>,
+    /// Later: the restore sheet is put away for now (the copy stays).
+    pub(super) later: bool,
     /// When the unsaved copy was last written (`recovery`).
     /// The Steps list: a press or drag, and the step under the pointer.
     pub(super) pick: Reorder,
@@ -437,7 +462,12 @@ impl Studio {
             overlay: false,
             shortcuts: false,
             context: None,
-            pointer: Point::ORIGIN,
+            pointer: PointerCell::default(),
+            alt_clean: false,
+            copy_on_disk: false,
+            restoring: None,
+            bounds_draft: None,
+            opened: false,
             lock: true,
             space: false,
             shift: false,
@@ -452,6 +482,7 @@ impl Studio {
             title: title_of(None),
             recent_info: Vec::new(),
             restorable: pending_copy(),
+            later: false,
             pick: Reorder::default(),
             step_hover: None,
             export: export_defaults(),
@@ -512,7 +543,13 @@ impl Studio {
         self.title = title_of(self.name.as_deref());
         self.editor = Some(editor);
         self.fit();
+        self.opened = true;
         if let Some(e) = &mut self.editor {
+            if let Some(r) = self.restoring.take() {
+                e.restore_annotations(&r.notes);
+                self.copy_on_disk = false;
+                recovery::discard();
+            }
             e.refresh();
         }
     }
@@ -832,7 +869,10 @@ impl Studio {
                 self.asking = Some(After::Close);
                 Outcome::None
             }
-            false => Outcome::Close,
+            false => {
+                self.drop_copy();
+                Outcome::Close
+            }
         }
     }
 
@@ -843,13 +883,16 @@ impl Studio {
                 self.asking = Some(After::Quit);
                 Outcome::None
             }
-            false => Outcome::Quit,
+            false => {
+                self.drop_copy();
+                Outcome::Quit
+            }
         }
     }
 
     /// The last Save landed: what is shown now is saved.
     pub fn saved(&mut self) {
-        recovery::discard();
+        self.drop_copy();
         if let Some(e) = &self.editor {
             self.saved = Some(e.doc.state());
         }
@@ -858,12 +901,17 @@ impl Studio {
     /// After the question's Save landed (or Don't save): what waited goes on.
     pub fn proceed(&mut self) -> Outcome {
         match self.asking.take() {
-            Some(After::Close) => Outcome::Close,
+            Some(After::Close) => {
+                self.drop_copy();
+                Outcome::Close
+            }
             Some(After::Quit) => {
+                self.drop_copy();
                 self.saved = self.editor.as_ref().map(|e| e.doc.state()); // nothing left to ask
                 Outcome::Quit
             }
             Some(After::Open(picture)) => {
+                self.drop_copy();
                 self.saved = self.editor.as_ref().map(|e| e.doc.state());
                 self.open(picture);
                 Outcome::None
@@ -888,6 +936,28 @@ impl Studio {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        let quiet_msg = matches!(
+            msg,
+            Msg::AltDown
+                | Msg::AltUp
+                | Msg::Pointer(_)
+                | Msg::Mods(..)
+                | Msg::Tick
+                | Msg::Focus(_)
+                | Msg::Scrolled(_)
+                | Msg::Resized(_)
+                | Msg::Scale(_)
+        );
+        if !quiet_msg {
+            self.alt_clean = false;
+        }
+        // a typed X / Y / W / H is one edit, made when the user moves on
+        if !matches!(msg, Msg::BoundsEdit(..) | Msg::BoundsCommit) && !quiet_msg {
+            let out = self.commit_bounds();
+            if !matches!(out, Outcome::None) {
+                return out;
+            }
+        }
         // the question blocks the picture: nothing changes it until answered
         if self.asking()
             && matches!(
@@ -1046,10 +1116,18 @@ impl Studio {
                 self.next_name = file_name(&path);
                 Outcome::Read(path)
             }
-            Msg::Recent(recent) => {
-                self.recent_info = recent.iter().map(|(p, _)| recent_line(p)).collect();
+            Msg::Recent(recent, info) => {
+                self.recent_info = info;
                 self.recent = recent;
-                Outcome::None
+                // Settings > Studio > Reopen the last picture: the newest, when none is open
+                let first = self.recent.first().map(|(p, _)| p.clone());
+                match (first, crate::shared::config::current().studio.reopen_last) {
+                    (Some(p), true) if self.editor.is_none() && !self.opened => {
+                        self.next_name = file_name(&p);
+                        Outcome::Read(p)
+                    }
+                    _ => Outcome::None,
+                }
             }
             Msg::Scale(s) => {
                 self.scale = s.max(0.1);
@@ -1093,8 +1171,17 @@ impl Studio {
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
                     || std::mem::take(&mut self.overlay);
-                if !closed && self.asking.take().is_none() {
-                    self.edit = None;
+                if !closed {
+                    match self.asking.take() {
+                        // the restore that waited on the question: the copy stays
+                        Some(After::Open(_)) => {
+                            if let Some(r) = self.restoring.take() {
+                                self.restorable = Some(r);
+                            }
+                        }
+                        Some(_) => {}
+                        None => self.edit = None,
+                    }
                 }
                 Outcome::None
             }
@@ -1102,13 +1189,30 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
-            Msg::Nothing => Outcome::None,
             Msg::Lock(on) => {
                 self.lock = on;
                 self.update(Msg::Editor(annotate::Message::LockRatio(on)))
             }
+            Msg::AltBreak => Outcome::None,
+            Msg::AltDown => {
+                self.alt_clean = true;
+                Outcome::None
+            }
+            Msg::AltUp => match std::mem::take(&mut self.alt_clean) {
+                true => self.update(Msg::MenuKey(Nav::Alt)),
+                false => Outcome::None,
+            },
+            Msg::BoundsEdit(axis, text) => {
+                if let Some(f) = self.bounds_fields() {
+                    let mut draft = self.bounds_draft.take().unwrap_or(f);
+                    draft[axis.min(3)] = text;
+                    self.bounds_draft = Some(draft);
+                }
+                Outcome::None
+            }
+            Msg::BoundsCommit => self.commit_bounds(),
             Msg::Pointer(p) => {
-                self.pointer = p;
+                self.pointer.set(p);
                 let Some(last) = self.pan else {
                     return Outcome::None;
                 };
@@ -1126,10 +1230,10 @@ impl Studio {
             }
             Msg::Tick => {
                 // the debounce: the copy is written once the picture has been quiet
-                if self.quiet.due(std::time::Instant::now()) {
-                    self.write_copy();
+                match self.quiet.due(std::time::Instant::now()) {
+                    true => self.copy_job(),
+                    false => Outcome::None,
                 }
-                Outcome::None
             }
             Msg::ObjPress(slot) => {
                 self.obj_pick.press(slot);
@@ -1162,7 +1266,7 @@ impl Studio {
                 Outcome::None
             }
             Msg::PanStart => {
-                self.pan = Some(self.pointer);
+                self.pan = Some(self.pointer.get());
                 Outcome::None
             }
             Msg::PanEnd => {
@@ -1201,7 +1305,7 @@ impl Studio {
                 }
             }
             Msg::ContextOpen => {
-                let at = self.image_point(self.pointer);
+                let at = self.image_point(self.pointer.get());
                 let _ = self.on_editor(annotate::Message::SelectAt(at, false));
                 let Some(e) = &self.editor else {
                     return Outcome::None;
@@ -1210,9 +1314,26 @@ impl Studio {
                     true => editing::picture_menu(e),
                     false => editing::object_menu(e),
                 };
-                let side = (self.library_shown() as u8 as f32) * (LIBRARY + 1.0);
-                let origin = Point::new(side + RAIL + 2.0, HEADER + OPTIONS + 1.0);
-                let at = Point::new(origin.x + self.pointer.x, origin.y + self.pointer.y);
+                // the stage's left edge: mirrored, the properties panel sits there
+                let left = match crate::shared::app_language::rtl() {
+                    true => (self.panel_shown() as u8 as f32) * (panel_width() + 1.0),
+                    false => (self.library_shown() as u8 as f32) * (LIBRARY + 1.0) + RAIL + 2.0,
+                };
+                let origin = Point::new(left, HEADER + OPTIONS + 1.0);
+                let seps = entries.iter().filter(|r| r.divider).count();
+                let menu = Size::new(
+                    crate::shared::kit::option_list::MENU_WIDTH,
+                    crate::shared::kit::option_list::menu_height(entries.len(), seps),
+                );
+                let p = self.pointer.get();
+                let at = Point::new(
+                    (origin.x + p.x)
+                        .min(self.window.width - menu.width - EDGE)
+                        .max(0.0),
+                    (origin.y + p.y)
+                        .min(self.window.height - menu.height - EDGE)
+                        .max(0.0),
+                );
                 self.context = Some(Context { at, entries });
                 Outcome::None
             }
@@ -1229,25 +1350,24 @@ impl Studio {
                 let Some(r) = self.restorable.take() else {
                     return Outcome::None;
                 };
-                // (the copy is the flattened picture: the drawings were baked in)
                 let Ok(img) = ::image::load_from_memory(&r.png) else {
                     recovery::discard();
                     return Outcome::Say(crate::t!(st_unreadable).to_string());
                 };
                 let img = img.into_rgba8();
+                // the picture and its drawings come back in `open`; with unsaved
+                // work on screen the question comes first (Cancel keeps the copy)
+                self.restoring = Some(r);
                 self.open(Picture::Crop(Crop {
                     width: img.width(),
                     height: img.height(),
                     rgba: img.into_raw(),
                 }));
-                if let Some(e) = &mut self.editor {
-                    e.restore_annotations(&r.notes);
-                }
-                recovery::discard();
                 Outcome::None
             }
             Msg::DiscardCopy => {
                 self.restorable = None;
+                self.copy_on_disk = false;
                 recovery::discard();
                 Outcome::None
             }
@@ -1292,6 +1412,14 @@ impl Studio {
             }
             Msg::Shortcuts(on) => {
                 self.shortcuts = on;
+                Outcome::None
+            }
+            Msg::EditShortcuts => {
+                self.shortcuts = false;
+                Outcome::Settings
+            }
+            Msg::Later => {
+                self.later = true;
                 Outcome::None
             }
             Msg::NewSnip => Outcome::NewSnip,
@@ -1443,25 +1571,81 @@ impl Studio {
     }
 
     /// Settings > Studio > "Keep unsaved work": every edit restarts the quiet
-    /// timer (`recovery::Debounce`); `Msg::Tick` writes the copy once it ran out.
+    /// timer (`recovery::Debounce`); `Msg::Tick` hands the host the copy to write
+    /// once it ran out. Back to a clean state (undo, save) the copy is removed.
     fn keep_unsaved(&mut self) {
-        if crate::shared::config::current().studio.keep_unsaved && self.dirty() {
-            self.quiet.changed(std::time::Instant::now());
+        if !crate::shared::config::current().studio.keep_unsaved {
+            return;
+        }
+        match self.dirty() {
+            true => self.quiet.changed(std::time::Instant::now()),
+            false => self.drop_copy(),
         }
     }
 
-    /// The private copy: the picture's own pixels and the drawings as JSON.
-    fn write_copy(&mut self) {
+    /// The unsaved copy to write: the picture's own pixels and the drawings as
+    /// JSON (the host encodes and writes it off the UI thread).
+    fn copy_job(&mut self) -> Outcome {
         let on = crate::shared::config::current().studio.keep_unsaved;
         if !on || !self.dirty() || self.restorable.is_some() {
-            return;
+            return Outcome::None;
         }
-        let Some(e) = &self.editor else { return };
-        let image = &e.doc.image;
-        if let Ok(png) = crate::shared::picture::encode_png(image.width, image.height, &image.rgba)
-        {
-            let _ = recovery::write(on, &png, &e.annotations_json());
+        let Some(e) = &self.editor else {
+            return Outcome::None;
+        };
+        self.copy_on_disk = true;
+        Outcome::KeepCopy(Box::new(KeepCopy {
+            generation: recovery::generation(),
+            width: e.doc.image.width,
+            height: e.doc.image.height,
+            rgba: e.doc.image.rgba.clone(),
+            notes: e.annotations_json(),
+        }))
+    }
+
+    /// The kept copy goes (saved, discarded, closed or back to clean). A copy
+    /// waiting for Restore is not ours to remove.
+    fn drop_copy(&mut self) {
+        if self.restorable.is_none() && self.restoring.is_none() {
+            recovery::discard();
         }
+        self.copy_on_disk = false;
+        self.quiet = recovery::Debounce::default();
+    }
+
+    /// The clock only runs while an edit waits for its copy.
+    pub fn waiting(&self) -> bool {
+        self.quiet.waiting()
+    }
+
+    /// The selection's box as typed fields (image px), when one is selected.
+    pub(super) fn bounds_fields(&self) -> Option<[String; 4]> {
+        let r = self.editor.as_ref()?.selection_bounds()?;
+        Some([r.x, r.y, r.width, r.height].map(|v| (v.round() as i32).to_string()))
+    }
+
+    /// The typed box becomes one edit (a field left empty or wrong keeps its value).
+    fn commit_bounds(&mut self) -> Outcome {
+        let (Some(draft), Some(now)) = (
+            self.bounds_draft.take(),
+            self.editor.as_ref().and_then(|e| e.selection_bounds()),
+        ) else {
+            return Outcome::None;
+        };
+        let was = [now.x, now.y, now.width, now.height];
+        let mut v = was;
+        for (i, text) in draft.iter().enumerate() {
+            if let Ok(n) = text.trim().parse::<f32>() {
+                v[i] = if i >= 2 { n.max(1.0) } else { n };
+            }
+        }
+        if v == was.map(f32::round) || v == was {
+            return Outcome::None;
+        }
+        self.on_editor(annotate::Message::Bounds(Rectangle::new(
+            Point::new(v[0], v[1]),
+            Size::new(v[2], v[3]),
+        )))
     }
 
     /// The picture point under `at` (a point of the stage): the scroll and the
@@ -1552,6 +1736,34 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
         .min(1.0 / scale.max(0.1))
 }
 
+/// The unsaved copy a Tick hands the host.
+pub struct KeepCopy {
+    /// `recovery::generation()` when it was made: a later discard voids the write.
+    pub generation: u32,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub notes: String,
+}
+
+/// The pointer's last place over the stage, kept by the stage's own widget with
+/// no message per move (`Msg::Pointer` is for a pan only).
+#[derive(Clone, Default)]
+pub struct PointerCell(std::sync::Arc<std::sync::Mutex<Point>>);
+
+impl PointerCell {
+    pub fn get(&self) -> Point {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set(&self, p: Point) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = p;
+    }
+}
+
+/// The right-click menu keeps this far from the window's edge.
+const EDGE: f32 = 8.0;
+
 /// The right-click menu: where (window px) and its rows.
 pub(super) struct Context {
     pub at: Point,
@@ -1602,7 +1814,7 @@ fn file_name(path: &std::path::Path) -> Option<String> {
 }
 
 /// "2.1 MB · 3 min ago" for a recent file (blank where the OS says nothing).
-fn recent_line(path: &std::path::Path) -> String {
+pub fn recent_line(path: &std::path::Path) -> String {
     use crate::shared::app_language::{S, fmt, tr};
     let Ok(meta) = std::fs::metadata(path) else {
         return String::new();

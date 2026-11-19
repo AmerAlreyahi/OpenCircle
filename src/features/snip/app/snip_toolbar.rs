@@ -89,7 +89,24 @@ impl App {
         }
         self.more_reset();
         self.o.edit = Some(edit);
+        // Settings > Studio > Open pictures in: the Studio instead of the widget
+        if crate::shared::config::current().studio.open_in
+            == crate::shared::config::StudioOpenIn::Studio
+        {
+            return self.open_in_studio();
+        }
         Task::none()
+    }
+
+    /// The same editor, its drawings and history, moves into the Studio.
+    fn open_in_studio(&mut self) -> Task<Message> {
+        let Some(edit) = self.o.edit.take() else {
+            return Task::none();
+        };
+        use crate::features::snip::screens::studio::Picture;
+        let picture = Picture::Editor(Box::new(edit.annotator));
+        let open = self.windows.open_studio(Some(picture));
+        Task::batch([self.close(), open.map(Message::Windows)])
     }
 
     pub(crate) fn on_snip_toolbar(&mut self, msg: annotate::Message) -> Task<Message> {
@@ -235,15 +252,7 @@ impl App {
             }),
             Some(Output::Dragged) => self.close(),
             // the same editor, its drawings and history, moves into the Studio
-            Some(Output::OpenStudio) => {
-                let Some(edit) = self.o.edit.take() else {
-                    return Task::none();
-                };
-                use crate::features::snip::screens::studio::Picture;
-                let picture = Picture::Editor(Box::new(edit.annotator));
-                let open = self.windows.open_studio(Some(picture));
-                Task::batch([self.close(), open.map(Message::Windows)])
-            }
+            Some(Output::OpenStudio) => self.open_in_studio(),
         }
     }
 

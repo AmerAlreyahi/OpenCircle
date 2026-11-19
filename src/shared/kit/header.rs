@@ -5,7 +5,7 @@
 use iced::font::Weight;
 use iced::widget::{Space, button, column, container, image, mouse_area, row, stack, text};
 use iced::window::Direction;
-use iced::{Center, Element, Fill, Length, mouse};
+use iced::{Border, Center, Element, Fill, Length, mouse};
 
 use super::icon::{Icon, icon};
 use super::surface::{Material, surface};
@@ -29,6 +29,14 @@ pub enum Caption {
 /// (12 px / 600) drag the window; `status` (a header pill) sits 8 px left of
 /// the caption buttons. `maximise`: `None` = a fixed-size window, no Maximise
 /// button (Close takes its place); `Some(maximised now)` = Maximise / Restore.
+/// The header's side padding and the gap after the logo.
+const PAD: f32 = 14.0;
+const LOGO_GAP: f32 = 10.0;
+
+/// Where a menu bar's first opener starts, from the header's start edge (what
+/// a menu hung under an opener aligns to).
+pub const MENU_X: f32 = PAD + size::ICON + LOGO_GAP;
+
 pub fn regular<'a, Message: Clone + 'a>(
     logo: image::Handle,
     title: &'a str,
@@ -36,7 +44,7 @@ pub fn regular<'a, Message: Clone + 'a>(
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
-    with_menu(logo, None, title, status, maximise, on)
+    with_menu(logo, None, title, false, status, maximise, on)
 }
 
 /// `regular` with a menu bar (`menu`) between the logo and the title (Studio:
@@ -46,14 +54,14 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     logo: image::Handle,
     menu: Option<Element<'a, Message>>,
     title: &'a str,
+    unsaved: bool,
     status: impl Into<Element<'a, Message>>,
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
     const H: f32 = size::HEADER;
-    const PAD: f32 = 14.0;
-    const LOGO_GAP: f32 = 10.0;
     const STATUS_GAP: f32 = 8.0;
+    const DOT: f32 = 6.0;
     const GLYPH: f32 = 12.0;
     let mark = image(logo).width(size::ICON).height(size::ICON);
     let name_text = text(title)
@@ -68,6 +76,7 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     // right to left: the whole header mirrored, the caption buttons at the
     // top left with close outermost (Win32 mirroring, GTK, KWin)
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
+    let has_menu = menu.is_some();
     let name: Element<'a, Message> = match menu {
         None => crate::dir_row![mark, name_text]
             .spacing(LOGO_GAP)
@@ -84,14 +93,29 @@ pub fn with_menu<'a, Message: Clone + 'a>(
                 .center_y(H)
                 .into(),
             );
-            name_text.into()
+            // the document's name, centred, with a dot while it has unsaved changes
+            let dot = unsaved.then(|| {
+                container(Space::new().width(DOT).height(DOT)).style(|_| container::Style {
+                    background: Some(c().accent.into()),
+                    border: Border::default().rounded(DOT / 2.0),
+                    ..container::Style::default()
+                })
+            });
+            crate::dir_row![name_text]
+                .push(dot)
+                .spacing(LOGO_GAP / 2.0)
+                .align_y(Center)
+                .into()
         }
     };
     let name = container(name)
         .padding([0.0, PAD])
         .center_y(H)
         .width(Fill)
-        .align_x(super::dir::start());
+        .align_x(match has_menu {
+            true => iced::alignment::Horizontal::Center,
+            false => super::dir::start(),
+        });
     parts.extend([
         mouse_area(name).on_press(on(Caption::Drag)).into(), // mouse only: drags the window
         status.into(),

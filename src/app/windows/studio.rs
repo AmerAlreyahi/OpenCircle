@@ -70,10 +70,13 @@ impl Windows {
         let to = |m: studio::Msg| Msg::Studio(m);
         let scale = window::scale_factor(id).map(move |f| to(studio::Msg::Scale(f)));
         let size = window::size(id).map(move |s| to(studio::Msg::Resized(s)));
+        // the list and each file's size and age: read once, off the UI thread
         let recent = background(|tx| {
-            let _ = tx.unbounded_send(crate::shared::history::recent::load());
+            let list = crate::shared::history::recent::load();
+            let info: Vec<String> = list.iter().map(|(p, _)| studio::recent_line(p)).collect();
+            let _ = tx.unbounded_send((list, info));
         })
-        .map(move |r| to(studio::Msg::Recent(r)));
+        .map(move |(r, info)| to(studio::Msg::Recent(r, info)));
         Task::batch([
             open.discard().chain(window::gain_focus(id)).chain(scale),
             size,
@@ -349,6 +352,21 @@ impl Windows {
                 },
             ))),
             Outcome::Settings => self.open(super::Kind::Settings),
+            Outcome::KeepCopy(job) => {
+                // encode and write off the UI thread; a discard in between voids it
+                std::thread::spawn(move || {
+                    let png = crate::shared::picture::encode_png(job.width, job.height, &job.rgba);
+                    if let Ok(png) = png {
+                        let _ = studio::recovery::write_if_current(
+                            job.generation,
+                            true,
+                            &png,
+                            &job.notes,
+                        );
+                    }
+                });
+                Task::none()
+            }
             Outcome::ClearRecent => {
                 std::thread::spawn(crate::shared::history::recent::clear);
                 Task::none()
@@ -373,10 +391,83 @@ impl Windows {
     }
 }
 
+/// Settings > Studio > Saving: the folder, the name pattern (`{date}` `{time}`),
+/// the format and quality, "Ask where to save" and "Copy the file path". Blocking;
+/// `None`: the dialog was cancelled. Ok / Err = the pill.
+fn save_file(crop: Crop) -> Option<Result<String, String>> {
+    use crate::shared::config::Format;
+    let config = crate::shared::config::current();
+    let prefs = config.studio;
+    let not_saved = || crate::t!(pill_not_saved).to_string();
+    let how = export::Picture {
+        format: match prefs.format {
+            Format::Png => export::Format::Png,
+            Format::Jpeg => export::Format::Jpg,
+        },
+        quality: prefs.quality,
+        max_edge: config.snip.max_edge,
+    };
+    let ext = how.format.ext();
+    let (date, time) = save::date_time();
+    let stem = prefs
+        .file_name
+        .replace("{date}", &date)
+        .replace("{time}", &time);
+    let stem = match stem.trim().is_empty() {
+        true => save::stamped_name(""),
+        false => stem,
+    };
+    let Some(folder) = save::start_folder(&prefs.folder) else {
+        return Some(Err(not_saved()));
+    };
+    let bytes = match export::encode(crop, how) {
+        Ok(b) => b,
+        Err(e) => {
+            crate::log!("[opencircle] save failed: {e}");
+            return Some(Err(not_saved()));
+        }
+    };
+    let path = match prefs.ask_where {
+        true => {
+            let picked = rfd::FileDialog::new()
+                .set_title(crate::t!(st_export_where))
+                .set_directory(&folder)
+                .set_file_name(format!("{stem}.{ext}"))
+                .add_filter(how.format.name(), &[ext])
+                .save_file()?;
+            export::with_ext(picked, how.format)
+        }
+        false => unused_name(&folder, &stem, ext),
+    };
+    if let Err(e) = std::fs::write(&path, bytes) {
+        crate::log!("[opencircle] save failed: {e}");
+        return Some(Err(not_saved()));
+    }
+    if prefs.copy_path {
+        let _ = copy::text(path.display().to_string());
+    }
+    let shown = path.parent().unwrap_or(&path);
+    Some(Ok(fmt(S::pill_saved, &[&save::short_path(shown)])))
+}
+
+/// `<stem>.<ext>` in `folder`, or `<stem>-2.<ext>`, ...: never over a file.
+fn unused_name(folder: &std::path::Path, stem: &str, ext: &str) -> std::path::PathBuf {
+    let mut path = folder.join(format!("{stem}.{ext}"));
+    let mut n = 2;
+    while path.exists() {
+        path = folder.join(format!("{stem}-{n}.{ext}"));
+        n += 1;
+    }
+    path
+}
+
 /// Save off the UI thread (encoding a big picture takes a while): `Msg::StudioSaved`.
 fn studio_save(crop: Crop, then: bool) -> Task<Msg> {
     background(move |tx| {
-        let _ = tx.unbounded_send(run(&save::ACTION, crop));
+        // (a cancelled Save dialog says nothing)
+        if let Some(saved) = save_file(crop) {
+            let _ = tx.unbounded_send(saved);
+        }
     })
     .map(move |saved| Msg::StudioSaved(saved, then))
 }
@@ -527,10 +618,10 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
         return Some(studio::Msg::Cancel);
     }
-    // the menu bar: Alt opens it, the arrows walk it (ignored while it is closed)
+    // the menu bar: Alt opens it on its release (the Alt key itself is the
+    // closure's), the arrows walk it (ignored while it is closed)
     if modifiers.is_empty() || modifiers == keyboard::Modifiers::ALT {
         let nav = match key {
-            keyboard::Key::Named(Named::Alt) => Some(studio::Nav::Alt),
             keyboard::Key::Named(Named::ArrowLeft) => Some(studio::Nav::Prev),
             keyboard::Key::Named(Named::ArrowRight) => Some(studio::Nav::Next),
             keyboard::Key::Named(Named::ArrowUp) => Some(studio::Nav::Up),
@@ -550,6 +641,7 @@ fn key_msg(
     }
     Some(match (physical_key, key.to_latin(physical_key)) {
         // panels: Ctrl+B left, Ctrl+Alt+B right, Ctrl+\ both
+        (_, Some('s')) if modifiers.shift() => studio::Msg::Export,
         (Physical::Code(Code::KeyB), _) if modifiers.alt() => studio::Msg::Panel,
         (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
         (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
@@ -569,9 +661,9 @@ fn key_msg(
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
 /// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
-pub(super) fn studio_events() -> iced::Subscription<Msg> {
-    // the unsaved copy's debounce runs on a clock, only while the switch is on
-    let tick = match crate::shared::config::current().studio.keep_unsaved {
+pub(super) fn studio_events(waiting: bool) -> iced::Subscription<Msg> {
+    // the unsaved copy's debounce runs on a clock, only while an edit waits for its copy
+    let tick = match waiting {
         true => iced::Subscription::run(recovery_ticks).map(|()| Msg::Studio(studio::Msg::Tick)),
         false => iced::Subscription::none(),
     };
@@ -605,6 +697,18 @@ fn keys() -> iced::Subscription<Msg> {
                 key: keyboard::Key::Named(keyboard::key::Named::Space),
                 ..
             }) => studio::Msg::Space(false),
+            iced::Event::Keyboard(keyboard::Event::KeyReleased {
+                key: keyboard::Key::Named(keyboard::key::Named::Alt),
+                ..
+            }) => studio::Msg::AltUp,
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Alt),
+                repeat,
+                ..
+            }) => match repeat {
+                true => return None,
+                false => studio::Msg::AltDown,
+            },
             iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 studio::Msg::Mods(m.command(), m.shift())
             }
@@ -613,7 +717,11 @@ fn keys() -> iced::Subscription<Msg> {
                 physical_key,
                 modifiers,
                 ..
-            }) if status == iced::event::Status::Ignored => key_msg(&key, physical_key, modifiers)?,
+            }) => match (status, key_msg(&key, physical_key, modifiers)) {
+                (iced::event::Status::Ignored, Some(m)) => m,
+                // (any other key ends an Alt press: its release opens nothing)
+                _ => studio::Msg::AltBreak,
+            },
             _ => return None,
         };
         Some(Msg::StudioEvent(id, m))

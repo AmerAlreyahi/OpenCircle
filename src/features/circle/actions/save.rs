@@ -115,6 +115,16 @@ pub fn stamped_name(infix: &str) -> String {
     format!("OpenCircle-{infix}{stamp}")
 }
 
+/// The date (`YYYY-MM-DD`) and the time (`HH-MM-SS`), local: a name pattern's
+/// `{date}` and `{time}`.
+pub fn date_time() -> (String, String) {
+    let (y, mo, d, h, mi, s) = local_now();
+    (
+        format!("{y:04}-{mo:02}-{d:02}"),
+        format!("{h:02}-{mi:02}-{s:02}"),
+    )
+}
+
 /// Local time as `YYYY-MM-DD_HH-MM-SS` (sorts by name, valid on every filesystem).
 fn timestamp() -> String {
     let (y, mo, d, h, mi, s) = local_now();
