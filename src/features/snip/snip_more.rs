@@ -225,6 +225,31 @@ pub fn keep_hidden(dst: &mut [u8], src: &[u8], width: usize, area: [usize; 4], h
     }
 }
 
+/// A translation (`from`, `from_w` px wide) pasted into `dst` (`dst_w` wide)
+/// over `area` (x0, y0, x1, y1): `whole` = `from` is the whole frame, else
+/// just the area. The one paste Snip's More and the Studio share.
+pub fn paste_translation(
+    dst: &mut [u8],
+    dst_w: usize,
+    from: &[u8],
+    from_w: usize,
+    area: [usize; 4],
+    whole: bool,
+) {
+    let [x0, y0, x1, y1] = area;
+    for y in y0..y1 {
+        let src = match whole {
+            true => (y * from_w + x0) * 4,
+            false => (y - y0) * (x1 - x0) * 4,
+        };
+        let at = (y * dst_w + x0) * 4;
+        let row = (x1 - x0) * 4;
+        if dst.len() >= at + row && from.len() >= src + row {
+            dst[at..at + row].copy_from_slice(&from[src..src + row]);
+        }
+    }
+}
+
 /// The lines of `blocks` that are not under a hidden part (a second guard
 /// after `mask`, which already painted the hidden pixels out: a line whose
 /// middle is hidden is dropped; one only touching it keeps its readable part).

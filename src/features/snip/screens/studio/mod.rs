@@ -15,6 +15,7 @@ use iced::widget::scrollable::AbsoluteOffset;
 use iced::{Point, Size, Vector};
 
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
+use crate::features::snip::snip_more::{self as more, Row};
 use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
@@ -96,6 +97,10 @@ pub enum Msg {
     DontSave,
     Cancel,
     SaveFirst,
+    /// A picture-panel row (Copy text, Translate, Ask AI).
+    Act(Row),
+    /// The window has / lost the keyboard (the quick-action keys act on it).
+    Focus(bool),
 }
 
 /// What the host does after a message.
@@ -122,6 +127,9 @@ pub enum Outcome {
     Panels(StudioConfig),
     /// Scroll the stage there (a zoom round the pointer).
     ScrollTo(AbsoluteOffset),
+    /// A picture action: the host (the App) runs main mode's own work on the
+    /// pictures `read_picture` / `annotated` / `translate_frame` give.
+    Act(Row),
 }
 
 pub struct Studio {
@@ -140,6 +148,15 @@ pub struct Studio {
     /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
     offset: Vector,
     pub(super) ctrl: bool,
+    /// The picture as it was before Translate (Show original), and the
+    /// editor's `own_image` before it.
+    original: Option<(Vec<u8>, bool)>,
+    /// Counts the pictures opened: a translation that answers for an older one
+    /// is dropped.
+    epoch: u32,
+    focused: bool,
+    /// Ask AI opens the browser (no AI key): the host says (`set_browser`).
+    browser: bool,
 }
 
 impl Studio {
@@ -157,6 +174,10 @@ impl Studio {
             hovered: false,
             offset: Vector::ZERO,
             ctrl: false,
+            original: None,
+            epoch: 0,
+            focused: false,
+            browser: false,
         }
     }
 
@@ -185,6 +206,8 @@ impl Studio {
         editor.edges.clear();
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
+        self.original = None;
+        self.epoch = self.epoch.wrapping_add(1);
         self.zoom = None;
         self.editor = Some(editor);
         self.fit();
@@ -202,6 +225,111 @@ impl Studio {
     #[cfg(test)]
     pub fn probe(&self) -> (Option<Size>, bool) {
         (self.editor.as_ref().map(|e| e.doc.view().size()), self.ctrl)
+    }
+
+    /// What the picture panel's rows show: the user's own keys, where Ask AI
+    /// goes, whether the translation is on.
+    pub(super) fn info(&self) -> more::Info {
+        more::Info {
+            caps: more::caps_from(&crate::shared::config::current()),
+            browser: self.browser,
+            translated: self.original.is_some(),
+            ..more::Info::default()
+        }
+    }
+
+    /// The window has the keyboard (and a picture is open): the quick-action
+    /// keys of Copy text / Ask AI / Translate act here.
+    pub fn takes_quick_keys(&self) -> bool {
+        self.focused && self.editor.is_some() && !self.asking()
+    }
+
+    pub fn set_browser(&mut self, on: bool) {
+        self.browser = on;
+    }
+
+    /// Which picture this is (`open` counts them).
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    /// The clean capture (no drawing on it) with every hidden part painted
+    /// out, and those parts: what Copy text reads. A blurred secret never
+    /// reaches the reader.
+    pub fn read_picture(&self) -> Option<(Crop, more::Hidden)> {
+        let doc = &self.editor.as_ref()?.doc;
+        let hidden = annotate::hidden_in_clean(doc);
+        let mut crop = annotate::clean(doc);
+        more::mask(&mut crop, &hidden);
+        Some((crop, hidden))
+    }
+
+    /// The picture as shown, drawings on it: what Ask AI gets.
+    pub fn annotated(&self) -> Option<Crop> {
+        Some(annotate::render(&self.editor.as_ref()?.doc))
+    }
+
+    /// Translate starts: the whole picture, hidden parts painted out, and the
+    /// area shown (image px); the picture as it was is kept for Show original.
+    pub fn translate_frame(&mut self) -> Option<(image::Handle, [u32; 4])> {
+        let e = self.editor.as_mut()?;
+        let doc = &e.doc;
+        let (w, h) = (doc.image.width, doc.image.height);
+        let view = doc.view();
+        let edge = |v: f32, max: u32| (v.max(0.0) as u32).min(max);
+        let area = [
+            edge(view.x.floor(), w),
+            edge(view.y.floor(), h),
+            edge((view.x + view.width).ceil(), w),
+            edge((view.y + view.height).ceil(), h),
+        ];
+        let original = doc.image.rgba.clone();
+        let mut frame = Crop {
+            width: w,
+            height: h,
+            rgba: original.clone(),
+        };
+        more::mask(&mut frame, &annotate::hidden(doc));
+        self.original = Some((original, e.own_image));
+        Some((image::Handle::from_rgba(w, h, frame.rgba), area))
+    }
+
+    /// The translation as far as it is: pasted into the picture under the
+    /// drawings, the hidden parts as they were.
+    pub fn show_translation(&mut self, from: &image::Handle, area: [u32; 4], whole: bool) {
+        let (Some((original, _)), Some(e)) = (&self.original, self.editor.as_mut()) else {
+            return;
+        };
+        let image::Handle::Rgba {
+            width, pixels: src, ..
+        } = from
+        else {
+            return;
+        };
+        let hidden = annotate::hidden(&e.doc);
+        let dst_w = e.doc.image.width as usize;
+        let area = area.map(|v| v as usize);
+        let dst = &mut e.doc.image.rgba;
+        more::paste_translation(dst, dst_w, src, *width as usize, area, whole);
+        more::keep_hidden(dst, original, dst_w, area, &hidden);
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+    }
+
+    /// Show original: the picture as it was before Translate.
+    pub fn show_original(&mut self) {
+        if let (Some((original, was_own)), Some(e)) = (self.original.take(), self.editor.as_mut()) {
+            if e.doc.image.rgba.len() == original.len() {
+                e.doc.image.rgba.copy_from_slice(&original);
+            }
+            e.own_image = was_own;
+            e.refresh();
+        }
+    }
+
+    /// The translation is on the picture (or being made).
+    pub fn translated(&self) -> bool {
+        self.original.is_some()
     }
 
     /// A picture is open.
@@ -276,6 +404,7 @@ impl Studio {
                     | Msg::Dropped(_)
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
+                    | Msg::Act(_)
             )
         {
             return Outcome::None;
@@ -356,6 +485,12 @@ impl Studio {
             Msg::Resized(size) => {
                 self.window = size;
                 self.fit();
+                Outcome::None
+            }
+            Msg::Act(_) if self.editor.is_none() => Outcome::None,
+            Msg::Act(row) => Outcome::Act(row),
+            Msg::Focus(on) => {
+                self.focused = on;
                 Outcome::None
             }
             Msg::DontSave => self.proceed(),

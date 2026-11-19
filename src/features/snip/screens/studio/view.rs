@@ -12,6 +12,7 @@ use super::{Msg, Studio};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
 use crate::features::snip::screens::snip_toolbar::toolbar;
+use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon::Icon;
@@ -21,7 +22,7 @@ use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
-use crate::shared::kit::{chip, colour, dir, divider, keycap, scroll, thumb};
+use crate::shared::kit::{chip, colour, dir, divider, keycap, option_list, scroll, thumb};
 use crate::t;
 
 const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
@@ -364,10 +365,29 @@ fn library(s: &Studio) -> Element<'_, Msg> {
     side(list, super::LIBRARY)
 }
 
-/// The picture panel: what the open picture is.
+/// The picture panel: what acts on the whole picture (Copy text, Translate,
+/// Ask AI: Snip More's own rows, with the user's keys), then what it is.
 fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     let mut list = column![text(Role::SECTION, t!(st_picture))].spacing(space::PAGE[0]);
     if let Some(e) = &s.editor {
+        let info = s.info();
+        let mut rows = column![];
+        for row in ACTS {
+            let at = Row::ALL.iter().position(|r| *r == row).unwrap_or(0);
+            let lead = match row {
+                Row::AskAi => option_list::logo_mark(16),
+                _ => option_list::glyph(row.glyph(), false),
+            };
+            rows = rows.push(option_list::action(option_list::ActionRow {
+                lead,
+                label: tr(row.label(info.translated)),
+                external: row == Row::AskAi && info.browser,
+                caps: info.caps[at].clone(),
+                reading: false,
+                focused: false,
+                press: Some(Msg::Act(row)),
+            }));
+        }
         let px = e.doc.view().size();
         let line = |name, value: String| {
             crate::dir_row![
@@ -378,6 +398,8 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
             .width(Fill)
         };
         list = list
+            .push(rows)
+            .push(divider::divider())
             .push(line(
                 t!(st_size),
                 format!("{} × {}", px.width.round(), px.height.round()),
@@ -386,6 +408,10 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     }
     side(list, super::PANEL)
 }
+
+/// The panel's rows, in the design's order (Edit text and Cut out come with
+/// v0.4.5 / v0.4.6).
+pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 
 fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
     let list = container(list).padding(space::PAGE[1]).width(Fill);

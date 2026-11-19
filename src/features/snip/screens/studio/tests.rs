@@ -2,6 +2,7 @@ use iced::{Point, Rectangle, Size, Vector};
 
 use super::*;
 use crate::features::snip::annotate::{Message, Tool};
+use crate::features::snip::snip_more::Row;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -343,4 +344,136 @@ fn the_question_blocks_editing() {
         Outcome::None
     ));
     assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
+}
+
+/// A picture of `px` (grey), with a Redact over (10,10)-(60,30).
+fn with_redact(px: [u8; 4]) -> Studio {
+    use crate::features::snip::annotate::{Item, Shape};
+    let rgba = (0..100 * 60).flat_map(|_| px).collect();
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(Crop {
+        width: 100,
+        height: 60,
+        rgba,
+    }));
+    s.editor.as_mut().unwrap().doc.items.push(Item {
+        shape: Shape::Redact {
+            a: Point::new(10.0, 10.0),
+            b: Point::new(60.0, 30.0),
+        },
+        colour: [0, 0, 0, 255],
+        width: 4.0,
+        outline: false,
+        fill: false,
+    });
+    s
+}
+
+/// A picture-panel row asks the host; with no picture, or under the unsaved
+/// question, nothing runs.
+#[test]
+fn a_panel_row_asks_the_host() {
+    let mut s = studio_on(100, 60);
+    for row in Row::ALL {
+        assert!(matches!(s.update(Msg::Act(row)), Outcome::Act(r) if r == row));
+    }
+    let mut empty = Studio::new(StudioConfig::default());
+    assert!(matches!(
+        empty.update(Msg::Act(Row::CopyText)),
+        Outcome::None
+    ));
+    draw(&mut s);
+    let _ = s.close_requested();
+    assert!(matches!(s.update(Msg::Act(Row::AskAi)), Outcome::None));
+}
+
+/// The panel shows Edit text and Cut out nowhere yet, in the design's order.
+#[test]
+fn the_panel_rows_are_the_three_actions_in_design_order() {
+    assert_eq!(view::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
+}
+
+/// Copy text reads the clean capture with the hidden part painted out; Ask AI
+/// gets the annotated picture (the drawing is on it).
+#[test]
+fn copy_text_reads_the_clean_picture_ask_ai_the_annotated_one() {
+    let s = with_redact([200, 120, 40, 255]);
+    let (read, hidden) = s.read_picture().unwrap();
+    let at = |c: &Crop, x: usize, y: usize| c.rgba[(y * c.width as usize + x) * 4..][..4].to_vec();
+    assert_eq!(
+        at(&read, 30, 20),
+        [255; 4],
+        "the redacted part is painted out"
+    );
+    assert_eq!(
+        at(&read, 80, 50),
+        [200, 120, 40, 255],
+        "the rest is the capture"
+    );
+    assert!(hidden.covers(30.0, 20.0) && !hidden.covers(80.0, 50.0));
+    let asked = s.annotated().unwrap();
+    assert_eq!(at(&asked, 30, 20), [0, 0, 0, 255], "the drawing is on it");
+    assert_eq!(at(&asked, 80, 50), [200, 120, 40, 255]);
+}
+
+/// Translate sends the picture with the hidden part painted out; the
+/// translation lands under the drawing, the hidden part stays as it was, and
+/// Show original brings the picture back exactly.
+#[test]
+fn translate_keeps_hidden_parts_and_show_original_restores() {
+    let mut s = with_redact([200, 120, 40, 255]);
+    let before = s.editor.as_ref().unwrap().doc.image.rgba.clone();
+    let (frame, area) = s.translate_frame().unwrap();
+    assert_eq!(area, [0, 0, 100, 60]);
+    let image::Handle::Rgba { pixels, .. } = &frame else {
+        panic!("a frame");
+    };
+    assert_eq!(
+        &pixels[(20 * 100 + 30) * 4..][..4],
+        [255; 4],
+        "masked for the translator"
+    );
+    assert!(s.translated());
+    // the translator's answer: all blue
+    let answer = image::Handle::from_rgba(100, 60, [0, 0, 255, 255].repeat(100 * 60));
+    s.show_translation(&answer, area, true);
+    let now = &s.editor.as_ref().unwrap().doc.image.rgba;
+    let at = |x: usize, y: usize| now[(y * 100 + x) * 4..][..4].to_vec();
+    assert_eq!(at(80, 50), [0, 0, 255, 255], "translated");
+    assert_eq!(at(30, 20), [200, 120, 40, 255], "the hidden part as it was");
+    s.show_original();
+    assert!(!s.translated());
+    assert_eq!(s.editor.as_ref().unwrap().doc.image.rgba, before);
+}
+
+/// A translation for an older picture never lands on a newer one.
+#[test]
+fn a_new_picture_forgets_the_translation() {
+    let mut s = studio_on(100, 60);
+    let epoch = s.epoch();
+    let _ = s.translate_frame();
+    s.open(Picture::Crop(crop(50, 50)));
+    assert!(!s.translated() && s.epoch() != epoch);
+}
+
+/// The quick-action keys act here only while the window has the keyboard.
+#[test]
+fn quick_keys_need_the_keyboard() {
+    let mut s = studio_on(100, 60);
+    assert!(!s.takes_quick_keys());
+    let _ = s.update(Msg::Focus(true));
+    assert!(s.takes_quick_keys());
+    let _ = s.update(Msg::Focus(false));
+    assert!(!s.takes_quick_keys());
+}
+
+/// The rows show the user's own keys (never hard-coded) and Show original while translated.
+#[test]
+fn the_rows_show_the_users_keys() {
+    let mut s = studio_on(100, 60);
+    let info = s.info();
+    assert_eq!(info.caps[0], ["Ctrl", "Shift", "X"]);
+    assert!(!info.translated);
+    let _ = s.translate_frame();
+    assert!(s.info().translated);
 }

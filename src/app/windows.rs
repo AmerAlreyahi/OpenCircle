@@ -116,6 +116,10 @@ pub enum Msg {
     StudioPasted(Option<Crop>, Option<iced::Point>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
+    /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
+    StudioAct(crate::features::snip::snip_more::Row),
+    /// Copy text's text, read (the Studio): the clipboard, then the pill.
+    StudioText(Result<String, String>),
 }
 
 #[derive(Default)]
@@ -1402,6 +1406,9 @@ impl Windows {
             Msg::StudioRead(read) => return self.studio_read(read),
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
+            // (`app::App` takes it before here.)
+            Msg::StudioAct(_) => {}
+            Msg::StudioText(read) => return self.studio_copy_text(read),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);
@@ -1507,6 +1514,7 @@ impl Windows {
             }
             // focus left the Studio: a Ctrl release may have gone elsewhere
             Msg::Unfocused(id) if self.studio_window() == Some(id) => {
+                let _ = self.on_studio(crate::features::snip::screens::studio::Msg::Focus(false));
                 return self.on_studio(crate::features::snip::screens::studio::Msg::Ctrl(false));
             }
             Msg::Unfocused(_) => {}

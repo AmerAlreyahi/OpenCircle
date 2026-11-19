@@ -141,6 +141,13 @@ pub struct Problem {
     pub setup: bool,
 }
 
+/// What stops a session that has no card (`Session::stuck`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stuck {
+    Models,
+    Failed(String),
+}
+
 #[derive(Debug)]
 enum Phase {
     /// No OCR models for the source yet: ask first (the download
@@ -307,6 +314,16 @@ impl Session {
     pub fn image(&self) -> Option<&image::Handle> {
         match &self.phase {
             Phase::Shown(shown) => Some(&shown.image),
+            _ => None,
+        }
+    }
+
+    /// A session with no card of its own (the Studio's) cannot go on: it needs
+    /// the user's download (`Models`), or it failed (why).
+    pub fn stuck(&self) -> Option<Stuck> {
+        match &self.phase {
+            Phase::Consent(_) | Phase::DownloadFailed(_) => Some(Stuck::Models),
+            Phase::Failed(p) => Some(Stuck::Failed(p.message.clone())),
             _ => None,
         }
     }

@@ -26,6 +26,7 @@ impl Windows {
         super::activate_next();
         let (id, open) = super::normal(Kind::Studio);
         let mut s = Studio::new(crate::shared::config::current().snip.studio);
+        s.set_browser(crate::features::ask_ai::app::ai_chat::hands_off());
         if let Some(picture) = picture {
             s.open(picture);
         }
@@ -72,6 +73,35 @@ impl Windows {
         Some(window::minimize(id, false).chain(window::gain_focus(id)))
     }
 
+    pub fn studio(&self) -> Option<&Studio> {
+        self.studio.as_ref().map(|(_, s)| s)
+    }
+
+    pub fn studio_mut(&mut self) -> Option<&mut Studio> {
+        self.studio.as_mut().map(|(_, s)| s)
+    }
+
+    /// The Studio has the keyboard and a picture: the quick-action keys act on it.
+    pub fn studio_takes_quick_keys(&self) -> bool {
+        self.studio().is_some_and(Studio::takes_quick_keys)
+    }
+
+    /// Copy text's words, read: on the clipboard off the UI thread, then the pill.
+    pub(super) fn studio_copy_text(&mut self, read: Result<String, String>) -> Task<Msg> {
+        match read {
+            Ok(text) => background(move |tx| {
+                let _ = tx.unbounded_send(copy::text(text).map(|()| copy::COPIED_PILL.to_string()));
+            })
+            .map(Msg::StudioToast),
+            Err(why) => self.say(&why, false),
+        }
+    }
+
+    /// A pill with `text` (a picture action's answer).
+    pub fn say(&mut self, text: &str, ok: bool) -> Task<Msg> {
+        self.toast(text, ok, None, TOAST_MS)
+    }
+
     pub(super) fn studio_window(&self) -> Option<window::Id> {
         self.studio.as_ref().map(|(id, _)| *id)
     }
@@ -80,6 +110,7 @@ impl Windows {
         let Some((_, s)) = &mut self.studio else {
             return Task::none();
         };
+        s.set_browser(crate::features::ask_ai::app::ai_chat::hands_off());
         let outcome = s.update(msg);
         self.studio_outcome(outcome)
     }
@@ -184,6 +215,7 @@ impl Windows {
             Outcome::SaveThen(crop) => studio_save(crop, true),
             Outcome::Pin(crop) => self.pin(crop, None, 1.0),
             Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
+            Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
@@ -261,6 +293,7 @@ fn key_msg(
 pub(super) fn studio_events() -> iced::Subscription<Msg> {
     iced::event::listen_with(|event, status, id| {
         let m = match event {
+            iced::Event::Window(window::Event::Focused) => studio::Msg::Focus(true),
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
             iced::Event::Window(window::Event::FilesHoveredLeft) => studio::Msg::Hovered(false),
             iced::Event::Window(window::Event::FileDropped(path)) => studio::Msg::Dropped(path),

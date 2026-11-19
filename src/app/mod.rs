@@ -195,6 +195,9 @@ pub(crate) struct App {
     pub(crate) regions: Vec<(Point, Rectangle)>,
     /// Translate sessions started (numbers them).
     pub(crate) translates: u32,
+    /// The Studio's translation: its id, the picture's epoch, the session.
+    pub(crate) studio_translate:
+        Option<(u32, u32, crate::features::translate::screens::pill::Session)>,
     /// Translations by text, shared by one-shot and live mode.
     pub(crate) cache: Arc<Cache>,
     /// Live translate, while on.
@@ -308,6 +311,7 @@ impl App {
             windows: windows::Windows::default(),
             regions: Vec::new(),
             translates: 0,
+            studio_translate: None,
             cache: Arc::new(Cache::new(8)),
             live: None,
             timed: false,
