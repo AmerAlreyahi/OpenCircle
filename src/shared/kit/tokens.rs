@@ -184,4 +184,10 @@ pub mod fixed {
     pub const HANDLE: Color = Color::WHITE;
     pub const BRACKET_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.35);
     pub const BACKDROP: Color = Color::BLACK;
+    /// The squares behind a picture with a cut-out background (the same on
+    /// any theme, like every editor's transparency grid).
+    pub const CHECKER: (Color, Color) = (
+        Color::from_rgb8(0xf4, 0xf4, 0xf5),
+        Color::from_rgb8(0xd4, 0xd4, 0xd8),
+    );
 }

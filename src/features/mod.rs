@@ -4,6 +4,7 @@
 //! lives in `shared/`.
 pub(crate) mod ask_ai;
 pub(crate) mod circle;
+pub(crate) mod cutout;
 pub(crate) mod live_translate;
 pub(crate) mod onboarding;
 pub(crate) mod settings;

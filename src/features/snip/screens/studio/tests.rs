@@ -2,6 +2,8 @@ use iced::{Point, Rectangle, Size, Vector};
 
 use super::*;
 use crate::features::snip::annotate::{Message, Tool};
+use crate::features::snip::snip_more::Row;
+use crate::features::translate::Line;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -343,4 +345,736 @@ fn the_question_blocks_editing() {
         Outcome::None
     ));
     assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
+}
+
+/// A picture of `px` (grey), with a Redact over (10,10)-(60,30).
+fn with_redact(px: [u8; 4]) -> Studio {
+    use crate::features::snip::annotate::{Item, Shape};
+    let rgba = (0..100 * 60).flat_map(|_| px).collect();
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(Crop {
+        width: 100,
+        height: 60,
+        rgba,
+    }));
+    s.editor.as_mut().unwrap().doc.items.push(Item {
+        shape: Shape::Redact {
+            a: Point::new(10.0, 10.0),
+            b: Point::new(60.0, 30.0),
+        },
+        colour: [0, 0, 0, 255],
+        width: 4.0,
+        outline: false,
+        fill: false,
+    });
+    s
+}
+
+/// A picture-panel row asks the host; with no picture, or under the unsaved
+/// question, nothing runs.
+#[test]
+fn a_panel_row_asks_the_host() {
+    let mut s = studio_on(100, 60);
+    for row in Row::ALL {
+        assert!(matches!(s.update(Msg::Act(row)), Outcome::Act(r) if r == row));
+    }
+    let mut empty = Studio::new(StudioConfig::default());
+    assert!(matches!(
+        empty.update(Msg::Act(Row::CopyText)),
+        Outcome::None
+    ));
+    draw(&mut s);
+    let _ = s.close_requested();
+    assert!(matches!(s.update(Msg::Act(Row::AskAi)), Outcome::None));
+}
+
+/// The three actions in the design's order; Edit text and Cut out follow them.
+#[test]
+fn the_panel_rows_are_the_three_actions_in_design_order() {
+    assert_eq!(view::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
+}
+
+/// Copy text reads the clean capture with the hidden part painted out; Ask AI
+/// gets the annotated picture (the drawing is on it).
+#[test]
+fn copy_text_reads_the_clean_picture_ask_ai_the_annotated_one() {
+    let s = with_redact([200, 120, 40, 255]);
+    let (read, hidden) = s.read_picture().unwrap();
+    let at = |c: &Crop, x: usize, y: usize| c.rgba[(y * c.width as usize + x) * 4..][..4].to_vec();
+    assert_eq!(
+        at(&read, 30, 20),
+        [255; 4],
+        "the redacted part is painted out"
+    );
+    assert_eq!(
+        at(&read, 80, 50),
+        [200, 120, 40, 255],
+        "the rest is the capture"
+    );
+    assert!(hidden.covers(30.0, 20.0) && !hidden.covers(80.0, 50.0));
+    let asked = s.annotated().unwrap();
+    assert_eq!(at(&asked, 30, 20), [0, 0, 0, 255], "the drawing is on it");
+    assert_eq!(at(&asked, 80, 50), [200, 120, 40, 255]);
+}
+
+/// Translate sends the picture with the hidden part painted out; the
+/// translation lands under the drawing, the hidden part stays as it was, and
+/// Show original brings the picture back exactly.
+#[test]
+fn translate_keeps_hidden_parts_and_show_original_restores() {
+    let mut s = with_redact([200, 120, 40, 255]);
+    let before = s.editor.as_ref().unwrap().doc.image.rgba.clone();
+    let (frame, area) = s.translate_frame().unwrap();
+    assert_eq!(area, [0, 0, 100, 60]);
+    let image::Handle::Rgba { pixels, .. } = &frame else {
+        panic!("a frame");
+    };
+    assert_eq!(
+        &pixels[(20 * 100 + 30) * 4..][..4],
+        [255; 4],
+        "masked for the translator"
+    );
+    assert!(s.translated());
+    // the translator's answer: all blue
+    let answer = image::Handle::from_rgba(100, 60, [0, 0, 255, 255].repeat(100 * 60));
+    s.show_translation(&answer, area, true);
+    let now = &s.editor.as_ref().unwrap().doc.image.rgba;
+    let at = |x: usize, y: usize| now[(y * 100 + x) * 4..][..4].to_vec();
+    assert_eq!(at(80, 50), [0, 0, 255, 255], "translated");
+    assert_eq!(at(30, 20), [200, 120, 40, 255], "the hidden part as it was");
+    s.show_original();
+    assert!(!s.translated());
+    assert_eq!(s.editor.as_ref().unwrap().doc.image.rgba, before);
+}
+
+/// A translation for an older picture never lands on a newer one.
+#[test]
+fn a_new_picture_forgets_the_translation() {
+    let mut s = studio_on(100, 60);
+    let epoch = s.epoch();
+    let _ = s.translate_frame();
+    s.open(Picture::Crop(crop(50, 50)));
+    assert!(!s.translated() && s.epoch() != epoch);
+}
+
+/// The quick-action keys act here only while the window has the keyboard.
+#[test]
+fn quick_keys_need_the_keyboard() {
+    let mut s = studio_on(100, 60);
+    assert!(!s.takes_quick_keys());
+    let _ = s.update(Msg::Focus(true));
+    assert!(s.takes_quick_keys());
+    let _ = s.update(Msg::Focus(false));
+    assert!(!s.takes_quick_keys());
+}
+
+/// The rows show the user's own keys (never hard-coded) and Show original while translated.
+#[test]
+fn the_rows_show_the_users_keys() {
+    let mut s = studio_on(100, 60);
+    let info = s.info();
+    assert_eq!(info.caps[0], ["Ctrl", "Shift", "X"]);
+    assert!(!info.translated);
+    let _ = s.translate_frame();
+    assert!(s.info().translated);
+}
+
+/// The download card: Download starts it, Not now drops it, and no row acts
+/// while it is up; a reading Copy text is not read twice.
+#[test]
+fn the_download_card_blocks_rows_and_answers_its_buttons() {
+    let mut s = studio_on(100, 60);
+    s.set_card(Some(Fetching::reader()));
+    assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
+    assert!(matches!(s.update(Msg::Download), Outcome::Download));
+    assert_eq!(s.card().and_then(|c| c.share), Some(0.0));
+    assert!(matches!(s.update(Msg::DismissCard), Outcome::Dismissed));
+    assert!(s.card().is_none());
+    s.set_busy(Some(Row::CopyText));
+    assert!(matches!(s.update(Msg::Act(Row::CopyText)), Outcome::None));
+    assert!(matches!(
+        s.update(Msg::Act(Row::Translate)),
+        Outcome::Act(_)
+    ));
+}
+
+/// The panel with a spinning row, and the card, in English and Arabic.
+#[test]
+fn the_panel_and_card_match_their_golden_images() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let mut s = studio_on(640, 400);
+        s.set_busy(Some(Row::Translate));
+        let file = format!("studio-busy-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let mut asking = studio_on(640, 400);
+        asking.set_card(Some(Fetching {
+            which: crate::features::text_reading::model_download::Which::Pair,
+            bytes: 78_000_000,
+            share: None,
+            failed: None,
+            provider: true,
+        }));
+        let file = format!("studio-card-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&asking, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-panel-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
+}
+
+// ---- Edit text (v0.4.5, S8) ----
+
+/// A white picture with a dark bar of "text" rows at `y` (a line a reader would box).
+fn lined(width: u32, height: u32) -> (Studio, Line) {
+    let mut c = crop(width, height);
+    for y in 30..44usize {
+        for x in 20..140usize {
+            let on = (x / 3 + y / 2) % 3 != 0; // strokes, not a block
+            if on {
+                let i = (y * width as usize + x) * 4;
+                c.rgba[i..i + 4].copy_from_slice(&[20, 20, 30, 255]);
+            }
+        }
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    let line = Line {
+        bounds: [16.0, 26.0, 130.0, 22.0],
+        text: "Hello there".into(),
+    };
+    (s, line)
+}
+
+fn pixels_of(s: &Studio) -> Vec<u8> {
+    s.editor.as_ref().unwrap().doc.image.rgba.clone()
+}
+
+/// Edit text: the panel row asks the host to read the lines; a second click
+/// and the other rows rest meanwhile; Cancel (Esc) ends it with the picture as it was.
+#[test]
+fn edit_text_routes_reads_and_cancels_s8() {
+    let (mut s, line) = lined(300, 120);
+    let before = pixels_of(&s);
+    assert!(matches!(s.update(Msg::EditText), Outcome::ReadLines));
+    assert!(matches!(s.update(Msg::EditText), Outcome::None), "once");
+    assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
+    let epoch = s.edit_token();
+    // an answer for another picture lands nowhere
+    assert!(matches!(
+        s.set_lines(epoch + 1, Ok(vec![line.clone()])),
+        Outcome::None
+    ));
+    assert!(s.edit.as_ref().unwrap().lines.is_none());
+    assert!(matches!(s.set_lines(epoch, Ok(vec![line])), Outcome::None));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Bye".into()));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.edit.is_none());
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.dirty());
+}
+
+/// No lines found: a pill says so, nothing is on.
+#[test]
+fn edit_text_without_lines_says_so_s8() {
+    let (mut s, _) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    assert!(matches!(
+        s.set_lines(epoch, Ok(Vec::new())),
+        Outcome::Say(_)
+    ));
+    assert!(s.edit.is_none());
+}
+
+/// Lines read from a cropped view come back in image px.
+#[test]
+fn edit_text_lines_follow_the_crop_s8() {
+    let (mut s, line) = lined(300, 120);
+    s.editor.as_mut().unwrap().doc.crop = Some(Rectangle::new(
+        Point::new(10.0, 5.0),
+        Size::new(200.0, 100.0),
+    ));
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let l = &s.edit.as_ref().unwrap().lines.as_ref().unwrap()[0];
+    assert_eq!(l.bounds[..2], [26.0, 31.0]);
+}
+
+/// Done replaces the line in the pixels (the old strokes are gone, new ones
+/// drawn), as one undoable, unsaved document edit; Undo brings the bytes back
+/// exactly and Redo again.
+#[test]
+fn edit_text_done_is_one_undoable_edit_s8() {
+    let (mut s, line) = lined(300, 120);
+    let before = pixels_of(&s);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Hi".into()));
+    let out = s.update(Msg::EditDone);
+    assert!(
+        matches!(out, Outcome::None),
+        "{:?}",
+        matches!(out, Outcome::Say(_))
+    );
+    assert!(s.edit.is_none());
+    let after = pixels_of(&s);
+    assert_ne!(after, before);
+    assert!(s.dirty(), "an unsaved edit");
+    assert_eq!(s.editor.as_ref().unwrap().doc.steps(), (1, 1));
+    // the right part of the old line (past "Hi") is background again
+    let at = |x: usize, y: usize| after[(y * 300 + x) * 4..][..3].to_vec();
+    assert_eq!(at(130, 37), [255; 3], "old strokes erased");
+    // Undo / Redo through the editor's own messages
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.dirty());
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert_eq!(pixels_of(&s), after);
+    // Save and Copy get the edit
+    let saved = annotate::render(&s.editor.as_ref().unwrap().doc);
+    assert_eq!(saved.rgba, after);
+}
+
+/// An unchanged or empty text changes nothing (no history entry).
+#[test]
+fn edit_text_with_the_same_text_is_no_edit_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::EditDone);
+    assert!(s.edit.is_none());
+    assert_eq!(s.editor.as_ref().unwrap().doc.steps(), (0, 0));
+}
+
+/// Arabic text goes right to left: it is drawn against the line box's right edge.
+#[test]
+fn edit_text_arabic_is_right_aligned_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("مرحبا".into()));
+    assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+    let px = pixels_of(&s);
+    let ink: Vec<usize> = (0..300usize)
+        .filter(|&x| (26..48usize).any(|y| px[(y * 300 + x) * 4] < 128))
+        .collect();
+    let (lo, hi) = (*ink.first().unwrap(), *ink.last().unwrap());
+    assert!(hi > 100 && lo > 60, "against the right edge: {lo}..{hi}");
+}
+
+/// The lines over the picture, a picked one, and the bar, in English and Arabic.
+#[test]
+fn edit_text_matches_its_golden_images_s8() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let (mut s, line) = lined(640, 400);
+        let _ = s.update(Msg::EditText);
+        let epoch = s.edit_token();
+        let other = Line {
+            bounds: [16.0, 90.0, 200.0, 22.0],
+            text: "Another line".into(),
+        };
+        let _ = s.set_lines(epoch, Ok(vec![line, other]));
+        let _ = s.update(Msg::PickLine(0));
+        let file = format!("studio-edit-text-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-edit-text-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
+}
+
+/// Picks line 0 of a fresh `lined` picture.
+fn picked() -> Studio {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    assert!(matches!(s.update(Msg::PickLine(0)), Outcome::FocusField));
+    s
+}
+
+/// The dark-on-white bars: (ink pixels, ink rows) in the line's box.
+fn ink(px: &[u8]) -> (usize, usize) {
+    let on = |x: usize, y: usize| px[(y * 300 + x) * 4..][..3].iter().any(|&v| v < 200);
+    let rows = (20..60usize)
+        .filter(|&y| (10..160usize).any(|x| on(x, y)))
+        .count();
+    let n = (20..60usize)
+        .map(|y| (10..160usize).filter(|&x| on(x, y)).count())
+        .sum();
+    (n, rows)
+}
+
+/// Picking a line reads its matched look; the bar's controls (the editor's own
+/// messages) set size, colour and Bold on the line, not on the editor; picking
+/// again starts over.
+#[test]
+fn edit_text_controls_start_matched_and_change_s8() {
+    let mut s = picked();
+    let x = s.edit.as_ref().unwrap();
+    let m = x.matched.unwrap();
+    assert_eq!((x.size(), x.bold()), (m.em, m.bold));
+    assert_eq!(x.colour()[..3], m.colour);
+    let tool_colour = s.editor.as_ref().unwrap().colour;
+    let _ = s.update(Msg::Editor(Message::TextSize(30.0)));
+    let _ = s.update(Msg::Editor(Message::Colour([200, 30, 30, 255])));
+    let flipped = crate::features::snip::annotate::TextStyle {
+        bold: !m.bold,
+        ..Default::default()
+    };
+    let _ = s.update(Msg::Editor(Message::TextStyle(flipped)));
+    let x = s.edit.as_ref().unwrap();
+    assert_eq!((x.size(), x.bold()), (30.0, !m.bold));
+    assert_eq!(x.colour(), [200, 30, 30, 255]);
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!(
+        e.colour, tool_colour,
+        "the editor's own colour is untouched"
+    );
+    let _ = s.update(Msg::PickLine(0));
+    assert_eq!(s.edit.as_ref().unwrap().size(), m.em, "starts over");
+}
+
+/// Colour, size and Bold reach the pixels (render byte checks).
+#[test]
+fn edit_text_colour_size_and_bold_draw_s8() {
+    let done = |f: &dyn Fn(&mut Studio)| {
+        let mut s = picked();
+        let _ = s.update(Msg::Draft("Hello".into()));
+        f(&mut s);
+        assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+        pixels_of(&s)
+    };
+    let plain = done(&|_| {});
+    // colour: red ink where the matched colour was dark
+    let red = done(&|s| {
+        let _ = s.update(Msg::Editor(Message::Colour([220, 20, 20, 255])));
+    });
+    let reddest = |px: &[u8]| {
+        px.chunks(4)
+            .filter(|p| p[0] > 150 && p[1] < 100 && p[2] < 100)
+            .count()
+    };
+    assert_eq!(reddest(&plain), 0);
+    assert!(reddest(&red) > 20, "{}", reddest(&red));
+    // size: smaller text covers fewer rows
+    let small = done(&|s| {
+        let _ = s.update(Msg::Editor(Message::TextSize(9.0)));
+    });
+    assert!(
+        ink(&small).1 < ink(&plain).1,
+        "{:?} {:?}",
+        ink(&small),
+        ink(&plain)
+    );
+    // Bold: more ink than regular at the same size
+    let weight = |bold: bool| {
+        done(&|s| {
+            let _ = s.update(Msg::Editor(Message::TextSize(14.0)));
+            let st = crate::features::snip::annotate::TextStyle {
+                bold,
+                ..Default::default()
+            };
+            let _ = s.update(Msg::Editor(Message::TextStyle(st)));
+        })
+    };
+    assert!(ink(&weight(true)).0 > ink(&weight(false)).0);
+}
+
+/// The matched look: the dark ink colour of the line.
+#[test]
+fn edit_text_matched_colour_is_the_inks_s8() {
+    let s = picked();
+    let c = s.edit.as_ref().unwrap().matched.unwrap().colour;
+    assert!(c.iter().all(|&v| v < 80), "{c:?}");
+}
+
+/// The inline field is on the picture only once a line is picked.
+#[test]
+fn edit_text_inline_field_follows_the_pick_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.edit_token();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    assert!(s.edit.as_ref().unwrap().active.is_none());
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("typed".into()));
+    assert_eq!(s.edit.as_ref().unwrap().draft, "typed");
+}
+
+/// A read from a cancelled session never fills a new one: Edit text, Esc
+/// while it reads, Edit text again; the first read's answer is ignored.
+#[test]
+fn edit_text_a_cancelled_reads_answer_is_ignored_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let old = s.edit_token();
+    let _ = s.update(Msg::Cancel);
+    let _ = s.update(Msg::EditText);
+    let new = s.edit_token();
+    assert_ne!(old, new);
+    let stale = Line {
+        text: "stale".into(),
+        ..line.clone()
+    };
+    assert!(matches!(s.set_lines(old, Ok(vec![stale])), Outcome::None));
+    assert!(s.edit.as_ref().unwrap().lines.is_none(), "still reading");
+    let _ = s.set_lines(new, Ok(vec![line]));
+    assert_eq!(
+        s.edit.as_ref().unwrap().lines.as_ref().unwrap()[0].text,
+        "Hello there"
+    );
+}
+
+/// Esc on the unsaved-changes question closes only the question.
+#[test]
+fn edit_text_esc_on_the_question_keeps_the_session_s8() {
+    let mut s = picked();
+    let _ = s.close_requested(); // dirty? make it so
+    if !s.asking() {
+        s.asking = Some(After::Close);
+    }
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+    assert!(s.edit.is_some(), "the edit goes on");
+    let _ = s.update(Msg::Cancel);
+    assert!(s.edit.is_none());
+}
+
+/// Bold switched off and on again is the matched weight, not forced bold.
+#[test]
+fn edit_text_bold_back_is_the_matched_weight_s8() {
+    let mut s = picked();
+    let m = s.edit.as_ref().unwrap().matched.unwrap();
+    let style = |bold| crate::features::snip::annotate::TextStyle {
+        bold,
+        ..Default::default()
+    };
+    let _ = s.update(Msg::Editor(Message::TextStyle(style(!m.bold))));
+    assert_eq!(s.edit.as_ref().unwrap().tweak().bold, Some(!m.bold));
+    let _ = s.update(Msg::Editor(Message::TextStyle(style(m.bold))));
+    assert_eq!(s.edit.as_ref().unwrap().tweak().bold, None);
+}
+
+/// Only the rows round the line are copied, and the edit lands in the right rows.
+#[test]
+fn edit_text_works_on_a_band_of_rows_s8() {
+    let (mut s, line) = lined(300, 400);
+    let d = &s.editor.as_ref().unwrap().doc.image;
+    let (top, rows, moved) = edit_text::band(&d.rgba, 300, 400, &line);
+    assert!(rows.len() < d.rgba.len() / 2, "not the whole frame");
+    assert_eq!(moved.bounds[1], line.bounds[1] - top as f32);
+    let before = pixels_of(&s);
+    let _ = s.update(Msg::EditText);
+    let t = s.edit_token();
+    let _ = s.set_lines(t, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Hi".into()));
+    assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+    let after = pixels_of(&s);
+    assert_ne!(after, before);
+    // nothing outside the band moved
+    assert_eq!(after[..top * 300 * 4], before[..top * 300 * 4]);
+    let end = top + rows.len() / (300 * 4);
+    assert_eq!(after[end * 300 * 4..], before[end * 300 * 4..]);
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
+}
+
+// ---- Cut out (v0.4.6, S9) ----
+
+/// A white picture with a red box in the middle: a flat border.
+fn boxed(width: u32, height: u32) -> Studio {
+    let mut c = crop(width, height);
+    let (w, h) = (width as usize, height as usize);
+    for y in h / 3..h * 2 / 3 {
+        for x in w * 3 / 10..w * 7 / 10 {
+            let i = (y * w + x) * 4;
+            c.rgba[i..i + 4].copy_from_slice(&[200, 30, 30, 255]);
+        }
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    s
+}
+
+fn alpha_at(s: &Studio, x: usize, y: usize) -> u8 {
+    let w = s.editor.as_ref().unwrap().doc.image.width as usize;
+    s.editor.as_ref().unwrap().doc.image.rgba[(y * w + x) * 4 + 3]
+}
+
+/// The cut as the host does it: take the source, cut, answer.
+fn cut_now(s: &mut Studio) -> Outcome {
+    let (rgba, w, h, epoch) = s.cut_source().unwrap();
+    let done = match crate::features::cutout::quick(&rgba, w, h) {
+        Some(a) => CutDone::Alpha(a),
+        None => CutDone::NeedsModel,
+    };
+    s.set_cut(epoch, done)
+}
+
+/// S9: the row asks the host; it rests while a line is edited or a cut runs.
+#[test]
+fn cut_out_row_asks_the_host_s9() {
+    let mut s = boxed(100, 60);
+    assert!(matches!(s.update(Msg::CutOut), Outcome::CutOut));
+    let _ = s.cut_source();
+    assert!(matches!(s.update(Msg::CutOut), Outcome::None), "once");
+    let mut empty = Studio::new(StudioConfig::default());
+    assert!(matches!(empty.update(Msg::CutOut), Outcome::None));
+}
+
+/// S9 + brief 1(a): a flat border is cut with no model; the box stays, the
+/// background is transparent, and it is one undoable edit (Ctrl+Z brings it back).
+#[test]
+fn a_flat_background_is_cut_and_undo_brings_it_back_s9() {
+    let mut s = boxed(100, 60);
+    let before = pixels_of(&s);
+    assert!(matches!(cut_now(&mut s), Outcome::None));
+    assert_eq!((alpha_at(&s, 2, 2), alpha_at(&s, 50, 30)), (0, 255));
+    assert!(s.transparent && s.dirty());
+    assert_eq!(s.cut_phase(), CutPhase::Idle);
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.transparent && s.comparing().is_none());
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+}
+
+/// S9: Before | After compares without editing; anything that works on the
+/// picture (a drawing, Save) sees the cut.
+#[test]
+fn before_after_compares_and_work_sees_the_cut_s9() {
+    let mut s = boxed(100, 60);
+    let _ = cut_now(&mut s);
+    assert_eq!(s.comparing(), Some(false));
+    let _ = s.update(Msg::CutView(true));
+    assert_eq!((s.comparing(), alpha_at(&s, 2, 2)), (Some(true), 255));
+    assert!(s.dirty(), "the compare view is not an edit");
+    let _ = s.update(Msg::CutView(false));
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+    // Save from Before saves the cut
+    let _ = s.update(Msg::CutView(true));
+    let Outcome::SaveThen(crop) = s.update(Msg::SaveFirst) else {
+        panic!("save");
+    };
+    assert_eq!(crop.rgba[3], 0, "the cut, not the picture as it was");
+    // a drawing ends the compare view
+    draw(&mut s);
+    assert!(s.comparing().is_none());
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+}
+
+/// Brief 1(b): a busy background needs the model: the card asks (size shown),
+/// nothing is cut; Not now drops it.
+#[test]
+fn a_busy_background_asks_for_the_model_s9() {
+    let mut c = crop(100, 60);
+    for (i, p) in c.rgba.chunks_mut(4).enumerate() {
+        p[..3].fill(if (i % 100 + i / 100) % 2 == 0 { 0 } else { 255 });
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    let before = pixels_of(&s);
+    assert!(matches!(cut_now(&mut s), Outcome::None));
+    assert_eq!(s.cut_phase(), CutPhase::Asking);
+    let card = s.card().unwrap();
+    assert!(
+        card.share.is_none() && card.bytes > 178_000_000,
+        "the size is shown"
+    );
+    assert_eq!(pixels_of(&s), before);
+    assert!(
+        matches!(s.update(Msg::CutOut), Outcome::None),
+        "the card blocks"
+    );
+    assert!(matches!(s.update(Msg::DismissCard), Outcome::Dismissed));
+    assert_eq!(s.cut_phase(), CutPhase::Idle);
+}
+
+/// An answer for another picture lands nowhere; a cut with nothing to remove says so.
+#[test]
+fn a_late_or_empty_cut_changes_nothing_s9() {
+    let mut s = boxed(100, 60);
+    let (_, _, _, epoch) = s.cut_source().unwrap();
+    assert!(matches!(
+        s.set_cut(epoch + 1, CutDone::Alpha(vec![0; 6000])),
+        Outcome::None
+    ));
+    assert!(!s.transparent);
+    // an all-kept alpha changes nothing: a pill
+    assert!(matches!(
+        s.set_cut(epoch, CutDone::Alpha(vec![255; 6000])),
+        Outcome::Say(_)
+    ));
+    assert!(!s.dirty());
+}
+
+/// Save PNG keeps the alpha; JPEG blends on white.
+#[test]
+fn png_keeps_alpha_and_jpeg_blends_on_white_s9() {
+    use crate::shared::config::Format;
+    let mut s = boxed(100, 60);
+    let _ = cut_now(&mut s);
+    let crop = annotate::render(&s.editor.as_ref().unwrap().doc);
+    assert_eq!(crop.rgba[3], 0);
+    let png = crate::shared::picture::encode(&crop, Format::Png).unwrap();
+    let back = crate::shared::platform::capture::decode_png(std::io::Cursor::new(png)).unwrap();
+    assert_eq!((back.rgba[3], back.rgba[(30 * 100 + 50) * 4 + 3]), (0, 255));
+    // the background colour under the alpha (red here) must not show in a JPEG
+    let mut red = crop.clone();
+    red.rgba[..3].copy_from_slice(&[255, 0, 0]);
+    let jpg = crate::shared::picture::encode(&red, Format::Jpeg).unwrap();
+    let img = ::image::load_from_memory(&jpg).unwrap().to_rgb8();
+    let p = img.get_pixel(0, 0);
+    assert!(p[0] > 240 && p[1] > 240 && p[2] > 240, "white, got {p:?}");
+}
+
+/// The panel (with Cut out spinning), the compare bar on a checkerboard, and
+/// the card, in English and Arabic.
+#[test]
+fn cut_out_matches_its_golden_images_s9() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let mut s = boxed(640, 400);
+        let _ = cut_now(&mut s);
+        let file = format!("studio-cut-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let mut asking = boxed(640, 400);
+        asking.set_card(Some(Fetching::cutout()));
+        let file = format!("studio-cut-card-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&asking, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-cut-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
 }

@@ -12,6 +12,7 @@ use super::{Msg, Studio};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
 use crate::features::snip::screens::snip_toolbar::toolbar;
+use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon::Icon;
@@ -21,7 +22,7 @@ use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
-use crate::shared::kit::{chip, colour, dir, divider, keycap, scroll, thumb};
+use crate::shared::kit::{chip, colour, dir, divider, keycap, option_list, scroll, thumb};
 use crate::t;
 
 const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
@@ -66,7 +67,11 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
             parts.push(rail(e));
             parts.push(divider::vertical(Fill));
             let work = column![
-                options_bar(e),
+                match (&s.edit, s.comparing()) {
+                    (Some(x), _) => edit_bar(x),
+                    (None, Some(before)) => cut_bar(before),
+                    (None, None) => options_bar(e),
+                },
                 divider::divider(),
                 stage(s, e),
                 divider::divider(),
@@ -89,6 +94,17 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
         ]
         .into(),
         false => main.into(),
+    };
+    // the download card (Copy text / Translate need models): over the window
+    let main: Element<'_, Msg> = match &s.card() {
+        Some(card) => iced::widget::stack![
+            main,
+            iced::widget::opaque(
+                container(card.card(Msg::Download, Msg::DismissCard, Msg::Provider)).center(Fill)
+            )
+        ]
+        .into(),
+        None => main,
     };
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
@@ -207,10 +223,136 @@ fn options_bar(e: &Annotator) -> Element<'_, Msg> {
     Element::from(scroll::across(bar).width(Fill)).map(Msg::Editor)
 }
 
+/// Edit text's options bar (S8): Font size, Colour, Bold (the editor's own
+/// controls, set on the line), Cancel / Done. The text itself is typed on the
+/// picture (`inline_field`).
+fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
+    let line: Element<'_, Msg> = match (&x.lines, x.active) {
+        (None, _) => muted(Role::ROW_DESC, t!(st_edit_reading)).into(),
+        (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
+        _ => {
+            let now = x.colour();
+            let swatches = (style::ANNOTATION.iter().take(SWATCHES)).map(|c| {
+                let rgba = c.into_rgba8();
+                colour::swatch(*c, rgba[..3] == now[..3], Some(Message::Colour(rgba)))
+            });
+            let bold = crate::features::snip::annotate::TextStyle {
+                bold: x.bold(),
+                ..crate::features::snip::annotate::TextStyle::default()
+            };
+            let options: Vec<Element<'_, Message>> = vec![
+                container(toolbar::text_size_option(x.size()))
+                    .width(OPTION_W)
+                    .into(),
+                dir::row(swatches).spacing(space::TRACK_GAP).into(),
+                container(toolbar::bold_option(bold)).width(OPTION_W).into(),
+            ];
+            let options = dir::row(options)
+                .spacing(space::PAGE[1] + space::PAGE[1])
+                .align_y(Center);
+            Element::from(scroll::across(container(options).center_y(super::OPTIONS)))
+                .map(Msg::Editor)
+        }
+    };
+    let ready = x.active.is_some();
+    let row = crate::dir_row![
+        container(line).width(Fill),
+        container(cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel)).width(EDIT_BUTTON),
+        container(button::button(
+            label(t!(st_edit_done)),
+            Kind::Accent,
+            ready.then_some(Msg::EditDone)
+        ))
+        .width(EDIT_BUTTON),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    container(row)
+        .padding([0.0, space::PAGE[1]])
+        .center_y(super::OPTIONS)
+        .width(Fill)
+        .into()
+}
+
+/// The picked line's new text, typed on the picture over the line in a field
+/// ring (an input sized to the line, at least a words' width).
+fn inline_field<'a>(
+    x: &'a super::edit_text::Session,
+    origin: iced::Point,
+    zoom: f32,
+) -> Option<Element<'a, Msg>> {
+    let line = x.lines.as_ref()?.get(x.active?)?;
+    let [bx, by, bw, bh] = line.bounds;
+    let at = iced::Point::new((bx - origin.x) * zoom, (by - origin.y) * zoom);
+    let field = crate::shared::kit::field::input(t!(st_edit_type), &x.draft, false, false)
+        .id(super::FIELD)
+        .on_input(Msg::Draft)
+        .on_submit(Msg::EditDone)
+        .width(Length::Fixed((bw * zoom).max(INLINE_MIN)));
+    let _ = bh;
+    Some(iced::widget::pin(field).position(at).into())
+}
+
+/// Cancel's and Done's width on the edit bar.
+const EDIT_BUTTON: f32 = 84.0;
+
+/// The inline field's least width, logical px.
+const INLINE_MIN: f32 = 140.0;
+
+/// Cut out's options bar (S9): Before | After, and where the work stays.
+fn cut_bar<'a>(before: bool) -> Element<'a, Msg> {
+    let seg = crate::shared::kit::segmented::inline(
+        &[(true, t!(st_cut_before)), (false, t!(st_cut_after))],
+        before,
+        before,
+        1.0,
+        Msg::CutView,
+    );
+    let line = crate::dir_row![seg, muted(Role::ROW_DESC, t!(st_cut_note))]
+        .spacing(space::PAGE[1])
+        .align_y(Center);
+    container(line)
+        .padding([0.0, space::PAGE[1]])
+        .center_y(super::OPTIONS)
+        .width(Fill)
+        .into()
+}
+
 /// The picture, fitted or zoomed (both ways scrollable past the stage).
 fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let drawn = canvas::canvas(e, 1.0, ScreenMap::ONE).map(Msg::Editor);
     let (shown, room) = (e.size(), s.stage());
+    // a cut-out (or see-through) picture sits on a checkerboard
+    let drawn: Element<'a, Msg> = match s.transparent {
+        true => iced::widget::stack![super::cut::checker(shown), drawn].into(),
+        false => drawn,
+    };
+    // Edit text: the found lines over the picture (dashed, the picked one solid)
+    let drawn: Element<'a, Msg> = match s
+        .edit
+        .as_ref()
+        .and_then(|x| x.lines.as_deref().map(|l| (x, l)))
+    {
+        Some((x, lines)) => iced::widget::stack![
+            drawn,
+            super::edit_text::overlay(
+                super::edit_text::Overlay {
+                    lines,
+                    active: x.active,
+                    origin: e.doc.view().position(),
+                    zoom: e.zoom,
+                    look: crate::shared::theme::accent_of(&crate::shared::config::look()),
+                },
+                shown,
+            ),
+            match inline_field(x, e.doc.view().position(), e.zoom) {
+                Some(f) => f,
+                None => Space::new().into(),
+            }
+        ]
+        .into(),
+        None => drawn,
+    };
     // a px less than the stage: no scrollbar for a fitted picture
     let content = container(drawn)
         .center_x((room.width - 2.0).max(shown.width))
@@ -364,10 +506,53 @@ fn library(s: &Studio) -> Element<'_, Msg> {
     side(list, super::LIBRARY)
 }
 
-/// The picture panel: what the open picture is.
+/// The picture panel: what acts on the whole picture (Copy text, Translate,
+/// Ask AI: Snip More's own rows, with the user's keys), then what it is.
 fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     let mut list = column![text(Role::SECTION, t!(st_picture))].spacing(space::PAGE[0]);
     if let Some(e) = &s.editor {
+        let acts = s.info();
+        let mut rows = column![];
+        for row in ACTS {
+            let at = Row::ALL.iter().position(|r| *r == row).unwrap_or(0);
+            let lead = match row {
+                Row::AskAi => option_list::logo_mark(16),
+                _ => option_list::glyph(row.glyph(), false),
+            };
+            rows = rows.push(option_list::action(option_list::ActionRow {
+                lead,
+                label: tr(row.label(acts.translated)),
+                external: row == Row::AskAi && acts.browser,
+                caps: acts.caps[at].clone(),
+                reading: s.busy() == Some(row),
+                focused: false,
+                press: Some(Msg::Act(row)),
+            }));
+        }
+        // Edit text: only on the picture as opened (a translation is its own picture)
+        let editing = s.edit.is_some();
+        let lead = option_list::glyph(info(Tool::Text).icon, false);
+        rows = rows.push(option_list::action(option_list::ActionRow {
+            lead,
+            label: tr(crate::shared::app_language::S::st_edit_text),
+            external: false,
+            caps: Vec::new(),
+            reading: s.edit.as_ref().is_some_and(|x| x.lines.is_none()),
+            focused: false,
+            press: (!editing && !acts.translated).then_some(Msg::EditText),
+        }));
+        // Cut out: on the picture as opened or edited, not under a translation
+        let lead = option_list::glyph('\u{e151}', false); // lucide "scissors"
+        rows = rows.push(option_list::action(option_list::ActionRow {
+            lead,
+            label: tr(crate::shared::app_language::S::st_cut_out),
+            external: false,
+            caps: Vec::new(),
+            reading: s.cut_phase() == super::CutPhase::Working,
+            focused: false,
+            press: (!editing && !acts.translated && s.cut_phase() == super::CutPhase::Idle)
+                .then_some(Msg::CutOut),
+        }));
         let px = e.doc.view().size();
         let line = |name, value: String| {
             crate::dir_row![
@@ -378,14 +563,19 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
             .width(Fill)
         };
         list = list
+            .push(rows)
+            .push(divider::divider())
             .push(line(
                 t!(st_size),
                 format!("{} × {}", px.width.round(), px.height.round()),
             ))
             .push(line(t!(st_drawings), e.doc.items.len().to_string()));
     }
-    side(list, super::PANEL)
+    side(list, super::panel_width())
 }
+
+/// The panel's rows, in the design's order (Edit text and Cut out follow them).
+pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 
 fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
     let list = container(list).padding(space::PAGE[1]).width(Fill);

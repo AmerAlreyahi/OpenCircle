@@ -18,6 +18,7 @@ use crate::app::message::{Hiding, Message, Purpose};
 use crate::features::circle::app::quick::Quick;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
+use crate::features::snip::snip_more as more;
 use crate::shared::kit::motion;
 use crate::shared::kit::panel_frame as card;
 use crate::shared::platform::monitor;
@@ -39,6 +40,7 @@ impl App {
     /// (`sync_chat_window`).
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         let mut task = self.handle(message);
+        self.studio_gone();
         if self.o.is_some() && self.o.close_when_idle && self.ends_tool() {
             self.o.close_when_idle = false;
             task = Task::batch([task, self.close()]);
@@ -83,6 +85,11 @@ impl App {
                     false => self.edit_step(i),
                 }
             }
+            Message::Windows(windows::Msg::StudioAct(row)) => self.studio_act(row),
+            Message::Windows(windows::Msg::StudioEditText) => self.studio_edit_text(),
+            Message::Windows(windows::Msg::StudioCutOut) => self.studio_cut_out(),
+            Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
+            Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),
             Message::Windows(windows::Msg::UpdatePill(msg)) => self.on_update_pill(msg),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
@@ -110,6 +117,9 @@ impl App {
             }
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
+            Message::ChatHome(screen) => self.chat_home(screen),
+            Message::StudioTranslate(id, msg) => self.on_studio_translate(id, msg),
+            Message::StudioReader(epoch, step) => self.on_studio_reader(epoch, step),
             // Wayland: a long capture going on with its overlay gone ends by its
             // pop-up, the tray or any shortcut (Done: Snip opens with the page picked)
             Message::Trigger(Trigger::LongCapture(how)) => self.cast_finish(how),
@@ -133,6 +143,15 @@ impl App {
                 if qa.action == "snip" && self.o.frame.is_some() && self.o.translate.is_some() =>
             {
                 self.snip_here(None)
+            }
+            // The Studio has the keyboard: the same keys act on its picture
+            Message::Trigger(Trigger::Quick(_, qa))
+                if self.windows.studio_takes_quick_keys() && more::row_of(&qa).is_some() =>
+            {
+                match more::row_of(&qa) {
+                    Some(row) => self.studio_act(row),
+                    None => Task::none(),
+                }
             }
             // Snip has an area: Copy text / Ask AI / Translate's own keys act on it
             // instead of starting a capture (the keys More shows)
@@ -773,15 +792,9 @@ impl App {
                 let opening = self.opening;
                 let rec = self.o.script_reader;
                 background(move |tx| {
-                    let progress = |p| {
-                        let _ = tx.unbounded_send(Ok(p));
-                    };
-                    let done = text::download_reader(rec, progress)
-                        .map(|()| text::Progress::Reading)
-                        .map_err(|e| {
-                            crate::features::text_reading::screens::model_download::why_key(&e)
-                        });
-                    let _ = tx.unbounded_send(done);
+                    crate::features::text_reading::app::text::download_steps(rec, |step| {
+                        let _ = tx.unbounded_send(step);
+                    });
                 })
                 .map(move |step| Message::Reader(opening, step))
             }
@@ -885,6 +898,9 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)
+            | Message::StudioTranslate(..)
+            | Message::ChatHome(_)
+            | Message::StudioReader(..)
             | Message::Live(_)
             | Message::Drawn
             | Message::Resized(_)

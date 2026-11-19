@@ -46,7 +46,7 @@ fn engine_err(e: impl std::fmt::Display) -> OcrError {
 /// busy while the app rendered: a live step 0.6 s -> 0.2 s), the CPU EP
 /// registered as ours = no ORT memory arena (a warm helper kept every
 /// capture's peak, ~210 MB more after one 1080p read, for the same speed).
-fn session(path: &Path) -> Result<Session, OcrError> {
+pub(crate) fn session(path: &Path) -> Result<Session, OcrError> {
     let build = |b: SessionBuilder| -> ort::Result<Session> {
         b.with_memory_pattern(false)?
             .with_config_entry("session.intra_op.allow_spinning", "0")?

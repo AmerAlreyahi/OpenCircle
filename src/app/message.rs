@@ -115,6 +115,12 @@ pub(crate) enum Message {
     OpenEntity(crate::features::circle::actions::entities::Entity),
     /// From the translate session with this number (stale numbers are ignored).
     Translate(u32, pill::Msg),
+    /// The Studio's Translate (`features::snip::app::studio_acts`).
+    StudioTranslate(u32, pill::Msg),
+    /// The monitor (size) a chat asked from a window sizes itself by.
+    ChatHome(Size),
+    /// The Studio's text reader download (its picture's epoch).
+    StudioReader(u32, Result<text::Progress, S>),
     Live(live_layer::Msg),
     /// OCR for a tap or a text drag read these lines.
     Tapped(WordRead, Result<Vec<TextBlock>, String>),

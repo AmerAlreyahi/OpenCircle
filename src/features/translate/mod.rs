@@ -19,6 +19,7 @@ pub mod lang;
 pub(crate) mod mt;
 mod online;
 pub mod pipeline;
+pub(crate) use pipeline::to_line;
 pub(crate) mod screens;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -278,6 +279,36 @@ pub fn render(
     translations: &[String],
     rtl: bool,
 ) -> Drawn {
+    render_with(
+        rgba,
+        width,
+        height,
+        blocks,
+        translations,
+        rtl,
+        Tweak::default(),
+    )
+}
+
+/// What the user set over the matched look (Studio's Edit text): size (em),
+/// colour, weight. `None` = matched to the original.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Tweak {
+    pub em: Option<f32>,
+    pub colour: Option<[u8; 3]>,
+    pub bold: Option<bool>,
+}
+
+/// `render` with the user's own size, colour and weight over the matched ones.
+pub fn render_with(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    blocks: &[Block],
+    translations: &[String],
+    rtl: bool,
+    tweak: Tweak,
+) -> Drawn {
     let dims = (width as usize, height as usize);
     let mut report = Drawn::default();
     if rgba.len() != dims.0 * dims.1 * 4 {
@@ -297,8 +328,11 @@ pub fn render(
         let mut undo = Vec::new();
         let styles: Vec<erase::LineStyle> = (b.lines.iter())
             .map(|l| {
-                let (s, u) = erase::erase_line(rgba, dims.0, dims.1, l.bounds);
+                let (mut s, u) = erase::erase_line(rgba, dims.0, dims.1, l.bounds);
                 undo.push(u);
+                if let Some(c) = tweak.colour {
+                    (s.color, s.accent) = (c, None);
+                }
                 s
             })
             .collect();
@@ -337,6 +371,8 @@ pub fn render(
             styles,
             rtl,
             shared_em: None,
+            em: tweak.em,
+            bold: tweak.bold,
         };
         placed.push((i, t, p, undo));
     }
@@ -402,6 +438,72 @@ pub fn render(
         draw::draw_block(&mut fonts, rgba, dims, &p, fit);
     }
     report
+}
+
+/// What a line looks like now: its size (em), colour and weight, as the
+/// erase reads them (what `replace_line` matches).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Matched {
+    pub em: f32,
+    pub colour: [u8; 3],
+    pub bold: bool,
+}
+
+fn one_line(line: &Line) -> Block {
+    Block {
+        lines: vec![line.clone()],
+        text: line.text.clone(),
+        bounds: line.bounds,
+    }
+}
+
+/// `line`'s matched look (the picture is left as it is).
+pub fn matched(rgba: &[u8], width: u32, height: u32, line: &Line) -> Matched {
+    let mut copy = rgba.to_vec();
+    let dims = (width as usize, height as usize);
+    let (style, _) = erase::erase_line(&mut copy, dims.0, dims.1, line.bounds);
+    let p = draw::Placement {
+        bounds: line.bounds,
+        line_h: line.bounds[3],
+        texts: vec![line.text.clone()],
+        styles: vec![style],
+        rtl: false,
+        right: false,
+        centred: false,
+        shared_em: None,
+        em: None,
+        bold: None,
+    };
+    let em = draw::original_em(&p);
+    Matched {
+        em,
+        colour: style.color,
+        bold: draw::weight(&style, em) >= 600,
+    }
+}
+
+/// One line's text replaced in place (Snip Studio's Edit text): `render`'s own
+/// erase and redraw on a block of that one line, so the new text takes the
+/// old one's size, colour, weight and alignment unless `tweak` sets them.
+/// `drawn == 0` = the line was left as it was (busy background, or no room).
+pub fn replace_line(
+    rgba: &mut [u8],
+    width: u32,
+    height: u32,
+    line: &Line,
+    text: &str,
+    tweak: Tweak,
+) -> Drawn {
+    let rtl = rtl_text(text);
+    render_with(
+        rgba,
+        width,
+        height,
+        &[one_line(line)],
+        &[text.to_string()],
+        rtl,
+        tweak,
+    )
 }
 
 type Fitted<'a> = (

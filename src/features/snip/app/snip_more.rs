@@ -13,8 +13,15 @@ use crate::features::snip::annotate::{self, Message as E};
 use crate::features::snip::screens::snip_toolbar::SnipToolbar;
 use crate::features::snip::snip_more::{self as more, Hidden, Read, Row};
 use crate::features::text_reading::text;
+// (the Studio's `studio_acts` reaches the reader's models through here)
+pub(crate) use crate::features::ask_ai::app::ai_chat::hands_off;
+pub(crate) use crate::features::ask_ai::screens::ai_chat::hand_off;
+pub(crate) use crate::features::text_reading::app::text::download_steps;
+#[cfg(test)]
+pub(crate) use crate::features::text_reading::text::MODELS_HERE;
+pub(crate) use crate::features::text_reading::text::{Progress as text_progress, models_present};
 use crate::features::text_reading::{self, TextBlock};
-use crate::features::translate::screens::pill;
+pub(crate) use crate::features::translate::screens::pill;
 use crate::shared::config;
 
 use crate::app::message::{Message, Purpose};
@@ -298,17 +305,7 @@ impl App {
         let dst_w = edit.annotator.doc.image.width as usize;
         let [x0, y0, x1, y1] = area.map(|v| v as usize);
         let dst = &mut edit.annotator.doc.image.rgba;
-        for y in y0..y1 {
-            let src = match whole {
-                true => (y * width + x0) * 4,
-                false => (y - y0) * (x1 - x0) * 4,
-            };
-            let at = (y * dst_w + x0) * 4;
-            let row = (x1 - x0) * 4;
-            if dst.len() >= at + row && from.len() >= src + row {
-                dst[at..at + row].copy_from_slice(&from[src..src + row]);
-            }
-        }
+        more::paste_translation(dst, dst_w, &from, width, [x0, y0, x1, y1], whole);
         more::keep_hidden(dst, original, dst_w, [x0, y0, x1, y1], &hidden);
         edit.annotator.own_image = true; // its pixels are no longer the frozen frame's
         edit.annotator.refresh();
@@ -345,7 +342,7 @@ impl App {
 /// Reads `crop`'s lines as main mode's bar does: Windows OCR where
 /// `text_reading::route` says so (Windows), else the PP-OCR helper (Linux and the
 /// languages Windows OCR cannot read).
-fn read_crop(
+pub(crate) fn read_crop(
     crop: &Crop,
     setting: config::TextReader,
     scale: f32,

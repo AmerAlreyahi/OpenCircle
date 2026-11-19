@@ -14,7 +14,7 @@ use crate::features::ask_ai::ask::{self, Chat, Status};
 
 use crate::features::circle::actions;
 use crate::features::text_reading::models;
-use crate::features::text_reading::screens::model_download;
+use crate::features::text_reading::screens::model_download::{self, Fetching, Which};
 use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::{self, Cache, Deps, Error, Translation};
 use crate::features::translate::screens::language_picker::{self as picker, Picker};
@@ -139,6 +139,13 @@ pub struct Problem {
     pub message: String,
     /// The AI is not set up (no key, provider, model): offer Settings.
     pub setup: bool,
+}
+
+/// What stops a session that has no card (`Session::stuck`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stuck {
+    Models,
+    Failed(String),
 }
 
 #[derive(Debug)]
@@ -309,6 +316,43 @@ impl Session {
             Phase::Shown(shown) => Some(&shown.image),
             _ => None,
         }
+    }
+
+    /// A session with no card of its own (the Studio's) cannot go on: it needs
+    /// the user's download (`Models`), or it failed (why).
+    pub fn stuck(&self) -> Option<Stuck> {
+        match &self.phase {
+            Phase::Consent(_) | Phase::DownloadFailed(_) => Some(Stuck::Models),
+            Phase::Failed(p) => Some(Stuck::Failed(p.message.clone())),
+            _ => None,
+        }
+    }
+
+    /// What the session asks or fetches now: the card the pill shows, for a
+    /// host that draws it itself (the Studio).
+    pub fn fetching(&self) -> Option<Fetching> {
+        let (share, failed, asked) = match &self.phase {
+            Phase::Consent(ask) => (None, None, *ask),
+            Phase::Downloading(done) => (Some(*done), None, None),
+            Phase::DownloadFailed(why) => (None, Some(why.clone()), None),
+            _ => return None,
+        };
+        let (which, bytes) = match (asked, self.offline, &self.readers) {
+            (Some((_, bytes)), _, _) => (Which::Pair, bytes),
+            (None, Some(pair), _) => (Which::Pair, pair.full_size()),
+            (None, None, Some((bytes, names))) => (Which::Scripts(names.clone()), *bytes),
+            (None, None, None) => (
+                Which::Reader,
+                crate::features::text_reading::models::full_size(),
+            ),
+        };
+        Some(Fetching {
+            which,
+            bytes,
+            share,
+            failed,
+            provider: asked.is_some(),
+        })
     }
 
     /// The whole page is translated and shown (not still translating).

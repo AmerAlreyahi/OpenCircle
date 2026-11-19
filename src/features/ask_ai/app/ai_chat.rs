@@ -24,6 +24,10 @@ use crate::shared::platform::shape::Anchor;
 use crate::app::App;
 use crate::shared::picture::{Crop, stack_crops};
 
+/// Where a chat window goes: its monitor (origin, size, taskbar inset), its
+/// top-left and size (logical desktop px), and the same in physical px.
+type Placing = ((Point, Size, f32), Point, Size, Place);
+
 /// The AI chat once pinned (`ai_chat::AiChat::pinned`): it outlives the overlay
 /// (`App::chat`) until its pin closes it. Never more than one.
 pub(crate) struct Resident {
@@ -331,11 +335,36 @@ impl App {
     /// same card, given a beat to paint, then solid at once, so the overlay
     /// can go with no blank beat.
     fn open_chat_window(&mut self, handover: bool) -> Task<Message> {
-        let (home, at, size, place) = self.chat_place();
+        let placing = self.chat_place();
+        self.open_chat_window_at(Ok(placing), handover)
+    }
+
+    /// `open_chat_window` where `placing` says (`Err(screen)`: where the desktop
+    /// puts it, as on Wayland: the size alone is ours, from that screen).
+    fn open_chat_window_at(
+        &mut self,
+        placing: Result<Placing, Size>,
+        handover: bool,
+    ) -> Task<Message> {
+        let given = placing.is_ok();
+        let ((origin, screen, inset), at, size, place) = placing.unwrap_or_else(|screen| {
+            let size = card::docked(screen, card::Side::Right, 0.0, self.chat_width).size();
+            let at = Point::ORIGIN;
+            (
+                (Point::ORIGIN, screen, 0.0),
+                at,
+                size,
+                place_px(at, size, 1.0),
+            )
+        });
+        let home = (origin, screen, inset);
         let (id, open) = windows::floating(
             window::Settings {
                 size,
-                position: window::Position::Specific(at),
+                position: match given {
+                    true => window::Position::Specific(at),
+                    false => window::Position::Default,
+                },
                 visible: false, // placed, then shown
                 resizable: false,
                 ..window::Settings::default()
@@ -350,7 +379,7 @@ impl App {
             moves: 0,
             size,
             glide: None,
-            placed: Some(place),
+            placed: given.then_some(place),
             hidden: false,
             out: false,
             wide: None,
@@ -371,8 +400,75 @@ impl App {
                 .chain(windows::foreground(overlay))
                 .chain(windows::fade(id, true, windows::POPUP, false)),
         };
-        open.then(move |id| place_window::<()>(id, place).chain(shown(id)))
-            .discard()
+        open.then(move |id| match given {
+            true => place_window::<()>(id, place).chain(shown(id)),
+            false => shown(id),
+        })
+        .discard()
+    }
+
+    /// Ask AI from a window with no overlay (the Studio): the chat is pinned and opens
+    /// in its own window docked on the screen the pointer is on (on Wayland
+    /// the desktop places it); a chat already pinned takes the question, as a
+    /// new capture's does.
+    pub(crate) fn ask_from_window(
+        &mut self,
+        crop: Crop,
+        from: Option<window::Id>,
+    ) -> Task<Message> {
+        if let Some(chat) = &mut self.chat {
+            let id = chat.id;
+            return (chat.panel.ask_about(crop, None, true)).map(move |m| Message::AiChat(id, m));
+        }
+        self.panels = self.panels.wrapping_add(1);
+        let id = self.panels;
+        let (mut panel, task) = ai_chat::AiChat::open(crop, None, true);
+        let _ = panel.update(ai_chat::Msg::Pin);
+        self.chat = Some(Resident { id, panel });
+        let window = match (self.chat_win.is_some(), self.dock_beside_pointer(), from) {
+            (true, ..) => Task::none(),
+            (false, Some(placing), _) => self.open_chat_window_at(Ok(placing), true),
+            // the pointer is unknown (Wayland): the size comes from the
+            // asking window's own monitor (its own size if the OS won't say)
+            (false, None, Some(id)) => window::monitor_size(id)
+                .then(move |monitor| match monitor {
+                    Some(size) => Task::done(size),
+                    None => window::size(id),
+                })
+                .map(Message::ChatHome),
+            (false, None, None) => Task::none(),
+        };
+        Task::batch([task.map(move |m| Message::AiChat(id, m)), window])
+    }
+
+    /// The screen a window-asked chat sizes from is known: its window opens
+    /// where the desktop puts it.
+    pub(crate) fn chat_home(&mut self, screen: Size) -> Task<Message> {
+        match self.chat.is_some() && self.chat_win.is_none() {
+            true => self.open_chat_window_at(Err(screen), true),
+            false => Task::none(),
+        }
+    }
+
+    /// Where the chat docks with no overlay: the right of the screen the
+    /// pointer is on (`None`: unknown, the desktop decides).
+    fn dock_beside_pointer(&self) -> Option<Placing> {
+        let (x, y) = crate::shared::platform::capture::pointer()?;
+        let places = monitor::places();
+        let m = places.iter().copied().find(|m| {
+            (m.origin.0..m.origin.0 + m.px.0 as i32).contains(&x)
+                && (m.origin.1..m.origin.1 + m.px.1 as i32).contains(&y)
+        })?;
+        let (origin, screen) = (m.logical_origin(), m.size());
+        let inset = monitor::taskbar_inset(origin, screen, m.scale);
+        let dock = self.chat_dock(screen, self.chat_side.unwrap_or(card::Side::Right), inset);
+        let at = origin + (dock.position() - Point::ORIGIN);
+        Some((
+            (origin, screen, inset),
+            at,
+            dock.size(),
+            place_px(at, dock.size(), m.scale),
+        ))
     }
 
     /// Wayland: the overlay closes with a pinned chat: it goes on in its own

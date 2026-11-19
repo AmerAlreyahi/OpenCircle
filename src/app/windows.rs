@@ -116,6 +116,20 @@ pub enum Msg {
     StudioPasted(Option<Crop>, Option<iced::Point>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
+    /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
+    StudioAct(crate::features::snip::snip_more::Row),
+    /// Copy text's text, read (the Studio): the clipboard, then the pill.
+    StudioText(u32, Result<String, String>),
+    /// Edit text: the picture's lines read (the Studio), for that picture.
+    StudioLines(u32, Result<Vec<crate::features::translate::Line>, String>),
+    /// Edit text starts (the App reads the picture: `snip::app::studio_acts`).
+    StudioEditText,
+    /// Cut out starts (the App cuts), and its answer for that picture.
+    StudioCutOut,
+    StudioCut(u32, crate::features::snip::screens::studio::CutDone),
+    /// The Studio's download card: Download / Try again, and dismissed.
+    StudioDownload,
+    StudioDismiss,
 }
 
 #[derive(Default)]
@@ -1402,6 +1416,24 @@ impl Windows {
             Msg::StudioRead(read) => return self.studio_read(read),
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
+            // (`app::App` takes it before here.)
+            Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut => {}
+            Msg::StudioCut(epoch, done) => {
+                let out = match self.studio_mut() {
+                    Some(s) => s.set_cut(epoch, done),
+                    None => return Task::none(),
+                };
+                return self.studio_outcome(out);
+            }
+            Msg::StudioLines(epoch, read) => {
+                let out = match self.studio_mut() {
+                    Some(s) => s.set_lines(epoch, read),
+                    None => return Task::none(),
+                };
+                return self.studio_outcome(out);
+            }
+            Msg::StudioDownload | Msg::StudioDismiss => {}
+            Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);
@@ -1507,6 +1539,7 @@ impl Windows {
             }
             // focus left the Studio: a Ctrl release may have gone elsewhere
             Msg::Unfocused(id) if self.studio_window() == Some(id) => {
+                let _ = self.on_studio(crate::features::snip::screens::studio::Msg::Focus(false));
                 return self.on_studio(crate::features::snip::screens::studio::Msg::Ctrl(false));
             }
             Msg::Unfocused(_) => {}

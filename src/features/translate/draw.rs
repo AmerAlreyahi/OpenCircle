@@ -268,6 +268,10 @@ pub struct Placement {
     pub centred: bool,
     /// The size its one-line siblings read (`render`): never smaller than it.
     pub shared_em: Option<f32>,
+    /// The user's own size (em) and weight (Studio's Edit text); `None` =
+    /// matched to the original.
+    pub em: Option<f32>,
+    pub bold: Option<bool>,
 }
 
 /// The laid-out translation: buffer, top-left, font size.
@@ -319,7 +323,7 @@ pub fn original_em(p: &Placement) -> f32 {
 /// Font weight from stroke width per em (Inter: 400 about 0.08, 500 about
 /// 0.095, 700 from 0.11), capped at semibold (600); a link (saturated, dark
 /// text on a light page) is normal.
-fn weight(s: &LineStyle, em: f32) -> u16 {
+pub fn weight(s: &LineStyle, em: f32) -> u16 {
     let c = s.color;
     let sat = c.iter().max().unwrap() - c.iter().min().unwrap();
     let dark = (0.299 * c[0] as f32 + 0.587 * c[1] as f32 + 0.114 * c[2] as f32) < 140.0;
@@ -366,10 +370,14 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     let accent = p.styles.iter().find_map(|s| s.accent).unwrap_or(color);
     let spans = parse_marked(text, color, accent);
     let n = p.styles.len();
-    let em = original_em(p);
+    let em = p.em.unwrap_or_else(|| original_em(p));
     // pitch of the original lines (baseline to baseline), if it wrapped
     let pitch = (n > 1).then(|| (p.styles[n - 1].ink[3] - s0.ink[3]) as f32 / (n - 1) as f32);
-    let weight = weight(s0, em);
+    let weight = match p.bold {
+        Some(true) => 700,
+        Some(false) => 400,
+        None => weight(s0, em),
+    };
     let align = match (p.centred, p.rtl || p.right) {
         (true, _) => Align::Center,
         (false, true) => Align::Right,
@@ -565,6 +573,8 @@ mod tests {
             right: false,
             centred: false,
             shared_em: None,
+            em: None,
+            bold: None,
         }
     }
 

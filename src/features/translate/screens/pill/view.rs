@@ -9,9 +9,7 @@ use super::{Card, Msg, Phase, Session};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
 use crate::features::ask_ai::screens::ai_chat::{actions, ai_error, card, note, provider_name};
-use crate::features::text_reading::screens::model_download::{
-    self, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION,
-};
+use crate::features::text_reading::screens::model_download::{self, Fetching};
 use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label, regular};
@@ -77,53 +75,18 @@ impl Session {
             .into()
         };
         let whole = Rectangle::with_size(screen);
-        // the download card (`model_download`): asks, its progress, why it failed
-        let download = |model: &Model, bytes, stage, provider| {
-            let on = model_download::On {
-                download: Msg::Download,
-                dismiss: Some(Msg::Close),
-                provider,
-            };
-            let card = model_download::card(model, bytes, stage, on);
-            let pill = Rectangle::new(pill_at(whole), picker::PILL);
-            stack![
-                model_download::floating(card, screen, pill),
-                self.pill(whole, None, None, None)
-            ]
-            .into()
-        };
-        // what is (being) fetched: the pair's models, else OCR's
-        let fetched = |stage| match self.offline {
-            Some(pair) => download(&TRANSLATION, pair.full_size(), stage, None),
-            None => match &self.readers {
-                // only the readers that aren't installed
-                Some((bytes, names)) => {
-                    let does = fmt(S::md_read_names, &[names]);
-                    download(
-                        &Model {
-                            does: Does::Text(&does),
-                            ..SCRIPTS
-                        },
-                        *bytes,
-                        stage,
-                        None,
-                    )
-                }
-                None => download(
-                    &OCR,
-                    crate::features::text_reading::models::full_size(),
-                    stage,
-                    None,
-                ),
-            },
-        };
         match &self.phase {
-            Phase::Consent(None) => fetched(Stage::Ask),
-            Phase::Consent(Some((_, bytes))) => {
-                download(&TRANSLATION, *bytes, Stage::Ask, Some(Msg::OpenSettings))
+            // the download card (`model_download`): asks, its progress, why it failed
+            Phase::Consent(_) | Phase::Downloading(_) | Phase::DownloadFailed(_) => {
+                let fetching = self.fetching().unwrap_or_else(Fetching::reader);
+                let card = fetching.card(Msg::Download, Msg::Close, Msg::OpenSettings);
+                let pill = Rectangle::new(pill_at(whole), picker::PILL);
+                stack![
+                    model_download::floating(card, screen, pill),
+                    self.pill(whole, None, None, None)
+                ]
+                .into()
             }
-            Phase::Downloading(done) => fetched(Stage::at(*done)),
-            Phase::DownloadFailed(why) => fetched(Stage::Failed(why)),
             Phase::Translating => self.pill(whole, Some(t!(tp_translating)), None, None),
             // Already in the target, no offline model, an AI error: one soft line
             // under the pill, never a card, and the pill stays put (owner,

@@ -44,6 +44,9 @@ const SCREEN: u8 = b's';
 /// Load the engine and a recognizer (one byte, as `OCR`'s), gently; reply `null`.
 const WARM: u8 = b'w';
 const TRANSLATE: u8 = b't';
+/// Cut out (`features::cutout`): `c`, the picture as the model's input
+/// (RGB bytes); reply the model's mask (bytes). No session outlives a request.
+const CUTOUT: u8 = b'c';
 /// Far more lines than any screen holds.
 const MAX_KNOWN: usize = 100_000;
 /// 1 MB of text is far beyond any screen.
@@ -84,6 +87,15 @@ pub fn recognize_as(
     }
     ready(read)?;
     recognize_via(session::call, rgba, width, height, read)
+}
+
+/// The cut-out model's mask for `input` (`cutout::model::pre`'s bytes), in the
+/// helper. The model must already be on disk (the helper never downloads).
+pub fn cut_out_in_child(input: &[u8]) -> Result<Vec<u8>, OcrError> {
+    if crate::features::cutout::model::missing_bytes() > 0 {
+        return Err(OcrError::Missing("the cut-out model".into()));
+    }
+    parse(session::call(&[&[CUTOUT], input])?)
 }
 
 /// Some recognizer for a script Windows OCR doesn't read for the user is on
@@ -312,6 +324,7 @@ pub fn worker_main() -> ExitCode {
                 json(warm_here(body, &mut engine))
             }
             Some((&TRANSLATE, body)) => json(translate_here(body, &mut translator)),
+            Some((&CUTOUT, body)) => json(crate::features::cutout::model::run(&models_dir(), body)),
             _ => json::<()>(Err(OcrError::BadImage("unknown request".into()))),
         };
         drop(request);

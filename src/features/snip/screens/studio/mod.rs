@@ -6,6 +6,8 @@
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
+mod cut;
+mod edit_text;
 mod view;
 
 use std::path::PathBuf;
@@ -15,10 +17,14 @@ use iced::widget::scrollable::AbsoluteOffset;
 use iced::{Point, Size, Vector};
 
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
+use crate::features::snip::snip_more::{self as more, Row};
+pub use crate::features::text_reading::model_download::Fetching;
+use crate::features::translate::{self, Line};
 use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
 
+pub use cut::{Done as CutDone, Phase as CutPhase};
 #[cfg(test)]
 pub use view::GLYPHS;
 pub use view::view;
@@ -34,6 +40,16 @@ const OPTIONS: f32 = 76.0;
 const STATUS: f32 = 44.0;
 const LIBRARY: f32 = 240.0;
 const PANEL: f32 = 260.0;
+/// Arabic's picture panel is wider (its names are longer; spec §2).
+const PANEL_AR: f32 = 288.0;
+
+/// The picture panel's width in the app's language.
+fn panel_width() -> f32 {
+    match crate::shared::app_language::rtl() {
+        true => PANEL_AR,
+        false => PANEL,
+    }
+}
 /// Room kept around a fitted picture.
 const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
@@ -41,6 +57,8 @@ const ZOOM_STEP: f32 = 1.25;
 const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 /// The canvas's scroll area (`operation::scroll_to`).
 pub const CANVAS: &str = "studio-canvas";
+/// Edit text's inline field.
+pub const FIELD: &str = "studio-edit-field";
 
 /// What the Studio opens.
 pub enum Picture {
@@ -49,6 +67,12 @@ pub enum Picture {
     /// The Snip widget's editor, its drawings still editable and its undo kept.
     Editor(Box<Annotator>),
 }
+
+/// Edit text's read counter, shared like the epoch: each read is its own.
+static NEXT_READ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The picture counter (`Studio::epoch`), shared by every Studio of the run.
+static NEXT_EPOCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// What waits on the unsaved-changes question.
 enum After {
@@ -96,6 +120,24 @@ pub enum Msg {
     DontSave,
     Cancel,
     SaveFirst,
+    /// A picture-panel row (Copy text, Translate, Ask AI).
+    Act(Row),
+    /// The download card's buttons (Download / Try again, Not now / Cancel,
+    /// Use an AI provider instead).
+    Download,
+    DismissCard,
+    Provider,
+    /// The window has / lost the keyboard (the quick-action keys act on it).
+    Focus(bool),
+    /// The panel's Edit text row; a line picked on the picture; its new text;
+    /// Done (Enter). Cancel (Esc) leaves the picture as it was.
+    EditText,
+    PickLine(usize),
+    Draft(String),
+    EditDone,
+    /// The panel's Cut out row; the options bar's Before (`true`) / After.
+    CutOut,
+    CutView(bool),
 }
 
 /// What the host does after a message.
@@ -122,6 +164,24 @@ pub enum Outcome {
     Panels(StudioConfig),
     /// Scroll the stage there (a zoom round the pointer).
     ScrollTo(AbsoluteOffset),
+    /// A picture action: the host (the App) runs main mode's own work on the
+    /// pictures `read_picture` / `annotated` / `translate_frame` give.
+    Act(Row),
+    /// The card's Download: the host fetches what the row needs.
+    Download,
+    /// The card was dismissed: the host drops what waited on it.
+    Dismissed,
+    /// The card's AI link: dismissed, and Settings opens.
+    Provider,
+    /// Edit text: the host reads the picture's lines (`read_picture`) and
+    /// answers with `set_lines`.
+    ReadLines,
+    /// The inline field takes the keyboard (`FIELD`).
+    FocusField,
+    /// A pill with this (an edit that could not be made).
+    Say(String),
+    /// Cut out: the host cuts `cut_source`'s picture and answers `set_cut`.
+    CutOut,
 }
 
 pub struct Studio {
@@ -140,6 +200,25 @@ pub struct Studio {
     /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
     offset: Vector,
     pub(super) ctrl: bool,
+    /// The picture as it was before Translate (Show original), and the
+    /// editor's `own_image` before it.
+    original: Option<(Vec<u8>, bool)>,
+    /// Counts the pictures opened: a translation that answers for an older one
+    /// is dropped.
+    epoch: u32,
+    focused: bool,
+    /// Ask AI opens the browser (no AI key): the host says (`set_browser`).
+    browser: bool,
+    /// The row that is working (its icon spins), and the download card up.
+    busy: Option<Row>,
+    card: Option<Fetching>,
+    /// Edit text is on (S8).
+    edit: Option<edit_text::Session>,
+    /// Cut out (S9): the work's phase, the compare view, and whether the
+    /// picture has see-through pixels (it sits on a checkerboard then).
+    cutting: cut::Phase,
+    cut: Option<cut::Cut>,
+    transparent: bool,
 }
 
 impl Studio {
@@ -157,6 +236,16 @@ impl Studio {
             hovered: false,
             offset: Vector::ZERO,
             ctrl: false,
+            original: None,
+            epoch: 0,
+            focused: false,
+            browser: false,
+            busy: None,
+            card: None,
+            edit: None,
+            cutting: cut::Phase::Idle,
+            cut: None,
+            transparent: false,
         }
     }
 
@@ -185,6 +274,11 @@ impl Studio {
         editor.edges.clear();
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
+        (self.original, self.busy, self.card, self.edit) = (None, None, None, None);
+        (self.cutting, self.cut) = (cut::Phase::Idle, None);
+        self.transparent = cut::has_alpha(&editor.doc.image.rgba);
+        // (one counter for every Studio: an answer for a closed one never fits a new one)
+        self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         self.zoom = None;
         self.editor = Some(editor);
         self.fit();
@@ -202,6 +296,283 @@ impl Studio {
     #[cfg(test)]
     pub fn probe(&self) -> (Option<Size>, bool) {
         (self.editor.as_ref().map(|e| e.doc.view().size()), self.ctrl)
+    }
+
+    /// What the picture panel's rows show: the user's own keys, where Ask AI
+    /// goes, whether the translation is on.
+    pub(super) fn info(&self) -> more::Info {
+        more::Info {
+            caps: more::caps_from(&crate::shared::config::current()),
+            browser: self.browser,
+            translated: self.original.is_some() && self.card.is_none(),
+            ..more::Info::default()
+        }
+    }
+
+    /// The window has the keyboard (and a picture is open): the quick-action
+    /// keys of Copy text / Ask AI / Translate act here.
+    pub fn takes_quick_keys(&self) -> bool {
+        self.focused && self.editor.is_some() && !self.asking()
+    }
+
+    /// The row that is reading or translating (`None`: none).
+    pub fn set_busy(&mut self, row: Option<Row>) {
+        self.busy = row;
+    }
+
+    pub fn busy(&self) -> Option<Row> {
+        self.busy
+    }
+
+    /// The download card up (`None`: gone).
+    pub fn set_card(&mut self, card: Option<Fetching>) {
+        self.card = card;
+    }
+
+    pub fn card(&self) -> Option<&Fetching> {
+        self.card.as_ref()
+    }
+
+    pub fn set_browser(&mut self, on: bool) {
+        self.browser = on;
+    }
+
+    /// Which picture this is (`open` counts them).
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    /// The clean capture (no drawing on it) with every hidden part painted
+    /// out, and those parts: what Copy text reads. A blurred secret never
+    /// reaches the reader.
+    pub fn read_picture(&self) -> Option<(Crop, more::Hidden)> {
+        let doc = &self.editor.as_ref()?.doc;
+        let hidden = annotate::hidden_in_clean(doc);
+        let mut crop = annotate::clean(doc);
+        more::mask(&mut crop, &hidden);
+        Some((crop, hidden))
+    }
+
+    /// Cut out starts: the picture's own pixels (drawings are items over them,
+    /// they stay), its size and which picture this is.
+    pub fn cut_source(&mut self) -> Option<(Vec<u8>, u32, u32, u32)> {
+        let e = self.editor.as_ref()?;
+        self.cutting = cut::Phase::Working;
+        self.busy = None;
+        Some((
+            e.doc.image.rgba.clone(),
+            e.doc.image.width,
+            e.doc.image.height,
+            self.epoch,
+        ))
+    }
+
+    pub fn cut_phase(&self) -> cut::Phase {
+        self.cutting
+    }
+
+    /// The cut's answer for the picture `epoch`: applied as one undoable edit
+    /// (the compare view opens), or the model's card, or a pill.
+    pub fn set_cut(&mut self, epoch: u32, done: cut::Done) -> Outcome {
+        if epoch != self.epoch || self.cutting != cut::Phase::Working {
+            return Outcome::None;
+        }
+        self.cutting = cut::Phase::Idle;
+        let alpha = match done {
+            cut::Done::NeedsModel => {
+                self.cutting = cut::Phase::Asking;
+                self.card = Some(Fetching::cutout());
+                return Outcome::None;
+            }
+            cut::Done::Failed(why) => return Outcome::Say(why),
+            cut::Done::Alpha(alpha) => alpha,
+        };
+        let Some(e) = self.editor.as_mut() else {
+            return Outcome::None;
+        };
+        let before = e.doc.image.rgba.clone();
+        let mut after = before.clone();
+        crate::features::cutout::apply(&mut after, &alpha);
+        if !e.doc.set_rows(0, &after) {
+            return Outcome::Say(crate::t!(st_cut_nothing).to_string());
+        }
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+        self.transparent = true;
+        self.cut = Some(cut::Cut {
+            before,
+            after,
+            state: e.doc.state(),
+            showing_before: false,
+        });
+        Outcome::None
+    }
+
+    /// The compare view is up (a cut made and nothing since).
+    pub(super) fn comparing(&self) -> Option<bool> {
+        let (c, e) = (self.cut.as_ref()?, self.editor.as_ref()?);
+        (c.state == e.doc.state()).then_some(c.showing_before)
+    }
+
+    /// Before / After: the picture's pixels shown, not an edit.
+    fn show_cut(&mut self, before: bool) {
+        let (Some(c), Some(e)) = (self.cut.as_mut(), self.editor.as_mut()) else {
+            return;
+        };
+        if c.showing_before == before || c.state != e.doc.state() {
+            return;
+        }
+        c.showing_before = before;
+        let shown = if before { &c.before } else { &c.after };
+        e.doc.image.rgba.copy_from_slice(shown);
+        e.refresh();
+    }
+
+    /// Anything that works on the picture sees the cut, not the "Before" view.
+    fn settle_cut(&mut self) {
+        self.show_cut(false);
+    }
+
+    /// Edit text stops (the reader's models are missing: the card asks).
+    pub fn cancel_edit(&mut self) {
+        self.edit = None;
+    }
+
+    /// The read the running Edit text session waits for (0: none).
+    pub fn edit_token(&self) -> u32 {
+        self.edit.as_ref().map_or(0, |s| s.token)
+    }
+
+    /// The lines read for session `token`, as the reader gave them in
+    /// `read_picture`'s px; or why none (a pill). An answer for a cancelled
+    /// session is dropped.
+    pub fn set_lines(&mut self, token: u32, read: Result<Vec<Line>, String>) -> Outcome {
+        let (Some(e), Some(session)) = (self.editor.as_ref(), self.edit.as_mut()) else {
+            return Outcome::None;
+        };
+        if token != session.token {
+            return Outcome::None;
+        }
+        // read from the clean view: back to image px
+        let view = e.doc.view();
+        let (dx, dy) = (view.x.floor(), view.y.floor());
+        match read {
+            Ok(lines) if !lines.is_empty() => {
+                session.lines = Some(
+                    lines
+                        .into_iter()
+                        .map(|mut l| {
+                            (l.bounds[0], l.bounds[1]) = (l.bounds[0] + dx, l.bounds[1] + dy);
+                            l
+                        })
+                        .collect(),
+                );
+                Outcome::None
+            }
+            Ok(_) => {
+                self.edit = None;
+                Outcome::Say(crate::t!(sn_no_text).to_string())
+            }
+            Err(why) => {
+                self.edit = None;
+                Outcome::Say(why)
+            }
+        }
+    }
+
+    /// Done: the picked line says the typed text in the pixels, one undoable edit.
+    fn finish_edit(&mut self) -> Outcome {
+        let (Some(e), Some(session)) = (self.editor.as_mut(), self.edit.as_ref()) else {
+            return Outcome::None;
+        };
+        let Some((line, text)) = session.target() else {
+            return Outcome::None;
+        };
+        if text.is_empty() || text == line.text.trim() {
+            self.edit = None; // nothing to change
+            return Outcome::None;
+        }
+        let (w, d) = (e.doc.image.width, &e.doc.image);
+        let (top, mut pixels, moved) = edit_text::band(&d.rgba, w, d.height, line);
+        let rows = (pixels.len() / (w as usize * 4)) as u32;
+        let drawn = translate::replace_line(&mut pixels, w, rows, &moved, text, session.tweak());
+        if drawn.drawn == 0 {
+            // (stays on the line: the text can be changed)
+            return Outcome::Say(crate::t!(st_edit_failed).to_string());
+        }
+        e.doc.set_rows(top, &pixels);
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+        self.edit = None;
+        Outcome::None
+    }
+
+    /// The picture as shown, drawings on it: what Ask AI gets.
+    pub fn annotated(&self) -> Option<Crop> {
+        Some(annotate::render(&self.editor.as_ref()?.doc))
+    }
+
+    /// Translate starts: the whole picture, hidden parts painted out, and the
+    /// area shown (image px); the picture as it was is kept for Show original.
+    pub fn translate_frame(&mut self) -> Option<(image::Handle, [u32; 4])> {
+        let e = self.editor.as_mut()?;
+        let doc = &e.doc;
+        let (w, h) = (doc.image.width, doc.image.height);
+        let view = doc.view();
+        let edge = |v: f32, max: u32| (v.max(0.0) as u32).min(max);
+        let area = [
+            edge(view.x.floor(), w),
+            edge(view.y.floor(), h),
+            edge((view.x + view.width).ceil(), w),
+            edge((view.y + view.height).ceil(), h),
+        ];
+        let original = doc.image.rgba.clone();
+        let mut frame = Crop {
+            width: w,
+            height: h,
+            rgba: original.clone(),
+        };
+        more::mask(&mut frame, &annotate::hidden(doc));
+        self.original = Some((original, e.own_image));
+        Some((image::Handle::from_rgba(w, h, frame.rgba), area))
+    }
+
+    /// The translation as far as it is: pasted into the picture under the
+    /// drawings, the hidden parts as they were.
+    pub fn show_translation(&mut self, from: &image::Handle, area: [u32; 4], whole: bool) {
+        let (Some((original, _)), Some(e)) = (&self.original, self.editor.as_mut()) else {
+            return;
+        };
+        let image::Handle::Rgba {
+            width, pixels: src, ..
+        } = from
+        else {
+            return;
+        };
+        let hidden = annotate::hidden(&e.doc);
+        let dst_w = e.doc.image.width as usize;
+        let area = area.map(|v| v as usize);
+        let dst = &mut e.doc.image.rgba;
+        more::paste_translation(dst, dst_w, src, *width as usize, area, whole);
+        more::keep_hidden(dst, original, dst_w, area, &hidden);
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+    }
+
+    /// Show original: the picture as it was before Translate.
+    pub fn show_original(&mut self) {
+        if let (Some((original, was_own)), Some(e)) = (self.original.take(), self.editor.as_mut()) {
+            if e.doc.image.rgba.len() == original.len() {
+                e.doc.image.rgba.copy_from_slice(&original);
+            }
+            e.own_image = was_own;
+            e.refresh();
+        }
+    }
+
+    /// The translation is on the picture (or being made).
+    pub fn translated(&self) -> bool {
+        self.original.is_some()
     }
 
     /// A picture is open.
@@ -276,11 +647,82 @@ impl Studio {
                     | Msg::Dropped(_)
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
+                    | Msg::Act(_)
+                    | Msg::EditText
+                    | Msg::CutOut
+                    | Msg::Download
             )
         {
             return Outcome::None;
         }
+        if matches!(
+            msg,
+            Msg::Editor(_) | Msg::Act(_) | Msg::EditText | Msg::CutOut | Msg::SaveFirst
+        ) {
+            self.settle_cut();
+        }
         match msg {
+            // while a line is edited the picture's tools rest; the bar's size,
+            // colour and Bold are the line's own
+            Msg::Editor(m) if self.edit.is_some() => {
+                if let Some(s) = &mut self.edit {
+                    s.set(m);
+                }
+                Outcome::None
+            }
+            Msg::Act(_) if self.edit.is_some() => Outcome::None,
+            Msg::CutView(before) => {
+                self.show_cut(before);
+                Outcome::None
+            }
+            Msg::CutOut
+                if self.editor.is_none()
+                    || self.card.is_some()
+                    || self.original.is_some()
+                    || self.edit.is_some()
+                    || self.cutting != cut::Phase::Idle =>
+            {
+                Outcome::None
+            }
+            Msg::CutOut => Outcome::CutOut,
+            Msg::EditText
+                if self.editor.is_none()
+                    || self.card.is_some()
+                    || self.original.is_some()
+                    || self.edit.is_some() =>
+            {
+                Outcome::None
+            }
+            Msg::EditText => {
+                let token = NEXT_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                self.edit = Some(edit_text::Session::new(token));
+                Outcome::ReadLines
+            }
+            Msg::PickLine(i) => {
+                let (Some(s), Some(e)) = (&mut self.edit, &self.editor) else {
+                    return Outcome::None;
+                };
+                let Some(line) = s.lines.as_ref().and_then(|l| l.get(i)) else {
+                    return Outcome::None;
+                };
+                let d = &e.doc.image;
+                let (_, rows, moved) = edit_text::band(&d.rgba, d.width, d.height, line);
+                let m = translate::matched(
+                    &rows,
+                    d.width,
+                    (rows.len() / (d.width as usize * 4)) as u32,
+                    &moved,
+                );
+                s.pick(i, m);
+                Outcome::FocusField
+            }
+            Msg::Draft(text) => {
+                if let Some(s) = &mut self.edit {
+                    s.draft = text;
+                }
+                Outcome::None
+            }
+            Msg::EditDone => self.finish_edit(),
             Msg::Editor(annotate::Message::Paste(at))
                 if self.editor.as_ref().is_some_and(|e| !e.typing()) =>
             {
@@ -358,9 +800,36 @@ impl Studio {
                 self.fit();
                 Outcome::None
             }
+            Msg::Act(_) if self.editor.is_none() || self.card.is_some() => Outcome::None,
+            // a second Copy text while it reads would only read twice
+            Msg::Act(Row::CopyText) if self.busy == Some(Row::CopyText) => Outcome::None,
+            Msg::Download if self.card.is_some() => {
+                if let Some(c) = &mut self.card {
+                    (c.share, c.failed) = (Some(0.0), None);
+                }
+                Outcome::Download
+            }
+            Msg::Download => Outcome::None,
+            Msg::DismissCard | Msg::Provider => {
+                self.card = None;
+                self.busy = None;
+                self.cutting = cut::Phase::Idle;
+                match msg {
+                    Msg::Provider => Outcome::Provider,
+                    _ => Outcome::Dismissed,
+                }
+            }
+            Msg::Act(row) => Outcome::Act(row),
+            Msg::Focus(on) => {
+                self.focused = on;
+                Outcome::None
+            }
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
-                self.asking = None;
+                // Esc on the unsaved question closes only the question
+                if self.asking.take().is_none() {
+                    self.edit = None;
+                }
                 Outcome::None
             }
             Msg::SaveFirst => match &mut self.editor {
@@ -374,7 +843,11 @@ impl Studio {
         let Some(e) = &mut self.editor else {
             return Outcome::None;
         };
+        let history = matches!(m, annotate::Message::Undo | annotate::Message::Redo);
         let out = e.update(m);
+        if history {
+            self.transparent = cut::has_alpha(&e.doc.image.rgba);
+        }
         self.fit(); // a crop changes what is shown
         match out {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
@@ -390,7 +863,7 @@ impl Studio {
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
         let side = (self.panels.library as u8 as f32) * (LIBRARY + 1.0)
-            + (self.panels.options as u8 as f32) * (PANEL + 1.0);
+            + (self.panels.options as u8 as f32) * (panel_width() + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),

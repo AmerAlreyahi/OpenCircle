@@ -1125,6 +1125,12 @@ strings! {
         | "يحتاج التعرّف على النص إلى تنزيل صغير";
     md_ocr_does: "Read text in images"
         | "قراءة النص في الصور";
+    md_cut_name: "Cut out"
+        | "إزالة الخلفية";
+    md_cut_title: "Cut out needs a download"
+        | "تحتاج إزالة الخلفية إلى تنزيل";
+    md_cut_does: "Remove the background from pictures"
+        | "إزالة الخلفية من الصور";
     md_scripts_name: "Text in other scripts"
         | "النص بالخطوط الأخرى";
     md_scripts_title: "This text needs another reader"
@@ -1772,6 +1778,32 @@ strings! {
         | "الحجم";
     st_drawings: "Drawings"
         | "الرسومات";
+    st_edit_text: "Edit text"
+        | "تحرير النص";
+    st_edit_pick: "Pick a line on the picture"
+        | "اختر سطرًا على الصورة";
+    st_edit_reading: "Finding the lines…"
+        | "جارٍ البحث عن الأسطر…";
+    st_edit_type: "Type the new text"
+        | "اكتب النص الجديد";
+    st_edit_done: "Done"
+        | "تم";
+    st_edit_failed: "This line can't be redrawn cleanly here"
+        | "تعذّر إعادة رسم هذا السطر بشكل نظيف هنا";
+    st_cut_out: "Cut out"
+        | "إزالة الخلفية";
+    st_cut_before: "Before"
+        | "قبل";
+    st_cut_after: "After"
+        | "بعد";
+    st_cut_note: "On this PC · Ctrl+Z brings the background back"
+        | "على هذا الجهاز · Ctrl+Z يعيد الخلفية";
+    st_cut_failed: "Couldn't cut out this picture"
+        | "تعذّرت إزالة الخلفية من هذه الصورة";
+    st_cut_nothing: "No background to remove here"
+        | "لا توجد خلفية لإزالتها هنا";
+    st_read_failed: "Couldn't read the text in this picture"
+        | "تعذّرت قراءة النص في هذه الصورة";
     st_show_library: "Show the library"
         | "أظهر المكتبة";
     st_hide_library: "Hide the library"
