@@ -32,10 +32,10 @@ impl Annotator {
     }
 }
 
-const RED: [u8; 4] = [255, 59, 48, 255];
+pub(super) const RED: [u8; 4] = [255, 59, 48, 255];
 
 /// `w`x`h` image, pixel (x, y) = `f(x, y)`.
-fn image_of(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Image {
+pub(super) fn image_of(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Image {
     Image {
         width: w,
         height: h,
@@ -57,7 +57,7 @@ fn checker(w: u32, h: u32) -> Image {
     })
 }
 
-fn item(shape: Shape) -> Item {
+pub(super) fn item(shape: Shape) -> Item {
     Item {
         shape,
         colour: RED,
@@ -75,7 +75,7 @@ fn doc_with(image: Image, items: Vec<Item>) -> Document {
     doc
 }
 
-fn px(c: &Crop, x: u32, y: u32) -> [u8; 4] {
+pub(super) fn px(c: &Crop, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * c.width + x) * 4) as usize;
     c.rgba[i..i + 4].try_into().unwrap()
 }

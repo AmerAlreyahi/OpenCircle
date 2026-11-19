@@ -21,10 +21,10 @@ pub use eraser::SIZES as ERASER_SIZES;
 mod highlighter;
 mod input;
 mod label;
-mod objects;
 mod legend;
 mod lines;
 mod magnifier;
+mod objects;
 mod pen;
 mod pointer;
 mod select;
@@ -44,6 +44,8 @@ fn clean_paste(t: &str) -> String {
     t.trim_end().to_string()
 }
 
+#[cfg(test)]
+mod objects_tests;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -769,7 +771,9 @@ impl Annotator {
                 | Message::Release
                 | Message::Cancel
         );
-        let picked = self.studio.then(|| (self.doc.selected, self.doc.extra.clone()));
+        let picked = self
+            .studio
+            .then(|| (self.doc.selected, self.doc.extra.clone()));
         let out = self.handle(message);
         if let Some(picked) = picked
             && picked != (self.doc.selected, self.doc.extra.clone())

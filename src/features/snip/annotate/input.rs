@@ -161,9 +161,8 @@ impl Annotator {
             }
         }
         if self.studio
-            && let Some(message) = crate::features::snip::screens::studio::editing::key(
-                self, key, latin, modifiers,
-            )
+            && let Some(message) =
+                crate::features::snip::screens::studio::editing::key(self, key, latin, modifiers)
         {
             return Some(message);
         }

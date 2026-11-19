@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::document::{Image, Item, Pic, Shape, span};
-use super::{Annotator, Document, Edit, Output, Tool, TextStyle, Width, select, style};
+use super::{Annotator, Document, Edit, Output, TextStyle, Tool, Width, select, style};
 use crate::shared::picture::Crop;
 
 /// Where a pasted copy lands, per paste (image px).
@@ -316,8 +316,16 @@ impl Annotator {
             return;
         };
         let (sx, sy) = (
-            if from.width > 0.0 { to.width / from.width } else { 1.0 },
-            if from.height > 0.0 { to.height / from.height } else { 1.0 },
+            if from.width > 0.0 {
+                to.width / from.width
+            } else {
+                1.0
+            },
+            if from.height > 0.0 {
+                to.height / from.height
+            } else {
+                1.0
+            },
         );
         let mut after = self.doc.items.clone();
         for &i in &sel {
@@ -537,8 +545,21 @@ impl Annotator {
         if sel.is_empty() || old == now {
             return;
         }
-        let sizes = (old.stroke, old.width, old.text_size, old.text_style, old.blur_size, old.blur_cell)
-            != (now.stroke, now.width, now.text_size, now.text_style, now.blur_size, now.blur_cell);
+        let sizes = (
+            old.stroke,
+            old.width,
+            old.text_size,
+            old.text_style,
+            old.blur_size,
+            old.blur_cell,
+        ) != (
+            now.stroke,
+            now.width,
+            now.text_size,
+            now.text_style,
+            now.blur_size,
+            now.blur_cell,
+        );
         let mut after = self.doc.items.clone();
         for &i in &sel {
             let before = &self.doc.items[i];
@@ -547,11 +568,12 @@ impl Annotator {
             } else {
                 before.clone()
             };
-            item.colour = if old.colour != now.colour && !matches!(before.shape, Shape::Picture { .. }) {
-                now.colour
-            } else {
-                before.colour
-            };
+            item.colour =
+                if old.colour != now.colour && !matches!(before.shape, Shape::Picture { .. }) {
+                    now.colour
+                } else {
+                    before.colour
+                };
             if old.outline == now.outline {
                 item.outline = before.outline;
             }

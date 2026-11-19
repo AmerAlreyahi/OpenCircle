@@ -11,8 +11,8 @@
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
 mod cut;
-pub(crate) mod editing;
 mod edit_text;
+pub(crate) mod editing;
 mod view;
 
 use std::path::PathBuf;

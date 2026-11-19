@@ -46,8 +46,16 @@ pub fn key(e: &Annotator, key: &Key, latin: Option<char>, m: Modifiers) -> Optio
         ('x', false) => Some(Message::CutSelection),
         ('d', false) => Some(Message::Duplicate),
         ('a', false) => Some(Message::SelectAll),
-        (']' | '}', shift) => Some(Message::Order(if shift { Order::Front } else { Order::Forward })),
-        ('[' | '{', shift) => Some(Message::Order(if shift { Order::Back } else { Order::Backward })),
+        (']' | '}', shift) => Some(Message::Order(if shift {
+            Order::Front
+        } else {
+            Order::Forward
+        })),
+        ('[' | '{', shift) => Some(Message::Order(if shift {
+            Order::Back
+        } else {
+            Order::Backward
+        })),
         _ => None,
     }
 }
@@ -123,9 +131,24 @@ pub fn object_menu(e: &Annotator) -> Vec<Entry> {
         row(Action::Duplicate, "Ctrl+D", !sel.is_empty(), false),
         row(Action::Delete, "Delete", !sel.is_empty(), false),
         row(Action::Forward, "Ctrl+]", !sel.is_empty() && !top, true),
-        row(Action::Backward, "Ctrl+[", !sel.is_empty() && !bottom, false),
-        row(Action::Front, "Ctrl+Shift+]", !sel.is_empty() && !top, false),
-        row(Action::Back, "Ctrl+Shift+[", !sel.is_empty() && !bottom, false),
+        row(
+            Action::Backward,
+            "Ctrl+[",
+            !sel.is_empty() && !bottom,
+            false,
+        ),
+        row(
+            Action::Front,
+            "Ctrl+Shift+]",
+            !sel.is_empty() && !top,
+            false,
+        ),
+        row(
+            Action::Back,
+            "Ctrl+Shift+[",
+            !sel.is_empty() && !bottom,
+            false,
+        ),
     ]
 }
 
