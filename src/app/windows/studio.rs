@@ -830,7 +830,7 @@ mod key_tests {
         };
         let is = |name: &str, ok: fn(&studio::Msg) -> bool| {
             let got = chord(name);
-            assert!(got.as_ref().is_some_and(ok), "{name:?} {got:?}");
+            assert!(got.as_ref().is_some_and(ok), "{:?}", (name, &got));
         };
         is(k::OPEN, |m| matches!(m, studio::Msg::Open));
         is(k::SAVE_AS, |m| matches!(m, studio::Msg::Export));
