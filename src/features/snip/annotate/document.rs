@@ -399,17 +399,18 @@ impl Document {
         self.undone.clear();
     }
 
-    /// Makes `new` (the whole image, same size) the picture as one undoable
-    /// edit of the box that differs. `false`: nothing differs.
-    pub fn set_pixels(&mut self, new: &[u8]) -> bool {
-        let (w, h) = (self.image.width as usize, self.image.height as usize);
-        if new.len() != self.image.rgba.len() {
+    /// Makes `rows` (whole image rows from row `top` down) the picture there,
+    /// as one undoable edit of the box that differs. `false`: nothing differs.
+    pub fn set_rows(&mut self, top: usize, rows: &[u8]) -> bool {
+        let w = self.image.width as usize;
+        let from = top * w * 4;
+        let Some(old) = self.image.rgba.get(from..from + rows.len()) else {
             return false;
-        }
-        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-        for (i, (a, b)) in self.image.rgba.chunks(4).zip(new.chunks(4)).enumerate() {
+        };
+        let (mut x0, mut y0, mut x1, mut y1) = (w, usize::MAX, 0, 0);
+        for (i, (a, b)) in old.chunks(4).zip(rows.chunks(4)).enumerate() {
             if a != b {
-                let (x, y) = (i % w, i / w);
+                let (x, y) = (i % w, top + i / w);
                 (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
             }
         }
@@ -417,15 +418,18 @@ impl Document {
             return false;
         }
         let at = [x0, y0, x1 - x0, y1 - y0];
-        let cut = |src: &[u8]| -> Vec<u8> {
+        let cut = |src: &[u8], first: usize| -> Vec<u8> {
             (y0..y1)
-                .flat_map(|y| src[(y * w + x0) * 4..(y * w + x1) * 4].iter().copied())
+                .flat_map(|y| {
+                    let r = (y - first) * w;
+                    src[(r + x0) * 4..(r + x1) * 4].iter().copied()
+                })
                 .collect()
         };
         let patch = Patch {
             at,
-            before: cut(&self.image.rgba),
-            after: cut(new),
+            before: cut(old, top),
+            after: cut(rows, top),
         };
         self.exec(Edit::Pixels(Box::new(patch)));
         true

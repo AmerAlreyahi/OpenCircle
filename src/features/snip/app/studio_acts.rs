@@ -51,7 +51,7 @@ impl App {
             }
             return Task::none();
         }
-        let epoch = self.windows.studio().map_or(0, |s| s.epoch());
+        let epoch = self.windows.studio().map_or(0, |s| s.edit_token());
         background(move |tx| {
             let _ = tx.unbounded_send(read_lines(&crop, setting, &hidden));
         })

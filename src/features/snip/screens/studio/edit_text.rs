@@ -14,6 +14,8 @@ use crate::shared::kit::area;
 
 /// The session: lines are `None` while they are being read.
 pub struct Session {
+    /// Which read this session waits for: an answer for another is dropped.
+    pub token: u32,
     pub lines: Option<Vec<Line>>,
     pub active: Option<usize>,
     pub draft: String,
@@ -25,8 +27,9 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new() -> Self {
+    pub fn new(token: u32) -> Self {
         Session {
+            token,
             lines: None,
             active: None,
             draft: String::new(),
@@ -52,7 +55,10 @@ impl Session {
         use crate::features::snip::annotate::Message as M;
         match m {
             M::TextSize(v) => self.em = Some(v),
-            M::TextStyle(s) => self.bold = Some(s.bold),
+            // (back to what was read: a semibold line stays semibold)
+            M::TextStyle(s) => {
+                self.bold = Some(s.bold).filter(|b| Some(*b) != self.matched.map(|m| m.bold))
+            }
             M::Colour(c) => self.colour = Some([c[0], c[1], c[2]]),
             _ => {}
         }
@@ -176,4 +182,18 @@ pub fn overlay<'a>(o: Overlay<'a>, shown: Size) -> iced::Element<'a, Msg> {
         .width(Length::Fixed(shown.width))
         .height(Length::Fixed(shown.height))
         .into()
+}
+
+/// The rows round `line` (full width, a few line heights above and below):
+/// all that matching and redrawing need, so a 4K picture is not copied whole.
+/// Returns the first row, the rows, and the line moved into them.
+pub fn band(rgba: &[u8], width: u32, height: u32, line: &Line) -> (usize, Vec<u8>, Line) {
+    let [_, y, _, h] = line.bounds;
+    let margin = 2.0 * h + 32.0;
+    let top = ((y - margin).max(0.0) as usize).min(height as usize);
+    let end = (((y + h + margin).ceil().max(0.0)) as usize).clamp(top, height as usize);
+    let stride = width as usize * 4;
+    let mut moved = line.clone();
+    moved.bounds[1] -= top as f32;
+    (top, rgba[top * stride..end * stride].to_vec(), moved)
 }

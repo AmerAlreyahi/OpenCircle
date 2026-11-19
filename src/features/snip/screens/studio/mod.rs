@@ -66,6 +66,9 @@ pub enum Picture {
     Editor(Box<Annotator>),
 }
 
+/// Edit text's read counter, shared like the epoch: each read is its own.
+static NEXT_READ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// The picture counter (`Studio::epoch`), shared by every Studio of the run.
 static NEXT_EPOCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -338,13 +341,19 @@ impl Studio {
         self.edit = None;
     }
 
-    /// The lines Edit text read (for the picture `epoch`), as the reader gave
-    /// them in `read_picture`'s px; or why none (a pill).
-    pub fn set_lines(&mut self, epoch: u32, read: Result<Vec<Line>, String>) -> Outcome {
+    /// The read the running Edit text session waits for (0: none).
+    pub fn edit_token(&self) -> u32 {
+        self.edit.as_ref().map_or(0, |s| s.token)
+    }
+
+    /// The lines read for session `token`, as the reader gave them in
+    /// `read_picture`'s px; or why none (a pill). An answer for a cancelled
+    /// session is dropped.
+    pub fn set_lines(&mut self, token: u32, read: Result<Vec<Line>, String>) -> Outcome {
         let (Some(e), Some(session)) = (self.editor.as_ref(), self.edit.as_mut()) else {
             return Outcome::None;
         };
-        if epoch != self.epoch {
+        if token != session.token {
             return Outcome::None;
         }
         // read from the clean view: back to image px
@@ -386,14 +395,15 @@ impl Studio {
             self.edit = None; // nothing to change
             return Outcome::None;
         }
-        let (w, h) = (e.doc.image.width, e.doc.image.height);
-        let mut pixels = e.doc.image.rgba.clone();
-        let drawn = translate::replace_line(&mut pixels, w, h, line, text, session.tweak());
+        let (w, d) = (e.doc.image.width, &e.doc.image);
+        let (top, mut pixels, moved) = edit_text::band(&d.rgba, w, d.height, line);
+        let rows = (pixels.len() / (w as usize * 4)) as u32;
+        let drawn = translate::replace_line(&mut pixels, w, rows, &moved, text, session.tweak());
         if drawn.drawn == 0 {
             // (stays on the line: the text can be changed)
             return Outcome::Say(crate::t!(st_edit_failed).to_string());
         }
-        e.doc.set_pixels(&pixels);
+        e.doc.set_rows(top, &pixels);
         e.own_image = true; // its pixels are no longer the opened picture's
         e.refresh();
         self.edit = None;
@@ -566,7 +576,8 @@ impl Studio {
                 Outcome::None
             }
             Msg::EditText => {
-                self.edit = Some(edit_text::Session::new());
+                let token = NEXT_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                self.edit = Some(edit_text::Session::new(token));
                 Outcome::ReadLines
             }
             Msg::PickLine(i) => {
@@ -577,7 +588,13 @@ impl Studio {
                     return Outcome::None;
                 };
                 let d = &e.doc.image;
-                let m = translate::matched(&d.rgba, d.width, d.height, line);
+                let (_, rows, moved) = edit_text::band(&d.rgba, d.width, d.height, line);
+                let m = translate::matched(
+                    &rows,
+                    d.width,
+                    (rows.len() / (d.width as usize * 4)) as u32,
+                    &moved,
+                );
                 s.pick(i, m);
                 Outcome::FocusField
             }
@@ -690,8 +707,10 @@ impl Studio {
             }
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
-                self.asking = None;
-                self.edit = None;
+                // Esc on the unsaved question closes only the question
+                if self.asking.take().is_none() {
+                    self.edit = None;
+                }
                 Outcome::None
             }
             Msg::SaveFirst => match &mut self.editor {

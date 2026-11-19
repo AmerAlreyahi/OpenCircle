@@ -566,7 +566,7 @@ fn edit_text_routes_reads_and_cancels_s8() {
     assert!(matches!(s.update(Msg::EditText), Outcome::ReadLines));
     assert!(matches!(s.update(Msg::EditText), Outcome::None), "once");
     assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     // an answer for another picture lands nowhere
     assert!(matches!(
         s.set_lines(epoch + 1, Ok(vec![line.clone()])),
@@ -587,7 +587,7 @@ fn edit_text_routes_reads_and_cancels_s8() {
 fn edit_text_without_lines_says_so_s8() {
     let (mut s, _) = lined(300, 120);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     assert!(matches!(
         s.set_lines(epoch, Ok(Vec::new())),
         Outcome::Say(_)
@@ -604,7 +604,7 @@ fn edit_text_lines_follow_the_crop_s8() {
         Size::new(200.0, 100.0),
     ));
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     let l = &s.edit.as_ref().unwrap().lines.as_ref().unwrap()[0];
     assert_eq!(l.bounds[..2], [26.0, 31.0]);
@@ -618,7 +618,7 @@ fn edit_text_done_is_one_undoable_edit_s8() {
     let (mut s, line) = lined(300, 120);
     let before = pixels_of(&s);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     let _ = s.update(Msg::PickLine(0));
     let _ = s.update(Msg::Draft("Hi".into()));
@@ -652,7 +652,7 @@ fn edit_text_done_is_one_undoable_edit_s8() {
 fn edit_text_with_the_same_text_is_no_edit_s8() {
     let (mut s, line) = lined(300, 120);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     let _ = s.update(Msg::PickLine(0));
     let _ = s.update(Msg::EditDone);
@@ -665,7 +665,7 @@ fn edit_text_with_the_same_text_is_no_edit_s8() {
 fn edit_text_arabic_is_right_aligned_s8() {
     let (mut s, line) = lined(300, 120);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     let _ = s.update(Msg::PickLine(0));
     let _ = s.update(Msg::Draft("مرحبا".into()));
@@ -686,7 +686,7 @@ fn edit_text_matches_its_golden_images_s8() {
     golden::each_theme(|theme, failed| {
         let (mut s, line) = lined(640, 400);
         let _ = s.update(Msg::EditText);
-        let epoch = s.epoch();
+        let epoch = s.edit_token();
         let other = Line {
             bounds: [16.0, 90.0, 200.0, 22.0],
             text: "Another line".into(),
@@ -709,7 +709,7 @@ fn edit_text_matches_its_golden_images_s8() {
 fn picked() -> Studio {
     let (mut s, line) = lined(300, 120);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     assert!(matches!(s.update(Msg::PickLine(0)), Outcome::FocusField));
     s
@@ -816,10 +816,89 @@ fn edit_text_matched_colour_is_the_inks_s8() {
 fn edit_text_inline_field_follows_the_pick_s8() {
     let (mut s, line) = lined(300, 120);
     let _ = s.update(Msg::EditText);
-    let epoch = s.epoch();
+    let epoch = s.edit_token();
     let _ = s.set_lines(epoch, Ok(vec![line]));
     assert!(s.edit.as_ref().unwrap().active.is_none());
     let _ = s.update(Msg::PickLine(0));
     let _ = s.update(Msg::Draft("typed".into()));
     assert_eq!(s.edit.as_ref().unwrap().draft, "typed");
+}
+
+/// A read from a cancelled session never fills a new one: Edit text, Esc
+/// while it reads, Edit text again; the first read's answer is ignored.
+#[test]
+fn edit_text_a_cancelled_reads_answer_is_ignored_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let old = s.edit_token();
+    let _ = s.update(Msg::Cancel);
+    let _ = s.update(Msg::EditText);
+    let new = s.edit_token();
+    assert_ne!(old, new);
+    let stale = Line {
+        text: "stale".into(),
+        ..line.clone()
+    };
+    assert!(matches!(s.set_lines(old, Ok(vec![stale])), Outcome::None));
+    assert!(s.edit.as_ref().unwrap().lines.is_none(), "still reading");
+    let _ = s.set_lines(new, Ok(vec![line]));
+    assert_eq!(
+        s.edit.as_ref().unwrap().lines.as_ref().unwrap()[0].text,
+        "Hello there"
+    );
+}
+
+/// Esc on the unsaved-changes question closes only the question.
+#[test]
+fn edit_text_esc_on_the_question_keeps_the_session_s8() {
+    let mut s = picked();
+    let _ = s.close_requested(); // dirty? make it so
+    if !s.asking() {
+        s.asking = Some(After::Close);
+    }
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+    assert!(s.edit.is_some(), "the edit goes on");
+    let _ = s.update(Msg::Cancel);
+    assert!(s.edit.is_none());
+}
+
+/// Bold switched off and on again is the matched weight, not forced bold.
+#[test]
+fn edit_text_bold_back_is_the_matched_weight_s8() {
+    let mut s = picked();
+    let m = s.edit.as_ref().unwrap().matched.unwrap();
+    let style = |bold| crate::features::snip::annotate::TextStyle {
+        bold,
+        ..Default::default()
+    };
+    let _ = s.update(Msg::Editor(Message::TextStyle(style(!m.bold))));
+    assert_eq!(s.edit.as_ref().unwrap().tweak().bold, Some(!m.bold));
+    let _ = s.update(Msg::Editor(Message::TextStyle(style(m.bold))));
+    assert_eq!(s.edit.as_ref().unwrap().tweak().bold, None);
+}
+
+/// Only the rows round the line are copied, and the edit lands in the right rows.
+#[test]
+fn edit_text_works_on_a_band_of_rows_s8() {
+    let (mut s, line) = lined(300, 400);
+    let d = &s.editor.as_ref().unwrap().doc.image;
+    let (top, rows, moved) = edit_text::band(&d.rgba, 300, 400, &line);
+    assert!(rows.len() < d.rgba.len() / 2, "not the whole frame");
+    assert_eq!(moved.bounds[1], line.bounds[1] - top as f32);
+    let before = pixels_of(&s);
+    let _ = s.update(Msg::EditText);
+    let t = s.edit_token();
+    let _ = s.set_lines(t, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Hi".into()));
+    assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+    let after = pixels_of(&s);
+    assert_ne!(after, before);
+    // nothing outside the band moved
+    assert_eq!(after[..top * 300 * 4], before[..top * 300 * 4]);
+    let end = top + rows.len() / (300 * 4);
+    assert_eq!(after[end * 300 * 4..], before[end * 300 * 4..]);
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
 }
