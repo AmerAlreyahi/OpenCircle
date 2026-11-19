@@ -3,6 +3,7 @@ use iced::{Point, Rectangle, Size, Vector};
 use super::*;
 use crate::features::snip::annotate::{Message, Tool};
 use crate::features::snip::snip_more::Row;
+use crate::features::translate::Line;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -387,7 +388,7 @@ fn a_panel_row_asks_the_host() {
     assert!(matches!(s.update(Msg::Act(Row::AskAi)), Outcome::None));
 }
 
-/// The panel shows Edit text and Cut out nowhere yet, in the design's order.
+/// The three actions in the design's order; Edit text follows them (Cut out comes later).
 #[test]
 fn the_panel_rows_are_the_three_actions_in_design_order() {
     assert_eq!(view::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
@@ -523,6 +524,181 @@ fn the_panel_and_card_match_their_golden_images() {
         }));
         let _ar = crate::shared::kit::testing::arabic();
         let file = format!("studio-panel-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
+}
+
+// ---- Edit text (v0.4.5, S8) ----
+
+/// A white picture with a dark bar of "text" rows at `y` (a line a reader would box).
+fn lined(width: u32, height: u32) -> (Studio, Line) {
+    let mut c = crop(width, height);
+    for y in 30..44usize {
+        for x in 20..140usize {
+            let on = (x / 3 + y / 2) % 3 != 0; // strokes, not a block
+            if on {
+                let i = (y * width as usize + x) * 4;
+                c.rgba[i..i + 4].copy_from_slice(&[20, 20, 30, 255]);
+            }
+        }
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    let line = Line {
+        bounds: [16.0, 26.0, 130.0, 22.0],
+        text: "Hello there".into(),
+    };
+    (s, line)
+}
+
+fn pixels_of(s: &Studio) -> Vec<u8> {
+    s.editor.as_ref().unwrap().doc.image.rgba.clone()
+}
+
+/// Edit text: the panel row asks the host to read the lines; a second click
+/// and the other rows rest meanwhile; Cancel (Esc) ends it with the picture as it was.
+#[test]
+fn edit_text_routes_reads_and_cancels_s8() {
+    let (mut s, line) = lined(300, 120);
+    let before = pixels_of(&s);
+    assert!(matches!(s.update(Msg::EditText), Outcome::ReadLines));
+    assert!(matches!(s.update(Msg::EditText), Outcome::None), "once");
+    assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
+    let epoch = s.epoch();
+    // an answer for another picture lands nowhere
+    assert!(matches!(
+        s.set_lines(epoch + 1, Ok(vec![line.clone()])),
+        Outcome::None
+    ));
+    assert!(s.edit.as_ref().unwrap().lines.is_none());
+    assert!(matches!(s.set_lines(epoch, Ok(vec![line])), Outcome::None));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Bye".into()));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.edit.is_none());
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.dirty());
+}
+
+/// No lines found: a pill says so, nothing is on.
+#[test]
+fn edit_text_without_lines_says_so_s8() {
+    let (mut s, _) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    assert!(matches!(
+        s.set_lines(epoch, Ok(Vec::new())),
+        Outcome::Say(_)
+    ));
+    assert!(s.edit.is_none());
+}
+
+/// Lines read from a cropped view come back in image px.
+#[test]
+fn edit_text_lines_follow_the_crop_s8() {
+    let (mut s, line) = lined(300, 120);
+    s.editor.as_mut().unwrap().doc.crop = Some(Rectangle::new(
+        Point::new(10.0, 5.0),
+        Size::new(200.0, 100.0),
+    ));
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let l = &s.edit.as_ref().unwrap().lines.as_ref().unwrap()[0];
+    assert_eq!(l.bounds[..2], [26.0, 31.0]);
+}
+
+/// Done replaces the line in the pixels (the old strokes are gone, new ones
+/// drawn), as one undoable, unsaved document edit; Undo brings the bytes back
+/// exactly and Redo again.
+#[test]
+fn edit_text_done_is_one_undoable_edit_s8() {
+    let (mut s, line) = lined(300, 120);
+    let before = pixels_of(&s);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("Hi".into()));
+    let out = s.update(Msg::EditDone);
+    assert!(
+        matches!(out, Outcome::None),
+        "{:?}",
+        matches!(out, Outcome::Say(_))
+    );
+    assert!(s.edit.is_none());
+    let after = pixels_of(&s);
+    assert_ne!(after, before);
+    assert!(s.dirty(), "an unsaved edit");
+    assert_eq!(s.editor.as_ref().unwrap().doc.steps(), (1, 1));
+    // the right part of the old line (past "Hi") is background again
+    let at = |x: usize, y: usize| after[(y * 300 + x) * 4..][..3].to_vec();
+    assert_eq!(at(130, 37), [255; 3], "old strokes erased");
+    // Undo / Redo through the editor's own messages
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.dirty());
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert_eq!(pixels_of(&s), after);
+    // Save and Copy get the edit
+    let saved = annotate::render(&s.editor.as_ref().unwrap().doc);
+    assert_eq!(saved.rgba, after);
+}
+
+/// An unchanged or empty text changes nothing (no history entry).
+#[test]
+fn edit_text_with_the_same_text_is_no_edit_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::EditDone);
+    assert!(s.edit.is_none());
+    assert_eq!(s.editor.as_ref().unwrap().doc.steps(), (0, 0));
+}
+
+/// Arabic text goes right to left: it is drawn against the line box's right edge.
+#[test]
+fn edit_text_arabic_is_right_aligned_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("مرحبا".into()));
+    assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+    let px = pixels_of(&s);
+    let ink: Vec<usize> = (0..300usize)
+        .filter(|&x| (26..48usize).any(|y| px[(y * 300 + x) * 4] < 128))
+        .collect();
+    let (lo, hi) = (*ink.first().unwrap(), *ink.last().unwrap());
+    assert!(hi > 100 && lo > 60, "against the right edge: {lo}..{hi}");
+}
+
+/// The lines over the picture, a picked one, and the bar, in English and Arabic.
+#[test]
+fn edit_text_matches_its_golden_images_s8() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let (mut s, line) = lined(640, 400);
+        let _ = s.update(Msg::EditText);
+        let epoch = s.epoch();
+        let other = Line {
+            bounds: [16.0, 90.0, 200.0, 22.0],
+            text: "Another line".into(),
+        };
+        let _ = s.set_lines(epoch, Ok(vec![line, other]));
+        let _ = s.update(Msg::PickLine(0));
+        let file = format!("studio-edit-text-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-edit-text-ar-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
             view(&s, false)
         }));

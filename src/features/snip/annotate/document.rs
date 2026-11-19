@@ -237,6 +237,29 @@ pub enum Edit {
     Area(Rectangle, Rectangle, Vector),
     /// Every item before and after (an eraser stroke: one undo brings back all it erased).
     Items(Vec<Item>, Vec<Item>),
+    /// The picture's own pixels changed (Studio's Edit text): the box that
+    /// changed, before and after.
+    Pixels(Box<Patch>),
+}
+
+/// A changed box of the image: `x, y, w, h` (image px), RGBA rows before and after.
+#[derive(Clone, Debug)]
+pub struct Patch {
+    pub at: [usize; 4],
+    pub before: Vec<u8>,
+    pub after: Vec<u8>,
+}
+
+impl Patch {
+    /// `after` written into `image`.
+    fn write(&self, image: &mut Image, bytes: &[u8]) {
+        let [x, y, w, h] = self.at;
+        let stride = image.width as usize * 4;
+        for row in 0..h {
+            let to = (y + row) * stride + x * 4;
+            image.rgba[to..to + w * 4].copy_from_slice(&bytes[row * w * 4..(row + 1) * w * 4]);
+        }
+    }
 }
 
 impl Edit {
@@ -248,6 +271,11 @@ impl Edit {
             Edit::Crop(before, after) => Edit::Crop(after, before),
             Edit::Area(before, after, moved) => Edit::Area(after, before, -moved),
             Edit::Items(before, after) => Edit::Items(after, before),
+            Edit::Pixels(p) => Edit::Pixels(Box::new(Patch {
+                at: p.at,
+                before: p.after,
+                after: p.before,
+            })),
         }
     }
 
@@ -274,6 +302,7 @@ impl Edit {
                 doc.items = after.clone();
                 doc.selected = None;
             }
+            Edit::Pixels(p) => p.write(&mut doc.image, &p.after),
         }
     }
 }
@@ -368,6 +397,38 @@ impl Document {
         self.made += 1;
         self.done.push((self.made, edit));
         self.undone.clear();
+    }
+
+    /// Makes `new` (the whole image, same size) the picture as one undoable
+    /// edit of the box that differs. `false`: nothing differs.
+    pub fn set_pixels(&mut self, new: &[u8]) -> bool {
+        let (w, h) = (self.image.width as usize, self.image.height as usize);
+        if new.len() != self.image.rgba.len() {
+            return false;
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+        for (i, (a, b)) in self.image.rgba.chunks(4).zip(new.chunks(4)).enumerate() {
+            if a != b {
+                let (x, y) = (i % w, i / w);
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+        if x1 <= x0 {
+            return false;
+        }
+        let at = [x0, y0, x1 - x0, y1 - y0];
+        let cut = |src: &[u8]| -> Vec<u8> {
+            (y0..y1)
+                .flat_map(|y| src[(y * w + x0) * 4..(y * w + x1) * 4].iter().copied())
+                .collect()
+        };
+        let patch = Patch {
+            at,
+            before: cut(&self.image.rgba),
+            after: cut(new),
+        };
+        self.exec(Edit::Pixels(Box::new(patch)));
+        true
     }
 
     /// Which state of the history this is: the same number only for the same

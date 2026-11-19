@@ -19,6 +19,7 @@ pub mod lang;
 pub(crate) mod mt;
 mod online;
 pub mod pipeline;
+pub(crate) use pipeline::to_line;
 pub(crate) mod screens;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -402,6 +403,26 @@ pub fn render(
         draw::draw_block(&mut fonts, rgba, dims, &p, fit);
     }
     report
+}
+
+/// One line's text replaced in place (Snip Studio's Edit text): `render`'s own
+/// erase and redraw on a block of that one line, so the new text takes the
+/// old one's size, colour, weight and alignment. `drawn == 0` = the line was
+/// left as it was (busy background, or no room).
+pub fn replace_line(rgba: &mut [u8], width: u32, height: u32, line: &Line, text: &str) -> Drawn {
+    let block = Block {
+        lines: vec![line.clone()],
+        text: line.text.clone(),
+        bounds: line.bounds,
+    };
+    render(
+        rgba,
+        width,
+        height,
+        &[block],
+        &[text.to_string()],
+        rtl_text(text),
+    )
 }
 
 type Fitted<'a> = (

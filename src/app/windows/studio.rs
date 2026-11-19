@@ -190,7 +190,7 @@ impl Windows {
         Task::batch([toast, self.studio_outcome(next)])
     }
 
-    fn studio_outcome(&mut self, outcome: Outcome) -> Task<Msg> {
+    pub(super) fn studio_outcome(&mut self, outcome: Outcome) -> Task<Msg> {
         let Some(id) = self.studio_window() else {
             return Task::none();
         };
@@ -230,6 +230,8 @@ impl Windows {
             Outcome::Pin(crop) => self.pin(crop, None, 1.0),
             Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
             Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
+            Outcome::ReadLines => Task::done(Msg::StudioEditText),
+            Outcome::Say(text) => self.say(&text, false),
             Outcome::Download => Task::done(Msg::StudioDownload),
             Outcome::Dismissed => Task::done(Msg::StudioDismiss),
             Outcome::Provider => Task::batch([

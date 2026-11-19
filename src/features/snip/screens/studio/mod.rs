@@ -6,6 +6,7 @@
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
+mod edit_text;
 mod view;
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ use iced::{Point, Size, Vector};
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
 use crate::features::snip::snip_more::{self as more, Row};
 pub use crate::features::text_reading::model_download::Fetching;
+use crate::features::translate::{self, Line};
 use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
@@ -120,6 +122,12 @@ pub enum Msg {
     Provider,
     /// The window has / lost the keyboard (the quick-action keys act on it).
     Focus(bool),
+    /// The panel's Edit text row; a line picked on the picture; its new text;
+    /// Done (Enter). Cancel (Esc) leaves the picture as it was.
+    EditText,
+    PickLine(usize),
+    Draft(String),
+    EditDone,
 }
 
 /// What the host does after a message.
@@ -155,6 +163,11 @@ pub enum Outcome {
     Dismissed,
     /// The card's AI link: dismissed, and Settings opens.
     Provider,
+    /// Edit text: the host reads the picture's lines (`read_picture`) and
+    /// answers with `set_lines`.
+    ReadLines,
+    /// A pill with this (an edit that could not be made).
+    Say(String),
 }
 
 pub struct Studio {
@@ -185,6 +198,8 @@ pub struct Studio {
     /// The row that is working (its icon spins), and the download card up.
     busy: Option<Row>,
     card: Option<Fetching>,
+    /// Edit text is on (S8).
+    edit: Option<edit_text::Session>,
 }
 
 impl Studio {
@@ -208,6 +223,7 @@ impl Studio {
             browser: false,
             busy: None,
             card: None,
+            edit: None,
         }
     }
 
@@ -236,7 +252,7 @@ impl Studio {
         editor.edges.clear();
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
-        (self.original, self.busy, self.card) = (None, None, None);
+        (self.original, self.busy, self.card, self.edit) = (None, None, None, None);
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         self.zoom = None;
@@ -311,6 +327,73 @@ impl Studio {
         let mut crop = annotate::clean(doc);
         more::mask(&mut crop, &hidden);
         Some((crop, hidden))
+    }
+
+    /// Edit text stops (the reader's models are missing: the card asks).
+    pub fn cancel_edit(&mut self) {
+        self.edit = None;
+    }
+
+    /// The lines Edit text read (for the picture `epoch`), as the reader gave
+    /// them in `read_picture`'s px; or why none (a pill).
+    pub fn set_lines(&mut self, epoch: u32, read: Result<Vec<Line>, String>) -> Outcome {
+        let (Some(e), Some(session)) = (self.editor.as_ref(), self.edit.as_mut()) else {
+            return Outcome::None;
+        };
+        if epoch != self.epoch {
+            return Outcome::None;
+        }
+        // read from the clean view: back to image px
+        let view = e.doc.view();
+        let (dx, dy) = (view.x.floor(), view.y.floor());
+        match read {
+            Ok(lines) if !lines.is_empty() => {
+                session.lines = Some(
+                    lines
+                        .into_iter()
+                        .map(|mut l| {
+                            (l.bounds[0], l.bounds[1]) = (l.bounds[0] + dx, l.bounds[1] + dy);
+                            l
+                        })
+                        .collect(),
+                );
+                Outcome::None
+            }
+            Ok(_) => {
+                self.edit = None;
+                Outcome::Say(crate::t!(sn_no_text).to_string())
+            }
+            Err(why) => {
+                self.edit = None;
+                Outcome::Say(why)
+            }
+        }
+    }
+
+    /// Done: the picked line says the typed text in the pixels, one undoable edit.
+    fn finish_edit(&mut self) -> Outcome {
+        let (Some(e), Some(session)) = (self.editor.as_mut(), self.edit.as_ref()) else {
+            return Outcome::None;
+        };
+        let Some((line, text)) = session.target() else {
+            return Outcome::None;
+        };
+        if text.is_empty() || text == line.text.trim() {
+            self.edit = None; // nothing to change
+            return Outcome::None;
+        }
+        let (w, h) = (e.doc.image.width, e.doc.image.height);
+        let mut pixels = e.doc.image.rgba.clone();
+        let drawn = translate::replace_line(&mut pixels, w, h, line, text);
+        if drawn.drawn == 0 {
+            // (stays on the line: the text can be changed)
+            return Outcome::Say(crate::t!(st_edit_failed).to_string());
+        }
+        e.doc.set_pixels(&pixels);
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+        self.edit = None;
+        Outcome::None
     }
 
     /// The picture as shown, drawings on it: what Ask AI gets.
@@ -454,12 +537,40 @@ impl Studio {
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
+                    | Msg::EditText
                     | Msg::Download
             )
         {
             return Outcome::None;
         }
         match msg {
+            // while a line is edited the picture's tools rest
+            Msg::Editor(_) | Msg::Act(_) if self.edit.is_some() => Outcome::None,
+            Msg::EditText
+                if self.editor.is_none()
+                    || self.card.is_some()
+                    || self.original.is_some()
+                    || self.edit.is_some() =>
+            {
+                Outcome::None
+            }
+            Msg::EditText => {
+                self.edit = Some(edit_text::Session::new());
+                Outcome::ReadLines
+            }
+            Msg::PickLine(i) => {
+                if let Some(s) = &mut self.edit {
+                    s.pick(i);
+                }
+                Outcome::None
+            }
+            Msg::Draft(text) => {
+                if let Some(s) = &mut self.edit {
+                    s.draft = text;
+                }
+                Outcome::None
+            }
+            Msg::EditDone => self.finish_edit(),
             Msg::Editor(annotate::Message::Paste(at))
                 if self.editor.as_ref().is_some_and(|e| !e.typing()) =>
             {
@@ -563,6 +674,7 @@ impl Studio {
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
                 self.asking = None;
+                self.edit = None;
                 Outcome::None
             }
             Msg::SaveFirst => match &mut self.editor {

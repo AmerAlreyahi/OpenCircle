@@ -67,7 +67,10 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
             parts.push(rail(e));
             parts.push(divider::vertical(Fill));
             let work = column![
-                options_bar(e),
+                match &s.edit {
+                    Some(x) => edit_bar(x),
+                    None => options_bar(e),
+                },
                 divider::divider(),
                 stage(s, e),
                 divider::divider(),
@@ -219,10 +222,69 @@ fn options_bar(e: &Annotator) -> Element<'_, Msg> {
     Element::from(scroll::across(bar).width(Fill)).map(Msg::Editor)
 }
 
+/// Edit text's options bar (S8): the new text, what is matched, Cancel / Done.
+fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
+    let line: Element<'_, Msg> = match (&x.lines, x.active) {
+        (None, _) => muted(Role::ROW_DESC, t!(st_edit_reading)).into(),
+        (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
+        _ => crate::dir_row![
+            crate::shared::kit::field::input(t!(st_edit_type), &x.draft, false, false)
+                .on_input(Msg::Draft)
+                .on_submit(Msg::EditDone)
+                .width(Length::Fixed(OPTION_W * 1.15)),
+            chip::tag(t!(st_edit_font)),
+            chip::tag(t!(st_edit_colour)),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center)
+        .into(),
+    };
+    let ready = x.active.is_some();
+    let row = crate::dir_row![
+        line,
+        Space::new().width(Fill),
+        cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel),
+        button::button(
+            label(t!(st_edit_done)),
+            Kind::Accent,
+            ready.then_some(Msg::EditDone)
+        ),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    container(row)
+        .padding([0.0, space::PAGE[1]])
+        .center_y(super::OPTIONS)
+        .width(Fill)
+        .into()
+}
+
 /// The picture, fitted or zoomed (both ways scrollable past the stage).
 fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let drawn = canvas::canvas(e, 1.0, ScreenMap::ONE).map(Msg::Editor);
     let (shown, room) = (e.size(), s.stage());
+    // Edit text: the found lines over the picture (dashed, the picked one solid)
+    let drawn: Element<'a, Msg> = match s
+        .edit
+        .as_ref()
+        .and_then(|x| x.lines.as_deref().map(|l| (x, l)))
+    {
+        Some((x, lines)) => iced::widget::stack![
+            drawn,
+            super::edit_text::overlay(
+                super::edit_text::Overlay {
+                    lines,
+                    active: x.active,
+                    origin: e.doc.view().position(),
+                    zoom: e.zoom,
+                    look: crate::shared::theme::accent_of(&crate::shared::config::look()),
+                },
+                shown,
+            )
+        ]
+        .into(),
+        None => drawn,
+    };
     // a px less than the stage: no scrollbar for a fitted picture
     let content = container(drawn)
         .center_x((room.width - 2.0).max(shown.width))
@@ -381,7 +443,7 @@ fn library(s: &Studio) -> Element<'_, Msg> {
 fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     let mut list = column![text(Role::SECTION, t!(st_picture))].spacing(space::PAGE[0]);
     if let Some(e) = &s.editor {
-        let info = s.info();
+        let acts = s.info();
         let mut rows = column![];
         for row in ACTS {
             let at = Row::ALL.iter().position(|r| *r == row).unwrap_or(0);
@@ -391,14 +453,26 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
             };
             rows = rows.push(option_list::action(option_list::ActionRow {
                 lead,
-                label: tr(row.label(info.translated)),
-                external: row == Row::AskAi && info.browser,
-                caps: info.caps[at].clone(),
+                label: tr(row.label(acts.translated)),
+                external: row == Row::AskAi && acts.browser,
+                caps: acts.caps[at].clone(),
                 reading: s.busy() == Some(row),
                 focused: false,
                 press: Some(Msg::Act(row)),
             }));
         }
+        // Edit text: only on the picture as opened (a translation is its own picture)
+        let editing = s.edit.is_some();
+        let lead = option_list::glyph(info(Tool::Text).icon, false);
+        rows = rows.push(option_list::action(option_list::ActionRow {
+            lead,
+            label: tr(crate::shared::app_language::S::st_edit_text),
+            external: false,
+            caps: Vec::new(),
+            reading: s.edit.as_ref().is_some_and(|x| x.lines.is_none()),
+            focused: false,
+            press: (!editing && !acts.translated).then_some(Msg::EditText),
+        }));
         let px = e.doc.view().size();
         let line = |name, value: String| {
             crate::dir_row![
@@ -420,8 +494,8 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     side(list, super::panel_width())
 }
 
-/// The panel's rows, in the design's order (Edit text and Cut out come with
-/// v0.4.5 / v0.4.6).
+/// The panel's rows, in the design's order (Edit text follows them, Cut out comes
+/// with v0.4.6).
 pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 
 fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {

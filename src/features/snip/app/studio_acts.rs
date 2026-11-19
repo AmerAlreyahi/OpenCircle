@@ -34,6 +34,30 @@ impl App {
         }
     }
 
+    /// Edit text: the picture's lines (hidden parts out), read as Copy text
+    /// reads, padded like Translate's: the Studio shows them over the picture.
+    pub(crate) fn studio_edit_text(&mut self) -> Task<Message> {
+        let Some((crop, hidden)) = self.windows.studio().and_then(|s| s.read_picture()) else {
+            return Task::none();
+        };
+        let setting = config::current().selection.text_reader;
+        let helper = text_reading::route(setting, Some(text_reading::system::language()))
+            == text_reading::Source::Helper;
+        if helper && !models_present() {
+            // the reader's card; the click on Edit text again, once it is in
+            if let Some(s) = self.windows.studio_mut() {
+                s.cancel_edit();
+                s.set_card(Some(Fetching::reader()));
+            }
+            return Task::none();
+        }
+        let epoch = self.windows.studio().map_or(0, |s| s.epoch());
+        background(move |tx| {
+            let _ = tx.unbounded_send(read_lines(&crop, setting, &hidden));
+        })
+        .map(move |r| Message::Windows(W::StudioLines(epoch, r)))
+    }
+
     fn studio_say(&mut self, text: &str, ok: bool) -> Task<Message> {
         self.windows.say(text, ok).map(Message::Windows)
     }
@@ -249,6 +273,22 @@ fn read_text(
         return Err(t!(sn_no_text).to_string());
     }
     Ok(text)
+}
+
+/// Blocking: the picture's lines, hidden parts left out; or why not.
+fn read_lines(
+    crop: &crate::shared::picture::Crop,
+    setting: config::TextReader,
+    hidden: &more::Hidden,
+) -> Result<Vec<crate::features::translate::Line>, String> {
+    let blocks = read_crop(crop, setting, 1.0).map_err(|e| {
+        crate::log!("[opencircle] Studio: the lines were not read: {e}");
+        t!(st_read_failed).to_string()
+    })?;
+    let (w, h) = (crop.width, crop.height);
+    Ok((more::visible(blocks, hidden).into_iter())
+        .map(|b| crate::features::translate::to_line(b, w, h))
+        .collect())
 }
 
 #[cfg(test)]

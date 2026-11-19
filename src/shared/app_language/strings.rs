@@ -1772,6 +1772,22 @@ strings! {
         | "الحجم";
     st_drawings: "Drawings"
         | "الرسومات";
+    st_edit_text: "Edit text"
+        | "تحرير النص";
+    st_edit_pick: "Pick a line on the picture"
+        | "اختر سطرًا على الصورة";
+    st_edit_reading: "Finding the lines…"
+        | "جارٍ البحث عن الأسطر…";
+    st_edit_type: "Type the new text"
+        | "اكتب النص الجديد";
+    st_edit_font: "Font size · matched"
+        | "حجم الخط · مطابق";
+    st_edit_colour: "Colour · matched"
+        | "اللون · مطابق";
+    st_edit_done: "Done"
+        | "تم";
+    st_edit_failed: "This line can't be redrawn cleanly here"
+        | "تعذّر إعادة رسم هذا السطر بشكل نظيف هنا";
     st_read_failed: "Couldn't read the text in this picture"
         | "تعذّرت قراءة النص في هذه الصورة";
     st_show_library: "Show the library"

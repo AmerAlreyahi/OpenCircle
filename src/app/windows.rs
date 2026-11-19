@@ -120,6 +120,10 @@ pub enum Msg {
     StudioAct(crate::features::snip::snip_more::Row),
     /// Copy text's text, read (the Studio): the clipboard, then the pill.
     StudioText(u32, Result<String, String>),
+    /// Edit text: the picture's lines read (the Studio), for that picture.
+    StudioLines(u32, Result<Vec<crate::features::translate::Line>, String>),
+    /// Edit text starts (the App reads the picture: `snip::app::studio_acts`).
+    StudioEditText,
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
@@ -1410,7 +1414,14 @@ impl Windows {
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
-            Msg::StudioAct(_) => {}
+            Msg::StudioAct(_) | Msg::StudioEditText => {}
+            Msg::StudioLines(epoch, read) => {
+                let out = match self.studio_mut() {
+                    Some(s) => s.set_lines(epoch, read),
+                    None => return Task::none(),
+                };
+                return self.studio_outcome(out);
+            }
             Msg::StudioDownload | Msg::StudioDismiss => {}
             Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioToast(done) => {
