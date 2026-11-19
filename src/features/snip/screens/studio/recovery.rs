@@ -27,7 +27,6 @@ pub struct Pending {
     pub saved_at: SystemTime,
 }
 
-/// `<data>/OpenCircle/studio-recovery`.
 #[cfg(test)]
 thread_local! {
     /// A test's own folder (each test runs on its own thread).
@@ -40,6 +39,7 @@ pub fn use_dir(dir: PathBuf) {
     TEST_DIR.with(|d| *d.borrow_mut() = Some(dir));
 }
 
+/// `<data>/OpenCircle/studio-recovery`.
 pub fn dir() -> PathBuf {
     #[cfg(test)]
     if let Some(dir) = TEST_DIR.with(|d| d.borrow().clone()) {

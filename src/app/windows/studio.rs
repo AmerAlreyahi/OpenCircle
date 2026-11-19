@@ -408,13 +408,37 @@ impl Windows {
     }
 }
 
-/// Settings > Studio > Saving: the folder, the name pattern (`{date}` `{time}`),
-/// the format and quality, "Ask where to save" and "Copy the file path". Blocking;
-/// `None`: the dialog was cancelled. Ok / Err = the pill.
+/// Settings > Studio > Saving with the dialog the user has (Save as, "Ask where
+/// to save"). Blocking; `None`: the dialog was cancelled. Ok / Err = the pill.
 fn save_file(crop: Crop) -> Option<Result<String, String>> {
-    use crate::shared::config::Format;
     let config = crate::shared::config::current();
-    let prefs = config.studio;
+    save_to(
+        crop,
+        &config.studio,
+        config.snip.max_edge,
+        |folder, name, how| {
+            rfd::FileDialog::new()
+                .set_title(crate::t!(st_export_where))
+                .set_directory(folder)
+                .set_file_name(name)
+                .add_filter(how.format.name(), &[how.format.ext()])
+                .save_file()
+        },
+    )
+}
+
+/// The Studio's Save: the folder, the name pattern (`{date}` `{time}`), the format
+/// and quality, "Ask where to save" (`ask` is the dialog: the folder, the name with
+/// its extension, the format; `None` = cancelled) and "Copy the file path". It
+/// never writes over a file the user did not confirm: a taken name gets `-2`, `-3`
+/// (created exclusively, so a file made meanwhile is safe too).
+fn save_to(
+    crop: Crop,
+    prefs: &crate::shared::config::StudioPrefs,
+    max_edge: u32,
+    ask: impl FnOnce(&std::path::Path, &str, export::Picture) -> Option<std::path::PathBuf>,
+) -> Option<Result<String, String>> {
+    use crate::shared::config::Format;
     let not_saved = || crate::t!(pill_not_saved).to_string();
     let how = export::Picture {
         format: match prefs.format {
@@ -422,7 +446,7 @@ fn save_file(crop: Crop) -> Option<Result<String, String>> {
             Format::Jpeg => export::Format::Jpg,
         },
         quality: prefs.quality,
-        max_edge: config.snip.max_edge,
+        max_edge,
     };
     let ext = how.format.ext();
     let (date, time) = save::date_time();
@@ -444,38 +468,69 @@ fn save_file(crop: Crop) -> Option<Result<String, String>> {
             return Some(Err(not_saved()));
         }
     };
-    let path = match prefs.ask_where {
+    // the name the dialog starts with has its extension already; what the user
+    // confirms there is what may be overwritten, nothing else
+    let (path, confirmed) = match prefs.ask_where {
         true => {
-            let picked = rfd::FileDialog::new()
-                .set_title(crate::t!(st_export_where))
-                .set_directory(&folder)
-                .set_file_name(format!("{stem}.{ext}"))
-                .add_filter(how.format.name(), &[ext])
-                .save_file()?;
-            export::with_ext(picked, how.format)
+            let picked = ask(&folder, &format!("{stem}.{ext}"), how)?;
+            let named = export::with_ext(picked.clone(), how.format);
+            let same = named == picked;
+            (named, same)
         }
-        false => unused_name(&folder, &stem, ext),
+        false => (folder.join(format!("{stem}.{ext}")), false),
     };
-    if let Err(e) = std::fs::write(&path, bytes) {
-        crate::log!("[opencircle] save failed: {e}");
-        return Some(Err(not_saved()));
-    }
+    let written = match write_file(&path, &bytes, confirmed) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::log!("[opencircle] save failed: {e}");
+            return Some(Err(not_saved()));
+        }
+    };
     if prefs.copy_path {
-        let _ = copy::text(path.display().to_string());
+        let _ = copy::text(written.display().to_string());
     }
-    let shown = path.parent().unwrap_or(&path);
+    let shown = written.parent().unwrap_or(&written);
     Some(Ok(fmt(S::pill_saved, &[&save::short_path(shown)])))
 }
 
-/// `<stem>.<ext>` in `folder`, or `<stem>-2.<ext>`, ...: never over a file.
-fn unused_name(folder: &std::path::Path, stem: &str, ext: &str) -> std::path::PathBuf {
-    let mut path = folder.join(format!("{stem}.{ext}"));
-    let mut n = 2;
-    while path.exists() {
-        path = folder.join(format!("{stem}-{n}.{ext}"));
-        n += 1;
+/// `bytes` into `path`, or into `<name>-2.<ext>`, `-3` ... when it is taken: created
+/// exclusively. `confirmed`: the user was asked about this very file (the dialog's
+/// overwrite question): it is written over. Returns where it went.
+fn write_file(
+    path: &std::path::Path,
+    bytes: &[u8],
+    confirmed: bool,
+) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    if confirmed {
+        std::fs::write(path, bytes)?;
+        return Ok(path.to_path_buf());
     }
-    path
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+    for n in 1.. {
+        let name = match (n, &ext) {
+            (1, _) => path.to_path_buf(),
+            (n, Some(ext)) => path.with_file_name(format!("{stem}-{n}.{ext}")),
+            (n, None) => path.with_file_name(format!("{stem}-{n}")),
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&name)
+        {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                return Ok(name);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!()
 }
 
 /// Save off the UI thread (encoding a big picture takes a while): `Msg::StudioSaved`.
@@ -865,6 +920,115 @@ fn exported_steps(n: usize, folder: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::shared::app_language::{Lang, set};
+
+    fn picture() -> crate::shared::picture::Crop {
+        crate::shared::picture::Crop {
+            width: 8,
+            height: 6,
+            rgba: vec![255; 8 * 6 * 4],
+        }
+    }
+
+    fn prefs(folder: &std::path::Path) -> crate::shared::config::StudioPrefs {
+        crate::shared::config::StudioPrefs {
+            folder: folder.display().to_string(),
+            file_name: "shot {date} {time}".into(),
+            ..Default::default()
+        }
+    }
+
+    /// Settings > Studio > Saving: the folder and the name pattern are used; a second
+    /// save never overwrites the first (`-2`); the path goes on the clipboard when
+    /// asked for.
+    #[test]
+    fn save_uses_the_folder_and_pattern_and_never_overwrites() {
+        let dir = crate::shared::paths::test_dir("w87-save-plain");
+        let mut p = prefs(&dir);
+        p.copy_path = true;
+        let say = |p: &crate::shared::config::StudioPrefs| {
+            super::save_to(picture(), p, 0, |_, _, _| panic!("no dialog"))
+                .unwrap()
+                .unwrap()
+        };
+        let _ = say(&p);
+        let _ = say(&p);
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(
+            names
+                .iter()
+                .all(|n| n.starts_with("shot 20") && n.ends_with(".png")),
+            "{names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n.contains("-2.")),
+            "the second got its own name: {names:?}"
+        );
+        let copied = crate::features::circle::actions::copy::copied::text().unwrap();
+        assert!(copied.starts_with(&dir.display().to_string()), "{copied}");
+        p.copy_path = false;
+        p.format = crate::shared::config::Format::Jpeg;
+        let _ = say(&p);
+        assert!(
+            std::fs::read_dir(&dir).unwrap().any(|e| e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".jpg"))
+        );
+    }
+
+    /// "Ask where to save": the dialog starts in the folder with the extension on
+    /// its name; what it returns is written (and may be overwritten: the dialog asked);
+    /// cancelled = nothing written; a name typed without the extension is never written
+    /// over an existing file the dialog did not ask about.
+    #[test]
+    fn save_as_asks_where_and_overwrites_only_what_was_confirmed() {
+        let dir = crate::shared::paths::test_dir("w87-save-ask");
+        let mut p = prefs(&dir);
+        p.ask_where = true;
+        p.file_name = "mine".into();
+        let target = dir.join("chosen.png");
+        std::fs::write(&target, b"old").unwrap();
+        let seen = std::cell::RefCell::new(None);
+        let out = super::save_to(picture(), &p, 0, |folder, name, _| {
+            *seen.borrow_mut() = Some((folder.to_path_buf(), name.to_string()));
+            Some(target.clone())
+        });
+        assert!(out.unwrap().is_ok());
+        assert_eq!(
+            seen.into_inner().unwrap(),
+            (dir.clone(), "mine.png".to_string())
+        );
+        assert_ne!(
+            std::fs::read(&target).unwrap(),
+            b"old",
+            "confirmed: overwritten"
+        );
+        // cancelled: nothing
+        assert!(super::save_to(picture(), &p, 0, |_, _, _| None).is_none());
+        // typed without the extension, and that file exists: not overwritten
+        std::fs::write(dir.join("typed.png"), b"keep").unwrap();
+        let out = super::save_to(picture(), &p, 0, |_, _, _| Some(dir.join("typed")));
+        assert!(out.unwrap().is_ok());
+        assert_eq!(std::fs::read(dir.join("typed.png")).unwrap(), b"keep");
+        assert!(dir.join("typed-2.png").exists());
+    }
+
+    /// Exclusive creation: a name that appears meanwhile is never written over.
+    #[test]
+    fn write_file_takes_the_next_free_name() {
+        let dir = crate::shared::paths::test_dir("w87-write-new");
+        let path = dir.join("a.png");
+        std::fs::write(&path, b"1").unwrap();
+        std::fs::write(dir.join("a-2.png"), b"2").unwrap();
+        let got = super::write_file(&path, b"new", false).unwrap();
+        assert_eq!(got, dir.join("a-3.png"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"1");
+    }
 
     #[test]
     fn the_exported_steps_message_counts_in_the_apps_language() {
