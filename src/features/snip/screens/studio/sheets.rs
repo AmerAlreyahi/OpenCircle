@@ -171,11 +171,23 @@ pub struct Restorable {
 }
 
 /// The restore sheet.
-pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg, later: Msg) -> Element<'a, Msg> {
+pub fn restore<'a>(
+    r: &'a Restorable,
+    restore: Msg,
+    discard: Msg,
+    later: Msg,
+    failed: bool,
+) -> Element<'a, Msg> {
     let sized = |b: Element<'a, Msg>| container(b).width(RESTORE_BUTTON);
     let body = column![
         text(Role::CARD_HEADING, t!(st_restore_title)),
-        sub(Role::ROW_DESC, t!(st_restore_hint)),
+        sub(
+            Role::ROW_DESC,
+            match failed {
+                true => t!(st_restore_failed),
+                false => t!(st_restore_hint),
+            }
+        ),
         muted(
             Role::KEYCAP,
             format!("{} · {} × {}", r.name, r.size.0, r.size.1)

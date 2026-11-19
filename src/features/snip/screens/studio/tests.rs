@@ -1468,7 +1468,7 @@ fn v3_the_frame_matches_its_golden_images() {
             &name,
             Size::new(560.0, 200.0),
             &[1.0],
-            || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None), Msg::Menu(None)),
+            || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None), Msg::Menu(None), false),
         ));
         let mut c = studio_on(640, 400);
         draw(&mut c);
@@ -1805,11 +1805,12 @@ fn v3_alt_opens_the_menu_bar_on_release_only() {
 #[test]
 fn v3_restore_waits_for_the_unsaved_question_and_cancel_keeps_the_copy() {
     let png = crate::shared::picture::encode_png(4, 3, &[200; 4 * 3 * 4]).unwrap();
+    let notes = empty_notes();
     let copy = || Restorable {
         name: "Unsaved".into(),
         size: (4, 3),
         png: png.clone(),
-        notes: String::new(),
+        notes: notes.clone(),
     };
     let mut s = studio_on(64, 64);
     draw(&mut s);
@@ -1840,9 +1841,8 @@ fn v3_the_recovery_clock_runs_only_while_an_edit_waits() {
     assert!(!s.waiting());
     s.quiet.changed(std::time::Instant::now());
     assert!(s.waiting());
-    s.copy_on_disk = true;
     s.drop_copy();
-    assert!(!s.waiting() && !s.copy_on_disk);
+    assert!(!s.waiting());
 }
 
 /// The right-click menu stays inside the window at the right / bottom edges, and
@@ -2043,4 +2043,51 @@ fn v3_several_selected_objects_show_every_swatch() {
 
 fn colours_again(e: &annotate::Annotator) -> iced::Element<'_, Msg> {
     options_bar::selection_groups(e, 6).remove(0)
+}
+
+/// A kept copy in this test's own folder, as the window's `Restorable` (`notes`
+/// are the drawings' JSON, or whatever is given).
+fn kept_copy(tag: &str, notes: &str) -> Restorable {
+    recovery::use_dir(crate::shared::paths::test_dir(tag).join("studio-recovery"));
+    let png = crate::shared::picture::encode_png(4, 3, &[200; 4 * 3 * 4]).unwrap();
+    assert!(recovery::write_in(&recovery::dir(), true, &png, notes).unwrap());
+    let p = recovery::pending().unwrap();
+    Restorable {
+        name: "Unsaved".into(),
+        size: (4, 3),
+        png: p.png,
+        notes: p.notes,
+    }
+}
+
+fn empty_notes() -> String {
+    studio_on(4, 3).editor.as_ref().unwrap().annotations_json()
+}
+
+/// Restore does not delete the copy on load: the restored document is unsaved
+/// (it asks before it is lost), a new copy is scheduled, and the old one goes only
+/// when it is saved.
+#[test]
+fn v3_restore_keeps_the_copy_until_the_document_is_saved() {
+    let r = kept_copy("w87-restore-keep", &empty_notes());
+    let mut s = studio_on(64, 64);
+    s.restorable = Some(r);
+    let _ = s.update(Msg::Restore);
+    assert_eq!(s.editor.as_ref().unwrap().doc.image.width, 4, "restored");
+    assert!(recovery::pending().is_some(), "the copy stays on disk");
+    assert!(s.dirty(), "the restored document is unsaved");
+    assert!(s.waiting(), "a new copy is scheduled");
+    s.saved();
+    assert!(recovery::pending().is_none(), "saved: the copy goes");
+}
+
+/// A copy whose drawings can't be read is kept and the sheet says so.
+#[test]
+fn v3_a_copy_that_cannot_be_restored_is_kept_and_says_so() {
+    let r = kept_copy("w87-restore-fail", "not json");
+    let mut s = studio_on(64, 64);
+    s.restorable = Some(r);
+    let _ = s.update(Msg::Restore);
+    assert!(s.restorable.is_some() && s.restore_failed);
+    assert!(recovery::pending().is_some());
 }

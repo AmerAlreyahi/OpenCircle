@@ -370,8 +370,6 @@ pub struct Studio {
     pub(super) pointer: PointerCell,
     /// Alt went down with nothing since: its release opens the menu bar.
     alt_clean: bool,
-    /// A kept copy of this picture is on disk (a clean state removes it).
-    copy_on_disk: bool,
     /// A restore that waits for the unsaved question (Cancel gives the sheet back).
     restoring: Option<Restorable>,
     /// Properties' X / Y / W / H while typed (committed on Enter or the next action).
@@ -400,6 +398,8 @@ pub struct Studio {
     pub(super) restorable: Option<Restorable>,
     /// Later: the restore sheet is put away for now (the copy stays).
     pub(super) later: bool,
+    /// The copy could not be restored (the sheet says so; the copy is kept).
+    pub(super) restore_failed: bool,
     /// When the unsaved copy was last written (`recovery`).
     /// The Steps list: a press or drag, and the step under the pointer.
     pub(super) pick: Reorder,
@@ -466,7 +466,6 @@ impl Studio {
             context: None,
             pointer: PointerCell::default(),
             alt_clean: false,
-            copy_on_disk: false,
             restoring: None,
             bounds_draft: None,
             opened: false,
@@ -485,6 +484,7 @@ impl Studio {
             recent_info: Vec::new(),
             restorable: pending_copy(),
             later: false,
+            restore_failed: false,
             pick: Reorder::default(),
             step_hover: None,
             export: export_defaults(),
@@ -552,9 +552,21 @@ impl Studio {
         self.sync_blocked();
         if let Some(e) = &mut self.editor {
             if let Some(r) = self.restoring.take() {
-                e.restore_annotations(&r.notes);
-                self.copy_on_disk = false;
-                recovery::discard();
+                match e.restore_annotations(&r.notes) {
+                    // the document is what it was: unsaved (it asks before it is lost), and a
+                    // new copy is written in time; the old one goes only when it is saved or
+                    // thrown away
+                    true => {
+                        self.saved = None;
+                        self.restore_failed = false;
+                        self.quiet.changed(std::time::Instant::now());
+                    }
+                    // the drawings can't be read: the copy is kept and the sheet says so
+                    false => {
+                        self.restorable = Some(r);
+                        self.restore_failed = true;
+                    }
+                }
             }
             e.refresh();
         }
@@ -1386,8 +1398,10 @@ impl Studio {
                     return Outcome::None;
                 };
                 let Ok(img) = ::image::load_from_memory(&r.png) else {
-                    recovery::discard();
-                    return Outcome::Say(crate::t!(st_unreadable).to_string());
+                    // (the copy stays: it may be readable by a later version)
+                    self.restorable = Some(r);
+                    self.restore_failed = true;
+                    return Outcome::None;
                 };
                 let img = img.into_rgba8();
                 // the picture and its drawings come back in `open`; with unsaved
@@ -1402,7 +1416,6 @@ impl Studio {
             }
             Msg::DiscardCopy => {
                 self.restorable = None;
-                self.copy_on_disk = false;
                 recovery::discard();
                 Outcome::None
             }
@@ -1631,7 +1644,6 @@ impl Studio {
         let Some(e) = &self.editor else {
             return Outcome::None;
         };
-        self.copy_on_disk = true;
         Outcome::KeepCopy(Box::new(KeepCopy {
             generation: recovery::generation(),
             width: e.doc.image.width,
@@ -1647,7 +1659,6 @@ impl Studio {
         if self.restorable.is_none() && self.restoring.is_none() {
             recovery::discard();
         }
-        self.copy_on_disk = false;
         self.quiet = recovery::Debounce::default();
     }
 

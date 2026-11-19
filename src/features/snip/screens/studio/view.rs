@@ -134,7 +134,8 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
                     r,
                     Msg::Restore,
                     Msg::DiscardCopy,
-                    Msg::Later
+                    Msg::Later,
+                    s.restore_failed
                 ))
                 .center(Fill)
             )

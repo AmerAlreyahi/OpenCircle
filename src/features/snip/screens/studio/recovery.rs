@@ -28,7 +28,23 @@ pub struct Pending {
 }
 
 /// `<data>/OpenCircle/studio-recovery`.
+#[cfg(test)]
+thread_local! {
+    /// A test's own folder (each test runs on its own thread).
+    static TEST_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests: this thread's recovery folder.
+#[cfg(test)]
+pub fn use_dir(dir: PathBuf) {
+    TEST_DIR.with(|d| *d.borrow_mut() = Some(dir));
+}
+
 pub fn dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = TEST_DIR.with(|d| d.borrow().clone()) {
+        return dir;
+    }
     crate::shared::paths::app_data().join("studio-recovery")
 }
 

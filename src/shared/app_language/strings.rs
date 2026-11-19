@@ -2526,4 +2526,6 @@ strings! {
         | "العرض والملفات";
     st_later: "Later"
         | "لاحقًا";
+    st_restore_failed: "This copy couldn't be restored. It is kept."
+        | "تعذّرت استعادة هذه النسخة. تم الاحتفاظ بها.";
 }
