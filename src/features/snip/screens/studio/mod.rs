@@ -55,6 +55,8 @@ const ZOOM_STEP: f32 = 1.25;
 const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 /// The canvas's scroll area (`operation::scroll_to`).
 pub const CANVAS: &str = "studio-canvas";
+/// Edit text's inline field.
+pub const FIELD: &str = "studio-edit-field";
 
 /// What the Studio opens.
 pub enum Picture {
@@ -166,6 +168,8 @@ pub enum Outcome {
     /// Edit text: the host reads the picture's lines (`read_picture`) and
     /// answers with `set_lines`.
     ReadLines,
+    /// The inline field takes the keyboard (`FIELD`).
+    FocusField,
     /// A pill with this (an edit that could not be made).
     Say(String),
 }
@@ -384,7 +388,7 @@ impl Studio {
         }
         let (w, h) = (e.doc.image.width, e.doc.image.height);
         let mut pixels = e.doc.image.rgba.clone();
-        let drawn = translate::replace_line(&mut pixels, w, h, line, text);
+        let drawn = translate::replace_line(&mut pixels, w, h, line, text, session.tweak());
         if drawn.drawn == 0 {
             // (stays on the line: the text can be changed)
             return Outcome::Say(crate::t!(st_edit_failed).to_string());
@@ -544,8 +548,15 @@ impl Studio {
             return Outcome::None;
         }
         match msg {
-            // while a line is edited the picture's tools rest
-            Msg::Editor(_) | Msg::Act(_) if self.edit.is_some() => Outcome::None,
+            // while a line is edited the picture's tools rest; the bar's size,
+            // colour and Bold are the line's own
+            Msg::Editor(m) if self.edit.is_some() => {
+                if let Some(s) = &mut self.edit {
+                    s.set(m);
+                }
+                Outcome::None
+            }
+            Msg::Act(_) if self.edit.is_some() => Outcome::None,
             Msg::EditText
                 if self.editor.is_none()
                     || self.card.is_some()
@@ -559,10 +570,16 @@ impl Studio {
                 Outcome::ReadLines
             }
             Msg::PickLine(i) => {
-                if let Some(s) = &mut self.edit {
-                    s.pick(i);
-                }
-                Outcome::None
+                let (Some(s), Some(e)) = (&mut self.edit, &self.editor) else {
+                    return Outcome::None;
+                };
+                let Some(line) = s.lines.as_ref().and_then(|l| l.get(i)) else {
+                    return Outcome::None;
+                };
+                let d = &e.doc.image;
+                let m = translate::matched(&d.rgba, d.width, d.height, line);
+                s.pick(i, m);
+                Outcome::FocusField
             }
             Msg::Draft(text) => {
                 if let Some(s) = &mut self.edit {

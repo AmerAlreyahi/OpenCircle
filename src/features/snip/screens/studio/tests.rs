@@ -704,3 +704,122 @@ fn edit_text_matches_its_golden_images_s8() {
         }));
     });
 }
+
+/// Picks line 0 of a fresh `lined` picture.
+fn picked() -> Studio {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    assert!(matches!(s.update(Msg::PickLine(0)), Outcome::FocusField));
+    s
+}
+
+/// The dark-on-white bars: (ink pixels, ink rows) in the line's box.
+fn ink(px: &[u8]) -> (usize, usize) {
+    let on = |x: usize, y: usize| px[(y * 300 + x) * 4..][..3].iter().any(|&v| v < 200);
+    let rows = (20..60usize)
+        .filter(|&y| (10..160usize).any(|x| on(x, y)))
+        .count();
+    let n = (20..60usize)
+        .map(|y| (10..160usize).filter(|&x| on(x, y)).count())
+        .sum();
+    (n, rows)
+}
+
+/// Picking a line reads its matched look; the bar's controls (the editor's own
+/// messages) set size, colour and Bold on the line, not on the editor; picking
+/// again starts over.
+#[test]
+fn edit_text_controls_start_matched_and_change_s8() {
+    let mut s = picked();
+    let x = s.edit.as_ref().unwrap();
+    let m = x.matched.unwrap();
+    assert_eq!((x.size(), x.bold()), (m.em, m.bold));
+    assert_eq!(x.colour()[..3], m.colour);
+    let tool_colour = s.editor.as_ref().unwrap().colour;
+    let _ = s.update(Msg::Editor(Message::TextSize(30.0)));
+    let _ = s.update(Msg::Editor(Message::Colour([200, 30, 30, 255])));
+    let flipped = crate::features::snip::annotate::TextStyle {
+        bold: !m.bold,
+        ..Default::default()
+    };
+    let _ = s.update(Msg::Editor(Message::TextStyle(flipped)));
+    let x = s.edit.as_ref().unwrap();
+    assert_eq!((x.size(), x.bold()), (30.0, !m.bold));
+    assert_eq!(x.colour(), [200, 30, 30, 255]);
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!(
+        e.colour, tool_colour,
+        "the editor's own colour is untouched"
+    );
+    let _ = s.update(Msg::PickLine(0));
+    assert_eq!(s.edit.as_ref().unwrap().size(), m.em, "starts over");
+}
+
+/// Colour, size and Bold reach the pixels (render byte checks).
+#[test]
+fn edit_text_colour_size_and_bold_draw_s8() {
+    let done = |f: &dyn Fn(&mut Studio)| {
+        let mut s = picked();
+        let _ = s.update(Msg::Draft("Hello".into()));
+        f(&mut s);
+        assert!(matches!(s.update(Msg::EditDone), Outcome::None));
+        pixels_of(&s)
+    };
+    let plain = done(&|_| {});
+    // colour: red ink where the matched colour was dark
+    let red = done(&|s| {
+        let _ = s.update(Msg::Editor(Message::Colour([220, 20, 20, 255])));
+    });
+    let reddest = |px: &[u8]| {
+        px.chunks(4)
+            .filter(|p| p[0] > 150 && p[1] < 100 && p[2] < 100)
+            .count()
+    };
+    assert_eq!(reddest(&plain), 0);
+    assert!(reddest(&red) > 20, "{}", reddest(&red));
+    // size: smaller text covers fewer rows
+    let small = done(&|s| {
+        let _ = s.update(Msg::Editor(Message::TextSize(9.0)));
+    });
+    assert!(
+        ink(&small).1 < ink(&plain).1,
+        "{:?} {:?}",
+        ink(&small),
+        ink(&plain)
+    );
+    // Bold: more ink than regular at the same size
+    let weight = |bold: bool| {
+        done(&|s| {
+            let _ = s.update(Msg::Editor(Message::TextSize(14.0)));
+            let st = crate::features::snip::annotate::TextStyle {
+                bold,
+                ..Default::default()
+            };
+            let _ = s.update(Msg::Editor(Message::TextStyle(st)));
+        })
+    };
+    assert!(ink(&weight(true)).0 > ink(&weight(false)).0);
+}
+
+/// The matched look: the dark ink colour of the line.
+#[test]
+fn edit_text_matched_colour_is_the_inks_s8() {
+    let s = picked();
+    let c = s.edit.as_ref().unwrap().matched.unwrap().colour;
+    assert!(c.iter().all(|&v| v < 80), "{c:?}");
+}
+
+/// The inline field is on the picture only once a line is picked.
+#[test]
+fn edit_text_inline_field_follows_the_pick_s8() {
+    let (mut s, line) = lined(300, 120);
+    let _ = s.update(Msg::EditText);
+    let epoch = s.epoch();
+    let _ = s.set_lines(epoch, Ok(vec![line]));
+    assert!(s.edit.as_ref().unwrap().active.is_none());
+    let _ = s.update(Msg::PickLine(0));
+    let _ = s.update(Msg::Draft("typed".into()));
+    assert_eq!(s.edit.as_ref().unwrap().draft, "typed");
+}

@@ -222,33 +222,47 @@ fn options_bar(e: &Annotator) -> Element<'_, Msg> {
     Element::from(scroll::across(bar).width(Fill)).map(Msg::Editor)
 }
 
-/// Edit text's options bar (S8): the new text, what is matched, Cancel / Done.
+/// Edit text's options bar (S8): Font size, Colour, Bold (the editor's own
+/// controls, set on the line), Cancel / Done. The text itself is typed on the
+/// picture (`inline_field`).
 fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
     let line: Element<'_, Msg> = match (&x.lines, x.active) {
         (None, _) => muted(Role::ROW_DESC, t!(st_edit_reading)).into(),
         (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
-        _ => crate::dir_row![
-            crate::shared::kit::field::input(t!(st_edit_type), &x.draft, false, false)
-                .on_input(Msg::Draft)
-                .on_submit(Msg::EditDone)
-                .width(Length::Fixed(OPTION_W * 1.15)),
-            chip::tag(t!(st_edit_font)),
-            chip::tag(t!(st_edit_colour)),
-        ]
-        .spacing(space::GAP)
-        .align_y(Center)
-        .into(),
+        _ => {
+            let now = x.colour();
+            let swatches = (style::ANNOTATION.iter().take(SWATCHES)).map(|c| {
+                let rgba = c.into_rgba8();
+                colour::swatch(*c, rgba[..3] == now[..3], Some(Message::Colour(rgba)))
+            });
+            let bold = crate::features::snip::annotate::TextStyle {
+                bold: x.bold(),
+                ..crate::features::snip::annotate::TextStyle::default()
+            };
+            let options: Vec<Element<'_, Message>> = vec![
+                container(toolbar::text_size_option(x.size()))
+                    .width(OPTION_W)
+                    .into(),
+                dir::row(swatches).spacing(space::TRACK_GAP).into(),
+                container(toolbar::bold_option(bold)).width(OPTION_W).into(),
+            ];
+            let options = dir::row(options)
+                .spacing(space::PAGE[1] + space::PAGE[1])
+                .align_y(Center);
+            Element::from(scroll::across(container(options).center_y(super::OPTIONS)))
+                .map(Msg::Editor)
+        }
     };
     let ready = x.active.is_some();
     let row = crate::dir_row![
-        line,
-        Space::new().width(Fill),
-        cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel),
-        button::button(
+        container(line).width(Fill),
+        container(cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel)).width(EDIT_BUTTON),
+        container(button::button(
             label(t!(st_edit_done)),
             Kind::Accent,
             ready.then_some(Msg::EditDone)
-        ),
+        ))
+        .width(EDIT_BUTTON),
     ]
     .spacing(space::GAP)
     .align_y(Center);
@@ -258,6 +272,31 @@ fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
         .width(Fill)
         .into()
 }
+
+/// The picked line's new text, typed on the picture over the line in a field
+/// ring (an input sized to the line, at least a words' width).
+fn inline_field<'a>(
+    x: &'a super::edit_text::Session,
+    origin: iced::Point,
+    zoom: f32,
+) -> Option<Element<'a, Msg>> {
+    let line = x.lines.as_ref()?.get(x.active?)?;
+    let [bx, by, bw, bh] = line.bounds;
+    let at = iced::Point::new((bx - origin.x) * zoom, (by - origin.y) * zoom);
+    let field = crate::shared::kit::field::input(t!(st_edit_type), &x.draft, false, false)
+        .id(super::FIELD)
+        .on_input(Msg::Draft)
+        .on_submit(Msg::EditDone)
+        .width(Length::Fixed((bw * zoom).max(INLINE_MIN)));
+    let _ = bh;
+    Some(iced::widget::pin(field).position(at).into())
+}
+
+/// Cancel's and Done's width on the edit bar.
+const EDIT_BUTTON: f32 = 84.0;
+
+/// The inline field's least width, logical px.
+const INLINE_MIN: f32 = 140.0;
 
 /// The picture, fitted or zoomed (both ways scrollable past the stage).
 fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
@@ -280,7 +319,11 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
                     look: crate::shared::theme::accent_of(&crate::shared::config::look()),
                 },
                 shown,
-            )
+            ),
+            match inline_field(x, e.doc.view().position(), e.zoom) {
+                Some(f) => f,
+                None => Space::new().into(),
+            }
         ]
         .into(),
         None => drawn,

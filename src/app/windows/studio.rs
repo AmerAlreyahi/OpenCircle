@@ -231,6 +231,7 @@ impl Windows {
             Outcome::ScrollTo(to) => iced::widget::operation::scroll_to(studio::CANVAS, to),
             Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
             Outcome::ReadLines => Task::done(Msg::StudioEditText),
+            Outcome::FocusField => iced::widget::operation::focus(studio::FIELD),
             Outcome::Say(text) => self.say(&text, false),
             Outcome::Download => Task::done(Msg::StudioDownload),
             Outcome::Dismissed => Task::done(Msg::StudioDismiss),

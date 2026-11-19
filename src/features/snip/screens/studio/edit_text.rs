@@ -9,7 +9,7 @@ use iced::widget::canvas::{self, Action};
 use iced::{Color, Length, Point, Rectangle, Renderer, Size, Theme};
 
 use super::Msg;
-use crate::features::translate::Line;
+use crate::features::translate::{Line, Matched, Tweak};
 use crate::shared::kit::area;
 
 /// The session: lines are `None` while they are being read.
@@ -17,6 +17,11 @@ pub struct Session {
     pub lines: Option<Vec<Line>>,
     pub active: Option<usize>,
     pub draft: String,
+    /// The picked line's look as the erase reads it; what the user set over it.
+    pub matched: Option<Matched>,
+    em: Option<f32>,
+    colour: Option<[u8; 3]>,
+    bold: Option<bool>,
 }
 
 impl Session {
@@ -25,13 +30,56 @@ impl Session {
             lines: None,
             active: None,
             draft: String::new(),
+            matched: None,
+            em: None,
+            colour: None,
+            bold: None,
         }
     }
 
-    pub fn pick(&mut self, i: usize) {
+    /// Line `i` is picked, with its matched look; the user's settings start over.
+    pub fn pick(&mut self, i: usize, matched: Matched) {
         if let Some(l) = self.lines.as_ref().and_then(|l| l.get(i)) {
             self.draft = l.text.clone();
             self.active = Some(i);
+            self.matched = Some(matched);
+            (self.em, self.colour, self.bold) = (None, None, None);
+        }
+    }
+
+    /// A setting from the bar's controls (the editor's own messages).
+    pub fn set(&mut self, m: crate::features::snip::annotate::Message) {
+        use crate::features::snip::annotate::Message as M;
+        match m {
+            M::TextSize(v) => self.em = Some(v),
+            M::TextStyle(s) => self.bold = Some(s.bold),
+            M::Colour(c) => self.colour = Some([c[0], c[1], c[2]]),
+            _ => {}
+        }
+    }
+
+    pub fn size(&self) -> f32 {
+        self.em.or(self.matched.map(|m| m.em)).unwrap_or(16.0)
+    }
+
+    pub fn bold(&self) -> bool {
+        self.bold.or(self.matched.map(|m| m.bold)).unwrap_or(false)
+    }
+
+    pub fn colour(&self) -> [u8; 4] {
+        let [r, g, b] = self
+            .colour
+            .or(self.matched.map(|m| m.colour))
+            .unwrap_or([0; 3]);
+        [r, g, b, 255]
+    }
+
+    /// Only what the user changed; the rest stays matched.
+    pub fn tweak(&self) -> Tweak {
+        Tweak {
+            em: self.em,
+            colour: self.colour,
+            bold: self.bold,
         }
     }
 

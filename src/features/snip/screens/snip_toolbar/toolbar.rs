@@ -439,6 +439,34 @@ fn build(
     (toolbar.into(), Some((panel, left)))
 }
 
+/// The font size option (presets and slider; `Message::TextSize`): the Text
+/// tool's, and Studio's Edit text's.
+pub fn text_size_option<'a>(size: f32) -> Element<'a, Message> {
+    let px = size.round() as u8;
+    let chosen = TEXT_PRESETS.iter().position(|&p| p == size);
+    let presets = segmented::presets(chosen, Some("A"), false, |i| {
+        Message::TextSize(TEXT_PRESETS[i])
+    });
+    let slider = slider::bare(crate::shared::config::TEXT_SIZE, px, SLIDER_W, false, |v| {
+        Message::TextSize(f32::from(v))
+    });
+    sizes(t!(sn_font_size), format!("{px} px"), presets, Some(slider))
+}
+
+/// The Bold switch (`Message::TextStyle` with the flipped weight).
+pub fn bold_option<'a>(style: crate::features::snip::annotate::TextStyle) -> Element<'a, Message> {
+    let flipped = crate::features::snip::annotate::TextStyle {
+        bold: !style.bold,
+        ..style
+    };
+    switch(
+        t!(sn_bold),
+        None,
+        style.bold,
+        Some(Message::TextStyle(flipped)),
+    )
+}
+
 /// An option's row: its name, a muted note after it, then `value` and
 /// `control` at the end.
 fn option<'a>(
@@ -535,17 +563,7 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         );
         sizes(t!(sn_size), format!("{px} px"), presets, Some(slider))
     };
-    let font = || {
-        let px = e.text_size.round() as u8;
-        let chosen = TEXT_PRESETS.iter().position(|&p| p == e.text_size);
-        let presets = segmented::presets(chosen, Some("A"), false, |i| {
-            Message::TextSize(TEXT_PRESETS[i])
-        });
-        let slider = slider::bare(crate::shared::config::TEXT_SIZE, px, SLIDER_W, false, |v| {
-            Message::TextSize(f32::from(v))
-        });
-        sizes(t!(sn_font_size), format!("{px} px"), presets, Some(slider))
-    };
+    let font = || text_size_option(e.text_size);
     let outline = || {
         switch(
             t!(sn_outline),
@@ -577,10 +595,6 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
         Tool::Text => {
             use crate::features::snip::annotate::{TextBack as B, TextFont as F, TextStyle};
             let style = e.text_style;
-            let bold = TextStyle {
-                bold: !style.bold,
-                ..style
-            };
             let faces = [
                 (F::Sans, t!(sn_sans)),
                 (F::Serif, t!(sn_serif)),
@@ -600,12 +614,7 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             vec![
                 font(),
                 option(t!(sn_font), None, None, Some(face)),
-                switch(
-                    t!(sn_bold),
-                    None,
-                    style.bold,
-                    Some(Message::TextStyle(bold)),
-                ),
+                bold_option(style),
                 option(t!(sn_back), None, None, Some(back)),
             ]
         }

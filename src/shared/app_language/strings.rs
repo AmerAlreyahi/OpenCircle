@@ -1780,10 +1780,6 @@ strings! {
         | "جارٍ البحث عن الأسطر…";
     st_edit_type: "Type the new text"
         | "اكتب النص الجديد";
-    st_edit_font: "Font size · matched"
-        | "حجم الخط · مطابق";
-    st_edit_colour: "Colour · matched"
-        | "اللون · مطابق";
     st_edit_done: "Done"
         | "تم";
     st_edit_failed: "This line can't be redrawn cleanly here"
