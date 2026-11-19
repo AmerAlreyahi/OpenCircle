@@ -235,6 +235,23 @@ pub(super) fn folder_row(state: &State) -> Element<'_, Message> {
 /// Browse… / Reset under it at the right.
 fn folder(state: &State) -> Element<'_, Message> {
     let folder = state.draft.general.save_folder.as_str();
+    folder_control(
+        state,
+        folder,
+        "general.save_folder",
+        Message::BrowseFolder,
+        Message::ClearFolder,
+    )
+}
+
+/// A folder field with Browse… and Reset (General's save folder, Studio's default folder).
+pub(super) fn folder_control<'a>(
+    state: &'a State,
+    folder: &'a str,
+    problem: &str,
+    browse_to: Message,
+    reset_to: Message,
+) -> Element<'a, Message> {
     let shown = match folder.is_empty() {
         true => crate::features::circle::actions::save::default_folder().map_or_else(
             || t!(g_folder_system).into(),
@@ -245,7 +262,7 @@ fn folder(state: &State) -> Element<'_, Message> {
     let value = container(field(
         &shown,
         None::<fn(String) -> Message>,
-        Message::BrowseFolder,
+        browse_to.clone(),
     ))
     .width(Fill);
     let value = if folder.is_empty() || shorten(folder) == folder {
@@ -253,15 +270,11 @@ fn folder(state: &State) -> Element<'_, Message> {
     } else {
         hint(value, t!(g_folder), Why::Cut(folder), Position::Top)
     };
-    let browse = button(
-        label(t!(c_browse)),
-        Kind::Elevated,
-        Some(Message::BrowseFolder),
-    );
+    let browse = button(label(t!(c_browse)), Kind::Elevated, Some(browse_to));
     let reset = button(
         label(t!(c_reset)),
         Kind::Elevated,
-        (!folder.is_empty()).then_some(Message::ClearFolder),
+        (!folder.is_empty()).then_some(reset_to),
     );
     let mut col = column![setting_row::field_with(
         value,
@@ -271,7 +284,7 @@ fn folder(state: &State) -> Element<'_, Message> {
         ],
     )]
     .spacing(space::GAP);
-    if let Some(e) = issue(&state.problems, "general.save_folder") {
+    if let Some(e) = issue(&state.problems, problem) {
         col = col.push(error(Role::ROW_DESC, e));
     }
     col.into()

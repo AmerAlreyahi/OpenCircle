@@ -2041,6 +2041,7 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "Ask AI",
             "Translate",
             "Snip",
+            "Studio",
             "History",
             "Shortcuts",
             "Privacy",
@@ -4196,4 +4197,67 @@ fn chat_zoom_and_web_search_have_their_settings() {
     update(&mut s, Message::WebSearch(true));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Ask AI web search"), "{texts:?}");
+}
+
+/// Settings > Studio in English and Arabic (mirrored), Sapphire and Daylight: tall, so
+/// every row shows; nothing drawn past its box.
+#[test]
+fn the_studio_page_matches_its_golden_images() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for ar in [false, true] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, _) = state(None);
+            if ar {
+                update(&mut s, Message::AppLanguage(Choice("ar")));
+            }
+            update(&mut s, Message::Section(Section::Studio));
+            themes::set(theme);
+            let file = format!(
+                "settings-studio-full{}-{}",
+                if ar { "-ar" } else { "" },
+                theme.id
+            );
+            let size = Size::new(WINDOW_SIZE.width, 2400.0);
+            let lost = shot::out_of_reach(view(&s), size);
+            assert!(lost.is_empty(), "{file}: {lost:?}");
+            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Settings > Studio edits the draft: a switch, the folder picker's answer (only
+/// Studio's own button sends it to the Studio), and Reset tool styles.
+#[test]
+fn the_studio_page_edits_its_own_settings() {
+    use crate::shared::config::{StudioBackdrop, StudioPrefs};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Studio));
+    let p = StudioPrefs {
+        keep_unsaved: true,
+        background: StudioBackdrop::Dark,
+        ..StudioPrefs::default()
+    };
+    update(&mut s, Message::Studio(p.clone()));
+    assert_eq!(s.draft.studio, p);
+    assert_eq!(update(&mut s, Message::BrowseStudioFolder), Outcome::Browse);
+    update(&mut s, Message::Folder(Some("pics".into())));
+    assert_eq!(s.draft.studio.folder, "pics");
+    assert_eq!(s.draft.general.save_folder, "");
+    update(&mut s, Message::BrowseFolder);
+    update(&mut s, Message::Folder(Some("other".into())));
+    assert_eq!(s.draft.general.save_folder, "other");
+    assert_eq!(s.draft.studio.folder, "pics");
+    update(&mut s, Message::ClearStudioFolder);
+    assert_eq!(s.draft.studio.folder, "");
+    s.draft.editor.colour = Some("#ff0000".into());
+    s.draft.editor.line_assist = false;
+    update(&mut s, Message::ResetToolStyles);
+    assert_eq!(s.draft.editor.colour, None);
+    assert!(!s.draft.editor.line_assist, "a setting, not a tool style");
 }

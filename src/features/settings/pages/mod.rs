@@ -20,6 +20,7 @@ mod privacy;
 mod shortcuts;
 pub mod snip;
 mod song;
+mod studio;
 pub mod text_reading;
 pub mod translate;
 
@@ -64,7 +65,7 @@ const fn page(id: Section, title: S, view: for<'a> fn(&'a State) -> Element<'a, 
 }
 
 /// In the design's order, except Shortcuts: after every feature page (owner, 2026-11-10).
-pub const PAGES: [Page; 13] = [
+pub const PAGES: [Page; 14] = [
     page(Section::General, S::nav_general, general::view),
     page(Section::Appearance, S::nav_appearance, appearance::view),
     page(Section::Look, S::nav_look, look::view),
@@ -72,6 +73,7 @@ pub const PAGES: [Page; 13] = [
     page(Section::TextReading, S::nav_text, text_reading::view),
     page(Section::Translate, S::nav_translate, translate::view),
     page(Section::Snip, S::nav_snip, snip::view),
+    page(Section::Studio, S::nav_studio, studio::view),
     Page {
         lab: Some(Feature::Song),
         ..page(Section::Song, S::lb_song, song::view)

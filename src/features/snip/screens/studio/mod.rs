@@ -18,6 +18,8 @@ mod options_bar;
 mod properties;
 mod sheets;
 mod status_bar;
+#[allow(dead_code)] // the Studio window wires it (W88 gives the API)
+pub mod recovery;
 mod view;
 
 use std::path::PathBuf;

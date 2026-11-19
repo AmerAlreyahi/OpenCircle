@@ -24,7 +24,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
 /// The last row: Reset shortcuts. Always shown (like History's Clear all), dimmed with
 /// its reason while every key is at its default; pressed, it asks first; after a reset
 /// it offers Undo until another key changes or the page is left.
-fn reset(state: &State) -> Element<'_, Message> {
+pub(super) fn reset(state: &State) -> Element<'_, Message> {
     if state.resetting {
         let buttons = crate::dir_row![
             setting_row::cancel(t!(c_cancel), Message::KeepShortcuts),
