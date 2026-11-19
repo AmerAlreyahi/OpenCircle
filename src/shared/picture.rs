@@ -70,6 +70,16 @@ pub fn fit_long_edge(crop: Crop, max_edge: u32) -> Crop {
     }
 }
 
+/// `crop`'s pixels as RGB with its alpha blended onto white (no black where it
+/// is see-through), for the formats without alpha (JPEG, PDF).
+pub fn rgb_on_white(crop: &Crop) -> Vec<u8> {
+    let (pixels, _) = crop.rgba.as_chunks::<4>();
+    let over = |c: u8, a: u16| ((u16::from(c) * a + 255 * (255 - a) + 127) / 255) as u8;
+    (pixels.iter())
+        .flat_map(|&[r, g, b, a]| [over(r, a.into()), over(g, a.into()), over(b, a.into())])
+        .collect()
+}
+
 /// `crop` as file bytes: PNG (alpha kept), or JPEG at quality 85 (no alpha: a
 /// see-through pixel, a cut-out background, is blended on white).
 pub fn encode(crop: &Crop, format: crate::shared::config::Format) -> Result<Vec<u8>, String> {
