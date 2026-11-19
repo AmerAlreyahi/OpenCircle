@@ -41,11 +41,16 @@ impl DragFile {
         Self::temp(crop, "drag")
     }
 
-    /// The drag-out file as a PNG, or a JPEG (`[studio] drag_type`).
+    /// The drag-out file as a PNG, or a JPEG at the Studio's own quality
+    /// (`[studio] drag_type`, `quality`).
     pub fn write_as(crop: &Crop, jpeg: bool) -> Result<Self, String> {
-        if !jpeg {
-            return Self::write(crop);
+        match jpeg {
+            false => Self::write(crop),
+            true => Self::write_jpeg(crop, crate::shared::config::current().studio.quality),
         }
+    }
+
+    pub fn write_jpeg(crop: &Crop, quality: u8) -> Result<Self, String> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
@@ -53,7 +58,7 @@ impl DragFile {
             std::process::id(),
             n + 1_000_000
         ));
-        let bytes = crate::shared::picture::encode_jpeg(crop, 90)?;
+        let bytes = crate::shared::picture::encode_jpeg(crop, quality.clamp(1, 100))?;
         std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
         Ok(DragFile {
             path,

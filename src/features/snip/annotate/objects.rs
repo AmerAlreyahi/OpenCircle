@@ -24,6 +24,21 @@ pub(crate) enum StudioKey {
     Pass,
 }
 
+/// The canvas never grows past this side (px), area (64 MP = 256 MB of
+/// RGBA) or this many times the picture's own area.
+pub(super) const GROW_SIDE: f64 = 16384.0;
+pub(super) const GROW_PIXELS: f64 = 64.0 * 1024.0 * 1024.0;
+pub(super) const GROW_TIMES: f64 = 4.0;
+
+/// Why "Grow the canvas past the edge" said no.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GrowRefusal {
+    /// A side would pass the limit (or the position is not a number).
+    TooLarge,
+    /// The area would pass the memory budget or four times the picture.
+    TooManyPixels,
+}
+
 /// A z-order move (Ctrl+] / Ctrl+[, with Shift = to the front / back).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Order {
@@ -167,10 +182,8 @@ impl Annotator {
         if !m.command() {
             return StudioKey::Pass;
         }
-        let order = |front: bool, shift: bool, fwd: Order, to: Order| {
-            let _ = front;
-            go(Message::Order(if shift { to } else { fwd }))
-        };
+        let order =
+            |shift: bool, fwd: Order, to: Order| go(Message::Order(if shift { to } else { fwd }));
         match (ch, m.shift()) {
             (Some('c'), false) => go(Message::CopySelection),
             (Some('c'), true) => go(Message::Copy),
@@ -179,8 +192,8 @@ impl Annotator {
             (Some('a'), false) => go(Message::SelectAll),
             // Save as is the window's (it opens the Picture sheet)
             (Some('s'), true) => StudioKey::Ignore,
-            (Some(']' | '}'), shift) => order(true, shift, Order::Forward, Order::Front),
-            (Some('[' | '{'), shift) => order(false, shift, Order::Backward, Order::Back),
+            (Some(']' | '}'), shift) => order(shift, Order::Forward, Order::Front),
+            (Some('[' | '{'), shift) => order(shift, Order::Backward, Order::Back),
             _ => StudioKey::Pass,
         }
     }
@@ -237,7 +250,10 @@ impl Annotator {
             let frames: Vec<Rectangle> = (after.iter().filter(|i| !i.hidden))
                 .map(Item::frame)
                 .collect();
-            let grow = self.grow_for(&frames);
+            let Ok(grow) = self.grow_for(&frames) else {
+                self.refresh(); // refused: nothing changed
+                return;
+            };
             let edit = Edit::Items(before, after);
             self.doc.exec(match grow {
                 Some(grow) => Edit::Seq(vec![edit, grow]),
@@ -426,52 +442,59 @@ impl Annotator {
     }
 
     /// "Grow the canvas past the edge" (on): the edit that makes the picture
-    /// big enough for `frames` (new pixels see-through), `None` when they fit,
-    /// the setting is off or the picture is cropped. To the left or top it
-    /// grows the other way and the drawings move with the picture.
-    // ponytail: the whole picture is kept per growth step in the history.
-    pub(super) fn grow_for(&self, frames: &[Rectangle]) -> Option<Edit> {
+    /// big enough for `frames` (new pixels see-through), `Ok(None)` when they
+    /// fit, the setting is off or the picture is cropped. To the left or top
+    /// it grows the other way and the drawings move with the picture. A
+    /// growth over the budget (`GROW_SIDE`, `GROW_PIXELS`, `GROW_TIMES`) or
+    /// from a non-finite position is refused, and the reason is kept for the
+    /// window (`take_grow_refusal`): the picture is never cut.
+    pub(super) fn grow_for(&mut self, frames: &[Rectangle]) -> Result<Option<Edit>, ()> {
         if !self.grow_canvas || self.doc.crop.is_some() {
-            return None;
+            return Ok(None);
         }
         let img = &self.doc.image;
-        let (w, h) = (img.width as f32, img.height as f32);
-        let (mut x0, mut y0, mut x1, mut y1) = (0.0f32, 0.0f32, w, h);
+        let (w, h) = (f64::from(img.width), f64::from(img.height));
+        let (mut x0, mut y0, mut x1, mut y1) = (0.0f64, 0.0f64, w, h);
         for f in frames {
-            (x0, y0) = (x0.min(f.x.floor()), y0.min(f.y.floor()));
+            let edge = [f.x, f.y, f.x + f.width, f.y + f.height];
+            if edge.iter().any(|v| !v.is_finite()) {
+                self.grow_refused = Some(GrowRefusal::TooLarge);
+                return Err(());
+            }
+            (x0, y0) = (
+                x0.min(f64::from(f.x).floor()),
+                y0.min(f64::from(f.y).floor()),
+            );
             (x1, y1) = (
-                x1.max((f.x + f.width).ceil()),
-                y1.max((f.y + f.height).ceil()),
+                x1.max(f64::from(f.x + f.width).ceil()),
+                y1.max(f64::from(f.y + f.height).ceil()),
             );
         }
         if (x0, y0, x1, y1) == (0.0, 0.0, w, h) {
-            return None;
+            return Ok(None);
         }
-        // never beyond a sane picture
-        let (nw, nh) = (
-            (x1 - x0).min(16384.0) as usize,
-            (y1 - y0).min(16384.0) as usize,
-        );
-        let (dx, dy) = ((-x0) as usize, (-y0) as usize);
-        let mut rgba = vec![0u8; nw * nh * 4];
-        for row in 0..img.height as usize {
-            if row + dy >= nh {
-                break;
-            }
-            let n = (img.width as usize).min(nw.saturating_sub(dx)) * 4;
-            let to = ((row + dy) * nw + dx) * 4;
-            rgba[to..to + n].copy_from_slice(&img.rgba[row * img.width as usize * 4..][..n]);
+        // x0 <= 0 and x1 >= w here: the new canvas always holds the old picture
+        let (nw, nh) = (x1 - x0, y1 - y0);
+        if nw > GROW_SIDE || nh > GROW_SIDE {
+            self.grow_refused = Some(GrowRefusal::TooLarge);
+            return Err(());
         }
-        let after = Image {
-            width: nw as u32,
-            height: nh as u32,
-            rgba,
-        };
-        Some(Edit::Canvas(
-            Box::new(img.clone()),
-            Box::new(after),
-            Vector::new(dx as f32, dy as f32),
-        ))
+        if nw * nh > GROW_PIXELS || nw * nh > GROW_TIMES * w * h {
+            self.grow_refused = Some(GrowRefusal::TooManyPixels);
+            return Err(());
+        }
+        Ok(Some(Edit::Canvas {
+            old: Box::new(img.clone()),
+            size: (nw as u32, nh as u32),
+            by: Vector::new((-x0) as f32, (-y0) as f32),
+            undo: false,
+        }))
+    }
+
+    /// Why the last growth was refused (once): the window says so in a pill.
+    #[allow(dead_code)] // the window shows it in a pill (W87)
+    pub fn take_grow_refusal(&mut self) -> Option<GrowRefusal> {
+        self.grow_refused.take()
     }
 
     /// The patch that bakes `layers` (in order) into the picture.
