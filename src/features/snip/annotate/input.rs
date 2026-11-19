@@ -160,6 +160,11 @@ impl Annotator {
                 _ => {}
             }
         }
+        if self.studio
+            && let Some(message) = self.studio_key(key, latin, modifiers)
+        {
+            return Some(message);
+        }
         let arrow = match key {
             Key::Named(Named::ArrowLeft) => Some((-1, 0)),
             Key::Named(Named::ArrowRight) => Some((1, 0)),

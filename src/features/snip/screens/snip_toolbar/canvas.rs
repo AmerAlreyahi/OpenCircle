@@ -120,6 +120,8 @@ struct Pointer {
     hot: Option<(i8, i8)>,
     /// Ctrl is held: a press moves what is under it (`Message::PressMove`).
     ctrl: bool,
+    /// Alt is held (Studio): a press moves a copy (`Message::PressCopy`).
+    alt: bool,
     /// The finger held (touch or pen acts as the left button: `shared::touch`).
     finger: Option<iced::touch::Finger>,
 }
@@ -150,9 +152,10 @@ impl canvas::Program<Message> for Input<'_> {
                     true => self.image_at(cursor.position()?),
                     false => e.to_image(at),
                 };
-                match pointer.ctrl {
-                    true => Message::PressMove(p),
-                    false => Message::Press(p),
+                match (pointer.ctrl, pointer.alt && e.studio) {
+                    (_, true) => Message::PressCopy(p),
+                    (true, _) => Message::PressMove(p),
+                    _ => Message::Press(p),
                 }
             }
             // Snip's live area: from the window's px, as the canvas moves with it.
@@ -185,6 +188,7 @@ impl canvas::Program<Message> for Input<'_> {
             // Not captured: other widgets see modifiers too.
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 pointer.ctrl = m.command();
+                pointer.alt = m.alt();
                 return Some(Action::publish(Message::Shift(m.shift())));
             }
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -240,6 +244,15 @@ impl canvas::Program<Message> for Input<'_> {
             area::handles(&mut frame, r, look, hot, self.grown);
         }
 
+        // Studio's rubber band (Select tool): a soft box in the look's colour.
+        if let Some(band) = e.band_rect() {
+            let look = crate::shared::theme::accent_of(&crate::shared::config::look());
+            frame.fill_rectangle(band.position(), band.size(), look.0.scale_alpha(0.12));
+            frame.stroke(
+                &Path::rectangle(band.position(), band.size()),
+                accent.with_color(look.0),
+            );
+        }
         if let Some(keep) = e.crop_preview() {
             let outside = Path::new(|p| {
                 p.rectangle(Point::ORIGIN, e.size());

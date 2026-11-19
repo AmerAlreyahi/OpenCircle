@@ -98,6 +98,50 @@ pub enum Shape {
         at: Point,
         radius: f32,
     },
+    /// A picture pasted in (Studio): a movable object between corners `a`
+    /// and `b`; its opacity is the item colour's alpha; `lock` keeps its
+    /// ratio when resized. "Merge" bakes it into the picture.
+    Picture {
+        a: Point,
+        b: Point,
+        pic: Pic,
+        lock: bool,
+    },
+}
+
+/// The pixels of a pasted picture, premultiplied once (shared by clones, so
+/// comparing two is a pointer check).
+#[derive(Clone)]
+pub struct Pic(pub std::sync::Arc<(u32, u32, Vec<u8>)>);
+
+impl Pic {
+    pub fn new(width: u32, height: u32, rgba: &[u8]) -> Self {
+        let mut data = rgba.to_vec();
+        for px in data.as_chunks_mut::<4>().0 {
+            let a = px[3] as u32;
+            for c in &mut px[..3] {
+                *c = (*c as u32 * a / 255) as u8;
+            }
+        }
+        Pic(std::sync::Arc::new((width, height, data)))
+    }
+
+    #[allow(dead_code)] // the Properties panel's W / H (W87)
+    pub fn size(&self) -> Size {
+        Size::new(self.0.0 as f32, self.0.1 as f32)
+    }
+}
+
+impl PartialEq for Pic {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for Pic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Pic({}x{})", self.0.0, self.0.1)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -121,7 +165,8 @@ impl Shape {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
             | Shape::Redact { a, b }
-            | Shape::Spotlight { a, b } => (*a, *b) = (f(*a), f(*b)),
+            | Shape::Spotlight { a, b }
+            | Shape::Picture { a, b, .. } => (*a, *b) = (f(*a), f(*b)),
             Shape::Blur {
                 points, size, cell, ..
             } => {
@@ -154,7 +199,8 @@ impl Item {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
             | Shape::Redact { a, b }
-            | Shape::Spotlight { a, b } => span(&[*a, *b]),
+            | Shape::Spotlight { a, b }
+            | Shape::Picture { a, b, .. } => span(&[*a, *b]),
             Shape::Blur { points, size, .. } => blur::frame(points, *size),
             Shape::Arrow {
                 a, b, bend, text, ..
@@ -241,6 +287,8 @@ pub enum Edit {
     /// The picture's own pixels changed (Studio's Edit text): the box that
     /// changed, before and after.
     Pixels(Box<Patch>),
+    /// Several edits that undo together (applied in order).
+    Seq(Vec<Edit>),
 }
 
 /// A changed box of the image: `x, y, w, h` (image px), RGBA rows before and after.
@@ -277,10 +325,12 @@ impl Edit {
                 before: p.after,
                 after: p.before,
             })),
+            Edit::Seq(all) => Edit::Seq(all.iter().rev().map(Edit::inverse).collect()),
         }
     }
 
     fn apply(&self, doc: &mut Document) {
+        doc.extra.clear();
         match self {
             Edit::Insert(i, item) => {
                 doc.items.insert(*i, item.clone());
@@ -304,6 +354,7 @@ impl Edit {
                 doc.selected = None;
             }
             Edit::Pixels(p) => p.write(&mut doc.image, &p.after),
+            Edit::Seq(all) => all.iter().for_each(|e| e.apply(doc)),
         }
     }
 }
@@ -315,6 +366,9 @@ pub struct Document {
     /// Bottom to top.
     pub items: Vec<Item>,
     pub selected: Option<usize>,
+    /// The other selected items (Studio's multi-selection; `selected` is the
+    /// one last picked).
+    pub extra: Vec<usize>,
     /// The part of the image that is kept (non-destructive, undoable).
     pub crop: Option<Rectangle>,
     /// The steps' notes show in a legend.
@@ -332,12 +386,39 @@ impl Document {
             image,
             items: Vec::new(),
             selected: None,
+            extra: Vec::new(),
             crop: None,
             legend: true,
             done: Vec::new(),
             undone: Vec::new(),
             made: 0,
         }
+    }
+
+    /// The selected items' indices, ascending (only those that exist).
+    pub fn selection(&self) -> Vec<usize> {
+        let mut all: Vec<usize> = (self.selected.into_iter())
+            .chain(self.extra.iter().copied())
+            .collect();
+        all.retain(|&i| i < self.items.len());
+        all.sort_unstable();
+        all.dedup();
+        all
+    }
+
+    /// Selects exactly `all` (the last one is the primary).
+    pub fn select(&mut self, all: &[usize]) {
+        self.selected = all.last().copied();
+        self.extra = all.iter().rev().skip(1).copied().collect();
+    }
+
+    pub fn select_one(&mut self, i: Option<usize>) {
+        self.selected = i;
+        self.extra.clear();
+    }
+
+    pub fn deselect(&mut self) {
+        self.select_one(None);
     }
 
     /// The legend as it shows now (`None`: off, or no step has a note).
@@ -404,11 +485,20 @@ impl Document {
     /// Makes `rows` (whole image rows from row `top` down) the picture there,
     /// as one undoable edit of the box that differs. `false`: nothing differs.
     pub fn set_rows(&mut self, top: usize, rows: &[u8]) -> bool {
+        match self.rows_patch(top, rows) {
+            Some(patch) => {
+                self.exec(Edit::Pixels(Box::new(patch)));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The patch that makes `rows` the picture from row `top` (`None`: no difference).
+    pub fn rows_patch(&self, top: usize, rows: &[u8]) -> Option<Patch> {
         let w = self.image.width as usize;
         let from = top * w * 4;
-        let Some(old) = self.image.rgba.get(from..from + rows.len()) else {
-            return false;
-        };
+        let old = self.image.rgba.get(from..from + rows.len())?;
         let (mut x0, mut y0, mut x1, mut y1) = (w, usize::MAX, 0, 0);
         for (i, (a, b)) in old.chunks(4).zip(rows.chunks(4)).enumerate() {
             if a != b {
@@ -417,7 +507,7 @@ impl Document {
             }
         }
         if x1 <= x0 {
-            return false;
+            return None;
         }
         let at = [x0, y0, x1 - x0, y1 - y0];
         let cut = |src: &[u8], first: usize| -> Vec<u8> {
@@ -428,13 +518,11 @@ impl Document {
                 })
                 .collect()
         };
-        let patch = Patch {
+        Some(Patch {
             at,
             before: cut(old, top),
             after: cut(rows, top),
-        };
-        self.exec(Edit::Pixels(Box::new(patch)));
-        true
+        })
     }
 
     /// Which state of the history this is: the same number only for the same
@@ -761,7 +849,29 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
                 size,
             } => callout::paint(&mut layer, (*tip, *at), text, *size, c, ring),
             Shape::Magnifier { at, radius } => magnifier::paint(&mut layer, *at, *radius, c, w),
+            Shape::Picture { a, b, pic, .. } => {
+                paint_picture(&mut layer, span(&[*a, *b]), pic, c[3])
+            }
         }
     }
     layer.pm
+}
+
+/// A pasted picture scaled into `to`, at `opacity` (0-255).
+fn paint_picture(layer: &mut Layer, to: Rectangle, pic: &Pic, opacity: u8) {
+    let (w, h, data) = &*pic.0;
+    let Some(src) = tiny_skia::PixmapRef::from_bytes(data, *w, *h) else {
+        return;
+    };
+    if to.width <= 0.0 || to.height <= 0.0 {
+        return;
+    }
+    let paint = tiny_skia::PixmapPaint {
+        opacity: f32::from(opacity) / 255.0,
+        quality: tiny_skia::FilterQuality::Bilinear,
+        ..Default::default()
+    };
+    let t = Transform::from_translate(to.x - layer.origin.x, to.y - layer.origin.y)
+        .pre_scale(to.width / *w as f32, to.height / *h as f32);
+    layer.pm.draw_pixmap(0, 0, src, &paint, t, None);
 }

@@ -20,6 +20,7 @@ mod sheets;
 mod status_bar;
 #[allow(dead_code)] // the Studio window wires it (W88 gives the API)
 pub mod recovery;
+pub(crate) mod editing;
 mod view;
 
 use std::path::PathBuf;
@@ -417,6 +418,7 @@ impl Studio {
         };
         // the widget's live area becomes a plain picture: the crop shows alone
         editor.movable = false;
+        editor.studio = true;
         editor.own_image = false;
         (editor.scroll, editor.capturing, editor.held) = (false, false, false);
         (editor.steps, editor.updating, editor.focus, editor.menu) = (None, None, None, None);
@@ -778,6 +780,16 @@ impl Studio {
             }
             None => Outcome::None,
         }
+    }
+
+    /// Ctrl+V found a picture on the clipboard while one is open: the editor
+    /// pastes our copied objects or a movable pasted picture (S1).
+    pub fn paste_objects(&mut self, clip: Crop) -> Outcome {
+        if let Some(e) = &mut self.editor {
+            e.paste_clipboard(Some(clip));
+        }
+        self.fit();
+        Outcome::None
     }
 
     /// Ctrl+V found no picture: the editor's own paste (text at `at`).
