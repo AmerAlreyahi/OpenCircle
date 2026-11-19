@@ -476,6 +476,7 @@ const UI_NOT_WORDS: &[&str] = &[
     "OpenCircle AI",
     // measurements and format-only text
     "{px} px",
+    "{size} · {when}",
     "{w}×{h} px",
     "x {}  y {}",
     "{label} · {keys}",
