@@ -231,3 +231,44 @@ pub fn done<'a>(ready: bool) -> Element<'a, Msg> {
         true,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::snip::annotate::{Group, Image};
+    use crate::shared::kit::option_bar::HEIGHT;
+    use iced::Length;
+
+    fn tall(e: &Element<'_, Message>) -> Length {
+        iced::advanced::Widget::size(e.as_widget()).height
+    }
+
+    /// STUDIO_V3 S4 (board 10): every group the Studio's bar builds, for every
+    /// tool, is the one control height (32).
+    #[test]
+    fn every_group_of_every_tools_bar_is_32_high() {
+        let mut e = Annotator::new(
+            Image {
+                width: 64,
+                height: 64,
+                rgba: vec![255; 64 * 64 * 4],
+            },
+            1.0,
+        );
+        let mut tools: Vec<Tool> = Group::ALL
+            .iter()
+            .flat_map(|g| g.tools())
+            .map(|t| t.tool)
+            .collect();
+        tools.push(Tool::Crop);
+        let mut built = 0;
+        for tool in tools {
+            e.update(Message::Tool(tool));
+            for group in groups(&e, tool, SWATCHES) {
+                assert_eq!(tall(&group), Length::Fixed(HEIGHT), "{tool:?}");
+                built += 1;
+            }
+        }
+        assert!(built >= 12, "the bars were measured: {built}");
+    }
+}

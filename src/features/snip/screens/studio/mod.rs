@@ -1834,7 +1834,7 @@ pub fn recent_line(path: &std::path::Path) -> String {
         3600..=86399 => fmt(S::st_ago_h, &[&(secs / 3600)]),
         _ => fmt(S::st_ago_d, &[&(secs / 86400)]),
     };
-    format!("{size} · {when}")
+    [size, when].join(" · ")
 }
 
 #[cfg(test)]

@@ -772,12 +772,62 @@ mod key_tests {
             Some(studio::Msg::Shortcuts(true))
         ));
         assert!(key("[", Code::BracketLeft, ctrl).is_none());
+        // Alt is the subscription's own (down / up); here it is no key
         let alt = keyboard::Key::Named(Named::Alt);
         let any = Physical::Code(Code::AltLeft);
-        assert!(matches!(
-            key_msg(&alt, any, keyboard::Modifiers::ALT),
-            Some(studio::Msg::MenuKey(studio::Nav::Alt))
-        ));
+        assert!(key_msg(&alt, any, keyboard::Modifiers::ALT).is_none());
+    }
+
+    /// The key names the menus, the sheet and the tooltips show (`studio::keys`)
+    /// are the keys that act: each window-level chord maps to its message.
+    #[test]
+    fn v3_the_labelled_keys_are_the_keys_that_act() {
+        use studio::keys as k;
+        let chord = |name: &str| {
+            let mut m = keyboard::Modifiers::empty();
+            let mut last = "";
+            for part in name.split('+') {
+                match part {
+                    "Ctrl" => m |= keyboard::Modifiers::CTRL,
+                    "Shift" => m |= keyboard::Modifiers::SHIFT,
+                    "Alt" => m |= keyboard::Modifiers::ALT,
+                    other => last = other,
+                }
+            }
+            let (c, code) = match last {
+                "O" | "o" => ("o", Code::KeyO),
+                "S" => ("s", Code::KeyS),
+                "V" => ("v", Code::KeyV),
+                "W" => ("w", Code::KeyW),
+                "B" => ("b", Code::KeyB),
+                "," => (",", Code::Comma),
+                "/" => ("/", Code::Slash),
+                "\\" => ("\\", Code::Backslash),
+                "=" => ("=", Code::Equal),
+                "-" => ("-", Code::Minus),
+                "0" => ("0", Code::Digit0),
+                "1" => ("1", Code::Digit1),
+                other => panic!("{other}"),
+            };
+            key_msg(&keyboard::Key::Character(c.into()), Physical::Code(code), m)
+        };
+        let is = |name: &str, want: &str| {
+            let got = format!("{:?}", chord(name));
+            assert!(got.contains(want), "{name}: {got}");
+        };
+        is(k::OPEN, "Open");
+        is(k::SAVE_AS, "Export");
+        is(k::PASTE, "Paste");
+        is(k::CLOSE, "Close");
+        is(k::LEFT_PANEL, "Library");
+        is(k::RIGHT_PANEL, "Panel");
+        is(k::ALL_PANELS, "Both");
+        is(k::SETTINGS, "Settings");
+        is(k::SHORTCUTS, "Shortcuts(true)");
+        is(k::ZOOM_IN, "ZoomIn");
+        is(k::ZOOM_OUT, "ZoomOut");
+        is(k::FIT, "Fit");
+        is(k::ACTUAL, "Actual");
     }
 }
 

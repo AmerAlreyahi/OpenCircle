@@ -34,3 +34,13 @@ pub const BACKWARD: &str = "Ctrl+[";
 pub const FRONT: &str = "Ctrl+Shift+]";
 pub const BACK: &str = "Ctrl+Shift+[";
 pub const PAN: &str = "Space+drag";
+
+/// A right-click row's key as key names (`Ctrl`, `Shift`, the key).
+pub fn chord_caps(k: super::editing::Chord) -> Vec<String> {
+    use super::editing::Chord as C;
+    match k {
+        C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
+        C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
+        C::Delete => vec!["Delete".into()],
+    }
+}

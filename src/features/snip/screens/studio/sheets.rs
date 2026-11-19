@@ -205,17 +205,7 @@ pub(super) fn words(a: editing::Action) -> S {
 
 /// A row's key as text ("Ctrl+Shift+C").
 pub(super) fn chord_text(k: editing::Chord) -> String {
-    caps(k).join("+")
-}
-
-/// A row's key as key caps.
-fn caps(k: editing::Chord) -> Vec<String> {
-    use editing::Chord as C;
-    match k {
-        C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
-        C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
-        C::Delete => vec!["Delete".into()],
-    }
+    super::keys::chord_caps(k).join("+")
 }
 
 /// The right-click menu over the editor's `entries`: a row that can't act is
@@ -230,7 +220,7 @@ pub fn context(entries: &[editing::Entry]) -> Element<'_, Msg> {
             lead: iced::widget::Space::new().width(LEAD).into(),
             label: tr(words(e.action)),
             external: false,
-            caps: caps(e.keys),
+            caps: super::keys::chord_caps(e.keys),
             reading: false,
             focused: false,
             press: e.enabled.then_some(Msg::ContextPick(i)),

@@ -1398,11 +1398,9 @@ fn v3_the_frame_matches_its_golden_images() {
         for ar in [false, true] {
             let _lang = ar.then(crate::shared::kit::testing::arabic);
             let tag = format!("{}{}", theme.id, if ar { "-ar" } else { "" });
-            let mut s = studio_on(640, 400);
-            draw(&mut s);
-            if let Some(e) = &mut s.editor {
-                e.doc.selected = Some(0);
-            }
+            // a rectangle selected with the Select tool: the bar shows ITS groups
+            let mut s = two_boxes();
+            let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
             let name = format!("studio3-selected-{tag}");
             failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
                 view(&s, &[], false)
@@ -1468,7 +1466,7 @@ fn v3_the_frame_matches_its_golden_images() {
             &name,
             Size::new(560.0, 200.0),
             &[1.0],
-            || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None)),
+            || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None), Msg::Menu(None)),
         ));
         let mut c = studio_on(640, 400);
         draw(&mut c);
@@ -1647,7 +1645,10 @@ fn v3_recent_menu_title_and_clear() {
     s.open(Picture::Crop(crop(8, 8)));
     assert_eq!(s.title, "holiday.png - OpenCircle Studio");
     let h = image::Handle::from_rgba(1, 1, vec![0; 4]);
-    let _ = s.update(Msg::Recent(vec![(PathBuf::from("/x/a.png"), h)]));
+    let _ = s.update(Msg::Recent(
+        vec![(PathBuf::from("/x/a.png"), h)],
+        vec![String::new()],
+    ));
     let rows = menu_bar::sub_items(Sub::Recent, &s);
     assert_eq!(rows[0].label, "a.png");
     assert!(matches!(s.update(Msg::ClearRecent), Outcome::ClearRecent));
@@ -1768,4 +1769,157 @@ fn v3_recovery_notes_restore_the_drawings() {
     let mut t = studio_on(640, 400);
     assert!(t.editor.as_mut().unwrap().restore_annotations(&json));
     assert_eq!(t.editor.as_ref().unwrap().doc.items.len(), 2);
+}
+
+/// Alt opens the menu bar on its release when nothing came between (Windows'
+/// way); another key or a click in between, and it opens nothing.
+#[test]
+fn v3_alt_opens_the_menu_bar_on_release_only() {
+    let mut s = studio_on(64, 64);
+    let _ = s.update(Msg::AltDown);
+    assert!(s.menu.is_none(), "not on the press");
+    let _ = s.update(Msg::AltUp);
+    assert_eq!(s.menu, Some((Menu::File, 0)));
+    let _ = s.update(Msg::Menu(None));
+    // Alt+A (a key between): nothing opens
+    let _ = s.update(Msg::AltDown);
+    let _ = s.update(Msg::AltBreak);
+    let _ = s.update(Msg::AltUp);
+    assert!(s.menu.is_none());
+    // a click between
+    let _ = s.update(Msg::AltDown);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+    let _ = s.update(Msg::AltUp);
+    assert!(s.menu.is_none());
+    // pointer moves and modifier changes do not count as another key
+    let _ = s.update(Msg::AltDown);
+    let _ = s.update(Msg::Mods(false, false));
+    let _ = s.update(Msg::AltUp);
+    assert!(s.menu.is_some());
+}
+
+/// Restore with unsaved work on screen asks first; Cancel keeps the copy (the
+/// sheet comes back), Don't save restores it.
+#[test]
+fn v3_restore_waits_for_the_unsaved_question_and_cancel_keeps_the_copy() {
+    let png = crate::shared::picture::encode_png(4, 3, &[200; 4 * 3 * 4]).unwrap();
+    let copy = || Restorable {
+        name: "Unsaved".into(),
+        size: (4, 3),
+        png: png.clone(),
+        notes: String::new(),
+    };
+    let mut s = studio_on(64, 64);
+    draw(&mut s);
+    s.restorable = Some(copy());
+    let _ = s.update(Msg::Restore);
+    assert!(s.asking(), "the question comes first");
+    assert!(s.restorable.is_none() && s.restoring.is_some());
+    assert_eq!(
+        s.editor.as_ref().unwrap().doc.image.width,
+        64,
+        "nothing replaced yet"
+    );
+    let _ = s.update(Msg::Cancel);
+    assert!(s.restorable.is_some(), "Cancel gives the copy back");
+    assert!(s.restoring.is_none() && !s.asking());
+    let _ = s.update(Msg::Restore);
+    let _ = s.update(Msg::DontSave);
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!((e.doc.image.width, e.doc.image.height), (4, 3), "restored");
+    assert!(s.restorable.is_none() && s.restoring.is_none());
+}
+
+/// The clock only runs while an edit waits for its copy; the copy's bookkeeping
+/// ends when the picture is clean again.
+#[test]
+fn v3_the_recovery_clock_runs_only_while_an_edit_waits() {
+    let mut s = studio_on(64, 64);
+    assert!(!s.waiting());
+    s.quiet.changed(std::time::Instant::now());
+    assert!(s.waiting());
+    s.copy_on_disk = true;
+    s.drop_copy();
+    assert!(!s.waiting() && !s.copy_on_disk);
+}
+
+/// The right-click menu stays inside the window at the right / bottom edges, and
+/// in Arabic is placed from the mirrored layout.
+#[test]
+fn v3_context_menu_stays_inside_the_window_and_mirrors() {
+    for arabic in [false, true] {
+        let _lang = arabic.then(crate::shared::kit::testing::arabic);
+        let mut s = studio_on(640, 400);
+        let _ = s.update(Msg::Resized(SIZE));
+        let stage = s.stage();
+        let _ = s.update(Msg::Pointer(Point::new(
+            stage.width - 2.0,
+            stage.height - 2.0,
+        )));
+        let _ = s.update(Msg::ContextOpen);
+        let c = s.context.as_ref().unwrap();
+        let w = crate::shared::kit::option_list::MENU_WIDTH;
+        assert!(
+            c.at.x >= 0.0 && c.at.x + w <= SIZE.width,
+            "{arabic}: x {}",
+            c.at.x
+        );
+        assert!(
+            c.at.y >= 0.0 && c.at.y < SIZE.height,
+            "{arabic}: y {}",
+            c.at.y
+        );
+        let _ = s.update(Msg::Cancel);
+        let _ = s.update(Msg::Pointer(Point::new(10.0, 10.0)));
+        let _ = s.update(Msg::ContextOpen);
+        let at = s.context.as_ref().unwrap().at;
+        let left = match arabic {
+            true => super::panel_width() + 1.0,
+            false => LIBRARY + 1.0 + RAIL + 2.0,
+        };
+        assert!(
+            (at.x - (left + 10.0)).abs() < 1.5,
+            "{arabic}: {} vs {}",
+            at.x,
+            left + 10.0
+        );
+    }
+}
+
+/// ONE source for key names: the editor's right-click rows and the menus read
+/// the same constants (`keys`).
+#[test]
+fn v3_key_names_have_one_source() {
+    use editing::Action as A;
+    let mut s = studio_on(64, 64);
+    draw(&mut s);
+    s.editor.as_mut().unwrap().doc.selected = Some(0);
+    let e = s.editor.as_ref().unwrap();
+    let rows: Vec<_> = editing::object_menu(e)
+        .into_iter()
+        .chain(editing::picture_menu(e))
+        .collect();
+    let want = |a: A| match a {
+        A::Cut => keys::CUT,
+        A::Copy => keys::COPY,
+        A::Paste => keys::PASTE,
+        A::Duplicate => keys::DUPLICATE,
+        A::Delete => keys::DELETE,
+        A::Forward => keys::FORWARD,
+        A::Backward => keys::BACKWARD,
+        A::Front => keys::FRONT,
+        A::Back => keys::BACK,
+        A::SelectAll => keys::SELECT_ALL,
+        A::CopyPicture => keys::COPY_PICTURE,
+        A::Fit => keys::FIT,
+        A::Shortcuts => keys::SHORTCUTS,
+    };
+    for r in rows {
+        assert_eq!(
+            keys::chord_caps(r.keys).join("+"),
+            want(r.action),
+            "{:?}",
+            r.action
+        );
+    }
 }
