@@ -73,6 +73,11 @@ impl Windows {
         Some(window::minimize(id, false).chain(window::gain_focus(id)))
     }
 
+    /// The Studio's window (for asking its monitor).
+    pub fn studio_id(&self) -> Option<window::Id> {
+        self.studio_window()
+    }
+
     pub fn studio(&self) -> Option<&Studio> {
         self.studio.as_ref().map(|(_, s)| s)
     }
@@ -87,9 +92,15 @@ impl Windows {
     }
 
     /// Copy text's words, read: on the clipboard off the UI thread, then the pill.
-    pub(super) fn studio_copy_text(&mut self, read: Result<String, String>) -> Task<Msg> {
-        if let Some(s) = self.studio_mut() {
-            s.set_busy(None);
+    pub(super) fn studio_copy_text(
+        &mut self,
+        epoch: u32,
+        read: Result<String, String>,
+    ) -> Task<Msg> {
+        // (an answer for a closed or replaced picture: no clipboard, no pill)
+        match self.studio_mut() {
+            Some(s) if s.epoch() == epoch => s.set_busy(None),
+            _ => return Task::none(),
         }
         match read {
             Ok(text) => background(move |tx| {
@@ -221,6 +232,10 @@ impl Windows {
             Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
             Outcome::Download => Task::done(Msg::StudioDownload),
             Outcome::Dismissed => Task::done(Msg::StudioDismiss),
+            Outcome::Provider => Task::batch([
+                Task::done(Msg::StudioDismiss),
+                self.open(super::Kind::Settings),
+            ]),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {

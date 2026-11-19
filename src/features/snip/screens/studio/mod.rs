@@ -16,6 +16,7 @@ use iced::{Point, Size, Vector};
 
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
 use crate::features::snip::snip_more::{self as more, Row};
+pub use crate::features::text_reading::model_download::Fetching;
 use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
@@ -61,30 +62,8 @@ pub enum Picture {
     Editor(Box<Annotator>),
 }
 
-/// The download card inside the Studio: what is missing for the row that was
-/// pressed, and where the download is.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Card {
-    pub what: What,
-    pub bytes: u64,
-    pub step: Step,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum What {
-    Reader,
-    Pair,
-    /// The readers for other scripts (their names).
-    Scripts(String),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Step {
-    Ask,
-    /// Fetching, 0..1.
-    At(f32),
-    Failed(String),
-}
+/// The picture counter (`Studio::epoch`), shared by every Studio of the run.
+static NEXT_EPOCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// What waits on the unsaved-changes question.
 enum After {
@@ -134,9 +113,11 @@ pub enum Msg {
     SaveFirst,
     /// A picture-panel row (Copy text, Translate, Ask AI).
     Act(Row),
-    /// The download card's buttons (Download / Try again, Not now / Cancel).
+    /// The download card's buttons (Download / Try again, Not now / Cancel,
+    /// Use an AI provider instead).
     Download,
     DismissCard,
+    Provider,
     /// The window has / lost the keyboard (the quick-action keys act on it).
     Focus(bool),
 }
@@ -172,6 +153,8 @@ pub enum Outcome {
     Download,
     /// The card was dismissed: the host drops what waited on it.
     Dismissed,
+    /// The card's AI link: dismissed, and Settings opens.
+    Provider,
 }
 
 pub struct Studio {
@@ -201,7 +184,7 @@ pub struct Studio {
     browser: bool,
     /// The row that is working (its icon spins), and the download card up.
     busy: Option<Row>,
-    card: Option<Card>,
+    card: Option<Fetching>,
 }
 
 impl Studio {
@@ -254,7 +237,8 @@ impl Studio {
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
         (self.original, self.busy, self.card) = (None, None, None);
-        self.epoch = self.epoch.wrapping_add(1);
+        // (one counter for every Studio: an answer for a closed one never fits a new one)
+        self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         self.zoom = None;
         self.editor = Some(editor);
         self.fit();
@@ -301,11 +285,11 @@ impl Studio {
     }
 
     /// The download card up (`None`: gone).
-    pub fn set_card(&mut self, card: Option<Card>) {
+    pub fn set_card(&mut self, card: Option<Fetching>) {
         self.card = card;
     }
 
-    pub fn card(&self) -> Option<&Card> {
+    pub fn card(&self) -> Option<&Fetching> {
         self.card.as_ref()
     }
 
@@ -558,15 +542,18 @@ impl Studio {
             Msg::Act(Row::CopyText) if self.busy == Some(Row::CopyText) => Outcome::None,
             Msg::Download if self.card.is_some() => {
                 if let Some(c) = &mut self.card {
-                    c.step = Step::At(0.0);
+                    (c.share, c.failed) = (Some(0.0), None);
                 }
                 Outcome::Download
             }
             Msg::Download => Outcome::None,
-            Msg::DismissCard => {
+            Msg::DismissCard | Msg::Provider => {
                 self.card = None;
                 self.busy = None;
-                Outcome::Dismissed
+                match msg {
+                    Msg::Provider => Outcome::Provider,
+                    _ => Outcome::Dismissed,
+                }
             }
             Msg::Act(row) => Outcome::Act(row),
             Msg::Focus(on) => {

@@ -95,7 +95,9 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
     let main: Element<'_, Msg> = match &s.card() {
         Some(card) => iced::widget::stack![
             main,
-            iced::widget::opaque(container(download(card)).center(Fill))
+            iced::widget::opaque(
+                container(card.card(Msg::Download, Msg::DismissCard, Msg::Provider)).center(Fill)
+            )
         ]
         .into(),
         None => main,
@@ -107,42 +109,6 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
             .width(Fill)
             .height(Fill),
     )
-}
-
-/// The download card, the overlay's own (`model_download`).
-fn download(card: &super::Card) -> Element<'_, Msg> {
-    use super::{Step, What};
-    use crate::features::text_reading::model_download::{
-        self as md, Does, Model, OCR, SCRIPTS, Stage, TRANSLATION,
-    };
-    let stage = match &card.step {
-        Step::Ask => Stage::Ask,
-        Step::At(share) => Stage::at(*share),
-        Step::Failed(why) => Stage::Failed(why),
-    };
-    let on = md::On {
-        download: Msg::Download,
-        dismiss: Some(Msg::DismissCard),
-        provider: None,
-    };
-    let does;
-    let scripts;
-    let model = match &card.what {
-        What::Reader => &OCR,
-        What::Pair => &TRANSLATION,
-        What::Scripts(names) => {
-            does = crate::shared::app_language::fmt(
-                crate::shared::app_language::S::md_read_names,
-                &[names],
-            );
-            scripts = Model {
-                does: Does::Text(&does),
-                ..SCRIPTS
-            };
-            &scripts
-        }
-    };
-    md::card(model, card.bytes, stage, on)
 }
 
 /// A panel's toggle: raised while its panel shows.

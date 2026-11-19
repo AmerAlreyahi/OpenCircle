@@ -196,6 +196,8 @@ pub(crate) struct App {
     /// Translate sessions started (numbers them).
     pub(crate) translates: u32,
     /// The Studio's translation: its id, the picture's epoch, the session.
+    /// The picture whose text-reader download the Studio's card waits on.
+    pub(crate) studio_reader: Option<u32>,
     pub(crate) studio_translate:
         Option<(u32, u32, crate::features::translate::screens::pill::Session)>,
     /// Translations by text, shared by one-shot and live mode.
@@ -311,6 +313,7 @@ impl App {
             windows: windows::Windows::default(),
             regions: Vec::new(),
             translates: 0,
+            studio_reader: None,
             studio_translate: None,
             cache: Arc::new(Cache::new(8)),
             live: None,

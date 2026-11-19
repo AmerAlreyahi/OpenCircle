@@ -14,7 +14,7 @@ use crate::features::ask_ai::ask::{self, Chat, Status};
 
 use crate::features::circle::actions;
 use crate::features::text_reading::models;
-use crate::features::text_reading::screens::model_download;
+use crate::features::text_reading::screens::model_download::{self, Fetching, Which};
 use crate::features::translate::mt::Pair;
 use crate::features::translate::pipeline::{self, Cache, Deps, Error, Translation};
 use crate::features::translate::screens::language_picker::{self as picker, Picker};
@@ -139,27 +139,6 @@ pub struct Problem {
     pub message: String,
     /// The AI is not set up (no key, provider, model): offer Settings.
     pub setup: bool,
-}
-
-/// What a session waits for the user to download (or is downloading): for a
-/// host that draws the download card itself (`Session::fetching`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Fetching {
-    pub what: Fetch,
-    pub bytes: u64,
-    /// `None`: asks; `Some(share)`: fetching.
-    pub share: Option<f32>,
-    pub failed: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Fetch {
-    /// A pair's translation models.
-    Pair,
-    /// The readers for other scripts (their names).
-    Scripts(String),
-    /// The text reader.
-    Reader,
 }
 
 /// What stops a session that has no card (`Session::stuck`).
@@ -349,28 +328,30 @@ impl Session {
         }
     }
 
-    /// What the session asks or fetches now (the same the pill's card shows).
+    /// What the session asks or fetches now: the card the pill shows, for a
+    /// host that draws it itself (the Studio).
     pub fn fetching(&self) -> Option<Fetching> {
         let (share, failed, asked) = match &self.phase {
-            Phase::Consent(ask) => (None, None, ask.map(|(_, b)| b)),
+            Phase::Consent(ask) => (None, None, *ask),
             Phase::Downloading(done) => (Some(*done), None, None),
             Phase::DownloadFailed(why) => (None, Some(why.clone()), None),
             _ => return None,
         };
-        let (what, bytes) = match (asked, self.offline, &self.readers) {
-            (Some(bytes), _, _) => (Fetch::Pair, bytes),
-            (None, Some(pair), _) => (Fetch::Pair, pair.full_size()),
-            (None, None, Some((bytes, names))) => (Fetch::Scripts(names.clone()), *bytes),
+        let (which, bytes) = match (asked, self.offline, &self.readers) {
+            (Some((_, bytes)), _, _) => (Which::Pair, bytes),
+            (None, Some(pair), _) => (Which::Pair, pair.full_size()),
+            (None, None, Some((bytes, names))) => (Which::Scripts(names.clone()), *bytes),
             (None, None, None) => (
-                Fetch::Reader,
+                Which::Reader,
                 crate::features::text_reading::models::full_size(),
             ),
         };
         Some(Fetching {
-            what,
+            which,
             bytes,
             share,
             failed,
+            provider: asked.is_some(),
         })
     }
 

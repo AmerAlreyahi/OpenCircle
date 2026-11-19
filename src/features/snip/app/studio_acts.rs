@@ -15,9 +15,9 @@ use crate::app::windows::Msg as W;
 #[cfg(test)]
 use crate::features::snip::app::snip_more::MODELS_HERE;
 use crate::features::snip::app::snip_more::{
-    hand_off, hands_off, models_present, pill, read_crop, text_download, text_progress,
+    download_steps, hand_off, hands_off, models_present, pill, read_crop, text_progress,
 };
-use crate::features::snip::screens::studio::{Card, Step, What};
+use crate::features::snip::screens::studio::Fetching;
 use crate::features::snip::snip_more::{self as more, Row};
 use crate::features::text_reading;
 use crate::shared::app_language::S;
@@ -49,21 +49,18 @@ impl App {
         if helper && !models_present() {
             // the overlay's card, in the Studio; Download reads it, then copies
             if let Some(s) = self.windows.studio_mut() {
-                s.set_card(Some(Card {
-                    what: What::Reader,
-                    bytes: text_reading::download_size(),
-                    step: Step::Ask,
-                }));
+                s.set_card(Some(Fetching::reader()));
             }
             return Task::none();
         }
-        if let Some(s) = self.windows.studio_mut() {
+        let epoch = self.windows.studio_mut().map_or(0, |s| {
             s.set_busy(Some(Row::CopyText));
-        }
+            s.epoch()
+        });
         background(move |tx| {
             let _ = tx.unbounded_send(read_text(&crop, setting, &hidden));
         })
-        .map(|r| Message::Windows(W::StudioText(r)))
+        .map(move |r| Message::Windows(W::StudioText(epoch, r)))
     }
 
     /// Ask AI with the annotated picture: the browser provider opens Google AI
@@ -75,7 +72,8 @@ impl App {
             return Task::none();
         };
         if !hands_off() {
-            return self.ask_from_window(crop);
+            let studio = self.windows.studio_id();
+            return self.ask_from_window(crop, studio);
         }
         background(move |tx| {
             let _ = tx.unbounded_send(hand_off(&crop, None, true));
@@ -139,19 +137,7 @@ impl App {
         let Some((_, _, session)) = self.studio_translate.as_ref() else {
             return Task::none();
         };
-        let card = session.fetching().map(|f| Card {
-            what: match f.what {
-                pill::Fetch::Pair => What::Pair,
-                pill::Fetch::Scripts(names) => What::Scripts(names),
-                pill::Fetch::Reader => What::Reader,
-            },
-            bytes: f.bytes,
-            step: match (f.failed, f.share) {
-                (Some(why), _) => Step::Failed(why),
-                (None, Some(share)) => Step::At(share),
-                (None, None) => Step::Ask,
-            },
-        });
+        let card = session.fetching();
         let working = card.is_none() && !session.is_shown();
         let stuck = session.stuck();
         if let Some(studio) = self.windows.studio_mut() {
@@ -184,59 +170,67 @@ impl App {
         let Some(epoch) = self.windows.studio().map(|s| s.epoch()) else {
             return Task::none();
         };
+        self.studio_reader = Some(epoch);
         if cfg!(test) {
             return Task::none(); // never the network
         }
         background(move |tx| {
-            let progress = |p| {
-                let _ = tx.unbounded_send(Ok(p));
-            };
-            let done = text_download(progress)
-                .map(|()| text_progress::Reading)
-                .map_err(|e| crate::features::snip::app::snip_more::why_key(&e));
-            let _ = tx.unbounded_send(done);
+            download_steps(None, |step| {
+                let _ = tx.unbounded_send(step);
+            });
         })
         .map(move |step| Message::StudioReader(epoch, step))
     }
 
     /// The reader download's steps: progress on the card; done, Copy text runs.
+    /// Only while its download is the wanted one: after Cancel (or another
+    /// picture, or a closed Studio) its answers land nowhere.
     pub(crate) fn on_studio_reader(
         &mut self,
         epoch: u32,
         step: Result<text_progress, S>,
     ) -> Task<Message> {
-        let Some(studio) = self.windows.studio_mut().filter(|s| s.epoch() == epoch) else {
+        let wanted = self.studio_reader == Some(epoch);
+        let Some(studio) = (self.windows.studio_mut()).filter(|s| wanted && s.epoch() == epoch)
+        else {
             return Task::none();
         };
-        let card = |step| {
-            Some(Card {
-                what: What::Reader,
-                bytes: text_reading::models::full_size(),
-                step,
-            })
-        };
         match step {
-            Ok(text_progress::Download(share)) => studio.set_card(card(Step::At(share))),
+            Ok(text_progress::Download(share)) => {
+                studio.set_card(Some(Fetching::reader().at(share)))
+            }
             Ok(text_progress::Reading) => {
                 studio.set_card(None);
+                self.studio_reader = None;
                 return self.studio_act(Row::CopyText);
             }
-            Err(why) => studio.set_card(card(Step::Failed(
-                crate::shared::app_language::tr(why).into(),
-            ))),
+            Err(why) => studio.set_card(Some(
+                Fetching::reader().stopped(crate::shared::app_language::tr(why).into()),
+            )),
         }
         Task::none()
     }
 
-    /// The card's Not now / Cancel: what waited on it goes (a translation's
-    /// session, with the picture back as it was).
+    /// The card's Not now / Cancel (or its AI link): what waited on it goes
+    /// (a translation's session, with the picture back as it was; a reader
+    /// download's answers, so nothing is copied after it).
     pub(crate) fn studio_dismissed(&mut self) -> Task<Message> {
+        self.studio_reader = None;
         if self.studio_translate.take().is_some()
             && let Some(studio) = self.windows.studio_mut()
         {
             studio.show_original();
         }
         Task::none()
+    }
+
+    /// The Studio is gone: nothing of it may land on a later one (its
+    /// session and its frame are freed, a download's answers dropped).
+    pub(crate) fn studio_gone(&mut self) {
+        if self.windows.studio().is_none() {
+            self.studio_reader = None;
+            self.studio_translate = None;
+        }
     }
 }
 
@@ -292,7 +286,11 @@ mod tests {
         let before = pixels(&app);
         let _ = app.studio_act(Row::Translate);
         let studio = app.windows.studio().unwrap();
-        assert!(studio.card().is_some_and(|c| c.step == Step::Ask));
+        assert!(
+            studio
+                .card()
+                .is_some_and(|c| c.share.is_none() && c.failed.is_none())
+        );
         assert!(app.studio_translate.is_some(), "waits for the click");
         assert_eq!(pixels(&app), before);
         assert!(app.windows.toasts().is_empty());
@@ -310,13 +308,16 @@ mod tests {
         let mut app = app();
         let _ = app.studio_act(Row::CopyText);
         let epoch = app.windows.studio().unwrap().epoch();
-        let step = |app: &App| app.windows.studio().unwrap().card().map(|c| c.step.clone());
-        assert_eq!(step(&app), Some(Step::Ask));
+        let _ = app.studio_download(); // the click on Download
+        let step = |app: &App| {
+            (app.windows.studio().unwrap().card()).map(|c| (c.share, c.failed.is_some()))
+        };
+        assert_eq!(step(&app), Some((None, false)));
         // (Download itself is the network: the tests drive its answers)
         let _ = app.on_studio_reader(epoch, Ok(text_progress::Download(0.5)));
-        assert_eq!(step(&app), Some(Step::At(0.5)));
+        assert_eq!(step(&app), Some((Some(0.5), false)));
         let _ = app.on_studio_reader(epoch, Err(S::md_err_offline));
-        assert!(matches!(step(&app), Some(Step::Failed(_))));
+        assert_eq!(step(&app), Some((None, true)));
         // an answer for another picture is dropped
         let _ = app.on_studio_reader(epoch + 1, Ok(text_progress::Reading));
         assert!(step(&app).is_some());
@@ -378,5 +379,80 @@ mod tests {
             app.windows.studio().unwrap().card().is_some(),
             "Translate ran: models missing"
         );
+    }
+
+    /// Cancel on the reader's card cancels: the download's later answers land
+    /// nowhere (no card back, no read, nothing copied).
+    #[test]
+    fn cancel_on_the_reader_download_really_cancels() {
+        MODELS_HERE.set(Some(false));
+        let mut app = app();
+        let _ = app.studio_act(Row::CopyText);
+        let epoch = app.windows.studio().unwrap().epoch();
+        let _ = app.studio_download();
+        let _ = app.on_studio_reader(epoch, Ok(text_progress::Download(0.3)));
+        assert!(app.windows.studio().unwrap().card().is_some());
+        let _ = app
+            .windows
+            .studio_mut()
+            .unwrap()
+            .update(st::Msg::DismissCard);
+        let _ = app.studio_dismissed(); // (what the Studio's outcome sends)
+        assert!(app.windows.studio().unwrap().card().is_none());
+        // the download was still running: its answers arrive after Cancel
+        let _ = app.on_studio_reader(epoch, Ok(text_progress::Download(0.6)));
+        assert!(
+            app.windows.studio().unwrap().card().is_none(),
+            "no card back"
+        );
+        MODELS_HERE.set(Some(true));
+        let _ = app.on_studio_reader(epoch, Ok(text_progress::Reading));
+        assert_eq!(
+            app.windows.studio().unwrap().busy(),
+            None,
+            "nothing is read"
+        );
+    }
+
+    /// A closed Studio takes its session and download with it; a new Studio
+    /// (its own picture) never gets their answers.
+    #[test]
+    fn a_reopened_studio_gets_nothing_of_the_old_one() {
+        MODELS_HERE.set(Some(true));
+        let mut app = app();
+        let _ = app.studio_act(Row::Translate);
+        let (id, ..) = app.studio_translate.as_ref().map(|t| (t.0, ())).unwrap();
+        let old = app.windows.studio().unwrap().epoch();
+        app.studio_reader = Some(old);
+        // closed, and another Studio opened with another picture
+        let window = app.windows.studio_id().unwrap();
+        let _ = app.update(Message::Windows(W::Closed(window)));
+        assert!(app.studio_translate.is_none() && app.studio_reader.is_none());
+        let _ = app.windows.open_studio(Some(st::Picture::Crop(Crop {
+            width: 50,
+            height: 50,
+            rgba: [9, 9, 9, 255].repeat(50 * 50),
+        })));
+        assert_ne!(app.windows.studio().unwrap().epoch(), old, "one counter");
+        let before = pixels(&app);
+        // the old session's answers and the old download's step arrive late
+        let _ = app.on_studio_translate(id, pill::Msg::Translating);
+        let _ = app.on_studio_reader(old, Ok(text_progress::Reading));
+        assert_eq!(pixels(&app), before);
+        assert!(!app.windows.studio().unwrap().translated());
+        assert_eq!(app.windows.studio().unwrap().busy(), None);
+    }
+
+    /// Copy text read for a closed or replaced picture copies nothing.
+    #[test]
+    fn a_late_copy_text_answer_is_dropped() {
+        let mut app = app();
+        let epoch = app.windows.studio().unwrap().epoch();
+        let _ = app.update(Message::Windows(W::StudioText(epoch + 99, Ok("x".into()))));
+        assert!(app.windows.toasts().is_empty(), "no pill");
+        let window = app.windows.studio_id().unwrap();
+        let _ = app.update(Message::Windows(W::Closed(window)));
+        let _ = app.update(Message::Windows(W::StudioText(epoch, Err("no".into()))));
+        assert!(app.windows.toasts().is_empty());
     }
 }

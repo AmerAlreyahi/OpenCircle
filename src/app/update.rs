@@ -40,6 +40,7 @@ impl App {
     /// (`sync_chat_window`).
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         let mut task = self.handle(message);
+        self.studio_gone();
         if self.o.is_some() && self.o.close_when_idle && self.ends_tool() {
             self.o.close_when_idle = false;
             task = Task::batch([task, self.close()]);
@@ -114,6 +115,7 @@ impl App {
             }
             Message::Live(msg) => self.on_live(msg),
             Message::Translate(id, msg) => self.on_translate(id, msg),
+            Message::ChatHome(screen) => self.chat_home(screen),
             Message::StudioTranslate(id, msg) => self.on_studio_translate(id, msg),
             Message::StudioReader(epoch, step) => self.on_studio_reader(epoch, step),
             // Wayland: a long capture going on with its overlay gone ends by its
@@ -788,15 +790,9 @@ impl App {
                 let opening = self.opening;
                 let rec = self.o.script_reader;
                 background(move |tx| {
-                    let progress = |p| {
-                        let _ = tx.unbounded_send(Ok(p));
-                    };
-                    let done = text::download_reader(rec, progress)
-                        .map(|()| text::Progress::Reading)
-                        .map_err(|e| {
-                            crate::features::text_reading::screens::model_download::why_key(&e)
-                        });
-                    let _ = tx.unbounded_send(done);
+                    crate::features::text_reading::app::text::download_steps(rec, |step| {
+                        let _ = tx.unbounded_send(step);
+                    });
                 })
                 .map(move |step| Message::Reader(opening, step))
             }
@@ -901,6 +897,7 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::ChatFrame(_)
             | Message::Windows(_)
             | Message::StudioTranslate(..)
+            | Message::ChatHome(_)
             | Message::StudioReader(..)
             | Message::Live(_)
             | Message::Drawn

@@ -874,6 +874,19 @@ impl App {
     }
 }
 
+/// Blocking: `download_reader` as the steps both hosts' cards show (the
+/// overlay's note, the Studio's card): each `Download` share, then `Reading`
+/// (done) or the card's words (why not). The one place that maps them.
+pub(crate) fn download_steps(
+    rec: Option<&'static text_reading::models::Recognizer>,
+    mut send: impl FnMut(Result<text::Progress, crate::shared::app_language::S>),
+) {
+    let done = text::download_reader(rec, |p| send(Ok(p)))
+        .map(|()| text::Progress::Reading)
+        .map_err(|e| crate::features::text_reading::screens::model_download::why_key(&e));
+    send(done);
+}
+
 /// A part of the screen's text as the helper sends it: the lines it found
 /// (first), then the band's lines read.
 enum Part {

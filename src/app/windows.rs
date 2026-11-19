@@ -119,7 +119,7 @@ pub enum Msg {
     /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
     StudioAct(crate::features::snip::snip_more::Row),
     /// Copy text's text, read (the Studio): the clipboard, then the pill.
-    StudioText(Result<String, String>),
+    StudioText(u32, Result<String, String>),
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
@@ -1412,7 +1412,7 @@ impl Windows {
             // (`app::App` takes it before here.)
             Msg::StudioAct(_) => {}
             Msg::StudioDownload | Msg::StudioDismiss => {}
-            Msg::StudioText(read) => return self.studio_copy_text(read),
+            Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);

@@ -483,14 +483,10 @@ fn the_rows_show_the_users_keys() {
 #[test]
 fn the_download_card_blocks_rows_and_answers_its_buttons() {
     let mut s = studio_on(100, 60);
-    s.set_card(Some(Card {
-        what: What::Reader,
-        bytes: 9_000_000,
-        step: Step::Ask,
-    }));
+    s.set_card(Some(Fetching::reader()));
     assert!(matches!(s.update(Msg::Act(Row::Translate)), Outcome::None));
     assert!(matches!(s.update(Msg::Download), Outcome::Download));
-    assert_eq!(s.card().map(|c| c.step.clone()), Some(Step::At(0.0)));
+    assert_eq!(s.card().and_then(|c| c.share), Some(0.0));
     assert!(matches!(s.update(Msg::DismissCard), Outcome::Dismissed));
     assert!(s.card().is_none());
     s.set_busy(Some(Row::CopyText));
@@ -514,10 +510,12 @@ fn the_panel_and_card_match_their_golden_images() {
             view(&s, false)
         }));
         let mut asking = studio_on(640, 400);
-        asking.set_card(Some(Card {
-            what: What::Pair,
+        asking.set_card(Some(Fetching {
+            which: crate::features::text_reading::model_download::Which::Pair,
             bytes: 78_000_000,
-            step: Step::Ask,
+            share: None,
+            failed: None,
+            provider: true,
         }));
         let file = format!("studio-card-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {

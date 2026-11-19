@@ -159,6 +159,92 @@ pub fn why_key(e: &crate::features::text_reading::OcrError) -> S {
     }
 }
 
+/// Which model a host's card is for (`Fetching`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Which {
+    /// The text reader.
+    Reader,
+    /// A pair's translation models.
+    Pair,
+    /// The readers for other scripts (their names).
+    Scripts(String),
+}
+
+/// What a host that has no card of its own (the Studio) shows, and the pill
+/// shows too: one description, one card (`card`). `share`: `None` asks,
+/// `Some` fetches; `failed`: why it stopped; `provider`: offers "Use an AI
+/// provider instead" (translation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fetching {
+    pub which: Which,
+    pub bytes: u64,
+    pub share: Option<f32>,
+    pub failed: Option<String>,
+    pub provider: bool,
+}
+
+impl Fetching {
+    /// The text reader's question (the whole set's size: the same measure
+    /// the progress shows).
+    pub fn reader() -> Self {
+        Fetching {
+            which: Which::Reader,
+            bytes: crate::features::text_reading::models::full_size(),
+            share: None,
+            failed: None,
+            provider: false,
+        }
+    }
+
+    /// The same, at `share` of the download.
+    pub fn at(self, share: f32) -> Self {
+        Fetching {
+            share: Some(share),
+            failed: None,
+            ..self
+        }
+    }
+
+    /// The same, stopped for `why` (Try again).
+    pub fn stopped(self, why: String) -> Self {
+        Fetching {
+            share: None,
+            failed: Some(why),
+            ..self
+        }
+    }
+
+    /// The card: `download` is Download / Try again, `dismiss` Not now /
+    /// Cancel, `provider` the AI link.
+    pub fn card<'a, M: Clone + 'a>(&self, download: M, dismiss: M, provider: M) -> Element<'a, M> {
+        let stage = match (&self.failed, self.share) {
+            (Some(why), _) => Stage::Failed(why),
+            (None, Some(share)) => Stage::at(share),
+            (None, None) => Stage::Ask,
+        };
+        let on = On {
+            download,
+            dismiss: Some(dismiss),
+            provider: self.provider.then_some(provider),
+        };
+        let does;
+        let scripts;
+        let model = match &self.which {
+            Which::Reader => &OCR,
+            Which::Pair => &TRANSLATION,
+            Which::Scripts(names) => {
+                does = fmt(S::md_read_names, &[names]);
+                scripts = Model {
+                    does: Does::Text(&does),
+                    ..SCRIPTS
+                };
+                &scripts
+            }
+        };
+        card(model, self.bytes, stage, on)
+    }
+}
+
 /// `bytes` as the design writes it: whole MB, at least 1.
 pub fn mb(bytes: u64) -> u64 {
     bytes.div_ceil(1_000_000).max(1)
@@ -168,7 +254,7 @@ pub fn mb(bytes: u64) -> u64 {
 pub fn card<'a, M: Clone + 'a>(
     model: &Model,
     bytes: u64,
-    stage: Stage<'a>,
+    stage: Stage<'_>,
     on: On<M>,
 ) -> Element<'a, M> {
     let header = row![
@@ -187,7 +273,7 @@ pub fn card<'a, M: Clone + 'a>(
 }
 
 /// The emblem, the stage's title and the model's line.
-fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a, M> {
+fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'_>) -> Element<'a, M> {
     let (icon, title) = match stage {
         Stage::Ask => (model.icon, tr(model.title).to_string()),
         Stage::Downloading(_) | Stage::Retrying(_) => (
@@ -218,7 +304,7 @@ fn heading<'a, M: 'a>(model: &Model, bytes: u64, stage: Stage<'a>) -> Element<'a
 fn body<'a, M: Clone + 'a>(
     model: &Model,
     bytes: u64,
-    stage: Stage<'a>,
+    stage: Stage<'_>,
     on: On<M>,
 ) -> Element<'a, M> {
     let said = |s: String| {

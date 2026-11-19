@@ -117,6 +117,8 @@ pub(crate) enum Message {
     Translate(u32, pill::Msg),
     /// The Studio's Translate (`features::snip::app::studio_acts`).
     StudioTranslate(u32, pill::Msg),
+    /// The monitor (size) a chat asked from a window sizes itself by.
+    ChatHome(Size),
     /// The Studio's text reader download (its picture's epoch).
     StudioReader(u32, Result<text::Progress, S>),
     Live(live_layer::Msg),
