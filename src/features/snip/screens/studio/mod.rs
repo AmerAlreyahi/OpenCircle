@@ -6,6 +6,7 @@
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
+mod cut;
 mod edit_text;
 mod view;
 
@@ -23,6 +24,7 @@ use crate::shared::config::StudioConfig;
 use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
 
+pub use cut::{Done as CutDone, Phase as CutPhase};
 #[cfg(test)]
 pub use view::GLYPHS;
 pub use view::view;
@@ -133,6 +135,9 @@ pub enum Msg {
     PickLine(usize),
     Draft(String),
     EditDone,
+    /// The panel's Cut out row; the options bar's Before (`true`) / After.
+    CutOut,
+    CutView(bool),
 }
 
 /// What the host does after a message.
@@ -175,6 +180,8 @@ pub enum Outcome {
     FocusField,
     /// A pill with this (an edit that could not be made).
     Say(String),
+    /// Cut out: the host cuts `cut_source`'s picture and answers `set_cut`.
+    CutOut,
 }
 
 pub struct Studio {
@@ -207,6 +214,11 @@ pub struct Studio {
     card: Option<Fetching>,
     /// Edit text is on (S8).
     edit: Option<edit_text::Session>,
+    /// Cut out (S9): the work's phase, the compare view, and whether the
+    /// picture has see-through pixels (it sits on a checkerboard then).
+    cutting: cut::Phase,
+    cut: Option<cut::Cut>,
+    transparent: bool,
 }
 
 impl Studio {
@@ -231,6 +243,9 @@ impl Studio {
             busy: None,
             card: None,
             edit: None,
+            cutting: cut::Phase::Idle,
+            cut: None,
+            transparent: false,
         }
     }
 
@@ -260,6 +275,8 @@ impl Studio {
         // what came from Snip with no drawing is nothing to lose
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
         (self.original, self.busy, self.card, self.edit) = (None, None, None, None);
+        (self.cutting, self.cut) = (cut::Phase::Idle, None);
+        self.transparent = cut::has_alpha(&editor.doc.image.rgba);
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         self.zoom = None;
@@ -334,6 +351,86 @@ impl Studio {
         let mut crop = annotate::clean(doc);
         more::mask(&mut crop, &hidden);
         Some((crop, hidden))
+    }
+
+    /// Cut out starts: the picture's own pixels (drawings are items over them,
+    /// they stay), its size and which picture this is.
+    pub fn cut_source(&mut self) -> Option<(Vec<u8>, u32, u32, u32)> {
+        let e = self.editor.as_ref()?;
+        self.cutting = cut::Phase::Working;
+        self.busy = None;
+        Some((
+            e.doc.image.rgba.clone(),
+            e.doc.image.width,
+            e.doc.image.height,
+            self.epoch,
+        ))
+    }
+
+    pub fn cut_phase(&self) -> cut::Phase {
+        self.cutting
+    }
+
+    /// The cut's answer for the picture `epoch`: applied as one undoable edit
+    /// (the compare view opens), or the model's card, or a pill.
+    pub fn set_cut(&mut self, epoch: u32, done: cut::Done) -> Outcome {
+        if epoch != self.epoch || self.cutting != cut::Phase::Working {
+            return Outcome::None;
+        }
+        self.cutting = cut::Phase::Idle;
+        let alpha = match done {
+            cut::Done::NeedsModel => {
+                self.cutting = cut::Phase::Asking;
+                self.card = Some(Fetching::cutout());
+                return Outcome::None;
+            }
+            cut::Done::Failed(why) => return Outcome::Say(why),
+            cut::Done::Alpha(alpha) => alpha,
+        };
+        let Some(e) = self.editor.as_mut() else {
+            return Outcome::None;
+        };
+        let before = e.doc.image.rgba.clone();
+        let mut after = before.clone();
+        crate::features::cutout::apply(&mut after, &alpha);
+        if !e.doc.set_pixels(&after) {
+            return Outcome::Say(crate::t!(st_cut_nothing).to_string());
+        }
+        e.own_image = true; // its pixels are no longer the opened picture's
+        e.refresh();
+        self.transparent = true;
+        self.cut = Some(cut::Cut {
+            before,
+            after,
+            state: e.doc.state(),
+            showing_before: false,
+        });
+        Outcome::None
+    }
+
+    /// The compare view is up (a cut made and nothing since).
+    pub(super) fn comparing(&self) -> Option<bool> {
+        let (c, e) = (self.cut.as_ref()?, self.editor.as_ref()?);
+        (c.state == e.doc.state()).then_some(c.showing_before)
+    }
+
+    /// Before / After: the picture's pixels shown, not an edit.
+    fn show_cut(&mut self, before: bool) {
+        let (Some(c), Some(e)) = (self.cut.as_mut(), self.editor.as_mut()) else {
+            return;
+        };
+        if c.showing_before == before || c.state != e.doc.state() {
+            return;
+        }
+        c.showing_before = before;
+        let shown = if before { &c.before } else { &c.after };
+        e.doc.image.rgba.copy_from_slice(shown);
+        e.refresh();
+    }
+
+    /// Anything that works on the picture sees the cut, not the "Before" view.
+    fn settle_cut(&mut self) {
+        self.show_cut(false);
     }
 
     /// Edit text stops (the reader's models are missing: the card asks).
@@ -552,10 +649,17 @@ impl Studio {
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
                     | Msg::EditText
+                    | Msg::CutOut
                     | Msg::Download
             )
         {
             return Outcome::None;
+        }
+        if matches!(
+            msg,
+            Msg::Editor(_) | Msg::Act(_) | Msg::EditText | Msg::CutOut | Msg::SaveFirst
+        ) {
+            self.settle_cut();
         }
         match msg {
             // while a line is edited the picture's tools rest; the bar's size,
@@ -567,6 +671,20 @@ impl Studio {
                 Outcome::None
             }
             Msg::Act(_) if self.edit.is_some() => Outcome::None,
+            Msg::CutView(before) => {
+                self.show_cut(before);
+                Outcome::None
+            }
+            Msg::CutOut
+                if self.editor.is_none()
+                    || self.card.is_some()
+                    || self.original.is_some()
+                    || self.edit.is_some()
+                    || self.cutting != cut::Phase::Idle =>
+            {
+                Outcome::None
+            }
+            Msg::CutOut => Outcome::CutOut,
             Msg::EditText
                 if self.editor.is_none()
                     || self.card.is_some()
@@ -695,6 +813,7 @@ impl Studio {
             Msg::DismissCard | Msg::Provider => {
                 self.card = None;
                 self.busy = None;
+                self.cutting = cut::Phase::Idle;
                 match msg {
                     Msg::Provider => Outcome::Provider,
                     _ => Outcome::Dismissed,
@@ -724,7 +843,11 @@ impl Studio {
         let Some(e) = &mut self.editor else {
             return Outcome::None;
         };
+        let history = matches!(m, annotate::Message::Undo | annotate::Message::Redo);
         let out = e.update(m);
+        if history {
+            self.transparent = cut::has_alpha(&e.doc.image.rgba);
+        }
         self.fit(); // a crop changes what is shown
         match out {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),

@@ -16,11 +16,13 @@ pub mod system;
 pub(crate) mod text;
 pub(crate) mod worker;
 
+pub(crate) use models::{ModelFile, ORT, ensure, missing_bytes, retrying};
 pub use models::{download_size, ensure_models, models_dir, ready};
+pub(crate) use ppocr::session as ort_session;
 pub(crate) use screens::model_download;
 pub use session::{Hold, gently_here, helper_pid, hold, keep_warm, when_idle};
 pub use worker::{
-    WORKER_ARG, read_screen, reads_other_scripts, recognize_as, recognize_except,
+    WORKER_ARG, cut_out_in_child, read_screen, reads_other_scripts, recognize_as, recognize_except,
     recognize_in_child, translate_in_child, warm, worker_main,
 };
 

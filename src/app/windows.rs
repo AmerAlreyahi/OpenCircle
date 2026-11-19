@@ -124,6 +124,9 @@ pub enum Msg {
     StudioLines(u32, Result<Vec<crate::features::translate::Line>, String>),
     /// Edit text starts (the App reads the picture: `snip::app::studio_acts`).
     StudioEditText,
+    /// Cut out starts (the App cuts), and its answer for that picture.
+    StudioCutOut,
+    StudioCut(u32, crate::features::snip::screens::studio::CutDone),
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
@@ -1414,7 +1417,14 @@ impl Windows {
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
-            Msg::StudioAct(_) | Msg::StudioEditText => {}
+            Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut => {}
+            Msg::StudioCut(epoch, done) => {
+                let out = match self.studio_mut() {
+                    Some(s) => s.set_cut(epoch, done),
+                    None => return Task::none(),
+                };
+                return self.studio_outcome(out);
+            }
             Msg::StudioLines(epoch, read) => {
                 let out = match self.studio_mut() {
                     Some(s) => s.set_lines(epoch, read),

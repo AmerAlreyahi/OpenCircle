@@ -48,6 +48,15 @@ pub const OCR: Model<'static> = Model {
     source: "GitHub",
 };
 
+/// The Studio's Cut out model (IS-Net).
+pub const CUTOUT: Model<'static> = Model {
+    name: S::md_cut_name,
+    icon: Icon::Picture,
+    title: S::md_cut_title,
+    does: Does::Said(S::md_cut_does),
+    source: "GitHub",
+};
+
 /// The readers for other scripts, for a page read as noise.
 pub const SCRIPTS: Model<'static> = Model {
     name: S::md_scripts_name,
@@ -168,6 +177,8 @@ pub enum Which {
     Pair,
     /// The readers for other scripts (their names).
     Scripts(String),
+    /// The Studio's Cut out model.
+    CutOut,
 }
 
 /// What a host that has no card of its own (the Studio) shows, and the pill
@@ -193,6 +204,15 @@ impl Fetching {
             share: None,
             failed: None,
             provider: false,
+        }
+    }
+
+    /// The Studio's Cut out question (ONNX Runtime too, when OCR never fetched it).
+    pub fn cutout() -> Self {
+        Fetching {
+            which: Which::CutOut,
+            bytes: crate::features::cutout::full_size(),
+            ..Fetching::reader()
         }
     }
 
@@ -232,6 +252,7 @@ impl Fetching {
         let model = match &self.which {
             Which::Reader => &OCR,
             Which::Pair => &TRANSLATION,
+            Which::CutOut => &CUTOUT,
             Which::Scripts(names) => {
                 does = fmt(S::md_read_names, &[names]);
                 scripts = Model {

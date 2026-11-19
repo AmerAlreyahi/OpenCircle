@@ -17,7 +17,7 @@ use crate::features::snip::app::snip_more::MODELS_HERE;
 use crate::features::snip::app::snip_more::{
     download_steps, hand_off, hands_off, models_present, pill, read_crop, text_progress,
 };
-use crate::features::snip::screens::studio::Fetching;
+use crate::features::snip::screens::studio::{CutDone, CutPhase, Fetching};
 use crate::features::snip::snip_more::{self as more, Row};
 use crate::features::text_reading;
 use crate::shared::app_language::S;
@@ -56,6 +56,21 @@ impl App {
             let _ = tx.unbounded_send(read_lines(&crop, setting, &hidden));
         })
         .map(move |r| Message::Windows(W::StudioLines(epoch, r)))
+    }
+
+    /// Cut out: a flat border is cut at once; anything else needs the model,
+    /// which the Studio's card asks for first (`studio_download` runs the cut
+    /// when it is in). Off the UI thread; the answer is dropped for another
+    /// picture.
+    pub(crate) fn studio_cut_out(&mut self) -> Task<Message> {
+        let Some((rgba, w, h, epoch)) = self.windows.studio_mut().and_then(|s| s.cut_source())
+        else {
+            return Task::none();
+        };
+        background(move |tx| {
+            let _ = tx.unbounded_send(cut(&rgba, w, h));
+        })
+        .map(move |done| Message::Windows(W::StudioCut(epoch, done)))
     }
 
     fn studio_say(&mut self, text: &str, ok: bool) -> Task<Message> {
@@ -198,10 +213,18 @@ impl App {
         if cfg!(test) {
             return Task::none(); // never the network
         }
+        let cutout = self
+            .windows
+            .studio()
+            .is_some_and(|s| s.cut_phase() == CutPhase::Asking);
         background(move |tx| {
-            download_steps(None, |step| {
+            let send = |step| {
                 let _ = tx.unbounded_send(step);
-            });
+            };
+            match cutout {
+                true => cut_download_steps(send),
+                false => download_steps(None, send),
+            }
         })
         .map(move |step| Message::StudioReader(epoch, step))
     }
@@ -219,17 +242,24 @@ impl App {
         else {
             return Task::none();
         };
+        // the card the download belongs to (Cut out's, else the reader's)
+        let cutout = studio.cut_phase() == CutPhase::Asking;
+        let card = || match cutout {
+            true => Fetching::cutout(),
+            false => Fetching::reader(),
+        };
         match step {
-            Ok(text_progress::Download(share)) => {
-                studio.set_card(Some(Fetching::reader().at(share)))
-            }
+            Ok(text_progress::Download(share)) => studio.set_card(Some(card().at(share))),
             Ok(text_progress::Reading) => {
                 studio.set_card(None);
                 self.studio_reader = None;
-                return self.studio_act(Row::CopyText);
+                return match cutout {
+                    true => self.studio_cut_out(),
+                    false => self.studio_act(Row::CopyText),
+                };
             }
             Err(why) => studio.set_card(Some(
-                Fetching::reader().stopped(crate::shared::app_language::tr(why).into()),
+                card().stopped(crate::shared::app_language::tr(why).into()),
             )),
         }
         Task::none()
@@ -273,6 +303,33 @@ fn read_text(
         return Err(t!(sn_no_text).to_string());
     }
     Ok(text)
+}
+
+/// Blocking: the cut-out download as the steps the Studio's card shows (the
+/// reader's own shape: each share, then `Reading` = done, or why not).
+fn cut_download_steps(mut send: impl FnMut(Result<text_progress, S>)) {
+    let done = crate::features::cutout::download(|share| send(Ok(text_progress::Download(share))))
+        .map(|()| text_progress::Reading)
+        .map_err(|e| text_reading::model_download::why_key(&e));
+    send(done);
+}
+
+/// Blocking: the picture's alpha: the quick cut, else the model's.
+fn cut(rgba: &[u8], w: u32, h: u32) -> CutDone {
+    use crate::features::cutout;
+    if let Some(alpha) = cutout::quick(rgba, w, h) {
+        return CutDone::Alpha(alpha);
+    }
+    if cutout::model::missing_bytes() > 0 {
+        return CutDone::NeedsModel;
+    }
+    match cutout::by_model(rgba, w, h) {
+        Ok(alpha) => CutDone::Alpha(alpha),
+        Err(e) => {
+            crate::log!("[opencircle] Studio: cut out failed: {e}");
+            CutDone::Failed(t!(st_cut_failed).to_string())
+        }
+    }
 }
 
 /// Blocking: the picture's lines, hidden parts left out; or why not.

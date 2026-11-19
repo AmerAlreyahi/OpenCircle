@@ -388,7 +388,7 @@ fn a_panel_row_asks_the_host() {
     assert!(matches!(s.update(Msg::Act(Row::AskAi)), Outcome::None));
 }
 
-/// The three actions in the design's order; Edit text follows them (Cut out comes later).
+/// The three actions in the design's order; Edit text and Cut out follow them.
 #[test]
 fn the_panel_rows_are_the_three_actions_in_design_order() {
     assert_eq!(view::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
@@ -901,4 +901,180 @@ fn edit_text_works_on_a_band_of_rows_s8() {
     assert_eq!(after[end * 300 * 4..], before[end * 300 * 4..]);
     let _ = s.update(Msg::Editor(Message::Undo));
     assert_eq!(pixels_of(&s), before);
+}
+
+// ---- Cut out (v0.4.6, S9) ----
+
+/// A white picture with a red box in the middle: a flat border.
+fn boxed(width: u32, height: u32) -> Studio {
+    let mut c = crop(width, height);
+    let (w, h) = (width as usize, height as usize);
+    for y in h / 3..h * 2 / 3 {
+        for x in w * 3 / 10..w * 7 / 10 {
+            let i = (y * w + x) * 4;
+            c.rgba[i..i + 4].copy_from_slice(&[200, 30, 30, 255]);
+        }
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    s
+}
+
+fn alpha_at(s: &Studio, x: usize, y: usize) -> u8 {
+    let w = s.editor.as_ref().unwrap().doc.image.width as usize;
+    s.editor.as_ref().unwrap().doc.image.rgba[(y * w + x) * 4 + 3]
+}
+
+/// The cut as the host does it: take the source, cut, answer.
+fn cut_now(s: &mut Studio) -> Outcome {
+    let (rgba, w, h, epoch) = s.cut_source().unwrap();
+    let done = match crate::features::cutout::quick(&rgba, w, h) {
+        Some(a) => CutDone::Alpha(a),
+        None => CutDone::NeedsModel,
+    };
+    s.set_cut(epoch, done)
+}
+
+/// S9: the row asks the host; it rests while a line is edited or a cut runs.
+#[test]
+fn cut_out_row_asks_the_host_s9() {
+    let mut s = boxed(100, 60);
+    assert!(matches!(s.update(Msg::CutOut), Outcome::CutOut));
+    let _ = s.cut_source();
+    assert!(matches!(s.update(Msg::CutOut), Outcome::None), "once");
+    let mut empty = Studio::new(StudioConfig::default());
+    assert!(matches!(empty.update(Msg::CutOut), Outcome::None));
+}
+
+/// S9 + brief 1(a): a flat border is cut with no model; the box stays, the
+/// background is transparent, and it is one undoable edit (Ctrl+Z brings it back).
+#[test]
+fn a_flat_background_is_cut_and_undo_brings_it_back_s9() {
+    let mut s = boxed(100, 60);
+    let before = pixels_of(&s);
+    assert!(matches!(cut_now(&mut s), Outcome::None));
+    assert_eq!((alpha_at(&s, 2, 2), alpha_at(&s, 50, 30)), (0, 255));
+    assert!(s.transparent && s.dirty());
+    assert_eq!(s.cut_phase(), CutPhase::Idle);
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert_eq!(pixels_of(&s), before);
+    assert!(!s.transparent && s.comparing().is_none());
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+}
+
+/// S9: Before | After compares without editing; anything that works on the
+/// picture (a drawing, Save) sees the cut.
+#[test]
+fn before_after_compares_and_work_sees_the_cut_s9() {
+    let mut s = boxed(100, 60);
+    let _ = cut_now(&mut s);
+    assert_eq!(s.comparing(), Some(false));
+    let _ = s.update(Msg::CutView(true));
+    assert_eq!((s.comparing(), alpha_at(&s, 2, 2)), (Some(true), 255));
+    assert!(s.dirty(), "the compare view is not an edit");
+    let _ = s.update(Msg::CutView(false));
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+    // Save from Before saves the cut
+    let _ = s.update(Msg::CutView(true));
+    let Outcome::SaveThen(crop) = s.update(Msg::SaveFirst) else {
+        panic!("save");
+    };
+    assert_eq!(crop.rgba[3], 0, "the cut, not the picture as it was");
+    // a drawing ends the compare view
+    draw(&mut s);
+    assert!(s.comparing().is_none());
+    assert_eq!(alpha_at(&s, 2, 2), 0);
+}
+
+/// Brief 1(b): a busy background needs the model: the card asks (size shown),
+/// nothing is cut; Not now drops it.
+#[test]
+fn a_busy_background_asks_for_the_model_s9() {
+    let mut c = crop(100, 60);
+    for (i, p) in c.rgba.chunks_mut(4).enumerate() {
+        p[..3].fill(if (i % 100 + i / 100) % 2 == 0 { 0 } else { 255 });
+    }
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(c));
+    let before = pixels_of(&s);
+    assert!(matches!(cut_now(&mut s), Outcome::None));
+    assert_eq!(s.cut_phase(), CutPhase::Asking);
+    let card = s.card().unwrap();
+    assert!(
+        card.share.is_none() && card.bytes > 178_000_000,
+        "the size is shown"
+    );
+    assert_eq!(pixels_of(&s), before);
+    assert!(
+        matches!(s.update(Msg::CutOut), Outcome::None),
+        "the card blocks"
+    );
+    assert!(matches!(s.update(Msg::DismissCard), Outcome::Dismissed));
+    assert_eq!(s.cut_phase(), CutPhase::Idle);
+}
+
+/// An answer for another picture lands nowhere; a cut with nothing to remove says so.
+#[test]
+fn a_late_or_empty_cut_changes_nothing_s9() {
+    let mut s = boxed(100, 60);
+    let (_, _, _, epoch) = s.cut_source().unwrap();
+    assert!(matches!(
+        s.set_cut(epoch + 1, CutDone::Alpha(vec![0; 6000])),
+        Outcome::None
+    ));
+    assert!(!s.transparent);
+    // an all-kept alpha changes nothing: a pill
+    assert!(matches!(
+        s.set_cut(epoch, CutDone::Alpha(vec![255; 6000])),
+        Outcome::Say(_)
+    ));
+    assert!(!s.dirty());
+}
+
+/// Save PNG keeps the alpha; JPEG blends on white.
+#[test]
+fn png_keeps_alpha_and_jpeg_blends_on_white_s9() {
+    use crate::shared::config::Format;
+    let mut s = boxed(100, 60);
+    let _ = cut_now(&mut s);
+    let crop = annotate::render(&s.editor.as_ref().unwrap().doc);
+    assert_eq!(crop.rgba[3], 0);
+    let png = crate::shared::picture::encode(&crop, Format::Png).unwrap();
+    let back = crate::shared::platform::capture::decode_png(std::io::Cursor::new(png)).unwrap();
+    assert_eq!((back.rgba[3], back.rgba[(30 * 100 + 50) * 4 + 3]), (0, 255));
+    // the background colour under the alpha (red here) must not show in a JPEG
+    let mut red = crop.clone();
+    red.rgba[..3].copy_from_slice(&[255, 0, 0]);
+    let jpg = crate::shared::picture::encode(&red, Format::Jpeg).unwrap();
+    let img = ::image::load_from_memory(&jpg).unwrap().to_rgb8();
+    let p = img.get_pixel(0, 0);
+    assert!(p[0] > 240 && p[1] > 240 && p[2] > 240, "white, got {p:?}");
+}
+
+/// The panel (with Cut out spinning), the compare bar on a checkerboard, and
+/// the card, in English and Arabic.
+#[test]
+fn cut_out_matches_its_golden_images_s9() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let mut s = boxed(640, 400);
+        let _ = cut_now(&mut s);
+        let file = format!("studio-cut-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+        let mut asking = boxed(640, 400);
+        asking.set_card(Some(Fetching::cutout()));
+        let file = format!("studio-cut-card-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&asking, false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-cut-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, false)
+        }));
+    });
 }

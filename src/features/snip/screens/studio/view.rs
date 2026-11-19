@@ -67,9 +67,10 @@ pub fn view(s: &Studio, maximised: bool) -> Element<'_, Msg> {
             parts.push(rail(e));
             parts.push(divider::vertical(Fill));
             let work = column![
-                match &s.edit {
-                    Some(x) => edit_bar(x),
-                    None => options_bar(e),
+                match (&s.edit, s.comparing()) {
+                    (Some(x), _) => edit_bar(x),
+                    (None, Some(before)) => cut_bar(before),
+                    (None, None) => options_bar(e),
                 },
                 divider::divider(),
                 stage(s, e),
@@ -298,10 +299,34 @@ const EDIT_BUTTON: f32 = 84.0;
 /// The inline field's least width, logical px.
 const INLINE_MIN: f32 = 140.0;
 
+/// Cut out's options bar (S9): Before | After, and where the work stays.
+fn cut_bar<'a>(before: bool) -> Element<'a, Msg> {
+    let seg = crate::shared::kit::segmented::inline(
+        &[(true, t!(st_cut_before)), (false, t!(st_cut_after))],
+        before,
+        before,
+        1.0,
+        Msg::CutView,
+    );
+    let line = crate::dir_row![seg, muted(Role::ROW_DESC, t!(st_cut_note))]
+        .spacing(space::PAGE[1])
+        .align_y(Center);
+    container(line)
+        .padding([0.0, space::PAGE[1]])
+        .center_y(super::OPTIONS)
+        .width(Fill)
+        .into()
+}
+
 /// The picture, fitted or zoomed (both ways scrollable past the stage).
 fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let drawn = canvas::canvas(e, 1.0, ScreenMap::ONE).map(Msg::Editor);
     let (shown, room) = (e.size(), s.stage());
+    // a cut-out (or see-through) picture sits on a checkerboard
+    let drawn: Element<'a, Msg> = match s.transparent {
+        true => iced::widget::stack![super::cut::checker(shown), drawn].into(),
+        false => drawn,
+    };
     // Edit text: the found lines over the picture (dashed, the picked one solid)
     let drawn: Element<'a, Msg> = match s
         .edit
@@ -516,6 +541,18 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
             focused: false,
             press: (!editing && !acts.translated).then_some(Msg::EditText),
         }));
+        // Cut out: on the picture as opened or edited, not under a translation
+        let lead = option_list::glyph('\u{e151}', false); // lucide "scissors"
+        rows = rows.push(option_list::action(option_list::ActionRow {
+            lead,
+            label: tr(crate::shared::app_language::S::st_cut_out),
+            external: false,
+            caps: Vec::new(),
+            reading: s.cut_phase() == super::CutPhase::Working,
+            focused: false,
+            press: (!editing && !acts.translated && s.cut_phase() == super::CutPhase::Idle)
+                .then_some(Msg::CutOut),
+        }));
         let px = e.doc.view().size();
         let line = |name, value: String| {
             crate::dir_row![
@@ -537,8 +574,7 @@ fn picture_panel(s: &Studio) -> Element<'_, Msg> {
     side(list, super::panel_width())
 }
 
-/// The panel's rows, in the design's order (Edit text follows them, Cut out comes
-/// with v0.4.6).
+/// The panel's rows, in the design's order (Edit text and Cut out follow them).
 pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 
 fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {

@@ -232,6 +232,7 @@ impl Windows {
             Outcome::Act(row) => Task::done(Msg::StudioAct(row)),
             Outcome::ReadLines => Task::done(Msg::StudioEditText),
             Outcome::FocusField => iced::widget::operation::focus(studio::FIELD),
+            Outcome::CutOut => Task::done(Msg::StudioCutOut),
             Outcome::Say(text) => self.say(&text, false),
             Outcome::Download => Task::done(Msg::StudioDownload),
             Outcome::Dismissed => Task::done(Msg::StudioDismiss),
