@@ -386,6 +386,21 @@ impl Document {
         self.done.len()
     }
 
+    /// Calls `f` with the document at each state of its history, the first
+    /// state to the current one; the document ends as it was (no copy).
+    pub fn replay(&mut self, mut f: impl FnMut(&Document)) {
+        let (depth, selected) = (self.done.len(), self.selected);
+        for _ in 0..depth {
+            self.undo();
+        }
+        f(self);
+        for _ in 0..depth {
+            self.redo();
+            f(self);
+        }
+        self.selected = selected;
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some((n, edit)) = self.done.pop() else {
             return false;

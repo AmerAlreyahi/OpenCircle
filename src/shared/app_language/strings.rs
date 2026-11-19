@@ -1820,6 +1820,30 @@ strings! {
         | "عرض متحرك (GIF)";
     st_gif_kind: "GIF"
         | "GIF";
+    st_walk_title: "Export walkthrough"
+        | "تصدير شرح متحرك";
+    st_walk_from: "From"
+        | "من";
+    st_walk_steps: "Steps"
+        | "الخطوات";
+    st_walk_edits: "Edits of this picture"
+        | "تعديلات هذه الصورة";
+    st_walk_frame: "Frame time"
+        | "مدة الإطار";
+    st_walk_s: "s"
+        | "ث";
+    st_walk_number: "Number the frames"
+        | "ترقيم الإطارات";
+    st_walk_loop: "Loop"
+        | "تكرار";
+    st_walk_frames: "Frames"
+        | "الإطارات";
+    st_walk_about: "about"
+        | "نحو";
+    st_walk_note: "Draws each step as a frame; not a screen recording."
+        | "يرسم كل خطوة كإطار؛ ليس تسجيلًا للشاشة.";
+    st_walk_pc: "Made on this PC; nothing is uploaded."
+        | "يُصنع على هذا الجهاز، ولا يُرفع شيء.";
     st_export_where: "Export the picture"
         | "تصدير الصورة";
     st_export_folder: "Choose a folder for the steps"

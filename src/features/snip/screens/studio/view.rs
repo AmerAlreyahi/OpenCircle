@@ -9,7 +9,7 @@ use iced::widget::{Space, column, container, mouse_area, tooltip::Position};
 use iced::{Center, Element, Event, Fill, Length, Rectangle, Vector, mouse};
 use std::sync::Arc;
 
-use super::{Msg, Studio, Tab};
+use super::{Msg, Studio, Tab, Walk};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
 use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
@@ -90,14 +90,19 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
     if s.exporting && !s.asking() {
         main = main.push(divider::divider()).push(export_bar(s));
     }
-    // the question is a card over the window: the picture under it takes no press
-    let main: Element<'_, Msg> = match s.asking() {
-        true => iced::widget::stack![
+    // the question and the walkthrough dialog are cards over the window: the picture under them takes no press
+    let main: Element<'_, Msg> = match (s.asking(), &s.walk) {
+        (true, _) => iced::widget::stack![
             main,
             iced::widget::opaque(container(question()).center(Fill))
         ]
         .into(),
-        false => main.into(),
+        (false, Some(w)) => iced::widget::stack![
+            main,
+            iced::widget::opaque(container(walk_dialog(s, *w, steps)).center(Fill))
+        ]
+        .into(),
+        (false, None) => main.into(),
     };
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
@@ -524,6 +529,134 @@ fn export_bar(s: &Studio) -> Element<'_, Msg> {
     let line = dir::row(items).spacing(space::PAGE[1]).align_y(Center);
     container(line).padding(space::PAGE).width(Fill).into()
 }
+
+/// The walkthrough dialog (STUDIO_V2_SPEC "Export dialog", boards S15 / S17):
+/// where the frames come from, the strip, Size, Frame time, the two switches,
+/// the estimate. GIF only for now (MP4 / WebM wait for the owner: a row with
+/// one choice is not shown).
+fn walk_dialog<'a>(s: &'a Studio, w: Walk, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+    let edits = s.editor.as_ref().map_or(0, |e| e.doc.depth());
+    let n_edits = (edits + 1).min(super::EDIT_FRAMES);
+    let n = if w.edits { n_edits } else { steps.len() };
+    let label = |words: &'a str| sub(Role::ROW_DESC, words);
+    let field =
+        |words: &'a str, body: Element<'a, Msg>| column![label(words), body].spacing(space::GAP);
+    // From: the Steps, or the picture's edits (none to replay: not offered)
+    let sources = [(false, t!(st_walk_steps)), (true, t!(st_walk_edits))];
+    let sources: Vec<_> = if edits > 0 {
+        sources.to_vec()
+    } else {
+        sources[..1].to_vec()
+    };
+    let from = segmented::inline(&sources, w.edits, w.edits, 1.0, Msg::WalkEdits);
+    // the frames, with each one's time (at most six shown)
+    let secs = format!("{:.1} {}", f32::from(w.tenths) / 10.0, t!(st_walk_s));
+    let frames: Vec<Element<'a, Msg>> = (0..n.min(WALK_SHOWN))
+        .map(|i| {
+            let picture: Element<'a, Msg> = match (w.edits, steps.get(i)) {
+                (false, Some(step)) => {
+                    thumb::step(step.thumb(), i + 1, thumb::Look::default(), None)
+                }
+                _ => surface(
+                    Material::Recessed,
+                    radius::TRACK,
+                    container(sub(Role::ROW_TITLE, (i + 1).to_string())).center(Fill),
+                )
+                .width(thumb::WELL.width)
+                .height(thumb::WELL.height)
+                .into(),
+            };
+            column![picture, sub(Role::KEYCAP, secs.clone())]
+                .spacing(space::GAP / 2.0)
+                .align_x(Center)
+                .into()
+        })
+        .collect();
+    let mut strip = dir::row(frames).spacing(space::GAP);
+    if n > WALK_SHOWN {
+        strip = strip.push(sub(Role::ROW_DESC, format!("+{}", n - WALK_SHOWN)));
+    }
+    let sizes = [
+        (0, t!(st_original)),
+        (1280, "1280"),
+        (960, "960"),
+        (640, "640"),
+    ];
+    let size = segmented::inline(&sizes, w.how.max_edge, w.how.max_edge, 1.0, Msg::WalkSize);
+    let time = crate::dir_row![
+        slider::bare(5..=60, w.tenths, WALK_SLIDER_W, false, Msg::WalkTime),
+        sub(Role::ROW_DESC, secs.clone()),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    let switches = crate::dir_row![
+        label(t!(st_walk_number)),
+        Space::new().width(space::GAP),
+        button::toggle(w.how.numbered, Some(Msg::WalkNumbered(!w.how.numbered))),
+        Space::new().width(Fill),
+        label(t!(st_walk_loop)),
+        button::toggle(w.how.repeat, Some(Msg::WalkLoop(!w.how.repeat))),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    let estimate = walk_estimate(s, w, steps, n);
+    let go = (n > 0).then_some(Msg::WalkGo);
+    let foot = crate::dir_row![
+        sub(Role::META, t!(st_walk_pc)).width(Fill),
+        button::regular(t!(c_cancel), false, Some(Msg::WalkCancel)),
+        button::regular(t!(st_export_go), true, go),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    let body = column![
+        text(Role::ROW_TITLE, t!(st_walk_title)),
+        field(t!(st_walk_from), from),
+        strip,
+        field(t!(st_size), size),
+        field(t!(st_walk_frame), time.into()),
+        switches,
+        column![
+            sub(Role::ROW_DESC, estimate).width(Fill),
+            sub(Role::META, t!(st_walk_note)).width(Fill)
+        ],
+        foot,
+    ]
+    .spacing(space::PAGE[1]);
+    surface(
+        Material::Widget,
+        radius::CARD,
+        container(body).padding(space::PAGE),
+    )
+    .width(Length::Fixed(540.0))
+    .into()
+}
+
+/// "4 frames · 8 s · about 1.1 MB".
+// ponytail: a GIF is guessed at a quarter byte a pixel (steps: their PNG's size); the real size shows in the file.
+fn walk_estimate(s: &Studio, w: Walk, steps: &[Arc<Step>], n: usize) -> String {
+    let bytes: usize = match (w.edits, &s.editor) {
+        (true, Some(e)) => {
+            let size = e.doc.view().size();
+            (size.width * size.height * 0.25) as usize * n
+        }
+        _ => steps.iter().map(|x| x.png().len()).sum(),
+    };
+    let secs = n as f32 * f32::from(w.tenths) / 10.0;
+    let size = match bytes >= 1_048_576 {
+        true => format!("{:.1} MB", bytes as f32 / 1_048_576.0),
+        false => format!("{} KB", bytes.div_ceil(1024)),
+    };
+    [
+        format!("{} {n}", t!(st_walk_frames)),
+        format!("{secs:.0} {}", t!(st_walk_s)),
+        format!("{} {size}", t!(st_walk_about)),
+    ]
+    .join(" · ")
+}
+
+/// The frames the dialog's strip shows at most.
+const WALK_SHOWN: usize = 6;
+const WALK_SLIDER_W: f32 = 240.0;
 
 /// The export bar's quality slider.
 const QUALITY_W: f32 = 120.0;

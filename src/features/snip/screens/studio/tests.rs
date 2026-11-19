@@ -268,6 +268,25 @@ fn the_studio_matches_its_golden_images() {
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
             view(&s, &steps, false)
         }));
+        // the walkthrough dialog over it: from the Steps, then from the edits, then in Arabic
+        let _ = s.update(Msg::ExportCancel);
+        let _ = s.update(Msg::ExportWalkthrough);
+        let file = format!("studio-walkthrough-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &steps, false)
+        }));
+        let _ = s.update(Msg::WalkEdits(true));
+        let _ = s.update(Msg::WalkNumbered(true));
+        let file = format!("studio-walkthrough-edits-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &steps, false)
+        }));
+        crate::shared::app_language::set(crate::shared::app_language::Lang::Ar);
+        let file = format!("studio-walkthrough-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &steps, false)
+        }));
+        crate::shared::app_language::set(crate::shared::app_language::Lang::En);
     });
 }
 
@@ -415,11 +434,79 @@ fn export_asks_for_the_choices_then_hands_over_the_drawn_picture() {
     assert!(s.dirty(), "an export is not a Save");
 }
 
+/// A Studio on a picture with `n` pen strokes (n undoable edits).
+fn drawn(n: usize) -> Studio {
+    let mut s = studio_on(300, 200);
+    for _ in 0..n {
+        draw(&mut s);
+    }
+    s
+}
+
 #[test]
-fn walkthrough_export_is_handed_to_the_host() {
+fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());
-    assert!(matches!(
-        s.update(Msg::ExportWalkthrough),
-        Outcome::ExportWalkthrough
-    ));
+    let _ = s.update(Msg::ExportWalkthrough);
+    assert!(s.walk.is_some());
+    let _ = s.update(Msg::WalkTime(35));
+    let _ = s.update(Msg::WalkSize(960));
+    let _ = s.update(Msg::WalkNumbered(true));
+    let _ = s.update(Msg::WalkLoop(false));
+    let Outcome::ExportWalkthrough(how, frames) = s.update(Msg::WalkGo) else {
+        panic!("no export");
+    };
+    assert_eq!(
+        how,
+        export::Walkthrough {
+            max_edge: 960,
+            frame_ms: 3500,
+            repeat: false,
+            numbered: true
+        }
+    );
+    assert!(frames.is_none(), "from the Steps: the host has them");
+    assert!(s.walk.is_none());
+    let _ = s.update(Msg::ExportWalkthrough);
+    let _ = s.update(Msg::WalkCancel);
+    assert!(s.walk.is_none());
+}
+
+#[test]
+fn walkthrough_from_edits_replays_the_history_and_leaves_the_document_as_it_was() {
+    let mut s = drawn(3);
+    let before = s.editor.as_ref().unwrap().doc.steps();
+    let state = s.editor.as_ref().unwrap().doc.state();
+    let _ = s.update(Msg::ExportWalkthrough);
+    let _ = s.update(Msg::WalkEdits(true));
+    let Outcome::ExportWalkthrough(_, Some(frames)) = s.update(Msg::WalkGo) else {
+        panic!("no frames");
+    };
+    assert_eq!(frames.len(), 4, "the start and each of the 3 edits");
+    assert_eq!(
+        frames[0].rgba,
+        crop(300, 200).rgba,
+        "the first is the plain picture"
+    );
+    assert_ne!(frames[0].rgba, frames[3].rgba);
+    assert_ne!(frames[1].rgba, frames[0].rgba);
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!((e.doc.steps(), e.doc.state()), (before, state));
+}
+
+#[test]
+fn a_long_history_is_sampled_to_at_most_the_frame_limit_keeping_both_ends() {
+    let mut s = drawn(45);
+    let _ = s.update(Msg::ExportWalkthrough);
+    let _ = s.update(Msg::WalkEdits(true));
+    let Outcome::ExportWalkthrough(_, Some(frames)) = s.update(Msg::WalkGo) else {
+        panic!("no frames");
+    };
+    assert_eq!(frames.len(), EDIT_FRAMES);
+    assert_eq!(frames[0].rgba, crop(300, 200).rgba);
+    let now = annotate::render(&s.editor.as_ref().unwrap().doc);
+    assert_eq!(
+        frames.last().unwrap().rgba,
+        now.rgba,
+        "ends on the current picture"
+    );
 }

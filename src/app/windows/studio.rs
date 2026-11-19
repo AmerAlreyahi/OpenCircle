@@ -216,11 +216,13 @@ impl Windows {
                 })
                 .map(Msg::StudioToast)
             }
-            Outcome::ExportWalkthrough => {
+            Outcome::ExportWalkthrough(how, frames) => {
                 let steps: Vec<_> =
                     (self.steps.as_ref()).map_or(Vec::new(), |(_, s)| s.steps().to_vec());
                 background(move |tx| {
-                    if let Some(done) = export_walkthrough(&steps) {
+                    let frames =
+                        frames.unwrap_or_else(|| steps.iter().filter_map(|s| s.crop()).collect());
+                    if let Some(done) = export_walkthrough(frames, how) {
                         let _ = tx.unbounded_send(done);
                     }
                 })
@@ -290,7 +292,10 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
 }
 
 /// Blocking: where to put the walkthrough GIF, then the file; `None`: cancelled.
-fn export_walkthrough(steps: &[Arc<Step>]) -> Option<Result<String, String>> {
+fn export_walkthrough(
+    frames: Vec<Crop>,
+    how: export::Walkthrough,
+) -> Option<Result<String, String>> {
     let mut dialog = rfd::FileDialog::new()
         .set_title(crate::t!(st_export_where))
         .set_file_name(format!("{}.gif", save::stamped_name("steps-")))
@@ -300,8 +305,7 @@ fn export_walkthrough(steps: &[Arc<Step>]) -> Option<Result<String, String>> {
         dialog = dialog.set_directory(folder);
     }
     let path = dialog.save_file()?.with_extension("gif");
-    let frames: Vec<Crop> = steps.iter().filter_map(|s| s.crop()).collect();
-    let written = export::encode_gif(frames, export::Walkthrough::default())
+    let written = export::encode_gif(frames, how)
         .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
     Some(match written {
         Ok(()) => Ok(fmt(

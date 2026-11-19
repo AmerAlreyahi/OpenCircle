@@ -123,8 +123,15 @@ pub enum Msg {
     StepDelete(usize),
     CopyAllSteps,
     ExportSteps(export::Steps),
-    /// The steps as one animated GIF.
+    /// The walkthrough dialog: open, its choices, Export…, Cancel.
     ExportWalkthrough,
+    WalkEdits(bool),
+    WalkSize(u32),
+    WalkTime(u8),
+    WalkNumbered(bool),
+    WalkLoop(bool),
+    WalkGo,
+    WalkCancel,
     /// The export bar: open, its choices, Export…, Cancel.
     Export,
     ExportFormat(export::Format),
@@ -164,8 +171,9 @@ pub enum Outcome {
     OpenStep(usize),
     /// Export the steps (the host asks for a folder).
     ExportSteps(export::Steps),
-    /// Export the steps as a walkthrough GIF (the host asks where).
-    ExportWalkthrough,
+    /// Export a walkthrough GIF (the host asks where): the picture's edits
+    /// replayed (`Some`), else the Steps' pictures.
+    ExportWalkthrough(export::Walkthrough, Option<Vec<Crop>>),
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
 }
@@ -194,6 +202,47 @@ pub struct Studio {
     /// The export bar's choices, and whether it shows.
     pub(super) export: export::Picture,
     pub(super) exporting: bool,
+    /// The walkthrough dialog's choices while it shows.
+    pub(super) walk: Option<Walk>,
+}
+
+/// The walkthrough dialog's choices (STUDIO_V2_SPEC "Export dialog").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Walk {
+    /// From the picture's edits, not the Steps.
+    pub edits: bool,
+    /// Frame time in tenths of a second.
+    pub tenths: u8,
+    pub how: export::Walkthrough,
+}
+
+/// Frames of an edits walkthrough at most (a long history is sampled evenly).
+pub(super) const EDIT_FRAMES: usize = 30;
+
+impl Walk {
+    fn how(self) -> export::Walkthrough {
+        export::Walkthrough {
+            frame_ms: u32::from(self.tenths) * 100,
+            ..self.how
+        }
+    }
+}
+
+/// The document's history as pictures, first state to current.
+fn edit_frames(doc: &mut annotate::Document) -> Vec<Crop> {
+    let total = doc.depth() + 1;
+    let want = |i: usize| match total <= EDIT_FRAMES {
+        true => true,
+        false => (0..EDIT_FRAMES).any(|j| j * (total - 1) / (EDIT_FRAMES - 1) == i),
+    };
+    let (mut i, mut out) = (0, Vec::new());
+    doc.replay(|d| {
+        if want(i) {
+            out.push(annotate::render(d));
+        }
+        i += 1;
+    });
+    out
 }
 
 impl Studio {
@@ -216,6 +265,7 @@ impl Studio {
             step_hover: None,
             export: export::Picture::default(),
             exporting: false,
+            walk: None,
         }
     }
 
@@ -457,7 +507,31 @@ impl Studio {
             }
             Msg::CopyAllSteps => Outcome::Steps(steps::Msg::CopyAll),
             Msg::ExportSteps(how) => Outcome::ExportSteps(how),
-            Msg::ExportWalkthrough => Outcome::ExportWalkthrough,
+            Msg::ExportWalkthrough => {
+                self.walk = Some(Walk {
+                    edits: false,
+                    tenths: 20,
+                    how: export::Walkthrough::default(),
+                });
+                Outcome::None
+            }
+            Msg::WalkEdits(on) => self.walk_set(|w| w.edits = on),
+            Msg::WalkSize(px) => self.walk_set(|w| w.how.max_edge = px),
+            Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
+            Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
+            Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkCancel => {
+                self.walk = None;
+                Outcome::None
+            }
+            Msg::WalkGo => match self.walk.take() {
+                Some(w) if w.edits => match &mut self.editor {
+                    Some(e) => Outcome::ExportWalkthrough(w.how(), Some(edit_frames(&mut e.doc))),
+                    None => Outcome::None,
+                },
+                Some(w) => Outcome::ExportWalkthrough(w.how(), None),
+                None => Outcome::None,
+            },
             Msg::Export => {
                 self.exporting = self.editor.is_some();
                 Outcome::None
@@ -486,6 +560,13 @@ impl Studio {
                 }
             }
         }
+    }
+
+    fn walk_set(&mut self, f: impl FnOnce(&mut Walk)) -> Outcome {
+        if let Some(w) = &mut self.walk {
+            f(w);
+        }
+        Outcome::None
     }
 
     fn on_editor(&mut self, m: annotate::Message) -> Outcome {

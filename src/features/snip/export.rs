@@ -217,6 +217,8 @@ pub struct Walkthrough {
     /// Seconds each frame shows, in milliseconds.
     pub frame_ms: u32,
     pub repeat: bool,
+    /// Each frame's place among them, in a badge at its corner.
+    pub numbered: bool,
 }
 
 impl Default for Walkthrough {
@@ -225,6 +227,7 @@ impl Default for Walkthrough {
             max_edge: 1280,
             frame_ms: 2000,
             repeat: true,
+            numbered: false,
         }
     }
 }
@@ -233,9 +236,14 @@ impl Default for Walkthrough {
 /// centred on white in a canvas as big as the biggest.
 /// ponytail: a GIF has 256 colours a frame (NeuQuant, speed 10); MP4 / WebM wait for the owner's pick.
 pub fn encode_gif(frames: Vec<Crop>, how: Walkthrough) -> Result<Vec<u8>, String> {
-    let frames: Vec<Crop> = frames
-        .into_iter()
-        .map(|f| fit_long_edge(f, how.max_edge))
+    let frames: Vec<Crop> = (frames.into_iter().enumerate())
+        .map(|(i, f)| {
+            let f = fit_long_edge(f, how.max_edge);
+            match how.numbered {
+                true => crate::features::snip::annotate::step::badge(f, i as u32 + 1),
+                false => f,
+            }
+        })
         .collect();
     let width = frames.iter().map(|f| f.width).max().ok_or("no frames")?;
     let height = frames.iter().map(|f| f.height).max().ok_or("no frames")?;
@@ -423,6 +431,21 @@ mod tests {
             .map(|r| (r.width(), r.height()));
         assert_eq!(r.unwrap(), (150, 113));
         assert!(encode_gif(vec![], Walkthrough::default()).is_err());
+        // numbered frames differ from plain ones (the badge) and keep their size
+        let plain = |how| {
+            let bytes = encode_gif(vec![crop(300, 100)], how).unwrap();
+            let mut d = gif::DecodeOptions::new();
+            d.set_color_output(gif::ColorOutput::RGBA);
+            let mut r = d.read_info(&bytes[..]).unwrap();
+            r.read_next_frame().unwrap().unwrap().buffer.to_vec()
+        };
+        let numbered = Walkthrough {
+            numbered: true,
+            ..Walkthrough::default()
+        };
+        let (a, b) = (plain(Walkthrough::default()), plain(numbered));
+        assert_eq!(a.len(), b.len());
+        assert_ne!(a, b);
     }
 
     #[test]
