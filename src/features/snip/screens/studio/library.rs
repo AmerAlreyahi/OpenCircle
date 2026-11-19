@@ -3,14 +3,14 @@
 //! there), in the kit's side panel.
 use std::sync::Arc;
 
-use iced::widget::{column, container, image};
+use iced::widget::{column, container, image, mouse_area};
 use iced::{Center, ContentFit, Element, Fill};
 
 use super::{Msg, Studio};
-use crate::features::snip::annotate::{Annotator, Shape, Tool, info};
+use crate::features::snip::annotate::{Annotator, Message, Shape, Tool, info};
 use crate::features::snip::screens::steps::Step;
 use crate::shared::app_language::tr;
-use crate::shared::kit::side_panel::{self, lead, row, section_head};
+use crate::shared::kit::side_panel::{self, lead, row, section_head, visible_mark};
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::{button, divider};
@@ -18,7 +18,7 @@ use crate::t;
 
 /// A Recent row's height, an Object row's, the thumbnail.
 const FILE_ROW: f32 = 44.0;
-const OBJECT_ROW: f32 = 30.0;
+pub(super) const OBJECT_ROW: f32 = 30.0;
 const THUMB: (f32, f32) = (40.0, 28.0);
 pub(super) const PAD: f32 = 12.0;
 const ROW_GAP: f32 = 10.0;
@@ -115,6 +115,7 @@ fn objects(e: Option<&Annotator>) -> Element<'_, Msg> {
         return note(t!(st_objects_empty));
     }
     let selected = e.and_then(|e| e.doc.selected);
+    let n = items.len();
     // top = front: the list runs top to bottom
     let rows = items.iter().enumerate().rev().map(|(i, item)| {
         let t = info(tool_of(&item.shape));
@@ -125,10 +126,18 @@ fn objects(e: Option<&Annotator>) -> Element<'_, Msg> {
         ]
         .spacing(space::GAP)
         .align_y(Center);
-        // (selecting from the list waits for the editing model)
-        row(line.into(), OBJECT_ROW, on, None)
+        let shown = !item.hidden;
+        let eye = visible_mark(shown, Msg::Editor(Message::ToggleHidden(i)));
+        let line = crate::dir_row![line.width(Fill), eye].align_y(Center);
+        let slot = n - 1 - i;
+        let held = row(line.into(), OBJECT_ROW, on, None);
+        mouse_area(held).on_press(Msg::ObjPress(slot)).into()
     });
-    column(rows).into()
+    let list = column(rows.collect::<Vec<Element<'_, Msg>>>());
+    mouse_area(list)
+        .on_move(move |at| Msg::ObjMove(at, n))
+        .on_release(Msg::ObjRelease)
+        .into()
 }
 
 /// The whole Library panel. `steps`: the Steps strip's steps.

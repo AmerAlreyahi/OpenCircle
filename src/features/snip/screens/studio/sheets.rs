@@ -67,6 +67,8 @@ pub struct Restorable {
     pub name: String,
     pub size: (u32, u32),
     pub png: Vec<u8>,
+    /// The drawings, as `Annotator::annotations_json` wrote them.
+    pub notes: String,
 }
 
 /// The restore sheet.

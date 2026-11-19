@@ -570,6 +570,31 @@ fn key_msg(
 /// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
 pub(super) fn studio_events() -> iced::Subscription<Msg> {
+    // the unsaved copy's debounce runs on a clock, only while the switch is on
+    let tick = match crate::shared::config::current().studio.keep_unsaved {
+        true => iced::Subscription::run(recovery_ticks).map(|()| Msg::Studio(studio::Msg::Tick)),
+        false => iced::Subscription::none(),
+    };
+    iced::Subscription::batch([tick, keys()])
+}
+
+/// One message a second while the unsaved copy is kept (a thread on a sleep; a
+/// tick the app is busy with is dropped).
+fn recovery_ticks() -> impl iced::futures::Stream<Item = ()> {
+    iced::stream::channel(1, async |mut out| {
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if out.try_send(()).is_err_and(|e| e.is_disconnected()) {
+                    return;
+                }
+            }
+        });
+        std::future::pending::<()>().await;
+    })
+}
+
+fn keys() -> iced::Subscription<Msg> {
     iced::event::listen_with(|event, status, id| {
         let m = match event {
             iced::Event::Window(window::Event::Focused) => studio::Msg::Focus(true),
@@ -581,7 +606,7 @@ pub(super) fn studio_events() -> iced::Subscription<Msg> {
                 ..
             }) => studio::Msg::Space(false),
             iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                studio::Msg::Ctrl(m.command())
+                studio::Msg::Mods(m.command(), m.shift())
             }
             iced::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,

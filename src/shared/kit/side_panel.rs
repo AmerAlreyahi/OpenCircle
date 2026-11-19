@@ -5,7 +5,7 @@
 //! object row, hover shade, `accent_soft` while selected) and the menu bar's
 //! opener (28 px).
 use iced::widget::{button, column, container, text};
-use iced::{Border, Center, Element, Fill, Length, Padding};
+use iced::{Border, Center, Color, Element, Fill, Length, Padding};
 
 use super::icon::{FONT, Icon};
 use super::icon_button::{self, State};
@@ -16,6 +16,7 @@ use super::{divider, scroll};
 
 pub const SECTION_H: f32 = 30.0;
 const OPENER_H: f32 = 28.0;
+const MARK: f32 = 22.0;
 const OPENER_R: f32 = 8.0;
 const PAD: f32 = 12.0;
 
@@ -127,6 +128,27 @@ pub fn lead<'a, Message: 'a>(glyph: char, selected: bool) -> Element<'a, Message
         .size(14)
         .color(if selected { c().accent } else { c().text_sub })
         .into()
+}
+
+/// A row's visibility mark (the Objects list's eye): a check while the object
+/// shows, nothing while it is hidden; a press flips it.
+pub fn visible_mark<'a, Message: Clone + 'a>(shown: bool, press: Message) -> Element<'a, Message> {
+    let glyph = text(Icon::Check.glyph()).font(FONT).size(12);
+    let mark = glyph.color(if shown {
+        c().text_sub
+    } else {
+        Color::TRANSPARENT
+    });
+    let b = button(container(mark).center(Fill))
+        .width(MARK)
+        .height(MARK)
+        .padding(0)
+        .style(|_, status| button::Style {
+            background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
+            border: Border::default().rounded(OPENER_R),
+            ..button::Style::default()
+        });
+    super::focus::press(b, OPENER_R, Some(press)).into()
 }
 
 /// A menu bar's opener: 28 high, radius 8, raised while its menu is `open`.

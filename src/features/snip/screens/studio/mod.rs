@@ -179,6 +179,14 @@ pub enum Msg {
     Lock(bool),
     /// Space held: the stage pans on a drag; the drag starts / ends.
     Space(bool),
+    /// Ctrl and Shift as the keyboard holds them; the recovery timer.
+    Mods(bool, bool),
+    Tick,
+    /// The Objects list: a press on a row (display slot, top = front), the
+    /// pointer over the list (with the rows' count), the press ends, the eye.
+    ObjPress(usize),
+    ObjMove(Point, usize),
+    ObjRelease,
     PanStart,
     PanEnd,
     /// A second menu's row; View > Snap / Pixel grid; Recent > Clear.
@@ -349,6 +357,9 @@ pub struct Studio {
     /// Space is held (the stage pans), the pointer where a pan last was, the
     /// open second menu, the document's name and the name of the next picture.
     pub(super) space: bool,
+    pub(super) shift: bool,
+    pub(super) obj_pick: Reorder,
+    quiet: recovery::Debounce,
     pan: Option<Point>,
     pub(super) sub: Option<Sub>,
     /// Snap and the pixel grid (Settings > Studio; the View menu flips them here).
@@ -363,7 +374,6 @@ pub struct Studio {
     /// A copy kept after a crash, waiting for Restore / Discard (board 20).
     pub(super) restorable: Option<Restorable>,
     /// When the unsaved copy was last written (`recovery`).
-    kept_at: Option<std::time::Instant>,
     /// The Steps list: a press or drag, and the step under the pointer.
     pub(super) pick: Reorder,
     pub(super) step_hover: Option<usize>,
@@ -430,6 +440,9 @@ impl Studio {
             pointer: Point::ORIGIN,
             lock: true,
             space: false,
+            shift: false,
+            obj_pick: Reorder::default(),
+            quiet: recovery::Debounce::default(),
             pan: None,
             sub: None,
             snap: crate::shared::config::current().studio.snap,
@@ -439,7 +452,6 @@ impl Studio {
             title: title_of(None),
             recent_info: Vec::new(),
             restorable: pending_copy(),
-            kept_at: None,
             pick: Reorder::default(),
             step_hover: None,
             export: export_defaults(),
@@ -1108,6 +1120,41 @@ impl Studio {
                 self.offset = off;
                 Outcome::ScrollTo(AbsoluteOffset { x: off.x, y: off.y })
             }
+            Msg::Mods(ctrl, shift) => {
+                (self.ctrl, self.shift) = (ctrl, shift);
+                Outcome::None
+            }
+            Msg::Tick => {
+                // the debounce: the copy is written once the picture has been quiet
+                if self.quiet.due(std::time::Instant::now()) {
+                    self.write_copy();
+                }
+                Outcome::None
+            }
+            Msg::ObjPress(slot) => {
+                self.obj_pick.press(slot);
+                Outcome::None
+            }
+            Msg::ObjMove(at, n) => {
+                self.obj_pick.moved(at, 0.0, library::OBJECT_ROW, n);
+                Outcome::None
+            }
+            Msg::ObjRelease => {
+                let n = self.editor.as_ref().map_or(0, |e| e.doc.items.len());
+                // the list shows the front first: slot k is item n - 1 - k
+                match self.obj_pick.release() {
+                    Some(Released::Click(slot)) if slot < n => self.update(Msg::Editor(
+                        annotate::Message::SelectIndex(n - 1 - slot, self.shift),
+                    )),
+                    Some(Released::Moved(from, to)) if from < n && to < n => {
+                        self.update(Msg::Editor(annotate::Message::Reorder {
+                            from: n - 1 - from,
+                            to: n - 1 - to,
+                        }))
+                    }
+                    _ => Outcome::None,
+                }
+            }
             Msg::Space(on) => {
                 // (typing a text on the picture keeps its spaces)
                 self.space = on && !self.editor.as_ref().is_some_and(|e| e.typing());
@@ -1154,6 +1201,8 @@ impl Studio {
                 }
             }
             Msg::ContextOpen => {
+                let at = self.image_point(self.pointer);
+                let _ = self.on_editor(annotate::Message::SelectAt(at, false));
                 let Some(e) = &self.editor else {
                     return Outcome::None;
                 };
@@ -1191,6 +1240,9 @@ impl Studio {
                     height: img.height(),
                     rgba: img.into_raw(),
                 }));
+                if let Some(e) = &mut self.editor {
+                    e.restore_annotations(&r.notes);
+                }
                 recovery::discard();
                 Outcome::None
             }
@@ -1390,25 +1442,42 @@ impl Studio {
         self.panels.options && !self.narrow()
     }
 
-    /// Settings > Studio > "Keep unsaved work": a private copy of the picture as
-    /// drawn, at most one every `recovery::QUIET` (the drawings are baked in).
+    /// Settings > Studio > "Keep unsaved work": every edit restarts the quiet
+    /// timer (`recovery::Debounce`); `Msg::Tick` writes the copy once it ran out.
     fn keep_unsaved(&mut self) {
+        if crate::shared::config::current().studio.keep_unsaved && self.dirty() {
+            self.quiet.changed(std::time::Instant::now());
+        }
+    }
+
+    /// The private copy: the picture's own pixels and the drawings as JSON.
+    fn write_copy(&mut self) {
         let on = crate::shared::config::current().studio.keep_unsaved;
-        let now = std::time::Instant::now();
-        if !on
-            || !self.dirty()
-            || self
-                .kept_at
-                .is_some_and(|t| now.duration_since(t) < recovery::QUIET)
-        {
+        if !on || !self.dirty() || self.restorable.is_some() {
             return;
         }
         let Some(e) = &self.editor else { return };
-        let flat = annotate::render(&e.doc);
-        if let Ok(png) = crate::shared::picture::encode_png(flat.width, flat.height, &flat.rgba) {
-            let _ = recovery::write(on, &png, "[]");
-            self.kept_at = Some(now);
+        let image = &e.doc.image;
+        if let Ok(png) = crate::shared::picture::encode_png(image.width, image.height, &image.rgba)
+        {
+            let _ = recovery::write(on, &png, &e.annotations_json());
         }
+    }
+
+    /// The picture point under `at` (a point of the stage): the scroll and the
+    /// centring undone, the zoom divided out, the view's corner added.
+    pub(super) fn image_point(&self, at: Point) -> Point {
+        let Some(e) = &self.editor else {
+            return at;
+        };
+        let (room, shown) = (self.stage(), e.size());
+        let corner = Vector::new(
+            ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
+            ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
+        );
+        let d = (Vector::new(at.x, at.y) + self.offset - corner) * (1.0 / e.zoom);
+        let origin = e.doc.view().position();
+        Point::new(origin.x + d.x, origin.y + d.y)
     }
 
     /// The stage: the window less the header, the rail, the bars and the shown panels.
@@ -1515,6 +1584,7 @@ fn pending_copy() -> Option<Restorable> {
         name: crate::t!(st_unsaved_picture).to_string(),
         size,
         png: p.png,
+        notes: p.notes,
     })
 }
 

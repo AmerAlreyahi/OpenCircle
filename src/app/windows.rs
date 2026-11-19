@@ -1413,7 +1413,11 @@ impl Windows {
                 return self.on_studio(msg);
             }
             // Ctrl released in any window: the Studio's flag must not stick
-            Msg::StudioEvent(_, msg @ crate::features::snip::screens::studio::Msg::Ctrl(_)) => {
+            Msg::StudioEvent(
+                _,
+                msg @ (crate::features::snip::screens::studio::Msg::Ctrl(_)
+                | crate::features::snip::screens::studio::Msg::Mods(..)),
+            ) => {
                 return self.on_studio(msg);
             }
             Msg::StudioEvent(..) => {}

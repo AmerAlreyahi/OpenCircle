@@ -1460,6 +1460,7 @@ fn v3_the_frame_matches_its_golden_images() {
             name: "Screenshot 2026-11-19".into(),
             size: (1920, 1080),
             png: Vec::new(),
+            notes: String::new(),
         };
         let name = format!("studio3-restore-{}", theme.id);
         failed.extend(golden::check(
@@ -1522,6 +1523,7 @@ fn v3_restore_sheet_buttons() {
         name: "x".into(),
         size: (1, 1),
         png: Vec::new(),
+        notes: String::new(),
     });
     let _ = s.update(Msg::DiscardCopy);
     assert!(s.restorable.is_none());
