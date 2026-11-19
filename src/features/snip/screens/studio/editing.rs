@@ -1,7 +1,6 @@
 //! The Studio's right-click menus (STUDIO_V3_SPEC S1): items with their
 //! enabled state. The key -> message table is `Annotator::studio_key` (the
 //! backend may not import this UI folder); the editor does all the work.
-#![allow(dead_code)] // the menus are drawn by the Studio view (W87)
 use crate::features::snip::annotate::{Annotator, Message, Order};
 
 /// A right-click menu row: what it does, its key (for the row's right

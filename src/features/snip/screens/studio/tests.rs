@@ -1457,6 +1457,7 @@ fn v3_the_frame_matches_its_golden_images() {
         let r = Restorable {
             name: "Screenshot 2026-11-19".into(),
             size: (1920, 1080),
+            png: Vec::new(),
         };
         let name = format!("studio3-restore-{}", theme.id);
         failed.extend(golden::check(
@@ -1466,31 +1467,19 @@ fn v3_the_frame_matches_its_golden_images() {
             &[1.0],
             || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None)),
         ));
-        let entries = || {
-            use crate::shared::app_language::S;
-            let e = |what, keys, sep| sheets::Entry {
-                what,
-                keys,
-                press: None,
-                sep,
-            };
-            vec![
-                e(S::st_cut, "Ctrl+X", false),
-                e(S::c_copy, "Ctrl+C", false),
-                e(S::st_paste, "Ctrl+V", false),
-                e(S::st_duplicate, "Ctrl+D", true),
-                e(S::st_delete, "Delete", false),
-                e(S::st_forward, "Ctrl+]", true),
-                e(S::st_backward, "Ctrl+[", false),
-            ]
-        };
+        let mut c = studio_on(640, 400);
+        draw(&mut c);
+        if let Some(e) = &mut c.editor {
+            e.doc.selected = Some(0);
+        }
+        let entries = editing::object_menu(c.editor.as_ref().unwrap());
         let name = format!("studio3-context-{}", theme.id);
         failed.extend(golden::check(
             "screens",
             &name,
             Size::new(260.0, 340.0),
             &[1.0],
-            || sheets::context(entries()),
+            || sheets::context(&entries),
         ));
     });
 }

@@ -3,7 +3,7 @@
 use iced::widget::{column, container};
 use iced::{Center, Element, Fill, Length};
 
-use super::Msg;
+use super::{Msg, editing};
 use crate::shared::app_language::{S, tr};
 use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::surface::{Material, surface};
@@ -13,6 +13,7 @@ use crate::shared::kit::{card, dir, divider, keycap, option_list};
 use crate::t;
 
 const ROW_H: f32 = 30.0;
+const LEAD: f32 = 2.0;
 const CAP_GAP: f32 = 4.0;
 const SHEET_W: f32 = 560.0;
 
@@ -66,6 +67,7 @@ pub fn shortcuts<'a>() -> Element<'a, Msg> {
 pub struct Restorable {
     pub name: String,
     pub size: (u32, u32),
+    pub png: Vec<u8>,
 }
 
 /// The restore sheet.
@@ -89,31 +91,52 @@ pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg) -> Element<'a,
     card::card(body)
 }
 
-/// One row of the right-click menu: what, its keys, and whether it can act.
-#[cfg_attr(not(test), allow(dead_code))] // ponytail: wired when W86's / W88's APIs land
-pub struct Entry {
-    pub what: S,
-    pub keys: &'static str,
-    pub press: Option<Msg>,
-    pub sep: bool,
+fn words(a: editing::Action) -> S {
+    use editing::Action as A;
+    match a {
+        A::Cut => S::st_cut,
+        A::Copy => S::c_copy,
+        A::Paste => S::st_paste,
+        A::Duplicate => S::st_duplicate,
+        A::Delete => S::st_delete,
+        A::Forward => S::st_forward,
+        A::Backward => S::st_backward,
+        A::Front => S::st_to_front,
+        A::Back => S::st_to_back,
+        A::SelectAll => S::st_select_all,
+        A::CopyPicture => S::st_copy_picture,
+        A::Fit => S::st_fit,
+        A::Shortcuts => S::st_shortcuts,
+    }
 }
 
-/// The right-click menu over `entries` (the editing model decides which).
-#[cfg_attr(not(test), allow(dead_code))] // ponytail: wired when W86's / W88's APIs land
-pub fn context<'a>(entries: Vec<Entry>) -> Element<'a, Msg> {
-    let mut rows: Vec<Element<'a, Msg>> = Vec::new();
-    for e in entries {
-        if e.sep {
+/// A row's key as key caps.
+fn caps(k: editing::Chord) -> Vec<String> {
+    use editing::Chord as C;
+    match k {
+        C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
+        C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
+        C::Delete => vec!["Delete".into()],
+    }
+}
+
+/// The right-click menu over the editor's `entries`: a row that can't act is
+/// dimmed; a line above the rows that start a group.
+pub fn context(entries: &[editing::Entry]) -> Element<'_, Msg> {
+    let mut rows: Vec<Element<'_, Msg>> = Vec::new();
+    for (i, e) in entries.iter().enumerate() {
+        if e.divider {
             rows.push(option_list::separator());
         }
-        let hint = (!e.keys.is_empty()).then(|| e.keys.to_string());
-        rows.push(option_list::item(
-            tr(e.what),
-            false,
-            hint,
-            false,
-            e.press.unwrap_or(Msg::Menu(None)),
-        ));
+        rows.push(option_list::action(option_list::ActionRow {
+            lead: iced::widget::Space::new().width(LEAD).into(),
+            label: tr(words(e.action)),
+            external: false,
+            caps: caps(e.keys),
+            reading: false,
+            focused: false,
+            press: e.enabled.then_some(Msg::ContextPick(i)),
+        }));
     }
     option_list::menu(rows)
 }

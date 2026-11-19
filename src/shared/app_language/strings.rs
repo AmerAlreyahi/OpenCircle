@@ -2480,4 +2480,10 @@ strings! {
         | "إظهار اللوحة اليمنى";
     ss_right_d: "The picture panel and its actions"
         | "لوحة الصورة وإجراءاتها";
+    st_unsaved_picture: "Unsaved picture"
+        | "صورة غير محفوظة";
+    st_recent_zero: "Recent files are off · Settings > Studio"
+        | "الملفات الأخيرة متوقفة · الإعدادات > الاستوديو";
+    st_select_all: "Select all"
+        | "تحديد الكل";
 }

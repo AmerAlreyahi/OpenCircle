@@ -12,15 +12,14 @@
 //! `open`s the next picture in it; unsaved drawings ask first.
 mod cut;
 mod edit_text;
+pub(crate) mod editing;
 mod library;
 mod menu_bar;
 mod options_bar;
 mod properties;
+pub mod recovery;
 mod sheets;
 mod status_bar;
-#[allow(dead_code)] // the Studio window wires it (W88 gives the API)
-pub mod recovery;
-pub(crate) mod editing;
 mod view;
 
 use std::path::PathBuf;
@@ -172,6 +171,13 @@ pub enum Msg {
     Overlay,
     /// The shortcuts sheet.
     Shortcuts(bool),
+    /// Right-click on the stage; the menu's row; the pointer over the stage.
+    ContextOpen,
+    ContextPick(usize),
+    Pointer(Point),
+    /// Board 20: bring the kept copy back / throw it away.
+    Restore,
+    DiscardCopy,
     /// File > New snip, File > Settings.
     NewSnip,
     Settings,
@@ -320,6 +326,13 @@ pub struct Studio {
     pub(super) shut: [bool; 3],
     pub(super) overlay: bool,
     pub(super) shortcuts: bool,
+    /// The right-click menu, and the pointer's last place on the stage.
+    pub(super) context: Option<Context>,
+    pub(super) pointer: Point,
+    /// A copy kept after a crash, waiting for Restore / Discard (board 20).
+    pub(super) restorable: Option<Restorable>,
+    /// When the unsaved copy was last written (`recovery`).
+    kept_at: Option<std::time::Instant>,
     /// The Steps list: a press or drag, and the step under the pointer.
     pub(super) pick: Reorder,
     pub(super) step_hover: Option<usize>,
@@ -382,9 +395,13 @@ impl Studio {
             shut: [false; 3],
             overlay: false,
             shortcuts: false,
+            context: None,
+            pointer: Point::ORIGIN,
+            restorable: pending_copy(),
+            kept_at: None,
             pick: Reorder::default(),
             step_hover: None,
-            export: export::Picture::default(),
+            export: export_defaults(),
             exporting: false,
             walk: Walk {
                 edits: false,
@@ -401,7 +418,7 @@ impl Studio {
 
     /// Opens `picture` (fitted); with unsaved drawings it asks first.
     pub fn open(&mut self, picture: Picture) {
-        if self.dirty() {
+        if self.asks() {
             self.asking = Some(After::Open(picture));
             return;
         }
@@ -430,7 +447,12 @@ impl Studio {
         self.transparent = cut::has_alpha(&editor.doc.image.rgba);
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        self.zoom = None;
+        let prefs = crate::shared::config::current().studio;
+        editor.copy_picture_when_empty = prefs.ctrl_c_picture;
+        self.zoom = match prefs.zoom_on_open {
+            crate::shared::config::StudioZoom::Actual => Some(1.0 / self.scale),
+            crate::shared::config::StudioZoom::Fit => None,
+        };
         self.editor = Some(editor);
         self.fit();
         if let Some(e) = &mut self.editor {
@@ -439,6 +461,11 @@ impl Studio {
     }
 
     /// Unsaved drawings: closing or opening another picture asks first.
+    /// Settings > Studio > "Ask before closing with unsaved changes".
+    fn asks(&self) -> bool {
+        self.dirty() && crate::shared::config::current().studio.ask_unsaved
+    }
+
     pub fn dirty(&self) -> bool {
         (self.editor.as_ref()).is_some_and(|e| Some(e.doc.state()) != self.saved)
     }
@@ -738,7 +765,7 @@ impl Studio {
 
     /// The OS (or the header's x) asked to close.
     pub fn close_requested(&mut self) -> Outcome {
-        match self.dirty() {
+        match self.asks() {
             true => {
                 self.asking = Some(After::Close);
                 Outcome::None
@@ -749,7 +776,7 @@ impl Studio {
 
     /// The app is quitting: unsaved drawings ask first (`Outcome::Quit` after).
     pub fn quit_requested(&mut self) -> Outcome {
-        match self.dirty() {
+        match self.asks() {
             true => {
                 self.asking = Some(After::Quit);
                 Outcome::None
@@ -760,6 +787,7 @@ impl Studio {
 
     /// The last Save landed: what is shown now is saved.
     pub fn saved(&mut self) {
+        recovery::discard();
         if let Some(e) = &self.editor {
             self.saved = Some(e.doc.state());
         }
@@ -993,7 +1021,8 @@ impl Studio {
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
                 // Esc ladder: menu, sheet, overlay, the question, Edit text
-                let closed = self.menu.take().is_some()
+                let closed = self.context.take().is_some()
+                    || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
                     || std::mem::take(&mut self.overlay);
                 if !closed && self.asking.take().is_none() {
@@ -1005,6 +1034,62 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
+            Msg::Pointer(p) => {
+                self.pointer = p;
+                Outcome::None
+            }
+            Msg::ContextOpen => {
+                let Some(e) = &self.editor else {
+                    return Outcome::None;
+                };
+                let entries = match e.selection().is_empty() {
+                    true => editing::picture_menu(e),
+                    false => editing::object_menu(e),
+                };
+                let side = (self.library_shown() as u8 as f32) * (LIBRARY + 1.0);
+                let origin = Point::new(side + RAIL + 2.0, HEADER + OPTIONS + 1.0);
+                let at = Point::new(origin.x + self.pointer.x, origin.y + self.pointer.y);
+                self.context = Some(Context { at, entries });
+                Outcome::None
+            }
+            Msg::ContextPick(i) => {
+                let Some(c) = self.context.take() else {
+                    return Outcome::None;
+                };
+                match c.entries.get(i).filter(|r| r.enabled).map(|r| r.action) {
+                    Some(editing::Action::Paste) => Outcome::Paste(None),
+                    Some(editing::Action::Fit) => self.update(Msg::Fit),
+                    Some(editing::Action::Shortcuts) => self.update(Msg::Shortcuts(true)),
+                    Some(a) => match a.message() {
+                        Some(m) => self.update(Msg::Editor(m)),
+                        None => Outcome::None,
+                    },
+                    None => Outcome::None,
+                }
+            }
+            Msg::Restore => {
+                let Some(r) = self.restorable.take() else {
+                    return Outcome::None;
+                };
+                // (the copy is the flattened picture: the drawings were baked in)
+                let Ok(img) = ::image::load_from_memory(&r.png) else {
+                    recovery::discard();
+                    return Outcome::Say(crate::t!(st_unreadable).to_string());
+                };
+                let img = img.into_rgba8();
+                self.open(Picture::Crop(Crop {
+                    width: img.width(),
+                    height: img.height(),
+                    rgba: img.into_raw(),
+                }));
+                recovery::discard();
+                Outcome::None
+            }
+            Msg::DiscardCopy => {
+                self.restorable = None;
+                recovery::discard();
+                Outcome::None
+            }
             Msg::Menu(m) => {
                 self.menu = m.map(|m| (m, 0));
                 Outcome::None
@@ -1160,6 +1245,7 @@ impl Studio {
             self.transparent = cut::has_alpha(&e.doc.image.rgba);
         }
         self.fit(); // a crop changes what is shown
+        self.keep_unsaved();
         match out {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
             Some(Output::Save(crop)) => Outcome::Save(crop),
@@ -1181,6 +1267,27 @@ impl Studio {
 
     pub(super) fn panel_shown(&self) -> bool {
         self.panels.options && !self.narrow()
+    }
+
+    /// Settings > Studio > "Keep unsaved work": a private copy of the picture as
+    /// drawn, at most one every `recovery::QUIET` (the drawings are baked in).
+    fn keep_unsaved(&mut self) {
+        let on = crate::shared::config::current().studio.keep_unsaved;
+        let now = std::time::Instant::now();
+        if !on
+            || !self.dirty()
+            || self
+                .kept_at
+                .is_some_and(|t| now.duration_since(t) < recovery::QUIET)
+        {
+            return;
+        }
+        let Some(e) = &self.editor else { return };
+        let flat = annotate::render(&e.doc);
+        if let Ok(png) = crate::shared::picture::encode_png(flat.width, flat.height, &flat.rgba) {
+            let _ = recovery::write(on, &png, "[]");
+            self.kept_at = Some(now);
+        }
     }
 
     /// The stage: the window less the header, the rail, the bars and the shown panels.
@@ -1253,6 +1360,41 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
     (room.width / picture.width.max(1.0))
         .min(room.height / picture.height.max(1.0))
         .min(1.0 / scale.max(0.1))
+}
+
+/// The right-click menu: where (window px) and its rows.
+pub(super) struct Context {
+    pub at: Point,
+    pub entries: Vec<editing::Entry>,
+}
+
+/// The export choices Settings > Studio starts the Export sheet with.
+fn export_defaults() -> export::Picture {
+    let prefs = crate::shared::config::current();
+    export::Picture {
+        format: match prefs.studio.format {
+            crate::shared::config::Format::Png => export::Format::Png,
+            crate::shared::config::Format::Jpeg => export::Format::Jpg,
+        },
+        quality: prefs.studio.quality,
+        max_edge: prefs.snip.max_edge,
+    }
+}
+
+/// A copy kept after a crash (only with the switch on), for the restore sheet.
+fn pending_copy() -> Option<Restorable> {
+    if !crate::shared::config::current().studio.keep_unsaved {
+        return None;
+    }
+    let p = recovery::pending()?;
+    let size = ::image::load_from_memory(&p.png)
+        .ok()
+        .map(|i| (i.width(), i.height()))?;
+    Some(Restorable {
+        name: crate::t!(st_unsaved_picture).to_string(),
+        size,
+        png: p.png,
+    })
 }
 
 #[cfg(test)]

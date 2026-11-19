@@ -2,11 +2,12 @@
 //! toggles before the caption buttons) · library | rail | options bar, stage,
 //! status bar | picture panel. The editor's own canvas and option rows
 //! (`snip_toolbar`) are reused as they are: one editor, two placements.
+use crate::shared::config::{StudioBackdrop, StudioWheel};
 use iced::advanced::layout::Layout;
 use iced::advanced::widget::Tree;
 use iced::advanced::{Clipboard, Shell};
 use iced::widget::{Space, column, container, mouse_area, tooltip::Position};
-use iced::{Center, Element, Event, Fill, Length, Rectangle, Vector, mouse};
+use iced::{Center, Element, Event, Fill, Length, Rectangle, Size, Vector, mouse};
 use std::sync::Arc;
 
 use super::{Msg, Studio, Walk};
@@ -99,6 +100,22 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
     };
     let main = column![header, divider::divider(), body];
     let main = super::menu_bar::over(main.into(), s);
+    let main: Element<'_, Msg> = match &s.context {
+        Some(c) => iced::widget::stack![
+            main,
+            iced::widget::opaque(
+                iced::widget::mouse_area(
+                    iced::widget::pin(super::sheets::context(&c.entries))
+                        .x(c.at.x)
+                        .y(c.at.y)
+                )
+                .on_press(Msg::Cancel)
+                .on_right_press(Msg::Cancel)
+            )
+        ]
+        .into(),
+        None => main,
+    };
     let main: Element<'_, Msg> = match s.shortcuts {
         true => iced::widget::stack![
             main,
@@ -106,6 +123,17 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
         ]
         .into(),
         false => main,
+    };
+    // after a crash: the kept copy
+    let main: Element<'_, Msg> = match &s.restorable {
+        Some(r) => iced::widget::stack![
+            main,
+            iced::widget::opaque(
+                container(super::sheets::restore(r, Msg::Restore, Msg::DiscardCopy)).center(Fill)
+            )
+        ]
+        .into(),
+        None => main,
     };
     // the question and the walkthrough dialog are cards over the window: the picture under them takes no press
     let main: Element<'_, Msg> = match (s.asking(), s.exporting) {
@@ -289,6 +317,7 @@ fn cut_bar<'a>(before: bool) -> Element<'a, Msg> {
 
 /// The picture, fitted or zoomed (both ways scrollable past the stage).
 fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
+    let prefs = crate::shared::config::current().studio;
     let drawn = canvas::canvas(e, 1.0, ScreenMap::ONE).map(Msg::Editor);
     let (shown, room) = (e.size(), s.stage());
     // a cut-out (or see-through) picture sits on a checkerboard
@@ -329,7 +358,24 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let area = scroll::both(content)
         .id(super::CANVAS)
         .on_scroll(|v| Msg::Scrolled(Vector::new(v.absolute_offset().x, v.absolute_offset().y)));
-    surface(Material::Recessed, 0.0, wrap(area, CtrlWheel(s.ctrl)))
+    // Settings > Studio: the wheel zooms (Ctrl+wheel then scrolls) or scrolls
+    let zooms = s.ctrl != (prefs.wheel == StudioWheel::Zoom);
+    let area: Element<'a, Msg> = match prefs.background {
+        StudioBackdrop::Checkerboard => iced::widget::stack![
+            super::cut::checker(Size::new(room.width, room.height)),
+            area
+        ]
+        .into(),
+        _ => area.into(),
+    };
+    let material = match prefs.background {
+        StudioBackdrop::Dark => Material::Window,
+        _ => Material::Recessed,
+    };
+    let stage = mouse_area(wrap(area, CtrlWheel(zooms)))
+        .on_right_press(Msg::ContextOpen)
+        .on_move(Msg::Pointer);
+    surface(material, 0.0, stage)
         .width(Fill)
         .height(Fill)
         .into()
