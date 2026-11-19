@@ -425,7 +425,10 @@ fn a_panel_row_asks_the_host() {
 /// The three actions in the design's order; Edit text and Cut out follow them.
 #[test]
 fn the_panel_rows_are_the_three_actions_in_design_order() {
-    assert_eq!(view::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
+    assert_eq!(
+        properties::ACTS,
+        [Row::CopyText, Row::Translate, Row::AskAi]
+    );
 }
 
 /// Copy text reads the clean capture with the hidden part painted out; Ask AI
@@ -1308,4 +1311,186 @@ fn a_long_history_is_sampled_to_at_most_the_frame_limit_keeping_both_ends() {
         now.rgba,
         "ends on the current picture"
     );
+}
+
+// ---- Studio v3: the frame (STUDIO_V3_SPEC §3 to §7) ----
+
+/// §3: below 1100 px both panels fold and the Library is an overlay; the saved
+/// choice is unchanged.
+#[test]
+fn v3_narrow_windows_fold_the_panels_and_open_the_library_over_the_stage() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Resized(Size::new(1280.0, 800.0)));
+    assert!(s.library_shown() && s.panel_shown() && !s.narrow());
+    let _ = s.update(Msg::Resized(Size::new(960.0, 600.0)));
+    assert!(s.narrow() && !s.library_shown() && !s.panel_shown());
+    assert!(
+        s.panels.library && s.panels.options,
+        "the saved choice stays"
+    );
+    // the toggle opens the overlay (and Esc closes it)
+    assert!(matches!(s.update(Msg::Library), Outcome::None));
+    assert!(s.overlay);
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.overlay);
+}
+
+/// §6: Alt opens File, the arrows walk, Enter picks, Esc closes.
+#[test]
+fn v3_the_menu_bar_is_keyboard_driven() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::MenuKey(Nav::Alt));
+    assert_eq!(s.menu, Some((Menu::File, 0)));
+    let _ = s.update(Msg::MenuKey(Nav::Next));
+    assert_eq!(s.menu.map(|m| m.0), Some(Menu::Edit));
+    let _ = s.update(Msg::MenuKey(Nav::Prev));
+    let _ = s.update(Msg::MenuKey(Nav::Prev));
+    assert_eq!(s.menu.map(|m| m.0), Some(Menu::View));
+    // View > Left panel
+    assert!(matches!(s.update(Msg::MenuKey(Nav::Enter)), Outcome::Panels(p) if !p.library));
+    assert!(s.menu.is_none());
+    // Esc closes an open menu before anything else
+    let _ = s.update(Msg::Menu(Some(Menu::File)));
+    let _ = s.update(Msg::Shortcuts(true));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.menu.is_none() && s.shortcuts);
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.shortcuts);
+}
+
+/// §6: File > Settings and New snip go to the host; Close asks about unsaved work.
+#[test]
+fn v3_file_menu_rows_reach_the_host() {
+    let mut s = studio_on(640, 400);
+    let pick = |s: &mut Studio, name: &str| {
+        let rows = menu_bar::items(Menu::File, s);
+        let at = rows.iter().position(|r| r.label == name).unwrap();
+        s.update(Msg::MenuPick(Menu::File, at))
+    };
+    assert!(matches!(pick(&mut s, "Settings…"), Outcome::Settings));
+    assert!(matches!(pick(&mut s, "New snip"), Outcome::NewSnip));
+    draw(&mut s);
+    assert!(matches!(pick(&mut s, "Close"), Outcome::None));
+    assert!(s.asking());
+}
+
+/// §5: the Library sections fold by their header.
+#[test]
+fn v3_library_sections_fold() {
+    let mut s = studio_on(640, 400);
+    assert_eq!(s.shut, [false; 3]);
+    let _ = s.update(Msg::Section(library::OBJECTS));
+    assert_eq!(s.shut, [false, true, false]);
+    let _ = s.update(Msg::Section(library::OBJECTS));
+    assert_eq!(s.shut, [false; 3]);
+}
+
+/// Golden images of the frame: the picture with a drawing selected, menus, the
+/// shortcuts sheet, narrow, empty, the panels' other states and the small
+/// sheets, in Sapphire and Daylight, English and Arabic.
+#[test]
+fn v3_the_frame_matches_its_golden_images() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        for ar in [false, true] {
+            let _lang = ar.then(crate::shared::kit::testing::arabic);
+            let tag = format!("{}{}", theme.id, if ar { "-ar" } else { "" });
+            let mut s = studio_on(640, 400);
+            draw(&mut s);
+            if let Some(e) = &mut s.editor {
+                e.doc.selected = Some(0);
+            }
+            let name = format!("studio3-selected-{tag}");
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let _ = s.update(Msg::Menu(Some(Menu::View)));
+            let name = format!("studio3-view-menu-{tag}");
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let _ = s.update(Msg::Menu(Some(Menu::File)));
+            let name = format!("studio3-file-menu-{tag}");
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let _ = s.update(Msg::Menu(None));
+            let _ = s.update(Msg::Shortcuts(true));
+            let name = format!("studio3-shortcuts-{tag}");
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let empty = Studio::new(StudioConfig::default());
+            let name = format!("studio3-empty-{tag}");
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&empty, &[], false)
+            }));
+        }
+        let mut n = studio_on(640, 400);
+        let narrow = Size::new(960.0, 600.0);
+        let _ = n.update(Msg::Resized(narrow));
+        let name = format!("studio3-narrow-{}", theme.id);
+        failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
+            view(&n, &[], false)
+        }));
+        let _ = n.update(Msg::Overlay);
+        let name = format!("studio3-narrow-library-{}", theme.id);
+        failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
+            view(&n, &[], false)
+        }));
+        // the panels' other states, and the small sheets
+        let s = studio_on(640, 400);
+        let panel = Size::new(super::PANEL, 700.0);
+        let name = format!("studio3-props-many-{}", theme.id);
+        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
+            properties::view(&s, properties::Subject::Many { count: 3 })
+        }));
+        let name = format!("studio3-props-pasted-{}", theme.id);
+        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
+            let p = properties::PastedInfo {
+                frame: [24, 40, 320, 180],
+                opacity: 100,
+            };
+            properties::view(&s, properties::Subject::Pasted(p))
+        }));
+        let r = Restorable {
+            name: "Screenshot 2026-11-19".into(),
+            size: (1920, 1080),
+        };
+        let name = format!("studio3-restore-{}", theme.id);
+        failed.extend(golden::check(
+            "screens",
+            &name,
+            Size::new(560.0, 200.0),
+            &[1.0],
+            || sheets::restore(&r, Msg::Menu(None), Msg::Menu(None)),
+        ));
+        let entries = || {
+            use crate::shared::app_language::S;
+            let e = |what, keys, sep| sheets::Entry {
+                what,
+                keys,
+                press: None,
+                sep,
+            };
+            vec![
+                e(S::st_cut, "Ctrl+X", false),
+                e(S::c_copy, "Ctrl+C", false),
+                e(S::st_paste, "Ctrl+V", false),
+                e(S::st_duplicate, "Ctrl+D", true),
+                e(S::st_delete, "Delete", false),
+                e(S::st_forward, "Ctrl+]", true),
+                e(S::st_backward, "Ctrl+[", false),
+            ]
+        };
+        let name = format!("studio3-context-{}", theme.id);
+        failed.extend(golden::check(
+            "screens",
+            &name,
+            Size::new(260.0, 340.0),
+            &[1.0],
+            || sheets::context(entries()),
+        ));
+    });
 }

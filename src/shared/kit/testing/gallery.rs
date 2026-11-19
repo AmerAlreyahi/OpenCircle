@@ -1791,3 +1791,86 @@ fn table_sheet() {
     })];
     sheet("table", Size::new(240.0, 150.0), &rows);
 }
+
+/// `option_bar`: Studio's options bar: groups of 28 px cells in one 32 px
+/// control, split by a hairline; a picked colour and size dot, a dimmed cell,
+/// the accent Done group.
+#[test]
+fn option_bar_sheet() {
+    use super::super::option_bar::{
+        accent_cell, caption, dot, glyph_cell, group, hairline, swatch, text_cell, value,
+    };
+    use iced::widget::row as line;
+    let bar = |ar: bool| {
+        let colours = group(
+            vec![
+                swatch(iced::Color::from_rgb8(239, 68, 68), true, Some(())),
+                swatch(iced::Color::from_rgb8(10, 132, 255), false, Some(())),
+                swatch(iced::Color::from_rgb8(34, 197, 94), false, Some(())),
+            ],
+            false,
+        );
+        let size = group(
+            vec![
+                caption(s(ar, "Size", "الحجم")),
+                dot(0, false, Some(())),
+                dot(1, true, Some(())),
+                dot(2, false, Some(())),
+                value("5 px".into()),
+            ],
+            false,
+        );
+        let toggles = group(
+            vec![
+                text_cell(s(ar, "Outline", "حدود"), true, Some(())),
+                text_cell(s(ar, "Fill", "تعبئة"), false, None),
+                glyph_cell('\u{e140}', false, Some(())),
+            ],
+            false,
+        );
+        let done = group(vec![accent_cell(s(ar, "Done", "تم"), Some(()))], true);
+        line![
+            colours,
+            hairline(),
+            size,
+            hairline(),
+            toggles,
+            hairline(),
+            done
+        ]
+        .spacing(8)
+        .align_y(iced::Center)
+        .into()
+    };
+    let rows = vec![row("rest", Act::Rest, bar), row("hover", Act::Hover, bar)];
+    sheet("option_bar", Size::new(560.0, 56.0), &rows);
+}
+
+/// `side_panel`: a section header (open, folded), a list row (rest, selected)
+/// and the menu bar's openers (rest, open).
+#[test]
+fn side_panel_sheet() {
+    use super::super::side_panel::{lead, menu_opener, row as list_row, section_head};
+    let item = |ar: bool, on: bool| {
+        let name = super::super::text::text(Role::CONTROL, s(ar, "Arrow", "سهم"));
+        let line = iced::widget::row![lead('\u{e140}', on), name].spacing(6);
+        list_row(line.into(), 30.0, on, Some(()))
+    };
+    let rows = vec![
+        row("section open", Act::Rest, |ar| {
+            section_head(s(ar, "Recent files", "الملفات الأخيرة"), true, Some(3), ())
+        }),
+        row("section folded", Act::Rest, |ar| {
+            section_head(s(ar, "Objects", "الكائنات"), false, None, ())
+        }),
+        row("row", Act::Rest, move |ar| item(ar, false)),
+        row("row selected", Act::Rest, move |ar| item(ar, true)),
+        row("opener", Act::Rest, |ar| {
+            menu_opener(s(ar, "File", "ملف"), false, ())
+        }),
+        row("opener open", Act::Rest, |ar| {
+            menu_opener(s(ar, "File", "ملف"), true, ())
+        }),
+    ];
+    sheet("side_panel", Size::new(240.0, 40.0), &rows);
+}

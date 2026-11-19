@@ -9,13 +9,12 @@ use iced::widget::{Space, column, container, mouse_area, tooltip::Position};
 use iced::{Center, Element, Event, Fill, Length, Rectangle, Vector, mouse};
 use std::sync::Arc;
 
-use super::{Msg, Studio, Tab, Walk};
+use super::{Msg, Studio, Walk};
 use crate::features::snip::annotate::{Annotator, Group, Message, Tool, info, style};
 use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::features::snip::screens::steps::Step;
-use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon::Icon;
@@ -25,17 +24,15 @@ use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
-use crate::shared::kit::{
-    chip, colour, dir, divider, dropdown, keycap, option_list, scroll, segmented, slider, thumb,
-};
+use crate::shared::kit::{chip, colour, dir, divider, dropdown, scroll, segmented, slider, thumb};
 use crate::t;
 
-const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
-const PANEL_RIGHT: char = '\u{e435}'; // lucide "panel-right"
+pub(super) const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
+pub(super) const PANEL_RIGHT: char = '\u{e435}'; // lucide "panel-right"
 const OPEN: char = '\u{e246}'; // lucide "folder-open"
 const PASTE: char = '\u{e3eb}'; // lucide "clipboard-paste"
-const PLUS: char = '\u{e140}'; // lucide "plus"
-const MINUS: char = '\u{e11f}'; // lucide "minus"
+pub(super) const PLUS: char = '\u{e140}'; // lucide "plus"
+pub(super) const MINUS: char = '\u{e11f}'; // lucide "minus"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
@@ -46,26 +43,20 @@ const OPTION_W: f32 = size::PANEL - 2.0 * space::PANEL;
 /// The colour swatches on the options bar (the editor's first ones).
 const SWATCHES: usize = 8;
 
-/// `steps`: the Steps strip's steps (the library's Steps tab shows them).
+/// `steps`: the Steps strip's steps (the Library's Steps section shows them).
 pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<'a, Msg> {
     let _dir = dir::scope(crate::shared::app_language::rtl());
-    let p = s.panels;
-    let toggles = crate::dir_row![
-        toggle(PANEL_LEFT, p.library, Msg::Library, "Ctrl+["),
-        toggle(PANEL_RIGHT, p.options, Msg::Panel, "Ctrl+]"),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    let header = crate::shared::kit::header::regular(
+    let header = crate::shared::kit::header::with_menu(
         crate::shared::kit::logo::logo(16),
+        Some(super::menu_bar::bar(s)),
         t!(st_title),
-        toggles,
+        Space::new(),
         Some(maximised),
         Msg::Caption,
     );
     let mut parts: Vec<Element<'_, Msg>> = Vec::new();
-    if p.library {
-        parts.push(library(s, steps));
+    if s.library_shown() {
+        parts.push(super::library::view(s, steps));
         parts.push(divider::vertical(Fill));
     }
     match &s.editor {
@@ -76,22 +67,46 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
                 match (&s.edit, s.comparing()) {
                     (Some(x), _) => edit_bar(x),
                     (None, Some(before)) => cut_bar(before),
-                    (None, None) => options_bar(e),
+                    (None, None) => super::options_bar::view(e),
                 },
                 divider::divider(),
                 stage(s, e),
                 divider::divider(),
-                status_bar(s, e),
+                super::status_bar::view(s, e),
             ];
             parts.push(container(work).width(Fill).height(Fill).into());
         }
         None => parts.push(empty(s)),
     }
-    if p.options {
+    if s.panel_shown() {
         parts.push(divider::vertical(Fill));
-        parts.push(picture_panel(s));
+        parts.push(super::properties::view(s, s.subject()));
     }
-    let main = column![header, divider::divider(), dir::row(parts).height(Fill)];
+    let body: Element<'_, Msg> = dir::row(parts).height(Fill).into();
+    // narrow: the Library over the stage, above the status bar
+    let body: Element<'_, Msg> = match (s.narrow(), s.overlay) {
+        (true, true) => iced::widget::stack![
+            body,
+            container(super::library::view(s, steps))
+                .height(Fill)
+                .padding(iced::Padding {
+                    bottom: super::STATUS + 1.0,
+                    ..iced::Padding::ZERO
+                })
+        ]
+        .into(),
+        _ => body,
+    };
+    let main = column![header, divider::divider(), body];
+    let main = super::menu_bar::over(main.into(), s);
+    let main: Element<'_, Msg> = match s.shortcuts {
+        true => iced::widget::stack![
+            main,
+            iced::widget::opaque(container(super::sheets::shortcuts()).center(Fill))
+        ]
+        .into(),
+        false => main,
+    };
     // the question and the walkthrough dialog are cards over the window: the picture under them takes no press
     let main: Element<'_, Msg> = match (s.asking(), s.exporting) {
         (true, _) => iced::widget::stack![
@@ -104,7 +119,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
             iced::widget::opaque(container(export_sheet(s, steps)).center(Fill))
         ]
         .into(),
-        (false, false) => main.into(),
+        (false, false) => main,
     };
     // the download card (Copy text / Translate need models): over the window
     let main: Element<'_, Msg> = match &s.card() {
@@ -123,26 +138,6 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
             .padding(rim)
             .width(Fill)
             .height(Fill),
-    )
-}
-
-/// A panel's toggle: raised while its panel shows.
-fn toggle<'a>(glyph: char, shown: bool, m: Msg, keys: &'a str) -> Element<'a, Msg> {
-    let state = State {
-        active: shown,
-        focused: false,
-    };
-    let words = match (glyph == PANEL_LEFT, shown) {
-        (true, true) => t!(st_hide_library),
-        (true, false) => t!(st_show_library),
-        (false, true) => t!(st_hide_panel),
-        (false, false) => t!(st_show_panel),
-    };
-    hint(
-        icon_button::square(glyph, state, Some(m)),
-        words,
-        Why::Keys(keys),
-        Position::Bottom,
     )
 }
 
@@ -202,38 +197,6 @@ fn rail(e: &Annotator) -> Element<'_, Msg> {
         .into()
 }
 
-/// The tool's name and key, the colours, then its options (the editor panel's
-/// own rows), always shown.
-fn options_bar(e: &Annotator) -> Element<'_, Msg> {
-    let base = info(info(e.tool).slot);
-    let mut items: Vec<Element<'_, Message>> = vec![
-        crate::dir_row![
-            text(Role::ROW_TITLE, tr(base.name)),
-            container(keycap::keycap(base.key.to_ascii_uppercase().to_string()))
-                .width(size::KEYCAP_H),
-        ]
-        .spacing(space::GAP)
-        .align_y(Center)
-        .into(),
-    ];
-    if !matches!(base.tool, Tool::Select | Tool::Crop | Tool::Eraser) {
-        let swatches = (style::ANNOTATION.iter().take(SWATCHES)).map(|c| {
-            let rgba = c.into_rgba8();
-            colour::swatch(*c, rgba == e.colour, Some(Message::Colour(rgba)))
-        });
-        items.push(dir::row(swatches).spacing(space::TRACK_GAP).into());
-    }
-    let options = toolbar::tool_options(e, base.tool);
-    items.extend((options.into_iter()).map(|o| container(o).width(OPTION_W).center_y(Fill).into()));
-    let line = dir::row(items)
-        .spacing(space::PAGE[1] + space::PAGE[1])
-        .align_y(Center);
-    let bar = container(line)
-        .padding([0.0, space::PAGE[1]])
-        .height(super::OPTIONS);
-    Element::from(scroll::across(bar).width(Fill)).map(Msg::Editor)
-}
-
 /// Edit text's options bar (S8): Font size, Colour, Bold (the editor's own
 /// controls, set on the line), Cancel / Done. The text itself is typed on the
 /// picture (`inline_field`).
@@ -269,12 +232,7 @@ fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
     let row = crate::dir_row![
         container(line).width(Fill),
         container(cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel)).width(EDIT_BUTTON),
-        container(button::button(
-            label(t!(st_edit_done)),
-            Kind::Accent,
-            ready.then_some(Msg::EditDone)
-        ))
-        .width(EDIT_BUTTON),
+        super::options_bar::done(ready),
     ]
     .spacing(space::GAP)
     .align_y(Center);
@@ -414,57 +372,6 @@ impl Hook<Msg> for CtrlWheel {
     }
 }
 
-/// The size, the zoom, Fit, Save and Copy.
-fn status_bar<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
-    let px = e.doc.view().size();
-    let size_label = format!("{} × {}", px.width.round(), px.height.round());
-    let percent = s.percent().map_or_else(String::new, |p| format!("{p} %"));
-    let zoom_button = |glyph, m, words, keys| {
-        hint(
-            icon_button::square(glyph, State::default(), Some(m)),
-            words,
-            Why::Keys(keys),
-            Position::Top,
-        )
-    };
-    let save = button::tool(
-        toolbar::SAVE,
-        Kind::Elevated,
-        false,
-        Some(Msg::Editor(Message::Save)),
-    );
-    let copy = button::tool(
-        toolbar::COPY,
-        Kind::Accent,
-        false,
-        Some(Msg::Editor(Message::Copy)),
-    );
-    let line = crate::dir_row![
-        chip::readout(size_label, false, None),
-        Space::new().width(Fill),
-        zoom_button(MINUS, Msg::ZoomOut, t!(st_zoom_out), "Ctrl+-"),
-        container(sub(Role::KEYCAP, percent)).center_x(56.0),
-        zoom_button(PLUS, Msg::ZoomIn, t!(st_zoom_in), "Ctrl+="),
-        hint(
-            button::button(label(t!(st_fit)), Kind::Quiet, Some(Msg::Fit)),
-            t!(st_fit),
-            Why::Keys("Ctrl+0"),
-            Position::Top,
-        ),
-        divider::vertical(size::ICON_BUTTON - 10.0),
-        button::button(label(t!(st_export)), Kind::Quiet, Some(Msg::Export)),
-        hint(save, t!(c_save), Why::Keys("Ctrl+S"), Position::Top),
-        hint(copy, t!(c_copy), Why::Keys("Ctrl+C"), Position::Top),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    container(line)
-        .padding([0.0, space::PAGE[1]])
-        .center_y(super::STATUS)
-        .width(Fill)
-        .into()
-}
-
 /// Opened alone: drop a picture, Open, Paste (the drop zone lights while a
 /// file is over the window).
 fn empty(s: &Studio) -> Element<'_, Msg> {
@@ -501,34 +408,9 @@ fn empty(s: &Studio) -> Element<'_, Msg> {
     .into()
 }
 
-/// The library: Recent | Steps (Steps first while there are some).
-fn library<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
-    let tab = s.tab.unwrap_or(match steps.is_empty() {
-        true => Tab::Recent,
-        false => Tab::Steps,
-    });
-    let tabs = segmented::spread(
-        super::LIBRARY - 2.0 * space::PAGE[1],
-        &[(Tab::Recent, t!(st_tab_recent)), (Tab::Steps, t!(st_steps))],
-        tab,
-        tab,
-        1.0,
-        Msg::Tab,
-    );
-    let tabs = container(tabs).padding([space::PAGE[0], space::PAGE[1]]);
-    let body = match tab {
-        Tab::Recent => recent(s),
-        Tab::Steps => steps_list(s, steps),
-    };
-    container(column![tabs, body])
-        .width(Length::Fixed(super::LIBRARY))
-        .height(Fill)
-        .into()
-}
-
 /// The Steps strip's steps, one under the other: click = open on the canvas,
 /// drag = reorder, x = delete; Copy all and Export at the foot.
-fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+pub(super) fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let pad = space::PAGE[1];
     if steps.is_empty() {
         let none = muted(Role::ROW_DESC, t!(st_steps_none));
@@ -584,107 +466,10 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let export = dropdown::labelled_menu(t!(st_export), rows, half);
     let foot = crate::dir_row![copy, export].spacing(space::GAP);
     column![
-        scroll::scroll(container(list).padding([0.0, pad])).height(Fill),
-        container(foot).padding(pad),
+        container(list).padding([0.0, pad]),
+        container(foot).padding(pad)
     ]
     .into()
-}
-
-/// Recent captures (two to a row), or why there are none.
-fn recent(s: &Studio) -> Element<'_, Msg> {
-    let mut list = column![].spacing(space::PAGE[0]);
-    if !crate::shared::config::current().snip.history {
-        list = list.push(muted(Role::ROW_DESC, t!(st_recent_off)));
-    } else if s.recent.is_empty() {
-        list = list.push(muted(Role::ROW_DESC, t!(st_recent_none)));
-    }
-    for pair in s.recent.chunks(2) {
-        let shots = pair
-            .iter()
-            .map(|(path, picture)| thumb::picture(picture.clone(), Msg::OpenRecent(path.clone())));
-        list = list.push(dir::row(shots).spacing(space::GAP));
-    }
-    let list = container(list).padding([0.0, space::PAGE[1]]).width(Fill);
-    scroll::scroll(list).height(Fill).into()
-}
-
-/// The picture panel: what acts on the whole picture (Copy text, Translate,
-/// Ask AI: Snip More's own rows, with the user's keys), then what it is.
-fn picture_panel(s: &Studio) -> Element<'_, Msg> {
-    let mut list = column![text(Role::SECTION, t!(st_picture))].spacing(space::PAGE[0]);
-    if let Some(e) = &s.editor {
-        let acts = s.info();
-        let mut rows = column![];
-        for row in ACTS {
-            let at = Row::ALL.iter().position(|r| *r == row).unwrap_or(0);
-            let lead = match row {
-                Row::AskAi => option_list::logo_mark(16),
-                _ => option_list::glyph(row.glyph(), false),
-            };
-            rows = rows.push(option_list::action(option_list::ActionRow {
-                lead,
-                label: tr(row.label(acts.translated)),
-                external: row == Row::AskAi && acts.browser,
-                caps: acts.caps[at].clone(),
-                reading: s.busy() == Some(row),
-                focused: false,
-                press: Some(Msg::Act(row)),
-            }));
-        }
-        // Edit text: only on the picture as opened (a translation is its own picture)
-        let editing = s.edit.is_some();
-        let lead = option_list::glyph(info(Tool::Text).icon, false);
-        rows = rows.push(option_list::action(option_list::ActionRow {
-            lead,
-            label: tr(crate::shared::app_language::S::st_edit_text),
-            external: false,
-            caps: Vec::new(),
-            reading: s.edit.as_ref().is_some_and(|x| x.lines.is_none()),
-            focused: false,
-            press: (!editing && !acts.translated).then_some(Msg::EditText),
-        }));
-        // Cut out: on the picture as opened or edited, not under a translation
-        let lead = option_list::glyph('\u{e151}', false); // lucide "scissors"
-        rows = rows.push(option_list::action(option_list::ActionRow {
-            lead,
-            label: tr(crate::shared::app_language::S::st_cut_out),
-            external: false,
-            caps: Vec::new(),
-            reading: s.cut_phase() == super::CutPhase::Working,
-            focused: false,
-            press: (!editing && !acts.translated && s.cut_phase() == super::CutPhase::Idle)
-                .then_some(Msg::CutOut),
-        }));
-        let px = e.doc.view().size();
-        let line = |name, value: String| {
-            crate::dir_row![
-                sub(Role::ROW_DESC, name),
-                Space::new().width(Fill),
-                text(Role::ROW_DESC, value)
-            ]
-            .width(Fill)
-        };
-        list = list
-            .push(rows)
-            .push(divider::divider())
-            .push(line(
-                t!(st_size),
-                format!("{} × {}", px.width.round(), px.height.round()),
-            ))
-            .push(line(t!(st_drawings), e.doc.items.len().to_string()));
-    }
-    side(list, super::panel_width())
-}
-
-/// The panel's rows, in the design's order (Edit text and Cut out follow them).
-pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
-
-fn side(list: iced::widget::Column<'_, Msg>, width: f32) -> Element<'_, Msg> {
-    let list = container(list).padding(space::PAGE[1]).width(Fill);
-    container(scroll::scroll(list).height(Fill))
-        .width(Length::Fixed(width))
-        .height(Fill)
-        .into()
 }
 
 /// Export picture: the format, the JPG quality, the size; Cancel / Export…
@@ -743,7 +528,11 @@ fn field<'a>(words: &'a str, body: Element<'a, Msg>) -> Element<'a, Msg> {
 }
 
 /// The Size row's options.
-fn sizes<'a>(list: &[u32], chosen: u32, pick: impl Fn(u32) -> Msg + 'a) -> Element<'a, Msg> {
+pub(super) fn sizes<'a>(
+    list: &[u32],
+    chosen: u32,
+    pick: impl Fn(u32) -> Msg + 'a,
+) -> Element<'a, Msg> {
     let list: Vec<_> = (list.iter())
         .map(|&px| match px {
             0 => (px, t!(st_original)),

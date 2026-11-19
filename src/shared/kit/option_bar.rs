@@ -79,7 +79,14 @@ fn cell<'a, Message: Clone + 'a>(
                 _ if on_ || hot => c().text,
                 _ => c().text_sub,
             };
-            let ink = if live { ink } else { Color { a: ink.a * 0.38, ..ink } };
+            let ink = if live {
+                ink
+            } else {
+                Color {
+                    a: ink.a * 0.38,
+                    ..ink
+                }
+            };
             button::Style {
                 background: fill.map(Into::into),
                 text_color: ink,
@@ -115,7 +122,13 @@ pub fn glyph_cell<'a, Message: Clone + 'a>(
     press: Option<Message>,
 ) -> Element<'a, Message> {
     let g = text(glyph).font(super::icon::FONT).size(14);
-    cell(container(g).center_x(CELL).into(), Some(CELL), on, false, press)
+    cell(
+        container(g).center_x(CELL).into(),
+        Some(CELL),
+        on,
+        false,
+        press,
+    )
 }
 
 /// The Done group's cell: words on the accent fill.
@@ -132,15 +145,29 @@ pub fn swatch<'a, Message: Clone + 'a>(
     picked: bool,
     press: Option<Message>,
 ) -> Element<'a, Message> {
-    let dot = container(Space::new().width(SWATCH).height(SWATCH)).style(move |_| container::Style {
-        background: Some(colour.into()),
-        border: Border::default()
-            .rounded(radius::FULL)
-            .width(if picked { 2.0 } else { 1.5 })
-            .color(if picked { c().text } else { Color { a: 0.4, ..c().text_sub } }),
-        ..container::Style::default()
-    });
-    cell(container(dot).center_x(CELL).into(), Some(CELL), picked, false, press)
+    let dot =
+        container(Space::new().width(SWATCH).height(SWATCH)).style(move |_| container::Style {
+            background: Some(colour.into()),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(if picked { 2.0 } else { 1.5 })
+                .color(if picked {
+                    c().text
+                } else {
+                    Color {
+                        a: 0.4,
+                        ..c().text_sub
+                    }
+                }),
+            ..container::Style::default()
+        });
+    cell(
+        container(dot).center_x(CELL).into(),
+        Some(CELL),
+        picked,
+        false,
+        press,
+    )
 }
 
 /// A size dot (`DOTS[i]` px across), raised while picked.
@@ -155,7 +182,13 @@ pub fn dot<'a, Message: Clone + 'a>(
         border: Border::default().rounded(radius::FULL),
         ..container::Style::default()
     });
-    cell(container(dot).center_x(CELL).into(), Some(CELL), picked, false, press)
+    cell(
+        container(dot).center_x(CELL).into(),
+        Some(CELL),
+        picked,
+        false,
+        press,
+    )
 }
 
 /// A value read out (mono 11.5): not pressable.

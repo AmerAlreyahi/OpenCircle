@@ -331,6 +331,16 @@ impl Windows {
                 }
             })
             .map(Msg::StudioToast),
+            Outcome::NewSnip => Task::done(Msg::Run(crate::Trigger::Quick(
+                std::time::Instant::now(),
+                crate::shared::config::QuickAction {
+                    action: "snip".into(),
+                    shortcut: String::new(),
+                    target: crate::shared::config::Target::Circle,
+                    live: false,
+                },
+            ))),
+            Outcome::Settings => self.open(super::Kind::Settings),
             Outcome::Panels(panels) => {
                 std::thread::spawn(move || {
                     if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
@@ -497,25 +507,44 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
         return Some(studio::Msg::Cancel);
     }
+    // the menu bar: Alt opens it, the arrows walk it (ignored while it is closed)
+    if modifiers.is_empty() || modifiers == keyboard::Modifiers::ALT {
+        let nav = match key {
+            keyboard::Key::Named(Named::Alt) => Some(studio::Nav::Alt),
+            keyboard::Key::Named(Named::ArrowLeft) => Some(studio::Nav::Prev),
+            keyboard::Key::Named(Named::ArrowRight) => Some(studio::Nav::Next),
+            keyboard::Key::Named(Named::ArrowUp) => Some(studio::Nav::Up),
+            keyboard::Key::Named(Named::ArrowDown) => Some(studio::Nav::Down),
+            keyboard::Key::Named(Named::Enter) => Some(studio::Nav::Enter),
+            _ => None,
+        };
+        if let Some(n) = nav {
+            return Some(studio::Msg::MenuKey(n));
+        }
+    }
     if !modifiers.command() {
         return None;
     }
     Some(match (physical_key, key.to_latin(physical_key)) {
-        (Physical::Code(Code::BracketLeft), _) => studio::Msg::Library,
-        (Physical::Code(Code::BracketRight), _) => studio::Msg::Panel,
+        // panels: Ctrl+B left, Ctrl+Alt+B right, Ctrl+\ both
+        (Physical::Code(Code::KeyB), _) if modifiers.alt() => studio::Msg::Panel,
+        (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
         (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
+        (Physical::Code(Code::Slash), _) => studio::Msg::Shortcuts(true),
+        (Physical::Code(Code::Comma), _) => studio::Msg::Settings,
         (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::ZoomIn,
         (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::ZoomOut,
         (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::Fit,
         (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
         (_, Some('o')) => studio::Msg::Open,
         (_, Some('v')) => studio::Msg::Paste,
+        (_, Some('w')) => studio::Msg::Caption(crate::shared::kit::header::Caption::Close),
         _ => return None,
     })
 }
 
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
-/// the panels (Ctrl+[ / Ctrl+] / Ctrl+\, by physical key), the zoom
+/// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
 pub(super) fn studio_events() -> iced::Subscription<Msg> {
     iced::event::listen_with(|event, status, id| {
@@ -555,6 +584,40 @@ mod key_tests {
         assert!(key_msg(&esc, p, keyboard::Modifiers::CTRL).is_none());
         let f = keyboard::Key::Character("f".into());
         assert!(key_msg(&f, Physical::Code(Code::KeyF), keyboard::Modifiers::empty()).is_none());
+    }
+
+    /// STUDIO_V3 §7: Ctrl+B / Ctrl+Alt+B / Ctrl+\ are the panels, Ctrl+/ the
+    /// shortcuts, Alt the menu bar; Ctrl+[ and Ctrl+] are z-order, not panels.
+    #[test]
+    fn v3_panel_and_menu_keys() {
+        let ctrl = keyboard::Modifiers::CTRL;
+        let key = |c: &str, code, m| {
+            key_msg(&keyboard::Key::Character(c.into()), Physical::Code(code), m)
+        };
+        assert!(matches!(
+            key("b", Code::KeyB, ctrl),
+            Some(studio::Msg::Library)
+        ));
+        let both = ctrl | keyboard::Modifiers::ALT;
+        assert!(matches!(
+            key("b", Code::KeyB, both),
+            Some(studio::Msg::Panel)
+        ));
+        assert!(matches!(
+            key("\\", Code::Backslash, ctrl),
+            Some(studio::Msg::Both)
+        ));
+        assert!(matches!(
+            key("/", Code::Slash, ctrl),
+            Some(studio::Msg::Shortcuts(true))
+        ));
+        assert!(key("[", Code::BracketLeft, ctrl).is_none());
+        let alt = keyboard::Key::Named(Named::Alt);
+        let any = Physical::Code(Code::AltLeft);
+        assert!(matches!(
+            key_msg(&alt, any, keyboard::Modifiers::ALT),
+            Some(studio::Msg::MenuKey(studio::Nav::Alt))
+        ));
     }
 }
 

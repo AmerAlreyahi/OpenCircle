@@ -36,20 +36,30 @@ pub fn regular<'a, Message: Clone + 'a>(
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
+    with_menu(logo, None, title, status, maximise, on)
+}
+
+/// `regular` with a menu bar (`menu`) between the logo and the title (Studio:
+/// File / Edit / View); the title then is the document's name. Only the title
+/// side drags the window.
+pub fn with_menu<'a, Message: Clone + 'a>(
+    logo: image::Handle,
+    menu: Option<Element<'a, Message>>,
+    title: &'a str,
+    status: impl Into<Element<'a, Message>>,
+    maximise: Option<bool>,
+    on: impl Fn(Caption) -> Message,
+) -> Element<'a, Message> {
     const H: f32 = size::HEADER;
     const PAD: f32 = 14.0;
     const LOGO_GAP: f32 = 10.0;
     const STATUS_GAP: f32 = 8.0;
     const GLYPH: f32 = 12.0;
-    let name = crate::dir_row![
-        image(logo).width(size::ICON).height(size::ICON),
-        text(title)
-            .size(12)
-            .font(weight(Weight::Semibold))
-            .color(c().text),
-    ]
-    .spacing(LOGO_GAP)
-    .align_y(Center);
+    let mark = image(logo).width(size::ICON).height(size::ICON);
+    let name_text = text(title)
+        .size(12)
+        .font(weight(Weight::Semibold))
+        .color(c().text);
     let restore = maximise.map(|maximised| match maximised {
         true => Icon::Restore,
         false => Icon::Maximise,
@@ -57,17 +67,37 @@ pub fn regular<'a, Message: Clone + 'a>(
     let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
     // right to left: the whole header mirrored, the caption buttons at the
     // top left with close outermost (Win32 mirroring, GTK, KWin)
+    let mut parts: Vec<Element<'a, Message>> = Vec::new();
+    let name: Element<'a, Message> = match menu {
+        None => crate::dir_row![mark, name_text]
+            .spacing(LOGO_GAP)
+            .align_y(Center)
+            .into(),
+        Some(menu) => {
+            parts.push(
+                container(
+                    crate::dir_row![mark, menu]
+                        .spacing(LOGO_GAP)
+                        .align_y(Center),
+                )
+                .padding([0.0, PAD])
+                .center_y(H)
+                .into(),
+            );
+            name_text.into()
+        }
+    };
     let name = container(name)
         .padding([0.0, PAD])
         .center_y(H)
         .width(Fill)
         .align_x(super::dir::start());
-    let mut parts = vec![
+    parts.extend([
         mouse_area(name).on_press(on(Caption::Drag)).into(), // mouse only: drags the window
         status.into(),
         Space::new().width(STATUS_GAP).into(),
         caption(Icon::Minimise, GLYPH, H, false, on(Caption::Minimise)),
-    ];
+    ]);
     parts.extend(restore);
     parts.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
     super::dir::row(parts).height(H).align_y(Center).into()

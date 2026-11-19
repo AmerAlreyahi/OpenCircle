@@ -1770,8 +1770,6 @@ strings! {
         | "فعّل «اللقطات الأخيرة» في الإعدادات > لقطة الشاشة لترى آخر لقطاتك هنا.";
     st_recent_none: "No recent captures yet."
         | "لا توجد لقطات أخيرة بعد.";
-    st_picture: "Picture"
-        | "الصورة";
     st_size: "Size"
         | "الحجم";
     st_drawings: "Drawings"
@@ -1828,8 +1826,6 @@ strings! {
         | "افتح صورة";
     st_pictures: "Pictures"
         | "الصور";
-    st_tab_recent: "Recent"
-        | "الأخيرة";
     st_steps: "Steps"
         | "الخطوات";
     st_step: "Step"
@@ -2288,10 +2284,6 @@ strings! {
         | "تكرار";
     st_delete: "Delete"
         | "حذف";
-    st_select_all: "Select all"
-        | "تحديد الكل";
-    st_deselect: "Deselect"
-        | "إلغاء التحديد";
     st_forward: "Bring forward"
         | "إلى الأمام";
     st_backward: "Send backward"
@@ -2316,20 +2308,14 @@ strings! {
         | "الكائنات";
     st_objects_empty: "Your drawings appear here."
         | "تظهر رسوماتك هنا.";
-    st_clear: "Clear"
-        | "مسح";
     st_actions: "Picture actions"
         | "إجراءات الصورة";
     st_save_export: "Save and export"
         | "الحفظ والتصدير";
-    st_name: "Name"
-        | "الاسم";
     st_opacity: "Opacity"
         | "العتمة";
     st_order: "Order"
         | "الترتيب";
-    st_lock_ratio: "Lock ratio"
-        | "قفل النسبة";
     st_merge: "Merge into picture"
         | "دمج في الصورة";
     st_pasted: "Pasted picture"
@@ -2338,8 +2324,6 @@ strings! {
         | "{} كائنات";
     st_add_steps: "Add to steps"
         | "أضف إلى الخطوات";
-    st_one_object: "Object"
-        | "كائن";
     st_tool_selected: "Selected"
         | "محدد";
     st_hint_select: "Click an object to edit it"
@@ -2376,6 +2360,6 @@ strings! {
         | "استعادة";
     st_discard: "Discard"
         | "تجاهل";
-    st_page: "Page"
-        | "الصفحة";
+    st_actual: "Actual size"
+        | "الحجم الفعلي";
 }

@@ -12,6 +12,12 @@
 //! `open`s the next picture in it; unsaved drawings ask first.
 mod cut;
 mod edit_text;
+mod library;
+mod menu_bar;
+mod options_bar;
+mod properties;
+mod sheets;
+mod status_bar;
 mod view;
 
 use std::path::PathBuf;
@@ -31,6 +37,9 @@ use crate::shared::kit::header::Caption;
 use crate::shared::picture::Crop;
 
 pub use cut::{Done as CutDone, Phase as CutPhase};
+pub use menu_bar::{Menu, Nav};
+#[cfg_attr(not(test), allow(unused_imports))]
+pub use sheets::Restorable;
 #[cfg(test)]
 pub use view::GLYPHS;
 pub use view::view;
@@ -42,7 +51,9 @@ pub const MIN: Size = Size::new(960.0, 600.0);
 // The regions around the canvas (logical px): the stage is what they leave.
 const HEADER: f32 = 41.0; // 40 + the hairline
 const RAIL: f32 = 52.0;
-const OPTIONS: f32 = 76.0;
+const OPTIONS: f32 = 48.0;
+/// Below this width both panels fold and the Library opens over the stage.
+const NARROW: f32 = 1100.0;
 const STATUS: f32 = 44.0;
 const LIBRARY: f32 = 240.0;
 const PANEL: f32 = 260.0;
@@ -69,13 +80,6 @@ pub const FIELD: &str = "studio-edit-field";
 /// One step's row in the Steps list: its thumbnail and the gap under it.
 const STEP_PITCH: f32 =
     crate::shared::kit::thumb::WELL.height + crate::shared::kit::tokens::space::GAP;
-
-/// The library's tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
-    Recent,
-    Steps,
-}
 
 /// What the Studio opens.
 pub enum Picture {
@@ -155,7 +159,19 @@ pub enum Msg {
     /// The panel's Cut out row; the options bar's Before (`true`) / After.
     CutOut,
     CutView(bool),
-    Tab(Tab),
+    /// A menu opens (`Some`) or closes; a row picked; the keyboard on the bar.
+    Menu(Option<Menu>),
+    MenuPick(Menu, usize),
+    MenuKey(Nav),
+    /// A Library section folds / unfolds (index in `library`).
+    Section(usize),
+    /// The Library over the stage (narrow windows).
+    Overlay,
+    /// The shortcuts sheet.
+    Shortcuts(bool),
+    /// File > New snip, File > Settings.
+    NewSnip,
+    Settings,
     /// The Steps list: a press on a step, the pointer over the list (list px,
     /// with the steps' count), the press ends, the pointer on / off a step.
     StepPress(usize),
@@ -254,6 +270,10 @@ pub enum Outcome {
     CancelWalkthrough,
     /// Export the picture so (the host asks where).
     ExportPicture(Crop, export::Picture),
+    /// File > New snip: the Snip capture starts.
+    NewSnip,
+    /// File > Settings…
+    Settings,
 }
 
 pub struct Studio {
@@ -291,8 +311,12 @@ pub struct Studio {
     cutting: cut::Phase,
     cut: Option<cut::Cut>,
     transparent: bool,
-    /// The library's tab the user picked (`None`: Steps while there are some).
-    pub(super) tab: Option<Tab>,
+    /// The open menu and its keyboard row; the Library's folded sections
+    /// (Recent, Objects, Steps); the narrow Library overlay; the shortcuts sheet.
+    pub(super) menu: Option<(Menu, usize)>,
+    pub(super) shut: [bool; 3],
+    pub(super) overlay: bool,
+    pub(super) shortcuts: bool,
     /// The Steps list: a press or drag, and the step under the pointer.
     pub(super) pick: Reorder,
     pub(super) step_hover: Option<usize>,
@@ -351,7 +375,10 @@ impl Studio {
             cutting: cut::Phase::Idle,
             cut: None,
             transparent: false,
-            tab: None,
+            menu: None,
+            shut: [false; 3],
+            overlay: false,
+            shortcuts: false,
             pick: Reorder::default(),
             step_hover: None,
             export: export::Picture::default(),
@@ -851,6 +878,11 @@ impl Studio {
             Msg::Editor(m) => self.on_editor(m),
             Msg::Caption(Caption::Close) => self.close_requested(),
             Msg::Caption(c) => Outcome::Caption(c),
+            // narrow: the Library is an overlay, the panels' choices stay as saved
+            Msg::Library | Msg::Panel | Msg::Both if self.narrow() => {
+                self.overlay = !self.overlay;
+                Outcome::None
+            }
             Msg::Library | Msg::Panel | Msg::Both => {
                 let p = &mut self.panels;
                 match msg {
@@ -946,8 +978,11 @@ impl Studio {
             }
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
-                // Esc on the unsaved question closes only the question
-                if self.asking.take().is_none() {
+                // Esc ladder: menu, sheet, overlay, the question, Edit text
+                let closed = self.menu.take().is_some()
+                    || std::mem::take(&mut self.shortcuts)
+                    || std::mem::take(&mut self.overlay);
+                if !closed && self.asking.take().is_none() {
                     self.edit = None;
                 }
                 Outcome::None
@@ -956,10 +991,41 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
-            Msg::Tab(tab) => {
-                self.tab = Some(tab);
+            Msg::Menu(m) => {
+                self.menu = m.map(|m| (m, 0));
                 Outcome::None
             }
+            Msg::MenuPick(menu, i) => {
+                self.menu = None;
+                match menu_bar::items(menu, self).into_iter().nth(i) {
+                    Some(row) => self.update(row.press),
+                    None => Outcome::None,
+                }
+            }
+            Msg::MenuKey(key) => {
+                let (menu, pick) = menu_bar::nav(self, key);
+                self.menu = menu;
+                match pick {
+                    Some(m) => self.update(m),
+                    None => Outcome::None,
+                }
+            }
+            Msg::Section(i) => {
+                if let Some(x) = self.shut.get_mut(i) {
+                    *x = !*x;
+                }
+                Outcome::None
+            }
+            Msg::Overlay => {
+                self.overlay = !self.overlay;
+                Outcome::None
+            }
+            Msg::Shortcuts(on) => {
+                self.shortcuts = on;
+                Outcome::None
+            }
+            Msg::NewSnip => Outcome::NewSnip,
+            Msg::Settings => Outcome::Settings,
             Msg::StepPress(i) => {
                 self.pick.press(i);
                 Outcome::None
@@ -1090,11 +1156,24 @@ impl Studio {
         }
     }
 
+    /// Narrow windows fold both panels (the Library opens over the stage).
+    pub(super) fn narrow(&self) -> bool {
+        self.window.width < NARROW
+    }
+
+    pub(super) fn library_shown(&self) -> bool {
+        self.panels.library && !self.narrow()
+    }
+
+    pub(super) fn panel_shown(&self) -> bool {
+        self.panels.options && !self.narrow()
+    }
+
     /// The stage: the window less the header, the rail, the bars and the shown panels.
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = (self.panels.library as u8 as f32) * (LIBRARY + 1.0)
-            + (self.panels.options as u8 as f32) * (panel_width() + 1.0);
+        let side = (self.library_shown() as u8 as f32) * (LIBRARY + 1.0)
+            + (self.panel_shown() as u8 as f32) * (panel_width() + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),
