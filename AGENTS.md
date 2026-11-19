@@ -1423,3 +1423,11 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   no-model fill for plain backgrounds always (instant, nothing downloaded) + IS-Net general-use (Apache-2.0, 179 MB, ~0.7-1 s and
   ~830 MB RAM per cut on the CPU, freed after) for other backgrounds, downloaded only after the user confirms it on first need
   (size shown), sha256 pinned, hosted on OpenCircle-models. Before shipping: a check on ~5 real CC0 photos.
+- No Ctrl+K in the Studio (owner, 2026-11-19, SUPERSEDES the Studio's Ctrl+K field/command bar in STUDIO_V2_SPEC.md and the
+  v0.4.1 "Ctrl+K in the Studio" version): the Studio has no search bar. The Raycast-style launcher the owner asked for is a
+  SEPARATE new feature (the hub / plugins launcher, option A on the Plugins canvas), not part of the Studio; it was misread.
+- Studio rework (owner, 2026-11-19, after trying the v0.4.0 build: "not finished, needs more work"): the Studio must behave like
+  familiar editors (Ctrl+C copies the SELECTED object, Ctrl+V pastes it; nothing selected = the whole picture), one standard
+  container size for every options-bar control, panel toggles in a familiar place (not beside the caption buttons), no empty
+  side panels, and real Studio settings (export defaults, behaviour, import ...). Research established editors first, then a
+  design round on the canvas, then one complete build.
