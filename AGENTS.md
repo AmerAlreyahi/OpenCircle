@@ -1414,3 +1414,5 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   notices (W72, capability table first) + the Start menu / "Open with" entries once the Studio's name is chosen (the user-facing
   name lives in ONE string-table entry). Settings v2 stays a draft: nothing of it is built. Then v0.4.1-v0.4.6 in order, the next
   ones built in parallel on branches while the owner tries a build.
+- Walkthrough video formats (owner, 2026-11-19, "ok for 3 types"): v0.4.3 exports GIF, MP4 and WebM; MP4 and WebM are AV1 through
+  rav1e (BSD-2, ~+1 MB), H.264 is not used (licence). GIF stays the format that opens everywhere.
