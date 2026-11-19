@@ -47,6 +47,10 @@ ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dy
 clipper2-rust = "1.2"
 # jpeg: Save as JPEG (already built for arboard / iced: no new crate).
 image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
+# Studio walkthrough export (v0.4.3): the animated GIF (MIT OR Apache-2.0; NeuQuant colours)
+gif = "0.14"
+# ...and AV1 for the MP4 / WebM walkthroughs (BSD-2-Clause; pure Rust: no asm, nothing to assemble on any build)
+rav1e = { version = "=0.8.1", default-features = false, features = ["threading"] }
 # Same version iced_tiny_skia already builds: the editor flattens annotations with it.
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 # Already built for cosmic-text (iced): the selection highlight of mixed

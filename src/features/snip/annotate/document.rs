@@ -13,6 +13,7 @@ use super::{
 use crate::shared::picture::Crop;
 
 /// The captured image: RGBA, straight alpha, `width * height * 4` bytes.
+#[derive(Clone)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
@@ -307,6 +308,7 @@ impl Edit {
     }
 }
 
+#[derive(Clone)]
 pub struct Document {
     /// The capture.
     pub image: Image,
@@ -449,6 +451,21 @@ impl Document {
     /// How many edits can be undone.
     pub fn depth(&self) -> usize {
         self.done.len()
+    }
+
+    /// Calls `f` with the document at each state of its history, the first
+    /// state to the current one; the document ends as it was (no copy).
+    pub fn replay(&mut self, mut f: impl FnMut(&Document)) {
+        let (depth, selected) = (self.done.len(), self.selected);
+        for _ in 0..depth {
+            self.undo();
+        }
+        f(self);
+        for _ in 0..depth {
+            self.redo();
+            f(self);
+        }
+        self.selected = selected;
     }
 
     pub fn undo(&mut self) -> bool {

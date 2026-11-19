@@ -130,6 +130,8 @@ pub enum Msg {
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
+    /// A walkthrough's encoder: a frame done, or its end.
+    StudioWalk(studio::Walked),
 }
 
 #[derive(Default)]
@@ -157,6 +159,8 @@ pub struct Windows {
     out: Option<Out>,
     /// OpenCircle Studio, at most one.
     studio: Option<(window::Id, crate::features::snip::screens::studio::Studio)>,
+    /// The walkthrough encoder that runs: set to stop it.
+    walk_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// What `Windows::leave_frame` took out of capture number `capture`'s grab.
@@ -1434,6 +1438,7 @@ impl Windows {
             }
             Msg::StudioDownload | Msg::StudioDismiss => {}
             Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
+            Msg::StudioWalk(walked) => return self.on_walked(walked),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);
@@ -1591,6 +1596,10 @@ impl Windows {
                     self.permission = None;
                 }
                 if self.studio_window() == Some(id) {
+                    // an encode that runs stops, and writes no file
+                    if let Some(stop) = &self.walk_cancel {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     self.studio = None; // its picture and history are freed
                     crate::shared::platform::sys::mem::trim_heap_soon();
                     return Task::none();
@@ -1791,7 +1800,11 @@ impl Windows {
         }
         if let Some((_, studio)) = self.studio.as_ref().filter(|(s, _)| *s == window) {
             let mode = self.mode(window);
-            let page = crate::features::snip::screens::studio::view(studio, mode.maximised)
+            let steps = self
+                .steps
+                .as_ref()
+                .map_or(&[][..], |(_, strip)| strip.steps());
+            let page = crate::features::snip::screens::studio::view(studio, steps, mode.maximised)
                 .map(Msg::Studio);
             return Some(chrome::with_edges(page, mode, move |e| {
                 Msg::Chrome(window, e)

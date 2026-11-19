@@ -29,7 +29,7 @@ mod pointer;
 mod select;
 mod shape;
 mod spotlight;
-mod step;
+pub(crate) mod step;
 pub mod style;
 /// Pasted text as a text item takes it: Windows line ends made `\n`, other
 /// control characters (tabs too) dropped, trailing blank lines off, at most

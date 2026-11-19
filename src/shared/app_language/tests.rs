@@ -417,6 +417,7 @@ const NOT_UI: &[&str] = &[
     "jpg",
     "OpenCircle-{stamp}{suffix}.{ext}",
     "OpenCircle-{stamp}.{ext}",
+    "OpenCircle-{infix}{stamp}",
     // numbers with their unit; a panic message; a test-only label
     "{done:.1} / {} MB",
     "ModelsJob({:?})",

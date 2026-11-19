@@ -4,6 +4,10 @@
 //! over the canvas, the canvas with zoom, Save / Copy in the status bar. Side
 //! panels: the library (Recent captures) and the picture panel, each hidden by
 //! its toggle or Ctrl+[ / Ctrl+] (Ctrl+\ both), remembered in `[snip.studio]`.
+//! The library's Steps tab (v0.4.2) shows the Steps strip's own steps (one
+//! store, the host's): click = open on the canvas, drag = reorder, x = delete,
+//! Copy all, Export (Markdown / HTML / images). Export picture: PNG / JPG /
+//! WebP / PDF at a size (`features::snip::export`).
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
 mod cut;
@@ -16,7 +20,9 @@ use iced::widget::image;
 use iced::widget::scrollable::AbsoluteOffset;
 use iced::{Point, Size, Vector};
 
+use super::steps::{self, Released, Reorder};
 use crate::features::snip::annotate::{self, Annotator, Image, Output};
+use crate::features::snip::export;
 use crate::features::snip::snip_more::{self as more, Row};
 pub use crate::features::text_reading::model_download::Fetching;
 use crate::features::translate::{self, Line};
@@ -59,6 +65,17 @@ const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 pub const CANVAS: &str = "studio-canvas";
 /// Edit text's inline field.
 pub const FIELD: &str = "studio-edit-field";
+
+/// One step's row in the Steps list: its thumbnail and the gap under it.
+const STEP_PITCH: f32 =
+    crate::shared::kit::thumb::WELL.height + crate::shared::kit::tokens::space::GAP;
+
+/// The library's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Recent,
+    Steps,
+}
 
 /// What the Studio opens.
 pub enum Picture {
@@ -138,6 +155,48 @@ pub enum Msg {
     /// The panel's Cut out row; the options bar's Before (`true`) / After.
     CutOut,
     CutView(bool),
+    Tab(Tab),
+    /// The Steps list: a press on a step, the pointer over the list (list px,
+    /// with the steps' count), the press ends, the pointer on / off a step.
+    StepPress(usize),
+    StepMove(Point, usize),
+    StepRelease,
+    StepHover(usize, bool),
+    StepDelete(usize),
+    CopyAllSteps,
+    ExportSteps(export::Steps),
+    /// The Export sheet's Walkthrough tab (the Steps menu's first row), its
+    /// choices, and the encoder's progress (done, total) and end.
+    ExportWalkthrough,
+    /// The sheet's tab: the picture's (`false`) or the walkthrough's.
+    ExportTab(bool),
+    WalkFormat(export::Movie),
+    WalkProgress(usize, usize),
+    /// The encoder ended (`true`: the file is written: the sheet closes).
+    WalkEnded(bool),
+    WalkEdits(bool),
+    WalkSize(u32),
+    WalkTime(u8),
+    WalkNumbered(bool),
+    WalkLoop(bool),
+    WalkGo,
+    /// The sheet's Cancel: stops the encoder when one runs, else closes.
+    WalkCancel,
+    /// The Export sheet: open (Picture tab), its choices, Export…, Cancel.
+    Export,
+    ExportFormat(export::Format),
+    ExportQuality(u8),
+    ExportSize(u32),
+    ExportGo,
+}
+
+/// Where a walkthrough's frames come from.
+pub enum Frames {
+    /// The Steps strip's steps.
+    Steps,
+    /// The picture's edits: a copy of the document, replayed by the host's
+    /// worker (one picture, not a copy of every frame).
+    Edits(Box<annotate::Document>),
 }
 
 /// What the host does after a message.
@@ -182,6 +241,19 @@ pub enum Outcome {
     Say(String),
     /// Cut out: the host cuts `cut_source`'s picture and answers `set_cut`.
     CutOut,
+    /// For the Steps strip (delete, reorder, Copy all): the steps are its.
+    Steps(steps::Msg),
+    /// Open the `i`th step on the canvas.
+    OpenStep(usize),
+    /// Export the steps (the host asks for a folder).
+    ExportSteps(export::Steps),
+    /// Export a walkthrough (the host asks where, then draws the frames and
+    /// encodes them off the UI thread).
+    ExportWalkthrough(export::Walkthrough, Frames),
+    /// Stop the encoder that runs.
+    CancelWalkthrough,
+    /// Export the picture so (the host asks where).
+    ExportPicture(Crop, export::Picture),
 }
 
 pub struct Studio {
@@ -219,6 +291,39 @@ pub struct Studio {
     cutting: cut::Phase,
     cut: Option<cut::Cut>,
     transparent: bool,
+    /// The library's tab the user picked (`None`: Steps while there are some).
+    pub(super) tab: Option<Tab>,
+    /// The Steps list: a press or drag, and the step under the pointer.
+    pub(super) pick: Reorder,
+    pub(super) step_hover: Option<usize>,
+    /// The export bar's choices, and whether it shows.
+    pub(super) export: export::Picture,
+    pub(super) exporting: bool,
+    /// The walkthrough tab's choices.
+    pub(super) walk: Walk,
+    /// The sheet shows the Walkthrough tab.
+    pub(super) walk_tab: bool,
+}
+
+/// The walkthrough dialog's choices (STUDIO_V2_SPEC "Export dialog").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Walk {
+    /// From the picture's edits, not the Steps.
+    pub edits: bool,
+    /// Frame time in tenths of a second.
+    pub tenths: u8,
+    pub how: export::Walkthrough,
+    /// The encoder runs: frames done and all (0 of 0 while the file is asked for).
+    pub busy: Option<(usize, usize)>,
+}
+
+impl Walk {
+    fn how(self) -> export::Walkthrough {
+        export::Walkthrough {
+            frame_ms: u32::from(self.tenths) * 100,
+            ..self.how
+        }
+    }
 }
 
 impl Studio {
@@ -246,6 +351,21 @@ impl Studio {
             cutting: cut::Phase::Idle,
             cut: None,
             transparent: false,
+            tab: None,
+            pick: Reorder::default(),
+            step_hover: None,
+            export: export::Picture::default(),
+            exporting: false,
+            walk: Walk {
+                edits: false,
+                tenths: 20,
+                how: export::Walkthrough {
+                    movie: export::Movie::from_index(panels.walk_format),
+                    ..export::Walkthrough::default()
+                },
+                busy: None,
+            },
+            walk_tab: false,
         }
     }
 
@@ -836,7 +956,118 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
+            Msg::Tab(tab) => {
+                self.tab = Some(tab);
+                Outcome::None
+            }
+            Msg::StepPress(i) => {
+                self.pick.press(i);
+                Outcome::None
+            }
+            Msg::StepMove(at, n) => {
+                self.pick.moved(at, 0.0, STEP_PITCH, n);
+                Outcome::None
+            }
+            Msg::StepRelease => match self.pick.release() {
+                Some(Released::Moved(from, to)) => Outcome::Steps(steps::Msg::Reorder(from, to)),
+                Some(Released::Click(i)) => Outcome::OpenStep(i),
+                None => Outcome::None,
+            },
+            Msg::StepHover(i, on) => {
+                self.step_hover = match on {
+                    true => Some(i),
+                    false => self.step_hover.filter(|&h| h != i),
+                };
+                Outcome::None
+            }
+            Msg::StepDelete(i) => {
+                self.pick.cancel();
+                self.step_hover = None;
+                Outcome::Steps(steps::Msg::Delete(i))
+            }
+            Msg::CopyAllSteps => Outcome::Steps(steps::Msg::CopyAll),
+            Msg::ExportSteps(how) => Outcome::ExportSteps(how),
+            Msg::ExportWalkthrough => {
+                self.exporting = true;
+                self.walk_tab = true;
+                self.walk.edits = false;
+                Outcome::None
+            }
+            Msg::ExportTab(walk) => {
+                self.walk_tab = walk;
+                Outcome::None
+            }
+            Msg::WalkFormat(movie) => {
+                self.walk.how.movie = movie;
+                self.panels.walk_format = movie.index();
+                Outcome::Panels(self.panels)
+            }
+            Msg::WalkProgress(done, total) => {
+                self.walk.busy = self.walk.busy.map(|_| (done, total));
+                Outcome::None
+            }
+            Msg::WalkEnded(done) => {
+                self.walk.busy = None;
+                self.exporting = self.exporting && !done;
+                Outcome::None
+            }
+            Msg::WalkEdits(on) => self.walk_set(|w| w.edits = on),
+            Msg::WalkSize(px) => self.walk_set(|w| w.how.max_edge = px),
+            Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
+            Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
+            Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
+            Msg::WalkCancel => {
+                self.exporting = false;
+                Outcome::None
+            }
+            Msg::WalkGo if self.walk.busy.is_some() => Outcome::None,
+            Msg::WalkGo => {
+                let w = self.walk;
+                match (w.edits, &mut self.editor) {
+                    (true, Some(e)) => {
+                        self.walk.busy = Some((0, 0));
+                        Outcome::ExportWalkthrough(w.how(), Frames::Edits(Box::new(e.doc.clone())))
+                    }
+                    (true, None) => Outcome::None,
+                    (false, _) => {
+                        self.walk.busy = Some((0, 0));
+                        Outcome::ExportWalkthrough(w.how(), Frames::Steps)
+                    }
+                }
+            }
+            Msg::Export => {
+                self.exporting = true;
+                self.walk_tab = false;
+                Outcome::None
+            }
+            Msg::ExportFormat(format) => {
+                self.export.format = format;
+                Outcome::None
+            }
+            Msg::ExportQuality(quality) => {
+                self.export.quality = quality;
+                Outcome::None
+            }
+            Msg::ExportSize(max_edge) => {
+                self.export.max_edge = max_edge;
+                Outcome::None
+            }
+            Msg::ExportGo => {
+                self.exporting = false;
+                match &self.editor {
+                    Some(e) => Outcome::ExportPicture(annotate::render(&e.doc), self.export),
+                    None => Outcome::None,
+                }
+            }
         }
+    }
+
+    fn walk_set(&mut self, f: impl FnOnce(&mut Walk)) -> Outcome {
+        if self.walk.busy.is_none() {
+            f(&mut self.walk);
+        }
+        Outcome::None
     }
 
     fn on_editor(&mut self, m: annotate::Message) -> Outcome {

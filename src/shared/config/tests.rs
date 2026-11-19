@@ -1637,3 +1637,16 @@ fn borealis_is_stored_only_when_picked() {
     assert_eq!(old.look.theme, LookTheme::SapphireGlow);
     assert_eq!(w.len(), 1, "{w:?}");
 }
+
+#[test]
+fn the_studios_last_walkthrough_format_is_kept_and_a_bad_one_is_dropped() {
+    assert_eq!(Config::parse("").0.snip.studio.walk_format, 0, "GIF first");
+    let (c, w) = Config::parse("[snip.studio]\nwalk_format = 2\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.snip.studio.walk_format, 2);
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert_eq!(Config::parse(&text).0, c);
+    let (c, w) = Config::parse("[snip.studio]\nwalk_format = 7\n");
+    assert_eq!(c.snip.studio.walk_format, 0);
+    assert!(!w.is_empty(), "the bad value is reported");
+}

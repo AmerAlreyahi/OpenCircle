@@ -305,6 +305,13 @@ impl Config {
                 let (p, d) = ("snip.studio.", d.snip.studio);
                 c.snip.studio.library = get(s, p, "library", d.library, &mut w);
                 c.snip.studio.options = get(s, p, "options", d.options, &mut w);
+                c.snip.studio.walk_format =
+                    get_checked(s, p, "walk_format", d.walk_format, &mut w, |v| {
+                        match *v < 3 {
+                            true => Ok(()),
+                            false => Err("0, 1 or 2".into()),
+                        }
+                    });
             }
         }
         // `[labs] online`: read only for schema 13's engine step

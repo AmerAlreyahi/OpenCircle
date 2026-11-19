@@ -3,6 +3,8 @@ pub(crate) mod action;
 pub mod annotate;
 pub(crate) mod app;
 pub(crate) mod capture;
+pub(crate) mod export;
+pub(crate) mod movie;
 pub(crate) mod screens;
 pub(crate) mod snip_more;
 

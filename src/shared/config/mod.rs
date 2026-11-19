@@ -485,6 +485,8 @@ pub struct StudioConfig {
     pub library: bool,
     /// The picture panel (end side).
     pub options: bool,
+    /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
+    pub walk_format: u8,
 }
 
 impl Default for StudioConfig {
@@ -492,6 +494,7 @@ impl Default for StudioConfig {
         StudioConfig {
             library: true,
             options: true,
+            walk_format: 0,
         }
     }
 }

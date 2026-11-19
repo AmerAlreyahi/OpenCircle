@@ -1766,8 +1766,6 @@ strings! {
         | "فتح…";
     st_paste: "Paste"
         | "لصق";
-    st_recent: "Recent captures"
-        | "اللقطات الأخيرة";
     st_recent_off: "Turn on Recent captures in Settings > Snip to see your last captures here."
         | "فعّل «اللقطات الأخيرة» في الإعدادات > لقطة الشاشة لترى آخر لقطاتك هنا.";
     st_recent_none: "No recent captures yet."
@@ -1830,6 +1828,88 @@ strings! {
         | "افتح صورة";
     st_pictures: "Pictures"
         | "الصور";
+    st_tab_recent: "Recent"
+        | "الأخيرة";
+    st_steps: "Steps"
+        | "الخطوات";
+    st_step: "Step"
+        | "الخطوة";
+    st_steps_none: "No steps yet. In Snip, More > Add to steps puts a capture here."
+        | "لا توجد خطوات بعد. في لقطة الشاشة، «المزيد» > «أضف إلى الخطوات» يضع اللقطة هنا.";
+    st_step_tip: "Open on the canvas · drag to reorder"
+        | "افتحها على اللوحة · اسحب لتغيير الترتيب";
+    st_export: "Export"
+        | "تصدير";
+    st_export_go: "Export…"
+        | "تصدير…";
+    st_export_md: "Markdown (.md + images)"
+        | "Markdown (.md مع الصور)";
+    st_export_html: "HTML page"
+        | "صفحة HTML";
+    st_export_images: "Images folder"
+        | "مجلد صور";
+    st_export_walkthrough: "Walkthrough: GIF, MP4, WebM…"
+        | "شرح متحرك: GIF وMP4 وWebM…";
+    st_walk_where: "Export the walkthrough"
+        | "تصدير الشرح المتحرك";
+    st_walk_cap: "A video is 4096 px on its long edge at most."
+        | "الفيديو بطول 4096 بكسل على أطول ضلع كحد أقصى.";
+    st_export_pic: "Picture"
+        | "الصورة";
+    st_export_walk: "Walkthrough"
+        | "شرح متحرك";
+    st_walk_format: "Format"
+        | "الصيغة";
+    st_walk_busy: "Encoding {} of {}…"
+        | "جارٍ الترميز {} من {}…";
+    st_pdf_note: "PDF: one page the picture's size"
+        | "PDF: صفحة واحدة بحجم الصورة";
+    st_lossless: "Lossless"
+        | "بلا فقد";
+    st_walk_from: "From"
+        | "من";
+    st_walk_steps: "Steps"
+        | "الخطوات";
+    st_walk_edits: "Edits of this picture"
+        | "تعديلات هذه الصورة";
+    st_walk_frame: "Frame time"
+        | "مدة الإطار";
+    st_walk_s: "s"
+        | "ث";
+    st_walk_number: "Number the frames"
+        | "ترقيم الإطارات";
+    st_walk_loop: "Loop"
+        | "تكرار";
+    st_walk_frames: "Frames"
+        | "الإطارات";
+    st_walk_about: "about"
+        | "نحو";
+    st_walk_note: "Draws each step as a frame; not a screen recording."
+        | "يرسم كل خطوة كإطار؛ ليس تسجيلًا للشاشة.";
+    st_walk_pc: "Made on this PC; nothing is uploaded."
+        | "يُصنع على هذا الجهاز، ولا يُرفع شيء.";
+    st_export_where: "Export the picture"
+        | "تصدير الصورة";
+    st_export_folder: "Choose a folder for the steps"
+        | "اختر مجلدًا للخطوات";
+    st_quality: "Quality"
+        | "الجودة";
+    st_original: "Original"
+        | "الأصلي";
+    st_exported_steps: "Exported {} to {}"
+        | "صُدّرت {} إلى {}";
+    st_steps_one: "1 step"
+        | "خطوة واحدة";
+    st_steps_two: "2 steps"
+        | "خطوتان";
+    st_steps_few: "{} steps"
+        | "{} خطوات";
+    st_steps_many: "{} steps"
+        | "{} خطوة";
+    st_export_webp_big: "WebP can't hold a picture over 16,384 px on a side. Pick a smaller size, or another format."
+        | "لا يتّسع WebP لصورة يتجاوز ضلعها 16384 بكسل. اختر حجمًا أصغر أو صيغة أخرى.";
+    st_export_pdf_wide: "A PDF page can't be wider than 19,200 px. Pick a smaller size."
+        | "لا يمكن أن يتجاوز عرض صفحة PDF 19200 بكسل. اختر حجمًا أصغر.";
     sn_pin: "Pin to screen"
         | "تثبيت على الشاشة";
     sn_live_pin: "Live pin"
