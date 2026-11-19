@@ -393,7 +393,7 @@ impl Studio {
         let before = e.doc.image.rgba.clone();
         let mut after = before.clone();
         crate::features::cutout::apply(&mut after, &alpha);
-        if !e.doc.set_pixels(&after) {
+        if !e.doc.set_rows(0, &after) {
             return Outcome::Say(crate::t!(st_cut_nothing).to_string());
         }
         e.own_image = true; // its pixels are no longer the opened picture's

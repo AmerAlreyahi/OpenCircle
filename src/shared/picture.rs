@@ -86,12 +86,7 @@ pub fn encode(crop: &Crop, format: crate::shared::config::Format) -> Result<Vec<
     match format {
         crate::shared::config::Format::Png => encode_png(crop.width, crop.height, &crop.rgba),
         crate::shared::config::Format::Jpeg => {
-            let (pixels, _) = crop.rgba.as_chunks::<4>();
-            let on_white =
-                |c: u8, a: u8| ((c as u32 * a as u32 + 255 * (255 - a as u32)) / 255) as u8;
-            let rgb: Vec<u8> = (pixels.iter())
-                .flat_map(|&[r, g, b, a]| [on_white(r, a), on_white(g, a), on_white(b, a)])
-                .collect();
+            let rgb = rgb_on_white(crop);
             let mut out = Vec::new();
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
                 .encode(

@@ -1,5 +1,5 @@
 //! The Studio's Cut out (v0.4.6, STUDIO_V2_SPEC S9): the picture's background
-//! goes transparent as one undoable edit of its pixels (`Document::set_pixels`:
+//! goes transparent as one undoable edit of its pixels (`Document::set_rows`:
 //! Ctrl+Z brings the background back). The options bar offers Before | After
 //! to compare; the picture sits on a checkerboard while it has transparency.
 //! The work (`features::cutout`) runs off the UI thread; this is what the
