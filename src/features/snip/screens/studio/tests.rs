@@ -1483,3 +1483,44 @@ fn v3_the_frame_matches_its_golden_images() {
         ));
     });
 }
+
+/// §5: the right-click menu follows the selection (object rows, else the
+/// picture's); a row acts through the editor; Esc closes it first.
+#[test]
+fn v3_right_click_menu_acts_on_the_selection() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::ContextOpen);
+    let picture_rows = s.context.as_ref().unwrap().entries.len();
+    let _ = s.update(Msg::Cancel);
+    assert!(s.context.is_none());
+    draw(&mut s);
+    s.editor.as_mut().unwrap().doc.selected = Some(0);
+    let _ = s.update(Msg::ContextOpen);
+    let entries = &s.context.as_ref().unwrap().entries;
+    assert_ne!(
+        entries.len(),
+        picture_rows,
+        "object rows, not the picture's"
+    );
+    let at = entries
+        .iter()
+        .position(|r| r.action == editing::Action::Delete)
+        .unwrap();
+    let _ = s.update(Msg::ContextPick(at));
+    assert!(s.context.is_none());
+    assert!(s.editor.as_ref().unwrap().doc.items.is_empty());
+}
+
+/// Board 20: Discard drops the kept copy; Restore with none is nothing.
+#[test]
+fn v3_restore_sheet_buttons() {
+    let mut s = studio_on(640, 400);
+    assert!(matches!(s.update(Msg::Restore), Outcome::None));
+    s.restorable = Some(Restorable {
+        name: "x".into(),
+        size: (1, 1),
+        png: Vec::new(),
+    });
+    let _ = s.update(Msg::DiscardCopy);
+    assert!(s.restorable.is_none());
+}

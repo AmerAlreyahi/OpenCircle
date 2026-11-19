@@ -63,7 +63,6 @@ pub fn shortcuts<'a>() -> Element<'a, Msg> {
 }
 
 /// A picture kept after a crash.
-#[cfg_attr(not(test), allow(dead_code))] // ponytail: wired when W86's / W88's APIs land
 pub struct Restorable {
     pub name: String,
     pub size: (u32, u32),
@@ -71,7 +70,6 @@ pub struct Restorable {
 }
 
 /// The restore sheet.
-#[cfg_attr(not(test), allow(dead_code))] // ponytail: wired when W86's / W88's APIs land
 pub fn restore<'a>(r: &'a Restorable, restore: Msg, discard: Msg) -> Element<'a, Msg> {
     let body = column![
         text(Role::CARD_HEADING, t!(st_restore_title)),

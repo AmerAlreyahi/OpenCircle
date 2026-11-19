@@ -413,15 +413,11 @@ pub enum Message {
     Shove((i8, i8), bool),
     Order(Order),
     PressCopy(Point),
-    #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
     Merge,
     /// Studio's Properties: the selection's box (image px), a pasted
     /// picture's opacity (0-255) and ratio lock.
-    #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
     Bounds(Rectangle),
-    #[allow(dead_code)]
     Opacity(u8),
-    #[allow(dead_code)]
     LockRatio(bool),
     /// More: Copy text, Ask AI, Translate on the area (`actions::snip_more`).
     CopyText,

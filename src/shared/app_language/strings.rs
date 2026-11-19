@@ -2486,4 +2486,6 @@ strings! {
         | "الملفات الأخيرة متوقفة · الإعدادات > الاستوديو";
     st_select_all: "Select all"
         | "تحديد الكل";
+    st_lock_ratio: "Lock ratio"
+        | "قفل النسبة";
 }

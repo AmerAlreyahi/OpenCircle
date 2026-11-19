@@ -126,7 +126,7 @@ impl Pic {
         Pic(std::sync::Arc::new((width, height, data)))
     }
 
-    #[allow(dead_code)] // the Properties panel's W / H (W87)
+    #[allow(dead_code)] // Properties reads the selection box instead
     pub fn size(&self) -> Size {
         Size::new(self.0.0 as f32, self.0.1 as f32)
     }

@@ -22,10 +22,37 @@ const TEXT_SIZES: [f32; 3] = [16.0, 26.0, 38.0];
 
 type El<'a> = Element<'a, Message>;
 
+/// The values the bar shows: the selection's (a mixed one reads as none), else
+/// the next drawing's (STUDIO_V3 S1: the bar follows the selection).
+struct Shown {
+    colour: Option<[u8; 4]>,
+    stroke: f32,
+    outline: bool,
+    fill: bool,
+}
+
+fn shown(e: &Annotator) -> Shown {
+    match e.selection_style() {
+        Some(st) => Shown {
+            colour: st.colour,
+            stroke: st.stroke.unwrap_or(0.0),
+            outline: st.outline.unwrap_or(false),
+            fill: st.fill.unwrap_or(false),
+        },
+        None => Shown {
+            colour: Some(e.colour),
+            stroke: e.stroke,
+            outline: e.outline,
+            fill: e.fill,
+        },
+    }
+}
+
 fn colours(e: &Annotator) -> El<'_> {
+    let now = shown(e).colour;
     let cells = style::ANNOTATION.iter().take(SWATCHES).map(|c| {
         let rgba = c.into_rgba8();
-        swatch(*c, rgba == e.colour, Some(Message::Colour(rgba)))
+        swatch(*c, Some(rgba) == now, Some(Message::Colour(rgba)))
     });
     group(cells.collect(), false)
 }
@@ -43,8 +70,9 @@ fn toggle<'a>(words: &'a str, on: bool, press: Option<Message>) -> El<'a> {
 }
 
 fn stroke(e: &Annotator) -> El<'_> {
-    let at = Width::ALL.iter().position(|w| w.stroke() == e.stroke);
-    dots(at, format!("{} px", e.stroke.round()), |i| {
+    let px = shown(e).stroke;
+    let at = Width::ALL.iter().position(|w| w.stroke() == px);
+    dots(at, format!("{} px", px.round()), |i| {
         Message::Width(Width::ALL[i])
     })
 }
@@ -58,22 +86,23 @@ fn font_size(e: &Annotator) -> El<'_> {
 
 /// The groups of `tool`, in the order of STUDIO_V3_SPEC §4.
 fn groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
+    let now = shown(e);
     let outline = || {
         toggle(
             t!(sn_outline),
-            e.outline,
-            Some(Message::Outline(!e.outline)),
+            now.outline,
+            Some(Message::Outline(!now.outline)),
         )
     };
     match tool {
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow => {
             let fills = crate::features::snip::annotate::fills_inside(tool);
-            let fill = fills.then_some(Message::Fill(!e.fill));
+            let fill = fills.then_some(Message::Fill(!now.fill));
             vec![
                 colours(e),
                 stroke(e),
                 outline(),
-                toggle(t!(sn_fill), e.fill && fills, fill),
+                toggle(t!(sn_fill), now.fill && fills, fill),
             ]
         }
         Tool::Pen | Tool::Highlighter | Tool::Step => vec![colours(e), stroke(e)],

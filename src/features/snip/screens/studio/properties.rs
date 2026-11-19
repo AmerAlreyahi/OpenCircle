@@ -7,7 +7,7 @@ use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill};
 
 use super::{Msg, Studio};
-use crate::features::snip::annotate::{Message, Tool, info};
+use crate::features::snip::annotate::{Message, Order, Tool, info};
 use crate::features::snip::export;
 use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::{fmt, tr};
@@ -22,6 +22,8 @@ pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 
 /// A read-out row's height, the panel's side padding.
 const KV_H: f32 = 22.0;
+const FIELD_LABEL: f32 = 14.0;
+const SLIDER_W: f32 = 140.0;
 const PAD: f32 = 12.0;
 
 /// A heading line (the object's name).
@@ -30,7 +32,6 @@ fn title<'a>(words: impl iced::widget::text::IntoFragment<'a>) -> Element<'a, Ms
 }
 
 /// What the panel is about.
-#[cfg_attr(not(test), allow(dead_code))] // ponytail: wired when W86's / W88's APIs land
 pub enum Subject {
     Picture,
     Object(ObjectInfo),
@@ -71,36 +72,93 @@ fn head<'a>(words: &'a str) -> Element<'a, Msg> {
         .into()
 }
 
-/// X, Y, W, H as four read-outs.
+/// X, Y, W, H (picture pixels): typed numbers move and resize the selection.
 fn frame<'a>(f: [i32; 4]) -> Element<'a, Msg> {
-    let cell = |k: &'a str, v: i32| kv(k, v.to_string());
+    let field = |k: &'a str, at: usize| {
+        let input = crate::shared::kit::field::input("", &f[at].to_string(), true, false).on_input(
+            move |typed: String| {
+                let mut v = f.map(|n| n as f32);
+                match typed.trim().parse::<f32>() {
+                    Ok(n) => v[at] = n.max(if at >= 2 { 1.0 } else { f32::MIN }),
+                    Err(_) => return Msg::Nothing,
+                }
+                Msg::Editor(Message::Bounds(iced::Rectangle::new(
+                    iced::Point::new(v[0], v[1]),
+                    iced::Size::new(v[2], v[3]),
+                )))
+            },
+        );
+        crate::dir_row![sub(Role::ROW_DESC, k).width(FIELD_LABEL), input.width(Fill)]
+            .spacing(space::GAP)
+            .align_y(Center)
+    };
     column![
-        cell("X", f[0]),
-        cell("Y", f[1]),
-        cell("W", f[2]),
-        cell("H", f[3])
+        crate::dir_row![field("X", 0), field("Y", 1)].spacing(space::GAP),
+        crate::dir_row![field("W", 2), field("H", 3)].spacing(space::GAP),
     ]
+    .spacing(space::GAP)
     .into()
 }
 
-/// The order buttons (dimmed: they act through the editing model).
+/// The order buttons.
 fn order<'a>() -> Element<'a, Msg> {
-    let b = |words| button::button(label(words), Kind::Elevated, None);
+    let b = |words, o| {
+        button::button(
+            label(words),
+            Kind::Elevated,
+            Some(Msg::Editor(Message::Order(o))),
+        )
+    };
     column![
-        crate::dir_row![b(t!(st_to_front)), b(t!(st_forward))].spacing(space::GAP),
-        crate::dir_row![b(t!(st_backward)), b(t!(st_to_back))].spacing(space::GAP),
+        crate::dir_row![
+            b(t!(st_to_front), Order::Front),
+            b(t!(st_forward), Order::Forward)
+        ]
+        .spacing(space::GAP),
+        crate::dir_row![
+            b(t!(st_backward), Order::Backward),
+            b(t!(st_to_back), Order::Back)
+        ]
+        .spacing(space::GAP),
     ]
     .spacing(space::GAP)
     .into()
 }
 
-fn duplicate_delete<'a>(delete: Option<Msg>) -> Element<'a, Msg> {
+fn duplicate_delete<'a>() -> Element<'a, Msg> {
     crate::dir_row![
-        button::button(label(t!(st_duplicate)), Kind::Elevated, None),
-        button::button(label(t!(st_delete)), Kind::Elevated, delete),
+        button::button(
+            label(t!(st_duplicate)),
+            Kind::Elevated,
+            Some(Msg::Editor(Message::Duplicate))
+        ),
+        button::button(
+            label(t!(st_delete)),
+            Kind::Elevated,
+            Some(Msg::Editor(Message::Delete))
+        ),
     ]
     .spacing(space::GAP)
     .into()
+}
+
+/// The pasted picture's opacity (per cent) and its ratio lock.
+fn picture_rows<'a>(opacity: u8, lock: bool) -> Element<'a, Msg> {
+    let percent = (u32::from(opacity) * 100 / 255).max(1) as u8;
+    let slide = slider::bare(1..=100, percent, SLIDER_W, false, |p| {
+        Msg::Editor(Message::Opacity((u32::from(p) * 255 / 100) as u8))
+    });
+    let opacity = crate::dir_row![slide, sub(Role::KEYCAP, format!("{percent} %"))]
+        .spacing(space::GAP)
+        .align_y(Center);
+    let lock = crate::dir_row![
+        sub(Role::ROW_DESC, t!(st_lock_ratio)).width(Fill),
+        button::toggle(lock, Some(Msg::Lock(!lock))),
+    ]
+    .align_y(Center);
+    column![head(t!(st_opacity)), opacity, lock]
+        .spacing(space::GAP)
+        .into()
 }
 
 /// Copy text, Translate, Ask AI (Snip More's rows, with the user's keys), Edit
@@ -215,7 +273,7 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
                 .push(frame(o.frame))
                 .push(head(t!(st_order)))
                 .push(order())
-                .push(duplicate_delete(Some(Msg::Editor(Message::Delete))))
+                .push(duplicate_delete())
                 .push(head(t!(st_actions)))
                 .push(actions(s));
         }
@@ -227,16 +285,20 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
                 )))
                 .push(head(t!(st_order)))
                 .push(order())
-                .push(duplicate_delete(Some(Msg::Editor(Message::Delete))));
+                .push(duplicate_delete());
         }
         Subject::Pasted(p) => {
             body = body
                 .push(title(t!(st_pasted)))
                 .push(frame(p.frame))
-                .push(kv(t!(st_opacity), format!("{} %", p.opacity)))
+                .push(picture_rows(p.opacity, s.lock))
                 .push(head(t!(st_order)))
                 .push(order())
-                .push(button::button(label(t!(st_merge)), Kind::Accent, None));
+                .push(button::button(
+                    label(t!(st_merge)),
+                    Kind::Accent,
+                    Some(Msg::Editor(Message::Merge)),
+                ));
         }
     }
     let list = container(body).padding([space::GAP, PAD]).width(Fill);
@@ -251,18 +313,25 @@ pub fn view(s: &Studio, subject: Subject) -> Element<'_, Msg> {
 }
 
 impl Studio {
-    /// What Properties is about: the selected object, else the picture.
+    /// What Properties is about: the selection (one object, several, a pasted
+    /// picture), else the picture.
     pub(super) fn subject(&self) -> Subject {
         let Some(e) = &self.editor else {
             return Subject::Picture;
         };
-        let Some(item) = e.doc.selected.and_then(|i| e.doc.items.get(i)) else {
+        let (Some(style), Some(r)) = (e.selection_style(), e.selection_bounds()) else {
             return Subject::Picture;
         };
-        let f = item.frame();
-        Subject::Object(ObjectInfo {
-            tool: super::library::tool_of(&item.shape),
-            frame: [f.x, f.y, f.width, f.height].map(|v| v.round() as i32),
-        })
+        let frame = [r.x, r.y, r.width, r.height].map(|v| v.round() as i32);
+        let first = e.selection().first().and_then(|&i| e.doc.items.get(i));
+        match (style.count, style.opacity, first) {
+            (n, _, _) if n > 1 => Subject::Many { count: n },
+            (_, Some(opacity), _) => Subject::Pasted(PastedInfo { frame, opacity }),
+            (_, _, Some(item)) => Subject::Object(ObjectInfo {
+                tool: super::library::tool_of(&item.shape),
+                frame,
+            }),
+            _ => Subject::Picture,
+        }
     }
 }

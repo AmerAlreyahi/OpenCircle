@@ -40,7 +40,6 @@ use crate::shared::picture::Crop;
 
 pub use cut::{Done as CutDone, Phase as CutPhase};
 pub use menu_bar::{Menu, Nav};
-#[cfg_attr(not(test), allow(unused_imports))]
 pub use sheets::Restorable;
 #[cfg(test)]
 pub use view::GLYPHS;
@@ -175,6 +174,9 @@ pub enum Msg {
     ContextOpen,
     ContextPick(usize),
     Pointer(Point),
+    /// Properties: the ratio lock; a typed number that isn't one.
+    Lock(bool),
+    Nothing,
     /// Board 20: bring the kept copy back / throw it away.
     Restore,
     DiscardCopy,
@@ -329,6 +331,7 @@ pub struct Studio {
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
     pub(super) pointer: Point,
+    pub(super) lock: bool,
     /// A copy kept after a crash, waiting for Restore / Discard (board 20).
     pub(super) restorable: Option<Restorable>,
     /// When the unsaved copy was last written (`recovery`).
@@ -397,6 +400,7 @@ impl Studio {
             shortcuts: false,
             context: None,
             pointer: Point::ORIGIN,
+            lock: true,
             restorable: pending_copy(),
             kept_at: None,
             pick: Reorder::default(),
@@ -1034,6 +1038,11 @@ impl Studio {
                 Some(e) => Outcome::SaveThen(annotate::render(&e.doc)),
                 None => self.proceed(),
             },
+            Msg::Nothing => Outcome::None,
+            Msg::Lock(on) => {
+                self.lock = on;
+                self.update(Msg::Editor(annotate::Message::LockRatio(on)))
+            }
             Msg::Pointer(p) => {
                 self.pointer = p;
                 Outcome::None

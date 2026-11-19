@@ -38,7 +38,6 @@ pub(crate) struct DrawStyle {
 }
 
 /// What the options bar shows for the selection; `None` = mixed.
-#[allow(dead_code)] // read by the Studio's bar (W87)
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectionStyle {
     pub count: usize,
@@ -575,7 +574,6 @@ impl Annotator {
     }
 
     /// The options bar's values for the selection (`None`: nothing selected).
-    #[allow(dead_code)] // read by the Studio's bar (W87)
     pub fn selection_style(&self) -> Option<SelectionStyle> {
         let sel = self.doc.selection();
         let items: Vec<&Item> = sel.iter().map(|&i| &self.doc.items[i]).collect();

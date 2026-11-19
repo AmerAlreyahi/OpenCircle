@@ -86,8 +86,10 @@ pub fn pending_in(dir: &Path) -> Option<Pending> {
 /// The "quiet for [`QUIET`]" rule: call `changed` on every edit and `due` on a timer;
 /// `due` is true once per burst of edits.
 #[derive(Debug, Default)]
+#[allow(dead_code)] // the window throttles its writes (no timer yet): see keep_unsaved
 pub struct Debounce(Option<Instant>);
 
+#[allow(dead_code)]
 impl Debounce {
     pub fn changed(&mut self, now: Instant) {
         self.0 = Some(now);
