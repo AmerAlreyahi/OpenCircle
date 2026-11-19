@@ -2264,4 +2264,118 @@ strings! {
         | "قراءة النص السيريلي";
     md_read_cjk: "Read Chinese and Japanese text"
         | "قراءة النص الصيني والياباني";
+    st_menu_file: "File"
+        | "ملف";
+    st_menu_edit: "Edit"
+        | "تحرير";
+    st_menu_view: "View"
+        | "عرض";
+    st_new_snip: "New snip"
+        | "لقطة جديدة";
+    st_save_as: "Save as…"
+        | "حفظ باسم…";
+    st_copy_picture: "Copy picture"
+        | "نسخ الصورة";
+    st_settings: "Settings…"
+        | "الإعدادات…";
+    st_shortcuts: "Keyboard shortcuts"
+        | "اختصارات لوحة المفاتيح";
+    st_close: "Close"
+        | "إغلاق";
+    st_cut: "Cut"
+        | "قص";
+    st_duplicate: "Duplicate"
+        | "تكرار";
+    st_delete: "Delete"
+        | "حذف";
+    st_select_all: "Select all"
+        | "تحديد الكل";
+    st_deselect: "Deselect"
+        | "إلغاء التحديد";
+    st_forward: "Bring forward"
+        | "إلى الأمام";
+    st_backward: "Send backward"
+        | "إلى الخلف";
+    st_to_front: "Bring to front"
+        | "إلى الواجهة";
+    st_to_back: "Send to back"
+        | "إلى الخلفية";
+    st_library: "Library"
+        | "المكتبة";
+    st_properties: "Properties"
+        | "الخصائص";
+    st_left_panel: "Left panel"
+        | "اللوحة اليسرى";
+    st_right_panel: "Right panel"
+        | "اللوحة اليمنى";
+    st_all_panels: "All panels"
+        | "كل اللوحات";
+    st_sec_recent: "Recent files"
+        | "الملفات الأخيرة";
+    st_sec_objects: "Objects"
+        | "الكائنات";
+    st_objects_empty: "Your drawings appear here."
+        | "تظهر رسوماتك هنا.";
+    st_clear: "Clear"
+        | "مسح";
+    st_actions: "Picture actions"
+        | "إجراءات الصورة";
+    st_save_export: "Save and export"
+        | "الحفظ والتصدير";
+    st_name: "Name"
+        | "الاسم";
+    st_opacity: "Opacity"
+        | "العتمة";
+    st_order: "Order"
+        | "الترتيب";
+    st_lock_ratio: "Lock ratio"
+        | "قفل النسبة";
+    st_merge: "Merge into picture"
+        | "دمج في الصورة";
+    st_pasted: "Pasted picture"
+        | "صورة ملصوقة";
+    st_n_objects: "{} objects"
+        | "{} كائنات";
+    st_add_steps: "Add to steps"
+        | "أضف إلى الخطوات";
+    st_one_object: "Object"
+        | "كائن";
+    st_tool_selected: "Selected"
+        | "محدد";
+    st_hint_select: "Click an object to edit it"
+        | "انقر كائنًا لتحريره";
+    st_sc_title: "Keyboard shortcuts"
+        | "اختصارات لوحة المفاتيح";
+    st_sc_tools: "Choose a tool"
+        | "اختيار أداة";
+    st_sc_copy: "Copy, cut, paste the selection"
+        | "نسخ المحدد وقصه ولصقه";
+    st_sc_whole: "Copy the whole picture"
+        | "نسخ الصورة كاملة";
+    st_sc_dup: "Duplicate, delete, select all"
+        | "تكرار وحذف وتحديد الكل";
+    st_sc_undo: "Undo, redo"
+        | "تراجع وإعادة";
+    st_sc_nudge: "Nudge 1 px, 10 px"
+        | "تحريك 1 بكسل، 10 بكسل";
+    st_sc_order: "Bring forward, send backward"
+        | "إلى الأمام وإلى الخلف";
+    st_sc_panels: "Left, right, all panels"
+        | "اللوحة اليسرى واليمنى وكلها";
+    st_sc_zoom: "Zoom in, out, fit, 100 %"
+        | "تكبير وتصغير وملاءمة و100 %";
+    st_sc_file: "Open, save, save as"
+        | "فتح وحفظ وحفظ باسم";
+    st_sc_misc: "New snip, close, settings"
+        | "لقطة جديدة وإغلاق وإعدادات";
+    st_restore_title: "Restore your unsaved work?"
+        | "استعادة عملك غير المحفوظ؟";
+    st_restore_hint: "OpenCircle closed before this was saved."
+        | "أُغلق OpenCircle قبل حفظ هذا.";
+    st_restore: "Restore"
+        | "استعادة";
+    st_discard: "Discard"
+        | "تجاهل";
+    st_page: "Page"
+        | "الصفحة";
 }

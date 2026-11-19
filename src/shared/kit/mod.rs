@@ -33,6 +33,7 @@ pub mod key_hint;
 pub mod keycap;
 pub mod logo;
 pub mod loupe;
+pub mod option_bar;
 pub mod markdown;
 pub mod option_list;
 pub mod panel_frame;
