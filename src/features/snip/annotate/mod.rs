@@ -21,6 +21,7 @@ pub use eraser::SIZES as ERASER_SIZES;
 mod highlighter;
 mod input;
 mod label;
+mod objects;
 mod legend;
 mod lines;
 mod magnifier;
@@ -51,6 +52,8 @@ pub use document::rounded as rounded_path;
 pub use document::{
     Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
 };
+#[allow(unused_imports)] // API for the Studio's bar (W87)
+pub use objects::{Order, SelectionStyle};
 pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
@@ -396,6 +399,28 @@ pub enum Message {
     UndoClick,
     Delete,
     Copy,
+    /// Studio (S1, S7): select all, deselect, Ctrl+C / Ctrl+X on the selected
+    /// objects (nothing selected: Ctrl+C = the picture), Ctrl+D, arrows
+    /// (direction, Shift = 10 px), Ctrl+] / Ctrl+[, Alt+press (a copy is
+    /// what moves), "Merge into picture".
+    SelectAll,
+    Deselect,
+    CopySelection,
+    CutSelection,
+    Duplicate,
+    Shove((i8, i8), bool),
+    Order(Order),
+    PressCopy(Point),
+    #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
+    Merge,
+    /// Studio's Properties: the selection's box (image px), a pasted
+    /// picture's opacity (0-255) and ratio lock.
+    #[allow(dead_code)] // wired by the Studio's Properties panel (W87)
+    Bounds(Rectangle),
+    #[allow(dead_code)]
+    Opacity(u8),
+    #[allow(dead_code)]
+    LockRatio(bool),
     /// More: Copy text, Ask AI, Translate on the area (`actions::snip_more`).
     CopyText,
     AskAi,
@@ -606,6 +631,18 @@ pub struct Annotator {
     pub updating: Option<usize>,
     /// The options as last remembered (`remember`).
     saved: EditorConfig,
+    /// The Studio's editor: multi-selection, the object clipboard, options
+    /// that follow the selection (Snip's quick widget keeps today's rules).
+    pub studio: bool,
+    /// Studio: Ctrl+C with nothing selected copies the picture (the
+    /// `studio` setting, default on).
+    pub copy_picture_when_empty: bool,
+    group: Option<objects::GroupDrag>,
+    band: Option<(Point, Point)>,
+    /// The next drawing's style while a selection shows its own values.
+    stash: Option<objects::DrawStyle>,
+    /// The values the options bar shows (to tell what the user changed).
+    shown: Option<objects::DrawStyle>,
 }
 
 impl Annotator {
@@ -683,6 +720,12 @@ impl Annotator {
             held: false,
             steps: None,
             updating: None,
+            studio: false,
+            copy_picture_when_empty: true,
+            group: None,
+            band: None,
+            stash: None,
+            shown: None,
             saved,
         };
         editor.refresh();
@@ -691,23 +734,24 @@ impl Annotator {
 
     /// The tool and options to remember: `saved` with this editor's own.
     pub(crate) fn remembered(&self) -> EditorConfig {
+        let d = self.drawing_style();
         EditorConfig {
             line_assist: self.assist,
             // Crop is a step, not a tool to open on.
             tool: (self.tool != Tool::Crop)
                 .then_some(self.tool)
                 .or(self.saved.tool),
-            colour: Some(hex(self.colour)),
-            size: Some(self.width),
-            text_size: Some(self.text_size.round().clamp(8.0, 96.0) as u8),
-            outline: Some(self.outline),
-            fill: Some(self.fill),
-            blur_size: self.blur_size,
-            blur_cell: Some(self.blur_cell),
-            stroke: Some(self.stroke.round().clamp(1.0, 32.0) as u8),
-            text_font: Some(self.text_style.font),
-            text_bold: Some(self.text_style.bold),
-            text_back: Some(self.text_style.back),
+            colour: Some(hex(d.colour)),
+            size: Some(d.width),
+            text_size: Some(d.text_size.round().clamp(8.0, 96.0) as u8),
+            outline: Some(d.outline),
+            fill: Some(d.fill),
+            blur_size: d.blur_size,
+            blur_cell: Some(d.blur_cell),
+            stroke: Some(d.stroke.round().clamp(1.0, 32.0) as u8),
+            text_font: Some(d.text_style.font),
+            text_bold: Some(d.text_style.bold),
+            text_back: Some(d.text_style.back),
             group_tools: Some(self.last.to_vec()),
             eraser: Some(self.eraser.round().clamp(1.0, 255.0) as u8),
             eraser_whole: Some(self.eraser_whole),
@@ -725,7 +769,13 @@ impl Annotator {
                 | Message::Release
                 | Message::Cancel
         );
+        let picked = self.studio.then(|| (self.doc.selected, self.doc.extra.clone()));
         let out = self.handle(message);
+        if let Some(picked) = picked
+            && picked != (self.doc.selected, self.doc.extra.clone())
+        {
+            self.sync_style();
+        }
         if !pointer {
             let now = self.remembered();
             if now != self.saved {
@@ -767,12 +817,23 @@ impl Annotator {
                 self.menu = self.menu.filter(|m| *m == Menu::Colour);
                 self.commit();
                 match select::hit(&self.doc.items, p, REACH / self.zoom) {
+                    Some(i)
+                        if self.studio
+                            && self.doc.selection().len() > 1
+                            && self.doc.selection().contains(&i) =>
+                    {
+                        self.start_group(p)
+                    }
                     Some(i) => {
-                        self.doc.selected = Some(i);
+                        self.doc.select_one(Some(i));
                         self.pick_up(i, false, p);
                     }
                     None => self.press(p),
                 }
+            }
+            Message::PressCopy(p) => {
+                (self.focus, self.nudged) = (None, false);
+                self.press_copy(p)
             }
             Message::Move(p) => self.drag_to(p),
             Message::Release => self.release(),
@@ -939,6 +1000,25 @@ impl Annotator {
                 }
                 self.undid = true;
             }
+            Message::Delete if self.studio => {
+                self.commit();
+                self.delete_selection();
+            }
+            Message::SelectAll => self.select_all(),
+            Message::Deselect => {
+                self.commit();
+                self.doc.deselect();
+            }
+            Message::CopySelection | Message::CutSelection => {
+                return self.copy_selection(matches!(message, Message::CutSelection));
+            }
+            Message::Duplicate => self.duplicate(),
+            Message::Shove(arrow, far) => self.shove(arrow, far),
+            Message::Order(how) => self.reorder(how),
+            Message::Merge => self.merge(),
+            Message::Bounds(r) => self.set_selection_bounds(r),
+            Message::Opacity(o) => self.set_picture(Some(o), None),
+            Message::LockRatio(on) => self.set_picture(None, Some(on)),
             Message::Delete => {
                 self.commit();
                 if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
@@ -1147,7 +1227,7 @@ impl Annotator {
         }
         if !p.keeps.contains(&self.tool) {
             self.pick_tool(p.tool);
-            self.doc.selected = None; // the style is for the next item
+            self.doc.deselect(); // the style is for the next item
         }
         self.set_width(p.width);
         self.set_colour(colour);
@@ -1218,8 +1298,12 @@ impl Annotator {
             self.erase_to(p);
             return;
         }
-        // The selected item's handles work in every tool.
-        if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
+        // The selected item's handles work in every tool (one selected item).
+        if let Some(i) = self
+            .doc
+            .selected
+            .filter(|&i| i < self.doc.items.len() && self.doc.extra.is_empty())
+        {
             let original = self.doc.items[i].clone();
             if let Some(handle) = select::handle_at(&original, p, reach) {
                 let drag = Drag::Handle(handle, original.clone());
@@ -1227,9 +1311,27 @@ impl Annotator {
                 return;
             }
         }
+        if self.tool == Tool::Select && self.studio {
+            let hit = select::hit(&self.doc.items, p, reach);
+            match hit {
+                Some(i) if self.shift => self.toggle_selected(i),
+                Some(i) if self.doc.selection().len() > 1 && self.doc.selection().contains(&i) => {
+                    self.start_group(p)
+                }
+                Some(i) => {
+                    self.doc.select_one(Some(i));
+                    self.pick_up(i, false, p);
+                }
+                None => {
+                    self.doc.deselect();
+                    self.band = Some((p, p));
+                }
+            }
+            return;
+        }
         if self.tool == Tool::Select {
             let hit = select::hit(&self.doc.items, p, reach);
-            self.doc.selected = hit;
+            self.doc.select_one(hit);
             match hit {
                 Some(i) => self.pick_up(i, false, p),
                 // Nothing there: the press inside moves Snip's live area.
@@ -1241,7 +1343,7 @@ impl Annotator {
             return;
         }
         if let Some(i) = self.grabbed(p) {
-            self.doc.selected = Some(i);
+            self.doc.select_one(Some(i));
             self.pick_up(i, true, p);
             return;
         }
@@ -1410,6 +1512,13 @@ impl Annotator {
             self.cropping = Some((from, p));
             return;
         }
+        if self.group.is_some() {
+            return self.drag_group(p);
+        }
+        if let Some((from, _)) = self.band {
+            self.band = Some((from, p));
+            return;
+        }
         if self.erasing.is_some() {
             self.erase_to(p);
             return;
@@ -1433,7 +1542,7 @@ impl Annotator {
             && p.distance(start) * self.zoom >= SLOP
         {
             self.pending = None;
-            self.doc.selected = None;
+            self.doc.deselect();
             let item = self.create(start);
             self.begin(None, item, Drag::Draw, start);
         }
@@ -1459,7 +1568,10 @@ impl Annotator {
     /// the area and the pending item stay as they were before the press.
     fn cancel_press(&mut self) {
         self.lock = None;
-        if let Some((before, _)) = self.erasing.take() {
+        self.band = None;
+        if self.group.is_some() {
+            self.cancel_group();
+        } else if let Some((before, _)) = self.erasing.take() {
             self.doc.items = before;
             self.refresh();
         } else if let Some(drag) = self.area_drag.take() {
@@ -1478,6 +1590,12 @@ impl Annotator {
 
     fn release(&mut self) {
         self.lock = None;
+        if self.group.is_some() {
+            return self.end_group();
+        }
+        if self.band.is_some() {
+            return self.end_band();
+        }
         if let Some(drag) = self.area_drag.take() {
             let to = self.doc.view();
             (self.doc.crop, self.doc.items) = (Some(drag.start), drag.items);
@@ -1544,7 +1662,7 @@ impl Annotator {
         let from = std::mem::replace(last, p);
         let r = self.eraser / 2.0 / self.zoom;
         if eraser::erase(&mut self.doc.items, from, p, r, self.eraser_whole) {
-            self.doc.selected = None;
+            self.doc.deselect();
             self.refresh();
         }
     }
@@ -1558,8 +1676,9 @@ impl Annotator {
         let empty = matches!(&item.shape,
             Shape::Text { text, .. } | Shape::Callout { text, .. } | Shape::Label { text, .. }
                 if text.trim().is_empty());
+        let unmoved_copy = matches!(&pending.drag, Drag::Move { from, .. } if *from == item);
         let edit = match pending.index {
-            None if empty || self.too_small(&item) => None,
+            None if empty || unmoved_copy || self.too_small(&item) => None,
             None => Some(Edit::Insert(self.doc.items.len(), item)),
             Some(i) if empty => Some(Edit::Delete(i, self.doc.items[i].clone())),
             Some(i) if item != self.doc.items[i] => {
@@ -1741,6 +1860,8 @@ impl Annotator {
                 pending.item = item;
             }
             self.update_live();
+        } else if self.studio {
+            self.restyle_selection(&styled);
         } else if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
             let before = self.doc.items[i].clone();
             let after = styled(&before, self);
@@ -1894,7 +2015,8 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool) -> Item {
         Shape::Rect { b, .. }
         | Shape::Ellipse { b, .. }
         | Shape::Redact { b, .. }
-        | Shape::Spotlight { b, .. } => *b = p,
+        | Shape::Spotlight { b, .. }
+        | Shape::Picture { b, .. } => *b = p,
         Shape::Arrow { a, b, bend, .. } => {
             *b = if shift { arrow::snap_angle(*a, p) } else { p };
             *bend = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);

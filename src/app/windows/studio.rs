@@ -196,6 +196,11 @@ impl Windows {
         at: Option<iced::Point>,
     ) -> Task<Msg> {
         match (image, &mut self.studio) {
+            // a picture is open: our own copied objects, or a movable pasted picture
+            (Some(crop), Some((_, s))) if s.editor_open() => {
+                let next = s.paste_objects(crop);
+                self.studio_outcome(next)
+            }
             (Some(crop), _) => self.studio_read(Ok(crop)),
             (None, Some((_, s))) if s.editor_open() => {
                 let next = s.paste_text(at);

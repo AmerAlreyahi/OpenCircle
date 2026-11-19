@@ -160,6 +160,13 @@ impl Annotator {
                 _ => {}
             }
         }
+        if self.studio
+            && let Some(message) = crate::features::snip::screens::studio::editing::key(
+                self, key, latin, modifiers,
+            )
+        {
+            return Some(message);
+        }
         let arrow = match key {
             Key::Named(Named::ArrowLeft) => Some((-1, 0)),
             Key::Named(Named::ArrowRight) => Some((1, 0)),

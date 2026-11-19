@@ -181,7 +181,12 @@ pub fn resized(original: &Item, corner: usize, p: Point) -> Item {
             (to - at) / (from - at)
         }
     };
-    let (sx, sy) = (scale(p.x, grab.x, fixed.x), scale(p.y, grab.y, fixed.y));
+    let (mut sx, mut sy) = (scale(p.x, grab.x, fixed.x), scale(p.y, grab.y, fixed.y));
+    // A pasted picture with "Lock ratio" scales evenly.
+    if matches!(original.shape, Shape::Picture { lock: true, .. }) {
+        let k = if sx.abs() >= sy.abs() { sx } else { sy };
+        (sx, sy) = (k, k);
+    }
     let mut item = original.clone();
     item.shape.transform(
         |q| {
