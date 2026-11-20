@@ -3493,3 +3493,37 @@ fn w90c_default_sizes_follow_the_picture() {
     assert_eq!(super::picture_scale(1080.0), 1.0);
     assert!((super::picture_scale(8000.0) - 8000.0 / 1080.0).abs() < 1e-4);
 }
+
+/// W90c item 4: on a big picture a default size is never thinner than the one the fit view
+/// gives (in IMAGE px, so at 100 % an 8K photo's default line is as bold, relative to the
+/// picture, as a 1080p snip's); at the fit zoom nothing changes; a 1080p picture keeps
+/// sizes constant on screen. 1080p, 4K (2160 short edge) and 8000 px.
+#[test]
+fn w90c_default_sizes_are_not_hair_thin_at_100_percent_on_big_pictures() {
+    let stroke = |side: u32, zoom: f32| {
+        let e = Annotator::new(image_of(side, side, |_, _| SLATE), zoom);
+        e.create(pt(1.0, 1.0)).width
+    };
+    for side in [1080u32, 2160, 8000] {
+        let scale = super::picture_scale(side as f32);
+        let fit = 700.0 / side as f32;
+        // at the fit zoom: the Medium default, 5 display px, as before
+        assert!((stroke(side, fit) * fit - 5.0).abs() < 0.01, "{side} fit");
+        let at_100 = stroke(side, 1.0);
+        if side == 1080 {
+            assert!(
+                (at_100 - 5.0).abs() < 0.01,
+                "a 1080p stroke is 5 px at 100 %"
+            );
+            // and zoomed in it keeps its size on screen
+            assert!((stroke(side, 4.0) * 4.0 - 5.0).abs() < 0.01);
+        } else {
+            assert!(at_100 >= 5.0 * scale - 0.01, "{side}: {at_100} at 100 %");
+            // the same share of the picture as the 1080p snip's at 100 %... in image px
+            assert!(
+                (stroke(side, 4.0) - at_100).abs() < 0.01,
+                "image px past fit"
+            );
+        }
+    }
+}

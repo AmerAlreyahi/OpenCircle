@@ -1013,7 +1013,7 @@ impl Annotator {
                 let item = (self.pending.as_ref().map(|p| &p.item))
                     .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)));
                 if let Some(item) = item {
-                    self.style = Some((item.colour, style::level(item, self.zoom)));
+                    self.style = Some((item.colour, style::level(item, self.size_zoom())));
                 }
             }
             Message::PasteStyle => {
@@ -1351,9 +1351,9 @@ impl Annotator {
     /// taller than three default brushes is a block, not a line), else the
     /// default.
     fn brush_size(&mut self, p: Point) -> (f32, Option<f32>) {
-        let default = Width::Medium.brush() / self.zoom;
+        let default = Width::Medium.brush() / self.size_zoom();
         if let Some(w) = self.blur_size {
-            return (w.brush() / self.zoom, None);
+            return (w.brush() / self.size_zoom(), None);
         }
         let zoom = self.zoom;
         lines::under(self.bands(), p)
@@ -1477,7 +1477,7 @@ impl Annotator {
         let from = self.doc.items[i].clone();
         // A text's options show (and edit) its own.
         if let Shape::Text { size, style, .. } = &from.shape {
-            (self.text_size, self.text_style) = (size * self.zoom, *style);
+            (self.text_size, self.text_style) = (size * self.size_zoom(), *style);
         }
         (self.outline, self.fill) = (from.outline, from.fill);
         self.begin(Some(i), from.clone(), Drag::Move { from, edits }, p);
@@ -1627,12 +1627,13 @@ impl Annotator {
             self.erase_to(p);
             return;
         }
+        let size_zoom = self.size_zoom();
         if let Some(held) = &mut self.lock
             && !self.shift
         {
             let brush = match self.pending.as_ref().map(|p| &p.item.shape) {
                 Some(Shape::Blur { size, .. }) => *size,
-                _ => Width::Medium.brush() / self.zoom,
+                _ => Width::Medium.brush() / size_zoom,
             };
             p = blur::follow(held, p, brush);
         }
@@ -1927,9 +1928,23 @@ impl Annotator {
         }
     }
 
+    /// The zoom the default sizes (stroke, text, markers, blur cell) are divided by: the
+    /// view's own while a snip or a 1080p picture is shown, so they hold their size on
+    /// screen. A picture bigger than that never gets a default thinner than its fit-view
+    /// one, in IMAGE px (the Photoshop / Paint.NET way: a brush size is in image px), so at
+    /// 100 % on an 8K photo a default line is as bold relative to the picture as a 1080p
+    /// snip's. At the zoom that fits the picture it is the view's own (no change there).
+    pub(crate) fn size_zoom(&self) -> f32 {
+        let v = self.doc.view().size();
+        match picture_scale(v.width.min(v.height)) {
+            s if s > 1.0 => self.zoom.min(1.0 / s),
+            _ => self.zoom,
+        }
+    }
+
     /// A new item of the current tool at `p`, in the current colour and width.
     fn create(&self, p: Point) -> Item {
-        let z = self.zoom;
+        let z = self.size_zoom();
         let shape = match self.tool {
             Tool::Rect => Shape::Rect { a: p, b: p },
             Tool::Ellipse => Shape::Ellipse { a: p, b: p },
@@ -2000,7 +2015,7 @@ impl Annotator {
         let styled = |item: &Item, editor: &Annotator| {
             let mut new = editor.create(Point::ORIGIN);
             new.shape = item.shape.clone();
-            let z = editor.zoom;
+            let z = editor.size_zoom();
             match &mut new.shape {
                 Shape::Text { size, style, .. } => {
                     *size = editor.text_size / z;
