@@ -184,6 +184,8 @@ pub mod fixed {
     pub const HANDLE: Color = Color::WHITE;
     pub const BRACKET_SHADOW: Color = Color::from_rgba8(0, 0, 0, 0.35);
     pub const BACKDROP: Color = Color::BLACK;
+    /// The dim over a window behind a modal dialog.
+    pub const MODAL_DIM: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.5);
     /// The squares behind a picture with a cut-out background (the same on
     /// any theme, like every editor's transparency grid).
     pub const CHECKER: (Color, Color) = (

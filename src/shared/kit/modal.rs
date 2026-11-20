@@ -5,16 +5,13 @@
 //! preferences ...); small glance-only things are a `popover`, big temporary tasks a
 //! `slide_over`.
 use iced::widget::{column, container, mouse_area, opaque, stack};
-use iced::{Center, Color, Element, Fill, Length};
+use iced::{Center, Element, Fill, Length};
 
 use super::icon::Icon;
 use super::icon_button::{self, State};
 use super::surface::{Material, surface};
 use super::text::{sub, text};
-use super::tokens::{Role, radius, space};
-
-/// The dim over the window behind the dialog.
-const DIM: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.5);
+use super::tokens::{Role, fixed, radius, space};
 
 /// The dialog's top line: `title` (and a grey one-line `subtitle`) and the X.
 pub fn header<'a, Message: Clone + 'a>(
@@ -70,7 +67,7 @@ pub fn over_sized<'a, Message: Clone + 'a>(
             .width(Fill)
             .height(Fill)
             .style(|_| container::Style {
-                background: Some(DIM.into()),
+                background: Some(fixed::MODAL_DIM.into()),
                 ..container::Style::default()
             }),
     )

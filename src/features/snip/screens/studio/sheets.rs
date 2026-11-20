@@ -7,9 +7,9 @@ use super::{Msg, editing};
 use crate::shared::app_language::{S, tr};
 use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{muted, sub, text};
+use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::tokens::{Role, radius, space};
-use crate::shared::kit::{divider, icon_button, option_list};
+use crate::shared::kit::{divider, option_list};
 use crate::t;
 
 const LEAD: f32 = 2.0;
@@ -147,20 +147,11 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         shortcut_column(t!(st_sc_g_view), view),
     ]
     .spacing(COLUMN_GAP);
-    let head = crate::dir_row![
-        column![
-            text(Role::CARD_HEADING, t!(st_sc_title)),
-            sub(Role::ROW_DESC, t!(st_sc_sub)),
-        ]
-        .width(Fill),
-        icon_button::square(
-            crate::shared::kit::icon::Icon::Close.glyph(),
-            icon_button::State::default(),
-            Some(Msg::Shortcuts(false)),
-        ),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
+    let head = crate::shared::kit::modal::header(
+        t!(st_sc_title),
+        Some(t!(st_sc_sub)),
+        Msg::Shortcuts(false),
+    );
     let foot = crate::dir_row![
         sub(Role::META, t!(st_sc_foot)).width(Fill),
         button::button(
