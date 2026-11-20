@@ -142,8 +142,6 @@ pub fn view(state: &State) -> Element<'_, Message> {
     rows.into()
 }
 
-/// The picture sizes Snip and Studio offer for `snip.max_edge` (one list, Snip's order).
-
 /// A long-capture limit as the page shows it.
 fn px_label(px: u32) -> &'static str {
     match px {
