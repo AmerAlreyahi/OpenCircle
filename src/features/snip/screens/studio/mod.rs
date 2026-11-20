@@ -1053,6 +1053,17 @@ impl Studio {
                 return out;
             }
         }
+        // a pick in a popover (an Actions row, the order buttons, Merge) closes it: its
+        // catch layer must never stay over the picture (Edit text's first pick)
+        if matches!(
+            msg,
+            Msg::Act(_)
+                | Msg::EditText
+                | Msg::CutOut
+                | Msg::Editor(annotate::Message::Order(_) | annotate::Message::Merge)
+        ) {
+            self.popover = None;
+        }
         // the question blocks the picture: nothing changes it until answered
         if self.asking()
             && matches!(

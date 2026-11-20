@@ -122,7 +122,10 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         false => main,
     };
     // a popover (Actions, Position, picture info, More) hangs from its opener
-    let main: Element<'_, Msg> = match s.popover.filter(|_| s.editor.is_some()) {
+    // (never over a slide-over: the picture must take its presses)
+    let main: Element<'_, Msg> = match s.popover.filter(|_| {
+        s.editor.is_some() && !s.exporting && s.edit.is_none() && s.comparing().is_none()
+    }) {
         Some(pop) => {
             let (corner, offset) = match pop {
                 super::popovers::Pop::Info => (

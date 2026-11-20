@@ -503,6 +503,8 @@ pub struct StudioConfig {
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
     pub walk_format: u8,
+    /// The Studio's UI scale, percent (`CHAT_ZOOM` steps; Ctrl+= / Ctrl+- / Ctrl+0).
+    pub ui_zoom: u16,
 }
 
 impl Default for StudioConfig {
@@ -511,6 +513,7 @@ impl Default for StudioConfig {
             library: true,
             options: true,
             walk_format: 0,
+            ui_zoom: 100,
         }
     }
 }

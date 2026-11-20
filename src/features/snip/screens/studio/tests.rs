@@ -2408,3 +2408,33 @@ fn v31_big_tasks_slide_in_and_the_header_stays_free() {
     let _ = s.update(Msg::Cancel);
     assert!(!s.exporting);
 }
+
+/// v3.1 review 1: a pick in a popover closes it, so the next press reaches the
+/// picture (Edit text's first pick), and no popover shows over a slide-over.
+#[test]
+fn v31_a_pick_in_a_popover_closes_it_and_the_canvas_gets_the_next_click() {
+    let mut s = two_boxes();
+    for (pop, pick) in [
+        (popovers::Pop::Actions, Msg::EditText),
+        (popovers::Pop::Actions, Msg::CutOut),
+        (
+            popovers::Pop::Position,
+            Msg::Editor(Message::Order(annotate::Order::Front)),
+        ),
+    ] {
+        let _ = s.update(Msg::Pop(Some(pop)));
+        let _ = s.update(Msg::Cancel);
+        let _ = s.update(Msg::Pop(Some(pop)));
+        assert_eq!(s.popover, Some(pop));
+        let _ = s.update(pick);
+        assert!(s.popover.is_none(), "{pop:?}");
+        let _ = s.update(Msg::Cancel);
+    }
+    // Edit text from Actions: the picture takes the next click
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    let _ = s.update(Msg::EditText);
+    assert!(s.popover.is_none() && s.edit.is_some());
+    let got = click_view(&s, (500.0, 400.0));
+    assert!(!got.is_empty(), "the picture got the click");
+    assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
+}

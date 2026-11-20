@@ -355,6 +355,17 @@ impl Config {
                             false => Err("0, 1 or 2".into()),
                         }
                     });
+                c.snip.studio.ui_zoom = get_checked(
+                    s,
+                    p,
+                    "ui_zoom",
+                    d.ui_zoom,
+                    &mut w,
+                    |z: &u16| match CHAT_ZOOM.contains(z) {
+                        true => Ok(()),
+                        false => Err(format!("expected one of {:?} (percent)", CHAT_ZOOM)),
+                    },
+                );
             }
         }
         // `[labs] online`: read only for schema 13's engine step
