@@ -424,10 +424,11 @@ impl Windows {
             ))),
             Outcome::Settings => self.open(super::Kind::Settings),
             Outcome::ApplyPrefs => {
-                if let Some((_, s)) = &mut self.studio
-                    && let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c))
-                {
-                    crate::log!("[opencircle] config: {e}");
+                if let Some((_, s)) = &mut self.studio {
+                    if let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c)) {
+                        crate::log!("[opencircle] config: {e}");
+                    }
+                    s.prefs_applied();
                 }
                 Task::none()
             }
@@ -478,12 +479,14 @@ impl Windows {
                 });
                 Task::none()
             }
-            Outcome::Panels(panels) => {
-                std::thread::spawn(move || {
-                    if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
-                        crate::log!("[opencircle] config: {e}");
-                    }
-                });
+            // (written here, in order, and only the keys that changed: a stale copy of the
+            // whole section would undo what Snip or the dialog wrote meanwhile)
+            Outcome::Panels(old, new) => {
+                if let Err(e) = crate::shared::config::update(|c| {
+                    c.snip.studio.apply_changes(&old, &new);
+                }) {
+                    crate::log!("[opencircle] config: {e}");
+                }
                 Task::none()
             }
         }
@@ -1191,5 +1194,94 @@ mod tests {
         assert!(ar(1).contains("خطوة واحدة") && ar(2).contains("خطوتان"));
         assert!(ar(5).contains("5 خطوات") && ar(12).contains("12 خطوة"));
         set(Lang::En);
+    }
+}
+
+/// `page` drawn under `theme`: kit styles read the theme at DRAW time and iced builds
+/// every window before it draws any, so a window with a theme of its own sets it
+/// around its own draw (and puts the other back).
+pub(super) fn themed<'a>(
+    page: iced::Element<'a, Msg>,
+    theme: &'static crate::shared::kit::themes::Theme,
+) -> iced::Element<'a, Msg> {
+    crate::shared::kit::wrap::wrap(page, Themed(theme))
+}
+
+struct Themed(&'static crate::shared::kit::themes::Theme);
+
+impl<M> crate::shared::kit::wrap::Hook<M> for Themed {
+    fn draw(
+        &self,
+        content: &iced::Element<'_, M>,
+        tree: &iced::advanced::widget::Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+        use crate::shared::kit::themes;
+        let before = themes::current();
+        themes::set(self.0);
+        (content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
+        themes::set(before);
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use iced::widget::container;
+
+    /// A square that reads its colour from the theme when it is DRAWN.
+    fn lazy<'a>() -> iced::Element<'a, Msg> {
+        container(iced::widget::Space::new())
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .style(|_| container::Style {
+                background: Some(themes::c().bg.into()),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn corner(view: iced::Element<'_, Msg>) -> [u8; 4] {
+        let size = iced::Size::new(16.0, 16.0);
+        let mut view = Some(view);
+        let (pixels, _) = crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| view.take()).flatten(),
+            size,
+            1.0,
+        );
+        [pixels[0], pixels[1], pixels[2], pixels[3]]
+    }
+
+    fn rgb(c: iced::Color) -> [u8; 3] {
+        [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8)
+    }
+
+    /// Two windows with different themes each draw their own (the Studio's own theme
+    /// never leaks into another window, and the other window's never into the Studio).
+    #[test]
+    fn a_window_with_its_own_theme_draws_it_and_puts_the_other_back() {
+        themes::set(&SAPPHIRE);
+        // both built under the app's theme (as iced builds every window first)
+        let studio = themed(lazy(), &DAYLIGHT);
+        let other = lazy();
+        let got = corner(studio);
+        assert_eq!(got[..3], rgb(DAYLIGHT.c.bg), "the Studio draws Daylight");
+        assert_eq!(
+            themes::current().id,
+            SAPPHIRE.id,
+            "and puts the app's theme back"
+        );
+        let got = corner(other);
+        assert_eq!(
+            got[..3],
+            rgb(SAPPHIRE.c.bg),
+            "the other window draws the app's theme"
+        );
     }
 }

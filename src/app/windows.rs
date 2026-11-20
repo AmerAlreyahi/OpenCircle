@@ -1785,14 +1785,6 @@ impl Windows {
     }
 
     pub fn view(&self, window: window::Id) -> Option<Element<'_, Msg>> {
-        // another window than the Studio draws with OpenCircle's own theme again
-        // (the Studio may have set its own in `Settings > Studio > Theme`)
-        if self.studio.as_ref().is_none_or(|(w, _)| *w != window)
-            && crate::shared::config::current().studio.theme
-                != crate::shared::config::STUDIO_THEME_FOLLOW
-        {
-            theme::apply(config::current().theme);
-        }
         if let Some((_, strip)) = self.steps.as_ref().filter(|(w, _)| *w == Some(window)) {
             return Some(strip.view(shape::radius(steps::RADIUS)).map(Msg::Steps));
         }
@@ -1837,11 +1829,19 @@ impl Windows {
             let own = crate::features::snip::screens::studio::preferences::theme_of(
                 &config::current().studio,
             );
+            // (built under it, then DRAWN under it too: kit styles read the theme at draw
+            // time, and every window is built before any is drawn: `studio::themed`)
+            let before = crate::shared::kit::themes::current();
             if let Some(theme) = own {
                 crate::shared::kit::themes::set(theme);
             }
             let page = crate::features::snip::screens::studio::view(studio, steps, mode.maximised)
                 .map(Msg::Studio);
+            crate::shared::kit::themes::set(before);
+            let page = match own {
+                Some(theme) => studio::themed(page, theme),
+                None => page,
+            };
             return Some(chrome::with_edges(page, mode, move |e| {
                 Msg::Chrome(window, e)
             }));
