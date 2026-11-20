@@ -499,6 +499,10 @@ impl Studio {
                 tenths: 20,
                 how: export::Walkthrough {
                     movie: export::Movie::from_index(panels.walk_format),
+                    transition: crate::features::snip::transition::Transition::from_index(
+                        panels.walk_transition,
+                    ),
+                    transition_ms: panels.walk_ms,
                     ..export::Walkthrough::default()
                 },
                 busy: None,
@@ -1594,8 +1598,16 @@ impl Studio {
             Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
             Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
             Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
-            Msg::WalkTransition(kind) => self.walk_set(|w| w.how.transition = kind),
-            Msg::WalkTransitionMs(ms) => self.walk_set(|w| w.how.transition_ms = ms),
+            Msg::WalkTransition(kind) => {
+                self.walk.how.transition = kind;
+                self.panels.walk_transition = kind.index();
+                Outcome::Panels(self.panels)
+            }
+            Msg::WalkTransitionMs(ms) => {
+                self.walk.how.transition_ms = ms;
+                self.panels.walk_ms = ms;
+                Outcome::Panels(self.panels)
+            }
             Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
                 self.exporting = false;

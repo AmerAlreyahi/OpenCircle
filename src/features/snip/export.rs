@@ -301,7 +301,8 @@ impl Walkthrough {
 
 /// The document's history as pictures, the first state to the current one
 /// (at most `EDIT_FRAMES`), each fitted to the walkthrough's size as it is
-/// drawn: only small frames are ever held. The document ends as it was.
+/// drawn: at most `EDIT_FRAMES` frames are held (the transition's frames between
+/// them are made one at a time while encoding). The document ends as it was.
 pub fn edit_frames(
     doc: &mut crate::features::snip::annotate::Document,
     how: Walkthrough,
@@ -354,48 +355,42 @@ pub fn encode_walkthrough(
         how.transition,
         how.transition_ms,
     );
-    // the mixed frames, drawn once each (a held step is the step itself)
-    let mirror = crate::shared::app_language::rtl();
-    let mixed: Vec<Crop> = (cells.iter())
-        .filter_map(|c| match *c {
-            transition::Cell::Mix(i, t) => Some(transition::mix(
-                &frames[i],
-                &frames[i + 1],
-                how.transition,
-                t,
-                mirror,
-            )),
-            transition::Cell::Hold(..) => None,
-        })
-        .collect();
-    let mut next_mix = mixed.iter();
-    // each cell's picture and how long it shows (ms)
-    let shown: Vec<(&Crop, u32)> = cells
-        .iter()
-        .map(|c| match *c {
-            transition::Cell::Hold(i, ms) => (&frames[i], ms),
-            transition::Cell::Mix(..) => (next_mix.next().unwrap_or(&frames[0]), transition::TICK),
-        })
-        .collect();
+    let shown = pictures(
+        &frames,
+        &cells,
+        how.transition,
+        crate::shared::app_language::rtl(),
+    );
     if how.movie == Movie::Gif {
-        return gif_of(width, height, &shown, how, progress);
+        return gif_of(width, height, shown, cells.len(), how, progress);
     }
-    // a video has one frame time: a held step is its picture repeated (with no
-    // transition the frame time is the step's own, one sample a step)
-    let tick = match how.transition {
-        Transition::Cut => how.frame_ms.max(1),
-        _ => transition::TICK,
-    };
-    let ticks: Vec<&Crop> = (shown.iter())
-        .flat_map(|&(f, ms)| std::iter::repeat_n(f, (ms / tick).max(1) as usize))
-        .collect();
-    let Some((av1c, samples)) = movie::encode_av1(&ticks, tick, movie::KEY_EVERY, progress)? else {
+    // a video sample is a step held for its whole time, or one mixed frame
+    let Some((av1c, samples)) = movie::encode_av1(shown, cells.len(), movie::KEY_EVERY, progress)?
+    else {
         return Ok(None);
     };
     Ok(Some(match how.movie {
-        Movie::Mp4 => movie::mp4(width, height, tick, &av1c, &samples)?,
-        _ => movie::webm(width, height, tick, &av1c, &samples)?,
+        Movie::Mp4 => movie::mp4(width, height, &av1c, &samples)?,
+        _ => movie::webm(width, height, &av1c, &samples)?,
     }))
+}
+
+/// What the file shows, one picture at a time with its time (ms): a step is
+/// the step itself (borrowed), a mixed frame is made when it is asked for and
+/// gone once the encoder has it, so at most a frame or two are ever alive.
+fn pictures<'a>(
+    frames: &'a [Crop],
+    cells: &'a [transition::Cell],
+    kind: Transition,
+    mirror: bool,
+) -> impl Iterator<Item = (std::borrow::Cow<'a, Crop>, u32)> + 'a {
+    cells.iter().map(move |c| match *c {
+        transition::Cell::Hold(i, ms) => (std::borrow::Cow::Borrowed(&frames[i]), ms),
+        transition::Cell::Mix(i, t) => (
+            std::borrow::Cow::Owned(transition::mix(&frames[i], &frames[i + 1], kind, t, mirror)),
+            transition::TICK,
+        ),
+    })
 }
 
 /// Every frame fitted, numbered, and centred on white in one canvas (`even`: a
@@ -442,10 +437,11 @@ fn on_canvas(
 }
 
 /// ponytail: a GIF has 256 colours a frame (NeuQuant, speed 10).
-fn gif_of(
+fn gif_of<'a>(
     width: u32,
     height: u32,
-    frames: &[(&Crop, u32)],
+    frames: impl Iterator<Item = (std::borrow::Cow<'a, Crop>, u32)>,
+    total: usize,
     how: Walkthrough,
     progress: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Result<Option<Vec<u8>>, String> {
@@ -459,12 +455,12 @@ fn gif_of(
         enc.set_repeat(gif::Repeat::Infinite)
             .map_err(|e| e.to_string())?;
     }
-    for (i, &(f, ms)) in frames.iter().enumerate() {
+    for (i, (f, ms)) in frames.enumerate() {
         let mut rgba = f.rgba.clone();
         let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut rgba, 10);
         frame.delay = u16::try_from(ms / 10).unwrap_or(u16::MAX).max(1);
         enc.write_frame(&frame).map_err(|e| e.to_string())?;
-        if !progress(i + 1, frames.len()) {
+        if !progress(i + 1, total) {
             return Ok(None);
         }
     }
@@ -643,7 +639,11 @@ mod tests {
         })
         .unwrap()
         .unwrap();
-        assert_eq!(total, 4 + 6 + 4, "hold, 6 mixes, hold, in 50 ms ticks");
+        assert_eq!(
+            total,
+            1 + 6 + 1,
+            "hold, 6 mixes, hold: a hold is one sample"
+        );
         assert_eq!(&bytes[4..8], b"ftyp");
     }
 
@@ -913,5 +913,26 @@ mod tests {
         assert_eq!(keep_only_if_written(ok.clone(), Ok(())).unwrap(), ok);
         assert!(ok.exists());
         let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    /// W91.1: the pictures are made one at a time: a held step is borrowed, a mixed frame
+    /// is built only when the iterator reaches it, so a long walkthrough never holds them all.
+    #[test]
+    fn mixed_frames_are_made_one_at_a_time() {
+        let frames = vec![crop(32, 16), crop(32, 16), crop(32, 16)];
+        let cells = transition::timeline(3, 1000, Transition::Crossfade, 1000);
+        assert_eq!(cells.len(), 3 + 2 * 20);
+        let before = transition::MIXES.with(std::cell::Cell::get);
+        let mut shown = pictures(&frames, &cells, Transition::Crossfade, false);
+        let made = || transition::MIXES.with(std::cell::Cell::get) - before;
+        assert_eq!(made(), 0, "nothing is built up front");
+        let (first, ms) = shown.next().unwrap();
+        assert!(matches!(first, std::borrow::Cow::Borrowed(_)) && ms == 1000);
+        let (mix, ms) = shown.next().unwrap();
+        assert!(matches!(mix, std::borrow::Cow::Owned(_)) && ms == transition::TICK);
+        assert_eq!(made(), 1, "one mix per picture asked for");
+        drop(mix);
+        let rest = shown.by_ref().take(5).count();
+        assert_eq!((rest, made()), (5, 6));
     }
 }

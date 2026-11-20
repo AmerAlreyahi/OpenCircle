@@ -113,6 +113,9 @@ pub struct Dialog {
     /// The editor's remembered tool options differ from the defaults.
     tool_styles_set: bool,
     reset_styles: bool,
+    /// What this dialog last read or wrote: `apply` lays only what differs from it
+    /// on the file, so a setting changed elsewhere meanwhile survives.
+    opened: (StudioPrefs, u32),
     default_folder: Option<String>,
     themes: Vec<Choice>,
 }
@@ -143,6 +146,7 @@ impl Dialog {
             max_edge: c.snip.max_edge,
             tool_styles_set: c.editor != default_styles(&c.editor),
             reset_styles: false,
+            opened: (c.studio.clone(), c.snip.max_edge),
             default_folder: None,
             themes,
         }
@@ -198,17 +202,51 @@ impl Dialog {
         }
     }
 
-    /// Writes the dialog's choices into `c` (what `Out::Changed` asks for). A file
-    /// name the config refuses is not written (the row says why).
+    /// Lays the dialog's changes on `c` (what `Out::Changed` asks for): only the keys
+    /// the user changed here, so a setting changed elsewhere meanwhile (another
+    /// `[studio]` key, `snip.max_edge`, Settings) survives. A file name the config
+    /// refuses is not written (the row says why).
     pub fn apply(&mut self, c: &mut Config) {
-        let kept = c.studio.file_name.clone();
-        c.studio = self.prefs.clone();
-        if config::check_studio_file_name(&c.studio.file_name).is_err() {
-            c.studio.file_name = kept;
+        use toml::{Table, Value};
+        let table = |v: Result<Value, toml::ser::Error>| match v {
+            Ok(Value::Table(t)) => t,
+            _ => Table::new(),
+        };
+        let (old, new) = (
+            table(Value::try_from(&self.opened.0)),
+            table(Value::try_from(&self.prefs)),
+        );
+        let mut file = table(Value::try_from(&*c));
+        let studio = match file
+            .entry("studio")
+            .or_insert_with(|| Value::Table(Table::new()))
+        {
+            Value::Table(t) => t,
+            _ => return,
+        };
+        let refused = config::check_studio_file_name(&self.prefs.file_name).is_err();
+        for (k, v) in &new {
+            let kept = k == "file_name" && refused;
+            if old.get(k) != Some(v) && !kept {
+                studio.insert(k.clone(), v.clone());
+            }
         }
-        c.snip.max_edge = self.max_edge;
-        if std::mem::take(&mut self.reset_styles) {
-            c.editor = default_styles(&c.editor);
+        if self.max_edge != self.opened.1
+            && let Some(Value::Table(snip)) = file.get_mut("snip")
+        {
+            snip.insert("max_edge".into(), Value::Integer(i64::from(self.max_edge)));
+        }
+        if let Ok(text) = toml::to_string(&file) {
+            let reset = std::mem::take(&mut self.reset_styles);
+            *c = Config::parse(&text).0;
+            if reset {
+                c.editor = default_styles(&c.editor);
+            }
+        }
+        let name = (refused).then(|| self.opened.0.file_name.clone());
+        self.opened = (self.prefs.clone(), self.max_edge);
+        if let Some(name) = name {
+            self.opened.0.file_name = name;
         }
     }
 
@@ -364,7 +402,7 @@ impl Dialog {
                     container(field(
                         &p.file_name,
                         Some(move |v: String| edit(&|s| s.file_name = v.clone())),
-                        Msg::Close,
+                        Msg::Tab(self.tab), // (Enter changes nothing; it must not close)
                     ))
                     .width(Fill),
                     t!(ss_name),
@@ -394,12 +432,7 @@ impl Dialog {
                         t!(ss_size),
                         t!(ss_size_d),
                         segmented(
-                            &[
-                                (1024, "1024"),
-                                (1568, "1568"),
-                                (2048, "2048"),
-                                (0, t!(s_original)),
-                            ],
+                            &config::size_choices(),
                             self.max_edge,
                             self.max_edge,
                             1.0,
@@ -685,5 +718,33 @@ mod tests {
             }
             app_language::set(Lang::En);
         });
+    }
+
+    /// W91.1: apply writes only what the dialog changed; a value changed elsewhere
+    /// while it was open (snip.max_edge, another [studio] key) is kept.
+    #[test]
+    fn apply_keeps_what_changed_elsewhere() {
+        let mut d = dialog();
+        let mut p = d.prefs().clone();
+        p.theme = "obsidian".into();
+        d.update(Msg::Prefs(Box::new(p)));
+        // meanwhile Settings / another window changed other keys on the file
+        let mut c = Config::default();
+        c.snip.max_edge = 2048;
+        c.studio.snap = false;
+        c.studio.recent_files = 20;
+        d.apply(&mut c);
+        assert_eq!(c.studio.theme, "obsidian", "the dialog's change");
+        assert_eq!(
+            c.snip.max_edge, 2048,
+            "not overwritten by the dialog's old value"
+        );
+        assert!(!c.studio.snap && c.studio.recent_files == 20);
+        // the next change is measured against the last one written
+        d.update(Msg::MaxEdge(1024));
+        c.studio.snap = true;
+        d.apply(&mut c);
+        assert_eq!((c.snip.max_edge, c.studio.snap), (1024, true));
+        assert_eq!(c.studio.theme, "obsidian");
     }
 }

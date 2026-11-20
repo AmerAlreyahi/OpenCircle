@@ -40,13 +40,13 @@ pub fn square<'a, Message: Clone + 'a>(
 }
 
 /// A square button around any `content` (a letter, a sample): the text of
-/// `content` takes the button's colours.
+/// `content` takes the button's colours; no `on_press` = dimmed.
 pub fn option<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     state: State,
-    on_press: Message,
+    on_press: impl Into<Option<Message>>,
 ) -> Element<'a, Message> {
-    made(content, radius::CONTROL, state, Some(on_press))
+    made(content, radius::CONTROL, state, on_press.into())
 }
 
 fn glyph_text<'a>(glyph: char) -> iced::widget::Text<'a> {

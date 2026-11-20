@@ -80,6 +80,10 @@
 //! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel,
 //! # theme ("follow" | a theme id), steps_side (start | end), steps_on_start, start_screen
 //!
+//! [snip.studio]                   # written only once changed
+//! # hint_seen = true               # Snip's one-time "Edit more in OpenCircle Studio" hint was shown
+//! # walk_transition, walk_ms       # the Studio walkthrough's last transition (0 cut .. 5 wipe) and length
+//!
 //! [snip]
 //! after = "both"                    # both (copy when picked) | editor; an old "copy" reads as both
 //! max_edge = 0                      # Copy / Save scale the long edge down to this; 0 = original (default)
@@ -492,6 +496,10 @@ pub struct StudioConfig {
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
     pub walk_format: u8,
+    /// The walkthrough's last transition (`Transition::ALL` index; 1 = Crossfade) and its
+    /// length in ms (one of `WALK_MS`).
+    pub walk_transition: u8,
+    pub walk_ms: u32,
     /// Snip's one-time "Edit more in OpenCircle Studio" hint has been shown.
     pub hint_seen: bool,
 }
@@ -502,6 +510,8 @@ impl Default for StudioConfig {
             library: true,
             options: true,
             walk_format: 0,
+            walk_transition: 1,
+            walk_ms: 500,
             hint_seen: false,
         }
     }
@@ -560,6 +570,9 @@ pub enum StudioSide {
     Start,
     End,
 }
+
+/// The walkthrough transition lengths a file may name (`snip.studio.walk_ms`).
+pub const WALK_MS: [u32; 3] = [300, 500, 1000];
 
 /// `studio.theme` when the Studio follows OpenCircle's own theme.
 pub const STUDIO_THEME_FOLLOW: &str = "follow";
@@ -654,6 +667,17 @@ impl StudioPrefs {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// The picture sizes offered for Copy / Save (`snip.max_edge`; 0 = Original): Settings >
+/// Snip and the Studio's preferences show this one list.
+pub fn size_choices() -> [(u32, &'static str); 4] {
+    [
+        (1024, "1024"),
+        (1568, "1568"),
+        (2048, "2048"),
+        (0, crate::t!(s_original)),
+    ]
 }
 
 /// Why a Studio file name pattern is refused (`studio.file_name`), for the preferences dialog.

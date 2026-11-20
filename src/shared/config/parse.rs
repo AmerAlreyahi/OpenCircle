@@ -358,6 +358,23 @@ impl Config {
                 let (p, d) = ("snip.studio.", d.snip.studio);
                 c.snip.studio.library = get(s, p, "library", d.library, &mut w);
                 c.snip.studio.options = get(s, p, "options", d.options, &mut w);
+                c.snip.studio.walk_transition = get_checked(
+                    s,
+                    p,
+                    "walk_transition",
+                    d.walk_transition,
+                    &mut w,
+                    |v| match *v < 6 {
+                        true => Ok(()),
+                        false => Err("0 to 5".into()),
+                    },
+                );
+                c.snip.studio.walk_ms = get_checked(s, p, "walk_ms", d.walk_ms, &mut w, |v| {
+                    WALK_MS
+                        .contains(v)
+                        .then_some(())
+                        .ok_or_else(|| "300, 500 or 1000".to_string())
+                });
                 c.snip.studio.hint_seen = get(s, p, "hint_seen", d.hint_seen, &mut w);
                 c.snip.studio.walk_format =
                     get_checked(s, p, "walk_format", d.walk_format, &mut w, |v| {

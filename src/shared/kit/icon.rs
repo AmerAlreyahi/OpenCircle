@@ -147,9 +147,10 @@ pub fn icon<'a>(icon: Icon, px: f32) -> Text<'a> {
 /// corner (lucide "image" and "pencil" stacked), in the colours of the button
 /// around it.
 pub fn picture_pen<'a, Message: 'a>() -> iced::Element<'a, Message> {
-    use super::tokens::size::ICON;
+    use super::tokens::size::{self, ICON};
     use iced::widget::{container, stack};
-    const PEN: f32 = 10.0;
+    // the corner pen: 5/8 of the picture's size
+    const PEN: f32 = size::ICON * 0.625;
     let corner = |e: Text<'a>| {
         container(e)
             .align_x(super::dir::end())

@@ -121,7 +121,12 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
         Message::Picker,
         Message::UndoClick,
         Message::Menu(Menu::More),
-        Message::OpenStudio,
+    ]);
+    // (a long capture running: Open in Studio is dimmed, so Tab skips it)
+    if !e.capturing {
+        stops.push(Message::OpenStudio);
+    }
+    stops.extend([
         if steps_on(e) {
             Message::AddStep
         } else {
@@ -399,7 +404,7 @@ fn build(
         icon_button::option(
             crate::shared::kit::icon::picture_pen(),
             studio,
-            Message::OpenStudio,
+            live(Message::OpenStudio),
         ),
         t!(sn_studio_btn),
         Why::Keys("Ctrl+E"),
@@ -1024,6 +1029,29 @@ mod tests {
         first.studio_hint = true;
         let (_, panel) = build(&first, tooltip::Position::Bottom);
         assert!(panel.is_some(), "the one-time hint");
+    }
+
+    /// W91.2: while a long capture runs Open in Studio is dimmed: no Tab stop, no Ctrl+E.
+    #[test]
+    fn open_in_studio_is_off_while_a_long_capture_runs() {
+        use iced::keyboard::{Key, Modifiers};
+        let mut e = editor();
+        e.movable = true;
+        e.capturing = true;
+        assert!(!stops(&e).contains(&Message::OpenStudio));
+        let key = e.key(
+            &Key::Character("e".into()),
+            Some('e'),
+            Modifiers::CTRL,
+            None,
+        );
+        assert!(!matches!(key, Some(Message::OpenStudio)));
+        assert!(
+            e.update(Message::OpenStudio).is_none(),
+            "even if it arrives"
+        );
+        e.capturing = false;
+        assert!(stops(&e).contains(&Message::OpenStudio));
     }
 
     /// W91.2: the bar is exactly one button wider than before.

@@ -10,10 +10,12 @@ use crate::shared::picture::Crop;
 /// screenshot stays sharp, a flat screen costs little.
 const QUANTIZER: usize = 100;
 
-/// One frame's data and whether it is a key frame (a place a player can seek to).
+/// One frame's data, whether it is a key frame (a place a player can seek to) and
+/// how long it shows (ms): a held step is ONE sample with its whole time.
 pub struct Sample {
     pub data: Vec<u8>,
     pub key: bool,
+    pub ms: u32,
 }
 
 /// The `av1C` record and one sample a frame.
@@ -23,20 +25,25 @@ pub type Encoded = (Vec<u8>, Vec<Sample>);
 /// one key frame at its start.
 pub const KEY_EVERY: u64 = 240;
 
-/// `frames` (same size, even sides) as AV1: the `av1C` record and one sample
-/// each. `progress(done, total)` after every sample: false = cancel (`None`).
-pub fn encode_av1(
-    frames: &[&Crop],
-    frame_ms: u32,
+/// `frames` (`total` of them, each with the time it shows in ms; same size, even
+/// sides) as AV1: the `av1C` record and one sample each. Frames are taken one at
+/// a time (a mixed frame lives only until the encoder has it). `progress(done,
+/// total)` after every sample: false = cancel (`None`).
+pub fn encode_av1<'a>(
+    mut frames: impl Iterator<Item = (std::borrow::Cow<'a, Crop>, u32)>,
+    total: usize,
     key_every: u64,
     progress: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Result<Option<Encoded>, String> {
-    let first = frames.first().ok_or("no frames")?;
+    let Some((first, first_ms)) = frames.next() else {
+        return Err("no frames".into());
+    };
     let (w, h) = (first.width as usize, first.height as usize);
     let mut enc = EncoderConfig::with_speed_preset(10);
     enc.width = w;
     enc.height = h;
-    enc.time_base = Rational::new(u64::from(frame_ms), 1000);
+    // (the file's own sample times are what players use; this is only the encoder's clock)
+    enc.time_base = Rational::new(50, 1000);
     enc.low_latency = true;
     enc.min_key_frame_interval = key_every;
     enc.max_key_frame_interval = key_every;
@@ -53,14 +60,19 @@ pub fn encode_av1(
     let cfg = Config::new().with_encoder_config(enc).with_threads(threads);
     let mut ctx: Context<u8> = cfg.new_context().map_err(|e| e.to_string())?;
     let mut samples = Vec::new();
-    let total = frames.len();
-    let mut take = |ctx: &mut Context<u8>, samples: &mut Vec<Sample>| -> Result<bool, String> {
+    // each frame's time, in the order they went in (packets come out in order)
+    let mut times = std::collections::VecDeque::new();
+    let mut take = |ctx: &mut Context<u8>,
+                    samples: &mut Vec<Sample>,
+                    times: &mut std::collections::VecDeque<u32>|
+     -> Result<bool, String> {
         loop {
             match ctx.receive_packet() {
                 Ok(p) => {
                     samples.push(Sample {
                         key: p.frame_type == FrameType::KEY,
                         data: strip_delimiter(p.data),
+                        ms: times.pop_front().unwrap_or(0),
                     });
                     if !progress(samples.len(), total) {
                         return Ok(false);
@@ -72,19 +84,21 @@ pub fn encode_av1(
             }
         }
     };
-    for &f in frames {
+    for (f, ms) in std::iter::once((first, first_ms)).chain(frames) {
         let mut frame = ctx.new_frame();
-        let (y, u, v) = yuv420(f);
+        let (y, u, v) = yuv420(&f);
+        drop(f); // (a mixed frame is gone as soon as the encoder has it)
         frame.planes[0].copy_from_raw_u8(&y, w, 1);
         frame.planes[1].copy_from_raw_u8(&u, w / 2, 1);
         frame.planes[2].copy_from_raw_u8(&v, w / 2, 1);
+        times.push_back(ms);
         ctx.send_frame(frame).map_err(|e| e.to_string())?;
-        if !take(&mut ctx, &mut samples)? {
+        if !take(&mut ctx, &mut samples, &mut times)? {
             return Ok(None);
         }
     }
     ctx.flush();
-    if !take(&mut ctx, &mut samples)? {
+    if !take(&mut ctx, &mut samples, &mut times)? {
         return Ok(None);
     }
     if samples.len() != total {
@@ -161,16 +175,12 @@ fn full(name: &[u8; 4], flags: u32, body: &[u8]) -> Vec<u8> {
 
 /// The samples in an MP4 (ISO BMFF): `ftyp`, `moov` (one `av01` track; the
 /// time unit is a millisecond) and one `mdat` chunk.
-pub fn mp4(
-    w: u32,
-    h: u32,
-    frame_ms: u32,
-    av1c: &[u8],
-    samples: &[Sample],
-) -> Result<Vec<u8>, String> {
+pub fn mp4(w: u32, h: u32, av1c: &[u8], samples: &[Sample]) -> Result<Vec<u8>, String> {
     let too_big = || "the video is too big for an MP4".to_string();
     let n = u32::try_from(samples.len()).map_err(|_| too_big())?;
-    let total = n.checked_mul(frame_ms).ok_or_else(too_big)?;
+    let total = (samples.iter())
+        .try_fold(0u32, |t, x| t.checked_add(x.ms))
+        .ok_or_else(too_big)?;
     let (w16, h16) = (
         u16::try_from(w).map_err(|_| too_big())?,
         u16::try_from(h).map_err(|_| too_big())?,
@@ -259,11 +269,18 @@ pub fn mp4(
             0,
             &[&be32(1)[..], &mp4_box(b"av01", &av01)].concat(),
         );
-        let stts = full(
-            b"stts",
-            0,
-            &[&be32(1)[..], &be32(n), &be32(frame_ms)].concat(),
-        );
+        // (count, time) runs: a held step is one sample with its whole time
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        for x in samples {
+            match runs.last_mut() {
+                Some((count, ms)) if *ms == x.ms => *count += 1,
+                _ => runs.push((1, x.ms)),
+            }
+        }
+        let mut times = be32(u32::try_from(runs.len()).unwrap_or(0)).to_vec();
+        runs.iter()
+            .for_each(|(c, ms)| times.extend([be32(*c), be32(*ms)].concat()));
+        let stts = full(b"stts", 0, &times);
         let stsc = full(
             b"stsc",
             0,
@@ -332,13 +349,7 @@ fn uint(id: &[u8], v: u64) -> Vec<u8> {
 /// The samples in a WebM: the EBML header, then one segment: info, the track
 /// (`V_AV1`, the `av1C` as its private data) and a cluster a frame (so no
 /// block's time needs more than the cluster's own).
-pub fn webm(
-    w: u32,
-    h: u32,
-    frame_ms: u32,
-    av1c: &[u8],
-    samples: &[Sample],
-) -> Result<Vec<u8>, String> {
+pub fn webm(w: u32, h: u32, av1c: &[u8], samples: &[Sample]) -> Result<Vec<u8>, String> {
     let header = ebml(
         &[0x1A, 0x45, 0xDF, 0xA3],
         &[
@@ -352,8 +363,7 @@ pub fn webm(
         ]
         .concat(),
     );
-    let ms = u64::from(frame_ms);
-    let total = (ms * samples.len() as u64) as f64; // a few seconds: exact in an f64
+    let total = samples.iter().map(|x| u64::from(x.ms)).sum::<u64>() as f64; // exact in an f64
     let info = ebml(
         &[0x15, 0x49, 0xA9, 0x66],
         &[
@@ -374,7 +384,6 @@ pub fn webm(
             uint(&[0xD7], 1),
             uint(&[0x73, 0xC5], 1),
             uint(&[0x83], 1),
-            uint(&[0x23, 0xE3, 0x83], ms * 1_000_000), // DefaultDuration, ns
             ebml(&[0x86], b"V_AV1"),
             ebml(&[0x63, 0xA2], av1c),
             video,
@@ -385,8 +394,12 @@ pub fn webm(
     // a cluster a frame (so no block's time needs more than the cluster's own)
     let (mut clusters, mut cues) = (Vec::new(), Vec::new());
     let before = (info.len() + tracks.len()) as u64; // the segment's data starts at info
+    let mut time = 0u64;
     for (i, x) in samples.iter().enumerate() {
-        let time = i as u64 * ms;
+        let ms = u64::from(x.ms);
+        let at_time = time;
+        time += ms;
+        let time = at_time;
         // track 1, time 0 in the cluster; the last frame carries its duration
         // (a block group: a key frame has no reference, another one the frame before)
         let block = |flags: u8| [&[0x81, 0, 0, flags][..], &x.data].concat();
@@ -396,7 +409,10 @@ pub fn webm(
                 let mut group = ebml(&[0xA1], &block(0));
                 group.extend(uint(&[0x9B], ms));
                 if !x.key {
-                    group.extend(sint(&[0xFB], -(ms as i64)));
+                    group.extend(sint(
+                        &[0xFB],
+                        -(i.checked_sub(1).map_or(ms, |p| u64::from(samples[p].ms)) as i64),
+                    ));
                 }
                 ebml(&[0xA0], &group)
             }
@@ -608,10 +624,14 @@ mod tests {
     #[test]
     fn key_frames_are_marked_in_both_containers_and_the_webm_cues_list_them() {
         let five: Vec<Crop> = frames().into_iter().cycle().take(5).collect();
-        let (av1c, samples) =
-            encode_av1(&five.iter().collect::<Vec<_>>(), 500, 2, &mut |_, _| true)
-                .unwrap()
-                .unwrap();
+        let (av1c, samples) = encode_av1(
+            five.iter().map(|f| (std::borrow::Cow::Borrowed(f), 500)),
+            5,
+            2,
+            &mut |_, _| true,
+        )
+        .unwrap()
+        .unwrap();
         let keys: Vec<bool> = samples.iter().map(|s| s.key).collect();
         assert_eq!(
             keys,
@@ -619,7 +639,7 @@ mod tests {
             "a key frame every 2"
         );
         // MP4: the sync sample table lists samples 1, 3, 5
-        let f = mp4(64, 48, 500, &av1c, &samples).unwrap();
+        let f = mp4(64, 48, &av1c, &samples).unwrap();
         let stbl = child(
             child(
                 child(child(&f[..], b"moov").unwrap(), b"trak").unwrap(),
@@ -634,7 +654,7 @@ mod tests {
         assert_eq!(be(stss, 4), 3);
         assert_eq!((be(stss, 8), be(stss, 12), be(stss, 16)), (1, 3, 5));
         // WebM: the key flag on the blocks, and one cue a key frame at the right place
-        let f = webm(64, 48, 500, &av1c, &samples).unwrap();
+        let f = webm(64, 48, &av1c, &samples).unwrap();
         let top = elements(&f);
         let segment = elements(find(&top, 0x18538067).unwrap());
         let (times, _, flags) = webm_blocks(&segment);
@@ -653,15 +673,19 @@ mod tests {
         let s = [Sample {
             data: vec![1],
             key: true,
+            ms: 500,
         }];
-        assert!(mp4(70_000, 48, 500, &[], &s).is_err());
+        assert!(mp4(70_000, 48, &[], &s).is_err());
         assert!(
             mp4(
                 64,
                 48,
-                u32::MAX,
                 &[],
-                &[s[0].data.clone(), s[0].data.clone()].map(|data| Sample { data, key: true })
+                &[s[0].data.clone(), s[0].data.clone()].map(|data| Sample {
+                    data,
+                    key: true,
+                    ms: u32::MAX
+                })
             )
             .is_err()
         );
@@ -689,7 +713,6 @@ mod tests {
             ),
             (64, 48)
         );
-        assert_eq!(uint_of(find(&track, 0x23E383).unwrap()), 500_000_000);
         let (times, samples, keys) = webm_blocks(&segment);
         assert_eq!(times, [0, 500, 1000]);
         assert_eq!(keys, [true, false, false]);
@@ -765,5 +788,57 @@ mod tests {
                 .unwrap();
             println!("{}: {} bytes, {:?}", movie.name(), out.len(), t.elapsed());
         }
+    }
+
+    /// W91.3: with a transition a held step is ONE sample with its whole time and only
+    /// the mixed frames are 50 ms samples: 3 steps of 1 s, 0.3 s between = 15 samples,
+    /// 3.6 s, in both containers.
+    #[test]
+    fn a_held_step_is_one_sample_with_its_whole_time() {
+        use crate::features::snip::transition::Transition;
+        let make = |movie| {
+            let how = Walkthrough {
+                movie,
+                max_edge: 0,
+                frame_ms: 1000,
+                transition: Transition::Crossfade,
+                transition_ms: 300,
+                ..Walkthrough::default()
+            };
+            encode_walkthrough(frames(), how, &mut |_, _| true)
+                .unwrap()
+                .unwrap()
+        };
+        let f = make(Movie::Mp4);
+        let mdia = child(child(&f, b"moov").unwrap(), b"trak")
+            .and_then(|t| child(t, b"mdia"))
+            .unwrap();
+        let stbl = child(child(mdia, b"minf").unwrap(), b"stbl").unwrap();
+        let stts = child(stbl, b"stts").unwrap();
+        assert_eq!(be(stts, 4), 5, "hold, mixes, hold, mixes, hold");
+        let runs: Vec<(u32, u32)> = (0..5)
+            .map(|k| (be(stts, 8 + 8 * k), be(stts, 12 + 8 * k)))
+            .collect();
+        assert_eq!(runs, [(1, 1000), (6, 50), (1, 1000), (6, 50), (1, 1000)]);
+        assert_eq!(be(child(stbl, b"stsz").unwrap(), 8), 15);
+        assert_eq!(be(child(mdia, b"mdhd").unwrap(), 16), 3600, "total ms");
+        let f = make(Movie::Webm);
+        let top = elements(&f);
+        let segment = elements(find(&top, 0x18538067).unwrap());
+        let info = elements(find(&segment, 0x1549A966).unwrap());
+        assert_eq!(
+            f64::from_be_bytes(find(&info, 0x4489).unwrap().try_into().unwrap()),
+            3600.0
+        );
+        let (times, _, _) = webm_blocks(&segment);
+        assert_eq!(times.len(), 15);
+        assert_eq!(
+            (times[0], times[1], times[7], times[8]),
+            (0, 1000, 1300, 2300)
+        );
+        assert_eq!(
+            times[14], 2600,
+            "the last step starts after two holds and two transitions"
+        );
     }
 }

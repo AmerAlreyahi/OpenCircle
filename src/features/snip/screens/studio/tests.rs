@@ -1186,6 +1186,27 @@ fn drawn(n: usize) -> Studio {
     s
 }
 
+/// W91.3: the walkthrough's transition and its length are remembered between sessions
+/// (`snip.studio`), and a new Studio starts from them.
+#[test]
+fn the_walkthrough_transition_is_remembered() {
+    use crate::features::snip::transition::Transition;
+    let mut s = Studio::new(StudioConfig::default());
+    assert_eq!(s.walk.how.transition, Transition::Crossfade);
+    let Outcome::Panels(p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
+        panic!("not saved");
+    };
+    assert_eq!(p.walk_transition, Transition::Wipe.index());
+    let Outcome::Panels(p) = s.update(Msg::WalkTransitionMs(1000)) else {
+        panic!("not saved");
+    };
+    let again = Studio::new(p);
+    assert_eq!(
+        (again.walk.how.transition, again.walk.how.transition_ms),
+        (Transition::Wipe, 1000)
+    );
+}
+
 #[test]
 fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());

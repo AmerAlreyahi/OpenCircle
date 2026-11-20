@@ -231,7 +231,7 @@ impl Annotator {
                 // Ctrl: plain P is the Pen tool.
                 (true, _, 'p') => Some(Message::Pin),
                 // Snip: the picture, drawings kept, into OpenCircle Studio.
-                (true, _, 'e') if self.movable => Some(Message::OpenStudio),
+                (true, _, 'e') if self.movable && !self.capturing => Some(Message::OpenStudio),
                 (false, _, 'd') => Some(Message::Eyedropper),
                 (false, _, digit @ '1'..='9') => {
                     let i = digit as usize - '1' as usize;

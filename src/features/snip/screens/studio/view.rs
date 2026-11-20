@@ -752,18 +752,7 @@ fn walk_tab<'a>(
         .iter()
         .map(|&k| (k, transition_name(k)))
         .collect();
-    let lengths: Vec<_> = transition::LENGTHS
-        .iter()
-        .map(|&ms| {
-            (
-                ms,
-                ["0.3 s", "0.5 s", "1 s"][transition::LENGTHS
-                    .iter()
-                    .position(|&l| l == ms)
-                    .unwrap_or(1)],
-            )
-        })
-        .collect();
+    let lengths = transition::LENGTHS;
     let mut change = column![field(
         t!(mv_transition),
         segmented::inline(

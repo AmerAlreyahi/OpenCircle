@@ -938,6 +938,7 @@ impl Annotator {
             }
             Message::EraserSize(px) => self.eraser = px,
             Message::EraserWhole(on) => self.eraser_whole = on,
+            Message::OpenStudio if self.capturing => {}
             Message::OpenStudio => {
                 self.commit();
                 self.menu = None;

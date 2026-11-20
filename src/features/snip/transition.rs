@@ -6,6 +6,12 @@
 //! Arabic (`mirror`) they come in from the left.
 use crate::shared::picture::Crop;
 
+#[cfg(test)]
+thread_local! {
+    /// How many mixed frames this thread has made (the streaming test).
+    pub static MIXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// One tick of a video / of a transition's frames (ms): 20 frames a second.
 pub const TICK: u32 = 50;
 
@@ -21,6 +27,15 @@ pub enum Transition {
 }
 
 impl Transition {
+    /// The config's number for it (`snip.studio.walk_transition`).
+    pub fn index(self) -> u8 {
+        Self::ALL.iter().position(|&k| k == self).unwrap_or(1) as u8
+    }
+
+    pub fn from_index(i: u8) -> Transition {
+        Self::ALL.get(usize::from(i)).copied().unwrap_or_default()
+    }
+
     pub const ALL: [Transition; 6] = [
         Transition::Cut,
         Transition::Crossfade,
@@ -32,7 +47,7 @@ impl Transition {
 }
 
 /// The lengths on offer (ms), and the default.
-pub const LENGTHS: [u32; 3] = [300, 500, 1000];
+pub const LENGTHS: [(u32, &str); 3] = [(300, "0.3 s"), (500, "0.5 s"), (1000, "1 s")];
 pub const DEFAULT_MS: u32 = 500;
 
 /// What the file shows, in order.
@@ -67,6 +82,8 @@ pub fn mix_count(kind: Transition, ms: u32) -> usize {
 
 /// The frame `t` of the way from `a` to `b` (`a` and `b` the same size).
 pub fn mix(a: &Crop, b: &Crop, kind: Transition, t: f32, mirror: bool) -> Crop {
+    #[cfg(test)]
+    MIXES.with(|m| m.set(m.get() + 1));
     let t = t.clamp(0.0, 1.0);
     if t <= 0.0 {
         return a.clone();

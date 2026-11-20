@@ -236,9 +236,15 @@ impl canvas::Program<Message> for Input<'_> {
         let message = match &event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
-                // a double click on the picked area (Select tool): into the Studio
+                // a double click inside the picked area (Select tool, not on a handle or
+                // its margin, not while a long capture runs): into the Studio
                 if e.movable
+                    && !e.capturing
                     && info(e.tool).group == Group::Select
+                    && cursor.position().is_some_and(|c| {
+                        let p = self.image_at(c);
+                        e.doc.view().contains(p) && e.area_hot(Some(p)).is_none()
+                    })
                     && double_click(&mut pointer.last_press, std::time::Instant::now())
                 {
                     pointer.down = false;

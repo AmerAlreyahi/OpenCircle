@@ -73,7 +73,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
             t!(s_size),
             t!(s_size_desc),
             segmented(
-                &size_choices(),
+                &crate::shared::config::size_choices(),
                 d.max_edge,
                 d.max_edge,
                 1.0,
@@ -143,14 +143,6 @@ pub fn view(state: &State) -> Element<'_, Message> {
 }
 
 /// The picture sizes Snip and Studio offer for `snip.max_edge` (one list, Snip's order).
-pub(super) fn size_choices() -> [(u32, &'static str); 4] {
-    [
-        (1024, "1024"),
-        (1568, "1568"),
-        (2048, "2048"),
-        (0, t!(s_original)),
-    ]
-}
 
 /// A long-capture limit as the page shows it.
 fn px_label(px: u32) -> &'static str {
