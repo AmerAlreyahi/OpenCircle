@@ -17,6 +17,7 @@ pub(crate) mod keys;
 mod library;
 mod menu_bar;
 mod options_bar;
+pub mod preferences;
 mod properties;
 pub mod recovery;
 mod sheets;
@@ -235,6 +236,9 @@ pub enum Msg {
     WalkTime(u8),
     WalkNumbered(bool),
     WalkLoop(bool),
+    /// The walkthrough's one transition between steps, and its length (ms).
+    WalkTransition(crate::features::snip::transition::Transition),
+    WalkTransitionMs(u32),
     WalkGo,
     /// The sheet's Cancel: stops the encoder when one runs, else closes.
     WalkCancel,
@@ -1590,6 +1594,8 @@ impl Studio {
             Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
             Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
             Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkTransition(kind) => self.walk_set(|w| w.how.transition = kind),
+            Msg::WalkTransitionMs(ms) => self.walk_set(|w| w.how.transition_ms = ms),
             Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
                 self.exporting = false;

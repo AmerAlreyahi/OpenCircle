@@ -26,7 +26,7 @@ pub const KEY_EVERY: u64 = 240;
 /// `frames` (same size, even sides) as AV1: the `av1C` record and one sample
 /// each. `progress(done, total)` after every sample: false = cancel (`None`).
 pub fn encode_av1(
-    frames: &[Crop],
+    frames: &[&Crop],
     frame_ms: u32,
     key_every: u64,
     progress: &mut dyn FnMut(usize, usize) -> bool,
@@ -72,7 +72,7 @@ pub fn encode_av1(
             }
         }
     };
-    for f in frames {
+    for &f in frames {
         let mut frame = ctx.new_frame();
         let (y, u, v) = yuv420(f);
         frame.planes[0].copy_from_raw_u8(&y, w, 1);
@@ -443,6 +443,7 @@ mod tests {
             movie,
             max_edge: 0,
             frame_ms: 500,
+            transition: crate::features::snip::transition::Transition::Cut,
             ..Walkthrough::default()
         };
         let mut seen = Vec::new();
@@ -607,9 +608,10 @@ mod tests {
     #[test]
     fn key_frames_are_marked_in_both_containers_and_the_webm_cues_list_them() {
         let five: Vec<Crop> = frames().into_iter().cycle().take(5).collect();
-        let (av1c, samples) = encode_av1(&five, 500, 2, &mut |_, _| true)
-            .unwrap()
-            .unwrap();
+        let (av1c, samples) =
+            encode_av1(&five.iter().collect::<Vec<_>>(), 500, 2, &mut |_, _| true)
+                .unwrap()
+                .unwrap();
         let keys: Vec<bool> = samples.iter().map(|s| s.key).collect();
         assert_eq!(
             keys,
@@ -716,6 +718,7 @@ mod tests {
         let how = Walkthrough {
             movie: Movie::Mp4,
             max_edge: 0,
+            transition: crate::features::snip::transition::Transition::Cut,
             ..Walkthrough::default()
         };
         let out = encode_walkthrough(frames(), how, &mut |d, _| d < 1).unwrap();
@@ -753,6 +756,7 @@ mod tests {
             let how = Walkthrough {
                 movie,
                 max_edge: 0,
+                transition: crate::features::snip::transition::Transition::Cut,
                 ..Walkthrough::default()
             };
             let t = std::time::Instant::now();

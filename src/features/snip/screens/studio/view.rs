@@ -16,6 +16,7 @@ use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::features::snip::screens::steps::Step;
+use crate::features::snip::transition::{self, Transition};
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon::Icon;
@@ -746,6 +747,46 @@ fn walk_tab<'a>(
     ]
     .spacing(space::GAP)
     .align_y(Center);
+    // ONE transition for all the steps, and how long it takes (a Cut has no length)
+    let kinds: Vec<_> = Transition::ALL
+        .iter()
+        .map(|&k| (k, transition_name(k)))
+        .collect();
+    let lengths: Vec<_> = transition::LENGTHS
+        .iter()
+        .map(|&ms| {
+            (
+                ms,
+                ["0.3 s", "0.5 s", "1 s"][transition::LENGTHS
+                    .iter()
+                    .position(|&l| l == ms)
+                    .unwrap_or(1)],
+            )
+        })
+        .collect();
+    let mut change = column![field(
+        t!(mv_transition),
+        segmented::inline(
+            &kinds,
+            w.how.transition,
+            w.how.transition,
+            1.0,
+            Msg::WalkTransition
+        ),
+    )]
+    .spacing(space::GAP);
+    if w.how.transition != Transition::Cut {
+        change = change.push(field(
+            t!(mv_duration),
+            segmented::inline(
+                &lengths,
+                w.how.transition_ms,
+                w.how.transition_ms,
+                1.0,
+                Msg::WalkTransitionMs,
+            ),
+        ));
+    }
     // a video plays once or loops as its player decides: Loop is the GIF's
     let looped = (w.how.movie == export::Movie::Gif).then_some(Msg::WalkLoop(!w.how.repeat));
     let switches = crate::dir_row![
@@ -770,12 +811,24 @@ fn walk_tab<'a>(
         strip,
         grid,
         field(t!(st_walk_frame), time.into()),
+        change,
         switches,
         notes,
     ]
     .spacing(space::PAGE[1]);
     let go = (n > 0).then_some(Msg::WalkGo);
     (body.into(), go, w.busy)
+}
+
+fn transition_name(kind: Transition) -> &'static str {
+    match kind {
+        Transition::Cut => t!(mv_tr_cut),
+        Transition::Crossfade => t!(mv_tr_fade),
+        Transition::Slide => t!(mv_tr_slide),
+        Transition::Push => t!(mv_tr_push),
+        Transition::Zoom => t!(mv_tr_zoom),
+        Transition::Wipe => t!(mv_tr_wipe),
+    }
 }
 
 /// "Frames 4 · 8 s · about 1.1 MB".
@@ -790,7 +843,10 @@ fn walk_estimate(s: &Studio, w: Walk, steps: &[Arc<Step>], n: usize) -> String {
         }
         _ => steps.iter().map(|x| w.how.movie.guess(x.png().len())).sum(),
     };
-    let secs = n as f32 * f32::from(w.tenths) / 10.0;
+    // the transitions' frames weigh like the average step
+    let bytes = bytes + bytes / n.max(1) * w.how.mix_frames(n);
+    let secs = n as f32 * f32::from(w.tenths) / 10.0
+        + (w.how.mix_frames(n) as f32) * transition::TICK as f32 / 1000.0;
     let size = match bytes >= 1_048_576 {
         true => format!("{:.1} MB", bytes as f32 / 1_048_576.0),
         false => format!("{} KB", bytes.div_ceil(1024)),

@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use super::transition::{self, Transition};
 use crate::shared::picture::{Crop, encode_png, fit_long_edge};
 
 /// The picture's formats.
@@ -270,6 +271,9 @@ pub struct Walkthrough {
     pub repeat: bool,
     /// Each frame's place among them, in a badge at its corner.
     pub numbered: bool,
+    /// ONE transition between all the steps (`transition`), and its length in ms.
+    pub transition: Transition,
+    pub transition_ms: u32,
 }
 
 /// A video's long edge at most (what a player and an MP4's 16-bit sizes hold).
@@ -279,6 +283,11 @@ pub const VIDEO_MAX_EDGE: u32 = 4096;
 pub const EDIT_FRAMES: usize = 30;
 
 impl Walkthrough {
+    /// The frames the transitions add between `steps` steps (what the size estimate adds).
+    pub fn mix_frames(self, steps: usize) -> usize {
+        steps.saturating_sub(1) * transition::mix_count(self.transition, self.transition_ms)
+    }
+
     /// The long edge the frames are fitted to: the pick, but a video never
     /// above `VIDEO_MAX_EDGE` ("Original" is that, at most).
     pub fn edge(self) -> u32 {
@@ -323,6 +332,8 @@ impl Default for Walkthrough {
             frame_ms: 2000,
             repeat: true,
             numbered: false,
+            transition: Transition::default(),
+            transition_ms: transition::DEFAULT_MS,
         }
     }
 }
@@ -337,17 +348,53 @@ pub fn encode_walkthrough(
 ) -> Result<Option<Vec<u8>>, String> {
     use crate::features::snip::movie;
     let (width, height, frames) = on_canvas(frames, how, how.movie != Movie::Gif)?;
+    let cells = transition::timeline(
+        frames.len(),
+        how.frame_ms,
+        how.transition,
+        how.transition_ms,
+    );
+    // the mixed frames, drawn once each (a held step is the step itself)
+    let mirror = crate::shared::app_language::rtl();
+    let mixed: Vec<Crop> = (cells.iter())
+        .filter_map(|c| match *c {
+            transition::Cell::Mix(i, t) => Some(transition::mix(
+                &frames[i],
+                &frames[i + 1],
+                how.transition,
+                t,
+                mirror,
+            )),
+            transition::Cell::Hold(..) => None,
+        })
+        .collect();
+    let mut next_mix = mixed.iter();
+    // each cell's picture and how long it shows (ms)
+    let shown: Vec<(&Crop, u32)> = cells
+        .iter()
+        .map(|c| match *c {
+            transition::Cell::Hold(i, ms) => (&frames[i], ms),
+            transition::Cell::Mix(..) => (next_mix.next().unwrap_or(&frames[0]), transition::TICK),
+        })
+        .collect();
     if how.movie == Movie::Gif {
-        return gif_of(width, height, &frames, how, progress);
+        return gif_of(width, height, &shown, how, progress);
     }
-    let Some((av1c, samples)) =
-        movie::encode_av1(&frames, how.frame_ms, movie::KEY_EVERY, progress)?
-    else {
+    // a video has one frame time: a held step is its picture repeated (with no
+    // transition the frame time is the step's own, one sample a step)
+    let tick = match how.transition {
+        Transition::Cut => how.frame_ms.max(1),
+        _ => transition::TICK,
+    };
+    let ticks: Vec<&Crop> = (shown.iter())
+        .flat_map(|&(f, ms)| std::iter::repeat_n(f, (ms / tick).max(1) as usize))
+        .collect();
+    let Some((av1c, samples)) = movie::encode_av1(&ticks, tick, movie::KEY_EVERY, progress)? else {
         return Ok(None);
     };
     Ok(Some(match how.movie {
-        Movie::Mp4 => movie::mp4(width, height, how.frame_ms, &av1c, &samples)?,
-        _ => movie::webm(width, height, how.frame_ms, &av1c, &samples)?,
+        Movie::Mp4 => movie::mp4(width, height, tick, &av1c, &samples)?,
+        _ => movie::webm(width, height, tick, &av1c, &samples)?,
     }))
 }
 
@@ -398,7 +445,7 @@ fn on_canvas(
 fn gif_of(
     width: u32,
     height: u32,
-    frames: &[Crop],
+    frames: &[(&Crop, u32)],
     how: Walkthrough,
     progress: &mut dyn FnMut(usize, usize) -> bool,
 ) -> Result<Option<Vec<u8>>, String> {
@@ -412,10 +459,10 @@ fn gif_of(
         enc.set_repeat(gif::Repeat::Infinite)
             .map_err(|e| e.to_string())?;
     }
-    for (i, f) in frames.iter().enumerate() {
+    for (i, &(f, ms)) in frames.iter().enumerate() {
         let mut rgba = f.rgba.clone();
         let mut frame = gif::Frame::from_rgba_speed(w16, h16, &mut rgba, 10);
-        frame.delay = u16::try_from(how.frame_ms / 10).unwrap_or(u16::MAX).max(1);
+        frame.delay = u16::try_from(ms / 10).unwrap_or(u16::MAX).max(1);
         enc.write_frame(&frame).map_err(|e| e.to_string())?;
         if !progress(i + 1, frames.len()) {
             return Ok(None);
@@ -547,10 +594,67 @@ mod tests {
         encode_walkthrough(frames, how, &mut |_, _| true).map(Option::unwrap)
     }
 
+    /// W91.3: one transition between all the steps: the file holds each step (its own
+    /// time) and the transition's frames between neighbours, one tick each.
+    #[test]
+    fn the_walkthrough_gif_has_the_transition_frames_between_the_steps() {
+        let frames = || vec![crop(40, 20), crop(40, 20), crop(40, 20)];
+        let times = |how| {
+            let bytes = encode_gif(frames(), how).unwrap();
+            let mut d = gif::DecodeOptions::new();
+            d.set_color_output(gif::ColorOutput::RGBA);
+            let mut r = d.read_info(&bytes[..]).unwrap();
+            let mut out = Vec::new();
+            while let Some(f) = r.read_next_frame().unwrap() {
+                out.push(f.delay);
+            }
+            out
+        };
+        let how = |transition, transition_ms| Walkthrough {
+            transition,
+            transition_ms,
+            frame_ms: 1000,
+            ..Walkthrough::default()
+        };
+        assert_eq!(times(how(Transition::Cut, 500)), [100, 100, 100]);
+        let fade = times(how(Transition::Crossfade, 300));
+        assert_eq!(fade.len(), 3 + 2 * 6, "6 ticks of 50 ms in 0.3 s");
+        assert_eq!((fade[0], fade[1], fade[7]), (100, 5, 100));
+        let wipe = times(how(Transition::Wipe, 1000));
+        assert_eq!(wipe.len(), 3 + 2 * 20);
+        assert_eq!(how(Transition::Slide, 500).mix_frames(3), 20);
+    }
+
+    /// W91.3: a video holds a step as repeated ticks; frames come out of the encoder
+    /// for every tick (the transition's included).
+    #[test]
+    fn a_video_walkthrough_with_a_transition_encodes_every_tick() {
+        let how = Walkthrough {
+            movie: Movie::Mp4,
+            transition: Transition::Push,
+            transition_ms: 300,
+            frame_ms: 200,
+            ..Walkthrough::default()
+        };
+        let mut total = 0;
+        let bytes = encode_walkthrough(vec![crop(64, 32), crop(64, 32)], how, &mut |_, all| {
+            total = all;
+            true
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(total, 4 + 6 + 4, "hold, 6 mixes, hold, in 50 ms ticks");
+        assert_eq!(&bytes[4..8], b"ftyp");
+    }
+
     #[test]
     fn walkthrough_gif_has_every_frame_its_time_and_the_loop_flag() {
         let frames = || vec![crop(300, 100), crop(200, 150), crop(300, 100)];
-        let bytes = encode_gif(frames(), Walkthrough::default()).unwrap();
+        let cut = Walkthrough {
+            transition: Transition::Cut,
+            ..Walkthrough::default()
+        };
+        let bytes = encode_gif(frames(), cut).unwrap();
         let mut d = gif::DecodeOptions::new();
         d.set_color_output(gif::ColorOutput::RGBA);
         let mut r = d.clone().read_info(&bytes[..]).unwrap();
@@ -568,7 +672,7 @@ mod tests {
         assert!(bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "loops");
         let once = Walkthrough {
             repeat: false,
-            ..Walkthrough::default()
+            ..cut
         };
         assert!(
             !encode_gif(frames(), once)
@@ -579,7 +683,7 @@ mod tests {
         // the size cap scales the frames down
         let small = Walkthrough {
             max_edge: 150,
-            ..Walkthrough::default()
+            ..cut
         };
         let r = d
             .read_info(&encode_gif(frames(), small).unwrap()[..])

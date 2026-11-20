@@ -1209,7 +1209,8 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
             max_edge: 960,
             frame_ms: 3500,
             repeat: false,
-            numbered: true
+            numbered: true,
+            ..export::Walkthrough::default()
         }
     );
     assert!(
