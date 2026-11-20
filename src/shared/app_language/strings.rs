@@ -2480,8 +2480,6 @@ strings! {
         | "السمة والحفظ والنسخ واللصق والتحرير";
     ss_prefs_open: "Open Studio preferences"
         | "فتح تفضيلات الاستوديو";
-    pf_title: "OpenCircle Studio preferences"
-        | "تفضيلات OpenCircle Studio";
     pf_tab_saving: "Saving and export"
         | "الحفظ والتصدير";
     pf_tab_copy: "Copy and paste"

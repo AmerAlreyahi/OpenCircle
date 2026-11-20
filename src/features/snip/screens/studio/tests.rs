@@ -2586,13 +2586,10 @@ fn v31_the_preferences_dialog_opens_over_the_studio_and_closes_on_esc() {
         Outcome::None
     ));
     assert!(s.prefs.is_some());
-    // it blocks the canvas keys and shows its title over the window
+    // it blocks the canvas keys and shows its sections over the window
     assert!(s.editor.as_ref().unwrap().keys_blocked);
     let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
-    assert!(
-        words.iter().any(|t| t == "OpenCircle Studio preferences"),
-        "{words:?}"
-    );
+    assert!(words.iter().any(|t| t == "Keyboard shortcuts"), "{words:?}");
     // a change: the host writes it
     let mut p = config::current().studio;
     p.snap = !p.snap;

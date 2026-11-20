@@ -287,7 +287,6 @@ pub fn chord_text(modifiers: Modifiers, key: &Key, physical: Physical) -> Option
         Code::Quote => "'".into(),
         Code::Backquote => "`".into(),
         Code::Enter => "Enter".into(),
-        Code::Tab => "Tab".into(),
         Code::F1 => "F1".into(),
         Code::F2 => "F2".into(),
         Code::F3 => "F3".into(),
