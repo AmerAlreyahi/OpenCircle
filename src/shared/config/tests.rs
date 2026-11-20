@@ -1668,7 +1668,7 @@ fn studio_settings_default_off_round_trip_and_are_not_written_until_changed() {
         open_in: StudioOpenIn::Studio,
         keep_unsaved: true,
         recent_files: 20,
-        folder: "/pics".into(),
+        folder: std::env::temp_dir().display().to_string(), // (absolute on every OS)
         file_name: "shot {date}".into(),
         format: Format::Jpeg,
         quality: 95,

@@ -399,6 +399,9 @@ mod tests {
     /// Copy text with the reader's models missing asks with the card; the
     /// download's steps show on it; done, the card goes and the row runs (the
     /// spinner shows while it reads); a failure offers it again.
+    // (Windows reads with the system's own OCR: no reader download is asked there; the card
+    // and its steps are the PP-OCR path of the other systems)
+    #[cfg(not(windows))]
     #[test]
     fn copy_text_without_models_asks_downloads_then_reads() {
         MODELS_HERE.set(Some(false));

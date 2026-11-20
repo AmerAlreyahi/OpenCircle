@@ -3555,7 +3555,14 @@ fn about_matches_its_golden_images_in_every_state() {
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
     let cases: [(&str, f32, f32, Setup); 4] = [
-        ("default", WINDOW_SIZE.width, WINDOW_SIZE.height, |_| {}),
+        // the size the window really opens at: on Windows the sidebar (Text reading and
+        // Studio too) is taller than the design's 560, and the window opens as tall as it
+        (
+            "default",
+            WINDOW_SIZE.width,
+            WINDOW_SIZE.height.max(FIT_HEIGHT),
+            |_| {},
+        ),
         ("wide", 1920.0, 1040.0, |_| {}),
         ("credits", WINDOW_SIZE.width, 1500.0, |s| {
             update(s, Message::Credits(true));
