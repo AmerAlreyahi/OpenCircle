@@ -263,7 +263,7 @@ impl Pop {
     /// The card's size (an estimate: the card is placed by it) and whether it hangs by its
     /// end edge from its opener (the bar's end buttons) or by its start edge.
     pub fn card(self) -> (iced::Size, bool) {
-        let pad = 2.0 * (space::GAP + 4.0);
+        let pad = 2.0 * (space::GAP + 4.0) + crate::shared::kit::popover::X_WIDTH;
         match self {
             Pop::Actions => (iced::Size::new(WIDTH + pad, 5.0 * 32.0 + pad), true),
             Pop::Position => (iced::Size::new(WIDTH + pad, 270.0), true),

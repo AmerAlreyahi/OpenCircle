@@ -11,6 +11,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::dir;
+use super::icon::Icon;
+use super::icon_button;
 use super::surface::{Material, surface};
 use super::tokens::{radius, space};
 
@@ -25,6 +27,37 @@ pub enum Corner {
     TopStart,
 }
 
+/// Width the close button adds to a card (its size + the gap), for the hosts' size estimates.
+pub const X_WIDTH: f32 = 36.0;
+
+/// The one card: `content` with the kit's close button at its top end (mirrored in
+/// right-to-left). Every popover gets it here: the X, Esc (the host's) and an outside press
+/// all send `close`.
+fn card<'a, Message: Clone + 'a>(
+    content: Element<'a, Message>,
+    close: Message,
+) -> Element<'a, Message> {
+    let x = icon_button::square(
+        Icon::Close.glyph(),
+        icon_button::State::default(),
+        Some(close),
+    );
+    opaque(
+        surface(
+            Material::Widget,
+            radius::MENU,
+            container(
+                crate::dir_row![content, x]
+                    .spacing(space::GAP)
+                    .align_y(iced::alignment::Vertical::Top),
+            )
+            .padding(space::GAP + 4.0),
+        )
+        .padding(0),
+    )
+    .into()
+}
+
 /// `base` with `content` in a card at `corner`, `gap` px in from the edges
 /// on the side it hangs from (`top`: from the base's top).
 pub fn over<'a, Message: Clone + 'a>(
@@ -34,14 +67,7 @@ pub fn over<'a, Message: Clone + 'a>(
     offset: Padding,
     close: Message,
 ) -> Element<'a, Message> {
-    let card = opaque(
-        surface(
-            Material::Widget,
-            radius::MENU,
-            container(content).padding(space::GAP + 4.0),
-        )
-        .padding(0),
-    );
+    let card = card(content, close.clone());
     let placed = container(card)
         .padding(offset)
         .width(Fill)
@@ -139,14 +165,7 @@ pub fn anchored<'a, Message: Clone + 'a>(
         return over(base, content, fallback.0, fallback.1, close);
     }
     let at = place(button, size, end, window);
-    let card = opaque(
-        surface(
-            Material::Widget,
-            radius::MENU,
-            container(content).padding(space::GAP + 4.0),
-        )
-        .padding(0),
-    );
+    let card = card(content, close.clone());
     let catch = mouse_area(
         container(iced::widget::Space::new())
             .width(Fill)
@@ -155,4 +174,41 @@ pub fn anchored<'a, Message: Clone + 'a>(
     .on_press(close.clone()) // mouse only: a press outside closes it (Esc is the host's)
     .on_right_press(close);
     stack![base, catch, pin(card).position(at)].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+
+    /// W90c item 1: every popover has the kit's X at its top end; X, an outside press and
+    /// (the host's) Esc all send the one `close`.
+    #[test]
+    fn w90c_a_popover_has_an_x_and_an_outside_press_closes_it() {
+        let size = Size::new(300.0, 200.0);
+        let view = || -> Element<'static, u8> {
+            over(
+                container(iced::widget::text(""))
+                    .width(Fill)
+                    .height(Fill)
+                    .into(),
+                iced::widget::text("Position").into(),
+                Corner::TopEnd,
+                Padding::new(6.0),
+                7,
+            )
+        };
+        // the card hangs at the top end: its X is the last thing on its row
+        let hits = (0..40)
+            .filter(|i| {
+                let at = iced::Point::new(size.width - 6.0 - 14.0 - *i as f32 * 0.5, 6.0 + 16.0);
+                shot::click(view(), size, at) == vec![7]
+            })
+            .count();
+        assert!(hits > 0, "the X is at the card's top end");
+        assert_eq!(
+            shot::click(view(), size, iced::Point::new(20.0, 150.0)),
+            vec![7]
+        );
+    }
 }
