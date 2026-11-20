@@ -1246,6 +1246,94 @@ impl<M> crate::shared::kit::wrap::Hook<M> for Themed {
         (content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
         themes::set(before);
     }
+
+    fn overlay<'b>(
+        &self,
+        overlay: iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+    ) -> iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>
+    where
+        M: 'b,
+    {
+        iced::advanced::overlay::Element::new(Box::new(ThemedOverlay(self.0, overlay)))
+    }
+}
+
+/// An overlay (a tooltip, a list) drawn under the window's own theme: iced draws overlays
+/// apart from their widget, after the window's draw put the app's theme back.
+struct ThemedOverlay<'b, M>(
+    &'static crate::shared::kit::themes::Theme,
+    iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+);
+
+impl<'b, M: 'b> iced::advanced::Overlay<M, iced::Theme, iced::Renderer> for ThemedOverlay<'b, M> {
+    fn layout(
+        &mut self,
+        renderer: &iced::Renderer,
+        bounds: iced::Size,
+    ) -> iced::advanced::layout::Node {
+        self.1.as_overlay_mut().layout(renderer, bounds)
+    }
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+    ) {
+        use crate::shared::kit::themes;
+        let before = themes::current();
+        themes::set(self.0);
+        self.1
+            .as_overlay()
+            .draw(renderer, theme, style, layout, cursor);
+        themes::set(before);
+    }
+    fn operate(
+        &mut self,
+        layout: iced::advanced::layout::Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        self.1.as_overlay_mut().operate(layout, renderer, operation);
+    }
+    fn update(
+        &mut self,
+        event: &iced::Event,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, M>,
+    ) {
+        self.1
+            .as_overlay_mut()
+            .update(event, layout, cursor, renderer, clipboard, shell);
+    }
+    fn mouse_interaction(
+        &self,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> iced::mouse::Interaction {
+        self.1
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+    fn overlay<'a>(
+        &'a mut self,
+        layout: iced::advanced::layout::Layout<'a>,
+        renderer: &iced::Renderer,
+    ) -> Option<iced::advanced::overlay::Element<'a, M, iced::Theme, iced::Renderer>> {
+        let theme = self.0;
+        let nested = self.1.as_overlay_mut().overlay(layout, renderer)?;
+        Some(iced::advanced::overlay::Element::new(Box::new(
+            ThemedOverlay(theme, nested),
+        )))
+    }
+    fn index(&self) -> f32 {
+        self.1.as_overlay().index()
+    }
 }
 
 #[cfg(test)]
@@ -1302,5 +1390,54 @@ mod theme_tests {
             rgb(SAPPHIRE.c.bg),
             "the other window draws the app's theme"
         );
+    }
+
+    /// W90c item 3: a tooltip (an overlay iced draws apart from its widget) of the
+    /// Studio's window is drawn under the Studio's theme, and the app's comes back.
+    #[test]
+    fn w90c_an_overlay_of_the_studio_window_draws_in_its_theme() {
+        use iced::advanced::{Overlay, layout, overlay};
+        struct Probe(std::rc::Rc<std::cell::Cell<&'static str>>);
+        impl Overlay<Msg, iced::Theme, iced::Renderer> for Probe {
+            fn layout(&mut self, _: &iced::Renderer, _: iced::Size) -> layout::Node {
+                layout::Node::new(iced::Size::ZERO)
+            }
+            fn draw(
+                &self,
+                _: &mut iced::Renderer,
+                _: &iced::Theme,
+                _: &iced::advanced::renderer::Style,
+                _: layout::Layout<'_>,
+                _: iced::mouse::Cursor,
+            ) {
+                self.0.set(themes::current().id);
+            }
+        }
+        themes::set(&SAPPHIRE);
+        let seen = std::rc::Rc::new(std::cell::Cell::new(""));
+        let plain: overlay::Element<'_, Msg, iced::Theme, iced::Renderer> =
+            overlay::Element::new(Box::new(Probe(seen.clone())));
+        let wrapped = crate::shared::kit::wrap::Hook::<Msg>::overlay(&Themed(&DAYLIGHT), plain);
+        let node = layout::Node::new(iced::Size::ZERO);
+        wrapped.as_overlay().draw(
+            &mut crate::shared::kit::testing::shot::renderer(),
+            &iced::Theme::Dark,
+            &iced::advanced::renderer::Style::default(),
+            layout::Layout::new(&node),
+            iced::mouse::Cursor::Unavailable,
+        );
+        assert_eq!(seen.get(), DAYLIGHT.id, "the overlay draws the Studio's theme");
+        assert_eq!(themes::current().id, SAPPHIRE.id, "the app's theme comes back");
+        // another window's overlay (no hook) draws the app's
+        let other: overlay::Element<'_, Msg, iced::Theme, iced::Renderer> =
+            overlay::Element::new(Box::new(Probe(seen.clone())));
+        other.as_overlay().draw(
+            &mut crate::shared::kit::testing::shot::renderer(),
+            &iced::Theme::Dark,
+            &iced::advanced::renderer::Style::default(),
+            layout::Layout::new(&node),
+            iced::mouse::Cursor::Unavailable,
+        );
+        assert_eq!(seen.get(), SAPPHIRE.id);
     }
 }
