@@ -24,7 +24,7 @@ pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 const KV_H: f32 = 22.0;
 const FIELD_LABEL: f32 = 14.0;
 /// Colours in Properties (the panel is narrower than the bar).
-const SWATCHES: usize = 6;
+const PANEL_SWATCHES: usize = 6;
 const SLIDER_W: f32 = 140.0;
 const PAD: f32 = 12.0;
 
@@ -103,7 +103,7 @@ fn frame<'a>(f: [String; 4]) -> Element<'a, Msg> {
 /// The selection's own style groups (colour, size, outline ... by its type), wrapping.
 fn style<'a>(s: &'a Studio) -> Element<'a, Msg> {
     let groups = s.editor.as_ref().map_or_else(Vec::new, |e| {
-        super::options_bar::selection_groups(e, SWATCHES)
+        super::options_bar::selection_groups(e, PANEL_SWATCHES)
     });
     iced::widget::row(groups).spacing(space::GAP).wrap().into()
 }

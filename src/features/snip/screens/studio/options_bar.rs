@@ -17,7 +17,8 @@ use crate::shared::kit::tokens::{Role, size, space};
 use crate::shared::kit::{dir, keycap, scroll};
 use crate::t;
 
-const SWATCHES: usize = 8;
+/// Colours on the options bar (and the Edit text bar).
+pub(super) const SWATCHES: usize = 8;
 const TEXT_SIZES: [f32; 3] = [16.0, 26.0, 38.0];
 
 type El<'a> = Element<'a, Message>;

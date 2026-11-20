@@ -16,6 +16,10 @@ const LEAD: f32 = 2.0;
 const CAP_GAP: f32 = 4.0;
 /// Board 9: 1000 wide, three columns.
 const SHEET_W: f32 = 1000.0;
+/// The sheet keeps this far from the window's edge, and never gets smaller than this.
+const SHEET_MARGIN: f32 = 12.0;
+const MIN_SHEET_W: f32 = 600.0;
+const MIN_SHEET_H: f32 = 300.0;
 const COLUMN_GAP: f32 = 32.0;
 const RESTORE_BUTTON: f32 = 96.0;
 
@@ -68,7 +72,7 @@ fn shortcut_column<'a>(title: &'a str, rows: Vec<Row<'a>>) -> Element<'a, Msg> {
 /// The shortcuts sheet (board 9): three columns (the tools, editing, view and
 /// files, every key from `keys` and the tool table), a foot note, Edit
 /// shortcuts… (Settings) and Close.
-pub fn shortcuts<'a>(s: &super::Studio) -> Element<'a, Msg> {
+pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> {
     use super::keys as k;
     use crate::features::snip::annotate::{Group, Tool, info};
     let mut tools: Vec<Row<'a>> = Vec::new();
@@ -152,13 +156,14 @@ pub fn shortcuts<'a>(s: &super::Studio) -> Element<'a, Msg> {
     .align_y(Center);
     let body = column![head, divider::divider(), columns, divider::divider(), foot]
         .spacing(space::PAGE[1]);
-    surface(
-        Material::Widget,
-        radius::CARD,
-        container(body).padding(space::PAGE),
-    )
-    .width(Length::Fixed(SHEET_W))
-    .into()
+    // never wider or taller than the window: the columns narrow, the body scrolls
+    let fit = (window.width - 2.0 * SHEET_MARGIN).clamp(MIN_SHEET_W, SHEET_W);
+    let body = crate::shared::kit::scroll::scroll(container(body).padding(space::PAGE))
+        .height(Length::Shrink);
+    surface(Material::Widget, radius::CARD, body)
+        .width(Length::Fixed(fit))
+        .max_height((window.height - 2.0 * SHEET_MARGIN).max(MIN_SHEET_H))
+        .into()
 }
 
 /// A picture kept after a crash.

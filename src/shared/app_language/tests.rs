@@ -253,8 +253,6 @@ const EXEMPT_FILES: &[&str] = &[
     "/tests.rs",
     "/arch_tests.rs",
     "/frame_times.rs",
-    // the Studio's key names, written once (key names are Latin in every language)
-    "screens/studio/keys.rs",
     "/snip_shots.rs",
     // the model's own prompts (English, sent to the provider), the AI setup steps
     "src/features/ask_ai/ask.rs",
@@ -323,6 +321,7 @@ fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
                 if words(&lit)
                     && !NOT_UI.contains(&lit.as_str())
                     && !UI_NOT_WORDS.contains(&lit.as_str())
+                    && !is_key_chord(&lit)
                     && !UNCONVERTED.contains(&lit.as_str())
                     && !lit.starts_with("[opencircle]")
                 {
@@ -335,6 +334,18 @@ fn words_outside_the_table(files: &[std::path::PathBuf]) -> Vec<String> {
 }
 
 /// The string literals of a line.
+/// A key-cap literal: key names and symbols joined by `+` (`Ctrl+Shift+S`, `Ctrl+=`,
+/// `Shift+←↑→↓`): the only words a screen may write itself (Latin in every language).
+fn is_key_chord(lit: &str) -> bool {
+    const NAMES: [&str; 8] = [
+        "Ctrl", "Shift", "Alt", "Delete", "Esc", "Enter", "Space", "Tab",
+    ];
+    lit.contains('+')
+        && lit.split('+').all(|p| {
+            NAMES.contains(&p) || p.chars().count() == 1 || p.chars().all(|c| "←↑→↓".contains(c))
+        })
+}
+
 fn literals(line: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut chars = line.chars().peekable();
@@ -393,6 +404,7 @@ const NOT_UI: &[&str] = &[
     "Esc",
     "Delete",
     "Backspace",
+    "Space",
     // the CLI (frozen contract)
     "opencircle capture",
     "opencircle run {}",

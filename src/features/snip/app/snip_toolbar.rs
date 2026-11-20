@@ -611,6 +611,27 @@ mod tests {
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
+    /// Settings > Studio > Open pictures in "Studio": the picked area's editor, its
+    /// drawings and history, moves into the Studio and the overlay's toolbar goes.
+    #[test]
+    fn a_pick_opens_in_the_studio_when_the_setting_says_so() {
+        use crate::shared::config::{StudioOpenIn, StudioPrefs};
+        assert_eq!(
+            StudioPrefs::default().open_in,
+            StudioOpenIn::Quick,
+            "the widget is the default"
+        );
+        let mut app = snip_toolbar_open();
+        assert!(app.editing() && app.windows.studio().is_none());
+        let task = app.open_in_studio();
+        run_task(&mut app, task);
+        assert!(
+            app.windows.studio().is_some(),
+            "the Studio holds the picture"
+        );
+        assert!(gone(&app), "no toolbar left over the desktop");
+    }
+
     /// #37: a drag-out an app took closes the overlay with its toolbar (none
     /// left floating over the desktop); one nothing took keeps the editor.
     #[test]

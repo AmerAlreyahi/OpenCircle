@@ -2102,7 +2102,8 @@ fn v3_a_requested_file_always_wins_over_reopen_last() {
     let _ = fresh.update(Msg::Recent(recent(), vec![String::new()]));
     assert_eq!(fresh.reopen(true), Some(PathBuf::from("/x/last.png")));
     assert_eq!(fresh.reopen(false), None, "the setting off");
-    let asks: [Box<dyn Fn(&mut Studio)>; 5] = [
+    type Ask = Box<dyn Fn(&mut Studio)>;
+    let asks: [Ask; 5] = [
         Box::new(|s| s.next_name(std::path::Path::new("/x/asked.png"))),
         Box::new(|s| drop(s.update(Msg::Dropped(PathBuf::from("/x/d.png"))))),
         Box::new(|s| drop(s.update(Msg::OpenRecent(PathBuf::from("/x/r.png"))))),
@@ -2146,4 +2147,93 @@ fn v3_blocked_keys_follow_the_hosts_calls_too() {
     s.saved();
     let _ = s.proceed();
     assert!(!blocked(&s));
+}
+
+/// "Grow the canvas past the edge" saying no gives a plain pill; a grow that is made
+/// refreshes the see-through flag (the new area has no pixels yet).
+#[test]
+fn v3_a_refused_or_made_grow_is_said_and_refreshes_the_transparent_flag() {
+    let mut s = two_boxes();
+    s.editor.as_mut().unwrap().grow_canvas = true;
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let r = s.editor.as_ref().unwrap().selection_bounds().unwrap();
+    let far = Rectangle::new(Point::new(1.0e9, 0.0), r.size());
+    let out = s.update(Msg::Editor(Message::Bounds(far)));
+    assert!(
+        matches!(&out, Outcome::Say(w) if w == "The picture can't grow that far"),
+        "{:?}",
+        matches!(out, Outcome::Say(_))
+    );
+    // a small grow past the right edge: the canvas gets wider, the flag follows
+    let r = s.editor.as_ref().unwrap().selection_bounds().unwrap();
+    let past = Rectangle::new(Point::new(630.0, r.y), r.size());
+    let _ = s.update(Msg::Editor(Message::Bounds(past)));
+    let e = s.editor.as_ref().unwrap();
+    assert!(e.doc.image.width > 640, "grown: {}", e.doc.image.width);
+    assert_eq!(s.transparent, cut::has_alpha(&e.doc.image.rgba));
+}
+
+/// Esc closes the export sheet, then the restore sheet (Later: the copy stays).
+#[test]
+fn v3_esc_closes_the_export_and_restore_sheets() {
+    let mut s = studio_on(64, 64);
+    let _ = s.update(Msg::Export);
+    assert!(s.exporting);
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.exporting, "Esc closes the sheet");
+    s.restorable = Some(Restorable {
+        name: "x".into(),
+        size: (1, 1),
+        png: Vec::new(),
+        notes: String::new(),
+    });
+    let _ = s.update(Msg::Cancel);
+    assert!(
+        s.later && s.restorable.is_some(),
+        "Later: put away, the copy stays"
+    );
+}
+
+/// Restyle through Properties: with the Select tool and a rectangle selected, a
+/// swatch of the panel's own style groups recolours THAT object.
+#[test]
+fn v3_properties_restyle_the_selected_object() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    assert_eq!(s.editor.as_ref().unwrap().tool, Tool::Select);
+    let before = s.editor.as_ref().unwrap().doc.items[1].colour;
+    let other = s.editor.as_ref().unwrap().doc.items[0].colour;
+    let e = s.editor.as_ref().unwrap();
+    // the second swatch of the first group (a swatch is 28 wide with 2 gaps and the 2 px pad)
+    let at = Point::new(2.0 + 14.0 + 30.0, 16.0);
+    let msgs = crate::shared::kit::testing::shot::click(
+        options_bar::selection_groups(e, 6).remove(0),
+        Size::new(400.0, 40.0),
+        at,
+    );
+    let pick = msgs
+        .into_iter()
+        .find(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+        .unwrap();
+    let _ = s.update(pick);
+    let e = s.editor.as_ref().unwrap();
+    assert_ne!(e.doc.items[1].colour, before, "the selected object took it");
+    assert_eq!(e.doc.items[0].colour, other, "the other did not");
+}
+
+/// The shortcuts sheet fits a narrow window (960 x 600): it narrows and scrolls.
+#[test]
+fn v3_the_shortcuts_sheet_fits_a_small_window() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    let small = Size::new(960.0, 600.0);
+    golden::each_theme(|theme, failed| {
+        let mut s = studio_on(640, 400);
+        let _ = s.update(Msg::Resized(small));
+        let _ = s.update(Msg::Shortcuts(true));
+        let name = format!("studio3-shortcuts-narrow-{}", theme.id);
+        failed.extend(golden::check("screens", &name, small, &[1.0], || {
+            view(&s, &[], false)
+        }));
+    });
 }

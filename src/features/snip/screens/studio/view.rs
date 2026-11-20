@@ -41,9 +41,6 @@ pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, OPEN, PASTE, PLUS, MINUS]
 
 /// A tool's options take the editor panel's column, side by side.
 const OPTION_W: f32 = size::PANEL - 2.0 * space::PANEL;
-/// The colour swatches on the options bar (the editor's first ones).
-const SWATCHES: usize = 8;
-
 /// `steps`: the Steps strip's steps (the Library's Steps section shows them).
 pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<'a, Msg> {
     let _dir = dir::scope(crate::shared::app_language::rtl());
@@ -120,7 +117,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Eleme
     let main: Element<'_, Msg> = match s.shortcuts {
         true => iced::widget::stack![
             main,
-            iced::widget::opaque(container(super::sheets::shortcuts(s)).center(Fill))
+            iced::widget::opaque(container(super::sheets::shortcuts(s, s.window)).center(Fill))
         ]
         .into(),
         false => main,
@@ -242,7 +239,7 @@ fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
         (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
         _ => {
             let now = x.colour();
-            let swatches = (style::ANNOTATION.iter().take(SWATCHES)).map(|c| {
+            let swatches = (style::ANNOTATION.iter().take(super::options_bar::SWATCHES)).map(|c| {
                 let rgba = c.into_rgba8();
                 colour::swatch(*c, rgba[..3] == now[..3], Some(Message::Colour(rgba)))
             });

@@ -1266,6 +1266,14 @@ impl Studio {
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
                     || std::mem::take(&mut self.overlay);
+                // the export sheet (a running encoder stops), then the restore sheet (Later)
+                if !closed && self.exporting {
+                    return self.update(Msg::WalkCancel);
+                }
+                if !closed && self.restorable.is_some() && !self.later {
+                    self.later = true;
+                    return Outcome::None;
+                }
                 if !closed {
                     match self.asking.take() {
                         // the restore that waited on the question: the copy stays
@@ -1645,11 +1653,14 @@ impl Studio {
         }
         self.fit(); // a crop changes what is shown
         self.keep_unsaved();
+        let refusal = self.editor.as_mut().and_then(|e| e.take_grow_refusal());
         match out {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
             Some(Output::Save(crop)) => Outcome::Save(crop),
             Some(Output::Pin(crop)) => Outcome::Pin(crop),
             Some(Output::AddStep(crop)) => Outcome::AddStep(crop),
+            // "Grow the canvas past the edge" said no: a plain pill says why
+            None if refusal.is_some() => Outcome::Say(grow_words(refusal)),
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
             // the widget's toolbar asks for is on the Studio
             _ => Outcome::None,
@@ -1693,7 +1704,7 @@ impl Studio {
             return Outcome::None;
         };
         Outcome::KeepCopy(Box::new(KeepCopy {
-            generation: recovery::generation(),
+            ticket: recovery::ticket(),
             width: e.doc.image.width,
             height: e.doc.image.height,
             rgba: e.doc.image.rgba.clone(),
@@ -1849,8 +1860,8 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
 
 /// The unsaved copy a Tick hands the host.
 pub struct KeepCopy {
-    /// `recovery::generation()` when it was made: a later discard voids the write.
-    pub generation: u32,
+    /// Taken when it was made: a later discard, or a newer copy, voids the write.
+    pub ticket: recovery::Ticket,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -1909,6 +1920,15 @@ fn pending_copy() -> Option<Restorable> {
         png: p.png,
         notes: p.notes,
     })
+}
+
+/// What the pill says when the canvas would not grow.
+fn grow_words(why: Option<annotate::GrowRefusal>) -> String {
+    match why {
+        Some(annotate::GrowRefusal::TooLarge) => crate::t!(st_grow_far),
+        _ => crate::t!(st_grow_big),
+    }
+    .to_string()
 }
 
 /// The window's title: the document's name, else "Untitled", then the app's.

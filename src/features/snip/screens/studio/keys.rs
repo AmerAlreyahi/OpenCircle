@@ -27,13 +27,13 @@ pub const ZOOM_IN: &str = "Ctrl+=";
 pub const ZOOM_OUT: &str = "Ctrl+-";
 pub const FIT: &str = "Ctrl+0";
 pub const ACTUAL: &str = "Ctrl+1";
-pub const NUDGE: &str = "Arrows";
-pub const NUDGE_FAR: &str = "Shift+Arrows";
+pub const NUDGE: &str = "←↑→↓";
+pub const NUDGE_FAR: &str = "Shift+←↑→↓";
 pub const FORWARD: &str = "Ctrl+]";
 pub const BACKWARD: &str = "Ctrl+[";
 pub const FRONT: &str = "Ctrl+Shift+]";
 pub const BACK: &str = "Ctrl+Shift+[";
-pub const PAN: &str = "Space+drag";
+pub const PAN: &str = "Space";
 
 /// A right-click row's key as key names (`Ctrl`, `Shift`, the key).
 pub fn chord_caps(k: super::editing::Chord) -> Vec<String> {

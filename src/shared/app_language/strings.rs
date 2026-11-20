@@ -2514,8 +2514,8 @@ strings! {
         | "Ctrl+C ينسخ العنصر المحدد؛ بلا تحديد ينسخ الصورة. Ctrl+Shift+C ينسخ الصورة دائمًا.";
     st_sc_edit: "Edit shortcuts…"
         | "تعديل الاختصارات…";
-    st_sc_pan: "Pan the picture"
-        | "تحريك الصورة";
+    st_sc_pan: "Pan the picture: hold, then drag"
+        | "تحريك الصورة: اضغط مطولًا ثم اسحب";
     st_sc_steps: "Add to steps"
         | "إضافة إلى الخطوات";
     st_sc_g_tools: "Tools"
@@ -2528,4 +2528,8 @@ strings! {
         | "لاحقًا";
     st_restore_failed: "This copy couldn't be restored. It is kept."
         | "تعذّرت استعادة هذه النسخة. تم الاحتفاظ بها.";
+    st_grow_far: "The picture can't grow that far"
+        | "لا يمكن توسيع الصورة إلى هذا الحد";
+    st_grow_big: "The picture would get too large"
+        | "ستصبح الصورة كبيرة جدًا";
 }
