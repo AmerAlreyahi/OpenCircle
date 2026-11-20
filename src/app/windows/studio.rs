@@ -829,8 +829,22 @@ fn recovery_ticks() -> impl iced::futures::Stream<Item = ()> {
     })
 }
 
+/// Window-level mouse events the Studio needs wherever the pointer is: the middle
+/// button's release ends a pan even when it happens outside the stage.
+fn mouse_msg(event: &iced::Event) -> Option<studio::Msg> {
+    match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Middle)) => {
+            Some(studio::Msg::Middle(false))
+        }
+        _ => None,
+    }
+}
+
 fn keys() -> iced::Subscription<Msg> {
     iced::event::listen_with(|event, status, id| {
+        if let Some(m) = mouse_msg(&event) {
+            return Some(Msg::StudioEvent(id, m));
+        }
         let m = match event {
             iced::Event::Window(window::Event::Focused) => studio::Msg::Focus(true),
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
@@ -874,6 +888,19 @@ fn keys() -> iced::Subscription<Msg> {
 mod key_tests {
     use super::*;
     use keyboard::key::{Code, Named, Physical};
+
+    /// A middle-button pan ends on the window-level release (outside the stage too).
+    #[test]
+    fn the_middle_button_release_ends_a_pan_anywhere() {
+        let up = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Middle,
+        ));
+        assert!(matches!(mouse_msg(&up), Some(studio::Msg::Middle(false))));
+        let left = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ));
+        assert!(mouse_msg(&left).is_none());
+    }
 
     /// Esc on the unsaved question = Cancel; Ctrl+Esc and other keys are not.
     #[test]
