@@ -1462,3 +1462,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   reliably, element / window picking that finds buttons, panels and menus, wheel steps element -> window -> screen); and
   drawing inside a snipped area stays inside it: text wraps to a new line before the area's edge, shapes / strokes stop at the
   area's last pixels so the whole shape shows (the Studio keeps this when "Grow the canvas" is off).
+  Tray menu at the click (owner, 2026-11-20, same phase): when a tray tool (e.g. Windhawk's tray flyout) shows our icon
+  somewhere else, our menu still opens at the icon's ORIGINAL taskbar spot, because it is placed at Shell_NotifyIconGetRect's
+  rect (tray.rs on_click); open it at the click point (TrayIconEvent's position / the cursor), like the shell's own menus.
