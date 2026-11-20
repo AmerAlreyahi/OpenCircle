@@ -73,8 +73,8 @@ pub fn with_menu<'a, Message: Clone + 'a>(
         false => Icon::Maximise,
     });
     let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
-    // right to left: the whole header mirrored, the caption buttons at the
-    // top left with close outermost (Win32 mirroring, GTK, KWin)
+    // right to left: the header's content is mirrored, the caption buttons keep
+    // their normal place (top right, close outermost) in every window
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
     let has_menu = menu.is_some();
     let name: Element<'a, Message> = match menu {
@@ -120,11 +120,19 @@ pub fn with_menu<'a, Message: Clone + 'a>(
         mouse_area(name).on_press(on(Caption::Drag)).into(), // mouse only: drags the window
         status.into(),
         Space::new().width(STATUS_GAP).into(),
-        caption(Icon::Minimise, GLYPH, H, false, on(Caption::Minimise)),
     ]);
-    parts.extend(restore);
-    parts.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
-    super::dir::row(parts).height(H).align_y(Center).into()
+    let mut buttons = vec![caption(
+        Icon::Minimise,
+        GLYPH,
+        H,
+        false,
+        on(Caption::Minimise),
+    )];
+    buttons.extend(restore);
+    buttons.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
+    // (a plain row: never mirrored)
+    let content = super::dir::row(parts).width(Fill).height(H).align_y(Center);
+    row![content, row(buttons)].height(H).align_y(Center).into()
 }
 
 /// `title` (mono, muted) that drags the window (`on_drag` on press), and the
@@ -135,8 +143,8 @@ pub fn compact<'a, Message: Clone + 'a>(
     on_close: Message,
 ) -> Element<'a, Message> {
     const H: f32 = size::HEADER_COMPACT;
-    // right to left: the close button at the left, the title at the right
-    crate::dir_row![
+    // right to left: the title mirrored, the close button keeps its place (right)
+    row![
         mouse_area(
             container(
                 text(title)
