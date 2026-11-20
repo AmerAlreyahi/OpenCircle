@@ -59,10 +59,10 @@ fn hiding_the_sidebar_gives_the_picture_its_room() {
     let mut s = studio_on(3840, 2160);
     let zoom = |s: &Studio| s.editor.as_ref().unwrap().zoom;
     let shown = zoom(&s);
-    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if !p.library));
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if !p.library));
     let hidden = zoom(&s);
     assert!(shown < hidden, "{shown} {hidden}");
-    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if p.library));
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if p.library));
     assert_eq!(zoom(&s), shown);
 }
 
@@ -1195,11 +1195,11 @@ fn the_walkthrough_transition_is_remembered() {
     use crate::features::snip::transition::Transition;
     let mut s = Studio::new(StudioConfig::default());
     assert_eq!(s.walk.how.transition, Transition::Crossfade);
-    let Outcome::Panels(p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
+    let Outcome::Panels(_, p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
         panic!("not saved");
     };
     assert_eq!(p.walk_transition, Transition::Wipe.index());
-    let Outcome::Panels(p) = s.update(Msg::WalkTransitionMs(1000)) else {
+    let Outcome::Panels(_, p) = s.update(Msg::WalkTransitionMs(1000)) else {
         panic!("not saved");
     };
     let again = Studio::new(p);
@@ -1214,7 +1214,7 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());
     let _ = s.update(Msg::ExportWalkthrough);
     assert!(s.exporting && s.walk_tab);
-    let Outcome::Panels(panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
+    let Outcome::Panels(_, panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
         panic!("the format is remembered");
     };
     assert_eq!(panels.walk_format, 1);
@@ -1363,7 +1363,7 @@ fn v3_the_menu_bar_is_keyboard_driven() {
     let _ = s.update(Msg::MenuKey(Nav::Prev));
     assert_eq!(s.menu.map(|m| m.0), Some(Menu::View));
     // View > Left panel
-    assert!(matches!(s.update(Msg::MenuKey(Nav::Enter)), Outcome::Panels(p) if !p.library));
+    assert!(matches!(s.update(Msg::MenuKey(Nav::Enter)), Outcome::Panels(_, p) if !p.library));
     assert!(s.menu.is_none());
     // Esc closes an open menu before anything else
     let _ = s.update(Msg::Menu(Some(Menu::File)));
@@ -2382,7 +2382,7 @@ fn v31_drops_follow_the_owner_rules() {
 fn v31_the_ui_scale_is_remembered() {
     let mut s = studio_on(640, 400);
     let out = s.update(Msg::UiScale(1));
-    assert!(matches!(out, Outcome::Panels(p) if p.ui_zoom == 110));
+    assert!(matches!(out, Outcome::Panels(_, p) if p.ui_zoom == 110));
     let again = Studio::new(StudioConfig {
         ui_zoom: 125,
         ..StudioConfig::default()
@@ -2632,5 +2632,77 @@ fn v31_the_steps_sidebar_side_is_a_setting() {
     assert!(
         rect.iter()
             .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
+    );
+}
+
+/// Review follow-up: the panels write only the keys that changed, in order, so a stale
+/// copy never undoes what Snip or the dialog wrote meanwhile (`hint_seen` here).
+#[test]
+fn v31_panels_write_only_what_changed() {
+    let mut s = studio_on(640, 400);
+    let Outcome::Panels(old, new) = s.update(Msg::UiScale(1)) else {
+        panic!("a UI scale is a panels change");
+    };
+    assert_eq!((old.ui_zoom, new.ui_zoom), (100, 110));
+    // the file meanwhile: Snip showed its hint, the walkthrough length changed
+    let mut file = StudioConfig {
+        hint_seen: true,
+        walk_ms: 1000,
+        ..StudioConfig::default()
+    };
+    file.apply_changes(&old, &new);
+    assert_eq!(file.ui_zoom, 110);
+    assert!(
+        file.hint_seen && file.walk_ms == 1000,
+        "what was not changed stays"
+    );
+}
+
+/// Review follow-up: a preference changed in the dialog reaches the open picture
+/// (snap, pixel grid, Ctrl+C, paste, grow, drag type), and "Reset tool styles" resets
+/// the open editor's own options.
+#[test]
+fn v31_preferences_reach_the_open_picture() {
+    let mut s = studio_on(640, 400);
+    {
+        let e = s.editor.as_mut().unwrap();
+        (e.snap, e.grid, e.grow_canvas, e.copy_picture_when_empty) = (false, false, true, false);
+    }
+    s.snap = false;
+    s.prefs_applied();
+    let d = config::current().studio;
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!((e.snap, e.grid), (d.snap, d.pixel_grid));
+    assert_eq!(e.grow_canvas, d.grow_canvas);
+    assert_eq!(e.copy_picture_when_empty, d.ctrl_c_picture);
+    assert_eq!(s.snap, d.snap);
+    // Reset tool styles: the colour the user picked goes back to the default
+    let red = [255, 0, 0, 255];
+    let _ = s.update(Msg::Editor(Message::Colour([1, 2, 3, 255])));
+    assert_ne!(s.editor.as_ref().unwrap().colour, red);
+    let _ = s.update(Msg::OpenPrefs);
+    let _ = s.update(Msg::Prefs(preferences::Msg::ResetToolStyles));
+    s.prefs_applied();
+    let now = s.editor.as_ref().unwrap().colour;
+    assert_ne!(now, [1, 2, 3, 255], "the editor took the defaults");
+}
+
+/// Review follow-up: the unsaved question takes over the files that were still arriving.
+#[test]
+fn v31_the_question_takes_the_pending_drops() {
+    let mut s = studio_on(64, 64);
+    draw(&mut s);
+    assert!(matches!(
+        s.update(Msg::Dropped(PathBuf::from("/tmp/a.png"))),
+        Outcome::SettleDrop(1)
+    ));
+    let _ = s.close_requested();
+    assert!(s.asking());
+    assert!(matches!(s.update(Msg::DropSettle(1)), Outcome::None));
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+    assert!(
+        matches!(s.update(Msg::DropSettle(1)), Outcome::None),
+        "nothing is left to place"
     );
 }

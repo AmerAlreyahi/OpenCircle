@@ -14,6 +14,7 @@ pub fn pictures_folder() -> Option<PathBuf> {
     dirs::picture_dir().map(|p| p.join("OpenCircle"))
 }
 
+/// `<data>/OpenCircle` (the temp folder when the OS has no data folder).
 pub fn app_data() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)

@@ -301,7 +301,8 @@ pub enum Outcome {
     SaveThen(Crop),
     Pin(Crop),
     /// The panels changed: remember them.
-    Panels(StudioConfig),
+    /// (what it was, what it is now): the host writes only the keys that differ.
+    Panels(StudioConfig, StudioConfig),
     /// Scroll the stage there (a zoom round the pointer).
     ScrollTo(AbsoluteOffset),
     /// A picture action: the host (the App) runs main mode's own work on the
@@ -394,6 +395,8 @@ pub struct Studio {
     pub(super) ui_zoom: u16,
     /// When the last file was dropped (files dropped together are steps).
     drops: Vec<PathBuf>,
+    /// "Reset tool styles" was pressed: the open editor takes the defaults when written.
+    reset_styles: bool,
     /// The preferences dialog, over the window while open.
     pub(super) prefs: Option<preferences::Dialog>,
     /// The pointer is over the Steps sidebar (a drop there is steps).
@@ -501,6 +504,7 @@ impl Studio {
             ui_zoom: panels.ui_zoom,
             drops: Vec::new(),
             prefs: None,
+            reset_styles: false,
             over_sidebar: false,
             shortcuts: false,
             context: None,
@@ -577,12 +581,7 @@ impl Studio {
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
-        editor.copy_picture_when_empty = prefs.ctrl_c_picture;
-        editor.paste_movable = prefs.paste_movable;
-        editor.grow_canvas = prefs.grow_canvas;
-        editor.drag_jpeg = prefs.drag_type == crate::shared::config::Format::Jpeg;
-        (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
-        (editor.snap, editor.grid) = (self.snap, self.grid);
+        self.prefs_into(&mut editor);
         self.zoom = match prefs.zoom_on_open {
             crate::shared::config::StudioZoom::Actual => Some(1.0 / self.scale),
             crate::shared::config::StudioZoom::Fit => None,
@@ -1055,6 +1054,10 @@ impl Studio {
     }
 
     fn sync_blocked(&mut self) {
+        // (the unsaved question takes over: files that were still arriving are dropped)
+        if self.asking() {
+            self.drops.clear();
+        }
         let blocked = self.blocked();
         if let Some(e) = &mut self.editor {
             e.keys_blocked = blocked;
@@ -1062,6 +1065,7 @@ impl Studio {
     }
 
     fn update_inner(&mut self, msg: Msg) -> Outcome {
+        let old_panels = self.panels;
         let quiet_msg = matches!(
             msg,
             Msg::AltDown
@@ -1206,7 +1210,7 @@ impl Studio {
                 self.panels.library = !self.panels.library;
                 self.popover = None;
                 self.fit();
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::Pop(p) => {
                 self.popover = p.filter(|p| self.popover != Some(*p));
@@ -1225,7 +1229,7 @@ impl Studio {
                 self.ui_zoom = crate::shared::config::zoom_step(self.ui_zoom, by);
                 // remembered, like the AI chat's text zoom
                 self.panels.ui_zoom = self.ui_zoom;
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::OpenPrefs => {
                 self.popover = None;
@@ -1239,6 +1243,9 @@ impl Studio {
                 let Some(d) = &mut self.prefs else {
                     return Outcome::None;
                 };
+                if matches!(m, preferences::Msg::ResetToolStyles) {
+                    self.reset_styles = true;
+                }
                 match d.update(m) {
                     preferences::Out::None => Outcome::None,
                     preferences::Out::Changed => Outcome::ApplyPrefs,
@@ -1667,7 +1674,7 @@ impl Studio {
             Msg::WalkFormat(movie) => {
                 self.walk.how.movie = movie;
                 self.panels.walk_format = movie.index();
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::WalkProgress(done, total) => {
                 self.walk.busy = self.walk.busy.map(|_| (done, total));
@@ -1686,12 +1693,12 @@ impl Studio {
             Msg::WalkTransition(kind) => {
                 self.walk.how.transition = kind;
                 self.panels.walk_transition = kind.index();
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::WalkTransitionMs(ms) => {
                 self.walk.how.transition_ms = ms;
                 self.panels.walk_ms = ms;
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
@@ -1771,6 +1778,31 @@ impl Studio {
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
             // the widget's toolbar asks for is on the Studio
             _ => Outcome::None,
+        }
+    }
+
+    /// Settings > Studio's switches onto `editor` (as the picture opens, and when the
+    /// dialog changes one while a picture is open).
+    fn prefs_into(&mut self, editor: &mut Annotator) {
+        let prefs = crate::shared::config::current().studio;
+        editor.copy_picture_when_empty = prefs.ctrl_c_picture;
+        editor.paste_movable = prefs.paste_movable;
+        editor.grow_canvas = prefs.grow_canvas;
+        editor.drag_jpeg = prefs.drag_type == crate::shared::config::Format::Jpeg;
+        (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
+        (editor.snap, editor.grid) = (self.snap, self.grid);
+    }
+
+    /// The dialog's changes were written: the open picture follows them now (snap,
+    /// pixel grid, Ctrl+C, paste, grow, drag type), and "Reset tool styles" resets
+    /// the editor's own options too.
+    pub fn prefs_applied(&mut self) {
+        if let Some(mut e) = self.editor.take() {
+            self.prefs_into(&mut e);
+            if std::mem::take(&mut self.reset_styles) {
+                e.reset_options(crate::shared::config::current().editor);
+            }
+            self.editor = Some(e);
         }
     }
 

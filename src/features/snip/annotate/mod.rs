@@ -789,6 +789,30 @@ impl Annotator {
         editor
     }
 
+    /// Settings > Studio > "Reset tool styles": this editor and the next ones take
+    /// `saved`'s tool and options (the config's defaults).
+    pub(crate) fn reset_options(&mut self, saved: EditorConfig) {
+        let fresh = Self::restored(
+            Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            },
+            1.0,
+            saved,
+        );
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        (self.tool, self.colour, self.width, self.stroke) =
+            (fresh.tool, fresh.colour, fresh.width, fresh.stroke);
+        (self.last, self.outline, self.fill) = (fresh.last, fresh.outline, fresh.fill);
+        (self.text_size, self.text_style, self.hex) =
+            (fresh.text_size, fresh.text_style, fresh.hex);
+        (self.assist, self.blur_size, self.blur_cell) =
+            (fresh.assist, fresh.blur_size, fresh.blur_cell);
+        (self.eraser, self.eraser_whole, self.saved) =
+            (fresh.eraser, fresh.eraser_whole, fresh.saved);
+    }
+
     /// The tool and options to remember: `saved` with this editor's own.
     pub(crate) fn remembered(&self) -> EditorConfig {
         let d = self.drawing_style();

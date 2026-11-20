@@ -533,6 +533,23 @@ impl Default for StudioConfig {
 }
 
 impl StudioConfig {
+    /// `self` with only what changed from `old` to `new` taken from `new` (a write
+    /// must never lay a stale copy over what the dialog or Snip wrote meanwhile).
+    pub fn apply_changes(&mut self, old: &Self, new: &Self) {
+        macro_rules! take {
+            ($($f:ident),*) => { $(if old.$f != new.$f { self.$f = new.$f; })* };
+        }
+        take!(
+            library,
+            options,
+            walk_format,
+            ui_zoom,
+            walk_transition,
+            walk_ms,
+            hint_seen
+        );
+    }
+
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
