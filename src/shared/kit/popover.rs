@@ -55,7 +55,6 @@ fn card<'a, Message: Clone + 'a>(
         )
         .padding(0),
     )
-    .into()
 }
 
 /// `base` with `content` in a card at `corner`, `gap` px in from the edges
