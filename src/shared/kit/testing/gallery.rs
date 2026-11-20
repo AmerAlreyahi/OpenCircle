@@ -1860,3 +1860,57 @@ fn side_panel_sheet() {
     ];
     sheet("side_panel", Size::new(240.0, 40.0), &rows);
 }
+
+/// `popover`: a card hung from a corner of its base.
+#[test]
+fn popover_sheet() {
+    use super::super::popover::{Corner, over};
+    let base = || container(text("")).width(Fill).height(Fill);
+    let rows = vec![
+        row("top end", Act::Rest, move |ar| {
+            let body = super::super::text::text(Role::CONTROL, s(ar, "Position", "الموضع"));
+            over(
+                base().into(),
+                body.into(),
+                Corner::TopEnd,
+                iced::Padding::new(6.0),
+                (),
+            )
+        }),
+        row("bottom start", Act::Rest, move |ar| {
+            let body = super::super::text::text(Role::CONTROL, "640 × 400");
+            over(
+                base().into(),
+                body.into(),
+                Corner::BottomStart,
+                iced::Padding::new(6.0),
+                (),
+            )
+        }),
+    ];
+    sheet("popover", Size::new(200.0, 90.0), &rows);
+}
+
+/// `slide_over`: the end-edge panel, with and without its scrim.
+#[test]
+fn slide_over_sheet() {
+    use super::super::slide_over::{Scrim, over};
+    let rows: Vec<_> = [("no scrim", Scrim::None), ("scrim", Scrim::Closes)]
+        .into_iter()
+        .map(|(state, scrim)| {
+            row(state, Act::Rest, move |ar| {
+                let base = container(text("")).width(Fill).height(Fill);
+                let body = super::super::text::text(Role::CONTROL, s(ar, "Cut out", "قص الخلفية"));
+                over(
+                    base.into(),
+                    s(ar, "Cut out", "قص الخلفية"),
+                    body.into(),
+                    (),
+                    scrim,
+                    0.0,
+                )
+            })
+        })
+        .collect();
+    sheet("slide_over", Size::new(200.0, 120.0), &rows);
+}

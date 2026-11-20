@@ -1766,8 +1766,6 @@ strings! {
         | "فتح…";
     st_paste: "Paste"
         | "لصق";
-    st_recent_none: "Pictures you open or save appear here."
-        | "تظهر هنا الصور التي تفتحها أو تحفظها.";
     st_size: "Size"
         | "الحجم";
     st_drawings: "Drawings"
@@ -1798,14 +1796,6 @@ strings! {
         | "لا توجد خلفية لإزالتها هنا";
     st_read_failed: "Couldn't read the text in this picture"
         | "تعذّرت قراءة النص في هذه الصورة";
-    st_show_library: "Show the library"
-        | "أظهر المكتبة";
-    st_hide_library: "Hide the library"
-        | "أخفِ المكتبة";
-    st_show_panel: "Show the picture panel"
-        | "أظهر لوحة الصورة";
-    st_hide_panel: "Hide the picture panel"
-        | "أخفِ لوحة الصورة";
     st_zoom_in: "Zoom in"
         | "تكبير";
     st_zoom_out: "Zoom out"
@@ -2290,30 +2280,10 @@ strings! {
         | "إلى الواجهة";
     st_to_back: "Send to back"
         | "إلى الخلفية";
-    st_library: "Library"
-        | "المكتبة";
-    st_properties: "Properties"
-        | "الخصائص";
-    st_left_panel: "Left panel"
-        | "اللوحة اليسرى";
-    st_right_panel: "Right panel"
-        | "اللوحة اليمنى";
-    st_all_panels: "All panels"
-        | "كل اللوحات";
-    st_sec_recent: "Recent files"
-        | "الملفات الأخيرة";
-    st_sec_objects: "Objects"
-        | "الكائنات";
-    st_objects_empty: "Your drawings appear here."
-        | "تظهر رسوماتك هنا.";
-    st_actions: "Picture actions"
-        | "إجراءات الصورة";
     st_actions_menu: "Actions"
         | "إجراءات";
     st_hide_steps: "Hide the Steps sidebar"
         | "إخفاء الشريط الجانبي للخطوات";
-    st_show_steps: "Show the Steps sidebar"
-        | "إظهار الشريط الجانبي للخطوات";
     st_add_pictures: "Add pictures…"
         | "إضافة صور…";
     st_paste_step: "Paste as step"
@@ -2326,22 +2296,16 @@ strings! {
         | "معلومات الصورة";
     st_recent_pictures: "Recent pictures"
         | "الصور الأخيرة";
-    st_save_export: "Save and export"
-        | "الحفظ والتصدير";
     st_opacity: "Opacity"
         | "العتمة";
     st_order: "Order"
         | "الترتيب";
     st_merge: "Merge into picture"
         | "دمج في الصورة";
-    st_pasted: "Pasted picture"
-        | "صورة ملصوقة";
     st_n_objects: "{} objects"
         | "{} كائنات";
     st_add_steps: "Add to steps"
         | "أضف إلى الخطوات";
-    st_tool_selected: "Selected"
-        | "محدد";
     st_hint_select: "Click an object to edit it"
         | "انقر كائنًا لتحريره";
     st_sc_title: "Keyboard shortcuts"
@@ -2496,8 +2460,6 @@ strings! {
         | "لوحة الصورة وإجراءاتها";
     st_unsaved_picture: "Unsaved picture"
         | "صورة غير محفوظة";
-    st_recent_zero: "Recent files are off · Settings > Studio"
-        | "الملفات الأخيرة متوقفة · الإعدادات > الاستوديو";
     st_select_all: "Select all"
         | "تحديد الكل";
     st_lock_ratio: "Lock ratio"

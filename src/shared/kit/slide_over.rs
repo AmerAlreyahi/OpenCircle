@@ -70,7 +70,7 @@ pub fn over<'a, Message: Clone + 'a>(
                 .height(Fill),
         );
         let area = match press {
-            Some(m) => area.on_press(m),
+            Some(m) => area.on_press(m), // mouse only: a press outside closes it (Esc is the host's)
             None => area,
         };
         column![iced::widget::Space::new().height(top), area]

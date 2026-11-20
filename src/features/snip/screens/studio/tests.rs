@@ -2200,3 +2200,211 @@ fn v3_the_start_screen_lists_recent_pictures() {
     );
     assert!(got.iter().any(|t| t == "holiday.png"), "{got:?}");
 }
+
+// ---- Studio v3.1: the window, popovers, the Steps sidebar, input ----
+
+fn click_view(s: &Studio, at: (f32, f32)) -> Vec<Msg> {
+    crate::shared::kit::testing::shot::click(view(s, &[], false), SIZE, Point::new(at.0, at.1))
+}
+
+/// v3.1 item 6: a press anywhere outside an open menu closes it (before, it
+/// stayed until its opener was pressed again); the press goes no further.
+#[test]
+fn v31_an_open_menu_closes_on_an_outside_click() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Menu(Some(Menu::Edit)));
+    let got = click_view(&s, (700.0, 500.0));
+    assert!(matches!(got.as_slice(), [Msg::Menu(None)]), "{got:?}");
+    let _ = s.update(Msg::Menu(None));
+    assert!(s.menu.is_none());
+}
+
+/// v3.1 item 5: a popover closes on an outside press and on Esc; a press on its
+/// own row acts.
+#[test]
+fn v31_a_popover_closes_on_an_outside_click_and_esc() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    assert_eq!(s.popover, Some(popovers::Pop::Actions));
+    let got = click_view(&s, (300.0, 600.0));
+    assert!(matches!(got.as_slice(), [Msg::Pop(None)]), "{got:?}");
+    // the "Cut out" row (the fifth) acts
+    let got = click_view(&s, (1010.0, 247.0));
+    assert!(got.iter().any(|m| matches!(m, Msg::CutOut)), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(s.popover.is_none());
+    // the same opener twice closes it
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Position)));
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Position)));
+    assert!(s.popover.is_none());
+}
+
+/// v3.1 item 2: the bar always shows every control; ones the tool can't use do
+/// nothing (dimmed), the tool's own ones act.
+#[test]
+fn v31_the_options_bar_dims_what_the_tool_cannot_use() {
+    let colours = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(1227.0, 48.0);
+        (0..130)
+            .filter(|i| {
+                let at = Point::new(60.0 + 8.0 * *i as f32, 24.0);
+                let bar = options_bar::view(s, e);
+                crate::shared::kit::testing::shot::click(bar, size, at)
+                    .iter()
+                    .any(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+            })
+            .count()
+    };
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+    assert_eq!(colours(&s), 0, "Select has no colour: dimmed, not hidden");
+    let bar = options_bar::view(&s, s.editor.as_ref().unwrap());
+    let words = crate::shared::kit::testing::shot::texts(bar);
+    for w in ["Size", "Opacity", "Outline", "Fill", "Position", "Actions"] {
+        assert!(words.iter().any(|t| t == w), "{w} shown: {words:?}");
+    }
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    assert!(colours(&s) > 3, "Rect takes a colour");
+}
+
+/// v3.1 item 1: the caption buttons keep their place (right) in Arabic too, the
+/// rail sits at the window's edge and the Steps sidebar on the other side.
+#[test]
+fn v31_the_caption_buttons_stay_right_in_arabic() {
+    let s = studio_on(640, 400);
+    let is_close = |got: Vec<Msg>| {
+        got.iter()
+            .any(|m| matches!(m, Msg::Caption(Caption::Close)))
+    };
+    assert!(is_close(click_view(&s, (1256.0, 20.0))));
+    let _ar = crate::shared::kit::testing::arabic();
+    assert!(is_close(click_view(&s, (1256.0, 20.0))));
+    assert!(!is_close(click_view(&s, (24.0, 20.0))));
+    // the rail (Rectangle tool) is at the right edge, the sidebar's Add at the left
+    let rect = click_view(&s, (1252.0, 155.0));
+    assert!(
+        rect.iter()
+            .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect)))),
+        "{rect:?}"
+    );
+    let add = click_view(&s, (130.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+}
+
+/// v3.1 item 3: Add pictures asks for several files; files dropped together (or onto an
+/// open picture) become steps; a single drop on the empty Studio opens it.
+#[test]
+fn v31_pictures_join_the_steps() {
+    let mut s = studio_on(640, 400);
+    let add = click_view(&s, (1148.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+    assert!(matches!(s.update(Msg::PickFiles), Outcome::PickFiles));
+    let files = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")];
+    assert!(matches!(s.update(Msg::AddFiles(files)), Outcome::AddPictures(v) if v.len() == 2));
+    assert!(matches!(s.update(Msg::AddFiles(Vec::new())), Outcome::None));
+    assert!(matches!(s.update(Msg::PasteStep), Outcome::PasteStep));
+    // a drop on an open picture is a step
+    let one = PathBuf::from("/tmp/c.png");
+    assert!(matches!(
+        s.update(Msg::Dropped(one.clone())),
+        Outcome::AddPictures(_)
+    ));
+    // the empty Studio: the first file opens, the others of the same drop are steps
+    let mut e = Studio::new(StudioConfig::default());
+    assert!(matches!(
+        e.update(Msg::Dropped(one.clone())),
+        Outcome::Read(_)
+    ));
+    assert!(matches!(
+        e.update(Msg::Dropped(one)),
+        Outcome::AddPictures(_)
+    ));
+}
+
+/// v3.1 item 4: the empty Studio shows its recent pictures big, and a click opens one.
+#[test]
+fn v31_the_start_screen_opens_a_recent_picture() {
+    let mut s = Studio::new(StudioConfig::default());
+    let picture = iced::widget::image::Handle::from_rgba(1, 1, vec![9; 4]);
+    let path = PathBuf::from("/tmp/holiday.png");
+    let _ = s.update(Msg::Recent(
+        vec![(path.clone(), picture)],
+        vec![String::new()],
+    ));
+    let got: Vec<Msg> = (0..14 * 12)
+        .flat_map(|i| {
+            let at = (
+                380.0 + 40.0 * (i % 14) as f32,
+                400.0 + 30.0 * (i / 14) as f32,
+            );
+            click_view(&s, at)
+        })
+        .collect();
+    assert!(
+        got.iter()
+            .any(|m| matches!(m, Msg::OpenRecent(p) if *p == path)),
+        "{got:?}"
+    );
+}
+
+/// v3.1 item 7: the wheel zooms by default (Ctrl+wheel too), the middle button pans,
+/// Ctrl+= / Ctrl+- / Ctrl+0 scale the UI.
+#[test]
+fn v31_wheel_middle_button_and_ui_scale() {
+    assert_eq!(
+        crate::shared::config::StudioPrefs::default().wheel,
+        crate::shared::config::StudioWheel::Zoom
+    );
+    let mut s = studio_on(1600, 900);
+    let before = s.editor.as_ref().unwrap().zoom;
+    let _ = s.update(Msg::Wheel {
+        at: Point::new(300.0, 300.0),
+        notches: 2.0,
+    });
+    assert!(s.editor.as_ref().unwrap().zoom > before);
+    // the middle button: a move pans while it is down, none after
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(10.0, 10.0))),
+        Outcome::None
+    ));
+    let _ = s.update(Msg::Middle(true));
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(12.0, 12.0))),
+        Outcome::ScrollTo(_)
+    ));
+    let _ = s.update(Msg::Middle(false));
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(14.0, 14.0))),
+        Outcome::None
+    ));
+    // the UI scale steps like the AI chat's
+    assert_eq!(s.ui_zoom, 100);
+    let _ = s.update(Msg::UiScale(1));
+    assert_eq!(s.ui_zoom, 110);
+    let _ = s.update(Msg::UiScale(-1));
+    let _ = s.update(Msg::UiScale(-1));
+    assert_eq!(s.ui_zoom, 90);
+    let _ = s.update(Msg::UiScale(0));
+    assert_eq!(s.ui_zoom, 100);
+}
+
+/// v3.1 item 5: the walkthrough opens in the slide-over (the header stays free: the
+/// caption buttons still work); Esc closes the panel.
+#[test]
+fn v31_big_tasks_slide_in_and_the_header_stays_free() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::ExportWalkthrough);
+    assert!(s.exporting);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(words.iter().any(|t| t == "Walkthrough"), "{words:?}");
+    let close = click_view(&s, (1256.0, 20.0));
+    assert!(
+        close
+            .iter()
+            .any(|m| matches!(m, Msg::Caption(Caption::Close))),
+        "{close:?}"
+    );
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.exporting);
+}

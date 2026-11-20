@@ -145,6 +145,14 @@ pub fn swatch<'a, Message: Clone + 'a>(
     picked: bool,
     press: Option<Message>,
 ) -> Element<'a, Message> {
+    // no press: dimmed to 38 %, the dot too
+    let colour = match press.is_some() {
+        true => colour,
+        false => Color {
+            a: colour.a * 0.38,
+            ..colour
+        },
+    };
     let dot =
         container(Space::new().width(SWATCH).height(SWATCH)).style(move |_| container::Style {
             background: Some(colour.into()),

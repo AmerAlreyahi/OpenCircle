@@ -53,7 +53,7 @@ pub fn over<'a, Message: Clone + 'a>(
             .width(Fill)
             .height(Fill),
     )
-    .on_press(close.clone())
+    .on_press(close.clone()) // mouse only: a press outside closes it (Esc is the host's)
     .on_right_press(close);
     stack![base, catch, placed].into()
 }

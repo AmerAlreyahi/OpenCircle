@@ -2,7 +2,7 @@
 //! then its groups, every control 32 high (`kit::option_bar`). The groups read
 //! the editor's current values and send the editor's own messages.
 use iced::widget::{Space, container};
-use iced::{Center, Color, Element, Fill};
+use iced::{Center, Element, Fill};
 
 use super::popovers::Pop;
 use super::{Msg, Studio};
@@ -120,12 +120,8 @@ fn colours(e: &Annotator, n: usize, live: bool) -> El<'_> {
     let now = shown(e).colour;
     let cells = style::ANNOTATION.iter().take(n).map(|c| {
         let rgba = c.into_rgba8();
-        let shade = Color {
-            a: if live { c.a } else { c.a * 0.38 },
-            ..*c
-        };
         swatch(
-            shade,
+            *c,
             live && Some(rgba) == now,
             live.then_some(Message::Colour(rgba)),
         )
