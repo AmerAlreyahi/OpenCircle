@@ -23,6 +23,8 @@ pub enum Pop {
     Position,
     Info,
     More,
+    /// The narrow bar's colour swatches.
+    Colours,
 }
 
 /// The panel's rows, in the design's order (Edit text and Cut out follow them).
@@ -223,6 +225,10 @@ pub fn content<'a>(s: &'a Studio, pop: Pop) -> Element<'a, Msg> {
         Pop::Actions => actions(s),
         Pop::Position => position(s),
         Pop::Info => picture_info(s),
+        Pop::Colours => match &s.editor {
+            Some(e) => super::options_bar::colour_group(e, super::options_bar::SWATCHES),
+            None => Space::new().into(),
+        },
         Pop::More => match &s.editor {
             Some(e) => super::options_bar::tool_group(e),
             None => Space::new().into(),

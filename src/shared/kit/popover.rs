@@ -17,6 +17,8 @@ pub enum Corner {
     TopEnd,
     /// Over the start edge, at the bottom.
     BottomStart,
+    /// Under the start edge (left; right in right-to-left).
+    TopStart,
 }
 
 /// `base` with `content` in a card at `corner`, `gap` px in from the edges
@@ -42,10 +44,10 @@ pub fn over<'a, Message: Clone + 'a>(
         .height(Fill)
         .align_x(match corner {
             Corner::TopEnd => dir::end(),
-            Corner::BottomStart => dir::start(),
+            Corner::BottomStart | Corner::TopStart => dir::start(),
         })
         .align_y(match corner {
-            Corner::TopEnd => iced::alignment::Vertical::Top,
+            Corner::TopEnd | Corner::TopStart => iced::alignment::Vertical::Top,
             Corner::BottomStart => iced::alignment::Vertical::Bottom,
         });
     let catch = mouse_area(

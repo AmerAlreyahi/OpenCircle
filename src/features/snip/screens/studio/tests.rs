@@ -2438,3 +2438,51 @@ fn v31_a_pick_in_a_popover_closes_it_and_the_canvas_gets_the_next_click() {
     assert!(!got.is_empty(), "the picture got the click");
     assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
 }
+
+/// v3.1 review 3: a narrow bar never hides a control: below the room for eight
+/// colour dots they become ONE swatch button that opens the Colour popover; the
+/// plan follows the bar's own room (window, UI scale), not the window alone.
+#[test]
+fn v31_a_narrow_bar_keeps_every_control_and_folds_the_colours() {
+    let probe = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(s.window.width - 54.0, 48.0);
+        let (mut colours, mut button) = (0, 0);
+        for i in 0..(size.width / 8.0) as usize {
+            let at = Point::new(8.0 * i as f32, 24.0);
+            let got = crate::shared::kit::testing::shot::click(options_bar::view(s, e), size, at);
+            colours += got
+                .iter()
+                .filter(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+                .count();
+            button += got
+                .iter()
+                .filter(|m| matches!(m, Msg::Pop(Some(popovers::Pop::Colours))))
+                .count();
+        }
+        let words = crate::shared::kit::testing::shot::texts(options_bar::view(s, e));
+        (colours, button, words)
+    };
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Text)));
+    let _ = s.update(Msg::Resized(SIZE));
+    let (colours, button, _) = probe(&s);
+    assert!(
+        colours >= 6 && button == 0,
+        "wide: dots {colours}, button {button}"
+    );
+    let _ = s.update(Msg::Resized(super::MIN));
+    let (colours, button, words) = probe(&s);
+    assert_eq!(colours, 0, "narrow: no loose dots");
+    assert!(button >= 1, "narrow: the colour button");
+    for w in ["Outline", "Fill", "Position", "Actions", "More", "100 %"] {
+        assert!(words.iter().any(|t| t == w), "{w} kept: {words:?}");
+    }
+    // the plan follows the UI scale too: at 1280 a large UI folds the dots
+    let _ = s.update(Msg::Resized(SIZE));
+    for _ in 0..4 {
+        let _ = s.update(Msg::UiScale(1));
+    }
+    let (colours, button, _) = probe(&s);
+    assert!(colours == 0 && button >= 1, "scaled: {colours} {button}");
+}

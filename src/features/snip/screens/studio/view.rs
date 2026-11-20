@@ -137,6 +137,15 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                         ..iced::Padding::ZERO
                     },
                 ),
+                super::popovers::Pop::Colours => (
+                    popover::Corner::TopStart,
+                    iced::Padding {
+                        left: super::RAIL + 40.0,
+                        right: 8.0,
+                        top: super::HEADER + super::OPTIONS + 4.0,
+                        ..iced::Padding::ZERO
+                    },
+                ),
                 _ => (
                     popover::Corner::TopEnd,
                     iced::Padding {

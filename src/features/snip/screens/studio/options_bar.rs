@@ -21,7 +21,6 @@ use crate::t;
 
 /// Colours on the options bar (and the Edit text bar).
 pub(super) const SWATCHES: usize = 8;
-const NARROW_SWATCHES: usize = 4;
 const TEXT_SIZES: [f32; 3] = [16.0, 26.0, 38.0];
 
 type El<'a> = Element<'a, Message>;
@@ -134,9 +133,13 @@ fn dots<'a>(
     at: Option<usize>,
     words: String,
     live: bool,
+    captioned: bool,
     pick: impl Fn(usize) -> Message,
 ) -> El<'a> {
-    let mut cells: Vec<El<'a>> = vec![caption(t!(sn_size))];
+    let mut cells: Vec<El<'a>> = Vec::new();
+    if captioned {
+        cells.push(caption(t!(sn_size)));
+    }
     cells.extend((0..3).map(|i| dot(i, live && at == Some(i), live.then(|| pick(i)))));
     cells.push(value(words));
     group(cells, false)
@@ -146,19 +149,19 @@ fn toggle<'a>(words: &'a str, on: bool, press: Option<Message>) -> El<'a> {
     group(vec![text_cell(words, on, press)], false)
 }
 
-fn stroke(e: &Annotator, live: bool) -> El<'_> {
+fn stroke(e: &Annotator, live: bool, captioned: bool) -> El<'_> {
     let px = shown(e).stroke;
     let at = Width::ALL.iter().position(|w| w.stroke() == px);
-    dots(at, format!("{} px", px.round()), live, |i| {
+    dots(at, format!("{} px", px.round()), live, captioned, |i| {
         Message::Width(Width::ALL[i])
     })
 }
 
 /// A pasted picture's opacity: three common steps.
-fn opacity(e: &Annotator, live: bool, compact: bool) -> El<'_> {
+fn opacity(e: &Annotator, live: bool, captioned: bool) -> El<'_> {
     let now = e.selection_style().and_then(|s| s.opacity).unwrap_or(255);
     let mut cells: Vec<El<'_>> = Vec::new();
-    if !compact {
+    if captioned {
         cells.push(caption(t!(st_opacity)));
     }
     for (words, v) in [("100 %", 255u8), ("70 %", 178), ("40 %", 102)] {
@@ -189,7 +192,7 @@ fn outline_fill(e: &Annotator, tool: Tool, c: Can) -> El<'_> {
 
 fn font_size(e: &Annotator) -> El<'_> {
     let at = TEXT_SIZES.iter().position(|&p| p == e.text_size);
-    dots(at, format!("{} px", e.text_size.round()), true, |i| {
+    dots(at, format!("{} px", e.text_size.round()), true, true, |i| {
         Message::TextSize(TEXT_SIZES[i])
     })
 }
@@ -213,7 +216,7 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
             let at = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let px = e.blur_cell.cell();
             vec![
-                dots(at, format!("{px} px"), true, |i| {
+                dots(at, format!("{px} px"), true, true, |i| {
                     Message::BlurCell(Width::ALL[i])
                 }),
                 toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
@@ -222,7 +225,7 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
         Tool::Eraser => {
             let at = ERASER_SIZES.iter().position(|&s| s == e.eraser);
             vec![
-                dots(at, format!("{} px", e.eraser.round()), true, |i| {
+                dots(at, format!("{} px", e.eraser.round()), true, true, |i| {
                     Message::EraserSize(ERASER_SIZES[i])
                 }),
                 toggle(
@@ -236,8 +239,7 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
     }
 }
 
-/// The colour swatches alone (the tests click them).
-#[cfg(test)]
+/// The colour swatches alone (the Colour popover's content; the tests click them).
 pub(super) fn colour_group(e: &Annotator, n: usize) -> Element<'_, Msg> {
     Element::from(colours(e, n, true)).map(Msg::Editor)
 }
@@ -252,10 +254,77 @@ pub fn tool_group(e: &Annotator) -> Element<'_, Msg> {
     Element::from(body).map(Msg::Editor)
 }
 
-/// Below `WIDE` the tool's own group folds into "More"; below `NARROW` the
-/// colours shrink and the key hides (the bar never wraps and never clips).
-const WIDE: f32 = 1360.0;
-const NARROW: f32 = 1100.0;
+/// How the bar is drawn at the room it has: never a control hidden. In order of
+/// preference: everything inline; the tool's own group folded into More; the tool
+/// name down to its icon; the eight colours down to ONE swatch button that opens
+/// a Colour popover; last, the "Size" / "Opacity" captions go.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Plan {
+    name_full: bool,
+    colours_inline: bool,
+    own_inline: bool,
+    captions: bool,
+}
+
+/// Widths at 100 % (measured from the 1280 px golden), logical px.
+const W_FIXED: f32 = 177.0 + 219.0 + 101.0 + 98.0 + 97.0; // Size, Opacity, Outline/Fill, Position, Actions
+const W_NAME: f32 = 105.0;
+const W_ICON: f32 = 34.0;
+const W_COLOURS: f32 = 240.0;
+const W_COLOUR_BUTTON: f32 = 48.0;
+const W_OWN: f32 = 290.0;
+const W_MORE: f32 = 90.0;
+const W_CAPTIONS: f32 = 85.0;
+const W_GAP: f32 = 8.0;
+/// The bar's side padding.
+const PAD_L: f32 = 14.0;
+const PAD_R: f32 = 12.0;
+
+impl Plan {
+    fn width(self, has_own: bool, scale: f32) -> f32 {
+        let mut w = W_FIXED;
+        let mut items = 6.0; // the groups, Position, Actions, the name
+        w += if self.name_full { W_NAME } else { W_ICON };
+        w += if self.colours_inline {
+            W_COLOURS
+        } else {
+            W_COLOUR_BUTTON
+        };
+        if has_own {
+            w += if self.own_inline { W_OWN } else { W_MORE };
+            items += 1.0;
+        }
+        if !self.captions {
+            w -= W_CAPTIONS;
+        }
+        (w + items * W_GAP) * scale + PAD_L + PAD_R
+    }
+
+    /// The first plan that fits `avail` px (the last one when none does).
+    fn at(avail: f32, scale: f32, has_own: bool) -> Plan {
+        let steps = [
+            (true, true, true, true),
+            (true, true, false, true),
+            (false, true, false, true),
+            (false, false, false, true),
+            (false, false, false, false),
+        ];
+        let plans = steps.map(|(name_full, colours_inline, own_inline, captions)| Plan {
+            name_full,
+            colours_inline,
+            own_inline,
+            captions,
+        });
+        let fit = plans.iter().find(|p| p.width(has_own, scale) <= avail);
+        *fit.unwrap_or(&plans[plans.len() - 1])
+    }
+}
+
+/// The room the bar has: the window less its rim and the rail (the bar runs over
+/// the sidebar to the edge, so the sidebar does not change it).
+fn bar_room(s: &Studio) -> f32 {
+    s.window.width - 2.0 - (super::RAIL + 1.0)
+}
 
 fn opener<'a>(words: &'a str, on: bool, pop: Pop, live: bool) -> Element<'a, Msg> {
     let press = live.then_some(Msg::Pop(Some(pop)));
@@ -268,16 +337,32 @@ fn opener<'a>(words: &'a str, on: bool, pop: Pop, live: bool) -> Element<'a, Msg
     )
 }
 
+/// The narrow bar's colour: ONE swatch button (the current colour) that opens the
+/// Colour popover with all of them.
+fn colour_button<'a>(e: &Annotator, on: bool, live: bool) -> Element<'a, Msg> {
+    let now = shown(e)
+        .colour
+        .map_or(iced::Color::from_rgb8(128, 128, 128), |c| {
+            iced::Color::from_rgba8(c[0], c[1], c[2], f32::from(c[3]) / 255.0)
+        });
+    let press = live.then_some(Msg::Pop(Some(Pop::Colours)));
+    group(
+        vec![
+            swatch(now, on, press.clone()),
+            glyph_cell(Icon::ChevronDown.glyph(), on, press),
+        ],
+        false,
+    )
+}
+
 /// The bar: the tool's name and key, the shared controls (always all of them),
 /// the tool's own, then Position and Actions.
 pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let tool = base_tool(e);
     let c = can(e, tool);
-    let wide = s.window.width >= WIDE;
-    let swatches = match s.window.width >= NARROW {
-        true => SWATCHES,
-        false => NARROW_SWATCHES,
-    };
+    let own = own_groups(e, tool);
+    let scale = f32::from(s.ui_zoom) / 100.0;
+    let plan = Plan::at(bar_room(s), scale, !own.is_empty());
     let sel = e.selection();
     let (title, key) = match sel.len() {
         0 => {
@@ -290,30 +375,40 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             None,
         ),
     };
-    let mut head: Vec<El<'_>> = vec![text(Role::ROW_TITLE, title).into()];
-    if s.window.width >= NARROW {
-        head.extend(key.filter(|k| *k != '\0').map(|k| {
-            let cap = keycap::keycap(k.to_ascii_uppercase().to_string());
-            container(cap).width(size::KEYCAP_H).into()
-        }));
+    let ed = |g: El<'a>| -> Element<'a, Msg> { Element::from(g).map(Msg::Editor) };
+    let mut items: Vec<Element<'a, Msg>> = Vec::new();
+    // the name: words and key, or just the tool's icon in the narrow
+    match plan.name_full {
+        true => {
+            let mut head: Vec<El<'_>> = vec![text(Role::ROW_TITLE, title).into()];
+            head.extend(key.filter(|k| *k != '\0').map(|k| {
+                let cap = keycap::keycap(k.to_ascii_uppercase().to_string());
+                container(cap).width(size::KEYCAP_H).into()
+            }));
+            items.push(ed(dir::row(head)
+                .spacing(space::GAP)
+                .align_y(Center)
+                .into()));
+            items.push(ed(hairline()));
+        }
+        false => {
+            let glyph = iced::widget::text(info(tool).icon)
+                .font(crate::shared::kit::icon::FONT)
+                .size(16);
+            items.push(container(glyph).center_x(W_ICON).into());
+        }
     }
-    let name: El<'_> = dir::row(head).spacing(space::GAP).align_y(Center).into();
-    // the narrowest windows give the name up first (the rail's tool shows it)
-    let mut items: Vec<El<'_>> = match s.window.width >= NARROW {
-        true => vec![name, hairline()],
-        false => Vec::new(),
-    };
-    items.extend([
-        colours(e, swatches, c.colour),
-        stroke(e, c.stroke),
-        opacity(e, c.opacity, s.window.width < NARROW),
-        outline_fill(e, tool, c),
-    ]);
-    let own = own_groups(e, tool);
-    let more = !own.is_empty() && !wide;
-    if !own.is_empty() && wide {
-        items.push(hairline());
-        items.extend(own);
+    items.push(match plan.colours_inline {
+        true => ed(colours(e, SWATCHES, c.colour)),
+        false => colour_button(e, s.popover == Some(Pop::Colours), c.colour),
+    });
+    items.push(ed(stroke(e, c.stroke, plan.captions)));
+    items.push(ed(opacity(e, c.opacity, plan.captions)));
+    items.push(ed(outline_fill(e, tool, c)));
+    let more = !own.is_empty() && !plan.own_inline;
+    if !own.is_empty() && plan.own_inline {
+        items.push(ed(hairline()));
+        items.extend(own.into_iter().map(ed));
     }
     let mut end: Vec<Element<'a, Msg>> = Vec::new();
     if more {
@@ -337,15 +432,14 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         true,
     ));
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
-    let line: Element<'a, Msg> = Element::from(line).map(Msg::Editor);
-    let ends = Element::from(dir::row(end).spacing(GROUP_GAP).align_y(Center)).map(|m: Msg| m);
+    let ends = dir::row(end).spacing(GROUP_GAP).align_y(Center);
     let row = crate::dir_row![line, Space::new().width(Fill), ends]
         .spacing(GROUP_GAP)
         .align_y(Center);
     let bar = container(row)
         .padding(iced::Padding {
-            left: 14.0,
-            right: 12.0,
+            left: PAD_L,
+            right: PAD_R,
             ..iced::Padding::ZERO
         })
         .height(super::OPTIONS)
