@@ -1,22 +1,19 @@
-//! A window's side panel (Studio's Library and Properties, board 2): its own
+//! A window's side panel (Studio's Steps sidebar): its own
 //! 40 px header (a name and the button that hides it), a hairline, and a body
 //! that scrolls, on the `sidebar` fill. Also the parts its lists are made of:
 //! a collapsible section header (30 px), a list row (a thumbnail row or an
 //! object row, hover shade, `accent_soft` while selected) and the menu bar's
 //! opener (28 px).
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container};
 use iced::{Border, Center, Element, Fill, Length, Padding};
 
-use super::icon::{FONT, Icon};
 use super::icon_button::{self, State};
 use super::themes::c;
-use super::tokens::{Role, size, space};
+use super::tokens::{Role, size};
 use super::tooltip::{Why, hint};
 use super::{divider, scroll};
 
-pub const SECTION_H: f32 = 30.0;
 const OPENER_H: f32 = 28.0;
-const MARK: f32 = 22.0;
 const OPENER_R: f32 = 8.0;
 const PAD: f32 = 12.0;
 
@@ -58,147 +55,6 @@ pub fn panel<'a, Message: Clone + 'a>(
         ..container::Style::default()
     })
     .into()
-}
-
-/// A section's header: a chevron (down open, forward folded), the name in
-/// small caps, a count at the end.
-pub fn section_head<'a, Message: Clone + 'a>(
-    words: &'a str,
-    open: bool,
-    count: Option<usize>,
-    toggle: Message,
-) -> Element<'a, Message> {
-    let glyph = if open {
-        Icon::ChevronDown
-    } else {
-        Icon::Forward
-    };
-    let face = text(glyph.glyph()).font(FONT);
-    let chevron = face.size(12).color(c().text_muted);
-    let mut line = crate::dir_row![
-        chevron,
-        super::text::muted(Role::SECTION, words).width(Fill)
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    if let Some(n) = count {
-        line = line.push(super::text::muted(Role::KEYCAP, n.to_string()));
-    }
-    let b = button(line)
-        .width(Fill)
-        .height(SECTION_H)
-        .padding([0.0, PAD])
-        .style(|_, status| button::Style {
-            background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
-            text_color: c().text_muted,
-            ..button::Style::default()
-        });
-    super::focus::press(b, 0.0, Some(toggle)).into()
-}
-
-/// A list row `height` tall around `content`: shaded under the pointer, tinted
-/// while `selected`; pressable when `press` is given.
-pub fn row<'a, Message: Clone + 'a>(
-    content: Element<'a, Message>,
-    height: f32,
-    selected: bool,
-    press: Option<Message>,
-) -> Element<'a, Message> {
-    let b = button(container(content).center_y(Fill))
-        .width(Fill)
-        .height(height)
-        .padding([0.0, PAD])
-        .style(move |_, status| button::Style {
-            background: match () {
-                _ if selected => Some(c().accent_soft.into()),
-                _ if matches!(status, button::Status::Hovered) => Some(c().hover.into()),
-                _ => None,
-            },
-            text_color: c().text,
-            border: Border::default(),
-            ..button::Style::default()
-        });
-    super::focus::press(b, 0.0, press).into()
-}
-
-/// A row's lead glyph (14 px): `text_sub`, the accent while selected.
-pub fn lead<'a, Message: 'a>(glyph: char, selected: bool) -> Element<'a, Message> {
-    text(glyph)
-        .font(FONT)
-        .size(14)
-        .color(if selected { c().accent } else { c().text_sub })
-        .into()
-}
-
-/// A row's visibility mark (the Objects list's eye), drawn as a small vector: an
-/// open eye while the object shows, struck through while it is hidden; a press
-/// flips it.
-pub fn visible_mark<'a, Message: Clone + 'a>(shown: bool, press: Message) -> Element<'a, Message> {
-    let eye = iced::widget::canvas(Eye { shown })
-        .width(EYE.0)
-        .height(EYE.1);
-    let b = button(container(eye).center(Fill))
-        .width(MARK)
-        .height(MARK)
-        .padding(0)
-        .style(|_, status| button::Style {
-            background: matches!(status, button::Status::Hovered).then(|| c().hover.into()),
-            border: Border::default().rounded(OPENER_R),
-            ..button::Style::default()
-        });
-    super::focus::press(b, OPENER_R, Some(press)).into()
-}
-
-/// The eye's size.
-const EYE: (f32, f32) = (14.0, 10.0);
-
-struct Eye {
-    shown: bool,
-}
-
-impl<Message> iced::widget::canvas::Program<Message> for Eye {
-    type State = ();
-
-    fn draw(
-        &self,
-        _: &(),
-        renderer: &iced::Renderer,
-        _: &iced::Theme,
-        bounds: iced::Rectangle,
-        _: iced::mouse::Cursor,
-    ) -> Vec<iced::widget::canvas::Geometry> {
-        use iced::widget::canvas::{Frame, Path, Stroke};
-        let mut frame = Frame::new(renderer, bounds.size());
-        let (w, h) = (bounds.width, bounds.height);
-        let ink = if self.shown {
-            c().text_sub
-        } else {
-            c().text_muted
-        };
-        let lid = Path::new(|p| {
-            p.move_to(iced::Point::new(1.0, h / 2.0));
-            p.quadratic_curve_to(
-                iced::Point::new(w / 2.0, -h * 0.3),
-                iced::Point::new(w - 1.0, h / 2.0),
-            );
-            p.quadratic_curve_to(
-                iced::Point::new(w / 2.0, h * 1.3),
-                iced::Point::new(1.0, h / 2.0),
-            );
-        });
-        frame.stroke(&lid, Stroke::default().with_color(ink).with_width(1.3));
-        match self.shown {
-            true => frame.fill(
-                &Path::circle(iced::Point::new(w / 2.0, h / 2.0), h * 0.2),
-                ink,
-            ),
-            false => frame.stroke(
-                &Path::line(iced::Point::new(2.0, h), iced::Point::new(w - 2.0, 0.0)),
-                Stroke::default().with_color(ink).with_width(1.3),
-            ),
-        }
-        vec![frame.into_geometry()]
-    }
 }
 
 /// A menu bar's opener: 28 high, radius 8, raised while its menu is `open`.

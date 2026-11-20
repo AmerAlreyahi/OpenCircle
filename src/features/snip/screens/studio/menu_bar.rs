@@ -148,6 +148,7 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
             action(s, Action::Cut, true),
             action(s, Action::Copy, false),
             action(s, Action::Paste, false),
+            item(S::st_paste_step, "", Msg::PasteStep, false),
             action(s, Action::Duplicate, false),
             action(s, Action::Delete, false),
             action(s, Action::SelectAll, true),
@@ -157,9 +158,7 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
         Menu::View => {
             let p = s.panels;
             let mut v = vec![
-                item(S::st_left_panel, keys::LEFT_PANEL, Msg::Library, false),
-                item(S::st_right_panel, keys::RIGHT_PANEL, Msg::Panel, false),
-                item(S::st_all_panels, keys::ALL_PANELS, Msg::Both, false),
+                item(S::st_steps, keys::STEPS_SIDEBAR, Msg::Library, false),
                 item(S::st_zoom_in, keys::ZOOM_IN, Msg::ZoomIn, true),
                 item(S::st_zoom_out, keys::ZOOM_OUT, Msg::ZoomOut, false),
                 item(S::st_fit, keys::FIT, Msg::Fit, false),
@@ -168,10 +167,8 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
                 item(S::st_grid, "", Msg::Grid, false),
             ];
             v[0].checked = p.library;
-            v[1].checked = p.options;
-            v[2].checked = p.library && p.options;
-            v[7].checked = s.snap;
-            v[8].checked = s.grid;
+            v[5].checked = s.snap;
+            v[6].checked = s.grid;
             v
         }
     }
@@ -203,6 +200,14 @@ pub fn sub_items(sub: Sub, s: &Studio) -> Vec<Item<'_>> {
                 sep: false,
                 sub: None,
             })
+            .chain((!s.recent.is_empty()).then(|| Item {
+                label: tr(S::st_clear),
+                keys: String::new(),
+                checked: false,
+                press: Msg::ClearRecent,
+                sep: true,
+                sub: None,
+            }))
             .collect(),
     }
 }
@@ -297,7 +302,14 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
                 .into(),
         }
     };
-    let mut layers = vec![base, place(first, x, HEADER_BELOW)];
+    // a press anywhere under the header (outside the menu) closes it
+    let outside = iced::widget::column![
+        iced::widget::Space::new().height(HEADER_BELOW),
+        iced::widget::mouse_area(iced::widget::Space::new().width(Fill).height(Fill))
+            .on_press(Msg::Menu(None))
+            .on_right_press(Msg::Menu(None)),
+    ];
+    let mut layers = vec![base, outside.into(), place(first, x, HEADER_BELOW)];
     if let (Some(sub), Some(y)) = (s.sub, sub_at) {
         let second = panel(sub_items(sub, s), None, move |i| Msg::SubPick(sub, i));
         let beside = x + option_list::MENU_WIDTH + SUB_GAP;

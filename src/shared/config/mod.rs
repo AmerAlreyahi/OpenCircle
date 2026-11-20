@@ -405,6 +405,18 @@ pub struct AiConfig {
 /// The AI chat's zoom steps (percent; 100 = none).
 pub const CHAT_ZOOM: [u16; 7] = [80, 90, 100, 110, 125, 140, 160];
 
+/// The step after `zoom` (percent) in `CHAT_ZOOM`: `by` > 0 a step larger, < 0
+/// smaller, 0 back to 100 % (the AI chat's and the Studio's Ctrl+= / Ctrl+- / Ctrl+0).
+pub fn zoom_step(zoom: u16, by: i8) -> u16 {
+    let steps = CHAT_ZOOM;
+    let at = (steps.iter().position(|&z| z >= zoom)).unwrap_or(steps.len() - 1);
+    match by.signum() {
+        1 => steps[(at + 1).min(steps.len() - 1)],
+        -1 => steps[at.saturating_sub(1)],
+        _ => 100,
+    }
+}
+
 fn default_chat_zoom(zoom: &u16) -> bool {
     *zoom == 100
 }
@@ -616,7 +628,7 @@ impl Default for StudioPrefs {
             pixel_grid: true,
             background: StudioBackdrop::Theme,
             zoom_on_open: StudioZoom::Fit,
-            wheel: StudioWheel::Scroll,
+            wheel: StudioWheel::Zoom,
         }
     }
 }

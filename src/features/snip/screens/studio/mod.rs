@@ -14,12 +14,13 @@ mod cut;
 mod edit_text;
 pub(crate) mod editing;
 pub(crate) mod keys;
-mod library;
 mod menu_bar;
 mod options_bar;
-mod properties;
+mod popovers;
 pub mod recovery;
 mod sheets;
+mod sidebar;
+mod start;
 mod status_bar;
 mod view;
 
@@ -54,21 +55,9 @@ pub const MIN: Size = Size::new(960.0, 600.0);
 const HEADER: f32 = 41.0; // 40 + the hairline
 const RAIL: f32 = 52.0;
 const OPTIONS: f32 = 48.0;
-/// Below this width both panels fold and the Library opens over the stage.
-const NARROW: f32 = 1100.0;
 const STATUS: f32 = 44.0;
-const LIBRARY: f32 = 240.0;
-const PANEL: f32 = 260.0;
-/// Arabic's picture panel is wider (its names are longer; spec §2).
-const PANEL_AR: f32 = 288.0;
-
-/// The picture panel's width in the app's language.
-fn panel_width() -> f32 {
-    match crate::shared::app_language::rtl() {
-        true => PANEL_AR,
-        false => PANEL,
-    }
-}
+/// The Steps sidebar's width.
+const SIDEBAR: f32 = 260.0;
 /// Room kept around a fitted picture.
 const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
@@ -78,6 +67,9 @@ const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.05..=8.0;
 pub const CANVAS: &str = "studio-canvas";
 /// Edit text's inline field.
 pub const FIELD: &str = "studio-edit-field";
+
+/// Files dropped within this are one drop (steps).
+const DROP_BURST: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// The Steps grid: four to a row, the cell and the gap round it.
 const STEP_COLS: usize = 4;
@@ -110,10 +102,19 @@ enum After {
 pub enum Msg {
     Editor(annotate::Message),
     Caption(Caption),
-    /// The side panels' toggles (Ctrl+[ / Ctrl+] / Ctrl+\).
+    /// The Steps sidebar's toggle (its header, View menu, Ctrl+B).
     Library,
-    Panel,
-    Both,
+    /// A popover opens (`Some`) or closes (v3.1).
+    Pop(Option<popovers::Pop>),
+    /// Steps: the file dialog (several pictures), the files it gave or that were
+    /// dropped together, Paste as step.
+    PickFiles,
+    AddFiles(Vec<PathBuf>),
+    PasteStep,
+    /// The middle button pans (drag start / end).
+    Middle(bool),
+    /// Ctrl+= / Ctrl+- / Ctrl+0 scale the Studio's own UI (steps; 0 = reset).
+    UiScale(i8),
     ZoomIn,
     ZoomOut,
     /// Ctrl+wheel over the stage: `notches` steps (up = in) round the pointer
@@ -162,14 +163,12 @@ pub enum Msg {
     /// The panel's Cut out row; the options bar's Before (`true`) / After.
     CutOut,
     CutView(bool),
+    /// The Cut out panel's close: the cut stays, the compare view goes.
+    CutClose,
     /// A menu opens (`Some`) or closes; a row picked; the keyboard on the bar.
     Menu(Option<Menu>),
     MenuPick(Menu, usize),
     MenuKey(Nav),
-    /// A Library section folds / unfolds (index in `library`).
-    Section(usize),
-    /// The Library over the stage (narrow windows).
-    Overlay,
     /// The shortcuts sheet.
     Shortcuts(bool),
     /// The shortcuts sheet's Edit shortcuts… (Settings); the restore sheet's Later.
@@ -194,11 +193,6 @@ pub enum Msg {
     /// Properties' box fields: a typed value (axis, text), Enter.
     BoundsEdit(usize, String),
     BoundsCommit,
-    /// The Objects list: a press on a row (display slot, top = front), the
-    /// pointer over the list (with the rows' count), the press ends, the eye.
-    ObjPress(usize),
-    ObjMove(Point, usize),
-    ObjRelease,
     PanStart,
     PanEnd,
     /// A second menu's row; View > Snap / Pixel grid; Recent > Clear.
@@ -265,6 +259,13 @@ pub enum Outcome {
     Caption(Caption),
     /// The open-file dialog, then `Msg::Dropped` with the file.
     PickFile,
+    /// The open-file dialog for several pictures, then `Msg::AddFiles`.
+    PickFiles,
+    /// Read these files and add each as a step.
+    AddPictures(Vec<PathBuf>),
+    /// The clipboard's picture becomes a step.
+    PasteStep,
+
     /// Read this file (a dropped or recent one) and `open` it.
     Read(PathBuf),
     /// Ctrl+V: a picture on the clipboard opens; else the editor pastes its text
@@ -362,8 +363,13 @@ pub struct Studio {
     /// The open menu and its keyboard row; the Library's folded sections
     /// (Recent, Objects, Steps); the narrow Library overlay; the shortcuts sheet.
     pub(super) menu: Option<(Menu, usize)>,
-    pub(super) shut: [bool; 3],
-    pub(super) overlay: bool,
+    pub(super) popover: Option<popovers::Pop>,
+    /// A middle-button pan is on.
+    middle: bool,
+    /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
+    pub(super) ui_zoom: u16,
+    /// When the last file was dropped (files dropped together are steps).
+    last_drop: Option<std::time::Instant>,
     pub(super) shortcuts: bool,
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
@@ -382,7 +388,6 @@ pub struct Studio {
     /// open second menu, the document's name and the name of the next picture.
     pub(super) space: bool,
     pub(super) shift: bool,
-    pub(super) obj_pick: Reorder,
     quiet: recovery::Debounce,
     pan: Option<Point>,
     pub(super) sub: Option<Sub>,
@@ -461,8 +466,10 @@ impl Studio {
             cut: None,
             transparent: false,
             menu: None,
-            shut: [false; 3],
-            overlay: false,
+            popover: None,
+            middle: false,
+            ui_zoom: 100,
+            last_drop: None,
             shortcuts: false,
             context: None,
             pointer: PointerCell::default(),
@@ -473,7 +480,6 @@ impl Studio {
             lock: true,
             space: false,
             shift: false,
-            obj_pick: Reorder::default(),
             quiet: recovery::Debounce::default(),
             pan: None,
             sub: None,
@@ -1005,7 +1011,6 @@ impl Studio {
         self.menu.is_some()
             || self.context.is_some()
             || self.shortcuts
-            || (self.overlay && self.narrow())
             || self.asking()
             || self.exporting
             || self.card.is_some()
@@ -1086,6 +1091,11 @@ impl Studio {
                 self.show_cut(before);
                 Outcome::None
             }
+            Msg::CutClose => {
+                self.show_cut(false);
+                self.cut = None;
+                Outcome::None
+            }
             Msg::CutOut
                 if self.editor.is_none()
                     || self.card.is_some()
@@ -1142,24 +1152,33 @@ impl Studio {
             Msg::Editor(m) => self.on_editor(m),
             Msg::Caption(Caption::Close) => self.close_requested(),
             Msg::Caption(c) => Outcome::Caption(c),
-            // narrow: the Library is an overlay, the panels' choices stay as saved
-            Msg::Library | Msg::Panel | Msg::Both if self.narrow() => {
-                self.overlay = !self.overlay;
-                Outcome::None
-            }
-            Msg::Library | Msg::Panel | Msg::Both => {
-                let p = &mut self.panels;
-                match msg {
-                    Msg::Library => p.library = !p.library,
-                    Msg::Panel => p.options = !p.options,
-                    // both: hidden if either shows, else both shown
-                    _ => {
-                        let show = !(p.library || p.options);
-                        (p.library, p.options) = (show, show);
-                    }
-                }
+            Msg::Library => {
+                self.panels.library = !self.panels.library;
+                self.popover = None;
                 self.fit();
                 Outcome::Panels(self.panels)
+            }
+            Msg::Pop(p) => {
+                self.popover = p.filter(|p| self.popover != Some(*p));
+                Outcome::None
+            }
+            Msg::PickFiles => {
+                self.asked = true;
+                Outcome::PickFiles
+            }
+            Msg::AddFiles(files) => match files.is_empty() {
+                true => Outcome::None,
+                false => Outcome::AddPictures(files),
+            },
+            Msg::PasteStep => Outcome::PasteStep,
+            Msg::UiScale(by) => {
+                self.ui_zoom = crate::shared::config::zoom_step(self.ui_zoom, by);
+                Outcome::None
+            }
+            Msg::Middle(on) => {
+                self.middle = on;
+                self.pan = on.then(|| self.pointer.get());
+                Outcome::None
             }
             Msg::ZoomIn | Msg::ZoomOut | Msg::Actual => {
                 let Some(e) = &self.editor else {
@@ -1207,8 +1226,18 @@ impl Studio {
             Msg::Dropped(path) => {
                 self.asked = true;
                 self.hovered = false;
-                self.next_name = file_name(&path);
-                Outcome::Read(path)
+                // files dropped together, or any file dropped on an open picture,
+                // are steps; a single one on an empty Studio opens
+                let now = std::time::Instant::now();
+                let together = (self.last_drop.replace(now))
+                    .is_some_and(|t| now.duration_since(t) < DROP_BURST);
+                match together || self.editor.is_some() {
+                    true => Outcome::AddPictures(vec![path]),
+                    false => {
+                        self.next_name = file_name(&path);
+                        Outcome::Read(path)
+                    }
+                }
             }
             Msg::OpenRecent(path) => {
                 self.asked = true;
@@ -1269,7 +1298,7 @@ impl Studio {
                     || self.context.take().is_some()
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
-                    || std::mem::take(&mut self.overlay);
+                    || self.popover.take().is_some();
                 // the export sheet (a running encoder stops), then the restore sheet (Later)
                 if !closed && self.exporting {
                     return self.update(Msg::WalkCancel);
@@ -1342,30 +1371,6 @@ impl Studio {
                     false => Outcome::None,
                 }
             }
-            Msg::ObjPress(slot) => {
-                self.obj_pick.press(slot);
-                Outcome::None
-            }
-            Msg::ObjMove(at, n) => {
-                self.obj_pick.moved(at, 0.0, library::OBJECT_ROW, n);
-                Outcome::None
-            }
-            Msg::ObjRelease => {
-                let n = self.editor.as_ref().map_or(0, |e| e.doc.items.len());
-                // the list shows the front first: slot k is item n - 1 - k
-                match self.obj_pick.release() {
-                    Some(Released::Click(slot)) if slot < n => self.update(Msg::Editor(
-                        annotate::Message::SelectIndex(n - 1 - slot, self.shift),
-                    )),
-                    Some(Released::Moved(from, to)) if from < n && to < n => {
-                        self.update(Msg::Editor(annotate::Message::Reorder {
-                            from: n - 1 - from,
-                            to: n - 1 - to,
-                        }))
-                    }
-                    _ => Outcome::None,
-                }
-            }
             Msg::Space(on) => {
                 // (typing a text on the picture keeps its spaces)
                 self.space = on && !self.editor.as_ref().is_some_and(|e| e.typing());
@@ -1421,10 +1426,10 @@ impl Studio {
                     true => editing::picture_menu(e),
                     false => editing::object_menu(e),
                 };
-                // the stage's left edge: mirrored, the properties panel sits there
+                // the stage's left edge: mirrored, the Steps sidebar sits there
                 let left = match crate::shared::app_language::rtl() {
-                    true => (self.panel_shown() as u8 as f32) * (panel_width() + 1.0),
-                    false => (self.library_shown() as u8 as f32) * (LIBRARY + 1.0) + RAIL + 2.0,
+                    true => (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0),
+                    false => RAIL + 2.0,
                 };
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
                 let seps = entries.iter().filter(|r| r.divider).count();
@@ -1507,16 +1512,6 @@ impl Studio {
                     Some(m) => self.update(m),
                     None => Outcome::None,
                 }
-            }
-            Msg::Section(i) => {
-                if let Some(x) = self.shut.get_mut(i) {
-                    *x = !*x;
-                }
-                Outcome::None
-            }
-            Msg::Overlay => {
-                self.overlay = !self.overlay;
-                Outcome::None
             }
             Msg::Shortcuts(on) => {
                 self.shortcuts = on;
@@ -1671,17 +1666,9 @@ impl Studio {
         }
     }
 
-    /// Narrow windows fold both panels (the Library opens over the stage).
-    pub(super) fn narrow(&self) -> bool {
-        self.window.width < NARROW
-    }
-
-    pub(super) fn library_shown(&self) -> bool {
-        self.panels.library && !self.narrow()
-    }
-
-    pub(super) fn panel_shown(&self) -> bool {
-        self.panels.options && !self.narrow()
+    /// The Steps sidebar shows.
+    pub(super) fn sidebar_shown(&self) -> bool {
+        self.panels.library
     }
 
     /// Settings > Studio > "Keep unsaved work": every edit restarts the quiet
@@ -1779,8 +1766,7 @@ impl Studio {
     /// The stage: the window less the header, the rail, the bars and the shown panels.
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = (self.library_shown() as u8 as f32) * (LIBRARY + 1.0)
-            + (self.panel_shown() as u8 as f32) * (panel_width() + 1.0);
+        let side = (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),

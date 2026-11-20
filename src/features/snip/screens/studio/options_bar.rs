@@ -1,16 +1,18 @@
 //! The options bar (board 10, STUDIO_V3_SPEC §4): the tool's name and key,
 //! then its groups, every control 32 high (`kit::option_bar`). The groups read
 //! the editor's current values and send the editor's own messages.
-use iced::widget::container;
-use iced::{Center, Element, Fill};
+use iced::widget::{Space, container};
+use iced::{Center, Color, Element, Fill};
 
-use super::Msg;
+use super::popovers::Pop;
+use super::{Msg, Studio};
 use crate::features::snip::annotate::{
-    Annotator, ERASER_SIZES, Message, TextStyle, Tool, Width, info, style,
+    Annotator, ERASER_SIZES, Message, TextStyle, Tool, Width, fills_inside, info, style,
 };
 use crate::shared::app_language::{fmt, tr};
+use crate::shared::kit::icon::Icon;
 use crate::shared::kit::option_bar::{
-    GROUP_GAP, accent_cell, caption, dot, group, hairline, swatch, text_cell, value,
+    GROUP_GAP, accent_cell, caption, dot, glyph_cell, group, hairline, swatch, text_cell, value,
 };
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
@@ -19,6 +21,7 @@ use crate::t;
 
 /// Colours on the options bar (and the Edit text bar).
 pub(super) const SWATCHES: usize = 8;
+const NARROW_SWATCHES: usize = 4;
 const TEXT_SIZES: [f32; 3] = [16.0, 26.0, 38.0];
 
 type El<'a> = Element<'a, Message>;
@@ -49,19 +52,96 @@ fn shown(e: &Annotator) -> Shown {
     }
 }
 
-fn colours(e: &Annotator, n: usize) -> El<'_> {
+/// What the shared controls can do for the tool / selection now: a control
+/// that can't is dimmed (38 %), never hidden (STUDIO v3.1).
+#[derive(Clone, Copy)]
+struct Can {
+    colour: bool,
+    stroke: bool,
+    opacity: bool,
+    outline: bool,
+    fill: bool,
+}
+
+fn can(e: &Annotator, tool: Tool) -> Can {
+    let sel = e.selection();
+    let pasted = e.selection_style().is_some_and(|s| s.opacity.is_some());
+    if pasted {
+        return Can {
+            colour: false,
+            stroke: false,
+            opacity: true,
+            outline: false,
+            fill: false,
+        };
+    }
+    if sel.len() > 1 {
+        return Can {
+            colour: true,
+            stroke: true,
+            opacity: false,
+            outline: false,
+            fill: false,
+        };
+    }
+    let liney = matches!(
+        tool,
+        Tool::Rect
+            | Tool::Ellipse
+            | Tool::Line
+            | Tool::Arrow
+            | Tool::Pen
+            | Tool::Highlighter
+            | Tool::Step
+    );
+    Can {
+        colour: liney || matches!(tool, Tool::Text | Tool::Callout | Tool::Redact),
+        stroke: liney,
+        opacity: false,
+        outline: matches!(
+            tool,
+            Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow | Tool::Callout
+        ),
+        fill: fills_inside(tool),
+    }
+}
+
+/// The tool the bar is for: the selected object's, else the active tool's.
+fn base_tool(e: &Annotator) -> Tool {
+    let sel = e.selection();
+    let item = (sel.len() == 1).then(|| e.doc.items.get(sel[0])).flatten();
+    match item {
+        Some(item) => info(info(super::popovers::tool_of(&item.shape)).slot).tool,
+        None => info(info(e.tool).slot).tool,
+    }
+}
+
+fn colours(e: &Annotator, n: usize, live: bool) -> El<'_> {
     let now = shown(e).colour;
     let cells = style::ANNOTATION.iter().take(n).map(|c| {
         let rgba = c.into_rgba8();
-        swatch(*c, Some(rgba) == now, Some(Message::Colour(rgba)))
+        let shade = Color {
+            a: if live { c.a } else { c.a * 0.38 },
+            ..*c
+        };
+        swatch(
+            shade,
+            live && Some(rgba) == now,
+            live.then_some(Message::Colour(rgba)),
+        )
     });
     group(cells.collect(), false)
 }
 
 /// Three size dots and the value.
-fn dots<'a>(at: Option<usize>, words: String, pick: impl Fn(usize) -> Message) -> El<'a> {
+fn dots<'a>(
+    at: Option<usize>,
+    words: String,
+    live: bool,
+    pick: impl Fn(usize) -> Message,
+) -> El<'a> {
     let mut cells: Vec<El<'a>> = vec![caption(t!(sn_size))];
-    cells.extend((0..3).map(|i| dot(i, at == Some(i), Some(pick(i)))));
+    cells.extend((0..3).map(|i| dot(i, live && at == Some(i), live.then(|| pick(i)))));
     cells.push(value(words));
     group(cells, false)
 }
@@ -70,43 +150,57 @@ fn toggle<'a>(words: &'a str, on: bool, press: Option<Message>) -> El<'a> {
     group(vec![text_cell(words, on, press)], false)
 }
 
-fn stroke(e: &Annotator) -> El<'_> {
+fn stroke(e: &Annotator, live: bool) -> El<'_> {
     let px = shown(e).stroke;
     let at = Width::ALL.iter().position(|w| w.stroke() == px);
-    dots(at, format!("{} px", px.round()), |i| {
+    dots(at, format!("{} px", px.round()), live, |i| {
         Message::Width(Width::ALL[i])
     })
 }
 
+/// A pasted picture's opacity: three common steps.
+fn opacity(e: &Annotator, live: bool, compact: bool) -> El<'_> {
+    let now = e.selection_style().and_then(|s| s.opacity).unwrap_or(255);
+    let mut cells: Vec<El<'_>> = Vec::new();
+    if !compact {
+        cells.push(caption(t!(st_opacity)));
+    }
+    for (words, v) in [("100 %", 255u8), ("70 %", 178), ("40 %", 102)] {
+        cells.push(text_cell(
+            words,
+            live && now.abs_diff(v) < 12,
+            live.then_some(Message::Opacity(v)),
+        ));
+    }
+    group(cells, false)
+}
+
+fn outline_fill(e: &Annotator, tool: Tool, c: Can) -> El<'_> {
+    let now = shown(e);
+    let fill = (c.fill && fills_inside(tool)).then_some(Message::Fill(!now.fill));
+    group(
+        vec![
+            text_cell(
+                t!(sn_outline),
+                c.outline && now.outline,
+                c.outline.then_some(Message::Outline(!now.outline)),
+            ),
+            text_cell(t!(sn_fill), c.fill && now.fill, fill),
+        ],
+        false,
+    )
+}
+
 fn font_size(e: &Annotator) -> El<'_> {
     let at = TEXT_SIZES.iter().position(|&p| p == e.text_size);
-    dots(at, format!("{} px", e.text_size.round()), |i| {
+    dots(at, format!("{} px", e.text_size.round()), true, |i| {
         Message::TextSize(TEXT_SIZES[i])
     })
 }
 
-/// The groups of `tool`, in the order of STUDIO_V3_SPEC §4.
-fn groups(e: &Annotator, tool: Tool, n: usize) -> Vec<El<'_>> {
-    let now = shown(e);
-    let outline = || {
-        toggle(
-            t!(sn_outline),
-            now.outline,
-            Some(Message::Outline(!now.outline)),
-        )
-    };
+/// The tool's own groups (what the shared ones don't cover).
+fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
     match tool {
-        Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow => {
-            let fills = crate::features::snip::annotate::fills_inside(tool);
-            let fill = fills.then_some(Message::Fill(!now.fill));
-            vec![
-                colours(e, n),
-                stroke(e),
-                outline(),
-                toggle(t!(sn_fill), now.fill && fills, fill),
-            ]
-        }
-        Tool::Pen | Tool::Highlighter | Tool::Step => vec![colours(e, n), stroke(e)],
         Tool::Text => {
             let st = e.text_style;
             let bold = TextStyle {
@@ -114,25 +208,25 @@ fn groups(e: &Annotator, tool: Tool, n: usize) -> Vec<El<'_>> {
                 ..st
             };
             vec![
-                colours(e, n),
                 font_size(e),
                 toggle(t!(sn_bold), st.bold, Some(Message::TextStyle(bold))),
             ]
         }
-        Tool::Callout => vec![colours(e, n), font_size(e), outline()],
-        Tool::Redact => vec![colours(e, n)],
+        Tool::Callout => vec![font_size(e)],
         Tool::Blur => {
             let at = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let px = e.blur_cell.cell();
             vec![
-                dots(at, format!("{px} px"), |i| Message::BlurCell(Width::ALL[i])),
+                dots(at, format!("{px} px"), true, |i| {
+                    Message::BlurCell(Width::ALL[i])
+                }),
                 toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
             ]
         }
         Tool::Eraser => {
             let at = ERASER_SIZES.iter().position(|&s| s == e.eraser);
             vec![
-                dots(at, format!("{} px", e.eraser.round()), |i| {
+                dots(at, format!("{} px", e.eraser.round()), true, |i| {
                     Message::EraserSize(ERASER_SIZES[i])
                 }),
                 toggle(
@@ -146,72 +240,113 @@ fn groups(e: &Annotator, tool: Tool, n: usize) -> Vec<El<'_>> {
     }
 }
 
-/// What the groups are for: the tool's (nothing selected), the selected
-/// object's own (by its type), or what several objects share.
-fn subject(e: &Annotator, n: usize) -> (String, Option<char>, Vec<El<'_>>) {
+/// The colour swatches alone (the tests click them).
+#[cfg(test)]
+pub(super) fn colour_group(e: &Annotator, n: usize) -> Element<'_, Msg> {
+    Element::from(colours(e, n, true)).map(Msg::Editor)
+}
+
+/// The tool's own groups as one element (the More popover's content).
+pub fn tool_group(e: &Annotator) -> Element<'_, Msg> {
+    let g = own_groups(e, base_tool(e));
+    let body: El<'_> = match g.is_empty() {
+        true => muted(Role::ROW_DESC, t!(st_hint_select)).into(),
+        false => iced::widget::column(g).spacing(space::GAP).into(),
+    };
+    Element::from(body).map(Msg::Editor)
+}
+
+/// Below `WIDE` the tool's own group folds into "More"; below `NARROW` the
+/// colours shrink and the key hides (the bar never wraps and never clips).
+const WIDE: f32 = 1360.0;
+const NARROW: f32 = 1100.0;
+
+fn opener<'a>(words: &'a str, on: bool, pop: Pop, live: bool) -> Element<'a, Msg> {
+    let press = live.then_some(Msg::Pop(Some(pop)));
+    group(
+        vec![
+            text_cell(words, on, press.clone()),
+            glyph_cell(Icon::ChevronDown.glyph(), on, press),
+        ],
+        false,
+    )
+}
+
+/// The bar: the tool's name and key, the shared controls (always all of them),
+/// the tool's own, then Position and Actions.
+pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
+    let tool = base_tool(e);
+    let c = can(e, tool);
+    let wide = s.window.width >= WIDE;
+    let swatches = match s.window.width >= NARROW {
+        true => SWATCHES,
+        false => NARROW_SWATCHES,
+    };
     let sel = e.selection();
-    let item = (sel.len() == 1).then(|| e.doc.items.get(sel[0])).flatten();
-    match (sel.len(), item) {
-        (0, _) => {
+    let (title, key) = match sel.len() {
+        0 => {
             let base = info(info(e.tool).slot);
-            (
-                tr(base.name).to_string(),
-                Some(base.key),
-                groups(e, base.tool, n),
-            )
+            (tr(base.name).to_string(), Some(base.key))
         }
-        (_, Some(item)) => {
-            let t = info(info(super::library::tool_of(&item.shape)).slot);
-            (tr(t.name).to_string(), None, groups(e, t.tool, n))
-        }
-        (count, None) => (
+        1 => (tr(info(tool).name).to_string(), None),
+        count => (
             fmt(crate::shared::app_language::S::st_n_objects, &[&count]),
             None,
-            vec![colours(e, n), stroke(e)],
         ),
-    }
-}
-
-/// The selection's own style groups, for Properties (none: nothing selected).
-pub fn selection_groups(e: &Annotator, swatches: usize) -> Vec<Element<'_, Msg>> {
-    match e.selection().is_empty() {
-        true => Vec::new(),
-        false => subject(e, swatches)
-            .2
-            .into_iter()
-            .map(|g| g.map(Msg::Editor))
-            .collect(),
-    }
-}
-
-/// The bar (48 high).
-pub fn view(e: &Annotator) -> Element<'_, Msg> {
-    let (title, key, g) = subject(e, SWATCHES);
+    };
     let mut head: Vec<El<'_>> = vec![text(Role::ROW_TITLE, title).into()];
-    head.extend(key.map(|k| {
-        let cap = keycap::keycap(k.to_ascii_uppercase().to_string());
-        container(cap).width(size::KEYCAP_H).into()
-    }));
+    if s.window.width >= NARROW {
+        head.extend(key.filter(|k| *k != '\0').map(|k| {
+            let cap = keycap::keycap(k.to_ascii_uppercase().to_string());
+            container(cap).width(size::KEYCAP_H).into()
+        }));
+    }
     let name: El<'_> = dir::row(head).spacing(space::GAP).align_y(Center).into();
-    let mut items: Vec<El<'_>> = vec![name];
-    let selected = !e.selection().is_empty();
-    let tool = info(e.tool).slot;
-    if !selected && (g.is_empty() || matches!(tool, Tool::Select | Tool::Crop)) {
-        let hint = muted(Role::ROW_DESC, t!(st_hint_select));
+    // the narrowest windows give the name up first (the rail's tool shows it)
+    let mut items: Vec<El<'_>> = match s.window.width >= NARROW {
+        true => vec![name, hairline()],
+        false => Vec::new(),
+    };
+    items.extend([
+        colours(e, swatches, c.colour),
+        stroke(e, c.stroke),
+        opacity(e, c.opacity, s.window.width < NARROW),
+        outline_fill(e, tool, c),
+    ]);
+    let own = own_groups(e, tool);
+    let more = !own.is_empty() && !wide;
+    if !own.is_empty() && wide {
         items.push(hairline());
-        items.push(hint.into());
+        items.extend(own);
     }
-    for (i, one) in g.into_iter().enumerate() {
-        if i == 0 {
-            items.push(hairline());
-        }
-        items.push(one);
+    let mut end: Vec<Element<'a, Msg>> = Vec::new();
+    if more {
+        end.push(opener(
+            t!(st_more),
+            s.popover == Some(Pop::More),
+            Pop::More,
+            true,
+        ));
     }
-    if selected {
-        items.push(crate::shared::kit::chip::tag(t!(st_tool_selected)));
-    }
+    end.push(opener(
+        t!(st_position),
+        s.popover == Some(Pop::Position),
+        Pop::Position,
+        !sel.is_empty(),
+    ));
+    end.push(opener(
+        t!(st_actions_menu),
+        s.popover == Some(Pop::Actions),
+        Pop::Actions,
+        true,
+    ));
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
-    let bar = container(line)
+    let line: Element<'a, Msg> = Element::from(line).map(Msg::Editor);
+    let ends = Element::from(dir::row(end).spacing(GROUP_GAP).align_y(Center)).map(|m: Msg| m);
+    let row = crate::dir_row![line, Space::new().width(Fill), ends]
+        .spacing(GROUP_GAP)
+        .align_y(Center);
+    let bar = container(row)
         .padding(iced::Padding {
             left: 14.0,
             right: 12.0,
@@ -219,7 +354,8 @@ pub fn view(e: &Annotator) -> Element<'_, Msg> {
         })
         .height(super::OPTIONS)
         .center_y(super::OPTIONS);
-    Element::from(scroll::across(bar).width(Fill)).map(Msg::Editor)
+    // (a last resort: a bar the estimates missed scrolls rather than clips)
+    scroll::across(bar).width(Fill).into()
 }
 
 /// The Done group (Edit text): the accent group, text on the fill.
@@ -265,11 +401,11 @@ mod tests {
         let mut built = 0;
         for tool in tools {
             e.update(Message::Tool(tool));
-            for group in groups(&e, tool, SWATCHES) {
+            for group in own_groups(&e, tool) {
                 assert_eq!(tall(&group), Length::Fixed(HEIGHT), "{tool:?}");
                 built += 1;
             }
         }
-        assert!(built >= 12, "the bars were measured: {built}");
+        assert!(built >= 5, "the bars were measured: {built}");
     }
 }

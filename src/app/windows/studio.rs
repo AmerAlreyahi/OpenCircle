@@ -194,6 +194,18 @@ impl Windows {
         }
     }
 
+    /// Pictures read for the Steps: each joins the strip as the next step.
+    pub(super) fn studio_add_pictures(&mut self, crops: Vec<Crop>) -> Task<Msg> {
+        if crops.is_empty() {
+            return self.toast(crate::t!(st_unreadable), false, None, TOAST_MS);
+        }
+        let tasks: Vec<_> = crops
+            .into_iter()
+            .map(|crop| self.studio_outcome(Outcome::AddStep(crop)))
+            .collect();
+        Task::batch(tasks)
+    }
+
     /// The clipboard was read for Ctrl+V: a picture opens; else the editor
     /// pastes its text at `at`; else the pill says there is none.
     pub(super) fn studio_pasted(
@@ -259,6 +271,37 @@ impl Windows {
                 }
             })
             .map(|path| Msg::Studio(studio::Msg::Dropped(path))),
+            Outcome::PickFiles => background(|tx| {
+                let picked = rfd::FileDialog::new()
+                    .set_title(crate::t!(st_open_title))
+                    .add_filter(
+                        crate::t!(st_pictures),
+                        &["png", "jpg", "jpeg", "webp", "bmp", "gif"],
+                    )
+                    .pick_files();
+                if let Some(paths) = picked {
+                    let _ = tx.unbounded_send(paths);
+                }
+            })
+            .map(|paths| Msg::Studio(studio::Msg::AddFiles(paths))),
+            Outcome::AddPictures(paths) => background(move |tx| {
+                let crops: Vec<Crop> = paths
+                    .iter()
+                    .filter_map(|p| match read_picture(p) {
+                        Ok(crop) => Some(crop),
+                        Err(e) => {
+                            crate::log!("[opencircle] studio: {e}");
+                            None
+                        }
+                    })
+                    .collect();
+                let _ = tx.unbounded_send(crops);
+            })
+            .map(Msg::StudioAddPictures),
+            Outcome::PasteStep => background(move |tx| {
+                let _ = tx.unbounded_send(copy::read_image().into_iter().collect::<Vec<_>>());
+            })
+            .map(Msg::StudioAddPictures),
             Outcome::Read(path) => background(move |tx| {
                 let _ = tx.unbounded_send(read_picture(&path));
             })
@@ -725,20 +768,31 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Space) && modifiers.is_empty() {
         return Some(studio::Msg::Space(true));
     }
+    // Shift+1: the whole picture in the stage (Fit)
+    if modifiers == keyboard::Modifiers::SHIFT
+        && matches!(physical_key, Physical::Code(Code::Digit1 | Code::Numpad1))
+    {
+        return Some(studio::Msg::Fit);
+    }
     if !modifiers.command() {
         return None;
     }
     Some(match (physical_key, key.to_latin(physical_key)) {
-        // panels: Ctrl+B left, Ctrl+Alt+B right, Ctrl+\ both
+        // the Steps sidebar: Ctrl+B
         (_, Some('s')) if modifiers.shift() => studio::Msg::Export,
-        (Physical::Code(Code::KeyB), _) if modifiers.alt() => studio::Msg::Panel,
         (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
-        (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
         (Physical::Code(Code::Slash), _) => studio::Msg::Shortcuts(true),
         (Physical::Code(Code::Comma), _) => studio::Msg::Settings,
-        (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::ZoomIn,
-        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::ZoomOut,
-        (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::Fit,
+        // the Studio's UI scale (as in the AI chat); with Shift, the picture's zoom
+        (Physical::Code(Code::Equal | Code::NumpadAdd), _) if modifiers.shift() => {
+            studio::Msg::ZoomIn
+        }
+        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) if modifiers.shift() => {
+            studio::Msg::ZoomOut
+        }
+        (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::UiScale(1),
+        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::UiScale(-1),
+        (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::UiScale(0),
         (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
         (_, Some('o')) => studio::Msg::Open,
         (_, Some('v')) => studio::Msg::Paste,
@@ -847,15 +901,8 @@ mod key_tests {
             key("b", Code::KeyB, ctrl),
             Some(studio::Msg::Library)
         ));
-        let both = ctrl | keyboard::Modifiers::ALT;
-        assert!(matches!(
-            key("b", Code::KeyB, both),
-            Some(studio::Msg::Panel)
-        ));
-        assert!(matches!(
-            key("\\", Code::Backslash, ctrl),
-            Some(studio::Msg::Both)
-        ));
+        // v3.1: one sidebar; Ctrl+\ is no key any more
+        assert!(key("\\", Code::Backslash, ctrl).is_none());
         assert!(matches!(
             key("/", Code::Slash, ctrl),
             Some(studio::Msg::Shortcuts(true))
@@ -908,9 +955,10 @@ mod key_tests {
         is(k::SAVE_AS, |m| matches!(m, studio::Msg::Export));
         is(k::PASTE, |m| matches!(m, studio::Msg::Paste));
         is(k::CLOSE, |m| matches!(m, studio::Msg::Caption(_)));
-        is(k::LEFT_PANEL, |m| matches!(m, studio::Msg::Library));
-        is(k::RIGHT_PANEL, |m| matches!(m, studio::Msg::Panel));
-        is(k::ALL_PANELS, |m| matches!(m, studio::Msg::Both));
+        is(k::STEPS_SIDEBAR, |m| matches!(m, studio::Msg::Library));
+        is(k::UI_LARGER, |m| matches!(m, studio::Msg::UiScale(1)));
+        is(k::UI_SMALLER, |m| matches!(m, studio::Msg::UiScale(-1)));
+        is(k::UI_RESET, |m| matches!(m, studio::Msg::UiScale(0)));
         is(k::SETTINGS, |m| matches!(m, studio::Msg::Settings));
         is(k::SHORTCUTS, |m| matches!(m, studio::Msg::Shortcuts(true)));
         is(k::ZOOM_IN, |m| matches!(m, studio::Msg::ZoomIn));

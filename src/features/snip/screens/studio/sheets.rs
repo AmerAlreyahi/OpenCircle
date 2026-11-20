@@ -103,7 +103,7 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
     ];
     // the quick actions run on the user's own keys (Settings > Shortcuts)
     let acts = s.info();
-    let quick = super::properties::ACTS.iter().map(|r| {
+    let quick = super::popovers::ACTS.iter().map(|r| {
         let at = crate::features::snip::snip_more::Row::ALL
             .iter()
             .position(|x| x == r)
@@ -111,14 +111,12 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         row(tr(r.label(false)), &[&acts.caps[at].join("+")])
     });
     let view = vec![
-        row(
-            tr(S::st_sc_panels),
-            &[k::LEFT_PANEL, k::RIGHT_PANEL, k::ALL_PANELS],
-        ),
+        row(tr(S::st_steps), &[k::STEPS_SIDEBAR]),
         row(
             tr(S::st_sc_zoom),
             &[k::ZOOM_IN, k::ZOOM_OUT, k::FIT, k::ACTUAL],
         ),
+        row(tr(S::st_sc_ui), &[k::UI_LARGER, k::UI_SMALLER, k::UI_RESET]),
         row(tr(S::st_sc_pan), &[k::PAN]),
         row(tr(S::st_sc_file), &[k::OPEN, k::SAVE, k::SAVE_AS]),
         row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::SETTINGS]),

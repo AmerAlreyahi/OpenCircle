@@ -5,54 +5,22 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, container};
 use iced::{Center, Element, Fill};
 
-use super::view::{MINUS, PANEL_LEFT, PANEL_RIGHT, PLUS};
+use super::popovers::Pop;
+use super::view::{MINUS, PLUS};
 use super::{Msg, Studio, keys};
 use crate::features::snip::annotate::{Annotator, Message};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::chip;
-use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::option_bar::{glyph_cell, group, text_cell, value};
 use crate::shared::kit::tokens::space;
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
 
-fn toggle<'a>(
-    glyph: char,
-    shown: bool,
-    press: Msg,
-    words: &'a str,
-    keys: &'a str,
-) -> Element<'a, Msg> {
-    let state = State {
-        active: shown,
-        focused: false,
-    };
-    hint(
-        icon_button::square(glyph, state, Some(press)),
-        words,
-        Why::Keys(keys),
-        Position::Top,
-    )
-}
-
 pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let px = e.doc.view().size();
     let size_label = format!("{} × {}", px.width.round(), px.height.round());
     let percent = s.percent().map_or_else(String::new, |p| format!("{p} %"));
-    // narrow: the left toggle opens the Library over the stage
-    let (left_shown, left_press) = match s.narrow() {
-        true => (s.overlay, Msg::Overlay),
-        false => (s.panels.library, Msg::Library),
-    };
-    let left_words = match left_shown {
-        true => t!(st_hide_library),
-        false => t!(st_show_library),
-    };
-    let right_words = match s.panels.options && !s.narrow() {
-        true => t!(st_hide_panel),
-        false => t!(st_show_panel),
-    };
     let zoom = group(
         vec![
             glyph_cell(MINUS, false, Some(Msg::ZoomOut)),
@@ -80,14 +48,15 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         Some(Msg::Editor(Message::Copy)),
     );
     let line = crate::dir_row![
-        toggle(
-            PANEL_LEFT,
-            left_shown,
-            left_press,
-            left_words,
-            keys::LEFT_PANEL
-        ),
         chip::size_handle(size_label, false, Msg::Editor(Message::DragOut)),
+        group(
+            vec![text_cell(
+                t!(st_picture_info),
+                s.popover == Some(Pop::Info),
+                Some(Msg::Pop(Some(Pop::Info)))
+            )],
+            false
+        ),
         Space::new().width(Fill),
         zoom,
         Space::new().width(Fill),
@@ -97,13 +66,6 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             t!(st_copy_picture),
             Why::Keys(keys::COPY_PICTURE),
             Position::Top
-        ),
-        toggle(
-            PANEL_RIGHT,
-            s.panels.options && !s.narrow(),
-            Msg::Panel,
-            right_words,
-            keys::RIGHT_PANEL
         ),
     ]
     .spacing(space::GAP)

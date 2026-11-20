@@ -2308,6 +2308,24 @@ strings! {
         | "تظهر رسوماتك هنا.";
     st_actions: "Picture actions"
         | "إجراءات الصورة";
+    st_actions_menu: "Actions"
+        | "إجراءات";
+    st_hide_steps: "Hide the Steps sidebar"
+        | "إخفاء الشريط الجانبي للخطوات";
+    st_show_steps: "Show the Steps sidebar"
+        | "إظهار الشريط الجانبي للخطوات";
+    st_add_pictures: "Add pictures…"
+        | "إضافة صور…";
+    st_paste_step: "Paste as step"
+        | "لصق كخطوة";
+    st_position: "Position"
+        | "الموضع";
+    st_more: "More"
+        | "المزيد";
+    st_picture_info: "Picture info"
+        | "معلومات الصورة";
+    st_recent_pictures: "Recent pictures"
+        | "الصور الأخيرة";
     st_save_export: "Save and export"
         | "الحفظ والتصدير";
     st_opacity: "Opacity"
@@ -2340,8 +2358,8 @@ strings! {
         | "تحريك 1 بكسل، 10 بكسل";
     st_sc_order: "Bring forward, send backward"
         | "إلى الأمام وإلى الخلف";
-    st_sc_panels: "Left, right, all panels"
-        | "اللوحة اليسرى واليمنى وكلها";
+    st_sc_ui: "Interface size"
+        | "حجم الواجهة";
     st_sc_zoom: "Zoom in, out, fit, 100 %"
         | "تكبير وتصغير وملاءمة و100 %";
     st_sc_file: "Open, save, save as"

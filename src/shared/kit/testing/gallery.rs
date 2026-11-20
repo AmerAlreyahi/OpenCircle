@@ -1846,25 +1846,11 @@ fn option_bar_sheet() {
     sheet("option_bar", Size::new(560.0, 56.0), &rows);
 }
 
-/// `side_panel`: a section header (open, folded), a list row (rest, selected)
-/// and the menu bar's openers (rest, open).
+/// `side_panel`: the menu bar's openers (rest, open).
 #[test]
 fn side_panel_sheet() {
-    use super::super::side_panel::{lead, menu_opener, row as list_row, section_head};
-    let item = |ar: bool, on: bool| {
-        let name = super::super::text::text(Role::CONTROL, s(ar, "Arrow", "سهم"));
-        let line = iced::widget::row![lead('\u{e140}', on), name].spacing(6);
-        list_row(line.into(), 30.0, on, Some(()))
-    };
+    use super::super::side_panel::menu_opener;
     let rows = vec![
-        row("section open", Act::Rest, |ar| {
-            section_head(s(ar, "Recent files", "الملفات الأخيرة"), true, Some(3), ())
-        }),
-        row("section folded", Act::Rest, |ar| {
-            section_head(s(ar, "Objects", "الكائنات"), false, None, ())
-        }),
-        row("row", Act::Rest, move |ar| item(ar, false)),
-        row("row selected", Act::Rest, move |ar| item(ar, true)),
         row("opener", Act::Rest, |ar| {
             menu_opener(s(ar, "File", "ملف"), false, ())
         }),

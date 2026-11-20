@@ -428,8 +428,12 @@ pub enum Message {
     /// Ctrl+Enter in the Studio: the picture goes to the Steps (`Output::AddStep`).
     AddToSteps,
     SelectAt(Point, bool),
+    // (the Objects list is gone in v3.1: the editor's API keeps these, its tests use them)
+    #[allow(dead_code)]
     SelectIndex(usize, bool),
+    #[allow(dead_code)]
     ToggleHidden(usize),
+    #[allow(dead_code)]
     Reorder {
         from: usize,
         to: usize,

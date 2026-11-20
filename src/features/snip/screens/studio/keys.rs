@@ -20,13 +20,16 @@ pub const DELETE: &str = "Delete";
 pub const SELECT_ALL: &str = "Ctrl+A";
 pub const DESELECT: &str = "Esc";
 pub const ADD_STEPS: &str = "Ctrl+Enter";
-pub const LEFT_PANEL: &str = "Ctrl+B";
-pub const RIGHT_PANEL: &str = "Ctrl+Alt+B";
-pub const ALL_PANELS: &str = "Ctrl+\\";
-pub const ZOOM_IN: &str = "Ctrl+=";
-pub const ZOOM_OUT: &str = "Ctrl+-";
-pub const FIT: &str = "Ctrl+0";
+pub const STEPS_SIDEBAR: &str = "Ctrl+B";
+/// The picture's zoom: the status bar's buttons and the View menu (the wheel
+/// zooms at the pointer). Ctrl+= / Ctrl+- / Ctrl+0 scale the Studio's UI.
+pub const ZOOM_IN: &str = "Ctrl+Shift+=";
+pub const ZOOM_OUT: &str = "Ctrl+Shift+-";
+pub const FIT: &str = "Shift+1";
 pub const ACTUAL: &str = "Ctrl+1";
+pub const UI_LARGER: &str = "Ctrl+=";
+pub const UI_SMALLER: &str = "Ctrl+-";
+pub const UI_RESET: &str = "Ctrl+0";
 pub const NUDGE: &str = "←↑→↓";
 pub const NUDGE_FAR: &str = "Shift+←↑→↓";
 pub const FORWARD: &str = "Ctrl+]";
@@ -41,6 +44,7 @@ pub fn chord_caps(k: super::editing::Chord) -> Vec<String> {
     match k {
         C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
         C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
+        C::Shift(c) => vec!["Shift".into(), c.to_string()],
         C::Delete => vec!["Delete".into()],
     }
 }

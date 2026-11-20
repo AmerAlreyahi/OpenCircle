@@ -52,19 +52,17 @@ fn a_picture_fits_the_stage_never_above_100_percent() {
     assert_eq!(s.percent(), Some(100));
 }
 
+/// v3.1: the one Steps sidebar toggles (Ctrl+B) and the picture gets its room back.
 #[test]
-fn hiding_the_panels_gives_the_picture_their_room() {
+fn hiding_the_sidebar_gives_the_picture_its_room() {
     let mut s = studio_on(3840, 2160);
     let zoom = |s: &Studio| s.editor.as_ref().unwrap().zoom;
-    let both = zoom(&s);
-    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if !p.library && p.options));
-    let one = zoom(&s);
-    // Ctrl+\: with one still shown, both go; again, both come back
-    assert!(matches!(s.update(Msg::Both), Outcome::Panels(p) if !p.library && !p.options));
-    let none = zoom(&s);
-    assert!(both < one && one < none, "{both} {one} {none}");
-    assert!(matches!(s.update(Msg::Both), Outcome::Panels(p) if p.library && p.options));
-    assert_eq!(zoom(&s), both);
+    let shown = zoom(&s);
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if !p.library));
+    let hidden = zoom(&s);
+    assert!(shown < hidden, "{shown} {hidden}");
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if p.library));
+    assert_eq!(zoom(&s), shown);
 }
 
 #[test]
@@ -426,10 +424,7 @@ fn a_panel_row_asks_the_host() {
 /// The three actions in the design's order; Edit text and Cut out follow them.
 #[test]
 fn the_panel_rows_are_the_three_actions_in_design_order() {
-    assert_eq!(
-        properties::ACTS,
-        [Row::CopyText, Row::Translate, Row::AskAi]
-    );
+    assert_eq!(popovers::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
 }
 
 /// Copy text reads the clean capture with the hidden part painted out; Ask AI
@@ -1317,24 +1312,14 @@ fn a_long_history_is_sampled_to_at_most_the_frame_limit_keeping_both_ends() {
 
 // ---- Studio v3: the frame (STUDIO_V3_SPEC §3 to §7) ----
 
-/// §3: below 1100 px both panels fold and the Library is an overlay; the saved
-/// choice is unchanged.
+/// v3.1: at the smallest window (960 x 600) the sidebar stays and the stage keeps room.
 #[test]
-fn v3_narrow_windows_fold_the_panels_and_open_the_library_over_the_stage() {
+fn v3_the_sidebar_stays_at_the_smallest_window() {
     let mut s = studio_on(640, 400);
-    let _ = s.update(Msg::Resized(Size::new(1280.0, 800.0)));
-    assert!(s.library_shown() && s.panel_shown() && !s.narrow());
-    let _ = s.update(Msg::Resized(Size::new(960.0, 600.0)));
-    assert!(s.narrow() && !s.library_shown() && !s.panel_shown());
-    assert!(
-        s.panels.library && s.panels.options,
-        "the saved choice stays"
-    );
-    // the toggle opens the overlay (and Esc closes it)
-    assert!(matches!(s.update(Msg::Library), Outcome::None));
-    assert!(s.overlay);
-    let _ = s.update(Msg::Cancel);
-    assert!(!s.overlay);
+    let _ = s.update(Msg::Resized(super::MIN));
+    assert!(s.sidebar_shown());
+    let stage = s.stage();
+    assert!(stage.width > 600.0 && stage.height > 300.0, "{stage:?}");
 }
 
 /// §6: Alt opens File, the arrows walk, Enter picks, Esc closes.
@@ -1374,17 +1359,6 @@ fn v3_file_menu_rows_reach_the_host() {
     draw(&mut s);
     assert!(matches!(pick(&mut s, "Close"), Outcome::None));
     assert!(s.asking());
-}
-
-/// §5: the Library sections fold by their header.
-#[test]
-fn v3_library_sections_fold() {
-    let mut s = studio_on(640, 400);
-    assert_eq!(s.shut, [false; 3]);
-    let _ = s.update(Msg::Section(library::OBJECTS));
-    assert_eq!(s.shut, [false, true, false]);
-    let _ = s.update(Msg::Section(library::OBJECTS));
-    assert_eq!(s.shut, [false; 3]);
 }
 
 /// Golden images of the frame: the picture with a drawing selected, menus, the
@@ -1434,27 +1408,24 @@ fn v3_the_frame_matches_its_golden_images() {
         failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
             view(&n, &[], false)
         }));
-        let _ = n.update(Msg::Overlay);
-        let name = format!("studio3-narrow-library-{}", theme.id);
-        failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
-            view(&n, &[], false)
-        }));
-        // the panels' other states, and the small sheets
-        // two boxes selected: the panel's style groups are the shared ones
+        // v3.1: a popover (Actions, Position) and the Steps sidebar's walkthrough panel
         let mut s = two_boxes();
         let _ = s.update(Msg::Editor(Message::SelectAll));
-        let panel = Size::new(super::PANEL, 700.0);
-        let name = format!("studio3-props-many-{}", theme.id);
-        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
-            properties::view(&s, properties::Subject::Many { count: 2 })
-        }));
-        let name = format!("studio3-props-pasted-{}", theme.id);
-        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
-            let p = properties::PastedInfo {
-                frame: [24, 40, 320, 180],
-                opacity: 100,
-            };
-            properties::view(&s, properties::Subject::Pasted(p))
+        for (pop, tag) in [
+            (popovers::Pop::Actions, "actions"),
+            (popovers::Pop::Position, "position"),
+        ] {
+            let _ = s.update(Msg::Pop(Some(pop)));
+            let name = format!("studio31-{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let _ = s.update(Msg::Pop(Some(pop)));
+        }
+        let _ = s.update(Msg::ExportWalkthrough);
+        let name = format!("studio31-export-{}", theme.id);
+        failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+            view(&s, &[], false)
         }));
         let r = Restorable {
             name: "Screenshot 2026-11-19".into(),
@@ -1710,34 +1681,6 @@ fn two_boxes() -> Studio {
     s
 }
 
-/// The Objects list: a click selects (top row = front), the eye hides, a drag
-/// moves a row (the list shows the front first).
-#[test]
-fn v3_objects_list_selects_hides_and_reorders() {
-    let mut s = two_boxes();
-    // row 0 is the front object = item 1
-    let _ = s.update(Msg::ObjPress(0));
-    let _ = s.update(Msg::ObjRelease);
-    assert_eq!(s.editor.as_ref().unwrap().selection(), vec![1]);
-    let _ = s.update(Msg::Editor(Message::ToggleHidden(1)));
-    assert!(s.editor.as_ref().unwrap().doc.items[1].hidden);
-    // drag the front row to the bottom: the back object comes forward
-    let _ = s.update(Msg::ObjMove(Point::new(10.0, 5.0), 2));
-    let _ = s.update(Msg::ObjPress(0));
-    let _ = s.update(Msg::ObjMove(Point::new(10.0, 50.0), 2));
-    let _ = s.update(Msg::ObjRelease);
-    let order: Vec<bool> = s
-        .editor
-        .as_ref()
-        .unwrap()
-        .doc
-        .items
-        .iter()
-        .map(|i| i.hidden)
-        .collect();
-    assert_eq!(order, vec![true, false], "the hidden one went to the back");
-}
-
 /// A right-click selects the object under the pointer first.
 #[test]
 fn v3_right_click_selects_under_the_pointer() {
@@ -1876,8 +1819,8 @@ fn v3_context_menu_stays_inside_the_window_and_mirrors() {
         let _ = s.update(Msg::ContextOpen);
         let at = s.context.as_ref().unwrap().at;
         let left = match arabic {
-            true => super::panel_width() + 1.0,
-            false => LIBRARY + 1.0 + RAIL + 2.0,
+            true => super::SIDEBAR + 1.0,
+            false => RAIL + 2.0,
         };
         assert!(
             (at.x - (left + 10.0)).abs() < 1.5,
@@ -1943,26 +1886,18 @@ fn v3_open_menus_and_sheets_block_the_canvas_keys() {
         )
     };
     assert!(arrow(&s).is_some(), "an open canvas nudges the selection");
-    let ups: [(Msg, Msg); 4] = [
+    let ups: [(Msg, Msg); 3] = [
         (Msg::Menu(Some(Menu::Edit)), Msg::Menu(None)),
         (Msg::Shortcuts(true), Msg::Shortcuts(false)),
         (Msg::ContextOpen, Msg::Cancel),
-        (Msg::Resized(Size::new(900.0, 600.0)), Msg::Resized(SIZE)),
     ];
     for (up, down) in ups {
-        let narrow = matches!(up, Msg::Resized(_));
         let _ = s.update(up);
-        if narrow {
-            let _ = s.update(Msg::Overlay);
-        }
         assert!(s.editor.as_ref().unwrap().keys_blocked, "{:?}", s.menu);
         assert!(
             arrow(&s).is_none(),
             "the canvas takes no key while it is up"
         );
-        if narrow {
-            let _ = s.update(Msg::Overlay);
-        }
         let _ = s.update(down);
         assert!(!s.editor.as_ref().unwrap().keys_blocked);
     }
@@ -2025,7 +1960,7 @@ fn v3_several_selected_objects_show_every_swatch() {
     let _ = s.update(Msg::Editor(Message::SelectAll));
     assert_eq!(s.editor.as_ref().unwrap().selection().len(), 2);
     let e = s.editor.as_ref().unwrap();
-    let colours = options_bar::selection_groups(e, 6).remove(0);
+    let colours = options_bar::colour_group(e, 6);
     let picked = (0..8)
         .filter(|i| {
             let at = Point::new(2.0 + 14.0 + 30.0 * *i as f32, 16.0);
@@ -2044,7 +1979,7 @@ fn v3_several_selected_objects_show_every_swatch() {
 }
 
 fn colours_again(e: &annotate::Annotator) -> iced::Element<'_, Msg> {
-    options_bar::selection_groups(e, 6).remove(0)
+    options_bar::colour_group(e, 6)
 }
 
 /// A kept copy in this test's own folder, as the window's `Restorable` (`notes`
@@ -2209,7 +2144,7 @@ fn v3_properties_restyle_the_selected_object() {
     // the second swatch of the first group (a swatch is 28 wide with 2 gaps and the 2 px pad)
     let at = Point::new(2.0 + 14.0 + 30.0, 16.0);
     let msgs = crate::shared::kit::testing::shot::click(
-        options_bar::selection_groups(e, 6).remove(0),
+        options_bar::colour_group(e, 6),
         Size::new(400.0, 40.0),
         at,
     );
@@ -2240,41 +2175,28 @@ fn v3_the_shortcuts_sheet_fits_a_small_window() {
     });
 }
 
-/// Recent files reads Settings > Studio's count, not the old Snip switch: with none yet
-/// it says what goes there; at 0 it says it is off (EN and AR).
+/// The start screen shows the recent pictures as big thumbnails (Settings > Studio's
+/// count); with none yet it shows no such list.
 #[test]
-fn v3_recent_files_empty_and_off_states() {
+fn v3_the_start_screen_lists_recent_pictures() {
     use crate::shared::kit::testing::shot;
-    let size = Size::new(240.0, 200.0);
-    let s = studio_on(64, 64);
-    let words = |n| shot::texts(library::recent(&s, n).map(|_| ()));
+    let mut s = Studio::new(StudioConfig::default());
+    let words = |s: &Studio| shot::texts(start::view(s).map(|_| ()));
     assert!(
-        words(10)
+        !words(&s)
             .iter()
-            .any(|t| t == "Pictures you open or save appear here."),
-        "{:?}",
-        words(10)
+            .any(|t| t.eq_ignore_ascii_case("Recent pictures"))
     );
+    let picture = iced::widget::image::Handle::from_rgba(1, 1, vec![9; 4]);
+    let _ = s.update(Msg::Recent(
+        vec![(std::path::PathBuf::from("/tmp/holiday.png"), picture)],
+        vec![String::new()],
+    ));
+    let got = words(&s);
     assert!(
-        words(0)
-            .iter()
-            .any(|t| t == "Recent files are off · Settings > Studio"),
-        "{:?}",
-        words(0)
+        got.iter()
+            .any(|t| t.eq_ignore_ascii_case("Recent pictures")),
+        "{got:?}"
     );
-    assert!(!words(10).iter().any(|t| t.contains("Settings > Snip")));
-    {
-        let _ar = crate::shared::kit::testing::arabic();
-        let off = shot::texts(library::recent(&s, 0).map(|_| ()));
-        assert!(
-            off.iter().any(|t| t.contains("الملفات الأخيرة متوقفة")),
-            "{off:?}"
-        );
-        let none = shot::texts(library::recent(&s, 10).map(|_| ()));
-        assert!(
-            none.iter().any(|t| t.contains("تظهر هنا الصور")),
-            "{none:?}"
-        );
-    }
-    let _ = size;
+    assert!(got.iter().any(|t| t == "holiday.png"), "{got:?}");
 }

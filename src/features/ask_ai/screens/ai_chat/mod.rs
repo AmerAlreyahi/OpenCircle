@@ -214,16 +214,14 @@ pub enum Zoom {
 
 /// The zoom step after `zoom` (percent) for `key` (`config::CHAT_ZOOM`).
 pub fn zoomed(zoom: u16, key: Zoom) -> u16 {
-    let steps = config::CHAT_ZOOM;
-    let at = steps
-        .iter()
-        .position(|&z| z >= zoom)
-        .unwrap_or(steps.len() - 1);
-    match key {
-        Zoom::In => steps[(at + 1).min(steps.len() - 1)],
-        Zoom::Out => steps[at.saturating_sub(1)],
-        Zoom::Reset => 100,
-    }
+    config::zoom_step(
+        zoom,
+        match key {
+            Zoom::In => 1,
+            Zoom::Out => -1,
+            Zoom::Reset => 0,
+        },
+    )
 }
 
 pub struct AiChat {
