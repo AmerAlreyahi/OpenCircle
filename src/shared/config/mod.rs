@@ -553,7 +553,7 @@ pub enum StudioZoom {
     Actual,
 }
 
-/// What the mouse wheel does on the canvas (`studio.wheel`); Ctrl+wheel is the other.
+/// What the mouse wheel does on the canvas (`studio.wheel`); Ctrl+wheel always zooms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StudioWheel {

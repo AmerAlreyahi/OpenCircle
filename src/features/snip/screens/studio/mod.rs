@@ -68,8 +68,8 @@ pub const CANVAS: &str = "studio-canvas";
 /// Edit text's inline field.
 pub const FIELD: &str = "studio-edit-field";
 
-/// Files dropped within this are one drop (steps).
-const DROP_BURST: std::time::Duration = std::time::Duration::from_millis(400);
+/// Files of one drop arrive one by one: the drop settles after this.
+pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The Steps grid: four to a row, the cell and the gap round it.
 const STEP_COLS: usize = 4;
@@ -117,7 +117,7 @@ pub enum Msg {
     UiScale(i8),
     ZoomIn,
     ZoomOut,
-    /// Ctrl+wheel over the stage: `notches` steps (up = in) round the pointer
+    /// The wheel over the stage (it zooms; Ctrl+wheel always does): `notches` steps (up = in) round the pointer
     /// `at` (in the stage).
     Wheel {
         at: Point,
@@ -136,6 +136,12 @@ pub enum Msg {
     /// A file is dragged over the window / dropped on it.
     Hovered(bool),
     Dropped(PathBuf),
+    /// The drop's files have all arrived (`n` of them: a later one voids this).
+    DropSettle(usize),
+    /// The pointer enters / leaves the Steps sidebar.
+    OverSidebar(bool),
+    /// The Open dialog's file.
+    Picked(PathBuf),
     OpenRecent(PathBuf),
     Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
@@ -263,6 +269,12 @@ pub enum Outcome {
     PickFiles,
     /// Read these files and add each as a step.
     AddPictures(Vec<PathBuf>),
+    /// Several files dropped on an empty Studio: the first opens AND all are steps.
+    OpenAndAdd(Vec<PathBuf>),
+    /// One file dropped on an open picture: placed on it as a movable picture.
+    Place(PathBuf),
+    /// A drop's files are still arriving: settle after `DROP_SETTLE`.
+    SettleDrop(usize),
     /// The clipboard's picture becomes a step.
     PasteStep,
 
@@ -369,7 +381,9 @@ pub struct Studio {
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
     pub(super) ui_zoom: u16,
     /// When the last file was dropped (files dropped together are steps).
-    last_drop: Option<std::time::Instant>,
+    drops: Vec<PathBuf>,
+    /// The pointer is over the Steps sidebar (a drop there is steps).
+    over_sidebar: bool,
     pub(super) shortcuts: bool,
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
@@ -468,8 +482,9 @@ impl Studio {
             menu: None,
             popover: None,
             middle: false,
-            ui_zoom: 100,
-            last_drop: None,
+            ui_zoom: panels.ui_zoom,
+            drops: Vec::new(),
+            over_sidebar: false,
             shortcuts: false,
             context: None,
             pointer: PointerCell::default(),
@@ -1072,6 +1087,8 @@ impl Studio {
                     | Msg::Open
                     | Msg::Paste
                     | Msg::Dropped(_)
+                    | Msg::DropSettle(_)
+                    | Msg::Picked(_)
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
@@ -1184,7 +1201,18 @@ impl Studio {
             Msg::PasteStep => Outcome::PasteStep,
             Msg::UiScale(by) => {
                 self.ui_zoom = crate::shared::config::zoom_step(self.ui_zoom, by);
+                // remembered, like the AI chat's text zoom
+                self.panels.ui_zoom = self.ui_zoom;
+                Outcome::Panels(self.panels)
+            }
+            Msg::OverSidebar(on) => {
+                self.over_sidebar = on;
                 Outcome::None
+            }
+            Msg::Picked(path) => {
+                self.asked = true;
+                self.next_name = file_name(&path);
+                Outcome::Read(path)
             }
             Msg::Middle(on) => {
                 self.middle = on;
@@ -1237,19 +1265,29 @@ impl Studio {
             Msg::Dropped(path) => {
                 self.asked = true;
                 self.hovered = false;
-                // files dropped together, or any file dropped on an open picture,
-                // are steps; a single one on an empty Studio opens
-                let now = std::time::Instant::now();
-                let together = (self.last_drop.replace(now))
-                    .is_some_and(|t| now.duration_since(t) < DROP_BURST);
-                match together || self.editor.is_some() {
-                    true => Outcome::AddPictures(vec![path]),
-                    false => {
-                        self.next_name = file_name(&path);
-                        Outcome::Read(path)
+                self.drops.push(path);
+                Outcome::SettleDrop(self.drops.len())
+            }
+            // what was dropped: several files = all steps (an empty Studio also opens
+            // the first); one on the Steps sidebar = a step; one on an open picture =
+            // placed on it; one on the empty Studio opens
+            Msg::DropSettle(n) if n == self.drops.len() && n > 0 => {
+                let files = std::mem::take(&mut self.drops);
+                match (files.len(), self.editor.is_some()) {
+                    (1, _) if self.over_sidebar => Outcome::AddPictures(files),
+                    (1, true) => Outcome::Place(files[0].clone()),
+                    (1, false) => {
+                        self.next_name = file_name(&files[0]);
+                        Outcome::Read(files[0].clone())
+                    }
+                    (_, true) => Outcome::AddPictures(files),
+                    (_, false) => {
+                        self.next_name = file_name(&files[0]);
+                        Outcome::OpenAndAdd(files)
                     }
                 }
             }
+            Msg::DropSettle(_) => Outcome::None,
             Msg::OpenRecent(path) => {
                 self.asked = true;
                 self.next_name = file_name(&path);

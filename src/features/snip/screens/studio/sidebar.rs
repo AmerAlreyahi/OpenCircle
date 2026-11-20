@@ -4,9 +4,9 @@
 //! the foot, Copy all and Export. The Steps strip's own steps, one store.
 use std::sync::Arc;
 
+use iced::Element;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container, mouse_area};
-use iced::{Element, Fill};
 
 use super::{Msg, Studio};
 use crate::features::snip::annotate::Message;
@@ -60,14 +60,19 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     );
     let tools = container(column![add, this, paste].spacing(space::GAP)).padding([space::GAP, PAD]);
     let body = column![tools, steps_list(s, steps)];
-    side_panel::panel(
+    let panel = side_panel::panel(
         super::SIDEBAR,
         t!(st_steps),
         toggle_glyph(),
         Msg::Library,
         t!(st_hide_steps),
         body.into(),
-    )
+    );
+    // (a file dropped while the pointer is here is a step)
+    mouse_area(panel)
+        .on_enter(Msg::OverSidebar(true))
+        .on_exit(Msg::OverSidebar(false))
+        .into()
 }
 
 /// The Steps strip's steps, four to a row: click = open on the canvas, drag =
@@ -142,9 +147,4 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         container(foot).padding([space::GAP, PAD])
     ]
     .into()
-}
-
-#[allow(dead_code)]
-fn _fill() -> iced::Length {
-    Fill
 }

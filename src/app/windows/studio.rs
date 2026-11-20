@@ -194,6 +194,15 @@ impl Windows {
         }
     }
 
+    /// The clipboard read for Paste as step: a picture joins the Steps, else the pill
+    /// says there is none.
+    pub(super) fn studio_step_pasted(&mut self, image: Option<Crop>) -> Task<Msg> {
+        match image {
+            Some(crop) => self.studio_outcome(Outcome::AddStep(crop)),
+            None => self.toast(crate::t!(st_no_picture), false, None, TOAST_MS),
+        }
+    }
+
     /// Pictures read for the Steps: each joins the strip as the next step.
     pub(super) fn studio_add_pictures(&mut self, crops: Vec<Crop>) -> Task<Msg> {
         if crops.is_empty() {
@@ -270,7 +279,7 @@ impl Windows {
                     let _ = tx.unbounded_send(path);
                 }
             })
-            .map(|path| Msg::Studio(studio::Msg::Dropped(path))),
+            .map(|path| Msg::Studio(studio::Msg::Picked(path))),
             Outcome::PickFiles => background(|tx| {
                 let picked = rfd::FileDialog::new()
                     .set_title(crate::t!(st_open_title))
@@ -299,9 +308,28 @@ impl Windows {
             })
             .map(Msg::StudioAddPictures),
             Outcome::PasteStep => background(move |tx| {
-                let _ = tx.unbounded_send(copy::read_image().into_iter().collect::<Vec<_>>());
+                let _ = tx.unbounded_send(copy::read_image());
             })
-            .map(Msg::StudioAddPictures),
+            .map(Msg::StudioStepPasted),
+            Outcome::SettleDrop(n) => background(move |tx| {
+                std::thread::sleep(studio::DROP_SETTLE);
+                let _ = tx.unbounded_send(n);
+            })
+            .map(|n| Msg::Studio(studio::Msg::DropSettle(n))),
+            Outcome::Place(path) => background(move |tx| {
+                let _ = tx.unbounded_send(read_picture(&path));
+            })
+            .map(|read| match read {
+                Ok(crop) => Msg::StudioPasted(Some(crop), None),
+                Err(e) => Msg::StudioRead(Err(e)),
+            }),
+            Outcome::OpenAndAdd(paths) => {
+                let first = paths[0].clone();
+                Task::batch([
+                    self.studio_outcome(Outcome::Read(first)),
+                    self.studio_outcome(Outcome::AddPictures(paths)),
+                ])
+            }
             Outcome::Read(path) => background(move |tx| {
                 let _ = tx.unbounded_send(read_picture(&path));
             })

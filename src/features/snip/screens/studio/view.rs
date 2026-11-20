@@ -30,13 +30,15 @@ use crate::t;
 
 pub(super) const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
 pub(super) const PANEL_RIGHT: char = '\u{e435}'; // lucide "panel-right"
+/// lucide "folder-open"
+pub(super) const OPEN: char = '\u{e246}';
 pub(super) const PASTE: char = '\u{e3eb}'; // lucide "clipboard-paste"
 pub(super) const PLUS: char = '\u{e140}'; // lucide "plus"
 pub(super) const MINUS: char = '\u{e11f}'; // lucide "minus"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
-pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, '\u{e246}', PASTE, PLUS, MINUS];
+pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, OPEN, PASTE, PLUS, MINUS];
 
 /// OpenCircle Studio's window (v3.1): the header with the menu bar; below it
 /// the tools rail (full height, at the window's edge), then the options bar
@@ -426,7 +428,7 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let area = scroll::both(content)
         .id(super::CANVAS)
         .on_scroll(|v| Msg::Scrolled(Vector::new(v.absolute_offset().x, v.absolute_offset().y)));
-    // Settings > Studio: the wheel zooms (Ctrl+wheel then scrolls) or scrolls
+    // the wheel zooms the picture at the pointer (Settings > Studio: or scrolls it); Ctrl+wheel always zooms
     let zooms = s.ctrl || prefs.wheel == StudioWheel::Zoom;
     let area: Element<'a, Msg> = match prefs.background {
         StudioBackdrop::Checkerboard => iced::widget::stack![
@@ -472,8 +474,8 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         .into()
 }
 
-/// Ctrl + wheel over the stage zooms round the pointer instead of scrolling
-/// (the area under it never sees that wheel).
+/// A wheel over the stage that zooms (the default, or Ctrl held) zooms round the
+/// pointer instead of scrolling (the area under it never sees that wheel).
 struct CtrlWheel(bool, super::PointerCell);
 
 /// One wheel notch in pixels (touchpads send pixels).

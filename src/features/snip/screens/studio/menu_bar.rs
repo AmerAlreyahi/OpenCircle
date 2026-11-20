@@ -303,11 +303,20 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
         }
     };
     // a press anywhere under the header (outside the menu) closes it
-    let outside = iced::widget::column![
-        iced::widget::Space::new().height(HEADER_BELOW),
-        iced::widget::mouse_area(iced::widget::Space::new().width(Fill).height(Fill))
+    let catch = |h: iced::Length| {
+        iced::widget::mouse_area(iced::widget::Space::new().width(Fill).height(h))
             .on_press(Msg::Menu(None))
-            .on_right_press(Msg::Menu(None)),
+            .on_right_press(Msg::Menu(None))
+    };
+    // (the header row too, but never the caption buttons: they keep working)
+    let outside = iced::widget::column![
+        iced::widget::row![
+            catch(HEADER_BELOW.into()),
+            iced::widget::Space::new()
+                .width(crate::shared::kit::tokens::size::CAPTION_BUTTON * 3.0)
+                .height(HEADER_BELOW),
+        ],
+        catch(Fill),
     ];
     let mut layers = vec![base, outside.into(), place(first, x, HEADER_BELOW)];
     if let (Some(sub), Some(y)) = (s.sub, sub_at) {

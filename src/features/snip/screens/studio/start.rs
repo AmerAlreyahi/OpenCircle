@@ -78,8 +78,8 @@ pub fn view(s: &Studio) -> Element<'_, Msg> {
         let w = button::labelled_width(words);
         button::labelled(glyph, words, w, kind, false, Some(m))
     };
-    let open = labelled('\u{e246}', t!(st_open), Kind::Accent, Msg::Open);
-    let paste = labelled('\u{e3eb}', t!(st_paste), Kind::Elevated, Msg::Paste);
+    let open = labelled(super::view::OPEN, t!(st_open), Kind::Accent, Msg::Open);
+    let paste = labelled(super::view::PASTE, t!(st_paste), Kind::Elevated, Msg::Paste);
     let mut card = column![
         chip::emblem(Icon::Picture),
         text(Role::CARD_HEADING, t!(st_empty_title)),

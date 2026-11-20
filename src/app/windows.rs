@@ -116,6 +116,8 @@ pub enum Msg {
     StudioPasted(Option<Crop>, Option<iced::Point>),
     /// Pictures read to join the Steps (several files, a drop, the clipboard).
     StudioAddPictures(Vec<Crop>),
+    /// The clipboard read for Paste as step (a picture, or none).
+    StudioStepPasted(Option<Crop>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
     /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
@@ -1426,6 +1428,7 @@ impl Windows {
             Msg::StudioRead(read) => return self.studio_read(read),
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
             Msg::StudioAddPictures(crops) => return self.studio_add_pictures(crops),
+            Msg::StudioStepPasted(image) => return self.studio_step_pasted(image),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
             Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut => {}

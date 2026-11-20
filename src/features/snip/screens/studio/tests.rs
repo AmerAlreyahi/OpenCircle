@@ -213,7 +213,12 @@ fn ctrl_v_asks_the_host_for_a_picture_first() {
     assert!(matches!(empty.update(Msg::Paste), Outcome::Paste(None)));
     assert!(matches!(empty.update(Msg::Open), Outcome::PickFile));
     let file = std::path::PathBuf::from("/tmp/x.png");
-    assert!(matches!(empty.update(Msg::Dropped(file.clone())), Outcome::Read(p) if p == file));
+    // a single drop on the empty Studio opens it (after the drop settles)
+    assert!(matches!(
+        empty.update(Msg::Dropped(file.clone())),
+        Outcome::SettleDrop(1)
+    ));
+    assert!(matches!(empty.update(Msg::DropSettle(1)), Outcome::Read(p) if p == file));
 }
 
 #[test]
@@ -376,6 +381,7 @@ fn the_question_blocks_editing() {
         s.update(Msg::Dropped("/x.png".into())),
         Outcome::None
     ));
+    assert!(matches!(s.update(Msg::DropSettle(1)), Outcome::None));
     assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
 }
 
@@ -2042,7 +2048,7 @@ fn v3_a_requested_file_always_wins_over_reopen_last() {
     type Ask = Box<dyn Fn(&mut Studio)>;
     let asks: [Ask; 5] = [
         Box::new(|s| s.next_name(std::path::Path::new("/x/asked.png"))),
-        Box::new(|s| drop(s.update(Msg::Dropped(PathBuf::from("/x/d.png"))))),
+        Box::new(|s| drop(s.update(Msg::Picked(PathBuf::from("/x/d.png"))))),
         Box::new(|s| drop(s.update(Msg::OpenRecent(PathBuf::from("/x/r.png"))))),
         Box::new(|s| drop(s.update(Msg::Open))),
         Box::new(|s| drop(s.update(Msg::Paste))),
@@ -2304,22 +2310,59 @@ fn v31_pictures_join_the_steps() {
     assert!(matches!(s.update(Msg::AddFiles(files)), Outcome::AddPictures(v) if v.len() == 2));
     assert!(matches!(s.update(Msg::AddFiles(Vec::new())), Outcome::None));
     assert!(matches!(s.update(Msg::PasteStep), Outcome::PasteStep));
-    // a drop on an open picture is a step
-    let one = PathBuf::from("/tmp/c.png");
-    assert!(matches!(
-        s.update(Msg::Dropped(one.clone())),
-        Outcome::AddPictures(_)
-    ));
-    // the empty Studio: the first file opens, the others of the same drop are steps
+    // (the drops are judged in `v31_drops_follow_the_owner_rules`)
+}
+
+/// v3.1 review 5: one file dropped on an open picture is placed on it as a movable
+/// picture; on the Steps sidebar it is a step; several files anywhere are all steps
+/// (the empty Studio also opens the first); a single one on the empty Studio opens.
+#[test]
+fn v31_drops_follow_the_owner_rules() {
+    let (a, b) = (PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png"));
+    let drop = |s: &mut Studio, files: &[&PathBuf]| {
+        let mut last = Outcome::None;
+        for f in files {
+            last = s.update(Msg::Dropped((*f).clone()));
+        }
+        // (a settle that was voided by a later file does nothing)
+        let n = files.len();
+        assert!(
+            matches!(
+                s.update(Msg::DropSettle(n.saturating_sub(1))),
+                Outcome::None
+            ) || n == 1
+        );
+        let _ = last;
+        s.update(Msg::DropSettle(n))
+    };
+    // open picture: one = placed
+    let mut s = studio_on(640, 400);
+    assert!(matches!(drop(&mut s, &[&a]), Outcome::Place(p) if p == a));
+    // over the Steps sidebar: one = a step
+    let _ = s.update(Msg::OverSidebar(true));
+    assert!(matches!(drop(&mut s, &[&a]), Outcome::AddPictures(v) if v == vec![a.clone()]));
+    let _ = s.update(Msg::OverSidebar(false));
+    // several: all steps
+    assert!(matches!(drop(&mut s, &[&a, &b]), Outcome::AddPictures(v) if v.len() == 2));
+    // empty Studio: one opens; several open the first AND are all steps
     let mut e = Studio::new(StudioConfig::default());
-    assert!(matches!(
-        e.update(Msg::Dropped(one.clone())),
-        Outcome::Read(_)
-    ));
-    assert!(matches!(
-        e.update(Msg::Dropped(one)),
-        Outcome::AddPictures(_)
-    ));
+    assert!(matches!(drop(&mut e, &[&a]), Outcome::Read(p) if p == a));
+    assert!(matches!(drop(&mut e, &[&a, &b]), Outcome::OpenAndAdd(v) if v.len() == 2));
+    // the Open dialog's file opens at once
+    assert!(matches!(e.update(Msg::Picked(a.clone())), Outcome::Read(p) if p == a));
+}
+
+/// v3.1 review 6: the UI scale is remembered like the AI chat's text zoom.
+#[test]
+fn v31_the_ui_scale_is_remembered() {
+    let mut s = studio_on(640, 400);
+    let out = s.update(Msg::UiScale(1));
+    assert!(matches!(out, Outcome::Panels(p) if p.ui_zoom == 110));
+    let again = Studio::new(StudioConfig {
+        ui_zoom: 125,
+        ..StudioConfig::default()
+    });
+    assert_eq!(again.ui_zoom, 125);
 }
 
 /// v3.1 item 4: the empty Studio shows its recent pictures big, and a click opens one.
