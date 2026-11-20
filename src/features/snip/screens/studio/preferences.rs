@@ -309,6 +309,10 @@ impl Dialog {
                 studio.insert(k.clone(), v.clone());
             }
         }
+        // a key the dialog emptied (skipped when empty, e.g. every shortcut reset) leaves the file
+        for k in old.keys().filter(|k| !new.contains_key(*k)) {
+            studio.remove(k);
+        }
         if self.max_edge != self.opened.1
             && let Some(Value::Table(snip)) = file.get_mut("snip")
         {

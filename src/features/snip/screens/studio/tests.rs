@@ -3288,3 +3288,69 @@ fn w90b_every_studio_preference_acts() {
         },
     );
 }
+
+/// Review 1: resetting the last custom key empties `[studio.shortcuts]`; the write must
+/// remove the table from a file that already has it.
+#[test]
+fn w90c_resetting_every_shortcut_leaves_the_file() {
+    use super::keys::Cmd;
+    let mut file = config::Config::default();
+    file.studio
+        .shortcuts
+        .insert("open".into(), "Ctrl+Shift+O".into());
+    with_config(
+        |c| *c = file.clone(),
+        || {
+            let mut d = preferences::Dialog::open(None);
+            let _ = d.update(preferences::Msg::ResetKey(Cmd::Open));
+            let mut c = file.clone();
+            d.apply(&mut c);
+            assert!(c.studio.shortcuts.is_empty(), "{:?}", c.studio.shortcuts);
+        },
+    );
+}
+
+/// Review 2: a hand-edited chord is written the one way (Ctrl, Alt, Shift, key); one on a
+/// fixed key or a menu Alt key never shadows it.
+#[test]
+fn w90c_hand_edited_chords_are_canonical_and_never_shadow_fixed_keys() {
+    use super::keys::{self, Cmd, Taken};
+    let (c, _) = config::Config::parse(
+        "[studio.shortcuts]\nopen = \"Shift+Ctrl+O\"\nfit = \"Shift+Alt+9\"\nactual = \"Ctrl+W\"\nsave_as = \"Alt+F\"\n",
+    );
+    assert_eq!(
+        c.studio.shortcuts.get("open").map(String::as_str),
+        Some("Ctrl+Shift+O")
+    );
+    assert_eq!(
+        c.studio.shortcuts.get("fit").map(String::as_str),
+        Some("Alt+Shift+9")
+    );
+    with_config(
+        |cfg| *cfg = c.clone(),
+        || {
+            assert_eq!(keys::of(Cmd::Open), "Ctrl+Shift+O");
+            assert_eq!(keys::of(Cmd::Actual), Cmd::Actual.default_chord());
+            assert_eq!(keys::of(Cmd::SaveAs), Cmd::SaveAs.default_chord());
+            assert_eq!(keys::taken(Cmd::Fit, "Alt+V"), Some(Taken::Fixed));
+        },
+    );
+}
+
+/// Review 5: a command on an Alt chord leaves no pending Alt (its release opens no menu).
+#[test]
+fn w90c_an_alt_chord_does_not_open_the_menu_bar_on_release() {
+    let mut file = config::Config::default();
+    file.studio.shortcuts.insert("fit".into(), "Alt+9".into());
+    with_config(
+        |c| *c = file.clone(),
+        || {
+            let mut s = studio_on(640, 400);
+            let _ = s.update(Msg::AltDown);
+            let cmd = super::keys::command_for("Alt+9").expect("the chord is Fit's");
+            let _ = s.update(cmd.msg());
+            let _ = s.update(Msg::AltUp);
+            assert!(s.menu.is_none(), "the menu bar stayed shut");
+        },
+    );
+}
