@@ -1439,8 +1439,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   The owner gets ONE complete build (v3 + steps export + walkthrough + picture actions + edit text + cut out) to try.
 - Studio v3.1 layout (owner, 2026-11-20, "I approve everything you said", after trying dev build 9c88010): ONE sidebar only, for
   Steps (add several pictures at once: multi-select Open, drop many files, paste; click = edit that step; drag reorders; Export at
-  its foot); the tools rail always at the window edge, the sidebar on the other side; the options bar spans the full width under
-  the menu bar (the sidebar starts below it), is never empty and shows ALL controls always (the shared ones colour / size /
+  its foot); the tools rail always at the window edge, the sidebar on the other side; the options bar keeps today's relation to the tools rail (the rail is a full-height
+  column at the edge, the options bar starts beside it) and runs over the sidebar to the other edge (only the sidebar starts
+  below it; owner, 2026-11-20 correction), is never empty and shows ALL controls always (the shared ones colour / size /
   opacity / outline-fill first; ones that don't apply are dimmed, not hidden), then the tool's own, then "Actions" (Copy text,
   Translate, Ask AI, Edit text, Cut out) as a dropdown; the panel toggle only in the sidebar's header (+ View menu, Ctrl+B), none
   in the status bar. Removed panels: Recent files -> File > Open recent + the empty Studio's start screen; Objects list -> dropped
