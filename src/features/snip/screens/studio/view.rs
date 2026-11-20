@@ -79,7 +79,10 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             ];
             side(&mut under);
             let right = column![
-                super::options_bar::view(s, e),
+                match &s.edit {
+                    Some(x) => edit_bar(x),
+                    None => super::options_bar::view(s, e),
+                },
                 divider::divider(),
                 dir::row(under).height(Fill)
             ]
@@ -202,14 +205,6 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 super::HEADER,
             )
         }
-        (false, Some(x), _) => slide_over::over(
-            main,
-            t!(st_edit_text),
-            edit_panel(x),
-            Msg::Cancel,
-            Scrim::None,
-            super::HEADER,
-        ),
         (false, None, Some(before)) => slide_over::over(
             main,
             t!(st_cut_out),
@@ -305,10 +300,10 @@ fn rail(e: &Annotator) -> Element<'_, Msg> {
         .into()
 }
 
-/// Edit text's slide-over (S8): Font size, Colour, Bold (the editor's own
-/// controls, set on the line), Cancel / Done. The text itself is typed on the
-/// picture (`inline_field`).
-fn edit_panel(x: &super::edit_text::Session) -> Element<'_, Msg> {
+/// Edit text's bar (S8), in the options bar's place while it runs: Font size,
+/// ONE colour row, Bold (the editor's own controls, set on the line), Cancel /
+/// Done. The text itself is typed on the picture (`inline_field`).
+fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
     let line: Element<'_, Msg> = match (&x.lines, x.active) {
         (None, _) => muted(Role::ROW_DESC, t!(st_edit_reading)).into(),
         (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
@@ -327,17 +322,26 @@ fn edit_panel(x: &super::edit_text::Session) -> Element<'_, Msg> {
                 dir::row(swatches).spacing(space::TRACK_GAP).into(),
                 toolbar::bold_option(bold),
             ];
-            Element::from(column(options).spacing(space::PAGE[1])).map(Msg::Editor)
+            let options = dir::row(options)
+                .spacing(space::PAGE[1] + space::PAGE[1])
+                .align_y(Center);
+            Element::from(scroll::across(container(options).center_y(super::OPTIONS)))
+                .map(Msg::Editor)
         }
     };
     let ready = x.active.is_some();
-    let foot = crate::dir_row![
+    let row = crate::dir_row![
+        container(line).width(Fill),
         container(cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel)).width(EDIT_BUTTON),
         super::options_bar::done(ready),
     ]
     .spacing(space::GAP)
     .align_y(Center);
-    column![line, foot].spacing(space::PAGE[1]).into()
+    container(row)
+        .padding([0.0, space::PAGE[1]])
+        .center_y(super::OPTIONS)
+        .width(Fill)
+        .into()
 }
 
 /// The picked line's new text, typed on the picture over the line in a field

@@ -2486,3 +2486,21 @@ fn v31_a_narrow_bar_keeps_every_control_and_folds_the_colours() {
     let (colours, button, _) = probe(&s);
     assert!(colours == 0 && button >= 1, "scaled: {colours} {button}");
 }
+
+/// v3.1 review 4: while Edit text runs its own bar replaces the options bar (one
+/// colour row, never the shared groups beside it); no second panel shows.
+#[test]
+fn v31_edit_text_replaces_the_options_bar() {
+    let mut s = studio_on(640, 400);
+    let words = |s: &Studio| crate::shared::kit::testing::shot::texts(view(s, &[], false));
+    assert!(words(&s).iter().any(|t| t == "Opacity"));
+    let _ = s.update(Msg::EditText);
+    let got = words(&s);
+    assert!(
+        !got.iter().any(|t| t == "Opacity" || t == "Position"),
+        "{got:?}"
+    );
+    assert!(got.iter().any(|t| t == "Cancel"), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(words(&s).iter().any(|t| t == "Opacity"));
+}
