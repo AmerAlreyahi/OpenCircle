@@ -239,6 +239,82 @@ pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -
     messages
 }
 
+/// The messages of a left press at `from` and a move to `to` (the button stays down).
+pub fn press_move<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    from: iced::Point,
+    to: iced::Point,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    // (the press with the cursor at `from`, then the move with it at `to`)
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: from }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+        ],
+        mouse::Cursor::Available(from),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    ui.update(
+        &[Event::Mouse(Mouse::CursorMoved { position: to })],
+        mouse::Cursor::Available(to),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
+/// `press_move` in a window whose scroll area `id` was scrolled to `offset` first.
+pub fn press_move_scrolled<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    scrolled: (&'static str, iced::Vector),
+    from: iced::Point,
+    to: iced::Point,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::advanced::widget::{Id, operation::scrollable::scroll_to};
+    use iced::widget::scrollable::AbsoluteOffset;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut op = scroll_to(
+        Id::new(scrolled.0),
+        AbsoluteOffset {
+            x: Some(scrolled.1.x),
+            y: Some(scrolled.1.y),
+        },
+    );
+    ui.operate(&renderer, &mut op);
+    let mut messages = Vec::new();
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: from }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+        ],
+        mouse::Cursor::Available(from),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    ui.update(
+        &[Event::Mouse(Mouse::CursorMoved { position: to })],
+        mouse::Cursor::Available(to),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
 /// The messages of left clicks at `points`, one after another in one window
 /// (`view` built anew for each, its widgets' state kept, as a window does).
 pub fn clicks<'a, Message>(

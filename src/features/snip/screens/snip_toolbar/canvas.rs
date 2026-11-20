@@ -268,7 +268,11 @@ impl canvas::Program<Message> for Input<'_> {
                 Message::Move(self.image_at(*position))
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
-                Message::Move(e.to_image(*position - (bounds.position() - Point::ORIGIN)))
+                // the cursor, not the event's raw position: inside a scroll area the cursor is
+                // moved by the scroll offset as the bounds are, the raw position is not (the
+                // press above reads the cursor too: both must agree)
+                let at = cursor.position().unwrap_or(*position);
+                Message::Move(e.to_image(at - (bounds.position() - Point::ORIGIN)))
             }
             // Snip's area: the handle under the pointer shows hot (a redraw
             // only when it changes).

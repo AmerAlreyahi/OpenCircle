@@ -2706,3 +2706,103 @@ fn v31_the_question_takes_the_pending_drops() {
         "nothing is left to place"
     );
 }
+
+/// Owner note 7: the rubber band is drawn from the press to the pointer at any zoom
+/// (16 % and 300 %): the box's corners are the pointer's, in canvas px.
+#[test]
+fn w90b_the_rubber_band_follows_the_pointer_at_any_zoom() {
+    for zoom in [0.16_f32, 1.0, 3.0] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let (from, to) = (Point::new(40.0, 30.0), Point::new(300.0, 200.0));
+        let size = s.editor.as_ref().unwrap().size();
+        let msgs = {
+            let e = s.editor.as_ref().unwrap();
+            crate::shared::kit::testing::shot::press_move(
+                crate::features::snip::screens::snip_toolbar::canvas::canvas(
+                    e,
+                    1.0,
+                    crate::features::snip::screens::snip_toolbar::canvas::ScreenMap::ONE,
+                ),
+                size,
+                from,
+                to,
+            )
+        };
+        for m in msgs {
+            let _ = s.update(Msg::Editor(m));
+        }
+        let band = s.editor.as_ref().unwrap().band_rect().expect("a band");
+        assert!(
+            (band.x - from.x).abs() < 1.5 && (band.y - from.y).abs() < 1.5,
+            "zoom {zoom}: {band:?}"
+        );
+        assert!(
+            (band.x + band.width - to.x).abs() < 1.5 && (band.y + band.height - to.y).abs() < 1.5,
+            "zoom {zoom}: {band:?}"
+        );
+    }
+}
+
+/// Owner note 7 through the whole window (stage, scroll area, centring, UI scale): the
+/// band's size is the pointer's travel, its end is where the pointer is.
+#[test]
+fn w90b_the_rubber_band_in_the_window_matches_the_pointer() {
+    for (scale, zoom) in [(1.0_f32, 0.16_f32), (1.5, 0.16), (1.0, 3.0), (2.0, 1.0)] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Scale(scale));
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
+        let msgs =
+            crate::shared::kit::testing::shot::press_move(view(&s, &[], false), SIZE, from, to);
+        for m in msgs {
+            let _ = s.update(m);
+        }
+        let band = s.editor.as_ref().unwrap().band_rect().expect("a band");
+        assert!(
+            (band.width - 200.0).abs() < 2.0 && (band.height - 150.0).abs() < 2.0,
+            "scale {scale} zoom {zoom}: {band:?}"
+        );
+    }
+}
+
+/// Owner note 7, zoomed in AND scrolled (the picture bigger than the stage): the band
+/// is where the pointer is, at the scroll offset of the stage.
+#[test]
+fn w90b_the_rubber_band_is_right_after_a_scroll() {
+    for zoom in [1.0_f32, 3.0] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let scrolled = (CANVAS, Vector::new(700.0, 500.0));
+        let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
+        let msgs = crate::shared::kit::testing::shot::press_move_scrolled(
+            view(&s, &[], false),
+            SIZE,
+            scrolled,
+            from,
+            to,
+        );
+        // what the pointer travelled, in picture px, is what the band spans
+        for m in msgs {
+            let _ = s.update(m);
+        }
+        let e = s.editor.as_ref().unwrap();
+        let band = e.band_rect().expect("a band");
+        assert!(
+            (band.width - 200.0).abs() < 2.0 && (band.height - 150.0).abs() < 2.0,
+            "zoom {zoom}: {band:?}"
+        );
+        // and it starts where the picture point under the first press is
+        let start = e.to_display_point(e.to_image(Point::new(band.x, band.y)));
+        assert!((start.x - band.x).abs() < 1.0);
+    }
+}
