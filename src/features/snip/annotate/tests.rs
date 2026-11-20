@@ -3446,3 +3446,18 @@ fn x_picks_the_eraser_and_crop_keeps_no_key() {
     assert_eq!(TOOLS.iter().filter(|t| t.key == 'x').count(), 1);
     assert!(Group::Draw.tools().any(|t| t.tool == Tool::Eraser));
 }
+
+/// Owner note 8: the legend follows the picture's size: the same share of the picture
+/// on an 8000 px photo as on a 1080 px snip (before: a fixed 28 px, almost invisible).
+#[test]
+fn w90b_the_legend_scales_with_the_picture() {
+    let size_on = |side: u32| {
+        let mut e = Annotator::new(image_of(side, side, |_, _| SLATE), 1.0);
+        let s = side as f32;
+        step_with(&mut e, pt(s * 0.1, s * 0.1), "Open settings");
+        let l = e.doc.legend_layout().expect("a legend");
+        l.size / s
+    };
+    let (small, big) = (size_on(1080), size_on(8000));
+    assert!((big / small - 1.0).abs() < 0.05, "{small} vs {big}");
+}
