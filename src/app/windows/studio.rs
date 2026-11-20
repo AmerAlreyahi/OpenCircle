@@ -1426,8 +1426,16 @@ mod theme_tests {
             layout::Layout::new(&node),
             iced::mouse::Cursor::Unavailable,
         );
-        assert_eq!(seen.get(), DAYLIGHT.id, "the overlay draws the Studio's theme");
-        assert_eq!(themes::current().id, SAPPHIRE.id, "the app's theme comes back");
+        assert_eq!(
+            seen.get(),
+            DAYLIGHT.id,
+            "the overlay draws the Studio's theme"
+        );
+        assert_eq!(
+            themes::current().id,
+            SAPPHIRE.id,
+            "the app's theme comes back"
+        );
         // another window's overlay (no hook) draws the app's
         let other: overlay::Element<'_, Msg, iced::Theme, iced::Renderer> =
             overlay::Element::new(Box::new(Probe(seen.clone())));

@@ -179,8 +179,13 @@ impl<Message, H: Hook<Message>> Widget<Message, T, R> for Wrap<'_, Message, H> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, T, R>> {
-        let overlay =
-            (self.content.as_widget_mut()).overlay(tree, layout, renderer, viewport, translation)?;
+        let overlay = (self.content.as_widget_mut()).overlay(
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )?;
         Some(self.hook.overlay(overlay))
     }
 }
