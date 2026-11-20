@@ -1877,7 +1877,7 @@ fn popover_sheet() {
                 (),
             )
         }),
-        row("bottom start", Act::Rest, move |ar| {
+        row("bottom start", Act::Rest, move |_ar| {
             let body = super::super::text::text(Role::CONTROL, "640 × 400");
             over(
                 base().into(),
