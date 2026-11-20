@@ -292,6 +292,15 @@ pub fn info(tool: Tool) -> &'static ToolInfo {
         .expect("every tool is listed")
 }
 
+/// How much bigger than a 1080p snip a picture whose short edge is `short` image px is
+/// (1 up to 1080 px): what makes a size that is fixed in image px (the legend's text) look
+/// the same on an 8K photo as on a 1080p snip. Every other default size (stroke, text, step
+/// marker, blur cell, handle reach) is in display px, divided by the zoom, so it follows
+/// the picture by itself.
+pub(crate) fn picture_scale(short: f32) -> f32 {
+    (short / 1080.0).max(1.0)
+}
+
 /// Stroke weight, in display px (as seen on screen, whatever the zoom).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

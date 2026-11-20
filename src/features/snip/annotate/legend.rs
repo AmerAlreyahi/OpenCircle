@@ -52,7 +52,7 @@ pub fn rows(items: &[Item]) -> Vec<Row> {
 /// 1080 px (its short edge) so an 8K photo's key looks like a 1080p snip's.
 fn font(view: Rectangle) -> f32 {
     let short = view.width.min(view.height);
-    (short / 28.0).clamp(13.0, 28.0) * (short / 1080.0).max(1.0)
+    (short / 28.0).clamp(13.0, 28.0) * super::picture_scale(short)
 }
 
 /// Badge radius, row height and the text's left edge, for a font size.

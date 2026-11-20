@@ -3461,3 +3461,35 @@ fn w90b_the_legend_scales_with_the_picture() {
     let (small, big) = (size_on(1080), size_on(8000));
     assert!((big / small - 1.0).abs() < 0.05, "{small} vs {big}");
 }
+
+/// Review 3: every default size follows the picture, so an 8K photo looks like a 1080p
+/// snip: at the zoom that fits the picture to the same window, the stroke, text size, step
+/// marker, blur cell and handle reach are the same share of the picture's edge, and the
+/// legend (the one size fixed in image px) uses the same `picture_scale`.
+#[test]
+fn w90c_default_sizes_follow_the_picture() {
+    let share = |side: u32| {
+        let zoom = 700.0 / side as f32; // the same window shows either picture whole
+        let mut e = Annotator::new(image_of(side, side, |_, _| SLATE), zoom);
+        let p = pt(side as f32 * 0.1, side as f32 * 0.1);
+        step_with(&mut e, p, "Open");
+        let Shape::Step { radius, .. } = e.doc.items[0].shape else {
+            panic!("a step marker");
+        };
+        let s = side as f32;
+        [
+            e.stroke / e.zoom / s,
+            e.text_size / e.zoom / s,
+            radius / s,
+            e.blur_cell.cell() / e.zoom / s,
+            super::REACH / e.zoom / s,
+        ]
+    };
+    let (small, big) = (share(1080), share(8000));
+    for (i, (a, b)) in small.iter().zip(&big).enumerate() {
+        assert!((b / a - 1.0).abs() < 0.02, "size {i}: {a} vs {b}");
+    }
+    // the legend's text, fixed in image px, scales by the one shared factor
+    assert_eq!(super::picture_scale(1080.0), 1.0);
+    assert!((super::picture_scale(8000.0) - 8000.0 / 1080.0).abs() < 1e-4);
+}
