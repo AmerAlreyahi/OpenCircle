@@ -497,9 +497,26 @@ fn write_file(
     bytes: &[u8],
     confirmed: bool,
 ) -> std::io::Result<std::path::PathBuf> {
-    use std::io::Write;
+    write_file_with(path, confirmed, |file| {
+        use std::io::Write;
+        file.write_all(bytes)
+    })
+}
+
+/// `write_file` with the writing given: a file made new that then fails to be written
+/// (a full disk) is removed, never left cut off.
+fn write_file_with(
+    path: &std::path::Path,
+    confirmed: bool,
+    put: impl Fn(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<std::path::PathBuf> {
     if confirmed {
-        std::fs::write(path, bytes)?;
+        let mut file = std::fs::File::create(path)?;
+        if let Err(e) = put(&mut file) {
+            drop(file);
+            let _ = std::fs::remove_file(path); // (the user chose it: a cut-off file is no better than none)
+            return Err(e);
+        }
         return Ok(path.to_path_buf());
     }
     let stem = path
@@ -519,7 +536,11 @@ fn write_file(
             .open(&name)
         {
             Ok(mut file) => {
-                file.write_all(bytes)?;
+                if let Err(e) = put(&mut file) {
+                    drop(file);
+                    let _ = std::fs::remove_file(&name);
+                    return Err(e);
+                }
                 return Ok(name);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -1012,6 +1033,22 @@ mod tests {
         assert!(out.unwrap().is_ok());
         assert_eq!(std::fs::read(dir.join("typed.png")).unwrap(), b"keep");
         assert!(dir.join("typed-2.png").exists());
+    }
+
+    /// A write that fails after the file was made leaves no cut-off file.
+    #[test]
+    fn a_failed_write_leaves_no_file() {
+        let dir = crate::shared::paths::test_dir("w87-write-fail");
+        let path = dir.join("a.png");
+        let fail = |_: &mut std::fs::File| Err(std::io::Error::other("disk full"));
+        assert!(super::write_file_with(&path, false, fail).is_err());
+        assert!(!path.exists(), "no cut-off file");
+        std::fs::write(&path, b"old").unwrap();
+        assert!(super::write_file_with(&path, true, fail).is_err());
+        assert!(
+            !path.exists(),
+            "a confirmed overwrite that fails is removed too"
+        );
     }
 
     /// Exclusive creation: a name that appears meanwhile is never written over.
