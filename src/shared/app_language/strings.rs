@@ -1800,6 +1800,8 @@ strings! {
         | "تصغير";
     st_fit: "Fit"
         | "ملاءمة";
+    st_ask_hint: "Your drawings are not saved yet."
+        | "رسوماتك لم تُحفظ بعد.";
     st_ask_close: "Save the changes to this picture?"
         | "هل تحفظ التغييرات على هذه الصورة؟";
     st_dont_save: "Don't save"

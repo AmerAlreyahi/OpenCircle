@@ -1914,3 +1914,18 @@ fn slide_over_sheet() {
         .collect();
     sheet("slide_over", Size::new(200.0, 120.0), &rows);
 }
+
+/// `modal`: the dialog card over a dimmed window, with its header and X.
+#[test]
+fn modal_sheet() {
+    use super::super::modal::{header, over, pad};
+    let rows = vec![row("question", Act::Rest, move |ar| {
+        let base = container(text("")).width(Fill).height(Fill);
+        let body = pad(vec![
+            header(s(ar, "Save the changes?", "حفظ التغييرات؟"), None, ()),
+            super::super::text::text(Role::CONTROL, s(ar, "Your drawings", "رسوماتك")).into(),
+        ]);
+        over(base.into(), body, 160.0, ())
+    })];
+    sheet("modal", Size::new(200.0, 140.0), &rows);
+}

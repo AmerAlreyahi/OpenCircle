@@ -34,6 +34,7 @@ pub mod keycap;
 pub mod logo;
 pub mod loupe;
 pub mod markdown;
+pub mod modal;
 pub mod option_bar;
 pub mod option_list;
 pub mod panel_frame;

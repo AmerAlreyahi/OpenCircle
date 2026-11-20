@@ -9,7 +9,7 @@ use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{muted, sub, text};
 use crate::shared::kit::tokens::{Role, radius, space};
-use crate::shared::kit::{card, divider, option_list};
+use crate::shared::kit::{divider, icon_button, option_list};
 use crate::t;
 
 const LEAD: f32 = 2.0;
@@ -135,12 +135,13 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
             sub(Role::ROW_DESC, t!(st_sc_sub)),
         ]
         .width(Fill),
-        button::button(
-            label(t!(st_close)),
-            Kind::Elevated,
-            Some(Msg::Shortcuts(false))
+        icon_button::square(
+            crate::shared::kit::icon::Icon::Close.glyph(),
+            icon_button::State::default(),
+            Some(Msg::Shortcuts(false)),
         ),
     ]
+    .spacing(space::GAP)
     .align_y(Center);
     let foot = crate::dir_row![
         sub(Role::META, t!(st_sc_foot)).width(Fill),
@@ -173,7 +174,10 @@ pub struct Restorable {
     pub notes: String,
 }
 
-/// The restore sheet.
+/// The restore sheet's width (a solid modal, the X = Later).
+pub const RESTORE_W: f32 = 480.0;
+
+/// The restore sheet's body.
 pub fn restore<'a>(
     r: &'a Restorable,
     restore: Msg,
@@ -182,41 +186,38 @@ pub fn restore<'a>(
     failed: bool,
 ) -> Element<'a, Msg> {
     let sized = |b: Element<'a, Msg>| container(b).width(RESTORE_BUTTON);
-    let body = column![
-        text(Role::CARD_HEADING, t!(st_restore_title)),
-        sub(
-            Role::ROW_DESC,
-            match failed {
-                true => t!(st_restore_failed),
-                false => t!(st_restore_hint),
-            }
-        ),
-        muted(
-            Role::KEYCAP,
-            format!("{} · {} × {}", r.name, r.size.0, r.size.1)
-        ),
-        crate::dir_row![
-            iced::widget::Space::new().width(Fill),
-            sized(button::button(
-                label(t!(st_later)),
-                Kind::Quiet,
-                Some(later)
-            )),
-            sized(button::button(
-                label(t!(st_discard)),
-                Kind::Elevated,
-                Some(discard)
-            )),
-            sized(button::button(
-                label(t!(st_restore)),
-                Kind::Accent,
-                Some(restore)
-            )),
-        ]
-        .spacing(space::GAP),
+    let hint = match failed {
+        true => t!(st_restore_failed),
+        false => t!(st_restore_hint),
+    };
+    let buttons = crate::dir_row![
+        iced::widget::Space::new().width(Fill),
+        sized(button::button(
+            label(t!(st_later)),
+            Kind::Quiet,
+            Some(later.clone())
+        )),
+        sized(button::button(
+            label(t!(st_discard)),
+            Kind::Elevated,
+            Some(discard)
+        )),
+        sized(button::button(
+            label(t!(st_restore)),
+            Kind::Accent,
+            Some(restore)
+        )),
     ]
     .spacing(space::GAP);
-    card::card(body)
+    crate::shared::kit::modal::pad(vec![
+        crate::shared::kit::modal::header(t!(st_restore_title), Some(hint), later),
+        muted(
+            Role::KEYCAP,
+            format!("{} · {} × {}", r.name, r.size.0, r.size.1),
+        )
+        .into(),
+        buttons.into(),
+    ])
 }
 
 pub(super) fn words(a: editing::Action) -> S {

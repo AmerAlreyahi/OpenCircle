@@ -20,9 +20,10 @@ use crate::features::snip::transition::{self, Transition};
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, cancel, label};
 use crate::shared::kit::icon_button::{self, State};
+use crate::shared::kit::modal;
 use crate::shared::kit::slide_over::{self, Scrim};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{muted, sub, text};
+use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
@@ -133,21 +134,21 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         None => main,
     };
     let main: Element<'_, Msg> = match s.shortcuts {
-        true => iced::widget::stack![
+        true => modal::over_sized(
             main,
-            iced::widget::opaque(container(super::sheets::shortcuts(s, s.window)).center(Fill))
-        ]
-        .into(),
+            super::sheets::shortcuts(s, s.window),
+            Msg::Shortcuts(false),
+        ),
         false => main,
     };
     // the Studio's preferences (Ctrl+, / File > Preferences), over everything but the
     // question; the keys are the dialog's (Esc closes it)
     let main: Element<'_, Msg> = match &s.prefs {
-        Some(d) => iced::widget::stack![
+        Some(d) => modal::over_sized(
             main,
-            iced::widget::opaque(container(d.view(s.window).map(Msg::Prefs)).center(Fill))
-        ]
-        .into(),
+            d.view(s.window).map(Msg::Prefs),
+            Msg::Prefs(super::preferences::Msg::Close),
+        ),
         None => main,
     };
     // a popover (Actions, Position, picture info, More) hangs from its opener
@@ -197,20 +198,18 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
     };
     // after a crash: the kept copy
     let main: Element<'_, Msg> = match s.restorable.as_ref().filter(|_| !s.later) {
-        Some(r) => iced::widget::stack![
+        Some(r) => modal::over(
             main,
-            iced::widget::opaque(
-                container(super::sheets::restore(
-                    r,
-                    Msg::Restore,
-                    Msg::DiscardCopy,
-                    Msg::Later,
-                    s.restore_failed
-                ))
-                .center(Fill)
-            )
-        ]
-        .into(),
+            super::sheets::restore(
+                r,
+                Msg::Restore,
+                Msg::DiscardCopy,
+                Msg::Later,
+                s.restore_failed,
+            ),
+            super::sheets::RESTORE_W,
+            Msg::Later,
+        ),
         None => main,
     };
     // the big temporary tasks slide in from the end edge: the walkthrough /
@@ -241,13 +240,9 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         ),
         _ => main,
     };
-    // the question is a card over the window: the picture under it takes no press
+    // the question is a solid modal over the dimmed window: the picture under it takes no press
     let main: Element<'_, Msg> = match s.asking() {
-        true => iced::widget::stack![
-            main,
-            iced::widget::opaque(container(question()).center(Fill))
-        ]
-        .into(),
+        true => modal::over(main, question(), QUESTION_W, Msg::Cancel),
         false => main,
     };
     // the download card (Copy text / Translate need models): over the window
@@ -820,24 +815,27 @@ const WALK_SLIDER_W: f32 = 240.0;
 /// The Picture tab's quality slider.
 const QUALITY_W: f32 = 120.0;
 const QUALITY_VALUE_W: f32 = 40.0;
-/// Closing or opening another picture with unsaved drawings: Don't save /
-/// Cancel / Save.
-fn question<'a>() -> Element<'a, Msg> {
-    container(crate::shared::kit::card::card(question_row()))
-        .width(Length::Fixed(560.0))
-        .into()
-}
+/// The question's buttons: one size, from the kit.
+const QUESTION_BUTTON: f32 = 108.0;
+const QUESTION_W: f32 = 460.0;
 
-fn question_row<'a>() -> Element<'a, Msg> {
-    let b = |s, kind, m| button::button(label(s), kind, Some(m));
-    crate::dir_row![
-        text(Role::ROW_TITLE, t!(st_ask_close)),
+/// Closing or opening another picture with unsaved drawings: a solid modal over the
+/// dimmed window: Don't save / Cancel (secondary), Save (the accent primary); Esc
+/// cancels, Enter saves, the X cancels.
+fn question<'a>() -> Element<'a, Msg> {
+    let b = |words: &'a str, kind, m| {
+        container(button::button(label(words), kind, Some(m))).width(QUESTION_BUTTON)
+    };
+    let buttons = crate::dir_row![
         Space::new().width(Fill),
         b(t!(st_dont_save), Kind::Elevated, Msg::DontSave),
-        cancel(label(t!(c_cancel)), Kind::Elevated, Msg::Cancel),
+        b(t!(c_cancel), Kind::Elevated, Msg::Cancel),
         b(t!(c_save), Kind::Accent, Msg::SaveFirst),
     ]
     .spacing(space::GAP)
-    .align_y(Center)
-    .into()
+    .align_y(Center);
+    modal::pad(vec![
+        modal::header(t!(st_ask_close), Some(t!(st_ask_hint)), Msg::Cancel),
+        buttons.into(),
+    ])
 }

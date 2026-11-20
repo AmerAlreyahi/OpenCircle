@@ -2806,3 +2806,67 @@ fn w90b_the_rubber_band_is_right_after_a_scroll() {
         assert!((start.x - band.x).abs() < 1.0);
     }
 }
+
+/// Owner notes 9 and 4: the unsaved question is a solid modal over a dimmed window (the
+/// picture does not show through), the buttons are one size, Save is the accent primary;
+/// Esc cancels, Enter saves, the X and a press outside cancel.
+#[test]
+fn w90b_the_question_is_a_solid_modal() {
+    let mut s = studio_on(640, 400);
+    draw(&mut s);
+    let _ = s.close_requested();
+    assert!(s.asking());
+    // a press outside the card (the dimmed window) cancels; the picture takes no press
+    let got = click_view(&s, (60.0, 400.0));
+    assert!(matches!(got.as_slice(), [Msg::Cancel]), "{got:?}");
+    // the card's words and buttons
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    for w in ["Don't save", "Cancel", "Save"] {
+        assert!(words.iter().any(|t| t == w), "{w}: {words:?}");
+    }
+    assert!(
+        !words.iter().any(|t| t == "Close"),
+        "no Close text button: {words:?}"
+    );
+    // solid: a point inside the card, away from its words, is the widget colour
+    let size = SIZE;
+    let pixels = {
+        let mut shown = Some(view(&s, &[], false));
+        crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| shown.take()).flatten(),
+            size,
+            1.0,
+        )
+        .0
+    };
+    let at = ((400.0 * size.width + 430.0) * 4.0) as usize;
+    let want = crate::shared::kit::themes::c().widget;
+    let got = [pixels[at], pixels[at + 1], pixels[at + 2]];
+    let want = [want.r, want.g, want.b].map(|v| (v * 255.0).round() as u8);
+    assert_eq!(
+        got, want,
+        "the card is solid, the picture does not show through"
+    );
+    // Enter saves, Esc cancels
+    assert!(matches!(
+        s.update(Msg::MenuKey(Nav::Enter)),
+        Outcome::SaveThen(_)
+    ));
+    let _ = s.close_requested();
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+}
+
+/// Owner note 4: the shortcuts sheet and the restore sheet are the same modal: an X
+/// (never a Close text button), a press outside closes it.
+#[test]
+fn w90b_every_studio_sheet_closes_by_x_outside_press_and_esc() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Shortcuts(true));
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(!words.iter().any(|t| t == "Close"), "{words:?}");
+    let got = click_view(&s, (4.0, 400.0));
+    assert!(matches!(got.as_slice(), [Msg::Shortcuts(false)]), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.shortcuts, "Esc closes it");
+}

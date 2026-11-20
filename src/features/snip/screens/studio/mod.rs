@@ -1611,6 +1611,7 @@ impl Studio {
                     None => Outcome::None,
                 }
             }
+            Msg::MenuKey(Nav::Enter) if self.asking() => self.update(Msg::SaveFirst),
             Msg::MenuKey(key) => {
                 let (menu, pick) = menu_bar::nav(self, key);
                 self.menu = menu;
