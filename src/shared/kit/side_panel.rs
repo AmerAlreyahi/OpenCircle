@@ -7,38 +7,27 @@
 use iced::widget::{button, column, container};
 use iced::{Border, Center, Element, Fill, Length, Padding};
 
-use super::icon_button::{self, State};
 use super::themes::c;
 use super::tokens::{Role, size};
-use super::tooltip::{Why, hint};
 use super::{divider, scroll};
 
 const OPENER_H: f32 = 28.0;
 const OPENER_R: f32 = 8.0;
 const PAD: f32 = 12.0;
 
-/// The panel: `title`, the hide button (`glyph`, `tip`), a hairline, `body`.
+/// The panel: `title`, a hairline, `body`. (Its show / hide button is the window's:
+/// the same place whether the panel is open or closed.)
 pub fn panel<'a, Message: Clone + 'a>(
     width: f32,
     title: &'a str,
-    glyph: char,
-    hide: Message,
-    tip: &'a str,
     body: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let toggle = hint(
-        icon_button::square(glyph, State::default(), Some(hide)),
-        tip,
-        Why::Icon,
-        iced::widget::tooltip::Position::Bottom,
-    );
     let head = container(
-        crate::dir_row![super::text::text(Role::CONTROL, title).width(Fill), toggle]
-            .align_y(Center),
+        crate::dir_row![super::text::text(Role::CONTROL, title).width(Fill)].align_y(Center),
     )
     .padding(Padding {
         left: PAD,
-        right: 8.0,
+        right: PAD,
         ..Padding::ZERO
     })
     .height(size::HEADER)

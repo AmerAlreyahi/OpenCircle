@@ -2282,6 +2282,8 @@ strings! {
         | "إلى الخلفية";
     st_actions_menu: "Actions"
         | "إجراءات";
+    st_show_steps: "Show the Steps sidebar"
+        | "إظهار الشريط الجانبي للخطوات";
     st_hide_steps: "Hide the Steps sidebar"
         | "إخفاء الشريط الجانبي للخطوات";
     st_add_pictures: "Add pictures…"

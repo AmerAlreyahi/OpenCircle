@@ -2870,3 +2870,35 @@ fn w90b_every_studio_sheet_closes_by_x_outside_press_and_esc() {
     let _ = s.update(Msg::Cancel);
     assert!(!s.shortcuts, "Esc closes it");
 }
+
+/// Owner note 1: the Steps sidebar's toggle is at the END of the options bar's row, the
+/// same spot whether the sidebar is open or closed; the sidebar's header has none.
+#[test]
+fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
+    let mut s = studio_on(640, 400);
+    let at_end = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(SIZE.width - 54.0, 48.0);
+        // the last 40 px of the bar (its padding, then the button)
+        (0..8)
+            .filter(|i| {
+                let at = Point::new(size.width - 14.0 - 4.0 * *i as f32, 24.0);
+                crate::shared::kit::testing::shot::click(options_bar::view(s, e), size, at)
+                    .iter()
+                    .any(|m| matches!(m, Msg::Library))
+            })
+            .count()
+    };
+    assert!(s.sidebar_shown());
+    assert!(at_end(&s) > 0, "open: the toggle at the row's end");
+    // the sidebar's own header has no button
+    let side = crate::shared::kit::testing::shot::click(
+        sidebar::view(&s, &[]),
+        Size::new(super::SIDEBAR, 700.0),
+        Point::new(super::SIDEBAR - 20.0, 20.0),
+    );
+    assert!(!side.iter().any(|m| matches!(m, Msg::Library)), "{side:?}");
+    let _ = s.update(Msg::Library);
+    assert!(!s.sidebar_shown());
+    assert!(at_end(&s) > 0, "closed: the same spot opens it again");
+}

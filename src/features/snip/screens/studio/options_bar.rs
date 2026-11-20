@@ -1,7 +1,7 @@
 //! The options bar (board 10, STUDIO_V3_SPEC §4): the tool's name and key,
 //! then its groups, every control 32 high (`kit::option_bar`). The groups read
 //! the editor's current values and send the editor's own messages.
-use iced::widget::{Space, container};
+use iced::widget::container;
 use iced::{Center, Element, Fill};
 
 use super::popovers::Pop;
@@ -11,12 +11,14 @@ use crate::features::snip::annotate::{
 };
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button;
 use crate::shared::kit::option_bar::{
     GROUP_GAP, accent_cell, caption, dot, glyph_cell, group, hairline, swatch, swatch_of,
     text_cell, value,
 };
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{dir, keycap, scroll};
 use crate::t;
 
@@ -277,13 +279,15 @@ const W_OWN: f32 = 290.0;
 const W_MORE: f32 = 90.0;
 const W_CAPTIONS: f32 = 85.0;
 const W_GAP: f32 = 8.0;
+/// The Steps sidebar's toggle at the row's end.
+const W_TOGGLE: f32 = 36.0;
 /// The bar's side padding.
 const PAD_L: f32 = 14.0;
 const PAD_R: f32 = 12.0;
 
 impl Plan {
     fn width(self, has_own: bool, scale: f32) -> f32 {
-        let mut w = W_FIXED;
+        let mut w = W_FIXED + W_TOGGLE;
         let mut items = 6.0; // the groups, Position, Actions, the name
         w += if self.name_full { W_NAME } else { W_ICON };
         w += if self.colours_inline {
@@ -427,19 +431,54 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     ));
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
     let ends = dir::row(end).spacing(GROUP_GAP).align_y(Center);
-    let row = crate::dir_row![line, Space::new().width(Fill), ends]
-        .spacing(GROUP_GAP)
-        .align_y(Center);
-    let bar = container(row)
-        .padding(iced::Padding {
-            left: PAD_L,
-            right: PAD_R,
-            ..iced::Padding::ZERO
-        })
-        .height(super::OPTIONS)
-        .center_y(super::OPTIONS);
-    // (a last resort: a bar the estimates missed scrolls rather than clips)
-    scroll::across(bar).width(Fill).into()
+    // the Steps sidebar's toggle: the end of the row, the same place open or closed
+    let shown = s.sidebar_shown();
+    let toggle = hint(
+        icon_button::square(
+            super::sidebar::toggle_glyph(s.sidebar_at_start()),
+            icon_button::State {
+                active: shown,
+                focused: false,
+            },
+            Some(Msg::Library),
+        ),
+        match shown {
+            true => t!(st_hide_steps),
+            false => t!(st_show_steps),
+        },
+        Why::Keys(super::keys::STEPS_SIDEBAR),
+        iced::widget::tooltip::Position::Bottom,
+    );
+    // the groups scroll (a last resort: a bar the estimates missed scrolls rather than
+    // clips); Position, Actions and the toggle stay put at the row's end
+    let pad = |side: f32| iced::Padding {
+        left: side,
+        right: side,
+        ..iced::Padding::ZERO
+    };
+    let groups = scroll::across(
+        container(line)
+            .padding(iced::Padding {
+                left: PAD_L,
+                ..iced::Padding::ZERO
+            })
+            .height(super::OPTIONS)
+            .center_y(super::OPTIONS),
+    )
+    .width(Fill);
+    let tail = container(
+        crate::dir_row![ends, toggle]
+            .spacing(GROUP_GAP)
+            .align_y(Center),
+    )
+    .padding(iced::Padding {
+        left: pad(GROUP_GAP).left,
+        right: PAD_R,
+        ..iced::Padding::ZERO
+    })
+    .height(super::OPTIONS)
+    .center_y(super::OPTIONS);
+    crate::dir_row![groups, tail].width(Fill).into()
 }
 
 /// The Done group (Edit text): the accent group, text on the fill.

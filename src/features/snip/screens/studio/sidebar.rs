@@ -24,7 +24,7 @@ use crate::t;
 pub(super) const PAD: f32 = 12.0;
 
 /// The toggle's glyph: it points at the side the sidebar is on.
-fn toggle_glyph(at_start: bool) -> char {
+pub(super) fn toggle_glyph(at_start: bool) -> char {
     match at_start != dir::rtl() {
         true => super::view::PANEL_LEFT,
         false => super::view::PANEL_RIGHT,
@@ -60,14 +60,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     );
     let tools = container(column![add, this, paste].spacing(space::GAP)).padding([space::GAP, PAD]);
     let body = column![tools, steps_list(s, steps)];
-    let panel = side_panel::panel(
-        super::SIDEBAR,
-        t!(st_steps),
-        toggle_glyph(s.sidebar_at_start()),
-        Msg::Library,
-        t!(st_hide_steps),
-        body.into(),
-    );
+    let panel = side_panel::panel(super::SIDEBAR, t!(st_steps), body.into());
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
         .on_enter(Msg::OverSidebar(true))
