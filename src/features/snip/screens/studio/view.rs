@@ -112,9 +112,18 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             dir::row(parts).height(Fill).into()
         }
         None => {
+            // no picture: the options bar's row stays (its picture controls dimmed), so the
+            // Steps toggle sits where it does with a picture; the sidebar starts under it
             let mut parts: Vec<Element<'a, Msg>> = vec![super::start::view(s)];
             side(&mut parts);
-            dir::row(parts).height(Fill).into()
+            column![
+                super::options_bar::empty(s),
+                divider::divider(),
+                dir::row(parts).height(Fill)
+            ]
+            .width(Fill)
+            .height(Fill)
+            .into()
         }
     };
     let main = column![header, divider::divider(), body];

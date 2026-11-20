@@ -420,6 +420,50 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     }
     end.push(opener(s, t!(st_position), Pop::Position, !sel.is_empty()));
     end.push(opener(s, t!(st_actions_menu), Pop::Actions, true));
+    finish(s, items, end)
+}
+
+/// The bar of the empty Studio (no picture): the same row, its picture controls dimmed
+/// (never hidden), the Steps sidebar's toggle live at the same spot at the row's end.
+pub fn empty<'a>(s: &'a Studio) -> Element<'a, Msg> {
+    let ed = |g: El<'a>| -> Element<'a, Msg> { Element::from(g).map(Msg::Editor) };
+    let swatches = style::ANNOTATION
+        .iter()
+        .take(SWATCHES)
+        .map(|c| swatch(*c, false, None))
+        .collect();
+    let opacity = [t!(st_opacity)]
+        .into_iter()
+        .map(caption)
+        .chain(["100 %", "70 %", "40 %"].map(|w| text_cell(w, false, None)))
+        .collect();
+    let items = vec![
+        ed(group(swatches, false)),
+        ed(dots(None, "5 px".into(), false, true, |i| {
+            Message::Width(Width::ALL[i])
+        })),
+        ed(group(opacity, false)),
+        ed(group(
+            vec![
+                text_cell(t!(sn_outline), false, None),
+                text_cell(t!(sn_fill), false, None),
+            ],
+            false,
+        )),
+    ];
+    let end = vec![
+        opener(s, t!(st_position), Pop::Position, false),
+        opener(s, t!(st_actions_menu), Pop::Actions, false),
+    ];
+    finish(s, items, end)
+}
+
+/// The row: the groups (scrolling as a last resort), then `end` and the Steps toggle.
+fn finish<'a>(
+    s: &'a Studio,
+    items: Vec<Element<'a, Msg>>,
+    end: Vec<Element<'a, Msg>>,
+) -> Element<'a, Msg> {
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
     let ends = dir::row(end).spacing(GROUP_GAP).align_y(Center);
     // the Steps sidebar's toggle: the end of the row, the same place open or closed

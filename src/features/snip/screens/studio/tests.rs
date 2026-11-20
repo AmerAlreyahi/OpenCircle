@@ -3354,3 +3354,32 @@ fn w90c_an_alt_chord_does_not_open_the_menu_bar_on_release() {
         },
     );
 }
+
+/// W90c item 2: the empty Studio keeps the options bar's row with its picture controls
+/// dimmed; the Steps toggle is live at the window's end, where it is with a picture.
+#[test]
+fn w90c_the_empty_studio_has_the_steps_toggle_at_the_same_spot() {
+    let toggle_at = |s: &Studio| -> Vec<f32> {
+        // the header is 40 px; the bar's row is under it
+        (0..60)
+            .map(|i| SIZE.width - 8.0 - i as f32)
+            .filter(|x| {
+                click_view(s, (*x, super::HEADER + super::OPTIONS / 2.0))
+                    .iter()
+                    .any(|m| matches!(m, Msg::Library))
+            })
+            .collect()
+    };
+    let empty = Studio::new(StudioConfig::default());
+    assert!(empty.editor.is_none());
+    let with = studio_on(640, 400);
+    let (a, b) = (toggle_at(&empty), toggle_at(&with));
+    assert!(!a.is_empty(), "the toggle is live in the empty Studio");
+    assert_eq!(a, b, "and sits where it does with a picture");
+    // the picture controls are dimmed: pressing Position / Actions does nothing
+    let got = click_view(
+        &empty,
+        (SIZE.width - 120.0, super::HEADER + super::OPTIONS / 2.0),
+    );
+    assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
+}
