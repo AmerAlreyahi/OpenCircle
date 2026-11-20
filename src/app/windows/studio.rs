@@ -422,7 +422,6 @@ impl Windows {
                     live: false,
                 },
             ))),
-            Outcome::Settings => self.open(super::Kind::Settings),
             Outcome::ApplyPrefs => {
                 if let Some((_, s)) = &mut self.studio {
                     if let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c)) {
@@ -534,15 +533,7 @@ fn save_to(
         max_edge,
     };
     let ext = how.format.ext();
-    let (date, time) = save::date_time();
-    let stem = prefs
-        .file_name
-        .replace("{date}", &date)
-        .replace("{time}", &time);
-    let stem = match stem.trim().is_empty() {
-        true => save::stamped_name(""),
-        false => stem,
-    };
+    let stem = studio_stem(&prefs.file_name);
     let Some(folder) = save::start_folder(&prefs.folder) else {
         return Some(Err(not_saved()));
     };
@@ -576,6 +567,16 @@ fn save_to(
     }
     let shown = written.parent().unwrap_or(&written);
     Some(Ok(fmt(S::pill_saved, &[&save::short_path(shown)])))
+}
+
+/// The file name (no extension) Studio preferences' pattern gives now.
+fn studio_stem(pattern: &str) -> String {
+    let (date, time) = save::date_time();
+    let stem = pattern.replace("{date}", &date).replace("{time}", &time);
+    match stem.trim().is_empty() {
+        true => save::stamped_name(""),
+        false => stem,
+    }
 }
 
 /// `bytes` into `path`, or into `<name>-2.<ext>`, `-3` ... when it is taken: created
@@ -666,10 +667,18 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
     }
     let mut dialog = rfd::FileDialog::new()
         .set_title(crate::t!(st_export_where))
-        .set_file_name(format!("{}.{ext}", save::stamped_name("")))
+        .set_file_name(format!(
+            "{}.{ext}",
+            studio_stem(&crate::shared::config::current().studio.file_name)
+        ))
         .add_filter(how.format.name(), &[ext]);
+    // Studio preferences' folder, else the general Save folder
     let config = crate::shared::config::current();
-    if let Some(folder) = save::start_folder(&config.general.save_folder) {
+    let configured = match config.studio.folder.is_empty() {
+        true => &config.general.save_folder,
+        false => &config.studio.folder,
+    };
+    if let Some(folder) = save::start_folder(configured) {
         dialog = dialog.set_directory(folder);
     }
     let path = export::with_ext(dialog.save_file()?, how.format);
@@ -792,7 +801,7 @@ fn key_msg(
     physical_key: keyboard::key::Physical,
     modifiers: keyboard::Modifiers,
 ) -> Option<studio::Msg> {
-    use keyboard::key::{Code, Named, Physical};
+    use keyboard::key::Named;
     if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
         return Some(studio::Msg::Cancel);
     }
@@ -814,33 +823,16 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Space) && modifiers.is_empty() {
         return Some(studio::Msg::Space(true));
     }
-    // Shift+1: the whole picture in the stage (Fit)
-    if modifiers == keyboard::Modifiers::SHIFT
-        && matches!(physical_key, Physical::Code(Code::Digit1 | Code::Numpad1))
+    // the Studio's own commands: the user's keys or the defaults (`studio::keys`)
+    if let Some(chord) = studio::keys::chord_text(modifiers, key, physical_key)
+        && let Some(cmd) = studio::keys::command_for(&chord)
     {
-        return Some(studio::Msg::Fit);
+        return Some(cmd.msg());
     }
     if !modifiers.command() {
         return None;
     }
     Some(match (physical_key, key.to_latin(physical_key)) {
-        // the Steps sidebar: Ctrl+B
-        (_, Some('s')) if modifiers.shift() => studio::Msg::Export,
-        (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
-        (Physical::Code(Code::Slash), _) => studio::Msg::Shortcuts(true),
-        (Physical::Code(Code::Comma), _) => studio::Msg::OpenPrefs,
-        // the Studio's UI scale (as in the AI chat); with Shift, the picture's zoom
-        (Physical::Code(Code::Equal | Code::NumpadAdd), _) if modifiers.shift() => {
-            studio::Msg::ZoomIn
-        }
-        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) if modifiers.shift() => {
-            studio::Msg::ZoomOut
-        }
-        (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::UiScale(1),
-        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::UiScale(-1),
-        (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::UiScale(0),
-        (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
-        (_, Some('o')) => studio::Msg::Open,
         (_, Some('v')) => studio::Msg::Paste,
         (_, Some('w')) => studio::Msg::Caption(crate::shared::kit::header::Caption::Close),
         _ => return None,
@@ -850,13 +842,18 @@ fn key_msg(
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
 /// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
-pub(super) fn studio_events(waiting: bool) -> iced::Subscription<Msg> {
+pub(super) fn studio_events(waiting: bool, recording: bool) -> iced::Subscription<Msg> {
     // the unsaved copy's debounce runs on a clock, only while an edit waits for its copy
     let tick = match waiting {
         true => iced::Subscription::run(recovery_ticks).map(|()| Msg::Studio(studio::Msg::Tick)),
         false => iced::Subscription::none(),
     };
-    iced::Subscription::batch([tick, keys()])
+    // while Studio preferences wait for a new key, every chord is that key (Esc stops)
+    let keys = match recording {
+        true => recording_keys(),
+        false => keys(),
+    };
+    iced::Subscription::batch([tick, keys])
 }
 
 /// One message a second while the unsaved copy is kept (a thread on a sleep; a
@@ -884,6 +881,28 @@ fn mouse_msg(event: &iced::Event) -> Option<studio::Msg> {
         }
         _ => None,
     }
+}
+
+/// The keys while a new shortcut is recorded: a chord is the answer, Esc stops, nothing acts.
+fn recording_keys() -> iced::Subscription<Msg> {
+    iced::event::listen_with(|event, _, id| {
+        let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) = event
+        else {
+            return None;
+        };
+        let m = match key == keyboard::Key::Named(keyboard::key::Named::Escape) {
+            true => studio::Msg::Cancel,
+            false => studio::Msg::Prefs(studio::preferences::Msg::Recorded(
+                studio::keys::chord_text(modifiers, &key, physical_key)?,
+            )),
+        };
+        Some(Msg::StudioEvent(id, m))
+    })
 }
 
 fn keys() -> iced::Subscription<Msg> {

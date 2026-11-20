@@ -169,6 +169,8 @@ mod parse;
 mod store;
 
 pub use look::PRESETS;
+#[cfg(test)]
+pub use store::with_test_config;
 pub use store::{appearance, current, look, look_config, rebase, set_current, update, update_at};
 use {look::*, migrate::*, parse::*};
 
@@ -662,6 +664,23 @@ pub struct StudioPrefs {
     pub steps_on_start: bool,
     /// The empty Studio shows its start screen (Open, Paste, New snip, recent files).
     pub start_screen: bool,
+    /// The user's own keys for the Studio's commands (`[studio.shortcuts]`: a command's id
+    /// to a chord such as `"Ctrl+Shift+O"`); a command not here has its default key.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub shortcuts: std::collections::BTreeMap<String, String>,
+}
+
+/// `chord` is a key chord the Studio can bind: modifiers (`Ctrl`, `Alt`, `Shift`) joined by
+/// `+` and one last key name.
+pub fn is_chord(chord: &str) -> bool {
+    let parts: Vec<&str> = chord.split('+').collect();
+    let (key, mods) = match parts.split_last() {
+        Some((k, m)) => (*k, m),
+        None => return false,
+    };
+    let mods_ok = mods.iter().all(|m| matches!(*m, "Ctrl" | "Alt" | "Shift"));
+    let distinct = mods.iter().enumerate().all(|(i, m)| !mods[..i].contains(m));
+    mods_ok && distinct && !key.is_empty() && !matches!(key, "Ctrl" | "Alt" | "Shift")
 }
 
 impl Default for StudioPrefs {
@@ -691,6 +710,7 @@ impl Default for StudioPrefs {
             steps_side: StudioSide::End,
             steps_on_start: true,
             start_screen: true,
+            shortcuts: Default::default(),
         }
     }
 }

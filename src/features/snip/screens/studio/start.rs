@@ -84,7 +84,7 @@ pub fn view(s: &Studio) -> Element<'_, Msg> {
         hint(
             open,
             t!(st_open),
-            Why::Keys(super::keys::OPEN),
+            Why::Keys(super::keys::of(super::keys::Cmd::Open)),
             Position::Bottom
         ),
         hint(

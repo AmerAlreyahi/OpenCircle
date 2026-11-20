@@ -111,16 +111,34 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         row(tr(r.label(false)), &[&acts.caps[at].join("+")])
     });
     let view = vec![
-        row(tr(S::st_steps), &[k::STEPS_SIDEBAR]),
+        row(tr(S::st_steps), &[k::of(k::Cmd::StepsSidebar)]),
         row(
             tr(S::st_sc_zoom),
-            &[k::ZOOM_IN, k::ZOOM_OUT, k::FIT, k::ACTUAL],
+            &[
+                k::of(k::Cmd::ZoomIn),
+                k::of(k::Cmd::ZoomOut),
+                k::of(k::Cmd::Fit),
+                k::of(k::Cmd::Actual),
+            ],
         ),
-        row(tr(S::st_sc_ui), &[k::UI_LARGER, k::UI_SMALLER, k::UI_RESET]),
+        row(
+            tr(S::st_sc_ui),
+            &[
+                k::of(k::Cmd::UiLarger),
+                k::of(k::Cmd::UiSmaller),
+                k::of(k::Cmd::UiReset),
+            ],
+        ),
         row(tr(S::st_sc_pan), &[k::PAN]),
-        row(tr(S::st_sc_file), &[k::OPEN, k::SAVE, k::SAVE_AS]),
-        row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::PREFERENCES]),
-        row(tr(S::st_shortcuts), &[k::SHORTCUTS]),
+        row(
+            tr(S::st_sc_file),
+            &[k::of(k::Cmd::Open), k::SAVE, k::of(k::Cmd::SaveAs)],
+        ),
+        row(
+            tr(S::st_sc_misc),
+            &[k::NEW_SNIP, k::CLOSE, k::of(k::Cmd::Preferences)],
+        ),
+        row(tr(S::st_shortcuts), &[k::of(k::Cmd::Shortcuts)]),
     ];
     let view: Vec<Row<'a>> = view.into_iter().chain(quick).collect();
     let columns = crate::dir_row![

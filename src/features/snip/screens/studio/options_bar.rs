@@ -437,7 +437,7 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             true => t!(st_hide_steps),
             false => t!(st_show_steps),
         },
-        Why::Keys(super::keys::STEPS_SIDEBAR),
+        Why::Keys(super::keys::of(super::keys::Cmd::StepsSidebar)),
         iced::widget::tooltip::Position::Bottom,
     );
     // the groups scroll (a last resort: a bar the estimates missed scrolls rather than

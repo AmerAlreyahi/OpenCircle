@@ -86,6 +86,7 @@ ICONS=$(printf '%s,' \
   U+E246 `# folder-open (Snip Studio: Open)` \
   U+E3EB `# clipboard-paste (Snip Studio: Paste)` \
   U+E140 `# plus (Snip Studio: zoom in)` \
+  U+E157 `# settings (Snip Studio: the preferences button)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

@@ -346,8 +346,6 @@ pub enum Outcome {
     Prefs(crate::shared::config::StudioPrefs),
     /// Recent > Clear.
     ClearRecent,
-    /// File > Settings…
-    Settings,
 }
 
 pub struct Studio {
@@ -1400,7 +1398,11 @@ impl Studio {
             }
             Msg::DontSave => self.proceed(),
             Msg::Cancel => {
-                // Esc ladder: menu, sheet, overlay, the question, Edit text
+                // Esc ladder: a key being recorded, menu, sheet, overlay, the question, Edit text
+                if let Some(d) = self.prefs.as_mut().filter(|d| d.recording()) {
+                    d.stop_recording();
+                    return Outcome::None;
+                }
                 let closed = self.sub.take().is_some()
                     || self.context.take().is_some()
                     || self.menu.take().is_some()
@@ -1627,9 +1629,14 @@ impl Studio {
                 self.shortcuts = on;
                 Outcome::None
             }
+            // the shortcuts sheet's Edit: the keys are Studio preferences' own page
             Msg::EditShortcuts => {
                 self.shortcuts = false;
-                Outcome::Settings
+                let _ = self.update(Msg::OpenPrefs);
+                if let Some(d) = &mut self.prefs {
+                    d.show_shortcuts();
+                }
+                Outcome::None
             }
             Msg::Later => {
                 self.later = true;
@@ -1808,6 +1815,8 @@ impl Studio {
             }
             self.editor = Some(e);
         }
+        // (the Save as sheet starts on the format, quality and size the dialog now says)
+        self.export = export_defaults();
     }
 
     /// The dialog's changes onto `c` (the host calls this inside `config::update`).
@@ -1822,6 +1831,11 @@ impl Studio {
     pub(super) fn sidebar_at_start(&self) -> bool {
         crate::shared::config::current().studio.steps_side
             == crate::shared::config::StudioSide::Start
+    }
+
+    /// Studio preferences wait for a new key: the host sends the next chord.
+    pub fn recording(&self) -> bool {
+        self.prefs.as_ref().is_some_and(|d| d.recording())
     }
 
     /// The Steps sidebar shows.

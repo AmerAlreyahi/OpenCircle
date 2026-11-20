@@ -9,7 +9,7 @@
 //! `config::update(|c| dialog.apply(c))`; `Browse`: pick a folder, answer with
 //! `set_folder`; `Close`: drop it). `theme_of` gives the Studio window's theme.
 use iced::widget::{column, container};
-use iced::{Center, Element, Fill, Length, Size, widget::tooltip::Position};
+use iced::{Element, Fill, Length, Size, widget::tooltip::Position};
 
 use crate::features::snip::screens::studio::keys;
 use crate::shared::app_language::{S, tr};
@@ -21,19 +21,21 @@ use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::field::field;
 use crate::shared::kit::scroll::scroll;
-use crate::shared::kit::segmented::{boolean, inline, segmented};
+use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{error, text};
+use crate::shared::kit::text::{error, muted};
 use crate::shared::kit::themes::{self, THEMES};
 use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::tip;
-use crate::shared::kit::{divider, option_list};
+use crate::shared::kit::{divider, modal, option_list};
 use crate::t;
 
 /// The dialog's size (logical px); it never exceeds the window less `MARGIN`.
-const WIDTH: f32 = 760.0;
-const HEIGHT: f32 = 600.0;
+const WIDTH: f32 = 960.0;
+const HEIGHT: f32 = 640.0;
+/// The section list's width.
+const NAV: f32 = 210.0;
 const MARGIN: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +58,18 @@ impl Tab {
         Tab::Shortcuts,
     ];
 
+    /// The one line under the section's title.
+    fn subtitle(self) -> &'static str {
+        match self {
+            Tab::General => t!(pf_sub_general),
+            Tab::Appearance => t!(pf_sub_appearance),
+            Tab::Saving => t!(pf_sub_saving),
+            Tab::CopyPaste => t!(pf_sub_copy),
+            Tab::Editing => t!(pf_sub_editing),
+            Tab::Shortcuts => t!(pf_sub_shortcuts),
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Tab::General => t!(nav_general),
@@ -63,7 +77,7 @@ impl Tab {
             Tab::Saving => t!(pf_tab_saving),
             Tab::CopyPaste => t!(pf_tab_copy),
             Tab::Editing => t!(pf_tab_editing),
-            Tab::Shortcuts => t!(nav_shortcuts),
+            Tab::Shortcuts => t!(st_shortcuts),
         }
     }
 }
@@ -78,6 +92,12 @@ pub enum Msg {
     BrowseFolder,
     ClearFolder,
     ResetToolStyles,
+    /// Keyboard shortcuts: record a new key for a command (its field was pressed), the
+    /// chord pressed, back to the default key, every key back to the defaults.
+    Record(keys::Cmd),
+    Recorded(String),
+    ResetKey(keys::Cmd),
+    ResetKeys,
     Close,
 }
 
@@ -117,6 +137,9 @@ pub struct Dialog {
     opened: (StudioPrefs, u32),
     default_folder: Option<String>,
     themes: Vec<Choice>,
+    /// The command whose new key is awaited, and a chord that was refused (and why).
+    recording: Option<keys::Cmd>,
+    refused: Option<(keys::Cmd, String, keys::Taken)>,
 }
 
 impl Dialog {
@@ -148,6 +171,8 @@ impl Dialog {
             opened: (c.studio.clone(), c.snip.max_edge),
             default_folder: None,
             themes,
+            recording: None,
+            refused: None,
         }
     }
 
@@ -188,8 +213,60 @@ impl Dialog {
                 (self.reset_styles, self.tool_styles_set) = (true, false);
                 Out::Changed
             }
+            Msg::Record(cmd) => {
+                self.recording = Some(cmd);
+                self.refused = None;
+                Out::None
+            }
+            Msg::Recorded(chord) => {
+                let Some(cmd) = self.recording.take() else {
+                    return Out::None;
+                };
+                if chord == cmd.default_chord() {
+                    return self.set_key(cmd, None);
+                }
+                match keys::taken(cmd, &chord) {
+                    Some(why) => {
+                        self.refused = Some((cmd, chord, why));
+                        Out::None
+                    }
+                    None => self.set_key(cmd, Some(chord)),
+                }
+            }
+            Msg::ResetKey(cmd) => self.set_key(cmd, None),
+            Msg::ResetKeys => {
+                self.recording = None;
+                self.refused = None;
+                self.prefs.shortcuts.clear();
+                Out::Changed
+            }
             Msg::Close => Out::Close,
         }
+    }
+
+    /// A key for `cmd` (`None`: its default again).
+    fn set_key(&mut self, cmd: keys::Cmd, chord: Option<String>) -> Out {
+        self.refused = None;
+        match chord {
+            Some(chord) => self.prefs.shortcuts.insert(cmd.id().to_string(), chord),
+            None => self.prefs.shortcuts.remove(cmd.id()),
+        };
+        Out::Changed
+    }
+
+    /// Opens on the Keyboard shortcuts page.
+    pub fn show_shortcuts(&mut self) {
+        self.tab = Tab::Shortcuts;
+    }
+
+    /// A new key is awaited: the host sends the next chord (`Recorded`) and Esc stops it.
+    pub fn recording(&self) -> bool {
+        self.recording.is_some()
+    }
+
+    /// Esc while a key is awaited: stop waiting (the dialog stays).
+    pub fn stop_recording(&mut self) {
+        self.recording = None;
     }
 
     /// The folder picker's answer (`None`: cancelled).
@@ -251,21 +328,31 @@ impl Dialog {
         }
     }
 
+    /// The dialog: a list of sections on the left; on the right the section's title and
+    /// one-line subtitle with the X at the top, then its rows in small-headed groups.
     pub fn view(&self, window: Size) -> Element<'_, Msg> {
-        let head = crate::dir_row![
-            text(Role::CARD_HEADING, t!(pf_title)).width(Fill),
-            button::button(label(t!(st_close)), Kind::Elevated, Some(Msg::Close)),
-        ]
-        .align_y(Center);
-        let tabs = Tab::ALL.map(|t| (t, t.name()));
-        let bar = inline(&tabs, self.tab, self.tab, 1.0, Msg::Tab);
+        let nav = column(Tab::ALL.map(|t| {
+            let kind = match t == self.tab {
+                true => Kind::Elevated,
+                false => Kind::Quiet,
+            };
+            container(button::button(label(t.name()), kind, Some(Msg::Tab(t))))
+                .width(Fill)
+                .into()
+        }))
+        .spacing(space::GAP / 2.0)
+        .padding(space::PAGE[1]);
+        let nav = container(scroll(nav)).width(NAV).height(Length::Fill);
+        let head = container(modal::header(
+            self.tab.name(),
+            Some(self.tab.subtitle()),
+            Msg::Close,
+        ))
+        .padding([space::PAGE[1], space::PAGE[1]]);
         let body =
             scroll(container(self.rows()).padding([0.0, space::PAGE[1]])).height(Length::Fill);
-        let content = column![
-            container(column![head, bar].spacing(space::GAP)).padding(space::PAGE),
-            divider::divider(),
-            body
-        ];
+        let page = column![head, divider::divider(), body].width(Fill);
+        let content = crate::dir_row![nav, divider::vertical(Fill), page];
         let w = (window.width - 2.0 * MARGIN).clamp(0.0, WIDTH);
         let h = (window.height - 2.0 * MARGIN).clamp(0.0, HEIGHT);
         surface(Material::Widget, radius::CARD, content)
@@ -274,7 +361,7 @@ impl Dialog {
             .into()
     }
 
-    /// The rows of the open tab.
+    /// The rows of the open section, in groups with a small heading each.
     fn rows(&self) -> Element<'_, Msg> {
         let p = &self.prefs;
         let edit = move |change: &dyn Fn(&mut StudioPrefs)| {
@@ -305,98 +392,117 @@ impl Dialog {
                 ),
             )
         };
-        let rows: Vec<Element<'_, Msg>> = match self.tab {
+        type Group<'a> = (&'static str, Vec<Element<'a, Msg>>);
+        let groups: Vec<Group<'_>> = match self.tab {
             Tab::General => vec![
-                row(
-                    t!(ss_open_in),
-                    t!(ss_open_in_d),
-                    segmented(
-                        &[
-                            (StudioOpenIn::Quick, t!(ss_quick)),
-                            (StudioOpenIn::Studio, t!(ss_studio)),
-                        ],
-                        p.open_in,
-                        p.open_in,
-                        1.0,
-                        move |v| edit(&|s| s.open_in = v),
-                    ),
+                (
+                    t!(pf_grp_opening),
+                    vec![
+                        row(
+                            t!(ss_open_in),
+                            t!(ss_open_in_d),
+                            segmented(
+                                &[
+                                    (StudioOpenIn::Quick, t!(ss_quick)),
+                                    (StudioOpenIn::Studio, t!(ss_studio)),
+                                ],
+                                p.open_in,
+                                p.open_in,
+                                1.0,
+                                move |v| edit(&|s| s.open_in = v),
+                            ),
+                        ),
+                        switch(t!(ss_reopen), t!(ss_reopen_d), p.reopen_last, |s, v| {
+                            s.reopen_last = v
+                        }),
+                        switch(
+                            t!(pf_start_screen),
+                            t!(pf_start_screen_d),
+                            p.start_screen,
+                            |s, v| s.start_screen = v,
+                        ),
+                        row(
+                            t!(ss_recent),
+                            t!(ss_recent_d),
+                            segmented(
+                                &[(0, t!(c_off)), (10, "10"), (20, "20")],
+                                p.recent_files,
+                                p.recent_files,
+                                1.0,
+                                move |v| edit(&|s| s.recent_files = v),
+                            ),
+                        ),
+                    ],
                 ),
-                switch(t!(ss_reopen), t!(ss_reopen_d), p.reopen_last, |s, v| {
-                    s.reopen_last = v
-                }),
-                switch(
-                    t!(ss_ask_unsaved),
-                    t!(ss_ask_unsaved_d),
-                    p.ask_unsaved,
-                    |s, v| s.ask_unsaved = v,
+                (
+                    t!(pf_grp_sidebar),
+                    vec![
+                        switch(
+                            t!(pf_steps_start),
+                            t!(pf_steps_start_d),
+                            p.steps_on_start,
+                            |s, v| s.steps_on_start = v,
+                        ),
+                        row(
+                            t!(pf_steps_side),
+                            t!(pf_steps_side_d),
+                            segmented(
+                                &[
+                                    (StudioSide::Start, t!(pf_side_start)),
+                                    (StudioSide::End, t!(pf_side_end)),
+                                ],
+                                p.steps_side,
+                                p.steps_side,
+                                1.0,
+                                move |v| edit(&|s| s.steps_side = v),
+                            ),
+                        ),
+                    ],
                 ),
-                switch(t!(ss_keep), t!(ss_keep_d), p.keep_unsaved, |s, v| {
-                    s.keep_unsaved = v
-                }),
-                row(
-                    t!(ss_recent),
-                    t!(ss_recent_d),
-                    segmented(
-                        &[(0, t!(c_off)), (10, "10"), (20, "20")],
-                        p.recent_files,
-                        p.recent_files,
-                        1.0,
-                        move |v| edit(&|s| s.recent_files = v),
-                    ),
-                ),
-                switch(
-                    t!(pf_steps_start),
-                    t!(pf_steps_start_d),
-                    p.steps_on_start,
-                    |s, v| s.steps_on_start = v,
-                ),
-                row(
-                    t!(pf_steps_side),
-                    t!(pf_steps_side_d),
-                    segmented(
-                        &[
-                            (StudioSide::Start, t!(pf_side_start)),
-                            (StudioSide::End, t!(pf_side_end)),
-                        ],
-                        p.steps_side,
-                        p.steps_side,
-                        1.0,
-                        move |v| edit(&|s| s.steps_side = v),
-                    ),
-                ),
-                switch(
-                    t!(pf_start_screen),
-                    t!(pf_start_screen_d),
-                    p.start_screen,
-                    |s, v| s.start_screen = v,
+                (
+                    t!(pf_grp_closing),
+                    vec![
+                        switch(
+                            t!(ss_ask_unsaved),
+                            t!(ss_ask_unsaved_d),
+                            p.ask_unsaved,
+                            |s, v| s.ask_unsaved = v,
+                        ),
+                        switch(t!(ss_keep), t!(ss_keep_d), p.keep_unsaved, |s, v| {
+                            s.keep_unsaved = v
+                        }),
+                    ],
                 ),
             ],
             Tab::Appearance => {
                 let chosen = self.themes.iter().find(|c| c.id == p.theme).cloned();
-                vec![
-                    row(
-                        t!(pf_theme),
-                        t!(pf_theme_d),
-                        dropdown(&self.themes, chosen, t!(pf_theme_follow), move |c| {
-                            edit(&|s| s.theme = c.id.to_string())
-                        }),
-                    ),
-                    row(
-                        t!(ss_bg),
-                        t!(ss_bg_d),
-                        segmented(
-                            &[
-                                (StudioBackdrop::Theme, t!(ss_bg_theme)),
-                                (StudioBackdrop::Checkerboard, t!(ss_bg_check)),
-                                (StudioBackdrop::Dark, t!(ss_bg_dark)),
-                            ],
-                            p.background,
-                            p.background,
-                            1.0,
-                            move |v| edit(&|s| s.background = v),
+                vec![(
+                    t!(pf_grp_theme),
+                    vec![
+                        row(
+                            t!(pf_theme),
+                            t!(pf_theme_d),
+                            dropdown(&self.themes, chosen, t!(pf_theme_follow), move |c| {
+                                edit(&|s| s.theme = c.id.to_string())
+                            }),
                         ),
-                    ),
-                ]
+                        row(
+                            t!(ss_bg),
+                            t!(ss_bg_d),
+                            segmented(
+                                &[
+                                    (StudioBackdrop::Theme, t!(ss_bg_theme)),
+                                    (StudioBackdrop::Checkerboard, t!(ss_bg_check)),
+                                    (StudioBackdrop::Dark, t!(ss_bg_dark)),
+                                ],
+                                p.background,
+                                p.background,
+                                1.0,
+                                move |v| edit(&|s| s.background = v),
+                            ),
+                        ),
+                    ],
+                )]
             }
             Tab::Saving => {
                 let mut name = column![tip(
@@ -413,57 +519,84 @@ impl Dialog {
                     name = name.push(error(Role::ROW_DESC, e));
                 }
                 vec![
-                    row(t!(ss_folder), t!(ss_folder_d), self.folder()),
-                    row(t!(ss_name), t!(ss_name_d), name.spacing(space::GAP).into()),
-                    format_row(t!(ss_format), t!(ss_format_d), p.format, |s, f| {
-                        s.format = f
-                    }),
-                    row(
-                        t!(ss_quality),
-                        t!(ss_quality_d),
-                        segmented(
-                            &[(70, "70 %"), (85, "85 %"), (95, "95 %")],
-                            p.quality,
-                            p.quality,
-                            1.0,
-                            move |v| edit(&|s| s.quality = v),
-                        ),
+                    (
+                        t!(pf_grp_where),
+                        vec![
+                            row(t!(ss_folder), t!(ss_folder_d), self.folder()),
+                            row(t!(ss_name), t!(ss_name_d), name.spacing(space::GAP).into()),
+                            switch(t!(ss_ask_where), t!(ss_ask_where_d), p.ask_where, |s, v| {
+                                s.ask_where = v
+                            }),
+                            switch(t!(ss_copy_path), t!(ss_copy_path_d), p.copy_path, |s, v| {
+                                s.copy_path = v
+                            }),
+                        ],
                     ),
-                    row(
-                        t!(ss_size),
-                        t!(ss_size_d),
-                        segmented(
-                            &config::size_choices(),
-                            self.max_edge,
-                            self.max_edge,
-                            1.0,
-                            Msg::MaxEdge,
-                        ),
+                    (
+                        t!(pf_grp_file),
+                        vec![
+                            format_row(t!(ss_format), t!(ss_format_d), p.format, |s, f| {
+                                s.format = f
+                            }),
+                            row(
+                                t!(ss_quality),
+                                t!(ss_quality_d),
+                                segmented(
+                                    &[(70, "70 %"), (85, "85 %"), (95, "95 %")],
+                                    p.quality,
+                                    p.quality,
+                                    1.0,
+                                    move |v| edit(&|s| s.quality = v),
+                                ),
+                            ),
+                            row(
+                                t!(ss_size),
+                                t!(ss_size_d),
+                                segmented(
+                                    &config::size_choices(),
+                                    self.max_edge,
+                                    self.max_edge,
+                                    1.0,
+                                    Msg::MaxEdge,
+                                ),
+                            ),
+                        ],
                     ),
-                    switch(t!(ss_ask_where), t!(ss_ask_where_d), p.ask_where, |s, v| {
-                        s.ask_where = v
-                    }),
-                    switch(t!(ss_copy_path), t!(ss_copy_path_d), p.copy_path, |s, v| {
-                        s.copy_path = v
-                    }),
                 ]
             }
             Tab::CopyPaste => vec![
-                switch(t!(ss_ctrlc), t!(ss_ctrlc_d), p.ctrl_c_picture, |s, v| {
-                    s.ctrl_c_picture = v
-                }),
-                switch(
-                    t!(ss_paste_obj),
-                    t!(ss_paste_obj_d),
-                    p.paste_movable,
-                    |s, v| s.paste_movable = v,
+                (
+                    t!(pf_grp_copy),
+                    vec![switch(
+                        t!(ss_ctrlc),
+                        t!(ss_ctrlc_d),
+                        p.ctrl_c_picture,
+                        |s, v| s.ctrl_c_picture = v,
+                    )],
                 ),
-                switch(t!(ss_grow), t!(ss_grow_d), p.grow_canvas, |s, v| {
-                    s.grow_canvas = v
-                }),
-                format_row(t!(ss_drag), t!(ss_drag_d), p.drag_type, |s, f| {
-                    s.drag_type = f
-                }),
+                (
+                    t!(pf_grp_paste),
+                    vec![
+                        switch(
+                            t!(ss_paste_obj),
+                            t!(ss_paste_obj_d),
+                            p.paste_movable,
+                            |s, v| s.paste_movable = v,
+                        ),
+                        switch(t!(ss_grow), t!(ss_grow_d), p.grow_canvas, |s, v| {
+                            s.grow_canvas = v
+                        }),
+                    ],
+                ),
+                (
+                    t!(pf_grp_drag),
+                    vec![format_row(
+                        t!(ss_drag),
+                        t!(ss_drag_d),
+                        p.drag_type,
+                        |s, f| s.drag_type = f,
+                    )],
+                ),
             ],
             Tab::Editing => {
                 let (desc, press) = match self.tool_styles_set {
@@ -471,48 +604,144 @@ impl Dialog {
                     false => (t!(ss_tool_styles_done), None),
                 };
                 vec![
-                    row(
-                        t!(ss_tool_styles),
-                        desc,
-                        setting_row::action(t!(c_reset), Kind::Elevated, press),
+                    (
+                        t!(pf_grp_tools),
+                        vec![
+                            row(
+                                t!(ss_tool_styles),
+                                desc,
+                                setting_row::action(t!(c_reset), Kind::Elevated, press),
+                            ),
+                            switch(t!(ss_snap), t!(ss_snap_d), p.snap, |s, v| s.snap = v),
+                            switch(t!(ss_grid), t!(ss_grid_d), p.pixel_grid, |s, v| {
+                                s.pixel_grid = v
+                            }),
+                        ],
                     ),
-                    switch(t!(ss_snap), t!(ss_snap_d), p.snap, |s, v| s.snap = v),
-                    switch(t!(ss_grid), t!(ss_grid_d), p.pixel_grid, |s, v| {
-                        s.pixel_grid = v
-                    }),
-                    row(
-                        t!(ss_zoom),
-                        t!(ss_zoom_d),
-                        segmented(
-                            &[
-                                (StudioZoom::Fit, t!(ss_zoom_fit)),
-                                (StudioZoom::Actual, t!(ss_zoom_100)),
-                            ],
-                            p.zoom_on_open,
-                            p.zoom_on_open,
-                            1.0,
-                            move |v| edit(&|s| s.zoom_on_open = v),
-                        ),
-                    ),
-                    row(
-                        t!(ss_wheel),
-                        t!(ss_wheel_d),
-                        segmented(
-                            &[
-                                (StudioWheel::Scroll, t!(ss_wheel_scroll)),
-                                (StudioWheel::Zoom, t!(ss_wheel_zoom)),
-                            ],
-                            p.wheel,
-                            p.wheel,
-                            1.0,
-                            move |v| edit(&|s| s.wheel = v),
-                        ),
+                    (
+                        t!(pf_grp_view),
+                        vec![
+                            row(
+                                t!(ss_zoom),
+                                t!(ss_zoom_d),
+                                segmented(
+                                    &[
+                                        (StudioZoom::Fit, t!(ss_zoom_fit)),
+                                        (StudioZoom::Actual, t!(ss_zoom_100)),
+                                    ],
+                                    p.zoom_on_open,
+                                    p.zoom_on_open,
+                                    1.0,
+                                    move |v| edit(&|s| s.zoom_on_open = v),
+                                ),
+                            ),
+                            row(
+                                t!(ss_wheel),
+                                t!(ss_wheel_d),
+                                segmented(
+                                    &[
+                                        (StudioWheel::Scroll, t!(ss_wheel_scroll)),
+                                        (StudioWheel::Zoom, t!(ss_wheel_zoom)),
+                                    ],
+                                    p.wheel,
+                                    p.wheel,
+                                    1.0,
+                                    move |v| edit(&|s| s.wheel = v),
+                                ),
+                            ),
+                        ],
                     ),
                 ]
             }
-            Tab::Shortcuts => shortcut_rows(),
+            Tab::Shortcuts => self.shortcut_groups(),
         };
-        column(rows).into()
+        let mut page = column![].spacing(space::PAGE[1]);
+        for (heading, rows) in groups {
+            page = page.push(
+                column![
+                    container(muted(Role::SECTION, heading)).padding([space::GAP, 0.0]),
+                    column(rows)
+                ]
+                .spacing(space::GAP),
+            );
+        }
+        container(page).padding([space::PAGE[1], 0.0]).into()
+    }
+
+    /// Keyboard shortcuts: each command's key is a field to press and record, with Reset;
+    /// a refused key says why; the editor's fixed keys follow as a reference.
+    fn shortcut_groups(&self) -> Vec<(&'static str, Vec<Element<'_, Msg>>)> {
+        use crate::shared::kit::shortcut_field::{State, shortcut_field};
+        let commands: Vec<Element<'_, Msg>> = keys::Cmd::ALL
+            .into_iter()
+            .map(|cmd| {
+                let now = self
+                    .prefs
+                    .shortcuts
+                    .get(cmd.id())
+                    .map_or(cmd.default_chord(), String::as_str);
+                let parts: Vec<String> = now.split('+').map(String::from).collect();
+                let refused = self.refused.as_ref().filter(|(c, ..)| *c == cmd);
+                let state = match (self.recording == Some(cmd), refused) {
+                    (true, _) => State::Recording,
+                    (false, Some(_)) => State::Conflict,
+                    _ => State::Rest,
+                };
+                let field = shortcut_field(
+                    parts,
+                    state,
+                    t!(pf_key_press),
+                    t!(pf_key_none),
+                    Msg::Record(cmd),
+                );
+                let custom = self.prefs.shortcuts.contains_key(cmd.id());
+                let reset = button::button(
+                    label(t!(c_reset)),
+                    Kind::Elevated,
+                    custom.then_some(Msg::ResetKey(cmd)),
+                );
+                let control = setting_row::field_with(field, [reset]);
+                let desc: String = match refused {
+                    Some((_, chord, keys::Taken::Fixed)) => {
+                        crate::shared::app_language::fmt(S::pf_key_fixed, &[chord])
+                    }
+                    Some((_, chord, keys::Taken::Command(other))) => {
+                        crate::shared::app_language::fmt(
+                            S::pf_key_taken,
+                            &[chord, &tr(other.name())],
+                        )
+                    }
+                    None => String::new(),
+                };
+                setting_row::row(title(tr(cmd.name())), desc, control)
+            })
+            .collect();
+        let fixed: Vec<Element<'_, Msg>> = keys::FIXED_ROWS
+            .iter()
+            .map(|(what, keys)| {
+                let caps = iced::widget::row(keys.iter().map(|key| {
+                    let parts: Vec<String> = key.split('+').map(String::from).collect();
+                    option_list::caps(&parts, false)
+                }))
+                .spacing(space::GAP)
+                .wrap();
+                setting_row::row(title(tr(*what)), "", caps)
+            })
+            .collect();
+        let reset_all = setting_row::row(
+            title(t!(pf_keys_reset_all)),
+            t!(pf_keys_note),
+            setting_row::action(
+                t!(c_reset),
+                Kind::Elevated,
+                (!self.prefs.shortcuts.is_empty()).then_some(Msg::ResetKeys),
+            ),
+        );
+        vec![
+            (t!(pf_grp_commands), commands),
+            (t!(pf_grp_fixed), fixed),
+            ("", vec![reset_all]),
+        ]
     }
 
     /// The default folder: the field (Browse… too), Browse… and Reset.
@@ -547,51 +776,6 @@ fn default_styles(c: &EditorConfig) -> EditorConfig {
         line_assist: c.line_assist,
         ..Default::default()
     }
-}
-
-/// The Studio's keys as a reference (the keys themselves are `keys`); the Snip key
-/// is the user's own, in Settings > Shortcuts.
-fn shortcut_rows<'a>() -> Vec<Element<'a, Msg>> {
-    use keys as k;
-    let list: [(S, &[&str]); 12] = [
-        (S::st_sc_file, &[k::OPEN, k::SAVE, k::SAVE_AS]),
-        (S::st_sc_copy, &[k::COPY, k::CUT, k::PASTE]),
-        (S::st_sc_whole, &[k::COPY_PICTURE]),
-        (S::st_sc_dup, &[k::DUPLICATE, k::DELETE, k::SELECT_ALL]),
-        (S::st_sc_undo, &[k::UNDO, k::REDO]),
-        (S::st_sc_nudge, &[k::NUDGE, k::NUDGE_FAR]),
-        (
-            S::st_sc_order,
-            &[k::FORWARD, k::BACKWARD, k::FRONT, k::BACK],
-        ),
-        (S::st_sc_steps, &[k::ADD_STEPS]),
-        (S::st_steps, &[k::STEPS_SIDEBAR]),
-        (S::st_sc_zoom, &[k::ZOOM_IN, k::ZOOM_OUT, k::FIT, k::ACTUAL]),
-        (S::st_sc_ui, &[k::UI_LARGER, k::UI_SMALLER, k::UI_RESET]),
-        (S::st_sc_pan, &[k::PAN]),
-    ];
-    let mut rows: Vec<Element<'a, Msg>> = list
-        .into_iter()
-        .map(|(what, keys)| {
-            // one cap set per key name, wrapping when there are many
-            let caps = iced::widget::row(keys.iter().map(|key| {
-                let parts: Vec<String> = key.split('+').map(String::from).collect();
-                option_list::caps(&parts, false)
-            }))
-            .spacing(space::GAP)
-            .wrap();
-            setting_row::row(title(tr(what)), "", caps)
-        })
-        .collect();
-    rows.push(
-        container(crate::shared::kit::text::sub(
-            Role::ROW_DESC,
-            t!(pf_keys_note),
-        ))
-        .padding([space::GAP, 0.0])
-        .into(),
-    );
-    rows
 }
 
 /// The theme the Studio window draws with: `studio.theme`'s, or `None` to follow

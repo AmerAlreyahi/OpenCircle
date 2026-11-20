@@ -1934,7 +1934,7 @@ impl Windows {
                 None => Subscription::none(),
             },
             match &self.studio {
-                Some((_, s)) => studio::studio_events(s.waiting()),
+                Some((_, s)) => studio::studio_events(s.waiting(), s.recording()),
                 None => Subscription::none(),
             },
             // the Updating pill's logo turns (a frame clock only while it shows)

@@ -117,10 +117,15 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
     match menu {
         Menu::File => vec![
             item(S::st_new_snip, keys::NEW_SNIP, Msg::NewSnip, false),
-            item(S::st_open, keys::OPEN, Msg::Open, false),
+            item(S::st_open, keys::of(keys::Cmd::Open), Msg::Open, false),
             opens(S::st_open_recent, Sub::Recent, false),
             item(S::c_save, keys::SAVE, ed(Message::Save), true),
-            item(S::st_save_as, keys::SAVE_AS, Msg::Export, false),
+            item(
+                S::st_save_as,
+                keys::of(keys::Cmd::SaveAs),
+                Msg::Export,
+                false,
+            ),
             item(S::st_export_walkthrough, "", Msg::ExportWalkthrough, false),
             item(
                 S::st_copy_picture,
@@ -128,10 +133,15 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
                 ed(Message::Copy),
                 true,
             ),
-            item(S::st_prefs, keys::PREFERENCES, Msg::OpenPrefs, true),
+            item(
+                S::st_prefs,
+                keys::of(keys::Cmd::Preferences),
+                Msg::OpenPrefs,
+                true,
+            ),
             item(
                 S::st_shortcuts,
-                keys::SHORTCUTS,
+                keys::of(keys::Cmd::Shortcuts),
                 Msg::Shortcuts(true),
                 false,
             ),
@@ -158,11 +168,31 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
         Menu::View => {
             let p = s.panels;
             let mut v = vec![
-                item(S::st_steps, keys::STEPS_SIDEBAR, Msg::Library, false),
-                item(S::st_zoom_in, keys::ZOOM_IN, Msg::ZoomIn, true),
-                item(S::st_zoom_out, keys::ZOOM_OUT, Msg::ZoomOut, false),
-                item(S::st_fit, keys::FIT, Msg::Fit, false),
-                item(S::st_actual, keys::ACTUAL, Msg::Actual, false),
+                item(
+                    S::st_steps,
+                    keys::of(keys::Cmd::StepsSidebar),
+                    Msg::Library,
+                    false,
+                ),
+                item(
+                    S::st_zoom_in,
+                    keys::of(keys::Cmd::ZoomIn),
+                    Msg::ZoomIn,
+                    true,
+                ),
+                item(
+                    S::st_zoom_out,
+                    keys::of(keys::Cmd::ZoomOut),
+                    Msg::ZoomOut,
+                    false,
+                ),
+                item(S::st_fit, keys::of(keys::Cmd::Fit), Msg::Fit, false),
+                item(
+                    S::st_actual,
+                    keys::of(keys::Cmd::Actual),
+                    Msg::Actual,
+                    false,
+                ),
                 item(S::st_snap, "", Msg::Snap, true),
                 item(S::st_grid, "", Msg::Grid, false),
             ];
@@ -230,7 +260,23 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
         let on = open == Some(m);
         side_panel::menu_opener(m.name(), on, Msg::Menu(if on { None } else { Some(m) }))
     });
-    dir::row(row).spacing(OPENER_GAP).align_y(Center).into()
+    // the gear: Studio preferences, at the menus' end (the familiar spot for settings)
+    let gear = crate::shared::kit::tooltip::hint(
+        crate::shared::kit::icon_button::square(
+            super::view::GEAR,
+            crate::shared::kit::icon_button::State {
+                active: s.prefs.is_some(),
+                focused: false,
+            },
+            Some(Msg::OpenPrefs),
+        ),
+        crate::t!(pf_settings_tip),
+        crate::shared::kit::tooltip::Why::Keys(keys::of(keys::Cmd::Preferences)),
+        iced::widget::tooltip::Position::Bottom,
+    );
+    let mut parts: Vec<Element<'_, Msg>> = row.into_iter().collect();
+    parts.push(gear);
+    dir::row(parts).spacing(OPENER_GAP).align_y(Center).into()
 }
 
 /// Where the opener of `menu` starts, from the header's start edge.

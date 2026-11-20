@@ -272,6 +272,33 @@ pub fn press_move<Message>(
     messages
 }
 
+/// The messages of the wheel turned `lines` notches (up = positive) at `at` in `view`.
+pub fn wheel<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    at: iced::Point,
+    lines: f32,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Event as Mouse, mouse::ScrollDelta};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: at }),
+            Event::Mouse(Mouse::WheelScrolled {
+                delta: ScrollDelta::Lines { x: 0.0, y: lines },
+            }),
+        ],
+        mouse::Cursor::Available(at),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
 /// `press_move` in a window whose scroll area `id` was scrolled to `offset` first.
 pub fn press_move_scrolled<Message>(
     view: Element<'_, Message>,

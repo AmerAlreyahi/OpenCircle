@@ -34,13 +34,15 @@ pub(super) const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
 pub(super) const PANEL_RIGHT: char = '\u{e435}'; // lucide "panel-right"
 /// lucide "folder-open"
 pub(super) const OPEN: char = '\u{e246}';
+/// lucide "settings" (Studio preferences)
+pub(super) const GEAR: char = '\u{e157}';
 pub(super) const PASTE: char = '\u{e3eb}'; // lucide "clipboard-paste"
 pub(super) const PLUS: char = '\u{e140}'; // lucide "plus"
 pub(super) const MINUS: char = '\u{e11f}'; // lucide "minus"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
-pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, OPEN, PASTE, PLUS, MINUS];
+pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, OPEN, PASTE, PLUS, MINUS, GEAR];
 
 /// OpenCircle Studio's window (v3.1): the header with the menu bar; below it
 /// the tools rail (full height, at the window's edge), then the options bar

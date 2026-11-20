@@ -2324,6 +2324,62 @@ strings! {
         | "تحريك 1 بكسل، 10 بكسل";
     st_sc_order: "Bring forward, send backward"
         | "إلى الأمام وإلى الخلف";
+    st_ui_larger: "Interface larger"
+        | "تكبير الواجهة";
+    st_ui_smaller: "Interface smaller"
+        | "تصغير الواجهة";
+    st_ui_reset: "Interface size: reset"
+        | "حجم الواجهة: إعادة";
+    pf_grp_opening: "Opening"
+        | "الفتح";
+    pf_grp_sidebar: "Steps sidebar"
+        | "الشريط الجانبي للخطوات";
+    pf_grp_closing: "Closing"
+        | "الإغلاق";
+    pf_grp_theme: "Theme"
+        | "السمة";
+    pf_grp_where: "Where to save"
+        | "مكان الحفظ";
+    pf_grp_file: "The file"
+        | "الملف";
+    pf_grp_copy: "Copy"
+        | "النسخ";
+    pf_grp_paste: "Paste"
+        | "اللصق";
+    pf_grp_drag: "Dragging a picture out"
+        | "سحب الصورة إلى الخارج";
+    pf_grp_tools: "Tools"
+        | "الأدوات";
+    pf_grp_view: "View"
+        | "العرض";
+    pf_grp_commands: "Studio commands"
+        | "أوامر الاستوديو";
+    pf_grp_fixed: "Editing keys (fixed)"
+        | "مفاتيح التحرير (ثابتة)";
+    pf_sub_general: "How the Studio opens, closes and remembers your work."
+        | "كيف يفتح الاستوديو ويُغلق ويتذكر عملك.";
+    pf_sub_appearance: "The Studio's theme and the canvas behind the picture."
+        | "سمة الاستوديو وخلفية اللوحة خلف الصورة.";
+    pf_sub_saving: "Where pictures go and what file they become."
+        | "أين تذهب الصور وبأي ملف تُحفظ.";
+    pf_sub_copy: "What copy, paste and dragging a picture out do."
+        | "ما تفعله أوامر النسخ واللصق وسحب الصورة.";
+    pf_sub_editing: "Tools, snapping, zoom and the mouse wheel."
+        | "الأدوات والالتصاق والتكبير وعجلة الفأرة.";
+    pf_sub_shortcuts: "Click a key to change it; Esc stops."
+        | "انقر مفتاحاً لتغييره؛ Esc للإيقاف.";
+    pf_key_press: "Press the new keys…"
+        | "اضغط المفاتيح الجديدة…";
+    pf_key_none: "Not set"
+        | "غير محدد";
+    pf_key_taken: "{} is already used by {}"
+        | "{} مستخدم بالفعل في {}";
+    pf_key_fixed: "{} is a fixed editing key"
+        | "{} مفتاح تحرير ثابت";
+    pf_keys_reset_all: "Reset all keys"
+        | "إعادة كل المفاتيح";
+    pf_settings_tip: "Studio preferences"
+        | "تفضيلات الاستوديو";
     st_sc_ui: "Interface size"
         | "حجم الواجهة";
     st_sc_zoom: "Zoom in, out, fit, 100 %"

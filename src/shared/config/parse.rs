@@ -321,6 +321,17 @@ impl Config {
             s.steps_side = get(t, p, "steps_side", d.steps_side, &mut w);
             s.steps_on_start = get(t, p, "steps_on_start", d.steps_on_start, &mut w);
             s.start_screen = get(t, p, "start_screen", d.start_screen, &mut w);
+            // the user's own keys: a chord that is none is dropped (the default stays)
+            let mut keys: std::collections::BTreeMap<String, String> =
+                get(t, p, "shortcuts", Default::default(), &mut w);
+            keys.retain(|id, chord| {
+                let ok = is_chord(chord);
+                if !ok {
+                    w.push(format!("{p}shortcuts.{id}: \"{chord}\" is not a key chord"));
+                }
+                ok
+            });
+            s.shortcuts = keys;
         }
         if let Some(t) = section(&root, "update", &mut w) {
             c.update.auto = get(t, "update.", "auto", None, &mut w);

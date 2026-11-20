@@ -2957,3 +2957,337 @@ fn w90b_a_popover_opens_under_its_own_button() {
         "the first row sits under the button: {got:?} at {at:?}"
     );
 }
+
+/// Owner note 3: Studio settings are a familiar settings window: a gear in the header, a
+/// list of sections on the left, the section's title and one-line subtitle, groups with
+/// small headings, rows (label + grey text, control), an X at the top, and an outside
+/// press closes it (Esc too).
+#[test]
+fn w90b_studio_settings_are_a_familiar_settings_window() {
+    let mut s = studio_on(640, 400);
+    // the gear: a visible button in the header row, near the menus
+    let gear = (0..80)
+        .map(|i| Point::new(180.0 + 2.0 * i as f32, 20.0))
+        .any(|at| {
+            click_view(&s, (at.x, at.y))
+                .iter()
+                .any(|m| matches!(m, Msg::OpenPrefs))
+        });
+    assert!(gear, "a gear button opens the preferences");
+    let _ = s.update(Msg::OpenPrefs);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    for w in [
+        "General",
+        "Appearance",
+        "Saving and export",
+        "Copy and paste",
+        "Editing",
+        "Keyboard shortcuts",
+    ] {
+        assert!(words.iter().any(|t| t == w), "section {w}: {words:?}");
+    }
+    // the section's subtitle and a small group heading
+    assert!(
+        words.iter().any(|t| t.starts_with("How the Studio opens")),
+        "{words:?}"
+    );
+    assert!(
+        words.iter().any(|t| t.eq_ignore_ascii_case("Opening")),
+        "{words:?}"
+    );
+    assert!(
+        !words.iter().any(|t| t == "Close"),
+        "an X, not a Close button: {words:?}"
+    );
+    // a press on the dim outside the dialog closes it
+    let got = click_view(&s, (3.0, 400.0));
+    assert!(
+        got.iter()
+            .any(|m| matches!(m, Msg::Prefs(preferences::Msg::Close))),
+        "{got:?}"
+    );
+    // Esc closes it too
+    let _ = s.update(Msg::Cancel);
+    assert!(s.prefs.is_none());
+}
+
+/// Owner note 5: the Studio's keys are editable in its preferences: record a new key
+/// (Esc stops), conflicts are refused and said, Reset gives the default back, and the
+/// key handler, menus and sheet all read the same table.
+#[test]
+fn w90b_studio_shortcuts_can_be_recorded_refused_and_reset() {
+    use super::keys::{Cmd, Taken};
+    let mut d = preferences::Dialog::open(None);
+    // record Open as Ctrl+Shift+O
+    assert!(matches!(
+        d.update(preferences::Msg::Record(Cmd::Open)),
+        preferences::Out::None
+    ));
+    assert!(d.recording());
+    assert!(matches!(
+        d.update(preferences::Msg::Recorded("Ctrl+Shift+O".into())),
+        preferences::Out::Changed
+    ));
+    assert!(!d.recording());
+    let mut c = config::Config::default();
+    d.apply(&mut c);
+    assert_eq!(
+        c.studio.shortcuts.get("open").map(String::as_str),
+        Some("Ctrl+Shift+O")
+    );
+    // a chord another command has is refused, and so is an editing key
+    let _ = d.update(preferences::Msg::Record(Cmd::Fit));
+    assert!(matches!(
+        d.update(preferences::Msg::Recorded("Ctrl+B".into())),
+        preferences::Out::None
+    ));
+    assert_eq!(
+        keys::taken(Cmd::Fit, "Ctrl+B"),
+        Some(Taken::Command(Cmd::StepsSidebar))
+    );
+    assert_eq!(keys::taken(Cmd::Fit, "Ctrl+Z"), Some(Taken::Fixed));
+    assert!(keys::taken(Cmd::Fit, "Ctrl+Alt+9").is_none());
+    // Esc stops waiting
+    let _ = d.update(preferences::Msg::Record(Cmd::Fit));
+    d.stop_recording();
+    assert!(!d.recording());
+    // Reset: Open has its own key again
+    assert!(matches!(
+        d.update(preferences::Msg::ResetKey(Cmd::Open)),
+        preferences::Out::Changed
+    ));
+    let mut c = config::Config::default();
+    d.apply(&mut c);
+    assert!(c.studio.shortcuts.is_empty());
+    // the file: a chord that is none is dropped, a good one kept
+    let (c, warnings) = config::Config::parse(
+        "[studio.shortcuts]\nopen = \"Ctrl+Shift+O\"\nfit = \"nonsense++\"\n",
+    );
+    assert_eq!(c.studio.shortcuts.len(), 1, "{:?}", c.studio.shortcuts);
+    assert!(!warnings.is_empty());
+    // the keys the table gives: defaults, and the chord text of a pressed key
+    assert_eq!(keys::of(Cmd::Open), "Ctrl+O");
+    assert_eq!(keys::command_for("Ctrl+B"), Some(Cmd::StepsSidebar));
+    use iced::keyboard::{Key, Modifiers, key::Code, key::Physical};
+    let chord = keys::chord_text(
+        Modifiers::CTRL | Modifiers::SHIFT,
+        &Key::Character("o".into()),
+        Physical::Code(Code::KeyO),
+    );
+    assert_eq!(chord.as_deref(), Some("Ctrl+Shift+O"));
+    assert!(
+        keys::chord_text(
+            Modifiers::empty(),
+            &Key::Character("a".into()),
+            Physical::Code(Code::KeyA)
+        )
+        .is_none()
+    );
+}
+
+/// Runs `body` with `change` applied to the running config on this test's own thread
+/// (no other test sees it).
+fn with_config<R>(change: impl FnOnce(&mut config::Config), body: impl FnOnce() -> R) -> R {
+    let mut changed = config::current();
+    change(&mut changed);
+    config::with_test_config(changed, body)
+}
+
+/// Owner note 6: every Studio preference acts in the open Studio (or at its next
+/// opening, where that is what the row says). One check per row.
+#[test]
+fn w90b_every_studio_preference_acts() {
+    use crate::shared::config::{Format, StudioBackdrop, StudioSide, StudioWheel, StudioZoom};
+    let texts = |s: &Studio| crate::shared::kit::testing::shot::texts(view(s, &[], false));
+
+    // Start screen: off = no Open / Paste / recent files, only the drop zone's words
+    with_config(
+        |c| c.studio.start_screen = false,
+        || {
+            let words = texts(&Studio::new(StudioConfig::default()));
+            assert!(
+                !words.iter().any(|t| t == "Open…" || t == "Paste"),
+                "{words:?}"
+            );
+        },
+    );
+    let words = texts(&Studio::new(StudioConfig::default()));
+    assert!(words.iter().any(|t| t == "Open…"), "on: Open is there");
+
+    // Show Steps when the Studio opens
+    with_config(
+        |c| c.studio.steps_on_start = false,
+        || assert!(!Studio::new(StudioConfig::default()).sidebar_shown()),
+    );
+    assert!(Studio::new(StudioConfig::default()).sidebar_shown());
+
+    // Steps sidebar side: the sidebar's Add at the left, the rail at the right
+    with_config(
+        |c| c.studio.steps_side = StudioSide::Start,
+        || {
+            let s = studio_on(640, 400);
+            assert!(s.sidebar_at_start());
+            let add = click_view(&s, (130.0, 155.0));
+            assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+            let rail = click_view(&s, (1252.0, 155.0));
+            assert!(
+                rail.iter()
+                    .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
+            );
+        },
+    );
+
+    // Ask before closing with unsaved changes
+    let dirty = || {
+        let mut s = studio_on(64, 64);
+        draw(&mut s);
+        s
+    };
+    assert!(dirty().asks());
+    with_config(
+        |c| c.studio.ask_unsaved = false,
+        || assert!(!dirty().asks()),
+    );
+
+    // Keep unsaved work: an edit waits for its copy only when it is on
+    with_config(
+        |c| c.studio.keep_unsaved = true,
+        || assert!(dirty().quiet.waiting()),
+    );
+    assert!(!dirty().quiet.waiting());
+
+    // Reopen the last picture
+    let mut fresh = Studio::new(StudioConfig::default());
+    let _ = fresh.update(Msg::Recent(
+        vec![(
+            PathBuf::from("/x/last.png"),
+            iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]),
+        )],
+        vec![String::new()],
+    ));
+    with_config(
+        |c| c.studio.reopen_last = true,
+        || {
+            let mut s = Studio::new(StudioConfig::default());
+            let out = s.update(Msg::Recent(
+                vec![(
+                    PathBuf::from("/x/last.png"),
+                    iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]),
+                )],
+                vec![String::new()],
+            ));
+            assert!(matches!(out, Outcome::Read(_)));
+        },
+    );
+
+    // Recent files shown: 0 hides the list on the start screen
+    with_config(
+        |c| c.studio.recent_files = 0,
+        || {
+            let words = texts(&fresh);
+            assert!(!words.iter().any(|t| t == "last.png"), "{words:?}");
+        },
+    );
+    assert!(texts(&fresh).iter().any(|t| t == "last.png"));
+
+    // Zoom on a new picture
+    with_config(
+        |c| c.studio.zoom_on_open = StudioZoom::Actual,
+        || {
+            let s = studio_on(4000, 2500);
+            assert!((s.editor.as_ref().unwrap().zoom - 1.0).abs() < 0.001);
+        },
+    );
+    assert!(studio_on(4000, 2500).editor.as_ref().unwrap().zoom < 0.5);
+
+    // Canvas background: the stage behind the picture changes
+    let stage_pixel = |s: &Studio| {
+        let mut shown = Some(view(s, &[], false));
+        let (pixels, _) = crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| shown.take()).flatten(),
+            SIZE,
+            1.0,
+        );
+        let at = ((150.0 * SIZE.width + 100.0) * 4.0) as usize;
+        [pixels[at], pixels[at + 1], pixels[at + 2]]
+    };
+    let plain = stage_pixel(&studio_on(64, 64));
+    let others: Vec<[u8; 3]> = [StudioBackdrop::Checkerboard, StudioBackdrop::Dark]
+        .into_iter()
+        .map(|b| {
+            with_config(
+                |c| c.studio.background = b,
+                || stage_pixel(&studio_on(64, 64)),
+            )
+        })
+        .collect();
+    assert!(
+        others.iter().any(|p| *p != plain),
+        "{plain:?} vs {others:?}"
+    );
+
+    // Mouse wheel: it zooms by default; set to scroll it leaves the wheel to the scroll area
+    let wheel = |s: &Studio| {
+        crate::shared::kit::testing::shot::wheel(
+            view(s, &[], false),
+            SIZE,
+            Point::new(500.0, 300.0),
+            1.0,
+        )
+        .iter()
+        .any(|m| matches!(m, Msg::Wheel { .. }))
+    };
+    assert!(
+        wheel(&studio_on(2000, 1500)),
+        "zoom: the wheel is the picture's zoom"
+    );
+    with_config(
+        |c| c.studio.wheel = StudioWheel::Scroll,
+        || assert!(!wheel(&studio_on(2000, 1500)), "scroll: the wheel scrolls"),
+    );
+
+    // Studio theme: its own theme (None = follow OpenCircle's)
+    let mut prefs = config::current().studio;
+    assert!(preferences::theme_of(&prefs).is_none());
+    prefs.theme = "obsidian".into();
+    assert_eq!(
+        preferences::theme_of(&prefs).map(|t| t.id),
+        Some("obsidian")
+    );
+
+    // Format / Quality / Save size: the Save as sheet starts on them after the dialog writes
+    with_config(
+        |c| {
+            c.studio.format = Format::Jpeg;
+            c.studio.quality = 95;
+            c.snip.max_edge = 1568;
+        },
+        || {
+            let mut s = studio_on(64, 64);
+            s.prefs_applied();
+            assert_eq!(
+                (s.export.format, s.export.quality, s.export.max_edge),
+                (crate::features::snip::export::Format::Jpg, 95, 1568)
+            );
+        },
+    );
+
+    // Copy / paste / grow / drag type / snap / grid reach the open picture
+    with_config(
+        |c| {
+            c.studio.ctrl_c_picture = false;
+            c.studio.paste_movable = false;
+            c.studio.grow_canvas = true;
+            c.studio.drag_type = Format::Jpeg;
+            c.studio.snap = false;
+            c.studio.pixel_grid = false;
+        },
+        || {
+            let mut s = studio_on(64, 64);
+            s.prefs_applied();
+            let e = s.editor.as_ref().unwrap();
+            assert!(!e.copy_picture_when_empty && !e.paste_movable && e.grow_canvas && e.drag_jpeg);
+            assert!(!e.snap && !e.grid && !s.snap && !s.grid);
+        },
+    );
+}
