@@ -132,6 +132,9 @@ struct Pointer {
     finger: Option<iced::touch::Finger>,
     /// Snip: when the last press landed (a second one soon after opens the Studio).
     last_press: Option<std::time::Instant>,
+    /// The cursor's last place while a drag runs (the scrolled one, as the press read it):
+    /// a move with no cursor keeps it, never the event's raw position.
+    last_at: Option<Point>,
 }
 
 /// The picture pixel columns and rows whose lines cross `seen` (display px).
@@ -251,6 +254,7 @@ impl canvas::Program<Message> for Input<'_> {
                     return Some(Action::publish(Message::OpenStudio).and_capture());
                 }
                 pointer.down = true;
+                pointer.last_at = cursor.position();
                 let p = match e.movable {
                     true => self.image_at(cursor.position()?),
                     false => e.to_image(at),
@@ -267,11 +271,12 @@ impl canvas::Program<Message> for Input<'_> {
             {
                 Message::Move(self.image_at(*position))
             }
-            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if pointer.down => {
                 // the cursor, not the event's raw position: inside a scroll area the cursor is
                 // moved by the scroll offset as the bounds are, the raw position is not (the
                 // press above reads the cursor too: both must agree)
-                let at = cursor.position().unwrap_or(*position);
+                let at = cursor.position().or(pointer.last_at)?;
+                pointer.last_at = Some(at);
                 Message::Move(e.to_image(at - (bounds.position() - Point::ORIGIN)))
             }
             // Snip's area: the handle under the pointer shows hot (a redraw
@@ -532,6 +537,52 @@ mod tests {
         let got = run(&touch);
         assert_eq!(got.len(), 4, "{got:?}");
         assert_eq!(got, run(&by_mouse));
+    }
+
+    /// Review 4: a move while the cursor is unavailable never falls back to the event's raw
+    /// position (it ignores the scroll): it keeps the last scrolled one.
+    #[test]
+    fn w90c_a_move_without_a_cursor_never_uses_the_raw_position() {
+        use iced::mouse::{self, Cursor};
+        use iced::widget::canvas::Program;
+        let e = Annotator::new(page(), 1.0);
+        let input = super::Input {
+            editor: &e,
+            grown: 0.0,
+            map: ScreenMap::ONE,
+        };
+        let bounds = iced::Rectangle::new(Point::ORIGIN, Size::new(W as f32, H as f32));
+        let mut state = super::Pointer::default();
+        let moved = |position| iced::Event::Mouse(mouse::Event::CursorMoved { position });
+        let press = iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        let at = Cursor::Available(pt(40.0, 40.0));
+        let _ = input.update(&mut state, &press, bounds, at);
+        // no cursor: the raw (unscrolled) position is not used, the last one stays
+        let got = input
+            .update(
+                &mut state,
+                &moved(pt(190.0, 100.0)),
+                bounds,
+                Cursor::Unavailable,
+            )
+            .and_then(|a| a.into_inner().0);
+        assert!(
+            matches!(got, Some(Message::Move(p)) if (p.x - 40.0).abs() < 0.5),
+            "{got:?}"
+        );
+        // the cursor is back: the move follows it
+        let got = input
+            .update(
+                &mut state,
+                &moved(pt(190.0, 100.0)),
+                bounds,
+                Cursor::Available(pt(60.0, 50.0)),
+            )
+            .and_then(|a| a.into_inner().0);
+        assert!(
+            matches!(got, Some(Message::Move(p)) if (p.x - 60.0).abs() < 0.5),
+            "{got:?}"
+        );
     }
 
     fn pt(x: f32, y: f32) -> Point {
