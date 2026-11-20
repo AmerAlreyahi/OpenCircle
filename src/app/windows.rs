@@ -1286,6 +1286,10 @@ impl Windows {
                             ]);
                         }
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
+                        // W90 opens the Studio's preferences dialog here (ctrl+, / File > Preferences)
+                        settings::Outcome::OpenStudioPreferences => {
+                            return Task::batch([keys, self.open_studio(None)]);
+                        }
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {
                             let report = crate::shared::diagnostics::report(

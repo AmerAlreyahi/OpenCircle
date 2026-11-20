@@ -4248,46 +4248,13 @@ fn the_studio_page_matches_its_golden_images() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// Settings > Studio edits the draft: a switch, the folder picker's answer (only
-/// Studio's own button sends it to the Studio), and Reset tool styles.
+/// Settings > Studio is one button that asks the app to open the Studio's preferences.
 #[test]
-fn the_studio_page_edits_its_own_settings() {
-    use crate::shared::config::{StudioBackdrop, StudioPrefs};
+fn the_studio_page_opens_the_studio_preferences() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Studio));
-    let p = StudioPrefs {
-        keep_unsaved: true,
-        background: StudioBackdrop::Dark,
-        ..StudioPrefs::default()
-    };
-    update(&mut s, Message::Studio(p.clone()));
-    assert_eq!(s.draft.studio, p);
-    // an empty or forbidden file name is refused and the row says why
-    for bad in ["", "a:b", "x/y"] {
-        let wrong = StudioPrefs {
-            file_name: bad.into(),
-            ..StudioPrefs::default()
-        };
-        update(&mut s, Message::Studio(wrong));
-        assert!(
-            crate::features::settings::state::issue(s.problems(), "studio.file_name").is_some(),
-            "{bad:?}"
-        );
-    }
-    update(&mut s, Message::Studio(p.clone()));
-    assert_eq!(update(&mut s, Message::BrowseStudioFolder), Outcome::Browse);
-    update(&mut s, Message::Folder(Some("pics".into())));
-    assert_eq!(s.draft.studio.folder, "pics");
-    assert_eq!(s.draft.general.save_folder, "");
-    update(&mut s, Message::BrowseFolder);
-    update(&mut s, Message::Folder(Some("other".into())));
-    assert_eq!(s.draft.general.save_folder, "other");
-    assert_eq!(s.draft.studio.folder, "pics");
-    update(&mut s, Message::ClearStudioFolder);
-    assert_eq!(s.draft.studio.folder, "");
-    s.draft.editor.colour = Some("#ff0000".into());
-    s.draft.editor.line_assist = false;
-    update(&mut s, Message::ResetToolStyles);
-    assert_eq!(s.draft.editor.colour, None);
-    assert!(!s.draft.editor.line_assist, "a setting, not a tool style");
+    assert_eq!(
+        update(&mut s, Message::OpenStudioPreferences),
+        Outcome::OpenStudioPreferences
+    );
 }

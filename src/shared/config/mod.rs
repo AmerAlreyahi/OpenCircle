@@ -77,7 +77,8 @@
 //! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
 //! [studio]                          # OpenCircle Studio (Settings > Studio); written only once changed, additive (no schema bump)
 //! # open_in, reopen_last, ask_unsaved, keep_unsaved, recent_files, folder, file_name, format, quality, ask_where,
-//! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel
+//! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel,
+//! # theme ("follow" | a theme id), steps_side (start | end), steps_on_start, start_screen
 //!
 //! [snip]
 //! after = "both"                    # both (copy when picked) | editor; an old "copy" reads as both
@@ -491,6 +492,8 @@ pub struct StudioConfig {
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
     pub walk_format: u8,
+    /// Snip's one-time "Edit more in OpenCircle Studio" hint has been shown.
+    pub hint_seen: bool,
 }
 
 impl Default for StudioConfig {
@@ -499,6 +502,7 @@ impl Default for StudioConfig {
             library: true,
             options: true,
             walk_format: 0,
+            hint_seen: false,
         }
     }
 }
@@ -547,6 +551,19 @@ pub enum StudioWheel {
     Zoom,
 }
 
+/// Which side the Steps sidebar sits on (`studio.steps_side`): the reading start
+/// (left; right in Arabic) or the end. The tools rail takes the other edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioSide {
+    #[default]
+    Start,
+    End,
+}
+
+/// `studio.theme` when the Studio follows OpenCircle's own theme.
+pub const STUDIO_THEME_FOLLOW: &str = "follow";
+
 /// Quality steps of a saved JPEG (`studio.quality`, percent).
 pub const STUDIO_QUALITY: [u8; 3] = [70, 85, 95];
 /// "Recent files shown" (`studio.recent_files`); 0 hides them.
@@ -592,6 +609,14 @@ pub struct StudioPrefs {
     pub background: StudioBackdrop,
     pub zoom_on_open: StudioZoom,
     pub wheel: StudioWheel,
+    /// `"follow"` (OpenCircle's theme) or a built-in theme id (`DARK_THEMES` / `LIGHT_THEMES`);
+    /// it themes the Studio window only.
+    pub theme: String,
+    pub steps_side: StudioSide,
+    /// The Steps sidebar is shown when the Studio opens.
+    pub steps_on_start: bool,
+    /// The empty Studio shows its start screen (Open, Paste, New snip, recent files).
+    pub start_screen: bool,
 }
 
 impl Default for StudioPrefs {
@@ -617,6 +642,10 @@ impl Default for StudioPrefs {
             background: StudioBackdrop::Theme,
             zoom_on_open: StudioZoom::Fit,
             wheel: StudioWheel::Scroll,
+            theme: STUDIO_THEME_FOLLOW.into(),
+            steps_side: StudioSide::Start,
+            steps_on_start: true,
+            start_screen: true,
         }
     }
 }
@@ -625,6 +654,11 @@ impl StudioPrefs {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// Why a Studio file name pattern is refused (`studio.file_name`), for the preferences dialog.
+pub fn check_studio_file_name(s: &str) -> Result<(), String> {
+    check_file_name(s)
 }
 
 fn is_default_long_max(px: &u32) -> bool {

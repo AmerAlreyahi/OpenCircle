@@ -311,6 +311,16 @@ impl Config {
             s.background = get(t, p, "background", d.background, &mut w);
             s.zoom_on_open = get(t, p, "zoom_on_open", d.zoom_on_open, &mut w);
             s.wheel = get(t, p, "wheel", d.wheel, &mut w);
+            s.theme = get_checked(t, p, "theme", d.theme.clone(), &mut w, |id: &String| {
+                (id == STUDIO_THEME_FOLLOW
+                    || DARK_THEMES.contains(&id.as_str())
+                    || LIGHT_THEMES.contains(&id.as_str()))
+                .then_some(())
+                .ok_or_else(|| "expected \"follow\" or a theme id".to_string())
+            });
+            s.steps_side = get(t, p, "steps_side", d.steps_side, &mut w);
+            s.steps_on_start = get(t, p, "steps_on_start", d.steps_on_start, &mut w);
+            s.start_screen = get(t, p, "start_screen", d.start_screen, &mut w);
         }
         if let Some(t) = section(&root, "update", &mut w) {
             c.update.auto = get(t, "update.", "auto", None, &mut w);
@@ -348,6 +358,7 @@ impl Config {
                 let (p, d) = ("snip.studio.", d.snip.studio);
                 c.snip.studio.library = get(s, p, "library", d.library, &mut w);
                 c.snip.studio.options = get(s, p, "options", d.options, &mut w);
+                c.snip.studio.hint_seen = get(s, p, "hint_seen", d.hint_seen, &mut w);
                 c.snip.studio.walk_format =
                     get_checked(s, p, "walk_format", d.walk_format, &mut w, |v| {
                         match *v < 3 {
