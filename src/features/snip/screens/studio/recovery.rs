@@ -60,18 +60,36 @@ pub fn discard() {
 static GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// The discard count now (a writer takes it before it starts).
-pub fn generation() -> u32 {
-    GEN.load(std::sync::atomic::Ordering::SeqCst)
+/// The number of the last copy written: copies made later have bigger numbers, and
+/// a slow writer never lands over a newer one.
+static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// What a writer takes before it starts: the discard count and its place in line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ticket {
+    generation: u32,
+    order: u64,
 }
 
-/// `write`, unless a `discard` came after `generation` was taken.
-pub fn write_if_current(generation: u32, on: bool, png: &[u8], notes: &str) -> io::Result<bool> {
+pub fn ticket() -> Ticket {
+    Ticket {
+        generation: GEN.load(std::sync::atomic::Ordering::SeqCst),
+        order: NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+    }
+}
+
+/// `write`, unless a `discard` came after `ticket` was taken or a newer copy has
+/// been written already.
+pub fn write_if_current(ticket: Ticket, on: bool, png: &[u8], notes: &str) -> io::Result<bool> {
+    use std::sync::atomic::Ordering::SeqCst;
     let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if GEN.load(std::sync::atomic::Ordering::SeqCst) != generation {
+    if GEN.load(SeqCst) != ticket.generation || LAST.load(SeqCst) > ticket.order {
         return Ok(false);
     }
-    write_in(&dir(), on, png, notes)
+    let wrote = write_in(&dir(), on, png, notes)?;
+    LAST.store(ticket.order, SeqCst);
+    Ok(wrote)
 }
 
 /// The leftover copy of a crashed session, if a whole one exists. The caller checks
@@ -143,6 +161,31 @@ impl Debounce {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A copy whose writer was slow never lands after a discard, nor over a newer copy.
+    #[test]
+    fn a_late_writer_cannot_outlive_a_discard_or_overwrite_a_newer_copy() {
+        use_dir(crate::shared::paths::test_dir("w87-ticket").join("studio-recovery"));
+        let (old, newer) = (ticket(), ticket());
+        assert!(write_if_current(newer, true, b"new", "[2]").unwrap());
+        assert!(
+            !write_if_current(old, true, b"old", "[1]").unwrap(),
+            "a newer copy is there"
+        );
+        assert_eq!(pending().unwrap().png, b"new");
+        let late = ticket();
+        discard();
+        assert!(pending().is_none());
+        assert!(
+            !write_if_current(late, true, b"late", "[3]").unwrap(),
+            "a discard came after"
+        );
+        assert!(pending().is_none(), "nothing came back");
+        assert!(
+            write_if_current(ticket(), true, b"after", "[4]").unwrap(),
+            "a copy made after is fine"
+        );
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         crate::shared::paths::test_dir(tag).join("studio-recovery")

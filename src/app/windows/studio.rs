@@ -374,12 +374,8 @@ impl Windows {
                 std::thread::spawn(move || {
                     let png = crate::shared::picture::encode_png(job.width, job.height, &job.rgba);
                     if let Ok(png) = png {
-                        let _ = studio::recovery::write_if_current(
-                            job.generation,
-                            true,
-                            &png,
-                            &job.notes,
-                        );
+                        let _ =
+                            studio::recovery::write_if_current(job.ticket, true, &png, &job.notes);
                     }
                 });
                 Task::none()
