@@ -2239,3 +2239,42 @@ fn v3_the_shortcuts_sheet_fits_a_small_window() {
         }));
     });
 }
+
+/// Recent files reads Settings > Studio's count, not the old Snip switch: with none yet
+/// it says what goes there; at 0 it says it is off (EN and AR).
+#[test]
+fn v3_recent_files_empty_and_off_states() {
+    use crate::shared::kit::testing::shot;
+    let size = Size::new(240.0, 200.0);
+    let s = studio_on(64, 64);
+    let words = |n| shot::texts(library::recent(&s, n).map(|_| ()));
+    assert!(
+        words(10)
+            .iter()
+            .any(|t| t == "Pictures you open or save appear here."),
+        "{:?}",
+        words(10)
+    );
+    assert!(
+        words(0)
+            .iter()
+            .any(|t| t == "Recent files are off · Settings > Studio"),
+        "{:?}",
+        words(0)
+    );
+    assert!(!words(10).iter().any(|t| t.contains("Settings > Snip")));
+    {
+        let _ar = crate::shared::kit::testing::arabic();
+        let off = shot::texts(library::recent(&s, 0).map(|_| ()));
+        assert!(
+            off.iter().any(|t| t.contains("الملفات الأخيرة متوقفة")),
+            "{off:?}"
+        );
+        let none = shot::texts(library::recent(&s, 10).map(|_| ()));
+        assert!(
+            none.iter().any(|t| t.contains("تظهر هنا الصور")),
+            "{none:?}"
+        );
+    }
+    let _ = size;
+}

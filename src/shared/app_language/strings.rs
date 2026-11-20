@@ -1766,10 +1766,8 @@ strings! {
         | "فتح…";
     st_paste: "Paste"
         | "لصق";
-    st_recent_off: "Turn on Recent captures in Settings > Snip to see your last captures here."
-        | "فعّل «اللقطات الأخيرة» في الإعدادات > لقطة الشاشة لترى آخر لقطاتك هنا.";
-    st_recent_none: "No recent captures yet."
-        | "لا توجد لقطات أخيرة بعد.";
+    st_recent_none: "Pictures you open or save appear here."
+        | "تظهر هنا الصور التي تفتحها أو تحفظها.";
     st_size: "Size"
         | "الحجم";
     st_drawings: "Drawings"

@@ -66,13 +66,12 @@ fn note(words: &str) -> Element<'_, Msg> {
         .into()
 }
 
-fn recent(s: &Studio) -> Element<'_, Msg> {
+/// Recent files: `shown` rows at most (Settings > Studio > Recent files shown; 0 = the
+/// section says it is off), or what goes here when there are none yet.
+pub(super) fn recent(s: &Studio, shown: usize) -> Element<'_, Msg> {
     let mut col = column![];
-    let shown = usize::from(crate::shared::config::current().studio.recent_files);
     if shown == 0 {
         col = col.push(note(t!(st_recent_zero)));
-    } else if !crate::shared::config::current().snip.history {
-        col = col.push(note(t!(st_recent_off)));
     } else if s.recent.is_empty() {
         col = col.push(note(t!(st_recent_none)));
     }
@@ -145,7 +144,16 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let objs = s.editor.as_ref().map(|e| e.doc.items.len());
     let count = Some(steps.len()).filter(|n| *n > 0);
     let body = column![
-        section(s, RECENT, t!(st_sec_recent), None, recent(s)),
+        section(
+            s,
+            RECENT,
+            t!(st_sec_recent),
+            None,
+            recent(
+                s,
+                usize::from(crate::shared::config::current().studio.recent_files)
+            )
+        ),
         divider::divider(),
         section(
             s,
