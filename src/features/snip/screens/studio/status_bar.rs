@@ -49,13 +49,16 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     );
     let line = crate::dir_row![
         chip::size_handle(size_label, false, Msg::Editor(Message::DragOut)),
-        group(
-            vec![text_cell(
-                t!(st_picture_info),
-                s.popover == Some(Pop::Info),
-                Some(Msg::Pop(Some(Pop::Info)))
-            )],
-            false
+        crate::shared::kit::popover::track(
+            group(
+                vec![text_cell(
+                    t!(st_picture_info),
+                    s.popover == Some(Pop::Info),
+                    Some(Msg::Pop(Some(Pop::Info)))
+                )],
+                false
+            ),
+            s.anchors.of(Pop::Info)
         ),
         Space::new().width(Fill),
         zoom,

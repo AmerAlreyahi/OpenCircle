@@ -16,6 +16,7 @@ use crate::shared::kit::option_bar::{
     GROUP_GAP, accent_cell, caption, dot, glyph_cell, group, hairline, swatch, swatch_of,
     text_cell, value,
 };
+use crate::shared::kit::popover;
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -331,28 +332,33 @@ fn bar_room(s: &Studio) -> f32 {
     s.window.width - 2.0 - (super::RAIL + 1.0)
 }
 
-fn opener<'a>(words: &'a str, on: bool, pop: Pop, live: bool) -> Element<'a, Msg> {
+fn opener<'a>(s: &Studio, words: &'a str, pop: Pop, live: bool) -> Element<'a, Msg> {
+    let on = s.popover == Some(pop);
     let press = live.then_some(Msg::Pop(Some(pop)));
-    group(
+    let button = group(
         vec![
             text_cell(words, on, press.clone()),
             glyph_cell(Icon::ChevronDown.glyph(), on, press),
         ],
         false,
-    )
+    );
+    // (it remembers where it is drawn: its popover hangs from it)
+    popover::track(button, s.anchors.of(pop))
 }
 
 /// The narrow bar's colour: ONE swatch button (the current colour) that opens the
 /// Colour popover with all of them.
-fn colour_button<'a>(e: &Annotator, on: bool, live: bool) -> Element<'a, Msg> {
+fn colour_button<'a>(s: &Studio, e: &Annotator, live: bool) -> Element<'a, Msg> {
+    let on = s.popover == Some(Pop::Colours);
     let press = live.then_some(Msg::Pop(Some(Pop::Colours)));
-    group(
+    let button = group(
         vec![
             swatch_of(shown(e).colour, on, press.clone()),
             glyph_cell(Icon::ChevronDown.glyph(), on, press),
         ],
         false,
-    )
+    );
+    popover::track(button, s.anchors.of(Pop::Colours))
 }
 
 /// The bar: the tool's name and key, the shared controls (always all of them),
@@ -398,7 +404,7 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     }
     items.push(match plan.colours_inline {
         true => ed(colours(e, SWATCHES, c.colour)),
-        false => colour_button(e, s.popover == Some(Pop::Colours), c.colour),
+        false => colour_button(s, e, c.colour),
     });
     items.push(ed(stroke(e, c.stroke, plan.captions)));
     items.push(ed(opacity(e, c.opacity, plan.captions)));
@@ -410,25 +416,10 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     }
     let mut end: Vec<Element<'a, Msg>> = Vec::new();
     if more {
-        end.push(opener(
-            t!(st_more),
-            s.popover == Some(Pop::More),
-            Pop::More,
-            true,
-        ));
+        end.push(opener(s, t!(st_more), Pop::More, true));
     }
-    end.push(opener(
-        t!(st_position),
-        s.popover == Some(Pop::Position),
-        Pop::Position,
-        !sel.is_empty(),
-    ));
-    end.push(opener(
-        t!(st_actions_menu),
-        s.popover == Some(Pop::Actions),
-        Pop::Actions,
-        true,
-    ));
+    end.push(opener(s, t!(st_position), Pop::Position, !sel.is_empty()));
+    end.push(opener(s, t!(st_actions_menu), Pop::Actions, true));
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
     let ends = dir::row(end).spacing(GROUP_GAP).align_y(Center);
     // the Steps sidebar's toggle: the end of the row, the same place open or closed

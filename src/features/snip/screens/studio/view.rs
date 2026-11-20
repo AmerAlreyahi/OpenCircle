@@ -186,11 +186,15 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                     },
                 ),
             };
-            popover::over(
+            let (size, end) = pop.card();
+            popover::anchored(
                 main,
                 super::popovers::content(s, pop),
-                corner,
-                offset,
+                s.anchors.of(pop).get(),
+                size,
+                end,
+                s.window,
+                (corner, offset),
                 Msg::Pop(None),
             )
         }

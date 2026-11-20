@@ -236,3 +236,40 @@ pub fn content<'a>(s: &'a Studio, pop: Pop) -> Element<'a, Msg> {
     };
     container(body).width(WIDTH).into()
 }
+
+/// Where each popover's opener was last drawn (the popover hangs from it).
+#[derive(Clone, Default)]
+pub struct Anchors {
+    actions: crate::shared::kit::popover::Anchor,
+    position: crate::shared::kit::popover::Anchor,
+    more: crate::shared::kit::popover::Anchor,
+    colours: crate::shared::kit::popover::Anchor,
+    info: crate::shared::kit::popover::Anchor,
+}
+
+impl Anchors {
+    pub fn of(&self, pop: Pop) -> &crate::shared::kit::popover::Anchor {
+        match pop {
+            Pop::Actions => &self.actions,
+            Pop::Position => &self.position,
+            Pop::More => &self.more,
+            Pop::Colours => &self.colours,
+            Pop::Info => &self.info,
+        }
+    }
+}
+
+impl Pop {
+    /// The card's size (an estimate: the card is placed by it) and whether it hangs by its
+    /// end edge from its opener (the bar's end buttons) or by its start edge.
+    pub fn card(self) -> (iced::Size, bool) {
+        let pad = 2.0 * (space::GAP + 4.0);
+        match self {
+            Pop::Actions => (iced::Size::new(WIDTH + pad, 5.0 * 32.0 + pad), true),
+            Pop::Position => (iced::Size::new(WIDTH + pad, 270.0), true),
+            Pop::More => (iced::Size::new(WIDTH + pad, 160.0), true),
+            Pop::Colours => (iced::Size::new(8.0 * 30.0 + pad, 32.0 + pad), false),
+            Pop::Info => (iced::Size::new(WIDTH + pad, 70.0), false),
+        }
+    }
+}

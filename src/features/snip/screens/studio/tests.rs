@@ -2902,3 +2902,58 @@ fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
     assert!(!s.sidebar_shown());
     assert!(at_end(&s) > 0, "closed: the same spot opens it again");
 }
+
+/// Draws `s` once, so each tracked opener knows where it is.
+fn draw_once(s: &Studio) {
+    let mut shown = Some(view(s, &[], false));
+    let _ = crate::shared::kit::testing::shot::redrawn(
+        |i| (i == 0).then(|| shown.take()).flatten(),
+        SIZE,
+        1.0,
+    );
+}
+
+/// Owner note 2: a popover hangs directly under its own button, end edge on the button's
+/// end edge, kept inside the window (above when there is no room below); Arabic mirrored.
+#[test]
+fn w90b_a_popover_opens_under_its_own_button() {
+    use crate::shared::kit::popover::place;
+    let button = iced::Rectangle::new(Point::new(1000.0, 50.0), Size::new(90.0, 32.0));
+    let card = Size::new(324.0, 200.0);
+    let win = Size::new(1280.0, 800.0);
+    let at = place(button, card, true, win);
+    assert_eq!(
+        at.x + card.width,
+        button.x + button.width,
+        "end edge on the button's end edge"
+    );
+    assert_eq!(at.y, button.y + button.height + 4.0, "directly under it");
+    // no room to the right: kept inside the window
+    let edge = iced::Rectangle::new(Point::new(1250.0, 50.0), Size::new(30.0, 32.0));
+    assert!(place(edge, card, false, win).x + card.width <= win.width);
+    // no room below: above
+    let low = iced::Rectangle::new(Point::new(300.0, 700.0), Size::new(90.0, 32.0));
+    assert!(place(low, card, true, win).y + card.height <= low.y);
+    // Arabic: the start edge becomes the right one, so an `end` card hangs by the left edge
+    {
+        let _ar = crate::shared::kit::testing::arabic();
+        let left = iced::Rectangle::new(Point::new(300.0, 50.0), Size::new(90.0, 32.0));
+        assert_eq!(place(left, card, true, win).x, left.x);
+    }
+    // the real window: draw it once, open Actions, its first row is right under the button
+    let mut s = two_boxes();
+    draw_once(&s);
+    let anchor = s.anchors.of(popovers::Pop::Actions).get();
+    assert!(
+        anchor.width > 0.0 && anchor.y > 40.0,
+        "the opener knows its place: {anchor:?}"
+    );
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    let (size, end) = popovers::Pop::Actions.card();
+    let at = place(anchor, size, end, s.window);
+    let got = click_view(&s, (at.x + 60.0, at.y + 12.0 + 16.0));
+    assert!(
+        got.iter().any(|m| matches!(m, Msg::Act(Row::CopyText))),
+        "the first row sits under the button: {got:?} at {at:?}"
+    );
+}

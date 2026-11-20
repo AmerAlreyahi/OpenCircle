@@ -389,6 +389,8 @@ pub struct Studio {
     /// (Recent, Objects, Steps); the narrow Library overlay; the shortcuts sheet.
     pub(super) menu: Option<(Menu, usize)>,
     pub(super) popover: Option<popovers::Pop>,
+    /// Where each popover's opener was last drawn.
+    pub(super) anchors: popovers::Anchors,
     /// A middle-button pan is on.
     middle: bool,
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
@@ -500,6 +502,7 @@ impl Studio {
             transparent: false,
             menu: None,
             popover: None,
+            anchors: popovers::Anchors::default(),
             middle: false,
             ui_zoom: panels.ui_zoom,
             drops: Vec::new(),
