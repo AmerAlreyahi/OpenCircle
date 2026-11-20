@@ -324,12 +324,15 @@ impl Config {
             // the user's own keys: a chord that is none is dropped (the default stays)
             let mut keys: std::collections::BTreeMap<String, String> =
                 get(t, p, "shortcuts", Default::default(), &mut w);
-            keys.retain(|id, chord| {
-                let ok = is_chord(chord);
-                if !ok {
-                    w.push(format!("{p}shortcuts.{id}: \"{chord}\" is not a key chord"));
+            keys.retain(|id, chord| match canonical_chord(chord) {
+                Some(c) => {
+                    *chord = c;
+                    true
                 }
-                ok
+                None => {
+                    w.push(format!("{p}shortcuts.{id}: \"{chord}\" is not a key chord"));
+                    false
+                }
             });
             s.shortcuts = keys;
         }

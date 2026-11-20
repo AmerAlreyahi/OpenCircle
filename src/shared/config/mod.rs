@@ -683,6 +683,22 @@ pub fn is_chord(chord: &str) -> bool {
     mods_ok && distinct && !key.is_empty() && !matches!(key, "Ctrl" | "Alt" | "Shift")
 }
 
+/// `chord` written the one way the Studio compares keys (`Ctrl`, `Alt`, `Shift`, then the
+/// key), or `None` when it is no chord: a hand-edited `shift+ctrl+o` stays a key that works.
+pub fn canonical_chord(chord: &str) -> Option<String> {
+    if !is_chord(chord) {
+        return None;
+    }
+    let parts: Vec<&str> = chord.split('+').collect();
+    let (key, mods) = parts.split_last()?;
+    let mut out: Vec<&str> = ["Ctrl", "Alt", "Shift"]
+        .into_iter()
+        .filter(|m| mods.contains(m))
+        .collect();
+    out.push(key);
+    Some(out.join("+"))
+}
+
 impl Default for StudioPrefs {
     fn default() -> Self {
         StudioPrefs {

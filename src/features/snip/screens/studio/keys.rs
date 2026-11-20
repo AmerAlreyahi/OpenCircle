@@ -184,6 +184,14 @@ pub const FIXED: &[&str] = &[
     CLOSE,
 ];
 
+/// The menu bar's own Alt keys (File, Edit, View): no command may take them.
+pub const MENU_KEYS: &[&str] = &["Alt+F", "Alt+E", "Alt+V"];
+
+/// A chord no command may have: the editor's fixed keys and the menu bar's Alt keys.
+fn reserved(chord: &str) -> bool {
+    FIXED.contains(&chord) || MENU_KEYS.contains(&chord)
+}
+
 /// A chord that was taken: by another Studio command or by a fixed key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Taken {
@@ -195,9 +203,10 @@ pub enum Taken {
 /// so tooltips and menus can hold it (the chords the user has ever set are interned).
 pub fn of(cmd: Cmd) -> &'static str {
     let config = crate::shared::config::current();
+    // (a hand-edited chord on a fixed key would shadow it: the default stays)
     match config.studio.shortcuts.get(cmd.id()) {
-        Some(chord) => intern(chord),
-        None => cmd.default_chord(),
+        Some(chord) if !reserved(chord) => intern(chord),
+        _ => cmd.default_chord(),
     }
 }
 
@@ -208,7 +217,7 @@ pub fn command_for(chord: &str) -> Option<Cmd> {
 
 /// Why `chord` can't be `cmd`'s key: taken by another command or a fixed key.
 pub fn taken(cmd: Cmd, chord: &str) -> Option<Taken> {
-    if FIXED.contains(&chord) {
+    if reserved(chord) {
         return Some(Taken::Fixed);
     }
     Cmd::ALL
