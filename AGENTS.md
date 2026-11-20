@@ -1437,3 +1437,27 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   button always the whole picture (narrows "Copy = button AND Ctrl+C" for the Studio only); (B) "Keep unsaved work if
   OpenCircle closes unexpectedly" is a Settings > Studio switch, OFF by default. Group / lock / align / print stay later.
   The owner gets ONE complete build (v3 + steps export + walkthrough + picture actions + edit text + cut out) to try.
+- Studio v3.1 layout (owner, 2026-11-20, "I approve everything you said", after trying dev build 9c88010): ONE sidebar only, for
+  Steps (add several pictures at once: multi-select Open, drop many files, paste; click = edit that step; drag reorders; Export at
+  its foot); the tools rail always at the window edge, the sidebar on the other side; the options bar spans the full width under
+  the menu bar (the sidebar starts below it), is never empty and shows ALL controls always (the shared ones colour / size /
+  opacity / outline-fill first; ones that don't apply are dimmed, not hidden), then the tool's own, then "Actions" (Copy text,
+  Translate, Ask AI, Edit text, Cut out) as a dropdown; the panel toggle only in the sidebar's header (+ View menu, Ctrl+B), none
+  in the status bar. Removed panels: Recent files -> File > Open recent + the empty Studio's start screen; Objects list -> dropped
+  (canvas selection + right-click); picture info -> a popover from the status bar's size chip; object X/Y/W/H -> a Position
+  popover in the options bar; export defaults -> Studio preferences + the Save as sheet. Popovers for small glance-only things,
+  a right slide-over for big temporary tasks (Export walkthrough, Edit text, Cut out), centred dialogs for Preferences and the
+  shortcuts list. Studio preferences = a dialog inside the Studio (Ctrl+, / File > Preferences; tabs General, Appearance,
+  Saving and export, Copy and paste, Editing, Shortcuts), one source with Settings > Studio (which keeps one "Open Studio
+  preferences" button); Theme: Follow OpenCircle (default) or any built-in theme; also Steps sidebar side, show it on start,
+  start screen. Menus and the context menu close on any outside click, Esc or a pick. Zoom: Ctrl+= / Ctrl+- / Ctrl+0 scale the
+  Studio's UI (like the AI chat), the mouse wheel zooms the PICTURE at the pointer, middle-button drag pans (Photoshop), Space+
+  drag still pans. Window buttons keep their normal place in Arabic in EVERY OpenCircle window (SUPERSEDES "window buttons top
+  left on every OS" of the Arabic UI design). Snip toolbar: a visible "Open in OpenCircle Studio" button (frame + pen icon,
+  Ctrl+E, before Copy / Save), a one-time hint "Edit more in OpenCircle Studio", double-click on the picked area also opens it.
+  Walkthrough video: one transition for all steps (Cut, Crossfade default, Slide, Push, Zoom, Wipe) + duration 0.3/0.5/1 s; the
+  sheet shows the expected GIF size. Cut out model upload "cutout-1" approved.
+- Snip enhancements, LATER (owner, 2026-11-20): a pro picker with Snagit's logic, not its look (magnetic edges that catch
+  reliably, element / window picking that finds buttons, panels and menus, wheel steps element -> window -> screen); and
+  drawing inside a snipped area stays inside it: text wraps to a new line before the area's edge, shapes / strokes stop at the
+  area's last pixels so the whole shape shows (the Studio keeps this when "Grow the canvas" is off).
