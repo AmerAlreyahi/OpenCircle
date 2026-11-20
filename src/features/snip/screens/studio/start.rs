@@ -80,30 +80,34 @@ pub fn view(s: &Studio) -> Element<'_, Msg> {
     };
     let open = labelled(super::view::OPEN, t!(st_open), Kind::Accent, Msg::Open);
     let paste = labelled(super::view::PASTE, t!(st_paste), Kind::Elevated, Msg::Paste);
+    let buttons = crate::dir_row![
+        hint(
+            open,
+            t!(st_open),
+            Why::Keys(super::keys::OPEN),
+            Position::Bottom
+        ),
+        hint(
+            paste,
+            t!(st_paste),
+            Why::Keys(super::keys::PASTE),
+            Position::Bottom
+        ),
+    ]
+    .spacing(space::GAP);
     let mut card = column![
         chip::emblem(Icon::Picture),
         text(Role::CARD_HEADING, t!(st_empty_title)),
         sub(Role::ROW_DESC, t!(st_empty_hint)),
-        crate::dir_row![
-            hint(
-                open,
-                t!(st_open),
-                Why::Keys(super::keys::OPEN),
-                Position::Bottom
-            ),
-            hint(
-                paste,
-                t!(st_paste),
-                Why::Keys(super::keys::PASTE),
-                Position::Bottom
-            ),
-        ]
-        .spacing(space::GAP),
     ]
     .spacing(space::PAGE[0])
     .align_x(Center);
-    if let Some(r) = recent(s) {
-        card = card.push(r);
+    // Settings > Studio > Show the start screen: off = just the drop zone's words
+    if crate::shared::config::current().studio.start_screen {
+        card = card.push(buttons);
+        if let Some(r) = recent(s) {
+            card = card.push(r);
+        }
     }
     let zone = match s.hovered {
         true => Material::Held, // its accent edge: "drop it here"

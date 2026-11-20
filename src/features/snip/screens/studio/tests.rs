@@ -5,6 +5,7 @@ use crate::features::snip::annotate::{Message, Tool};
 use crate::features::snip::screens::steps::Step;
 use crate::features::snip::snip_more::Row;
 use crate::features::translate::Line;
+use crate::shared::config;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -1187,6 +1188,27 @@ fn drawn(n: usize) -> Studio {
     s
 }
 
+/// W91.3: the walkthrough's transition and its length are remembered between sessions
+/// (`snip.studio`), and a new Studio starts from them.
+#[test]
+fn the_walkthrough_transition_is_remembered() {
+    use crate::features::snip::transition::Transition;
+    let mut s = Studio::new(StudioConfig::default());
+    assert_eq!(s.walk.how.transition, Transition::Crossfade);
+    let Outcome::Panels(p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
+        panic!("not saved");
+    };
+    assert_eq!(p.walk_transition, Transition::Wipe.index());
+    let Outcome::Panels(p) = s.update(Msg::WalkTransitionMs(1000)) else {
+        panic!("not saved");
+    };
+    let again = Studio::new(p);
+    assert_eq!(
+        (again.walk.how.transition, again.walk.how.transition_ms),
+        (Transition::Wipe, 1000)
+    );
+}
+
 #[test]
 fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());
@@ -1210,7 +1232,8 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
             max_edge: 960,
             frame_ms: 3500,
             repeat: false,
-            numbered: true
+            numbered: true,
+            ..export::Walkthrough::default()
         }
     );
     assert!(
@@ -1360,7 +1383,9 @@ fn v3_file_menu_rows_reach_the_host() {
         let at = rows.iter().position(|r| r.label == name).unwrap();
         s.update(Msg::MenuPick(Menu::File, at))
     };
-    assert!(matches!(pick(&mut s, "Settings…"), Outcome::Settings));
+    assert!(matches!(pick(&mut s, "Preferences…"), Outcome::None));
+    assert!(s.prefs.is_some());
+    let _ = s.update(Msg::Cancel);
     assert!(matches!(pick(&mut s, "New snip"), Outcome::NewSnip));
     draw(&mut s);
     assert!(matches!(pick(&mut s, "Close"), Outcome::None));
@@ -2546,4 +2571,66 @@ fn v31_edit_text_replaces_the_options_bar() {
     assert!(got.iter().any(|t| t == "Cancel"), "{got:?}");
     let _ = s.update(Msg::Cancel);
     assert!(words(&s).iter().any(|t| t == "Opacity"));
+}
+
+/// W91 wiring: File > Preferences (Ctrl+,) opens the dialog over the Studio; a change in
+/// it asks the host to write the config; Esc closes it; Out::Browse asks for a folder.
+#[test]
+fn v31_the_preferences_dialog_opens_over_the_studio_and_closes_on_esc() {
+    let mut s = studio_on(640, 400);
+    assert!(s.prefs.is_none());
+    let rows = menu_bar::items(Menu::File, &s);
+    let at = rows.iter().position(|r| r.label == "Preferences…").unwrap();
+    assert!(matches!(
+        s.update(Msg::MenuPick(Menu::File, at)),
+        Outcome::None
+    ));
+    assert!(s.prefs.is_some());
+    // it blocks the canvas keys and shows its title over the window
+    assert!(s.editor.as_ref().unwrap().keys_blocked);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(
+        words.iter().any(|t| t == "OpenCircle Studio preferences"),
+        "{words:?}"
+    );
+    // a change: the host writes it
+    let mut p = config::current().studio;
+    p.snap = !p.snap;
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::Prefs(Box::new(p)))),
+        Outcome::ApplyPrefs
+    ));
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::BrowseFolder)),
+        Outcome::PrefsBrowse
+    ));
+    assert!(matches!(s.update(Msg::Browsed(None)), Outcome::None));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.prefs.is_none());
+    assert!(!s.editor.as_ref().unwrap().keys_blocked);
+    // the dialog's own Close button
+    let _ = s.update(Msg::OpenPrefs);
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::Close)),
+        Outcome::None
+    ));
+    assert!(s.prefs.is_none());
+}
+
+/// W91 wiring: the sidebar's side follows Settings > Studio (the rail takes the other
+/// edge), and the default is the end (rail at the window's start edge).
+#[test]
+fn v31_the_steps_sidebar_side_is_a_setting() {
+    use crate::shared::config::StudioSide;
+    assert_eq!(config::current().studio.steps_side, StudioSide::End);
+    let s = studio_on(640, 400);
+    assert!(!s.sidebar_at_start());
+    // End: the sidebar's Add at the right, the rail's Rectangle at the left
+    let add = click_view(&s, (1148.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+    let rect = click_view(&s, (27.0, 155.0));
+    assert!(
+        rect.iter()
+            .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
+    );
 }

@@ -13,7 +13,7 @@ use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
     BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
 };
-use crate::features::snip::annotate::{Annotator, Message};
+use crate::features::snip::annotate::{Annotator, Group, Message, info};
 
 /// Room around the image for Snip's live area handles (display px; none
 /// otherwise): the canvas is this much bigger on every side.
@@ -130,6 +130,8 @@ struct Pointer {
     grid_key: std::cell::Cell<Option<[u32; 6]>>,
     /// The finger held (touch or pen acts as the left button: `shared::touch`).
     finger: Option<iced::touch::Finger>,
+    /// Snip: when the last press landed (a second one soon after opens the Studio).
+    last_press: Option<std::time::Instant>,
 }
 
 /// The picture pixel columns and rows whose lines cross `seen` (display px).
@@ -200,6 +202,19 @@ impl Input<'_> {
     }
 }
 
+/// Two presses this close are a double click (`last`: the previous press, cleared by a double).
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(350);
+
+fn double_click(last: &mut Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    match last.take() {
+        Some(before) if now.duration_since(before) <= DOUBLE_CLICK => true,
+        _ => {
+            *last = Some(now);
+            false
+        }
+    }
+}
+
 impl canvas::Program<Message> for Input<'_> {
     type State = Pointer;
 
@@ -221,6 +236,20 @@ impl canvas::Program<Message> for Input<'_> {
         let message = match &event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
+                // a double click inside the picked area (Select tool, not on a handle or
+                // its margin, not while a long capture runs): into the Studio
+                if e.movable
+                    && !e.capturing
+                    && info(e.tool).group == Group::Select
+                    && cursor.position().is_some_and(|c| {
+                        let p = self.image_at(c);
+                        e.doc.view().contains(p) && e.area_hot(Some(p)).is_none()
+                    })
+                    && double_click(&mut pointer.last_press, std::time::Instant::now())
+                {
+                    pointer.down = false;
+                    return Some(Action::publish(Message::OpenStudio).and_capture());
+                }
                 pointer.down = true;
                 let p = match e.movable {
                     true => self.image_at(cursor.position()?),
@@ -600,5 +629,24 @@ mod tests {
                 }));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod double_click_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// W91.2: a second press within the window is a double click; the third starts over.
+    #[test]
+    fn two_quick_presses_are_a_double_click() {
+        let (mut last, t0) = (None, Instant::now());
+        assert!(!double_click(&mut last, t0));
+        assert!(double_click(&mut last, t0 + Duration::from_millis(200)));
+        assert!(!double_click(&mut last, t0 + Duration::from_millis(300)));
+        assert!(
+            !double_click(&mut last, t0 + Duration::from_millis(900)),
+            "too slow"
+        );
     }
 }

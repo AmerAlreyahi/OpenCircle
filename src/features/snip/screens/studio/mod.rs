@@ -17,6 +17,7 @@ pub(crate) mod keys;
 mod menu_bar;
 mod options_bar;
 mod popovers;
+pub mod preferences;
 pub mod recovery;
 mod sheets;
 mod sidebar;
@@ -142,6 +143,11 @@ pub enum Msg {
     OverSidebar(bool),
     /// The Open dialog's file.
     Picked(PathBuf),
+    /// Studio preferences (Ctrl+, / File > Preferences): open, the dialog's own messages,
+    /// the folder picker's answer.
+    OpenPrefs,
+    Prefs(preferences::Msg),
+    Browsed(Option<PathBuf>),
     OpenRecent(PathBuf),
     Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
@@ -209,9 +215,8 @@ pub enum Msg {
     /// Board 20: bring the kept copy back / throw it away.
     Restore,
     DiscardCopy,
-    /// File > New snip, File > Settings.
+    /// File > New snip.
     NewSnip,
-    Settings,
     /// The Steps list: a press on a step, the pointer over the list (list px,
     /// with the steps' count), the press ends, the pointer on / off a step.
     StepPress(usize),
@@ -235,6 +240,9 @@ pub enum Msg {
     WalkTime(u8),
     WalkNumbered(bool),
     WalkLoop(bool),
+    /// The walkthrough's one transition between steps, and its length (ms).
+    WalkTransition(crate::features::snip::transition::Transition),
+    WalkTransitionMs(u32),
     WalkGo,
     /// The sheet's Cancel: stops the encoder when one runs, else closes.
     WalkCancel,
@@ -265,6 +273,10 @@ pub enum Outcome {
     Caption(Caption),
     /// The open-file dialog, then `Msg::Dropped` with the file.
     PickFile,
+    /// The preferences dialog changed something: write it (`Studio::apply_prefs`).
+    ApplyPrefs,
+    /// Show the folder picker; answer `Msg::Browsed`.
+    PrefsBrowse,
     /// The open-file dialog for several pictures, then `Msg::AddFiles`.
     PickFiles,
     /// Read these files and add each as a step.
@@ -382,6 +394,8 @@ pub struct Studio {
     pub(super) ui_zoom: u16,
     /// When the last file was dropped (files dropped together are steps).
     drops: Vec<PathBuf>,
+    /// The preferences dialog, over the window while open.
+    pub(super) prefs: Option<preferences::Dialog>,
     /// The pointer is over the Steps sidebar (a drop there is steps).
     over_sidebar: bool,
     pub(super) shortcuts: bool,
@@ -456,7 +470,9 @@ impl Walk {
 
 impl Studio {
     /// The empty Studio with the user's panels.
-    pub fn new(panels: StudioConfig) -> Self {
+    pub fn new(mut panels: StudioConfig) -> Self {
+        // Settings > Studio: the Steps sidebar on opening
+        panels.library = crate::shared::config::current().studio.steps_on_start;
         Studio {
             editor: None,
             zoom: None,
@@ -484,6 +500,7 @@ impl Studio {
             middle: false,
             ui_zoom: panels.ui_zoom,
             drops: Vec::new(),
+            prefs: None,
             over_sidebar: false,
             shortcuts: false,
             context: None,
@@ -516,6 +533,10 @@ impl Studio {
                 tenths: 20,
                 how: export::Walkthrough {
                     movie: export::Movie::from_index(panels.walk_format),
+                    transition: crate::features::snip::transition::Transition::from_index(
+                        panels.walk_transition,
+                    ),
+                    transition_ms: panels.walk_ms,
                     ..export::Walkthrough::default()
                 },
                 busy: None,
@@ -1026,6 +1047,7 @@ impl Studio {
         self.menu.is_some()
             || self.context.is_some()
             || self.shortcuts
+            || self.prefs.is_some()
             || self.asking()
             || self.exporting
             || self.card.is_some()
@@ -1205,6 +1227,32 @@ impl Studio {
                 self.panels.ui_zoom = self.ui_zoom;
                 Outcome::Panels(self.panels)
             }
+            Msg::OpenPrefs => {
+                self.popover = None;
+                self.menu = None;
+                self.prefs = Some(preferences::Dialog::open(
+                    crate::shared::paths::pictures_folder(),
+                ));
+                Outcome::None
+            }
+            Msg::Prefs(m) => {
+                let Some(d) = &mut self.prefs else {
+                    return Outcome::None;
+                };
+                match d.update(m) {
+                    preferences::Out::None => Outcome::None,
+                    preferences::Out::Changed => Outcome::ApplyPrefs,
+                    preferences::Out::Browse => Outcome::PrefsBrowse,
+                    preferences::Out::Close => {
+                        self.prefs = None;
+                        Outcome::None
+                    }
+                }
+            }
+            Msg::Browsed(dir) => match self.prefs.as_mut().map(|d| d.set_folder(dir)) {
+                Some(preferences::Out::Changed) => Outcome::ApplyPrefs,
+                _ => Outcome::None,
+            },
             Msg::OverSidebar(on) => {
                 self.over_sidebar = on;
                 Outcome::None
@@ -1347,7 +1395,8 @@ impl Studio {
                     || self.context.take().is_some()
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
-                    || self.popover.take().is_some();
+                    || self.popover.take().is_some()
+                    || self.prefs.take().is_some();
                 // the export sheet (a running encoder stops), then the restore sheet (Later)
                 if !closed && self.exporting {
                     return self.update(Msg::WalkCancel);
@@ -1476,7 +1525,8 @@ impl Studio {
                     false => editing::object_menu(e),
                 };
                 // the stage's left edge: mirrored, the Steps sidebar sits there
-                let left = match crate::shared::app_language::rtl() {
+                let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
+                let left = match sidebar_left {
                     true => (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0),
                     false => RAIL + 2.0,
                 };
@@ -1575,7 +1625,6 @@ impl Studio {
                 Outcome::None
             }
             Msg::NewSnip => Outcome::NewSnip,
-            Msg::Settings => Outcome::Settings,
             Msg::StepPress(i) => {
                 self.pick.press(i);
                 Outcome::None
@@ -1634,6 +1683,16 @@ impl Studio {
             Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
             Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
             Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkTransition(kind) => {
+                self.walk.how.transition = kind;
+                self.panels.walk_transition = kind.index();
+                Outcome::Panels(self.panels)
+            }
+            Msg::WalkTransitionMs(ms) => {
+                self.walk.how.transition_ms = ms;
+                self.panels.walk_ms = ms;
+                Outcome::Panels(self.panels)
+            }
             Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
                 self.exporting = false;
@@ -1713,6 +1772,20 @@ impl Studio {
             // the widget's toolbar asks for is on the Studio
             _ => Outcome::None,
         }
+    }
+
+    /// The dialog's changes onto `c` (the host calls this inside `config::update`).
+    pub fn apply_prefs(&mut self, c: &mut crate::shared::config::Config) {
+        if let Some(d) = &mut self.prefs {
+            d.apply(c);
+        }
+    }
+
+    /// Settings > Studio > Steps sidebar side: at the reading start (left; right in
+    /// Arabic), the rail on the other edge.
+    pub(super) fn sidebar_at_start(&self) -> bool {
+        crate::shared::config::current().studio.steps_side
+            == crate::shared::config::StudioSide::Start
     }
 
     /// The Steps sidebar shows.

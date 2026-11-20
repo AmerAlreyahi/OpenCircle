@@ -128,7 +128,7 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
                 ed(Message::Copy),
                 true,
             ),
-            item(S::st_settings, keys::SETTINGS, Msg::Settings, true),
+            item(S::st_prefs, keys::PREFERENCES, Msg::OpenPrefs, true),
             item(
                 S::st_shortcuts,
                 keys::SHORTCUTS,

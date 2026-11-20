@@ -633,6 +633,8 @@ pub struct Annotator {
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
+    /// Snip's first run ever: the toolbar shows its one-time "Edit more in OpenCircle Studio" hint.
+    pub studio_hint: bool,
     /// A long capture of the area is running: the toolbar keeps only what
     /// finishes it (Copy, Save, Pin, Share, close); the rest is dimmed.
     pub capturing: bool,
@@ -757,6 +759,7 @@ impl Annotator {
             viewport: None,
             grid: false,
             scroll: false,
+            studio_hint: false,
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
@@ -939,6 +942,7 @@ impl Annotator {
             }
             Message::EraserSize(px) => self.eraser = px,
             Message::EraserWhole(on) => self.eraser_whole = on,
+            Message::OpenStudio if self.capturing => {}
             Message::OpenStudio => {
                 self.commit();
                 self.menu = None;

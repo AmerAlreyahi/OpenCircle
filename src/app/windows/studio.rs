@@ -423,6 +423,21 @@ impl Windows {
                 },
             ))),
             Outcome::Settings => self.open(super::Kind::Settings),
+            Outcome::ApplyPrefs => {
+                if let Some((_, s)) = &mut self.studio
+                    && let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c))
+                {
+                    crate::log!("[opencircle] config: {e}");
+                }
+                Task::none()
+            }
+            Outcome::PrefsBrowse => crate::app::background::background(|tx| {
+                let picked = rfd::FileDialog::new()
+                    .set_title(crate::t!(dlg_folder))
+                    .pick_folder();
+                let _ = tx.unbounded_send(picked);
+            })
+            .map(|dir| Msg::Studio(studio::Msg::Browsed(dir))),
             Outcome::AddStep(crop) => {
                 // the strip opens on the first screen when there is none yet
                 let place = crate::shared::platform::monitor::places()
@@ -810,7 +825,7 @@ fn key_msg(
         (_, Some('s')) if modifiers.shift() => studio::Msg::Export,
         (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
         (Physical::Code(Code::Slash), _) => studio::Msg::Shortcuts(true),
-        (Physical::Code(Code::Comma), _) => studio::Msg::Settings,
+        (Physical::Code(Code::Comma), _) => studio::Msg::OpenPrefs,
         // the Studio's UI scale (as in the AI chat); with Shift, the picture's zoom
         (Physical::Code(Code::Equal | Code::NumpadAdd), _) if modifiers.shift() => {
             studio::Msg::ZoomIn
@@ -1014,7 +1029,7 @@ mod key_tests {
         is(k::UI_LARGER, |m| matches!(m, studio::Msg::UiScale(1)));
         is(k::UI_SMALLER, |m| matches!(m, studio::Msg::UiScale(-1)));
         is(k::UI_RESET, |m| matches!(m, studio::Msg::UiScale(0)));
-        is(k::SETTINGS, |m| matches!(m, studio::Msg::Settings));
+        is(k::PREFERENCES, |m| matches!(m, studio::Msg::OpenPrefs));
         is(k::SHORTCUTS, |m| matches!(m, studio::Msg::Shortcuts(true)));
         is(k::ZOOM_IN, |m| matches!(m, studio::Msg::ZoomIn));
         is(k::ZOOM_OUT, |m| matches!(m, studio::Msg::ZoomOut));

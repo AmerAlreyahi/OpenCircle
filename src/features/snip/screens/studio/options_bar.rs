@@ -12,7 +12,8 @@ use crate::features::snip::annotate::{
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::option_bar::{
-    GROUP_GAP, accent_cell, caption, dot, glyph_cell, group, hairline, swatch, text_cell, value,
+    GROUP_GAP, accent_cell, caption, dot, glyph_cell, group, hairline, swatch, swatch_of,
+    text_cell, value,
 };
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
@@ -340,15 +341,10 @@ fn opener<'a>(words: &'a str, on: bool, pop: Pop, live: bool) -> Element<'a, Msg
 /// The narrow bar's colour: ONE swatch button (the current colour) that opens the
 /// Colour popover with all of them.
 fn colour_button<'a>(e: &Annotator, on: bool, live: bool) -> Element<'a, Msg> {
-    let now = shown(e)
-        .colour
-        .map_or(iced::Color::from_rgb8(128, 128, 128), |c| {
-            iced::Color::from_rgba8(c[0], c[1], c[2], f32::from(c[3]) / 255.0)
-        });
     let press = live.then_some(Msg::Pop(Some(Pop::Colours)));
     group(
         vec![
-            swatch(now, on, press.clone()),
+            swatch_of(shown(e).colour, on, press.clone()),
             glyph_cell(Icon::ChevronDown.glyph(), on, press),
         ],
         false,
@@ -392,9 +388,7 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             items.push(ed(hairline()));
         }
         false => {
-            let glyph = iced::widget::text(info(tool).icon)
-                .font(crate::shared::kit::icon::FONT)
-                .size(16);
+            let glyph = crate::shared::kit::icon::glyph(info(tool).icon, 16.0);
             items.push(container(glyph).center_x(W_ICON).into());
         }
     }

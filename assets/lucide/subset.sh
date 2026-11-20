@@ -80,7 +80,7 @@ ICONS=$(printf '%s,' \
   U+E07B `# circle-alert (the AI error card)` \
   U+E548 `# book-a (the translate pill: the glossary)` \
   U+E28E `# eraser (Snip: the Eraser tool)` \
-  U+E42A `# app-window (Snip More: Open in Studio)` \
+  U+E42A `# app-window (Snip Studio: its mark)` \
   U+E12D `# panel-left (Snip Studio: the library's toggle)` \
   U+E435 `# panel-right (Snip Studio: the picture panel's toggle)` \
   U+E246 `# folder-open (Snip Studio: Open)` \

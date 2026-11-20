@@ -90,7 +90,7 @@ fn export(crop: Crop, snip: &SnipConfig) -> (Crop, Format) {
 
 /// Where saves go when no folder is set: the Pictures folder + `OpenCircle`.
 pub fn default_folder() -> Option<PathBuf> {
-    dirs::picture_dir().map(|p| p.join("OpenCircle"))
+    crate::shared::paths::pictures_folder()
 }
 
 /// The folder saves go to: the configured one if set and existing, else the

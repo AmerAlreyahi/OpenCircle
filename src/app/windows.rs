@@ -1290,6 +1290,16 @@ impl Windows {
                             ]);
                         }
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
+                        // Settings > Studio's button: the Studio opens with its preferences dialog
+                        settings::Outcome::OpenStudioPreferences => {
+                            return Task::batch([
+                                keys,
+                                self.open_studio(None),
+                                Task::done(Msg::Studio(
+                                    crate::features::snip::screens::studio::Msg::OpenPrefs,
+                                )),
+                            ]);
+                        }
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {
                             let report = crate::shared::diagnostics::report(
@@ -1775,6 +1785,14 @@ impl Windows {
     }
 
     pub fn view(&self, window: window::Id) -> Option<Element<'_, Msg>> {
+        // another window than the Studio draws with OpenCircle's own theme again
+        // (the Studio may have set its own in `Settings > Studio > Theme`)
+        if self.studio.as_ref().is_none_or(|(w, _)| *w != window)
+            && crate::shared::config::current().studio.theme
+                != crate::shared::config::STUDIO_THEME_FOLLOW
+        {
+            theme::apply(config::current().theme);
+        }
         if let Some((_, strip)) = self.steps.as_ref().filter(|(w, _)| *w == Some(window)) {
             return Some(strip.view(shape::radius(steps::RADIUS)).map(Msg::Steps));
         }
@@ -1815,6 +1833,13 @@ impl Windows {
                 .steps
                 .as_ref()
                 .map_or(&[][..], |(_, strip)| strip.steps());
+            // Settings > Studio > Theme: the Studio's own (None = follow OpenCircle's)
+            let own = crate::features::snip::screens::studio::preferences::theme_of(
+                &config::current().studio,
+            );
+            if let Some(theme) = own {
+                crate::shared::kit::themes::set(theme);
+            }
             let page = crate::features::snip::screens::studio::view(studio, steps, mode.maximised)
                 .map(Msg::Studio);
             return Some(chrome::with_edges(page, mode, move |e| {

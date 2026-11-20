@@ -119,7 +119,7 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         row(tr(S::st_sc_ui), &[k::UI_LARGER, k::UI_SMALLER, k::UI_RESET]),
         row(tr(S::st_sc_pan), &[k::PAN]),
         row(tr(S::st_sc_file), &[k::OPEN, k::SAVE, k::SAVE_AS]),
-        row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::SETTINGS]),
+        row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::PREFERENCES]),
         row(tr(S::st_shortcuts), &[k::SHORTCUTS]),
     ];
     let view: Vec<Row<'a>> = view.into_iter().chain(quick).collect();
