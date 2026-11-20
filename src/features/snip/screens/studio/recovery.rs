@@ -50,20 +50,8 @@ pub fn dir() -> PathBuf {
 
 /// Deletes the copy (saved, discarded, or closed cleanly). Nothing there is fine.
 pub fn discard() {
-    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    discard_in(&dir());
+    LEDGER.discard(&dir());
 }
-
-/// Counts the discards: a write made off the UI thread (`write_if_current`) that
-/// finishes after a discard is dropped, so a copy never outlives what it kept.
-static GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// The number of the last copy written: copies made later have bigger numbers, and
-/// a slow writer never lands over a newer one.
-static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// What a writer takes before it starts: the discard count and its place in line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,23 +61,72 @@ pub struct Ticket {
 }
 
 pub fn ticket() -> Ticket {
-    Ticket {
-        generation: GEN.load(std::sync::atomic::Ordering::SeqCst),
-        order: NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-    }
+    LEDGER.ticket()
 }
 
 /// `write`, unless a `discard` came after `ticket` was taken or a newer copy has
 /// been written already.
 pub fn write_if_current(ticket: Ticket, on: bool, png: &[u8], notes: &str) -> io::Result<bool> {
-    use std::sync::atomic::Ordering::SeqCst;
-    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if GEN.load(SeqCst) != ticket.generation || LAST.load(SeqCst) > ticket.order {
-        return Ok(false);
+    LEDGER.write_if_current(&dir(), ticket, on, png, notes)
+}
+
+/// The window's one ledger (tests make their own, so none touches another's counts).
+static LEDGER: Ledger = Ledger::new();
+
+/// Counts the discards (a write made off the UI thread that finishes after a discard
+/// is dropped, so a copy never outlives what it kept) and numbers the copies (a slow
+/// writer never lands over a newer one); one lock orders the writes and discards.
+pub struct Ledger {
+    generation: std::sync::atomic::AtomicU32,
+    last: std::sync::atomic::AtomicU64,
+    next: std::sync::atomic::AtomicU64,
+    lock: std::sync::Mutex<()>,
+}
+
+impl Ledger {
+    pub const fn new() -> Self {
+        Ledger {
+            generation: std::sync::atomic::AtomicU32::new(0),
+            last: std::sync::atomic::AtomicU64::new(0),
+            next: std::sync::atomic::AtomicU64::new(1),
+            lock: std::sync::Mutex::new(()),
+        }
     }
-    let wrote = write_in(&dir(), on, png, notes)?;
-    LAST.store(ticket.order, SeqCst);
-    Ok(wrote)
+
+    pub fn ticket(&self) -> Ticket {
+        use std::sync::atomic::Ordering::SeqCst;
+        Ticket {
+            generation: self.generation.load(SeqCst),
+            order: self.next.fetch_add(1, SeqCst),
+        }
+    }
+
+    pub fn write_if_current(
+        &self,
+        dir: &Path,
+        ticket: Ticket,
+        on: bool,
+        png: &[u8],
+        notes: &str,
+    ) -> io::Result<bool> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        if self.generation.load(SeqCst) != ticket.generation
+            || self.last.load(SeqCst) > ticket.order
+        {
+            return Ok(false);
+        }
+        let wrote = write_in(dir, on, png, notes)?;
+        self.last.store(ticket.order, SeqCst);
+        Ok(wrote)
+    }
+
+    pub fn discard(&self, dir: &Path) {
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        discard_in(dir);
+    }
 }
 
 /// The leftover copy of a crashed session, if a whole one exists. The caller checks
@@ -162,33 +199,34 @@ impl Debounce {
 mod tests {
     use super::*;
 
-    /// A copy whose writer was slow never lands after a discard, nor over a newer copy.
-    #[test]
-    fn a_late_writer_cannot_outlive_a_discard_or_overwrite_a_newer_copy() {
-        use_dir(crate::shared::paths::test_dir("w87-ticket").join("studio-recovery"));
-        let (old, newer) = (ticket(), ticket());
-        assert!(write_if_current(newer, true, b"new", "[2]").unwrap());
-        assert!(
-            !write_if_current(old, true, b"old", "[1]").unwrap(),
-            "a newer copy is there"
-        );
-        assert_eq!(pending().unwrap().png, b"new");
-        let late = ticket();
-        discard();
-        assert!(pending().is_none());
-        assert!(
-            !write_if_current(late, true, b"late", "[3]").unwrap(),
-            "a discard came after"
-        );
-        assert!(pending().is_none(), "nothing came back");
-        assert!(
-            write_if_current(ticket(), true, b"after", "[4]").unwrap(),
-            "a copy made after is fine"
-        );
-    }
-
     fn tmp(tag: &str) -> PathBuf {
         crate::shared::paths::test_dir(tag).join("studio-recovery")
+    }
+
+    /// A copy whose writer was slow never lands after a discard, nor over a newer copy
+    /// (a ledger of its own and a folder of its own: no other test can move its counts).
+    #[test]
+    fn a_late_writer_cannot_outlive_a_discard_or_overwrite_a_newer_copy() {
+        let (l, d) = (Ledger::new(), tmp("w87-ticket"));
+        let (old, newer) = (l.ticket(), l.ticket());
+        assert!(l.write_if_current(&d, newer, true, b"new", "[2]").unwrap());
+        assert!(
+            !l.write_if_current(&d, old, true, b"old", "[1]").unwrap(),
+            "a newer copy is there"
+        );
+        assert_eq!(pending_in(&d).unwrap().png, b"new");
+        let late = l.ticket();
+        l.discard(&d);
+        assert!(pending_in(&d).is_none());
+        assert!(
+            !l.write_if_current(&d, late, true, b"late", "[3]").unwrap(),
+            "a discard came after"
+        );
+        assert!(pending_in(&d).is_none(), "nothing came back");
+        assert!(
+            l.write_if_current(&d, l.ticket(), true, b"after", "[4]")
+                .unwrap()
+        );
     }
 
     #[test]
