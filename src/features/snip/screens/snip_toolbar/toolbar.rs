@@ -43,8 +43,6 @@ const PIPETTE: char = crate::features::snip::screens::tools::picker::ICON;
 const SHARE: char = '\u{e158}'; // lucide "share"
 const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
 const LIST_PLUS: char = '\u{e23e}'; // lucide "list-plus"
-/// More's Open in Studio (and the Studio's own mark).
-pub const STUDIO: char = '\u{e42a}'; // lucide "app-window"
 /// A tool's keycap in its panel.
 const KEY_W: f32 = 22.0;
 /// The Text tool's size presets (display px).
@@ -64,7 +62,6 @@ pub const GLYPHS: &[char] = &[
     crate::features::snip::screens::tools::ruler::ICON,
     LIVE_PIN,
     LIST_PLUS,
-    STUDIO,
 ];
 
 /// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
@@ -88,6 +85,7 @@ fn widths(primary: bool) -> Vec<f32> {
         bar::DIVIDER,
         CONTROL,
         bar::DIVIDER,
+        CONTROL,
         if primary { PRIMARY_W } else { CONTROL },
         CONTROL,
     ]);
@@ -123,6 +121,7 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
         Message::Picker,
         Message::UndoClick,
         Message::Menu(Menu::More),
+        Message::OpenStudio,
         if steps_on(e) {
             Message::AddStep
         } else {
@@ -184,12 +183,6 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
             }
         })
         .collect();
-    rows.push(MoreRow::plain(
-        STUDIO,
-        S::sn_open_studio,
-        None,
-        live(Message::OpenStudio),
-    ));
     rows.push(MoreRow::plain(
         SCROLL,
         S::sn_long_capture,
@@ -398,6 +391,19 @@ fn build(
         Why::Icon,
     ));
     items.push(divide());
+    let studio = State {
+        active: false,
+        focused: focused(&Message::OpenStudio),
+    };
+    items.push(hinted(
+        icon_button::option(
+            crate::shared::kit::icon::picture_pen(),
+            studio,
+            Message::OpenStudio,
+        ),
+        t!(sn_studio_btn),
+        Why::Keys("Ctrl+E"),
+    ));
     items.push(primary(
         e,
         focused(&Message::AddStep) || focused(&Message::Copy),
@@ -420,7 +426,12 @@ fn build(
     )
     .padding(bar::PAD);
     let Some(menu) = e.menu else {
-        return (toolbar.into(), None);
+        // the first Snip ever: a one-time hint by the Studio button
+        let hint = (e.studio_hint && idle).then(|| {
+            let (_, left) = centred_on(e, widths(steps_on(e)).len() - 3, STUDIO_HINT_W);
+            (studio_hint(), left)
+        });
+        return (toolbar.into(), hint);
     };
     let (panel, width) = match menu {
         Menu::Colour => (colour_panel(e), colour::PICKER_W),
@@ -428,15 +439,33 @@ fn build(
         Menu::Undo => (undo_panel(e), size::PANEL),
         Menu::More => (more_panel(e), option_list::MENU_WIDTH),
     };
-    // centred on its button (mirrored right to left)
-    let w = widths(steps_on(e));
     let i = at.iter().find(|(m, _)| *m == menu).map_or(0, |(_, i)| *i);
+    (toolbar.into(), Some((panel, centred_on(e, i, width).1)))
+}
+
+/// The one-time hint's width, and the bubble (Snip's first run).
+const STUDIO_HINT_W: f32 = 232.0;
+
+fn studio_hint<'a>() -> Element<'a, Message> {
+    surface(
+        Material::Widget,
+        radius::CONTROL,
+        container(caption(Role::ROW_TITLE, t!(sn_studio_hint))).padding(space::PANEL),
+    )
+    .width(STUDIO_HINT_W)
+    .into()
+}
+
+/// Item `i`'s centre and a `width`-wide panel's left edge to sit centred on it
+/// (mirrored right to left).
+fn centred_on(e: &Annotator, i: usize, width: f32) -> (f32, f32) {
+    let w = widths(steps_on(e));
     let mut x = bar::PAD + w[..i].iter().map(|w| w + SPACING).sum::<f32>();
     if dir::rtl() {
         x = size_for(e).width - x - w[i];
     }
-    let left = x + w[i] / 2.0 - width / 2.0;
-    (toolbar.into(), Some((panel, left)))
+    let centre = x + w[i] / 2.0;
+    (centre, centre - width / 2.0)
 }
 
 /// The font size option (presets and slider; `Message::TextSize`): the Text
@@ -934,7 +963,10 @@ mod tests {
                 };
                 let mut add_more = with(Some(1), None);
                 add_more.update(Message::Menu(Menu::More));
+                let mut hint = editor();
+                hint.studio_hint = true;
                 let cases: Vec<(&str, Annotator, f32)> = vec![
+                    ("studio-hint", hint, 110.0),
                     ("add-step", with(Some(1), None), 60.0),
                     ("steps-full", with(Some(12), None), 60.0),
                     ("update-step", with(Some(3), Some(1)), 60.0),
@@ -966,5 +998,57 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W91.2: the Studio button sits before Copy / Save (Tab reaches it), More has no
+    /// Studio row any more, and the one-time hint shows only while asked for.
+    #[test]
+    fn the_studio_button_is_in_the_bar_and_not_in_more() {
+        let e = editor();
+        let at = |m: &Message| stops(&e).iter().position(|s| s == m);
+        let (studio, copy, save) = (
+            at(&Message::OpenStudio),
+            at(&Message::Copy),
+            at(&Message::Save),
+        );
+        assert!(studio.is_some() && studio < copy && copy < save);
+        assert!(
+            more_rows(&e)
+                .iter()
+                .all(|r| r.message != Some(Message::OpenStudio)),
+            "no second entry in More"
+        );
+        let (_, panel) = build(&e, tooltip::Position::Bottom);
+        assert!(panel.is_none(), "no hint unless it is the first Snip");
+        let mut first = editor();
+        first.studio_hint = true;
+        let (_, panel) = build(&first, tooltip::Position::Bottom);
+        assert!(panel.is_some(), "the one-time hint");
+    }
+
+    /// W91.2: the bar is exactly one button wider than before.
+    #[test]
+    fn the_bar_grew_by_one_button() {
+        let w = widths(false);
+        assert_eq!(w.len(), 3 + Group::ALL.len() + 7 + 1);
+    }
+
+    /// W91.2: Ctrl+E opens the Studio from Snip (not from a plain editor).
+    #[test]
+    fn ctrl_e_opens_the_studio_in_snip_only() {
+        use iced::keyboard::{Key, Modifiers};
+        let mut e = editor();
+        e.movable = true;
+        let key = |e: &Annotator| {
+            e.key(
+                &Key::Character("e".into()),
+                Some('e'),
+                Modifiers::CTRL,
+                None,
+            )
+        };
+        assert!(matches!(key(&e), Some(Message::OpenStudio)));
+        e.movable = false;
+        assert!(!matches!(key(&e), Some(Message::OpenStudio)));
     }
 }

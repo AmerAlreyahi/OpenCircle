@@ -66,6 +66,15 @@ impl App {
         };
         // Scrolling capture needs the page under the area: Snip, in place.
         edit.annotator.scroll = matches!(&self.o.purpose, Purpose::Snip(s) if s.can_scroll());
+        // the first Snip ever shows the one-time Studio hint (never again after it)
+        if edit.annotator.movable && !crate::shared::config::current().snip.studio.hint_seen {
+            edit.annotator.studio_hint = true;
+            std::thread::spawn(|| {
+                if let Err(e) = crate::shared::config::update(|c| c.snip.studio.hint_seen = true) {
+                    crate::log!("[opencircle] config: {e}");
+                }
+            });
+        }
         if edit.annotator.movable {
             (self.o.bar_now, self.o.bar_glide, self.o.bar_left) = (None, None, None); // it rises from the area
         }
@@ -601,7 +610,7 @@ mod tests {
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
         // Down x6: the sixth live row (Copy text, Ask AI, Translate, Long
         // capture, Add to steps, Pin); Enter pins (the overlay closes)
-        for _ in 0..7 {
+        for _ in 0..6 {
             let _ = app.on_snip_toolbar(E::MenuStep(false));
         }
         let editor = &app.o.edit.as_ref().unwrap().annotator;

@@ -1752,8 +1752,6 @@ strings! {
         | "الرسم كاملًا";
     sn_eraser_undo: "Ctrl+Z brings them back"
         | "Ctrl+Z يعيدها";
-    sn_open_studio: "Open in Studio"
-        | "افتح في الاستوديو";
     tray_studio: "Studio"
         | "الاستوديو";
     st_title: "OpenCircle Studio"
@@ -2434,6 +2432,64 @@ strings! {
         | "تعود الألوان والأحجام إلى الافتراضي";
     ss_tool_styles_done: "Tool styles are at the defaults"
         | "أنماط الأدوات على الوضع الافتراضي";
+    ss_prefs: "Studio preferences"
+        | "تفضيلات الاستوديو";
+    ss_prefs_d: "Theme, saving, copy and paste, editing"
+        | "السمة والحفظ والنسخ واللصق والتحرير";
+    ss_prefs_open: "Open Studio preferences"
+        | "فتح تفضيلات الاستوديو";
+    pf_title: "OpenCircle Studio preferences"
+        | "تفضيلات OpenCircle Studio";
+    pf_tab_saving: "Saving and export"
+        | "الحفظ والتصدير";
+    pf_tab_copy: "Copy and paste"
+        | "النسخ واللصق";
+    pf_tab_editing: "Editing"
+        | "التحرير";
+    pf_theme: "Theme"
+        | "السمة";
+    pf_theme_d: "Follow OpenCircle, or give the Studio its own theme"
+        | "مثل OpenCircle، أو سمة خاصة بالاستوديو";
+    pf_theme_follow: "Follow OpenCircle"
+        | "مثل OpenCircle";
+    pf_steps_side: "Steps sidebar side"
+        | "جانب شريط الخطوات";
+    pf_steps_side_d: "The tools stay on the other edge"
+        | "تبقى الأدوات على الحافة الأخرى";
+    pf_side_start: "Left"
+        | "اليمين";
+    pf_side_end: "Right"
+        | "اليسار";
+    pf_steps_start: "Show Steps when the Studio opens"
+        | "إظهار الخطوات عند فتح الاستوديو";
+    pf_steps_start_d: "Off keeps the sidebar closed until you open it"
+        | "عند الإيقاف يبقى الشريط مغلقا حتى تفتحه";
+    pf_start_screen: "Show the start screen"
+        | "إظهار شاشة البداية";
+    pf_start_screen_d: "Open, Paste and recent files when no picture is open"
+        | "فتح ولصق والملفات الأخيرة عند عدم وجود صورة";
+    pf_keys_note: "Your Snip key is in Settings > Shortcuts"
+        | "مفتاح لقطة الشاشة في الإعدادات > الاختصارات";
+    sn_studio_btn: "Open in OpenCircle Studio"
+        | "فتح في OpenCircle Studio";
+    sn_studio_hint: "Edit more in OpenCircle Studio"
+        | "حرّر أكثر في OpenCircle Studio";
+    mv_transition: "Transition"
+        | "الانتقال";
+    mv_tr_cut: "Cut"
+        | "قطع";
+    mv_tr_fade: "Crossfade"
+        | "تلاشٍ";
+    mv_tr_slide: "Slide"
+        | "انزلاق";
+    mv_tr_push: "Push"
+        | "دفع";
+    mv_tr_zoom: "Zoom"
+        | "تكبير";
+    mv_tr_wipe: "Wipe"
+        | "مسح";
+    mv_duration: "Transition length"
+        | "مدة الانتقال";
     ss_snap: "Snap to edges and objects"
         | "الالتصاق بالحواف والعناصر";
     ss_snap_d: "Guides help you line things up"
@@ -2468,14 +2524,6 @@ strings! {
         | "تمرير";
     ss_wheel_zoom: "Zooms"
         | "تكبير";
-    ss_left: "Show Library panel"
-        | "إظهار لوحة المكتبة";
-    ss_left_d: "The library: recent files, drawings, steps"
-        | "المكتبة: الملفات الأخيرة والرسومات والخطوات";
-    ss_right: "Show Properties panel"
-        | "إظهار لوحة الخصائص";
-    ss_right_d: "The picture panel and its actions"
-        | "لوحة الصورة وإجراءاتها";
     st_unsaved_picture: "Unsaved picture"
         | "صورة غير محفوظة";
     st_recent_zero: "Recent files are off · Settings > Studio"
