@@ -64,22 +64,24 @@ fn the_pixel_budget_refuses_a_growth_that_is_too_big() {
     e.update(Message::Bounds(to));
     assert!(e.doc.image.width > 400);
     assert_eq!(e.take_grow_refusal(), None);
-    // the big absolute budget: a picture already near it cannot double
+    // the absolute budget (made small here, so the test holds no 268 MB picture): a
+    // picture already near it cannot grow past it, though it is within 4x
     let mut big = Annotator::new(
         Image {
-            width: 8192,
-            height: 8192,
-            rgba: vec![255; 8192 * 8192 * 4],
+            width: 800,
+            height: 800,
+            rgba: vec![255; 800 * 800 * 4],
         },
         1.0,
     );
     big.studio = true;
     big.grow_canvas = true;
+    big.grow_pixels = 1_000_000.0;
     big.doc.exec(Edit::Insert(0, rect(10.0, 10.0, 60.0, 60.0)));
     big.doc.select(&[0]);
-    let to = Rectangle::new(Point::new(8100.0, 8100.0), Size::new(1000.0, 1000.0));
-    big.update(Message::Bounds(to)); // 9100 x 9100 = 82 MP
-    assert_eq!(big.doc.image.width, 8192);
+    let to = Rectangle::new(Point::new(1000.0, 1000.0), Size::new(100.0, 100.0));
+    big.update(Message::Bounds(to)); // 1100 x 1100 = 1.21 MP, within 4x of 0.64 MP
+    assert_eq!(big.doc.image.width, 800);
     assert_eq!(big.take_grow_refusal(), Some(GrowRefusal::TooManyPixels));
 }
 
@@ -159,4 +161,53 @@ fn the_drag_out_jpeg_uses_the_studio_quality() {
     let f = dragout::DragFile::write_as(&crop, true).unwrap();
     assert_eq!(std::fs::metadata(f.path()).unwrap().len(), size(85));
     assert_ne!(size(85), size(90));
+}
+
+/// The history keeps the old picture of every growth: together they stay inside the
+/// budget; a growth past it is refused and the picture is whole.
+#[test]
+fn the_history_of_grown_canvases_has_a_memory_budget() {
+    let mut e = growing();
+    e.grow_history = 3 * 400 * 300 * 4; // room for about three old pictures
+    e.update(Message::SelectIndex(0, false));
+    let mut refused = None;
+    for step in 1..12 {
+        let to = bounds_at(&e, 420.0 + 20.0 * step as f32, 100.0);
+        e.update(Message::Bounds(to));
+        if let Some(why) = e.take_grow_refusal() {
+            refused = Some(why);
+            break;
+        }
+        assert!(
+            e.doc.canvas_bytes() <= e.grow_history,
+            "{step}: {}",
+            e.doc.canvas_bytes()
+        );
+    }
+    assert_eq!(refused, Some(GrowRefusal::TooManyPixels));
+    assert!(e.doc.canvas_bytes() <= e.grow_history);
+}
+
+/// A refused growth keeps the item (clipped by the picture) instead of dropping it.
+#[test]
+fn a_refused_growth_keeps_the_drawn_item_clipped() {
+    let mut e = growing();
+    e.grow_pixels = 1.0; // nothing may grow
+    e.update(Message::Tool(Tool::Rect));
+    let before = e.doc.items.len();
+    for m in [
+        Message::Press(Point::new(300.0, 100.0)),
+        Message::Move(Point::new(380.0, 140.0)),
+        Message::Move(Point::new(560.0, 200.0)),
+        Message::Release,
+    ] {
+        e.update(m);
+    }
+    assert_eq!(e.take_grow_refusal(), Some(GrowRefusal::TooManyPixels));
+    assert_eq!(e.doc.items.len(), before + 1, "the rectangle is kept");
+    assert_eq!(
+        (e.doc.image.width, e.doc.image.height),
+        (400, 300),
+        "the picture is whole"
+    );
 }

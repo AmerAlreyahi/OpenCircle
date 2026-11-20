@@ -1998,6 +1998,8 @@ fn v3_typed_box_is_not_committed_by_the_keys_it_is_typed_with() {
     }
     let _ = s.update(Msg::BoundsEdit(2, String::new()));
     let _ = s.update(Msg::AltBreak);
+    // a Space typed in the field: its release is typing too
+    let _ = s.update(Msg::Space(false));
     assert_eq!(
         s.editor.as_ref().unwrap().doc.depth(),
         depth,

@@ -592,6 +592,20 @@ impl Document {
         })
     }
 
+    /// Bytes the history holds for grown canvases (the old picture of each growth).
+    pub fn canvas_bytes(&self) -> usize {
+        fn of(e: &Edit) -> usize {
+            match e {
+                Edit::Canvas { old, .. } => old.rgba.len(),
+                Edit::Seq(all) => all.iter().map(of).sum(),
+                _ => 0,
+            }
+        }
+        (self.done.iter().chain(&self.undone))
+            .map(|(_, e)| of(e))
+            .sum()
+    }
+
     /// Which state of the history this is: the same number only for the same
     /// edits (undo then redo comes back to it; undo then a new edit never does).
     pub fn state(&self) -> u64 {

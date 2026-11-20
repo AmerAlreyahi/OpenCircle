@@ -29,6 +29,9 @@ pub(crate) enum StudioKey {
 pub(super) const GROW_SIDE: f64 = 16384.0;
 pub(super) const GROW_PIXELS: f64 = 64.0 * 1024.0 * 1024.0;
 pub(super) const GROW_TIMES: f64 = 4.0;
+/// The history keeps the old picture of every growth: all of them together may hold
+/// this many bytes; a growth past it is refused (the picture is never cut).
+pub(super) const GROW_HISTORY: usize = 512 * 1024 * 1024;
 
 /// Why "Grow the canvas past the edge" said no.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -479,7 +482,8 @@ impl Annotator {
             self.grow_refused = Some(GrowRefusal::TooLarge);
             return Err(());
         }
-        if nw * nh > GROW_PIXELS || nw * nh > GROW_TIMES * w * h {
+        let kept = self.doc.canvas_bytes() + img.rgba.len();
+        if nw * nh > self.grow_pixels || nw * nh > GROW_TIMES * w * h || kept > self.grow_history {
             self.grow_refused = Some(GrowRefusal::TooManyPixels);
             return Err(());
         }
@@ -492,7 +496,6 @@ impl Annotator {
     }
 
     /// Why the last growth was refused (once): the window says so in a pill.
-    #[allow(dead_code)] // the window shows it in a pill (W87)
     pub fn take_grow_refusal(&mut self) -> Option<GrowRefusal> {
         self.grow_refused.take()
     }

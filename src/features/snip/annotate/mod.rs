@@ -618,6 +618,9 @@ pub struct Annotator {
     pub drag_jpeg: bool,
     /// Why the last "grow the canvas" was refused (`take_grow_refusal`).
     grow_refused: Option<GrowRefusal>,
+    /// The growth budgets (`objects::GROW_PIXELS`, `GROW_HISTORY`; tests make them small).
+    pub(super) grow_pixels: f64,
+    pub(super) grow_history: usize,
     /// The part of the picture the stage shows (display px from its top-left),
     /// so the pixel grid draws only that; `None` = all of it.
     pub viewport: Option<Rectangle>,
@@ -745,6 +748,8 @@ impl Annotator {
             grow_canvas: false,
             drag_jpeg: false,
             grow_refused: None,
+            grow_pixels: objects::GROW_PIXELS,
+            grow_history: objects::GROW_HISTORY,
             viewport: None,
             grid: false,
             scroll: false,
@@ -1811,7 +1816,9 @@ impl Annotator {
             match grown {
                 Ok(Some(grow)) => self.doc.exec(Edit::Seq(vec![edit, grow])),
                 Ok(None) => self.doc.exec(edit),
-                Err(()) => {} // refused: the change is dropped, the reason is kept
+                // refused: the item stays where it was put, clipped by the picture (a typed
+                // text is never lost); the reason is kept for the window's pill
+                Err(()) => self.doc.exec(edit),
             }
         }
         if repaint {
