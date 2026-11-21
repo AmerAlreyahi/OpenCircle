@@ -47,6 +47,7 @@ pub mod shortcut_field;
 pub mod side_panel;
 pub mod sidebar;
 pub mod slide_over;
+pub mod slide_pages;
 pub mod slider;
 pub mod spinner;
 pub mod surface;

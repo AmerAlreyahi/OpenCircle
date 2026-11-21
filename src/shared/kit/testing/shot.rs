@@ -183,6 +183,61 @@ pub fn redrawn<'a, Message: 'a>(
     (rgba(&window), fresh.unwrap_or_default())
 }
 
+/// The time each of `views` takes to reach the pixels, as a window does it: build the
+/// user interface (layout), draw it (the widget tree), and rasterise only the damaged
+/// part (the CPU renderer). Milliseconds: (layout + draw, raster) per frame, one renderer
+/// for all (its picture cache is warm from the second frame on). Measurements only.
+pub fn frame_times<'a, Message: 'a>(
+    mut views: impl FnMut(usize) -> Option<Element<'a, Message>>,
+    size: Size,
+) -> Vec<(f64, f64)> {
+    use iced::advanced::graphics::damage;
+    let mut renderer = renderer();
+    let (w, h) = (size.width.round() as u32, size.height.round() as u32);
+    let viewport = Viewport::with_physical_size(Size::new(w, h), 1.0);
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    let background = crate::shared::kit::themes::c().bg;
+    let all = Rectangle::with_size(size);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    let mut window = tiny_skia::Pixmap::new(w, h).unwrap();
+    let (mut last, mut out) = (None::<Vec<iced_tiny_skia::Layer>>, Vec::new());
+    let mut i = 0;
+    loop {
+        let t0 = std::time::Instant::now();
+        let Some(view) = views(i) else { break };
+        let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+        ui.draw(
+            &mut renderer,
+            &Theme::Dark,
+            &style,
+            mouse::Cursor::Unavailable,
+        );
+        let t1 = std::time::Instant::now();
+        let layers = renderer.layers().to_vec();
+        let changed = match &last {
+            Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
+            None => vec![all],
+        };
+        let changed = damage::group(changed, all);
+        if !changed.is_empty() {
+            renderer.draw(
+                &mut window.as_mut(),
+                &mut mask,
+                &viewport,
+                &changed,
+                background,
+            );
+        }
+        let t2 = std::time::Instant::now();
+        out.push(((t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3));
+        last = Some(layers);
+        i += 1;
+    }
+    out
+}
+
 /// What the window compositor would redraw for each of `views` after the one
 /// before (logical px, grouped as it groups them); the first: the whole window.
 pub fn damage<'a, Message: 'a>(

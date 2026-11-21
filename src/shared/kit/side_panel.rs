@@ -72,3 +72,31 @@ pub fn menu_opener<'a, Message: Clone + 'a>(
         });
     super::focus::press(b, OPENER_R, Some(press)).into()
 }
+
+/// A column inside a card, on its start side (the left, or the right right to left): `width`
+/// wide, as tall as the card, recessed (a darker fill) with the card's own corners on its
+/// outer side (`corner`: the card's radius less its edge). A dialog's section list.
+pub fn inset<'a, Message: 'a>(
+    content: Element<'a, Message>,
+    width: f32,
+    corner: f32,
+) -> Element<'a, Message> {
+    let outer = match super::dir::rtl() {
+        true => [0.0, corner, corner, 0.0],
+        false => [corner, 0.0, 0.0, corner],
+    };
+    container(content)
+        .width(width)
+        .height(Fill)
+        .style(move |_| container::Style {
+            background: Some(c().track_glass.into()),
+            border: Border::default().rounded(iced::border::Radius {
+                top_left: outer[0],
+                top_right: outer[1],
+                bottom_right: outer[2],
+                bottom_left: outer[3],
+            }),
+            ..container::Style::default()
+        })
+        .into()
+}

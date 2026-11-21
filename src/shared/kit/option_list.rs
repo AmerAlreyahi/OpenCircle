@@ -326,10 +326,12 @@ pub fn item<'a, Message: Clone + 'a>(
     use button::Status;
     let (role, small) = (Role::MENU, Role::MENU_HINT);
     let check = checked.then(|| {
-        container(icon(Icon::Check, CHECK).color(c().text_muted)).padding(Padding {
-            left: CHECK_GAP,
-            ..Padding::ZERO
-        })
+        container(icon(Icon::Check, CHECK).color(c().text_muted)).padding(super::dir::pad(
+            Padding {
+                left: CHECK_GAP,
+                ..Padding::ZERO
+            },
+        ))
     });
     let hint = hint.map(|h| {
         container(
@@ -338,15 +340,17 @@ pub fn item<'a, Message: Clone + 'a>(
                 .font(font(small))
                 .color(c().text_muted),
         )
-        .padding(Padding {
+        .padding(super::dir::pad(Padding {
             left: HINT_GAP,
             ..Padding::ZERO
-        })
+        }))
     });
-    let content = row![text(label).size(super::text::size(role)).font(font(role))]
+    // (right to left: the label at the right, its key at the left)
+    let content = crate::dir_row![text(label).size(super::text::size(role)).font(font(role))]
         .push(check)
         .push(Space::new().width(Fill))
         .push(hint)
+        .width(Fill)
         .align_y(Center);
     super::focus::press(
         button(container(content).center_y(Fill))

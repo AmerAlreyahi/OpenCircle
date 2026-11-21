@@ -1915,6 +1915,30 @@ fn slide_over_sheet() {
     sheet("slide_over", Size::new(200.0, 120.0), &rows);
 }
 
+/// `slide_pages`: two pages of one panel, at rest on each and halfway (a slide).
+#[test]
+fn slide_pages_sheet() {
+    use super::super::slide_pages::pages;
+    let rows: Vec<_> = [("first", 0.0), ("halfway", 0.5), ("second", 1.0)]
+        .into_iter()
+        .map(|(state, t)| {
+            row(state, Act::Rest, move |ar| {
+                let page = |en: &'static str, a: &'static str| {
+                    super::super::text::text(Role::CONTROL, s(ar, en, a))
+                };
+                pages(
+                    page("Steps", "الخطوات").into(),
+                    page("Export", "تصدير").into(),
+                    120.0,
+                    t,
+                    ar,
+                )
+            })
+        })
+        .collect();
+    sheet("slide_pages", Size::new(160.0, 90.0), &rows);
+}
+
 /// `modal`: the dialog card over a dimmed window, with its header and X.
 #[test]
 fn modal_sheet() {

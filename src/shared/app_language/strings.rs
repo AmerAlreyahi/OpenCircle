@@ -1824,16 +1824,18 @@ strings! {
         | "افتحها على اللوحة · اسحب لتغيير الترتيب";
     st_export: "Export"
         | "تصدير";
+    st_export_back: "Back to the steps"
+        | "العودة إلى الخطوات";
     st_export_go: "Export…"
         | "تصدير…";
     st_export_md: "Markdown (.md + images)"
-        | "\u{2066}Markdown\u{2069} (\u{2066}.md\u{2069} مع الصور)";
+        | "Markdown (.md مع الصور)";
     st_export_html: "HTML page"
-        | "صفحة \u{2066}HTML\u{2069}";
+        | "صفحة HTML";
     st_export_images: "Images folder"
         | "مجلد صور";
     st_export_walkthrough: "Walkthrough: GIF, MP4, WebM…"
-        | "شرح متحرك: \u{2066}GIF\u{2069} و\u{2066}MP4\u{2069} و\u{2066}WebM\u{2069}…";
+        | "شرح متحرك: GIF وMP4 وWebM…";
     st_walk_where: "Export the walkthrough"
         | "تصدير الشرح المتحرك";
     st_walk_cap: "A video is 4096 px on its long edge at most."

@@ -81,28 +81,6 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     menu(opener, rows, width)
 }
 
-/// `menu_button` opened by a labelled button ("Export ▾"), `width` wide; its
-/// menu as wide, hanging from it.
-pub fn labelled_menu<'a, Message: Clone + 'a>(
-    words: &'a str,
-    rows: Vec<(String, bool, Message)>,
-    width: f32,
-) -> Element<'a, Message> {
-    let role = Role::CONTROL;
-    let size = super::text::size(role);
-    let opener = container(
-        crate::dir_row![
-            text(words).size(size).font(font(role)).color(c().text),
-            text("▾").size(size).font(MONO).color(c().text),
-        ]
-        .spacing(6.0)
-        .align_y(Center),
-    )
-    .center_x(width)
-    .padding([7.0, 0.0]);
-    menu(opener, rows, width)
-}
-
 fn menu<'a, Message: Clone + 'a>(
     opener: container::Container<'a, Message>,
     rows: Vec<(String, bool, Message)>,

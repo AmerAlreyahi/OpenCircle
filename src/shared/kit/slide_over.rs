@@ -35,6 +35,20 @@ pub fn over<'a, Message: Clone + 'a>(
     scrim: Scrim,
     top: f32,
 ) -> Element<'a, Message> {
+    over_wide(base, title, body, close, scrim, top, WIDTH)
+}
+
+/// `over` with a panel `width` wide (a roomy task: Export), never wider than the window's
+/// two thirds.
+pub fn over_wide<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    title: &'a str,
+    body: Element<'a, Message>,
+    close: Message,
+    scrim: Scrim,
+    top: f32,
+    width: f32,
+) -> Element<'a, Message> {
     let x = icon_button::square(
         Icon::Close.glyph(),
         State::default(),
@@ -52,7 +66,8 @@ pub fn over<'a, Message: Clone + 'a>(
             scroll::scroll(container(body).padding(space::PAGE)).height(Fill)
         ],
     )
-    .width(Length::Fixed(WIDTH))
+    .width(Length::Fixed(width))
+    .max_width(width)
     .height(Fill);
     let placed = container(opaque(panel))
         .padding(iced::Padding {

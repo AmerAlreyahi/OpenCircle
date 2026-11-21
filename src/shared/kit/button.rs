@@ -588,6 +588,38 @@ pub fn labelled<'a, Message: Clone + 'a>(
     tooled(content, width, kind, focused, on_press)
 }
 
+/// A dialog's button: `label` only, centred, `width` wide, the kit's tool height, the same
+/// for every `kind` (Elevated beside Accent were two heights). `dialog_width` sizes a row of
+/// them.
+pub fn dialog<'a, Message: Clone + 'a>(
+    label: &'a str,
+    width: f32,
+    kind: Kind,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use super::tokens::Role;
+    let content = text(label)
+        .size(super::text::size(Role::CONTROL))
+        .font(super::text::font(Role::CTA))
+        .wrapping(text::Wrapping::None);
+    tooled(content, width, kind, false, Some(on_press))
+}
+
+/// The one width for a row of dialog buttons: the longest label and 14 px each side (96 at least).
+pub fn dialog_width(labels: &[&str]) -> f32 {
+    use super::tokens::Role;
+    let longest = (labels.iter())
+        .map(|l| {
+            super::text::width(
+                l,
+                super::text::size(Role::CONTROL),
+                super::text::font(Role::CTA),
+            )
+        })
+        .fold(0.0, f32::max);
+    (longest + 28.0).ceil().max(96.0)
+}
+
 /// The width `labelled` needs for `label` (its glyph, the gap, 14 px each side).
 pub fn labelled_width(label: &str) -> f32 {
     use super::tokens::{Role, space};
