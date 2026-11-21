@@ -282,7 +282,7 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
 /// Where the opener of `menu` starts, from the header's start edge.
 fn offset(menu: Menu) -> f32 {
     let role = Role::NAV;
-    let mut x = crate::shared::kit::header::MENU_X;
+    let mut x = crate::shared::kit::header::menu_start(dir::rtl(), 3);
     for m in Menu::ALL {
         if m == menu {
             return x;

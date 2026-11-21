@@ -37,6 +37,20 @@ const LOGO_GAP: f32 = 10.0;
 /// a menu hung under an opener aligns to).
 pub const MENU_X: f32 = PAD + size::ICON + LOGO_GAP;
 
+/// Right to left, the caption buttons keep their corner (top right) and the menu
+/// bar starts beside them: this much clear space between the two clusters.
+pub const CAPTION_GAP: f32 = 28.0;
+
+/// Where a menu bar's first opener starts, from the WINDOW's start edge: `MENU_X`, and
+/// right to left the clear space and the caption buttons (`buttons`: how many) that
+/// sit at that edge.
+pub fn menu_start(rtl: bool, buttons: u8) -> f32 {
+    match rtl {
+        true => MENU_X + CAPTION_GAP + f32::from(buttons) * size::CAPTION_BUTTON,
+        false => MENU_X,
+    }
+}
+
 pub fn regular<'a, Message: Clone + 'a>(
     logo: image::Handle,
     title: &'a str,
@@ -89,7 +103,13 @@ pub fn with_menu<'a, Message: Clone + 'a>(
                         .spacing(LOGO_GAP)
                         .align_y(Center),
                 )
-                .padding([0.0, PAD])
+                .padding(iced::Padding {
+                    top: 0.0,
+                    bottom: 0.0,
+                    left: PAD,
+                    // (right to left: the start side meets the caption buttons)
+                    right: PAD + if super::dir::rtl() { CAPTION_GAP } else { 0.0 },
+                })
                 .center_y(H)
                 .into(),
             );
@@ -284,6 +304,17 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
 
 #[cfg(test)]
 mod tests {
+    /// W90d.1: right to left the menus start clear of the caption buttons (gap + 3 buttons).
+    #[test]
+    fn the_menu_bar_starts_clear_of_the_caption_buttons_in_arabic() {
+        assert_eq!(menu_start(false, 3), MENU_X);
+        assert_eq!(
+            menu_start(true, 3),
+            MENU_X + CAPTION_GAP + 3.0 * size::CAPTION_BUTTON
+        );
+        assert!(CAPTION_GAP >= 24.0);
+    }
+
     use super::*;
     use crate::shared::kit::testing::shot;
     use iced::Size;
