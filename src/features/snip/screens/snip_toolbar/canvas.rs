@@ -69,6 +69,10 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
         true => iced::widget::space().into(),
         false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
+            .filter_method(match e.crisp {
+                true => iced::widget::image::FilterMethod::Nearest,
+                false => iced::widget::image::FilterMethod::Linear,
+            })
             .width(size.width)
             .height(size.height)
             .content_fit(ContentFit::Fill))

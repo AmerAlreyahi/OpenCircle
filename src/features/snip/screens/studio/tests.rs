@@ -18,6 +18,7 @@ fn crop(width: u32, height: u32) -> Crop {
 fn studio_on(width: u32, height: u32) -> Studio {
     let mut s = Studio::new(StudioConfig::default());
     s.open(Picture::Crop(crop(width, height)));
+    s.settle_open();
     s
 }
 
@@ -3400,6 +3401,7 @@ fn studio_delay_by_action() {
         let mut s = Studio::new(StudioConfig::default());
         let _ = s.update(Msg::Resized(win));
         s.open(Picture::Crop(crop(w, h)));
+        s.settle_open();
         // a big picture's smaller copies are made on a thread: wait for them, as a user
         // would have by the time a menu is opened
         for _ in 0..1000 {
@@ -3520,8 +3522,9 @@ fn studio_delay_by_action() {
     ] {
         for (zoom, label) in [(None, "fit"), (Some(1.0f32), "100 %")] {
             let mut s = make(w, h);
-            if let (Some(z), Some(e)) = (zoom, &mut s.editor) {
-                e.zoom = z;
+            if zoom.is_some() {
+                s.zoom = Some(1.0 / s.scale);
+                s.fit();
             }
             let e = s.editor.as_ref().unwrap();
             let f = shot::frame_times(
@@ -3544,50 +3547,6 @@ fn studio_delay_by_action() {
             );
             let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
             println!("pan frames {name} at {label:<6}: {}", shown.join("  "));
-            // the same frames with the picture pre-scaled to what is shown (a 1:1 copy)
-            let shown_size = e.size();
-            let (tw, th) = (
-                (shown_size.width * e.zoom).round().max(1.0) as u32,
-                (shown_size.height * e.zoom).round().max(1.0) as u32,
-            );
-            if e.zoom < 1.0 {
-                let t0 = std::time::Instant::now();
-                let src = ::image::ImageBuffer::<::image::Rgba<u8>, _>::from_raw(
-                    w,
-                    h,
-                    vec![255u8; (w * h * 4) as usize],
-                )
-                .unwrap();
-                let small = ::image::imageops::thumbnail(&src, tw, th);
-                let prep = t0.elapsed().as_secs_f64() * 1e3;
-                let handle = iced::widget::image::Handle::from_rgba(tw, th, small.into_raw());
-                let f = shot::frame_times(
-                    |i| {
-                        (i < 6).then(|| -> iced::Element<'_, ()> {
-                            iced::widget::container(
-                                iced::widget::pin(
-                                    iced::widget::image(handle.clone())
-                                        .width(tw as f32)
-                                        .height(th as f32),
-                                )
-                                .position(Point::new(
-                                    -(i as f32) * 9.0 + 600.0,
-                                    -(i as f32) * 5.0 + 100.0,
-                                )),
-                            )
-                            .width(iced::Fill)
-                            .height(iced::Fill)
-                            .into()
-                        })
-                    },
-                    win,
-                );
-                let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
-                println!(
-                    "pan frames {name} PRESCALED ({tw}x{th}, made in {prep:.0} ms): {}",
-                    shown.join("  ")
-                );
-            }
         }
     }
 }
@@ -3599,11 +3558,11 @@ fn the_sidebar_pages_and_the_question_match_their_golden_images() {
     use crate::shared::app_language::{self, Lang};
     use crate::shared::kit::testing::golden;
     crate::shared::kit::text::load();
-    crate::shared::kit::motion::set_reduced(false);
     let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
         .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
         .into();
     golden::each_theme(|theme, failed| {
+        crate::shared::kit::motion::set_reduced(false); // (the slide is the thing shown)
         for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
             app_language::set(lang);
             let mut s = studio_on(300, 200);
@@ -3668,11 +3627,265 @@ fn a_big_picture_shown_small_is_drawn_from_a_smaller_copy() {
         panic!("pixels")
     };
     let want = 3000.0 * e.zoom * s.scale;
-    assert!(*width as f32 >= want && *width < 3000, "{width} vs {want}");
+    assert!(
+        (*width as f32 - want).abs() <= 1.0 && *width < 3000,
+        "{width} vs {want}"
+    );
+    assert!(e.crisp, "drawn pixel for pixel");
     // an edit repaints the base: the copy is made again from the new base
     draw(&mut s);
     assert!(ready(&mut s));
     // a small picture never gets one
     let small = studio_on(800, 500);
     assert!(small.editor.as_ref().unwrap().display.is_none());
+}
+
+/// W90d.C: a menu, a popover or another tool inserts primitives in the middle of the frame; the
+/// picture and the bars that did not change are not redrawn (paired by index, everything after the
+/// insertion differed and the whole window was repainted: 15-35 ms a frame at 3440x1440).
+#[test]
+fn an_action_redraws_only_what_changed() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(1920.0, 1080.0);
+    let mut s = studio_on(1600, 900);
+    let _ = s.update(Msg::Resized(win));
+    let acts = [
+        Msg::Menu(Some(menu_bar::Menu::File)),
+        Msg::Menu(None),
+        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::Pop(None),
+        Msg::Editor(Message::Tool(Tool::Rect)),
+    ];
+    let frames = shot::frames_of(win, acts.len() + 2, |i, show| {
+        // frame 0 draws the picture; frame 1 is idle; then one action each
+        if i >= 2 {
+            let _ = s.update(acts[i - 2].clone());
+        }
+        show(view::view(&s, &[], false));
+    });
+    let area = |rs: &[Rectangle]| rs.iter().map(|r| r.width * r.height).sum::<f32>();
+    assert_eq!(area(&frames[1].damage), 0.0, "idle: {:?}", frames[1].damage);
+    for (i, f) in frames.iter().enumerate().skip(2) {
+        let hit = area(&f.damage);
+        assert!(
+            hit < win.width * win.height * 0.25,
+            "action {i}: {hit} px of {} redrawn: {:?}",
+            win.width * win.height,
+            f.damage
+        );
+    }
+}
+
+/// W90d.C: per-action frame times with the interface kept between frames (as a window does):
+/// `cargo test --release --bin opencircle studio_frames -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_frames_by_action() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(3440.0, 1440.0);
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let mut s = Studio::new(StudioConfig::default());
+        let _ = s.update(Msg::Resized(win));
+        crate::shared::kit::motion::set_reduced(false);
+        let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
+            .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
+            .into();
+        // each: (label, what it does to the Studio before the frame is drawn)
+        type Act<'a> = (&'a str, Box<dyn Fn(&mut Studio)>);
+        let big = w * h >= 3_000_000;
+        let acts: Vec<Act> = vec![
+            (
+                "open (spinner)",
+                Box::new(move |s| s.open(Picture::Crop(crop(w, h)))),
+            ),
+            (
+                "open (picture)",
+                Box::new(move |s| {
+                    s.settle_open();
+                    for _ in 0..1000 {
+                        let _ = s.update(Msg::Fit);
+                        if !big
+                            || s.editor
+                                .as_ref()
+                                .is_some_and(|e| e.display.is_some() || e.crisp)
+                        {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }),
+            ),
+            ("idle", Box::new(|_| {})),
+            (
+                "pick Rect",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+                }),
+            ),
+            (
+                "pick Pen",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+                }),
+            ),
+            (
+                "stroke press",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+                }),
+            ),
+            (
+                "stroke move 1",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Move(Point::new(60.0, 40.0))));
+                }),
+            ),
+            (
+                "stroke move 2",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Move(Point::new(120.0, 80.0))));
+                }),
+            ),
+            (
+                "stroke release",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Release));
+                }),
+            ),
+            (
+                "menu (rising 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Menu(Some(menu_bar::Menu::File)));
+                }),
+            ),
+            (
+                "menu (rising 1/3)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(70)));
+                }),
+            ),
+            (
+                "menu (rising 2/3)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(140)));
+                }),
+            ),
+            (
+                "menu (risen)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "menu closed",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Menu(None));
+                }),
+            ),
+            (
+                "popover (rising 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Pop(Some(popovers::Pop::Info)));
+                }),
+            ),
+            (
+                "popover (risen)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "popover closed",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Pop(None));
+                }),
+            ),
+            (
+                "sidebar page (slide 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::SidebarPage(Page::Export));
+                }),
+            ),
+            (
+                "sidebar page (slide 1/3)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(67)));
+                }),
+            ),
+            (
+                "sidebar page (slide 2/3)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(133)));
+                }),
+            ),
+            (
+                "sidebar page (landed)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "sidebar page back",
+                Box::new(|s| {
+                    let _ = s.update(Msg::SidebarPage(Page::Steps));
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "sidebar toggle",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Library);
+                }),
+            ),
+            (
+                "zoom in (instant)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::ZoomIn);
+                }),
+            ),
+            (
+                "zoom in (instant)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::ZoomIn);
+                }),
+            ),
+        ];
+        let mut stamps: Vec<f64> = Vec::new();
+        let frames = shot::frames_of(win, acts.len() + 1, |i, show| {
+            let t = std::time::Instant::now();
+            if i > 0 {
+                (acts[i - 1].1)(&mut s);
+            }
+            stamps.push(t.elapsed().as_secs_f64() * 1e3);
+            show(view::view(&s, &steps, false));
+        });
+        for (i, f) in frames.iter().enumerate().skip(1) {
+            let area: f32 = f.damage.iter().map(|r| r.width * r.height).sum();
+            let frame = f.draw_ms + f.raster_ms;
+            println!(
+                "{name:<6} {:<24} update {:>6.1} ms | layout+draw {:>5.1} + raster {:>5.1} = {:>5.1} ms ({:>3.0} % of a core at 60 fps) | damage {:>3.0} %",
+                acts[i - 1].0,
+                stamps[i],
+                f.draw_ms,
+                f.raster_ms,
+                frame,
+                frame / 16.7 * 100.0,
+                area / (win.width * win.height) * 100.0
+            );
+        }
+    }
 }

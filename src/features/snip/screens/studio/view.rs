@@ -148,20 +148,22 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         None => main,
     };
     let main: Element<'_, Msg> = match s.shortcuts {
-        true => modal::over_sized(
+        true => modal::over_rising(
             main,
             super::sheets::shortcuts(s, s.window),
             Msg::Shortcuts(false),
+            s.rise(),
         ),
         false => main,
     };
     // the Studio's preferences (Ctrl+, / File > Preferences), over everything but the
     // question; the keys are the dialog's (Esc closes it)
     let main: Element<'_, Msg> = match &s.prefs {
-        Some(d) => modal::over_sized(
+        Some(d) => modal::over_rising(
             main,
             d.view(s.window).map(Msg::Prefs),
             Msg::Prefs(super::preferences::Msg::Close),
+            s.rise(),
         ),
         None => main,
     };
@@ -201,7 +203,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 ),
             };
             let (size, end) = pop.card();
-            popover::anchored(
+            popover::anchored_rising(
                 main,
                 super::popovers::content(s, pop),
                 s.anchors.of(pop).get(),
@@ -210,6 +212,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 s.window,
                 (corner, offset),
                 Msg::Pop(None),
+                s.rise(),
             )
         }
         None => main,
@@ -261,7 +264,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
     };
     // the question is a solid modal over the dimmed window: the picture under it takes no press
     let main: Element<'_, Msg> = match s.asking() {
-        true => modal::over(main, question(), QUESTION_W, Msg::Cancel),
+        true => modal::over_lifted(main, question(), QUESTION_W, Msg::Cancel, s.rise()),
         false => main,
     };
     // the download card (Copy text / Translate need models): over the window
@@ -273,6 +276,20 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             )
         ]
         .into(),
+        None => main,
+    };
+    // a big picture is being prepared: the kit's turning logo over the window (no press blocked)
+    let main: Element<'_, Msg> = match s.opening_since() {
+        Some(since) => {
+            let turn = crate::shared::kit::spinner::turn(s.now.saturating_duration_since(since));
+            let spin = crate::shared::kit::spinner::spinner(
+                crate::shared::kit::logo::logo(56),
+                28.0,
+                turn,
+                crate::shared::kit::motion::reduced(),
+            );
+            iced::widget::stack![main, container(spin).center(Fill)].into()
+        }
         None => main,
     };
     let rim = if maximised { 0.0 } else { 1.0 };

@@ -238,6 +238,80 @@ pub fn frame_times<'a, Message: 'a>(
     out
 }
 
+/// One frame of `frames_of`: layout + draw and raster milliseconds, and what was redrawn.
+pub struct Frame {
+    pub draw_ms: f64,
+    pub raster_ms: f64,
+    pub damage: Vec<Rectangle>,
+}
+
+/// `steps` frames as a window draws them: the user interface kept between frames (the widget
+/// states, paragraphs and image handles of an unchanged part stay the same objects, so the
+/// damage is what a window really repaints), `step(i, show)` changes the state and `show`s the
+/// view (once). Only the damaged part is rastered.
+pub fn frames_of<Message>(
+    size: Size,
+    steps: usize,
+    mut step: impl FnMut(usize, &mut dyn for<'x> FnMut(Element<'x, Message>)),
+) -> Vec<Frame> {
+    use iced::advanced::graphics::damage;
+    let mut renderer = renderer();
+    let (w, h) = (size.width.round() as u32, size.height.round() as u32);
+    let viewport = Viewport::with_physical_size(Size::new(w, h), 1.0);
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    let background = crate::shared::kit::themes::c().bg;
+    let all = Rectangle::with_size(size);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    let mut window = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut cache = Cache::default();
+    let (mut last, mut out) = (None::<Vec<iced_tiny_skia::Layer>>, Vec::new());
+    for i in 0..steps {
+        let t0 = std::time::Instant::now();
+        let mut shown = false;
+        step(i, &mut |view| {
+            shown = true;
+            let mut ui =
+                UserInterface::build(view, size, std::mem::take(&mut cache), &mut renderer);
+            ui.draw(
+                &mut renderer,
+                &Theme::Dark,
+                &style,
+                mouse::Cursor::Unavailable,
+            );
+            cache = ui.into_cache();
+        });
+        if !shown {
+            break;
+        }
+        let t1 = std::time::Instant::now();
+        let layers = renderer.layers().to_vec();
+        let changed = match &last {
+            Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
+            None => vec![all],
+        };
+        let changed = damage::group(changed, all);
+        if !changed.is_empty() {
+            renderer.draw(
+                &mut window.as_mut(),
+                &mut mask,
+                &viewport,
+                &changed,
+                background,
+            );
+        }
+        let t2 = std::time::Instant::now();
+        out.push(Frame {
+            draw_ms: (t1 - t0).as_secs_f64() * 1e3,
+            raster_ms: (t2 - t1).as_secs_f64() * 1e3,
+            damage: changed,
+        });
+        last = Some(layers);
+    }
+    out
+}
+
 /// What the window compositor would redraw for each of `views` after the one
 /// before (logical px, grouped as it groups them); the first: the whole window.
 pub fn damage<'a, Message: 'a>(

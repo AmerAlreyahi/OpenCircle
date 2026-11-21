@@ -438,6 +438,23 @@ impl Windows {
                 let _ = tx.unbounded_send(picked);
             })
             .map(|dir| Msg::Studio(studio::Msg::Browsed(dir))),
+            Outcome::AddStepDoc(doc) => {
+                // (the strip opens on the first screen when there is none yet)
+                match crate::shared::platform::monitor::places()
+                    .into_iter()
+                    .next()
+                {
+                    Some(place) => {
+                        let inset = crate::shared::platform::monitor::taskbar_inset(
+                            place.logical_origin(),
+                            place.size(),
+                            place.scale,
+                        );
+                        self.add_step_of(super::StepSource::Doc(doc), None, place, inset)
+                    }
+                    None => Task::none(),
+                }
+            }
             Outcome::AddStep(crop) => {
                 // the strip opens on the first screen when there is none yet
                 let place = crate::shared::platform::monitor::places()

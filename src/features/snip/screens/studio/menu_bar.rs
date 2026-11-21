@@ -335,7 +335,9 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
     });
     let first = panel(rows, Some(focus), move |i| Msg::MenuPick(menu, i));
     let x = offset(menu);
+    let rise = s.rise();
     let place = |panel: Element<'a, Msg>, x: f32, y: f32| -> Element<'a, Msg> {
+        let y = y + rise; // (opening: a little lower, rising to its place)
         match dir::rtl() {
             false => pin(panel).x(x).y(y).into(),
             true => container(panel)

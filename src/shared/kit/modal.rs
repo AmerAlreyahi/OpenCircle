@@ -48,6 +48,20 @@ pub fn over<'a, Message: Clone + 'a>(
     over_sized(base, card, close)
 }
 
+/// `over`, rising (see `over_rising`).
+pub fn over_lifted<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+    close: Message,
+    rise: f32,
+) -> Element<'a, Message> {
+    let card = surface(Material::Widget, radius::CARD, content)
+        .width(Length::Fixed(width))
+        .max_width(width);
+    over_rising(base, card, close, rise)
+}
+
 /// The body of a small confirmation: `body` under the header, `buttons` (right) below it.
 pub fn pad<'a, Message: 'a>(parts: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     container(column(parts).spacing(space::PAGE[1]))
@@ -62,6 +76,17 @@ pub fn over_sized<'a, Message: Clone + 'a>(
     card: impl Into<Element<'a, Message>>,
     close: Message,
 ) -> Element<'a, Message> {
+    over_rising(base, card, close, 0.0)
+}
+
+/// `over_sized`, the card `rise` px lower than it will rest (it opens: the host lowers `rise` to
+/// 0 over `motion::OPEN`; the dim is static, only the card's place redraws).
+pub fn over_rising<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    card: impl Into<Element<'a, Message>>,
+    close: Message,
+    rise: f32,
+) -> Element<'a, Message> {
     let dim = mouse_area(
         container(iced::widget::Space::new())
             .width(Fill)
@@ -72,7 +97,12 @@ pub fn over_sized<'a, Message: Clone + 'a>(
             }),
     )
     .on_press(close); // mouse only: a press outside the card closes it (Esc is the host's)
+    // (centred, then lowered: twice the rise as top padding moves the centre by the rise)
     let placed = container(opaque(card.into()))
+        .padding(iced::Padding {
+            top: 2.0 * rise,
+            ..iced::Padding::ZERO
+        })
         .width(Fill)
         .height(Fill)
         .center(Fill);

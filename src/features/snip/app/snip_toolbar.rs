@@ -252,6 +252,8 @@ impl App {
                 let update = edit.annotator.updating;
                 self.add_step(crop, update)
             }
+            // (only the Studio's editor makes this: it has its own host)
+            Some(Output::AddStepDoc(_)) => Task::none(),
             // the colour picker, the ruler: Esc there comes back to this
             Some(Output::ScreenTool(tool)) => self.start_tool(tool),
             // The share sheet is up: once a target is picked, the editor closes.

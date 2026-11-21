@@ -54,6 +54,13 @@ pub enum Kind {
     Studio,
 }
 
+/// What a step is made from.
+pub enum StepSource {
+    Crop(Crop),
+    /// The Studio's document, flattened on the step's thread.
+    Doc(Box<crate::features::snip::annotate::Document>),
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
     Settings(settings::Message),
@@ -499,6 +506,18 @@ impl Windows {
         monitor: platform::monitor::Place,
         inset: f32,
     ) -> Task<Msg> {
+        self.add_step_of(StepSource::Crop(crop), update, monitor, inset)
+    }
+
+    /// `add_step` of the Studio's document: flattened on the thread too, and the Studio's sidebar
+    /// shows a place for the step at once (`Studio::step_pending`).
+    pub fn add_step_of(
+        &mut self,
+        source: StepSource,
+        update: Option<usize>,
+        monitor: platform::monitor::Place,
+        inset: f32,
+    ) -> Task<Msg> {
         let fresh = match &self.steps {
             None => true,
             Some((_, strip)) => strip.cleared && update.is_none(),
@@ -509,13 +528,23 @@ impl Windows {
             let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
             self.steps = Some((id, Strip::new(monitor, inset, rtl)));
         }
-        crate::app::background::background(move |tx| match steps::Step::new(&crop) {
-            Ok(step) => {
-                let _ = tx.unbounded_send(std::sync::Arc::new(step));
-            }
-            Err(e) => crate::log!("[opencircle] step not added: {e}"),
+        if let (None, Some((_, s))) = (update, &mut self.studio) {
+            s.step_pending(1);
+        }
+        crate::app::background::background(move |tx| {
+            let crop = match source {
+                StepSource::Crop(crop) => crop,
+                StepSource::Doc(doc) => crate::features::snip::annotate::render(&doc),
+            };
+            let _ = tx.unbounded_send(steps::Step::new(&crop).map(std::sync::Arc::new));
         })
-        .map(move |step| Msg::Steps(steps::Msg::Ready(step, update)))
+        .map(move |made| match made {
+            Ok(step) => Msg::Steps(steps::Msg::Ready(step, update)),
+            Err(e) => {
+                crate::log!("[opencircle] step not added: {e}");
+                Msg::Steps(steps::Msg::Failed)
+            }
+        })
     }
 
     fn on_steps(&mut self, msg: steps::Msg) -> Task<Msg> {
@@ -524,6 +553,7 @@ impl Windows {
         };
         let window = *id;
         let todo = match msg {
+            steps::Msg::Failed => return Task::none(),
             steps::Msg::Ready(step, update) => {
                 match update {
                     Some(i) => strip.replace(i, step),
@@ -1406,7 +1436,15 @@ impl Windows {
             // through Settings' own path, so its auto-save write runs
             Msg::Folder(dir) => return self.handle(Msg::Settings(settings::Message::Folder(dir))),
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
-            Msg::Steps(msg) => return self.on_steps(msg),
+            Msg::Steps(msg) => {
+                // a step made for the Studio's sidebar arrived (or failed): its place goes
+                if matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed) {
+                    if let Some((_, s)) = &mut self.studio {
+                        s.step_pending(-1);
+                    }
+                }
+                return self.on_steps(msg);
+            }
             Msg::StepKey(id, key) if self.steps_window() == Some(id) => {
                 return self.on_steps(steps::Msg::Key(key));
             }

@@ -679,19 +679,43 @@ impl Document {
     }
 }
 
+/// The base an editor shows for a picture with no drawing: its pixels as the renderer wants
+/// them (alpha premultiplied) and whether any pixel is see-through. One pass, pure: made on a
+/// thread for a big picture.
+pub fn base_of(image: &Image) -> (iced::widget::image::Handle, bool) {
+    let mut px = image.rgba.clone();
+    let mut alpha = false;
+    for p in px.as_chunks_mut::<4>().0 {
+        if p[3] != 255 {
+            alpha = true;
+            let a = p[3] as u32;
+            for c in &mut p[..3] {
+                *c = (*c as u32 * a / 255) as u8;
+            }
+        }
+    }
+    (
+        iced::widget::image::Handle::from_rgba(image.width, image.height, px),
+        alpha,
+    )
+}
+
 /// The flattened result (crop applied, every annotation drawn): what Copy and
 /// Save get. Pure: no window, no state.
 pub fn render(doc: &Document) -> Crop {
     let layers: Vec<_> = doc.items.iter().map(|item| (item, true)).collect();
     let pm = doc.flatten(&layers, doc.legend_layout().as_ref());
-    let rgba = pm
-        .pixels()
-        .iter()
-        .flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        })
-        .collect();
+    // (an opaque pixel is the same premultiplied or not: no division for it)
+    let mut rgba = Vec::with_capacity(pm.data().len());
+    for p in pm.pixels() {
+        match p.alpha() {
+            255 => rgba.extend_from_slice(&[p.red(), p.green(), p.blue(), 255]),
+            _ => {
+                let c = p.demultiply();
+                rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+            }
+        }
+    }
     Crop {
         width: pm.width(),
         height: pm.height(),

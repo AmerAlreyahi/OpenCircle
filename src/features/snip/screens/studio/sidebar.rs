@@ -88,7 +88,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
 /// The Steps strip's steps, four to a row: click = open on the canvas, drag =
 /// reorder, x = delete; Copy all and Export at the foot.
 fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
-    if steps.is_empty() {
+    if steps.is_empty() && s.steps_pending == 0 {
         let none = muted(Role::ROW_DESC, t!(st_steps_none));
         return container(none).padding([0.0, PAD]).into();
     }
@@ -105,7 +105,13 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
                 focused: false,
                 rtl: dir::rtl(),
             };
-            let shot = thumb::mini(steps[i].thumb(), place + 1, look, Some(Msg::StepDelete(i)));
+            let shot = thumb::cell(
+                steps[i].thumb(),
+                place + 1,
+                look,
+                Some(Msg::StepDelete(i)),
+                super::STEP_CELL,
+            );
             let shot = mouse_area(shot)
                 .on_press(Msg::StepPress(i))
                 .on_enter(Msg::StepHover(i, true))
@@ -114,6 +120,8 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         })
         .collect();
     let mut cells = cells;
+    // the steps being made: their places, numbered, until they arrive
+    cells.extend((0..s.steps_pending).map(|k| thumb::pending(n + k + 1, super::STEP_CELL)));
     let rows = cells.chunks_mut(super::STEP_COLS).map(|chunk| {
         let line = chunk
             .iter_mut()

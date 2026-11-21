@@ -37,6 +37,10 @@ pub const DRAG_SCALE: f32 = 1.012;
 pub const DRAG_EDGE: f32 = 6.0;
 pub const DRAG_EDGE_BOTTOM: f32 = 54.0;
 
+/// How far a menu, popover or dialog rises as it opens (px; it also keeps its place the whole
+/// time: no fade, which the CPU renderer can't do for a group).
+pub const RISE: f32 = 8.0;
+
 /// The design's easing curves (cubic Béziers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Curve {

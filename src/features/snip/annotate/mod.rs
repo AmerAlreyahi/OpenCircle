@@ -60,7 +60,7 @@ mod text;
 
 pub use document::rounded as rounded_path;
 pub use document::{
-    Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
+    Document, Edit, Image, Item, Shape, base_of, clean, hidden, hidden_in_clean, render, span,
 };
 #[allow(unused_imports)] // API for the Studio's bar (W87)
 pub use objects::{GrowRefusal, Order, SelectionStyle, clear_clipboard};
@@ -522,6 +522,9 @@ pub enum Output {
     /// The flattened image for the Steps strip (`Annotator::updating`: in place
     /// of that step).
     AddStep(Crop),
+    /// The Studio's picture for the Steps, not yet flattened (a copy of the document: flattening an
+    /// 8K picture takes 130-180 ms, so the host does it on a thread).
+    AddStepDoc(Box<Document>),
     /// The share sheet is up: fires once the user picked a target (send
     /// `Message::Shared` then); cancelled if the sheet goes without one.
     Sharing(iced::futures::channel::oneshot::Receiver<()>),
@@ -607,6 +610,10 @@ pub struct Annotator {
     /// the CPU renderer redraws a downscaled 8K picture from its full pixels every frame, 25 ms, and
     /// 1 ms from this); `None`: draw `base`. Cleared whenever `base` is repainted.
     pub(crate) display: Option<image::Handle>,
+    /// Draw the picture with the renderer's pixel-for-pixel fast path (nearest, clipped rows): the
+    /// Studio sets it when the picture lands 1:1 or from a copy of about its shown size, where it
+    /// looks the same and costs a copy of the visible rows (a linear draw of an 8K picture: 40 ms).
+    pub(crate) crisp: bool,
     /// The legend as the base shows it (placed among the committed items).
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
@@ -712,8 +719,23 @@ impl Annotator {
         Self::restored(image, zoom, remembered())
     }
 
+    /// `new` with the base already painted (`document::base_of`, made off the UI thread: the
+    /// flatten of an 8K picture is 130-180 ms).
+    pub fn new_with_base(image: Image, zoom: f32, base: image::Handle) -> Self {
+        Self::restored_with(image, zoom, remembered(), Some(base))
+    }
+
     /// `new` with `saved`'s tool and options (a missing or bad one: its default).
     pub(crate) fn restored(image: Image, zoom: f32, saved: EditorConfig) -> Self {
+        Self::restored_with(image, zoom, saved, None)
+    }
+
+    fn restored_with(
+        image: Image,
+        zoom: f32,
+        saved: EditorConfig,
+        base: Option<image::Handle>,
+    ) -> Self {
         let colour = (saved.colour.as_deref())
             .and_then(parse_hex)
             .unwrap_or(style::ANNOTATION[0].into_rgba8());
@@ -755,6 +777,7 @@ impl Annotator {
             style: None,
             base: image::Handle::from_rgba(1, 1, vec![0; 4]),
             display: None,
+            crisp: false,
             legend: None,
             live: None,
             pending: None,
@@ -799,7 +822,10 @@ impl Annotator {
             touch: 0,
             saved,
         };
-        editor.refresh();
+        match base {
+            Some(base) => editor.base = base,
+            None => editor.refresh(),
+        }
         editor
     }
 
@@ -1044,7 +1070,10 @@ impl Annotator {
             Message::AddToSteps => {
                 self.commit();
                 self.menu = None;
-                return Some(Output::AddStep(render(&self.doc)));
+                return Some(match self.studio {
+                    true => Output::AddStepDoc(Box::new(self.doc.clone())),
+                    false => Output::AddStep(render(&self.doc)),
+                });
             }
             Message::DragOut => {
                 self.commit();
@@ -2082,6 +2111,7 @@ impl Annotator {
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
         self.display = None;
+        self.crisp = false;
         self.update_live();
     }
 

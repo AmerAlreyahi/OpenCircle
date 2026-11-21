@@ -141,6 +141,8 @@ pub enum Msg {
     /// A step is packed and joins the strip, or takes the `i`th's place
     /// (`Windows::add_step`).
     Ready(Arc<Step>, Option<usize>),
+    /// The step could not be made (the Studio's place for it goes).
+    Failed,
     /// The window moved (logical desktop px): it docks once it stops.
     Moved(Point),
     /// No move since the `n`th: dock now.
@@ -391,8 +393,12 @@ impl Strip {
                     .dock_on(self.moved_to, k, &monitor::places())
                     .then_some(Do::Resize);
             }
-            Msg::Settle(_) | Msg::Docked(..) | Msg::Ready(..) | Msg::Expire(_) | Msg::Copied(_) => {
-            }
+            Msg::Settle(_)
+            | Msg::Docked(..)
+            | Msg::Ready(..)
+            | Msg::Failed
+            | Msg::Expire(_)
+            | Msg::Copied(_) => {}
         }
         None
     }

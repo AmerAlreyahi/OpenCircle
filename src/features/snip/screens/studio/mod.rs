@@ -73,9 +73,10 @@ pub const FIELD: &str = "studio-edit-field";
 pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The Steps grid: four to a row, the cell and the gap round it.
-const STEP_COLS: usize = 4;
-const STEP_CELL: Size = crate::shared::kit::thumb::MINI;
-const STEP_GAP: f32 = 8.0;
+/// The sidebar's steps: three to a row (236 px: 3 x 72 + 2 x 10), room for the number badge.
+const STEP_COLS: usize = 3;
+const STEP_CELL: Size = Size::new(72.0, 48.0);
+const STEP_GAP: f32 = 10.0;
 
 /// What the Studio opens.
 pub enum Picture {
@@ -98,6 +99,18 @@ enum After {
     Quit,
     Open(Picture),
 }
+
+/// A picture of at least this many pixels (1 MP) is prepared on a thread.
+const BIG_PICTURE: u32 = 1_000_000;
+
+/// What the thread made of a big picture.
+struct Prepared {
+    image: Image,
+    base: image::Handle,
+    alpha: bool,
+}
+
+type OpenSlot = std::sync::Arc<std::sync::Mutex<Option<Prepared>>>;
 
 /// The Steps sidebar's pages: the list, and (drilled into) the export choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -356,6 +369,8 @@ pub enum Outcome {
     ExportPicture(Crop, export::Picture),
     /// Add to steps: the picture as drawn joins the Steps strip.
     AddStep(Crop),
+    /// The picture to add as a step, flattened by the host on a thread.
+    AddStepDoc(Box<annotate::Document>),
     /// Write the unsaved copy (the host encodes and writes it off the UI thread).
     KeepCopy(Box<KeepCopy>),
     /// File > New snip: the Snip capture starts.
@@ -414,6 +429,12 @@ pub struct Studio {
     middle: bool,
     /// The Steps sidebar's page and its slide (the frame clock runs only while it moves).
     pub(super) page: Page,
+    /// When a menu, popover or dialog began to rise (the frame clock runs until it has).
+    pub(super) rise_from: Option<std::time::Instant>,
+    /// Steps being made on a thread (flatten, PNG, thumbnail): the sidebar shows a place for each.
+    pub(super) steps_pending: usize,
+    /// A big picture is being prepared on a thread: when it began, where the thread leaves it.
+    opening: Option<(std::time::Instant, OpenSlot)>,
     pub(super) slide: Option<Slide>,
     pub(super) now: std::time::Instant,
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
@@ -545,6 +566,9 @@ impl Studio {
             quiet: recovery::Debounce::default(),
             pan: None,
             page: Page::Steps,
+            opening: None,
+            steps_pending: 0,
+            rise_from: None,
             mips: None,
             slide: None,
             now: std::time::Instant::now(),
@@ -579,23 +603,81 @@ impl Studio {
         }
     }
 
-    /// Opens `picture` (fitted); with unsaved drawings it asks first.
+    /// Opens `picture` (fitted); with unsaved drawings it asks first. A big picture is prepared
+    /// on a thread (its base painted, its see-through pixels looked for: 130-220 ms at 8K) while
+    /// the window shows a spinner: the UI thread only starts it (`poll_open` finishes it).
     pub fn open(&mut self, picture: Picture) {
         if self.asks() {
             self.asking = Some(After::Open(picture));
             return;
         }
-        let mut editor = match picture {
-            Picture::Crop(crop) => Annotator::new(
-                Image {
-                    width: crop.width,
-                    height: crop.height,
-                    rgba: crop.rgba,
-                },
-                1.0,
-            ),
-            Picture::Editor(editor) => *editor,
+        match picture {
+            Picture::Crop(crop) if crop.width * crop.height >= BIG_PICTURE => {
+                let slot: OpenSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let out = slot.clone();
+                std::thread::spawn(move || {
+                    let image = Image {
+                        width: crop.width,
+                        height: crop.height,
+                        rgba: crop.rgba,
+                    };
+                    let (base, alpha) = annotate::base_of(&image);
+                    if let Ok(mut out) = out.lock() {
+                        *out = Some(Prepared { image, base, alpha });
+                    }
+                });
+                self.now = std::time::Instant::now();
+                self.opening = Some((self.now, slot));
+            }
+            Picture::Crop(crop) => {
+                let editor = Annotator::new(
+                    Image {
+                        width: crop.width,
+                        height: crop.height,
+                        rgba: crop.rgba,
+                    },
+                    1.0,
+                );
+                self.finish_open(editor, None);
+            }
+            Picture::Editor(editor) => self.finish_open(*editor, None),
+        }
+    }
+
+    /// The big picture's thread is done: open it (a frame tick calls this).
+    fn poll_open(&mut self) {
+        let Some((_, slot)) = &self.opening else {
+            return;
         };
+        let ready = slot.lock().ok().and_then(|mut s| s.take());
+        if let Some(p) = ready {
+            self.opening = None;
+            let editor = Annotator::new_with_base(p.image, 1.0, p.base);
+            self.finish_open(editor, Some(p.alpha));
+        }
+    }
+
+    /// A big picture is being prepared (the window shows a spinner): when it began.
+    pub(super) fn opening_since(&self) -> Option<std::time::Instant> {
+        self.opening.as_ref().map(|(t, _)| *t)
+    }
+
+    /// Tests: wait for the big picture's thread and open it.
+    #[cfg(test)]
+    pub fn settle_open(&mut self) {
+        for _ in 0..2000 {
+            if self.opening.is_none() {
+                return;
+            }
+            self.poll_open();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Takes `editor` as the open picture.
+    /// `alpha`: whether it has see-through pixels, when that is known already (its base is then
+    /// painted too).
+    fn finish_open(&mut self, mut editor: Annotator, alpha: Option<bool>) {
         // the widget's live area becomes a plain picture: the crop shows alone
         editor.movable = false;
         editor.studio = true;
@@ -607,7 +689,7 @@ impl Studio {
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
         (self.original, self.busy, self.card, self.edit) = (None, None, None, None);
         (self.cutting, self.cut) = (cut::Phase::Idle, None);
-        self.transparent = cut::has_alpha(&editor.doc.image.rgba);
+        self.transparent = alpha.unwrap_or_else(|| cut::has_alpha(&editor.doc.image.rgba));
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
@@ -639,8 +721,10 @@ impl Studio {
                         self.restore_failed = true;
                     }
                 }
+                e.refresh();
+            } else if alpha.is_none() {
+                e.refresh(); // (a prepared picture has its base already)
             }
-            e.refresh();
         }
         self.fit(); // (the repaint cleared the stage copy)
     }
@@ -684,8 +768,16 @@ impl Studio {
     }
 
     /// The frame clock should run: a slide is moving.
+    /// A step is being made (+1) or has arrived or failed (-1).
+    pub fn step_pending(&mut self, delta: isize) {
+        self.steps_pending = self.steps_pending.saturating_add_signed(delta);
+    }
+
     pub fn moving(&self) -> bool {
         self.slide.is_some()
+            || self.rise_from.is_some()
+            || self.opening.is_some()
+            || self.mips.as_ref().is_some_and(|m| m.pending.is_some())
     }
 
     pub fn dirty(&self) -> bool {
@@ -1089,9 +1181,46 @@ impl Studio {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        let before = self.layers_up();
         let out = self.update_inner(msg);
         self.sync_blocked();
+        // a menu, popover or dialog that just opened rises to its place (motion off: none)
+        let after = self.layers_up();
+        if (0..after.len()).any(|i| after[i] && !before[i])
+            && !crate::shared::kit::motion::reduced()
+        {
+            let now = std::time::Instant::now();
+            (self.now, self.rise_from) = (now, Some(now));
+        }
         out
+    }
+
+    /// Which of menu, popover, preferences, shortcuts, question are up.
+    fn layers_up(&self) -> [bool; 5] {
+        [
+            self.menu.is_some(),
+            self.popover.is_some(),
+            self.prefs.is_some(),
+            self.shortcuts,
+            self.asking(),
+        ]
+    }
+
+    /// How far below its place a menu, popover or dialog is now (px): `motion::RISE` as it opens,
+    /// 0 when it has risen (or motion is off).
+    pub(super) fn rise(&self) -> f32 {
+        match self.rise_from {
+            Some(t) => {
+                let k = crate::shared::kit::motion::progress(
+                    t,
+                    self.now,
+                    crate::shared::kit::motion::OPEN,
+                    crate::shared::kit::motion::Curve::Out,
+                );
+                crate::shared::kit::motion::RISE * (1.0 - k)
+            }
+            None => 0.0,
+        }
     }
 
     /// A menu, the right-click menu, a sheet, the narrow overlay or a dialog is up:
@@ -1466,6 +1595,16 @@ impl Studio {
             }
             Msg::Frame(now) => {
                 self.now = now;
+                self.poll_open();
+                if self.rise_from.is_some_and(|t| {
+                    crate::shared::kit::motion::done(t, now, crate::shared::kit::motion::OPEN)
+                        >= 1.0
+                }) {
+                    self.rise_from = None;
+                }
+                if self.mips.as_ref().is_some_and(|m| m.pending.is_some()) {
+                    self.fit(); // (the stage copy, once its thread is done)
+                }
                 if self.slide.is_some_and(|s| self.slide_done(s)) {
                     self.slide = None;
                 }
@@ -1871,6 +2010,7 @@ impl Studio {
             Some(Output::Save(crop)) => Outcome::Save(crop),
             Some(Output::Pin(crop)) => Outcome::Pin(crop),
             Some(Output::AddStep(crop)) => Outcome::AddStep(crop),
+            Some(Output::AddStepDoc(doc)) => Outcome::AddStepDoc(doc),
             // "Grow the canvas past the edge" said no: a plain pill says why
             None if refusal.is_some() => Outcome::Say(grow_words(refusal)),
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
@@ -2108,47 +2248,27 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
         .min(1.0 / scale.max(0.1))
 }
 
-/// A picture over this many pixels is drawn from a smaller copy when shown small.
+/// A picture over this many pixels is drawn from a copy of its shown size when shown small.
 const MIP_MIN_PIXELS: u32 = 3_000_000;
 
-/// The half-size copies of one base picture: ready (width, pixels) smallest last, and the thread
-/// still making them (they are made off the UI thread: ~80 ms for 8K).
-/// Where the thread leaves the copies.
-type MipSlot = std::sync::Arc<std::sync::Mutex<Option<Vec<(u32, image::Handle)>>>>;
-
+/// The copy of one base picture at about the size the stage shows it, made on a thread.
 pub(super) struct Mips {
     key: iced::advanced::image::Id,
-    ready: Vec<(u32, image::Handle)>,
-    pending: Option<MipSlot>,
+    /// The copy and its width, once made.
+    ready: Option<(u32, image::Handle)>,
+    /// The thread making one: the width it makes, and where it leaves it.
+    pending: Option<(u32, MipSlot)>,
 }
 
-fn make_mips(width: u32, height: u32, pixels: impl AsRef<[u8]>) -> Vec<(u32, image::Handle)> {
-    let first =
-        ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(width, height, pixels.as_ref());
-    let mut levels = Vec::new();
-    let mut parent: Option<::image::RgbaImage> = None;
-    let mut size = (width, height);
-    loop {
-        let (w, h) = ((size.0 / 2).max(1), (size.1 / 2).max(1));
-        if w < 256 {
-            break;
-        }
-        let small = match (&parent, &first) {
-            (Some(p), _) => ::image::imageops::thumbnail(p, w, h),
-            (None, Some(f)) => ::image::imageops::thumbnail(f, w, h),
-            (None, None) => break,
-        };
-        levels.push((w, image::Handle::from_rgba(w, h, small.as_raw().clone())));
-        (parent, size) = (Some(small), (w, h));
-    }
-    levels
-}
+/// Where the thread leaves the copy.
+type MipSlot = std::sync::Arc<std::sync::Mutex<Option<image::Handle>>>;
 
-/// Sets `e.display`: for a big picture shown at less than half its size, the smallest half-size
-/// copy that is still at least as wide as what the stage shows, so the CPU renderer copies about 1
-/// source pixel per screen pixel (the full 8K at the fit zoom: 22 ms a frame, this: 1 ms; w90d
-/// report). The copies are made on a thread once per repaint of the base; until they are there the
-/// picture draws as before, and a later call (any editor event, a pan) picks them up.
+/// Sets `e.display` and `e.crisp` for the stage's zoom. Shown at 100 % the picture itself draws
+/// pixel for pixel; shown smaller (over 25 % less) a big picture draws from a copy of about the
+/// shown size, made on a thread (box-filtered: 4K ~17 ms, 8K ~75 ms), until which the picture
+/// draws as before. The renderer's pixel-for-pixel path (nearest) then copies only the visible
+/// rows: the full 8K at the fit zoom cost 22 ms a frame through the linear pipeline, 100 % 40 ms;
+/// this ~1-3 ms (w90d report).
 fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
     let image::Handle::Rgba {
         id,
@@ -2157,37 +2277,49 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
         pixels,
     } = &e.base
     else {
-        e.display = None;
+        (e.display, e.crisp) = (None, false);
         return;
     };
-    let want = (*width as f32 * e.zoom * scale).max(1.0);
-    if width * height < MIP_MIN_PIXELS || want * 2.0 > *width as f32 {
-        e.display = None;
+    let want = (*width as f32 * e.zoom * scale).round().max(1.0);
+    let actual = (want - *width as f32).abs() < 1.0;
+    if *width * *height < MIP_MIN_PIXELS || want * 1.25 > *width as f32 {
+        // (a small or hardly-shrunk picture: itself; at 100 % the fast path needs no copy)
+        (e.display, e.crisp) = (None, actual);
         return;
     }
+    let want = want as u32;
     if mips.as_ref().is_none_or(|m| m.key != *id) {
-        let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let (out, w, h, px) = (slot.clone(), *width, *height, pixels.clone());
-        std::thread::spawn(move || {
-            let levels = make_mips(w, h, px);
-            if let Ok(mut slot) = out.lock() {
-                *slot = Some(levels);
-            }
-        });
         *mips = Some(Mips {
             key: *id,
-            ready: Vec::new(),
-            pending: Some(slot),
+            ready: None,
+            pending: None,
         });
     }
     let Some(m) = mips else { return };
-    if let Some(done) = (m.pending.as_ref()).and_then(|p| p.lock().ok().and_then(|mut s| s.take()))
+    if let Some((w, slot)) = &m.pending
+        && let Some(done) = slot.lock().ok().and_then(|mut s| s.take())
     {
-        (m.ready, m.pending) = (done, None);
+        m.ready = Some((*w, done));
+        m.pending = None;
     }
-    e.display = (m.ready.iter().rev())
-        .find(|(w, _)| *w as f32 >= want)
-        .map(|(_, h)| h.clone());
+    let near = |w: u32| w.abs_diff(want) * 50 <= want; // within 2 %
+    if m.ready.as_ref().is_none_or(|(w, _)| !near(*w)) && m.pending.is_none() {
+        let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (out, (bw, bh), px) = (slot.clone(), (*width, *height), pixels.clone());
+        std::thread::spawn(move || {
+            let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
+            let small =
+                ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(bw, bh, px.as_ref())
+                    .map(|src| ::image::imageops::thumbnail(&src, want, th));
+            if let (Some(small), Ok(mut out)) = (small, out.lock()) {
+                *out = Some(image::Handle::from_rgba(want, th, small.into_raw()));
+            }
+        });
+        m.pending = Some((want, slot));
+    }
+    // (an older size draws meanwhile, stretched a little; none yet: the picture as before)
+    e.display = m.ready.as_ref().map(|(_, h)| h.clone());
+    e.crisp = e.display.is_some();
 }
 
 /// The unsaved copy a Tick hands the host.

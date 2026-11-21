@@ -149,8 +149,10 @@ pub fn place(button: Rectangle, size: Size, end: bool, window: Size) -> Point {
 /// is `size` big (an estimate: it is placed by it), `end`-aligned or start-aligned with the
 /// button, inside `window`. A button not drawn yet (an empty rectangle) falls back to
 /// `corner` / `offset`, as `over`.
+/// (`rise` px lower than it rests while it opens: the host lowers it to 0 over `motion::OPEN`;
+/// nothing else redraws but the popover's own place.)
 #[allow(clippy::too_many_arguments)]
-pub fn anchored<'a, Message: Clone + 'a>(
+pub fn anchored_rising<'a, Message: Clone + 'a>(
     base: Element<'a, Message>,
     content: Element<'a, Message>,
     button: Rectangle,
@@ -159,11 +161,17 @@ pub fn anchored<'a, Message: Clone + 'a>(
     window: Size,
     fallback: (Corner, Padding),
     close: Message,
+    rise: f32,
 ) -> Element<'a, Message> {
     if button.width <= 0.0 {
-        return over(base, content, fallback.0, fallback.1, close);
+        let lower = Padding {
+            top: fallback.1.top + rise,
+            ..fallback.1
+        };
+        return over(base, content, fallback.0, lower, close);
     }
-    let at = place(button, size, end, window);
+    let mut at = place(button, size, end, window);
+    at.y += rise;
     let card = card(content, close.clone());
     let catch = mouse_area(
         container(iced::widget::Space::new())
