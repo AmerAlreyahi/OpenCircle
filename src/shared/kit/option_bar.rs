@@ -145,6 +145,14 @@ pub fn swatch<'a, Message: Clone + 'a>(
     picked: bool,
     press: Option<Message>,
 ) -> Element<'a, Message> {
+    // no press: dimmed to 38 %, the dot too
+    let colour = match press.is_some() {
+        true => colour,
+        false => Color {
+            a: colour.a * 0.38,
+            ..colour
+        },
+    };
     let dot =
         container(Space::new().width(SWATCH).height(SWATCH)).style(move |_| container::Style {
             background: Some(colour.into()),
@@ -168,6 +176,18 @@ pub fn swatch<'a, Message: Clone + 'a>(
         false,
         press,
     )
+}
+
+/// A swatch of an RGBA colour (grey when the selection mixes colours).
+pub fn swatch_of<'a, Message: Clone + 'a>(
+    rgba: Option<[u8; 4]>,
+    picked: bool,
+    press: Option<Message>,
+) -> Element<'a, Message> {
+    let colour = rgba.map_or(Color::from_rgb8(128, 128, 128), |c| {
+        Color::from_rgba8(c[0], c[1], c[2], f32::from(c[3]) / 255.0)
+    });
+    swatch(colour, picked, press)
 }
 
 /// A size dot (`DOTS[i]` px across), raised while picked.

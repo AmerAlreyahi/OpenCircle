@@ -18,8 +18,7 @@ use super::tokens::{Role, radius};
 /// A thumbnail's well.
 pub const WELL: Size = Size::new(96.0, 60.0);
 /// The grid cell's well and its badge.
-pub const MINI: Size = Size::new(48.0, 36.0);
-const MINI_BADGE: f32 = 14.0;
+const CELL_BADGE: f32 = 16.0;
 /// The strip's padding and the gap between its parts.
 pub const PAD: f32 = 4.0;
 /// The strip's top row (grip, x).
@@ -59,15 +58,38 @@ pub fn step<'a, Message: Clone + 'a>(
     build(picture, number, look, on_delete, WELL, BADGE)
 }
 
-/// The Studio Library's Steps grid cell (four to a row): `step` at 48 x 36 with
-/// a 14 px badge.
-pub fn mini<'a, Message: Clone + 'a>(
+/// A step's cell `size` wide (the Steps sidebar's: three to a row), with a 16 px badge.
+pub fn cell<'a, Message: Clone + 'a>(
     picture: image::Handle,
     number: usize,
     look: Look,
     on_delete: Option<Message>,
+    size: Size,
 ) -> Element<'a, Message> {
-    build(picture, number, look, on_delete, MINI, MINI_BADGE)
+    build(picture, number, look, on_delete, size, CELL_BADGE)
+}
+
+/// The place of a step that is being made: an empty well, `size` wide, with its number and a
+/// quiet hairline edge; it becomes `cell` when the step arrives.
+pub fn pending<'a, Message: 'a>(number: usize, size: Size) -> Element<'a, Message> {
+    container(
+        text(number.to_string())
+            .size(NUMBER)
+            .font(font(Role::BADGE))
+            .color(c().text_muted),
+    )
+    .center(Fill)
+    .width(size.width)
+    .height(size.height)
+    .style(move |_| container::Style {
+        background: Some(c().track.into()),
+        border: Border::default()
+            .rounded(CORNER)
+            .width(1)
+            .color(c().divider),
+        ..container::Style::default()
+    })
+    .into()
 }
 
 fn build<'a, Message: Clone + 'a>(

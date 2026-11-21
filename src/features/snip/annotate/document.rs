@@ -679,19 +679,43 @@ impl Document {
     }
 }
 
+/// The base an editor shows for a picture with no drawing: its pixels as the renderer wants
+/// them (alpha premultiplied) and whether any pixel is see-through. One pass, pure: made on a
+/// thread for a big picture.
+pub fn base_of(image: &Image) -> (iced::widget::image::Handle, bool) {
+    let mut px = image.rgba.clone();
+    let mut alpha = false;
+    for p in px.as_chunks_mut::<4>().0 {
+        if p[3] != 255 {
+            alpha = true;
+            let a = p[3] as u32;
+            for c in &mut p[..3] {
+                *c = (*c as u32 * a / 255) as u8;
+            }
+        }
+    }
+    (
+        iced::widget::image::Handle::from_rgba(image.width, image.height, px),
+        alpha,
+    )
+}
+
 /// The flattened result (crop applied, every annotation drawn): what Copy and
 /// Save get. Pure: no window, no state.
 pub fn render(doc: &Document) -> Crop {
     let layers: Vec<_> = doc.items.iter().map(|item| (item, true)).collect();
     let pm = doc.flatten(&layers, doc.legend_layout().as_ref());
-    let rgba = pm
-        .pixels()
-        .iter()
-        .flat_map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        })
-        .collect();
+    // (an opaque pixel is the same premultiplied or not: no division for it)
+    let mut rgba = Vec::with_capacity(pm.data().len());
+    for p in pm.pixels() {
+        match p.alpha() {
+            255 => rgba.extend_from_slice(&[p.red(), p.green(), p.blue(), 255]),
+            _ => {
+                let c = p.demultiply();
+                rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+            }
+        }
+    }
     Crop {
         width: pm.width(),
         height: pm.height(),
@@ -842,25 +866,37 @@ pub fn rounded(r: Rectangle, radius: f32) -> Option<Path> {
 /// `(item, false)` = hidden (being edited live), but it still counts as a step.
 pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap {
     let (w, h) = (region.width(), region.height());
-    let mut pm = Pixmap::new(w, h).expect("non-empty region");
-    let stride = image.width as usize * 4;
-    let (x, y) = (region.x() as usize, region.y() as usize);
-    for (row, dst) in pm.data_mut().chunks_exact_mut(w as usize * 4).enumerate() {
-        let start = (y + row) * stride + x * 4;
-        dst.copy_from_slice(&image.rgba[start..start + dst.len()]);
-        // Screen captures are opaque; premultiply anything that is not.
-        for px in dst
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .filter(|px| px[3] != 255)
-        {
-            let a = px[3] as u32;
-            for c in &mut px[..3] {
-                *c = (*c as u32 * a / 255) as u8;
+    let premultiply = |px: &mut [u8]| {
+        // Screen captures are opaque (one cheap look says so); premultiply anything that is not.
+        if px.as_chunks::<4>().0.iter().any(|p| p[3] != 255) {
+            for p in px.as_chunks_mut::<4>().0.iter_mut().filter(|p| p[3] != 255) {
+                let a = p[3] as u32;
+                for c in &mut p[..3] {
+                    *c = (*c as u32 * a / 255) as u8;
+                }
             }
         }
-    }
+    };
+    let whole = (region.x(), region.y(), w, h) == (0, 0, image.width, image.height);
+    let pm = match whole.then(|| tiny_skia::IntSize::from_wh(w, h)).flatten() {
+        // the whole picture: one copy (a new pixmap is zeroed first, 8K: a pass of 130 MB)
+        Some(size) => {
+            let mut data = image.rgba.clone();
+            premultiply(&mut data);
+            Pixmap::from_vec(data, size).expect("as many bytes as pixels")
+        }
+        None => {
+            let mut pm = Pixmap::new(w, h).expect("non-empty region");
+            let stride = image.width as usize * 4;
+            let (x, y) = (region.x() as usize, region.y() as usize);
+            for (row, dst) in pm.data_mut().chunks_exact_mut(w as usize * 4).enumerate() {
+                let start = (y + row) * stride + x * 4;
+                dst.copy_from_slice(&image.rgba[start..start + dst.len()]);
+                premultiply(dst);
+            }
+            pm
+        }
+    };
     let mut layer = Layer {
         pm,
         origin: Point::new(region.x() as f32, region.y() as f32),

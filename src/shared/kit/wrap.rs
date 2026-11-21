@@ -56,6 +56,18 @@ pub trait Hook<Message> {
     ) {
         (content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
     }
+
+    /// The hook's say over the content's overlay (a tooltip, a dropdown list), which iced
+    /// draws apart from the content: what an overlay needs at draw time (a theme) is set here.
+    fn overlay<'b>(
+        &self,
+        overlay: overlay::Element<'b, Message, T, R>,
+    ) -> overlay::Element<'b, Message, T, R>
+    where
+        Message: 'b,
+    {
+        overlay
+    }
 }
 
 /// `content` with `hook` in front of it.
@@ -167,6 +179,13 @@ impl<Message, H: Hook<Message>> Widget<Message, T, R> for Wrap<'_, Message, H> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, T, R>> {
-        (self.content.as_widget_mut()).overlay(tree, layout, renderer, viewport, translation)
+        let overlay = (self.content.as_widget_mut()).overlay(
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )?;
+        Some(self.hook.overlay(overlay))
     }
 }

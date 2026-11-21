@@ -183,6 +183,135 @@ pub fn redrawn<'a, Message: 'a>(
     (rgba(&window), fresh.unwrap_or_default())
 }
 
+/// The time each of `views` takes to reach the pixels, as a window does it: build the
+/// user interface (layout), draw it (the widget tree), and rasterise only the damaged
+/// part (the CPU renderer). Milliseconds: (layout + draw, raster) per frame, one renderer
+/// for all (its picture cache is warm from the second frame on). Measurements only.
+pub fn frame_times<'a, Message: 'a>(
+    mut views: impl FnMut(usize) -> Option<Element<'a, Message>>,
+    size: Size,
+) -> Vec<(f64, f64)> {
+    use iced::advanced::graphics::damage;
+    let mut renderer = renderer();
+    let (w, h) = (size.width.round() as u32, size.height.round() as u32);
+    let viewport = Viewport::with_physical_size(Size::new(w, h), 1.0);
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    let background = crate::shared::kit::themes::c().bg;
+    let all = Rectangle::with_size(size);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    let mut window = tiny_skia::Pixmap::new(w, h).unwrap();
+    let (mut last, mut out) = (None::<Vec<iced_tiny_skia::Layer>>, Vec::new());
+    let mut i = 0;
+    loop {
+        let t0 = std::time::Instant::now();
+        let Some(view) = views(i) else { break };
+        let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+        ui.draw(
+            &mut renderer,
+            &Theme::Dark,
+            &style,
+            mouse::Cursor::Unavailable,
+        );
+        let t1 = std::time::Instant::now();
+        let layers = renderer.layers().to_vec();
+        let changed = match &last {
+            Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
+            None => vec![all],
+        };
+        let changed = damage::group(changed, all);
+        if !changed.is_empty() {
+            renderer.draw(
+                &mut window.as_mut(),
+                &mut mask,
+                &viewport,
+                &changed,
+                background,
+            );
+        }
+        let t2 = std::time::Instant::now();
+        out.push(((t1 - t0).as_secs_f64() * 1e3, (t2 - t1).as_secs_f64() * 1e3));
+        last = Some(layers);
+        i += 1;
+    }
+    out
+}
+
+/// One frame of `frames_of`: layout + draw and raster milliseconds, and what was redrawn.
+pub struct Frame {
+    pub draw_ms: f64,
+    pub raster_ms: f64,
+    pub damage: Vec<Rectangle>,
+}
+
+/// `steps` frames as a window draws them: the user interface kept between frames (the widget
+/// states, paragraphs and image handles of an unchanged part stay the same objects, so the
+/// damage is what a window really repaints), `step(i, show)` changes the state and `show`s the
+/// view (once). Only the damaged part is rastered.
+pub fn frames_of<Message>(
+    size: Size,
+    steps: usize,
+    mut step: impl FnMut(usize, &mut dyn for<'x> FnMut(Element<'x, Message>)),
+) -> Vec<Frame> {
+    use iced::advanced::graphics::damage;
+    let mut renderer = renderer();
+    let (w, h) = (size.width.round() as u32, size.height.round() as u32);
+    let viewport = Viewport::with_physical_size(Size::new(w, h), 1.0);
+    let mut mask = tiny_skia::Mask::new(w, h).unwrap();
+    let background = crate::shared::kit::themes::c().bg;
+    let all = Rectangle::with_size(size);
+    let style = renderer::Style {
+        text_color: Color::WHITE,
+    };
+    let mut window = tiny_skia::Pixmap::new(w, h).unwrap();
+    let mut cache = Cache::default();
+    let (mut last, mut out) = (None::<Vec<iced_tiny_skia::Layer>>, Vec::new());
+    for i in 0..steps {
+        let t0 = std::time::Instant::now();
+        let mut shown = false;
+        step(i, &mut |view| {
+            shown = true;
+            let mut ui =
+                UserInterface::build(view, size, std::mem::take(&mut cache), &mut renderer);
+            ui.draw(
+                &mut renderer,
+                &Theme::Dark,
+                &style,
+                mouse::Cursor::Unavailable,
+            );
+            cache = ui.into_cache();
+        });
+        if !shown {
+            break;
+        }
+        let t1 = std::time::Instant::now();
+        let layers = renderer.layers().to_vec();
+        let changed = match &last {
+            Some(last) => iced_tiny_skia::Layer::frame_damage(last, &layers),
+            None => vec![all],
+        };
+        let changed = damage::group(changed, all);
+        if !changed.is_empty() {
+            renderer.draw(
+                &mut window.as_mut(),
+                &mut mask,
+                &viewport,
+                &changed,
+                background,
+            );
+        }
+        let t2 = std::time::Instant::now();
+        out.push(Frame {
+            draw_ms: (t1 - t0).as_secs_f64() * 1e3,
+            raster_ms: (t2 - t1).as_secs_f64() * 1e3,
+            damage: changed,
+        });
+        last = Some(layers);
+    }
+    out
+}
+
 /// What the window compositor would redraw for each of `views` after the one
 /// before (logical px, grouped as it groups them); the first: the whole window.
 pub fn damage<'a, Message: 'a>(
@@ -232,6 +361,109 @@ pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -
     ui.update(
         &events,
         mouse::Cursor::Available(at),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
+/// The messages of a left press at `from` and a move to `to` (the button stays down).
+pub fn press_move<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    from: iced::Point,
+    to: iced::Point,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    // (the press with the cursor at `from`, then the move with it at `to`)
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: from }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+        ],
+        mouse::Cursor::Available(from),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    ui.update(
+        &[Event::Mouse(Mouse::CursorMoved { position: to })],
+        mouse::Cursor::Available(to),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
+/// The messages of the wheel turned `lines` notches (up = positive) at `at` in `view`.
+pub fn wheel<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    at: iced::Point,
+    lines: f32,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Event as Mouse, mouse::ScrollDelta};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: at }),
+            Event::Mouse(Mouse::WheelScrolled {
+                delta: ScrollDelta::Lines { x: 0.0, y: lines },
+            }),
+        ],
+        mouse::Cursor::Available(at),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
+/// `press_move` in a window whose scroll area `id` was scrolled to `offset` first.
+pub fn press_move_scrolled<Message>(
+    view: Element<'_, Message>,
+    size: Size,
+    scrolled: (&'static str, iced::Vector),
+    from: iced::Point,
+    to: iced::Point,
+) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::advanced::widget::{Id, operation::scrollable::scroll_to};
+    use iced::widget::scrollable::AbsoluteOffset;
+    use iced::{Event, mouse::Button, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut op = scroll_to(
+        Id::new(scrolled.0),
+        AbsoluteOffset {
+            x: Some(scrolled.1.x),
+            y: Some(scrolled.1.y),
+        },
+    );
+    ui.operate(&renderer, &mut op);
+    let mut messages = Vec::new();
+    ui.update(
+        &[
+            Event::Mouse(Mouse::CursorMoved { position: from }),
+            Event::Mouse(Mouse::ButtonPressed(Button::Left)),
+        ],
+        mouse::Cursor::Available(from),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    ui.update(
+        &[Event::Mouse(Mouse::CursorMoved { position: to })],
+        mouse::Cursor::Available(to),
         &mut renderer,
         &mut clipboard::Null,
         &mut messages,

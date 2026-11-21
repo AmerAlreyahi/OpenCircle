@@ -1846,25 +1846,11 @@ fn option_bar_sheet() {
     sheet("option_bar", Size::new(560.0, 56.0), &rows);
 }
 
-/// `side_panel`: a section header (open, folded), a list row (rest, selected)
-/// and the menu bar's openers (rest, open).
+/// `side_panel`: the menu bar's openers (rest, open).
 #[test]
 fn side_panel_sheet() {
-    use super::super::side_panel::{lead, menu_opener, row as list_row, section_head};
-    let item = |ar: bool, on: bool| {
-        let name = super::super::text::text(Role::CONTROL, s(ar, "Arrow", "سهم"));
-        let line = iced::widget::row![lead('\u{e140}', on), name].spacing(6);
-        list_row(line.into(), 30.0, on, Some(()))
-    };
+    use super::super::side_panel::menu_opener;
     let rows = vec![
-        row("section open", Act::Rest, |ar| {
-            section_head(s(ar, "Recent files", "الملفات الأخيرة"), true, Some(3), ())
-        }),
-        row("section folded", Act::Rest, |ar| {
-            section_head(s(ar, "Objects", "الكائنات"), false, None, ())
-        }),
-        row("row", Act::Rest, move |ar| item(ar, false)),
-        row("row selected", Act::Rest, move |ar| item(ar, true)),
         row("opener", Act::Rest, |ar| {
             menu_opener(s(ar, "File", "ملف"), false, ())
         }),
@@ -1873,4 +1859,97 @@ fn side_panel_sheet() {
         }),
     ];
     sheet("side_panel", Size::new(240.0, 40.0), &rows);
+}
+
+/// `popover`: a card hung from a corner of its base.
+#[test]
+fn popover_sheet() {
+    use super::super::popover::{Corner, over};
+    let base = || container(text("")).width(Fill).height(Fill);
+    let rows = vec![
+        row("top end", Act::Rest, move |ar| {
+            let body = super::super::text::text(Role::CONTROL, s(ar, "Position", "الموضع"));
+            over(
+                base().into(),
+                body.into(),
+                Corner::TopEnd,
+                iced::Padding::new(6.0),
+                (),
+            )
+        }),
+        row("bottom start", Act::Rest, move |_ar| {
+            let body = super::super::text::text(Role::CONTROL, "640 × 400");
+            over(
+                base().into(),
+                body.into(),
+                Corner::BottomStart,
+                iced::Padding::new(6.0),
+                (),
+            )
+        }),
+    ];
+    sheet("popover", Size::new(200.0, 90.0), &rows);
+}
+
+/// `slide_over`: the end-edge panel, with and without its scrim.
+#[test]
+fn slide_over_sheet() {
+    use super::super::slide_over::{Scrim, over};
+    let rows: Vec<_> = [("no scrim", Scrim::None), ("scrim", Scrim::Closes)]
+        .into_iter()
+        .map(|(state, scrim)| {
+            row(state, Act::Rest, move |ar| {
+                let base = container(text("")).width(Fill).height(Fill);
+                let body = super::super::text::text(Role::CONTROL, s(ar, "Cut out", "قص الخلفية"));
+                over(
+                    base.into(),
+                    s(ar, "Cut out", "قص الخلفية"),
+                    body.into(),
+                    (),
+                    scrim,
+                    0.0,
+                )
+            })
+        })
+        .collect();
+    sheet("slide_over", Size::new(200.0, 120.0), &rows);
+}
+
+/// `slide_pages`: two pages of one panel, at rest on each and halfway (a slide).
+#[test]
+fn slide_pages_sheet() {
+    use super::super::slide_pages::pages;
+    let rows: Vec<_> = [("first", 0.0), ("halfway", 0.5), ("second", 1.0)]
+        .into_iter()
+        .map(|(state, t)| {
+            row(state, Act::Rest, move |ar| {
+                let page = |en: &'static str, a: &'static str| {
+                    super::super::text::text(Role::CONTROL, s(ar, en, a))
+                };
+                pages(
+                    page("Steps", "الخطوات").into(),
+                    page("Export", "تصدير").into(),
+                    120.0,
+                    t,
+                    ar,
+                )
+            })
+        })
+        .collect();
+    sheet("slide_pages", Size::new(160.0, 90.0), &rows);
+}
+
+/// `modal`: the dialog card over a dimmed window, with its header and X.
+#[test]
+fn modal_sheet() {
+    use super::super::modal::{header, over, pad};
+    let rows = vec![row("question", Act::Rest, move |ar| {
+        let base = container(text("")).width(Fill).height(Fill);
+        let body = pad(vec![
+            header(s(ar, "Save the changes?", "حفظ التغييرات؟"), None, ()),
+            super::super::text::text(Role::CONTROL, s(ar, "Your drawings", "رسوماتك")).into(),
+        ]);
+        over(base.into(), body, 160.0, ())
+    })];
+    sheet("modal", Size::new(200.0, 140.0), &rows);
 }

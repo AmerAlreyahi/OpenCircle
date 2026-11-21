@@ -3,8 +3,8 @@
 //! kit's menu rows; Open recent and Arrange open a second menu beside it. Alt
 //! opens File, arrows walk, Enter picks, Esc closes. The Edit rows are the
 //! editor's own entries (`editing`), the same ones the right-click menu uses.
-use iced::widget::{container, pin, stack};
-use iced::{Center, Element, Fill, Padding};
+use iced::widget::{pin, stack};
+use iced::{Center, Element, Fill};
 
 use super::editing::{self, Action};
 use super::keys;
@@ -117,10 +117,15 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
     match menu {
         Menu::File => vec![
             item(S::st_new_snip, keys::NEW_SNIP, Msg::NewSnip, false),
-            item(S::st_open, keys::OPEN, Msg::Open, false),
+            item(S::st_open, keys::of(keys::Cmd::Open), Msg::Open, false),
             opens(S::st_open_recent, Sub::Recent, false),
             item(S::c_save, keys::SAVE, ed(Message::Save), true),
-            item(S::st_save_as, keys::SAVE_AS, Msg::Export, false),
+            item(
+                S::st_save_as,
+                keys::of(keys::Cmd::SaveAs),
+                Msg::Export,
+                false,
+            ),
             item(S::st_export_walkthrough, "", Msg::ExportWalkthrough, false),
             item(
                 S::st_copy_picture,
@@ -128,10 +133,15 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
                 ed(Message::Copy),
                 true,
             ),
-            item(S::st_settings, keys::SETTINGS, Msg::Settings, true),
+            item(
+                S::st_prefs,
+                keys::of(keys::Cmd::Preferences),
+                Msg::OpenPrefs,
+                true,
+            ),
             item(
                 S::st_shortcuts,
-                keys::SHORTCUTS,
+                keys::of(keys::Cmd::Shortcuts),
                 Msg::Shortcuts(true),
                 false,
             ),
@@ -148,6 +158,7 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
             action(s, Action::Cut, true),
             action(s, Action::Copy, false),
             action(s, Action::Paste, false),
+            item(S::st_paste_step, "", Msg::PasteStep, false),
             action(s, Action::Duplicate, false),
             action(s, Action::Delete, false),
             action(s, Action::SelectAll, true),
@@ -157,21 +168,37 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
         Menu::View => {
             let p = s.panels;
             let mut v = vec![
-                item(S::st_left_panel, keys::LEFT_PANEL, Msg::Library, false),
-                item(S::st_right_panel, keys::RIGHT_PANEL, Msg::Panel, false),
-                item(S::st_all_panels, keys::ALL_PANELS, Msg::Both, false),
-                item(S::st_zoom_in, keys::ZOOM_IN, Msg::ZoomIn, true),
-                item(S::st_zoom_out, keys::ZOOM_OUT, Msg::ZoomOut, false),
-                item(S::st_fit, keys::FIT, Msg::Fit, false),
-                item(S::st_actual, keys::ACTUAL, Msg::Actual, false),
+                item(
+                    S::st_steps,
+                    keys::of(keys::Cmd::StepsSidebar),
+                    Msg::Library,
+                    false,
+                ),
+                item(
+                    S::st_zoom_in,
+                    keys::of(keys::Cmd::ZoomIn),
+                    Msg::ZoomIn,
+                    true,
+                ),
+                item(
+                    S::st_zoom_out,
+                    keys::of(keys::Cmd::ZoomOut),
+                    Msg::ZoomOut,
+                    false,
+                ),
+                item(S::st_fit, keys::of(keys::Cmd::Fit), Msg::Fit, false),
+                item(
+                    S::st_actual,
+                    keys::of(keys::Cmd::Actual),
+                    Msg::Actual,
+                    false,
+                ),
                 item(S::st_snap, "", Msg::Snap, true),
                 item(S::st_grid, "", Msg::Grid, false),
             ];
             v[0].checked = p.library;
-            v[1].checked = p.options;
-            v[2].checked = p.library && p.options;
-            v[7].checked = s.snap;
-            v[8].checked = s.grid;
+            v[5].checked = s.snap;
+            v[6].checked = s.grid;
             v
         }
     }
@@ -203,6 +230,14 @@ pub fn sub_items(sub: Sub, s: &Studio) -> Vec<Item<'_>> {
                 sep: false,
                 sub: None,
             })
+            .chain((!s.recent.is_empty()).then(|| Item {
+                label: tr(S::st_clear),
+                keys: String::new(),
+                checked: false,
+                press: Msg::ClearRecent,
+                sep: true,
+                sub: None,
+            }))
             .collect(),
     }
 }
@@ -225,7 +260,27 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
         let on = open == Some(m);
         side_panel::menu_opener(m.name(), on, Msg::Menu(if on { None } else { Some(m) }))
     });
-    dir::row(row).spacing(OPENER_GAP).align_y(Center).into()
+    // the gear: Studio preferences, at the menus' end (the familiar spot for settings)
+    let gear = crate::shared::kit::tooltip::hint(
+        crate::shared::kit::icon_button::square(
+            super::view::GEAR,
+            crate::shared::kit::icon_button::State {
+                active: s.prefs.is_some(),
+                focused: false,
+            },
+            Some(Msg::OpenPrefs),
+        ),
+        crate::t!(pf_settings_tip),
+        crate::shared::kit::tooltip::Why::Keys(keys::of(keys::Cmd::Preferences)),
+        iced::widget::tooltip::Position::Bottom,
+    );
+    let mut parts: Vec<Element<'_, Msg>> = row.into_iter().collect();
+    parts.push(gear);
+    // (the bar is at the left in the English order in every language; its menus' contents follow the language)
+    iced::widget::row(parts)
+        .spacing(OPENER_GAP)
+        .align_y(Center)
+        .into()
 }
 
 /// Where the opener of `menu` starts, from the header's start edge.
@@ -284,23 +339,37 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
     });
     let first = panel(rows, Some(focus), move |i| Msg::MenuPick(menu, i));
     let x = offset(menu);
+    let rise = s.rise();
+    // under the opener at the left, kept inside the window (its contents read right to left in Arabic)
+    let room = (s.window.width - option_list::MENU_WIDTH).max(0.0);
     let place = |panel: Element<'a, Msg>, x: f32, y: f32| -> Element<'a, Msg> {
-        match dir::rtl() {
-            false => pin(panel).x(x).y(y).into(),
-            true => container(panel)
-                .padding(Padding {
-                    top: y,
-                    right: x,
-                    ..Padding::ZERO
-                })
-                .align_right(Fill)
-                .into(),
-        }
+        pin(panel).x(x.clamp(0.0, room)).y(y + rise).into()
     };
-    let mut layers = vec![base, place(first, x, HEADER_BELOW)];
+    // a press anywhere under the header (outside the menu) closes it
+    let catch = |h: iced::Length| {
+        iced::widget::mouse_area(iced::widget::Space::new().width(Fill).height(h))
+            .on_press(Msg::Menu(None))
+            .on_right_press(Msg::Menu(None))
+    };
+    // (the header row too, but never the caption buttons: they keep working)
+    let outside = iced::widget::column![
+        iced::widget::row![
+            catch(HEADER_BELOW.into()),
+            iced::widget::Space::new()
+                .width(crate::shared::kit::tokens::size::CAPTION_BUTTON * 3.0)
+                .height(HEADER_BELOW),
+        ],
+        catch(Fill),
+    ];
+    let mut layers = vec![base, outside.into(), place(first, x, HEADER_BELOW)];
     if let (Some(sub), Some(y)) = (s.sub, sub_at) {
         let second = panel(sub_items(sub, s), None, move |i| Msg::SubPick(sub, i));
-        let beside = x + option_list::MENU_WIDTH + SUB_GAP;
+        let x = x.clamp(0.0, room);
+        // (beside the first menu; at its other side when there is no room)
+        let beside = match x + 2.0 * option_list::MENU_WIDTH + SUB_GAP <= s.window.width {
+            true => x + option_list::MENU_WIDTH + SUB_GAP,
+            false => (x - option_list::MENU_WIDTH - SUB_GAP).max(0.0),
+        };
         layers.push(place(second, beside, HEADER_BELOW + y));
     }
     stack(layers).into()

@@ -1787,7 +1787,8 @@ fn toolbar_size_matches_its_layout() {
     e.update(Message::UndoClick);
     e.update(Message::Tool(Tool::Blur));
     assert_eq!(laid_out(e.toolbar_at(Rectangle::default()).0), one);
-    assert!(one.width < 600.0 && one.width > 500.0, "{one:?}");
+    // (the Open in Studio button made it one button wider)
+    assert!(one.width < 650.0 && one.width > 500.0, "{one:?}");
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------
@@ -3444,4 +3445,85 @@ fn x_picks_the_eraser_and_crop_keeps_no_key() {
     assert_eq!(info(Tool::Eraser).group, Group::Draw);
     assert_eq!(TOOLS.iter().filter(|t| t.key == 'x').count(), 1);
     assert!(Group::Draw.tools().any(|t| t.tool == Tool::Eraser));
+}
+
+/// Owner note 8: the legend follows the picture's size: the same share of the picture
+/// on an 8000 px photo as on a 1080 px snip (before: a fixed 28 px, almost invisible).
+#[test]
+fn w90b_the_legend_scales_with_the_picture() {
+    let size_on = |side: u32| {
+        let mut e = Annotator::new(image_of(side, side, |_, _| SLATE), 1.0);
+        let s = side as f32;
+        step_with(&mut e, pt(s * 0.1, s * 0.1), "Open settings");
+        let l = e.doc.legend_layout().expect("a legend");
+        l.size / s
+    };
+    let (small, big) = (size_on(1080), size_on(8000));
+    assert!((big / small - 1.0).abs() < 0.05, "{small} vs {big}");
+}
+
+/// Review 3: every default size follows the picture, so an 8K photo looks like a 1080p
+/// snip: at the zoom that fits the picture to the same window, the stroke, text size, step
+/// marker, blur cell and handle reach are the same share of the picture's edge, and the
+/// legend (the one size fixed in image px) uses the same `picture_scale`.
+#[test]
+fn w90c_default_sizes_follow_the_picture() {
+    let share = |side: u32| {
+        let zoom = 700.0 / side as f32; // the same window shows either picture whole
+        let mut e = Annotator::new(image_of(side, side, |_, _| SLATE), zoom);
+        let p = pt(side as f32 * 0.1, side as f32 * 0.1);
+        step_with(&mut e, p, "Open");
+        let Shape::Step { radius, .. } = e.doc.items[0].shape else {
+            panic!("a step marker");
+        };
+        let s = side as f32;
+        [
+            e.stroke / e.zoom / s,
+            e.text_size / e.zoom / s,
+            radius / s,
+            e.blur_cell.cell() / e.zoom / s,
+            super::REACH / e.zoom / s,
+        ]
+    };
+    let (small, big) = (share(1080), share(8000));
+    for (i, (a, b)) in small.iter().zip(&big).enumerate() {
+        assert!((b / a - 1.0).abs() < 0.02, "size {i}: {a} vs {b}");
+    }
+    // the legend's text, fixed in image px, scales by the one shared factor
+    assert_eq!(super::picture_scale(1080.0), 1.0);
+    assert!((super::picture_scale(8000.0) - 8000.0 / 1080.0).abs() < 1e-4);
+}
+
+/// W90c item 4: on a big picture a default size is never thinner than the one the fit view
+/// gives (in IMAGE px, so at 100 % an 8K photo's default line is as bold, relative to the
+/// picture, as a 1080p snip's); at the fit zoom nothing changes; a 1080p picture keeps
+/// sizes constant on screen. 1080p, 4K (2160 short edge) and 8000 px.
+#[test]
+fn w90c_default_sizes_are_not_hair_thin_at_100_percent_on_big_pictures() {
+    let stroke = |side: u32, zoom: f32| {
+        let e = Annotator::new(image_of(side, side, |_, _| SLATE), zoom);
+        e.create(pt(1.0, 1.0)).width
+    };
+    for side in [1080u32, 2160, 8000] {
+        let scale = super::picture_scale(side as f32);
+        let fit = 700.0 / side as f32;
+        // at the fit zoom: the Medium default, 5 display px, as before
+        assert!((stroke(side, fit) * fit - 5.0).abs() < 0.01, "{side} fit");
+        let at_100 = stroke(side, 1.0);
+        if side == 1080 {
+            assert!(
+                (at_100 - 5.0).abs() < 0.01,
+                "a 1080p stroke is 5 px at 100 %"
+            );
+            // and zoomed in it keeps its size on screen
+            assert!((stroke(side, 4.0) * 4.0 - 5.0).abs() < 0.01);
+        } else {
+            assert!(at_100 >= 5.0 * scale - 0.01, "{side}: {at_100} at 100 %");
+            // the same share of the picture as the 1080p snip's at 100 %... in image px
+            assert!(
+                (stroke(side, 4.0) - at_100).abs() < 0.01,
+                "image px past fit"
+            );
+        }
+    }
 }

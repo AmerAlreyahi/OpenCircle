@@ -7,9 +7,9 @@ use super::{Msg, editing};
 use crate::shared::app_language::{S, tr};
 use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{muted, sub, text};
+use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::tokens::{Role, radius, space};
-use crate::shared::kit::{card, divider, option_list};
+use crate::shared::kit::{divider, option_list};
 use crate::t;
 
 const LEAD: f32 = 2.0;
@@ -103,7 +103,7 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
     ];
     // the quick actions run on the user's own keys (Settings > Shortcuts)
     let acts = s.info();
-    let quick = super::properties::ACTS.iter().map(|r| {
+    let quick = super::popovers::ACTS.iter().map(|r| {
         let at = crate::features::snip::snip_more::Row::ALL
             .iter()
             .position(|x| x == r)
@@ -111,18 +111,34 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         row(tr(r.label(false)), &[&acts.caps[at].join("+")])
     });
     let view = vec![
-        row(
-            tr(S::st_sc_panels),
-            &[k::LEFT_PANEL, k::RIGHT_PANEL, k::ALL_PANELS],
-        ),
+        row(tr(S::st_steps), &[k::of(k::Cmd::StepsSidebar)]),
         row(
             tr(S::st_sc_zoom),
-            &[k::ZOOM_IN, k::ZOOM_OUT, k::FIT, k::ACTUAL],
+            &[
+                k::of(k::Cmd::ZoomIn),
+                k::of(k::Cmd::ZoomOut),
+                k::of(k::Cmd::Fit),
+                k::of(k::Cmd::Actual),
+            ],
+        ),
+        row(
+            tr(S::st_sc_ui),
+            &[
+                k::of(k::Cmd::UiLarger),
+                k::of(k::Cmd::UiSmaller),
+                k::of(k::Cmd::UiReset),
+            ],
         ),
         row(tr(S::st_sc_pan), &[k::PAN]),
-        row(tr(S::st_sc_file), &[k::OPEN, k::SAVE, k::SAVE_AS]),
-        row(tr(S::st_sc_misc), &[k::NEW_SNIP, k::CLOSE, k::SETTINGS]),
-        row(tr(S::st_shortcuts), &[k::SHORTCUTS]),
+        row(
+            tr(S::st_sc_file),
+            &[k::of(k::Cmd::Open), k::SAVE, k::of(k::Cmd::SaveAs)],
+        ),
+        row(
+            tr(S::st_sc_misc),
+            &[k::NEW_SNIP, k::CLOSE, k::of(k::Cmd::Preferences)],
+        ),
+        row(tr(S::st_shortcuts), &[k::of(k::Cmd::Shortcuts)]),
     ];
     let view: Vec<Row<'a>> = view.into_iter().chain(quick).collect();
     let columns = crate::dir_row![
@@ -131,19 +147,11 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
         shortcut_column(t!(st_sc_g_view), view),
     ]
     .spacing(COLUMN_GAP);
-    let head = crate::dir_row![
-        column![
-            text(Role::CARD_HEADING, t!(st_sc_title)),
-            sub(Role::ROW_DESC, t!(st_sc_sub)),
-        ]
-        .width(Fill),
-        button::button(
-            label(t!(st_close)),
-            Kind::Elevated,
-            Some(Msg::Shortcuts(false))
-        ),
-    ]
-    .align_y(Center);
+    let head = crate::shared::kit::modal::header(
+        t!(st_sc_title),
+        Some(t!(st_sc_sub)),
+        Msg::Shortcuts(false),
+    );
     let foot = crate::dir_row![
         sub(Role::META, t!(st_sc_foot)).width(Fill),
         button::button(
@@ -175,7 +183,10 @@ pub struct Restorable {
     pub notes: String,
 }
 
-/// The restore sheet.
+/// The restore sheet's width (a solid modal, the X = Later).
+pub const RESTORE_W: f32 = 480.0;
+
+/// The restore sheet's body.
 pub fn restore<'a>(
     r: &'a Restorable,
     restore: Msg,
@@ -184,41 +195,38 @@ pub fn restore<'a>(
     failed: bool,
 ) -> Element<'a, Msg> {
     let sized = |b: Element<'a, Msg>| container(b).width(RESTORE_BUTTON);
-    let body = column![
-        text(Role::CARD_HEADING, t!(st_restore_title)),
-        sub(
-            Role::ROW_DESC,
-            match failed {
-                true => t!(st_restore_failed),
-                false => t!(st_restore_hint),
-            }
-        ),
-        muted(
-            Role::KEYCAP,
-            format!("{} · {} × {}", r.name, r.size.0, r.size.1)
-        ),
-        crate::dir_row![
-            iced::widget::Space::new().width(Fill),
-            sized(button::button(
-                label(t!(st_later)),
-                Kind::Quiet,
-                Some(later)
-            )),
-            sized(button::button(
-                label(t!(st_discard)),
-                Kind::Elevated,
-                Some(discard)
-            )),
-            sized(button::button(
-                label(t!(st_restore)),
-                Kind::Accent,
-                Some(restore)
-            )),
-        ]
-        .spacing(space::GAP),
+    let hint = match failed {
+        true => t!(st_restore_failed),
+        false => t!(st_restore_hint),
+    };
+    let buttons = crate::dir_row![
+        iced::widget::Space::new().width(Fill),
+        sized(button::button(
+            label(t!(st_later)),
+            Kind::Quiet,
+            Some(later.clone())
+        )),
+        sized(button::button(
+            label(t!(st_discard)),
+            Kind::Elevated,
+            Some(discard)
+        )),
+        sized(button::button(
+            label(t!(st_restore)),
+            Kind::Accent,
+            Some(restore)
+        )),
     ]
     .spacing(space::GAP);
-    card::card(body)
+    crate::shared::kit::modal::pad(vec![
+        crate::shared::kit::modal::header(t!(st_restore_title), Some(hint), later),
+        muted(
+            Role::KEYCAP,
+            format!("{} · {} × {}", r.name, r.size.0, r.size.1),
+        )
+        .into(),
+        buttons.into(),
+    ])
 }
 
 pub(super) fn words(a: editing::Action) -> S {

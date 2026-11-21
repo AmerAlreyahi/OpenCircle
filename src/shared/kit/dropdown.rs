@@ -81,33 +81,12 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     menu(opener, rows, width)
 }
 
-/// `menu_button` opened by a labelled button ("Export ▾"), `width` wide; its
-/// menu as wide, hanging from it.
-pub fn labelled_menu<'a, Message: Clone + 'a>(
-    words: &'a str,
-    rows: Vec<(String, bool, Message)>,
-    width: f32,
-) -> Element<'a, Message> {
-    let role = Role::CONTROL;
-    let size = super::text::size(role);
-    let opener = container(
-        crate::dir_row![
-            text(words).size(size).font(font(role)).color(c().text),
-            text("▾").size(size).font(MONO).color(c().text),
-        ]
-        .spacing(6.0)
-        .align_y(Center),
-    )
-    .center_x(width)
-    .padding([7.0, 0.0]);
-    menu(opener, rows, width)
-}
-
 fn menu<'a, Message: Clone + 'a>(
     opener: container::Container<'a, Message>,
     rows: Vec<(String, bool, Message)>,
     width: f32,
 ) -> Element<'a, Message> {
+    let width = width.max(menu_fit(&rows));
     let inner = width - 2.0 * MENU_PAD - 2.0;
     let mut list = column![];
     for (label, removes, message) in rows {
@@ -146,6 +125,17 @@ fn menu<'a, Message: Clone + 'a>(
         rtl: super::dir::rtl(),
         menu_width: Some(width),
     })
+}
+
+/// The room a menu needs so no row's label is cut: the longest label, a row's own
+/// padding (10 px each side), the menu's padding and edge (a mixed Arabic + Latin
+/// label cut in the middle reads as garbage, so it is never cut).
+fn menu_fit<Message>(rows: &[(String, bool, Message)]) -> f32 {
+    let role = Role::CONTROL;
+    let longest = (rows.iter())
+        .map(|(l, ..)| super::text::width(l, super::text::size(role), font(role)))
+        .fold(0.0, f32::max);
+    longest.ceil() + 2.0 * 10.0 + 2.0 * MENU_PAD + 2.0 + 2.0
 }
 
 /// The rows' width (the scroller beside them, 2 px apart).
@@ -564,7 +554,7 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
             false => MENU_MAX,
         };
         let width = self.wide.map_or(self.opener.width, |(w, _)| w);
-        let limits = layout::Limits::new(Size::ZERO, Size::new(width, max));
+        let limits = layout::Limits::new(Size::ZERO, Size::new(width.min(bounds.width), max));
         let node = (self.menu.as_widget_mut()).layout(self.tree, renderer, &limits);
         let h = node.size().height;
         let below = self.opener.y + self.opener.height + MENU_GAP;
@@ -578,6 +568,8 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
             Some((w, false)) => (self.opener.x + self.opener.width - w).max(0.0),
             _ => self.opener.x,
         };
+        // (never past the window's edge, the label's room first)
+        let x = x.min(bounds.width - node.size().width).max(0.0);
         let node = node.move_to(Point::new(x, y));
         if let (Some(at), false) = (self.keyed.take(), self.foot) {
             let mut nth = super::focus::nth(at);
@@ -704,6 +696,22 @@ impl<Message> overlay::Overlay<Message, iced::Theme, iced::Renderer> for Menu<'_
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    /// W90d.4: a menu is as wide as its longest label (an Arabic + Latin label is never cut).
+    #[test]
+    fn a_menu_fits_its_longest_label() {
+        let rows = vec![
+            (
+                "Walkthrough: GIF, MP4, WebM and a much longer label than that".to_string(),
+                false,
+                (),
+            ),
+            ("x".to_string(), false, ()),
+        ];
+        assert!(menu_fit(&rows) > 260.0, "{}", menu_fit(&rows));
+        assert!(menu_fit::<()>(&[]) < 20.0 + 2.0 * MENU_PAD + 5.0);
+    }
+
     use iced::{Point, Size};
 
     use super::super::testing::shot;

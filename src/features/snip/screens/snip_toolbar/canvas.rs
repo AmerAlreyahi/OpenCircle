@@ -13,7 +13,7 @@ use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
     BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
 };
-use crate::features::snip::annotate::{Annotator, Message};
+use crate::features::snip::annotate::{Annotator, Group, Message, info};
 
 /// Room around the image for Snip's live area handles (display px; none
 /// otherwise): the canvas is this much bigger on every side.
@@ -68,7 +68,11 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     // (Snip's bare live area: the frozen frame under it shows through)
     let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
         true => iced::widget::space().into(),
-        false => pin(image(e.base.clone())
+        false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
+            .filter_method(match e.crisp {
+                true => iced::widget::image::FilterMethod::Nearest,
+                false => iced::widget::image::FilterMethod::Linear,
+            })
             .width(size.width)
             .height(size.height)
             .content_fit(ContentFit::Fill))
@@ -130,6 +134,11 @@ struct Pointer {
     grid_key: std::cell::Cell<Option<[u32; 6]>>,
     /// The finger held (touch or pen acts as the left button: `shared::touch`).
     finger: Option<iced::touch::Finger>,
+    /// Snip: when the last press landed (a second one soon after opens the Studio).
+    last_press: Option<std::time::Instant>,
+    /// The cursor's last place while a drag runs (the scrolled one, as the press read it):
+    /// a move with no cursor keeps it, never the event's raw position.
+    last_at: Option<Point>,
 }
 
 /// The picture pixel columns and rows whose lines cross `seen` (display px).
@@ -200,6 +209,19 @@ impl Input<'_> {
     }
 }
 
+/// Two presses this close are a double click (`last`: the previous press, cleared by a double).
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(350);
+
+fn double_click(last: &mut Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    match last.take() {
+        Some(before) if now.duration_since(before) <= DOUBLE_CLICK => true,
+        _ => {
+            *last = Some(now);
+            false
+        }
+    }
+}
+
 impl canvas::Program<Message> for Input<'_> {
     type State = Pointer;
 
@@ -221,7 +243,22 @@ impl canvas::Program<Message> for Input<'_> {
         let message = match &event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?; // None = over the toolbar
+                // a double click inside the picked area (Select tool, not on a handle or
+                // its margin, not while a long capture runs): into the Studio
+                if e.movable
+                    && !e.capturing
+                    && info(e.tool).group == Group::Select
+                    && cursor.position().is_some_and(|c| {
+                        let p = self.image_at(c);
+                        e.doc.view().contains(p) && e.area_hot(Some(p)).is_none()
+                    })
+                    && double_click(&mut pointer.last_press, std::time::Instant::now())
+                {
+                    pointer.down = false;
+                    return Some(Action::publish(Message::OpenStudio).and_capture());
+                }
                 pointer.down = true;
+                pointer.last_at = cursor.position();
                 let p = match e.movable {
                     true => self.image_at(cursor.position()?),
                     false => e.to_image(at),
@@ -238,8 +275,13 @@ impl canvas::Program<Message> for Input<'_> {
             {
                 Message::Move(self.image_at(*position))
             }
-            canvas::Event::Mouse(mouse::Event::CursorMoved { position }) if pointer.down => {
-                Message::Move(e.to_image(*position - (bounds.position() - Point::ORIGIN)))
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if pointer.down => {
+                // the cursor, not the event's raw position: inside a scroll area the cursor is
+                // moved by the scroll offset as the bounds are, the raw position is not (the
+                // press above reads the cursor too: both must agree)
+                let at = cursor.position().or(pointer.last_at)?;
+                pointer.last_at = Some(at);
+                Message::Move(e.to_image(at - (bounds.position() - Point::ORIGIN)))
             }
             // Snip's area: the handle under the pointer shows hot (a redraw
             // only when it changes).
@@ -501,6 +543,52 @@ mod tests {
         assert_eq!(got, run(&by_mouse));
     }
 
+    /// Review 4: a move while the cursor is unavailable never falls back to the event's raw
+    /// position (it ignores the scroll): it keeps the last scrolled one.
+    #[test]
+    fn w90c_a_move_without_a_cursor_never_uses_the_raw_position() {
+        use iced::mouse::{self, Cursor};
+        use iced::widget::canvas::Program;
+        let e = Annotator::new(page(), 1.0);
+        let input = super::Input {
+            editor: &e,
+            grown: 0.0,
+            map: ScreenMap::ONE,
+        };
+        let bounds = iced::Rectangle::new(Point::ORIGIN, Size::new(W as f32, H as f32));
+        let mut state = super::Pointer::default();
+        let moved = |position| iced::Event::Mouse(mouse::Event::CursorMoved { position });
+        let press = iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+        let at = Cursor::Available(pt(40.0, 40.0));
+        let _ = input.update(&mut state, &press, bounds, at);
+        // no cursor: the raw (unscrolled) position is not used, the last one stays
+        let got = input
+            .update(
+                &mut state,
+                &moved(pt(190.0, 100.0)),
+                bounds,
+                Cursor::Unavailable,
+            )
+            .and_then(|a| a.into_inner().0);
+        assert!(
+            matches!(got, Some(Message::Move(p)) if (p.x - 40.0).abs() < 0.5),
+            "{got:?}"
+        );
+        // the cursor is back: the move follows it
+        let got = input
+            .update(
+                &mut state,
+                &moved(pt(190.0, 100.0)),
+                bounds,
+                Cursor::Available(pt(60.0, 50.0)),
+            )
+            .and_then(|a| a.into_inner().0);
+        assert!(
+            matches!(got, Some(Message::Move(p)) if (p.x - 60.0).abs() < 0.5),
+            "{got:?}"
+        );
+    }
+
     fn pt(x: f32, y: f32) -> Point {
         Point::new(x, y)
     }
@@ -600,5 +688,24 @@ mod tests {
                 }));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod double_click_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// W91.2: a second press within the window is a double click; the third starts over.
+    #[test]
+    fn two_quick_presses_are_a_double_click() {
+        let (mut last, t0) = (None, Instant::now());
+        assert!(!double_click(&mut last, t0));
+        assert!(double_click(&mut last, t0 + Duration::from_millis(200)));
+        assert!(!double_click(&mut last, t0 + Duration::from_millis(300)));
+        assert!(
+            !double_click(&mut last, t0 + Duration::from_millis(900)),
+            "too slow"
+        );
     }
 }

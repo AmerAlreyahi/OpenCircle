@@ -1703,3 +1703,23 @@ fn an_older_file_without_studio_loads_clean_and_bad_studio_values_take_defaults(
         (STUDIO_FILE_NAME, 1)
     );
 }
+
+/// W91.3: the walkthrough's transition and length are remembered; bad values take the defaults.
+#[test]
+fn the_walkthrough_transition_is_remembered_and_checked() {
+    let d = Config::default().snip.studio;
+    assert_eq!((d.walk_transition, d.walk_ms), (1, 500));
+    let (c, w) =
+        Config::parse("version = 13\n[snip.studio]\nwalk_transition = 4\nwalk_ms = 1000\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        (c.snip.studio.walk_transition, c.snip.studio.walk_ms),
+        (4, 1000)
+    );
+    let (c, w) = Config::parse("version = 13\n[snip.studio]\nwalk_transition = 9\nwalk_ms = 123\n");
+    assert_eq!(
+        (c.snip.studio.walk_transition, c.snip.studio.walk_ms),
+        (1, 500)
+    );
+    assert_eq!(w.len(), 2, "{w:?}");
+}

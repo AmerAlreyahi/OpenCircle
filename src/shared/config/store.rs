@@ -32,6 +32,11 @@ pub fn appearance() -> AppearanceConfig {
 /// The config the running app uses (any thread). Read from disk on first use;
 /// after that only `set_current` changes it (Settings saved, onboarding finished).
 pub fn current() -> Config {
+    // (a test's own config, on its own thread: other tests never see it)
+    #[cfg(test)]
+    if let Some(c) = TEST_CONFIG.with(|t| t.borrow().clone()) {
+        return c;
+    }
     if let Some(c) = CURRENT.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
         return c.clone();
     }
@@ -44,6 +49,20 @@ pub fn current() -> Config {
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert(config)
         .clone()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CONFIG: std::cell::RefCell<Option<Config>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `body` with `config` as THIS thread's running config (and no other thread's).
+#[cfg(test)]
+pub fn with_test_config<R>(config: Config, body: impl FnOnce() -> R) -> R {
+    let before = TEST_CONFIG.with(|t| t.replace(Some(config)));
+    let out = body();
+    TEST_CONFIG.with(|t| *t.borrow_mut() = before);
+    out
 }
 
 pub fn set_current(config: Config) {

@@ -5,6 +5,7 @@ use crate::features::snip::annotate::{Message, Tool};
 use crate::features::snip::screens::steps::Step;
 use crate::features::snip::snip_more::Row;
 use crate::features::translate::Line;
+use crate::shared::config;
 
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
@@ -17,6 +18,7 @@ fn crop(width: u32, height: u32) -> Crop {
 fn studio_on(width: u32, height: u32) -> Studio {
     let mut s = Studio::new(StudioConfig::default());
     s.open(Picture::Crop(crop(width, height)));
+    s.settle_open();
     s
 }
 
@@ -52,19 +54,17 @@ fn a_picture_fits_the_stage_never_above_100_percent() {
     assert_eq!(s.percent(), Some(100));
 }
 
+/// v3.1: the one Steps sidebar toggles (Ctrl+B) and the picture gets its room back.
 #[test]
-fn hiding_the_panels_gives_the_picture_their_room() {
+fn hiding_the_sidebar_gives_the_picture_its_room() {
     let mut s = studio_on(3840, 2160);
     let zoom = |s: &Studio| s.editor.as_ref().unwrap().zoom;
-    let both = zoom(&s);
-    assert!(matches!(s.update(Msg::Library), Outcome::Panels(p) if !p.library && p.options));
-    let one = zoom(&s);
-    // Ctrl+\: with one still shown, both go; again, both come back
-    assert!(matches!(s.update(Msg::Both), Outcome::Panels(p) if !p.library && !p.options));
-    let none = zoom(&s);
-    assert!(both < one && one < none, "{both} {one} {none}");
-    assert!(matches!(s.update(Msg::Both), Outcome::Panels(p) if p.library && p.options));
-    assert_eq!(zoom(&s), both);
+    let shown = zoom(&s);
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if !p.library));
+    let hidden = zoom(&s);
+    assert!(shown < hidden, "{shown} {hidden}");
+    assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if p.library));
+    assert_eq!(zoom(&s), shown);
 }
 
 #[test]
@@ -215,7 +215,12 @@ fn ctrl_v_asks_the_host_for_a_picture_first() {
     assert!(matches!(empty.update(Msg::Paste), Outcome::Paste(None)));
     assert!(matches!(empty.update(Msg::Open), Outcome::PickFile));
     let file = std::path::PathBuf::from("/tmp/x.png");
-    assert!(matches!(empty.update(Msg::Dropped(file.clone())), Outcome::Read(p) if p == file));
+    // a single drop on the empty Studio opens it (after the drop settles)
+    assert!(matches!(
+        empty.update(Msg::Dropped(file.clone())),
+        Outcome::SettleDrop(1)
+    ));
+    assert!(matches!(empty.update(Msg::DropSettle(1)), Outcome::Read(p) if p == file));
 }
 
 #[test]
@@ -378,6 +383,7 @@ fn the_question_blocks_editing() {
         s.update(Msg::Dropped("/x.png".into())),
         Outcome::None
     ));
+    assert!(matches!(s.update(Msg::DropSettle(1)), Outcome::None));
     assert_eq!(s.editor.as_ref().unwrap().doc.state(), before);
 }
 
@@ -426,10 +432,7 @@ fn a_panel_row_asks_the_host() {
 /// The three actions in the design's order; Edit text and Cut out follow them.
 #[test]
 fn the_panel_rows_are_the_three_actions_in_design_order() {
-    assert_eq!(
-        properties::ACTS,
-        [Row::CopyText, Row::Translate, Row::AskAi]
-    );
+    assert_eq!(popovers::ACTS, [Row::CopyText, Row::Translate, Row::AskAi]);
 }
 
 /// Copy text reads the clean capture with the hidden part painted out; Ask AI
@@ -1186,12 +1189,33 @@ fn drawn(n: usize) -> Studio {
     s
 }
 
+/// W91.3: the walkthrough's transition and its length are remembered between sessions
+/// (`snip.studio`), and a new Studio starts from them.
+#[test]
+fn the_walkthrough_transition_is_remembered() {
+    use crate::features::snip::transition::Transition;
+    let mut s = Studio::new(StudioConfig::default());
+    assert_eq!(s.walk.how.transition, Transition::Crossfade);
+    let Outcome::Panels(_, p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
+        panic!("not saved");
+    };
+    assert_eq!(p.walk_transition, Transition::Wipe.index());
+    let Outcome::Panels(_, p) = s.update(Msg::WalkTransitionMs(1000)) else {
+        panic!("not saved");
+    };
+    let again = Studio::new(p);
+    assert_eq!(
+        (again.walk.how.transition, again.walk.how.transition_ms),
+        (Transition::Wipe, 1000)
+    );
+}
+
 #[test]
 fn walkthrough_dialog_hands_its_choices_to_the_host() {
     let mut s = Studio::new(StudioConfig::default());
     let _ = s.update(Msg::ExportWalkthrough);
     assert!(s.exporting && s.walk_tab);
-    let Outcome::Panels(panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
+    let Outcome::Panels(_, panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
         panic!("the format is remembered");
     };
     assert_eq!(panels.walk_format, 1);
@@ -1209,7 +1233,8 @@ fn walkthrough_dialog_hands_its_choices_to_the_host() {
             max_edge: 960,
             frame_ms: 3500,
             repeat: false,
-            numbered: true
+            numbered: true,
+            ..export::Walkthrough::default()
         }
     );
     assert!(
@@ -1317,24 +1342,14 @@ fn a_long_history_is_sampled_to_at_most_the_frame_limit_keeping_both_ends() {
 
 // ---- Studio v3: the frame (STUDIO_V3_SPEC §3 to §7) ----
 
-/// §3: below 1100 px both panels fold and the Library is an overlay; the saved
-/// choice is unchanged.
+/// v3.1: at the smallest window (960 x 600) the sidebar stays and the stage keeps room.
 #[test]
-fn v3_narrow_windows_fold_the_panels_and_open_the_library_over_the_stage() {
+fn v3_the_sidebar_stays_at_the_smallest_window() {
     let mut s = studio_on(640, 400);
-    let _ = s.update(Msg::Resized(Size::new(1280.0, 800.0)));
-    assert!(s.library_shown() && s.panel_shown() && !s.narrow());
-    let _ = s.update(Msg::Resized(Size::new(960.0, 600.0)));
-    assert!(s.narrow() && !s.library_shown() && !s.panel_shown());
-    assert!(
-        s.panels.library && s.panels.options,
-        "the saved choice stays"
-    );
-    // the toggle opens the overlay (and Esc closes it)
-    assert!(matches!(s.update(Msg::Library), Outcome::None));
-    assert!(s.overlay);
-    let _ = s.update(Msg::Cancel);
-    assert!(!s.overlay);
+    let _ = s.update(Msg::Resized(super::MIN));
+    assert!(s.sidebar_shown());
+    let stage = s.stage();
+    assert!(stage.width > 600.0 && stage.height > 300.0, "{stage:?}");
 }
 
 /// §6: Alt opens File, the arrows walk, Enter picks, Esc closes.
@@ -1349,7 +1364,7 @@ fn v3_the_menu_bar_is_keyboard_driven() {
     let _ = s.update(Msg::MenuKey(Nav::Prev));
     assert_eq!(s.menu.map(|m| m.0), Some(Menu::View));
     // View > Left panel
-    assert!(matches!(s.update(Msg::MenuKey(Nav::Enter)), Outcome::Panels(p) if !p.library));
+    assert!(matches!(s.update(Msg::MenuKey(Nav::Enter)), Outcome::Panels(_, p) if !p.library));
     assert!(s.menu.is_none());
     // Esc closes an open menu before anything else
     let _ = s.update(Msg::Menu(Some(Menu::File)));
@@ -1369,22 +1384,13 @@ fn v3_file_menu_rows_reach_the_host() {
         let at = rows.iter().position(|r| r.label == name).unwrap();
         s.update(Msg::MenuPick(Menu::File, at))
     };
-    assert!(matches!(pick(&mut s, "Settings…"), Outcome::Settings));
+    assert!(matches!(pick(&mut s, "Preferences…"), Outcome::None));
+    assert!(s.prefs.is_some());
+    let _ = s.update(Msg::Cancel);
     assert!(matches!(pick(&mut s, "New snip"), Outcome::NewSnip));
     draw(&mut s);
     assert!(matches!(pick(&mut s, "Close"), Outcome::None));
     assert!(s.asking());
-}
-
-/// §5: the Library sections fold by their header.
-#[test]
-fn v3_library_sections_fold() {
-    let mut s = studio_on(640, 400);
-    assert_eq!(s.shut, [false; 3]);
-    let _ = s.update(Msg::Section(library::OBJECTS));
-    assert_eq!(s.shut, [false, true, false]);
-    let _ = s.update(Msg::Section(library::OBJECTS));
-    assert_eq!(s.shut, [false; 3]);
 }
 
 /// Golden images of the frame: the picture with a drawing selected, menus, the
@@ -1434,27 +1440,24 @@ fn v3_the_frame_matches_its_golden_images() {
         failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
             view(&n, &[], false)
         }));
-        let _ = n.update(Msg::Overlay);
-        let name = format!("studio3-narrow-library-{}", theme.id);
-        failed.extend(golden::check("screens", &name, narrow, &[1.0], || {
-            view(&n, &[], false)
-        }));
-        // the panels' other states, and the small sheets
-        // two boxes selected: the panel's style groups are the shared ones
+        // v3.1: a popover (Actions, Position) and the Steps sidebar's walkthrough panel
         let mut s = two_boxes();
         let _ = s.update(Msg::Editor(Message::SelectAll));
-        let panel = Size::new(super::PANEL, 700.0);
-        let name = format!("studio3-props-many-{}", theme.id);
-        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
-            properties::view(&s, properties::Subject::Many { count: 2 })
-        }));
-        let name = format!("studio3-props-pasted-{}", theme.id);
-        failed.extend(golden::check("screens", &name, panel, &[1.0], || {
-            let p = properties::PastedInfo {
-                frame: [24, 40, 320, 180],
-                opacity: 100,
-            };
-            properties::view(&s, properties::Subject::Pasted(p))
+        for (pop, tag) in [
+            (popovers::Pop::Actions, "actions"),
+            (popovers::Pop::Position, "position"),
+        ] {
+            let _ = s.update(Msg::Pop(Some(pop)));
+            let name = format!("studio31-{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+                view(&s, &[], false)
+            }));
+            let _ = s.update(Msg::Pop(Some(pop)));
+        }
+        let _ = s.update(Msg::ExportWalkthrough);
+        let name = format!("studio31-export-{}", theme.id);
+        failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
+            view(&s, &[], false)
         }));
         let r = Restorable {
             name: "Screenshot 2026-11-19".into(),
@@ -1710,34 +1713,6 @@ fn two_boxes() -> Studio {
     s
 }
 
-/// The Objects list: a click selects (top row = front), the eye hides, a drag
-/// moves a row (the list shows the front first).
-#[test]
-fn v3_objects_list_selects_hides_and_reorders() {
-    let mut s = two_boxes();
-    // row 0 is the front object = item 1
-    let _ = s.update(Msg::ObjPress(0));
-    let _ = s.update(Msg::ObjRelease);
-    assert_eq!(s.editor.as_ref().unwrap().selection(), vec![1]);
-    let _ = s.update(Msg::Editor(Message::ToggleHidden(1)));
-    assert!(s.editor.as_ref().unwrap().doc.items[1].hidden);
-    // drag the front row to the bottom: the back object comes forward
-    let _ = s.update(Msg::ObjMove(Point::new(10.0, 5.0), 2));
-    let _ = s.update(Msg::ObjPress(0));
-    let _ = s.update(Msg::ObjMove(Point::new(10.0, 50.0), 2));
-    let _ = s.update(Msg::ObjRelease);
-    let order: Vec<bool> = s
-        .editor
-        .as_ref()
-        .unwrap()
-        .doc
-        .items
-        .iter()
-        .map(|i| i.hidden)
-        .collect();
-    assert_eq!(order, vec![true, false], "the hidden one went to the back");
-}
-
 /// A right-click selects the object under the pointer first.
 #[test]
 fn v3_right_click_selects_under_the_pointer() {
@@ -1876,8 +1851,8 @@ fn v3_context_menu_stays_inside_the_window_and_mirrors() {
         let _ = s.update(Msg::ContextOpen);
         let at = s.context.as_ref().unwrap().at;
         let left = match arabic {
-            true => super::panel_width() + 1.0,
-            false => LIBRARY + 1.0 + RAIL + 2.0,
+            true => super::SIDEBAR + 1.0,
+            false => RAIL + 2.0,
         };
         assert!(
             (at.x - (left + 10.0)).abs() < 1.5,
@@ -1943,26 +1918,18 @@ fn v3_open_menus_and_sheets_block_the_canvas_keys() {
         )
     };
     assert!(arrow(&s).is_some(), "an open canvas nudges the selection");
-    let ups: [(Msg, Msg); 4] = [
+    let ups: [(Msg, Msg); 3] = [
         (Msg::Menu(Some(Menu::Edit)), Msg::Menu(None)),
         (Msg::Shortcuts(true), Msg::Shortcuts(false)),
         (Msg::ContextOpen, Msg::Cancel),
-        (Msg::Resized(Size::new(900.0, 600.0)), Msg::Resized(SIZE)),
     ];
     for (up, down) in ups {
-        let narrow = matches!(up, Msg::Resized(_));
         let _ = s.update(up);
-        if narrow {
-            let _ = s.update(Msg::Overlay);
-        }
         assert!(s.editor.as_ref().unwrap().keys_blocked, "{:?}", s.menu);
         assert!(
             arrow(&s).is_none(),
             "the canvas takes no key while it is up"
         );
-        if narrow {
-            let _ = s.update(Msg::Overlay);
-        }
         let _ = s.update(down);
         assert!(!s.editor.as_ref().unwrap().keys_blocked);
     }
@@ -2025,7 +1992,7 @@ fn v3_several_selected_objects_show_every_swatch() {
     let _ = s.update(Msg::Editor(Message::SelectAll));
     assert_eq!(s.editor.as_ref().unwrap().selection().len(), 2);
     let e = s.editor.as_ref().unwrap();
-    let colours = options_bar::selection_groups(e, 6).remove(0);
+    let colours = options_bar::colour_group(e, 6);
     let picked = (0..8)
         .filter(|i| {
             let at = Point::new(2.0 + 14.0 + 30.0 * *i as f32, 16.0);
@@ -2044,7 +2011,7 @@ fn v3_several_selected_objects_show_every_swatch() {
 }
 
 fn colours_again(e: &annotate::Annotator) -> iced::Element<'_, Msg> {
-    options_bar::selection_groups(e, 6).remove(0)
+    options_bar::colour_group(e, 6)
 }
 
 /// A kept copy in this test's own folder, as the window's `Restorable` (`notes`
@@ -2107,7 +2074,7 @@ fn v3_a_requested_file_always_wins_over_reopen_last() {
     type Ask = Box<dyn Fn(&mut Studio)>;
     let asks: [Ask; 5] = [
         Box::new(|s| s.next_name(std::path::Path::new("/x/asked.png"))),
-        Box::new(|s| drop(s.update(Msg::Dropped(PathBuf::from("/x/d.png"))))),
+        Box::new(|s| drop(s.update(Msg::Picked(PathBuf::from("/x/d.png"))))),
         Box::new(|s| drop(s.update(Msg::OpenRecent(PathBuf::from("/x/r.png"))))),
         Box::new(|s| drop(s.update(Msg::Open))),
         Box::new(|s| drop(s.update(Msg::Paste))),
@@ -2209,7 +2176,7 @@ fn v3_properties_restyle_the_selected_object() {
     // the second swatch of the first group (a swatch is 28 wide with 2 gaps and the 2 px pad)
     let at = Point::new(2.0 + 14.0 + 30.0, 16.0);
     let msgs = crate::shared::kit::testing::shot::click(
-        options_bar::selection_groups(e, 6).remove(0),
+        options_bar::colour_group(e, 6),
         Size::new(400.0, 40.0),
         at,
     );
@@ -2240,41 +2207,1911 @@ fn v3_the_shortcuts_sheet_fits_a_small_window() {
     });
 }
 
-/// Recent files reads Settings > Studio's count, not the old Snip switch: with none yet
-/// it says what goes there; at 0 it says it is off (EN and AR).
+/// The start screen shows the recent pictures as big thumbnails (Settings > Studio's
+/// count); with none yet it shows no such list.
 #[test]
-fn v3_recent_files_empty_and_off_states() {
+fn v3_the_start_screen_lists_recent_pictures() {
     use crate::shared::kit::testing::shot;
-    let size = Size::new(240.0, 200.0);
-    let s = studio_on(64, 64);
-    let words = |n| shot::texts(library::recent(&s, n).map(|_| ()));
+    let mut s = Studio::new(StudioConfig::default());
+    let words = |s: &Studio| shot::texts(start::view(s).map(|_| ()));
     assert!(
-        words(10)
+        !words(&s)
             .iter()
-            .any(|t| t == "Pictures you open or save appear here."),
-        "{:?}",
-        words(10)
+            .any(|t| t.eq_ignore_ascii_case("Recent pictures"))
     );
+    let picture = iced::widget::image::Handle::from_rgba(1, 1, vec![9; 4]);
+    let _ = s.update(Msg::Recent(
+        vec![(std::path::PathBuf::from("/tmp/holiday.png"), picture)],
+        vec![String::new()],
+    ));
+    let got = words(&s);
     assert!(
-        words(0)
-            .iter()
-            .any(|t| t == "Recent files are off · Settings > Studio"),
-        "{:?}",
-        words(0)
+        got.iter()
+            .any(|t| t.eq_ignore_ascii_case("Recent pictures")),
+        "{got:?}"
     );
-    assert!(!words(10).iter().any(|t| t.contains("Settings > Snip")));
-    {
-        let _ar = crate::shared::kit::testing::arabic();
-        let off = shot::texts(library::recent(&s, 0).map(|_| ()));
+    assert!(got.iter().any(|t| t == "holiday.png"), "{got:?}");
+}
+
+// ---- Studio v3.1: the window, popovers, the Steps sidebar, input ----
+
+fn click_view(s: &Studio, at: (f32, f32)) -> Vec<Msg> {
+    crate::shared::kit::testing::shot::click(view(s, &[], false), SIZE, Point::new(at.0, at.1))
+}
+
+/// v3.1 item 6: a press anywhere outside an open menu closes it (before, it
+/// stayed until its opener was pressed again); the press goes no further.
+#[test]
+fn v31_an_open_menu_closes_on_an_outside_click() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Menu(Some(Menu::Edit)));
+    let got = click_view(&s, (700.0, 500.0));
+    assert!(matches!(got.as_slice(), [Msg::Menu(None)]), "{got:?}");
+    let _ = s.update(Msg::Menu(None));
+    assert!(s.menu.is_none());
+}
+
+/// v3.1 item 5: a popover closes on an outside press and on Esc; a press on its
+/// own row acts.
+#[test]
+fn v31_a_popover_closes_on_an_outside_click_and_esc() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    assert_eq!(s.popover, Some(popovers::Pop::Actions));
+    let got = click_view(&s, (300.0, 600.0));
+    assert!(matches!(got.as_slice(), [Msg::Pop(None)]), "{got:?}");
+    // the "Cut out" row (the fifth) acts
+    let got = click_view(&s, (1010.0, 247.0));
+    assert!(got.iter().any(|m| matches!(m, Msg::CutOut)), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(s.popover.is_none());
+    // the same opener twice closes it
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Position)));
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Position)));
+    assert!(s.popover.is_none());
+}
+
+/// v3.1 item 2: the bar always shows every control; ones the tool can't use do
+/// nothing (dimmed), the tool's own ones act.
+#[test]
+fn v31_the_options_bar_dims_what_the_tool_cannot_use() {
+    let colours = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(1227.0, 48.0);
+        (0..130)
+            .filter(|i| {
+                let at = Point::new(60.0 + 8.0 * *i as f32, 24.0);
+                let bar = options_bar::view(s, e);
+                crate::shared::kit::testing::shot::click(bar, size, at)
+                    .iter()
+                    .any(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+            })
+            .count()
+    };
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+    assert_eq!(colours(&s), 0, "Select has no colour: dimmed, not hidden");
+    let bar = options_bar::view(&s, s.editor.as_ref().unwrap());
+    let words = crate::shared::kit::testing::shot::texts(bar);
+    for w in ["Size", "Opacity", "Outline", "Fill", "Position", "Actions"] {
+        assert!(words.iter().any(|t| t == w), "{w} shown: {words:?}");
+    }
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    assert!(colours(&s) > 3, "Rect takes a colour");
+}
+
+/// v3.1 item 1: the caption buttons keep their place (right) in Arabic too, the
+/// rail sits at the window's edge and the Steps sidebar on the other side.
+#[test]
+fn v31_the_caption_buttons_stay_right_in_arabic() {
+    let s = studio_on(640, 400);
+    let is_close = |got: Vec<Msg>| {
+        got.iter()
+            .any(|m| matches!(m, Msg::Caption(Caption::Close)))
+    };
+    assert!(is_close(click_view(&s, (1256.0, 20.0))));
+    let _ar = crate::shared::kit::testing::arabic();
+    assert!(is_close(click_view(&s, (1256.0, 20.0))));
+    assert!(!is_close(click_view(&s, (24.0, 20.0))));
+    // the rail (Rectangle tool) is at the right edge, the sidebar's Add at the left
+    let rect = click_view(&s, (1252.0, 155.0));
+    assert!(
+        rect.iter()
+            .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect)))),
+        "{rect:?}"
+    );
+    let add = click_view(&s, (130.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+}
+
+/// v3.1 item 3: Add pictures asks for several files; files dropped together (or onto an
+/// open picture) become steps; a single drop on the empty Studio opens it.
+#[test]
+fn v31_pictures_join_the_steps() {
+    let mut s = studio_on(640, 400);
+    let add = click_view(&s, (1148.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+    assert!(matches!(s.update(Msg::PickFiles), Outcome::PickFiles));
+    let files = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")];
+    assert!(matches!(s.update(Msg::AddFiles(files)), Outcome::AddPictures(v) if v.len() == 2));
+    assert!(matches!(s.update(Msg::AddFiles(Vec::new())), Outcome::None));
+    assert!(matches!(s.update(Msg::PasteStep), Outcome::PasteStep));
+    // (the drops are judged in `v31_drops_follow_the_owner_rules`)
+}
+
+/// v3.1 review 5: one file dropped on an open picture is placed on it as a movable
+/// picture; on the Steps sidebar it is a step; several files anywhere are all steps
+/// (the empty Studio also opens the first); a single one on the empty Studio opens.
+#[test]
+fn v31_drops_follow_the_owner_rules() {
+    let (a, b) = (PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png"));
+    let drop = |s: &mut Studio, files: &[&PathBuf]| {
+        let mut last = Outcome::None;
+        for f in files {
+            last = s.update(Msg::Dropped((*f).clone()));
+        }
+        // (a settle that was voided by a later file does nothing)
+        let n = files.len();
         assert!(
-            off.iter().any(|t| t.contains("الملفات الأخيرة متوقفة")),
-            "{off:?}"
+            matches!(
+                s.update(Msg::DropSettle(n.saturating_sub(1))),
+                Outcome::None
+            ) || n == 1
         );
-        let none = shot::texts(library::recent(&s, 10).map(|_| ()));
+        let _ = last;
+        s.update(Msg::DropSettle(n))
+    };
+    // open picture: one = placed
+    let mut s = studio_on(640, 400);
+    assert!(matches!(drop(&mut s, &[&a]), Outcome::Place(p) if p == a));
+    // over the Steps sidebar: one = a step
+    let _ = s.update(Msg::OverSidebar(true));
+    assert!(matches!(drop(&mut s, &[&a]), Outcome::AddPictures(v) if v == vec![a.clone()]));
+    let _ = s.update(Msg::OverSidebar(false));
+    // several: all steps
+    assert!(matches!(drop(&mut s, &[&a, &b]), Outcome::AddPictures(v) if v.len() == 2));
+    // empty Studio: one opens; several open the first AND are all steps
+    let mut e = Studio::new(StudioConfig::default());
+    assert!(matches!(drop(&mut e, &[&a]), Outcome::Read(p) if p == a));
+    assert!(matches!(drop(&mut e, &[&a, &b]), Outcome::OpenAndAdd(v) if v.len() == 2));
+    // the Open dialog's file opens at once
+    assert!(matches!(e.update(Msg::Picked(a.clone())), Outcome::Read(p) if p == a));
+}
+
+/// v3.1 review 6: the UI scale is remembered like the AI chat's text zoom.
+#[test]
+fn v31_the_ui_scale_is_remembered() {
+    let mut s = studio_on(640, 400);
+    let out = s.update(Msg::UiScale(1));
+    assert!(matches!(out, Outcome::Panels(_, p) if p.ui_zoom == 110));
+    let again = Studio::new(StudioConfig {
+        ui_zoom: 125,
+        ..StudioConfig::default()
+    });
+    assert_eq!(again.ui_zoom, 125);
+}
+
+/// v3.1 item 4: the empty Studio shows its recent pictures big, and a click opens one.
+#[test]
+fn v31_the_start_screen_opens_a_recent_picture() {
+    let mut s = Studio::new(StudioConfig::default());
+    let picture = iced::widget::image::Handle::from_rgba(1, 1, vec![9; 4]);
+    let path = PathBuf::from("/tmp/holiday.png");
+    let _ = s.update(Msg::Recent(
+        vec![(path.clone(), picture)],
+        vec![String::new()],
+    ));
+    let got: Vec<Msg> = (0..14 * 12)
+        .flat_map(|i| {
+            let at = (
+                380.0 + 40.0 * (i % 14) as f32,
+                400.0 + 30.0 * (i / 14) as f32,
+            );
+            click_view(&s, at)
+        })
+        .collect();
+    assert!(
+        got.iter()
+            .any(|m| matches!(m, Msg::OpenRecent(p) if *p == path)),
+        "{got:?}"
+    );
+}
+
+/// v3.1 item 7: the wheel zooms by default (Ctrl+wheel too), the middle button pans,
+/// Ctrl+= / Ctrl+- / Ctrl+0 scale the UI.
+#[test]
+fn v31_wheel_middle_button_and_ui_scale() {
+    assert_eq!(
+        crate::shared::config::StudioPrefs::default().wheel,
+        crate::shared::config::StudioWheel::Zoom
+    );
+    let mut s = studio_on(1600, 900);
+    let before = s.editor.as_ref().unwrap().zoom;
+    let _ = s.update(Msg::Wheel {
+        at: Point::new(300.0, 300.0),
+        notches: 2.0,
+    });
+    assert!(s.editor.as_ref().unwrap().zoom > before);
+    // the middle button: a move pans while it is down, none after
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(10.0, 10.0))),
+        Outcome::None
+    ));
+    let _ = s.update(Msg::Middle(true));
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(12.0, 12.0))),
+        Outcome::ScrollTo(_)
+    ));
+    let _ = s.update(Msg::Middle(false));
+    assert!(matches!(
+        s.update(Msg::Pointer(Point::new(14.0, 14.0))),
+        Outcome::None
+    ));
+    // the UI scale steps like the AI chat's
+    assert_eq!(s.ui_zoom, 100);
+    let _ = s.update(Msg::UiScale(1));
+    assert_eq!(s.ui_zoom, 110);
+    let _ = s.update(Msg::UiScale(-1));
+    let _ = s.update(Msg::UiScale(-1));
+    assert_eq!(s.ui_zoom, 90);
+    let _ = s.update(Msg::UiScale(0));
+    assert_eq!(s.ui_zoom, 100);
+}
+
+/// v3.1 item 5: the walkthrough opens in the slide-over (the header stays free: the
+/// caption buttons still work); Esc closes the panel.
+#[test]
+fn v31_big_tasks_slide_in_and_the_header_stays_free() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::ExportWalkthrough);
+    assert!(s.exporting);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(words.iter().any(|t| t == "Walkthrough"), "{words:?}");
+    let close = click_view(&s, (1256.0, 20.0));
+    assert!(
+        close
+            .iter()
+            .any(|m| matches!(m, Msg::Caption(Caption::Close))),
+        "{close:?}"
+    );
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.exporting);
+}
+
+/// v3.1 review 1: a pick in a popover closes it, so the next press reaches the
+/// picture (Edit text's first pick), and no popover shows over a slide-over.
+#[test]
+fn v31_a_pick_in_a_popover_closes_it_and_the_canvas_gets_the_next_click() {
+    let mut s = two_boxes();
+    for (pop, pick) in [
+        (popovers::Pop::Actions, Msg::EditText),
+        (popovers::Pop::Actions, Msg::CutOut),
+        (
+            popovers::Pop::Position,
+            Msg::Editor(Message::Order(annotate::Order::Front)),
+        ),
+    ] {
+        let _ = s.update(Msg::Pop(Some(pop)));
+        let _ = s.update(Msg::Cancel);
+        let _ = s.update(Msg::Pop(Some(pop)));
+        assert_eq!(s.popover, Some(pop));
+        let _ = s.update(pick);
+        assert!(s.popover.is_none(), "{pop:?}");
+        let _ = s.update(Msg::Cancel);
+    }
+    // Edit text from Actions: the picture takes the next click
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    let _ = s.update(Msg::EditText);
+    assert!(s.popover.is_none() && s.edit.is_some());
+    let got = click_view(&s, (500.0, 400.0));
+    assert!(!got.is_empty(), "the picture got the click");
+    assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
+}
+
+/// v3.1 review 3: a narrow bar never hides a control: below the room for eight
+/// colour dots they become ONE swatch button that opens the Colour popover; the
+/// plan follows the bar's own room (window, UI scale), not the window alone.
+#[test]
+fn v31_a_narrow_bar_keeps_every_control_and_folds_the_colours() {
+    let probe = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(s.window.width - 54.0, 48.0);
+        let (mut colours, mut button) = (0, 0);
+        for i in 0..(size.width / 8.0) as usize {
+            let at = Point::new(8.0 * i as f32, 24.0);
+            let got = crate::shared::kit::testing::shot::click(options_bar::view(s, e), size, at);
+            colours += got
+                .iter()
+                .filter(|m| matches!(m, Msg::Editor(Message::Colour(_))))
+                .count();
+            button += got
+                .iter()
+                .filter(|m| matches!(m, Msg::Pop(Some(popovers::Pop::Colours))))
+                .count();
+        }
+        let words = crate::shared::kit::testing::shot::texts(options_bar::view(s, e));
+        (colours, button, words)
+    };
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Text)));
+    let _ = s.update(Msg::Resized(SIZE));
+    let (colours, button, _) = probe(&s);
+    assert!(
+        colours >= 6 && button == 0,
+        "wide: dots {colours}, button {button}"
+    );
+    let _ = s.update(Msg::Resized(super::MIN));
+    let (colours, button, words) = probe(&s);
+    assert_eq!(colours, 0, "narrow: no loose dots");
+    assert!(button >= 1, "narrow: the colour button");
+    for w in ["Outline", "Fill", "Position", "Actions", "More", "100 %"] {
+        assert!(words.iter().any(|t| t == w), "{w} kept: {words:?}");
+    }
+    // the plan follows the UI scale too: at 1280 a large UI folds the dots
+    let _ = s.update(Msg::Resized(SIZE));
+    for _ in 0..4 {
+        let _ = s.update(Msg::UiScale(1));
+    }
+    let (colours, button, _) = probe(&s);
+    assert!(colours == 0 && button >= 1, "scaled: {colours} {button}");
+}
+
+/// v3.1 review 4: while Edit text runs its own bar replaces the options bar (one
+/// colour row, never the shared groups beside it); no second panel shows.
+#[test]
+fn v31_edit_text_replaces_the_options_bar() {
+    let mut s = studio_on(640, 400);
+    let words = |s: &Studio| crate::shared::kit::testing::shot::texts(view(s, &[], false));
+    assert!(words(&s).iter().any(|t| t == "Opacity"));
+    let _ = s.update(Msg::EditText);
+    let got = words(&s);
+    assert!(
+        !got.iter().any(|t| t == "Opacity" || t == "Position"),
+        "{got:?}"
+    );
+    assert!(got.iter().any(|t| t == "Cancel"), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(words(&s).iter().any(|t| t == "Opacity"));
+}
+
+/// W91 wiring: File > Preferences (Ctrl+,) opens the dialog over the Studio; a change in
+/// it asks the host to write the config; Esc closes it; Out::Browse asks for a folder.
+#[test]
+fn v31_the_preferences_dialog_opens_over_the_studio_and_closes_on_esc() {
+    let mut s = studio_on(640, 400);
+    assert!(s.prefs.is_none());
+    let rows = menu_bar::items(Menu::File, &s);
+    let at = rows.iter().position(|r| r.label == "Preferences…").unwrap();
+    assert!(matches!(
+        s.update(Msg::MenuPick(Menu::File, at)),
+        Outcome::None
+    ));
+    assert!(s.prefs.is_some());
+    // it blocks the canvas keys and shows its sections over the window
+    assert!(s.editor.as_ref().unwrap().keys_blocked);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(words.iter().any(|t| t == "Keyboard shortcuts"), "{words:?}");
+    // a change: the host writes it
+    let mut p = config::current().studio;
+    p.snap = !p.snap;
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::Prefs(Box::new(p)))),
+        Outcome::ApplyPrefs
+    ));
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::BrowseFolder)),
+        Outcome::PrefsBrowse
+    ));
+    assert!(matches!(s.update(Msg::Browsed(None)), Outcome::None));
+    let _ = s.update(Msg::Cancel);
+    assert!(s.prefs.is_none());
+    assert!(!s.editor.as_ref().unwrap().keys_blocked);
+    // the dialog's own Close button
+    let _ = s.update(Msg::OpenPrefs);
+    assert!(matches!(
+        s.update(Msg::Prefs(preferences::Msg::Close)),
+        Outcome::None
+    ));
+    assert!(s.prefs.is_none());
+}
+
+/// W91 wiring: the sidebar's side follows Settings > Studio (the rail takes the other
+/// edge), and the default is the end (rail at the window's start edge).
+#[test]
+fn v31_the_steps_sidebar_side_is_a_setting() {
+    use crate::shared::config::StudioSide;
+    assert_eq!(config::current().studio.steps_side, StudioSide::End);
+    let s = studio_on(640, 400);
+    assert!(!s.sidebar_at_start());
+    // End: the sidebar's Add at the right, the rail's Rectangle at the left
+    let add = click_view(&s, (1148.0, 155.0));
+    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+    let rect = click_view(&s, (27.0, 155.0));
+    assert!(
+        rect.iter()
+            .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
+    );
+}
+
+/// Review follow-up: the panels write only the keys that changed, in order, so a stale
+/// copy never undoes what Snip or the dialog wrote meanwhile (`hint_seen` here).
+#[test]
+fn v31_panels_write_only_what_changed() {
+    let mut s = studio_on(640, 400);
+    let Outcome::Panels(old, new) = s.update(Msg::UiScale(1)) else {
+        panic!("a UI scale is a panels change");
+    };
+    assert_eq!((old.ui_zoom, new.ui_zoom), (100, 110));
+    // the file meanwhile: Snip showed its hint, the walkthrough length changed
+    let mut file = StudioConfig {
+        hint_seen: true,
+        walk_ms: 1000,
+        ..StudioConfig::default()
+    };
+    file.apply_changes(&old, &new);
+    assert_eq!(file.ui_zoom, 110);
+    assert!(
+        file.hint_seen && file.walk_ms == 1000,
+        "what was not changed stays"
+    );
+}
+
+/// Review follow-up: a preference changed in the dialog reaches the open picture
+/// (snap, pixel grid, Ctrl+C, paste, grow, drag type), and "Reset tool styles" resets
+/// the open editor's own options.
+#[test]
+fn v31_preferences_reach_the_open_picture() {
+    let mut s = studio_on(640, 400);
+    {
+        let e = s.editor.as_mut().unwrap();
+        (e.snap, e.grid, e.grow_canvas, e.copy_picture_when_empty) = (false, false, true, false);
+    }
+    s.snap = false;
+    s.prefs_applied();
+    let d = config::current().studio;
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!((e.snap, e.grid), (d.snap, d.pixel_grid));
+    assert_eq!(e.grow_canvas, d.grow_canvas);
+    assert_eq!(e.copy_picture_when_empty, d.ctrl_c_picture);
+    assert_eq!(s.snap, d.snap);
+    // Reset tool styles: the colour the user picked goes back to the default
+    let red = [255, 0, 0, 255];
+    let _ = s.update(Msg::Editor(Message::Colour([1, 2, 3, 255])));
+    assert_ne!(s.editor.as_ref().unwrap().colour, red);
+    let _ = s.update(Msg::OpenPrefs);
+    let _ = s.update(Msg::Prefs(preferences::Msg::ResetToolStyles));
+    s.prefs_applied();
+    let now = s.editor.as_ref().unwrap().colour;
+    assert_ne!(now, [1, 2, 3, 255], "the editor took the defaults");
+}
+
+/// Review follow-up: the unsaved question takes over the files that were still arriving.
+#[test]
+fn v31_the_question_takes_the_pending_drops() {
+    let mut s = studio_on(64, 64);
+    draw(&mut s);
+    assert!(matches!(
+        s.update(Msg::Dropped(PathBuf::from("/tmp/a.png"))),
+        Outcome::SettleDrop(1)
+    ));
+    let _ = s.close_requested();
+    assert!(s.asking());
+    assert!(matches!(s.update(Msg::DropSettle(1)), Outcome::None));
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+    assert!(
+        matches!(s.update(Msg::DropSettle(1)), Outcome::None),
+        "nothing is left to place"
+    );
+}
+
+/// Owner note 7: the rubber band is drawn from the press to the pointer at any zoom
+/// (16 % and 300 %): the box's corners are the pointer's, in canvas px.
+#[test]
+fn w90b_the_rubber_band_follows_the_pointer_at_any_zoom() {
+    for zoom in [0.16_f32, 1.0, 3.0] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let (from, to) = (Point::new(40.0, 30.0), Point::new(300.0, 200.0));
+        let size = s.editor.as_ref().unwrap().size();
+        let msgs = {
+            let e = s.editor.as_ref().unwrap();
+            crate::shared::kit::testing::shot::press_move(
+                crate::features::snip::screens::snip_toolbar::canvas::canvas(
+                    e,
+                    1.0,
+                    crate::features::snip::screens::snip_toolbar::canvas::ScreenMap::ONE,
+                ),
+                size,
+                from,
+                to,
+            )
+        };
+        for m in msgs {
+            let _ = s.update(Msg::Editor(m));
+        }
+        let band = s.editor.as_ref().unwrap().band_rect().expect("a band");
         assert!(
-            none.iter().any(|t| t.contains("تظهر هنا الصور")),
-            "{none:?}"
+            (band.x - from.x).abs() < 1.5 && (band.y - from.y).abs() < 1.5,
+            "zoom {zoom}: {band:?}"
+        );
+        assert!(
+            (band.x + band.width - to.x).abs() < 1.5 && (band.y + band.height - to.y).abs() < 1.5,
+            "zoom {zoom}: {band:?}"
         );
     }
-    let _ = size;
+}
+
+/// Owner note 7 through the whole window (stage, scroll area, centring, UI scale): the
+/// band's size is the pointer's travel, its end is where the pointer is.
+#[test]
+fn w90b_the_rubber_band_in_the_window_matches_the_pointer() {
+    for (scale, zoom) in [(1.0_f32, 0.16_f32), (1.5, 0.16), (1.0, 3.0), (2.0, 1.0)] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Scale(scale));
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
+        let msgs =
+            crate::shared::kit::testing::shot::press_move(view(&s, &[], false), SIZE, from, to);
+        for m in msgs {
+            let _ = s.update(m);
+        }
+        let band = s.editor.as_ref().unwrap().band_rect().expect("a band");
+        assert!(
+            (band.width - 200.0).abs() < 2.0 && (band.height - 150.0).abs() < 2.0,
+            "scale {scale} zoom {zoom}: {band:?}"
+        );
+    }
+}
+
+/// Owner note 7, zoomed in AND scrolled (the picture bigger than the stage): the band
+/// is where the pointer is, at the scroll offset of the stage.
+#[test]
+fn w90b_the_rubber_band_is_right_after_a_scroll() {
+    for zoom in [1.0_f32, 3.0] {
+        let mut s = studio_on(4000, 2500);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
+        s.zoom = Some(zoom);
+        s.fit();
+        s.editor.as_mut().unwrap().refresh();
+        let scrolled = (CANVAS, Vector::new(700.0, 500.0));
+        let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
+        let msgs = crate::shared::kit::testing::shot::press_move_scrolled(
+            view(&s, &[], false),
+            SIZE,
+            scrolled,
+            from,
+            to,
+        );
+        // what the pointer travelled, in picture px, is what the band spans
+        for m in msgs {
+            let _ = s.update(m);
+        }
+        let e = s.editor.as_ref().unwrap();
+        let band = e.band_rect().expect("a band");
+        assert!(
+            (band.width - 200.0).abs() < 2.0 && (band.height - 150.0).abs() < 2.0,
+            "zoom {zoom}: {band:?}"
+        );
+        // and it starts where the picture point under the first press is
+        let start = e.to_display_point(e.to_image(Point::new(band.x, band.y)));
+        assert!((start.x - band.x).abs() < 1.0);
+    }
+}
+
+/// Owner notes 9 and 4: the unsaved question is a solid modal over a dimmed window (the
+/// picture does not show through), the buttons are one size, Save is the accent primary;
+/// Esc cancels, Enter saves, the X and a press outside cancel.
+#[test]
+fn w90b_the_question_is_a_solid_modal() {
+    let mut s = studio_on(640, 400);
+    draw(&mut s);
+    let _ = s.close_requested();
+    assert!(s.asking());
+    // a press outside the card (the dimmed window) cancels; the picture takes no press
+    let got = click_view(&s, (60.0, 400.0));
+    assert!(matches!(got.as_slice(), [Msg::Cancel]), "{got:?}");
+    // the card's words and buttons
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    for w in ["Don't save", "Cancel", "Save"] {
+        assert!(words.iter().any(|t| t == w), "{w}: {words:?}");
+    }
+    assert!(
+        !words.iter().any(|t| t == "Close"),
+        "no Close text button: {words:?}"
+    );
+    // solid: a point inside the card, away from its words, is the widget colour
+    let size = SIZE;
+    let pixels = {
+        let mut shown = Some(view(&s, &[], false));
+        crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| shown.take()).flatten(),
+            size,
+            1.0,
+        )
+        .0
+    };
+    let at = ((400.0 * size.width + 430.0) * 4.0) as usize;
+    let want = crate::shared::kit::themes::c().widget;
+    let got = [pixels[at], pixels[at + 1], pixels[at + 2]];
+    let want = [want.r, want.g, want.b].map(|v| (v * 255.0).round() as u8);
+    assert_eq!(
+        got, want,
+        "the card is solid, the picture does not show through"
+    );
+    // Enter saves, Esc cancels
+    assert!(matches!(
+        s.update(Msg::MenuKey(Nav::Enter)),
+        Outcome::SaveThen(_)
+    ));
+    let _ = s.close_requested();
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.asking());
+}
+
+/// Owner note 4: the shortcuts sheet and the restore sheet are the same modal: an X
+/// (never a Close text button), a press outside closes it.
+#[test]
+fn w90b_every_studio_sheet_closes_by_x_outside_press_and_esc() {
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Shortcuts(true));
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    assert!(!words.iter().any(|t| t == "Close"), "{words:?}");
+    let got = click_view(&s, (4.0, 400.0));
+    assert!(matches!(got.as_slice(), [Msg::Shortcuts(false)]), "{got:?}");
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.shortcuts, "Esc closes it");
+}
+
+/// Owner note 1: the Steps sidebar's toggle is at the END of the options bar's row, the
+/// same spot whether the sidebar is open or closed; the sidebar's header has none.
+#[test]
+fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
+    let mut s = studio_on(640, 400);
+    let at_end = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(SIZE.width - 54.0, 48.0);
+        // the last 40 px of the bar (its padding, then the button)
+        (0..8)
+            .filter(|i| {
+                let at = Point::new(size.width - 14.0 - 4.0 * *i as f32, 24.0);
+                crate::shared::kit::testing::shot::click(options_bar::view(s, e), size, at)
+                    .iter()
+                    .any(|m| matches!(m, Msg::Library))
+            })
+            .count()
+    };
+    assert!(s.sidebar_shown());
+    assert!(at_end(&s) > 0, "open: the toggle at the row's end");
+    // the sidebar's own header has no button
+    let side = crate::shared::kit::testing::shot::click(
+        sidebar::view(&s, &[]),
+        Size::new(super::SIDEBAR, 700.0),
+        Point::new(super::SIDEBAR - 20.0, 20.0),
+    );
+    assert!(!side.iter().any(|m| matches!(m, Msg::Library)), "{side:?}");
+    let _ = s.update(Msg::Library);
+    assert!(!s.sidebar_shown());
+    assert!(at_end(&s) > 0, "closed: the same spot opens it again");
+}
+
+/// Draws `s` once, so each tracked opener knows where it is.
+fn draw_once(s: &Studio) {
+    let mut shown = Some(view(s, &[], false));
+    let _ = crate::shared::kit::testing::shot::redrawn(
+        |i| (i == 0).then(|| shown.take()).flatten(),
+        SIZE,
+        1.0,
+    );
+}
+
+/// Owner note 2: a popover hangs directly under its own button, end edge on the button's
+/// end edge, kept inside the window (above when there is no room below); Arabic mirrored.
+#[test]
+fn w90b_a_popover_opens_under_its_own_button() {
+    use crate::shared::kit::popover::place;
+    let button = iced::Rectangle::new(Point::new(1000.0, 50.0), Size::new(90.0, 32.0));
+    let card = Size::new(324.0, 200.0);
+    let win = Size::new(1280.0, 800.0);
+    let at = place(button, card, true, win);
+    assert_eq!(
+        at.x + card.width,
+        button.x + button.width,
+        "end edge on the button's end edge"
+    );
+    assert_eq!(at.y, button.y + button.height + 4.0, "directly under it");
+    // no room to the right: kept inside the window
+    let edge = iced::Rectangle::new(Point::new(1250.0, 50.0), Size::new(30.0, 32.0));
+    assert!(place(edge, card, false, win).x + card.width <= win.width);
+    // no room below: above
+    let low = iced::Rectangle::new(Point::new(300.0, 700.0), Size::new(90.0, 32.0));
+    assert!(place(low, card, true, win).y + card.height <= low.y);
+    // Arabic: the start edge becomes the right one, so an `end` card hangs by the left edge
+    {
+        let _ar = crate::shared::kit::testing::arabic();
+        let left = iced::Rectangle::new(Point::new(300.0, 50.0), Size::new(90.0, 32.0));
+        assert_eq!(place(left, card, true, win).x, left.x);
+    }
+    // the real window: draw it once, open Actions, its first row is right under the button
+    let mut s = two_boxes();
+    draw_once(&s);
+    let anchor = s.anchors.of(popovers::Pop::Actions).get();
+    assert!(
+        anchor.width > 0.0 && anchor.y > 40.0,
+        "the opener knows its place: {anchor:?}"
+    );
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
+    let (size, end) = popovers::Pop::Actions.card();
+    let at = place(anchor, size, end, s.window);
+    let got = click_view(&s, (at.x + 60.0, at.y + 12.0 + 16.0));
+    assert!(
+        got.iter().any(|m| matches!(m, Msg::Act(Row::CopyText))),
+        "the first row sits under the button: {got:?} at {at:?}"
+    );
+}
+
+/// Owner note 3: Studio settings are a familiar settings window: a gear in the header, a
+/// list of sections on the left, the section's title and one-line subtitle, groups with
+/// small headings, rows (label + grey text, control), an X at the top, and an outside
+/// press closes it (Esc too).
+#[test]
+fn w90b_studio_settings_are_a_familiar_settings_window() {
+    let mut s = studio_on(640, 400);
+    // the gear: a visible button in the header row, near the menus
+    let gear = (0..80)
+        .map(|i| Point::new(180.0 + 2.0 * i as f32, 20.0))
+        .any(|at| {
+            click_view(&s, (at.x, at.y))
+                .iter()
+                .any(|m| matches!(m, Msg::OpenPrefs))
+        });
+    assert!(gear, "a gear button opens the preferences");
+    let _ = s.update(Msg::OpenPrefs);
+    let words = crate::shared::kit::testing::shot::texts(view(&s, &[], false));
+    for w in [
+        "General",
+        "Appearance",
+        "Saving and export",
+        "Copy and paste",
+        "Editing",
+        "Keyboard shortcuts",
+    ] {
+        assert!(words.iter().any(|t| t == w), "section {w}: {words:?}");
+    }
+    // the section's subtitle and a small group heading
+    assert!(
+        words.iter().any(|t| t.starts_with("How the Studio opens")),
+        "{words:?}"
+    );
+    assert!(
+        words.iter().any(|t| t.eq_ignore_ascii_case("Opening")),
+        "{words:?}"
+    );
+    assert!(
+        !words.iter().any(|t| t == "Close"),
+        "an X, not a Close button: {words:?}"
+    );
+    // a press on the dim outside the dialog closes it
+    let got = click_view(&s, (3.0, 400.0));
+    assert!(
+        got.iter()
+            .any(|m| matches!(m, Msg::Prefs(preferences::Msg::Close))),
+        "{got:?}"
+    );
+    // Esc closes it too
+    let _ = s.update(Msg::Cancel);
+    assert!(s.prefs.is_none());
+}
+
+/// Owner note 5: the Studio's keys are editable in its preferences: record a new key
+/// (Esc stops), conflicts are refused and said, Reset gives the default back, and the
+/// key handler, menus and sheet all read the same table.
+#[test]
+fn w90b_studio_shortcuts_can_be_recorded_refused_and_reset() {
+    use super::keys::{Cmd, Taken};
+    let mut d = preferences::Dialog::open(None);
+    // record Open as Ctrl+Shift+O
+    assert!(matches!(
+        d.update(preferences::Msg::Record(Cmd::Open)),
+        preferences::Out::None
+    ));
+    assert!(d.recording());
+    assert!(matches!(
+        d.update(preferences::Msg::Recorded("Ctrl+Shift+O".into())),
+        preferences::Out::Changed
+    ));
+    assert!(!d.recording());
+    let mut c = config::Config::default();
+    d.apply(&mut c);
+    assert_eq!(
+        c.studio.shortcuts.get("open").map(String::as_str),
+        Some("Ctrl+Shift+O")
+    );
+    // a chord another command has is refused, and so is an editing key
+    let _ = d.update(preferences::Msg::Record(Cmd::Fit));
+    assert!(matches!(
+        d.update(preferences::Msg::Recorded("Ctrl+B".into())),
+        preferences::Out::None
+    ));
+    assert_eq!(
+        keys::taken(Cmd::Fit, "Ctrl+B"),
+        Some(Taken::Command(Cmd::StepsSidebar))
+    );
+    assert_eq!(keys::taken(Cmd::Fit, "Ctrl+Z"), Some(Taken::Fixed));
+    assert!(keys::taken(Cmd::Fit, "Ctrl+Alt+9").is_none());
+    // Esc stops waiting
+    let _ = d.update(preferences::Msg::Record(Cmd::Fit));
+    d.stop_recording();
+    assert!(!d.recording());
+    // Reset: Open has its own key again
+    assert!(matches!(
+        d.update(preferences::Msg::ResetKey(Cmd::Open)),
+        preferences::Out::Changed
+    ));
+    let mut c = config::Config::default();
+    d.apply(&mut c);
+    assert!(c.studio.shortcuts.is_empty());
+    // the file: a chord that is none is dropped, a good one kept
+    let (c, warnings) = config::Config::parse(
+        "[studio.shortcuts]\nopen = \"Ctrl+Shift+O\"\nfit = \"nonsense++\"\n",
+    );
+    assert_eq!(c.studio.shortcuts.len(), 1, "{:?}", c.studio.shortcuts);
+    assert!(!warnings.is_empty());
+    // the keys the table gives: defaults, and the chord text of a pressed key
+    assert_eq!(keys::of(Cmd::Open), "Ctrl+O");
+    assert_eq!(keys::command_for("Ctrl+B"), Some(Cmd::StepsSidebar));
+    use iced::keyboard::{Key, Modifiers, key::Code, key::Physical};
+    let chord = keys::chord_text(
+        Modifiers::CTRL | Modifiers::SHIFT,
+        &Key::Character("o".into()),
+        Physical::Code(Code::KeyO),
+    );
+    assert_eq!(chord.as_deref(), Some("Ctrl+Shift+O"));
+    assert!(
+        keys::chord_text(
+            Modifiers::empty(),
+            &Key::Character("a".into()),
+            Physical::Code(Code::KeyA)
+        )
+        .is_none()
+    );
+}
+
+/// Runs `body` with `change` applied to the running config on this test's own thread
+/// (no other test sees it).
+fn with_config<R>(change: impl FnOnce(&mut config::Config), body: impl FnOnce() -> R) -> R {
+    let mut changed = config::current();
+    change(&mut changed);
+    config::with_test_config(changed, body)
+}
+
+/// Owner note 6: every Studio preference acts in the open Studio (or at its next
+/// opening, where that is what the row says). One check per row.
+#[test]
+fn w90b_every_studio_preference_acts() {
+    use crate::shared::config::{Format, StudioBackdrop, StudioSide, StudioWheel, StudioZoom};
+    let texts = |s: &Studio| crate::shared::kit::testing::shot::texts(view(s, &[], false));
+
+    // Start screen: off = no Open / Paste / recent files, only the drop zone's words
+    with_config(
+        |c| c.studio.start_screen = false,
+        || {
+            let words = texts(&Studio::new(StudioConfig::default()));
+            assert!(
+                !words.iter().any(|t| t == "Open…" || t == "Paste"),
+                "{words:?}"
+            );
+        },
+    );
+    let words = texts(&Studio::new(StudioConfig::default()));
+    assert!(words.iter().any(|t| t == "Open…"), "on: Open is there");
+
+    // Show Steps when the Studio opens
+    with_config(
+        |c| c.studio.steps_on_start = false,
+        || assert!(!Studio::new(StudioConfig::default()).sidebar_shown()),
+    );
+    assert!(Studio::new(StudioConfig::default()).sidebar_shown());
+
+    // Steps sidebar side: the sidebar's Add at the left, the rail at the right
+    with_config(
+        |c| c.studio.steps_side = StudioSide::Start,
+        || {
+            let s = studio_on(640, 400);
+            assert!(s.sidebar_at_start());
+            let add = click_view(&s, (130.0, 155.0));
+            assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
+            let rail = click_view(&s, (1252.0, 155.0));
+            assert!(
+                rail.iter()
+                    .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
+            );
+        },
+    );
+
+    // Ask before closing with unsaved changes
+    let dirty = || {
+        let mut s = studio_on(64, 64);
+        draw(&mut s);
+        s
+    };
+    assert!(dirty().asks());
+    with_config(
+        |c| c.studio.ask_unsaved = false,
+        || assert!(!dirty().asks()),
+    );
+
+    // Keep unsaved work: an edit waits for its copy only when it is on
+    with_config(
+        |c| c.studio.keep_unsaved = true,
+        || assert!(dirty().quiet.waiting()),
+    );
+    assert!(!dirty().quiet.waiting());
+
+    // Reopen the last picture
+    let mut fresh = Studio::new(StudioConfig::default());
+    let _ = fresh.update(Msg::Recent(
+        vec![(
+            PathBuf::from("/x/last.png"),
+            iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]),
+        )],
+        vec![String::new()],
+    ));
+    with_config(
+        |c| c.studio.reopen_last = true,
+        || {
+            let mut s = Studio::new(StudioConfig::default());
+            let out = s.update(Msg::Recent(
+                vec![(
+                    PathBuf::from("/x/last.png"),
+                    iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]),
+                )],
+                vec![String::new()],
+            ));
+            assert!(matches!(out, Outcome::Read(_)));
+        },
+    );
+
+    // Recent files shown: 0 hides the list on the start screen
+    with_config(
+        |c| c.studio.recent_files = 0,
+        || {
+            let words = texts(&fresh);
+            assert!(!words.iter().any(|t| t == "last.png"), "{words:?}");
+        },
+    );
+    assert!(texts(&fresh).iter().any(|t| t == "last.png"));
+
+    // Zoom on a new picture
+    with_config(
+        |c| c.studio.zoom_on_open = StudioZoom::Actual,
+        || {
+            let s = studio_on(4000, 2500);
+            assert!((s.editor.as_ref().unwrap().zoom - 1.0).abs() < 0.001);
+        },
+    );
+    assert!(studio_on(4000, 2500).editor.as_ref().unwrap().zoom < 0.5);
+
+    // Canvas background: the stage behind the picture changes
+    let stage_pixel = |s: &Studio| {
+        let mut shown = Some(view(s, &[], false));
+        let (pixels, _) = crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| shown.take()).flatten(),
+            SIZE,
+            1.0,
+        );
+        let at = ((150.0 * SIZE.width + 100.0) * 4.0) as usize;
+        [pixels[at], pixels[at + 1], pixels[at + 2]]
+    };
+    let plain = stage_pixel(&studio_on(64, 64));
+    let others: Vec<[u8; 3]> = [StudioBackdrop::Checkerboard, StudioBackdrop::Dark]
+        .into_iter()
+        .map(|b| {
+            with_config(
+                |c| c.studio.background = b,
+                || stage_pixel(&studio_on(64, 64)),
+            )
+        })
+        .collect();
+    assert!(
+        others.iter().any(|p| *p != plain),
+        "{plain:?} vs {others:?}"
+    );
+
+    // Mouse wheel: it zooms by default; set to scroll it leaves the wheel to the scroll area
+    let wheel = |s: &Studio| {
+        crate::shared::kit::testing::shot::wheel(
+            view(s, &[], false),
+            SIZE,
+            Point::new(500.0, 300.0),
+            1.0,
+        )
+        .iter()
+        .any(|m| matches!(m, Msg::Wheel { .. }))
+    };
+    assert!(
+        wheel(&studio_on(2000, 1500)),
+        "zoom: the wheel is the picture's zoom"
+    );
+    with_config(
+        |c| c.studio.wheel = StudioWheel::Scroll,
+        || assert!(!wheel(&studio_on(2000, 1500)), "scroll: the wheel scrolls"),
+    );
+
+    // Studio theme: its own theme (None = follow OpenCircle's)
+    let mut prefs = config::current().studio;
+    assert!(preferences::theme_of(&prefs).is_none());
+    prefs.theme = "obsidian".into();
+    assert_eq!(
+        preferences::theme_of(&prefs).map(|t| t.id),
+        Some("obsidian")
+    );
+
+    // Format / Quality / Save size: the Save as sheet starts on them after the dialog writes
+    with_config(
+        |c| {
+            c.studio.format = Format::Jpeg;
+            c.studio.quality = 95;
+            c.snip.max_edge = 1568;
+        },
+        || {
+            let mut s = studio_on(64, 64);
+            s.prefs_applied();
+            assert_eq!(
+                (s.export.format, s.export.quality, s.export.max_edge),
+                (crate::features::snip::export::Format::Jpg, 95, 1568)
+            );
+        },
+    );
+
+    // Copy / paste / grow / drag type / snap / grid reach the open picture
+    with_config(
+        |c| {
+            c.studio.ctrl_c_picture = false;
+            c.studio.paste_movable = false;
+            c.studio.grow_canvas = true;
+            c.studio.drag_type = Format::Jpeg;
+            c.studio.snap = false;
+            c.studio.pixel_grid = false;
+        },
+        || {
+            let mut s = studio_on(64, 64);
+            s.prefs_applied();
+            let e = s.editor.as_ref().unwrap();
+            assert!(!e.copy_picture_when_empty && !e.paste_movable && e.grow_canvas && e.drag_jpeg);
+            assert!(!e.snap && !e.grid && !s.snap && !s.grid);
+        },
+    );
+}
+
+/// Review 1: resetting the last custom key empties `[studio.shortcuts]`; the write must
+/// remove the table from a file that already has it.
+#[test]
+fn w90c_resetting_every_shortcut_leaves_the_file() {
+    use super::keys::Cmd;
+    let mut file = config::Config::default();
+    file.studio
+        .shortcuts
+        .insert("open".into(), "Ctrl+Shift+O".into());
+    with_config(
+        |c| *c = file.clone(),
+        || {
+            let mut d = preferences::Dialog::open(None);
+            let _ = d.update(preferences::Msg::ResetKey(Cmd::Open));
+            let mut c = file.clone();
+            d.apply(&mut c);
+            assert!(c.studio.shortcuts.is_empty(), "{:?}", c.studio.shortcuts);
+        },
+    );
+}
+
+/// Review 2: a hand-edited chord is written the one way (Ctrl, Alt, Shift, key); one on a
+/// fixed key or a menu Alt key never shadows it.
+#[test]
+fn w90c_hand_edited_chords_are_canonical_and_never_shadow_fixed_keys() {
+    use super::keys::{self, Cmd, Taken};
+    let (c, _) = config::Config::parse(
+        "[studio.shortcuts]\nopen = \"Shift+Ctrl+O\"\nfit = \"Shift+Alt+9\"\nactual = \"Ctrl+W\"\nsave_as = \"Alt+F\"\n",
+    );
+    assert_eq!(
+        c.studio.shortcuts.get("open").map(String::as_str),
+        Some("Ctrl+Shift+O")
+    );
+    assert_eq!(
+        c.studio.shortcuts.get("fit").map(String::as_str),
+        Some("Alt+Shift+9")
+    );
+    with_config(
+        |cfg| *cfg = c.clone(),
+        || {
+            assert_eq!(keys::of(Cmd::Open), "Ctrl+Shift+O");
+            assert_eq!(keys::of(Cmd::Actual), Cmd::Actual.default_chord());
+            assert_eq!(keys::of(Cmd::SaveAs), Cmd::SaveAs.default_chord());
+            assert_eq!(keys::taken(Cmd::Fit, "Alt+V"), Some(Taken::Fixed));
+        },
+    );
+}
+
+/// Review 5: a command on an Alt chord leaves no pending Alt (its release opens no menu).
+#[test]
+fn w90c_an_alt_chord_does_not_open_the_menu_bar_on_release() {
+    let mut file = config::Config::default();
+    file.studio.shortcuts.insert("fit".into(), "Alt+9".into());
+    with_config(
+        |c| *c = file.clone(),
+        || {
+            let mut s = studio_on(640, 400);
+            let _ = s.update(Msg::AltDown);
+            let cmd = super::keys::command_for("Alt+9").expect("the chord is Fit's");
+            let _ = s.update(cmd.msg());
+            let _ = s.update(Msg::AltUp);
+            assert!(s.menu.is_none(), "the menu bar stayed shut");
+        },
+    );
+}
+
+/// W90c item 2: the empty Studio keeps the options bar's row with its picture controls
+/// dimmed; the Steps toggle is live at the window's end, where it is with a picture.
+#[test]
+fn w90c_the_empty_studio_has_the_steps_toggle_at_the_same_spot() {
+    let toggle_at = |s: &Studio| -> Vec<f32> {
+        // the header is 40 px; the bar's row is under it
+        (0..60)
+            .map(|i| SIZE.width - 8.0 - i as f32)
+            .filter(|x| {
+                click_view(s, (*x, super::HEADER + super::OPTIONS / 2.0))
+                    .iter()
+                    .any(|m| matches!(m, Msg::Library))
+            })
+            .collect()
+    };
+    let empty = Studio::new(StudioConfig::default());
+    assert!(empty.editor.is_none());
+    let with = studio_on(640, 400);
+    let (a, b) = (toggle_at(&empty), toggle_at(&with));
+    assert!(!a.is_empty(), "the toggle is live in the empty Studio");
+    assert_eq!(a, b, "and sits where it does with a picture");
+    // the picture controls are dimmed: pressing Position / Actions does nothing
+    let got = click_view(
+        &empty,
+        (SIZE.width - 120.0, super::HEADER + super::OPTIONS / 2.0),
+    );
+    assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
+}
+
+/// W90d.5: where the time goes, measured (not a gate): `cargo test --release --bin opencircle
+/// studio_delay -- --ignored --nocapture`. At 3440x1440, per action: the update on the UI
+/// thread, and the frame that shows the result (layout + draw, raster of the damaged part).
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_delay_by_action() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(3440.0, 1440.0);
+    let mut sized = Studio::new(StudioConfig::default());
+    let _ = sized.update(Msg::Resized(win));
+    drop(sized);
+    let make = |w: u32, h: u32| {
+        let mut s = Studio::new(StudioConfig::default());
+        let _ = s.update(Msg::Resized(win));
+        s.open(Picture::Crop(crop(w, h)));
+        s.settle_open();
+        // a big picture's smaller copies are made on a thread: wait for them, as a user
+        // would have by the time a menu is opened
+        for _ in 0..1000 {
+            let _ = s.update(Msg::Fit);
+            if w * h < 3_000_000 || s.editor.as_ref().is_some_and(|e| e.display.is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        s
+    };
+    let frames = |states: &[&Studio], steps: &[std::sync::Arc<Step>]| -> Vec<(f64, f64)> {
+        shot::frame_times(|i| states.get(i).map(|s| view::view(s, steps, false)), win)
+    };
+    let line = |what: &str, ms: f64, f: &[(f64, f64)]| {
+        let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
+        println!(
+            "{what:<34} update {ms:>7.1} ms | frames (layout+draw + raster ms): {}",
+            shown.join("  ")
+        );
+    };
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let empty = {
+            let mut s = Studio::new(StudioConfig::default());
+            let _ = s.update(Msg::Resized(win));
+            s
+        };
+        let t = std::time::Instant::now();
+        let a = make(w, h);
+        let open_ms = t.elapsed().as_secs_f64() * 1e3;
+        let f = frames(&[&empty, &a, &a, &a], &[]);
+        line(
+            &format!("open {name} (empty -> picture, +2 idle)"),
+            open_ms,
+            &f,
+        );
+        // pick a tool
+        let mut b = make(w, h);
+        let t = std::time::Instant::now();
+        let _ = b.update(Msg::Editor(Message::Tool(Tool::Rect)));
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        let f = frames(&[&a, &b, &b], &[]);
+        line(&format!("pick Rect tool on {name}"), ms, &f);
+        // a stroke: 4 moves
+        let mut moves = Vec::new();
+        let mut s = make(w, h);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+        let _ = s.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+        let mut upd = 0.0;
+        for k in 1..=4 {
+            let t = std::time::Instant::now();
+            let _ = s.update(Msg::Editor(Message::Move(Point::new(
+                10.0 + 40.0 * k as f32,
+                10.0 + 25.0 * k as f32,
+            ))));
+            upd += t.elapsed().as_secs_f64() * 1e3;
+            let mut again = make(w, h);
+            let _ = again.update(Msg::Editor(Message::Tool(Tool::Pen)));
+            let _ = again.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+            for j in 1..=k {
+                let _ = again.update(Msg::Editor(Message::Move(Point::new(
+                    10.0 + 40.0 * j as f32,
+                    10.0 + 25.0 * j as f32,
+                ))));
+            }
+            moves.push(again);
+        }
+        let mut st: Vec<&Studio> = vec![&a];
+        st.extend(moves.iter());
+        let f = frames(&st, &[]);
+        line(&format!("pen stroke, 4 moves on {name}"), upd / 4.0, &f);
+        // menu, popover, sidebar
+        let mut m = make(w, h);
+        let _ = m.update(Msg::Menu(Some(menu_bar::Menu::File)));
+        let mut p = make(w, h);
+        let _ = p.update(Msg::Pop(Some(popovers::Pop::Info)));
+        let mut sb = make(w, h);
+        let _ = sb.update(Msg::Library);
+        for (what, x) in [
+            ("tool", &b),
+            ("menu", &m),
+            ("popover", &p),
+            ("sidebar", &sb),
+        ] {
+            let d = shot::damage(|i| [&a, x].get(i).map(|s| view::view(s, &[], false)), win);
+            println!("damage after {what} on {name}: {:?}", d.get(1));
+        }
+        let f = frames(&[&a, &m, &a, &p, &a, &sb], &[]);
+        line(&format!("menu / popover / sidebar on {name}"), 0.0, &f);
+    }
+    // "add this picture as a step": the flatten on the UI thread, then the step (PNG + thumbnail) off it
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let s = make(w, h);
+        let t = std::time::Instant::now();
+        let flat = annotate::render(&s.editor.as_ref().unwrap().doc);
+        let flatten = t.elapsed().as_secs_f64() * 1e3;
+        let t = std::time::Instant::now();
+        let _step = Step::new(&flat).unwrap();
+        let make_step = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "add step {name}: flatten (UI thread) {flatten:.1} ms, step made off-thread {make_step:.1} ms"
+        );
+    }
+    // the canvas itself moving across the stage (a pan frame): the picture drawn at a new
+    // offset each frame, at the fit zoom and at 100 %
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        for (zoom, label) in [(None, "fit"), (Some(1.0f32), "100 %")] {
+            let mut s = make(w, h);
+            if zoom.is_some() {
+                s.zoom = Some(1.0 / s.scale);
+                s.fit();
+            }
+            let e = s.editor.as_ref().unwrap();
+            let f = shot::frame_times(
+                |i| {
+                    (i < 6).then(|| {
+                        iced::widget::container(
+                            iced::widget::pin(crate::features::snip::screens::snip_toolbar::canvas::canvas(
+                                e,
+                                1.0,
+                                crate::features::snip::screens::snip_toolbar::canvas::ScreenMap::ONE,
+                            ))
+                            .position(Point::new(-(i as f32) * 9.0, -(i as f32) * 5.0)),
+                        )
+                        .width(iced::Fill)
+                        .height(iced::Fill)
+                        .into()
+                    })
+                },
+                win,
+            );
+            let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
+            println!("pan frames {name} at {label:<6}: {}", shown.join("  "));
+        }
+    }
+}
+
+/// W90d.8 / W90d.10: the Steps sidebar's two pages and the slide between them, the unsaved
+/// question, in English and Arabic (look at each after an update); Esc and the back arrow go back.
+#[test]
+fn the_sidebar_pages_and_the_question_match_their_golden_images() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
+        .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
+        .into();
+    golden::each_theme(|theme, failed| {
+        crate::shared::kit::motion::set_reduced(false); // (the slide is the thing shown)
+        for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
+            app_language::set(lang);
+            let mut s = studio_on(300, 200);
+            let file = format!("studio-sidebar-steps{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            let _ = s.update(Msg::SidebarPage(Page::Export));
+            assert!(s.moving(), "the page slides");
+            let start = s.slide.unwrap().start;
+            // halfway through the slide, and at its end
+            let _ = s.update(Msg::Frame(start + crate::shared::kit::motion::GLIDE / 2));
+            assert!(s.moving() && s.slide_at() > 0.0 && s.slide_at() < 1.0);
+            let file = format!("studio-sidebar-slide{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            let _ = s.update(Msg::Frame(start + crate::shared::kit::motion::GLIDE * 2));
+            assert!(!s.moving(), "the clock stops when it lands");
+            let file = format!("studio-sidebar-export{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            // Esc goes back (a slide again), and the question's buttons
+            let _ = s.update(Msg::Cancel);
+            assert_eq!(s.page, Page::Steps);
+            draw(&mut s);
+            let _ = s.close_requested();
+            assert!(s.asking());
+            let file = format!("studio-question{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+        }
+        app_language::set(Lang::En);
+    });
+}
+
+/// W90d.5: a big picture shown small is drawn from a smaller copy (the full pixels cost 25 ms a
+/// frame on the CPU renderer); a small one, or one near its size, from itself; an edit keeps it.
+#[test]
+fn a_big_picture_shown_small_is_drawn_from_a_smaller_copy() {
+    // (the copies are made on a thread: the next event picks them up)
+    let ready = |s: &mut Studio| {
+        for _ in 0..500 {
+            let _ = s.update(Msg::Fit);
+            if s.editor.as_ref().unwrap().display.is_some() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    let mut s = studio_on(3000, 1500);
+    assert!(
+        s.editor.as_ref().unwrap().display.is_none(),
+        "not before the thread is done"
+    );
+    assert!(ready(&mut s), "4.5 MP at the fit zoom: a copy");
+    let e = s.editor.as_ref().unwrap();
+    let iced::widget::image::Handle::Rgba { width, .. } = e.display.as_ref().unwrap() else {
+        panic!("pixels")
+    };
+    let want = 3000.0 * e.zoom * s.scale;
+    assert!(
+        (*width as f32 - want).abs() <= 1.0 && *width < 3000,
+        "{width} vs {want}"
+    );
+    assert!(e.crisp, "drawn pixel for pixel");
+    // an edit repaints the base: the copy is made again from the new base
+    draw(&mut s);
+    assert!(ready(&mut s));
+    // a small picture never gets one
+    let small = studio_on(800, 500);
+    assert!(small.editor.as_ref().unwrap().display.is_none());
+}
+
+/// W90d.C: a menu, a popover or another tool inserts primitives in the middle of the frame; the
+/// picture and the bars that did not change are not redrawn (paired by index, everything after the
+/// insertion differed and the whole window was repainted: 15-35 ms a frame at 3440x1440).
+#[test]
+fn an_action_redraws_only_what_changed() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(1920.0, 1080.0);
+    let mut s = studio_on(1600, 900);
+    let _ = s.update(Msg::Resized(win));
+    let acts = [
+        Msg::Menu(Some(menu_bar::Menu::File)),
+        Msg::Menu(None),
+        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::Pop(None),
+        Msg::Editor(Message::Tool(Tool::Rect)),
+    ];
+    let frames = shot::frames_of(win, acts.len() + 2, |i, show| {
+        // frame 0 draws the picture; frame 1 is idle; then one action each
+        if i >= 2 {
+            let _ = s.update(acts[i - 2].clone());
+        }
+        show(view::view(&s, &[], false));
+    });
+    let area = |rs: &[Rectangle]| rs.iter().map(|r| r.width * r.height).sum::<f32>();
+    assert_eq!(area(&frames[1].damage), 0.0, "idle: {:?}", frames[1].damage);
+    for (i, f) in frames.iter().enumerate().skip(2) {
+        let hit = area(&f.damage);
+        assert!(
+            hit < win.width * win.height * 0.25,
+            "action {i}: {hit} px of {} redrawn: {:?}",
+            win.width * win.height,
+            f.damage
+        );
+    }
+}
+
+/// W90d.C: per-action frame times with the interface kept between frames (as a window does):
+/// `cargo test --release --bin opencircle studio_frames -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_frames_by_action() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(3440.0, 1440.0);
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let mut s = Studio::new(StudioConfig::default());
+        s.at_rest = false;
+        let _ = s.update(Msg::Resized(win));
+        crate::shared::kit::motion::set_reduced(false);
+        let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
+            .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
+            .into();
+        // each: (label, what it does to the Studio before the frame is drawn)
+        type Act<'a> = (&'a str, Box<dyn Fn(&mut Studio)>);
+        let big = w * h >= 3_000_000;
+        let acts: Vec<Act> = vec![
+            (
+                "open (spinner)",
+                Box::new(move |s| s.open(Picture::Crop(crop(w, h)))),
+            ),
+            (
+                "open (picture)",
+                Box::new(move |s| {
+                    s.settle_open();
+                    for _ in 0..1000 {
+                        let _ = s.update(Msg::Fit);
+                        if !big
+                            || s.editor
+                                .as_ref()
+                                .is_some_and(|e| e.display.is_some() || e.crisp)
+                        {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }),
+            ),
+            ("idle", Box::new(|_| {})),
+            (
+                "pick Rect",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+                }),
+            ),
+            (
+                "pick Pen",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+                }),
+            ),
+            (
+                "stroke press",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+                }),
+            ),
+            (
+                "stroke move 1",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Move(Point::new(60.0, 40.0))));
+                }),
+            ),
+            (
+                "stroke move 2",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Move(Point::new(120.0, 80.0))));
+                }),
+            ),
+            (
+                "stroke release",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Editor(Message::Release));
+                }),
+            ),
+            (
+                "menu (rising 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Menu(Some(menu_bar::Menu::File)));
+                }),
+            ),
+            (
+                "menu (rising 1/3)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(70)));
+                }),
+            ),
+            (
+                "menu (rising 2/3)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(140)));
+                }),
+            ),
+            (
+                "menu (risen)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "menu closed",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Menu(None));
+                }),
+            ),
+            (
+                "popover (rising 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Pop(Some(popovers::Pop::Info)));
+                }),
+            ),
+            (
+                "popover (risen)",
+                Box::new(|s| {
+                    let t = s.rise_from.unwrap();
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "popover closed",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Pop(None));
+                }),
+            ),
+            (
+                "sidebar page (slide 0)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::SidebarPage(Page::Export));
+                }),
+            ),
+            (
+                "sidebar page (slide 1/3)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(67)));
+                }),
+            ),
+            (
+                "sidebar page (slide 2/3)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(133)));
+                }),
+            ),
+            (
+                "sidebar page (landed)",
+                Box::new(|s| {
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "sidebar page back",
+                Box::new(|s| {
+                    let _ = s.update(Msg::SidebarPage(Page::Steps));
+                    let t = s.slide.unwrap().start;
+                    let _ = s.update(Msg::Frame(t + std::time::Duration::from_millis(300)));
+                }),
+            ),
+            (
+                "sidebar toggle",
+                Box::new(|s| {
+                    let _ = s.update(Msg::Library);
+                }),
+            ),
+            (
+                "zoom in (instant)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::ZoomIn);
+                }),
+            ),
+            (
+                "zoom in (instant)",
+                Box::new(|s| {
+                    let _ = s.update(Msg::ZoomIn);
+                }),
+            ),
+        ];
+        let mut stamps: Vec<f64> = Vec::new();
+        let frames = shot::frames_of(win, acts.len() + 1, |i, show| {
+            let t = std::time::Instant::now();
+            if i > 0 {
+                (acts[i - 1].1)(&mut s);
+            }
+            stamps.push(t.elapsed().as_secs_f64() * 1e3);
+            show(view::view(&s, &steps, false));
+        });
+        for (i, f) in frames.iter().enumerate().skip(1) {
+            let area: f32 = f.damage.iter().map(|r| r.width * r.height).sum();
+            let frame = f.draw_ms + f.raster_ms;
+            println!(
+                "{name:<6} {:<24} update {:>6.1} ms | layout+draw {:>5.1} + raster {:>5.1} = {:>5.1} ms ({:>3.0} % of a core at 60 fps) | damage {:>3.0} %",
+                acts[i - 1].0,
+                stamps[i],
+                f.draw_ms,
+                f.raster_ms,
+                frame,
+                frame / 16.7 * 100.0,
+                area / (win.width * win.height) * 100.0
+            );
+        }
+    }
+}
+
+/// W90d.A: what the UI thread pays to open a picture, before (all in place) and after (the thread
+/// starts, the opened picture is taken): `cargo test --release --bin opencircle studio_open_cost
+/// -- --ignored --nocapture`. The crop is built outside the timing (a decoder hands it over).
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_open_cost() {
+    crate::shared::kit::text::load();
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let mut before = Vec::new();
+        let mut start = Vec::new();
+        let mut finish = Vec::new();
+        for _ in 0..3 {
+            let mut s = Studio::new(StudioConfig::default());
+            let c = crop(w, h);
+            let t = std::time::Instant::now();
+            s.open_in_place(c);
+            before.push(t.elapsed().as_secs_f64() * 1e3);
+            let mut s = Studio::new(StudioConfig::default());
+            let c = crop(w, h);
+            let t = std::time::Instant::now();
+            s.open(Picture::Crop(c));
+            start.push(t.elapsed().as_secs_f64() * 1e3);
+            loop {
+                if let Some(ms) = s.poll_open_timed() {
+                    finish.push(ms);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let med = |v: &mut Vec<f64>| {
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[v.len() / 2]
+        };
+        // Add to steps: before = flatten on the UI thread; after = a copy of the document
+        let mut s = Studio::new(StudioConfig::default());
+        s.open(Picture::Crop(crop(w, h)));
+        s.settle_open();
+        let t = std::time::Instant::now();
+        let flat = annotate::render(&s.editor.as_ref().unwrap().doc);
+        let step_before = t.elapsed().as_secs_f64() * 1e3;
+        drop(flat);
+        let t = std::time::Instant::now();
+        s.editor.as_mut().unwrap().refresh();
+        println!(
+            "{name:<6} refresh alone (flatten + base handle): {:.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
+        let t = std::time::Instant::now();
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+        for m in [
+            Message::Press(Point::new(10.0, 10.0)),
+            Message::Move(Point::new(60.0, 40.0)),
+        ] {
+            let _ = s.update(Msg::Editor(m));
+        }
+        let t2 = std::time::Instant::now();
+        let _ = s.update(Msg::Editor(Message::Release));
+        println!(
+            "{name:<6} stroke release alone: {:.1} ms (stroke before it {:.1} ms)",
+            t2.elapsed().as_secs_f64() * 1e3,
+            (t2 - t).as_secs_f64() * 1e3
+        );
+        let t = std::time::Instant::now();
+        let out = s.update(Msg::Editor(Message::AddToSteps));
+        let step_after = t.elapsed().as_secs_f64() * 1e3;
+        assert!(matches!(out, Outcome::AddStepDoc(_)));
+        println!(
+            "{name:<6} add as step, UI thread: before {step_before:>6.1} ms | after {step_after:>5.1} ms (the flatten and the PNG run on a thread)"
+        );
+        println!(
+            "{name:<6} UI thread: before {:>6.1} ms | after: start {:>5.1} ms + take {:>5.1} ms",
+            med(&mut before),
+            med(&mut start),
+            med(&mut finish)
+        );
+    }
+}
+
+/// W90d.A: a big picture is prepared on a thread: `open` only starts it (a spinner shows, the frame
+/// clock runs), the picture is there when the thread is done, with its base painted and its
+/// see-through pixels known. (The 8K stall was 157 ms on the UI thread.)
+#[test]
+fn a_big_picture_opens_off_the_ui_thread() {
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(crop(3000, 2000)));
+    assert!(s.editor.is_none(), "not on the UI thread");
+    assert!(
+        s.opening_since().is_some() && s.moving(),
+        "a spinner and the clock"
+    );
+    s.settle_open();
+    let e = s.editor.as_ref().expect("opened when the thread is done");
+    let iced::widget::image::Handle::Rgba { width, .. } = &e.base else {
+        panic!("pixels")
+    };
+    assert_eq!(
+        *width, 3000,
+        "its base is the picture, not a 1 px placeholder"
+    );
+    // see-through pixels are found by the thread
+    let mut c = crop(2000, 1000);
+    c.rgba[3] = 10;
+    s.open(Picture::Crop(c));
+    s.settle_open();
+    assert!(s.transparent);
+    // a small picture opens at once
+    s.open(Picture::Crop(crop(300, 200)));
+    assert!(s.opening_since().is_none() && s.editor.as_ref().unwrap().doc.image.width == 300);
+}
+
+/// W90d.B: Add to steps hands the host the document to flatten on a thread (an 8K flatten + PNG
+/// was 143 + 126 ms), and the sidebar shows a numbered place for each step being made.
+#[test]
+fn adding_a_step_flattens_off_the_ui_thread_and_shows_its_place() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let mut s = studio_on(300, 200);
+    assert!(
+        matches!(
+            s.update(Msg::Editor(Message::AddToSteps)),
+            Outcome::AddStepDoc(_)
+        ),
+        "the document, not a flattened copy"
+    );
+    let texts = |s: &Studio| shot::texts(view::view(s, &[], false));
+    let before = texts(&s);
+    s.step_pending(1);
+    s.step_pending(1);
+    let after = texts(&s);
+    assert!(
+        !before.iter().any(|t| t == "1")
+            && after.iter().any(|t| t == "1")
+            && after.iter().any(|t| t == "2"),
+        "two numbered places: {after:?}"
+    );
+    s.step_pending(-1);
+    s.step_pending(-1);
+    s.step_pending(-1); // (never below none)
+    assert_eq!(s.steps_pending, 0);
+}
+
+/// W90d.D: at 100 % and magnified 200 % and more the picture draws pixel for pixel (the renderer's
+/// fast path copies only the visible rows: 40 ms down to 1-2 ms for 4K / 8K); between, smooth.
+#[test]
+fn a_picture_at_100_percent_draws_pixel_for_pixel() {
+    let mut s = studio_on(3000, 2000);
+    let _ = s.update(Msg::Resized(Size::new(3440.0, 1440.0)));
+    s.zoom = Some(1.0 / s.scale);
+    s.fit();
+    let e = s.editor.as_ref().unwrap();
+    assert!(e.crisp && e.display.is_none(), "100 %: nearest, no copy");
+    s.zoom = Some(4.0 / s.scale);
+    s.fit();
+    assert!(s.editor.as_ref().unwrap().crisp, "magnified 4x: pixels");
+    s.zoom = Some(1.5 / s.scale);
+    s.fit();
+    assert!(!s.editor.as_ref().unwrap().crisp, "1.5x stays smooth");
+}
+
+/// W90d.F: a menu, a popover or a dialog that opens rises into place over `motion::OPEN` (the
+/// frame clock runs only while it does); with motion off it is simply there.
+#[test]
+fn menus_popovers_and_dialogs_rise_as_they_open() {
+    use crate::shared::kit::motion::{self, OPEN, RISE};
+    motion::set_reduced(false);
+    let mut s = studio_on(300, 200);
+    s.at_rest = false;
+    assert_eq!(s.rise(), 0.0);
+    assert!(!s.moving());
+    for open in [
+        Msg::Menu(Some(menu_bar::Menu::File)),
+        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::OpenPrefs,
+    ] {
+        let _ = s.update(Msg::Cancel);
+        let _ = s.update(Msg::Frame(std::time::Instant::now() + OPEN * 2));
+        let _ = s.update(open.clone());
+        assert!(s.rise() > RISE * 0.9, "{open:?}: starts low: {}", s.rise());
+        assert!(s.moving(), "{open:?}: the clock runs");
+        let start = s.rise_from.unwrap();
+        let _ = s.update(Msg::Frame(start + OPEN / 2));
+        assert!(s.rise() > 0.0 && s.rise() < RISE, "{open:?}: half way");
+        let _ = s.update(Msg::Frame(start + OPEN * 2));
+        assert_eq!(s.rise(), 0.0);
+        assert!(!s.moving(), "{open:?}: the clock stops");
+    }
+    // motion off: nothing to wait for
+    motion::set_reduced(true);
+    let _ = s.update(Msg::Cancel);
+    let _ = s.update(Msg::Menu(Some(menu_bar::Menu::Edit)));
+    assert_eq!(s.rise(), 0.0);
+    motion::set_reduced(false);
+}
+
+/// The Studio's title row is laid out the same in Arabic as in English (logo, File, Edit, View,
+/// gear at the left, title centred, buttons at the right); a menu opens under its opener, kept in
+/// the window, its rows reading right to left. At 1280 and at 3440 wide, both themes.
+#[test]
+fn the_title_row_and_menus_are_the_same_places_in_arabic_and_english() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        for (w, h) in [(1280.0, 800.0), (3440.0, 1440.0)] {
+            for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
+                app_language::set(lang);
+                let mut s = studio_on(300, 200);
+                let _ = s.update(Msg::Resized(Size::new(w, h)));
+                let _ = s.update(Msg::Menu(Some(menu_bar::Menu::View)));
+                let size = Size::new(w, h);
+                let file = format!("studio-titlerow-{w}{tag}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                    view(&s, &[], false)
+                }));
+            }
+        }
+        app_language::set(Lang::En);
+    });
 }

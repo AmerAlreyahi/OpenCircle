@@ -77,7 +77,12 @@
 //! auto = true                       # keep OpenCircle up to date (unset = not asked yet: off)
 //! [studio]                          # OpenCircle Studio (Settings > Studio); written only once changed, additive (no schema bump)
 //! # open_in, reopen_last, ask_unsaved, keep_unsaved, recent_files, folder, file_name, format, quality, ask_where,
-//! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel
+//! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel,
+//! # theme ("follow" | a theme id), steps_side (start | end), steps_on_start, start_screen
+//!
+//! [snip.studio]                   # written only once changed
+//! # hint_seen = true               # Snip's one-time "Edit more in OpenCircle Studio" hint was shown
+//! # walk_transition, walk_ms       # the Studio walkthrough's last transition (0 cut .. 5 wipe) and length
 //!
 //! [snip]
 //! after = "both"                    # both (copy when picked) | editor; an old "copy" reads as both
@@ -164,6 +169,8 @@ mod parse;
 mod store;
 
 pub use look::PRESETS;
+#[cfg(test)]
+pub use store::with_test_config;
 pub use store::{appearance, current, look, look_config, rebase, set_current, update, update_at};
 use {look::*, migrate::*, parse::*};
 
@@ -405,6 +412,18 @@ pub struct AiConfig {
 /// The AI chat's zoom steps (percent; 100 = none).
 pub const CHAT_ZOOM: [u16; 7] = [80, 90, 100, 110, 125, 140, 160];
 
+/// The step after `zoom` (percent) in `CHAT_ZOOM`: `by` > 0 a step larger, < 0
+/// smaller, 0 back to 100 % (the AI chat's and the Studio's Ctrl+= / Ctrl+- / Ctrl+0).
+pub fn zoom_step(zoom: u16, by: i8) -> u16 {
+    let steps = CHAT_ZOOM;
+    let at = (steps.iter().position(|&z| z >= zoom)).unwrap_or(steps.len() - 1);
+    match by.signum() {
+        1 => steps[(at + 1).min(steps.len() - 1)],
+        -1 => steps[at.saturating_sub(1)],
+        _ => 100,
+    }
+}
+
 fn default_chat_zoom(zoom: &u16) -> bool {
     *zoom == 100
 }
@@ -491,6 +510,14 @@ pub struct StudioConfig {
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
     pub walk_format: u8,
+    /// The Studio's UI scale, percent (`CHAT_ZOOM` steps; Ctrl+= / Ctrl+- / Ctrl+0).
+    pub ui_zoom: u16,
+    /// The walkthrough's last transition (`Transition::ALL` index; 1 = Crossfade) and its
+    /// length in ms (one of `WALK_MS`).
+    pub walk_transition: u8,
+    pub walk_ms: u32,
+    /// Snip's one-time "Edit more in OpenCircle Studio" hint has been shown.
+    pub hint_seen: bool,
 }
 
 impl Default for StudioConfig {
@@ -499,11 +526,32 @@ impl Default for StudioConfig {
             library: true,
             options: true,
             walk_format: 0,
+            ui_zoom: 100,
+            walk_transition: 1,
+            walk_ms: 500,
+            hint_seen: false,
         }
     }
 }
 
 impl StudioConfig {
+    /// `self` with only what changed from `old` to `new` taken from `new` (a write
+    /// must never lay a stale copy over what the dialog or Snip wrote meanwhile).
+    pub fn apply_changes(&mut self, old: &Self, new: &Self) {
+        macro_rules! take {
+            ($($f:ident),*) => { $(if old.$f != new.$f { self.$f = new.$f; })* };
+        }
+        take!(
+            library,
+            options,
+            walk_format,
+            ui_zoom,
+            walk_transition,
+            walk_ms,
+            hint_seen
+        );
+    }
+
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -538,7 +586,7 @@ pub enum StudioZoom {
     Actual,
 }
 
-/// What the mouse wheel does on the canvas (`studio.wheel`); Ctrl+wheel is the other.
+/// What the mouse wheel does on the canvas (`studio.wheel`); Ctrl+wheel always zooms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StudioWheel {
@@ -546,6 +594,22 @@ pub enum StudioWheel {
     Scroll,
     Zoom,
 }
+
+/// Which side the Steps sidebar sits on (`studio.steps_side`): the reading start
+/// (left; right in Arabic) or the end. The tools rail takes the other edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudioSide {
+    Start,
+    #[default]
+    End,
+}
+
+/// The walkthrough transition lengths a file may name (`snip.studio.walk_ms`).
+pub const WALK_MS: [u32; 3] = [300, 500, 1000];
+
+/// `studio.theme` when the Studio follows OpenCircle's own theme.
+pub const STUDIO_THEME_FOLLOW: &str = "follow";
 
 /// Quality steps of a saved JPEG (`studio.quality`, percent).
 pub const STUDIO_QUALITY: [u8; 3] = [70, 85, 95];
@@ -592,6 +656,47 @@ pub struct StudioPrefs {
     pub background: StudioBackdrop,
     pub zoom_on_open: StudioZoom,
     pub wheel: StudioWheel,
+    /// `"follow"` (OpenCircle's theme) or a built-in theme id (`DARK_THEMES` / `LIGHT_THEMES`);
+    /// it themes the Studio window only.
+    pub theme: String,
+    pub steps_side: StudioSide,
+    /// The Steps sidebar is shown when the Studio opens.
+    pub steps_on_start: bool,
+    /// The empty Studio shows its start screen (Open, Paste, New snip, recent files).
+    pub start_screen: bool,
+    /// The user's own keys for the Studio's commands (`[studio.shortcuts]`: a command's id
+    /// to a chord such as `"Ctrl+Shift+O"`); a command not here has its default key.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub shortcuts: std::collections::BTreeMap<String, String>,
+}
+
+/// `chord` is a key chord the Studio can bind: modifiers (`Ctrl`, `Alt`, `Shift`) joined by
+/// `+` and one last key name.
+pub fn is_chord(chord: &str) -> bool {
+    let parts: Vec<&str> = chord.split('+').collect();
+    let (key, mods) = match parts.split_last() {
+        Some((k, m)) => (*k, m),
+        None => return false,
+    };
+    let mods_ok = mods.iter().all(|m| matches!(*m, "Ctrl" | "Alt" | "Shift"));
+    let distinct = mods.iter().enumerate().all(|(i, m)| !mods[..i].contains(m));
+    mods_ok && distinct && !key.is_empty() && !matches!(key, "Ctrl" | "Alt" | "Shift")
+}
+
+/// `chord` written the one way the Studio compares keys (`Ctrl`, `Alt`, `Shift`, then the
+/// key), or `None` when it is no chord: a hand-edited `shift+ctrl+o` stays a key that works.
+pub fn canonical_chord(chord: &str) -> Option<String> {
+    if !is_chord(chord) {
+        return None;
+    }
+    let parts: Vec<&str> = chord.split('+').collect();
+    let (key, mods) = parts.split_last()?;
+    let mut out: Vec<&str> = ["Ctrl", "Alt", "Shift"]
+        .into_iter()
+        .filter(|m| mods.contains(m))
+        .collect();
+    out.push(key);
+    Some(out.join("+"))
 }
 
 impl Default for StudioPrefs {
@@ -616,7 +721,12 @@ impl Default for StudioPrefs {
             pixel_grid: true,
             background: StudioBackdrop::Theme,
             zoom_on_open: StudioZoom::Fit,
-            wheel: StudioWheel::Scroll,
+            wheel: StudioWheel::Zoom,
+            theme: STUDIO_THEME_FOLLOW.into(),
+            steps_side: StudioSide::End,
+            steps_on_start: true,
+            start_screen: true,
+            shortcuts: Default::default(),
         }
     }
 }
@@ -625,6 +735,22 @@ impl StudioPrefs {
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// The picture sizes offered for Copy / Save (`snip.max_edge`; 0 = Original): Settings >
+/// Snip and the Studio's preferences show this one list.
+pub fn size_choices() -> [(u32, &'static str); 4] {
+    [
+        (1024, "1024"),
+        (1568, "1568"),
+        (2048, "2048"),
+        (0, crate::t!(s_original)),
+    ]
+}
+
+/// Why a Studio file name pattern is refused (`studio.file_name`), for the preferences dialog.
+pub fn check_studio_file_name(s: &str) -> Result<(), String> {
+    check_file_name(s)
 }
 
 fn is_default_long_max(px: &u32) -> bool {

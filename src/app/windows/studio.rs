@@ -194,6 +194,27 @@ impl Windows {
         }
     }
 
+    /// The clipboard read for Paste as step: a picture joins the Steps, else the pill
+    /// says there is none.
+    pub(super) fn studio_step_pasted(&mut self, image: Option<Crop>) -> Task<Msg> {
+        match image {
+            Some(crop) => self.studio_outcome(Outcome::AddStep(crop)),
+            None => self.toast(crate::t!(st_no_picture), false, None, TOAST_MS),
+        }
+    }
+
+    /// Pictures read for the Steps: each joins the strip as the next step.
+    pub(super) fn studio_add_pictures(&mut self, crops: Vec<Crop>) -> Task<Msg> {
+        if crops.is_empty() {
+            return self.toast(crate::t!(st_unreadable), false, None, TOAST_MS);
+        }
+        let tasks: Vec<_> = crops
+            .into_iter()
+            .map(|crop| self.studio_outcome(Outcome::AddStep(crop)))
+            .collect();
+        Task::batch(tasks)
+    }
+
     /// The clipboard was read for Ctrl+V: a picture opens; else the editor
     /// pastes its text at `at`; else the pill says there is none.
     pub(super) fn studio_pasted(
@@ -258,7 +279,57 @@ impl Windows {
                     let _ = tx.unbounded_send(path);
                 }
             })
-            .map(|path| Msg::Studio(studio::Msg::Dropped(path))),
+            .map(|path| Msg::Studio(studio::Msg::Picked(path))),
+            Outcome::PickFiles => background(|tx| {
+                let picked = rfd::FileDialog::new()
+                    .set_title(crate::t!(st_open_title))
+                    .add_filter(
+                        crate::t!(st_pictures),
+                        &["png", "jpg", "jpeg", "webp", "bmp", "gif"],
+                    )
+                    .pick_files();
+                if let Some(paths) = picked {
+                    let _ = tx.unbounded_send(paths);
+                }
+            })
+            .map(|paths| Msg::Studio(studio::Msg::AddFiles(paths))),
+            Outcome::AddPictures(paths) => background(move |tx| {
+                let crops: Vec<Crop> = paths
+                    .iter()
+                    .filter_map(|p| match read_picture(p) {
+                        Ok(crop) => Some(crop),
+                        Err(e) => {
+                            crate::log!("[opencircle] studio: {e}");
+                            None
+                        }
+                    })
+                    .collect();
+                let _ = tx.unbounded_send(crops);
+            })
+            .map(Msg::StudioAddPictures),
+            Outcome::PasteStep => background(move |tx| {
+                let _ = tx.unbounded_send(copy::read_image());
+            })
+            .map(Msg::StudioStepPasted),
+            Outcome::SettleDrop(n) => background(move |tx| {
+                std::thread::sleep(studio::DROP_SETTLE);
+                let _ = tx.unbounded_send(n);
+            })
+            .map(|n| Msg::Studio(studio::Msg::DropSettle(n))),
+            Outcome::Place(path) => background(move |tx| {
+                let _ = tx.unbounded_send(read_picture(&path));
+            })
+            .map(|read| match read {
+                Ok(crop) => Msg::StudioPasted(Some(crop), None),
+                Err(e) => Msg::StudioRead(Err(e)),
+            }),
+            Outcome::OpenAndAdd(paths) => {
+                let first = paths[0].clone();
+                Task::batch([
+                    self.studio_outcome(Outcome::Read(first)),
+                    self.studio_outcome(Outcome::AddPictures(paths)),
+                ])
+            }
             Outcome::Read(path) => background(move |tx| {
                 let _ = tx.unbounded_send(read_picture(&path));
             })
@@ -351,7 +422,39 @@ impl Windows {
                     live: false,
                 },
             ))),
-            Outcome::Settings => self.open(super::Kind::Settings),
+            Outcome::ApplyPrefs => {
+                if let Some((_, s)) = &mut self.studio {
+                    if let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c)) {
+                        crate::log!("[opencircle] config: {e}");
+                    }
+                    s.prefs_applied();
+                }
+                Task::none()
+            }
+            Outcome::PrefsBrowse => crate::app::background::background(|tx| {
+                let picked = rfd::FileDialog::new()
+                    .set_title(crate::t!(dlg_folder))
+                    .pick_folder();
+                let _ = tx.unbounded_send(picked);
+            })
+            .map(|dir| Msg::Studio(studio::Msg::Browsed(dir))),
+            Outcome::AddStepDoc(doc) => {
+                // (the strip opens on the first screen when there is none yet)
+                match crate::shared::platform::monitor::places()
+                    .into_iter()
+                    .next()
+                {
+                    Some(place) => {
+                        let inset = crate::shared::platform::monitor::taskbar_inset(
+                            place.logical_origin(),
+                            place.size(),
+                            place.scale,
+                        );
+                        self.add_step_of(super::StepSource::Doc(doc), None, place, inset)
+                    }
+                    None => Task::none(),
+                }
+            }
             Outcome::AddStep(crop) => {
                 // the strip opens on the first screen when there is none yet
                 let place = crate::shared::platform::monitor::places()
@@ -392,12 +495,14 @@ impl Windows {
                 });
                 Task::none()
             }
-            Outcome::Panels(panels) => {
-                std::thread::spawn(move || {
-                    if let Err(e) = crate::shared::config::update(|c| c.snip.studio = panels) {
-                        crate::log!("[opencircle] config: {e}");
-                    }
-                });
+            // (written here, in order, and only the keys that changed: a stale copy of the
+            // whole section would undo what Snip or the dialog wrote meanwhile)
+            Outcome::Panels(old, new) => {
+                if let Err(e) = crate::shared::config::update(|c| {
+                    c.snip.studio.apply_changes(&old, &new);
+                }) {
+                    crate::log!("[opencircle] config: {e}");
+                }
                 Task::none()
             }
         }
@@ -445,15 +550,7 @@ fn save_to(
         max_edge,
     };
     let ext = how.format.ext();
-    let (date, time) = save::date_time();
-    let stem = prefs
-        .file_name
-        .replace("{date}", &date)
-        .replace("{time}", &time);
-    let stem = match stem.trim().is_empty() {
-        true => save::stamped_name(""),
-        false => stem,
-    };
+    let stem = studio_stem(&prefs.file_name);
     let Some(folder) = save::start_folder(&prefs.folder) else {
         return Some(Err(not_saved()));
     };
@@ -487,6 +584,16 @@ fn save_to(
     }
     let shown = written.parent().unwrap_or(&written);
     Some(Ok(fmt(S::pill_saved, &[&save::short_path(shown)])))
+}
+
+/// The file name (no extension) Studio preferences' pattern gives now.
+fn studio_stem(pattern: &str) -> String {
+    let (date, time) = save::date_time();
+    let stem = pattern.replace("{date}", &date).replace("{time}", &time);
+    match stem.trim().is_empty() {
+        true => save::stamped_name(""),
+        false => stem,
+    }
 }
 
 /// `bytes` into `path`, or into `<name>-2.<ext>`, `-3` ... when it is taken: created
@@ -577,10 +684,18 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
     }
     let mut dialog = rfd::FileDialog::new()
         .set_title(crate::t!(st_export_where))
-        .set_file_name(format!("{}.{ext}", save::stamped_name("")))
+        .set_file_name(format!(
+            "{}.{ext}",
+            studio_stem(&crate::shared::config::current().studio.file_name)
+        ))
         .add_filter(how.format.name(), &[ext]);
+    // Studio preferences' folder, else the general Save folder
     let config = crate::shared::config::current();
-    if let Some(folder) = save::start_folder(&config.general.save_folder) {
+    let configured = match config.studio.folder.is_empty() {
+        true => &config.general.save_folder,
+        false => &config.studio.folder,
+    };
+    if let Some(folder) = save::start_folder(configured) {
         dialog = dialog.set_directory(folder);
     }
     let path = export::with_ext(dialog.save_file()?, how.format);
@@ -703,7 +818,7 @@ fn key_msg(
     physical_key: keyboard::key::Physical,
     modifiers: keyboard::Modifiers,
 ) -> Option<studio::Msg> {
-    use keyboard::key::{Code, Named, Physical};
+    use keyboard::key::Named;
     if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
         return Some(studio::Msg::Cancel);
     }
@@ -725,22 +840,16 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Space) && modifiers.is_empty() {
         return Some(studio::Msg::Space(true));
     }
+    // the Studio's own commands: the user's keys or the defaults (`studio::keys`)
+    if let Some(chord) = studio::keys::chord_text(modifiers, key, physical_key)
+        && let Some(cmd) = studio::keys::command_for(&chord)
+    {
+        return Some(cmd.msg());
+    }
     if !modifiers.command() {
         return None;
     }
     Some(match (physical_key, key.to_latin(physical_key)) {
-        // panels: Ctrl+B left, Ctrl+Alt+B right, Ctrl+\ both
-        (_, Some('s')) if modifiers.shift() => studio::Msg::Export,
-        (Physical::Code(Code::KeyB), _) if modifiers.alt() => studio::Msg::Panel,
-        (Physical::Code(Code::KeyB), _) => studio::Msg::Library,
-        (Physical::Code(Code::Backslash), _) => studio::Msg::Both,
-        (Physical::Code(Code::Slash), _) => studio::Msg::Shortcuts(true),
-        (Physical::Code(Code::Comma), _) => studio::Msg::Settings,
-        (Physical::Code(Code::Equal | Code::NumpadAdd), _) => studio::Msg::ZoomIn,
-        (Physical::Code(Code::Minus | Code::NumpadSubtract), _) => studio::Msg::ZoomOut,
-        (Physical::Code(Code::Digit0 | Code::Numpad0), _) => studio::Msg::Fit,
-        (Physical::Code(Code::Digit1 | Code::Numpad1), _) => studio::Msg::Actual,
-        (_, Some('o')) => studio::Msg::Open,
         (_, Some('v')) => studio::Msg::Paste,
         (_, Some('w')) => studio::Msg::Caption(crate::shared::kit::header::Caption::Close),
         _ => return None,
@@ -750,13 +859,18 @@ fn key_msg(
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
 /// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
 /// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
-pub(super) fn studio_events(waiting: bool) -> iced::Subscription<Msg> {
+pub(super) fn studio_events(waiting: bool, recording: bool) -> iced::Subscription<Msg> {
     // the unsaved copy's debounce runs on a clock, only while an edit waits for its copy
     let tick = match waiting {
         true => iced::Subscription::run(recovery_ticks).map(|()| Msg::Studio(studio::Msg::Tick)),
         false => iced::Subscription::none(),
     };
-    iced::Subscription::batch([tick, keys()])
+    // while Studio preferences wait for a new key, every chord is that key (Esc stops)
+    let keys = match recording {
+        true => recording_keys(),
+        false => keys(),
+    };
+    iced::Subscription::batch([tick, keys])
 }
 
 /// One message a second while the unsaved copy is kept (a thread on a sleep; a
@@ -775,8 +889,44 @@ fn recovery_ticks() -> impl iced::futures::Stream<Item = ()> {
     })
 }
 
+/// Window-level mouse events the Studio needs wherever the pointer is: the middle
+/// button's release ends a pan even when it happens outside the stage.
+fn mouse_msg(event: &iced::Event) -> Option<studio::Msg> {
+    match event {
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Middle)) => {
+            Some(studio::Msg::Middle(false))
+        }
+        _ => None,
+    }
+}
+
+/// The keys while a new shortcut is recorded: a chord is the answer, Esc stops, nothing acts.
+fn recording_keys() -> iced::Subscription<Msg> {
+    iced::event::listen_with(|event, _, id| {
+        let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        }) = event
+        else {
+            return None;
+        };
+        let m = match key == keyboard::Key::Named(keyboard::key::Named::Escape) {
+            true => studio::Msg::Cancel,
+            false => studio::Msg::Prefs(studio::preferences::Msg::Recorded(
+                studio::keys::chord_text(modifiers, &key, physical_key)?,
+            )),
+        };
+        Some(Msg::StudioEvent(id, m))
+    })
+}
+
 fn keys() -> iced::Subscription<Msg> {
     iced::event::listen_with(|event, status, id| {
+        if let Some(m) = mouse_msg(&event) {
+            return Some(Msg::StudioEvent(id, m));
+        }
         let m = match event {
             iced::Event::Window(window::Event::Focused) => studio::Msg::Focus(true),
             iced::Event::Window(window::Event::FileHovered(_)) => studio::Msg::Hovered(true),
@@ -821,6 +971,19 @@ mod key_tests {
     use super::*;
     use keyboard::key::{Code, Named, Physical};
 
+    /// A middle-button pan ends on the window-level release (outside the stage too).
+    #[test]
+    fn the_middle_button_release_ends_a_pan_anywhere() {
+        let up = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Middle,
+        ));
+        assert!(matches!(mouse_msg(&up), Some(studio::Msg::Middle(false))));
+        let left = iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ));
+        assert!(mouse_msg(&left).is_none());
+    }
+
     /// Esc on the unsaved question = Cancel; Ctrl+Esc and other keys are not.
     #[test]
     fn esc_is_cancel() {
@@ -847,15 +1010,8 @@ mod key_tests {
             key("b", Code::KeyB, ctrl),
             Some(studio::Msg::Library)
         ));
-        let both = ctrl | keyboard::Modifiers::ALT;
-        assert!(matches!(
-            key("b", Code::KeyB, both),
-            Some(studio::Msg::Panel)
-        ));
-        assert!(matches!(
-            key("\\", Code::Backslash, ctrl),
-            Some(studio::Msg::Both)
-        ));
+        // v3.1: one sidebar; Ctrl+\ is no key any more
+        assert!(key("\\", Code::Backslash, ctrl).is_none());
         assert!(matches!(
             key("/", Code::Slash, ctrl),
             Some(studio::Msg::Shortcuts(true))
@@ -908,10 +1064,11 @@ mod key_tests {
         is(k::SAVE_AS, |m| matches!(m, studio::Msg::Export));
         is(k::PASTE, |m| matches!(m, studio::Msg::Paste));
         is(k::CLOSE, |m| matches!(m, studio::Msg::Caption(_)));
-        is(k::LEFT_PANEL, |m| matches!(m, studio::Msg::Library));
-        is(k::RIGHT_PANEL, |m| matches!(m, studio::Msg::Panel));
-        is(k::ALL_PANELS, |m| matches!(m, studio::Msg::Both));
-        is(k::SETTINGS, |m| matches!(m, studio::Msg::Settings));
+        is(k::STEPS_SIDEBAR, |m| matches!(m, studio::Msg::Library));
+        is(k::UI_LARGER, |m| matches!(m, studio::Msg::UiScale(1)));
+        is(k::UI_SMALLER, |m| matches!(m, studio::Msg::UiScale(-1)));
+        is(k::UI_RESET, |m| matches!(m, studio::Msg::UiScale(0)));
+        is(k::PREFERENCES, |m| matches!(m, studio::Msg::OpenPrefs));
         is(k::SHORTCUTS, |m| matches!(m, studio::Msg::Shortcuts(true)));
         is(k::ZOOM_IN, |m| matches!(m, studio::Msg::ZoomIn));
         is(k::ZOOM_OUT, |m| matches!(m, studio::Msg::ZoomOut));
@@ -1073,5 +1230,239 @@ mod tests {
         assert!(ar(1).contains("خطوة واحدة") && ar(2).contains("خطوتان"));
         assert!(ar(5).contains("5 خطوات") && ar(12).contains("12 خطوة"));
         set(Lang::En);
+    }
+}
+
+/// `page` drawn under `theme`: kit styles read the theme at DRAW time and iced builds
+/// every window before it draws any, so a window with a theme of its own sets it
+/// around its own draw (and puts the other back).
+pub(super) fn themed<'a>(
+    page: iced::Element<'a, Msg>,
+    theme: &'static crate::shared::kit::themes::Theme,
+) -> iced::Element<'a, Msg> {
+    crate::shared::kit::wrap::wrap(page, Themed(theme))
+}
+
+struct Themed(&'static crate::shared::kit::themes::Theme);
+
+impl<M> crate::shared::kit::wrap::Hook<M> for Themed {
+    fn draw(
+        &self,
+        content: &iced::Element<'_, M>,
+        tree: &iced::advanced::widget::Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+        use crate::shared::kit::themes;
+        let before = themes::current();
+        themes::set(self.0);
+        (content.as_widget()).draw(tree, renderer, theme, style, layout, cursor, viewport);
+        themes::set(before);
+    }
+
+    fn overlay<'b>(
+        &self,
+        overlay: iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+    ) -> iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>
+    where
+        M: 'b,
+    {
+        iced::advanced::overlay::Element::new(Box::new(ThemedOverlay(self.0, overlay)))
+    }
+}
+
+/// An overlay (a tooltip, a list) drawn under the window's own theme: iced draws overlays
+/// apart from their widget, after the window's draw put the app's theme back.
+struct ThemedOverlay<'b, M>(
+    &'static crate::shared::kit::themes::Theme,
+    iced::advanced::overlay::Element<'b, M, iced::Theme, iced::Renderer>,
+);
+
+impl<'b, M: 'b> iced::advanced::Overlay<M, iced::Theme, iced::Renderer> for ThemedOverlay<'b, M> {
+    fn layout(
+        &mut self,
+        renderer: &iced::Renderer,
+        bounds: iced::Size,
+    ) -> iced::advanced::layout::Node {
+        self.1.as_overlay_mut().layout(renderer, bounds)
+    }
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &iced::advanced::renderer::Style,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+    ) {
+        use crate::shared::kit::themes;
+        let before = themes::current();
+        themes::set(self.0);
+        self.1
+            .as_overlay()
+            .draw(renderer, theme, style, layout, cursor);
+        themes::set(before);
+    }
+    fn operate(
+        &mut self,
+        layout: iced::advanced::layout::Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        self.1.as_overlay_mut().operate(layout, renderer, operation);
+    }
+    fn update(
+        &mut self,
+        event: &iced::Event,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn iced::advanced::Clipboard,
+        shell: &mut iced::advanced::Shell<'_, M>,
+    ) {
+        self.1
+            .as_overlay_mut()
+            .update(event, layout, cursor, renderer, clipboard, shell);
+    }
+    fn mouse_interaction(
+        &self,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: iced::mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> iced::mouse::Interaction {
+        self.1
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+    fn overlay<'a>(
+        &'a mut self,
+        layout: iced::advanced::layout::Layout<'a>,
+        renderer: &iced::Renderer,
+    ) -> Option<iced::advanced::overlay::Element<'a, M, iced::Theme, iced::Renderer>> {
+        let theme = self.0;
+        let nested = self.1.as_overlay_mut().overlay(layout, renderer)?;
+        Some(iced::advanced::overlay::Element::new(Box::new(
+            ThemedOverlay(theme, nested),
+        )))
+    }
+    fn index(&self) -> f32 {
+        self.1.as_overlay().index()
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    use iced::widget::container;
+
+    /// A square that reads its colour from the theme when it is DRAWN.
+    fn lazy<'a>() -> iced::Element<'a, Msg> {
+        container(iced::widget::Space::new())
+            .width(iced::Fill)
+            .height(iced::Fill)
+            .style(|_| container::Style {
+                background: Some(themes::c().bg.into()),
+                ..container::Style::default()
+            })
+            .into()
+    }
+
+    fn corner(view: iced::Element<'_, Msg>) -> [u8; 4] {
+        let size = iced::Size::new(16.0, 16.0);
+        let mut view = Some(view);
+        let (pixels, _) = crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| view.take()).flatten(),
+            size,
+            1.0,
+        );
+        [pixels[0], pixels[1], pixels[2], pixels[3]]
+    }
+
+    fn rgb(c: iced::Color) -> [u8; 3] {
+        [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8)
+    }
+
+    /// Two windows with different themes each draw their own (the Studio's own theme
+    /// never leaks into another window, and the other window's never into the Studio).
+    #[test]
+    fn a_window_with_its_own_theme_draws_it_and_puts_the_other_back() {
+        themes::set(&SAPPHIRE);
+        // both built under the app's theme (as iced builds every window first)
+        let studio = themed(lazy(), &DAYLIGHT);
+        let other = lazy();
+        let got = corner(studio);
+        assert_eq!(got[..3], rgb(DAYLIGHT.c.bg), "the Studio draws Daylight");
+        assert_eq!(
+            themes::current().id,
+            SAPPHIRE.id,
+            "and puts the app's theme back"
+        );
+        let got = corner(other);
+        assert_eq!(
+            got[..3],
+            rgb(SAPPHIRE.c.bg),
+            "the other window draws the app's theme"
+        );
+    }
+
+    /// W90c item 3: a tooltip (an overlay iced draws apart from its widget) of the
+    /// Studio's window is drawn under the Studio's theme, and the app's comes back.
+    #[test]
+    fn w90c_an_overlay_of_the_studio_window_draws_in_its_theme() {
+        use iced::advanced::{Overlay, layout, overlay};
+        struct Probe(std::rc::Rc<std::cell::Cell<&'static str>>);
+        impl Overlay<Msg, iced::Theme, iced::Renderer> for Probe {
+            fn layout(&mut self, _: &iced::Renderer, _: iced::Size) -> layout::Node {
+                layout::Node::new(iced::Size::ZERO)
+            }
+            fn draw(
+                &self,
+                _: &mut iced::Renderer,
+                _: &iced::Theme,
+                _: &iced::advanced::renderer::Style,
+                _: layout::Layout<'_>,
+                _: iced::mouse::Cursor,
+            ) {
+                self.0.set(themes::current().id);
+            }
+        }
+        themes::set(&SAPPHIRE);
+        let seen = std::rc::Rc::new(std::cell::Cell::new(""));
+        let plain: overlay::Element<'_, Msg, iced::Theme, iced::Renderer> =
+            overlay::Element::new(Box::new(Probe(seen.clone())));
+        let wrapped = crate::shared::kit::wrap::Hook::<Msg>::overlay(&Themed(&DAYLIGHT), plain);
+        let node = layout::Node::new(iced::Size::ZERO);
+        wrapped.as_overlay().draw(
+            &mut crate::shared::kit::testing::shot::renderer(),
+            &iced::Theme::Dark,
+            &iced::advanced::renderer::Style::default(),
+            layout::Layout::new(&node),
+            iced::mouse::Cursor::Unavailable,
+        );
+        assert_eq!(
+            seen.get(),
+            DAYLIGHT.id,
+            "the overlay draws the Studio's theme"
+        );
+        assert_eq!(
+            themes::current().id,
+            SAPPHIRE.id,
+            "the app's theme comes back"
+        );
+        // another window's overlay (no hook) draws the app's
+        let other: overlay::Element<'_, Msg, iced::Theme, iced::Renderer> =
+            overlay::Element::new(Box::new(Probe(seen.clone())));
+        other.as_overlay().draw(
+            &mut crate::shared::kit::testing::shot::renderer(),
+            &iced::Theme::Dark,
+            &iced::advanced::renderer::Style::default(),
+            layout::Layout::new(&node),
+            iced::mouse::Cursor::Unavailable,
+        );
+        assert_eq!(seen.get(), SAPPHIRE.id);
     }
 }

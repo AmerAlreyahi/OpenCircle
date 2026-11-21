@@ -1752,8 +1752,6 @@ strings! {
         | "الرسم كاملًا";
     sn_eraser_undo: "Ctrl+Z brings them back"
         | "Ctrl+Z يعيدها";
-    sn_open_studio: "Open in Studio"
-        | "افتح في الاستوديو";
     tray_studio: "Studio"
         | "الاستوديو";
     st_title: "OpenCircle Studio"
@@ -1766,8 +1764,6 @@ strings! {
         | "فتح…";
     st_paste: "Paste"
         | "لصق";
-    st_recent_none: "Pictures you open or save appear here."
-        | "تظهر هنا الصور التي تفتحها أو تحفظها.";
     st_size: "Size"
         | "الحجم";
     st_drawings: "Drawings"
@@ -1798,20 +1794,14 @@ strings! {
         | "لا توجد خلفية لإزالتها هنا";
     st_read_failed: "Couldn't read the text in this picture"
         | "تعذّرت قراءة النص في هذه الصورة";
-    st_show_library: "Show the library"
-        | "أظهر المكتبة";
-    st_hide_library: "Hide the library"
-        | "أخفِ المكتبة";
-    st_show_panel: "Show the picture panel"
-        | "أظهر لوحة الصورة";
-    st_hide_panel: "Hide the picture panel"
-        | "أخفِ لوحة الصورة";
     st_zoom_in: "Zoom in"
         | "تكبير";
     st_zoom_out: "Zoom out"
         | "تصغير";
     st_fit: "Fit"
         | "ملاءمة";
+    st_ask_hint: "Your drawings are not saved yet."
+        | "رسوماتك لم تُحفظ بعد.";
     st_ask_close: "Save the changes to this picture?"
         | "هل تحفظ التغييرات على هذه الصورة؟";
     st_dont_save: "Don't save"
@@ -1834,6 +1824,8 @@ strings! {
         | "افتحها على اللوحة · اسحب لتغيير الترتيب";
     st_export: "Export"
         | "تصدير";
+    st_export_back: "Back to the steps"
+        | "العودة إلى الخطوات";
     st_export_go: "Export…"
         | "تصدير…";
     st_export_md: "Markdown (.md + images)"
@@ -2270,8 +2262,8 @@ strings! {
         | "حفظ باسم…";
     st_copy_picture: "Copy picture"
         | "نسخ الصورة";
-    st_settings: "Settings…"
-        | "الإعدادات…";
+    st_prefs: "Preferences…"
+        | "التفضيلات…";
     st_shortcuts: "Keyboard shortcuts"
         | "اختصارات لوحة المفاتيح";
     st_close: "Close"
@@ -2290,40 +2282,34 @@ strings! {
         | "إلى الواجهة";
     st_to_back: "Send to back"
         | "إلى الخلفية";
-    st_library: "Library"
-        | "المكتبة";
-    st_properties: "Properties"
-        | "الخصائص";
-    st_left_panel: "Left panel"
-        | "اللوحة اليسرى";
-    st_right_panel: "Right panel"
-        | "اللوحة اليمنى";
-    st_all_panels: "All panels"
-        | "كل اللوحات";
-    st_sec_recent: "Recent files"
-        | "الملفات الأخيرة";
-    st_sec_objects: "Objects"
-        | "الكائنات";
-    st_objects_empty: "Your drawings appear here."
-        | "تظهر رسوماتك هنا.";
-    st_actions: "Picture actions"
-        | "إجراءات الصورة";
-    st_save_export: "Save and export"
-        | "الحفظ والتصدير";
+    st_actions_menu: "Actions"
+        | "إجراءات";
+    st_show_steps: "Show the Steps sidebar"
+        | "إظهار الشريط الجانبي للخطوات";
+    st_hide_steps: "Hide the Steps sidebar"
+        | "إخفاء الشريط الجانبي للخطوات";
+    st_add_pictures: "Add pictures…"
+        | "إضافة صور…";
+    st_paste_step: "Paste as step"
+        | "لصق كخطوة";
+    st_position: "Position"
+        | "الموضع";
+    st_more: "More"
+        | "المزيد";
+    st_picture_info: "Picture info"
+        | "معلومات الصورة";
+    st_recent_pictures: "Recent pictures"
+        | "الصور الأخيرة";
     st_opacity: "Opacity"
         | "العتمة";
     st_order: "Order"
         | "الترتيب";
     st_merge: "Merge into picture"
         | "دمج في الصورة";
-    st_pasted: "Pasted picture"
-        | "صورة ملصوقة";
     st_n_objects: "{} objects"
         | "{} كائنات";
     st_add_steps: "Add to steps"
         | "أضف إلى الخطوات";
-    st_tool_selected: "Selected"
-        | "محدد";
     st_hint_select: "Click an object to edit it"
         | "انقر كائنًا لتحريره";
     st_sc_title: "Keyboard shortcuts"
@@ -2340,8 +2326,64 @@ strings! {
         | "تحريك 1 بكسل، 10 بكسل";
     st_sc_order: "Bring forward, send backward"
         | "إلى الأمام وإلى الخلف";
-    st_sc_panels: "Left, right, all panels"
-        | "اللوحة اليسرى واليمنى وكلها";
+    st_ui_larger: "Interface larger"
+        | "تكبير الواجهة";
+    st_ui_smaller: "Interface smaller"
+        | "تصغير الواجهة";
+    st_ui_reset: "Interface size: reset"
+        | "حجم الواجهة: إعادة";
+    pf_grp_opening: "Opening"
+        | "الفتح";
+    pf_grp_sidebar: "Steps sidebar"
+        | "الشريط الجانبي للخطوات";
+    pf_grp_closing: "Closing"
+        | "الإغلاق";
+    pf_grp_theme: "Theme"
+        | "السمة";
+    pf_grp_where: "Where to save"
+        | "مكان الحفظ";
+    pf_grp_file: "The file"
+        | "الملف";
+    pf_grp_copy: "Copy"
+        | "النسخ";
+    pf_grp_paste: "Paste"
+        | "اللصق";
+    pf_grp_drag: "Dragging a picture out"
+        | "سحب الصورة إلى الخارج";
+    pf_grp_tools: "Tools"
+        | "الأدوات";
+    pf_grp_view: "View"
+        | "العرض";
+    pf_grp_commands: "Studio commands"
+        | "أوامر الاستوديو";
+    pf_grp_fixed: "Editing keys (fixed)"
+        | "مفاتيح التحرير (ثابتة)";
+    pf_sub_general: "How the Studio opens, closes and remembers your work."
+        | "كيف يفتح الاستوديو ويُغلق ويتذكر عملك.";
+    pf_sub_appearance: "The Studio's theme and the canvas behind the picture."
+        | "سمة الاستوديو وخلفية اللوحة خلف الصورة.";
+    pf_sub_saving: "Where pictures go and what file they become."
+        | "أين تذهب الصور وبأي ملف تُحفظ.";
+    pf_sub_copy: "What copy, paste and dragging a picture out do."
+        | "ما تفعله أوامر النسخ واللصق وسحب الصورة.";
+    pf_sub_editing: "Tools, snapping, zoom and the mouse wheel."
+        | "الأدوات والالتصاق والتكبير وعجلة الفأرة.";
+    pf_sub_shortcuts: "Click a key to change it; Esc stops."
+        | "انقر مفتاحاً لتغييره؛ Esc للإيقاف.";
+    pf_key_press: "Press the new keys…"
+        | "اضغط المفاتيح الجديدة…";
+    pf_key_none: "Not set"
+        | "غير محدد";
+    pf_key_taken: "{} is already used by {}"
+        | "{} مستخدم بالفعل في {}";
+    pf_key_fixed: "{} is a fixed editing key"
+        | "{} مفتاح تحرير ثابت";
+    pf_keys_reset_all: "Reset all keys"
+        | "إعادة كل المفاتيح";
+    pf_settings_tip: "Studio preferences"
+        | "تفضيلات الاستوديو";
+    st_sc_ui: "Interface size"
+        | "حجم الواجهة";
     st_sc_zoom: "Zoom in, out, fit, 100 %"
         | "تكبير وتصغير وملاءمة و100 %";
     st_sc_file: "Open, save, save as"
@@ -2434,6 +2476,62 @@ strings! {
         | "تعود الألوان والأحجام إلى الافتراضي";
     ss_tool_styles_done: "Tool styles are at the defaults"
         | "أنماط الأدوات على الوضع الافتراضي";
+    ss_prefs: "Studio preferences"
+        | "تفضيلات الاستوديو";
+    ss_prefs_d: "Theme, saving, copy and paste, editing"
+        | "السمة والحفظ والنسخ واللصق والتحرير";
+    ss_prefs_open: "Open Studio preferences"
+        | "فتح تفضيلات الاستوديو";
+    pf_tab_saving: "Saving and export"
+        | "الحفظ والتصدير";
+    pf_tab_copy: "Copy and paste"
+        | "النسخ واللصق";
+    pf_tab_editing: "Editing"
+        | "التحرير";
+    pf_theme: "Theme"
+        | "السمة";
+    pf_theme_d: "Follow OpenCircle, or give the Studio its own theme"
+        | "مثل OpenCircle، أو سمة خاصة بالاستوديو";
+    pf_theme_follow: "Follow OpenCircle"
+        | "مثل OpenCircle";
+    pf_steps_side: "Steps sidebar side"
+        | "جانب شريط الخطوات";
+    pf_steps_side_d: "The tools stay on the other edge"
+        | "تبقى الأدوات على الحافة الأخرى";
+    pf_side_start: "Left"
+        | "اليمين";
+    pf_side_end: "Right"
+        | "اليسار";
+    pf_steps_start: "Show Steps when the Studio opens"
+        | "إظهار الخطوات عند فتح الاستوديو";
+    pf_steps_start_d: "Off keeps the sidebar closed until you open it"
+        | "عند الإيقاف يبقى الشريط مغلقا حتى تفتحه";
+    pf_start_screen: "Show the start screen"
+        | "إظهار شاشة البداية";
+    pf_start_screen_d: "Open, Paste and recent files when no picture is open"
+        | "فتح ولصق والملفات الأخيرة عند عدم وجود صورة";
+    pf_keys_note: "Your Snip key is in Settings > Shortcuts"
+        | "مفتاح لقطة الشاشة في الإعدادات > الاختصارات";
+    sn_studio_btn: "Open in OpenCircle Studio"
+        | "فتح في OpenCircle Studio";
+    sn_studio_hint: "Edit more in OpenCircle Studio"
+        | "حرّر أكثر في OpenCircle Studio";
+    mv_transition: "Transition"
+        | "الانتقال";
+    mv_tr_cut: "Cut"
+        | "قطع";
+    mv_tr_fade: "Crossfade"
+        | "تلاشٍ";
+    mv_tr_slide: "Slide"
+        | "انزلاق";
+    mv_tr_push: "Push"
+        | "دفع";
+    mv_tr_zoom: "Zoom"
+        | "تكبير";
+    mv_tr_wipe: "Wipe"
+        | "مسح";
+    mv_duration: "Transition length"
+        | "مدة الانتقال";
     ss_snap: "Snap to edges and objects"
         | "الالتصاق بالحواف والعناصر";
     ss_snap_d: "Guides help you line things up"
@@ -2468,18 +2566,8 @@ strings! {
         | "تمرير";
     ss_wheel_zoom: "Zooms"
         | "تكبير";
-    ss_left: "Show Library panel"
-        | "إظهار لوحة المكتبة";
-    ss_left_d: "The library: recent files, drawings, steps"
-        | "المكتبة: الملفات الأخيرة والرسومات والخطوات";
-    ss_right: "Show Properties panel"
-        | "إظهار لوحة الخصائص";
-    ss_right_d: "The picture panel and its actions"
-        | "لوحة الصورة وإجراءاتها";
     st_unsaved_picture: "Unsaved picture"
         | "صورة غير محفوظة";
-    st_recent_zero: "Recent files are off · Settings > Studio"
-        | "الملفات الأخيرة متوقفة · الإعدادات > الاستوديو";
     st_select_all: "Select all"
         | "تحديد الكل";
     st_lock_ratio: "Lock ratio"

@@ -60,7 +60,7 @@ mod text;
 
 pub use document::rounded as rounded_path;
 pub use document::{
-    Document, Edit, Image, Item, Shape, clean, hidden, hidden_in_clean, render, span,
+    Document, Edit, Image, Item, Shape, base_of, clean, hidden, hidden_in_clean, render, span,
 };
 #[allow(unused_imports)] // API for the Studio's bar (W87)
 pub use objects::{GrowRefusal, Order, SelectionStyle, clear_clipboard};
@@ -292,6 +292,15 @@ pub fn info(tool: Tool) -> &'static ToolInfo {
         .expect("every tool is listed")
 }
 
+/// How much bigger than a 1080p snip a picture whose short edge is `short` image px is
+/// (1 up to 1080 px): what makes a size that is fixed in image px (the legend's text) look
+/// the same on an 8K photo as on a 1080p snip. Every other default size (stroke, text, step
+/// marker, blur cell, handle reach) is in display px, divided by the zoom, so it follows
+/// the picture by itself.
+pub(crate) fn picture_scale(short: f32) -> f32 {
+    (short / 1080.0).max(1.0)
+}
+
 /// Stroke weight, in display px (as seen on screen, whatever the zoom).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -428,8 +437,12 @@ pub enum Message {
     /// Ctrl+Enter in the Studio: the picture goes to the Steps (`Output::AddStep`).
     AddToSteps,
     SelectAt(Point, bool),
+    // (the Objects list is gone in v3.1: the editor's API keeps these, its tests use them)
+    #[allow(dead_code)]
     SelectIndex(usize, bool),
+    #[allow(dead_code)]
     ToggleHidden(usize),
+    #[allow(dead_code)]
     Reorder {
         from: usize,
         to: usize,
@@ -509,6 +522,9 @@ pub enum Output {
     /// The flattened image for the Steps strip (`Annotator::updating`: in place
     /// of that step).
     AddStep(Crop),
+    /// The Studio's picture for the Steps, not yet flattened (a copy of the document: flattening an
+    /// 8K picture takes 130-180 ms, so the host does it on a thread).
+    AddStepDoc(Box<Document>),
     /// The share sheet is up: fires once the user picked a target (send
     /// `Message::Shared` then); cancelled if the sheet goes without one.
     Sharing(iced::futures::channel::oneshot::Receiver<()>),
@@ -590,6 +606,14 @@ pub struct Annotator {
     /// Copied style: colour, weight.
     style: Option<([u8; 4], Width)>,
     pub(crate) base: image::Handle,
+    /// The Studio's copy of `base` scaled to about what the stage shows (a big picture at a small zoom:
+    /// the CPU renderer redraws a downscaled 8K picture from its full pixels every frame, 25 ms, and
+    /// 1 ms from this); `None`: draw `base`. Cleared whenever `base` is repainted.
+    pub(crate) display: Option<image::Handle>,
+    /// Draw the picture with the renderer's pixel-for-pixel fast path (nearest, clipped rows): the
+    /// Studio sets it when the picture lands 1:1 or from a copy of about its shown size, where it
+    /// looks the same and costs a copy of the visible rows (a linear draw of an 8K picture: 40 ms).
+    pub(crate) crisp: bool,
     /// The legend as the base shows it (placed among the committed items).
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
@@ -629,6 +653,8 @@ pub struct Annotator {
     /// Scrolling capture can run for this editor (the host sets it; the
     /// toolbar button is dimmed without).
     pub scroll: bool,
+    /// Snip's first run ever: the toolbar shows its one-time "Edit more in OpenCircle Studio" hint.
+    pub studio_hint: bool,
     /// A long capture of the area is running: the toolbar keeps only what
     /// finishes it (Copy, Save, Pin, Share, close); the rest is dimmed.
     pub capturing: bool,
@@ -693,8 +719,23 @@ impl Annotator {
         Self::restored(image, zoom, remembered())
     }
 
+    /// `new` with the base already painted (`document::base_of`, made off the UI thread: the
+    /// flatten of an 8K picture is 130-180 ms).
+    pub fn new_with_base(image: Image, zoom: f32, base: image::Handle) -> Self {
+        Self::restored_with(image, zoom, remembered(), Some(base))
+    }
+
     /// `new` with `saved`'s tool and options (a missing or bad one: its default).
     pub(crate) fn restored(image: Image, zoom: f32, saved: EditorConfig) -> Self {
+        Self::restored_with(image, zoom, saved, None)
+    }
+
+    fn restored_with(
+        image: Image,
+        zoom: f32,
+        saved: EditorConfig,
+        base: Option<image::Handle>,
+    ) -> Self {
         let colour = (saved.colour.as_deref())
             .and_then(parse_hex)
             .unwrap_or(style::ANNOTATION[0].into_rgba8());
@@ -735,6 +776,8 @@ impl Annotator {
             picking: false,
             style: None,
             base: image::Handle::from_rgba(1, 1, vec![0; 4]),
+            display: None,
+            crisp: false,
             legend: None,
             live: None,
             pending: None,
@@ -753,6 +796,7 @@ impl Annotator {
             viewport: None,
             grid: false,
             scroll: false,
+            studio_hint: false,
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
@@ -778,8 +822,35 @@ impl Annotator {
             touch: 0,
             saved,
         };
-        editor.refresh();
+        match base {
+            Some(base) => editor.base = base,
+            None => editor.refresh(),
+        }
         editor
+    }
+
+    /// Settings > Studio > "Reset tool styles": this editor and the next ones take
+    /// `saved`'s tool and options (the config's defaults).
+    pub(crate) fn reset_options(&mut self, saved: EditorConfig) {
+        let fresh = Self::restored(
+            Image {
+                width: 1,
+                height: 1,
+                rgba: vec![0; 4],
+            },
+            1.0,
+            saved,
+        );
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        (self.tool, self.colour, self.width, self.stroke) =
+            (fresh.tool, fresh.colour, fresh.width, fresh.stroke);
+        (self.last, self.outline, self.fill) = (fresh.last, fresh.outline, fresh.fill);
+        (self.text_size, self.text_style, self.hex) =
+            (fresh.text_size, fresh.text_style, fresh.hex);
+        (self.assist, self.blur_size, self.blur_cell) =
+            (fresh.assist, fresh.blur_size, fresh.blur_cell);
+        (self.eraser, self.eraser_whole, self.saved) =
+            (fresh.eraser, fresh.eraser_whole, fresh.saved);
     }
 
     /// The tool and options to remember: `saved` with this editor's own.
@@ -935,6 +1006,7 @@ impl Annotator {
             }
             Message::EraserSize(px) => self.eraser = px,
             Message::EraserWhole(on) => self.eraser_whole = on,
+            Message::OpenStudio if self.capturing => {}
             Message::OpenStudio => {
                 self.commit();
                 self.menu = None;
@@ -972,7 +1044,7 @@ impl Annotator {
                 let item = (self.pending.as_ref().map(|p| &p.item))
                     .or_else(|| self.doc.selected.and_then(|i| self.doc.items.get(i)));
                 if let Some(item) = item {
-                    self.style = Some((item.colour, style::level(item, self.zoom)));
+                    self.style = Some((item.colour, style::level(item, self.size_zoom())));
                 }
             }
             Message::PasteStyle => {
@@ -998,7 +1070,10 @@ impl Annotator {
             Message::AddToSteps => {
                 self.commit();
                 self.menu = None;
-                return Some(Output::AddStep(render(&self.doc)));
+                return Some(match self.studio {
+                    true => Output::AddStepDoc(Box::new(self.doc.clone())),
+                    false => Output::AddStep(render(&self.doc)),
+                });
             }
             Message::DragOut => {
                 self.commit();
@@ -1310,9 +1385,9 @@ impl Annotator {
     /// taller than three default brushes is a block, not a line), else the
     /// default.
     fn brush_size(&mut self, p: Point) -> (f32, Option<f32>) {
-        let default = Width::Medium.brush() / self.zoom;
+        let default = Width::Medium.brush() / self.size_zoom();
         if let Some(w) = self.blur_size {
-            return (w.brush() / self.zoom, None);
+            return (w.brush() / self.size_zoom(), None);
         }
         let zoom = self.zoom;
         lines::under(self.bands(), p)
@@ -1436,7 +1511,7 @@ impl Annotator {
         let from = self.doc.items[i].clone();
         // A text's options show (and edit) its own.
         if let Shape::Text { size, style, .. } = &from.shape {
-            (self.text_size, self.text_style) = (size * self.zoom, *style);
+            (self.text_size, self.text_style) = (size * self.size_zoom(), *style);
         }
         (self.outline, self.fill) = (from.outline, from.fill);
         self.begin(Some(i), from.clone(), Drag::Move { from, edits }, p);
@@ -1586,12 +1661,13 @@ impl Annotator {
             self.erase_to(p);
             return;
         }
+        let size_zoom = self.size_zoom();
         if let Some(held) = &mut self.lock
             && !self.shift
         {
             let brush = match self.pending.as_ref().map(|p| &p.item.shape) {
                 Some(Shape::Blur { size, .. }) => *size,
-                _ => Width::Medium.brush() / self.zoom,
+                _ => Width::Medium.brush() / size_zoom,
             };
             p = blur::follow(held, p, brush);
         }
@@ -1886,9 +1962,23 @@ impl Annotator {
         }
     }
 
+    /// The zoom the default sizes (stroke, text, markers, blur cell) are divided by: the
+    /// view's own while a snip or a 1080p picture is shown, so they hold their size on
+    /// screen. A picture bigger than that never gets a default thinner than its fit-view
+    /// one, in IMAGE px (the Photoshop / Paint.NET way: a brush size is in image px), so at
+    /// 100 % on an 8K photo a default line is as bold relative to the picture as a 1080p
+    /// snip's. At the zoom that fits the picture it is the view's own (no change there).
+    pub(crate) fn size_zoom(&self) -> f32 {
+        let v = self.doc.view().size();
+        match picture_scale(v.width.min(v.height)) {
+            s if s > 1.0 => self.zoom.min(1.0 / s),
+            _ => self.zoom,
+        }
+    }
+
     /// A new item of the current tool at `p`, in the current colour and width.
     fn create(&self, p: Point) -> Item {
-        let z = self.zoom;
+        let z = self.size_zoom();
         let shape = match self.tool {
             Tool::Rect => Shape::Rect { a: p, b: p },
             Tool::Ellipse => Shape::Ellipse { a: p, b: p },
@@ -1959,7 +2049,7 @@ impl Annotator {
         let styled = |item: &Item, editor: &Annotator| {
             let mut new = editor.create(Point::ORIGIN);
             new.shape = item.shape.clone();
-            let z = editor.zoom;
+            let z = editor.size_zoom();
             match &mut new.shape {
                 Shape::Text { size, style, .. } => {
                     *size = editor.text_size / z;
@@ -2020,6 +2110,8 @@ impl Annotator {
         }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
+        self.display = None;
+        self.crisp = false;
         self.update_live();
     }
 

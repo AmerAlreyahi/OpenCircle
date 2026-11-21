@@ -14,12 +14,14 @@ mod cut;
 mod edit_text;
 pub(crate) mod editing;
 pub(crate) mod keys;
-mod library;
 mod menu_bar;
 mod options_bar;
-mod properties;
+mod popovers;
+pub mod preferences;
 pub mod recovery;
 mod sheets;
+mod sidebar;
+mod start;
 mod status_bar;
 mod view;
 
@@ -54,21 +56,9 @@ pub const MIN: Size = Size::new(960.0, 600.0);
 const HEADER: f32 = 41.0; // 40 + the hairline
 const RAIL: f32 = 52.0;
 const OPTIONS: f32 = 48.0;
-/// Below this width both panels fold and the Library opens over the stage.
-const NARROW: f32 = 1100.0;
 const STATUS: f32 = 44.0;
-const LIBRARY: f32 = 240.0;
-const PANEL: f32 = 260.0;
-/// Arabic's picture panel is wider (its names are longer; spec §2).
-const PANEL_AR: f32 = 288.0;
-
-/// The picture panel's width in the app's language.
-fn panel_width() -> f32 {
-    match crate::shared::app_language::rtl() {
-        true => PANEL_AR,
-        false => PANEL,
-    }
-}
+/// The Steps sidebar's width.
+const SIDEBAR: f32 = 260.0;
 /// Room kept around a fitted picture.
 const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
@@ -79,10 +69,14 @@ pub const CANVAS: &str = "studio-canvas";
 /// Edit text's inline field.
 pub const FIELD: &str = "studio-edit-field";
 
+/// Files of one drop arrive one by one: the drop settles after this.
+pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
+
 /// The Steps grid: four to a row, the cell and the gap round it.
-const STEP_COLS: usize = 4;
-const STEP_CELL: Size = crate::shared::kit::thumb::MINI;
-const STEP_GAP: f32 = 8.0;
+/// The sidebar's steps: three to a row (236 px: 3 x 72 + 2 x 10), room for the number badge.
+const STEP_COLS: usize = 3;
+const STEP_CELL: Size = Size::new(72.0, 48.0);
+const STEP_GAP: f32 = 10.0;
 
 /// What the Studio opens.
 pub enum Picture {
@@ -106,17 +100,56 @@ enum After {
     Open(Picture),
 }
 
+/// A picture of at least this many pixels (1 MP) is prepared on a thread.
+const BIG_PICTURE: u32 = 1_000_000;
+
+/// What the thread made of a big picture.
+struct Prepared {
+    image: Image,
+    base: image::Handle,
+    alpha: bool,
+}
+
+type OpenSlot = std::sync::Arc<std::sync::Mutex<Option<Prepared>>>;
+
+/// The Steps sidebar's pages: the list, and (drilled into) the export choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Page {
+    #[default]
+    Steps,
+    Export,
+}
+
+/// The sidebar's page change: when it began and which way (`true`: into Export).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Slide {
+    pub start: std::time::Instant,
+    pub into: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
+    /// The Steps sidebar goes to a page (a slide), and the frame clock steps it.
+    SidebarPage(Page),
+    Frame(std::time::Instant),
     Editor(annotate::Message),
     Caption(Caption),
-    /// The side panels' toggles (Ctrl+[ / Ctrl+] / Ctrl+\).
+    /// The Steps sidebar's toggle (its header, View menu, Ctrl+B).
     Library,
-    Panel,
-    Both,
+    /// A popover opens (`Some`) or closes (v3.1).
+    Pop(Option<popovers::Pop>),
+    /// Steps: the file dialog (several pictures), the files it gave or that were
+    /// dropped together, Paste as step.
+    PickFiles,
+    AddFiles(Vec<PathBuf>),
+    PasteStep,
+    /// The middle button pans (drag start / end).
+    Middle(bool),
+    /// Ctrl+= / Ctrl+- / Ctrl+0 scale the Studio's own UI (steps; 0 = reset).
+    UiScale(i8),
     ZoomIn,
     ZoomOut,
-    /// Ctrl+wheel over the stage: `notches` steps (up = in) round the pointer
+    /// The wheel over the stage (it zooms; Ctrl+wheel always does): `notches` steps (up = in) round the pointer
     /// `at` (in the stage).
     Wheel {
         at: Point,
@@ -135,6 +168,17 @@ pub enum Msg {
     /// A file is dragged over the window / dropped on it.
     Hovered(bool),
     Dropped(PathBuf),
+    /// The drop's files have all arrived (`n` of them: a later one voids this).
+    DropSettle(usize),
+    /// The pointer enters / leaves the Steps sidebar.
+    OverSidebar(bool),
+    /// The Open dialog's file.
+    Picked(PathBuf),
+    /// Studio preferences (Ctrl+, / File > Preferences): open, the dialog's own messages,
+    /// the folder picker's answer.
+    OpenPrefs,
+    Prefs(preferences::Msg),
+    Browsed(Option<PathBuf>),
     OpenRecent(PathBuf),
     Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
@@ -162,14 +206,12 @@ pub enum Msg {
     /// The panel's Cut out row; the options bar's Before (`true`) / After.
     CutOut,
     CutView(bool),
+    /// The Cut out panel's close: the cut stays, the compare view goes.
+    CutClose,
     /// A menu opens (`Some`) or closes; a row picked; the keyboard on the bar.
     Menu(Option<Menu>),
     MenuPick(Menu, usize),
     MenuKey(Nav),
-    /// A Library section folds / unfolds (index in `library`).
-    Section(usize),
-    /// The Library over the stage (narrow windows).
-    Overlay,
     /// The shortcuts sheet.
     Shortcuts(bool),
     /// The shortcuts sheet's Edit shortcuts… (Settings); the restore sheet's Later.
@@ -194,11 +236,6 @@ pub enum Msg {
     /// Properties' box fields: a typed value (axis, text), Enter.
     BoundsEdit(usize, String),
     BoundsCommit,
-    /// The Objects list: a press on a row (display slot, top = front), the
-    /// pointer over the list (with the rows' count), the press ends, the eye.
-    ObjPress(usize),
-    ObjMove(Point, usize),
-    ObjRelease,
     PanStart,
     PanEnd,
     /// A second menu's row; View > Snap / Pixel grid; Recent > Clear.
@@ -209,9 +246,8 @@ pub enum Msg {
     /// Board 20: bring the kept copy back / throw it away.
     Restore,
     DiscardCopy,
-    /// File > New snip, File > Settings.
+    /// File > New snip.
     NewSnip,
-    Settings,
     /// The Steps list: a press on a step, the pointer over the list (list px,
     /// with the steps' count), the press ends, the pointer on / off a step.
     StepPress(usize),
@@ -235,6 +271,9 @@ pub enum Msg {
     WalkTime(u8),
     WalkNumbered(bool),
     WalkLoop(bool),
+    /// The walkthrough's one transition between steps, and its length (ms).
+    WalkTransition(crate::features::snip::transition::Transition),
+    WalkTransitionMs(u32),
     WalkGo,
     /// The sheet's Cancel: stops the encoder when one runs, else closes.
     WalkCancel,
@@ -265,6 +304,23 @@ pub enum Outcome {
     Caption(Caption),
     /// The open-file dialog, then `Msg::Dropped` with the file.
     PickFile,
+    /// The preferences dialog changed something: write it (`Studio::apply_prefs`).
+    ApplyPrefs,
+    /// Show the folder picker; answer `Msg::Browsed`.
+    PrefsBrowse,
+    /// The open-file dialog for several pictures, then `Msg::AddFiles`.
+    PickFiles,
+    /// Read these files and add each as a step.
+    AddPictures(Vec<PathBuf>),
+    /// Several files dropped on an empty Studio: the first opens AND all are steps.
+    OpenAndAdd(Vec<PathBuf>),
+    /// One file dropped on an open picture: placed on it as a movable picture.
+    Place(PathBuf),
+    /// A drop's files are still arriving: settle after `DROP_SETTLE`.
+    SettleDrop(usize),
+    /// The clipboard's picture becomes a step.
+    PasteStep,
+
     /// Read this file (a dropped or recent one) and `open` it.
     Read(PathBuf),
     /// Ctrl+V: a picture on the clipboard opens; else the editor pastes its text
@@ -276,7 +332,8 @@ pub enum Outcome {
     SaveThen(Crop),
     Pin(Crop),
     /// The panels changed: remember them.
-    Panels(StudioConfig),
+    /// (what it was, what it is now): the host writes only the keys that differ.
+    Panels(StudioConfig, StudioConfig),
     /// Scroll the stage there (a zoom round the pointer).
     ScrollTo(AbsoluteOffset),
     /// A picture action: the host (the App) runs main mode's own work on the
@@ -312,6 +369,8 @@ pub enum Outcome {
     ExportPicture(Crop, export::Picture),
     /// Add to steps: the picture as drawn joins the Steps strip.
     AddStep(Crop),
+    /// The picture to add as a step, flattened by the host on a thread.
+    AddStepDoc(Box<annotate::Document>),
     /// Write the unsaved copy (the host encodes and writes it off the UI thread).
     KeepCopy(Box<KeepCopy>),
     /// File > New snip: the Snip capture starts.
@@ -320,8 +379,6 @@ pub enum Outcome {
     Prefs(crate::shared::config::StudioPrefs),
     /// Recent > Clear.
     ClearRecent,
-    /// File > Settings…
-    Settings,
 }
 
 pub struct Studio {
@@ -362,8 +419,36 @@ pub struct Studio {
     /// The open menu and its keyboard row; the Library's folded sections
     /// (Recent, Objects, Steps); the narrow Library overlay; the shortcuts sheet.
     pub(super) menu: Option<(Menu, usize)>,
-    pub(super) shut: [bool; 3],
-    pub(super) overlay: bool,
+    pub(super) popover: Option<popovers::Pop>,
+    /// Where each popover's opener was last drawn.
+    pub(super) anchors: popovers::Anchors,
+    /// The picture's smaller copies (halves) for the stage, built when a big picture is shown
+    /// small: the base's handle id they were made from, and (width, pixels) of each.
+    mips: Option<Mips>,
+    /// A middle-button pan is on.
+    middle: bool,
+    /// The Steps sidebar's page and its slide (the frame clock runs only while it moves).
+    pub(super) page: Page,
+    /// Tests: draw a rising menu where it lands (goldens are things at rest); the rise test turns it off.
+    pub(super) at_rest: bool,
+    /// When a menu, popover or dialog began to rise (the frame clock runs until it has).
+    pub(super) rise_from: Option<std::time::Instant>,
+    /// Steps being made on a thread (flatten, PNG, thumbnail): the sidebar shows a place for each.
+    pub(super) steps_pending: usize,
+    /// A big picture is being prepared on a thread: when it began, where the thread leaves it.
+    opening: Option<(std::time::Instant, OpenSlot)>,
+    pub(super) slide: Option<Slide>,
+    pub(super) now: std::time::Instant,
+    /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
+    pub(super) ui_zoom: u16,
+    /// When the last file was dropped (files dropped together are steps).
+    drops: Vec<PathBuf>,
+    /// "Reset tool styles" was pressed: the open editor takes the defaults when written.
+    reset_styles: bool,
+    /// The preferences dialog, over the window while open.
+    pub(super) prefs: Option<preferences::Dialog>,
+    /// The pointer is over the Steps sidebar (a drop there is steps).
+    over_sidebar: bool,
     pub(super) shortcuts: bool,
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
@@ -382,7 +467,6 @@ pub struct Studio {
     /// open second menu, the document's name and the name of the next picture.
     pub(super) space: bool,
     pub(super) shift: bool,
-    pub(super) obj_pick: Reorder,
     quiet: recovery::Debounce,
     pan: Option<Point>,
     pub(super) sub: Option<Sub>,
@@ -437,7 +521,9 @@ impl Walk {
 
 impl Studio {
     /// The empty Studio with the user's panels.
-    pub fn new(panels: StudioConfig) -> Self {
+    pub fn new(mut panels: StudioConfig) -> Self {
+        // Settings > Studio: the Steps sidebar on opening
+        panels.library = crate::shared::config::current().studio.steps_on_start;
         Studio {
             editor: None,
             zoom: None,
@@ -461,8 +547,14 @@ impl Studio {
             cut: None,
             transparent: false,
             menu: None,
-            shut: [false; 3],
-            overlay: false,
+            popover: None,
+            anchors: popovers::Anchors::default(),
+            middle: false,
+            ui_zoom: panels.ui_zoom,
+            drops: Vec::new(),
+            prefs: None,
+            reset_styles: false,
+            over_sidebar: false,
             shortcuts: false,
             context: None,
             pointer: PointerCell::default(),
@@ -473,9 +565,16 @@ impl Studio {
             lock: true,
             space: false,
             shift: false,
-            obj_pick: Reorder::default(),
             quiet: recovery::Debounce::default(),
             pan: None,
+            page: Page::Steps,
+            opening: None,
+            steps_pending: 0,
+            rise_from: None,
+            at_rest: cfg!(test),
+            mips: None,
+            slide: None,
+            now: std::time::Instant::now(),
             sub: None,
             snap: crate::shared::config::current().studio.snap,
             grid: crate::shared::config::current().studio.pixel_grid,
@@ -495,6 +594,10 @@ impl Studio {
                 tenths: 20,
                 how: export::Walkthrough {
                     movie: export::Movie::from_index(panels.walk_format),
+                    transition: crate::features::snip::transition::Transition::from_index(
+                        panels.walk_transition,
+                    ),
+                    transition_ms: panels.walk_ms,
                     ..export::Walkthrough::default()
                 },
                 busy: None,
@@ -503,23 +606,104 @@ impl Studio {
         }
     }
 
-    /// Opens `picture` (fitted); with unsaved drawings it asks first.
+    /// Opens `picture` (fitted); with unsaved drawings it asks first. A big picture is prepared
+    /// on a thread (its base painted, its see-through pixels looked for: 130-220 ms at 8K) while
+    /// the window shows a spinner: the UI thread only starts it (`poll_open` finishes it).
     pub fn open(&mut self, picture: Picture) {
         if self.asks() {
             self.asking = Some(After::Open(picture));
             return;
         }
-        let mut editor = match picture {
-            Picture::Crop(crop) => Annotator::new(
-                Image {
-                    width: crop.width,
-                    height: crop.height,
-                    rgba: crop.rgba,
-                },
-                1.0,
-            ),
-            Picture::Editor(editor) => *editor,
+        match picture {
+            Picture::Crop(crop) if crop.width * crop.height >= BIG_PICTURE => {
+                let slot: OpenSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let out = slot.clone();
+                std::thread::spawn(move || {
+                    let image = Image {
+                        width: crop.width,
+                        height: crop.height,
+                        rgba: crop.rgba,
+                    };
+                    let (base, alpha) = annotate::base_of(&image);
+                    if let Ok(mut out) = out.lock() {
+                        *out = Some(Prepared { image, base, alpha });
+                    }
+                });
+                self.now = std::time::Instant::now();
+                self.opening = Some((self.now, slot));
+            }
+            Picture::Crop(crop) => {
+                let editor = Annotator::new(
+                    Image {
+                        width: crop.width,
+                        height: crop.height,
+                        rgba: crop.rgba,
+                    },
+                    1.0,
+                );
+                self.finish_open(editor, None);
+            }
+            Picture::Editor(editor) => self.finish_open(*editor, None),
+        }
+    }
+
+    /// The big picture's thread is done: open it (a frame tick calls this).
+    fn poll_open(&mut self) {
+        let Some((_, slot)) = &self.opening else {
+            return;
         };
+        let ready = slot.lock().ok().and_then(|mut s| s.take());
+        if let Some(p) = ready {
+            self.opening = None;
+            let editor = Annotator::new_with_base(p.image, 1.0, p.base);
+            self.finish_open(editor, Some(p.alpha));
+        }
+    }
+
+    /// A big picture is being prepared (the window shows a spinner): when it began.
+    pub(super) fn opening_since(&self) -> Option<std::time::Instant> {
+        self.opening.as_ref().map(|(t, _)| *t)
+    }
+
+    /// Tests: the old way, all on the calling thread (what `open` was before the thread).
+    #[cfg(test)]
+    pub fn open_in_place(&mut self, crop: Crop) {
+        let editor = Annotator::new(
+            Image {
+                width: crop.width,
+                height: crop.height,
+                rgba: crop.rgba,
+            },
+            1.0,
+        );
+        self.finish_open(editor, None);
+    }
+
+    /// Tests: `poll_open` once; how long it took when it opened the picture (ms).
+    #[cfg(test)]
+    pub fn poll_open_timed(&mut self) -> Option<f64> {
+        let t = std::time::Instant::now();
+        let was = self.opening.is_some();
+        self.poll_open();
+        (was && self.opening.is_none()).then(|| t.elapsed().as_secs_f64() * 1e3)
+    }
+
+    /// Tests: wait for the big picture's thread and open it.
+    #[cfg(test)]
+    pub fn settle_open(&mut self) {
+        for _ in 0..2000 {
+            if self.opening.is_none() {
+                return;
+            }
+            self.poll_open();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    /// Takes `editor` as the open picture.
+    /// `alpha`: whether it has see-through pixels, when that is known already (its base is then
+    /// painted too).
+    fn finish_open(&mut self, mut editor: Annotator, alpha: Option<bool>) {
         // the widget's live area becomes a plain picture: the crop shows alone
         editor.movable = false;
         editor.studio = true;
@@ -531,16 +715,11 @@ impl Studio {
         self.saved = (editor.doc.items.is_empty()).then(|| editor.doc.state());
         (self.original, self.busy, self.card, self.edit) = (None, None, None, None);
         (self.cutting, self.cut) = (cut::Phase::Idle, None);
-        self.transparent = cut::has_alpha(&editor.doc.image.rgba);
+        self.transparent = alpha.unwrap_or_else(|| cut::has_alpha(&editor.doc.image.rgba));
         // (one counter for every Studio: an answer for a closed one never fits a new one)
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
-        editor.copy_picture_when_empty = prefs.ctrl_c_picture;
-        editor.paste_movable = prefs.paste_movable;
-        editor.grow_canvas = prefs.grow_canvas;
-        editor.drag_jpeg = prefs.drag_type == crate::shared::config::Format::Jpeg;
-        (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
-        (editor.snap, editor.grid) = (self.snap, self.grid);
+        self.prefs_into(&mut editor);
         self.zoom = match prefs.zoom_on_open {
             crate::shared::config::StudioZoom::Actual => Some(1.0 / self.scale),
             crate::shared::config::StudioZoom::Fit => None,
@@ -568,9 +747,12 @@ impl Studio {
                         self.restore_failed = true;
                     }
                 }
+                e.refresh();
+            } else if alpha.is_none() {
+                e.refresh(); // (a prepared picture has its base already)
             }
-            e.refresh();
         }
+        self.fit(); // (the repaint cleared the stage copy)
     }
 
     /// The picture Reopen last brings back (`on`: the setting): the newest recent
@@ -591,6 +773,37 @@ impl Studio {
     /// Settings > Studio > "Ask before closing with unsaved changes".
     fn asks(&self) -> bool {
         self.dirty() && crate::shared::config::current().studio.ask_unsaved
+    }
+
+    /// The sidebar's slide, 0..1 of the way (1 when none runs or motion is reduced).
+    pub(super) fn slide_at(&self) -> f32 {
+        match self.slide {
+            Some(s) => crate::shared::kit::motion::progress(
+                s.start,
+                self.now,
+                crate::shared::kit::motion::GLIDE,
+                crate::shared::kit::motion::Curve::Standard,
+            ),
+            None => 1.0,
+        }
+    }
+
+    fn slide_done(&self, s: Slide) -> bool {
+        crate::shared::kit::motion::done(s.start, self.now, crate::shared::kit::motion::GLIDE)
+            >= 1.0
+    }
+
+    /// The frame clock should run: a slide is moving.
+    /// A step is being made (+1) or has arrived or failed (-1).
+    pub fn step_pending(&mut self, delta: isize) {
+        self.steps_pending = self.steps_pending.saturating_add_signed(delta);
+    }
+
+    pub fn moving(&self) -> bool {
+        self.slide.is_some()
+            || self.rise_from.is_some()
+            || self.opening.is_some()
+            || self.mips.as_ref().is_some_and(|m| m.pending.is_some())
     }
 
     pub fn dirty(&self) -> bool {
@@ -994,9 +1207,45 @@ impl Studio {
     }
 
     pub fn update(&mut self, msg: Msg) -> Outcome {
+        let before = self.layers_up();
         let out = self.update_inner(msg);
         self.sync_blocked();
+        // a menu, popover or dialog that just opened rises to its place (motion off: none)
+        let after = self.layers_up();
+        let animate = !crate::shared::kit::motion::reduced() && !self.at_rest;
+        if (0..after.len()).any(|i| after[i] && !before[i]) && animate {
+            let now = std::time::Instant::now();
+            (self.now, self.rise_from) = (now, Some(now));
+        }
         out
+    }
+
+    /// Which of menu, popover, preferences, shortcuts, question are up.
+    fn layers_up(&self) -> [bool; 5] {
+        [
+            self.menu.is_some(),
+            self.popover.is_some(),
+            self.prefs.is_some(),
+            self.shortcuts,
+            self.asking(),
+        ]
+    }
+
+    /// How far below its place a menu, popover or dialog is now (px): `motion::RISE` as it opens,
+    /// 0 when it has risen (or motion is off).
+    pub(super) fn rise(&self) -> f32 {
+        match self.rise_from {
+            Some(t) => {
+                let k = crate::shared::kit::motion::progress(
+                    t,
+                    self.now,
+                    crate::shared::kit::motion::OPEN,
+                    crate::shared::kit::motion::Curve::Out,
+                );
+                crate::shared::kit::motion::RISE * (1.0 - k)
+            }
+            None => 0.0,
+        }
     }
 
     /// A menu, the right-click menu, a sheet, the narrow overlay or a dialog is up:
@@ -1005,7 +1254,7 @@ impl Studio {
         self.menu.is_some()
             || self.context.is_some()
             || self.shortcuts
-            || (self.overlay && self.narrow())
+            || self.prefs.is_some()
             || self.asking()
             || self.exporting
             || self.card.is_some()
@@ -1013,6 +1262,10 @@ impl Studio {
     }
 
     fn sync_blocked(&mut self) {
+        // (the unsaved question takes over: files that were still arriving are dropped)
+        if self.asking() {
+            self.drops.clear();
+        }
         let blocked = self.blocked();
         if let Some(e) = &mut self.editor {
             e.keys_blocked = blocked;
@@ -1020,6 +1273,7 @@ impl Studio {
     }
 
     fn update_inner(&mut self, msg: Msg) -> Outcome {
+        let old_panels = self.panels;
         let quiet_msg = matches!(
             msg,
             Msg::AltDown
@@ -1027,6 +1281,7 @@ impl Studio {
                 | Msg::Pointer(_)
                 | Msg::Mods(..)
                 | Msg::Tick
+                | Msg::Frame(_)
                 | Msg::Focus(_)
                 | Msg::Scrolled(_)
                 | Msg::Resized(_)
@@ -1048,6 +1303,17 @@ impl Studio {
                 return out;
             }
         }
+        // a pick in a popover (an Actions row, the order buttons, Merge) closes it: its
+        // catch layer must never stay over the picture (Edit text's first pick)
+        if matches!(
+            msg,
+            Msg::Act(_)
+                | Msg::EditText
+                | Msg::CutOut
+                | Msg::Editor(annotate::Message::Order(_) | annotate::Message::Merge)
+        ) {
+            self.popover = None;
+        }
         // the question blocks the picture: nothing changes it until answered
         if self.asking()
             && matches!(
@@ -1056,6 +1322,8 @@ impl Studio {
                     | Msg::Open
                     | Msg::Paste
                     | Msg::Dropped(_)
+                    | Msg::DropSettle(_)
+                    | Msg::Picked(_)
                     | Msg::OpenRecent(_)
                     | Msg::Wheel { .. }
                     | Msg::Act(_)
@@ -1084,6 +1352,11 @@ impl Studio {
             Msg::Act(_) if self.edit.is_some() => Outcome::None,
             Msg::CutView(before) => {
                 self.show_cut(before);
+                Outcome::None
+            }
+            Msg::CutClose => {
+                self.show_cut(false);
+                self.cut = None;
                 Outcome::None
             }
             Msg::CutOut
@@ -1142,24 +1415,73 @@ impl Studio {
             Msg::Editor(m) => self.on_editor(m),
             Msg::Caption(Caption::Close) => self.close_requested(),
             Msg::Caption(c) => Outcome::Caption(c),
-            // narrow: the Library is an overlay, the panels' choices stay as saved
-            Msg::Library | Msg::Panel | Msg::Both if self.narrow() => {
-                self.overlay = !self.overlay;
+            Msg::Library => {
+                self.panels.library = !self.panels.library;
+                self.popover = None;
+                self.fit();
+                Outcome::Panels(old_panels, self.panels)
+            }
+            Msg::Pop(p) => {
+                self.popover = p.filter(|p| self.popover != Some(*p));
                 Outcome::None
             }
-            Msg::Library | Msg::Panel | Msg::Both => {
-                let p = &mut self.panels;
-                match msg {
-                    Msg::Library => p.library = !p.library,
-                    Msg::Panel => p.options = !p.options,
-                    // both: hidden if either shows, else both shown
-                    _ => {
-                        let show = !(p.library || p.options);
-                        (p.library, p.options) = (show, show);
+            Msg::PickFiles => {
+                self.asked = true;
+                Outcome::PickFiles
+            }
+            Msg::AddFiles(files) => match files.is_empty() {
+                true => Outcome::None,
+                false => Outcome::AddPictures(files),
+            },
+            Msg::PasteStep => Outcome::PasteStep,
+            Msg::UiScale(by) => {
+                self.ui_zoom = crate::shared::config::zoom_step(self.ui_zoom, by);
+                // remembered, like the AI chat's text zoom
+                self.panels.ui_zoom = self.ui_zoom;
+                Outcome::Panels(old_panels, self.panels)
+            }
+            Msg::OpenPrefs => {
+                self.popover = None;
+                self.menu = None;
+                self.prefs = Some(preferences::Dialog::open(
+                    crate::shared::paths::pictures_folder(),
+                ));
+                Outcome::None
+            }
+            Msg::Prefs(m) => {
+                let Some(d) = &mut self.prefs else {
+                    return Outcome::None;
+                };
+                if matches!(m, preferences::Msg::ResetToolStyles) {
+                    self.reset_styles = true;
+                }
+                match d.update(m) {
+                    preferences::Out::None => Outcome::None,
+                    preferences::Out::Changed => Outcome::ApplyPrefs,
+                    preferences::Out::Browse => Outcome::PrefsBrowse,
+                    preferences::Out::Close => {
+                        self.prefs = None;
+                        Outcome::None
                     }
                 }
-                self.fit();
-                Outcome::Panels(self.panels)
+            }
+            Msg::Browsed(dir) => match self.prefs.as_mut().map(|d| d.set_folder(dir)) {
+                Some(preferences::Out::Changed) => Outcome::ApplyPrefs,
+                _ => Outcome::None,
+            },
+            Msg::OverSidebar(on) => {
+                self.over_sidebar = on;
+                Outcome::None
+            }
+            Msg::Picked(path) => {
+                self.asked = true;
+                self.next_name = file_name(&path);
+                Outcome::Read(path)
+            }
+            Msg::Middle(on) => {
+                self.middle = on;
+                self.pan = on.then(|| self.pointer.get());
+                Outcome::None
             }
             Msg::ZoomIn | Msg::ZoomOut | Msg::Actual => {
                 let Some(e) = &self.editor else {
@@ -1207,9 +1529,29 @@ impl Studio {
             Msg::Dropped(path) => {
                 self.asked = true;
                 self.hovered = false;
-                self.next_name = file_name(&path);
-                Outcome::Read(path)
+                self.drops.push(path);
+                Outcome::SettleDrop(self.drops.len())
             }
+            // what was dropped: several files = all steps (an empty Studio also opens
+            // the first); one on the Steps sidebar = a step; one on an open picture =
+            // placed on it; one on the empty Studio opens
+            Msg::DropSettle(n) if n == self.drops.len() && n > 0 => {
+                let files = std::mem::take(&mut self.drops);
+                match (files.len(), self.editor.is_some()) {
+                    (1, _) if self.over_sidebar => Outcome::AddPictures(files),
+                    (1, true) => Outcome::Place(files[0].clone()),
+                    (1, false) => {
+                        self.next_name = file_name(&files[0]);
+                        Outcome::Read(files[0].clone())
+                    }
+                    (_, true) => Outcome::AddPictures(files),
+                    (_, false) => {
+                        self.next_name = file_name(&files[0]);
+                        Outcome::OpenAndAdd(files)
+                    }
+                }
+            }
+            Msg::DropSettle(_) => Outcome::None,
             Msg::OpenRecent(path) => {
                 self.asked = true;
                 self.next_name = file_name(&path);
@@ -1263,13 +1605,60 @@ impl Studio {
                 Outcome::None
             }
             Msg::DontSave => self.proceed(),
+            Msg::SidebarPage(page) => {
+                if self.page != page {
+                    let now = std::time::Instant::now();
+                    self.page = page;
+                    self.now = now;
+                    // (motion off: the page is simply there, no clock runs)
+                    self.slide = (!crate::shared::kit::motion::reduced()).then_some(Slide {
+                        start: now,
+                        into: page == Page::Export,
+                    });
+                }
+                Outcome::None
+            }
+            Msg::Frame(now) => {
+                self.now = now;
+                self.poll_open();
+                if self.rise_from.is_some_and(|t| {
+                    crate::shared::kit::motion::done(t, now, crate::shared::kit::motion::OPEN)
+                        >= 1.0
+                }) {
+                    self.rise_from = None;
+                }
+                if self.mips.as_ref().is_some_and(|m| m.pending.is_some()) {
+                    self.fit(); // (the stage copy, once its thread is done)
+                }
+                if self.slide.is_some_and(|s| self.slide_done(s)) {
+                    self.slide = None;
+                }
+                Outcome::None
+            }
             Msg::Cancel => {
-                // Esc ladder: menu, sheet, overlay, the question, Edit text
+                // Esc ladder: a key being recorded, menu, sheet, overlay, the question, Edit text
+                if let Some(d) = self.prefs.as_mut().filter(|d| d.recording()) {
+                    d.stop_recording();
+                    return Outcome::None;
+                }
+                // the sidebar's Export page goes back to the Steps (after the layers over it)
+                if self.page == Page::Export
+                    && self.menu.is_none()
+                    && self.popover.is_none()
+                    && self.prefs.is_none()
+                    && !self.shortcuts
+                    && !self.exporting
+                    && self.context.is_none()
+                    && !self.asking()
+                {
+                    return self.update(Msg::SidebarPage(Page::Steps));
+                }
                 let closed = self.sub.take().is_some()
                     || self.context.take().is_some()
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
-                    || std::mem::take(&mut self.overlay);
+                    || self.popover.take().is_some()
+                    || self.prefs.take().is_some();
                 // the export sheet (a running encoder stops), then the restore sheet (Later)
                 if !closed && self.exporting {
                     return self.update(Msg::WalkCancel);
@@ -1323,6 +1712,7 @@ impl Studio {
                 let Some(last) = self.pan else {
                     return Outcome::None;
                 };
+                self.fit(); // (the stage copy, once its thread is done)
                 self.pan = Some(p);
                 let off = Vector::new(
                     (self.offset.x - (p.x - last.x)).max(0.0),
@@ -1340,30 +1730,6 @@ impl Studio {
                 match self.quiet.due(std::time::Instant::now()) {
                     true => self.copy_job(),
                     false => Outcome::None,
-                }
-            }
-            Msg::ObjPress(slot) => {
-                self.obj_pick.press(slot);
-                Outcome::None
-            }
-            Msg::ObjMove(at, n) => {
-                self.obj_pick.moved(at, 0.0, library::OBJECT_ROW, n);
-                Outcome::None
-            }
-            Msg::ObjRelease => {
-                let n = self.editor.as_ref().map_or(0, |e| e.doc.items.len());
-                // the list shows the front first: slot k is item n - 1 - k
-                match self.obj_pick.release() {
-                    Some(Released::Click(slot)) if slot < n => self.update(Msg::Editor(
-                        annotate::Message::SelectIndex(n - 1 - slot, self.shift),
-                    )),
-                    Some(Released::Moved(from, to)) if from < n && to < n => {
-                        self.update(Msg::Editor(annotate::Message::Reorder {
-                            from: n - 1 - from,
-                            to: n - 1 - to,
-                        }))
-                    }
-                    _ => Outcome::None,
                 }
             }
             Msg::Space(on) => {
@@ -1421,10 +1787,11 @@ impl Studio {
                     true => editing::picture_menu(e),
                     false => editing::object_menu(e),
                 };
-                // the stage's left edge: mirrored, the properties panel sits there
-                let left = match crate::shared::app_language::rtl() {
-                    true => (self.panel_shown() as u8 as f32) * (panel_width() + 1.0),
-                    false => (self.library_shown() as u8 as f32) * (LIBRARY + 1.0) + RAIL + 2.0,
+                // the stage's left edge: mirrored, the Steps sidebar sits there
+                let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
+                let left = match sidebar_left {
+                    true => (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0),
+                    false => RAIL + 2.0,
                 };
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
                 let seps = entries.iter().filter(|r| r.divider).count();
@@ -1500,6 +1867,7 @@ impl Studio {
                     None => Outcome::None,
                 }
             }
+            Msg::MenuKey(Nav::Enter) if self.asking() => self.update(Msg::SaveFirst),
             Msg::MenuKey(key) => {
                 let (menu, pick) = menu_bar::nav(self, key);
                 self.menu = menu;
@@ -1508,30 +1876,24 @@ impl Studio {
                     None => Outcome::None,
                 }
             }
-            Msg::Section(i) => {
-                if let Some(x) = self.shut.get_mut(i) {
-                    *x = !*x;
-                }
-                Outcome::None
-            }
-            Msg::Overlay => {
-                self.overlay = !self.overlay;
-                Outcome::None
-            }
             Msg::Shortcuts(on) => {
                 self.shortcuts = on;
                 Outcome::None
             }
+            // the shortcuts sheet's Edit: the keys are Studio preferences' own page
             Msg::EditShortcuts => {
                 self.shortcuts = false;
-                Outcome::Settings
+                let _ = self.update(Msg::OpenPrefs);
+                if let Some(d) = &mut self.prefs {
+                    d.show_shortcuts();
+                }
+                Outcome::None
             }
             Msg::Later => {
                 self.later = true;
                 Outcome::None
             }
             Msg::NewSnip => Outcome::NewSnip,
-            Msg::Settings => Outcome::Settings,
             Msg::StepPress(i) => {
                 self.pick.press(i);
                 Outcome::None
@@ -1574,7 +1936,7 @@ impl Studio {
             Msg::WalkFormat(movie) => {
                 self.walk.how.movie = movie;
                 self.panels.walk_format = movie.index();
-                Outcome::Panels(self.panels)
+                Outcome::Panels(old_panels, self.panels)
             }
             Msg::WalkProgress(done, total) => {
                 self.walk.busy = self.walk.busy.map(|_| (done, total));
@@ -1590,6 +1952,16 @@ impl Studio {
             Msg::WalkTime(t) => self.walk_set(|w| w.tenths = t),
             Msg::WalkNumbered(on) => self.walk_set(|w| w.how.numbered = on),
             Msg::WalkLoop(on) => self.walk_set(|w| w.how.repeat = on),
+            Msg::WalkTransition(kind) => {
+                self.walk.how.transition = kind;
+                self.panels.walk_transition = kind.index();
+                Outcome::Panels(old_panels, self.panels)
+            }
+            Msg::WalkTransitionMs(ms) => {
+                self.walk.how.transition_ms = ms;
+                self.panels.walk_ms = ms;
+                Outcome::Panels(old_panels, self.panels)
+            }
             Msg::WalkCancel if self.walk.busy.is_some() => Outcome::CancelWalkthrough,
             Msg::WalkCancel => {
                 self.exporting = false;
@@ -1663,6 +2035,7 @@ impl Studio {
             Some(Output::Save(crop)) => Outcome::Save(crop),
             Some(Output::Pin(crop)) => Outcome::Pin(crop),
             Some(Output::AddStep(crop)) => Outcome::AddStep(crop),
+            Some(Output::AddStepDoc(doc)) => Outcome::AddStepDoc(doc),
             // "Grow the canvas past the edge" said no: a plain pill says why
             None if refusal.is_some() => Outcome::Say(grow_words(refusal)),
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
@@ -1671,17 +2044,55 @@ impl Studio {
         }
     }
 
-    /// Narrow windows fold both panels (the Library opens over the stage).
-    pub(super) fn narrow(&self) -> bool {
-        self.window.width < NARROW
+    /// Settings > Studio's switches onto `editor` (as the picture opens, and when the
+    /// dialog changes one while a picture is open).
+    fn prefs_into(&mut self, editor: &mut Annotator) {
+        let prefs = crate::shared::config::current().studio;
+        editor.copy_picture_when_empty = prefs.ctrl_c_picture;
+        editor.paste_movable = prefs.paste_movable;
+        editor.grow_canvas = prefs.grow_canvas;
+        editor.drag_jpeg = prefs.drag_type == crate::shared::config::Format::Jpeg;
+        (self.snap, self.grid) = (prefs.snap, prefs.pixel_grid);
+        (editor.snap, editor.grid) = (self.snap, self.grid);
     }
 
-    pub(super) fn library_shown(&self) -> bool {
-        self.panels.library && !self.narrow()
+    /// The dialog's changes were written: the open picture follows them now (snap,
+    /// pixel grid, Ctrl+C, paste, grow, drag type), and "Reset tool styles" resets
+    /// the editor's own options too.
+    pub fn prefs_applied(&mut self) {
+        if let Some(mut e) = self.editor.take() {
+            self.prefs_into(&mut e);
+            if std::mem::take(&mut self.reset_styles) {
+                e.reset_options(crate::shared::config::current().editor);
+            }
+            self.editor = Some(e);
+        }
+        // (the Save as sheet starts on the format, quality and size the dialog now says)
+        self.export = export_defaults();
     }
 
-    pub(super) fn panel_shown(&self) -> bool {
-        self.panels.options && !self.narrow()
+    /// The dialog's changes onto `c` (the host calls this inside `config::update`).
+    pub fn apply_prefs(&mut self, c: &mut crate::shared::config::Config) {
+        if let Some(d) = &mut self.prefs {
+            d.apply(c);
+        }
+    }
+
+    /// Settings > Studio > Steps sidebar side: at the reading start (left; right in
+    /// Arabic), the rail on the other edge.
+    pub(super) fn sidebar_at_start(&self) -> bool {
+        crate::shared::config::current().studio.steps_side
+            == crate::shared::config::StudioSide::Start
+    }
+
+    /// Studio preferences wait for a new key: the host sends the next chord.
+    pub fn recording(&self) -> bool {
+        self.prefs.as_ref().is_some_and(|d| d.recording())
+    }
+
+    /// The Steps sidebar shows.
+    pub(super) fn sidebar_shown(&self) -> bool {
+        self.panels.library
     }
 
     /// Settings > Studio > "Keep unsaved work": every edit restarts the quiet
@@ -1779,8 +2190,7 @@ impl Studio {
     /// The stage: the window less the header, the rail, the bars and the shown panels.
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = (self.library_shown() as u8 as f32) * (LIBRARY + 1.0)
-            + (self.panel_shown() as u8 as f32) * (panel_width() + 1.0);
+        let side = (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),
@@ -1793,6 +2203,7 @@ impl Studio {
         let (stage, scale, zoom) = (self.stage(), self.scale, self.zoom);
         if let Some(e) = &mut self.editor {
             e.zoom = zoom.unwrap_or_else(|| fit_zoom(e.doc.view().size(), stage, scale));
+            stage_copy(e, scale, &mut self.mips);
         }
         self.sync_view();
     }
@@ -1860,6 +2271,81 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
     (room.width / picture.width.max(1.0))
         .min(room.height / picture.height.max(1.0))
         .min(1.0 / scale.max(0.1))
+}
+
+/// A picture over this many pixels is drawn from a copy of its shown size when shown small.
+const MIP_MIN_PIXELS: u32 = 3_000_000;
+
+/// The copy of one base picture at about the size the stage shows it, made on a thread.
+pub(super) struct Mips {
+    key: iced::advanced::image::Id,
+    /// The copy and its width, once made.
+    ready: Option<(u32, image::Handle)>,
+    /// The thread making one: the width it makes, and where it leaves it.
+    pending: Option<(u32, MipSlot)>,
+}
+
+/// Where the thread leaves the copy.
+type MipSlot = std::sync::Arc<std::sync::Mutex<Option<image::Handle>>>;
+
+/// Sets `e.display` and `e.crisp` for the stage's zoom. Shown at 100 % the picture itself draws
+/// pixel for pixel; shown smaller (over 25 % less) a big picture draws from a copy of about the
+/// shown size, made on a thread (box-filtered: 4K ~17 ms, 8K ~75 ms), until which the picture
+/// draws as before. The renderer's pixel-for-pixel path (nearest) then copies only the visible
+/// rows: the full 8K at the fit zoom cost 22 ms a frame through the linear pipeline, 100 % 40 ms;
+/// this ~1-3 ms (w90d report).
+fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
+    let image::Handle::Rgba {
+        id,
+        width,
+        height,
+        pixels,
+    } = &e.base
+    else {
+        (e.display, e.crisp) = (None, false);
+        return;
+    };
+    let want = (*width as f32 * e.zoom * scale).round().max(1.0);
+    let actual = (want - *width as f32).abs() < 1.0;
+    if *width * *height < MIP_MIN_PIXELS || want * 1.25 > *width as f32 {
+        // (a small or hardly-shrunk picture: itself; at 100 % and magnified 200 % and more, as
+        // the editors do, pixel for pixel: no copy and the fast path)
+        (e.display, e.crisp) = (None, actual || e.zoom * scale >= 2.0);
+        return;
+    }
+    let want = want as u32;
+    if mips.as_ref().is_none_or(|m| m.key != *id) {
+        *mips = Some(Mips {
+            key: *id,
+            ready: None,
+            pending: None,
+        });
+    }
+    let Some(m) = mips else { return };
+    if let Some((w, slot)) = &m.pending
+        && let Some(done) = slot.lock().ok().and_then(|mut s| s.take())
+    {
+        m.ready = Some((*w, done));
+        m.pending = None;
+    }
+    let near = |w: u32| w.abs_diff(want) * 50 <= want; // within 2 %
+    if m.ready.as_ref().is_none_or(|(w, _)| !near(*w)) && m.pending.is_none() {
+        let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (out, (bw, bh), px) = (slot.clone(), (*width, *height), pixels.clone());
+        std::thread::spawn(move || {
+            let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
+            let small =
+                ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(bw, bh, px.as_ref())
+                    .map(|src| ::image::imageops::thumbnail(&src, want, th));
+            if let (Some(small), Ok(mut out)) = (small, out.lock()) {
+                *out = Some(image::Handle::from_rgba(want, th, small.into_raw()));
+            }
+        });
+        m.pending = Some((want, slot));
+    }
+    // (an older size draws meanwhile, stretched a little; none yet: the picture as before)
+    e.display = m.ready.as_ref().map(|(_, h)| h.clone());
+    e.crisp = e.display.is_some();
 }
 
 /// The unsaved copy a Tick hands the host.

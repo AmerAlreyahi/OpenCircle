@@ -784,7 +784,7 @@ impl Annotator {
                     self.stash = Some(self.current_style());
                 }
                 let item = self.doc.items[i].clone();
-                let z = self.zoom;
+                let z = self.size_zoom();
                 self.colour = item.colour;
                 self.hex = super::hex(item.colour);
                 self.width = style::level(&item, z);
@@ -817,7 +817,7 @@ impl Annotator {
         let sel = self.doc.selection();
         let items: Vec<&Item> = sel.iter().map(|&i| &self.doc.items[i]).collect();
         let first = items.first()?;
-        let z = self.zoom;
+        let z = self.size_zoom();
         let same = |f: &dyn Fn(&Item) -> bool| items.iter().all(|i| f(i) == f(first));
         let pics = items
             .iter()

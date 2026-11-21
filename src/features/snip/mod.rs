@@ -7,6 +7,7 @@ pub(crate) mod export;
 pub(crate) mod movie;
 pub(crate) mod screens;
 pub(crate) mod snip_more;
+pub(crate) mod transition;
 
 use iced::{Point, Rectangle};
 

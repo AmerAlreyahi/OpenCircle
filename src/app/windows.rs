@@ -54,6 +54,13 @@ pub enum Kind {
     Studio,
 }
 
+/// What a step is made from.
+pub enum StepSource {
+    Crop(Crop),
+    /// The Studio's document, flattened on the step's thread.
+    Doc(Box<crate::features::snip::annotate::Document>),
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
     Settings(settings::Message),
@@ -114,6 +121,10 @@ pub enum Msg {
     StudioRead(Result<Crop, String>),
     /// The clipboard read for Ctrl+V (a picture, or none) and where to paste text.
     StudioPasted(Option<Crop>, Option<iced::Point>),
+    /// Pictures read to join the Steps (several files, a drop, the clipboard).
+    StudioAddPictures(Vec<Crop>),
+    /// The clipboard read for Paste as step (a picture, or none).
+    StudioStepPasted(Option<Crop>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
     /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
@@ -495,6 +506,18 @@ impl Windows {
         monitor: platform::monitor::Place,
         inset: f32,
     ) -> Task<Msg> {
+        self.add_step_of(StepSource::Crop(crop), update, monitor, inset)
+    }
+
+    /// `add_step` of the Studio's document: flattened on the thread too, and the Studio's sidebar
+    /// shows a place for the step at once (`Studio::step_pending`).
+    pub fn add_step_of(
+        &mut self,
+        source: StepSource,
+        update: Option<usize>,
+        monitor: platform::monitor::Place,
+        inset: f32,
+    ) -> Task<Msg> {
         let fresh = match &self.steps {
             None => true,
             Some((_, strip)) => strip.cleared && update.is_none(),
@@ -505,13 +528,23 @@ impl Windows {
             let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
             self.steps = Some((id, Strip::new(monitor, inset, rtl)));
         }
-        crate::app::background::background(move |tx| match steps::Step::new(&crop) {
-            Ok(step) => {
-                let _ = tx.unbounded_send(std::sync::Arc::new(step));
-            }
-            Err(e) => crate::log!("[opencircle] step not added: {e}"),
+        if let (None, Some((_, s))) = (update, &mut self.studio) {
+            s.step_pending(1);
+        }
+        crate::app::background::background(move |tx| {
+            let crop = match source {
+                StepSource::Crop(crop) => crop,
+                StepSource::Doc(doc) => crate::features::snip::annotate::render(&doc),
+            };
+            let _ = tx.unbounded_send(steps::Step::new(&crop).map(std::sync::Arc::new));
         })
-        .map(move |step| Msg::Steps(steps::Msg::Ready(step, update)))
+        .map(move |made| match made {
+            Ok(step) => Msg::Steps(steps::Msg::Ready(step, update)),
+            Err(e) => {
+                crate::log!("[opencircle] step not added: {e}");
+                Msg::Steps(steps::Msg::Failed)
+            }
+        })
     }
 
     fn on_steps(&mut self, msg: steps::Msg) -> Task<Msg> {
@@ -520,6 +553,7 @@ impl Windows {
         };
         let window = *id;
         let todo = match msg {
+            steps::Msg::Failed => return Task::none(),
             steps::Msg::Ready(step, update) => {
                 match update {
                     Some(i) => strip.replace(i, step),
@@ -1286,6 +1320,16 @@ impl Windows {
                             ]);
                         }
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
+                        // Settings > Studio's button: the Studio opens with its preferences dialog
+                        settings::Outcome::OpenStudioPreferences => {
+                            return Task::batch([
+                                keys,
+                                self.open_studio(None),
+                                Task::done(Msg::Studio(
+                                    crate::features::snip::screens::studio::Msg::OpenPrefs,
+                                )),
+                            ]);
+                        }
                         settings::Outcome::OpenLink(url) => open_url(&url),
                         settings::Outcome::CopyDiagnostics => {
                             let report = crate::shared::diagnostics::report(
@@ -1392,7 +1436,16 @@ impl Windows {
             // through Settings' own path, so its auto-save write runs
             Msg::Folder(dir) => return self.handle(Msg::Settings(settings::Message::Folder(dir))),
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
-            Msg::Steps(msg) => return self.on_steps(msg),
+            Msg::Steps(msg) => {
+                // a step made for the Studio's sidebar arrived (or failed): its place goes
+                if let (true, Some((_, s))) = (
+                    matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed),
+                    &mut self.studio,
+                ) {
+                    s.step_pending(-1);
+                }
+                return self.on_steps(msg);
+            }
             Msg::StepKey(id, key) if self.steps_window() == Some(id) => {
                 return self.on_steps(steps::Msg::Key(key));
             }
@@ -1423,6 +1476,8 @@ impl Windows {
             Msg::StudioEvent(..) => {}
             Msg::StudioRead(read) => return self.studio_read(read),
             Msg::StudioPasted(image, at) => return self.studio_pasted(image, at),
+            Msg::StudioAddPictures(crops) => return self.studio_add_pictures(crops),
+            Msg::StudioStepPasted(image) => return self.studio_step_pasted(image),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
             Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut => {}
@@ -1809,8 +1864,23 @@ impl Windows {
                 .steps
                 .as_ref()
                 .map_or(&[][..], |(_, strip)| strip.steps());
+            // Settings > Studio > Theme: the Studio's own (None = follow OpenCircle's)
+            let own = crate::features::snip::screens::studio::preferences::theme_of(
+                &config::current().studio,
+            );
+            // (built under it, then DRAWN under it too: kit styles read the theme at draw
+            // time, and every window is built before any is drawn: `studio::themed`)
+            let before = crate::shared::kit::themes::current();
+            if let Some(theme) = own {
+                crate::shared::kit::themes::set(theme);
+            }
             let page = crate::features::snip::screens::studio::view(studio, steps, mode.maximised)
                 .map(Msg::Studio);
+            crate::shared::kit::themes::set(before);
+            let page = match own {
+                Some(theme) => studio::themed(page, theme),
+                None => page,
+            };
             return Some(chrome::with_edges(page, mode, move |e| {
                 Msg::Chrome(window, e)
             }));
@@ -1903,8 +1973,16 @@ impl Windows {
                 None => Subscription::none(),
             },
             match &self.studio {
-                Some((_, s)) => studio::studio_events(s.waiting()),
+                Some((_, s)) => studio::studio_events(s.waiting(), s.recording()),
                 None => Subscription::none(),
+            },
+            // the Studio's sidebar page slides (a frame clock only while it moves)
+            match &self.studio {
+                Some((_, s)) if s.moving() && !crate::shared::kit::motion::reduced() => {
+                    crate::shared::kit::motion::frames()
+                        .map(|t| Msg::Studio(crate::features::snip::screens::studio::Msg::Frame(t)))
+                }
+                _ => Subscription::none(),
             },
             // the Updating pill's logo turns (a frame clock only while it shows)
             match &self.update_pill {

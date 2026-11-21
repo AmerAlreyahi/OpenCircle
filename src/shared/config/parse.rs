@@ -311,6 +311,30 @@ impl Config {
             s.background = get(t, p, "background", d.background, &mut w);
             s.zoom_on_open = get(t, p, "zoom_on_open", d.zoom_on_open, &mut w);
             s.wheel = get(t, p, "wheel", d.wheel, &mut w);
+            s.theme = get_checked(t, p, "theme", d.theme.clone(), &mut w, |id: &String| {
+                (id == STUDIO_THEME_FOLLOW
+                    || DARK_THEMES.contains(&id.as_str())
+                    || LIGHT_THEMES.contains(&id.as_str()))
+                .then_some(())
+                .ok_or_else(|| "expected \"follow\" or a theme id".to_string())
+            });
+            s.steps_side = get(t, p, "steps_side", d.steps_side, &mut w);
+            s.steps_on_start = get(t, p, "steps_on_start", d.steps_on_start, &mut w);
+            s.start_screen = get(t, p, "start_screen", d.start_screen, &mut w);
+            // the user's own keys: a chord that is none is dropped (the default stays)
+            let mut keys: std::collections::BTreeMap<String, String> =
+                get(t, p, "shortcuts", Default::default(), &mut w);
+            keys.retain(|id, chord| match canonical_chord(chord) {
+                Some(c) => {
+                    *chord = c;
+                    true
+                }
+                None => {
+                    w.push(format!("{p}shortcuts.{id}: \"{chord}\" is not a key chord"));
+                    false
+                }
+            });
+            s.shortcuts = keys;
         }
         if let Some(t) = section(&root, "update", &mut w) {
             c.update.auto = get(t, "update.", "auto", None, &mut w);
@@ -348,6 +372,24 @@ impl Config {
                 let (p, d) = ("snip.studio.", d.snip.studio);
                 c.snip.studio.library = get(s, p, "library", d.library, &mut w);
                 c.snip.studio.options = get(s, p, "options", d.options, &mut w);
+                c.snip.studio.walk_transition = get_checked(
+                    s,
+                    p,
+                    "walk_transition",
+                    d.walk_transition,
+                    &mut w,
+                    |v| match *v < 6 {
+                        true => Ok(()),
+                        false => Err("0 to 5".into()),
+                    },
+                );
+                c.snip.studio.walk_ms = get_checked(s, p, "walk_ms", d.walk_ms, &mut w, |v| {
+                    WALK_MS
+                        .contains(v)
+                        .then_some(())
+                        .ok_or_else(|| "300, 500 or 1000".to_string())
+                });
+                c.snip.studio.hint_seen = get(s, p, "hint_seen", d.hint_seen, &mut w);
                 c.snip.studio.walk_format =
                     get_checked(s, p, "walk_format", d.walk_format, &mut w, |v| {
                         match *v < 3 {
@@ -355,6 +397,17 @@ impl Config {
                             false => Err("0, 1 or 2".into()),
                         }
                     });
+                c.snip.studio.ui_zoom = get_checked(
+                    s,
+                    p,
+                    "ui_zoom",
+                    d.ui_zoom,
+                    &mut w,
+                    |z: &u16| match CHAT_ZOOM.contains(z) {
+                        true => Ok(()),
+                        false => Err(format!("expected one of {:?} (percent)", CHAT_ZOOM)),
+                    },
+                );
             }
         }
         // `[labs] online`: read only for schema 13's engine step
