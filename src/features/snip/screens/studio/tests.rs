@@ -3485,6 +3485,23 @@ fn studio_delay_by_action() {
         let f = frames(&[&a, &m, &a, &p, &a, &sb], &[]);
         line(&format!("menu / popover / sidebar on {name}"), 0.0, &f);
     }
+    // "add this picture as a step": the flatten on the UI thread, then the step (PNG + thumbnail) off it
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let s = make(w, h);
+        let t = std::time::Instant::now();
+        let flat = annotate::render(&s.editor.as_ref().unwrap().doc);
+        let flatten = t.elapsed().as_secs_f64() * 1e3;
+        let t = std::time::Instant::now();
+        let _step = Step::new(&flat).unwrap();
+        let make_step = t.elapsed().as_secs_f64() * 1e3;
+        println!(
+            "add step {name}: flatten (UI thread) {flatten:.1} ms, step made off-thread {make_step:.1} ms"
+        );
+    }
     // the canvas itself moving across the stage (a pan frame): the picture drawn at a new
     // offset each frame, at the fit zoom and at 100 %
     for (name, w, h) in [
@@ -3616,4 +3633,39 @@ fn the_sidebar_pages_and_the_question_match_their_golden_images() {
         }
         app_language::set(Lang::En);
     });
+}
+
+/// W90d.5: a big picture shown small is drawn from a smaller copy (the full pixels cost 25 ms a
+/// frame on the CPU renderer); a small one, or one near its size, from itself; an edit keeps it.
+#[test]
+fn a_big_picture_shown_small_is_drawn_from_a_smaller_copy() {
+    // (the copies are made on a thread: the next event picks them up)
+    let ready = |s: &mut Studio| {
+        for _ in 0..500 {
+            let _ = s.update(Msg::Fit);
+            if s.editor.as_ref().unwrap().display.is_some() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    let mut s = studio_on(3000, 1500);
+    assert!(
+        s.editor.as_ref().unwrap().display.is_none(),
+        "not before the thread is done"
+    );
+    assert!(ready(&mut s), "4.5 MP at the fit zoom: a copy");
+    let e = s.editor.as_ref().unwrap();
+    let iced::widget::image::Handle::Rgba { width, .. } = e.display.as_ref().unwrap() else {
+        panic!("pixels")
+    };
+    let want = 3000.0 * e.zoom * s.scale;
+    assert!(*width as f32 >= want && *width < 3000, "{width} vs {want}");
+    // an edit repaints the base: the copy is made again from the new base
+    draw(&mut s);
+    assert!(ready(&mut s));
+    // a small picture never gets one
+    let small = studio_on(800, 500);
+    assert!(small.editor.as_ref().unwrap().display.is_none());
 }

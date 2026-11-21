@@ -68,7 +68,7 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     // (Snip's bare live area: the frozen frame under it shows through)
     let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
         true => iced::widget::space().into(),
-        false => pin(image(e.base.clone())
+        false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
             .width(size.width)
             .height(size.height)
             .content_fit(ContentFit::Fill))

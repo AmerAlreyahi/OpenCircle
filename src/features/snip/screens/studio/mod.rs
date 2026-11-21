@@ -407,6 +407,9 @@ pub struct Studio {
     pub(super) popover: Option<popovers::Pop>,
     /// Where each popover's opener was last drawn.
     pub(super) anchors: popovers::Anchors,
+    /// The picture's smaller copies (halves) for the stage, built when a big picture is shown
+    /// small: the base's handle id they were made from, and (width, pixels) of each.
+    mips: Option<Mips>,
     /// A middle-button pan is on.
     middle: bool,
     /// The Steps sidebar's page and its slide (the frame clock runs only while it moves).
@@ -542,6 +545,7 @@ impl Studio {
             quiet: recovery::Debounce::default(),
             pan: None,
             page: Page::Steps,
+            mips: None,
             slide: None,
             now: std::time::Instant::now(),
             sub: None,
@@ -638,6 +642,7 @@ impl Studio {
             }
             e.refresh();
         }
+        self.fit(); // (the repaint cleared the stage copy)
     }
 
     /// The picture Reopen last brings back (`on`: the setting): the newest recent
@@ -1543,6 +1548,7 @@ impl Studio {
                 let Some(last) = self.pan else {
                     return Outcome::None;
                 };
+                self.fit(); // (the stage copy, once its thread is done)
                 self.pan = Some(p);
                 let off = Vector::new(
                     (self.offset.x - (p.x - last.x)).max(0.0),
@@ -2032,6 +2038,7 @@ impl Studio {
         let (stage, scale, zoom) = (self.stage(), self.scale, self.zoom);
         if let Some(e) = &mut self.editor {
             e.zoom = zoom.unwrap_or_else(|| fit_zoom(e.doc.view().size(), stage, scale));
+            stage_copy(e, scale, &mut self.mips);
         }
         self.sync_view();
     }
@@ -2099,6 +2106,85 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
     (room.width / picture.width.max(1.0))
         .min(room.height / picture.height.max(1.0))
         .min(1.0 / scale.max(0.1))
+}
+
+/// A picture over this many pixels is drawn from a smaller copy when shown small.
+const MIP_MIN_PIXELS: u32 = 3_000_000;
+
+/// The half-size copies of one base picture: ready (width, pixels) smallest last, and the thread
+/// still making them (they are made off the UI thread: ~80 ms for 8K).
+pub(super) struct Mips {
+    key: iced::advanced::image::Id,
+    ready: Vec<(u32, image::Handle)>,
+    pending: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<(u32, image::Handle)>>>>>,
+}
+
+fn make_mips(width: u32, height: u32, pixels: impl AsRef<[u8]>) -> Vec<(u32, image::Handle)> {
+    let first =
+        ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(width, height, pixels.as_ref());
+    let mut levels = Vec::new();
+    let mut parent: Option<::image::RgbaImage> = None;
+    let mut size = (width, height);
+    loop {
+        let (w, h) = ((size.0 / 2).max(1), (size.1 / 2).max(1));
+        if w < 256 {
+            break;
+        }
+        let small = match (&parent, &first) {
+            (Some(p), _) => ::image::imageops::thumbnail(p, w, h),
+            (None, Some(f)) => ::image::imageops::thumbnail(f, w, h),
+            (None, None) => break,
+        };
+        levels.push((w, image::Handle::from_rgba(w, h, small.as_raw().clone())));
+        (parent, size) = (Some(small), (w, h));
+    }
+    levels
+}
+
+/// Sets `e.display`: for a big picture shown at less than half its size, the smallest half-size
+/// copy that is still at least as wide as what the stage shows, so the CPU renderer copies about 1
+/// source pixel per screen pixel (the full 8K at the fit zoom: 22 ms a frame, this: 1 ms; w90d
+/// report). The copies are made on a thread once per repaint of the base; until they are there the
+/// picture draws as before, and a later call (any editor event, a pan) picks them up.
+fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
+    let image::Handle::Rgba {
+        id,
+        width,
+        height,
+        pixels,
+    } = &e.base
+    else {
+        e.display = None;
+        return;
+    };
+    let want = (*width as f32 * e.zoom * scale).max(1.0);
+    if width * height < MIP_MIN_PIXELS || want * 2.0 > *width as f32 {
+        e.display = None;
+        return;
+    }
+    if mips.as_ref().is_none_or(|m| m.key != *id) {
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (out, w, h, px) = (slot.clone(), *width, *height, pixels.clone());
+        std::thread::spawn(move || {
+            let levels = make_mips(w, h, px);
+            if let Ok(mut slot) = out.lock() {
+                *slot = Some(levels);
+            }
+        });
+        *mips = Some(Mips {
+            key: *id,
+            ready: Vec::new(),
+            pending: Some(slot),
+        });
+    }
+    let Some(m) = mips else { return };
+    if let Some(done) = (m.pending.as_ref()).and_then(|p| p.lock().ok().and_then(|mut s| s.take()))
+    {
+        (m.ready, m.pending) = (done, None);
+    }
+    e.display = (m.ready.iter().rev())
+        .find(|(w, _)| *w as f32 >= want)
+        .map(|(_, h)| h.clone());
 }
 
 /// The unsaved copy a Tick hands the host.

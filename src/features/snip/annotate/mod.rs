@@ -603,6 +603,10 @@ pub struct Annotator {
     /// Copied style: colour, weight.
     style: Option<([u8; 4], Width)>,
     pub(crate) base: image::Handle,
+    /// The Studio's copy of `base` scaled to about what the stage shows (a big picture at a small zoom:
+    /// the CPU renderer redraws a downscaled 8K picture from its full pixels every frame, 25 ms, and
+    /// 1 ms from this); `None`: draw `base`. Cleared whenever `base` is repainted.
+    pub(crate) display: Option<image::Handle>,
     /// The legend as the base shows it (placed among the committed items).
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
@@ -750,6 +754,7 @@ impl Annotator {
             picking: false,
             style: None,
             base: image::Handle::from_rgba(1, 1, vec![0; 4]),
+            display: None,
             legend: None,
             live: None,
             pending: None,
@@ -2076,6 +2081,7 @@ impl Annotator {
         }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
+        self.display = None;
         self.update_live();
     }
 
