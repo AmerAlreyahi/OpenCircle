@@ -7,7 +7,7 @@ use std::sync::Arc;
 use iced::Element;
 use iced::widget::{Space, column, container, mouse_area};
 
-use super::{Msg, Studio};
+use super::{Msg, Page, Studio};
 use crate::features::snip::annotate::Message;
 use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::toolbar;
@@ -16,7 +16,7 @@ use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::text::muted;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{dir, dropdown, side_panel, thumb};
+use crate::shared::kit::{dir, side_panel, thumb};
 use crate::t;
 
 /// The sidebar's side padding.
@@ -58,7 +58,25 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         Some(Msg::PasteStep),
     );
     let tools = container(column![add, this, paste].spacing(space::GAP)).padding([space::GAP, PAD]);
-    let body = column![tools, steps_list(s, steps)];
+    let list = column![tools, steps_list(s, steps)];
+    // Export is a second page that slides in (back arrow, Esc); with no step there is none
+    let body: Element<'a, Msg> = match (s.page, s.slide, steps.is_empty()) {
+        (_, _, true) | (Page::Steps, None, _) => list.into(),
+        (Page::Export, None, _) => export_page(s, steps),
+        (_, Some(slide), _) => {
+            let t = match slide.into {
+                true => s.slide_at(),
+                false => 1.0 - s.slide_at(),
+            };
+            crate::shared::kit::slide_pages::pages(
+                list.into(),
+                export_page(s, steps),
+                super::SIDEBAR,
+                t,
+                dir::rtl(),
+            )
+        }
+    };
     let panel = side_panel::panel(super::SIDEBAR, t!(st_steps), body.into());
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
@@ -114,30 +132,69 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         false,
         Some(Msg::CopyAllSteps),
     );
+    let export = button::labelled(
+        crate::shared::kit::icon::Icon::Forward.directed().glyph(),
+        t!(st_export),
+        half,
+        Kind::Elevated,
+        false,
+        Some(Msg::SidebarPage(Page::Export)),
+    );
+    let foot = crate::dir_row![copy, export].spacing(space::GAP);
+    column![
+        container(list).padding([0.0, PAD]),
+        container(foot).padding([space::GAP, PAD])
+    ]
+    .into()
+}
+
+/// The Export page: a back arrow and its title, then one row per way out. The walkthrough
+/// has its own roomy slide-over (it does not fit this width).
+fn export_page<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
+    let _ = s;
+    let back = crate::shared::kit::icon_button::square(
+        crate::shared::kit::icon::Icon::Back.directed().glyph(),
+        crate::shared::kit::icon_button::State::default(),
+        Some(Msg::SidebarPage(Page::Steps)),
+    );
+    let back = hint(
+        back,
+        t!(st_export_back),
+        Why::Keys("Esc"),
+        super::view::inward(false),
+    );
+    let head = container(
+        dir::row([
+            back,
+            crate::shared::kit::text::text(Role::ROW_TITLE, t!(st_export)).into(),
+        ])
+        .spacing(space::GAP)
+        .width(iced::Fill)
+        .align_y(iced::Center),
+    )
+    .padding([space::GAP, PAD]);
     let rows = [
         (export::Steps::Markdown, t!(st_export_md)),
         (export::Steps::Html, t!(st_export_html)),
         (export::Steps::Images, t!(st_export_images)),
     ];
-    // the walkthrough first; one step is no walkthrough
-    let walk = (n > 1).then(|| {
-        (
-            t!(st_export_walkthrough).to_string(),
+    let walk = (steps.len() > 1).then(|| {
+        crate::shared::kit::option_list::item(
+            t!(st_export_walkthrough),
+            false,
+            None,
             false,
             Msg::ExportWalkthrough,
         )
     });
-    let rows = (walk.into_iter())
-        .chain(
-            rows.into_iter()
-                .map(|(how, words)| (words.to_string(), false, Msg::ExportSteps(how))),
-        )
-        .collect();
-    let export = dropdown::labelled_menu(t!(st_export), rows, half);
-    let foot = crate::dir_row![copy, export].spacing(space::GAP);
+    let list = walk.into_iter().chain(rows.into_iter().map(|(how, words)| {
+        crate::shared::kit::option_list::item(words, false, None, false, Msg::ExportSteps(how))
+    }));
     column![
-        container(list).padding([0.0, PAD]),
-        container(foot).padding([space::GAP, PAD])
+        head,
+        crate::shared::kit::divider::divider(),
+        container(column(list.collect::<Vec<_>>()).spacing(space::GAP / 4.0))
+            .padding([space::GAP, PAD])
     ]
     .into()
 }

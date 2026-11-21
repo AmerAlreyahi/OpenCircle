@@ -1937,6 +1937,14 @@ impl Windows {
                 Some((_, s)) => studio::studio_events(s.waiting(), s.recording()),
                 None => Subscription::none(),
             },
+            // the Studio's sidebar page slides (a frame clock only while it moves)
+            match &self.studio {
+                Some((_, s)) if s.moving() && !crate::shared::kit::motion::reduced() => {
+                    crate::shared::kit::motion::frames()
+                        .map(|t| Msg::Studio(crate::features::snip::screens::studio::Msg::Frame(t)))
+                }
+                _ => Subscription::none(),
+            },
             // the Updating pill's logo turns (a frame clock only while it shows)
             match &self.update_pill {
                 Some((_, p, _)) if p.spins() && !crate::shared::kit::motion::reduced() => {

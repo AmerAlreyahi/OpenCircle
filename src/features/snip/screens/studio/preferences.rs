@@ -362,24 +362,8 @@ impl Dialog {
         .padding(space::PAGE[1]);
         // the list is part of the card, not a box beside it: a recessed column on the card's
         // start side, as tall as the card, its outer corners the card's own
-        let inner = radius::CARD - 1.0;
-        let outer = match crate::shared::kit::dir::rtl() {
-            true => [0.0, inner, inner, 0.0],
-            false => [inner, 0.0, 0.0, inner],
-        };
-        let nav = container(scroll(nav))
-            .width(NAV)
-            .height(Length::Fill)
-            .style(move |_| container::Style {
-                background: Some(crate::shared::kit::themes::c().track_glass.into()),
-                border: iced::Border::default().rounded(iced::border::Radius {
-                    top_left: outer[0],
-                    top_right: outer[1],
-                    bottom_right: outer[2],
-                    bottom_left: outer[3],
-                }),
-                ..container::Style::default()
-            });
+        let nav =
+            crate::shared::kit::side_panel::inset(scroll(nav).into(), NAV, radius::CARD - 1.0);
         let head = container(modal::header(
             self.tab.name(),
             Some(self.tab.subtitle()),

@@ -3383,3 +3383,237 @@ fn w90c_the_empty_studio_has_the_steps_toggle_at_the_same_spot() {
     );
     assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
 }
+
+/// W90d.5: where the time goes, measured (not a gate): `cargo test --release --bin opencircle
+/// studio_delay -- --ignored --nocapture`. At 3440x1440, per action: the update on the UI
+/// thread, and the frame that shows the result (layout + draw, raster of the damaged part).
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_delay_by_action() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let win = Size::new(3440.0, 1440.0);
+    let mut sized = Studio::new(StudioConfig::default());
+    let _ = sized.update(Msg::Resized(win));
+    drop(sized);
+    let make = |w: u32, h: u32| {
+        let mut s = Studio::new(StudioConfig::default());
+        let _ = s.update(Msg::Resized(win));
+        s.open(Picture::Crop(crop(w, h)));
+        s
+    };
+    let frames = |states: &[&Studio], steps: &[std::sync::Arc<Step>]| -> Vec<(f64, f64)> {
+        shot::frame_times(|i| states.get(i).map(|s| view::view(s, steps, false)), win)
+    };
+    let line = |what: &str, ms: f64, f: &[(f64, f64)]| {
+        let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
+        println!(
+            "{what:<34} update {ms:>7.1} ms | frames (layout+draw + raster ms): {}",
+            shown.join("  ")
+        );
+    };
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let empty = {
+            let mut s = Studio::new(StudioConfig::default());
+            let _ = s.update(Msg::Resized(win));
+            s
+        };
+        let t = std::time::Instant::now();
+        let a = make(w, h);
+        let open_ms = t.elapsed().as_secs_f64() * 1e3;
+        let f = frames(&[&empty, &a, &a, &a], &[]);
+        line(
+            &format!("open {name} (empty -> picture, +2 idle)"),
+            open_ms,
+            &f,
+        );
+        // pick a tool
+        let mut b = make(w, h);
+        let t = std::time::Instant::now();
+        let _ = b.update(Msg::Editor(Message::Tool(Tool::Rect)));
+        let ms = t.elapsed().as_secs_f64() * 1e3;
+        let f = frames(&[&a, &b, &b], &[]);
+        line(&format!("pick Rect tool on {name}"), ms, &f);
+        // a stroke: 4 moves
+        let mut moves = Vec::new();
+        let mut s = make(w, h);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+        let _ = s.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+        let mut upd = 0.0;
+        for k in 1..=4 {
+            let t = std::time::Instant::now();
+            let _ = s.update(Msg::Editor(Message::Move(Point::new(
+                10.0 + 40.0 * k as f32,
+                10.0 + 25.0 * k as f32,
+            ))));
+            upd += t.elapsed().as_secs_f64() * 1e3;
+            let mut again = make(w, h);
+            let _ = again.update(Msg::Editor(Message::Tool(Tool::Pen)));
+            let _ = again.update(Msg::Editor(Message::Press(Point::new(10.0, 10.0))));
+            for j in 1..=k {
+                let _ = again.update(Msg::Editor(Message::Move(Point::new(
+                    10.0 + 40.0 * j as f32,
+                    10.0 + 25.0 * j as f32,
+                ))));
+            }
+            moves.push(again);
+        }
+        let mut st: Vec<&Studio> = vec![&a];
+        st.extend(moves.iter());
+        let f = frames(&st, &[]);
+        line(&format!("pen stroke, 4 moves on {name}"), upd / 4.0, &f);
+        // menu, popover, sidebar
+        let mut m = make(w, h);
+        let _ = m.update(Msg::Menu(Some(menu_bar::Menu::File)));
+        let mut p = make(w, h);
+        let _ = p.update(Msg::Pop(Some(popovers::Pop::Info)));
+        let mut sb = make(w, h);
+        let _ = sb.update(Msg::Library);
+        for (what, x) in [
+            ("tool", &b),
+            ("menu", &m),
+            ("popover", &p),
+            ("sidebar", &sb),
+        ] {
+            let d = shot::damage(|i| [&a, x].get(i).map(|s| view::view(s, &[], false)), win);
+            println!("damage after {what} on {name}: {:?}", d.get(1));
+        }
+        let f = frames(&[&a, &m, &a, &p, &a, &sb], &[]);
+        line(&format!("menu / popover / sidebar on {name}"), 0.0, &f);
+    }
+    // the canvas itself moving across the stage (a pan frame): the picture drawn at a new
+    // offset each frame, at the fit zoom and at 100 %
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        for (zoom, label) in [(None, "fit"), (Some(1.0f32), "100 %")] {
+            let mut s = make(w, h);
+            if let Some(z) = zoom {
+                if let Some(e) = &mut s.editor {
+                    e.zoom = z;
+                }
+            }
+            let e = s.editor.as_ref().unwrap();
+            let f = shot::frame_times(
+                |i| {
+                    (i < 6).then(|| {
+                        iced::widget::container(
+                            iced::widget::pin(crate::features::snip::screens::snip_toolbar::canvas::canvas(
+                                e,
+                                1.0,
+                                crate::features::snip::screens::snip_toolbar::canvas::ScreenMap::ONE,
+                            ))
+                            .position(Point::new(-(i as f32) * 9.0, -(i as f32) * 5.0)),
+                        )
+                        .width(iced::Fill)
+                        .height(iced::Fill)
+                        .into()
+                    })
+                },
+                win,
+            );
+            let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
+            println!("pan frames {name} at {label:<6}: {}", shown.join("  "));
+            // the same frames with the picture pre-scaled to what is shown (a 1:1 copy)
+            let shown_size = e.size();
+            let (tw, th) = (
+                (shown_size.width * e.zoom).round().max(1.0) as u32,
+                (shown_size.height * e.zoom).round().max(1.0) as u32,
+            );
+            if e.zoom < 1.0 {
+                let t0 = std::time::Instant::now();
+                let src = ::image::ImageBuffer::<::image::Rgba<u8>, _>::from_raw(
+                    w,
+                    h,
+                    vec![255u8; (w * h * 4) as usize],
+                )
+                .unwrap();
+                let small = ::image::imageops::thumbnail(&src, tw, th);
+                let prep = t0.elapsed().as_secs_f64() * 1e3;
+                let handle = iced::widget::image::Handle::from_rgba(tw, th, small.into_raw());
+                let f = shot::frame_times(
+                    |i| {
+                        (i < 6).then(|| -> iced::Element<'_, ()> {
+                            iced::widget::container(
+                                iced::widget::pin(
+                                    iced::widget::image(handle.clone())
+                                        .width(tw as f32)
+                                        .height(th as f32),
+                                )
+                                .position(Point::new(
+                                    -(i as f32) * 9.0 + 600.0,
+                                    -(i as f32) * 5.0 + 100.0,
+                                )),
+                            )
+                            .width(iced::Fill)
+                            .height(iced::Fill)
+                            .into()
+                        })
+                    },
+                    win,
+                );
+                let shown: Vec<String> = f.iter().map(|(a, b)| format!("{a:.1}+{b:.1}")).collect();
+                println!(
+                    "pan frames {name} PRESCALED ({tw}x{th}, made in {prep:.0} ms): {}",
+                    shown.join("  ")
+                );
+            }
+        }
+    }
+}
+
+/// W90d.8 / W90d.10: the Steps sidebar's two pages and the slide between them, the unsaved
+/// question, in English and Arabic (look at each after an update); Esc and the back arrow go back.
+#[test]
+fn the_sidebar_pages_and_the_question_match_their_golden_images() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    crate::shared::kit::motion::set_reduced(false);
+    let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
+        .map(|(w, h)| std::sync::Arc::new(Step::new(&crop(w, h)).unwrap()))
+        .into();
+    golden::each_theme(|theme, failed| {
+        for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
+            app_language::set(lang);
+            let mut s = studio_on(300, 200);
+            let file = format!("studio-sidebar-steps{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            let _ = s.update(Msg::SidebarPage(Page::Export));
+            assert!(s.moving(), "the page slides");
+            let start = s.slide.unwrap().start;
+            // halfway through the slide, and at its end
+            let _ = s.update(Msg::Frame(start + crate::shared::kit::motion::GLIDE / 2));
+            assert!(s.moving() && s.slide_at() > 0.0 && s.slide_at() < 1.0);
+            let file = format!("studio-sidebar-slide{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            let _ = s.update(Msg::Frame(start + crate::shared::kit::motion::GLIDE * 2));
+            assert!(!s.moving(), "the clock stops when it lands");
+            let file = format!("studio-sidebar-export{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+            // Esc goes back (a slide again), and the question's buttons
+            let _ = s.update(Msg::Cancel);
+            assert_eq!(s.page, Page::Steps);
+            draw(&mut s);
+            let _ = s.close_requested();
+            assert!(s.asking());
+            let file = format!("studio-question{tag}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+                view(&s, &steps, false)
+            }));
+        }
+        app_language::set(Lang::En);
+    });
+}

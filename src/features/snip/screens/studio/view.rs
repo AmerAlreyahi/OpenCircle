@@ -239,13 +239,14 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 Some(_) => Scrim::Holds,
                 None => Scrim::Closes,
             };
-            slide_over::over(
+            slide_over::over_wide(
                 main,
                 t!(st_export),
                 export_sheet(s, steps),
                 Msg::WalkCancel,
                 scrim,
                 super::HEADER,
+                EXPORT_W,
             )
         }
         (false, None, Some(before)) => slide_over::over(
@@ -602,6 +603,7 @@ fn export_sheet<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     .align_y(Center);
     column![head, body, progress, foot]
         .spacing(space::PAGE[1])
+        .align_x(dir::start())
         .into()
 }
 
@@ -609,6 +611,7 @@ fn export_sheet<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
 fn field<'a>(words: &'a str, body: Element<'a, Msg>) -> Element<'a, Msg> {
     column![sub(Role::ROW_DESC, words), body]
         .spacing(space::GAP)
+        .align_x(dir::start())
         .into()
 }
 
@@ -783,23 +786,35 @@ fn walk_tab<'a>(
         button::toggle(w.how.repeat, looped),
     ]
     .align_y(Center);
+    // (the estimate mixes digits and Latin units: it reads from the start edge, left to right)
+    let at = dir::start();
     let mut notes = column![
-        sub(Role::ROW_DESC, walk_estimate(s, w, steps, n)).width(Fill),
-        sub(Role::META, t!(st_walk_note)).width(Fill),
+        sub(Role::ROW_DESC, walk_estimate(s, w, steps, n))
+            .width(Fill)
+            .align_x(at),
+        sub(Role::META, t!(st_walk_note)).width(Fill).align_x(at),
     ];
     if w.how.movie != export::Movie::Gif {
-        notes = notes.push(sub(Role::META, t!(st_walk_cap)).width(Fill));
+        notes = notes.push(sub(Role::META, t!(st_walk_cap)).width(Fill).align_x(at));
     }
+    // sections, a hairline between: the frames, the video, the change between steps, the
+    // switches, then what comes out
+    let rule = || container(crate::shared::kit::divider::divider()).padding([space::GAP, 0.0]);
     let body = column![
         field(t!(st_walk_from), from),
         strip,
-        grid,
         field(t!(st_walk_frame), time.into()),
+        rule(),
+        grid,
+        rule(),
         change,
+        rule(),
         switches,
+        rule(),
         notes,
     ]
-    .spacing(space::PAGE[1]);
+    .spacing(space::PAGE[1])
+    .align_x(dir::start());
     let go = (n > 0).then_some(Msg::WalkGo);
     (body.into(), go, w.busy)
 }
@@ -838,33 +853,32 @@ fn walk_estimate(s: &Studio, w: Walk, steps: &[Arc<Step>], n: usize) -> String {
     [
         format!("{} {n}", t!(st_walk_frames)),
         format!("{secs:.0} {}", t!(st_walk_s)),
-        format!("{} {size}", t!(st_walk_about)),
+        format!("{} \u{2066}{size}\u{2069}", t!(st_walk_about)),
     ]
     .join(" · ")
 }
 
 /// The frames the sheet's strip shows at most.
 const WALK_SHOWN: usize = 6;
-const WALK_SLIDER_W: f32 = 240.0;
+const WALK_SLIDER_W: f32 = 300.0;
+/// The Export panel's width: room for the sections, the preview strip and two-column rows.
+const EXPORT_W: f32 = 560.0;
 /// The Picture tab's quality slider.
 const QUALITY_W: f32 = 120.0;
 const QUALITY_VALUE_W: f32 = 40.0;
-/// The question's buttons: one size, from the kit.
-const QUESTION_BUTTON: f32 = 108.0;
 const QUESTION_W: f32 = 460.0;
 
 /// Closing or opening another picture with unsaved drawings: a solid modal over the
 /// dimmed window: Don't save / Cancel (secondary), Save (the accent primary); Esc
 /// cancels, Enter saves, the X cancels.
 fn question<'a>() -> Element<'a, Msg> {
-    let b = |words: &'a str, kind, m| {
-        container(button::button(label(words), kind, Some(m))).width(QUESTION_BUTTON)
-    };
+    let labels = [t!(st_dont_save), t!(c_cancel), t!(c_save)];
+    let w = button::dialog_width(&labels);
     let buttons = crate::dir_row![
         Space::new().width(Fill),
-        b(t!(st_dont_save), Kind::Elevated, Msg::DontSave),
-        b(t!(c_cancel), Kind::Elevated, Msg::Cancel),
-        b(t!(c_save), Kind::Accent, Msg::SaveFirst),
+        button::dialog(labels[0], w, Kind::Elevated, Msg::DontSave),
+        button::dialog(labels[1], w, Kind::Elevated, Msg::Cancel),
+        button::dialog(labels[2], w, Kind::Accent, Msg::SaveFirst),
     ]
     .spacing(space::GAP)
     .align_y(Center);

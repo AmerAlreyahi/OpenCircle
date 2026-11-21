@@ -99,8 +99,26 @@ enum After {
     Open(Picture),
 }
 
+/// The Steps sidebar's pages: the list, and (drilled into) the export choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Page {
+    #[default]
+    Steps,
+    Export,
+}
+
+/// The sidebar's page change: when it began and which way (`true`: into Export).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Slide {
+    pub start: std::time::Instant,
+    pub into: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
+    /// The Steps sidebar goes to a page (a slide), and the frame clock steps it.
+    SidebarPage(Page),
+    Frame(std::time::Instant),
     Editor(annotate::Message),
     Caption(Caption),
     /// The Steps sidebar's toggle (its header, View menu, Ctrl+B).
@@ -391,6 +409,10 @@ pub struct Studio {
     pub(super) anchors: popovers::Anchors,
     /// A middle-button pan is on.
     middle: bool,
+    /// The Steps sidebar's page and its slide (the frame clock runs only while it moves).
+    pub(super) page: Page,
+    pub(super) slide: Option<Slide>,
+    pub(super) now: std::time::Instant,
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
     pub(super) ui_zoom: u16,
     /// When the last file was dropped (files dropped together are steps).
@@ -519,6 +541,9 @@ impl Studio {
             shift: false,
             quiet: recovery::Debounce::default(),
             pan: None,
+            page: Page::Steps,
+            slide: None,
+            now: std::time::Instant::now(),
             sub: None,
             snap: crate::shared::config::current().studio.snap,
             grid: crate::shared::config::current().studio.pixel_grid,
@@ -633,6 +658,29 @@ impl Studio {
     /// Settings > Studio > "Ask before closing with unsaved changes".
     fn asks(&self) -> bool {
         self.dirty() && crate::shared::config::current().studio.ask_unsaved
+    }
+
+    /// The sidebar's slide, 0..1 of the way (1 when none runs or motion is reduced).
+    pub(super) fn slide_at(&self) -> f32 {
+        match self.slide {
+            Some(s) => crate::shared::kit::motion::progress(
+                s.start,
+                self.now,
+                crate::shared::kit::motion::GLIDE,
+                crate::shared::kit::motion::Curve::Standard,
+            ),
+            None => 1.0,
+        }
+    }
+
+    fn slide_done(&self, s: Slide) -> bool {
+        crate::shared::kit::motion::done(s.start, self.now, crate::shared::kit::motion::GLIDE)
+            >= 1.0
+    }
+
+    /// The frame clock should run: a slide is moving.
+    pub fn moving(&self) -> bool {
+        self.slide.is_some()
     }
 
     pub fn dirty(&self) -> bool {
@@ -1074,6 +1122,7 @@ impl Studio {
                 | Msg::Pointer(_)
                 | Msg::Mods(..)
                 | Msg::Tick
+                | Msg::Frame(_)
                 | Msg::Focus(_)
                 | Msg::Scrolled(_)
                 | Msg::Resized(_)
@@ -1397,11 +1446,43 @@ impl Studio {
                 Outcome::None
             }
             Msg::DontSave => self.proceed(),
+            Msg::SidebarPage(page) => {
+                if self.page != page {
+                    let now = std::time::Instant::now();
+                    self.page = page;
+                    self.now = now;
+                    // (motion off: the page is simply there, no clock runs)
+                    self.slide = (!crate::shared::kit::motion::reduced()).then_some(Slide {
+                        start: now,
+                        into: page == Page::Export,
+                    });
+                }
+                Outcome::None
+            }
+            Msg::Frame(now) => {
+                self.now = now;
+                if self.slide.is_some_and(|s| self.slide_done(s)) {
+                    self.slide = None;
+                }
+                Outcome::None
+            }
             Msg::Cancel => {
                 // Esc ladder: a key being recorded, menu, sheet, overlay, the question, Edit text
                 if let Some(d) = self.prefs.as_mut().filter(|d| d.recording()) {
                     d.stop_recording();
                     return Outcome::None;
+                }
+                // the sidebar's Export page goes back to the Steps (after the layers over it)
+                if self.page == Page::Export
+                    && self.menu.is_none()
+                    && self.popover.is_none()
+                    && self.prefs.is_none()
+                    && !self.shortcuts
+                    && !self.exporting
+                    && self.context.is_none()
+                    && !self.asking()
+                {
+                    return self.update(Msg::SidebarPage(Page::Steps));
                 }
                 let closed = self.sub.take().is_some()
                     || self.context.take().is_some()
