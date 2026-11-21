@@ -1472,3 +1472,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   main mode (Ctrl+Shift+Space) with actions on just the selection (translate only it, and more); STUDY first what to offer and
   where else the same logic applies, list to the owner before building; (2) Ctrl + mouse wheel resizes the selected shape in
   the Snip widget and the Studio.
+- Release commands for v0.4.0 (owner, 2026-11-21, "change it, I allow you"): the SDLC guard blocks `gh release` / tag pushes
+  in a session not started with SDLC_OWNER_RELEASE=1; for v0.4.0 the owner allowed the lead to make the release changes
+  (notes into the draft, publish after the gate passes) through `gh api` instead. Valid for v0.4.0 only; ask again next release.
