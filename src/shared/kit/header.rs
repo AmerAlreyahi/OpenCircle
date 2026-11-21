@@ -297,9 +297,9 @@ mod tests {
         let place = |ar: bool| -> Vec<(String, f32)> {
             let _dir = super::super::dir::scope(ar);
             let menu: Element<'static, ()> = row![
-                iced::widget::text("File"),
-                iced::widget::text("Edit"),
-                iced::widget::text("View")
+                iced::widget::text("File").width(60.0),
+                iced::widget::text("Edit").width(60.0),
+                iced::widget::text("View").width(60.0)
             ]
             .spacing(8.0)
             .into();
@@ -318,9 +318,24 @@ mod tests {
                 .collect()
         };
         let (en, ar) = (place(false), place(true));
-        assert_eq!(en, ar, "the same positions in Arabic");
-        let x = |name: &str| en.iter().find(|(t, _)| t == name).unwrap().1;
-        assert!(x("File") < x("Edit") && x("Edit") < x("View") && x("View") < x("Title"));
+        // (the menus have fixed widths, so fonts don't matter; the title's own width differs a
+        // little between the two languages' font settings on some systems: it is centred)
+        let x = |v: &[(String, f32)], name: &str| v.iter().find(|(t, _)| t == name).unwrap().1;
+        for name in ["File", "Edit", "View"] {
+            assert_eq!(
+                x(&en, name),
+                x(&ar, name),
+                "{name}: the same place in Arabic"
+            );
+        }
+        assert!(
+            (x(&en, "Title") - x(&ar, "Title")).abs() < 12.0,
+            "the title stays centred"
+        );
+        for v in [&en, &ar] {
+            assert!(x(v, "File") < x(v, "Edit") && x(v, "Edit") < x(v, "View"));
+            assert!(x(v, "View") < x(v, "Title"));
+        }
     }
 
     use super::*;
