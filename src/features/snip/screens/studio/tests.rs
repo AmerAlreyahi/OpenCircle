@@ -3691,6 +3691,7 @@ fn studio_frames_by_action() {
         ("8K", 7680, 4320),
     ] {
         let mut s = Studio::new(StudioConfig::default());
+        s.at_rest = false;
         let _ = s.update(Msg::Resized(win));
         crate::shared::kit::motion::set_reduced(false);
         let steps: Vec<std::sync::Arc<Step>> = [(300, 200), (200, 300), (400, 120)]
@@ -4061,6 +4062,7 @@ fn menus_popovers_and_dialogs_rise_as_they_open() {
     use crate::shared::kit::motion::{self, OPEN, RISE};
     motion::set_reduced(false);
     let mut s = studio_on(300, 200);
+    s.at_rest = false;
     assert_eq!(s.rise(), 0.0);
     assert!(!s.moving());
     for open in [

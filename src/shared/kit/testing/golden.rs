@@ -46,15 +46,6 @@ pub fn check<'a, Message: 'a>(
 /// `each` once per theme (Sapphire, then Daylight), that theme set; it adds
 /// what differs to `failed`. Then Sapphire again, and nothing may differ.
 pub fn each_theme(mut each: impl FnMut(&'static Theme, &mut Vec<String>)) {
-    // (a golden is a thing at rest: a menu that rises or a page that slides is drawn where it lands)
-    struct Rest(bool);
-    impl Drop for Rest {
-        fn drop(&mut self) {
-            super::super::motion::set_reduced(self.0);
-        }
-    }
-    let _rest = Rest(super::super::motion::reduced());
-    super::super::motion::set_reduced(true);
     let mut failed = Vec::new();
     for theme in [&SAPPHIRE, &DAYLIGHT] {
         themes::set(theme);

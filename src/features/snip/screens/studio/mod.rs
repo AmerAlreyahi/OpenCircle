@@ -429,6 +429,8 @@ pub struct Studio {
     middle: bool,
     /// The Steps sidebar's page and its slide (the frame clock runs only while it moves).
     pub(super) page: Page,
+    /// Tests: draw a rising menu where it lands (goldens are things at rest); the rise test turns it off.
+    pub(super) at_rest: bool,
     /// When a menu, popover or dialog began to rise (the frame clock runs until it has).
     pub(super) rise_from: Option<std::time::Instant>,
     /// Steps being made on a thread (flatten, PNG, thumbnail): the sidebar shows a place for each.
@@ -569,6 +571,7 @@ impl Studio {
             opening: None,
             steps_pending: 0,
             rise_from: None,
+            at_rest: cfg!(test),
             mips: None,
             slide: None,
             now: std::time::Instant::now(),
@@ -1209,9 +1212,8 @@ impl Studio {
         self.sync_blocked();
         // a menu, popover or dialog that just opened rises to its place (motion off: none)
         let after = self.layers_up();
-        if (0..after.len()).any(|i| after[i] && !before[i])
-            && !crate::shared::kit::motion::reduced()
-        {
+        let animate = !crate::shared::kit::motion::reduced() && !self.at_rest;
+        if (0..after.len()).any(|i| after[i] && !before[i]) && animate {
             let now = std::time::Instant::now();
             (self.now, self.rise_from) = (now, Some(now));
         }
