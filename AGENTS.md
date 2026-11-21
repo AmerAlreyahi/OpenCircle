@@ -92,6 +92,11 @@ where they differ.
   shipped (fix first in the next version): on a fresh Windows install, Copy text on an Arabic page with the PP-OCR reader copied
   nothing in W71's runs (not yet confirmed app vs test click); the About avatar still drew as a square tile at 1280x720 (W69's
   circle radius did not take effect on the CPU renderer). Live translate hidden in this version.
+  v0.4.0 "OpenCircle Studio" published 2026-11-21 18:04 UTC on tag v0.4.0 (2abf6f6a), owner: "publish, that is fine" BEFORE
+  the Windows VM gate (W93) finished; release changes made through `gh api` (owner's OK, guard REL-04). Published first with a
+  placeholder tag (`untagged-...`) for ~1 min, then tag_name set to v0.4.0 (lesson: a publish through the API must send
+  tag_name). Published assets re-downloaded: SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.4.0", latest = v0.4.0.
+  Known issues shipped: stroke commit pause on 4K / 8K pictures, zoom not animated, a failed step's placeholder vanishes silently.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
