@@ -34,9 +34,23 @@ use crate::t;
 /// The dialog's size (logical px); it never exceeds the window less `MARGIN`.
 const WIDTH: f32 = 960.0;
 const HEIGHT: f32 = 640.0;
+const WIDE: f32 = 1280.0;
+const TALL: f32 = 900.0;
 /// The section list's width.
 const NAV: f32 = 210.0;
 const MARGIN: f32 = 12.0;
+
+/// The card's size: `WIDTH` x `HEIGHT` in a normal window, growing with a big one (half
+/// its width up to `WIDE`, 70 % of its height up to `TALL`), never past the window less
+/// `MARGIN`.
+fn card_size(window: Size) -> (f32, f32) {
+    let w = (window.width * 0.5).clamp(WIDTH, WIDE);
+    let h = (window.height * 0.7).clamp(HEIGHT, TALL);
+    (
+        w.min(window.width - 2.0 * MARGIN).max(0.0),
+        h.min(window.height - 2.0 * MARGIN).max(0.0),
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -346,7 +360,26 @@ impl Dialog {
         }))
         .spacing(space::GAP / 2.0)
         .padding(space::PAGE[1]);
-        let nav = container(scroll(nav)).width(NAV).height(Length::Fill);
+        // the list is part of the card, not a box beside it: a recessed column on the card's
+        // start side, as tall as the card, its outer corners the card's own
+        let inner = radius::CARD - 1.0;
+        let outer = match crate::shared::kit::dir::rtl() {
+            true => [0.0, inner, inner, 0.0],
+            false => [inner, 0.0, 0.0, inner],
+        };
+        let nav = container(scroll(nav))
+            .width(NAV)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(crate::shared::kit::themes::c().track_glass.into()),
+                border: iced::Border::default().rounded(iced::border::Radius {
+                    top_left: outer[0],
+                    top_right: outer[1],
+                    bottom_right: outer[2],
+                    bottom_left: outer[3],
+                }),
+                ..container::Style::default()
+            });
         let head = container(modal::header(
             self.tab.name(),
             Some(self.tab.subtitle()),
@@ -357,8 +390,7 @@ impl Dialog {
             scroll(container(self.rows()).padding([0.0, space::PAGE[1]])).height(Length::Fill);
         let page = column![head, divider::divider(), body].width(Fill);
         let content = crate::dir_row![nav, divider::vertical(Fill), page];
-        let w = (window.width - 2.0 * MARGIN).clamp(0.0, WIDTH);
-        let h = (window.height - 2.0 * MARGIN).clamp(0.0, HEIGHT);
+        let (w, h) = card_size(window);
         surface(Material::Widget, radius::CARD, content)
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
@@ -905,6 +937,46 @@ mod tests {
                         d.view(size)
                     }));
                 }
+            }
+            app_language::set(Lang::En);
+        });
+    }
+
+    /// W90d.2: in a big window (3440x1440) the card grows and the section list stays INSIDE it,
+    /// at the start side, as tall as the card (EN and AR).
+    #[test]
+    fn the_dialog_in_a_wide_window_is_one_card() {
+        use crate::shared::kit::testing::{golden, shot};
+        crate::shared::kit::text::load();
+        let size = Size::new(3440.0, 1440.0);
+        let (w, h) = card_size(size);
+        assert!(w > WIDTH && h > HEIGHT, "grows: {w} x {h}");
+        assert_eq!(card_size(Size::new(1280.0, 800.0)), (WIDTH, HEIGHT));
+        assert_eq!(card_size(Size::new(500.0, 400.0)), (476.0, 376.0));
+        {
+            // a narrow window: the card (and the list inside it) fits it
+            let narrow = Size::new(774.0, 700.0);
+            app_language::set(Lang::Ar);
+            let d = dialog();
+            crate::shared::kit::testing::golden::check(
+                "screens",
+                "studio-prefs-narrow-ar-sapphire",
+                narrow,
+                &[1.0],
+                || d.view(narrow),
+            );
+            app_language::set(Lang::En);
+        }
+        golden::each_theme(|theme, failed| {
+            for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
+                app_language::set(lang);
+                let file = format!("studio-prefs-wide{tag}-{}", theme.id);
+                let d = dialog();
+                let lost = shot::out_of_reach(d.view(size), size);
+                assert!(lost.is_empty(), "{file}: {lost:?}");
+                failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                    d.view(size)
+                }));
             }
             app_language::set(Lang::En);
         });
