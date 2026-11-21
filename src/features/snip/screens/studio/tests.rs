@@ -3511,10 +3511,8 @@ fn studio_delay_by_action() {
     ] {
         for (zoom, label) in [(None, "fit"), (Some(1.0f32), "100 %")] {
             let mut s = make(w, h);
-            if let Some(z) = zoom {
-                if let Some(e) = &mut s.editor {
-                    e.zoom = z;
-                }
+            if let (Some(z), Some(e)) = (zoom, &mut s.editor) {
+                e.zoom = z;
             }
             let e = s.editor.as_ref().unwrap();
             let f = shot::frame_times(

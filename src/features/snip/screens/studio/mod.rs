@@ -2113,10 +2113,13 @@ const MIP_MIN_PIXELS: u32 = 3_000_000;
 
 /// The half-size copies of one base picture: ready (width, pixels) smallest last, and the thread
 /// still making them (they are made off the UI thread: ~80 ms for 8K).
+/// Where the thread leaves the copies.
+type MipSlot = std::sync::Arc<std::sync::Mutex<Option<Vec<(u32, image::Handle)>>>>;
+
 pub(super) struct Mips {
     key: iced::advanced::image::Id,
     ready: Vec<(u32, image::Handle)>,
-    pending: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<(u32, image::Handle)>>>>>,
+    pending: Option<MipSlot>,
 }
 
 fn make_mips(width: u32, height: u32, pixels: impl AsRef<[u8]>) -> Vec<(u32, image::Handle)> {

@@ -77,7 +77,7 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
             )
         }
     };
-    let panel = side_panel::panel(super::SIDEBAR, t!(st_steps), body.into());
+    let panel = side_panel::panel(super::SIDEBAR, t!(st_steps), body);
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
         .on_enter(Msg::OverSidebar(true))

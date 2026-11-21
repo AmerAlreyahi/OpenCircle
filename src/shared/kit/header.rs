@@ -312,7 +312,7 @@ mod tests {
             menu_start(true, 3),
             MENU_X + CAPTION_GAP + 3.0 * size::CAPTION_BUTTON
         );
-        assert!(CAPTION_GAP >= 24.0);
+        const { assert!(CAPTION_GAP >= 24.0) };
     }
 
     use super::*;
