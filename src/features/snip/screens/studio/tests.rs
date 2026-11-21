@@ -4089,3 +4089,29 @@ fn menus_popovers_and_dialogs_rise_as_they_open() {
     assert_eq!(s.rise(), 0.0);
     motion::set_reduced(false);
 }
+
+/// The Studio's title row is laid out the same in Arabic as in English (logo, File, Edit, View,
+/// gear at the left, title centred, buttons at the right); a menu opens under its opener, kept in
+/// the window, its rows reading right to left. At 1280 and at 3440 wide, both themes.
+#[test]
+fn the_title_row_and_menus_are_the_same_places_in_arabic_and_english() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        for (w, h) in [(1280.0, 800.0), (3440.0, 1440.0)] {
+            for (lang, tag) in [(Lang::En, ""), (Lang::Ar, "-ar")] {
+                app_language::set(lang);
+                let mut s = studio_on(300, 200);
+                let _ = s.update(Msg::Resized(Size::new(w, h)));
+                let _ = s.update(Msg::Menu(Some(menu_bar::Menu::View)));
+                let size = Size::new(w, h);
+                let file = format!("studio-titlerow-{w}{tag}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, size, &[1.0], || {
+                    view(&s, &[], false)
+                }));
+            }
+        }
+        app_language::set(Lang::En);
+    });
+}

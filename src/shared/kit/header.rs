@@ -37,20 +37,6 @@ const LOGO_GAP: f32 = 10.0;
 /// a menu hung under an opener aligns to).
 pub const MENU_X: f32 = PAD + size::ICON + LOGO_GAP;
 
-/// Right to left, the caption buttons keep their corner (top right) and the menu
-/// bar starts beside them: this much clear space between the two clusters.
-pub const CAPTION_GAP: f32 = 28.0;
-
-/// Where a menu bar's first opener starts, from the WINDOW's start edge: `MENU_X`, and
-/// right to left the clear space and the caption buttons (`buttons`: how many) that
-/// sit at that edge.
-pub fn menu_start(rtl: bool, buttons: u8) -> f32 {
-    match rtl {
-        true => MENU_X + CAPTION_GAP + f32::from(buttons) * size::CAPTION_BUTTON,
-        false => MENU_X,
-    }
-}
-
 pub fn regular<'a, Message: Clone + 'a>(
     logo: image::Handle,
     title: &'a str,
@@ -98,20 +84,12 @@ pub fn with_menu<'a, Message: Clone + 'a>(
             .into(),
         Some(menu) => {
             parts.push(
-                container(
-                    crate::dir_row![mark, menu]
-                        .spacing(LOGO_GAP)
-                        .align_y(Center),
-                )
-                .padding(iced::Padding {
-                    top: 0.0,
-                    bottom: 0.0,
-                    left: PAD,
-                    // (right to left: the start side meets the caption buttons)
-                    right: PAD + if super::dir::rtl() { CAPTION_GAP } else { 0.0 },
-                })
-                .center_y(H)
-                .into(),
+                // (the logo and the menus sit at the left in every language, in the English
+                // order: a plain row, never mirrored; the menus' contents are the language's)
+                container(row![mark, menu].spacing(LOGO_GAP).align_y(Center))
+                    .padding([0.0, PAD])
+                    .center_y(H)
+                    .into(),
             );
             // the document's name, centred, with a dot while it has unsaved changes
             let dot = unsaved.then(|| {
@@ -151,7 +129,15 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     buttons.extend(restore);
     buttons.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
     // (a plain row: never mirrored)
-    let content = super::dir::row(parts).width(Fill).height(H).align_y(Center);
+    let content: Element<'a, Message> = match has_menu {
+        // (a menu bar's header is laid out as in English: logo, menus, title, buttons)
+        true => row(parts).width(Fill).height(H).align_y(Center).into(),
+        false => super::dir::row(parts)
+            .width(Fill)
+            .height(H)
+            .align_y(Center)
+            .into(),
+    };
     row![content, row(buttons)].height(H).align_y(Center).into()
 }
 
@@ -304,15 +290,37 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
 
 #[cfg(test)]
 mod tests {
-    /// W90d.1: right to left the menus start clear of the caption buttons (gap + 3 buttons).
     #[test]
-    fn the_menu_bar_starts_clear_of_the_caption_buttons_in_arabic() {
-        assert_eq!(menu_start(false, 3), MENU_X);
-        assert_eq!(
-            menu_start(true, 3),
-            MENU_X + CAPTION_GAP + 3.0 * size::CAPTION_BUTTON
-        );
-        const { assert!(CAPTION_GAP >= 24.0) };
+    fn a_menu_bar_header_is_laid_out_the_same_in_arabic_as_in_english() {
+        use crate::shared::kit::testing::shot;
+        let size = Size::new(900.0, 40.0);
+        let place = |ar: bool| -> Vec<(String, f32)> {
+            let _dir = super::super::dir::scope(ar);
+            let menu: Element<'static, ()> = row![
+                iced::widget::text("File"),
+                iced::widget::text("Edit"),
+                iced::widget::text("View")
+            ]
+            .spacing(8.0)
+            .into();
+            let head = with_menu(
+                super::super::logo::logo(16),
+                Some(menu),
+                "Title",
+                false,
+                Space::new(),
+                Some(false),
+                |_| (),
+            );
+            shot::texts_at(head, size)
+                .into_iter()
+                .map(|(r, t)| (t, r.x))
+                .collect()
+        };
+        let (en, ar) = (place(false), place(true));
+        assert_eq!(en, ar, "the same positions in Arabic");
+        let x = |name: &str| en.iter().find(|(t, _)| t == name).unwrap().1;
+        assert!(x("File") < x("Edit") && x("Edit") < x("View") && x("View") < x("Title"));
     }
 
     use super::*;

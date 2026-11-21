@@ -3,8 +3,8 @@
 //! kit's menu rows; Open recent and Arrange open a second menu beside it. Alt
 //! opens File, arrows walk, Enter picks, Esc closes. The Edit rows are the
 //! editor's own entries (`editing`), the same ones the right-click menu uses.
-use iced::widget::{container, pin, stack};
-use iced::{Center, Element, Fill, Padding};
+use iced::widget::{pin, stack};
+use iced::{Center, Element, Fill};
 
 use super::editing::{self, Action};
 use super::keys;
@@ -276,13 +276,17 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
     );
     let mut parts: Vec<Element<'_, Msg>> = row.into_iter().collect();
     parts.push(gear);
-    dir::row(parts).spacing(OPENER_GAP).align_y(Center).into()
+    // (the bar is at the left in the English order in every language; its menus' contents follow the language)
+    iced::widget::row(parts)
+        .spacing(OPENER_GAP)
+        .align_y(Center)
+        .into()
 }
 
 /// Where the opener of `menu` starts, from the header's start edge.
 fn offset(menu: Menu) -> f32 {
     let role = Role::NAV;
-    let mut x = crate::shared::kit::header::menu_start(dir::rtl(), 3);
+    let mut x = crate::shared::kit::header::MENU_X;
     for m in Menu::ALL {
         if m == menu {
             return x;
@@ -336,19 +340,10 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
     let first = panel(rows, Some(focus), move |i| Msg::MenuPick(menu, i));
     let x = offset(menu);
     let rise = s.rise();
+    // under the opener at the left, kept inside the window (its contents read right to left in Arabic)
+    let room = (s.window.width - option_list::MENU_WIDTH).max(0.0);
     let place = |panel: Element<'a, Msg>, x: f32, y: f32| -> Element<'a, Msg> {
-        let y = y + rise; // (opening: a little lower, rising to its place)
-        match dir::rtl() {
-            false => pin(panel).x(x).y(y).into(),
-            true => container(panel)
-                .padding(Padding {
-                    top: y,
-                    right: x,
-                    ..Padding::ZERO
-                })
-                .align_right(Fill)
-                .into(),
-        }
+        pin(panel).x(x.clamp(0.0, room)).y(y + rise).into()
     };
     // a press anywhere under the header (outside the menu) closes it
     let catch = |h: iced::Length| {
@@ -369,7 +364,12 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
     let mut layers = vec![base, outside.into(), place(first, x, HEADER_BELOW)];
     if let (Some(sub), Some(y)) = (s.sub, sub_at) {
         let second = panel(sub_items(sub, s), None, move |i| Msg::SubPick(sub, i));
-        let beside = x + option_list::MENU_WIDTH + SUB_GAP;
+        let x = x.clamp(0.0, room);
+        // (beside the first menu; at its other side when there is no room)
+        let beside = match x + 2.0 * option_list::MENU_WIDTH + SUB_GAP <= s.window.width {
+            true => x + option_list::MENU_WIDTH + SUB_GAP,
+            false => (x - option_list::MENU_WIDTH - SUB_GAP).max(0.0),
+        };
         layers.push(place(second, beside, HEADER_BELOW + y));
     }
     stack(layers).into()
