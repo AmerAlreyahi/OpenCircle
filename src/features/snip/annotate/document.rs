@@ -866,25 +866,37 @@ pub fn rounded(r: Rectangle, radius: f32) -> Option<Path> {
 /// `(item, false)` = hidden (being edited live), but it still counts as a step.
 pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap {
     let (w, h) = (region.width(), region.height());
-    let mut pm = Pixmap::new(w, h).expect("non-empty region");
-    let stride = image.width as usize * 4;
-    let (x, y) = (region.x() as usize, region.y() as usize);
-    for (row, dst) in pm.data_mut().chunks_exact_mut(w as usize * 4).enumerate() {
-        let start = (y + row) * stride + x * 4;
-        dst.copy_from_slice(&image.rgba[start..start + dst.len()]);
-        // Screen captures are opaque; premultiply anything that is not.
-        for px in dst
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .filter(|px| px[3] != 255)
-        {
-            let a = px[3] as u32;
-            for c in &mut px[..3] {
-                *c = (*c as u32 * a / 255) as u8;
+    let premultiply = |px: &mut [u8]| {
+        // Screen captures are opaque (one cheap look says so); premultiply anything that is not.
+        if px.as_chunks::<4>().0.iter().any(|p| p[3] != 255) {
+            for p in px.as_chunks_mut::<4>().0.iter_mut().filter(|p| p[3] != 255) {
+                let a = p[3] as u32;
+                for c in &mut p[..3] {
+                    *c = (*c as u32 * a / 255) as u8;
+                }
             }
         }
-    }
+    };
+    let whole = (region.x(), region.y(), w, h) == (0, 0, image.width, image.height);
+    let pm = match whole.then(|| tiny_skia::IntSize::from_wh(w, h)).flatten() {
+        // the whole picture: one copy (a new pixmap is zeroed first, 8K: a pass of 130 MB)
+        Some(size) => {
+            let mut data = image.rgba.clone();
+            premultiply(&mut data);
+            Pixmap::from_vec(data, size).expect("as many bytes as pixels")
+        }
+        None => {
+            let mut pm = Pixmap::new(w, h).expect("non-empty region");
+            let stride = image.width as usize * 4;
+            let (x, y) = (region.x() as usize, region.y() as usize);
+            for (row, dst) in pm.data_mut().chunks_exact_mut(w as usize * 4).enumerate() {
+                let start = (y + row) * stride + x * 4;
+                dst.copy_from_slice(&image.rgba[start..start + dst.len()]);
+                premultiply(dst);
+            }
+            pm
+        }
+    };
     let mut layer = Layer {
         pm,
         origin: Point::new(region.x() as f32, region.y() as f32),

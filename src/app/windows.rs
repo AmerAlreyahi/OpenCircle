@@ -1438,10 +1438,11 @@ impl Windows {
             Msg::Pin(id, msg) => return self.on_pin(id, msg),
             Msg::Steps(msg) => {
                 // a step made for the Studio's sidebar arrived (or failed): its place goes
-                if matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed) {
-                    if let Some((_, s)) = &mut self.studio {
-                        s.step_pending(-1);
-                    }
+                if let (true, Some((_, s))) = (
+                    matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed),
+                    &mut self.studio,
+                ) {
+                    s.step_pending(-1);
                 }
                 return self.on_steps(msg);
             }

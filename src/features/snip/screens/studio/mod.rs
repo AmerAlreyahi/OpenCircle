@@ -662,6 +662,29 @@ impl Studio {
         self.opening.as_ref().map(|(t, _)| *t)
     }
 
+    /// Tests: the old way, all on the calling thread (what `open` was before the thread).
+    #[cfg(test)]
+    pub fn open_in_place(&mut self, crop: Crop) {
+        let editor = Annotator::new(
+            Image {
+                width: crop.width,
+                height: crop.height,
+                rgba: crop.rgba,
+            },
+            1.0,
+        );
+        self.finish_open(editor, None);
+    }
+
+    /// Tests: `poll_open` once; how long it took when it opened the picture (ms).
+    #[cfg(test)]
+    pub fn poll_open_timed(&mut self) -> Option<f64> {
+        let t = std::time::Instant::now();
+        let was = self.opening.is_some();
+        self.poll_open();
+        (was && self.opening.is_none()).then(|| t.elapsed().as_secs_f64() * 1e3)
+    }
+
     /// Tests: wait for the big picture's thread and open it.
     #[cfg(test)]
     pub fn settle_open(&mut self) {
@@ -2283,8 +2306,9 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
     let want = (*width as f32 * e.zoom * scale).round().max(1.0);
     let actual = (want - *width as f32).abs() < 1.0;
     if *width * *height < MIP_MIN_PIXELS || want * 1.25 > *width as f32 {
-        // (a small or hardly-shrunk picture: itself; at 100 % the fast path needs no copy)
-        (e.display, e.crisp) = (None, actual);
+        // (a small or hardly-shrunk picture: itself; at 100 % and magnified 200 % and more, as
+        // the editors do, pixel for pixel: no copy and the fast path)
+        (e.display, e.crisp) = (None, actual || e.zoom * scale >= 2.0);
         return;
     }
     let want = want as u32;

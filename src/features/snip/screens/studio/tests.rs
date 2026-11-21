@@ -3889,3 +3889,201 @@ fn studio_frames_by_action() {
         }
     }
 }
+
+/// W90d.A: what the UI thread pays to open a picture, before (all in place) and after (the thread
+/// starts, the opened picture is taken): `cargo test --release --bin opencircle studio_open_cost
+/// -- --ignored --nocapture`. The crop is built outside the timing (a decoder hands it over).
+#[test]
+#[ignore = "a measurement, not a gate"]
+fn studio_open_cost() {
+    crate::shared::kit::text::load();
+    for (name, w, h) in [
+        ("1080p", 1920, 1080),
+        ("4K", 3840, 2160),
+        ("8K", 7680, 4320),
+    ] {
+        let mut before = Vec::new();
+        let mut start = Vec::new();
+        let mut finish = Vec::new();
+        for _ in 0..3 {
+            let mut s = Studio::new(StudioConfig::default());
+            let c = crop(w, h);
+            let t = std::time::Instant::now();
+            s.open_in_place(c);
+            before.push(t.elapsed().as_secs_f64() * 1e3);
+            let mut s = Studio::new(StudioConfig::default());
+            let c = crop(w, h);
+            let t = std::time::Instant::now();
+            s.open(Picture::Crop(c));
+            start.push(t.elapsed().as_secs_f64() * 1e3);
+            loop {
+                if let Some(ms) = s.poll_open_timed() {
+                    finish.push(ms);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let med = |v: &mut Vec<f64>| {
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[v.len() / 2]
+        };
+        // Add to steps: before = flatten on the UI thread; after = a copy of the document
+        let mut s = Studio::new(StudioConfig::default());
+        s.open(Picture::Crop(crop(w, h)));
+        s.settle_open();
+        let t = std::time::Instant::now();
+        let flat = annotate::render(&s.editor.as_ref().unwrap().doc);
+        let step_before = t.elapsed().as_secs_f64() * 1e3;
+        drop(flat);
+        let t = std::time::Instant::now();
+        s.editor.as_mut().unwrap().refresh();
+        println!(
+            "{name:<6} refresh alone (flatten + base handle): {:.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
+        let t = std::time::Instant::now();
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Pen)));
+        for m in [
+            Message::Press(Point::new(10.0, 10.0)),
+            Message::Move(Point::new(60.0, 40.0)),
+        ] {
+            let _ = s.update(Msg::Editor(m));
+        }
+        let t2 = std::time::Instant::now();
+        let _ = s.update(Msg::Editor(Message::Release));
+        println!(
+            "{name:<6} stroke release alone: {:.1} ms (stroke before it {:.1} ms)",
+            t2.elapsed().as_secs_f64() * 1e3,
+            (t2 - t).as_secs_f64() * 1e3
+        );
+        let t = std::time::Instant::now();
+        let out = s.update(Msg::Editor(Message::AddToSteps));
+        let step_after = t.elapsed().as_secs_f64() * 1e3;
+        assert!(matches!(out, Outcome::AddStepDoc(_)));
+        println!(
+            "{name:<6} add as step, UI thread: before {step_before:>6.1} ms | after {step_after:>5.1} ms (the flatten and the PNG run on a thread)"
+        );
+        println!(
+            "{name:<6} UI thread: before {:>6.1} ms | after: start {:>5.1} ms + take {:>5.1} ms",
+            med(&mut before),
+            med(&mut start),
+            med(&mut finish)
+        );
+    }
+}
+
+/// W90d.A: a big picture is prepared on a thread: `open` only starts it (a spinner shows, the frame
+/// clock runs), the picture is there when the thread is done, with its base painted and its
+/// see-through pixels known. (The 8K stall was 157 ms on the UI thread.)
+#[test]
+fn a_big_picture_opens_off_the_ui_thread() {
+    let mut s = Studio::new(StudioConfig::default());
+    s.open(Picture::Crop(crop(3000, 2000)));
+    assert!(s.editor.is_none(), "not on the UI thread");
+    assert!(
+        s.opening_since().is_some() && s.moving(),
+        "a spinner and the clock"
+    );
+    s.settle_open();
+    let e = s.editor.as_ref().expect("opened when the thread is done");
+    let iced::widget::image::Handle::Rgba { width, .. } = &e.base else {
+        panic!("pixels")
+    };
+    assert_eq!(
+        *width, 3000,
+        "its base is the picture, not a 1 px placeholder"
+    );
+    // see-through pixels are found by the thread
+    let mut c = crop(2000, 1000);
+    c.rgba[3] = 10;
+    s.open(Picture::Crop(c));
+    s.settle_open();
+    assert!(s.transparent);
+    // a small picture opens at once
+    s.open(Picture::Crop(crop(300, 200)));
+    assert!(s.opening_since().is_none() && s.editor.as_ref().unwrap().doc.image.width == 300);
+}
+
+/// W90d.B: Add to steps hands the host the document to flatten on a thread (an 8K flatten + PNG
+/// was 143 + 126 ms), and the sidebar shows a numbered place for each step being made.
+#[test]
+fn adding_a_step_flattens_off_the_ui_thread_and_shows_its_place() {
+    use crate::shared::kit::testing::shot;
+    crate::shared::kit::text::load();
+    let mut s = studio_on(300, 200);
+    assert!(
+        matches!(
+            s.update(Msg::Editor(Message::AddToSteps)),
+            Outcome::AddStepDoc(_)
+        ),
+        "the document, not a flattened copy"
+    );
+    let texts = |s: &Studio| shot::texts(view::view(s, &[], false));
+    let before = texts(&s);
+    s.step_pending(1);
+    s.step_pending(1);
+    let after = texts(&s);
+    assert!(
+        !before.iter().any(|t| t == "1")
+            && after.iter().any(|t| t == "1")
+            && after.iter().any(|t| t == "2"),
+        "two numbered places: {after:?}"
+    );
+    s.step_pending(-1);
+    s.step_pending(-1);
+    s.step_pending(-1); // (never below none)
+    assert_eq!(s.steps_pending, 0);
+}
+
+/// W90d.D: at 100 % and magnified 200 % and more the picture draws pixel for pixel (the renderer's
+/// fast path copies only the visible rows: 40 ms down to 1-2 ms for 4K / 8K); between, smooth.
+#[test]
+fn a_picture_at_100_percent_draws_pixel_for_pixel() {
+    let mut s = studio_on(3000, 2000);
+    let _ = s.update(Msg::Resized(Size::new(3440.0, 1440.0)));
+    s.zoom = Some(1.0 / s.scale);
+    s.fit();
+    let e = s.editor.as_ref().unwrap();
+    assert!(e.crisp && e.display.is_none(), "100 %: nearest, no copy");
+    s.zoom = Some(4.0 / s.scale);
+    s.fit();
+    assert!(s.editor.as_ref().unwrap().crisp, "magnified 4x: pixels");
+    s.zoom = Some(1.5 / s.scale);
+    s.fit();
+    assert!(!s.editor.as_ref().unwrap().crisp, "1.5x stays smooth");
+}
+
+/// W90d.F: a menu, a popover or a dialog that opens rises into place over `motion::OPEN` (the
+/// frame clock runs only while it does); with motion off it is simply there.
+#[test]
+fn menus_popovers_and_dialogs_rise_as_they_open() {
+    use crate::shared::kit::motion::{self, OPEN, RISE};
+    motion::set_reduced(false);
+    let mut s = studio_on(300, 200);
+    assert_eq!(s.rise(), 0.0);
+    assert!(!s.moving());
+    for open in [
+        Msg::Menu(Some(menu_bar::Menu::File)),
+        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::OpenPrefs,
+    ] {
+        let _ = s.update(Msg::Cancel);
+        let _ = s.update(Msg::Frame(std::time::Instant::now() + OPEN * 2));
+        let _ = s.update(open.clone());
+        assert!(s.rise() > RISE * 0.9, "{open:?}: starts low: {}", s.rise());
+        assert!(s.moving(), "{open:?}: the clock runs");
+        let start = s.rise_from.unwrap();
+        let _ = s.update(Msg::Frame(start + OPEN / 2));
+        assert!(s.rise() > 0.0 && s.rise() < RISE, "{open:?}: half way");
+        let _ = s.update(Msg::Frame(start + OPEN * 2));
+        assert_eq!(s.rise(), 0.0);
+        assert!(!s.moving(), "{open:?}: the clock stops");
+    }
+    // motion off: nothing to wait for
+    motion::set_reduced(true);
+    let _ = s.update(Msg::Cancel);
+    let _ = s.update(Msg::Menu(Some(menu_bar::Menu::Edit)));
+    assert_eq!(s.rise(), 0.0);
+    motion::set_reduced(false);
+}
