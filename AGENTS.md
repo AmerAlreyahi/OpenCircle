@@ -1465,3 +1465,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   Tray menu at the click (owner, 2026-11-20, same phase): when a tray tool (e.g. Windhawk's tray flyout) shows our icon
   somewhere else, our menu still opens at the icon's ORIGINAL taskbar spot, because it is placed at Shell_NotifyIconGetRect's
   rect (tray.rs on_click); open it at the click point (TrayIconEvent's position / the cursor), like the shell's own menus.
+- Studio title row in Arabic (owner, 2026-11-21, after e4cc590; refines the Arabic mirroring for the Studio header): the title
+  row is NOT mirrored: logo, File, Edit, View, gear stay at the left in the English order, the title in the middle, the window
+  buttons at the right, exactly like English; only the menus' contents are Arabic / right-to-left.
