@@ -3400,6 +3400,15 @@ fn studio_delay_by_action() {
         let mut s = Studio::new(StudioConfig::default());
         let _ = s.update(Msg::Resized(win));
         s.open(Picture::Crop(crop(w, h)));
+        // a big picture's smaller copies are made on a thread: wait for them, as a user
+        // would have by the time a menu is opened
+        for _ in 0..1000 {
+            let _ = s.update(Msg::Fit);
+            if w * h < 3_000_000 || s.editor.as_ref().is_some_and(|e| e.display.is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         s
     };
     let frames = |states: &[&Studio], steps: &[std::sync::Arc<Step>]| -> Vec<(f64, f64)> {
