@@ -126,6 +126,13 @@ Walkthrough video encoder (MP4 / WebM, AV1): rav1e (BSD-2-Clause), https://githu
 built into the app. Copyright (c) 2017-2023, the rav1e contributors, the Alliance for
 Open Media and the Xiph.Org Foundation. Same BSD 2-clause conditions as below.
 
+Cut out model (OpenCircle Studio): IS-Net general-use from DIS (Dichotomous Image Segmentation),
+https://github.com/xuebinqin/DIS, Apache-2.0 (Copyright the DIS authors), the ONNX file as published by
+rembg (https://github.com/danielgatis/rembg, MIT). Downloaded only after you agree; not bundled.
+
+Animated GIF encoder (walkthrough export): gif (MIT OR Apache-2.0), https://github.com/image-rs/image-gif,
+built into the app.
+
 Preview video decoder: rav1d (BSD-2-Clause), https://github.com/memorysafety/rav1d,
 built into the app. Copyright (c) 2018-2019, VideoLAN and dav1d authors;
 Copyright (c) 2023-2024, VideoLAN, dav1d authors, and Internet Security Research

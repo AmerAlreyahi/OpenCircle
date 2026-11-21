@@ -87,6 +87,10 @@ credited in [NOTICE](docs/NOTICE.md) and in Settings > About.
   AI and Translate for the picked area. Snip also takes a translated
   page as you see it (the translate pill's Snip button). Details:
   [Snip and annotate](docs/snip-and-annotate.md).
+- **OpenCircle Studio.** A window for longer work on a picture: the same editor with a
+  bigger canvas, Steps (several pictures, exported as images or a GIF / MP4 / WebM
+  walkthrough), Copy text, Translate, Ask AI, Edit text and Cut out on the picture.
+  Open it from the Snip toolbar, the tray or the Start menu.
 - **One bottom bar.** Ask OpenCircle AI about your screen, then Search in
   browser, Copy text, Translate and Snip. `Ctrl+C` copies the selection as an
   image (or the picked words as text), `Ctrl+S` saves it; a small pill confirms.

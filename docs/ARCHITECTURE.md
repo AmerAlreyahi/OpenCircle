@@ -29,7 +29,9 @@ src/
     snip/            the editor (annotate/), capture/ (snip frames, long capture, pins' capture), action.rs,
                      snip_more.rs, app/ (Snip, More, toolbar, screen tools), screens/ (the flow, toolbar,
                      Steps strip, long capture and its pop-up, screen tools, studio/: OpenCircle Studio's
-                     window, the same editor on a rail + options bar; its host is app/windows/studio.rs)
+                     window, the same editor on a rail + options bar; its host is app/windows/studio.rs); export.rs, movie.rs,
+                     transition.rs (Steps export: images, GIF, MP4 / WebM walkthrough)
+    cutout/          Cut out (Studio): the plain-background fill and the IS-Net model (downloaded on first use)
     song/            song search, its history, screens/
     settings/        the Settings window and its pages, previews, the Labs switches (labs.rs)
     onboarding/      the first-run steps

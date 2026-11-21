@@ -131,29 +131,46 @@ back everything one drag erased.
 ## OpenCircle Studio
 
 OpenCircle Studio is a normal window for longer work on a picture: the same editor
-as the Snip toolbar, with a bigger canvas. Open it from the tray (**Studio**),
-from **More > Open in Studio** on a picked area (your drawings stay editable and
-`Ctrl+Z` still undoes them), or from a terminal with `opencircle studio
-[file]`. Only one Studio is open at a time: opening it again brings it to the
-front and opens the new picture in it.
+as the Snip toolbar, with a bigger canvas. Open it from the tray (**Studio**), the
+Start menu or app grid, **Open in OpenCircle Studio** on the Snip toolbar (`Ctrl+E`,
+or double-click the picked area; your drawings stay editable), "Open with" on an
+image file, or a terminal: `opencircle studio [file]`. Only one Studio is open at a
+time: opening it again brings it to the front and opens the new picture in it.
 
-- **Open a picture:** `Ctrl+O`, drop a file on the window, `Ctrl+V` with a
-  picture on the clipboard, or click one of your Recent captures (Settings >
-  Snip > Recent captures).
-- **Tools:** every tool is on the rail at the side; the current tool's options
-  and colours are always shown in the bar above the canvas.
-- **Zoom:** the picture fits the window (never above 100 %); `Ctrl+=` /
-  `Ctrl+-` zoom, `Ctrl+0` fits, `Ctrl+1` shows 100 %. Scroll to move around a
-  zoomed picture.
-- **Side panels:** the library (Recent captures) and the picture panel each
-  hide with their button in the header, `Ctrl+[` and `Ctrl+]`; `Ctrl+\` hides
-  or shows both. The Studio remembers them.
-- **Copy and Save** are at the bottom right (`Ctrl+C`, `Ctrl+S`). Closing the
-  window or opening another picture with unsaved drawings asks first: Don't
-  save, Cancel or Save. `Esc` never closes the Studio.
+- **Open pictures:** `Ctrl+O` (pick several at once), drop files on the window, or
+  `Ctrl+V` with a picture on the clipboard. File > Open recent and the start screen
+  list your latest files.
+- **Tools and options:** every tool is on the rail at the window's edge. The bar above
+  the canvas always shows the colour, size, opacity and outline / fill (dimmed where a
+  tool can't use them), then the tool's own options, then **Position** and
+  **Actions**.
+- **Select and copy:** click, `Shift`+click, drag a box or `Ctrl+A` to select drawings.
+  `Ctrl+C` / `Ctrl+X` / `Ctrl+V` / `Ctrl+D` / `Delete` act on the selected drawings;
+  with nothing selected `Ctrl+C` copies the whole picture. The **Copy** button and
+  `Ctrl+Shift+C` always copy the whole picture. Right-click for the same actions.
+- **Actions on the picture:** Copy text, Translate, Ask AI, Edit text (change the
+  words in the picture) and Cut out (remove the background).
+- **Steps:** the sidebar holds several pictures as numbered steps (**Add pictures**,
+  drop, paste; click a step to edit it, drag to reorder). **Export** writes the steps
+  or one picture as images, or a walkthrough as GIF, MP4 or WebM with a transition
+  (Cut, Crossfade, Slide, Push, Zoom or Wipe) of 0.3, 0.5 or 1 s; the sheet shows the
+  file's expected size. `Ctrl+B` hides or shows the sidebar.
+- **Zoom:** the mouse wheel zooms the picture at the pointer, a middle-button drag or
+  `Space`+drag pans, `Shift+1` fits, `Ctrl+1` shows 100 %. `Ctrl+=` / `Ctrl+-` /
+  `Ctrl+0` scale the Studio's own text and controls.
+- **Preferences:** `Ctrl+,` (File > Preferences, or Settings > Studio > Open Studio
+  preferences): theme, where the Steps sidebar sits, saving and export defaults,
+  copy and paste, editing, and every shortcut. Settings > Studio can keep unsaved
+  work if OpenCircle closes unexpectedly (off by default).
+- **Saving:** closing the window or opening another picture with unsaved drawings asks
+  first: Don't save, Cancel or Save. `Esc` never closes the Studio.
 
-On Wayland a file can't be dropped on the window yet (use `Ctrl+O` or
-`Ctrl+V`).
+**Cut out** first fills a plain background at once, with nothing downloaded. For
+other backgrounds it can use a background-removal model (about 179 MB, from
+`github.com/AmerAlreyahi/OpenCircle-models`, checked against a pinned checksum); it
+asks before downloading, and runs on your PC. Your picture is never sent anywhere.
+
+On Wayland a file can't be dropped on the window yet (use `Ctrl+O` or `Ctrl+V`).
 
 ## Long capture
 

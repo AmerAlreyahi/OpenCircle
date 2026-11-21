@@ -62,8 +62,7 @@ pub use document::rounded as rounded_path;
 pub use document::{
     Document, Edit, Image, Item, Shape, base_of, clean, hidden, hidden_in_clean, render, span,
 };
-#[allow(unused_imports)] // API for the Studio's bar (W87)
-pub use objects::{GrowRefusal, Order, SelectionStyle, clear_clipboard};
+pub use objects::{GrowRefusal, Order, clear_clipboard};
 pub use style::PRESETS;
 
 /// Steps the Steps strip holds at most (open point 3: 12).
