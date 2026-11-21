@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use iced::Element;
-use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container, mouse_area};
 
 use super::{Msg, Studio};
@@ -75,6 +74,7 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         let none = muted(Role::ROW_DESC, t!(st_steps_none));
         return container(none).padding([0.0, PAD]).into();
     }
+    let tip_at = super::view::inward(!super::view::rail_on_left(s.sidebar_at_start(), dir::rtl()));
     let n = steps.len();
     let order = s.pick.order(n);
     let cells: Vec<Element<'a, Msg>> = order
@@ -92,7 +92,7 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
                 .on_press(Msg::StepPress(i))
                 .on_enter(Msg::StepHover(i, true))
                 .on_exit(Msg::StepHover(i, false));
-            hint(shot, t!(st_step_tip), Why::Icon, Position::Right)
+            hint(shot, t!(st_step_tip), Why::Icon, tip_at)
         })
         .collect();
     let mut cells = cells;

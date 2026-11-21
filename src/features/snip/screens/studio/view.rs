@@ -104,8 +104,11 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             ]
             .width(Fill)
             .height(Fill);
-            let mut parts: Vec<Element<'a, Msg>> =
-                vec![rail(e), divider::vertical(Fill), right.into()];
+            let mut parts: Vec<Element<'a, Msg>> = vec![
+                rail(e, inward(rail_on_left(first, dir::rtl()))),
+                divider::vertical(Fill),
+                right.into(),
+            ];
             if first {
                 parts.reverse();
             }
@@ -281,7 +284,23 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
 }
 
 /// Every tool on the rail, groups split by a hairline; Undo / Redo at its foot.
-fn rail(e: &Annotator) -> Element<'_, Msg> {
+/// A tooltip beside a control of a side panel, toward the picture: `on_left` = the panel
+/// is at the window's left edge. (A tooltip pointing off the window is pushed back over
+/// its own control.)
+pub(super) fn inward(on_left: bool) -> Position {
+    match on_left {
+        true => Position::Right,
+        false => Position::Left,
+    }
+}
+
+/// Is the tools rail at the window's left edge? It takes the edge the Steps sidebar
+/// does not: the sidebar at the reading start puts the rail at the end.
+pub(super) fn rail_on_left(sidebar_first: bool, rtl: bool) -> bool {
+    sidebar_first == rtl
+}
+
+fn rail(e: &Annotator, tip_at: Position) -> Element<'_, Msg> {
     let base = info(e.tool).slot;
     let mut tools: Vec<Element<'_, Msg>> = Vec::new();
     for (i, g) in Group::ALL.into_iter().enumerate() {
@@ -307,7 +326,7 @@ fn rail(e: &Annotator) -> Element<'_, Msg> {
                 Tool::Crop => tr(t.name),
                 _ => toolbar::tip(t),
             };
-            tools.push(hint(button, name, Why::Icon, Position::Right));
+            tools.push(hint(button, name, Why::Icon, tip_at));
         }
     }
     let (done, all) = e.doc.steps();
@@ -318,13 +337,13 @@ fn rail(e: &Annotator) -> Element<'_, Msg> {
             icon_button::square(toolbar::UNDO, State::default(), undo),
             t!(sn_undo),
             Why::Keys(super::keys::UNDO),
-            Position::Right,
+            tip_at,
         ),
         hint(
             icon_button::square(toolbar::REDO, State::default(), redo),
             t!(sn_redo),
             Why::Keys(super::keys::REDO),
-            Position::Right,
+            tip_at,
         ),
     ]
     .spacing(space::GAP);
@@ -853,4 +872,27 @@ fn question<'a>() -> Element<'a, Msg> {
         modal::header(t!(st_ask_close), Some(t!(st_ask_hint)), Msg::Cancel),
         buttons.into(),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// W90d.3: the rail's and the sidebar's tooltips point toward the picture, never off the
+    /// window (where they land over their own control).
+    #[test]
+    fn side_panel_tooltips_point_inward() {
+        // default: rail at the reading start; English = left edge
+        assert!(rail_on_left(false, false));
+        assert!(
+            !rail_on_left(false, true),
+            "Arabic: the rail is at the right edge"
+        );
+        assert!(matches!(inward(rail_on_left(false, true)), Position::Left));
+        assert!(matches!(
+            inward(rail_on_left(false, false)),
+            Position::Right
+        ));
+        assert!(matches!(inward(!rail_on_left(true, true)), Position::Left));
+    }
 }
