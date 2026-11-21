@@ -1468,3 +1468,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Studio title row in Arabic (owner, 2026-11-21, after e4cc590; refines the Arabic mirroring for the Studio header): the title
   row is NOT mirrored: logo, File, Edit, View, gear stay at the left in the English order, the title in the middle, the window
   buttons at the right, exactly like English; only the menus' contents are Arabic / right-to-left.
+- Next release, beside Snip enhancements (owner, 2026-11-21; planning #200-#202): (1) a right-click menu on text selected in
+  main mode (Ctrl+Shift+Space) with actions on just the selection (translate only it, and more); STUDY first what to offer and
+  where else the same logic applies, list to the owner before building; (2) Ctrl + mouse wheel resizes the selected shape in
+  the Snip widget and the Studio.
