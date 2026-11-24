@@ -279,6 +279,11 @@
           "id": "L-06",
           "title": "Game watch area (#196)",
           "status": "todo"
+        },
+        {
+          "id": "L-07",
+          "title": "Game mode follows a real game launch (like NVIDIA app / Discord) (#224)",
+          "status": "todo"
         }
       ],
       "gate": [
