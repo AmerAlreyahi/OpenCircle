@@ -1102,6 +1102,16 @@ production systems.
   and the Settings v2 draft canvas https://claude.ai/artifact/2u6VGzutWoVxNpqxHTQoSE (round 5). New prototypes go on their own
   new canvas.
 
+- Blur rework (owner, 2026-11-24, study docs/internal/reports-enh/w100-blur-study.md; in the enhancements release, steps 1-5):
+  Hide's default = a smooth secure frost built from the area's BACKGROUND (never reads the content: anything that reads it was
+  recovered 100 % in the lab); today's mosaic stays as the "Pixelate" style, made consistent. Soft / Frosted / Progressive
+  (direction + start/end handles, like the owner's reference) are LOOK styles with a one-line note "for looks, not for secrets",
+  never the default. Strength = Light / Medium / Strong (0.25 / 0.5 / 1.0 x reference text height) in Snip, plus a Custom slider in
+  the Studio; the same at any zoom (image px x capture DPI scale, never / zoom). One texture per picture, overlaps merge. Shapes:
+  rectangle, ellipse, free brush with soft round ends, "Hide this shape"; edges feather outward only; an ellipse stays an ellipse
+  (Redact too); the #154 drag-back shrink only while line help holds the stroke on one line. Blur once, mask many (cache).
+  Old saved blurs re-render with the new fill. Keys: B, Shift+B cycles styles, R/E/P shapes, 1-3 strength.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
