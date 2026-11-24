@@ -2290,8 +2290,14 @@ strings! {
         | "إظهار الشريط الجانبي للخطوات";
     st_hide_steps: "Hide the Steps sidebar"
         | "إخفاء الشريط الجانبي للخطوات";
-    st_add_pictures: "Add pictures…"
-        | "إضافة صور…";
+    st_step_pictures: "Pictures…"
+        | "صور…";
+    st_step_paste: "Paste"
+        | "لصق";
+    st_step_this: "This picture"
+        | "هذه الصورة";
+    st_add_step: "Add step"
+        | "إضافة خطوة";
     st_paste_step: "Paste as step"
         | "لصق كخطوة";
     st_position: "Position"
@@ -2310,8 +2316,6 @@ strings! {
         | "دمج في الصورة";
     st_n_objects: "{} objects"
         | "{} كائنات";
-    st_add_steps: "Add to steps"
-        | "أضف إلى الخطوات";
     st_hint_select: "Click an object to edit it"
         | "انقر كائنًا لتحريره";
     st_sc_title: "Keyboard shortcuts"

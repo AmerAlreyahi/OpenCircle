@@ -81,6 +81,33 @@ pub fn menu_button<'a, Message: Clone + 'a>(
     menu(opener, rows, width)
 }
 
+/// `menu_button` with a words opener (the Steps sidebar's "Add step"): `glyph` and
+/// `label`, as wide as its room, opening the same menu of `rows`.
+pub fn menu_labelled<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: &'a str,
+    rows: Vec<(String, bool, Message)>,
+    width: f32,
+) -> Element<'a, Message> {
+    let line = crate::dir_row![
+        text(glyph)
+            .font(super::icon::FONT)
+            .size(size::ICON_SMALL)
+            .color(c().text),
+        super::text::text(Role::CONTROL, label),
+        Space::new().width(Fill),
+        super::icon::icon(super::icon::Icon::ChevronDown, size::ICON_SMALL).color(c().text_sub),
+    ]
+    .spacing(8.0)
+    .align_y(Center);
+    // the row fills the opener from its start edge (right in Arabic), a caret at the end
+    let opener = container(line)
+        .padding([7.0, 14.0])
+        .width(Fill)
+        .align_x(super::dir::start());
+    menu(opener, rows, width)
+}
+
 fn menu<'a, Message: Clone + 'a>(
     opener: container::Container<'a, Message>,
     rows: Vec<(String, bool, Message)>,
@@ -947,5 +974,57 @@ mod tests {
             &[opener, Point::new(60.0, 60.0 + 30.0 * 2.0 + 15.0)],
         );
         assert_eq!(picked, ["Japanese"]);
+    }
+
+    /// F8 (#213): the labelled menu opener starts at the start edge (right in Arabic) with a
+    /// F8: a press on the opener at the start edge (left; right in Arabic) opens the menu, and
+    /// a press on its first row picks it.
+    #[test]
+    fn f8_clicking_the_labelled_opener_opens_its_menu() {
+        let size = iced::Size::new(240.0, 200.0);
+        for rtl in [false, true] {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            let x = if rtl { size.width - 20.0 } else { 20.0 };
+            let picked = shot::clicks(
+                || {
+                    menu_labelled(
+                        '\u{e140}',
+                        "Add step",
+                        vec![("Pictures".into(), false, 7u8)],
+                        240.0,
+                    )
+                },
+                size,
+                &[iced::Point::new(x, 16.0), iced::Point::new(x, 56.0)],
+            );
+            assert_eq!(picked, [7], "rtl {rtl}");
+        }
+    }
+
+    /// caret at the end: most of its ink is in the start half.
+    #[test]
+    fn f8_a_labelled_menu_opener_starts_at_the_start_edge() {
+        let (w, h) = (240.0_f32, 32.0_f32);
+        let ink = |rtl: bool| {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            let view = menu_labelled('\u{e140}', "Add step", vec![("a".into(), false, ())], w);
+            let px = shot::render_with(view, iced::Size::new(w, h), None, &[]);
+            let at = |x: usize, y: usize| {
+                let i = (y * w as usize + x) * 4;
+                [px[i], px[i + 1], px[i + 2]]
+            };
+            let fill = at(w as usize / 2, 4);
+            let half = |from: usize, to: usize| {
+                (from..to)
+                    .flat_map(|x| (6..h as usize - 6).map(move |y| (x, y)))
+                    .filter(|&(x, y)| at(x, y) != fill)
+                    .count()
+            };
+            (half(0, w as usize / 2), half(w as usize / 2, w as usize))
+        };
+        let (left, right) = ink(false);
+        assert!(left > 2 * right, "LTR: {left} vs {right}");
+        let (left, right) = ink(true);
+        assert!(right > 2 * left, "RTL: {left} vs {right}");
     }
 }

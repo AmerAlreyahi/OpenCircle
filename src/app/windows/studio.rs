@@ -62,6 +62,11 @@ impl Windows {
         let (id, open) = super::normal(Kind::Studio);
         let mut s = Studio::new(crate::shared::config::current().snip.studio);
         s.set_browser(crate::features::ask_ai::app::ai_chat::hands_off());
+        s.steps_at_open(
+            self.steps
+                .as_ref()
+                .map_or(0, |(_, strip)| strip.steps().len()),
+        );
         if let Some(picture) = picture {
             s.open(picture);
         }

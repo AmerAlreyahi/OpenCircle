@@ -150,11 +150,11 @@ time: opening it again brings it to the front and opens the new picture in it.
   `Ctrl+Shift+C` always copy the whole picture. Right-click for the same actions.
 - **Actions on the picture:** Copy text, Translate, Ask AI, Edit text (change the
   words in the picture) and Cut out (remove the background).
-- **Steps:** the sidebar holds several pictures as numbered steps (**Add pictures**,
+- **Steps:** the sidebar holds several pictures as numbered steps (**Add step** > Pictures, Paste or This picture,
   drop, paste; click a step to edit it, drag to reorder). **Export** writes the steps
   or one picture as images, or a walkthrough as GIF, MP4 or WebM with a transition
   (Cut, Crossfade, Slide, Push, Zoom or Wipe) of 0.3, 0.5 or 1 s; the sheet shows the
-  file's expected size. `Ctrl+B` hides or shows the sidebar.
+  file's expected size. The sidebar starts closed while there are no steps and opens with the first one; `Ctrl+B` hides or shows it.
 - **Zoom:** the mouse wheel zooms the picture at the pointer, a middle-button drag or
   `Space`+drag pans, `Shift+1` fits, `Ctrl+1` shows 100 %. `Ctrl+=` / `Ctrl+-` /
   `Ctrl+0` scale the Studio's own text and controls.

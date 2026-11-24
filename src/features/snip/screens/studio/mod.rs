@@ -435,6 +435,8 @@ pub struct Studio {
     pub(super) rise_from: Option<std::time::Instant>,
     /// Steps being made on a thread (flatten, PNG, thumbnail): the sidebar shows a place for each.
     pub(super) steps_pending: usize,
+    /// The sidebar was closed at opening for want of steps: only the first step opens it.
+    closed_for_empty: bool,
     /// A big picture is being prepared on a thread: when it began, where the thread leaves it.
     opening: Option<(std::time::Instant, OpenSlot)>,
     pub(super) slide: Option<Slide>,
@@ -570,6 +572,7 @@ impl Studio {
             page: Page::Steps,
             opening: None,
             steps_pending: 0,
+            closed_for_empty: false,
             rise_from: None,
             at_rest: cfg!(test),
             mips: None,
@@ -797,6 +800,21 @@ impl Studio {
     /// A step is being made (+1) or has arrived or failed (-1).
     pub fn step_pending(&mut self, delta: isize) {
         self.steps_pending = self.steps_pending.saturating_add_signed(delta);
+        // the first step after an empty start opens the sidebar that was closed for want of
+        // steps (F8); later steps leave it as the user has it (Ctrl+B, the setting)
+        if delta > 0 && std::mem::take(&mut self.closed_for_empty) {
+            self.panels.library = true;
+            self.fit();
+        }
+    }
+
+    /// The Studio opened with `n` steps: with none, the Steps sidebar starts closed (owner
+    /// rule: no empty panels, F8); it opens with the first step or by hand (Ctrl+B).
+    pub fn steps_at_open(&mut self, n: usize) {
+        if n == 0 && self.panels.library {
+            self.panels.library = false;
+            self.closed_for_empty = true;
+        }
     }
 
     pub fn moving(&self) -> bool {
@@ -1417,6 +1435,7 @@ impl Studio {
             Msg::Caption(c) => Outcome::Caption(c),
             Msg::Library => {
                 self.panels.library = !self.panels.library;
+                self.closed_for_empty = false; // the user's own say now
                 self.popover = None;
                 self.fit();
                 Outcome::Panels(old_panels, self.panels)

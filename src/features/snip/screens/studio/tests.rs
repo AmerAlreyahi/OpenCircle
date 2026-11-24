@@ -2320,8 +2320,6 @@ fn v31_the_caption_buttons_stay_right_in_arabic() {
             .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect)))),
         "{rect:?}"
     );
-    let add = click_view(&s, (130.0, 155.0));
-    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
 }
 
 /// v3.1 item 3: Add pictures asks for several files; files dropped together (or onto an
@@ -2329,8 +2327,6 @@ fn v31_the_caption_buttons_stay_right_in_arabic() {
 #[test]
 fn v31_pictures_join_the_steps() {
     let mut s = studio_on(640, 400);
-    let add = click_view(&s, (1148.0, 155.0));
-    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
     assert!(matches!(s.update(Msg::PickFiles), Outcome::PickFiles));
     let files = vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")];
     assert!(matches!(s.update(Msg::AddFiles(files)), Outcome::AddPictures(v) if v.len() == 2));
@@ -2624,8 +2620,6 @@ fn v31_the_steps_sidebar_side_is_a_setting() {
     let s = studio_on(640, 400);
     assert!(!s.sidebar_at_start());
     // End: the sidebar's Add at the right, the rail's Rectangle at the left
-    let add = click_view(&s, (1148.0, 155.0));
-    assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
     let rect = click_view(&s, (27.0, 155.0));
     assert!(
         rect.iter()
@@ -3125,8 +3119,6 @@ fn w90b_every_studio_preference_acts() {
         || {
             let s = studio_on(640, 400);
             assert!(s.sidebar_at_start());
-            let add = click_view(&s, (130.0, 155.0));
-            assert!(add.iter().any(|m| matches!(m, Msg::PickFiles)), "{add:?}");
             let rail = click_view(&s, (1252.0, 155.0));
             assert!(
                 rail.iter()
@@ -4114,4 +4106,58 @@ fn the_title_row_and_menus_are_the_same_places_in_arabic_and_english() {
         }
         app_language::set(Lang::En);
     });
+}
+
+/// F8 (#213): opened with no steps, the Steps sidebar is closed (no empty panel); the first
+/// step opens it; with steps it stays as the user has it.
+#[test]
+fn f8_the_sidebar_starts_closed_without_steps_and_opens_with_the_first() {
+    let mut s = studio_on(100, 100);
+    assert!(s.sidebar_shown(), "the user's own panels");
+    s.steps_at_open(2);
+    assert!(s.sidebar_shown(), "steps: as the user has it");
+    s.steps_at_open(0);
+    assert!(!s.sidebar_shown(), "no steps: closed");
+    s.step_pending(1);
+    assert!(s.sidebar_shown(), "the first step opens it");
+    // the user closes it (Ctrl+B): the next step does not reopen it
+    let _ = s.update(Msg::Library);
+    assert!(!s.sidebar_shown());
+    s.step_pending(1);
+    assert!(
+        !s.sidebar_shown(),
+        "only the first step after an empty start opens it"
+    );
+}
+
+/// F8: Ctrl+B before any step is the user's own say: the first step then leaves it closed.
+#[test]
+fn f8_toggling_the_sidebar_by_hand_ends_the_auto_open() {
+    let mut s = studio_on(100, 100);
+    s.steps_at_open(0);
+    let _ = s.update(Msg::Library); // open by hand
+    let _ = s.update(Msg::Library); // closed by hand
+    s.step_pending(1);
+    assert!(!s.sidebar_shown());
+}
+
+/// F8: one Add step button instead of three look-alike ones; its menu has Pictures, Paste
+/// and This picture (the last only with a picture open).
+#[test]
+fn f8_the_sidebar_has_one_add_step_button() {
+    use crate::shared::kit::testing::shot;
+    let s = studio_on(100, 100);
+    let texts = shot::texts(sidebar::view(&s, &[]));
+    for gone in ["Add pictures…", "Add to steps", "Paste as step"] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
+    let labels =
+        |s: &Studio| -> Vec<String> { sidebar::add_rows(s).into_iter().map(|r| r.0).collect() };
+    assert_eq!(labels(&s), ["Pictures…", "Paste", "This picture"]);
+    let empty = Studio::new(StudioConfig::default());
+    assert_eq!(
+        labels(&empty),
+        ["Pictures…", "Paste"],
+        "no picture: no This picture"
+    );
 }

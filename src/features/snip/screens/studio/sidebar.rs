@@ -1,5 +1,5 @@
 //! The Steps sidebar (STUDIO v3.1): the only side panel. Its header names it and
-//! holds its toggle; then Add pictures / Add this picture / Paste as step, the
+//! holds its toggle; then one Add step menu (Pictures / Paste / This picture), the
 //! numbered steps (click = edit that step, drag = reorder, x = delete) and, at
 //! the foot, Copy all and Export. The Steps strip's own steps, one store.
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::text::muted;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{dir, side_panel, thumb};
+use crate::shared::kit::{dir, dropdown, side_panel, thumb};
 use crate::t;
 
 /// The sidebar's side padding.
@@ -33,31 +33,10 @@ pub(super) fn toggle_glyph(at_start: bool) -> char {
 /// The whole sidebar. `steps`: the Steps strip's steps.
 pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let wide = super::SIDEBAR - 2.0 * PAD;
-    let add = button::labelled(
-        super::view::PLUS,
-        t!(st_add_pictures),
-        wide,
-        Kind::Elevated,
-        false,
-        Some(Msg::PickFiles),
-    );
-    let this = button::labelled(
-        toolbar::COPY,
-        t!(st_add_steps),
-        wide,
-        Kind::Elevated,
-        false,
-        s.editor.is_some().then_some(Msg::Editor(Message::AddStep)),
-    );
-    let paste = button::labelled(
-        super::view::PASTE,
-        t!(st_paste_step),
-        wide,
-        Kind::Elevated,
-        false,
-        Some(Msg::PasteStep),
-    );
-    let tools = container(column![add, this, paste].spacing(space::GAP)).padding([space::GAP, PAD]);
+    // one button, one menu (Pictures... / Paste / This picture)
+    let rows = add_rows(s);
+    let add = dropdown::menu_labelled(super::view::PLUS, t!(st_add_step), rows, wide);
+    let tools = container(add).padding([space::GAP, PAD]);
     let list = column![tools, steps_list(s, steps)];
     // Export is a second page that slides in (back arrow, Esc); with no step there is none
     let body: Element<'a, Msg> = match (s.page, s.slide, steps.is_empty()) {
@@ -83,6 +62,22 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         .on_enter(Msg::OverSidebar(true))
         .on_exit(Msg::OverSidebar(false))
         .into()
+}
+
+/// The Add step menu: Pictures, Paste and, with a picture open, This picture.
+pub(super) fn add_rows(s: &Studio) -> Vec<(String, bool, Msg)> {
+    let mut rows = vec![
+        (t!(st_step_pictures).to_string(), false, Msg::PickFiles),
+        (t!(st_step_paste).to_string(), false, Msg::PasteStep),
+    ];
+    if s.editor.is_some() {
+        rows.push((
+            t!(st_step_this).to_string(),
+            false,
+            Msg::Editor(Message::AddStep),
+        ));
+    }
+    rows
 }
 
 /// The Steps strip's steps, four to a row: click = open on the canvas, drag =
