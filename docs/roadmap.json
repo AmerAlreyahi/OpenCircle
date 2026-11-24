@@ -1,0 +1,384 @@
+{
+  "sample": false,
+  "project": "OpenCircle",
+  "tagline": "Circle anything on screen: search, translate, ask AI, snip. Free, private, Windows and Linux",
+  "outcome": "One key over any app gives search, in-place translation, an AI answer or a snip, offline first, with nothing leaving the PC unless the user asks.",
+  "status": "on-track",
+  "approval": {
+    "state": "approved",
+    "date": "2026-11-24",
+    "ref": "owner answers in chat 2026-11-24 (AGENTS.md 37f6ae38)",
+    "by": "Owner"
+  },
+  "updated": "2026-11-24",
+  "links": [
+    {
+      "label": "Board",
+      "href": "https://github.com/users/AmerAlreyahi/projects/8"
+    },
+    {
+      "label": "Repository",
+      "href": "https://github.com/AmerAlreyahi/OpenCircle"
+    }
+  ],
+  "northStar": {
+    "users": [
+      "People who search, translate or ask AI about what is on their screen",
+      "Players who want games translated in place"
+    ],
+    "problem": "Circle to Search and Lens are phone-first, online and tied to one company; desktop users get scattered tools.",
+    "nonGoals": [
+      "No telemetry",
+      "No account required",
+      "No macOS until the owner has a Mac"
+    ],
+    "constraints": [
+      "Windows 10/11 and Linux (X11 + Wayland) from the first design",
+      "Offline by default; online only when the user chooses it",
+      "One native binary, light on RAM and CPU"
+    ],
+    "measures": [
+      {
+        "name": "One-shot translate time",
+        "target": "back to v0.1.8 or faster",
+        "now": "slower since v0.2.0 (W94 measuring)"
+      }
+    ]
+  },
+  "waiting": [
+    {
+      "id": "Q-03",
+      "question": "What does the new design cover?",
+      "recommended": "Settings v2 + the app-wide look + the Snip widget per mode, one canvas round",
+      "blocks": "N-01"
+    }
+  ],
+  "releases": [
+    {
+      "version": "0.4.0",
+      "name": "OpenCircle Studio",
+      "status": "shipped",
+      "shipped": "2026-11-21",
+      "why": "Give snips a real editor window.",
+      "outcome": "The Studio: its own window, steps, export, edit text, cut out.",
+      "items": [
+        {
+          "id": "S-01",
+          "title": "OpenCircle Studio window",
+          "status": "done"
+        },
+        {
+          "id": "S-02",
+          "title": "Steps and export (GIF/MP4/WebM)",
+          "status": "done"
+        },
+        {
+          "id": "S-03",
+          "title": "Edit text and cut out",
+          "status": "done"
+        }
+      ],
+      "gate": [
+        {
+          "check": "Windows + Ubuntu VM update gate",
+          "ok": true
+        },
+        {
+          "check": "Assets and signatures verified after publish",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "version": "0.5.0",
+      "name": "Enhancements (no new features)",
+      "status": "active",
+      "why": "Make what exists familiar, fast and dependable before anything new (owner 2026-11-24).",
+      "outcome": "Translate is fast again; every tool behaves like the apps people know; the kit's checks guard every commit.",
+      "items": [
+        {
+          "id": "K-01",
+          "title": "Kit: sdlc.json gate (done) + commit hooks (after the running workers finish)",
+          "status": "todo"
+        },
+        {
+          "id": "K-02",
+          "title": "Kit: confirm the 8 old secret-scan hits are fakes; .gitleaksignore",
+          "status": "done"
+        },
+        {
+          "id": "K-03",
+          "title": "Kit: handover rewritten as one current state",
+          "status": "todo"
+        },
+        {
+          "id": "K-04",
+          "title": "Kit: map the board fields so roadmap.json drives the board (sync not run yet: field names differ)",
+          "status": "todo"
+        },
+        {
+          "id": "E-01",
+          "title": "Translate slow: measured (#221): no regression since v0.1.8; 3 old costs found",
+          "status": "done"
+        },
+        {
+          "id": "E-02",
+          "title": "Translate faster (#221): 2nd read only on game screens, warm-up overlaps OCR, keep 2 models",
+          "status": "in-progress",
+          "depends": [
+            "E-01"
+          ]
+        },
+        {
+          "id": "E-08",
+          "title": "Right-click menu on selected text (#201): study, owner approves the actions, then build",
+          "status": "todo"
+        },
+        {
+          "id": "E-03",
+          "title": "UX batch 1 (#206-#220) + F7 Original toggle: review fix round",
+          "status": "in-progress"
+        },
+        {
+          "id": "E-04",
+          "title": "UX batch 2: F5 F6 F11 F12 F13 (small design round first)",
+          "status": "todo"
+        },
+        {
+          "id": "E-05",
+          "title": "UX batch 3: owner calls C2 C3 C4 C5 C6 C7 (#205)",
+          "status": "todo"
+        },
+        {
+          "id": "E-06",
+          "title": "Snip enhancements: pro picker, drawing stays inside, tray menu at the click (#200)",
+          "status": "todo"
+        },
+        {
+          "id": "E-07",
+          "title": "Ctrl + mouse wheel resizes the selected shape (#202)",
+          "status": "todo"
+        },
+        {
+          "id": "E-09",
+          "title": "CI audit: url 2.5.9 (RUSTSEC-2026-0592, #223)",
+          "status": "in-progress"
+        }
+      ],
+      "gate": [
+        {
+          "check": "Full gate + CI green, test count not lower",
+          "ok": false
+        },
+        {
+          "check": "Translate time measured before and after",
+          "ok": false
+        },
+        {
+          "check": "Windows + Ubuntu VM gate",
+          "ok": false
+        },
+        {
+          "check": "Owner tried the dev build",
+          "ok": false
+        }
+      ]
+    },
+    {
+      "version": "0.6.0",
+      "name": "Snip recording + the new design",
+      "status": "next",
+      "why": "Owner 2026-11-24: video and audio recording in Snip next, and the design he has not approved yet is finished right after the enhancements.",
+      "outcome": "Snip records an area, a window or the screen with microphone and/or computer sound; its widget changes with the mode (record mode shows record controls only, no picture tools); the new design is approved and applied.",
+      "items": [
+        {
+          "id": "N-01",
+          "title": "Design round: the new design, approved on the canvas before any build (after Q-03)",
+          "status": "todo"
+        },
+        {
+          "id": "R-01",
+          "title": "Recording research: capability table Windows / X11 / Wayland (capture, mic, system audio, hardware encoder)",
+          "status": "todo"
+        },
+        {
+          "id": "R-02",
+          "title": "Recording design: the Snip widget per mode (picture tools only for pictures; record bar only for audio/video)",
+          "status": "todo",
+          "depends": [
+            "N-01",
+            "R-01"
+          ]
+        },
+        {
+          "id": "R-03",
+          "title": "Audio foundations: microphone and system audio (#118)",
+          "status": "todo",
+          "depends": [
+            "R-01"
+          ]
+        },
+        {
+          "id": "R-04",
+          "title": "Record video of an area / window / screen with sound (#168)",
+          "status": "todo",
+          "depends": [
+            "R-02",
+            "R-03"
+          ]
+        },
+        {
+          "id": "R-05",
+          "title": "Record audio only",
+          "status": "todo",
+          "depends": [
+            "R-03",
+            "R-02"
+          ]
+        }
+      ],
+      "gate": [
+        {
+          "check": "Design approved by the owner",
+          "ok": false
+        },
+        {
+          "check": "Recording proved on Windows 10, GNOME Wayland, KDE, X11",
+          "ok": false
+        }
+      ]
+    },
+    {
+      "version": "0.7.0",
+      "name": "Later plans (order kept from the master roadmap)",
+      "status": "planned",
+      "why": "Planned features, kept and not dropped.",
+      "outcome": "Taken in the board's order after 0.6.0.",
+      "items": [
+        {
+          "id": "L-02",
+          "title": "Paste or drop an image into the AI chat (#203)",
+          "status": "todo"
+        },
+        {
+          "id": "L-03",
+          "title": "Steps strip: + and Open in Studio (#204)",
+          "status": "todo"
+        },
+        {
+          "id": "L-04",
+          "title": "Ctrl+K in the Studio (#189)",
+          "status": "todo"
+        },
+        {
+          "id": "L-05",
+          "title": "Live page translation, new engine (#195)",
+          "status": "todo"
+        },
+        {
+          "id": "L-06",
+          "title": "Game watch area (#196)",
+          "status": "todo"
+        }
+      ],
+      "gate": [
+        {
+          "check": "Each item's own VM gate",
+          "ok": false
+        }
+      ]
+    }
+  ],
+  "criticalPath": [
+    "E-01",
+    "E-02",
+    "N-01",
+    "R-02",
+    "R-04"
+  ],
+  "decisions": [
+    {
+      "id": "D-01",
+      "date": "2026-11-24",
+      "decision": "The release after v0.4.0 is enhancements only, no new features",
+      "why": "Owner: make what exists dependable first"
+    },
+    {
+      "id": "D-02",
+      "date": "2026-11-24",
+      "decision": "UX owner calls C1-C7 taken as recommended (AGENTS.md)",
+      "why": "Familiar behaviour across every tool"
+    },
+    {
+      "id": "D-03",
+      "date": "2026-11-24",
+      "decision": "Next: Snip video + audio recording, the widget changes with the mode",
+      "why": "Owner: no picture tools in record mode"
+    },
+    {
+      "id": "D-04",
+      "date": "2026-11-24",
+      "decision": "Right-click menu on selected text is in the enhancements release",
+      "why": "Owner sees it as an enhancement"
+    },
+    {
+      "id": "D-05",
+      "date": "2026-11-24",
+      "decision": "Translate: 2nd whole-screen read only on game screens; keep two models warm",
+      "why": "3-4 s of ~6 s on Windows web pages; no accuracy risk outside games"
+    },
+    {
+      "id": "D-06",
+      "date": "2026-11-24",
+      "decision": "F7: an Original toggle on the translate pill (click, not Alt)",
+      "why": "Familiar; a click can't get stuck like the Alt peek"
+    },
+    {
+      "id": "D-07",
+      "date": "2026-11-24",
+      "decision": "Kit adopted; old AI attribution history left, new commits guarded; docs/roadmap.json is the roadmap source",
+      "why": "Owner approved the adoption report"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Live recording needs a hardware encoder; our AV1 encoder is too slow live",
+      "impact": "high",
+      "likelihood": "high",
+      "mitigation": "Capability table first; Media Foundation / VA-API, AV1 only for export",
+      "status": "open"
+    },
+    {
+      "risk": "Wayland recording goes through the ScreenCast portal (asks the user)",
+      "impact": "medium",
+      "likelihood": "high",
+      "mitigation": "Design for Wayland first (PLAT-01)",
+      "status": "open"
+    },
+    {
+      "risk": "The translate speed fix may lower game-mode accuracy",
+      "impact": "medium",
+      "likelihood": "medium",
+      "mitigation": "Keep the #111 corpus score in the gate",
+      "status": "open"
+    }
+  ],
+  "parked": [
+    {
+      "item": "macOS",
+      "why": "No Mac",
+      "revisit": "when the owner has one"
+    }
+  ],
+  "changelog": [
+    {
+      "date": "2026-11-24",
+      "change": "Owner approved the kit roadmap; right-click menu moved into 0.5.0; translate measured, fixes started."
+    },
+    {
+      "date": "2026-11-24",
+      "change": "First kit roadmap drafted during adoption; enhancements release active; recording + new design next."
+    }
+  ],
+  "archive": []
+}

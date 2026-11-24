@@ -1,0 +1,9 @@
+# Checked 2026-11-24: test strings for the log masker, a UI test string, the minisign PUBLIC key. No real secrets.
+676ab674255afeb9b9ef967738f57ade05db44cf:src/diagnostics.rs:generic-api-key:107
+676ab674255afeb9b9ef967738f57ade05db44cf:src/log.rs:jwt:396
+676ab674255afeb9b9ef967738f57ade05db44cf:src/log.rs:github-pat:395
+676ab674255afeb9b9ef967738f57ade05db44cf:src/log.rs:github-pat:477
+676ab674255afeb9b9ef967738f57ade05db44cf:src/log.rs:generic-api-key:472
+676ab674255afeb9b9ef967738f57ade05db44cf:src/log.rs:gcp-api-key:394
+1eec8ddf5267afc336f99d3e912d3c03ad0e5797:scripts/install.sh:generic-api-key:20
+edd9193c5b3b1c9d7ad5d2986daa2c458568e9f9:src/editor/tests.rs:generic-api-key:1694
