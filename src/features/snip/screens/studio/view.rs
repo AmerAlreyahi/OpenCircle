@@ -549,8 +549,7 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
 /// pointer instead of scrolling (the area under it never sees that wheel).
 struct CtrlWheel(bool, super::PointerCell);
 
-/// One wheel notch in pixels (touchpads send pixels).
-const WHEEL_PX: f32 = 40.0;
+use crate::features::snip::annotate::WHEEL_PX;
 
 impl Hook<Msg> for CtrlWheel {
     fn update(

@@ -4198,3 +4198,34 @@ fn f15_popovers_stay_off_the_sidebar_and_edit_text_has_its_own_icon() {
         crate::features::snip::snip_more::Row::CopyText.glyph()
     );
 }
+
+/// W98 #202 (criterion 202.6): Ctrl+wheel over the selected box resizes it; off it, it zooms.
+#[test]
+fn w98_202_6_studio_ctrl_wheel_resizes_over_the_selection_and_zooms_elsewhere() {
+    let mut s = two_boxes();
+    let _ = s.update(Msg::Editor(Message::SelectIndex(1, false)));
+    let _ = s.update(Msg::Ctrl(true));
+    let (zoom, depth) = {
+        let e = s.editor.as_ref().unwrap();
+        (e.zoom, e.doc.depth())
+    };
+    let origin = s.image_point(Point::ORIGIN);
+    let at = Point::new((350.0 - origin.x) * zoom, (240.0 - origin.y) * zoom);
+    let width = |s: &Studio| s.editor.as_ref().unwrap().selection_bounds().unwrap().width;
+    let w = width(&s);
+    let _ = s.update(Msg::Wheel { at, notches: 2.0 });
+    assert!(width(&s) > w, "resized");
+    assert_eq!(
+        s.editor.as_ref().unwrap().zoom,
+        zoom,
+        "the picture did not zoom"
+    );
+    assert_eq!(s.editor.as_ref().unwrap().doc.depth(), depth + 1);
+    // off the selection (the first box) the wheel zooms the picture
+    let off = Point::new((60.0 - origin.x) * zoom, (50.0 - origin.y) * zoom);
+    let _ = s.update(Msg::Wheel {
+        at: off,
+        notches: 1.0,
+    });
+    assert!(s.editor.as_ref().unwrap().zoom > zoom, "zoomed");
+}

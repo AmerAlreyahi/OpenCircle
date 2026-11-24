@@ -301,6 +301,24 @@ impl canvas::Program<Message> for Input<'_> {
                 pointer.down = false;
                 Message::Release
             }
+            // Ctrl+wheel over the selection resizes it (the Studio's path, `annotate::wheel`)
+            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta }) if pointer.ctrl => {
+                let at = cursor.position_in(bounds)?;
+                let p = match e.movable {
+                    true => self.image_at(cursor.position()?),
+                    false => e.to_image(at),
+                };
+                if !e.wheel_over(p) {
+                    return None;
+                }
+                let notches = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => *y,
+                    mouse::ScrollDelta::Pixels { y, .. } => {
+                        *y / crate::features::snip::annotate::WHEEL_PX
+                    }
+                };
+                return Some(Action::publish(Message::WheelResize(p, notches)).and_capture());
+            }
             // Not captured: other widgets see modifiers too.
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
                 pointer.ctrl = m.command();
@@ -483,6 +501,62 @@ mod tests {
             height: H,
             rgba,
         }
+    }
+
+    /// W98 202.7: Ctrl+wheel over the selection publishes the resize (a notch = one line = the
+    /// shared WHEEL_PX of pixels); off it, or without Ctrl, the canvas leaves the wheel alone.
+    #[test]
+    fn w98_202_7_ctrl_wheel_over_the_selection_asks_for_a_resize() {
+        use iced::keyboard;
+        use iced::mouse::{self, Cursor};
+        use iced::widget::canvas::Program;
+        let mut e = Annotator::new(page(), 1.0);
+        e.studio = true;
+        e.update(Message::Tool(Tool::Rect));
+        for m in [
+            Message::Press(Point::new(40.0, 40.0)),
+            Message::Move(Point::new(120.0, 90.0)),
+            Message::Release,
+            Message::SelectIndex(0, false),
+        ] {
+            e.update(m);
+        }
+        let input = super::Input {
+            editor: &e,
+            grown: 0.0,
+            map: ScreenMap::ONE,
+        };
+        let bounds = iced::Rectangle::new(Point::ORIGIN, Size::new(W as f32, H as f32));
+        let mut state = super::Pointer::default();
+        let mut wheel = |at: Point, delta: mouse::ScrollDelta| {
+            let ev = iced::Event::Mouse(mouse::Event::WheelScrolled { delta });
+            input
+                .update(&mut state, &ev, bounds, Cursor::Available(at))
+                .and_then(|a| a.into_inner().0)
+        };
+        let over = Point::new(80.0, 60.0);
+        let lines = mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 };
+        assert!(wheel(over, lines).is_none(), "no Ctrl: nothing");
+        let mods =
+            iced::Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::CTRL));
+        let _ = input.update(&mut state, &mods, bounds, Cursor::Unavailable);
+        let mut wheel = |at: Point, delta: mouse::ScrollDelta| {
+            let ev = iced::Event::Mouse(mouse::Event::WheelScrolled { delta });
+            input
+                .update(&mut state, &ev, bounds, Cursor::Available(at))
+                .and_then(|a| a.into_inner().0)
+        };
+        assert!(
+            matches!(wheel(over, lines), Some(Message::WheelResize(p, n)) if p == over && n == 1.0)
+        );
+        let pixels = mouse::ScrollDelta::Pixels {
+            x: 0.0,
+            y: crate::features::snip::annotate::WHEEL_PX,
+        };
+        assert!(
+            matches!(wheel(over, pixels), Some(Message::WheelResize(p, n)) if p == over && n == 1.0)
+        );
+        assert!(wheel(Point::new(10.0, H as f32 - 5.0), lines).is_none());
     }
 
     /// A stroke by finger is the same messages as by the left button.

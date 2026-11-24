@@ -57,6 +57,10 @@ mod objects_tests;
 #[cfg(test)]
 mod tests;
 mod text;
+mod wheel;
+pub use wheel::WHEEL_PX;
+#[cfg(test)]
+mod wheel_tests;
 
 pub use document::rounded as rounded_path;
 pub use document::{
@@ -436,6 +440,8 @@ pub enum Message {
     /// Ctrl+Enter in the Studio: the picture goes to the Steps (`Output::AddStep`).
     AddToSteps,
     SelectAt(Point, bool),
+    /// Ctrl+wheel at a point (image px): resizes the selection when over it.
+    WheelResize(Point, f32),
     // (the Objects list is gone in v3.1: the editor's API keeps these, its tests use them)
     #[allow(dead_code)]
     SelectIndex(usize, bool),
@@ -707,6 +713,8 @@ pub struct Annotator {
     pub copy_picture_when_empty: bool,
     group: Option<objects::GroupDrag>,
     band: Option<(Point, Point)>,
+    /// Ctrl+wheel resizing in progress (`wheel.rs`).
+    wheel: Option<wheel::Burst>,
     /// The next drawing's style while a selection shows its own values.
     stash: Option<objects::DrawStyle>,
     /// What the options message being handled changes (`objects::touch`).
@@ -820,6 +828,7 @@ impl Annotator {
             copy_picture_when_empty: true,
             group: None,
             band: None,
+            wheel: None,
             stash: None,
             touch: 0,
             saved,
@@ -1156,6 +1165,9 @@ impl Annotator {
             Message::Order(how) => self.reorder(how),
             Message::Merge => self.merge(),
             Message::SelectAt(p, add) => self.select_at(p, add),
+            Message::WheelResize(p, n) => {
+                self.wheel_resize(p, n, std::time::Instant::now());
+            }
             Message::SelectIndex(i, add) => self.select_index(i, add),
             Message::ToggleHidden(i) => self.toggle_hidden(i),
             Message::Reorder { from, to } => self.reorder_to(from, to),

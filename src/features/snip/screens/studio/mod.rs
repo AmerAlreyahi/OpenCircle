@@ -1514,6 +1514,14 @@ impl Studio {
                 self.zoom_to(zoom, None)
             }
             Msg::Wheel { at, notches } => {
+                // Ctrl+wheel over the selection resizes it (annotate::wheel); elsewhere it zooms
+                let over = self.image_point(at);
+                if self.ctrl
+                    && let Some(e) = &mut self.editor
+                    && e.wheel_resize(over, notches, std::time::Instant::now())
+                {
+                    return Outcome::None;
+                }
                 let Some(e) = &self.editor else {
                     return Outcome::None;
                 };
