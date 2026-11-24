@@ -38,7 +38,7 @@ Snip also opens from the tray menu (**Snip**), the bar's Snip button, and with
 no combination is free on every PC; give them one in **Settings > Shortcuts**.
 While Snip is open: `Enter` full screen (`Shift+Enter` all screens), `Esc` clears
 the area and then closes, arrows nudge the area. After a pick: `Ctrl+C` copies,
-`Ctrl+S` saves, `Ctrl+Z` / `Ctrl+Shift+Z` undo / redo, `Ctrl+V` pastes the clipboard's text
+`Ctrl+S` saves, `Ctrl+Z` undo, `Ctrl+Y` or `Ctrl+Shift+Z` redo, `Ctrl+V` pastes a picture on the clipboard as an image, else its text
 (into the text being typed, else as a new text), `Ctrl+Enter` adds to steps, `Ctrl+P` pins. The tool keys are in
 [Snip and annotate](snip-and-annotate.md).
 

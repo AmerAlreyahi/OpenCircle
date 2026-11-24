@@ -111,7 +111,7 @@ Every tool has a key:
 | Spotlight (dims everything else) | `S` |
 | Magnifier | `M` |
 
-`Ctrl+Z` undoes, `Ctrl+Shift+Z` redoes, `Ctrl+V` pastes the clipboard's text (into
+`Ctrl+Z` undoes, `Ctrl+Y` or `Ctrl+Shift+Z` redoes, `Ctrl+V` pastes a picture on the clipboard as an image, else its text (into
 the text being typed, else as a new text). Annotations stay editable until you copy
 or save. With a drawing tool a plain drag always draws; to move an annotation,
 use **Select** or hold `Ctrl` and drag. A selected annotation shows only its own

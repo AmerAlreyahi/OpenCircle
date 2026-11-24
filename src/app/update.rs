@@ -313,6 +313,12 @@ impl App {
                 ctrl: true,
             }),
             Message::Annotate(msg) => self.on_snip_toolbar(msg),
+            Message::SnipPasted(clip, at) => {
+                if let Some(edit) = &mut self.o.edit {
+                    edit.annotator.paste_picture_or_text(clip, at);
+                }
+                Task::none()
+            }
             Message::Snip(msg) => self.on_snip(msg),
             Message::Confirm(place, result) => self.toast_for(place, result),
             Message::ThenClose(Some(pill)) => self.toast_then_close(pill),

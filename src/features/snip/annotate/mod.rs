@@ -532,6 +532,9 @@ pub enum Output {
     Dragged,
     /// More's Open in Studio: the host moves this editor into the Studio.
     OpenStudio,
+    /// Ctrl+V in Snip: the host reads the clipboard's picture on a thread and answers with
+    /// `Annotator::paste_picture_or_text`.
+    Paste(Option<Point>),
 }
 
 /// An item being drawn, moved, resized or typed: shown live, committed as one edit.
@@ -964,7 +967,10 @@ impl Annotator {
             Message::Cancel => self.cancel_press(),
             Message::Shift(on) => self.shift = on,
             Message::Type(s) => self.edit_text(|t| t.push_str(&s)),
-            Message::Paste(at) => self.paste(at),
+            // typing, or the Studio (it read the picture itself, off the UI thread): the
+            // text; Snip: the host reads the clipboard's picture off the UI thread
+            Message::Paste(at) if self.typing() || self.studio => self.paste_text(at),
+            Message::Paste(at) => return Some(Output::Paste(at)),
             Message::Backspace => self.edit_text(|t| {
                 t.pop();
             }),
@@ -1921,10 +1927,17 @@ impl Annotator {
         )
     }
 
+    /// Ctrl+V found `clip` (a picture) on the clipboard in Snip: an image object; none: the
+    /// clipboard's text (F2: the same rule as the Studio).
+    pub(crate) fn paste_picture_or_text(&mut self, clip: Option<Crop>, at: Option<Point>) {
+        if !self.paste_clipboard(clip) {
+            self.paste_text(at);
+        }
+    }
+
     /// Ctrl+V (owner, 2026-11-03): the clipboard's text where the typing is,
     /// else a new text (the last text style) at `at`, being typed into.
-    /// A picture on the clipboard: nothing (pasting pictures is not built).
-    fn paste(&mut self, at: Option<Point>) {
+    pub(crate) fn paste_text(&mut self, at: Option<Point>) {
         let Some(text) =
             crate::features::circle::actions::copy::read_text().map(|t| clean_paste(&t))
         else {

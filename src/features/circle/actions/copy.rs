@@ -76,7 +76,7 @@ fn read_with<T>(read: impl FnOnce(&mut arboard::Clipboard) -> Option<T>) -> Opti
 /// The clipboard's picture, if it holds one (Ctrl+V in OpenCircle Studio).
 pub fn read_image() -> Option<Crop> {
     #[cfg(test)]
-    return None; // never the machine's clipboard
+    return copied::pasted_picture(); // never the machine's clipboard
     #[cfg(not(test))]
     read_with(|c| {
         let picture = c.get_image().ok()?;
@@ -156,6 +156,17 @@ pub mod copied {
 
     pub(super) fn pasted() -> Option<String> {
         take(&PASTE)
+    }
+
+    static PASTE_PICTURE: Last<crate::shared::picture::Crop> = Mutex::new(None);
+
+    /// What `read_image` gives this test (the clipboard's picture).
+    pub fn set_paste_picture(crop: crate::shared::picture::Crop) {
+        put(&PASTE_PICTURE, crop);
+    }
+
+    pub(super) fn pasted_picture() -> Option<crate::shared::picture::Crop> {
+        take(&PASTE_PICTURE)
     }
 
     pub(super) fn set_text(text: String) {

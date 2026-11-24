@@ -3229,7 +3229,7 @@ fn ctrl_v_pastes_the_clipboard_text() {
     e.update(Message::Tool(Tool::Arrow));
     assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
     crate::features::circle::actions::copy::copied::set_paste("hello\r\nworld\t!\n\n");
-    e.update(Message::Paste(Some(Point::new(40.0, 50.0))));
+    paste(&mut e, Some(Point::new(40.0, 50.0)));
     assert!(e.typing());
     assert_eq!(
         text_of(&e),
@@ -3238,18 +3238,18 @@ fn ctrl_v_pastes_the_clipboard_text() {
     // typing: into the same text
     assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
     crate::features::circle::actions::copy::copied::set_paste(" again");
-    e.update(Message::Paste(None));
+    paste(&mut e, None);
     assert_eq!(text_of(&e).1, "hello\nworld! again");
     e.update(Message::Finish);
     assert_eq!(e.doc.items.len(), 1, "committed like typed text");
     // outside the area: its middle; the tool stays the user's
     crate::features::circle::actions::copy::copied::set_paste("x");
-    e.update(Message::Paste(None));
+    paste(&mut e, None);
     assert_eq!(text_of(&e).0, e.doc.view().center());
     assert_eq!(e.tool, Tool::Arrow);
     e.update(Message::Finish);
     // nothing (or a picture) on the clipboard: nothing happens
-    e.update(Message::Paste(None));
+    paste(&mut e, None);
     assert!(!e.typing() && e.doc.items.len() == 2);
 }
 
@@ -3553,4 +3553,45 @@ fn f4_redo_answers_to_ctrl_y_and_ctrl_shift_z_everywhere() {
             assert!(matches!(k, Some(Message::Redo)), "studio {studio}: typing");
         }
     }
+}
+
+/// What the host does with Snip's Ctrl+V: read the clipboard's picture, answer the editor.
+fn paste(e: &mut Annotator, at: Option<Point>) {
+    if let Some(Output::Paste(at)) = e.update(Message::Paste(at)) {
+        e.paste_picture_or_text(crate::features::circle::actions::copy::read_image(), at);
+    }
+}
+
+/// F2 (#207): Ctrl+V in Snip pastes a picture as an image object and text as a text
+/// annotation, the same rule as the Studio; the picture is read by the host, off the UI
+/// thread (the editor only asks).
+#[test]
+fn f2_snip_pastes_a_picture_as_an_image_object_and_text_as_text() {
+    use crate::features::circle::actions::copy::copied;
+    let mut e = editor(200, 200);
+    assert!(
+        matches!(e.update(Message::Paste(None)), Some(Output::Paste(None))),
+        "the editor asks the host, it reads no clipboard itself"
+    );
+    copied::set_paste_picture(Crop {
+        width: 10,
+        height: 8,
+        rgba: vec![200; 10 * 8 * 4],
+    });
+    paste(&mut e, None);
+    assert!(!e.typing());
+    assert_eq!(e.doc.items.len(), 1);
+    assert!(
+        matches!(e.doc.items[0].shape, Shape::Picture { .. }),
+        "an image object"
+    );
+    copied::set_paste("note");
+    paste(&mut e, None);
+    assert!(e.typing(), "text: a text annotation");
+    // the Studio's editor reads the picture itself: its text path never asks again
+    let mut studio = editor(200, 200);
+    studio.studio = true;
+    copied::set_paste("hello");
+    assert!(studio.update(Message::Paste(None)).is_none());
+    assert!(studio.typing());
 }

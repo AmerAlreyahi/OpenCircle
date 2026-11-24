@@ -88,6 +88,8 @@ pub(crate) enum Message {
     Windows(windows::Msg),
     /// From the Snip annotation editor.
     Annotate(annotate::Message),
+    /// Snip's Ctrl+V: the clipboard's picture (if any) was read off the UI thread.
+    SnipPasted(Option<crate::shared::picture::Crop>, Option<iced::Point>),
     Snip(pick::Msg),
     /// The copy-text quick action read the text and copied it (or why not).
     TextRead(Result<(), String>),

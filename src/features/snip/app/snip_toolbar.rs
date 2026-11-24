@@ -264,6 +264,10 @@ impl App {
             Some(Output::Dragged) => self.close(),
             // the same editor, its drawings and history, moves into the Studio
             Some(Output::OpenStudio) => self.open_in_studio(),
+            Some(Output::Paste(at)) => crate::app::background::background(move |tx| {
+                let _ = tx.unbounded_send(copy::read_image());
+            })
+            .map(move |clip| Message::SnipPasted(clip, at)),
         }
     }
 

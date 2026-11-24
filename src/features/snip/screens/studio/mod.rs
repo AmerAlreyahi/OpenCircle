@@ -2034,6 +2034,7 @@ impl Studio {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
             Some(Output::Save(crop)) => Outcome::Save(crop),
             Some(Output::Pin(crop)) => Outcome::Pin(crop),
+            Some(Output::Paste(at)) => Outcome::Paste(at),
             Some(Output::AddStep(crop)) => Outcome::AddStep(crop),
             Some(Output::AddStepDoc(doc)) => Outcome::AddStepDoc(doc),
             // "Grow the canvas past the edge" said no: a plain pill says why
