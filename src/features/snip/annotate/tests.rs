@@ -3527,3 +3527,30 @@ fn w90c_default_sizes_are_not_hair_thin_at_100_percent_on_big_pictures() {
         }
     }
 }
+
+/// F4 (#209): Redo answers to Ctrl+Y and Ctrl+Shift+Z in Snip and the Studio, also
+/// while a text is typed.
+#[test]
+fn f4_redo_answers_to_ctrl_y_and_ctrl_shift_z_everywhere() {
+    let redo_keys = |e: &Annotator| {
+        [
+            ("y", Modifiers::CTRL),
+            ("z", Modifiers::CTRL | Modifiers::SHIFT),
+        ]
+        .map(|(c, m)| e.key(&Key::Character(c.into()), c.chars().next(), m, None))
+    };
+    for studio in [false, true] {
+        let mut e = editor(200, 200);
+        e.studio = studio;
+        for k in redo_keys(&e) {
+            assert!(matches!(k, Some(Message::Redo)), "studio {studio}: idle");
+        }
+        e.update(Message::Tool(Tool::Text));
+        e.update(Message::Press(Point::new(100.0, 100.0)));
+        e.update(Message::Release);
+        assert!(e.typing());
+        for k in redo_keys(&e) {
+            assert!(matches!(k, Some(Message::Redo)), "studio {studio}: typing");
+        }
+    }
+}

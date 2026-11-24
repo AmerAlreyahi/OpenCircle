@@ -153,9 +153,13 @@ impl Annotator {
                     }))
                 }
                 // (Ctrl+Z ends the typing and undoes it: `Message::Undo`)
-                _ if modifiers.command() => (latin.map(|c| c.to_ascii_lowercase()) == Some('z')
-                    && !modifiers.shift())
-                .then_some(Message::Undo),
+                _ if modifiers.command() => {
+                    match (latin.map(|c| c.to_ascii_lowercase()), modifiers.shift()) {
+                        (Some('z'), false) => Some(Message::Undo),
+                        (Some('z'), true) | (Some('y'), _) => Some(Message::Redo),
+                        _ => None,
+                    }
+                }
                 _ => text
                     .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
                     .map(|t| Message::Type(t.to_string())),
