@@ -1039,6 +1039,10 @@ production systems.
   The new design is not approved yet: its design round comes directly after the enhancements release, approved on the
   canvas (COM-08) before recording UI or any new UI is built.
 
+- No peek at the original under a translation (owner, 2026-11-18, commit 0977fb5f; recorded here 2026-11-24): holding Alt no
+  longer shows the original (Alt+A left the peek stuck); no frame of the original until Esc. UX F7 (a Show original toggle on
+  the pill) waits for the owner because it goes against this.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
