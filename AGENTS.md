@@ -1057,6 +1057,16 @@ production systems.
   - Roadmap source = docs/roadmap.json (kit template); the board is generated from it and the private master roadmap page
     shows it (supersedes "the private Artifact roadmap.md is the master" for planning edits).
 
+- Right-click menu on selected text, v1 (owner, 2026-11-24, study docs/internal/reports-enh/w97-rightclick-study.md): items
+  Copy (Ctrl+C), Search the web (L), Ask AI (A), Translate (R), Select all text (when not all is selected), Open link / Send
+  email (only when the selection is one). Later: Copy as picture, Explain/Summarize, call/calendar/map, unit & currency convert.
+  It opens only on a right press ON the selection; right-drag pan and double right-click reset stay everywhere else. Ask AI
+  from this menu sends the selected TEXT (the picture only when there is no text); the bar's Ask AI keeps sending the picture
+  (2026-11-08). Menu key + Shift+F10 open it with arrow keys; Copy/Search/link close the overlay, Ask AI/Translate keep it.
+  Surfaces v1: main overlay selection + select-text mode; pill, Snip area, circled area without words later.
+- Ctrl+wheel (owner, 2026-11-24, #202): over a selected shape it resizes the shape (Studio and Snip editor); elsewhere in the
+  Studio it keeps zooming the picture.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
