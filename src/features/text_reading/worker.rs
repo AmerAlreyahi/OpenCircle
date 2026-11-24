@@ -573,6 +573,10 @@ impl<T: Send + 'static> Mt<T> {
         warm: bool,
         load: impl FnOnce() -> Result<T, OcrError> + Send + 'static,
     ) -> Result<Option<&mut T>, OcrError> {
+        // already loading this pair: no waiting for it (W96)
+        if warm && matches!(self, Mt::Loading(p, _) if std::ptr::eq(*p, pair)) {
+            return Ok(None);
+        }
         // (a failed warm load is tried again here, as before)
         if matches!(self, Mt::Loading(..))
             && let Mt::Loading(p, job) = std::mem::replace(self, Mt::Idle)
@@ -634,23 +638,51 @@ mod mt_tests {
     use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
     use std::time::Duration;
 
-    static LOADS: AtomicUsize = AtomicUsize::new(0);
+    use std::sync::Arc;
 
     fn slow(n: u32) -> impl FnOnce() -> Result<u32, OcrError> + Send + 'static {
+        counted(n, Arc::default())
+    }
+
+    /// `slow`, counting its load in `loads` (one counter per test: they run in parallel).
+    fn counted(
+        n: u32,
+        loads: Arc<AtomicUsize>,
+    ) -> impl FnOnce() -> Result<u32, OcrError> + Send + 'static {
         move || {
             std::thread::sleep(Duration::from_millis(300));
-            LOADS.fetch_add(1, SeqCst);
+            loads.fetch_add(1, SeqCst);
             Ok(n)
         }
+    }
+
+    // W96 AC-2: a warm-up for a pair that is already loading answers at once
+    // (the helper no longer waits for the whole load before the screen read).
+    #[test]
+    fn ac2_a_warm_up_of_a_loading_pair_does_not_wait() {
+        let en_ar = mt::pair("en", "ar").unwrap();
+        let mut m = Mt::Idle;
+        assert!(m.get(en_ar, true, slow(1)).unwrap().is_none());
+        let t = Instant::now();
+        assert!(m.get(en_ar, true, slow(2)).unwrap().is_none());
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "waited {:?}",
+            t.elapsed()
+        );
+        assert_eq!(m.get(en_ar, false, slow(3)).unwrap(), Some(&mut 1));
     }
 
     #[test]
     fn a_warm_up_loads_meanwhile_and_the_next_request_waits_for_it() {
         let (en_ar, fr_en) = (mt::pair("en", "ar").unwrap(), mt::pair("fr", "en").unwrap());
         let mut m = Mt::Idle;
+        let loads = Arc::new(AtomicUsize::new(0));
         let t = Instant::now();
         assert!(
-            m.get(en_ar, true, slow(1)).unwrap().is_none(),
+            m.get(en_ar, true, counted(1, loads.clone()))
+                .unwrap()
+                .is_none(),
             "answered at once"
         );
         assert!(
@@ -660,16 +692,16 @@ mod mt_tests {
         );
         // the read asked for next would run here
         assert_eq!(
-            m.get(en_ar, false, slow(2)).unwrap(),
+            m.get(en_ar, false, counted(2, loads.clone())).unwrap(),
             Some(&mut 1),
             "the warm one"
         );
         assert_eq!(
-            m.get(en_ar, false, slow(9)).unwrap(),
+            m.get(en_ar, false, counted(9, loads.clone())).unwrap(),
             Some(&mut 1),
             "kept for the next request"
         );
-        assert_eq!(LOADS.load(SeqCst), 1, "loaded once");
+        assert_eq!(loads.load(SeqCst), 1, "loaded once");
         // another pair: the first is freed, the new one loaded
         assert_eq!(m.get(fr_en, false, slow(3)).unwrap(), Some(&mut 3));
         assert!(matches!(m, Mt::Loaded(p, 3) if std::ptr::eq(p, fr_en)));

@@ -1671,3 +1671,21 @@ fn ac1_a_dense_screen_is_never_read_again() {
         .collect();
     assert!(!reread_wanted(&many, 1280, 720));
 }
+
+// W96 AC-2: `Real::warm` sends its empty request before it returns (so before
+// OCR), on the calling thread, and ignores a failure.
+#[test]
+fn ac2_the_warm_up_is_sent_before_warm_returns_on_the_calling_thread() {
+    let pair = mt::pair("en", "ar").unwrap();
+    let here = std::thread::current().id();
+    let mut sent = Vec::new();
+    Real::send_warm(pair, |texts, p| {
+        sent.push((
+            texts.is_empty(),
+            std::ptr::eq(p, pair),
+            std::thread::current().id(),
+        ));
+        Err::<(), _>(OcrError::Engine("no helper".into()))
+    });
+    assert_eq!(sent, [(true, true, here)]);
+}

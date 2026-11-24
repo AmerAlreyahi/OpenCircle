@@ -1146,8 +1146,16 @@ impl Real {
         if let (lang::AUTO, Some(target), Some(source)) = (self.source.as_str(), target, source)
             && let Some(pair) = self.to_warm(source, &target)
         {
-            let _ = mt::translate(&[], pair);
+            Self::send_warm(pair, mt::translate);
         }
+    }
+
+    /// The warm-up request, sent here on the calling thread (the pipeline's
+    /// own worker, never the UI's) and not on a spawned one: the helper
+    /// answers a warm-up at once, so it holds this request before OCR's and
+    /// the load overlaps the read. A failure only means a cold first call.
+    fn send_warm<R>(pair: &'static mt::Pair, send: impl FnOnce(&[String], &'static mt::Pair) -> R) {
+        let _ = send(&[], pair);
     }
 
     /// `recognize` without the check for noise.
@@ -1314,7 +1322,7 @@ impl Deps for Real {
     fn warm(&self, target: &str) {
         *self.target.lock().unwrap_or_else(|e| e.into_inner()) = Some(target.into());
         if let Some(pair) = self.to_warm(self.source(&[]), target) {
-            std::thread::spawn(move || mt::translate(&[], pair));
+            Self::send_warm(pair, mt::translate);
         }
     }
 }
