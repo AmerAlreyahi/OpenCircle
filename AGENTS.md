@@ -1151,6 +1151,15 @@ production systems.
     on a wide window); he wants MORE, bolder ideas: "the preview isn't getting its full rights". Next: a sheet of new ideas.
   These replace the round-1/round-2 recording looks and the slim preview row.
 
+- Three tiers (owner, 2026-11-24): CORE (always there: Circle to Search, Translate, Snip incl. recording, AI and Search) ·
+  EXTENSIONS (new Settings page "Extensions": finished optional tools installed on demand, each with a card + preview + download
+  size; Add downloads only its parts; On/Off keeps files but removes shortcuts, tray and menu entries; Remove frees the space,
+  settings kept unless cleared; updated with the app) · LABS (keeps its name: unfinished experiments that later graduate).
+  First-party extensions are built into the binary but dormant until added (no third-party plugin ABI now; sandboxed outside
+  plugins maybe much later). The owner's personal tools are extensions (listed for all or private). Candidates to move from core:
+  song search, game translation + glossaries, colour picker, ruler, QR, quick convert, advanced paste. First new one: meeting
+  captions (#227).
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
