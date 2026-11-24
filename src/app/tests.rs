@@ -6036,3 +6036,22 @@ mod second_reader {
         assert!(!needs_no_second_reader(&[]));
     }
 }
+
+/// F14 (#219): the first follow-up that pins the chat and closes the overlay says why,
+/// once; a later one (the hint was seen) stays quiet.
+#[test]
+fn f14_the_auto_pin_says_so_once() {
+    use crate::shared::config::{self, Config};
+    let hint = crate::t!(pill_chat_pinned);
+    for (seen, shown) in [(false, true), (true, false)] {
+        let mut cfg = Config::default();
+        cfg.general.pin_hint_seen = seen;
+        config::with_test_config(cfg, || {
+            let (mut app, id) = chat_asked();
+            chat_turn(&mut app, id, "And the trend?", "Up.");
+            assert!(app.o.is_none(), "the follow-up pinned and closed");
+            let told = app.windows.toasts().iter().any(|(t, _)| t == hint);
+            assert_eq!(told, shown, "seen {seen}");
+        });
+    }
+}

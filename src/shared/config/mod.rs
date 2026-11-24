@@ -26,6 +26,7 @@
 //!                                   # language (...)"), else en | ar (written only when the user picks one)
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
+//! pin_hint_seen = true              # the one-time "Pinned" hint of the AI chat was shown (written only when true)
 //!
 //! [bar]                             # the overlay's action bar, where the user docked it
 //! anchor = "bottom"                 # bottom | top | bottom_left | bottom_right
@@ -792,6 +793,9 @@ pub struct GeneralConfig {
     /// (`hotkey::taken_notice`): the same ones aren't told again.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub shortcuts_taken_shown: Vec<String>,
+    /// The one-time "Pinned · the chat stays open over your apps" hint was shown (F14).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pin_hint_seen: bool,
 }
 
 impl Default for GeneralConfig {
@@ -803,6 +807,7 @@ impl Default for GeneralConfig {
             language: String::new(),
             app_language: String::new(),
             shortcuts_taken_shown: Vec::new(),
+            pin_hint_seen: false,
         }
     }
 }

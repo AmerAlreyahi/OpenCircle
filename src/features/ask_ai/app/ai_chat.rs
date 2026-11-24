@@ -270,6 +270,29 @@ impl App {
         self.chat = Some(Resident { id, panel });
     }
 
+    /// The first time the chat pins itself (`pinned_now`: a follow-up or the header's pin) and the
+    /// overlay closes at once, a pill says why (F14, once per install). Not asked for a chat
+    /// that was already pinned, nor when the close waits for a menu or download (`close_when_idle`).
+    fn pinned_hint(&mut self, pinned_now: bool) -> Task<Message> {
+        if !pinned_now || config::current().general.pin_hint_seen {
+            return Task::none();
+        }
+        std::thread::spawn(|| {
+            if let Err(e) = config::update(|c| c.general.pin_hint_seen = true) {
+                crate::log!("[opencircle] config: {e}");
+            }
+        });
+        let text = crate::t!(pill_chat_pinned);
+        (self.windows)
+            .toast(
+                text,
+                crate::app::screens::toast::Tone::Neutral,
+                None,
+                windows::NOTICE_MS,
+            )
+            .map(Message::Windows)
+    }
+
     /// The pinned chat's pin: it closes (its window with it, `sync_chat_window`).
     pub(crate) fn drop_chat(&mut self) -> Task<Message> {
         if self.chat.take().is_some() {
@@ -875,7 +898,7 @@ impl App {
                 // question asked into a chat pinned before (C4c). Not in Snip,
                 // not mid-drag; "Always" pinned it from the first question, no close.
                 if ((pins && self.chat.is_some()) || into_pinned) && ends {
-                    return Task::batch([task, self.close()]);
+                    return Task::batch([task, self.pinned_hint(pins), self.close()]);
                 }
                 // The header's pin takes the same path; if a menu, download or
                 // song search is busy, the overlay closes right after it ends.

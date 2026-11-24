@@ -1723,3 +1723,21 @@ fn the_walkthrough_transition_is_remembered_and_checked() {
     );
     assert_eq!(w.len(), 2, "{w:?}");
 }
+
+/// F14 (#219): the one-time pin hint's flag is written only once set and reads back.
+#[test]
+fn f14_pin_hint_seen_round_trips() {
+    let mut c = Config::default();
+    assert!(!c.general.pin_hint_seen);
+    assert!(
+        !toml::to_string_pretty(&c)
+            .unwrap()
+            .contains("pin_hint_seen")
+    );
+    c.general.pin_hint_seen = true;
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("pin_hint_seen = true"), "{text}");
+    let (back, w) = Config::parse(&text);
+    assert!(w.is_empty(), "{w:?}");
+    assert!(back.general.pin_hint_seen);
+}

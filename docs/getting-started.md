@@ -142,7 +142,7 @@ on (the default) the selected area goes with it; off sends only your question.
   still work. Ask a follow-up and the chat pins: it is its own window, the
   overlay closes by itself, and the chat stays open above other apps; a new
   capture asks into the same chat. The pin button in the header unpins and
-  closes it. **Settings > Ask AI > AI chat stays open** changes this.
+  closes it. The first time, a small pill says "Pinned · the chat stays open over your apps". **Settings > Ask AI > AI chat stays open** changes this.
 - **Model** in Settings > Ask AI lists each provider's current models, with the
   provider's own Free or Paid tag where it publishes one; **Load models** asks
   the provider for its full list (with your key, only on that click).
