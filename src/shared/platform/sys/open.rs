@@ -77,17 +77,37 @@ fn test_browser() -> Option<std::ffi::OsString> {
     None
 }
 
+/// Tests: every target `spawn` was asked to open (none is really opened), newest last.
+#[cfg(test)]
+static LAUNCHED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(crate) fn launched() -> Vec<String> {
+    LAUNCHED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 fn spawn(target: &std::ffi::OsStr) -> io::Result<()> {
     #[cfg(windows)]
     hand_off_foreground();
     if let Some(program) = test_browser() {
         return reap(Command::new(program).arg(target));
     }
-    #[cfg(target_os = "linux")]
-    if open_on_linux(target) {
-        return Ok(());
+    #[cfg(test)]
+    {
+        LAUNCHED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(target.to_string_lossy().into_owned());
+        Ok(())
     }
-    reap(&mut launcher(target))
+    #[cfg(not(test))]
+    {
+        #[cfg(target_os = "linux")]
+        if open_on_linux(target) {
+            return Ok(());
+        }
+        reap(&mut launcher(target))
+    }
 }
 
 /// How Linux hands `target` to the desktop.
@@ -113,6 +133,7 @@ fn route(target: &str) -> Route {
 
 /// Opens `target` by its [`Route`]; `false` = fall back to `xdg-open` (logged).
 #[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))] // tests record the target instead (`spawn`)
 fn open_on_linux(target: &std::ffi::OsStr) -> bool {
     let Some(target) = target.to_str() else {
         return false;
@@ -128,6 +149,7 @@ fn open_on_linux(target: &std::ffi::OsStr) -> bool {
 }
 
 #[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))]
 fn open_uri(uri: &str) -> Result<(), String> {
     use crate::shared::platform::capture::portal;
     use gtk::gio::{Cancellable, DBusCallFlags};

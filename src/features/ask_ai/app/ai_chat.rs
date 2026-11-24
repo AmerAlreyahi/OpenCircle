@@ -224,11 +224,38 @@ thread_local! {
 
 impl App {
     pub(crate) fn open_chat(&mut self, crop: Crop, question: Option<String>) -> Task<Message> {
+        self.open_chat_with(crop, question, self.o.include)
+    }
+
+    /// Ask AI about selected `text` (the right-click menu's): the chat opens with the text in the
+    /// composer, no picture and no question of ours sent; the user types the question. The browser
+    /// provider has no composer: the text goes to it as it is.
+    pub(crate) fn ask_with_text(&mut self, crop: Crop, text: String) -> Task<Message> {
+        if hands_off() {
+            return self.open_chat_with(crop, Some(text), false);
+        }
+        let task = self.open_chat_with(crop, None, false);
+        let context = format!("{text}\n\n");
+        match (&mut self.chat, &mut self.o.ai_chat) {
+            (Some(chat), _) => chat.panel.prefill(&context),
+            (None, Some((_, panel))) => panel.prefill(&context),
+            _ => {}
+        }
+        task
+    }
+
+    /// `open_chat`, the selection going with the question or not (`include`).
+    pub(crate) fn open_chat_with(
+        &mut self,
+        crop: Crop,
+        question: Option<String>,
+        include: bool,
+    ) -> Task<Message> {
         // one chat: a question while one stays open goes into it, with this crop
         if let Some(chat) = &mut self.chat {
             let id = chat.id;
             let asks = question.is_some();
-            let task = (chat.panel.ask_about(crop, question, self.o.include))
+            let task = (chat.panel.ask_about(crop, question, include))
                 .map(move |msg| Message::AiChat(id, msg));
             // a question sent into a chat pinned before this overlay: the
             // overlay closes by itself, as after the follow-up (C4c, #170)
@@ -238,7 +265,6 @@ impl App {
             return task;
         }
         // the overlay's own chat, still open (the bar is beside it): the same chat
-        let include = self.o.include;
         if let Some((id, panel)) = &mut self.o.ai_chat {
             let id = *id;
             return (panel.ask_about(crop, question, include))
@@ -247,12 +273,11 @@ impl App {
         // No key (Google AI Mode): the browser opens, a pill says so, the
         // overlay closes; the chat is for an AI provider only.
         if hands_off() {
-            let include = self.o.include;
             return self.confirm_after(move || ai_chat::hand_off(&crop, question, include));
         }
         self.panels = self.panels.wrapping_add(1);
         let id = self.panels;
-        let (panel, task) = ai_chat::AiChat::open(crop, question, self.o.include);
+        let (panel, task) = ai_chat::AiChat::open(crop, question, include);
         self.o.ai_chat = Some((id, panel));
         self.keep_chat();
         task.map(move |msg| Message::AiChat(id, msg))

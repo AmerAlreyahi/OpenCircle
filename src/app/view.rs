@@ -11,6 +11,7 @@ use crate::shared::config;
 use crate::app::message::{Message, Purpose};
 use crate::app::screens::toast;
 use crate::features::circle::screens::bar::geometry as bar;
+use crate::features::circle::screens::context_menu;
 use crate::features::circle::screens::edge as border;
 use crate::features::circle::screens::overlay;
 use crate::features::snip::screens::pick;
@@ -135,6 +136,7 @@ impl App {
                 _ => Vec::new(),
             },
             waiting: self.text_waiting(),
+            target: self.menu_target(),
         };
         // (Snip's More pastes its translation into the picture: no frame of the session's)
         let own = matches!(self.o.purpose, Purpose::Snip(_));
@@ -359,6 +361,17 @@ impl App {
                 .center_x(room.width)
                 .padding(HINT_EDGE);
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
+        }
+        // The right-click menu on the selected text, over everything but the pill.
+        if let Some(m) = &self.o.menu {
+            // the menu takes every press on it (rows, padding, separators); a press (or right
+            // press) anywhere else closes it and goes no further, as in the Studio
+            let menu = opaque(context_menu::view(m).map(Message::ContextMenu));
+            layers = layers.push(opaque(
+                iced::widget::mouse_area(pin(menu).position(m.at))
+                    .on_press(Message::ContextMenu(context_menu::Msg::Close))
+                    .on_right_press(Message::ContextMenu(context_menu::Msg::Close)),
+            ));
         }
         layers.extend(self.pill_view()).into()
     }

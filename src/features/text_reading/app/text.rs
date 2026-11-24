@@ -732,6 +732,15 @@ impl App {
         }
     }
 
+    /// Select-text mode: every word of the box is picked (the right-click menu's Select all text).
+    pub(crate) fn pick_all_in_box(&mut self) {
+        let area = self.area();
+        if let Some(mode) = &mut self.o.text_mode {
+            let lines = mode.lines.clone().unwrap_or_default();
+            mode.picked = word::Picked::all(lines, area);
+        }
+    }
+
     /// Words picked in a snapped box (select-text mode), not still being dragged.
     pub(crate) fn picked_in_box(&self) -> bool {
         (self.o.text_mode.as_ref()).is_some_and(|m| m.picked.is_some() && !m.picking)

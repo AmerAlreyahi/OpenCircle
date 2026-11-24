@@ -793,6 +793,7 @@ impl App {
                 _ => Vec::new(),
             },
             waiting: Vec::new(),
+            target: Vec::new(),
         };
         let frozen = overlay::Frozen {
             frame: &screen.frame,

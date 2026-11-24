@@ -1419,6 +1419,15 @@ strings! {
         | "نسخ النص";
     act_translate: "Translate"
         | "ترجمة";
+    // the right-click menu on selected text (#201)
+    ctx_search: "Search the web"
+        | "بحث في الويب";
+    ctx_select_all: "Select all text"
+        | "تحديد كل النص";
+    ctx_open_link: "Open {}"
+        | "فتح {}";
+    ctx_send_email: "Send email to {}"
+        | "إرسال بريد إلى {}";
     tp_show_translation: "Show translation"
         | "إظهار الترجمة";
     st_not_for_tool: "Not for this tool"

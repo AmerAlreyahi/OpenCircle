@@ -131,6 +131,18 @@ fn links(bytes: &mut [u8]) -> Vec<String> {
     found
 }
 
+/// A scheme a pick cut short ("ps://", "ttp://": the end of "https" or "http", never "ftp"):
+/// where its letters start and where the host after "://" does.
+fn cut_scheme(lower: &str) -> Option<(usize, usize)> {
+    let at = lower.find("://")?;
+    let from = lower[..at]
+        .rfind(|c: char| !c.is_ascii_alphabetic())
+        .map_or(0, |i| i + 1);
+    let cut = &lower[from..at];
+    (!cut.is_empty() && ["https", "http"].iter().any(|s| s.ends_with(cut)))
+        .then_some((from, at + 3))
+}
+
 /// The link in one whitespace-free `token`: its range and absolute URL.
 fn link_in(token: &[u8]) -> Option<(usize, usize, String)> {
     let token_str = std::str::from_utf8(token).ok()?;
@@ -141,6 +153,11 @@ fn link_in(token: &[u8]) -> Option<(usize, usize, String)> {
         .min();
     let (from, host_at, absolute) = match scheme {
         Some((at, len)) => (at, at + len, true),
+        // a pick that cut the scheme ("ps://shop.example.com"): the host after "://" is still a link
+        None if cut_scheme(&lower).is_some() => {
+            let (from, host_at) = cut_scheme(&lower)?;
+            (from, host_at, true)
+        }
         None => {
             let from = lower.find(|c: char| !"([{<\"'".contains(c))?;
             // Bare "example.com" next to an '@' is an email, not a link.
@@ -403,6 +420,17 @@ mod tests {
             .filter(|e| e.kind == Kind::Phone)
             .map(|e| e.text)
             .collect()
+    }
+
+    /// W98: a pick that cut the scheme still gives the link (the right-click menu's row).
+    #[test]
+    fn a_link_with_its_scheme_cut_is_still_a_link() {
+        assert_eq!(
+            links_in("ps://shop.example.com/track/4412 for"),
+            ["https://shop.example.com/track/4412"]
+        );
+        assert_eq!(links_in("ttp://example.org"), ["https://example.org"]);
+        assert!(links_in("ab://").is_empty());
     }
 
     #[test]

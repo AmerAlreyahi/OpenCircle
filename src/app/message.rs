@@ -49,6 +49,8 @@ pub(crate) enum Message {
     /// Snip capture number `.0` will open on this monitor (its grab runs).
     Chosen(u32, pick::Place),
     Overlay(overlay::Event),
+    /// The right-click menu's row clicked (#201).
+    ContextMenu(crate::features::circle::screens::context_menu::Msg),
     /// Another monitor's frame of capture number `.0` landed (`app::screens`).
     Screen(u32, pick::Place, image::Handle),
     /// From another monitor's overlay window (its logical px).

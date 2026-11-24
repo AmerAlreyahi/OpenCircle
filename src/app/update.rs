@@ -257,6 +257,9 @@ impl App {
                 Task::none()
             }
             Message::Escape if self.o.is_none() => Task::none(),
+            // the right-click menu's Esc closes it, not the overlay
+            Message::Escape | Message::EscapeTaken if self.close_context() => Task::none(),
+            Message::ContextMenu(msg) => self.on_context_menu(msg),
             // translate's open language list: Esc closes the list (a second, translate)
             Message::Escape | Message::EscapeTaken
                 if (self.o.translate.as_ref()).is_some_and(|(_, s)| s.picker_open()) =>

@@ -1827,13 +1827,11 @@ impl Studio {
                     crate::shared::kit::option_list::menu_height(entries.len(), seps),
                 );
                 let p = self.pointer.get();
-                let at = Point::new(
-                    (origin.x + p.x)
-                        .min(self.window.width - menu.width - EDGE)
-                        .max(0.0),
-                    (origin.y + p.y)
-                        .min(self.window.height - menu.height - EDGE)
-                        .max(0.0),
+                let at = crate::shared::kit::option_list::place(
+                    Point::new(origin.x + p.x, origin.y + p.y),
+                    menu,
+                    self.window,
+                    EDGE,
                 );
                 self.context = Some(Context { at, entries });
                 Outcome::None

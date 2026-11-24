@@ -6122,3 +6122,273 @@ fn f3_keys_show_on_the_bar_and_after_a_selection() {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
 }
+
+// ---- #201 the right-click menu on selected text (W98) ----
+use crate::shared::platform::sys::open;
+
+/// `read_app` with a word picked, and the middle of its highlight (screen px).
+fn menu_app() -> (App, Point) {
+    let mut app = read_app();
+    app.taps += 1;
+    read_back(&mut app, at_word(1, 7.0), page(), false);
+    let on = app.o.view.rect_to_screen(app.menu_target()[0]).center();
+    (app, on)
+}
+
+fn menu_rows(app: &App) -> Vec<String> {
+    let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
+    [
+        "Copy",
+        "Search the web",
+        "Ask AI",
+        "Translate",
+        "Select all text",
+    ]
+    .into_iter()
+    .filter(|r| texts.iter().any(|t| t == r))
+    .map(String::from)
+    .collect()
+}
+
+/// 201.7: a right press on the picked words opens the menu (nothing else opens it); Esc closes it
+/// and the overlay stays; a press elsewhere closes it and goes on.
+#[test]
+fn w98_201_7_the_menu_opens_on_the_selected_words_and_closes_on_esc_or_a_click_away() {
+    let (mut app, on) = menu_app();
+    assert!(app.o.menu.is_none());
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    assert!(app.o.menu.is_some(), "opened");
+    assert!(menu_rows(&app).contains(&"Search the web".to_string()));
+    let _ = app.update(Message::Escape);
+    assert!(
+        app.o.menu.is_none() && !app.o.is_none(),
+        "Esc closes the menu only"
+    );
+    // a press elsewhere closes it and starts a selection as usual
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let away = overlay::Event::Press {
+        at: Point::new(800.0, 380.0),
+        shift: false,
+    };
+    let _ = app.update(Message::Overlay(away));
+    assert!(app.o.menu.is_none());
+}
+
+/// 201.8: Copy runs the bar's Copy (the picked text, overlay closes); the Menu key opens it with
+/// the first row focused and Enter runs that row.
+#[test]
+fn w98_201_8_copy_and_the_menu_key() {
+    let (mut app, _) = menu_app();
+    let want = picked_text(&app).expect("a word is picked");
+    let _ = copy::copied::text();
+    let _ = app.update(Message::Overlay(overlay::Event::ContextKey));
+    assert!(
+        app.o.menu.is_some(),
+        "the Menu key opens it at the selection"
+    );
+    let task = app.update(Message::Overlay(overlay::Event::Enter));
+    assert!(app.o.menu.is_none());
+    run_task(&mut app, task);
+    assert_eq!(copy::copied::text().as_deref(), Some(want.as_str()));
+    assert_eq!(copy::copied::image(), None, "never the picture");
+}
+
+/// 201.9: Ask AI from the menu sends the selected TEXT, not the picture; the bar's Ask AI is unchanged.
+#[test]
+fn w98_201_9_ask_ai_from_the_menu_sends_the_text_without_the_picture() {
+    use crate::features::circle::screens::context_menu::Msg;
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let want = picked_text(&app).expect("a word is picked");
+    let task = app.update(Message::ContextMenu(Msg::Pick(2)));
+    run_task(&mut app, task);
+    assert!(app.o.menu.is_none());
+    let (_, chat) = app.o.ai_chat.as_ref().expect("the chat opened");
+    assert_eq!(chat.include(), Some(false), "the picture does not go");
+    // the text sits in the composer for the user to go on from; nothing was asked
+    assert!(
+        chat.draft().contains(&want),
+        "{:?} should hold {want:?}",
+        chat.draft()
+    );
+    assert!(
+        chat.chat().is_some_and(|c| c.turns.is_empty()),
+        "nothing sent"
+    );
+    // the bar's Ask AI still includes it
+    let (mut bar_app, _) = menu_app();
+    let task = bar_app.update(Message::Run(&crate::features::ask_ai::ask::ACTION));
+    run_task(&mut bar_app, task);
+    assert_eq!(
+        bar_app.o.ai_chat.as_ref().and_then(|(_, c)| c.include()),
+        Some(true)
+    );
+}
+
+/// The app with a link picked ("see https://shop.example/track now"), and a point on it.
+fn link_menu_app() -> (App, Point) {
+    let mut app = reader_app();
+    app.o.frame = Some(image::Handle::from_rgba(960, 420, vec![255; 960 * 420 * 4]));
+    app.taps += 1;
+    let line = "see https://shop.example/track now";
+    let block = TextBlock {
+        text: line.into(),
+        bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
+        confidence: 1.0,
+    };
+    let what = WordRead {
+        id: app.taps,
+        at: at_word(0, 12.0),
+        origin: [0, 0],
+        region: page(),
+        extend: false,
+    };
+    let _ = app.on_tapped(what, Ok(vec![block]));
+    let on = app.o.view.rect_to_screen(app.menu_target()[0]).center();
+    (app, on)
+}
+
+/// The row of the open menu that is `row`: its index.
+fn row_at(app: &App, row: &crate::features::circle::screens::context_menu::Row) -> usize {
+    let menu = app.o.menu.as_ref().expect("the menu is open");
+    menu.rows().iter().position(|r| *r == row).expect("the row")
+}
+
+/// 201.13: every row does its work and keeps or closes the overlay as the bar's does (owner
+/// 2026-11-24): Copy, Search the web and Open link close it; Ask AI and Translate keep it.
+#[test]
+fn w98_201_13_each_row_runs_and_closes_or_keeps_the_overlay() {
+    use crate::features::circle::actions::entities::{Entity, Kind};
+    use crate::features::circle::screens::context_menu::{Msg, Row};
+    let pick = |app: &mut App, on: Point, row: Row| {
+        let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+        let i = row_at(app, &row);
+        let task = app.update(Message::ContextMenu(Msg::Pick(i)));
+        assert!(app.o.menu.is_none(), "{row:?} closes the menu");
+        task
+    };
+    // Search the web: the selected text in a Google search, then the overlay closes
+    let (mut app, on) = menu_app();
+    let want = picked_text(&app).expect("a word is picked");
+    let task = pick(&mut app, on, Row::Search);
+    run_task(&mut app, task);
+    let word = want.split_whitespace().next().unwrap().to_string();
+    assert!(
+        open::launched()
+            .iter()
+            .any(|u| u.starts_with("https://www.google.com/search") && u.contains(&word)),
+        "{:?}",
+        open::launched()
+    );
+    assert!(app.o.is_none(), "Search closes the overlay");
+    // Open link: the link opens, the overlay closes
+    let (mut app, on) = link_menu_app();
+    let entity = Entity {
+        kind: Kind::Link,
+        text: "https://shop.example/track".into(),
+    };
+    let task = pick(&mut app, on, Row::Open(entity));
+    run_task(&mut app, task);
+    assert!(open::launched().contains(&"https://shop.example/track".to_string()));
+    assert!(app.o.is_none(), "the link closes the overlay");
+    // Translate keeps the overlay (its result shows on it)
+    let (mut app, on) = menu_app();
+    let _ = pick(&mut app, on, Row::Translate);
+    assert!(!app.o.is_none(), "Translate keeps the overlay");
+    // Ask AI keeps it (the chat opens on it)
+    let (mut app, on) = menu_app();
+    let _ = pick(&mut app, on, Row::Ask);
+    assert!(!app.o.is_none() && app.o.ai_chat.is_some());
+    // Copy closes it
+    let (mut app, on) = menu_app();
+    let task = pick(&mut app, on, Row::Copy);
+    run_task(&mut app, task);
+    assert!(app.o.is_none(), "Copy closes the overlay");
+}
+
+/// 201.14: the menu takes every press on it (padding and separators too): nothing reaches the
+/// overlay under it; a press (or right press) elsewhere closes it and goes no further.
+#[test]
+fn w98_201_14_presses_on_the_menu_never_reach_the_overlay() {
+    use crate::features::circle::screens::context_menu::Msg;
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let at = app.o.menu.as_ref().unwrap().at;
+    let size = app.o.menu.as_ref().unwrap().size();
+    let click = |app: &App, p: Point| {
+        crate::shared::kit::testing::shot::click(app.view(app.overlay), app.o.screen, p)
+    };
+    // the menu's padding (its corner) and a separator: no message at all
+    for p in [
+        at + Vector::new(2.0, 2.0),
+        at + Vector::new(size.width / 2.0, 5.0 + 32.0 + 4.0),
+    ] {
+        let got = click(&app, p);
+        assert!(
+            !got.iter().any(|m| matches!(m, Message::Overlay(_))),
+            "{p:?}: {got:?}"
+        );
+    }
+    // elsewhere: it closes and the overlay sees nothing
+    let got = click(&app, Point::new(800.0, 380.0));
+    assert!(
+        got.iter()
+            .any(|m| matches!(m, Message::ContextMenu(Msg::Close))),
+        "{got:?}"
+    );
+    assert!(
+        !got.iter().any(|m| matches!(m, Message::Overlay(_))),
+        "{got:?}"
+    );
+}
+
+/// 201.10: select-text mode: the box answers (all its text), Select all text picks every word and
+/// then its row is gone.
+#[test]
+fn w98_201_10_select_text_mode_and_select_all() {
+    use crate::features::circle::screens::context_menu::Msg;
+    let mut app = select_text_app();
+    let on = app.o.view.rect_to_screen(app.area()).center();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    assert!(app.o.menu.is_some(), "the box with nothing picked answers");
+    assert!(menu_rows(&app).contains(&"Select all text".to_string()));
+    let _ = app.update(Message::ContextMenu(Msg::Pick(4)));
+    let mode = app.o.text_mode.as_ref().unwrap();
+    assert!(mode.picked.as_ref().is_some_and(word::Picked::is_all));
+    let on = app.o.view.rect_to_screen(app.menu_target()[0]).center();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    assert!(!menu_rows(&app).contains(&"Select all text".to_string()));
+}
+
+/// 201.11: a link in the selection adds its Open row, named by the host; none for plain text.
+#[test]
+fn w98_201_11_a_link_in_the_selection_adds_its_row() {
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
+    assert!(!texts.iter().any(|t| t.starts_with("Open ")), "{texts:?}");
+    let mut app = reader_app();
+    app.o.frame = Some(image::Handle::from_rgba(960, 420, vec![255; 960 * 420 * 4]));
+    app.taps += 1;
+    let line = "see https://shop.example/track now";
+    let block = TextBlock {
+        text: line.into(),
+        bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
+        confidence: 1.0,
+    };
+    let what = WordRead {
+        id: app.taps,
+        at: at_word(0, 12.0),
+        origin: [0, 0],
+        region: page(),
+        extend: false,
+    };
+    let _ = app.on_tapped(what, Ok(vec![block]));
+    let on = app.o.view.rect_to_screen(app.menu_target()[0]).center();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
+    assert!(
+        texts.contains(&"Open shop.example".to_string()),
+        "{texts:?}"
+    );
+}

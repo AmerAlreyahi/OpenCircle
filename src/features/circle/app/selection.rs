@@ -22,6 +22,17 @@ impl App {
             self.o.alt = alt;
             return Task::none();
         }
+        // The right-click menu: opens on a right press on the selected text, then drives itself.
+        match event {
+            _ if self.o.menu.is_some() => {
+                if let Some(task) = self.menu_event(event) {
+                    return task;
+                }
+            }
+            overlay::Event::Context(at) => return self.open_context(Some(at)),
+            overlay::Event::ContextKey => return self.open_context(None),
+            _ => {}
+        }
         // A drag let go before the band under its press was read waits for
         // it, with the keys after it (Ctrl+C); a new press goes on without.
         if let Some(held) = &mut self.o.held {
@@ -487,6 +498,8 @@ impl App {
             | overlay::Event::PanMove(_)
             | overlay::Event::PanEnd
             | overlay::Event::ZoomReset
+            | overlay::Event::Context(_)
+            | overlay::Event::ContextKey
             | overlay::Event::Cancel => {}
         }
         Task::none()

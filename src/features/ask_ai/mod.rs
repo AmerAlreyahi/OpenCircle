@@ -30,6 +30,12 @@ use serde_json::Value;
 use crate::shared::config::{AiConfig, Provider};
 use crate::shared::secrets::Secret;
 
+/// Selected text as the chat's context ("Text from my screen:" and the lines), no question of ours
+/// (the right-click menu's Ask AI attaches this, not the picture; the user types the question).
+pub fn text_context(text: &str) -> String {
+    browser::question("", Some(text)).trim_start().to_string()
+}
+
 /// The one place default model ids live. Anthropic: current Sonnet (DESIGN.md);
 /// an OpenAI-compatible server has no sensible default, the user picks one.
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-5-5";

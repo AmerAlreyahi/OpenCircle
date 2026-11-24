@@ -683,6 +683,11 @@ impl Picked {
         out
     }
 
+    /// Everything is selected (Ctrl+A).
+    pub fn is_all(&self) -> bool {
+        self.all
+    }
+
     /// The box around the whole highlight.
     pub fn area(&self) -> Rectangle {
         let rects = self.rects();

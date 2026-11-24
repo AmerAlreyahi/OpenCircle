@@ -307,6 +307,14 @@ pub fn menu_height(items: usize, separators: usize) -> f32 {
     2.0 * MENU_PAD + items as f32 * ITEM_H + separators as f32 * SEPARATOR_H
 }
 
+/// Where a menu of `menu` size opens for a pointer at `at`: there, kept `edge` px inside `room`.
+pub fn place(at: iced::Point, menu: iced::Size, room: iced::Size, edge: f32) -> iced::Point {
+    iced::Point::new(
+        at.x.min(room.width - menu.width - edge).max(0.0),
+        at.y.min(room.height - menu.height - edge).max(0.0),
+    )
+}
+
 /// A menu's hairline between groups (`h-px my-1 mx-2`).
 pub fn separator<'a, Message: 'a>() -> Element<'a, Message> {
     container(divider()).padding(SEPARATOR_PAD).into()

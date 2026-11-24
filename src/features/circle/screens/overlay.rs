@@ -120,6 +120,10 @@ pub enum Event {
     PanEnd,
     /// Double right-click: back to 1x.
     ZoomReset,
+    /// A right press on the selected text (`Overlay::target`): its menu opens at the pointer.
+    Context(Point),
+    /// The Menu key or Shift+F10: the same menu, at the selection.
+    ContextKey,
 }
 
 /// How a selection was made (and so how its clear area is drawn).
@@ -928,6 +932,9 @@ pub struct Overlay<'a> {
     /// Lines found but not read yet (image px, #169): the pointer over them
     /// is the system's working cursor (`Progress`: the OS animates it).
     pub waiting: Vec<Rectangle>,
+    /// What the right-click menu answers on (image px): the selected text's lines, or the
+    /// select-text box. A right press elsewhere keeps its pan and double-click reset.
+    pub target: Vec<Rectangle>,
 }
 
 /// The pointer as the canvas saw it, event by event. Events can arrive in one batch
@@ -974,6 +981,11 @@ impl Overlay<'_> {
     /// `p` (screen px) is over a line of the screen's text.
     fn over_text(&self, p: Point) -> bool {
         (self.text.iter()).any(|l| self.view.rect_to_screen(*l).contains(p))
+    }
+
+    /// `p` (screen px) is on the selected text (the right-click menu's).
+    fn over_target(&self, p: Point) -> bool {
+        (self.target.iter()).any(|r| self.view.rect_to_screen(*r).contains(p))
     }
 }
 
@@ -1028,6 +1040,8 @@ impl canvas::Program<Event> for Overlay<'_> {
                 keyboard::Key::Named(Named::Enter) if modifiers.shift() => Event::ShiftEnter,
                 keyboard::Key::Named(Named::Enter) => Event::Enter,
                 keyboard::Key::Named(Named::Space) => Event::Space,
+                keyboard::Key::Named(Named::ContextMenu) => Event::ContextKey,
+                keyboard::Key::Named(Named::F10) if modifiers.shift() => Event::ContextKey,
                 keyboard::Key::Named(Named::Tab) => Event::Tab {
                     back: modifiers.shift(),
                 },
@@ -1063,6 +1077,10 @@ impl canvas::Program<Event> for Overlay<'_> {
             )) => {
                 let at = pointer.at.unwrap_or(cursor.position_in(bounds)?);
                 let right = *button == mouse::Button::Right;
+                if right && self.over_target(at) {
+                    pointer.right = None;
+                    return Some(Action::publish(Event::Context(at)).and_capture());
+                }
                 let double = right && pointer.right.is_some_and(|t| t.elapsed() < DOUBLE_CLICK);
                 pointer.right = (right && !double).then(Instant::now);
                 if double {
@@ -1586,6 +1604,7 @@ mod tests {
             picked: Vec::new(),
             text: vec![line(100.0)],
             waiting: vec![line(200.0)],
+            target: Vec::new(),
         };
         let bounds = Rectangle::new(Point::ORIGIN, Size::new(960.0, 540.0));
         let at = |x: f32, y: f32| {
@@ -1598,6 +1617,77 @@ mod tests {
         assert_eq!(at(150.0, 110.0), mouse::Interaction::Text);
         assert_eq!(at(150.0, 210.0), mouse::Interaction::Progress);
         assert_eq!(at(150.0, 400.0), mouse::Interaction::Crosshair);
+    }
+
+    /// #201 (criteria 201.5, 201.6): a right press ON the selected text asks for the menu; anywhere
+    /// else it pans as before, and a double right-click resets the zoom. The Menu key and
+    /// Shift+F10 ask for it too.
+    #[test]
+    fn w98_201_5_a_right_press_on_the_selected_text_opens_the_menu_elsewhere_it_pans() {
+        use iced::widget::canvas::Program;
+        let first_draw = Cell::new(None);
+        let overlay = Overlay {
+            stroke: &[],
+            selection: None,
+            others: &[],
+            view: View::new(960, 540, Size::new(960.0, 540.0)),
+            zooming: false,
+            handles: false,
+            opening: 0,
+            first_draw: &first_draw,
+            frame_times: &RefCell::default(),
+            hover: false,
+            dim: true,
+            live_drag: false,
+            look: crate::shared::config::Config::default().look.active(),
+            morph: None,
+            words: &[],
+            picked: Vec::new(),
+            text: Vec::new(),
+            waiting: Vec::new(),
+            target: vec![Rectangle::new(
+                Point::new(100.0, 100.0),
+                Size::new(200.0, 20.0),
+            )],
+        };
+        let bounds = Rectangle::new(Point::ORIGIN, Size::new(960.0, 540.0));
+        let mut pointer = Pointer::default();
+        let mut send = |event: canvas::Event, at: Point| -> Option<Event> {
+            overlay
+                .update(&mut pointer, &event, bounds, Cursor::Available(at))
+                .and_then(|a| a.into_inner().0)
+        };
+        let right = canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right));
+        let on = Point::new(150.0, 110.0);
+        assert!(matches!(send(right.clone(), on), Some(Event::Context(p)) if p == on));
+        // elsewhere: a pan, and a quick second press resets the zoom
+        let off = Point::new(150.0, 400.0);
+        assert!(matches!(send(right.clone(), off), Some(Event::PanStart(_))));
+        assert!(matches!(send(right.clone(), off), Some(Event::ZoomReset)));
+        // the keys
+        let key = |key: keyboard::Key, shift: bool| {
+            canvas::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: keyboard::key::Physical::Unidentified(
+                    keyboard::key::NativeCode::Unidentified,
+                ),
+                location: keyboard::Location::Standard,
+                modifiers: if shift {
+                    keyboard::Modifiers::SHIFT
+                } else {
+                    keyboard::Modifiers::empty()
+                },
+                text: None,
+                repeat: false,
+            })
+        };
+        let menu_key = key(keyboard::Key::Named(Named::ContextMenu), false);
+        assert!(matches!(send(menu_key, off), Some(Event::ContextKey)));
+        let f10 = key(keyboard::Key::Named(Named::F10), true);
+        assert!(matches!(send(f10, off), Some(Event::ContextKey)));
+        let plain_f10 = key(keyboard::Key::Named(Named::F10), false);
+        assert!(!matches!(send(plain_f10, off), Some(Event::ContextKey)));
     }
 
     #[test]
@@ -2390,6 +2480,7 @@ mod tests {
             picked: Vec::new(),
             text: Vec::new(),
             waiting: Vec::new(),
+            target: Vec::new(),
         };
         let bounds = Rectangle::with_size(Size::new(960.0, 540.0));
         let mut state = Pointer::default();
@@ -2481,6 +2572,7 @@ mod tests {
             picked: Vec::new(),
             text: Vec::new(),
             waiting: Vec::new(),
+            target: Vec::new(),
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)
@@ -2523,6 +2615,7 @@ mod tests {
             picked: Vec::new(),
             text: Vec::new(),
             waiting: Vec::new(),
+            target: Vec::new(),
         };
         let canvas = iced::widget::canvas(overlay)
             .width(iced::Fill)

@@ -350,6 +350,19 @@ impl AiChat {
         }
     }
 
+    /// `text` in the composer for the user to go on from (nothing is sent).
+    pub fn prefill(&mut self, text: &str) {
+        self.input = text_editor::Content::with_text(text);
+        self.input
+            .perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+    }
+
+    /// What is typed in the composer (tests).
+    #[cfg(test)]
+    pub fn draft(&self) -> String {
+        self.input.text()
+    }
+
     /// Pinned: it stays open over other apps until its pin closes it.
     pub fn pinned(&self) -> bool {
         self.pinned

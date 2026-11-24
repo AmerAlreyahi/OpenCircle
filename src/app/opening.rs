@@ -63,6 +63,8 @@ pub(crate) struct Opening {
     pub(crate) zoom: Option<crate::features::circle::app::zoom::ZoomMotion>,
     /// The tapped word(s) the selection is (the tap's number: `App::taps`).
     pub(crate) word: Option<word::Picked>,
+    /// The right-click menu on the selected text, while it is open (#201).
+    pub(crate) menu: Option<crate::features::circle::screens::context_menu::Menu>,
     /// Main mode: the frame's text lines (image px), read on demand band by
     /// band (#123): never at open, the band the user touches first.
     pub(crate) screen_text: word::Screen,
@@ -266,6 +268,7 @@ impl Default for Opening {
             pan: None,
             zoom: None,
             word: None,
+            menu: None,
             screen_text: word::Screen::default(),
             reading: None,
             other_read: false,

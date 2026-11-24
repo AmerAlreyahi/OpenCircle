@@ -75,11 +75,15 @@ pub fn for_key(
         })
 }
 
+/// The action named `id` (the first registry entry if there is none).
+pub fn by_id(id: &str) -> &'static Action {
+    ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
+}
+
 /// The action Enter runs: the config's `general.default_action` (the first
 /// registry entry if the registry ever lacks it).
 pub fn default_for(cfg: &crate::shared::config::Config) -> &'static Action {
-    let id = cfg.general.default_action.id();
-    ACTIONS.iter().find(|a| a.id == id).unwrap_or(&ACTIONS[0])
+    by_id(cfg.general.default_action.id())
 }
 
 #[cfg(test)]
