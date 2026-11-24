@@ -1094,14 +1094,16 @@ production systems.
   floating CORNER THUMBNAIL (CleanShot-style): hover shows small icon actions Copy / Save / Edit in OpenCircle Studio / Open with;
   drag it straight into another app or a folder; it slides away by itself after a few seconds. No big result card, no row of
   large buttons, no technical text (temp file, MB). Same pattern for audio (a small waveform chip).
-  Round 2 (canvas https://claude.ai/artifact/AKoKdVveRjedVz38kEEmV7): the "Open with" design is NOT approved (owner 2026-11-24).
+  Round 2 (canvas https://claude.ai/artifact/AKoKdVveRjedVz38kEEmV7): the custom "Open with" menu is NOT approved (owner 2026-11-24).
+  DECIDED instead: "Open with..." opens the SYSTEM's own chooser (Windows Open with dialog; Linux desktop app chooser via the
+  OpenURI portal ask=true / Gio), like right-clicking a file in Explorer. No custom app list to design or maintain.
 
 - DESIGN SOURCES (lead mistake 2026-11-24, owner: "this design was outdated long time ago"): the canvas
   https://claude.ai/artifact/B9g1audcqL1zPbZ2cz4KdQ (and its local copy .claude/artifacts/design/project/) is the OUTDATED
   October canvas: never base new work on it or publish to it. The current look = the shipped app (goldens tests/fixtures/
   screens/, e.g. snip-toolbar-*, studio31-*, settings-*), the approved Studio v3.1 = the SHIPPED Studio (goldens
-  tests/fixtures/screens/studio31-*; owner 2026-11-24: the v3 canvas, rebuilt at https://claude.ai/artifact/T84StiE78CvGLMuCvfZbhD,
-  is NOT the current Studio design, history only) and the Settings v2 draft canvas https://claude.ai/artifact/2u6VGzutWoVxNpqxHTQoSE (round 5). New prototypes go on their own
+  tests/fixtures/screens/studio31-*; owner 2026-11-24: the old v3 canvas is NOT the current Studio design; its rebuild was deleted
+  on his word, local copy .claude/artifacts/design/studio-v3/ is history only) and the Settings v2 draft canvas https://claude.ai/artifact/2u6VGzutWoVxNpqxHTQoSE (round 5). New prototypes go on their own
   new canvas.
 
 - Blur rework (owner, 2026-11-24, study docs/internal/reports-enh/w100-blur-study.md; in the enhancements release, steps 1-5):
