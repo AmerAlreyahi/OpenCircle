@@ -1112,6 +1112,12 @@ production systems.
   (Redact too); the #154 drag-back shrink only while line help holds the stroke on one line. Blur once, mask many (cache).
   Old saved blurs re-render with the new fill. Keys: B, Shift+B cycles styles, R/E/P shapes, 1-3 strength.
 
+- Settings sidebar (owner, 2026-11-24): he still prefers an earlier sidebar he can't find; the CLOSEST is Settings v2 round 1
+  (backup .claude/artifacts/backups/settings-v2-round1.*.tgz, render B2-AskAI): the selected item is a raised pill (elevated
+  surface) with a thin accent bar at its start edge, on a calm light pane, icons + labels, hairline groups, Report a problem +
+  Collapse (Ctrl+B) at the foot. The Settings design round starts from that and shows 2-3 prettier variants of the same idea
+  for him to pick (the round 5 filled-block selection is NOT the target).
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
