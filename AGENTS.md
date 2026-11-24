@@ -1095,6 +1095,13 @@ production systems.
   drag it straight into another app or a folder; it slides away by itself after a few seconds. No big result card, no row of
   large buttons, no technical text (temp file, MB). Same pattern for audio (a small waveform chip).
 
+- DESIGN SOURCES (lead mistake 2026-11-24, owner: "this design was outdated long time ago"): the canvas
+  https://claude.ai/artifact/B9g1audcqL1zPbZ2cz4KdQ (and its local copy .claude/artifacts/design/project/) is the OUTDATED
+  October canvas: never base new work on it or publish to it. The current look = the shipped app (goldens tests/fixtures/
+  screens/, e.g. snip-toolbar-*, studio31-*, settings-*), the Studio v3/v3.1 canvas https://claude.ai/artifact/3x4ShGjBgD5TNZBXSMCRPu
+  and the Settings v2 draft canvas https://claude.ai/artifact/2u6VGzutWoVxNpqxHTQoSE (round 5). New prototypes go on their own
+  new canvas.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
