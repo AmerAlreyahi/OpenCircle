@@ -80,7 +80,7 @@ Snip then opens as it does from `Alt+A`.
 
 While the overlay is open: `Esc` closes, `Enter` runs the default action
 (Search unless you changed it in **Settings → General**), and the action keys
-are `L` Search in browser, `A` Ask AI, `T` Copy text, `E` Snip, `R` Translate.
+are `L` Search in browser, `A` Ask AI, `T` Copy text, `E` Snip, `R` Translate (hover a bar button to see its key; after you select, a hint at the top shows `Ctrl+C` copy and `Ctrl+S` save).
 
 **Selection box.** After you draw, the box can be moved (drag inside it, not over
 text; `Alt`+drag moves it over text), resized by its edges and corners, and

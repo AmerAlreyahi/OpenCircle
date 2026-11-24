@@ -553,6 +553,17 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
     let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
     let texts = overlay_texts(&app);
     assert!(texts.contains(&protected().to_string()), "{texts:?}");
+    // F3: the key hint gives that spot to the protected hint (they never overlap)
+    assert!(!texts.contains(&"Ctrl+S".to_string()), "{texts:?}");
+    {
+        use crate::shared::kit::testing::golden;
+        golden::each_theme(|theme, failed| {
+            let file = format!("overlay-protected-selection-{}", theme.id);
+            failed.extend(golden::check("screens", &file, area.size(), &[1.0], || {
+                app.view(app.overlay)
+            }));
+        });
+    }
     let texts = overlay_texts(&app);
     assert!(
         texts.contains(&search_in_browser::ACTION.icon.to_string()),
@@ -571,6 +582,10 @@ fn a_black_capture_says_it_is_protected_and_keeps_the_bar() {
     let (mut app, area) = selected_app(&grey);
     let _ = app.update(Message::Scanned(area, qr::scan(&app.crop().unwrap())));
     assert!(!overlay_texts(&app).contains(&protected().to_string()));
+    assert!(
+        overlay_texts(&app).contains(&"Ctrl+S".to_string()),
+        "the key hint shows"
+    );
 }
 
 /// An open overlay on a `w` x `h` frame at `scale`; pixel (x, y) is
@@ -6053,5 +6068,57 @@ fn f14_the_auto_pin_says_so_once() {
             let told = app.windows.toasts().iter().any(|(t, _)| t == hint);
             assert_eq!(told, shown, "seen {seen}");
         });
+    }
+}
+
+/// F3: the key hint after a selection, over the bar, in every theme.
+#[test]
+fn f3_the_selection_key_hint_matches_its_golden_images() {
+    use crate::shared::kit::testing::golden;
+    golden::each_theme(|theme, failed| {
+        let mut app = open_app(720, 260, 1.0);
+        drag(
+            &mut app,
+            Point::new(60.0, 50.0),
+            Point::new(260.0, 140.0),
+            false,
+        );
+        settle_bar(&mut app);
+        let file = format!("overlay-selection-keys-{}", theme.id);
+        failed.extend(golden::check(
+            "screens",
+            &file,
+            app.o.screen,
+            &[1.0],
+            || app.view(app.overlay),
+        ));
+    });
+}
+
+/// F3 (#208): the bar's pills carry their in-overlay letter keys in their tooltips (L, T, R,
+/// E), and after a selection a hint names the keys that act on it.
+#[test]
+fn f3_keys_show_on_the_bar_and_after_a_selection() {
+    let keys = BarKeys::of(&config::Config::default());
+    assert_eq!(
+        [&keys.search, &keys.copy_text, &keys.translate, &keys.edit].map(String::as_str),
+        ["L", "T", "R", "E"]
+    );
+    let mut app = open_app(800, 600, 1.0);
+    let texts = texts_of(&app, app.overlay);
+    assert!(
+        !texts.iter().any(|t| t == "Ctrl+S"),
+        "nothing selected: {texts:?}"
+    );
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(150.0, 120.0),
+        false,
+    );
+    settle_bar(&mut app);
+    let texts = texts_of(&app, app.overlay);
+    for want in ["Ctrl+C", "copy", "Ctrl+S", "save"] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
 }

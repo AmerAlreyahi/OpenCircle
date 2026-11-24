@@ -261,7 +261,7 @@ impl App {
         } else if let Some(toast) = self.o.toast {
             container(surface::hint(crate::shared::app_language::tr(toast.0)))
                 .center_x(Fill)
-                .padding(24)
+                .padding(HINT_EDGE)
                 .into()
         } else if let Some((id, song)) = &self.o.song {
             let id = *id;
@@ -296,7 +296,12 @@ impl App {
         } else if let Some(selection) = self.o.selection {
             match self.o.purpose {
                 Purpose::Search if !self.o.drawing && !self.settling() => {
-                    self.selection_ui(selection, self.overlay)
+                    let ui = self.selection_ui(selection, self.overlay);
+                    // (the protected-window hint takes that spot)
+                    match self.protected_capture() {
+                        true => ui,
+                        false => stack![ui, selection_keys()].into(),
+                    }
                 }
                 _ => space().into(),
             }
@@ -304,7 +309,7 @@ impl App {
             // slides down into place as the overlay opens
             let hint = container(surface::hint(super::hint()))
                 .center_x(Fill)
-                .padding(24);
+                .padding(HINT_EDGE);
             let rise = (1.0 - self.appeared()) * SLIDE;
             iced::widget::float(hint)
                 .translate(move |_, _| Vector::new(0.0, -rise))
@@ -348,14 +353,19 @@ impl App {
             layers = layers.push(lifted(card, at, chat.panel.held));
         }
         // A black capture (DRM / protected window): say so, but keep Copy, Save and Text.
-        if self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected) {
+        if self.protected_capture() {
             let room = self.room();
             let pill = container(surface::hint(super::protected()))
                 .center_x(room.width)
-                .padding(24);
+                .padding(HINT_EDGE);
             layers = layers.push(iced::widget::pin(pill).position(room.position()));
         }
         layers.extend(self.pill_view()).into()
+    }
+
+    /// A black capture (DRM / protected window) is selected: its hint shows.
+    fn protected_capture(&self) -> bool {
+        self.o.selection.is_some() && self.o.scan.as_ref().is_some_and(|s| s.protected)
     }
 
     /// The AI chat card, or the translation's pill and cards (main mode's
@@ -569,4 +579,21 @@ pub(crate) fn chips_at(
         .find(free)
         .unwrap_or(bottom - size.height); // the box fills the screen: on it, at the bottom
     Point::new(x, y)
+}
+
+/// The freeze hint's and the key hint's distance from the screen's top edge.
+const HINT_EDGE: f32 = 24.0;
+
+/// After a selection, the keys that act on it (F3): "Ctrl+C Copy · Ctrl+S Save", on the
+/// freeze hint's spot at the top.
+pub(crate) fn selection_keys<'a>() -> Element<'a, Message> {
+    use crate::shared::app_language::{S, tr};
+    let groups = [
+        (Some("Ctrl+C"), tr(S::bar_key_copy)),
+        (Some("Ctrl+S"), tr(S::bar_key_save)),
+    ];
+    container(crate::shared::kit::key_hint::key_hint(&groups))
+        .center_x(Fill)
+        .padding(HINT_EDGE)
+        .into()
 }

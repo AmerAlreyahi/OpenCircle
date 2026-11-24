@@ -135,10 +135,13 @@ impl App {
             if let Some(status) = status {
                 return crate::shared::kit::tooltip::cut(pill, status);
             }
-            // Its label is written on it; an icon-only pill (narrow screens)
-            // names itself and its shortcut in a tooltip.
+            // Its label is written on it, so a tooltip only adds its key (F3); an
+            // icon-only pill (narrow screens) names itself and its key in one.
             if labelled {
-                return pill;
+                return match keys.is_empty() {
+                    true => pill,
+                    false => crate::shared::kit::tooltip::cut(pill, fmt(S::bar_press_key, &[keys])),
+                };
             }
             let why = match keys.is_empty() {
                 true => Why::Icon,

@@ -1419,6 +1419,12 @@ strings! {
         | "نسخ النص";
     act_translate: "Translate"
         | "ترجمة";
+    bar_key_copy: "copy"
+        | "نسخ";
+    bar_key_save: "save"
+        | "حفظ";
+    bar_press_key: "Press {}"
+        | "اضغط {}";
     bar_hint: "Circle, drag or tap anything · Esc to close"
         | "ارسم دائرة أو اسحب أو انقر على أي شيء · Esc للإغلاق";
     bar_protected: "This window is protected; it can't be captured"

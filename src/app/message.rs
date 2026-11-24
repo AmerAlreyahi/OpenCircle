@@ -212,8 +212,8 @@ impl BarKeys {
         let key = |a: &Action| bar::key_hint(a.key);
         BarKeys {
             search: key(&search_in_browser::ACTION),
-            copy_text: quick("copy_text", false),
-            translate: quick(crate::features::translate::action::ACTION.id, false),
+            copy_text: key(&crate::features::text_reading::text::ACTION),
+            translate: key(&crate::features::translate::action::ACTION),
             live: quick(crate::features::translate::action::ACTION.id, true),
             song: quick("song_search", false),
             edit: key(&crate::features::snip::action::ACTION),
