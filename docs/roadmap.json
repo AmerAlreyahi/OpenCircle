@@ -264,6 +264,11 @@
       "outcome": "Taken in the board's order after 0.6.0.",
       "items": [
         {
+          "id": "L-09",
+          "title": "Meeting captions add-on: live transcript + translation widget, installed on demand (after the recording release)",
+          "status": "todo"
+        },
+        {
           "id": "L-02",
           "title": "Paste or drop an image into the AI chat (#203)",
           "status": "todo"
