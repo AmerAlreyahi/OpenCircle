@@ -1111,6 +1111,8 @@ strings! {
         | "حتى 4 تثبيتات حيّة: أغلق أحدها أولًا";
     pill_pins_pick: "Pick a part of one window to pin it live"
         | "اختر جزءًا من نافذة واحدة لتثبيته حيًّا";
+    pill_ctrl_moves: "Ctrl+drag moves"
+        | "اسحب مع Ctrl للتحريك";
     pill_chat_pinned: "Pinned · the chat stays open over your apps"
         | "تم التثبيت · تبقى المحادثة مفتوحة فوق تطبيقاتك";
     pill_tray: "OpenCircle is running in the tray. Press {}."

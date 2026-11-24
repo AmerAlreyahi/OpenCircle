@@ -27,6 +27,7 @@
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
 //! pin_hint_seen = true              # the one-time "Pinned" hint of the AI chat was shown (written only when true)
+//! ctrl_hint_seen = true             # the one-time "Ctrl+drag moves" hint of the editor was shown (written only when true)
 //!
 //! [bar]                             # the overlay's action bar, where the user docked it
 //! anchor = "bottom"                 # bottom | top | bottom_left | bottom_right
@@ -172,7 +173,10 @@ mod store;
 pub use look::PRESETS;
 #[cfg(test)]
 pub use store::with_test_config;
-pub use store::{appearance, current, look, look_config, rebase, set_current, update, update_at};
+pub use store::{
+    appearance, current, look, look_config, rebase, set_current, update, update_at,
+    update_in_background,
+};
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
@@ -820,6 +824,9 @@ pub struct GeneralConfig {
     /// The one-time "Pinned · the chat stays open over your apps" hint was shown (F14).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub pin_hint_seen: bool,
+    /// The one-time "Ctrl+drag moves" hint (a drag began on a shape with a drawing tool) was shown (C5).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ctrl_hint_seen: bool,
 }
 
 impl Default for GeneralConfig {
@@ -832,6 +839,7 @@ impl Default for GeneralConfig {
             app_language: String::new(),
             shortcuts_taken_shown: Vec::new(),
             pin_hint_seen: false,
+            ctrl_hint_seen: false,
         }
     }
 }

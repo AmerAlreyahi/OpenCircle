@@ -4293,3 +4293,18 @@ fn w98_202_6_studio_ctrl_wheel_resizes_over_the_selection_and_zooms_elsewhere() 
     });
     assert!(s.editor.as_ref().unwrap().zoom > zoom, "zoomed");
 }
+
+/// C5: in the Studio the first drag that starts on a shape (drawing tool) says "Ctrl+drag moves".
+#[test]
+fn c5_the_studio_says_ctrl_drag_moves_on_the_first_drag_over_a_shape() {
+    use crate::shared::config::{self, Config};
+    config::with_test_config(Config::default(), || {
+        let mut s = studio_on(640, 400);
+        draw(&mut s);
+        let _ = s.update(Msg::Editor(Message::Deselect));
+        let out = s.update(Msg::Editor(Message::Press(Point::new(60.0, 40.0))));
+        assert!(!matches!(&out, Outcome::Say(_)), "a press alone is no drag");
+        let out = s.update(Msg::Editor(Message::Move(Point::new(70.0, 50.0))));
+        assert!(matches!(&out, Outcome::Say(t) if t == "Ctrl+drag moves"));
+    });
+}

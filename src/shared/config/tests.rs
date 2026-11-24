@@ -1724,6 +1724,21 @@ fn the_walkthrough_transition_is_remembered_and_checked() {
     assert_eq!(w.len(), 2, "{w:?}");
 }
 
+/// C5: the one-time "Ctrl+drag moves" hint's flag is written only once set and reads back.
+#[test]
+fn c5_ctrl_hint_seen_round_trips() {
+    let mut c = Config::default();
+    assert!(
+        !toml::to_string_pretty(&c)
+            .unwrap()
+            .contains("ctrl_hint_seen")
+    );
+    c.general.ctrl_hint_seen = true;
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("ctrl_hint_seen = true"), "{text}");
+    assert!(Config::parse(&text).0.general.ctrl_hint_seen);
+}
+
 /// F14 (#219): the one-time pin hint's flag is written only once set and reads back.
 #[test]
 fn f14_pin_hint_seen_round_trips() {

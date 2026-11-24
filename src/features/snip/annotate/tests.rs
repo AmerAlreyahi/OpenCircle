@@ -962,6 +962,38 @@ fn a_cancelled_press_draws_nothing() {
     assert_eq!(e.doc.items.len(), 1);
 }
 
+/// C5: a drag that starts on a shape with a drawing tool keeps drawing and asks the host for
+/// the "Ctrl+drag moves" hint, once ever (`general.ctrl_hint_seen`); not when it starts on empty
+/// picture, and Ctrl+drag (a move) does not ask.
+#[test]
+fn c5_a_drag_on_a_shape_asks_for_the_ctrl_drag_hint_once() {
+    use crate::shared::config::{self, Config};
+    for (seen, told) in [(false, true), (true, false)] {
+        let mut cfg = Config::default();
+        cfg.general.ctrl_hint_seen = seen;
+        config::with_test_config(cfg, || {
+            let mut e = editor(400, 300);
+            e.update(Message::Tool(Tool::Rect));
+            drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
+            assert!(!e.take_ctrl_hint(), "empty picture: no hint");
+            // a plain click on the shape is no drag: no hint
+            e.update(Message::Press(pt(60.0, 60.0)));
+            e.update(Message::Release);
+            assert!(!e.take_ctrl_hint(), "a click is no drag");
+            e.doc.items.clear();
+            drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
+            e.doc.items.truncate(1);
+            drag(&mut e, pt(60.0, 60.0), &[], pt(100.0, 90.0));
+            assert_eq!(e.doc.items.len(), 2, "it still drew");
+            assert_eq!(e.take_ctrl_hint(), told, "seen {seen}");
+            assert!(!e.take_ctrl_hint(), "once per press");
+            e.update(Message::PressMove(pt(60.0, 60.0)));
+            e.update(Message::Release);
+            assert!(!e.take_ctrl_hint(), "Ctrl+drag moves: no hint");
+        });
+    }
+}
+
 /// A drawing tool's plain drag always draws, even over an annotation; only the
 /// Select tool or Ctrl+drag moves one (owner, 2026-10-31). The selection's
 /// handles still resize with any tool; undo puts it all back.

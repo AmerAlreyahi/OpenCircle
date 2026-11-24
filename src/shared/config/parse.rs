@@ -121,6 +121,7 @@ impl Config {
             c.general.shortcuts_taken_shown =
                 get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
             c.general.pin_hint_seen = get(t, "general.", "pin_hint_seen", false, &mut w);
+            c.general.ctrl_hint_seen = get(t, "general.", "ctrl_hint_seen", false, &mut w);
         }
         // `[results]` (schema 1-2: the web view card's side and size) is ignored.
         if let Some(t) = section(&root, "bar", &mut w) {

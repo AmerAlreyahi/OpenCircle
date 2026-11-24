@@ -663,6 +663,11 @@ pub struct Annotator {
     pub scroll: bool,
     /// Snip's first run ever: the toolbar shows its one-time "Edit more in OpenCircle Studio" hint.
     pub studio_hint: bool,
+    /// A drag began on a shape with a drawing tool (it draws; Ctrl+drag moves): the host
+    /// says "Ctrl+drag moves" once ever (`take_ctrl_hint`).
+    ctrl_hint: bool,
+    /// A press landed on a shape with a drawing tool: its first move is the drag that asks.
+    ctrl_armed: bool,
     /// A long capture of the area is running: the toolbar keeps only what
     /// finishes it (Copy, Save, Pin, Share, close); the rest is dimmed.
     pub capturing: bool,
@@ -807,6 +812,8 @@ impl Annotator {
             grid: false,
             scroll: false,
             studio_hint: false,
+            ctrl_hint: false,
+            ctrl_armed: false,
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
@@ -943,6 +950,7 @@ impl Annotator {
         }
         match message {
             Message::Press(p) => {
+                self.ctrl_armed = false;
                 (self.focus, self.nudged) = (None, false);
                 // starting to draw closes a panel (not the colour's: its field)
                 self.menu = self.menu.filter(|m| *m == Menu::Colour);
@@ -971,8 +979,14 @@ impl Annotator {
                 (self.focus, self.nudged) = (None, false);
                 self.press_copy(p)
             }
-            Message::Move(p) => self.drag_to(p),
-            Message::Release => self.release(),
+            Message::Move(p) => {
+                self.ctrl_hint |= std::mem::take(&mut self.ctrl_armed);
+                self.drag_to(p)
+            }
+            Message::Release => {
+                self.ctrl_armed = false;
+                self.release()
+            }
             Message::Cancel => self.cancel_press(),
             Message::Shift(on) => self.shift = on,
             Message::Type(s) => self.edit_text(|t| t.push_str(&s)),
@@ -1501,6 +1515,10 @@ impl Annotator {
             self.doc.select_one(Some(i));
             self.pick_up(i, true, p);
             return;
+        }
+        // a drawing tool draws over a shape; Ctrl+drag moves it (C5: said once)
+        if self.tool != Tool::Crop && select::hit(&self.doc.items, p, reach).is_some() {
+            self.ctrl_armed = true; // the hint waits for the drag (a plain click is no drag)
         }
         match self.tool {
             Tool::Crop => self.cropping = Some((p, p)),

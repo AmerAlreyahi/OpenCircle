@@ -78,6 +78,24 @@ pub fn update(f: impl FnOnce(&mut Config)) -> std::io::Result<Config> {
     update_at(None, f)
 }
 
+/// `update` on a worker thread, for a one-time flag (a seen hint): it never blocks the UI and a
+/// failure is only logged. In tests it never touches the disk: with `with_test_config` it edits
+/// that config (on the calling thread, at once), else it does nothing.
+pub fn update_in_background(f: impl FnOnce(&mut Config) + Send + 'static) {
+    #[cfg(test)]
+    TEST_CONFIG.with(|t| {
+        if let Some(c) = t.borrow_mut().as_mut() {
+            f(c);
+        }
+    });
+    #[cfg(not(test))]
+    std::thread::spawn(move || {
+        if let Err(e) = update(f) {
+            crate::log!("[opencircle] config: {e}");
+        }
+    });
+}
+
 /// `update` on another file (`Some`, Settings and onboarding tests); the
 /// running app's config is then left alone.
 pub fn update_at(path: Option<&Path>, f: impl FnOnce(&mut Config)) -> std::io::Result<Config> {

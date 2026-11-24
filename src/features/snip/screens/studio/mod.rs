@@ -2061,6 +2061,7 @@ impl Studio {
         self.fit(); // a crop changes what is shown
         self.keep_unsaved();
         let refusal = self.editor.as_mut().and_then(|e| e.take_grow_refusal());
+        let hint = self.editor.as_mut().is_some_and(|e| e.take_ctrl_hint());
         match out {
             Some(Output::Copy(crop)) => Outcome::Copy(crop),
             Some(Output::Save(crop)) => Outcome::Save(crop),
@@ -2070,6 +2071,8 @@ impl Studio {
             Some(Output::AddStepDoc(doc)) => Outcome::AddStepDoc(doc),
             // "Grow the canvas past the edge" said no: a plain pill says why
             None if refusal.is_some() => Outcome::Say(grow_words(refusal)),
+            // C5: a drag began on a shape; with a drawing tool it draws, Ctrl+drag moves
+            None if hint => Outcome::Say(crate::t!(pill_ctrl_moves).to_string()),
             // Esc never closes the Studio (Alt+F4 / the x does); nothing else
             // the widget's toolbar asks for is on the Studio
             _ => Outcome::None,

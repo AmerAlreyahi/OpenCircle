@@ -302,11 +302,7 @@ impl App {
         if !pinned_now || config::current().general.pin_hint_seen {
             return Task::none();
         }
-        std::thread::spawn(|| {
-            if let Err(e) = config::update(|c| c.general.pin_hint_seen = true) {
-                crate::log!("[opencircle] config: {e}");
-            }
-        });
+        config::update_in_background(|c| c.general.pin_hint_seen = true);
         let text = crate::t!(pill_chat_pinned);
         (self.windows)
             .toast(
