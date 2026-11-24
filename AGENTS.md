@@ -1155,8 +1155,13 @@ production systems.
   EXTENSIONS (new Settings page "Extensions": finished optional tools installed on demand, each with a card + preview + download
   size; Add downloads only its parts; On/Off keeps files but removes shortcuts, tray and menu entries; Remove frees the space,
   settings kept unless cleared; updated with the app) · LABS (keeps its name: unfinished experiments that later graduate).
-  First-party extensions are built into the binary but dormant until added (no third-party plugin ABI now; sandboxed outside
-  plugins maybe much later). The owner's personal tools are extensions (listed for all or private). Candidates to move from core:
+  ARCHITECTURE (owner, 2026-11-24, REVISED: "completely separated, never heavier when not installed"): each extension is its
+  OWN small executable, downloaded only on Add (signed + checked like releases), started by OpenCircle only when used, separate
+  process (a crash never takes the app down), stopped when done; it draws its own window; OpenCircle only shows its card,
+  registers its shortcut/tray entry while it is ON, and talks to it over one small fixed message channel (same pattern as the
+  text-reading helper). Not installed = nothing on disk, nothing runs; the catalogue list is read only when the Extensions page
+  opens, never at startup. Off = files only, zero RAM/CPU. Remove = its folder deleted. NOT built into the main binary, no
+  DLL/.so loading, no WASM runtime. Only first-party extensions; the message channel is frozen once (SEC-06) after the first one. The owner's personal tools are extensions (listed for all or private). Candidates to move from core:
   song search, game translation + glossaries, colour picker, ruler, QR, quick convert, advanced paste. First new one: meeting
   captions (#227).
 
