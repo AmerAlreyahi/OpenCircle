@@ -81,19 +81,21 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     }];
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
-    let live = e.live.as_ref().map(|(r, handle)| {
-        let z = e.zoom * k;
-        let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
-        pin(image(handle.clone())
-            .width(r.width * z)
-            .height(r.height * z)
-            .content_fit(ContentFit::Fill))
-        .position(at)
-    });
-    layers.push(match live {
-        Some(live) => live.into(),
-        None => iced::widget::space().into(),
-    });
+    for layer in [&e.patch, &e.live] {
+        let over = layer.as_ref().map(|(r, handle)| {
+            let z = e.zoom * k;
+            let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
+            pin(image(handle.clone())
+                .width(r.width * z)
+                .height(r.height * z)
+                .content_fit(ContentFit::Fill))
+            .position(at)
+        });
+        layers.push(match over {
+            Some(over) => over.into(),
+            None => iced::widget::space().into(),
+        });
+    }
     layers.push(
         iced::widget::canvas(Input {
             editor: e,

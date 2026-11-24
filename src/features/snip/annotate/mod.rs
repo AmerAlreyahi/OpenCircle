@@ -47,6 +47,8 @@ fn clean_paste(t: &str) -> String {
 #[cfg(test)]
 mod blur_shape_tests;
 #[cfg(test)]
+mod blur_speed_tests;
+#[cfg(test)]
 mod blur_tests;
 #[cfg(test)]
 mod objects_api_tests;
@@ -640,6 +642,9 @@ pub struct Annotator {
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
     pub(crate) live: Option<(Rectangle, image::Handle)>,
+    /// Hides committed since the picture was last painted whole: their region
+    /// of it, drawn over `base` (see `patch_over`; see-through where unpainted).
+    pub(crate) patch: Option<(Rectangle, image::Handle)>,
     pending: Option<Pending>,
     /// Crop drag: from, to.
     cropping: Option<(Point, Point)>,
@@ -818,6 +823,7 @@ impl Annotator {
             crisp: false,
             legend: None,
             live: None,
+            patch: None,
             pending: None,
             cropping: None,
             dragged: None,
@@ -2017,11 +2023,27 @@ impl Annotator {
             Some(_) => None,
         };
         let repaint = edit.is_some() || pending.hidden;
+        // A new Hide only paints over its own region, which the live layer has
+        // just painted: patch the picture with it instead of flattening it all
+        // (an 8K picture: ~150 ms).
+        let mut patch = pending.index.is_none()
+            && !pending.hidden
+            && matches!(
+                &edit,
+                Some(Edit::Insert(
+                    _,
+                    Item {
+                        shape: Shape::Blur { .. },
+                        ..
+                    }
+                ))
+            );
         if let Some(edit) = edit {
             let grown = match &edit {
                 Edit::Insert(_, item) | Edit::Change(_, _, item) => self.grow_for(&[item.frame()]),
                 _ => Ok(None),
             };
+            patch &= matches!(grown, Ok(None));
             match grown {
                 Ok(Some(grow)) => self.doc.exec(Edit::Seq(vec![edit, grow])),
                 Ok(None) => self.doc.exec(edit),
@@ -2030,10 +2052,75 @@ impl Annotator {
                 Err(()) => self.doc.exec(edit),
             }
         }
-        if repaint {
+        if patch && self.patch_over() {
+            self.live = None;
+        } else if repaint {
             self.refresh();
         } else {
             self.live = None;
+        }
+    }
+
+    /// Keeps the live layer (it holds every item over its region: what a full
+    /// repaint gives there) as part of one overlay over the picture, instead of
+    /// flattening the whole picture again; the next repaint folds it in.
+    /// `false`: it can't (no live layer, no base shown, a legend), then repaint.
+    fn patch_over(&mut self) -> bool {
+        let (Some((rect, live)), false, None) = (&self.live, self.bare(), &self.legend) else {
+            return false;
+        };
+        let image::Handle::Rgba {
+            width: lw,
+            pixels: over,
+            ..
+        } = live
+        else {
+            return false;
+        };
+        let whole = match &self.patch {
+            Some((old, _)) => old.union(rect),
+            None => *rect,
+        };
+        let (w, h) = (whole.width as usize, whole.height as usize);
+        let mut data = vec![0u8; w * h * 4];
+        let mut blit = |at: &Rectangle, width: usize, pixels: &[u8]| {
+            let (x0, y0) = ((at.x - whole.x) as usize, (at.y - whole.y) as usize);
+            for (row, line) in pixels.chunks_exact(width * 4).enumerate() {
+                let to = ((y0 + row) * w + x0) * 4;
+                data[to..to + width * 4].copy_from_slice(line);
+            }
+        };
+        if let Some((
+            old,
+            image::Handle::Rgba {
+                width: ow,
+                pixels: before,
+                ..
+            },
+        )) = &self.patch
+        {
+            blit(old, *ow as usize, before);
+        }
+        blit(rect, *lw as usize, over);
+        self.patch = Some((whole, image::Handle::from_rgba(w as u32, h as u32, data)));
+        true
+    }
+
+    /// The painted picture's bytes (the tests).
+    #[cfg(test)]
+    fn base_pixels(&self) -> Vec<u8> {
+        match &self.base {
+            image::Handle::Rgba { pixels, .. } => pixels.to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The committed Hides' overlay: its place (image px) and bytes (the tests).
+    #[cfg(test)]
+    fn patch_pixels(&self) -> Option<(Rectangle, Vec<u8>)> {
+        match &self.patch {
+            Some((r, image::Handle::Rgba { pixels, .. })) => Some((*r, pixels.to_vec())),
+            _ => None,
         }
     }
 
@@ -2260,6 +2347,7 @@ impl Annotator {
         }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
+        self.patch = None;
         self.display = None;
         self.crisp = false;
         self.update_live();

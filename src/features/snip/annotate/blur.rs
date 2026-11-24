@@ -153,6 +153,9 @@ pub fn reach(cell_px: f32) -> f32 {
     feather(cell_px) + (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0
 }
 
+/// How many pixels of a footprint the two colours are read from, at most.
+const SAMPLES: usize = 16_384;
+
 /// Hides `fp` in `layer` (texture scale `cell_px`, image px; `seed`: the
 /// document's secret).
 pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed: u64) {
@@ -200,9 +203,14 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
     // 1. The ONLY reading of the source: the background and the ink colour.
     let fill = {
         let data = layer.pm.data();
+        // (A big footprint is sampled: a drag repaints it every frame, and two
+        // colours need no more than a few thousand pixels.)
+        let step = (aw * ah / SAMPLES).max(1);
         let under = (ay0..ay1)
             .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
-            .filter_map(|(x, y)| {
+            .enumerate()
+            .filter(|(n, _)| n % step == 0)
+            .filter_map(|(_, (x, y))| {
                 let m = hard.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
                 let i = ((y * w + x) * 4) as usize;
                 (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
@@ -215,8 +223,12 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
     // 2. The texture, from the seed and image coordinates only.
     let tone: Box<dyn Fn(i64, i64) -> f32> = match style {
         Style::Frost => {
-            let l = cell(cell_px) * 2;
-            Box::new(move |x, y| FROST * frost(seed, x + oxi, y + oyi, l))
+            let lattice = Lattice::new(
+                seed,
+                cell(cell_px) * 2,
+                (ax0 + oxi, ay0 + oyi, ax1 + oxi, ay1 + oyi),
+            );
+            Box::new(move |x, y| FROST * lattice.at(x + oxi, y + oyi))
         }
         Style::Pixelate => {
             let buf = mosaic(
@@ -251,19 +263,49 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
 }
 
 /// Smooth value noise in -1..=1 on a lattice of `l` px anchored to image
-/// coordinates (smoothstep between hashed corners): the Frost texture.
-fn frost(seed: u64, x: i64, y: i64, l: i64) -> f32 {
-    let (gx, gy) = (x.div_euclid(l), y.div_euclid(l));
-    let smooth = |v: i64| {
-        let t = v.rem_euclid(l) as f32 / l as f32;
-        t * t * (3.0 - 2.0 * t)
-    };
-    let (tx, ty) = (smooth(x), smooth(y));
-    let corner =
-        |dx: i64, dy: i64| unit(mix(seed ^ mix((gx + dx) as u64 ^ ((gy + dy) as u64) << 32)));
-    let top = corner(0, 0) * (1.0 - tx) + corner(1, 0) * tx;
-    let bottom = corner(0, 1) * (1.0 - tx) + corner(1, 1) * tx;
-    top * (1.0 - ty) + bottom * ty
+/// coordinates (smoothstep between hashed corners): the Frost texture. The
+/// corners over a region are hashed once.
+struct Lattice {
+    l: i64,
+    /// The first corner column and row, and the columns per row.
+    gx0: i64,
+    gy0: i64,
+    gw: usize,
+    corners: Vec<f32>,
+}
+
+impl Lattice {
+    /// Covers image px `(x0, y0)..(x1, y1)`.
+    fn new(seed: u64, l: i64, (x0, y0, x1, y1): (i64, i64, i64, i64)) -> Self {
+        let (gx0, gy0) = (x0.div_euclid(l), y0.div_euclid(l));
+        let (gx1, gy1) = (x1.div_euclid(l) + 1, y1.div_euclid(l) + 1);
+        let corners = (gy0..=gy1)
+            .flat_map(|gy| (gx0..=gx1).map(move |gx| (gx, gy)))
+            .map(|(gx, gy)| unit(mix(seed ^ mix(gx as u64 ^ (gy as u64) << 32))))
+            .collect();
+        Lattice {
+            l,
+            gx0,
+            gy0,
+            gw: (gx1 - gx0 + 1) as usize,
+            corners,
+        }
+    }
+
+    fn at(&self, x: i64, y: i64) -> f32 {
+        let l = self.l;
+        let smooth = |v: i64| {
+            let t = v.rem_euclid(l) as f32 / l as f32;
+            t * t * (3.0 - 2.0 * t)
+        };
+        let (tx, ty) = (smooth(x), smooth(y));
+        let at = ((y.div_euclid(l) - self.gy0) as usize * self.gw)
+            + (x.div_euclid(l) - self.gx0) as usize;
+        let c = &self.corners;
+        let top = c[at] * (1.0 - tx) + c[at + 1] * tx;
+        let bottom = c[at + self.gw] * (1.0 - tx) + c[at + self.gw + 1] * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
 }
 
 /// The Pixelate texture over the layer region `(x0, y0, x1, y1)`: tone offsets
