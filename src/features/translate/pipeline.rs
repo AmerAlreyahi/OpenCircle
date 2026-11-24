@@ -904,6 +904,18 @@ pub(crate) fn merged(mut a: Vec<TextBlock>, b: Vec<TextBlock>) -> Vec<TextBlock>
 /// for "[V] Questgebiet anzeigen"). The three game screens: 8-17 lines.
 pub(super) const SPARSE: usize = 40;
 
+/// A sparse read (`SPARSE`) of a GAME's screen gets PP-OCR's second read; a
+/// plain page or app doesn't (3-4 s on the Win10 VM for nothing, W94): the
+/// glossary's one decision (`glossary::screen`), asked on this read's lines.
+pub(super) fn reread_wanted(lines: &[TextBlock], width: u32, height: u32) -> bool {
+    lines.len() <= SPARSE && {
+        let seen: Vec<Line> = (lines.iter().cloned())
+            .map(|b| to_line(b, width, height))
+            .collect();
+        super::glossary::screen::frame_is_game(has_address_bar(&seen, height))
+    }
+}
+
 /// Windows OCR's read of a sparse screen with PP-OCR's (`pp`, the same
 /// frame): a garbled line (`garbled`), an accent Windows OCR dropped
 /// ("Limite" for "Límite") or an icon it read as a letter ("O Invocation
@@ -1162,7 +1174,7 @@ impl Real {
                     }
                 }
                 // a game's screen: PP-OCR reads it too (no PP-OCR here: as read)
-                Ok(lines) if lines.len() <= SPARSE => {
+                Ok(lines) if reread_wanted(&lines, width, height) => {
                     self.warm_before_read(lang::guess(lines.iter().map(|l| l.text.as_str())));
                     return Ok(
                         match text_reading::recognize_as(rgba, width, height, &self.source) {

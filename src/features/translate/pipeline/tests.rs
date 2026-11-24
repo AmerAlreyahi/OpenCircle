@@ -1642,3 +1642,32 @@ fn closing_stops_the_calls() {
     assert!(deps.asked.borrow().is_empty());
     assert!(out.blocks.iter().all(|b| b.translation.is_empty()));
 }
+
+// W96 AC-1: the second whole-screen PP-OCR read after Windows OCR runs only on
+// a game's screen (the glossary's decision), never on a sparse web page.
+#[test]
+fn ac1_a_sparse_web_page_is_not_read_again() {
+    let page = vec![
+        tb("https://example.com/news/today", [200.0, 20.0, 500.0, 24.0]),
+        tb("Latest news", [40.0, 120.0, 200.0, 30.0]),
+        tb("Read more", [40.0, 200.0, 120.0, 30.0]),
+    ];
+    assert!(!reread_wanted(&page, 1280, 720));
+}
+
+#[test]
+fn ac1_a_sparse_game_screen_is_read_again() {
+    let menu = vec![
+        tb("Apply", [40.0, 120.0, 100.0, 30.0]),
+        tb("Reset", [40.0, 200.0, 100.0, 30.0]),
+    ];
+    assert!(reread_wanted(&menu, 1280, 720));
+}
+
+#[test]
+fn ac1_a_dense_screen_is_never_read_again() {
+    let many: Vec<TextBlock> = (0..=SPARSE)
+        .map(|i| tb("Apply", [40.0, 10.0 + 12.0 * i as f32, 100.0, 10.0]))
+        .collect();
+    assert!(!reread_wanted(&many, 1280, 720));
+}

@@ -100,11 +100,19 @@ pub fn begin() {
 /// The frame was read (`address_bar`: a browser's was found): decides the
 /// capture's screen.
 pub fn saw_frame(address_bar: bool) {
+    let game = frame_is_game(address_bar);
+    seen(|s| s.game = game);
+}
+
+/// The decision for a frame (`address_bar`: it shows a browser's): the one
+/// place it is made, also asked before the capture's frame is read whole
+/// (`pipeline::reread_wanted`).
+pub(crate) fn frame_is_game(address_bar: bool) -> bool {
     let all = store::load_all(&store::dir());
     let focus = window_rect::captured();
     let title = focus.as_ref().map(|f| f.title.as_str());
     let named = store::for_window(&all, title).is_some();
-    seen(|s| s.game = game(address_bar, focus.as_ref(), named));
+    game(address_bar, focus.as_ref(), named)
 }
 
 /// This capture's screen is a game's.

@@ -1204,7 +1204,7 @@ fn real_matrix() {
                 let got = match win {
                     Some(lines)
                         if !super::pipeline::misread(&lines)
-                            && lines.len() <= super::pipeline::SPARSE =>
+                            && super::pipeline::reread_wanted(&lines, f.width, f.height) =>
                     {
                         let read =
                             pp.recognize(&f.rgba, f.width, f.height, text_reading::Read::Auto);
