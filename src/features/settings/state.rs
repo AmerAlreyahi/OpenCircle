@@ -680,6 +680,8 @@ pub struct State {
     /// Shortcuts: "Reset shortcuts" is asking to be sure, and the keys it replaced
     /// (capture, then each quick action) while Undo is offered.
     pub(super) resetting: bool,
+    /// The Report a problem dialog is open (F9).
+    pub(super) reporting: bool,
     pub(super) reset_undo: Option<(String, Vec<String>)>,
     /// Ask AI's Model list.
     pub(super) model_list: super::model_list::ModelList,
@@ -744,6 +746,8 @@ pub enum Message {
     /// About: put the diagnostics on the clipboard / open the pre-filled issue.
     CopyDiagnostics,
     ReportProblem,
+    /// The sidebar's Report a problem item: open its dialog.
+    ReportOpen,
     /// About: unfold / fold the preview clip credits; show all / fewer of
     /// "Made by others".
     Credits(bool),
@@ -1186,6 +1190,7 @@ impl State {
             kept: None,
             clearing_all: false,
             resetting: false,
+            reporting: false,
             reset_undo: None,
             model_list: Default::default(),
             credits_open: false,
@@ -1920,7 +1925,11 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::ClearFolder => state.draft.general.save_folder.clear(),
         Message::OpenLink(url) => return Outcome::OpenLink(url),
         Message::CopyDiagnostics => return Outcome::CopyDiagnostics,
-        Message::ReportProblem => return Outcome::OpenLink(crate::shared::diagnostics::issue_url()),
+        Message::ReportOpen => state.reporting = true,
+        Message::ReportProblem => {
+            state.reporting = false;
+            return Outcome::OpenLink(crate::shared::diagnostics::issue_url());
+        }
         Message::Credits(open) => state.credits_open = open,
         Message::MadeByAll(all) => state.made_by_all = all,
         Message::AutoUpdate(on) => state.draft.update.auto = Some(on),
@@ -2027,7 +2036,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::CloseDiscard => state.leaving = true,
         Message::CloseKeep => {}
         // (the close question went with every message but Save / Discard)
-        Message::Dismiss => (state.resetting, state.clearing_all) = (false, false),
+        Message::Dismiss => {
+            (state.resetting, state.clearing_all, state.reporting) = (false, false, false)
+        }
     }
     state.revalidate();
     Outcome::None
@@ -2189,7 +2200,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         true => motion::frames().map(|_| Message::Tick),
         false => Subscription::none(),
     };
-    if state.resetting || state.clearing_all || state.asking_close {
+    if state.resetting || state.clearing_all || state.asking_close || state.reporting {
         let esc = event::listen_with(|event, status, _window| {
             (status == event::Status::Ignored).then(|| cancel_question(event))?
         });
@@ -2213,12 +2224,10 @@ pub(super) fn cancel_question(event: iced::Event) -> Option<Message> {
     (chord.bare() && chord.key == "Escape").then_some(Message::Dismiss)
 }
 
-/// Ctrl+C on the page shown (nothing in it took the key, e.g. a field's
-/// selected text): its Copy button's message, where it has one (About's
-/// Copy diagnostics). Copy is the button or Ctrl+C (owner, 2026-11-03).
+/// Ctrl+C with the Report a problem dialog open (nothing in it took the key):
+/// its Copy diagnostics button. Copy is the button or Ctrl+C (owner, 2026-11-03).
 pub fn copy_key(state: &State) -> Option<Message> {
-    (state.section == Section::About && state.recording.is_none())
-        .then_some(Message::CopyDiagnostics)
+    (state.reporting && state.recording.is_none()).then_some(Message::CopyDiagnostics)
 }
 
 /// The chord a key event records: a key going down, and Print Screen going

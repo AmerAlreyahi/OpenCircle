@@ -1,6 +1,5 @@
 //! About (`settings-window.js` "ABOUT"), clean and minimal (owner, 2026-11-11,
-//! planning #177): the app card, "Something not working?" (Copy diagnostics,
-//! Report a problem), the developer card, who made what we ship or download,
+//! planning #177): the app card, the developer card, who made what we ship or download,
 //! the preview clips' credits (folded) and one line on telemetry. Links are the
 //! kit's quiet links; a link opens only when it is clicked (the page itself
 //! never touches the network: the avatar and the profile are bundled,
@@ -9,16 +8,16 @@ use crate::shared::app_language::{S, fmt};
 use crate::t;
 use std::sync::LazyLock;
 
+use iced::widget::column;
 use iced::widget::image;
 use iced::widget::image::Handle;
 use iced::widget::tooltip::Position;
-use iced::widget::{Space, column};
 use iced::{Center, ContentFit, Element, Fill};
 use serde::Deserialize;
 
 use super::super::state::{Message, State};
 use crate::dir_row;
-use crate::shared::kit::button::{Kind, button, fold, label, regular};
+use crate::shared::kit::button::{Kind, button, fold, label};
 use crate::shared::kit::card::card;
 use crate::shared::kit::chip::{chip, pill};
 use crate::shared::kit::dir;
@@ -239,7 +238,7 @@ fn headed<'a>(
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let mut page = column![app(), trouble(), developer(), others(state)];
+    let mut page = column![app(), developer(), others(state)];
     if let Some(credits) = clip_notice(state) {
         page = page.push(credits);
     }
@@ -265,27 +264,6 @@ fn app<'a>() -> Element<'a, Message> {
     headed(
         tile(mark),
         column![name, paragraph(sub(Role::NOTE, t!(ab_what))), links],
-    )
-}
-
-/// "Something not working?": copy the diagnostics (the accent: the report
-/// needs them), then report; nothing is sent.
-fn trouble<'a>() -> Element<'a, Message> {
-    let buttons = dir_row![
-        regular(t!(ab_diag), true, Some(Message::CopyDiagnostics)),
-        regular(t!(ab_report), false, Some(Message::ReportProblem)),
-    ]
-    .spacing(BUTTON_GAP)
-    .align_y(Center);
-    card(
-        column![
-            text(Role::ROW_TITLE, t!(ab_trouble)),
-            paragraph(sub(Role::ROW_DESC, t!(ab_trouble_desc))),
-            Space::new().height(space::GAP),
-            buttons,
-        ]
-        .spacing(space::GAP)
-        .align_x(dir::start()),
     )
 }
 

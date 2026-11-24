@@ -51,7 +51,7 @@ only to the server of the provider it belongs to. A remote server must use `http
   `OpenCircle/mt` (one `OptimaMT-<from>-<into>` folder per translation pair)
   and `OpenCircle/ocr` in your local data folder, until you delete them or
   you uninstall and remove your data.
-- **Copy diagnostics / Report a problem** (Settings > About). *Copy
+- **Copy diagnostics / Report a problem** (the Report a problem window at the foot of the Settings sidebar). *Copy
   diagnostics* puts a report on your clipboard (version, Windows build,
   screens, a settings summary without keys or folders, which experiments are
   on, and the last 50 log lines) for you to paste where you choose. *Report a

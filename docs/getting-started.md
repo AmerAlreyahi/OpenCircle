@@ -250,8 +250,7 @@ crashes the app. API keys are never in this file.
   `libayatana-appindicator3-1`, Fedora: `libayatana-appindicator-gtk3`). The
   shortcuts and `opencircle capture` still work.
 - **Something broke.** OpenCircle keeps a small log on your PC (see
-  [Privacy](privacy.md)). The **Something not working?** card near the top of
-  **Settings > About** has **Copy diagnostics**, which puts a report
-  (no keys, no folders) on your clipboard, and **Report a problem** opens a
-  pre-filled GitHub issue in your browser (also at the foot of the Settings
-  sidebar). Nothing is sent by OpenCircle.
+  [Privacy](privacy.md)). The **Report a problem** item at the foot of the Settings
+  sidebar opens a small window with **Copy diagnostics**, which puts a report
+  (no keys, no folders) on your clipboard, and **Report a problem**, which opens a
+  pre-filled GitHub issue in your browser. Nothing is sent by OpenCircle.

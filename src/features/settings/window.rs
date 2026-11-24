@@ -16,6 +16,7 @@ use crate::shared::kit::button::{Kind, button, cancel, label};
 use crate::shared::kit::chip::{Tone, status};
 use crate::shared::kit::divider::divider;
 use crate::shared::kit::header::regular;
+use crate::shared::kit::modal;
 use crate::shared::kit::scroll::scroll;
 use crate::shared::kit::sidebar::{Item, sidebar};
 use crate::shared::kit::surface::{Material, surface};
@@ -54,12 +55,36 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     }
     let rim = if maximised { 0.0 } else { RIM };
     // Tab / Shift+Tab walk the sidebar, then the page (`kit::focus`)
-    crate::shared::kit::focus::scope(
+    let window = crate::shared::kit::focus::scope(
         surface(Material::Window, 0.0, column![header, divider(), main])
             .padding(rim)
             .width(Fill)
             .height(Fill),
-    )
+    );
+    match state.reporting {
+        true => modal::over(window, report_dialog(), REPORT_W, Message::Dismiss),
+        false => window,
+    }
+}
+
+/// The dialog's width.
+const REPORT_W: f32 = 420.0;
+
+/// "Report a problem" (owner, 2026-11-18): copy the diagnostics (the accent: the report
+/// needs them), then report; nothing is sent.
+fn report_dialog<'a>() -> Element<'a, Message> {
+    modal::pad(vec![
+        modal::header(t!(ab_trouble), None, Message::Dismiss),
+        sub(Role::ROW_DESC, t!(ab_trouble_desc)).into(),
+        crate::dir_row![
+            Space::new().width(Fill),
+            crate::shared::kit::button::regular(t!(ab_diag), true, Some(Message::CopyDiagnostics)),
+            crate::shared::kit::button::regular(t!(ab_report), false, Some(Message::ReportProblem)),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center)
+        .into(),
+    ])
 }
 
 /// The header pill, only when something needs the user (owner, 2026-10-29:
@@ -114,8 +139,8 @@ fn nav(state: &State) -> Element<'_, Message> {
         move |i| Message::Section(ids[i]),
         // (in RTL the footer mirrors: the version at the right)
         [VERSION, OS],
-        // the way to About's "Something not working?" card, from every page
-        Some((t!(ab_report), Message::Section(Section::About))),
+        // the Report a problem dialog, from every page
+        Some((t!(ab_report), Message::ReportOpen)),
     )
 }
 

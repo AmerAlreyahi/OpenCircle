@@ -1612,23 +1612,37 @@ fn about_shows_version_license_project_and_no_telemetry() {
         Outcome::OpenLink(url)
     );
     assert!(!s.dirty(), "About changes nothing");
-    for want in ["Copy diagnostics", "Report a problem"] {
-        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    // F9 (#214): no card on About; the dialog holds the two buttons
+    for gone in ["Copy diagnostics", "Something not working?"] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
+    assert!(copy_key(&s).is_none(), "no Copy button on About any more");
+    update(&mut s, Message::ReportOpen);
+    assert!(s.reporting);
+    let open = shot::texts(view(&s));
+    for want in [
+        "Something not working?",
+        "Copy diagnostics",
+        "Report a problem",
+    ] {
+        assert!(open.iter().any(|t| t == want), "{want}: {open:?}");
     }
     assert_eq!(
         update(&mut s, Message::CopyDiagnostics),
         Outcome::CopyDiagnostics
     );
-    // Ctrl+C on the page is its Copy button (owner, 2026-11-03)
-    let ctrl_c = copy_key(&s).expect("About copies on Ctrl+C");
+    // Ctrl+C in the dialog is its Copy button (owner, 2026-11-03)
+    let ctrl_c = copy_key(&s).expect("the dialog copies on Ctrl+C");
     assert_eq!(update(&mut s, ctrl_c), Outcome::CopyDiagnostics);
-    let _ = update(&mut s, Message::Section(Section::General));
-    assert!(copy_key(&s).is_none(), "no Copy button there");
-    let _ = update(&mut s, Message::Section(Section::About));
+    // Esc / X closes it
+    update(&mut s, Message::Dismiss);
+    assert!(!s.reporting && copy_key(&s).is_none());
+    update(&mut s, Message::ReportOpen);
     let Outcome::OpenLink(url) = update(&mut s, Message::ReportProblem) else {
         panic!("Report a problem opens a link");
     };
     assert!(url.starts_with("https://github.com/AmerAlreyahi/OpenCircle/issues/new?"));
+    assert!(!s.reporting, "the dialog closes after reporting");
 }
 
 #[test]
@@ -3344,7 +3358,7 @@ fn privacy_cells_in_arabic_start_at_the_columns_right_edge() {
 fn reset_shortcuts_asks_resets_saves_and_undoes() {
     let path = tmp("reset-shortcuts");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "version = 13\n").unwrap();
+    std::fs::write(&path, "version = 14\n").unwrap();
     let (mut s, _) = state(Some(path.clone()));
     s.draft = Config::load_from(&path).0;
     // Song search is off in Labs: its entry holds a key of the user's own
@@ -3639,14 +3653,8 @@ fn about_folds_the_credits_and_shows_the_first_names() {
     for gone in ["Problems", "Telemetry", "None", "Pure Rust · iced"] {
         assert!(!has(&texts, gone), "{gone}: {texts:?}");
     }
-    for want in [
-        "Something not working?",
-        "Copy diagnostics",
-        "Report a problem",
-        "No telemetry. Nothing leaves this PC unless you choose an action.",
-    ] {
-        assert!(has(&texts, want), "{want}: {texts:?}");
-    }
+    let want = "No telemetry. Nothing leaves this PC unless you choose an action.";
+    assert!(has(&texts, want), "{want}: {texts:?}");
     let names = made_by();
     assert!(has(&texts, names[MADE_BY_FIRST - 1].0));
     assert!(!has(&texts, names[MADE_BY_FIRST].0), "{texts:?}");
@@ -3672,7 +3680,7 @@ fn about_folds_the_credits_and_shows_the_first_names() {
 }
 
 /// Every page's sidebar has the quiet "Report a problem" link over the
-/// version line; it opens About, where the card is (in Arabic too).
+/// version line; it opens the Report a problem dialog (in Arabic too).
 #[test]
 fn the_sidebar_footer_reports_a_problem_from_every_page() {
     use crate::shared::app_language::{self, Choice, Lang};
@@ -3685,13 +3693,13 @@ fn the_sidebar_footer_reports_a_problem_from_every_page() {
         for section in shown {
             let texts = page(&mut s, section);
             let n = texts.iter().filter(|t| *t == word).count();
-            // About has the card's button too
-            let want = if section == Section::About { 2 } else { 1 };
-            assert_eq!(n, want, "{language} {section:?}: {texts:?}");
+            assert_eq!(n, 1, "{language} {section:?}: {texts:?}");
         }
         update(&mut s, Message::Section(Section::General));
-        update(&mut s, Message::Section(Section::About));
-        assert_eq!(s.section, Section::About);
+        update(&mut s, Message::ReportOpen);
+        assert!(s.reporting && s.section == Section::General);
+        let open = shot::texts(view(&s));
+        assert_eq!(open.iter().filter(|t| *t == word).count(), 2, "{open:?}");
     }
     app_language::set(Lang::En);
 }

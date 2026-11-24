@@ -133,7 +133,7 @@ enabled in **Settings > Labs**.
 - Nothing leaves your computer unless you choose an action.
 - No account, no telemetry, no image-hosting service.
 - Snips stay in memory until you save them; only what you copy or save leaves the app.
-- A small log stays on your PC (`logs/` in your local data folder) to help fix problems; nothing is sent. Settings > About has *Copy diagnostics* and *Report a problem*.
+- A small log stays on your PC (`logs/` in your local data folder) to help fix problems; nothing is sent. The Settings sidebar's *Report a problem* window has *Copy diagnostics* and *Report a problem*.
 - AI and song-search keys live in your system's keyring, never in a file.
 - Search and AI Mode open in your own browser, only when you press them. The
   picture goes from your browser to Lens; OpenCircle uploads it nowhere else.
