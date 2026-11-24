@@ -98,8 +98,8 @@
       "items": [
         {
           "id": "K-01",
-          "title": "Kit: sdlc.json gate (done) + commit hooks (after the running workers finish)",
-          "status": "todo"
+          "title": "Kit: sdlc.json gate + pre-commit gate hook (commit-msg AI guard already active)",
+          "status": "done"
         },
         {
           "id": "K-02",
@@ -124,7 +124,7 @@
         {
           "id": "E-02",
           "title": "Translate faster (#221): 2nd read only on game screens, warm-up overlaps OCR, keep 2 models",
-          "status": "in-progress",
+          "status": "done",
           "depends": [
             "E-01"
           ]
@@ -132,7 +132,7 @@
         {
           "id": "E-08",
           "title": "Right-click menu on selected text v1 (#201) + Ctrl+wheel resize (#202): building",
-          "status": "in-progress"
+          "status": "done"
         },
         {
           "id": "E-03",
@@ -146,7 +146,7 @@
         },
         {
           "id": "E-05",
-          "title": "UX batch 3: owner calls C2 C3 C4 C5 C6 C7 (#205)",
+          "title": "UX batch 3: C2 C3 C5 C6 C7 merged; C4 Snip options row next",
           "status": "todo"
         },
         {
@@ -157,11 +157,16 @@
         {
           "id": "E-07",
           "title": "Ctrl + mouse wheel resizes the selected shape (#202)",
-          "status": "in-progress"
+          "status": "done"
         },
         {
           "id": "E-09",
           "title": "CI audit: url 2.5.9 (RUSTSEC-2026-0592, #223)",
+          "status": "done"
+        },
+        {
+          "id": "E-10",
+          "title": "Blur rework (#226): consistent secure Hide, shapes, looks, strength",
           "status": "done"
         }
       ],
@@ -408,6 +413,10 @@
     }
   ],
   "changelog": [
+    {
+      "date": "2026-11-25",
+      "change": "Merged: translate speed, right-click menu + Ctrl+wheel, UX batch 3, blur rework; commit hooks on."
+    },
     {
       "date": "2026-11-24",
       "change": "UX batch 1 merged; CI green; right-click menu building; design prototypes started (3rd worker allowed)."
