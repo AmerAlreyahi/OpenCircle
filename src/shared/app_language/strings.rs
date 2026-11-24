@@ -103,10 +103,10 @@ strings! {
         | "بحث";
     g_default_ai: "Ask AI"
         | "الذكاء الاصطناعي";
-    g_default_text: "Text"
-        | "نص";
-    g_default_copy: "Copy"
-        | "نسخ";
+    g_default_text: "Copy text"
+        | "نسخ النص";
+    g_default_copy: "Copy image"
+        | "نسخ الصورة";
     g_start_win: "Start OpenCircle when Windows starts"
         | "تشغيل OpenCircle عند بدء Windows";
     g_start_linux: "Start OpenCircle when you log in"

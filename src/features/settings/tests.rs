@@ -4258,3 +4258,22 @@ fn the_studio_page_opens_the_studio_preferences() {
         Outcome::OpenStudioPreferences
     );
 }
+
+/// F10 (#215): Default action offers Search, Ask AI, Copy text and Copy image: the working
+/// "Text" choice (it runs Copy text) is named for what it does, and a saved "text" is kept.
+#[test]
+fn f10_default_action_names_say_what_they_do() {
+    let (mut s, _) = state(None);
+    let texts = page(&mut s, Section::General);
+    for want in ["Search", "Ask AI", "Copy text", "Copy image"] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
+    }
+    assert!(!texts.iter().any(|t| t == "Text"), "{texts:?}");
+    let (c, w) = Config::parse("[general]\ndefault_action = \"text\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        c.general.default_action,
+        DefaultAction::Text,
+        "kept, not migrated"
+    );
+}
