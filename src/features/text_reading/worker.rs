@@ -301,7 +301,7 @@ pub fn worker_main() -> ExitCode {
     let (mut input, mut output) = (std::io::stdin().lock(), std::io::stdout().lock());
     let idle = heap_keeper();
     let mut engine: Option<Engine> = None;
-    let mut translator = Mt::Idle;
+    let mut translator = Mt::new();
     loop {
         let (id, request) = match session::read_frame(&mut input, MAX_REQUEST) {
             Ok(Some(frame)) => frame,
@@ -553,47 +553,72 @@ impl Gentle {
     }
 }
 
-/// The helper's translation model (`T`: a `Translator`): one pair, loaded or
-/// loading. A warm-up (an empty request) loads it on its own thread and is
-/// answered at once, so the screen read asked for next runs meanwhile
-/// (#117: on a 2-core PC the pair's 0.8-1.4 s load came after the read).
-pub(crate) enum Mt<T> {
-    Idle,
+/// The helper's translation models (`T`: a `Translator`): the last two pairs
+/// asked for, each loaded or loading, the older one first (a pivot pair
+/// ru -> en -> ar alternates two models; one slot reloaded them every call).
+/// A warm-up (an empty request) loads a model on its own thread and is
+/// answered at once, also when that pair is already loading, so the screen
+/// read asked for next runs meanwhile (#117, W96).
+pub(crate) struct Mt<T>(Vec<Slot<T>>);
+
+enum Slot<T> {
     Loading(&'static Pair, std::thread::JoinHandle<Result<T, OcrError>>),
     Loaded(&'static Pair, T),
 }
 
+impl<T> Slot<T> {
+    fn pair(&self) -> &'static Pair {
+        match self {
+            Slot::Loading(p, _) | Slot::Loaded(p, _) => p,
+        }
+    }
+}
+
+/// Models kept at once (~+250 MB while warm for the second one).
+const KEPT: usize = 2;
+
+impl<T> Mt<T> {
+    pub(crate) fn new() -> Self {
+        Mt(Vec::new())
+    }
+}
+
 impl<T: Send + 'static> Mt<T> {
     /// `pair`'s model, loaded by `load` if it isn't (a load under way is
-    /// waited for; another pair is freed first). `warm`: only start loading
-    /// it, on a thread (`None`).
+    /// waited for; past two models the least recently used is freed first).
+    /// `warm`: only start loading it, on a thread (`None`).
     pub(crate) fn get(
         &mut self,
         pair: &'static Pair,
         warm: bool,
         load: impl FnOnce() -> Result<T, OcrError> + Send + 'static,
     ) -> Result<Option<&mut T>, OcrError> {
-        // already loading this pair: no waiting for it (W96)
-        if warm && matches!(self, Mt::Loading(p, _) if std::ptr::eq(*p, pair)) {
-            return Ok(None);
+        let mine = self.0.iter().position(|s| std::ptr::eq(s.pair(), pair));
+        let mut slot = mine.map(|i| self.0.remove(i));
+        if warm && matches!(slot, Some(Slot::Loading(..))) {
+            self.0.push(slot.take().expect("matched"));
+            return Ok(None); // already loading: no waiting for it
         }
         // (a failed warm load is tried again here, as before)
-        if matches!(self, Mt::Loading(..))
-            && let Mt::Loading(p, job) = std::mem::replace(self, Mt::Idle)
-            && let Ok(Ok(t)) = job.join()
-        {
-            *self = Mt::Loaded(p, t);
+        if let Some(Slot::Loading(p, job)) = slot {
+            slot = match job.join() {
+                Ok(Ok(t)) => Some(Slot::Loaded(p, t)),
+                _ => None,
+            };
         }
-        if !matches!(self, Mt::Loaded(p, _) if std::ptr::eq(*p, pair)) {
-            *self = Mt::Idle; // free the other pair first
+        if slot.is_none() {
+            if self.0.len() >= KEPT {
+                self.0.remove(0);
+            }
             if warm {
-                *self = Mt::Loading(pair, std::thread::spawn(load));
+                self.0.push(Slot::Loading(pair, std::thread::spawn(load)));
                 return Ok(None);
             }
-            *self = Mt::Loaded(pair, load()?);
+            slot = Some(Slot::Loaded(pair, load()?));
         }
-        match self {
-            Mt::Loaded(_, t) => Ok(Some(t)),
+        self.0.push(slot.expect("loaded above"));
+        match self.0.last_mut() {
+            Some(Slot::Loaded(_, t)) => Ok(Some(t)),
             _ => unreachable!("loaded above"),
         }
     }
@@ -656,27 +681,10 @@ mod mt_tests {
         }
     }
 
-    // W96 AC-2: a warm-up for a pair that is already loading answers at once
-    // (the helper no longer waits for the whole load before the screen read).
-    #[test]
-    fn ac2_a_warm_up_of_a_loading_pair_does_not_wait() {
-        let en_ar = mt::pair("en", "ar").unwrap();
-        let mut m = Mt::Idle;
-        assert!(m.get(en_ar, true, slow(1)).unwrap().is_none());
-        let t = Instant::now();
-        assert!(m.get(en_ar, true, slow(2)).unwrap().is_none());
-        assert!(
-            t.elapsed() < Duration::from_millis(100),
-            "waited {:?}",
-            t.elapsed()
-        );
-        assert_eq!(m.get(en_ar, false, slow(3)).unwrap(), Some(&mut 1));
-    }
-
     #[test]
     fn a_warm_up_loads_meanwhile_and_the_next_request_waits_for_it() {
         let (en_ar, fr_en) = (mt::pair("en", "ar").unwrap(), mt::pair("fr", "en").unwrap());
-        let mut m = Mt::Idle;
+        let mut m = Mt::new();
         let loads = Arc::new(AtomicUsize::new(0));
         let t = Instant::now();
         assert!(
@@ -702,17 +710,66 @@ mod mt_tests {
             "kept for the next request"
         );
         assert_eq!(loads.load(SeqCst), 1, "loaded once");
-        // another pair: the first is freed, the new one loaded
+        // another pair: loaded beside it
         assert_eq!(m.get(fr_en, false, slow(3)).unwrap(), Some(&mut 3));
-        assert!(matches!(m, Mt::Loaded(p, 3) if std::ptr::eq(p, fr_en)));
         // a failed warm load is tried again by the next request
-        let mut m: Mt<u32> = Mt::Idle;
+        let mut m: Mt<u32> = Mt::new();
         let fail = || Err(OcrError::Engine("broken".into()));
         assert!(m.get(en_ar, true, fail).unwrap().is_none());
         assert_eq!(
             m.get(en_ar, false, slow(5)).unwrap(),
             Some(&mut 5),
             "tried again"
+        );
+    }
+
+    // W96 AC-2: a warm-up for a pair that is already loading answers at once
+    // (the helper no longer waits for the whole load before the screen read).
+    #[test]
+    fn ac2_a_warm_up_of_a_loading_pair_does_not_wait() {
+        let en_ar = mt::pair("en", "ar").unwrap();
+        let mut m = Mt::new();
+        assert!(m.get(en_ar, true, slow(1)).unwrap().is_none());
+        let t = Instant::now();
+        assert!(m.get(en_ar, true, slow(2)).unwrap().is_none());
+        assert!(
+            t.elapsed() < Duration::from_millis(100),
+            "waited {:?}",
+            t.elapsed()
+        );
+        assert_eq!(m.get(en_ar, false, slow(3)).unwrap(), Some(&mut 1));
+    }
+
+    // W96 AC-3: the last two models stay loaded (a pivot pair ru -> en -> ar
+    // alternates two); a third frees the least recently used.
+    #[test]
+    fn ac3_the_helper_keeps_the_last_two_models() {
+        let (en_ar, ru_en, fr_en) = (
+            mt::pair("en", "ar").unwrap(),
+            mt::pair("ru", "en").unwrap(),
+            mt::pair("fr", "en").unwrap(),
+        );
+        let fresh = |n| move || -> Result<u32, OcrError> { Ok(n) };
+        let mut m = Mt::new();
+        m.get(en_ar, false, fresh(1)).unwrap();
+        m.get(ru_en, false, fresh(2)).unwrap();
+        assert_eq!(
+            m.get(en_ar, false, fresh(10)).unwrap(),
+            Some(&mut 1),
+            "kept"
+        );
+        assert_eq!(
+            m.get(ru_en, false, fresh(20)).unwrap(),
+            Some(&mut 2),
+            "kept"
+        );
+        // en_ar is now the least recently used: the third pair frees it
+        m.get(fr_en, false, fresh(3)).unwrap();
+        assert_eq!(m.get(ru_en, false, fresh(21)).unwrap(), Some(&mut 2));
+        assert_eq!(
+            m.get(en_ar, false, fresh(11)).unwrap(),
+            Some(&mut 11),
+            "freed, reloaded"
         );
     }
 }
