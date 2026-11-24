@@ -1089,6 +1089,12 @@ production systems.
   pill at the top of the PICK screen only (gone once you pick; then the Snip widget appears as today), not part of the widget.
   Win+Shift+R (Snipping Tool) and Win+Alt+R (Game Bar) stay Windows'. Keys rebindable in Settings > Shortcuts.
 
+- Recording look (owner, 2026-11-24, after seeing prototype round 1: "bad designs", the record bar and the "Recording ready" card
+  rejected): while recording = a TINY pill (red dot, timer, Pause, Stop; mic/sound and cancel only on hover). After stop = a small
+  floating CORNER THUMBNAIL (CleanShot-style): hover shows small icon actions Copy / Save / Edit in OpenCircle Studio / Open with;
+  drag it straight into another app or a folder; it slides away by itself after a few seconds. No big result card, no row of
+  large buttons, no technical text (temp file, MB). Same pattern for audio (a small waveform chip).
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
