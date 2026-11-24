@@ -1074,6 +1074,14 @@ production systems.
   (installed editors such as CapCut, Filmora). Never a rewrite of everything up front. After he approves the prototypes, the
   full Claude Design for all of Settings. Shown on the Claude Design canvas.
 
+- Review rhythm (owner, 2026-11-24): keep working; don't wait for his review after each phase. He asks to see several phases
+  at once when he wants. Decisions only when they block work; otherwise the recommended default, listed for him.
+- Recording triggers (lead proposal 2026-11-24, owner may change; for the design prototypes): Alt+A opens Snip as today with a
+  mode switch Picture / Video / Audio on its bar (the mode is remembered); direct keys Alt+Shift+R = record video (pick an area,
+  window or screen, 3-2-1, record), Alt+Shift+M = record audio (starts at once, no pick). The same key again = stop and save;
+  the record bar's Stop too; Esc while recording = stop and ask Keep / Discard. Also in the tray menu and the main bar.
+  Win+Shift+R (Snipping Tool) and Win+Alt+R (Game Bar) stay Windows'. Keys rebindable in Settings > Shortcuts.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
