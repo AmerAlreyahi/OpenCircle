@@ -2627,7 +2627,11 @@ fn play_preview_downloads_only_on_the_click() {
     assert!(s.players.iter().all(|(_, p)| !p.on_disk()));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
-    let out = update(&mut s, Message::Fetch("ai"));
+    assert!(
+        !texts.iter().any(|t| t == "Preview"),
+        "folded: no stage: {texts:?}"
+    );
+    let out = update(&mut s, Message::Preview("ai", true));
     assert_eq!(out, Outcome::Fetch("ai", vec!["ai-browser"]));
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Downloading…"));
     assert_eq!(update(&mut s, Message::Fetch("ai")), Outcome::None, "once");
@@ -2653,12 +2657,38 @@ fn play_preview_downloads_only_on_the_click() {
     assert!(s.fetching.is_empty() && s.failed.is_empty());
 }
 
+/// C7: an on/off setting is a toggle switch (no Off | On words), and while the clips aren't
+/// on this PC the preview is one "Play preview" row: no stage, no chip, no Hide / Show button.
+#[test]
+fn c7_switches_and_one_play_preview_row() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    let texts = shot::texts(view(&s));
+    assert!(!texts.iter().any(|t| t == "Off" || t == "On"), "{texts:?}");
+    update(&mut s, Message::Section(Section::Ai));
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    for gone in ["Preview", "Hide preview", "Show preview"] {
+        assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
+    // clips on this PC do not unfold it: only the click does (session-only, never saved)
+    with_clip(&mut s);
+    s.opened.clear();
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Preview"), "no stage: {texts:?}");
+    s.opened.push("ai"); // (the click; its clips are here)
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Hide preview"), "{texts:?}");
+}
+
 /// The stage is as wide as the page and 16:9; its width in px (times the
 /// scale factor) is what the clips are decoded at.
 #[test]
 fn the_stage_scales_with_the_window() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s); // (the clips are on this PC: the stage shows)
     let _ = shot::texts(view(&s));
     let w1 = s.stage.load(std::sync::atomic::Ordering::Relaxed);
     assert!(w1 > 300, "{w1}");
@@ -2676,6 +2706,7 @@ fn the_ai_preview_follows_the_provider() {
     let ai = HEROES.iter().find(|h| h.key == "ai").unwrap();
     let (mut s, _) = state(None);
     moving_update(&mut s, Message::Section(Section::Ai));
+    moving_update(&mut s, Message::Preview("ai", true));
     let want = chosen(ai, &s.draft);
     assert!(s.players[0].1.plays(&want));
     s.draft.ai.provider = crate::shared::config::Provider::Anthropic;
@@ -2704,10 +2735,10 @@ fn with_reduced_motion_a_preview_shows_its_still() {
     motion::set_reduced(false);
 }
 
-/// Hide / Show preview write `[appearance].hidden_previews`; hidden, the
-/// stage is gone and nothing plays.
+/// Hide / Show preview are session-only (C7: nothing is written); hidden, the
+/// stage is gone, nothing plays and the row is "Play preview" again.
 #[test]
-fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
+fn hiding_a_preview_is_session_only_and_folds_it_into_the_play_row() {
     let path = tmp("previews");
     let (mut s, _) = state(Some(path.clone()));
     update(&mut s, Message::Section(Section::Ai));
@@ -2717,12 +2748,12 @@ fn hiding_a_preview_writes_its_key_and_showing_removes_it() {
     assert!(!s.animating(), "hidden: no clock");
     update(&mut s, Message::Save);
     let saved = Config::load_from(&path).0.appearance.hidden_previews;
-    assert_eq!(saved, ["ai"]);
-    with_clip(&mut s);
+    assert!(saved.is_empty(), "nothing written: {saved:?}");
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Show preview"), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == "Preview" || t == "Play preview"));
+    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "Preview" || t == "Hide preview"));
     moving_update(&mut s, Message::Preview("ai", true));
+    s.fetching.clear(); // (its clips were not on this PC: the click started a download)
     with_clip(&mut s);
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Hide preview"));
     update(&mut s, Message::Save);
@@ -2812,6 +2843,7 @@ fn previews_stills_match_their_golden_images() {
             // laid out once (the stage's width), then each still decoded at it
             let _ = shot::render(page(&s), 640, height as u32);
             update(&mut s, Message::Preview("look", true));
+            s.fetching.clear(); // (the still, not the download)
             failed.extend(golden::check("screens", &file, size, &[1.0], || page(&s)));
         }
     });
@@ -2824,6 +2856,7 @@ fn a_multi_clip_preview_has_arrows_that_jump() {
     let pos = |s: &State| s.players[0].1.position();
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Look));
+    update(&mut s, Message::Preview("look", true));
     assert_eq!(pos(&s), (0, 3));
     let texts = shot::texts(view(&s));
     // the arrows' labels are tooltips: reachable as buttons, one pair per stage
@@ -2838,6 +2871,7 @@ fn a_multi_clip_preview_has_arrows_that_jump() {
     let _ = texts;
     // a single clip: no arrows
     update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preview("ai", true));
     assert_eq!(pos(&s).1, 1);
     // stepping is no setting change
     assert!(!s.dirty());
@@ -2851,6 +2885,7 @@ fn the_preview_stage_stays_small_in_a_maximized_window() {
     use crate::shared::kit::testing::golden;
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Ai));
+    with_clip(&mut s); // (the clips are on this PC: the stage shows)
     s.win_h = 1440.0;
     fn page(s: &State) -> Element<'_, Message> {
         surface(Material::Window, 0.0, super::previews::view(s).unwrap())

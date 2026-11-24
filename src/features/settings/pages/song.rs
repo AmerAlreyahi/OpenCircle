@@ -54,18 +54,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Message::SongSource,
         ),
     ));
-    let (from, t) = state.thumb(song.history, |p| match p {
-        Pick::SongHistory(v) => Some(v),
-        _ => None,
-    });
     rows = rows.push(setting_row::row(
         title(t!(nav_history)),
         t!(song_recent),
         boolean(
+            t!(nav_history),
             [t!(c_off), t!(c_on)],
             song.history,
-            from,
-            t,
             Message::SongHistory,
         ),
     ));

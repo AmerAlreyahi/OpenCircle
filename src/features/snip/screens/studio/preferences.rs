@@ -404,7 +404,7 @@ impl Dialog {
             row(
                 name,
                 desc,
-                boolean([t!(c_off), t!(c_on)], on, on, 1.0, move |v| {
+                boolean(name, [t!(c_off), t!(c_on)], on, move |v| {
                     edit(&|s| set(s, v))
                 }),
             )

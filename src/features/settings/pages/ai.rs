@@ -64,7 +64,7 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
     let web = setting_row::row(
         title(t!(ai_web)),
         t!(ai_web_desc),
-        boolean([t!(c_off), t!(c_on)], on, on, 1.0, Message::WebSearch),
+        boolean(t!(ai_web), [t!(c_off), t!(c_on)], on, Message::WebSearch),
     );
     // the chat's text zoom (also Ctrl+= / Ctrl+- / Ctrl+0 in the chat)
     let zoom = setting_row::row(

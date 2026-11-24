@@ -661,6 +661,9 @@ pub struct State {
     /// Previews whose clips are downloading, and those whose download failed
     /// (by `hidden_previews` name).
     pub(super) fetching: Vec<&'static str>,
+    /// Previews opened with "Play preview" this session (C7: every preview is folded into
+    /// one row until then, whatever is on disk); never saved.
+    pub(super) opened: Vec<&'static str>,
     pub(super) failed: Vec<&'static str>,
     /// Windows opens its own screen capture with Print Screen
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
@@ -1178,6 +1181,7 @@ impl State {
             scale: 1.0,
             win_h: 720.0,
             fetching: Vec::new(),
+            opened: Vec::new(),
             failed: Vec::new(),
             print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
             kept: None,
@@ -1936,18 +1940,23 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Save => return save(state),
         Message::Written(done) => return written(state, done),
         Message::Preview(key, show) => {
-            let hidden = &mut state.draft.appearance.hidden_previews;
-            hidden.retain(|k| k != key);
-            if !show {
-                hidden.push(key.to_string());
-            }
-            // a hidden preview stops; shown again, it plays from the start
+            state.opened.retain(|k| *k != key);
+            // a folded preview stops; opened, it plays from the start (and downloads its
+            // clips first when they are not on this PC: the click is the only trigger)
             match show {
-                true => state.play(),
+                true => {
+                    state.opened.push(key);
+                    state.play();
+                }
                 false => state.players.retain(|(k, _)| *k != key),
             }
             if !state.players.iter().any(|(_, p)| p.playing()) {
                 state.played = None;
+            }
+            let missing =
+                state.players.iter().any(|(k, p)| *k == key && !p.on_disk()) && !motion::reduced();
+            if show && missing {
+                return start_fetch(state, key);
             }
         }
         Message::Step(key, by) => {
@@ -1971,18 +1980,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 }
             }
         }
-        Message::Fetch(key) => {
-            let names = (previews::clips(state, state.section))
-                .find(|(k, _)| *k == key)
-                .map(|(_, names)| names);
-            // only pinned clips, one download at a time per preview
-            let pinned = |n: &Vec<_>| previews::online::files(n).is_some();
-            if let Some(names) = names.filter(|n| pinned(n) && !state.fetching.contains(&key)) {
-                state.fetching.push(key);
-                state.failed.retain(|k| *k != key);
-                return Outcome::Fetch(key, names);
-            }
-        }
+        Message::Fetch(key) => return start_fetch(state, key),
         Message::Fetched(key, ok) => {
             state.fetching.retain(|k| *k != key);
             match ok {
@@ -2256,6 +2254,7 @@ impl State {
         use previews::player::{Clip, Player};
         let still = motion::reduced();
         let keys: Vec<_> = previews::on(self, self.section).map(|h| h.key).collect();
+        self.opened.clone_from(&keys);
         let files: Vec<_> = clips.iter().map(|b| Clip::Bytes(b)).collect();
         self.players = (keys.into_iter())
             .filter_map(|k| {
@@ -2337,4 +2336,20 @@ fn linux_wayland() -> bool {
 #[cfg(not(target_os = "linux"))]
 fn linux_wayland() -> bool {
     false
+}
+
+/// Download preview `key`'s clips (only pinned ones, one download at a time per preview).
+fn start_fetch(state: &mut State, key: &'static str) -> Outcome {
+    let names = (previews::clips(state, state.section))
+        .find(|(k, _)| *k == key)
+        .map(|(_, names)| names);
+    let pinned = |n: &Vec<_>| previews::online::files(n).is_some();
+    match names.filter(|n| pinned(n) && !state.fetching.contains(&key)) {
+        Some(names) => {
+            state.fetching.push(key);
+            state.failed.retain(|k| *k != key);
+            Outcome::Fetch(key, names)
+        }
+        None => Outcome::None,
+    }
 }

@@ -60,7 +60,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         pick(
             t!(s_copy),
             t!(s_copy_desc),
-            boolean(off_on(), copies, copies, 1.0, move |copy| {
+            boolean(t!(s_copy), off_on(), copies, move |copy| {
                 let after = if copy {
                     SnipAfter::Both
                 } else {
@@ -106,7 +106,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         pick(
             t!(s_pointer),
             t!(s_pointer_desc),
-            boolean(off_on(), d.cursor, d.cursor, 1.0, move |cursor| {
+            boolean(t!(s_pointer), off_on(), d.cursor, move |cursor| {
                 edit(&|s| s.cursor = cursor)
             }),
         ),

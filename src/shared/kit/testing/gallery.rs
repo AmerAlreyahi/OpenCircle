@@ -257,8 +257,7 @@ fn button_sheet() {
 
 #[test]
 fn segmented_sheet() {
-    use segmented::{boolean, segmented};
-    let off_on = |ar| [s(ar, "Off", "إيقاف"), s(ar, "On", "تشغيل")];
+    use segmented::segmented;
     let three = |ar| {
         let options = [
             (0, s(ar, "System", "النظام")),
@@ -268,15 +267,6 @@ fn segmented_sheet() {
         segmented(&options, 0, 0, 1.0, |_| ())
     };
     let rows = vec![
-        row("off", Act::Rest, move |ar| {
-            boolean(off_on(ar), false, false, 1.0, |_| ())
-        }),
-        row("on", Act::Rest, move |ar| {
-            boolean(off_on(ar), true, true, 1.0, |_| ())
-        }),
-        row("glide 0.5", Act::Rest, move |ar| {
-            boolean(off_on(ar), true, false, 0.5, |_| ())
-        }),
         row("3, hover", Act::Hover, three),
         row("3, pressed", Act::Press, three),
     ];
@@ -481,7 +471,12 @@ fn setting_row_sheet() {
         setting_row::row(
             setting_row::title(s(ar, "Start with Windows", "التشغيل مع ويندوز")),
             s(ar, "Waits in the tray", "ينتظر في شريط المهام"),
-            boolean(off_on(ar), true, true, 1.0, |_| ()),
+            boolean(
+                s(ar, "Start with Windows", "التشغيل مع ويندوز"),
+                off_on(ar),
+                true,
+                |_| (),
+            ),
         )
     })];
     sheet("setting_row", Size::new(560.0, 120.0), &rows);
@@ -1131,10 +1126,9 @@ fn focus_sheet() {
         row("off / on", Act::Tab, |ar| {
             let _d = dir::scope(ar);
             segmented::boolean(
+                s(ar, "Switch", "مفتاح"),
                 [s(ar, "Off", "إيقاف"), s(ar, "On", "تشغيل")],
                 true,
-                true,
-                1.0,
                 |_| (),
             )
         }),
@@ -1630,6 +1624,7 @@ fn button_toggle_sheet() {
         row("on", Act::Rest, |_| button::toggle(true, Some(()))),
         row("off", Act::Rest, |_| button::toggle(false, Some(()))),
         row("  hover", Act::Hover, |_| button::toggle(false, Some(()))),
+        row("  focus", Act::Tab, |_| button::toggle(false, Some(()))),
         row("dimmed", Act::Rest, |_| button::toggle(false, None::<()>)),
     ];
     sheet("button_toggle", Size::new(120.0, 40.0), &rows);

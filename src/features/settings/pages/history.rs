@@ -7,7 +7,7 @@ use crate::t;
 use iced::widget::{Space, column};
 use iced::{Element, Fill};
 
-use super::super::state::{Message, Pick, Section, State};
+use super::super::state::{Message, Section, State};
 use crate::shared::history::Kind;
 use crate::shared::kit::button::{Kind as Button, button, label};
 use crate::shared::kit::segmented::boolean;
@@ -27,23 +27,24 @@ pub fn view(state: &State) -> Element<'_, Message> {
         Kind::Captures,
         t!(s_recent),
         t!(h_captures_desc),
-        boolean(off_on(), d.snip.history, d.snip.history, 1.0, move |on| {
+        boolean(t!(s_recent), off_on(), d.snip.history, move |on| {
             Message::Snip(crate::shared::config::SnipConfig {
                 history: on,
                 ..snip.clone()
             })
         }),
     );
-    let (from, t) = state.thumb(d.chat.keep_history, |p| match p {
-        Pick::KeepChats(v) => Some(v),
-        _ => None,
-    });
     let chats = row_of(
         state,
         Kind::Chats,
         t!(ai_hist),
         t!(h_chats_desc),
-        boolean(off_on(), d.chat.keep_history, from, t, Message::KeepChats),
+        boolean(
+            t!(ai_hist),
+            off_on(),
+            d.chat.keep_history,
+            Message::KeepChats,
+        ),
     );
     column![captures, chats, clear_all(state)].into()
 }

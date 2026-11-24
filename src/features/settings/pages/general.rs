@@ -182,14 +182,8 @@ fn answer_words(a: &crate::shared::update::Answer) -> String {
     }
 }
 
-fn switch<'a>(
-    state: &'a State,
-    on: bool,
-    pick: fn(Pick) -> Option<bool>,
-    m: fn(bool) -> Message,
-) -> Element<'a, Message> {
-    let (from, glide) = state.thumb(on, pick);
-    boolean(off_on(), on, from, glide, m)
+fn switch<'a>(name: &str, on: bool, m: fn(bool) -> Message) -> Element<'a, Message> {
+    boolean(name, off_on(), on, m)
 }
 
 /// Start with the OS (Settings, and onboarding's last step).
@@ -198,12 +192,8 @@ pub fn start_row(state: &State) -> Element<'_, Message> {
         title(tr(START_LABEL)),
         t!(g_start_desc),
         switch(
-            state,
+            tr(START_LABEL),
             state.draft.general.autostart,
-            |p| match p {
-                Pick::Autostart(v) => Some(v),
-                _ => None,
-            },
             Message::Autostart,
         ),
     )
@@ -215,12 +205,8 @@ pub fn update_row(state: &State) -> Element<'_, Message> {
         title(t!(g_update)),
         t!(g_update_desc),
         switch(
-            state,
+            t!(g_update),
             state.draft.update.auto == Some(true),
-            |p| match p {
-                Pick::Update(v) => Some(v),
-                _ => None,
-            },
             Message::AutoUpdate,
         ),
     )

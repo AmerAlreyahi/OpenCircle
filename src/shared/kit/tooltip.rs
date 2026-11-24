@@ -67,11 +67,11 @@ pub fn cut<'a, Message: 'a>(
 /// shortcut-carrying controls. `side` stays so a call can become a `hint` in place.
 pub fn tip<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
-    label: &'a str,
+    label: impl AsRef<str>,
     _side: Position,
 ) -> Element<'a, Message> {
     #[cfg(test)]
-    TIPS.with(|t| t.borrow_mut().push(label.to_string()));
+    TIPS.with(|t| t.borrow_mut().push(label.as_ref().to_string()));
     #[cfg(not(test))]
     let _ = label;
     content.into()

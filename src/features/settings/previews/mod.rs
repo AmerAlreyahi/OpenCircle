@@ -160,8 +160,9 @@ pub fn on(state: &State, page: Section) -> impl Iterator<Item = &'static Hero> {
     (HEROES.iter()).filter(move |h| h.page == page && h.lab.is_none_or(|f| labs.has(f)))
 }
 
+/// Folded: not opened with "Play preview" this session (C7: the default for every preview).
 fn hidden(state: &State, h: &Hero) -> bool {
-    (state.draft.appearance.hidden_previews.iter()).any(|k| k == h.key)
+    !state.opened.contains(&h.key)
 }
 
 /// The clips `h` plays now, in play order: those with a still (empty = none,
@@ -200,11 +201,16 @@ pub fn view(state: &State) -> Option<Element<'_, Message>> {
             let shown = !hidden(state, h);
             let player = (state.players.iter()).find(|(k, _)| *k == h.key);
             let has_clip = player.is_some() || !chosen(h, &state.draft).is_empty();
-            // the clips aren't on disk yet: the click that downloads them
-            let play = match state.fetching.contains(&h.key) {
-                true => Some((t!(c_downloading), None)),
-                false => (player.is_some_and(|(_, p)| !p.on_disk()) && !reduced)
-                    .then_some((t!(c_play_preview), Some(Message::Fetch(h.key)))),
+            // one "Play preview" row: folded, or opened but its clips aren't on disk (a failed
+            // download: the same button tries again); the click is the only download trigger
+            let play = match () {
+                _ if !has_clip => None,
+                _ if state.fetching.contains(&h.key) => Some((t!(c_downloading), None)),
+                _ if !shown => Some((t!(c_play_preview), Some(Message::Preview(h.key, true)))),
+                _ if state.failed.contains(&h.key) && !reduced => {
+                    Some((t!(c_play_preview), Some(Message::Fetch(h.key))))
+                }
+                _ => None,
             };
             hero(hero::Hero {
                 title: tr(h.title),

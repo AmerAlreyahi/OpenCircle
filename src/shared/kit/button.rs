@@ -346,8 +346,8 @@ pub fn switch<'a, Message: Clone + 'a>(
 }
 
 /// An on / off switch (Snip's toolbar panels: Outline, Fill, Bold, Line
-/// help): a 32x18 pill, `accent` with its knob right while on, `track` with a
-/// `divider` edge and the knob left while off; the knob 12 px, white (`fixed::HANDLE`)
+/// help; every Off / On setting, `segmented::boolean`): a 32x18 pill, `accent` with its knob right
+/// while on, `track` with a `text_sub` edge and the knob left while off; the knob 12 px, white (`fixed::HANDLE`)
 /// on / `text_sub` off. No `on_press` = dimmed (an option that does not
 /// apply, e.g. Fill for a line). Lighter under the cursor.
 pub fn toggle<'a, Message: Clone + 'a>(
@@ -396,13 +396,19 @@ pub fn toggle<'a, Message: Clone + 'a>(
                     border: Border::default()
                         .rounded(radius::FULL)
                         .width(if on { 0 } else { 1 })
-                        .color(faded(c().divider, alpha)),
+                        // (the off edge is the text colour's, so the switch reads in a light theme)
+                        .color(faded(c().text_sub, 0.5 * alpha)),
                     ..iced_button::Style::default()
                 }
             }),
         radius::FULL,
-        on_press,
+        on_press.clone(),
     )
+    // the arrows: toward the end turns it on, the other way off (a press flips it)
+    .steps(move |step| match (step, on) {
+        (super::focus::Step::On, false) | (super::focus::Step::Back, true) => on_press.clone(),
+        _ => None,
+    })
     .into()
 }
 

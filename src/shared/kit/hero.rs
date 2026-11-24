@@ -48,8 +48,8 @@ pub struct Hero<'a, Message> {
     pub shown: bool,
     /// Hide / Show preview; `None` = no clip yet: no button, no stage.
     pub toggle: Option<Message>,
-    /// The stage's button (its label; `None` message = greyed, e.g. while
-    /// downloading); `None` = no button.
+    /// The row's Play preview button while the clips aren't on this PC (its label; `None`
+    /// message = greyed, e.g. while downloading); it replaces Hide / Show and the stage.
     pub play: Option<(&'a str, Option<Message>)>,
     /// One calm line under the stage (a download that failed).
     pub note: Option<&'a str>,
@@ -130,20 +130,26 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
             .width(Fill)
             .into(),
     ];
-    heading.extend(
-        h.toggle
-            .map(|m| button(label(collapse), Kind::Elevated, Some(m))),
-    );
+    // one "Play preview" row (C7): while the clips aren't on this PC the row's button is
+    // Play preview (Downloading… greyed) and there is no stage; then Hide / Show preview
+    let folded = h.play.is_some();
+    match h.play {
+        Some((l, m)) => heading.push(button(label(l), Kind::Elevated, m)),
+        None => heading.extend(
+            h.toggle
+                .map(|m| button(label(collapse), Kind::Elevated, Some(m))),
+        ),
+    }
     heading.push(keys);
     let heading = super::dir::row(heading)
         .spacing(space::GAP * 2.0)
         .align_y(Center);
     let mut body = column![heading].spacing(STAGE_PAD);
-    if has_clip && h.shown {
-        body = body.push(stage(h.frame, h.play, h.width, h.pager, w));
-        if let Some(note) = h.note {
-            body = body.push(sub(Role::CARD_DESC, note));
-        }
+    if has_clip && h.shown && !folded {
+        body = body.push(stage(h.frame, h.width, h.pager, w));
+    }
+    if has_clip && let Some(note) = h.note {
+        body = body.push(sub(Role::CARD_DESC, note));
     }
     container(body)
         .padding(PAD)
@@ -161,7 +167,6 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
 
 fn stage<'a, Message: Clone + 'a>(
     frame: Option<Handle>,
-    play: Option<(&'a str, Option<Message>)>,
     (width, scale, win_h): (Arc<AtomicU32>, f32, f32),
     pager: Option<(usize, usize, Message, Message)>,
     w: Words<'a>,
@@ -178,9 +183,7 @@ fn stage<'a, Message: Clone + 'a>(
         border: Border::default().rounded(radius::FULL),
         ..container::Style::default()
     });
-    let play = play.map(|(l, m)| button(label(l), Kind::Elevated, m));
-    let mut top = vec![chip.into(), Space::new().width(Fill).into()];
-    top.extend(play);
+    let top = vec![chip.into(), Space::new().width(Fill).into()];
     let top = super::dir::row(top).width(Fill).align_y(Center);
     let media = Element::new(Media {
         frame,

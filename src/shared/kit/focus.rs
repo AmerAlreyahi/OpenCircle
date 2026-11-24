@@ -759,7 +759,7 @@ mod tests {
         super::scope(column![
             crate::dir_row![b("A", Some(M::A)), b("B", Some(M::B))].spacing(20),
             b("dimmed", None),
-            segmented::boolean(["Off", "On"], false, false, 1.0, M::Pick),
+            segmented::boolean("Switch", ["Off", "On"], false, M::Pick),
         ])
     }
 

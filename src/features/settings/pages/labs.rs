@@ -6,7 +6,7 @@ use crate::t;
 use iced::widget::column;
 use iced::{Center, Element};
 
-use super::super::state::{Message, Pick, State};
+use super::super::state::{Message, State};
 use crate::features::settings::labs::Feature;
 use crate::shared::kit::chip::tag;
 use crate::shared::kit::segmented::boolean;
@@ -17,18 +17,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let labs = &state.draft.labs;
     column(Feature::ALL.into_iter().filter(|f| f.shown()).map(|f| {
         let on = labs.has(f);
-        let (from, glide) = state.thumb(on, |p| match p {
-            Pick::Lab(g, v) if g == f => Some(v),
-            _ => None,
-        });
         let (name, blurb) = words(f);
-        let name = crate::dir_row![title(tr(name)), tag(t!(lb_tag))]
+        let label = tr(name);
+        let name = crate::dir_row![title(label), tag(t!(lb_tag))]
             .spacing(space::GAP)
             .align_y(Center);
         setting_row::row(
             name.into(),
             tr(blurb),
-            boolean([t!(c_off), t!(c_on)], on, from, glide, move |on| {
+            boolean(label, [t!(c_off), t!(c_on)], on, move |on| {
                 Message::Labs(f, on)
             }),
         )

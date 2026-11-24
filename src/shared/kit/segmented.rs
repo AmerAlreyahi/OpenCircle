@@ -1,5 +1,5 @@
 //! `.oc-track` with `.oc-pills` and the gliding thumb: one choice of a few.
-//! `boolean` (Off / On) is the only on/off control (the design has no switch).
+//! An on/off setting is a `switch` (C7), not a segmented control.
 use iced::widget::{Space, button, container, row, stack, text};
 use iced::{Border, Element, Fill, Size};
 
@@ -268,21 +268,20 @@ fn choices<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// Off / On (`labels` in that order): `segmented` over a bool.
+/// An on/off setting as the kit's toggle switch (`button::toggle`; owner call C7, it used to be
+/// Off | On segments), at the end of its row's control column. Its accessible name is the row's
+/// `name` and the state (`labels`: Off, On), "Start with Windows: On".
 pub fn boolean<'a, Message: Clone + 'a>(
-    labels: [&'a str; 2],
+    name: &str,
+    labels: [&str; 2],
     on: bool,
-    from: bool,
-    glide: f32,
     pick: impl Fn(bool) -> Message + 'a,
 ) -> Element<'a, Message> {
-    segmented(
-        &[(false, labels[0]), (true, labels[1])],
-        on,
-        from,
-        glide,
-        pick,
-    )
+    let named = format!("{name}: {}", labels[usize::from(on)]);
+    let switch = container(super::button::toggle(on, Some(pick(!on))))
+        .width(Fill)
+        .align_x(super::dir::end());
+    super::tooltip::tip(switch, named, iced::widget::tooltip::Position::Bottom)
 }
 
 /// `boolean` only as wide as its labels (the installer).
