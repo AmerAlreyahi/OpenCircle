@@ -401,6 +401,7 @@ fn with_redact(px: [u8; 4]) -> Studio {
         shape: Shape::Redact {
             a: Point::new(10.0, 10.0),
             b: Point::new(60.0, 30.0),
+            oval: false,
         },
         colour: [0, 0, 0, 255],
         width: 4.0,

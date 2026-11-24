@@ -19,7 +19,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
 use iced::{Point, Rectangle};
-use tiny_skia::{FillRule, LineCap, LineJoin, Mask, Stroke, Transform};
+use tiny_skia::{FillRule, LineCap, LineJoin, Mask, Path, PathBuilder, Stroke, Transform};
 
 use super::document::{Layer, span};
 use super::pen;
@@ -55,6 +55,66 @@ pub enum Style {
     Pixelate,
 }
 
+/// The shape of a Hide (W102 step 2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    /// A free brush: the stroke `size` wide with soft round ends.
+    #[default]
+    Brush,
+    /// The rectangle between the two points.
+    Rect,
+    /// The ellipse in the rectangle between the two points.
+    Ellipse,
+}
+
+/// What a Hide covers: a brush stroke (`points`, `size` wide), or a rectangle
+/// or ellipse between `points`' first and last, filled or, when `outline` is
+/// over 0, as a ring that wide along its edge.
+#[derive(Clone, Copy)]
+pub struct Footprint<'a> {
+    pub points: &'a [Point],
+    pub size: f32,
+    pub kind: Kind,
+    pub outline: f32,
+}
+
+impl<'a> Footprint<'a> {
+    /// A free brush stroke (the tests').
+    #[cfg(test)]
+    pub fn brush(points: &'a [Point], size: f32) -> Self {
+        Footprint {
+            points,
+            size,
+            kind: Kind::Brush,
+            outline: 0.0,
+        }
+    }
+
+    /// The outline of the covered area.
+    fn path(&self) -> Option<Path> {
+        let round = |width: f32| Stroke {
+            width,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Stroke::default()
+        };
+        if self.kind == Kind::Brush {
+            return pen::smooth(self.points)?.stroke(&round(self.size), 1.0);
+        }
+        let b = span(&[*self.points.first()?, *self.points.last()?]);
+        let rect = tiny_skia::Rect::from_xywh(b.x, b.y, b.width.max(0.01), b.height.max(0.01))?;
+        let path = match self.kind {
+            Kind::Ellipse => PathBuilder::from_oval(rect)?,
+            _ => PathBuilder::from_rect(rect),
+        };
+        match self.outline > 0.0 {
+            true => path.stroke(&round(self.outline), 1.0),
+            false => Some(path),
+        }
+    }
+}
+
 /// Side of a mosaic cell, image px (at least 2).
 pub fn cell(cell: f32) -> i64 {
     cell.round().max(2.0) as i64
@@ -72,28 +132,30 @@ pub fn soften(cell_px: i64) -> usize {
     (cell_px as usize / 4).max(1)
 }
 
-/// What the stroke covers (its points, `size` tall, square ends; a diagonal
-/// stroke's corners reach a little further).
-pub fn frame(points: &[Point], size: f32) -> Rectangle {
-    span(points).expand(size * std::f32::consts::FRAC_1_SQRT_2 + 1.0)
+/// What a Hide covers fully (a brush's round ends reach half its size).
+pub fn frame(fp: &Footprint) -> Rectangle {
+    let pad = match fp.kind {
+        Kind::Brush => fp.size / 2.0,
+        _ => fp.outline / 2.0,
+    };
+    span(fp.points).expand(pad + 1.0)
 }
 
-/// Beyond `frame`: what a repaint must hold (the softening and whole cells).
+/// The edge fades OUTWARD this far (image px): the inside is always whole.
+pub fn feather(cell_px: f32) -> f32 {
+    (cell_px * 0.75).round().max(2.0)
+}
+
+/// Beyond `frame`: what a repaint must hold (the feather, the softening and
+/// whole cells).
 pub fn reach(cell_px: f32) -> f32 {
     let c = cell(cell_px);
-    (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0
+    feather(cell_px) + (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0
 }
 
-/// Hides the stroke `points` (band `size` tall; texture scale `cell_px`, image
-/// px; `seed`: the document's secret) in `layer`.
-pub fn paint(
-    layer: &mut Layer,
-    points: &[Point],
-    size: f32,
-    cell_px: f32,
-    style: Style,
-    seed: u64,
-) {
+/// Hides `fp` in `layer` (texture scale `cell_px`, image px; `seed`: the
+/// document's secret).
+pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed: u64) {
     let (w, h) = (layer.pm.width() as i64, layer.pm.height() as i64);
     let (ox, oy) = (layer.origin.x, layer.origin.y);
     let clip = |r: Rectangle| {
@@ -103,33 +165,37 @@ pub fn paint(
         let y1 = ((r.y + r.height - oy).ceil() as i64).clamp(0, h);
         (x0, y0, x1, y1)
     };
-    let area = frame(points, size);
+    let feather_px = feather(cell_px);
+    let area = frame(fp).expand(feather_px);
     let (ax0, ay0, ax1, ay1) = clip(area);
     if ax0 >= ax1 || ay0 >= ay1 {
         return;
     }
     let (aw, ah) = ((ax1 - ax0) as usize, (ay1 - ay0) as usize);
 
-    // The footprint: the stroke `size` wide with square ends (hard-edged).
-    let Some(mut mask) = Mask::new(aw as u32, ah as u32) else {
+    // The footprint, hard-edged: not anti-aliased, a half-covered rim pixel
+    // would show half of its source (a glyph's edge) through the fill.
+    let Some(mut hard) = Mask::new(aw as u32, ah as u32) else {
         return;
     };
-    let Some(path) = pen::smooth(points) else {
-        return;
-    };
-    let stroke = Stroke {
-        width: size,
-        line_cap: LineCap::Square,
-        line_join: LineJoin::Bevel,
-        ..Stroke::default()
-    };
-    let Some(outline) = path.stroke(&stroke, 1.0) else {
+    let Some(outline) = fp.path() else {
         return;
     };
     let to_mask = Transform::from_translate(-(ox + ax0 as f32), -(oy + ay0 as f32));
-    // Not anti-aliased: a half-covered rim pixel would show half of its source
-    // (a glyph's edge) through the fill.
-    mask.fill_path(&outline, FillRule::Winding, false, to_mask);
+    hard.fill_path(&outline, FillRule::Winding, false, to_mask);
+    // The coverage: whole inside, fading OUTWARD over `feather` (what the
+    // shape covers is never softer than whole, so nothing of it shows).
+    let mut cover: Vec<[f32; 1]> = hard
+        .data()
+        .iter()
+        .map(|&m| [f32::from(m) / 255.0])
+        .collect();
+    blur2d(&mut cover, aw, ah, (feather_px as usize / 2).max(1), 2);
+    let cover: Vec<f32> = cover
+        .iter()
+        .zip(hard.data())
+        .map(|(&[soft], &m)| (soft * 2.0).min(1.0).max(f32::from(m) / 255.0))
+        .collect();
 
     // 1. The ONLY reading of the source: the background and the ink colour.
     let fill = {
@@ -137,7 +203,7 @@ pub fn paint(
         let under = (ay0..ay1)
             .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
             .filter_map(|(x, y)| {
-                let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
+                let m = hard.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
                 let i = ((y * w + x) * 4) as usize;
                 (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
             });
@@ -169,8 +235,8 @@ pub fn paint(
     let data = layer.pm.data_mut();
     for y in ay0..ay1 {
         for x in ax0..ax1 {
-            let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize] as f32 / 255.0;
-            if m <= 0.0 {
+            let m = cover[(y - ay0) as usize * aw + (x - ax0) as usize];
+            if m <= 0.001 {
                 continue;
             }
             let t = tone(x, y);

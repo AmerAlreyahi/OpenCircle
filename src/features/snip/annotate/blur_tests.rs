@@ -3,7 +3,7 @@
 use super::tests::{image_of, item, px};
 use super::*;
 
-fn pt(x: f32, y: f32) -> Point {
+pub(super) fn pt(x: f32, y: f32) -> Point {
     Point::new(x, y)
 }
 
@@ -13,6 +13,8 @@ fn hide(points: Vec<Point>, size: f32, style: blur::Style) -> Item {
         size,
         cell: 6.0,
         style,
+        kind: blur::Kind::Brush,
+        outline: 0.0,
     })
 }
 
@@ -28,7 +30,7 @@ fn card(bg: [u8; 4]) -> Image {
     })
 }
 
-fn rendered(image: Image, seed: u64, items: Vec<Item>) -> Crop {
+pub(super) fn rendered(image: Image, seed: u64, items: Vec<Item>) -> Crop {
     let mut doc = Document::new(image);
     doc.seed = seed;
     for i in items {

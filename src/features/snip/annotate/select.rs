@@ -5,7 +5,7 @@
 use iced::{Point, Rectangle, Size, Vector};
 
 use super::document::{Item, Shape, span};
-use super::{arrow, callout, label};
+use super::{arrow, blur, callout, label};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Handle {
@@ -163,7 +163,12 @@ pub(super) fn touches(item: &Item, p: Point, reach: f32) -> bool {
                 })
         }
         Shape::Pen(points) | Shape::Highlighter(points) => line(points, near),
-        Shape::Blur { points, size, .. } => line(points, reach + size / 2.0),
+        Shape::Blur {
+            points,
+            size,
+            kind: blur::Kind::Brush,
+            ..
+        } => line(points, reach + size / 2.0),
         _ => item.frame().expand(reach).contains(p),
     }
 }

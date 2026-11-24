@@ -45,6 +45,8 @@ fn clean_paste(t: &str) -> String {
 }
 
 #[cfg(test)]
+mod blur_shape_tests;
+#[cfg(test)]
 mod blur_tests;
 #[cfg(test)]
 mod objects_api_tests;
@@ -64,6 +66,7 @@ pub use wheel::WHEEL_PX;
 #[cfg(test)]
 mod wheel_tests;
 
+pub use blur::Kind as BlurShape;
 pub use document::rounded as rounded_path;
 pub use document::{
     Document, Edit, Image, Item, Shape, base_of, clean, hidden, hidden_in_clean, render, span,
@@ -393,6 +396,11 @@ pub enum Message {
     BlurSize(Option<Width>),
     /// The blur's pixel size (its mosaic cells).
     BlurCell(Width),
+    /// Hide's shape for the next one drawn.
+    BlurShape(blur::Kind),
+    /// Hide the selected annotation: a rectangle, ellipse, pen or arrow gets
+    /// a Hide over its area (`true`: only along its outline).
+    HideShape(bool),
     /// The eraser's brush (display px, `ERASER_SIZES`) and "Whole drawing".
     EraserSize(f32),
     EraserWhole(bool),
@@ -689,6 +697,8 @@ pub struct Annotator {
     pub(crate) blur_cell: Width,
     /// Hide's look (Frost, or the Pixelate mosaic).
     pub(crate) blur_style: blur::Style,
+    /// Hide's shape: the free brush, a rectangle or an ellipse.
+    pub(crate) blur_shape: blur::Kind,
     /// Image px per display px of the capture (its monitor's DPI scale, or what
     /// the picture's size says): Hide's texture scale is this times its base size,
     /// never divided by the zoom.
@@ -832,6 +842,7 @@ impl Annotator {
             blur_size: saved.blur_size,
             blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
             blur_style: blur::Style::default(),
+            blur_shape: blur::Kind::default(),
             capture_scale,
             eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
             eraser_whole: saved.eraser_whole.unwrap_or(false),
@@ -1047,6 +1058,8 @@ impl Annotator {
                 self.blur_cell = cell;
                 self.restyle();
             }
+            Message::BlurShape(kind) => self.blur_shape = kind,
+            Message::HideShape(outline) => self.hide_shape(outline),
             Message::EraserSize(px) => self.eraser = px,
             Message::EraserWhole(on) => self.eraser_whole = on,
             Message::OpenStudio if self.capturing => {}
@@ -1390,6 +1403,58 @@ impl Annotator {
         self.restyle();
     }
 
+    /// "Hide this shape": a Hide over the selected rectangle, ellipse, pen
+    /// stroke or arrow (`outline`: a ring along its edge, not its inside),
+    /// selected, on top (one undo step).
+    fn hide_shape(&mut self, outline: bool) {
+        let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) else {
+            return;
+        };
+        let item = &self.doc.items[i];
+        let cell = self.blur_cell.cell() * self.capture_scale;
+        let over = item.width + 4.0;
+        let (points, size, kind, ring) = match &item.shape {
+            Shape::Rect { a, b } => (vec![*a, *b], over, blur::Kind::Rect, outline),
+            Shape::Ellipse { a, b } => (vec![*a, *b], over, blur::Kind::Ellipse, outline),
+            Shape::Pen(points) | Shape::Highlighter(points) => {
+                (points.clone(), over, blur::Kind::Brush, false)
+            }
+            Shape::Arrow { a, b, .. } => (vec![*a, *b], over, blur::Kind::Brush, false),
+            _ => return,
+        };
+        let hide = Item {
+            shape: Shape::Blur {
+                points,
+                size,
+                cell,
+                style: self.blur_style,
+                kind,
+                outline: if ring { over } else { 0.0 },
+            },
+            colour: self.colour,
+            width: item.width,
+            outline: false,
+            fill: false,
+            hidden: false,
+        };
+        let at = self.doc.items.len();
+        self.commit();
+        self.doc.exec(Edit::Insert(at, hide));
+        self.doc.select_one(Some(at));
+        self.refresh();
+    }
+
+    /// What "Hide this shape" can cover now: the selection is a rectangle,
+    /// ellipse (both: inside or outline), pen stroke, highlighter or arrow.
+    pub fn hideable(&self) -> Option<bool> {
+        let shape = &self.doc.items.get(self.doc.selected?)?.shape;
+        match shape {
+            Shape::Rect { .. } | Shape::Ellipse { .. } => Some(true),
+            Shape::Pen(_) | Shape::Highlighter(_) | Shape::Arrow { .. } => Some(false),
+            _ => None,
+        }
+    }
+
     /// A style preset: its colour and weight, for its tool (kept when the active
     /// one is one it suits). Redact on a selected box turns it into a solid box.
     fn preset(&mut self, i: usize) {
@@ -1406,7 +1471,11 @@ impl Annotator {
         {
             let before = self.doc.items[i].clone();
             let after = Item {
-                shape: Shape::Redact { a, b },
+                shape: Shape::Redact {
+                    a,
+                    b,
+                    oval: matches!(before.shape, Shape::Ellipse { .. }),
+                },
                 colour,
                 ..before.clone()
             };
@@ -1450,6 +1519,9 @@ impl Annotator {
     /// middle, so it covers that line and no other); with line help (and no
     /// Shift) held at its height.
     fn brush(&mut self, mut p: Point) -> Item {
+        if self.blur_shape != blur::Kind::Brush {
+            return self.create(p);
+        }
         let (size, middle) = self.brush_size(p);
         if let Some(y) = middle.filter(|_| !self.shift) {
             p.y = y;
@@ -1723,7 +1795,13 @@ impl Annotator {
                 Some(Shape::Blur { size, .. }) => *size,
                 _ => Width::Medium.brush() / size_zoom,
             };
+            let before = *held;
             p = blur::follow(held, p, brush);
+            // Once the stroke leaves its line it is a free brush (a ring, a
+            // loop): the drag-back shrink belongs to a held line only.
+            if *held != before {
+                self.lock = None;
+            }
         }
         // A press on a text item the tool types into that turns into a drag
         // draws a new item from there: a drawing tool never moves one.
@@ -1759,6 +1837,7 @@ impl Annotator {
                 drawn_to,
                 self.zoom,
                 self.shift,
+                self.lock.is_some(),
             ),
             // A click that wobbles a pixel is not a move.
             Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => from.clone(),
@@ -1973,6 +2052,10 @@ impl Annotator {
                 | Shape::Arrow { .. }
                 | Shape::Redact { .. }
                 | Shape::Spotlight { .. }
+                | Shape::Blur {
+                    kind: blur::Kind::Rect | blur::Kind::Ellipse,
+                    ..
+                }
         )
     }
 
@@ -2083,8 +2166,14 @@ impl Annotator {
                 size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
                 cell: self.blur_cell.cell() * self.capture_scale,
                 style: self.blur_style,
+                kind: self.blur_shape,
+                outline: 0.0,
             },
-            Tool::Redact => Shape::Redact { a: p, b: p },
+            Tool::Redact => Shape::Redact {
+                a: p,
+                b: p,
+                oval: false,
+            },
             Tool::Spotlight => Shape::Spotlight { a: p, b: p },
             Tool::Magnifier => Shape::Magnifier {
                 at: p,
@@ -2126,11 +2215,8 @@ impl Annotator {
                 }
                 Shape::Highlighter(_) => new.width = editor.stroke * 4.0 / z,
                 // Auto keeps the size it was given (its line); a picked one applies.
-                Shape::Blur {
-                    size, cell, style, ..
-                } => {
+                Shape::Blur { size, cell, .. } => {
                     *cell = editor.blur_cell.cell() * editor.capture_scale;
-                    *style = editor.blur_style;
                     new.width = item.width;
                     if let Some(w) = editor.blur_size {
                         *size = w.brush() / z;
@@ -2297,7 +2383,7 @@ fn sample(image: &Image, p: Point) -> Option<[u8; 4]> {
 
 /// The new item `item` (started at `start`) dragged to `p`; `shift` keeps lines
 /// and arrows at 0/45/90°.
-fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool) -> Item {
+fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: bool) -> Item {
     let mut item = item.clone();
     match &mut item.shape {
         Shape::Rect { b, .. }
@@ -2309,10 +2395,28 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool) -> Item {
             *b = if shift { arrow::snap_angle(*a, p) } else { p };
             *bend = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
         }
+        Shape::Blur {
+            points,
+            kind: blur::Kind::Rect | blur::Kind::Ellipse,
+            ..
+        } => {
+            // Shift: a square or a circle.
+            let d = p - start;
+            let side = d.x.abs().max(d.y.abs());
+            let end = match shift {
+                true => start + iced::Vector::new(side.copysign(d.x), side.copysign(d.y)),
+                false => p,
+            };
+            *points = vec![start, end];
+        }
         Shape::Blur { points, .. } => {
-            // The span is press..pointer: sliding back un-blurs what it left.
+            // Line help holds the stroke on one line: sliding back along it
+            // un-blurs what it left (#154). A free brush never loses a point.
             let dir = points.last().map_or(0.0, |l| l.x - start.x).signum();
-            while points.len() > 1 && points.last().is_some_and(|l| (l.x - p.x) * dir > 0.0) {
+            while line_help
+                && points.len() > 1
+                && points.last().is_some_and(|l| (l.x - p.x) * dir > 0.0)
+            {
                 points.pop();
             }
             if points

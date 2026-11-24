@@ -7,7 +7,7 @@ use iced::{Center, Element, Fill};
 use super::popovers::Pop;
 use super::{Msg, Studio};
 use crate::features::snip::annotate::{
-    Annotator, ERASER_SIZES, Message, TextStyle, Tool, Width, fills_inside, info, style,
+    Annotator, BlurShape, ERASER_SIZES, Message, TextStyle, Tool, Width, fills_inside, info, style,
 };
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
@@ -219,12 +219,41 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
         Tool::Blur => {
             let at = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let px = e.blur_cell.cell();
-            vec![
+            let shapes = [
+                (BlurShape::Brush, t!(sn_brush)),
+                (BlurShape::Rect, t!(tl_rect)),
+                (BlurShape::Ellipse, t!(tl_ellipse)),
+            ];
+            let mut o = vec![
+                group(
+                    shapes
+                        .iter()
+                        .map(|&(kind, words)| {
+                            text_cell(words, e.blur_shape == kind, Some(Message::BlurShape(kind)))
+                        })
+                        .collect(),
+                    false,
+                ),
                 dots(at, format!("{px} px"), true, true, |i| {
                     Message::BlurCell(Width::ALL[i])
                 }),
                 toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
-            ]
+            ];
+            if let Some(both) = e.hideable() {
+                o.push(toggle(
+                    t!(sn_hide_shape),
+                    false,
+                    Some(Message::HideShape(false)),
+                ));
+                if both {
+                    o.push(toggle(
+                        t!(sn_hide_outline),
+                        false,
+                        Some(Message::HideShape(true)),
+                    ));
+                }
+            }
+            o
         }
         Tool::Eraser => {
             let at = ERASER_SIZES.iter().position(|&s| s == e.eraser);

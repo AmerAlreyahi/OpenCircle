@@ -556,6 +556,7 @@ mod tests {
             shape: Shape::Redact {
                 a: Point::new(100.0, 100.0),
                 b: Point::new(300.0, 120.0),
+                oval: false,
             },
             colour: [0, 0, 0, 255],
             width: 1.0,

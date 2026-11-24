@@ -88,6 +88,13 @@ pub enum Shape {
         cell: f32,
         #[serde(default)]
         style: blur::Style,
+        /// Brush (the points are its stroke), or a rectangle / ellipse between
+        /// the first and last point.
+        #[serde(default)]
+        kind: blur::Kind,
+        /// Over 0: only a ring this wide along the shape's edge.
+        #[serde(default)]
+        outline: f32,
     },
     /// A solid box of the colour (passwords, keys: nothing left to recover).
     Redact {
@@ -95,6 +102,9 @@ pub enum Shape {
         a: Point,
         #[serde(with = "pt")]
         b: Point,
+        /// An ellipse in the box (a hidden circle stays a circle).
+        #[serde(default)]
+        oval: bool,
     },
     /// Everything outside the union of all spotlights is dimmed.
     Spotlight {
@@ -191,15 +201,20 @@ impl Shape {
         match self {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Redact { a, b }
+            | Shape::Redact { a, b, .. }
             | Shape::Spotlight { a, b }
             | Shape::Picture { a, b, .. } => (*a, *b) = (f(*a), f(*b)),
             Shape::Blur {
-                points, size, cell, ..
+                points,
+                size,
+                cell,
+                outline,
+                ..
             } => {
                 points.iter_mut().for_each(|p| *p = f(*p));
                 *size = (*size * k).max(4.0);
                 *cell = (*cell * k).max(2.0);
+                *outline *= k;
             }
             Shape::Arrow { a, b, bend, .. } => (*a, *b, *bend) = (f(*a), f(*b), f(*bend)),
             Shape::Pen(points) | Shape::Highlighter(points) => {
@@ -225,10 +240,21 @@ impl Item {
         match &self.shape {
             Shape::Rect { a, b }
             | Shape::Ellipse { a, b }
-            | Shape::Redact { a, b }
+            | Shape::Redact { a, b, .. }
             | Shape::Spotlight { a, b }
             | Shape::Picture { a, b, .. } => span(&[*a, *b]),
-            Shape::Blur { points, size, .. } => blur::frame(points, *size),
+            Shape::Blur {
+                points,
+                size,
+                kind,
+                outline,
+                ..
+            } => blur::frame(&blur::Footprint {
+                points,
+                size: *size,
+                kind: *kind,
+                outline: *outline,
+            }),
             Shape::Arrow {
                 a, b, bend, text, ..
             } => {
@@ -862,6 +888,11 @@ pub fn rounded(r: Rectangle, radius: f32) -> Option<Path> {
     p.finish()
 }
 
+/// The ellipse in `r`.
+pub fn oval_path(r: Rectangle) -> Option<Path> {
+    PathBuilder::from_oval(tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height)?)
+}
+
 /// Paints `region` (image px, inside the image) of the image with `items` over it.
 /// `(item, false)` = hidden (being edited live), but it still counts as a step.
 pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64) -> Pixmap {
@@ -958,9 +989,24 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
                 size,
                 cell,
                 style,
-            } => blur::paint(&mut layer, points, *size, *cell, *style, seed),
-            Shape::Redact { a, b } => {
-                if let Some(path) = rounded(span(&[*a, *b]), 0.0) {
+                kind,
+                outline,
+            } => {
+                let fp = blur::Footprint {
+                    points,
+                    size: *size,
+                    kind: *kind,
+                    outline: *outline,
+                };
+                blur::paint(&mut layer, &fp, *cell, *style, seed)
+            }
+            Shape::Redact { a, b, oval } => {
+                let r = span(&[*a, *b]);
+                let path = match oval {
+                    true => oval_path(r),
+                    false => rounded(r, 0.0),
+                };
+                if let Some(path) = path {
                     layer.fill(&path, [c[0], c[1], c[2], 255]);
                 }
             }

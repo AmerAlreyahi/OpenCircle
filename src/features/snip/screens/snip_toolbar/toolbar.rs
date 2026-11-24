@@ -12,7 +12,8 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::share;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
-    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
+    Annotator, BlurShape, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width,
+    dragout, info,
 };
 use crate::features::snip::snip_more::{self, Read, Row};
 use crate::shared::app_language::{S, fmt, tr};
@@ -700,7 +701,16 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let cell = Width::ALL.iter().position(|&w| w == e.blur_cell);
             let cells = segmented::presets(cell, None, false, |i| Message::BlurCell(Width::ALL[i]));
             let px = e.blur_cell.cell();
-            vec![
+            let shapes = [
+                (BlurShape::Brush, t!(sn_brush)),
+                (BlurShape::Rect, t!(tl_rect)),
+                (BlurShape::Ellipse, t!(tl_ellipse)),
+            ];
+            let shape = segmented::inline(&shapes, e.blur_shape, e.blur_shape, 1.0, |kind| {
+                Message::BlurShape(kind)
+            });
+            let mut o = vec![
+                option(t!(sn_shape), None, None, Some(shape)),
                 column![
                     option(t!(sn_brush), None, Some(value.into()), Some(chip)),
                     line(vec![brush]),
@@ -714,7 +724,23 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
                     e.assist,
                     Some(Message::Assist),
                 ),
-            ]
+            ];
+            if let Some(both) = e.hideable() {
+                let mut chips = vec![button::switch(
+                    t!(sn_hide_shape),
+                    false,
+                    Message::HideShape(false),
+                )];
+                if both {
+                    chips.push(button::switch(
+                        t!(sn_hide_outline),
+                        false,
+                        Message::HideShape(true),
+                    ));
+                }
+                o.push(line(chips).into());
+            }
+            o
         }
         Tool::Redact => vec![muted(Role::META, t!(sn_uses_colour)).into()],
         Tool::Eraser => {

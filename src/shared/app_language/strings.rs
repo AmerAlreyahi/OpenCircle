@@ -1751,6 +1751,12 @@ strings! {
         | "الفرشاة";
     sn_pixel: "Pixel size"
         | "حجم البكسل";
+    sn_shape: "Shape"
+        | "الشكل";
+    sn_hide_shape: "Hide this shape"
+        | "إخفاء هذا الشكل";
+    sn_hide_outline: "Its outline"
+        | "حدّه";
     sn_line_help: "Line help"
         | "مساعدة السطر";
     sn_stays: "stays on the line"

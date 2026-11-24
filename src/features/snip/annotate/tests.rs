@@ -186,21 +186,27 @@ fn blur_changes_only_its_band() {
         size,
         cell: 6.0,
         style: blur::Style::Frost,
+        kind: blur::Kind::Brush,
+        outline: 0.0,
     });
     let plain = render(&doc_with(checker(100, 80), vec![]));
     let blurred = render(&doc_with(checker(100, 80), vec![blur]));
-    // A flat band: x 12..88 (square ends), y 32..48; nothing else changes.
+    // A band: x 12..88, y 32..48, round ends, its edge fading OUTWARD over
+    // the feather (4 px); nothing else changes.
     for y in 0..80u32 {
         for x in 0..100u32 {
-            let near = (11..89).contains(&x) && (31..49).contains(&y);
+            let near = (7..93).contains(&x) && (27..53).contains(&y);
             if !near {
                 assert_eq!(px(&plain, x, y), px(&blurred, x, y), "({x}, {y})");
             }
         }
     }
-    // Square ends, not a round blob: the band's corners are pixelated too.
-    for (x, y) in [(12, 32), (87, 32), (12, 47), (87, 47)] {
-        assert_ne!(px(&plain, x, y), px(&blurred, x, y), "corner ({x}, {y})");
+    // Round ends: the band's far corners are out, its middle is whole.
+    for (x, y) in [(9, 29), (90, 29), (9, 50), (90, 50)] {
+        assert_eq!(px(&plain, x, y), px(&blurred, x, y), "corner ({x}, {y})");
+    }
+    for (x, y) in [(14, 40), (50, 36), (85, 40)] {
+        assert_ne!(px(&plain, x, y), px(&blurred, x, y), "inside ({x}, {y})");
     }
 }
 
@@ -252,7 +258,13 @@ fn brushed_in(style: blur::Style, image: Image, band: lines::Band, cell: f32, se
     };
     let (middle, size) = band.stroke(1.0);
     let stroke = [pt(8.0, middle), pt(w as f32 - 8.0, middle)];
-    blur::paint(&mut layer, &stroke, size, cell, style, seed);
+    blur::paint(
+        &mut layer,
+        &blur::Footprint::brush(&stroke, size),
+        cell,
+        style,
+        seed,
+    );
     Image {
         width: w,
         height: h,
@@ -423,7 +435,13 @@ fn blur_mosaic_colours_are_one_pair_per_stroke() {
     // Painted: where the coloured word sits changes nothing of the fill.
     let paint = |mut l: document::Layer| {
         let stroke = [pt(10.0, 20.0), pt(390.0, 20.0)];
-        blur::paint(&mut l, &stroke, 24.0, 6.0, blur::Style::Frost, 9);
+        blur::paint(
+            &mut l,
+            &blur::Footprint::brush(&stroke, 24.0),
+            6.0,
+            blur::Style::Frost,
+            9,
+        );
         l.pm.take()
     };
     assert_eq!(paint(a), paint(b));
@@ -724,9 +742,10 @@ fn repaint_of_a_crop(style: blur::Style) {
         .unwrap(),
         origin: Point::ORIGIN,
     };
-    blur::paint(&mut whole, &stroke, size, cell, style, 1);
+    let fp = blur::Footprint::brush(&stroke, size);
+    blur::paint(&mut whole, &fp, cell, style, 1);
     // A layer holding only what the stroke can touch (frame + reach).
-    let r = blur::frame(&stroke, size).expand(blur::reach(cell));
+    let r = blur::frame(&fp).expand(blur::reach(cell));
     let (x0, y0) = (r.x.floor().max(0.0) as u32, 0u32);
     let (x1, y1) = (((r.x + r.width).ceil() as u32).min(240), 40u32);
     let mut data = Vec::new();
@@ -742,7 +761,7 @@ fn repaint_of_a_crop(style: blur::Style) {
         .unwrap(),
         origin: Point::new(x0 as f32, y0 as f32),
     };
-    blur::paint(&mut crop, &stroke, size, cell, style, 1);
+    blur::paint(&mut crop, &fp, cell, style, 1);
     for y in y0..y1 {
         for x in x0..x1 {
             let a = &whole.pm.data()[((y * 240 + x) * 4) as usize..][..4];
@@ -758,6 +777,7 @@ fn redact_is_a_solid_box() {
         shape: Shape::Redact {
             a: pt(10.0, 10.0),
             b: pt(60.0, 30.0),
+            oval: false,
         },
         colour: [0, 0, 0, 255],
         width: 4.0,
@@ -2119,6 +2139,10 @@ fn auto_blur_covers_all_of_the_line_it_starts_on_and_no_other() {
                 let Shape::Blur { size: brush, .. } = e.doc.items[0].shape else {
                     panic!()
                 };
+                let Shape::Blur { points, .. } = &e.doc.items[0].shape else {
+                    panic!()
+                };
+                let centre = points[0].y;
                 // Full strength over the band, so compare with the band's own paint.
                 let band = |y: u32| {
                     let Shape::Blur { points, .. } = &e.doc.items[0].shape else {
@@ -2140,7 +2164,10 @@ fn auto_blur_covers_all_of_the_line_it_starts_on_and_no_other() {
                             if luma(pxi(&page, x, y)) < 100 {
                                 assert_ne!(at(x, y), pxi(&page, x, y), "ink left {here}");
                             }
-                        } else if ink(0, x, y) || ink(2, x, y) {
+                        } else if (ink(0, x, y) || ink(2, x, y))
+                            && (y as f32 + 0.5 - centre).abs()
+                                > brush / 2.0 + blur::feather(6.0) + 1.0
+                        {
                             others += 1;
                             touched += usize::from(at(x, y) != pxi(&page, x, y));
                         }
@@ -2186,7 +2213,7 @@ fn touching_lines_are_split_at_their_sparse_rows() {
     drag(&mut e, pt(12.0, 30.0), &[], pt(380.0, 30.0));
     let out = render(&e.doc);
     // The first line's core stays, but for the least margin (2 px) at its foot.
-    for y in 0..18 {
+    for y in 0..14 {
         for x in 0..400 {
             assert_eq!(px(&out, x, y), bars(x, y), "line 1 touched at ({x}, {y})");
         }
@@ -3341,6 +3368,7 @@ fn more_rows_get_the_picture_decided_for_them() {
     let redact = item(Shape::Redact {
         a: pt(30.0, 20.0),
         b: pt(60.0, 40.0),
+        oval: false,
     });
     let arrow = item(Shape::Rect {
         a: pt(5.0, 5.0),
@@ -3403,6 +3431,8 @@ fn a_blur_hides_its_footprint_not_its_reach() {
         size: 20.0,
         cell: 6.0,
         style: blur::Style::Frost,
+        kind: blur::Kind::Brush,
+        outline: 0.0,
     });
     let doc = doc_with(checker(500, 300), vec![blur]);
     let hidden = super::hidden(&doc);
