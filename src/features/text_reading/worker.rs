@@ -558,8 +558,10 @@ impl Gentle {
 /// ru -> en -> ar alternates two models; one slot reloaded them every call).
 /// A warm-up (an empty request) loads a model on its own thread and is
 /// answered at once, also when that pair is already loading, so the screen
-/// read asked for next runs meanwhile (#117, W96).
-pub(crate) struct Mt<T>(Vec<Slot<T>>);
+/// read asked for next runs meanwhile (#117, W96). A model only warmed up
+/// (no translation used it yet) is dropped when another warm-up arrives, so
+/// the two kept are models that were really used (W96).
+pub(crate) struct Mt<T>(Vec<Slot<T>>, Vec<&'static Pair>);
 
 enum Slot<T> {
     Loading(&'static Pair, std::thread::JoinHandle<Result<T, OcrError>>),
@@ -579,7 +581,7 @@ const KEPT: usize = 2;
 
 impl<T> Mt<T> {
     pub(crate) fn new() -> Self {
-        Mt(Vec::new())
+        Mt(Vec::new(), Vec::new())
     }
 }
 
@@ -607,14 +609,26 @@ impl<T: Send + 'static> Mt<T> {
             };
         }
         if slot.is_none() {
+            // a warm-up replaces a warmed-up model nobody used (a wrong guess);
+            // a real request keeps it (its load can't be called off, and the
+            // page may still need it: reloading it cost time and peak memory)
+            if warm {
+                let unused = std::mem::take(&mut self.1);
+                self.0
+                    .retain(|s| !unused.iter().any(|p| std::ptr::eq(*p, s.pair())));
+            }
             if self.0.len() >= KEPT {
                 self.0.remove(0);
             }
             if warm {
+                self.1.push(pair);
                 self.0.push(Slot::Loading(pair, std::thread::spawn(load)));
                 return Ok(None);
             }
             slot = Some(Slot::Loaded(pair, load()?));
+        }
+        if !warm {
+            self.1.retain(|p| !std::ptr::eq(*p, pair)); // used now
         }
         self.0.push(slot.expect("loaded above"));
         match self.0.last_mut() {
@@ -738,6 +752,35 @@ mod mt_tests {
             t.elapsed()
         );
         assert_eq!(m.get(en_ar, false, slow(3)).unwrap(), Some(&mut 1));
+    }
+
+    // W96 AC-4: a model that was only warmed up (no translation used it) is
+    // dropped when a second warm-up arrives; a used one stays.
+    #[test]
+    fn ac4_a_warmed_model_nobody_used_is_dropped_when_another_pair_loads() {
+        let (en_ar, es_en, fr_en) = (
+            mt::pair("en", "ar").unwrap(),
+            mt::pair("es", "en").unwrap(),
+            mt::pair("fr", "en").unwrap(),
+        );
+        let fresh = |n| move || -> Result<u32, OcrError> { Ok(n) };
+        let kept = |m: &Mt<u32>| m.0.iter().map(|s| s.pair().label()).collect::<Vec<_>>();
+        // never used: the real pair's warm-up replaces it
+        let mut m = Mt::new();
+        m.get(en_ar, true, fresh(1)).unwrap();
+        m.get(es_en, true, fresh(2)).unwrap();
+        assert_eq!(kept(&m), [es_en.label()]);
+        // used: it stays beside the next one
+        let mut m = Mt::new();
+        m.get(en_ar, true, fresh(1)).unwrap();
+        m.get(en_ar, false, fresh(9)).unwrap();
+        m.get(fr_en, true, fresh(3)).unwrap();
+        assert_eq!(kept(&m), [en_ar.label(), fr_en.label()]);
+        // a real request for another pair keeps an unused warm-up
+        let mut m = Mt::new();
+        m.get(en_ar, true, fresh(1)).unwrap();
+        m.get(es_en, false, fresh(2)).unwrap();
+        assert_eq!(kept(&m), [en_ar.label(), es_en.label()]);
     }
 
     // W96 AC-3: the last two models stay loaded (a pivot pair ru -> en -> ar
