@@ -1076,7 +1076,7 @@ production systems.
 
 - Tips (lead recommendation 2026-11-24, owner asked): no always-on floating tips widget; one-time contextual hints at the moment a
   feature is relevant (max one per session, dismissible, "Don't show tips" in Settings, never during a fast flow) + a "What can
-  I do?" card on demand (key + tray). Pending the owner's OK; goes to the design round.
+  I do?" card on demand (key + tray). APPROVED by the owner 2026-11-24; goes to the design round.
 - Review rhythm (owner, 2026-11-24): keep working; don't wait for his review after each phase. He asks to see several phases
   at once when he wants. Decisions only when they block work; otherwise the recommended default, listed for him.
 - Recording triggers (lead proposal 2026-11-24, owner may change; for the design prototypes): Alt+A ALWAYS opens Snip in Picture
@@ -1084,7 +1084,9 @@ production systems.
   Video | Audio switch at the top while picking, already on Picture; after picking in Video the SAME widget turns into the record
   bar (picture tools gone), no second widget; direct keys Alt+Shift+R = record video (pick an area,
   window or screen, 3-2-1, record), Alt+Shift+M = record audio (starts at once, no pick). The same key again = stop and save;
-  the record bar's Stop too; Esc while recording = stop and ask Keep / Discard. Also in the tray menu and the main bar.
+  the record bar's Stop too; Esc while recording = stop and ask Keep / Discard. Also in the tray menu; NOT on the main
+  Ctrl+Shift+Space bar (it acts on a frozen screen; lead recommendation 2026-11-24). The Picture | Video | Audio switch is a small
+  pill at the top of the PICK screen only (gone once you pick; then the Snip widget appears as today), not part of the widget.
   Win+Shift+R (Snipping Tool) and Win+Alt+R (Game Bar) stay Windows'. Keys rebindable in Settings > Shortcuts.
 
 ## Domain quirks
