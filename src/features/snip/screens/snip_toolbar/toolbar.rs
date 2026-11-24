@@ -25,7 +25,7 @@ use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{
-    button, chip, colour, divider, grip, keycap, option_list, segmented, slider,
+    button, chip, colour, divider, grip, keycap, option_list, segmented, slider, thumb,
 };
 use crate::t;
 
@@ -698,9 +698,15 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let to = if auto { Some(Width::Medium) } else { None };
             let chip = button::switch(t!(sn_auto), auto, Message::BlurSize(to));
             let value = if auto { t!(sn_line) } else { "" };
-            let cell = Width::ALL.iter().position(|&w| w == e.blur_cell);
-            let cells = segmented::presets(cell, None, false, |i| Message::BlurCell(Width::ALL[i]));
-            let px = e.blur_cell.cell();
+            let strengths = [
+                (Width::Thin, t!(sn_light)),
+                (Width::Medium, t!(sn_medium)),
+                (Width::Thick, t!(sn_strong)),
+            ];
+            let cells = segmented::inline(&strengths, e.blur_cell, e.blur_cell, 1.0, |w| {
+                Message::BlurCell(w)
+            });
+            let px = e.blur_cell.cell().round();
             let shapes = [
                 (BlurShape::Brush, t!(sn_brush)),
                 (BlurShape::Rect, t!(tl_rect)),
@@ -709,17 +715,23 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let shape = segmented::inline(&shapes, e.blur_shape, e.blur_shape, 1.0, |kind| {
                 Message::BlurShape(kind)
             });
-            // The styles: Hide (never reads the text) and Pixelate, then the
+            // The styles as cards, each showing what it does to the area under
+            // the pointer: Hide (never reads the text) and Pixelate, then the
             // looks, with their one-line note.
             let styles = crate::features::snip::annotate::blur_styles();
-            let style = |from: usize, to: usize| {
-                segmented::inline(&styles[from..to], e.blur_style, e.blur_style, 1.0, |s| {
-                    Message::BlurStyle(s)
-                })
+            let thumbs = e.style_thumbs();
+            let card = |i: usize| {
+                let (style, words) = styles[i];
+                thumb::style_card(
+                    thumbs[i].clone(),
+                    words,
+                    e.blur_style == style,
+                    Message::BlurStyle(style),
+                )
             };
             let mut o = vec![
-                line(vec![style(0, 2)]).into(),
-                line(vec![style(2, 5)]).into(),
+                line((0..2).map(card).collect()).into(),
+                line((2..5).map(card).collect()).into(),
             ];
             if e.blur_style.is_look() {
                 o.push(muted(Role::META, t!(sn_looks_note)).into());
@@ -732,7 +744,7 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
                 ]
                 .spacing(SPACING)
                 .into(),
-                sizes(t!(sn_pixel), format!("{px} px"), cells, None),
+                sizes(t!(sn_strength), format!("{px} px"), cells, None),
                 switch(
                     t!(sn_line_help),
                     Some(t!(sn_stays)),

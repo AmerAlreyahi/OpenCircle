@@ -1749,8 +1749,14 @@ strings! {
         | "السطر";
     sn_brush: "Brush"
         | "الفرشاة";
-    sn_pixel: "Pixel size"
-        | "حجم البكسل";
+    sn_strength: "Strength"
+        | "القوة";
+    sn_light: "Light"
+        | "خفيف";
+    sn_medium: "Medium"
+        | "متوسط";
+    sn_strong: "Strong"
+        | "قوي";
     sn_shape: "Shape"
         | "الشكل";
     sn_style_hide: "Hide"

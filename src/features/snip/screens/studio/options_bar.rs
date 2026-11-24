@@ -7,7 +7,8 @@ use iced::{Center, Element, Fill};
 use super::popovers::Pop;
 use super::{Msg, Studio};
 use crate::features::snip::annotate::{
-    Annotator, BlurShape, ERASER_SIZES, Message, TextStyle, Tool, Width, fills_inside, info, style,
+    Annotator, BlurShape, ERASER_SIZES, Message, STRENGTH_RANGE, TextStyle, Tool, Width,
+    fills_inside, info, style,
 };
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
@@ -20,7 +21,7 @@ use crate::shared::kit::popover;
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{dir, keycap, scroll};
+use crate::shared::kit::{dir, keycap, scroll, slider};
 use crate::t;
 
 /// Colours on the options bar (and the Edit text bar).
@@ -217,8 +218,12 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
         }
         Tool::Callout => vec![font_size(e)],
         Tool::Blur => {
-            let at = Width::ALL.iter().position(|&w| w == e.blur_cell);
-            let px = e.blur_cell.cell();
+            let strengths = [
+                (Width::Thin, t!(sn_light)),
+                (Width::Medium, t!(sn_medium)),
+                (Width::Thick, t!(sn_strong)),
+            ];
+            let value = e.blur_custom.unwrap_or(e.blur_cell.cell().round() as u8);
             let shapes = [
                 (BlurShape::Brush, t!(sn_brush)),
                 (BlurShape::Rect, t!(tl_rect)),
@@ -248,13 +253,34 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
                         .collect(),
                     false,
                 ),
-                dots(at, format!("{px} px"), true, true, |i| {
-                    Message::BlurCell(Width::ALL[i])
-                }),
+                group(
+                    strengths
+                        .iter()
+                        .map(|&(w, words)| {
+                            text_cell(
+                                words,
+                                e.blur_custom.is_none() && e.blur_cell == w,
+                                Some(Message::BlurCell(w)),
+                            )
+                        })
+                        .collect(),
+                    false,
+                ),
+                // Custom: any strength between (the presets are 4, 8, 16 px)
+                group(
+                    vec![slider::bare(
+                        STRENGTH_RANGE,
+                        value,
+                        96.0,
+                        e.blur_custom.is_none(),
+                        |v| Message::BlurCustom(Some(v)),
+                    )],
+                    false,
+                ),
                 toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
             ];
             if e.blur_style.is_look() {
-                o.push(muted(Role::ROW_DESC, t!(sn_looks_note)).into());
+                o.push(group(vec![caption(t!(sn_looks_note))], false));
             }
             if let Some(both) = e.hideable() {
                 o.push(toggle(

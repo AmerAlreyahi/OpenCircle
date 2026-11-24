@@ -51,6 +51,8 @@ mod blur_shape_tests;
 #[cfg(test)]
 mod blur_speed_tests;
 #[cfg(test)]
+mod blur_strength_tests;
+#[cfg(test)]
 mod blur_tests;
 #[cfg(test)]
 mod objects_api_tests;
@@ -313,6 +315,12 @@ pub(crate) fn picture_scale(short: f32) -> f32 {
     (short / 1080.0).max(1.0)
 }
 
+/// The reference text height Hide's strength is a fraction of (image px at DPI
+/// scale 1).
+pub const STRENGTH_TEXT: f32 = 16.0;
+/// The Studio's custom strength: its range, in the same px.
+pub const STRENGTH_RANGE: std::ops::RangeInclusive<u8> = 2..=32;
+
 /// Stroke weight, in display px (as seen on screen, whatever the zoom).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -338,11 +346,12 @@ impl Width {
     fn brush(self) -> f32 {
         [14.0, 20.0, 32.0][self as usize]
     }
-    /// The blur's mosaic cell (display px): fine, iTop's look with smaller
-    /// cells (owner, 2026-10-31); no finer than 6 px: below that the text shows
-    /// through (the candidate-scoring test, Windows CI 2026-11-02).
+    /// Hide's strength: Light, Medium, Strong = 0.25, 0.5, 1.0 of the
+    /// reference text height (16 px at the capture's DPI scale; owner,
+    /// 2026-11-24): the texture scale of Hide and Pixelate, the sigma of the
+    /// looks. Image px at scale 1; the capture's scale is applied by the editor.
     pub(crate) fn cell(self) -> f32 {
-        [6.0, 9.0, 12.0][self as usize]
+        STRENGTH_TEXT * [0.25, 0.5, 1.0][self as usize]
     }
 }
 
@@ -400,6 +409,10 @@ pub enum Message {
     BlurSize(Option<Width>),
     /// The blur's pixel size (its mosaic cells).
     BlurCell(Width),
+    /// The Studio's custom strength (`None`: back to the presets).
+    BlurCustom(Option<u8>),
+    /// The next look in the list (Shift+B).
+    BlurCycle,
     /// Hide's shape for the next one drawn.
     BlurShape(blur::Kind),
     /// Hide's look: for the next one drawn, and the selected one.
@@ -602,6 +615,9 @@ struct AreaDrag {
     items: Vec<Item>,
 }
 
+/// The style cards' pictures and what they were made for (place, strength).
+type Thumbs = ((i32, i32, u32), Vec<image::Handle>);
+
 pub struct Annotator {
     pub doc: Document,
     pub tool: Tool,
@@ -704,6 +720,13 @@ pub struct Annotator {
     pub(crate) blur_size: Option<Width>,
     /// The blur's pixel size (its mosaic cells).
     pub(crate) blur_cell: Width,
+    /// The Studio's custom strength (px at scale 1); `None`: the preset.
+    pub(crate) blur_custom: Option<u8>,
+    /// Where the pointer last was over the picture (image px): the style cards
+    /// show what each style does to the area there.
+    hover: Option<Point>,
+    /// The style cards' pictures, made for (place, strength, style count).
+    thumbs: std::cell::RefCell<Option<Thumbs>>,
     /// Hide's look (Frost, or the Pixelate mosaic).
     pub(crate) blur_style: blur::Style,
     /// Hide's shape: the free brush, a rectangle or an ellipse.
@@ -852,7 +875,10 @@ impl Annotator {
             capturing: false,
             lock: None,
             blur_size: saved.blur_size,
-            blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
+            blur_cell: saved.blur_cell.unwrap_or(Width::Medium),
+            blur_custom: None,
+            hover: None,
+            thumbs: std::cell::RefCell::new(None),
             blur_style: blur::Style::default(),
             blur_shape: blur::Kind::default(),
             style_picked: false,
@@ -1020,6 +1046,7 @@ impl Annotator {
             }
             Message::Move(p) => {
                 self.ctrl_hint |= std::mem::take(&mut self.ctrl_armed);
+                self.hover = Some(p);
                 self.drag_to(p)
             }
             Message::Release => {
@@ -1069,7 +1096,18 @@ impl Annotator {
             }
             Message::BlurCell(cell) => {
                 self.blur_cell = cell;
+                self.blur_custom = None;
                 self.restyle();
+            }
+            Message::BlurCustom(px) => {
+                self.blur_custom = px;
+                self.restyle();
+            }
+            Message::BlurCycle => {
+                let all = blur_styles();
+                let at = all.iter().position(|(s, _)| *s == self.blur_style);
+                let next = all[at.map_or(0, |i| (i + 1) % all.len())].0;
+                return self.handle(Message::BlurStyle(next));
             }
             Message::BlurShape(kind) => self.blur_shape = kind,
             Message::BlurStyle(style) => {
@@ -1430,7 +1468,7 @@ impl Annotator {
             return;
         };
         let item = &self.doc.items[i];
-        let cell = self.blur_cell.cell() * self.capture_scale;
+        let cell = self.blur_strength();
         let over = item.width + 4.0;
         let (points, size, kind, ring) = match &item.shape {
             Shape::Rect { a, b } => (vec![*a, *b], over, blur::Kind::Rect, outline),
@@ -1462,6 +1500,66 @@ impl Annotator {
         self.doc.exec(Edit::Insert(at, hide));
         self.doc.select_one(Some(at));
         self.refresh();
+    }
+
+    /// One picture per style in `blur_styles()`: the area under the pointer
+    /// (else the picture's middle), its left half as it is and its right half
+    /// hidden in that style, at the strength now. Made again when the pointer
+    /// moves on by 8 px or the strength changes.
+    pub fn style_thumbs(&self) -> Vec<image::Handle> {
+        let view = self.doc.view();
+        let at = self.hover.unwrap_or_else(|| view.center());
+        let strength = self.blur_strength();
+        let key = ((at.x / 8.0) as i32, (at.y / 8.0) as i32, strength.to_bits());
+        if let Some((k, all)) = &*self.thumbs.borrow()
+            && *k == key
+        {
+            return all.clone();
+        }
+        let all = blur_styles()
+            .iter()
+            .map(|&(style, _)| self.style_thumb(style, at, strength))
+            .collect::<Vec<_>>();
+        *self.thumbs.borrow_mut() = Some((key, all.clone()));
+        all
+    }
+
+    fn style_thumb(&self, style: blur::Style, at: Point, strength: f32) -> image::Handle {
+        let k = self.capture_scale;
+        let (w, h) = ((72.0 * k).ceil(), (44.0 * k).ceil());
+        let view = self.doc.view();
+        let from = Point::new(
+            (at.x - w / 2.0).clamp(view.x, (view.x + view.width - w).max(view.x)),
+            (at.y - h / 2.0).clamp(view.y, (view.y + view.height - h).max(view.y)),
+        );
+        let region = document::int_rect(Rectangle::new(from, iced::Size::new(w, h)), view);
+        let pm = self.doc.paint(&[], region, None);
+        let mut layer = document::Layer {
+            pm,
+            origin: Point::new(region.x() as f32, region.y() as f32),
+        };
+        let (x0, y0) = (region.x() as f32, region.y() as f32);
+        let (rw, rh) = (region.width() as f32, region.height() as f32);
+        let corners = [Point::new(x0 + rw / 2.0, y0), Point::new(x0 + rw, y0 + rh)];
+        let ramp = [
+            Point::new(x0 + rw / 2.0, y0 + rh / 2.0),
+            Point::new(x0 + rw, y0 + rh / 2.0),
+        ];
+        let fp = blur::Footprint {
+            points: &corners,
+            size: 0.0,
+            kind: blur::Kind::Rect,
+            outline: 0.0,
+            ramp: &ramp,
+        };
+        blur::paint(&mut layer, &fp, strength, style, self.doc.seed);
+        handle(layer.pm)
+    }
+
+    /// Hide's strength now, image px: the preset's (or the custom slider's) times
+    /// the capture's scale: never divided by the zoom.
+    pub(crate) fn blur_strength(&self) -> f32 {
+        self.blur_custom.map_or(self.blur_cell.cell(), f32::from) * self.capture_scale
     }
 
     /// What "Hide this shape" can cover now: the selection is a rectangle,
@@ -2265,7 +2363,7 @@ impl Annotator {
             Tool::Blur => Shape::Blur {
                 points: vec![p],
                 size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
-                cell: self.blur_cell.cell() * self.capture_scale,
+                cell: self.blur_strength(),
                 style: self.blur_style,
                 // (a progressive look is a region with a ramp across it)
                 kind: match self.blur_style {
@@ -2324,7 +2422,7 @@ impl Annotator {
                 Shape::Blur {
                     size, cell, style, ..
                 } => {
-                    *cell = editor.blur_cell.cell() * editor.capture_scale;
+                    *cell = editor.blur_strength();
                     if editor.style_picked {
                         *style = editor.blur_style;
                     }

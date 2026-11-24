@@ -70,9 +70,11 @@ impl Style {
     }
 }
 
-/// A look's blur radius (Gaussian sigma, image px) for texture scale `cell_px`.
-pub fn sigma(cell_px: f32) -> f32 {
-    cell_px / 2.0
+/// A look's blur radius (Gaussian sigma, image px): the strength itself. Light
+/// (0.25 of the reference text height) leaves a line's shape, Medium and Strong
+/// take the words (the lab: 15 px text is gone from sigma 4).
+pub fn sigma(strength_px: f32) -> f32 {
+    strength_px
 }
 
 /// The shape of a Hide (W102 step 2).

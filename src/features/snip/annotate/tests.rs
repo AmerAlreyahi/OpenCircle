@@ -2328,14 +2328,14 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     e.update(Message::BlurSize(None));
     drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
     assert_eq!(size_of(&e, 4).0, b.stroke(1.0).1);
-    // Pixel size: fine 6 px cells by default (display px), coarser picked.
+    // Strength: Medium (8 px at scale 1) by default, Strong (16) picked.
     let cell_of = |e: &Annotator, i: usize| match &e.doc.items[i].shape {
         Shape::Blur { cell, .. } => *cell,
         _ => panic!(),
     };
-    assert_eq!(cell_of(&e, 4), 6.0);
+    assert_eq!(cell_of(&e, 4), 8.0);
     e.update(Message::BlurCell(Width::Thick));
-    assert_eq!(cell_of(&e, 4), 12.0, "the selected one too");
+    assert_eq!(cell_of(&e, 4), 16.0, "the selected one too");
     e.update(Message::BlurCell(Width::Thin));
 
     // Line help off: the stroke follows the pointer.
