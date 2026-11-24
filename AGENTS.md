@@ -1098,6 +1098,8 @@ production systems.
   drag it straight into another app or a folder; it slides away by itself after a few seconds. No big result card, no row of
   large buttons, no technical text (temp file, MB). Same pattern for audio (a small waveform chip).
   Round 2 (canvas https://claude.ai/artifact/AKoKdVveRjedVz38kEEmV7): the custom "Open with" menu is NOT approved (owner 2026-11-24).
+  The round-2 recording widget (tiny pill + corner thumbnail) is ALSO NOT approved (owner 2026-11-24): next = a comparison sheet
+  of 5-6 real recording-widget styles + 3 result styles for him to pick.
   DECIDED instead: "Open with..." opens the SYSTEM's own chooser (Windows Open with dialog; Linux desktop app chooser via the
   OpenURI portal ask=true / Gio), like right-clicking a file in Explorer. No custom app list to design or maintain.
 
