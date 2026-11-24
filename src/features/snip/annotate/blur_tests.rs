@@ -197,3 +197,36 @@ fn w102_1f_old_saved_blur_loads_as_frost() {
         "{shape:?}"
     );
 }
+
+/// W102 (review): the ink term is read in coarse steps, so ink colours a fringe apart
+/// (the same text, other anti-aliasing) give the same fill, and the background stays exact.
+#[test]
+fn w102_1g_the_ink_is_read_coarsely() {
+    let fill = |ink: [u8; 4], bg: [u8; 4]| {
+        let img = image_of(300, 150, |x, y| {
+            if (30..40).contains(&y) && x % 5 < 3 && (10..280).contains(&x) {
+                ink
+            } else {
+                bg
+            }
+        });
+        let out = rendered(
+            img,
+            3,
+            vec![hide(
+                vec![pt(20.0, 35.0), pt(280.0, 35.0)],
+                16.0,
+                blur::Style::Frost,
+            )],
+        );
+        mean(&out, 30, 270, 30, 40)
+    };
+    let bg = [243, 241, 250, 255];
+    let (a, b) = (fill([20, 20, 30, 255], bg), fill([28, 24, 36, 255], bg));
+    for k in 0..3 {
+        assert!((a[k] - b[k]).abs() < 0.5, "{a:?} vs {b:?}");
+    }
+    // a different background shows through exactly (about 12 % of one level per level)
+    let c = fill([20, 20, 30, 255], [233, 231, 240, 255]);
+    assert!((a[0] - c[0] - 8.8).abs() < 1.5, "{a:?} {c:?}");
+}

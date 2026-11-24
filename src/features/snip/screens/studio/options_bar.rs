@@ -7,8 +7,8 @@ use iced::{Center, Element, Fill};
 use super::popovers::Pop;
 use super::{Msg, Studio};
 use crate::features::snip::annotate::{
-    Annotator, BlurShape, ERASER_SIZES, Message, STRENGTH_RANGE, TextStyle, Tool, Width,
-    fills_inside, info, style,
+    Annotator, ERASER_SIZES, Message, STRENGTH_RANGE, TextStyle, Tool, Width, fills_inside, info,
+    style,
 };
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
@@ -218,17 +218,9 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
         }
         Tool::Callout => vec![font_size(e)],
         Tool::Blur => {
-            let strengths = [
-                (Width::Thin, t!(sn_light)),
-                (Width::Medium, t!(sn_medium)),
-                (Width::Thick, t!(sn_strong)),
-            ];
+            let strengths = crate::features::snip::annotate::blur_strengths();
             let value = e.blur_custom.unwrap_or(e.blur_cell.cell().round() as u8);
-            let shapes = [
-                (BlurShape::Brush, t!(sn_brush)),
-                (BlurShape::Rect, t!(tl_rect)),
-                (BlurShape::Ellipse, t!(tl_ellipse)),
-            ];
+            let shapes = crate::features::snip::annotate::blur_shapes();
             let styles = crate::features::snip::annotate::blur_styles();
             let mut o = vec![
                 group(

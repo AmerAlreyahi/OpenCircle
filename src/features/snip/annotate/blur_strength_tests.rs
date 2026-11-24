@@ -143,3 +143,60 @@ fn w102_5d_style_cards_show_the_area_under_the_pointer() {
     let moved: Vec<_> = e.style_thumbs().iter().map(pic).collect();
     assert_ne!(moved[0].1, pics[0].1, "follows the pointer");
 }
+
+/// W102 (review): a style card over an existing Hide shows the picture WITH it (as the
+/// editor and Copy do), never the bare pixels under it.
+#[test]
+fn w102_5e_style_cards_never_show_the_pixels_under_an_existing_hide() {
+    let mut e = editor(1.0);
+    e.update(Message::Press(pt(40.0, 100.0)));
+    e.update(Message::Move(pt(360.0, 100.0)));
+    e.update(Message::Release);
+    e.update(Message::Move(pt(200.0, 100.0)));
+    let bare = document::clean(&e.doc);
+    let shown = render(&e.doc);
+    assert_ne!(bare.rgba, shown.rgba, "the Hide changed the picture");
+    let pic = |h: &iced::widget::image::Handle| match h {
+        iced::widget::image::Handle::Rgba { pixels, width, .. } => {
+            (*width as usize, pixels.to_vec())
+        }
+        _ => panic!("pixels"),
+    };
+    let (w, px) = pic(&e.style_thumbs()[0]);
+    // the card's left half, one row: the same as the editor shows there
+    let (x0, y0, row) = (200 - w / 2, 100 - 22, 22);
+    let at =
+        |c: &Crop, x: usize| c.rgba[((y0 + row) * c.width as usize + x0 + x) * 4..][..4].to_vec();
+    let mut differs = 0;
+    for x in 2..w / 2 - 12 {
+        let card = px[(row * w + x) * 4..][..4].to_vec();
+        assert_eq!(card, at(&shown, x), "x {x}: as shown");
+        differs += usize::from(card != at(&bare, x));
+    }
+    assert!(differs > 10, "not the bare pixels: {differs}");
+}
+
+/// W102 (review): Shift+B changes the style for the NEXT Hide; an existing Hide keeps its
+/// own (a secure Hide never silently turns into a look); a click on a card restyles it.
+#[test]
+fn w102_5f_cycling_never_restyles_an_existing_hide() {
+    let mut e = editor(1.0);
+    e.studio = true;
+    e.update(Message::Press(pt(40.0, 100.0)));
+    e.update(Message::Move(pt(200.0, 100.0)));
+    e.update(Message::Release);
+    e.doc.select_one(Some(0));
+    for _ in 0..4 {
+        e.update(Message::BlurCycle);
+        let Shape::Blur { style, .. } = e.doc.items[0].shape else {
+            panic!()
+        };
+        assert_eq!(style, blur::Style::Frost, "after {:?}", e.blur_style);
+    }
+    assert_ne!(e.blur_style, blur::Style::Frost);
+    e.update(Message::BlurStyle(blur::Style::Soft));
+    let Shape::Blur { style, .. } = e.doc.items[0].shape else {
+        panic!()
+    };
+    assert_eq!(style, blur::Style::Soft, "a click on a card restyles it");
+}

@@ -106,7 +106,7 @@
 //! outline = false                   # shapes, arrows, callouts get an outline
 //! fill = false                      # rectangles and ellipses get a tint
 //! blur_size = "medium"              # the blur brush: thin | medium | thick; missing = Auto
-//! blur_cell = "thin"                # the blur's pixel size: thin (6 px) | medium (9) | thick (12)
+//! blur_cell = "medium"              # Hide's strength: thin = Light (4 px) | medium (8) | thick = Strong (16)
 //! stroke = 5                        # the line width of shapes, arrows, pen: 1-32 px
 //! text_font = "sans"                # the Text tool's face: sans | serif | mono
 //! text_bold = true                  # the Text tool's weight

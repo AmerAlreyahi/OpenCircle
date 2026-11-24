@@ -377,9 +377,10 @@ fn blur_mosaic_text_is_below_the_noise() {
                             format!("cell {cell} {a}/{b} {bg:?} fringed {fringed} {view} {what}");
                         eprintln!("{at}: text {text:.2} noise {noise:.2}");
                         // The fill reads only two colours (a twelfth of the ink's
-                        // differs by a fringe's few levels): under half a level
-                        // on average, and below the seed's own spread where there is one.
-                        assert!(text < noise || text < 0.5, "{at}: {text} vs {noise}");
+                        // differs by a fringe's few levels, read in 32-level steps): at most one
+                        // step (3.8 levels) when a fringe lands across a step, else nothing;
+                        // below the seed's own spread where there is one.
+                        assert!(text < noise || text < 4.0, "{at}: {text} vs {noise}");
                     }
                 }
             }
@@ -576,7 +577,8 @@ fn blur_mosaic_has_no_tint() {
             let diffs = |p: [u8; 4]| (p[0] as i32 - p[1] as i32, p[1] as i32 - p[2] as i32);
             let first = diffs(pxi(&flat, core[0].0, core[0].1));
             let want = diffs(colour);
-            assert!((first.0 - want.0).abs() <= 1 && (first.1 - want.1).abs() <= 1);
+            // (the ink term is read in 32-level steps: up to 4 levels of colour shift)
+            assert!((first.0 - want.0).abs() <= 4 && (first.1 - want.1).abs() <= 4);
             for &(x, y) in &core {
                 let d = diffs(pxi(&flat, x, y));
                 assert!(

@@ -127,8 +127,9 @@ the Studio alike. Its options row has:
   *Frosted* and *Progressive* (a blur that fades from one handle to the other;
   drag the two handles to change where it starts and ends) are **looks, not
   for secrets**: they blur what is there, and with a known font a blurred code can
-  be recovered. They are never the default, and Copy text and Ask AI still skip
-  everything you hid.
+  be recovered. They are never the default. Copy text and Translate skip every Hide, but
+  **Ask AI receives the picture as you see it**: with a look style that is the
+  blurred picture, so a look never keeps a secret from the AI you ask.
 - **Shape.** *Brush* (a stroke with soft round ends, sized to the text line under
   it unless you pick a size; line help keeps it on its line, and sliding back
   along a held line un-hides what you left), *Rectangle* or *Ellipse* (hold
@@ -139,7 +140,7 @@ the Studio alike. Its options row has:
   or only its outline.
 - **Strength.** Light, Medium or Strong (a quarter, a half, or one text height),
   the same at any zoom; the Studio also has a Custom slider. While Hide is the
-  tool, `1`, `2`, `3` pick the strength and `Shift+B` goes to the next style.
+  tool, `1`, `2`, `3` pick the strength and `Shift+B` picks the next style for the next Hide (an existing Hide is restyled by clicking a style card).
 
 **Redact** is a solid box (or an ellipse, if you redact an ellipse), for when you
 want no trace at all.

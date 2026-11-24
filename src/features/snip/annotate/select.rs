@@ -94,7 +94,10 @@ fn body(item: &Item) -> Rectangle {
             points,
             kind: blur::Kind::Rect | blur::Kind::Ellipse,
             ..
-        } => span(&[points[0], points[points.len() - 1]]),
+        } => match (points.first(), points.last()) {
+            (Some(a), Some(b)) => span(&[*a, *b]),
+            _ => item.frame(),
+        },
         _ => item.frame(),
     }
 }

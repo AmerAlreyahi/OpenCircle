@@ -12,8 +12,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::share;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
-    Annotator, BlurShape, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width,
-    dragout, info,
+    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
 };
 use crate::features::snip::snip_more::{self, Read, Row};
 use crate::shared::app_language::{S, fmt, tr};
@@ -698,20 +697,12 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let to = if auto { Some(Width::Medium) } else { None };
             let chip = button::switch(t!(sn_auto), auto, Message::BlurSize(to));
             let value = if auto { t!(sn_line) } else { "" };
-            let strengths = [
-                (Width::Thin, t!(sn_light)),
-                (Width::Medium, t!(sn_medium)),
-                (Width::Thick, t!(sn_strong)),
-            ];
+            let strengths = crate::features::snip::annotate::blur_strengths();
             let cells = segmented::inline(&strengths, e.blur_cell, e.blur_cell, 1.0, |w| {
                 Message::BlurCell(w)
             });
             let px = e.blur_cell.cell().round();
-            let shapes = [
-                (BlurShape::Brush, t!(sn_brush)),
-                (BlurShape::Rect, t!(tl_rect)),
-                (BlurShape::Ellipse, t!(tl_ellipse)),
-            ];
+            let shapes = crate::features::snip::annotate::blur_shapes();
             let shape = segmented::inline(&shapes, e.blur_shape, e.blur_shape, 1.0, |kind| {
                 Message::BlurShape(kind)
             });

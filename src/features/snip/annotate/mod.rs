@@ -72,7 +72,6 @@ pub use wheel::WHEEL_PX;
 #[cfg(test)]
 mod wheel_tests;
 
-pub use blur::Kind as BlurShape;
 pub use document::rounded as rounded_path;
 pub use document::{
     Document, Edit, Image, Item, Shape, base_of, clean, hidden, hidden_in_clean, render, span,
@@ -411,7 +410,7 @@ pub enum Message {
     BlurCell(Width),
     /// The Studio's custom strength (`None`: back to the presets).
     BlurCustom(Option<u8>),
-    /// The next look in the list (Shift+B).
+    /// The next style in the list for the NEXT Hide (Shift+B).
     BlurCycle,
     /// Hide's shape for the next one drawn.
     BlurShape(blur::Kind),
@@ -664,7 +663,7 @@ pub struct Annotator {
     pub(crate) live: Option<(Rectangle, image::Handle)>,
     /// Hides committed since the picture was last painted whole: their region
     /// of it, drawn over `base` (see `patch_over`; see-through where unpainted).
-    pub(crate) patch: Option<(Rectangle, image::Handle)>,
+    pub(crate) patch: Vec<(Rectangle, image::Handle)>,
     pending: Option<Pending>,
     /// Crop drag: from, to.
     cropping: Option<(Point, Point)>,
@@ -852,7 +851,7 @@ impl Annotator {
             crisp: false,
             legend: None,
             live: None,
-            patch: None,
+            patch: Vec::new(),
             pending: None,
             cropping: None,
             dragged: None,
@@ -1106,8 +1105,9 @@ impl Annotator {
             Message::BlurCycle => {
                 let all = blur_styles();
                 let at = all.iter().position(|(s, _)| *s == self.blur_style);
-                let next = all[at.map_or(0, |i| (i + 1) % all.len())].0;
-                return self.handle(Message::BlurStyle(next));
+                // the next Hide only: an existing one is restyled by a click on a style
+                // card, never silently (a secure Hide must not turn into a look)
+                self.blur_style = all[at.map_or(0, |i| (i + 1) % all.len())].0;
             }
             Message::BlurShape(kind) => self.blur_shape = kind,
             Message::BlurStyle(style) => {
@@ -1464,40 +1464,97 @@ impl Annotator {
     /// stroke or arrow (`outline`: a ring along its edge, not its inside),
     /// selected, on top (one undo step).
     fn hide_shape(&mut self, outline: bool) {
+        // (an edit in progress ends first: it may change the items and the selection)
+        self.commit();
         let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) else {
             return;
         };
         let item = &self.doc.items[i];
         let cell = self.blur_strength();
         let over = item.width + 4.0;
-        let (points, size, kind, ring) = match &item.shape {
-            Shape::Rect { a, b } => (vec![*a, *b], over, blur::Kind::Rect, outline),
-            Shape::Ellipse { a, b } => (vec![*a, *b], over, blur::Kind::Ellipse, outline),
-            Shape::Pen(points) | Shape::Highlighter(points) => {
-                (points.clone(), over, blur::Kind::Brush, false)
+        // (what it covers: its points, brush size or box, whether a ring; an arrow's
+        // label frame is a second Hide)
+        let mut covers: Vec<(Vec<Point>, f32, blur::Kind, bool)> = Vec::new();
+        match &item.shape {
+            Shape::Rect { a, b } => covers.push((vec![*a, *b], over, blur::Kind::Rect, outline)),
+            Shape::Ellipse { a, b } => {
+                covers.push((vec![*a, *b], over, blur::Kind::Ellipse, outline))
             }
-            Shape::Arrow { a, b, .. } => (vec![*a, *b], over, blur::Kind::Brush, false),
+            Shape::Pen(points) | Shape::Highlighter(points) => {
+                covers.push((points.clone(), over, blur::Kind::Brush, false))
+            }
+            Shape::Arrow {
+                a,
+                b,
+                bend,
+                head,
+                text,
+            } => {
+                // along the curve as it is drawn (a quadratic through its bend),
+                // wide enough for its head
+                let curve = (0..=24)
+                    .map(|k| {
+                        let t = k as f32 / 24.0;
+                        let (u, v, w) = ((1.0 - t) * (1.0 - t), 2.0 * (1.0 - t) * t, t * t);
+                        Point::new(
+                            u * a.x + v * bend.x + w * b.x,
+                            u * a.y + v * bend.y + w * b.y,
+                        )
+                    })
+                    .collect();
+                let wide = match head {
+                    true => over.max(arrow::head_length(item.width) * 1.3),
+                    false => over,
+                };
+                covers.push((curve, wide, blur::Kind::Brush, false));
+                if !text.is_empty() {
+                    let size = label::arrow_size(item.width);
+                    let frame = label::bubble(label::centred(*a, text, size), text, size);
+                    let r = frame.expand(2.0);
+                    covers.push((
+                        vec![
+                            r.position(),
+                            r.position() + iced::Vector::new(r.width, r.height),
+                        ],
+                        over,
+                        blur::Kind::Rect,
+                        false,
+                    ));
+                }
+            }
             _ => return,
-        };
-        let hide = Item {
-            shape: Shape::Blur {
-                points,
-                size,
-                cell,
-                style: self.blur_style,
-                kind,
-                outline: if ring { over } else { 0.0 },
-                ramp: Vec::new(),
-            },
-            colour: self.colour,
-            width: item.width,
-            outline: false,
-            fill: false,
-            hidden: false,
-        };
+        }
+        let (colour, width) = (self.colour, item.width);
         let at = self.doc.items.len();
-        self.commit();
-        self.doc.exec(Edit::Insert(at, hide));
+        let inserts: Vec<Edit> = covers
+            .into_iter()
+            .enumerate()
+            .map(|(n, (points, size, kind, ring))| {
+                Edit::Insert(
+                    at + n,
+                    Item {
+                        shape: Shape::Blur {
+                            points,
+                            size,
+                            cell,
+                            style: self.blur_style,
+                            kind,
+                            outline: if ring { over } else { 0.0 },
+                            ramp: Vec::new(),
+                        },
+                        colour,
+                        width,
+                        outline: false,
+                        fill: false,
+                        hidden: false,
+                    },
+                )
+            })
+            .collect();
+        match inserts.len() {
+            1 => self.doc.exec(inserts.into_iter().next().unwrap()),
+            _ => self.doc.exec(Edit::Seq(inserts)),
+        }
         self.doc.select_one(Some(at));
         self.refresh();
     }
@@ -1533,7 +1590,10 @@ impl Annotator {
             (at.y - h / 2.0).clamp(view.y, (view.y + view.height - h).max(view.y)),
         );
         let region = document::int_rect(Rectangle::new(from, iced::Size::new(w, h)), view);
-        let pm = self.doc.paint(&[], region, None);
+        // the picture as the editor shows it (every item, as flatten draws it): the
+        // half "as it is" never shows the bare pixels under an existing Hide
+        let layers: Vec<_> = self.doc.items.iter().map(|i| (i, true)).collect();
+        let pm = self.doc.paint(&layers, region, None);
         let mut layer = document::Layer {
             pm,
             origin: Point::new(region.x() as f32, region.y() as f32),
@@ -2175,47 +2235,19 @@ impl Annotator {
     }
 
     /// Keeps the live layer (it holds every item over its region: what a full
-    /// repaint gives there) as part of one overlay over the picture, instead of
-    /// flattening the whole picture again; the next repaint folds it in.
-    /// `false`: it can't (no live layer, no base shown, a legend), then repaint.
+    /// repaint gives there) as one more local patch over the picture, instead of
+    /// flattening the whole picture again; the next repaint folds them in. Each
+    /// patch is only its own region, so two Hides far apart never allocate the
+    /// space between them. `false`: it can't (no live layer, no base shown, a
+    /// legend, or `MAX_PATCHES` already), then repaint.
     fn patch_over(&mut self) -> bool {
-        let (Some((rect, live)), false, None) = (&self.live, self.bare(), &self.legend) else {
+        let (Some(live), false, None) = (&self.live, self.bare(), &self.legend) else {
             return false;
         };
-        let image::Handle::Rgba {
-            width: lw,
-            pixels: over,
-            ..
-        } = live
-        else {
+        if self.patch.len() >= MAX_PATCHES {
             return false;
-        };
-        let whole = match &self.patch {
-            Some((old, _)) => old.union(rect),
-            None => *rect,
-        };
-        let (w, h) = (whole.width as usize, whole.height as usize);
-        let mut data = vec![0u8; w * h * 4];
-        let mut blit = |at: &Rectangle, width: usize, pixels: &[u8]| {
-            let (x0, y0) = ((at.x - whole.x) as usize, (at.y - whole.y) as usize);
-            for (row, line) in pixels.chunks_exact(width * 4).enumerate() {
-                let to = ((y0 + row) * w + x0) * 4;
-                data[to..to + width * 4].copy_from_slice(line);
-            }
-        };
-        if let Some((
-            old,
-            image::Handle::Rgba {
-                width: ow,
-                pixels: before,
-                ..
-            },
-        )) = &self.patch
-        {
-            blit(old, *ow as usize, before);
         }
-        blit(rect, *lw as usize, over);
-        self.patch = Some((whole, image::Handle::from_rgba(w as u32, h as u32, data)));
+        self.patch.push(live.clone());
         true
     }
 
@@ -2228,13 +2260,15 @@ impl Annotator {
         }
     }
 
-    /// The committed Hides' overlay: its place (image px) and bytes (the tests).
+    /// The committed Hides' patches: each one's place (image px) and bytes (the tests).
     #[cfg(test)]
-    fn patch_pixels(&self) -> Option<(Rectangle, Vec<u8>)> {
-        match &self.patch {
-            Some((r, image::Handle::Rgba { pixels, .. })) => Some((*r, pixels.to_vec())),
-            _ => None,
-        }
+    fn patch_pixels(&self) -> Vec<(Rectangle, Vec<u8>)> {
+        (self.patch.iter())
+            .filter_map(|(r, h)| match h {
+                image::Handle::Rgba { pixels, .. } => Some((*r, pixels.to_vec())),
+                _ => None,
+            })
+            .collect()
     }
 
     /// A drag that is really a click (shapes that need a size).
@@ -2470,7 +2504,7 @@ impl Annotator {
         }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
         self.base = handle(pm);
-        self.patch = None;
+        self.patch.clear();
         self.display = None;
         self.crisp = false;
         self.update_live();
@@ -2521,6 +2555,30 @@ pub fn blur_styles() -> [(blur::Style, &'static str); 5] {
         (blur::Style::Soft, t!(sn_style_soft)),
         (blur::Style::Frosted, t!(sn_style_frosted)),
         (blur::Style::Progressive, t!(sn_style_progressive)),
+    ]
+}
+
+/// Committed Hides kept as patches before the picture is painted whole again.
+const MAX_PATCHES: usize = 64;
+
+/// Hide's strengths and their words (Light / Medium / Strong), for Snip's panel and
+/// the Studio's bar.
+pub fn blur_strengths() -> [(Width, &'static str); 3] {
+    use crate::t;
+    [
+        (Width::Thin, t!(sn_light)),
+        (Width::Medium, t!(sn_medium)),
+        (Width::Thick, t!(sn_strong)),
+    ]
+}
+
+/// Hide's shapes and their words, for Snip's panel and the Studio's bar.
+pub fn blur_shapes() -> [(blur::Kind, &'static str); 3] {
+    use crate::t;
+    [
+        (blur::Kind::Brush, t!(sn_brush)),
+        (blur::Kind::Rect, t!(tl_rect)),
+        (blur::Kind::Ellipse, t!(tl_ellipse)),
     ]
 }
 

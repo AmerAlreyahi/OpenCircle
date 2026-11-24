@@ -14,7 +14,7 @@
 //! in image px (the capture's DPI scale, never the zoom). So two strokes on
 //! one background match within a level or two, a repaint of any crop gives
 //! the same pixels, and strokes that overlap merge. The footprint is a flat
-//! band `size` tall along the stroke (square ends).
+//! band `size` wide along the stroke (soft round ends).
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -37,6 +37,8 @@ pub fn seed() -> u64 {
 /// The fill is the background pulled this much toward the ink: fixed, so it
 /// never tracks how much text there is.
 pub const DARKEN: f32 = 0.12;
+/// The ink colour is read in steps of this many levels.
+const INK_STEP: f32 = 32.0;
 /// Frost: the texture's reach, ± levels.
 pub const FROST: f32 = 10.0;
 /// Pixelate: secret tone offset per block, ± levels.
@@ -290,7 +292,9 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
                 (m > 0).then(|| picture.unwrap_or_else(|| at(&data[i..i + 3])))
             });
         let (ink, bg) = colours(under);
-        [0, 1, 2].map(|k| bg[k] * (1.0 - DARKEN) + ink[k] * DARKEN)
+        // The ink term is quantised coarsely (a fringe's few levels of the ink read
+        // no longer reach the fill); the background stays exact, so a pastel stays pastel.
+        [0, 1, 2].map(|k| bg[k] * (1.0 - DARKEN) + (ink[k] / INK_STEP).round() * INK_STEP * DARKEN)
     };
     let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
 
@@ -544,7 +548,7 @@ fn mosaic(
 /// value away from the background among the 2 % of pixels furthest from it in
 /// tone (each channel is whole somewhere on a stem, however little text there
 /// is and even with ClearType's per-channel fringes). Neither tracks how much
-/// ink the text has; what is left of that is snapped away in `snapped_tint`.
+/// ink the text has; `paint` reads the ink in coarse steps (`INK_STEP`).
 pub(crate) fn colours(pixels: impl Iterator<Item = [u8; 3]>) -> ([f32; 3], [f32; 3]) {
     let mut all: Vec<(f32, [u8; 3])> = pixels.map(|p| (luma(p.map(f32::from)), p)).collect();
     if all.is_empty() {

@@ -189,9 +189,9 @@ fn w102_2e_hide_this_shape_fills_or_follows_the_outline() {
 #[test]
 fn w102_2f_dragging_draws_the_chosen_shape() {
     for (kind, shift) in [
-        (BlurShape::Ellipse, false),
-        (BlurShape::Rect, false),
-        (BlurShape::Ellipse, true),
+        (blur::Kind::Ellipse, false),
+        (blur::Kind::Rect, false),
+        (blur::Kind::Ellipse, true),
     ] {
         let mut e = Annotator::new(image_of(400, 300, |_, _| [250, 250, 250, 255]), 1.0);
         e.update(Message::Tool(Tool::Blur));
@@ -325,4 +325,60 @@ fn w102_corner_handles_resize_a_hide_rectangle_and_ellipse() {
         ramp: Vec::new(),
     });
     assert!(select::handles(&brush).is_empty());
+}
+
+/// W102 (review): "Hide this shape" on a bent, labelled arrow covers the curve as it is
+/// drawn (not the straight line between its ends) and the label's frame, as one undo step.
+#[test]
+fn w102_2i_hide_this_shape_on_a_bent_labelled_arrow_follows_the_curve_and_the_label() {
+    let mut e = Annotator::new(image_of(400, 300, |_, _| [250, 250, 250, 255]), 1.0);
+    let (a, b) = (pt(60.0, 220.0), pt(340.0, 220.0));
+    let bend = pt(200.0, 20.0);
+    e.doc.exec(Edit::Insert(
+        0,
+        item(Shape::Arrow {
+            a,
+            b,
+            bend,
+            head: true,
+            text: "note".into(),
+        }),
+    ));
+    e.doc.select_one(Some(0));
+    e.update(Message::HideShape(false));
+    assert_eq!(e.doc.items.len(), 3, "the curve and the label");
+    let Shape::Blur { points, kind, .. } = &e.doc.items[1].shape else {
+        panic!()
+    };
+    assert_eq!(*kind, blur::Kind::Brush);
+    // the curve's middle (t = 0.5) is near y = 120, far from the chord at y = 220
+    let mid = points[points.len() / 2];
+    assert!((mid.y - 120.0).abs() < 2.0, "{mid:?}");
+    let Shape::Blur { kind, points, .. } = &e.doc.items[2].shape else {
+        panic!()
+    };
+    assert_eq!(*kind, blur::Kind::Rect);
+    assert!(
+        points[0].distance(a) < 40.0,
+        "the label sits on the arrow's tail"
+    );
+    e.update(Message::Undo);
+    assert_eq!(e.doc.items.len(), 1, "one undo step");
+}
+
+/// W102 (review): a Hide from a file with no points never panics a hit test or its handles.
+#[test]
+fn w102_2j_an_empty_hide_does_not_panic() {
+    let empty = item(Shape::Blur {
+        points: Vec::new(),
+        size: 16.0,
+        cell: 8.0,
+        style: blur::Style::Frost,
+        kind: blur::Kind::Rect,
+        outline: 0.0,
+        ramp: Vec::new(),
+    });
+    let _ = select::handles(&empty);
+    let _ = select::hit(std::slice::from_ref(&empty), pt(5.0, 5.0), 4.0);
+    let _ = empty.frame();
 }
