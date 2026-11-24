@@ -478,6 +478,8 @@ pub enum Message {
     /// `Output::Sharing`).
     Shared,
     Back,
+    /// The toolbar's quiet x (C6): the same as Esc, Snip ends.
+    Close,
     /// A press on the toolbar's grip: the host drags the toolbar (the editor
     /// ignores it).
     Grab,
@@ -508,6 +510,8 @@ pub enum ScreenTool {
 pub enum Output {
     /// Back to the action bar (edits are kept in the editor).
     Back,
+    /// The toolbar's x: Snip ends, as with Esc (C6).
+    Close,
     /// The flattened image, for the Copy / Save actions.
     Copy(Crop),
     Save(Crop),
@@ -1236,6 +1240,10 @@ impl Annotator {
             Message::Back => {
                 self.commit();
                 return Some(Output::Back);
+            }
+            Message::Close => {
+                self.commit();
+                return Some(Output::Close);
             }
             Message::Grab
             | Message::Focus(_)

@@ -194,6 +194,7 @@ impl App {
                 annotate::Message::Share => Finish::Share,
                 annotate::Message::CopyText => Finish::CopyText,
                 annotate::Message::AskAi => Finish::AskAi,
+                annotate::Message::Close => Finish::Cancel,
                 _ => return Task::none(),
             };
             return self.on_snip(crate::features::snip::screens::pick::Msg::Finish(how));
@@ -243,6 +244,8 @@ impl App {
                 self.o.esc_back = true;
                 Task::none()
             }
+            // the quiet x: as Esc does (C6)
+            Some(Output::Close) => self.end_snip(),
             Some(Output::CopyText) => self.more_copy_text(),
             Some(Output::AskAi(crop)) => self.open_chat(crop, None),
             Some(Output::Translate) => self.more_translate(),

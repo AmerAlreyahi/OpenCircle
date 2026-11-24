@@ -197,12 +197,28 @@ impl Session {
         )
     }
 
-    /// The pill's buttons after the chips: Original, Snip, then the glossary.
+    /// The quiet x at the pill's end (C6): closes the translation (Esc keeps working).
+    fn close_button(&self) -> Element<'_, Msg> {
+        let x = icon_button(
+            crate::shared::kit::icon::Icon::Close.glyph(),
+            State::default(),
+            Some(Msg::Close),
+        );
+        hint(
+            x,
+            t!(sn_close),
+            Why::Icon,
+            iced::widget::tooltip::Position::Bottom,
+        )
+    }
+
+    /// The pill's buttons after the chips: Original, Snip, the glossary, then the x.
     fn tail(&self) -> Element<'_, Msg> {
         dir::row([
             self.original_button(),
             self.snip_button(),
             self.glossary.button(),
+            self.close_button(),
         ])
         .spacing(picker::SPACING)
         .into()

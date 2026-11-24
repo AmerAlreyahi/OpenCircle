@@ -88,6 +88,7 @@ fn widths(primary: bool) -> Vec<f32> {
         CONTROL,
         if primary { PRIMARY_W } else { CONTROL },
         CONTROL,
+        CONTROL, // the quiet x
     ]);
     w
 }
@@ -133,6 +134,7 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
             Message::Copy
         },
         Message::Save,
+        Message::Close,
     ]);
     stops
 }
@@ -436,6 +438,14 @@ fn build(
     );
     items.push(hinted(save, t!(c_save), Why::Keys("Ctrl+S")));
 
+    // the quiet x at the end (C6): closes the Snip (Esc keeps working)
+    let close = Message::Close;
+    items.push(hinted(
+        icon_button::square(Icon::Close.glyph(), state(false, &close), live(close)),
+        t!(sn_close),
+        Why::Icon,
+    ));
+
     let toolbar = surface(
         match e.held {
             true => Material::Held,
@@ -448,7 +458,7 @@ fn build(
     let Some(menu) = e.menu else {
         // the first Snip ever: a one-time hint by the Studio button
         let hint = (e.studio_hint && idle).then(|| {
-            let (_, left) = centred_on(e, widths(steps_on(e)).len() - 3, STUDIO_HINT_W);
+            let (_, left) = centred_on(e, widths(steps_on(e)).len() - 4, STUDIO_HINT_W);
             (studio_hint(), left)
         });
         return (toolbar.into(), hint);
@@ -1077,7 +1087,19 @@ mod tests {
     #[test]
     fn the_bar_grew_by_one_button() {
         let w = widths(false);
-        assert_eq!(w.len(), 3 + Group::ALL.len() + 7 + 1);
+        assert_eq!(w.len(), 3 + Group::ALL.len() + 7 + 1 + 1, "+ the x (C6)");
+    }
+
+    /// C6: the toolbar ends with a quiet x (Tab reaches it last): it asks the host to end
+    /// Snip, as Esc does.
+    #[test]
+    fn c6_the_toolbar_ends_with_a_quiet_x() {
+        let mut e = editor();
+        assert_eq!(stops(&e).last(), Some(&Message::Close));
+        assert!(matches!(
+            e.update(Message::Close),
+            Some(crate::features::snip::annotate::Output::Close)
+        ));
     }
 
     /// W91.2: Ctrl+E opens the Studio from Snip (not from a plain editor).

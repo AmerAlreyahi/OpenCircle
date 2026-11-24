@@ -207,8 +207,8 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         let pill = view::pill_at(Rectangle::with_size(size));
         let (rows, cols) = (
             (view::PILL_TOP + picker::PILL.height) as usize,
-            // (the Original, Snip and glossary buttons, which never change)
-            (pill.x + picker::PILL.width) as usize - 116,
+            // (the Original, Snip, glossary and x buttons, which never change)
+            (pill.x + picker::PILL.width) as usize - 155,
         );
         for y in 0..rows {
             let at = y * 1280 * 4;
@@ -1213,7 +1213,7 @@ fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
     let button = Point::new(
         pill.x + pill.width
             - 6.0
-            - (2.0 * crate::shared::kit::tokens::size::ICON_BUTTON + picker::SPACING)
+            - (3.0 * crate::shared::kit::tokens::size::ICON_BUTTON + 2.0 * picker::SPACING)
             + crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
         pill.y + pill.height / 2.0,
     );
@@ -1226,6 +1226,26 @@ fn the_pill_has_a_snip_button_that_wakes_with_the_first_result() {
     assert!(matches!(press(&s)[..], [Msg::Snip]), "{:?}", press(&s));
 }
 
+/// C6: a quiet x ends the pill: a press sends `Close` (the overlay closes, as Esc does), also
+/// before anything is translated; the pill's size is the same in every state.
+#[test]
+fn c6_the_pill_ends_with_a_quiet_x() {
+    use crate::shared::kit::testing::shot;
+    let size = Size::new(1280.0, 200.0);
+    let at = card::place(size, None, None);
+    let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
+    let icon = crate::shared::kit::tokens::size::ICON_BUTTON;
+    let button = Point::new(
+        pill.x + pill.width - 6.0 - icon / 2.0,
+        pill.y + pill.height / 2.0,
+    );
+    let mut s = session(true);
+    let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };
+    assert!(matches!(press(&s)[..], [Msg::Close]), "{:?}", press(&s));
+    let _ = s.update(shown(Vec::new()));
+    assert!(matches!(press(&s)[..], [Msg::Close]), "{:?}", press(&s));
+}
+
 /// The glossary button after Snip (always there, so the pill never changes)
 /// opens its list; a press on a row picks that glossary (translate again), a
 /// second press on the button closes it, another list closes it.
@@ -1236,7 +1256,10 @@ fn the_glossary_button_opens_its_list_and_a_pick_translates_again() {
     let at = card::place(size, None, None);
     let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
     let button = Point::new(
-        pill.x + pill.width - 6.0 - crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
+        pill.x + pill.width
+            - 6.0
+            - (2.0 * crate::shared::kit::tokens::size::ICON_BUTTON + picker::SPACING)
+            + crate::shared::kit::tokens::size::ICON_BUTTON / 2.0,
         pill.y + pill.height / 2.0,
     );
     let mut s = session(true);
@@ -1435,7 +1458,7 @@ fn f7_the_original_button_toggles_the_page() {
     let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
     let icon = crate::shared::kit::tokens::size::ICON_BUTTON;
     let button = Point::new(
-        pill.x + pill.width - 6.0 - (3.0 * icon + 2.0 * picker::SPACING) + icon / 2.0,
+        pill.x + pill.width - 6.0 - (4.0 * icon + 3.0 * picker::SPACING) + icon / 2.0,
         pill.y + pill.height / 2.0,
     );
     let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };

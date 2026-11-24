@@ -825,7 +825,11 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
         edit(app).key(&keyboard::Key::Named(named), None, none, None)
     }
     let stops = toolbar::stops(edit(&app));
-    assert_eq!(stops.last(), Some(&E::Save), "no ×: Esc closes");
+    assert_eq!(
+        stops.last(),
+        Some(&E::Close),
+        "C6: the quiet x is last; Esc closes too"
+    );
     assert!(
         !stops.contains(&E::Slot(annotate::Tool::Crop)),
         "no Crop in Snip"
@@ -833,9 +837,9 @@ fn a_snips_toolbar_walks_by_tab_and_stays_put_while_the_area_moves() {
     let _ = app.on_snip_toolbar(E::Focus(true));
     let _ = app.on_snip_toolbar(E::Focus(true));
     let focus = edit(&app).focus.unwrap();
-    assert_eq!(stops[focus], E::Copy);
+    assert_eq!(stops[focus], E::Save);
     let _ = app.on_snip_toolbar(E::Focus(false));
-    assert_eq!(stops[edit(&app).focus.unwrap()], E::Save, "and forward");
+    assert_eq!(stops[edit(&app).focus.unwrap()], E::Close, "and forward");
     // the keys: Tab, Enter on the focus, Enter alone = Copy
     assert_eq!(key(&app, keyboard::key::Named::Tab), Some(E::Focus(false)));
     assert_eq!(key(&app, keyboard::key::Named::Enter), Some(E::Activate));
@@ -1190,9 +1194,9 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
         assert!(app.o.bar_drag.is_some(), "the grip holds the toolbar");
         let from = docked + Vector::new(10.0, 10.0);
         let _ = app.update(Message::BarMoved(from));
-        let _ = app.update(Message::BarMoved(from + Vector::new(120.0, 100.0)));
+        let _ = app.update(Message::BarMoved(from + Vector::new(100.0, 100.0)));
         let _ = app.update(Message::BarReleased);
-        let dropped = docked + Vector::new(120.0, 100.0);
+        let dropped = docked + Vector::new(100.0, 100.0);
         assert_eq!(
             app.bar_target(),
             dropped,

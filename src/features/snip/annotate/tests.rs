@@ -1771,26 +1771,24 @@ fn undos_second_click_opens_its_panel() {
     assert_eq!((e.doc.steps(), e.menu), ((2, 3), None));
 }
 
-/// No close button (owner, 2026-11-02): Esc closes; Copy and Save are
-/// icon-only (their tooltips say them and their keys).
+/// A quiet x at the end (owner call C6, supersedes "no close button", 2026-11-02): Esc closes
+/// too; Copy and Save are icon-only (their tooltips say them and their keys).
 #[test]
-fn the_toolbar_has_no_close_button() {
+fn the_toolbar_has_a_quiet_close_button() {
     use crate::shared::kit::tooltip::tests_support::shown;
     let mut e = editor(100, 100);
     e.movable = true;
     let _ = shown();
     let _ = e.toolbar();
     let tips = shown();
-    assert!(!tips.iter().any(|t| t.starts_with("Close")), "{tips:?}");
+    assert!(tips.contains(&"Close".to_string()), "{tips:?}");
     assert!(tips.contains(&"Copy · Ctrl+C".to_string()), "{tips:?}");
     assert!(tips.contains(&"Save · Ctrl+S".to_string()), "{tips:?}");
     assert!(tips.contains(&"Move toolbar".to_string()), "{tips:?}");
     assert!(tips.contains(&"Shapes · Arrow (A)".to_string()), "{tips:?}");
-    assert!(
-        !toolbar::stops(&e)
-            .iter()
-            .any(|m| matches!(m, Message::Back))
-    );
+    let stops = toolbar::stops(&e);
+    assert!(!stops.iter().any(|m| matches!(m, Message::Back)));
+    assert_eq!(stops.last(), Some(&Message::Close));
 }
 
 /// The laid-out size of `element` (logical px).
@@ -1819,8 +1817,8 @@ fn toolbar_size_matches_its_layout() {
     e.update(Message::UndoClick);
     e.update(Message::Tool(Tool::Blur));
     assert_eq!(laid_out(e.toolbar_at(Rectangle::default()).0), one);
-    // (the Open in Studio button made it one button wider)
-    assert!(one.width < 650.0 && one.width > 500.0, "{one:?}");
+    // (the Open in Studio button and the quiet x made it wider)
+    assert!(one.width < 700.0 && one.width > 500.0, "{one:?}");
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------
