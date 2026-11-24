@@ -1027,6 +1027,8 @@ production systems.
 - UX study owner calls (owner, 2026-11-24; SUPERSEDE the older decisions they name):
   C1 main bar keeps Copy image = Ctrl+C / Save = Ctrl+S without buttons; the key hint (F3) shows them.
   C2 the pinned AI chat gets an x that closes it; the pin only pins / unpins (supersedes "no x, the pin closes", 2026-10-28).
+  Unpin (lead 2026-11-25) = really leaves pinned mode: not on top, not kept across questions (next question = fresh quick chat),
+  quick-chat close rules again; with no overlay it stays a normal window until its x / Esc.
   C3 Studio: Ctrl+= / Ctrl+- zoom the PICTURE, Ctrl+0 fits; UI size moves to Preferences > Appearance and the View menu
   (supersedes 2026-11-20).
   C4 Snip shows the active tool's options at once in a slim row under its toolbar, like the Studio (supersedes the second click, 2026-11-02).
