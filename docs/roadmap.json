@@ -235,6 +235,14 @@
             "R-03",
             "R-02"
           ]
+        },
+        {
+          "id": "R-06",
+          "title": "Blur zones in recordings (areas or a followed app window) (#225)",
+          "status": "todo",
+          "depends": [
+            "R-04"
+          ]
         }
       ],
       "gate": [
@@ -283,6 +291,11 @@
         {
           "id": "L-07",
           "title": "Game mode follows a real game launch (like NVIDIA app / Discord) (#224)",
+          "status": "todo"
+        },
+        {
+          "id": "L-08",
+          "title": "Privacy curtain over an area or app for other apps' streams (Teams, Zoom), Windows + X11 first (#225)",
           "status": "todo"
         }
       ],
