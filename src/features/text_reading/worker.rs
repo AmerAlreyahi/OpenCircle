@@ -561,7 +561,14 @@ impl Gentle {
 /// read asked for next runs meanwhile (#117, W96). A model only warmed up
 /// (no translation used it yet) is dropped when another warm-up arrives, so
 /// the two kept are models that were really used (W96).
-pub(crate) struct Mt<T>(Vec<Slot<T>>, Vec<&'static Pair>);
+pub(crate) struct Mt<T> {
+    slots: Vec<Slot<T>>,
+    /// Pairs only warmed up so far.
+    unused: Vec<&'static Pair>,
+    /// Loads of dropped slots, still running (they can't be called off):
+    /// at most one, so a third load never stacks another ~250 MB on them.
+    gone: Vec<std::thread::JoinHandle<Result<T, OcrError>>>,
+}
 
 enum Slot<T> {
     Loading(&'static Pair, std::thread::JoinHandle<Result<T, OcrError>>),
@@ -581,7 +588,18 @@ const KEPT: usize = 2;
 
 impl<T> Mt<T> {
     pub(crate) fn new() -> Self {
-        Mt(Vec::new(), Vec::new())
+        Mt {
+            slots: Vec::new(),
+            unused: Vec::new(),
+            gone: Vec::new(),
+        }
+    }
+
+    /// Frees a slot; a load under way runs on, kept in `gone`.
+    fn drop_slot(&mut self, slot: Slot<T>) {
+        if let Slot::Loading(_, job) = slot {
+            self.gone.push(job);
+        }
     }
 }
 
@@ -595,10 +613,12 @@ impl<T: Send + 'static> Mt<T> {
         warm: bool,
         load: impl FnOnce() -> Result<T, OcrError> + Send + 'static,
     ) -> Result<Option<&mut T>, OcrError> {
-        let mine = self.0.iter().position(|s| std::ptr::eq(s.pair(), pair));
-        let mut slot = mine.map(|i| self.0.remove(i));
+        // (a finished dropped load still holds its model until its handle goes)
+        self.gone.retain(|j| !j.is_finished());
+        let mine = self.slots.iter().position(|s| std::ptr::eq(s.pair(), pair));
+        let mut slot = mine.map(|i| self.slots.remove(i));
         if warm && matches!(slot, Some(Slot::Loading(..))) {
-            self.0.push(slot.take().expect("matched"));
+            self.slots.push(slot.take().expect("matched"));
             return Ok(None); // already loading: no waiting for it
         }
         // (a failed warm load is tried again here, as before)
@@ -609,29 +629,42 @@ impl<T: Send + 'static> Mt<T> {
             };
         }
         if slot.is_none() {
+            // one dropped load may still run: a warm-up then waits for its
+            // turn (skipped, the real request loads it), a real request waits
+            if !self.gone.is_empty() {
+                if warm {
+                    return Ok(None);
+                }
+                self.gone.drain(..).for_each(|j| drop(j.join()));
+            }
             // a warm-up replaces a warmed-up model nobody used (a wrong guess);
             // a real request keeps it (its load can't be called off, and the
             // page may still need it: reloading it cost time and peak memory)
             if warm {
-                let unused = std::mem::take(&mut self.1);
-                self.0
-                    .retain(|s| !unused.iter().any(|p| std::ptr::eq(*p, s.pair())));
+                let unused = std::mem::take(&mut self.unused);
+                let (old, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.slots)
+                    .into_iter()
+                    .partition(|s| unused.iter().any(|p| std::ptr::eq(*p, s.pair())));
+                self.slots = kept;
+                old.into_iter().for_each(|s| self.drop_slot(s));
             }
-            if self.0.len() >= KEPT {
-                self.0.remove(0);
+            if self.slots.len() >= KEPT {
+                let oldest = self.slots.remove(0);
+                self.drop_slot(oldest);
             }
             if warm {
-                self.1.push(pair);
-                self.0.push(Slot::Loading(pair, std::thread::spawn(load)));
+                self.unused.push(pair);
+                self.slots
+                    .push(Slot::Loading(pair, std::thread::spawn(load)));
                 return Ok(None);
             }
             slot = Some(Slot::Loaded(pair, load()?));
         }
         if !warm {
-            self.1.retain(|p| !std::ptr::eq(*p, pair)); // used now
+            self.unused.retain(|p| !std::ptr::eq(*p, pair)); // used now
         }
-        self.0.push(slot.expect("loaded above"));
-        match self.0.last_mut() {
+        self.slots.push(slot.expect("loaded above"));
+        match self.slots.last_mut() {
             Some(Slot::Loaded(_, t)) => Ok(Some(t)),
             _ => unreachable!("loaded above"),
         }
@@ -764,7 +797,7 @@ mod mt_tests {
             mt::pair("fr", "en").unwrap(),
         );
         let fresh = |n| move || -> Result<u32, OcrError> { Ok(n) };
-        let kept = |m: &Mt<u32>| m.0.iter().map(|s| s.pair().label()).collect::<Vec<_>>();
+        let kept = |m: &Mt<u32>| m.slots.iter().map(|s| s.pair().label()).collect::<Vec<_>>();
         // never used: the real pair's warm-up replaces it
         let mut m = Mt::new();
         m.get(en_ar, true, fresh(1)).unwrap();
@@ -781,6 +814,56 @@ mod mt_tests {
         m.get(en_ar, true, fresh(1)).unwrap();
         m.get(es_en, false, fresh(2)).unwrap();
         assert_eq!(kept(&m), [en_ar.label(), es_en.label()]);
+    }
+
+    // W96 AC-5: at most one dropped load runs on beside the live ones: a third
+    // warm-up is skipped while it does; a real request waits for it.
+    #[test]
+    fn ac5_a_new_warm_up_does_not_stack_a_load_on_a_dropped_one() {
+        let (en_ar, es_en, fr_en) = (
+            mt::pair("en", "ar").unwrap(),
+            mt::pair("es", "en").unwrap(),
+            mt::pair("fr", "en").unwrap(),
+        );
+        let kept = |m: &Mt<u32>| m.slots.iter().map(|s| s.pair().label()).collect::<Vec<_>>();
+        let mut m = Mt::new();
+        m.get(en_ar, true, slow(1)).unwrap(); // loading
+        m.get(es_en, true, slow(2)).unwrap(); // replaces it: its load runs on
+        assert_eq!(kept(&m), [es_en.label()]);
+        // a third warm-up while that one still runs is skipped
+        assert!(m.get(fr_en, true, slow(3)).unwrap().is_none());
+        assert_eq!(kept(&m), [es_en.label()], "nothing stacked");
+        // a real request waits for the dropped load, then loads
+        let t = Instant::now();
+        assert_eq!(m.get(fr_en, false, slow(4)).unwrap(), Some(&mut 4));
+        assert!(
+            t.elapsed() >= Duration::from_millis(250),
+            "{:?}",
+            t.elapsed()
+        );
+        // once it is over a warm-up goes ahead again
+        let mut m = Mt::new();
+        m.get(en_ar, true, slow(1)).unwrap();
+        m.get(es_en, true, slow(2)).unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        m.get(fr_en, true, slow(3)).unwrap();
+        assert_eq!(kept(&m), [fr_en.label()], "the unused warm-up was replaced");
+    }
+
+    // W96 AC-5: a dropped load that has finished frees its model at the next
+    // request (its handle holds the result until then).
+    #[test]
+    fn ac5_a_finished_dropped_load_frees_its_model() {
+        let (en_ar, es_en) = (mt::pair("en", "ar").unwrap(), mt::pair("es", "en").unwrap());
+        let probe = Arc::new(());
+        let (a, b) = (probe.clone(), Arc::new(()));
+        let mut m: Mt<Arc<()>> = Mt::new();
+        m.get(en_ar, true, move || Ok(a)).unwrap();
+        m.get(es_en, true, move || Ok(b)).unwrap(); // drops the first: it runs on
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(Arc::strong_count(&probe), 2, "held by the finished handle");
+        m.get(es_en, false, || Ok(Arc::new(()))).unwrap();
+        assert_eq!(Arc::strong_count(&probe), 1, "freed");
     }
 
     // W96 AC-3: the last two models stay loaded (a pivot pair ru -> en -> ar
