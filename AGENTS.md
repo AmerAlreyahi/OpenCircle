@@ -1041,7 +1041,21 @@ production systems.
 
 - No peek at the original under a translation (owner, 2026-11-18, commit 0977fb5f; recorded here 2026-11-24): holding Alt no
   longer shows the original (Alt+A left the peek stuck); no frame of the original until Esc. UX F7 (a Show original toggle on
-  the pill) waits for the owner because it goes against this.
+  the pill) waits for the owner because it goes against this. UPDATE (owner, 2026-11-24): build F7 as a click toggle: an
+  "Original" button on the translate pill, click = original, click again = translation; Esc still ends it; Alt never peeks.
+
+- Owner answers 2026-11-24 (3):
+  - #201 right-click menu on selected text is IN the enhancements release (owner sees it as an enhancement): study the actions
+    first (Windows + Linux), owner approves the list, then build; #202 Ctrl+wheel resize with it.
+  - F10: keep Enter's "Text" choice, renamed "Copy text" (id "text"; no migration, nobody's Enter changes).
+  - The new design: the owner decides what it covers after reviewing it, not now.
+  - Translate speed (#221, W94 measured: no regression since v0.1.8; the cost was already there): (1) the second whole-screen
+    PP-OCR read after Windows OCR runs only on game screens; (2) the model warm-up no longer blocks or waits behind OCR;
+    (3) the helper keeps the last two translation models (about +250 MB while warm). The owner uses the offline (Local) engine.
+  - SDLC Kit adoption APPROVED: commit hooks (gate + no AI attribution), .gitleaksignore for the 8 fake history hits, sdlc.json.
+    Old history with AI attribution is LEFT as it is (no rewrite); the hook guards new commits.
+  - Roadmap source = docs/roadmap.json (kit template); the board is generated from it and the private master roadmap page
+    shows it (supersedes "the private Artifact roadmap.md is the master" for planning edits).
 
 ## Domain quirks
 
