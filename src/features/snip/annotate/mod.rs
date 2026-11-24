@@ -45,6 +45,8 @@ fn clean_paste(t: &str) -> String {
 }
 
 #[cfg(test)]
+mod blur_tests;
+#[cfg(test)]
 mod objects_api_tests;
 #[cfg(test)]
 mod objects_grow_tests;
@@ -685,6 +687,12 @@ pub struct Annotator {
     pub(crate) blur_size: Option<Width>,
     /// The blur's pixel size (its mosaic cells).
     pub(crate) blur_cell: Width,
+    /// Hide's look (Frost, or the Pixelate mosaic).
+    pub(crate) blur_style: blur::Style,
+    /// Image px per display px of the capture (its monitor's DPI scale, or what
+    /// the picture's size says): Hide's texture scale is this times its base size,
+    /// never divided by the zoom.
+    pub(crate) capture_scale: f32,
     /// The eraser's brush (display px) and "Whole drawing".
     pub(crate) eraser: f32,
     pub(crate) eraser_whole: bool,
@@ -767,6 +775,7 @@ impl Annotator {
             last.copy_from_slice(tools);
         }
         last[info(tool).group as usize] = tool;
+        let capture_scale = (1.0 / zoom).max(picture_scale(image.width.min(image.height) as f32));
         let mut editor = Annotator {
             doc: Document::new(image),
             tool,
@@ -822,6 +831,8 @@ impl Annotator {
             lock: None,
             blur_size: saved.blur_size,
             blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
+            blur_style: blur::Style::default(),
+            capture_scale,
             eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
             eraser_whole: saved.eraser_whole.unwrap_or(false),
             erasing: None,
@@ -2070,8 +2081,8 @@ impl Annotator {
             Tool::Blur => Shape::Blur {
                 points: vec![p],
                 size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
-                cell: self.blur_cell.cell() / z,
-                seed: blur::seed(),
+                cell: self.blur_cell.cell() * self.capture_scale,
+                style: self.blur_style,
             },
             Tool::Redact => Shape::Redact { a: p, b: p },
             Tool::Spotlight => Shape::Spotlight { a: p, b: p },
@@ -2115,8 +2126,11 @@ impl Annotator {
                 }
                 Shape::Highlighter(_) => new.width = editor.stroke * 4.0 / z,
                 // Auto keeps the size it was given (its line); a picked one applies.
-                Shape::Blur { size, cell, .. } => {
-                    *cell = editor.blur_cell.cell() / z;
+                Shape::Blur {
+                    size, cell, style, ..
+                } => {
+                    *cell = editor.blur_cell.cell() * editor.capture_scale;
+                    *style = editor.blur_style;
                     new.width = item.width;
                     if let Some(w) = editor.blur_size {
                         *size = w.brush() / z;

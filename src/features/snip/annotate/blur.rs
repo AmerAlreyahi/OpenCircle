@@ -1,28 +1,20 @@
-//! Blur brush: a fine pixel mosaic along a text line (owner, 2026-10-31: like
-//! iTop's pixelate, softer and with smaller cells); line help keeps a stroke on
-//! its line.
+//! Hide (the blur brush): a content-free fill over what the user wants gone.
 //!
-//! It must not be reversible: a mosaic of fine cell means is a function of the
-//! glyph shapes, and an attacker renders candidate strings and scores them
-//! (Depix, or a likelihood over all cells). Even coarse block means (two or
-//! three glyphs each) left the true text ranked first more often than chance
-//! on Windows. So the source is read ONCE, for the whole stroke: its mean tone
-//! and one tint (`tint`: the chroma of its ink / background pair, snapped
-//! coarsely, none for grey content, plus a secret per-stroke jitter).
-//! The stroke's tone gets a secret offset, is snapped to `TONE_STEP` with a
-//! secret dither (its last levels are gone) and is kept so far inside 0..=255
-//! that no noise below ever clips or folds (a fold would let a fitted offset
-//! tell tones apart). The mosaic is then drawn from secrets only: coarse
-//! blocks one brush tall and 2.5 brushes wide, each that tone plus a secret
-//! offset; each fine cell's tone interpolated between them, plus a secret
-//! jitter per cell, all from an OS-random seed (never from the content);
-//! its colour = that tone in grey + the stroke's tint, the same on every cell
-//! (no colour noise, no cast: grey stays grey, a blue link stays blue). The
-//! cell grid is softened a little (two box passes of a quarter cell). The
-//! footprint is a flat band `size` tall along the stroke (square ends, no
-//! round blob), sharp at its edges. A repaint of any region holding the
-//! stroke gives the same pixels (blocks, cells and jitter belong to the
-//! image's coordinates and the stroke's seed).
+//! It must not be reversible: anything that reads the covered pixels (a
+//! Gaussian of any strength, a pixelate up to 16 px cells) was recovered 100 %
+//! by candidate matching in the W100 lab (Depix / Unredacter); only a fill
+//! that never reads the content was at chance. So the source is read ONCE per
+//! stroke for two colours only: its background (the most common colour under
+//! the footprint, which says nothing about the text) and its ink (the
+//! extreme colour away from it, whole on any stem however little text there
+//! is). The fill is the background pulled a FIXED 12 % toward the ink
+//! (`DARKEN`), plus a texture that belongs to the PICTURE: a smooth noise
+//! (Frost, the default) or a fine mosaic of cells (Pixelate, today's look), from
+//! one secret seed per document, anchored to image coordinates and a scale
+//! in image px (the capture's DPI scale, never the zoom). So two strokes on
+//! one background match within a level or two, a repaint of any crop gives
+//! the same pixels, and strokes that overlap merge. The footprint is a flat
+//! band `size` tall along the stroke (square ends).
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -42,28 +34,37 @@ pub fn seed() -> u64 {
     })
 }
 
-/// Secret tone offset per block, ± levels.
-pub const BLOCK_NOISE: f32 = 20.0;
-/// Secret tone jitter per cell, ± levels.
-pub const JITTER: f32 = 14.0;
-/// Secret tone offset for the whole stroke, ± levels: how much ink the text
-/// has (its mean tone) is hidden under it, also where black and white fold
-/// the tone back (a fitted offset can't undo a fold).
-pub const STROKE_NOISE: f32 = 32.0;
-/// The stroke's tone is snapped to steps of this many levels.
-pub const TONE_STEP: f32 = 16.0;
-/// A block is this many brushes wide (about two or three glyphs).
-pub const BLOCK_WIDTH: f32 = 2.5;
+/// The fill is the background pulled this much toward the ink: fixed, so it
+/// never tracks how much text there is.
+pub const DARKEN: f32 = 0.12;
+/// Frost: the texture's reach, ± levels.
+pub const FROST: f32 = 10.0;
+/// Pixelate: secret tone offset per block, ± levels.
+pub const BLOCK_NOISE: f32 = 8.0;
+/// Pixelate: secret tone jitter per cell, ± levels.
+pub const JITTER: f32 = 6.0;
+
+/// How a hidden area looks. Both never read the covered text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Style {
+    /// A smooth, secure frost (the default).
+    #[default]
+    Frost,
+    /// A fine pixel mosaic (the look of the first secure blur).
+    Pixelate,
+}
 
 /// Side of a mosaic cell, image px (at least 2).
 pub fn cell(cell: f32) -> i64 {
     cell.round().max(2.0) as i64
 }
 
-/// A block's (width, height), image px, for a brush `size` tall.
-pub fn block(size: f32) -> (i64, i64) {
-    let h = size.round().max(4.0) as i64;
-    ((BLOCK_WIDTH * h as f32).round() as i64, h)
+/// A mosaic block's (width, height), image px: from the cell, so the pattern
+/// is the same on every line.
+pub fn block(cell_px: f32) -> (i64, i64) {
+    let c = cell(cell_px);
+    (8 * c, 3 * c)
 }
 
 /// Box radius of each of the two softening passes: a quarter cell.
@@ -77,23 +78,22 @@ pub fn frame(points: &[Point], size: f32) -> Rectangle {
     span(points).expand(size * std::f32::consts::FRAC_1_SQRT_2 + 1.0)
 }
 
-/// Beyond `frame`: what the mosaic reads (the softening, whole cells, and the
-/// blocks the cells are interpolated between: up to two blocks each way).
-pub fn reach(size: f32, cell_px: f32) -> f32 {
+/// Beyond `frame`: what a repaint must hold (the softening and whole cells).
+pub fn reach(cell_px: f32) -> f32 {
     let c = cell(cell_px);
-    let (bw, bh) = block(size);
-    (2 * soften(c)) as f32 + c as f32 + 2.0 * bw.max(bh) as f32 + 1.0
+    (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0
 }
 
-/// One coarse block: the stroke's tone with its secret offset, snapped.
-#[derive(Clone, Copy)]
-struct Block {
-    tone: f32,
-}
-
-/// Pixelates the stroke `points` (band `size` tall, cells `cell_px` wide,
-/// image px; `seed`: the stroke's secret) in `layer`.
-pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed: u64) {
+/// Hides the stroke `points` (band `size` tall; texture scale `cell_px`, image
+/// px; `seed`: the document's secret) in `layer`.
+pub fn paint(
+    layer: &mut Layer,
+    points: &[Point],
+    size: f32,
+    cell_px: f32,
+    style: Style,
+    seed: u64,
+) {
     let (w, h) = (layer.pm.width() as i64, layer.pm.height() as i64);
     let (ox, oy) = (layer.origin.x, layer.origin.y);
     let clip = |r: Rectangle| {
@@ -108,18 +108,7 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
     if ax0 >= ax1 || ay0 >= ay1 {
         return;
     }
-    let c = cell(cell_px);
-    let r = soften(c);
-    let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
-    // Grid snapping (image-anchored): `n` px cells or blocks, layer px `v`.
-    let down = |v: i64, o: i64, n: i64| (v + o).div_euclid(n) * n - o;
-    let up = |v: i64, o: i64, n: i64| -(-(v + o)).div_euclid(n) * n - o;
-    // The cells drawn: the area plus the softening margin, whole cells.
-    let (sx0, sy0, sx1, sy1) = clip(area.expand((2 * r) as f32));
-    let (sx0, sx1) = (down(sx0, oxi, c).clamp(0, w), up(sx1, oxi, c).clamp(0, w));
-    let (sy0, sy1) = (down(sy0, oyi, c).clamp(0, h), up(sy1, oyi, c).clamp(0, h));
     let (aw, ah) = ((ax1 - ax0) as usize, (ay1 - ay0) as usize);
-    let (sw, sh) = ((sx1 - sx0) as usize, (sy1 - sy0) as usize);
 
     // The footprint: the stroke `size` wide with square ends (hard-edged).
     let Some(mut mask) = Mask::new(aw as u32, ah as u32) else {
@@ -139,75 +128,100 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
     };
     let to_mask = Transform::from_translate(-(ox + ax0 as f32), -(oy + ay0 as f32));
     // Not anti-aliased: a half-covered rim pixel would show half of its source
-    // (a glyph's edge) through the mosaic.
+    // (a glyph's edge) through the fill.
     mask.fill_path(&outline, FillRule::Winding, false, to_mask);
 
-    // 1. The ONLY reading of the source: what is under the footprint gives
-    // one tone and one tint for the whole stroke.
-    let (tone, tint) = {
+    // 1. The ONLY reading of the source: the background and the ink colour.
+    let fill = {
         let data = layer.pm.data();
-        let under: Vec<[u8; 3]> = (ay0..ay1)
+        let under = (ay0..ay1)
             .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
             .filter_map(|(x, y)| {
                 let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
                 let i = ((y * w + x) * 4) as usize;
                 (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
-            })
-            .collect();
-        let n = under.len().max(1) as f32;
-        let tone = under.iter().map(|p| luma(p.map(f32::from))).sum::<f32>() / n;
-        (tone, tint(colours(under.into_iter()), seed))
-    };
-    // The stroke's tone + its secret offset, kept so far inside 0..=255 (and
-    // so that its tint fits) that no cell's noise ever clips or folds: the
-    // noise is then purely additive, and a fitted offset tells nothing apart.
-    let (lo, hi) = (
-        tint.iter().fold(0.0f32, |m, &t| m.min(t)),
-        tint.iter().fold(0.0f32, |m, &t| m.max(t)),
-    );
-    let noise = BLOCK_NOISE + JITTER;
-    let (floor, ceiling) = (noise - lo, 255.0 - noise - hi);
-    // Snapped to `TONE_STEP` with a secret dither: what is left of the mean
-    // after the offset (its last few levels) is gone, not just hidden.
-    let dither = TONE_STEP / 2.0 * unit(mix(seed ^ 0x2545_f491));
-    let shifted = tone + STROKE_NOISE * unit(mix(seed ^ 0x5bd1_e995)) + dither;
-    let stroke_tone = (shifted / TONE_STEP).round() * TONE_STEP - dither;
-    let tone = match floor <= ceiling {
-        true => stroke_tone.max(floor).min(ceiling),
-        false => (floor + ceiling) / 2.0,
-    };
-    // 2. The coarse blocks (columns on the image's grid; rows on the stroke's
-    // band, its start's middle): the stroke's tone, each with a secret
-    // offset. They give the mosaic its patches; no content.
-    let (bw, bh) = block(size);
-    let band = (points[0].y - size / 2.0).round() as i64;
-    let oyb = oyi - band;
-    let (gx0, gx1) = (
-        (sx0 + oxi).div_euclid(bw) - 1,
-        (sx1 + oxi).div_euclid(bw) + 1,
-    );
-    let (gy0, gy1) = (
-        (sy0 + oyb).div_euclid(bh) - 1,
-        (sy1 + oyb).div_euclid(bh) + 1,
-    );
-    let gw = (gx1 - gx0 + 1) as usize;
-    let mut blocks = Vec::with_capacity(gw * (gy1 - gy0 + 1) as usize);
-    for gy in gy0..=gy1 {
-        for gx in gx0..=gx1 {
-            let key = mix(!seed ^ mix(gx as u64 ^ (gy as u64) << 32));
-            blocks.push(Block {
-                tone: tone + BLOCK_NOISE * unit(key),
             });
+        let (ink, bg) = colours(under);
+        [0, 1, 2].map(|k| bg[k] * (1.0 - DARKEN) + ink[k] * DARKEN)
+    };
+    let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
+
+    // 2. The texture, from the seed and image coordinates only.
+    let tone: Box<dyn Fn(i64, i64) -> f32> = match style {
+        Style::Frost => {
+            let l = cell(cell_px) * 2;
+            Box::new(move |x, y| FROST * frost(seed, x + oxi, y + oyi, l))
         }
-    }
-    let at = |gx: i64, gy: i64| {
-        blocks[(gy.clamp(gy0, gy1) - gy0) as usize * gw + (gx.clamp(gx0, gx1) - gx0) as usize]
+        Style::Pixelate => {
+            let buf = mosaic(
+                cell_px,
+                seed,
+                clip(area.expand(2.0 * soften(cell(cell_px)) as f32)),
+                (oxi, oyi),
+                (w, h),
+            );
+            let (sx0, sy0, sw) = (buf.0, buf.1, buf.2);
+            let data = buf.3;
+            Box::new(move |x, y| data[(y - sy0) as usize * sw + (x - sx0) as usize])
+        }
     };
 
-    // 3. The fine cells, from the blocks only.
     let data = layer.pm.data_mut();
-    let index = |x: i64, y: i64| ((y * w + x) * 4) as usize;
-    let mut buf = vec![[0.0f32; 3]; sw * sh];
+    for y in ay0..ay1 {
+        for x in ax0..ax1 {
+            let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize] as f32 / 255.0;
+            if m <= 0.0 {
+                continue;
+            }
+            let t = tone(x, y);
+            let i = ((y * w + x) * 4) as usize;
+            for k in 0..3 {
+                let v = (fill[k] + t).clamp(0.0, 255.0);
+                data[i + k] = (v * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
+            }
+            data[i + 3] = 255;
+        }
+    }
+}
+
+/// Smooth value noise in -1..=1 on a lattice of `l` px anchored to image
+/// coordinates (smoothstep between hashed corners): the Frost texture.
+fn frost(seed: u64, x: i64, y: i64, l: i64) -> f32 {
+    let (gx, gy) = (x.div_euclid(l), y.div_euclid(l));
+    let smooth = |v: i64| {
+        let t = v.rem_euclid(l) as f32 / l as f32;
+        t * t * (3.0 - 2.0 * t)
+    };
+    let (tx, ty) = (smooth(x), smooth(y));
+    let corner =
+        |dx: i64, dy: i64| unit(mix(seed ^ mix((gx + dx) as u64 ^ ((gy + dy) as u64) << 32)));
+    let top = corner(0, 0) * (1.0 - tx) + corner(1, 0) * tx;
+    let bottom = corner(0, 1) * (1.0 - tx) + corner(1, 1) * tx;
+    top * (1.0 - ty) + bottom * ty
+}
+
+/// The Pixelate texture over the layer region `(x0, y0, x1, y1)`: tone offsets
+/// per fine cell (a secret jitter) on coarse blocks (a secret offset each,
+/// blended across), softened a little. Returns (x0, y0, width, offsets).
+fn mosaic(
+    cell_px: f32,
+    seed: u64,
+    (x0, y0, x1, y1): (i64, i64, i64, i64),
+    (oxi, oyi): (i64, i64),
+    (w, h): (i64, i64),
+) -> (i64, i64, usize, Vec<f32>) {
+    let c = cell(cell_px);
+    let r = soften(c);
+    // Grid snapping (image-anchored): `n` px cells, layer px `v`.
+    let down = |v: i64, o: i64, n: i64| (v + o).div_euclid(n) * n - o;
+    let up = |v: i64, o: i64, n: i64| -(-(v + o)).div_euclid(n) * n - o;
+    let (sx0, sx1) = (down(x0, oxi, c).clamp(0, w), up(x1, oxi, c).clamp(0, w));
+    let (sy0, sy1) = (down(y0, oyi, c).clamp(0, h), up(y1, oyi, c).clamp(0, h));
+    let (sw, sh) = ((sx1 - sx0) as usize, (sy1 - sy0) as usize);
+    let (bw, bh) = block(cell_px);
+    let block_tone =
+        |gx: i64, gy: i64| BLOCK_NOISE * unit(mix(!seed ^ mix(gx as u64 ^ (gy as u64) << 32)));
+    let mut buf = vec![[0.0f32; 1]; sw * sh];
     let mut cy = sy0;
     while cy < sy1 {
         let y1 = up(cy + 1, oyi, c).min(sy1);
@@ -215,40 +229,24 @@ pub fn paint(layer: &mut Layer, points: &[Point], size: f32, cell_px: f32, seed:
         while cx < sx1 {
             let x1 = up(cx + 1, oxi, c).min(sx1);
             // The cell's middle in block units: across, between the blocks'
-            // middles; down, its own row (the line's, inside the band).
+            // middles; down, its own block row.
             let fx = ((cx + x1) as f32 / 2.0 + oxi as f32) / bw as f32 - 0.5;
-            let iy = ((cy + y1) / 2 + oyb).div_euclid(bh);
+            let iy = ((cy + y1) / 2 + oyi).div_euclid(bh);
             let ix = fx.floor() as i64;
             let tx = fx - ix as f32;
-            let tone = (1.0 - tx) * at(ix, iy).tone + tx * at(ix + 1, iy).tone;
+            let blocks = (1.0 - tx) * block_tone(ix, iy) + tx * block_tone(ix + 1, iy);
             let (gx, gy) = ((cx + oxi).div_euclid(c), (cy + oyi).div_euclid(c));
             let jitter = JITTER * unit(mix(seed ^ mix(gx as u64 ^ (gy as u64) << 32)));
-            // (In range by construction; the clamp only guards rounding.)
-            let value = tint.map(|t| (tone + jitter + t).clamp(0.0, 255.0));
             for y in cy..y1 {
                 buf[(y - sy0) as usize * sw + (cx - sx0) as usize..][..(x1 - cx) as usize]
-                    .fill(value);
+                    .fill([blocks + jitter]);
             }
             cx = x1;
         }
         cy = y1;
     }
     blur2d(&mut buf, sw, sh, r, 2);
-
-    for y in ay0..ay1 {
-        for x in ax0..ax1 {
-            let m = mask.data()[(y - ay0) as usize * aw + (x - ax0) as usize] as f32 / 255.0;
-            if m <= 0.0 {
-                continue;
-            }
-            let cell = buf[(y - sy0) as usize * sw + (x - sx0) as usize];
-            let i = index(x, y);
-            for k in 0..3 {
-                data[i + k] = (cell[k] * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
-            }
-            data[i + 3] = 255;
-        }
-    }
+    (sx0, sy0, sw, buf.into_iter().map(|[v]| v).collect())
 }
 
 /// The stroke's ONE colour pair (owner's look, review: never per block, or a
@@ -282,41 +280,6 @@ pub(crate) fn colours(pixels: impl Iterator<Item = [u8; 3]>) -> ([f32; 3], [f32;
     });
     (ink, bg.map(f32::from))
 }
-
-/// The chroma of the middle of the stroke's pair, snapped to `TINT_STEP`
-/// (coarser than the jitter; under half a step on every channel: none, so
-/// grey text and ClearType fringes on it stay grey).
-pub(crate) fn snapped_tint((ink, bg): ([f32; 3], [f32; 3])) -> [f32; 3] {
-    let mid = [0, 1, 2].map(|k| (ink[k] + bg[k]) / 2.0);
-    let y = luma(mid);
-    mid.map(|v| ((v - y) / TINT_STEP).round() * TINT_STEP)
-}
-
-/// The stroke's ONE tint, the same on every cell whatever its tone, so no
-/// cell's colour carries anything of its own: a cell = its tone in grey + this
-/// tint. `snapped_tint`, plus (when there is one) a secret per-stroke jitter
-/// added after the snap; its spread is kept within 255 levels so a grey tone
-/// always fits.
-fn tint(pair: ([f32; 3], [f32; 3]), seed: u64) -> [f32; 3] {
-    let snapped = snapped_tint(pair);
-    if snapped == [0.0; 3] {
-        return snapped;
-    }
-    let jitter = [0u64, 1, 2].map(|k| TINT_JITTER * unit(mix(seed ^ (0x7f4a_7c15 + k))));
-    let jy = luma(jitter);
-    let t = [0, 1, 2].map(|k| snapped[k] + jitter[k] - jy);
-    let spread =
-        t.iter().fold(f32::MIN, |m, &v| m.max(v)) - t.iter().fold(f32::MAX, |m, &v| m.min(v));
-    match spread > 255.0 {
-        true => t.map(|v| v * 255.0 / spread),
-        false => t,
-    }
-}
-
-/// The stroke's tint is snapped to steps of this many levels.
-pub const TINT_STEP: f32 = 48.0;
-/// Secret per-stroke tint jitter, ± levels per channel (after the snap).
-pub const TINT_JITTER: f32 = 8.0;
 
 fn luma(c: [f32; 3]) -> f32 {
     0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]

@@ -79,14 +79,15 @@ pub enum Shape {
         at: Point,
         radius: f32,
     },
-    /// A blur brush stroke: a pixel mosaic `size` px tall, of `cell` px cells.
-    /// `seed`: OS-random per item, never shown: its jitter makes it irreversible.
+    /// A Hide brush stroke `size` px tall; `cell` is its texture scale (image
+    /// px). Its secret is the document's (`Document::seed`), one per picture.
     Blur {
         #[serde(with = "pts")]
         points: Vec<Point>,
         size: f32,
         cell: f32,
-        seed: u64,
+        #[serde(default)]
+        style: blur::Style,
     },
     /// A solid box of the colour (passwords, keys: nothing left to recover).
     Redact {
@@ -272,7 +273,7 @@ impl Item {
             }
             Shape::Highlighter(_) => self.width / 2.0 + 2.0,
             Shape::Redact { .. } | Shape::Spotlight { .. } => 1.0,
-            Shape::Blur { size, cell, .. } => blur::reach(*size, *cell),
+            Shape::Blur { cell, .. } => blur::reach(*cell),
             Shape::Text { size, .. } | Shape::Callout { size, .. } | Shape::Label { size, .. } => {
                 size / 6.0 + 3.0
             }
@@ -440,6 +441,9 @@ pub struct Document {
     undone: Vec<(u64, Edit)>,
     /// Edits numbered so far.
     made: u64,
+    /// The picture's one secret (Hide's texture, never shown): OS-random per
+    /// document, so every Hide in it matches and no two pictures share a texture.
+    pub seed: u64,
 }
 
 impl Document {
@@ -454,6 +458,7 @@ impl Document {
             done: Vec::new(),
             undone: Vec::new(),
             made: 0,
+            seed: blur::seed(),
         }
     }
 
@@ -497,7 +502,7 @@ impl Document {
         region: IntRect,
         legend: Option<&Legend>,
     ) -> Pixmap {
-        let mut pm = paint(&self.image, layers, region);
+        let mut pm = paint(&self.image, layers, region, self.seed);
         if let Some(legend) = legend.filter(|l| l.band == 0.0) {
             let mut layer = Layer {
                 pm,
@@ -859,7 +864,7 @@ pub fn rounded(r: Rectangle, radius: f32) -> Option<Path> {
 
 /// Paints `region` (image px, inside the image) of the image with `items` over it.
 /// `(item, false)` = hidden (being edited live), but it still counts as a step.
-pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap {
+pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64) -> Pixmap {
     let (w, h) = (region.width(), region.height());
     let premultiply = |px: &mut [u8]| {
         // Screen captures are opaque (one cheap look says so); premultiply anything that is not.
@@ -952,8 +957,8 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect) -> Pixmap 
                 points,
                 size,
                 cell,
-                seed,
-            } => blur::paint(&mut layer, points, *size, *cell, *seed),
+                style,
+            } => blur::paint(&mut layer, points, *size, *cell, *style, seed),
             Shape::Redact { a, b } => {
                 if let Some(path) = rounded(span(&[*a, *b]), 0.0) {
                     layer.fill(&path, [c[0], c[1], c[2], 255]);

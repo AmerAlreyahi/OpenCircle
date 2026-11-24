@@ -518,7 +518,7 @@ impl Annotator {
         let img = &self.doc.image;
         let layers: Vec<_> = layers.iter().map(|i| (*i, true)).collect();
         let whole = tiny_skia::IntRect::from_xywh(0, 0, img.width, img.height)?;
-        let rgba: Vec<u8> = super::document::paint(img, &layers, whole)
+        let rgba: Vec<u8> = super::document::paint(img, &layers, whole, self.doc.seed)
             .pixels()
             .iter()
             .flat_map(|p| {

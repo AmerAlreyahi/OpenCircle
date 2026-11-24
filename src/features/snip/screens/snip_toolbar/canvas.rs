@@ -705,14 +705,10 @@ mod tests {
                 }
             }
         }
-        // The blur's secret seed is OS-random per stroke: fixed here, or no
+        // The blur's secret seed is OS-random per picture: fixed here, or no
         // two runs draw it alike.
-        if let Some(crate::features::snip::annotate::Shape::Blur { seed, .. }) =
-            e.doc.items.first_mut().map(|i| &mut i.shape)
-        {
-            *seed = 7;
-            e.refresh();
-        }
+        e.doc.seed = 7;
+        e.refresh();
         e
     }
 

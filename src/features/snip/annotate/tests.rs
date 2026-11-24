@@ -185,7 +185,7 @@ fn blur_changes_only_its_band() {
         points: stroke,
         size,
         cell: 6.0,
-        seed: 7,
+        style: blur::Style::Frost,
     });
     let plain = render(&doc_with(checker(100, 80), vec![]));
     let blurred = render(&doc_with(checker(100, 80), vec![blur]));
@@ -240,6 +240,10 @@ fn pxi(i: &Image, x: u32, y: u32) -> [u8; 4] {
 /// `image` with a blur brush (`cell` px cells, secret `seed`) along its line
 /// `band` (as line help does).
 fn brushed(image: Image, band: lines::Band, cell: f32, seed: u64) -> Image {
+    brushed_in(blur::Style::Frost, image, band, cell, seed)
+}
+
+fn brushed_in(style: blur::Style, image: Image, band: lines::Band, cell: f32, seed: u64) -> Image {
     let (w, h) = (image.width, image.height);
     let mut layer = document::Layer {
         pm: tiny_skia::Pixmap::from_vec(image.rgba, tiny_skia::IntSize::from_wh(w, h).unwrap())
@@ -248,7 +252,7 @@ fn brushed(image: Image, band: lines::Band, cell: f32, seed: u64) -> Image {
     };
     let (middle, size) = band.stroke(1.0);
     let stroke = [pt(8.0, middle), pt(w as f32 - 8.0, middle)];
-    blur::paint(&mut layer, &stroke, size, cell, seed);
+    blur::paint(&mut layer, &stroke, size, cell, style, seed);
     Image {
         width: w,
         height: h,
@@ -359,8 +363,10 @@ fn blur_mosaic_text_is_below_the_noise() {
                         let at =
                             format!("cell {cell} {a}/{b} {bg:?} fringed {fringed} {view} {what}");
                         eprintln!("{at}: text {text:.2} noise {noise:.2}");
-                        // (A grey field has no colour at all: both are 0 there.)
-                        assert!(text < noise || text < 0.05, "{at}: {text} vs {noise}");
+                        // The fill reads only two colours (a twelfth of the ink's
+                        // differs by a fringe's few levels): under half a level
+                        // on average, and below the seed's own spread where there is one.
+                        assert!(text < noise || text < 0.5, "{at}: {text} vs {noise}");
                     }
                 }
             }
@@ -414,26 +420,13 @@ fn blur_mosaic_colours_are_one_pair_per_stroke() {
     let (a, b) = (line(20.0, 260.0), line(260.0, 20.0));
     assert_ne!(a.pm.data(), b.pm.data());
     assert_eq!(blur::colours(pixels(&a)), blur::colours(pixels(&b)));
-    // Painted: the same tone always has the same blue-red difference, in
-    // both pictures and every block (the soft cell edges round by a level).
-    let mut seen = std::collections::HashMap::new();
-    for mut l in [a, b] {
+    // Painted: where the coloured word sits changes nothing of the fill.
+    let paint = |mut l: document::Layer| {
         let stroke = [pt(10.0, 20.0), pt(390.0, 20.0)];
-        blur::paint(&mut l, &stroke, 24.0, 6.0, 9);
-        for y in 10..30u32 {
-            for x in 20..380u32 {
-                let i = ((y * 400 + x) * 4) as usize;
-                let p = &l.pm.data()[i..i + 3];
-                let tone = (p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8;
-                let chroma = p[2] as i32 - p[0] as i32;
-                let first = *seen.entry(tone).or_insert(chroma);
-                assert!(
-                    (chroma - first).abs() <= 3,
-                    "({x}, {y}) tone {tone}: {chroma} vs {first}"
-                );
-            }
-        }
-    }
+        blur::paint(&mut l, &stroke, 24.0, 6.0, blur::Style::Frost, 9);
+        l.pm.take()
+    };
+    assert_eq!(paint(a), paint(b));
 }
 
 /// The stroke's tint doesn't track how much ink is under it (review): a line
@@ -462,11 +455,14 @@ fn blur_tint_ignores_how_much_ink_there_is() {
             };
             let (thin, heavy) = (pair("iiiiiiii"), pair("WWWWWWWW"));
             assert_eq!(thin.1, heavy.1, "{fg:?} fringed {fringed}: background");
-            assert_eq!(
-                blur::snapped_tint(thin),
-                blur::snapped_tint(heavy),
-                "{fg:?} fringed {fringed}: {thin:?} vs {heavy:?}"
-            );
+            // The fill (background + 12 % of the ink) moves a few levels at most.
+            for k in 0..3 {
+                let fill = |p: ([f32; 3], [f32; 3])| p.1[k] * 0.88 + p.0[k] * 0.12;
+                assert!(
+                    (fill(thin) - fill(heavy)).abs() <= 3.0,
+                    "{fg:?} fringed {fringed}: {thin:?} vs {heavy:?}"
+                );
+            }
         }
     }
 }
@@ -560,8 +556,8 @@ fn blur_mosaic_has_no_tint() {
             // differences (its colour moves only in tone), near the source's.
             let diffs = |p: [u8; 4]| (p[0] as i32 - p[1] as i32, p[1] as i32 - p[2] as i32);
             let first = diffs(pxi(&flat, core[0].0, core[0].1));
-            let (want, step) = (diffs(colour), (blur::TINT_STEP + blur::TINT_JITTER) as i32);
-            assert!((first.0 - want.0).abs() <= step && (first.1 - want.1).abs() <= step);
+            let want = diffs(colour);
+            assert!((first.0 - want.0).abs() <= 1 && (first.1 - want.1).abs() <= 1);
             for &(x, y) in &core {
                 let d = diffs(pxi(&flat, x, y));
                 assert!(
@@ -580,7 +576,7 @@ fn blur_mosaic_has_no_tint() {
 fn blur_mosaic_reads_only_coarse_blocks() {
     let original = field("hunter2");
     let band = lines::detect(&original)[0];
-    let (bw, bh) = blur::block(band.stroke(1.0).1);
+    let (bw, bh) = blur::block(6.0);
     let (bw, bh) = (bw as u32, bh as u32);
     let mut mirrored = field("hunter2");
     for y in 0..40 - 40 % bh {
@@ -710,6 +706,12 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
 
 #[test]
 fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
+    for style in [blur::Style::Frost, blur::Style::Pixelate] {
+        repaint_of_a_crop(style);
+    }
+}
+
+fn repaint_of_a_crop(style: blur::Style) {
     let full = field("hunter2");
     let band = lines::detect(&full)[0];
     let (size, cell) = (band.stroke(1.0).1, 6.0);
@@ -722,9 +724,9 @@ fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
         .unwrap(),
         origin: Point::ORIGIN,
     };
-    blur::paint(&mut whole, &stroke, size, cell, 1);
+    blur::paint(&mut whole, &stroke, size, cell, style, 1);
     // A layer holding only what the stroke can touch (frame + reach).
-    let r = blur::frame(&stroke, size).expand(blur::reach(size, cell));
+    let r = blur::frame(&stroke, size).expand(blur::reach(cell));
     let (x0, y0) = (r.x.floor().max(0.0) as u32, 0u32);
     let (x1, y1) = (((r.x + r.width).ceil() as u32).min(240), 40u32);
     let mut data = Vec::new();
@@ -740,7 +742,7 @@ fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
         .unwrap(),
         origin: Point::new(x0 as f32, y0 as f32),
     };
-    blur::paint(&mut crop, &stroke, size, cell, 1);
+    blur::paint(&mut crop, &stroke, size, cell, style, 1);
     for y in y0..y1 {
         for x in x0..x1 {
             let a = &whole.pm.data()[((y * 240 + x) * 4) as usize..][..4];
@@ -3400,7 +3402,7 @@ fn a_blur_hides_its_footprint_not_its_reach() {
         points: vec![pt(200.0, 150.0), pt(260.0, 150.0)],
         size: 20.0,
         cell: 6.0,
-        seed: 3,
+        style: blur::Style::Frost,
     });
     let doc = doc_with(checker(500, 300), vec![blur]);
     let hidden = super::hidden(&doc);
