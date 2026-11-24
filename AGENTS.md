@@ -1052,6 +1052,8 @@ production systems.
   - Translate speed (#221, W94 measured: no regression since v0.1.8; the cost was already there): (1) the second whole-screen
     PP-OCR read after Windows OCR runs only on game screens; (2) the model warm-up no longer blocks or waits behind OCR;
     (3) the helper keeps the last two translation models (about +250 MB while warm). The owner uses the offline (Local) engine.
+    (4, owner 2026-11-24) an unused warm-up model is dropped when another warm-up arrives; the ~1 GB transient peak for ~1.5 s on a
+    non-English game screen is ACCEPTED by the owner (avoiding it would give back the time saved).
   - SDLC Kit adoption APPROVED: commit hooks (gate + no AI attribution), .gitleaksignore for the 8 fake history hits, sdlc.json.
     Old history with AI attribution is LEFT as it is (no rewrite); the hook guards new commits.
   - Roadmap source = docs/roadmap.json (kit template); the board is generated from it and the private master roadmap page
