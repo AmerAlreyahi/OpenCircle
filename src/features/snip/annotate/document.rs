@@ -95,6 +95,9 @@ pub enum Shape {
         /// Over 0: only a ring this wide along the shape's edge.
         #[serde(default)]
         outline: f32,
+        /// Progressive: where the blur is strongest, then where it is gone.
+        #[serde(with = "pts", default)]
+        ramp: Vec<Point>,
     },
     /// A solid box of the colour (passwords, keys: nothing left to recover).
     Redact {
@@ -209,9 +212,11 @@ impl Shape {
                 size,
                 cell,
                 outline,
+                ramp,
                 ..
             } => {
                 points.iter_mut().for_each(|p| *p = f(*p));
+                ramp.iter_mut().for_each(|p| *p = f(*p));
                 *size = (*size * k).max(4.0);
                 *cell = (*cell * k).max(2.0);
                 *outline *= k;
@@ -248,12 +253,14 @@ impl Item {
                 size,
                 kind,
                 outline,
+                ramp,
                 ..
             } => blur::frame(&blur::Footprint {
                 points,
                 size: *size,
                 kind: *kind,
                 outline: *outline,
+                ramp,
             }),
             Shape::Arrow {
                 a, b, bend, text, ..
@@ -991,12 +998,14 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
                 style,
                 kind,
                 outline,
+                ramp,
             } => {
                 let fp = blur::Footprint {
                     points,
                     size: *size,
                     kind: *kind,
                     outline: *outline,
+                    ramp,
                 };
                 blur::paint(&mut layer, &fp, *cell, *style, seed)
             }

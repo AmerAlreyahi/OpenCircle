@@ -25,6 +25,10 @@ pub enum Handle {
 /// corners. Pen, highlighter and blur strokes have none (dragged by the stroke).
 pub fn handles(item: &Item) -> Vec<(Handle, Point)> {
     match item.shape {
+        // A progressive Hide: where it is strongest and where it is gone.
+        Shape::Blur { ref ramp, .. } if ramp.len() == 2 => {
+            vec![(Handle::End(0), ramp[0]), (Handle::End(1), ramp[1])]
+        }
         Shape::Pen(_) | Shape::Highlighter(_) | Shape::Blur { .. } => Vec::new(),
         Shape::Arrow { a, b, bend, .. } => vec![
             (Handle::End(0), a),
@@ -252,6 +256,7 @@ pub fn dragged(original: &Item, handle: Handle, p: Point) -> Item {
             *bend += (p - *at) * 0.5;
             *at = p;
         }
+        (Shape::Blur { ramp, .. }, Handle::End(end)) if ramp.len() == 2 => ramp[end] = p,
         (Shape::Callout { tip, .. }, Handle::Tip) => *tip = p,
         _ => {}
     }

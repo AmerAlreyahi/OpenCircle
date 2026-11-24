@@ -188,6 +188,7 @@ fn blur_changes_only_its_band() {
         style: blur::Style::Frost,
         kind: blur::Kind::Brush,
         outline: 0.0,
+        ramp: Vec::new(),
     });
     let plain = render(&doc_with(checker(100, 80), vec![]));
     let blurred = render(&doc_with(checker(100, 80), vec![blur]));
@@ -3433,6 +3434,7 @@ fn a_blur_hides_its_footprint_not_its_reach() {
         style: blur::Style::Frost,
         kind: blur::Kind::Brush,
         outline: 0.0,
+        ramp: Vec::new(),
     });
     let doc = doc_with(checker(500, 300), vec![blur]);
     let hidden = super::hidden(&doc);

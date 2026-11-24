@@ -224,7 +224,21 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
                 (BlurShape::Rect, t!(tl_rect)),
                 (BlurShape::Ellipse, t!(tl_ellipse)),
             ];
+            let styles = crate::features::snip::annotate::blur_styles();
             let mut o = vec![
+                group(
+                    styles
+                        .iter()
+                        .map(|&(style, words)| {
+                            text_cell(
+                                words,
+                                e.blur_style == style,
+                                Some(Message::BlurStyle(style)),
+                            )
+                        })
+                        .collect(),
+                    false,
+                ),
                 group(
                     shapes
                         .iter()
@@ -239,6 +253,9 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
                 }),
                 toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
             ];
+            if e.blur_style.is_look() {
+                o.push(muted(Role::ROW_DESC, t!(sn_looks_note)).into());
+            }
             if let Some(both) = e.hideable() {
                 o.push(toggle(
                     t!(sn_hide_shape),

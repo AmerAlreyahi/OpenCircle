@@ -709,8 +709,23 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
             let shape = segmented::inline(&shapes, e.blur_shape, e.blur_shape, 1.0, |kind| {
                 Message::BlurShape(kind)
             });
+            // The styles: Hide (never reads the text) and Pixelate, then the
+            // looks, with their one-line note.
+            let styles = crate::features::snip::annotate::blur_styles();
+            let style = |from: usize, to: usize| {
+                segmented::inline(&styles[from..to], e.blur_style, e.blur_style, 1.0, |s| {
+                    Message::BlurStyle(s)
+                })
+            };
             let mut o = vec![
-                option(t!(sn_shape), None, None, Some(shape)),
+                line(vec![style(0, 2)]).into(),
+                line(vec![style(2, 5)]).into(),
+            ];
+            if e.blur_style.is_look() {
+                o.push(muted(Role::META, t!(sn_looks_note)).into());
+            }
+            o.extend([
+                sizes(t!(sn_shape), String::new(), shape, None),
                 column![
                     option(t!(sn_brush), None, Some(value.into()), Some(chip)),
                     line(vec![brush]),
@@ -724,7 +739,7 @@ pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
                     e.assist,
                     Some(Message::Assist),
                 ),
-            ];
+            ]);
             if let Some(both) = e.hideable() {
                 let mut chips = vec![button::switch(
                     t!(sn_hide_shape),
@@ -1038,7 +1053,7 @@ mod tests {
                     ("draw", panel(Tool::Pen), 230.0),
                     ("text", panel(Tool::Text), 360.0),
                     ("steps", panel(Tool::Step), 330.0),
-                    ("hide", panel(Tool::Blur), 360.0),
+                    ("hide", panel(Tool::Blur), 520.0),
                     ("colour", colour, 440.0),
                     ("undo", undo, 130.0),
                     ("more", more, 430.0),

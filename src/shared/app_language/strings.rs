@@ -1753,6 +1753,18 @@ strings! {
         | "حجم البكسل";
     sn_shape: "Shape"
         | "الشكل";
+    sn_style_hide: "Hide"
+        | "إخفاء";
+    sn_style_pixelate: "Pixelate"
+        | "تبكسل";
+    sn_style_soft: "Soft"
+        | "ناعم";
+    sn_style_frosted: "Frosted"
+        | "زجاجي";
+    sn_style_progressive: "Progressive"
+        | "متدرّج";
+    sn_looks_note: "For looks, not for secrets"
+        | "للمظهر فقط، وليس للأسرار";
     sn_hide_shape: "Hide this shape"
         | "إخفاء هذا الشكل";
     sn_hide_outline: "Its outline"

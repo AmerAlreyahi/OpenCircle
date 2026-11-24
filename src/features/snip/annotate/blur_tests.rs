@@ -15,6 +15,7 @@ fn hide(points: Vec<Point>, size: f32, style: blur::Style) -> Item {
         style,
         kind: blur::Kind::Brush,
         outline: 0.0,
+        ramp: Vec::new(),
     })
 }
 

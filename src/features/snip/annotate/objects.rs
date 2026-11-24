@@ -119,6 +119,7 @@ pub(super) mod touch {
             M::Stroke(_) => STROKE,
             M::TextSize(_) | M::TextStyle(_) => TEXT,
             M::BlurSize(_) | M::BlurCell(_) => BLUR,
+            M::BlurStyle(_) => BLUR,
             M::Outline(_) => OUTLINE,
             M::Fill(_) => FILL,
             M::Preset(_) => COLOUR | STROKE | TEXT,

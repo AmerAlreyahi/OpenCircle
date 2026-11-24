@@ -53,6 +53,26 @@ pub enum Style {
     Frost,
     /// A fine pixel mosaic (the look of the first secure blur).
     Pixelate,
+    /// A look: a soft Gaussian blur of what is there.
+    Soft,
+    /// A look: a blur with a light tint, a little more colour and fine noise
+    /// (the Acrylic recipe).
+    Frosted,
+    /// A look: a blur that fades from one handle to the other (`Footprint::ramp`).
+    Progressive,
+}
+
+impl Style {
+    /// A look reads what it covers: for looks, not for secrets (the lab got a
+    /// 6-digit code back 100 % through any such blur).
+    pub fn is_look(self) -> bool {
+        matches!(self, Style::Soft | Style::Frosted | Style::Progressive)
+    }
+}
+
+/// A look's blur radius (Gaussian sigma, image px) for texture scale `cell_px`.
+pub fn sigma(cell_px: f32) -> f32 {
+    cell_px / 2.0
 }
 
 /// The shape of a Hide (W102 step 2).
@@ -77,6 +97,9 @@ pub struct Footprint<'a> {
     pub size: f32,
     pub kind: Kind,
     pub outline: f32,
+    /// Progressive: where the blur is strongest, then where it is gone (two
+    /// points; none: even).
+    pub ramp: &'a [Point],
 }
 
 impl<'a> Footprint<'a> {
@@ -88,6 +111,7 @@ impl<'a> Footprint<'a> {
             size,
             kind: Kind::Brush,
             outline: 0.0,
+            ramp: &[],
         }
     }
 
@@ -150,7 +174,8 @@ pub fn feather(cell_px: f32) -> f32 {
 /// whole cells).
 pub fn reach(cell_px: f32) -> f32 {
     let c = cell(cell_px);
-    feather(cell_px) + (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0
+    let looks = 3.0 * sigma(cell_px).ceil() + 1.0;
+    (feather(cell_px) + (2 * soften(c)) as f32 + 2.0 * c as f32 + 1.0).max(feather(cell_px) + looks)
 }
 
 /// How many pixels of a footprint the two colours are read from, at most.
@@ -200,6 +225,19 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
         .map(|(&[soft], &m)| (soft * 2.0).min(1.0).max(f32::from(m) / 255.0))
         .collect();
 
+    if style.is_look() {
+        return look(
+            layer,
+            fp,
+            &cover,
+            (ax0, ay0, ax1, ay1),
+            cell_px,
+            style,
+            seed,
+            clip(area.expand(3.0 * sigma(cell_px).ceil() + 1.0)),
+        );
+    }
+
     // 1. The ONLY reading of the source: the background and the ink colour.
     let fill = {
         let data = layer.pm.data();
@@ -222,14 +260,6 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
 
     // 2. The texture, from the seed and image coordinates only.
     let tone: Box<dyn Fn(i64, i64) -> f32> = match style {
-        Style::Frost => {
-            let lattice = Lattice::new(
-                seed,
-                cell(cell_px) * 2,
-                (ax0 + oxi, ay0 + oyi, ax1 + oxi, ay1 + oyi),
-            );
-            Box::new(move |x, y| FROST * lattice.at(x + oxi, y + oyi))
-        }
         Style::Pixelate => {
             let buf = mosaic(
                 cell_px,
@@ -241,6 +271,14 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
             let (sx0, sy0, sw) = (buf.0, buf.1, buf.2);
             let data = buf.3;
             Box::new(move |x, y| data[(y - sy0) as usize * sw + (x - sx0) as usize])
+        }
+        _ => {
+            let lattice = Lattice::new(
+                seed,
+                cell(cell_px) * 2,
+                (ax0 + oxi, ay0 + oyi, ax1 + oxi, ay1 + oyi),
+            );
+            Box::new(move |x, y| FROST * lattice.at(x + oxi, y + oyi))
         }
     };
 
@@ -256,6 +294,112 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
             for k in 0..3 {
                 let v = (fill[k] + t).clamp(0.0, 255.0);
                 data[i + k] = (v * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
+            }
+            data[i + 3] = 255;
+        }
+    }
+}
+
+/// A Frosted look's tint (white) and colour boost, and its noise, ± levels.
+const TINT: f32 = 0.30;
+const BOOST: f32 = 1.15;
+const GRAIN: f32 = 3.0;
+
+/// How far along the ramp `p` is, 0 at its start (strongest) to 1 at its end,
+/// smoothstepped: the blur is `1 - this`.
+fn ramp_at(ramp: &[Point], p: Point) -> f32 {
+    let [a, b] = ramp else {
+        return 0.0;
+    };
+    let d = *b - *a;
+    let len2 = (d.x * d.x + d.y * d.y).max(1e-3);
+    let t = (((p.x - a.x) * d.x + (p.y - a.y) * d.y) / len2).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// A look: the covered picture blurred (Gaussian, from `sigma`; Progressive
+/// through levels between none and that, by `ramp_at`), tinted for Frosted,
+/// blended by `cover`. Unlike Hide it reads what is under it.
+#[allow(clippy::too_many_arguments)]
+fn look(
+    layer: &mut Layer,
+    fp: &Footprint,
+    cover: &[f32],
+    (ax0, ay0, ax1, ay1): (i64, i64, i64, i64),
+    cell_px: f32,
+    style: Style,
+    seed: u64,
+    (rx0, ry0, rx1, ry1): (i64, i64, i64, i64),
+) {
+    let (w, ox, oy) = (layer.pm.width() as i64, layer.origin.x, layer.origin.y);
+    let (rw, rh, aw) = (
+        (rx1 - rx0) as usize,
+        (ry1 - ry0) as usize,
+        (ax1 - ax0) as usize,
+    );
+    let data = layer.pm.data();
+    let mut src = Vec::with_capacity(rw * rh);
+    for y in ry0..ry1 {
+        for x in rx0..rx1 {
+            let i = ((y * w + x) * 4) as usize;
+            src.push([data[i] as f32, data[i + 1] as f32, data[i + 2] as f32]);
+        }
+    }
+    // The blurred levels: 0 = the picture; the last = the full sigma. A
+    // progressive look blends between them, the others use the last.
+    let levels = if style == Style::Progressive { 5 } else { 1 };
+    let sigma = sigma(cell_px).max(1.0);
+    let mut blurred = vec![src.clone()];
+    for k in 1..=levels {
+        let r = (sigma * k as f32 / levels as f32).round().max(1.0) as usize;
+        let mut b = src.clone();
+        blur2d(&mut b, rw, rh, r, 3);
+        blurred.push(b);
+    }
+    let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
+    let data = layer.pm.data_mut();
+    for y in ay0..ay1 {
+        for x in ax0..ax1 {
+            let m = cover[(y - ay0) as usize * aw + (x - ax0) as usize];
+            if m <= 0.001 {
+                continue;
+            }
+            let at = ((y - ry0) * rw as i64 + (x - rx0)) as usize;
+            // How blurred this pixel is: 0..=levels (fractional between).
+            let strength = match style {
+                Style::Progressive => {
+                    let p = Point::new((x + oxi) as f32 + 0.5, (y + oyi) as f32 + 0.5);
+                    (1.0 - ramp_at(fp.ramp, p)) * levels as f32
+                }
+                _ => 1.0,
+            };
+            let (lo, hi) = (
+                strength.floor() as usize,
+                (strength.ceil() as usize).min(levels),
+            );
+            let t = strength - lo as f32;
+            let mut c = [0, 1, 2].map(|k| blurred[lo][at][k] * (1.0 - t) + blurred[hi][at][k] * t);
+            if style != Style::Soft {
+                // Frosted: tint + colour boost + grain; Progressive: the same
+                // tint, fading with the blur.
+                let fade = strength / levels as f32;
+                let (tint, grain) = match style {
+                    Style::Frosted => (TINT, GRAIN),
+                    _ => (TINT * 0.7 * fade, 0.0),
+                };
+                let luma = luma(c);
+                let noise =
+                    grain * unit(mix(seed ^ mix((x + oxi) as u64 ^ ((y + oyi) as u64) << 32)));
+                let boost = if style == Style::Frosted { BOOST } else { 1.0 };
+                c = c.map(|v| {
+                    let v = luma + (v - luma) * boost;
+                    v * (1.0 - tint) + 255.0 * tint + noise
+                });
+            }
+            let i = (((y) * w + x) * 4) as usize;
+            for k in 0..3 {
+                data[i + k] =
+                    (c[k].clamp(0.0, 255.0) * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
             }
             data[i + 3] = 255;
         }

@@ -66,6 +66,7 @@ fn drawn(kind: blur::Kind, a: Point, b: Point, outline: f32, image: Image) -> Cr
             style: blur::Style::Frost,
             kind,
             outline,
+            ramp: Vec::new(),
         })],
     )
 }

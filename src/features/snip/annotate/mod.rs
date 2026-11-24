@@ -45,6 +45,8 @@ fn clean_paste(t: &str) -> String {
 }
 
 #[cfg(test)]
+mod blur_look_tests;
+#[cfg(test)]
 mod blur_shape_tests;
 #[cfg(test)]
 mod blur_speed_tests;
@@ -400,6 +402,8 @@ pub enum Message {
     BlurCell(Width),
     /// Hide's shape for the next one drawn.
     BlurShape(blur::Kind),
+    /// Hide's look: for the next one drawn, and the selected one.
+    BlurStyle(blur::Style),
     /// Hide the selected annotation: a rectangle, ellipse, pen or arrow gets
     /// a Hide over its area (`true`: only along its outline).
     HideShape(bool),
@@ -704,6 +708,8 @@ pub struct Annotator {
     pub(crate) blur_style: blur::Style,
     /// Hide's shape: the free brush, a rectangle or an ellipse.
     pub(crate) blur_shape: blur::Kind,
+    /// Hide's look was just picked: a restyle gives it to the selected Hides.
+    style_picked: bool,
     /// Image px per display px of the capture (its monitor's DPI scale, or what
     /// the picture's size says): Hide's texture scale is this times its base size,
     /// never divided by the zoom.
@@ -849,6 +855,7 @@ impl Annotator {
             blur_cell: saved.blur_cell.unwrap_or(Width::Thin),
             blur_style: blur::Style::default(),
             blur_shape: blur::Kind::default(),
+            style_picked: false,
             capture_scale,
             eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
             eraser_whole: saved.eraser_whole.unwrap_or(false),
@@ -1065,6 +1072,12 @@ impl Annotator {
                 self.restyle();
             }
             Message::BlurShape(kind) => self.blur_shape = kind,
+            Message::BlurStyle(style) => {
+                self.blur_style = style;
+                self.style_picked = true;
+                self.restyle();
+                self.style_picked = false;
+            }
             Message::HideShape(outline) => self.hide_shape(outline),
             Message::EraserSize(px) => self.eraser = px,
             Message::EraserWhole(on) => self.eraser_whole = on,
@@ -1436,6 +1449,7 @@ impl Annotator {
                 style: self.blur_style,
                 kind,
                 outline: if ring { over } else { 0.0 },
+                ramp: Vec::new(),
             },
             colour: self.colour,
             width: item.width,
@@ -1525,7 +1539,7 @@ impl Annotator {
     /// middle, so it covers that line and no other); with line help (and no
     /// Shift) held at its height.
     fn brush(&mut self, mut p: Point) -> Item {
-        if self.blur_shape != blur::Kind::Brush {
+        if self.blur_shape != blur::Kind::Brush || self.blur_style == blur::Style::Progressive {
             return self.create(p);
         }
         let (size, middle) = self.brush_size(p);
@@ -2253,8 +2267,13 @@ impl Annotator {
                 size: self.blur_size.unwrap_or(Width::Medium).brush() / z,
                 cell: self.blur_cell.cell() * self.capture_scale,
                 style: self.blur_style,
-                kind: self.blur_shape,
+                // (a progressive look is a region with a ramp across it)
+                kind: match self.blur_style {
+                    blur::Style::Progressive => blur::Kind::Rect,
+                    _ => self.blur_shape,
+                },
                 outline: 0.0,
+                ramp: Vec::new(),
             },
             Tool::Redact => Shape::Redact {
                 a: p,
@@ -2302,8 +2321,13 @@ impl Annotator {
                 }
                 Shape::Highlighter(_) => new.width = editor.stroke * 4.0 / z,
                 // Auto keeps the size it was given (its line); a picked one applies.
-                Shape::Blur { size, cell, .. } => {
+                Shape::Blur {
+                    size, cell, style, ..
+                } => {
                     *cell = editor.blur_cell.cell() * editor.capture_scale;
+                    if editor.style_picked {
+                        *style = editor.blur_style;
+                    }
                     new.width = item.width;
                     if let Some(w) = editor.blur_size {
                         *size = w.brush() / z;
@@ -2385,6 +2409,20 @@ impl Annotator {
             (rect, handle(pm))
         });
     }
+}
+
+/// Hide's styles and their words, in the order of the options row (Snip's
+/// panel and the Studio's bar both show this one list): the two that never
+/// read the text, then the looks.
+pub fn blur_styles() -> [(blur::Style, &'static str); 5] {
+    use crate::t;
+    [
+        (blur::Style::Frost, t!(sn_style_hide)),
+        (blur::Style::Pixelate, t!(sn_style_pixelate)),
+        (blur::Style::Soft, t!(sn_style_soft)),
+        (blur::Style::Frosted, t!(sn_style_frosted)),
+        (blur::Style::Progressive, t!(sn_style_progressive)),
+    ]
 }
 
 /// The editor's options as last changed in this run (the next editor opens on
@@ -2486,6 +2524,8 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: 
         Shape::Blur {
             points,
             kind: blur::Kind::Rect | blur::Kind::Ellipse,
+            ramp,
+            style,
             ..
         } => {
             // Shift: a square or a circle.
@@ -2496,6 +2536,12 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: 
                 false => p,
             };
             *points = vec![start, end];
+            if *style == blur::Style::Progressive {
+                // Strongest along the bottom, gone at the top (Figma's default).
+                let r = document::span(points);
+                let mid = r.x + r.width / 2.0;
+                *ramp = vec![Point::new(mid, r.y + r.height), Point::new(mid, r.y)];
+            }
         }
         Shape::Blur { points, .. } => {
             // Line help holds the stroke on one line: sliding back along it
