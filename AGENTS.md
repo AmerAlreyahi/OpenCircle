@@ -1141,6 +1141,16 @@ production systems.
   UPDATE (owner, same day): one "AI and Search" page = yes; the preview presentation and the Browser | AI provider control are
   OPEN: he picks from a comparison sheet (5-6 preview methods, 3-4 choice controls). Do NOT draw all pages yet.
 
+- Owner picks from the comparison sheets (2026-11-24; sheets in .claude/artifacts/design/render/out/w101/compare-*.png):
+  - Recording, while recording = R1: a top-centre bar (Windows Snipping Tool style) with timer, Pause, Stop, discard, PLUS a mic
+    mute toggle and an audio device picker (from R6) and the capture SIZE and FPS shown on the bar.
+  - After stop = S2: a small corner thumbnail with hover actions (Copy, Save, Edit, Open with = system chooser), drag-out; its
+    Edit opens the recording in OpenCircle Studio (S1) to trim.
+  - Settings "Answers from: Browser | AI provider" = B2: two choice cards, each saying what it does before the pick.
+  - Settings feature preview: base = A3 ("See how it works" opens the clip inline) + A5 (sticky clip column beside the settings
+    on a wide window); he wants MORE, bolder ideas: "the preview isn't getting its full rights". Next: a sheet of new ideas.
+  These replace the round-1/round-2 recording looks and the slim preview row.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
