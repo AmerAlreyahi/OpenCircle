@@ -1165,6 +1165,13 @@ production systems.
   song search, game translation + glossaries, colour picker, ruler, QR, quick convert, advanced paste. First new one: meeting
   captions (#227).
 
+- CORE vs EXTENSION RULE (owner agreed 2026-11-24): a new tool goes into Extensions unless most users would use it every week.
+  Core out of the box: Circle to Search (select, copy text, search, right-click menu), Translate screen (one shot) + Show original,
+  Ask AI about the screen, Snip (picture) + OpenCircle Studio (edit, steps, export), Snip recording (video/audio), Blur/Hide,
+  edit text, cut out. Extensions: meeting captions, live/game translation + glossaries, song search, colour picker, ruler, pin
+  live region, QR/barcodes, quick convert, advanced paste, actions on detected things, local offline AI model, dictation, read
+  aloud, writing assist, privacy curtain. The name OpenCircle stays; the tagline is being chosen.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
