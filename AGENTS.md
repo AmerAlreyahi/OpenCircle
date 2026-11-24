@@ -1132,6 +1132,10 @@ production systems.
   dashboard for this app?": no Home page, no stats tiles). New content is inspired by the owner's other app's LATEST design
   (/home/az_work/MainHub/Apps/CA_Catalog_Orchestrator: design/, docs/internal/v034-harmony/), with the feature preview done the
   best possible way. Show ONE sample page, light mode, one picture; never recreate everything before he approves the sample.
+  SAMPLE APPROVED (owner, 2026-11-24, "yes, continue"): docs/internal/reports-enh/w101-settings-sample.md, PNG
+  .claude/artifacts/design/render/out/w101/settings-sample-daylight.png. Lead defaults for its questions: one "AI and Search"
+  page; the preview = a slim row at the top (hover/focus plays a silent ~5 s loop, still under reduced motion) whose text
+  describes the FEATURE, never the design; two-option choices stay segmented, on/off = toggle switches. Next: every page.
 
 ## Domain quirks
 
