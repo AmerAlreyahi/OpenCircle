@@ -1123,6 +1123,14 @@ production systems.
   Collapse (Ctrl+B) at the foot. The Settings design round starts from that and shows 2-3 prettier variants of the same idea
   for him to pick (the round 5 filled-block selection is NOT the target).
 
+- Settings redesign RESET (owner, 2026-11-24, on the round 5 canvas): APPROVED = only the shell: the title bar (logo, name, version
+  chip, centred search with Ctrl F keycaps, window buttons) + the round-1 sidebar (raised white pill + thin accent bar on the
+  selected item, icons + labels, hairline groups, Report a problem + Collapse Ctrl B at the foot), as in Settings v2 round 1 (B2).
+  NOT approved = everything in the content area; the round 5 content and the Home dashboard are WITHDRAWN ("why do I need a
+  dashboard for this app?": no Home page, no stats tiles). New content is inspired by the owner's other app's LATEST design
+  (/home/az_work/MainHub/Apps/CA_Catalog_Orchestrator: design/, docs/internal/v034-harmony/), with the feature preview done the
+  best possible way. Show ONE sample page, light mode, one picture; never recreate everything before he approves the sample.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
