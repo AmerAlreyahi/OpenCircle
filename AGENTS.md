@@ -1121,7 +1121,9 @@ production systems.
   the Studio; the same at any zoom (image px x capture DPI scale, never / zoom). One texture per picture, overlaps merge. Shapes:
   rectangle, ellipse, free brush with soft round ends, "Hide this shape"; edges feather outward only; an ellipse stays an ellipse
   (Redact too); the #154 drag-back shrink only while line help holds the stroke on one line. Blur once, mask many (cache).
-  Old saved blurs re-render with the new fill. Keys: B, Shift+B cycles styles, R/E/P shapes, 1-3 strength.
+  Old saved blurs re-render with the new fill. Keys: B, Shift+B cycles the style for the NEXT Hide (restyling an existing Hide
+  needs a click on a style card), 1-3 strength while Hide is the tool; NO R/E/P override (shapes in the options row only).
+  Old blur_cell "thin" (the written default) migrates once to Medium (schema 14). The Hide fill's ink term is quantised.
 
 - Settings sidebar (owner, 2026-11-24): he still prefers an earlier sidebar he can't find; the CLOSEST is Settings v2 round 1
   (backup .claude/artifacts/backups/settings-v2-round1.*.tgz, render B2-AskAI): the selected item is a raised pill (elevated
