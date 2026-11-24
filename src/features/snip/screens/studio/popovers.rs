@@ -7,7 +7,7 @@ use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill};
 
 use super::{Msg, Studio};
-use crate::features::snip::annotate::{Message, Order, Shape, Tool, info};
+use crate::features::snip::annotate::{Message, Order, Shape, Tool};
 use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, label};
@@ -26,6 +26,9 @@ pub enum Pop {
     /// The narrow bar's colour swatches.
     Colours,
 }
+
+/// Edit text's glyph (lucide "pencil", in the subset font).
+pub(super) const EDIT_TEXT_ICON: char = '\u{e1f8}';
 
 /// The panel's rows, in the design's order (Edit text and Cut out follow them).
 pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
@@ -198,7 +201,8 @@ fn actions(s: &Studio) -> Element<'_, Msg> {
     }
     let editing = s.edit.is_some();
     rows = rows.push(option_list::action(option_list::ActionRow {
-        lead: option_list::glyph(info(Tool::Text).icon, false),
+        // lucide "pencil": Copy text keeps the "type" T (F15: they shared it)
+        lead: option_list::glyph(EDIT_TEXT_ICON, false),
         label: tr(crate::shared::app_language::S::st_edit_text),
         external: false,
         caps: Vec::new(),

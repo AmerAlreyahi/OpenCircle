@@ -361,6 +361,11 @@ fn colour_button<'a>(s: &Studio, e: &Annotator, live: bool) -> Element<'a, Msg> 
     popover::track(button, s.anchors.of(Pop::Colours))
 }
 
+/// What a dimmed control's tooltip says (F15); none while it is live.
+fn off_note(on: bool) -> Option<String> {
+    (!on).then(|| t!(st_not_for_tool).to_string())
+}
+
 /// The bar: the tool's name and key, the shared controls (always all of them),
 /// the tool's own, then Position and Actions.
 pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
@@ -402,13 +407,21 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             items.push(container(glyph).center_x(W_ICON).into());
         }
     }
-    items.push(match plan.colours_inline {
-        true => ed(colours(e, SWATCHES, c.colour)),
-        false => colour_button(s, e, c.colour),
-    });
-    items.push(ed(stroke(e, c.stroke, plan.captions)));
-    items.push(ed(opacity(e, c.opacity, plan.captions)));
-    items.push(ed(outline_fill(e, tool, c)));
+    // a dimmed control says why in its tooltip (F15)
+    let why = |el: Element<'a, Msg>, on: bool| match off_note(on) {
+        None => el,
+        Some(note) => crate::shared::kit::tooltip::cut(el, note),
+    };
+    items.push(why(
+        match plan.colours_inline {
+            true => ed(colours(e, SWATCHES, c.colour)),
+            false => colour_button(s, e, c.colour),
+        },
+        c.colour,
+    ));
+    items.push(why(ed(stroke(e, c.stroke, plan.captions)), c.stroke));
+    items.push(why(ed(opacity(e, c.opacity, plan.captions)), c.opacity));
+    items.push(why(ed(outline_fill(e, tool, c)), c.outline || c.fill));
     let more = !own.is_empty() && !plan.own_inline;
     if !own.is_empty() && plan.own_inline {
         items.push(ed(hairline()));
@@ -533,6 +546,30 @@ mod tests {
     use crate::features::snip::annotate::{Group, Image};
     use crate::shared::kit::option_bar::HEIGHT;
     use iced::Length;
+
+    /// F15 (#220): a control the tool cannot use is dimmed AND says so in its tooltip; a live
+    /// one has none.
+    #[test]
+    fn f15_a_dimmed_control_says_why() {
+        let mut e = Annotator::new(
+            Image {
+                width: 64,
+                height: 64,
+                rgba: vec![255; 64 * 64 * 4],
+            },
+            1.0,
+        );
+        e.update(Message::Tool(Tool::Select));
+        let none = can(&e, Tool::Select);
+        assert!(
+            !none.colour && !none.stroke && !none.outline,
+            "Select uses none"
+        );
+        assert_eq!(off_note(none.colour).as_deref(), Some("Not for this tool"));
+        let rect = can(&e, Tool::Rect);
+        assert!(rect.colour && rect.stroke);
+        assert_eq!(off_note(rect.colour), None);
+    }
 
     fn tall(e: &Element<'_, Message>) -> Length {
         iced::advanced::Widget::size(e.as_widget()).height

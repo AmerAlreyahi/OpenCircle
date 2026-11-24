@@ -4161,3 +4161,40 @@ fn f8_the_sidebar_has_one_add_step_button() {
         "no picture: no This picture"
     );
 }
+
+/// F15 (#220): a popover from the options bar hangs inside the window less the Steps sidebar
+/// (the Actions card covered the sidebar), on either side; Copy text and Edit text no longer
+/// share the "T" glyph.
+#[test]
+fn f15_popovers_stay_off_the_sidebar_and_edit_text_has_its_own_icon() {
+    use crate::shared::config::StudioSide;
+    let s = studio_on(640, 400);
+    let room = s.popover_room();
+    // the default: the sidebar at the end, the room ends where it starts
+    assert_eq!(room.x, 0.0);
+    assert_eq!(room.x + room.width, s.window.width - (SIDEBAR + 1.0));
+    // the end-hung Actions card (324 px) is placed inside it
+    let button = iced::Rectangle::new(Point::new(room.width - 60.0, 50.0), Size::new(90.0, 32.0));
+    let at = crate::shared::kit::popover::place_in(button, Size::new(324.0, 200.0), true, room);
+    assert!(at.x + 324.0 <= room.x + room.width, "{at:?}");
+    with_config(
+        |c| c.studio.steps_side = StudioSide::Start,
+        || {
+            let s = studio_on(640, 400);
+            let room = s.popover_room();
+            assert_eq!(room.x, SIDEBAR + 1.0, "the sidebar at the start");
+            assert_eq!(room.x + room.width, s.window.width);
+        },
+    );
+    let mut closed = studio_on(640, 400);
+    closed.steps_at_open(0);
+    assert_eq!(
+        closed.popover_room().width,
+        closed.window.width,
+        "no sidebar"
+    );
+    assert_ne!(
+        popovers::EDIT_TEXT_ICON,
+        crate::features::snip::snip_more::Row::CopyText.glyph()
+    );
+}

@@ -2110,6 +2110,22 @@ impl Studio {
         self.prefs.as_ref().is_some_and(|d| d.recording())
     }
 
+    /// The window less the Steps sidebar: a popover hangs inside it, never over the sidebar
+    /// (F15: the Actions card covered the sidebar's buttons and text).
+    pub(super) fn popover_room(&self) -> iced::Rectangle {
+        let side = match self.sidebar_shown() {
+            true => SIDEBAR + 1.0,
+            false => 0.0,
+        };
+        let sidebar_left =
+            !view::rail_on_left(self.sidebar_at_start(), crate::shared::kit::dir::rtl());
+        let left = if sidebar_left { side } else { 0.0 };
+        iced::Rectangle::new(
+            Point::new(left, 0.0),
+            Size::new(self.window.width - side, self.window.height),
+        )
+    }
+
     /// The Steps sidebar shows.
     pub(super) fn sidebar_shown(&self) -> bool {
         self.panels.library

@@ -145,6 +145,8 @@ pub struct MoreRow {
     pub caps: Vec<String>,
     pub message: Option<Message>,
     pub of: Option<Row>,
+    /// Why a dimmed row is off, in its tooltip (F15; the text rows say it in the foot).
+    pub why: Option<S>,
 }
 
 impl MoreRow {
@@ -155,6 +157,7 @@ impl MoreRow {
             caps: key.map(snip_more::caps).unwrap_or_default(),
             message,
             of: None,
+            why: None,
         }
     }
 }
@@ -185,6 +188,7 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
                 caps: info.caps[i].clone(),
                 message,
                 of: Some(row),
+                why: None,
             }
         })
         .collect();
@@ -234,6 +238,17 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         None,
         live(Message::ScreenTool(ScreenTool::Ruler)),
     ));
+    // a dimmed row says why in its tooltip (F15)
+    for r in rows
+        .iter_mut()
+        .filter(|r| r.of.is_none() && r.message.is_none())
+    {
+        r.why = match (e.capturing, r.name) {
+            (true, _) => Some(S::sn_why_capturing),
+            (false, S::sn_long_capture) => Some(S::sn_why_no_long),
+            _ => None,
+        };
+    }
     rows
 }
 
@@ -791,7 +806,7 @@ fn more_panel(e: &Annotator) -> Element<'_, Message> {
         let reading = r.of.is_some_and(|row| {
             e.more.read == Read::Reading && matches!(row, Row::CopyText | Row::Translate)
         });
-        items.push(option_list::action(option_list::ActionRow {
+        let row = option_list::action(option_list::ActionRow {
             lead,
             label,
             external: r.of == Some(Row::AskAi) && e.more.browser,
@@ -799,7 +814,11 @@ fn more_panel(e: &Annotator) -> Element<'_, Message> {
             reading,
             focused: e.row == Some(i),
             press: r.message,
-        }));
+        });
+        items.push(match r.why {
+            Some(why) => crate::shared::kit::tooltip::cut(row, tr(why).to_string()),
+            None => row,
+        });
     }
     let foot = snip_more::foot(&e.more, e.capturing).map(|words| option_list::foot(tr(words)));
     option_list::action_menu(if rtl { MORE_W_AR } else { MORE_W }, items, foot)
@@ -1078,5 +1097,30 @@ mod tests {
         assert!(matches!(key(&e), Some(Message::OpenStudio)));
         e.movable = false;
         assert!(!matches!(key(&e), Some(Message::OpenStudio)));
+    }
+
+    /// F15 (#220): a dimmed More row says why in its tooltip: a long capture running, or no
+    /// long capture on this desktop.
+    #[test]
+    fn f15_dimmed_more_rows_say_why() {
+        let why_of = |e: &Annotator, name: S| {
+            more_rows(e)
+                .into_iter()
+                .find(|r| r.name == name)
+                .map(|r| (r.message.is_some(), r.why))
+        };
+        let mut e = editor();
+        e.scroll = false;
+        assert_eq!(
+            why_of(&e, S::sn_long_capture),
+            Some((false, Some(S::sn_why_no_long)))
+        );
+        e.scroll = true;
+        assert_eq!(why_of(&e, S::sn_long_capture), Some((true, None)));
+        e.capturing = true;
+        assert_eq!(
+            why_of(&e, S::sn_long_capture),
+            Some((false, Some(S::sn_why_capturing)))
+        );
     }
 }

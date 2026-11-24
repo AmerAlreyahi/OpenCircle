@@ -1419,6 +1419,12 @@ strings! {
         | "نسخ النص";
     act_translate: "Translate"
         | "ترجمة";
+    st_not_for_tool: "Not for this tool"
+        | "لا ينطبق على هذه الأداة";
+    sn_why_capturing:"Finish the long capture first"
+        | "أنهِ الالتقاط الطويل أولًا";
+    sn_why_no_long: "Not available on this desktop"
+        | "غير متاح على سطح المكتب هذا";
     bar_key_copy: "copy"
         | "نسخ";
     bar_key_save: "save"

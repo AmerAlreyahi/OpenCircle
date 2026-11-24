@@ -32,6 +32,20 @@ fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {
         .into()
 }
 
+/// The swatch's mark: the colour as a filled rounded square (a round dot read as a record
+fn mark<'a, Message: 'a>(colour: Color) -> Element<'a, Message> {
+    container(Space::new().width(DOT).height(DOT))
+        .style(move |_| container::Style {
+            background: Some(colour.into()),
+            border: Border::default()
+                .rounded(radius::MENU_ITEM)
+                .width(1)
+                .color(c().rim),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 pub fn swatch<'a, Message: Clone + 'a>(
     colour: Color,
     open: bool,
@@ -43,7 +57,7 @@ pub fn swatch<'a, Message: Clone + 'a>(
         None => colour.scale_alpha(0.4),
     };
     super::focus::press(
-        button(container(dot(colour, DOT)).center(Fill))
+        button(container(mark(colour)).center(Fill))
             .width(size::ICON_BUTTON)
             .height(size::ICON_BUTTON)
             .padding(0)
@@ -149,4 +163,39 @@ pub fn recent<'a, Message: Clone + 'a>(
     row(colours.iter().enumerate().map(chip))
         .spacing(space::TRACK_GAP)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+
+    /// F15 (#220): the colour button is a filled rounded square (a round dot read as a record
+    /// button): the colour fills the middle AND the corner region a round dot would leave bare.
+    #[test]
+    fn f15_the_swatch_is_a_filled_rounded_square() {
+        let red = Color::from_rgb8(220, 30, 30);
+        let side = size::ICON_BUTTON;
+        let px = shot::render_with(
+            swatch(red, false, Some(())),
+            iced::Size::new(side, side),
+            None,
+            &[],
+        );
+        let at = |x: f32, y: f32| {
+            let i = ((y as usize) * (side as usize) + x as usize) * 4;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        let mid = side / 2.0;
+        assert_eq!(at(mid, mid), [220, 30, 30], "the colour in the middle");
+        // 6 px right and down: inside a square of 18, outside a circle of 18
+        // near the corner, where a round dot leaves the button bare, the square is still colour
+        let near = at(mid + 6.0, mid + 5.0);
+        assert!(
+            near[0] > 190 && near[1] < 70,
+            "a square, not a dot: {near:?}"
+        );
+        // and the corner itself is rounded off
+        assert_ne!(at(mid + 8.5, mid + 8.5), [220, 30, 30]);
+    }
 }

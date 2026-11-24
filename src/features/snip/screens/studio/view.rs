@@ -209,7 +209,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 s.anchors.of(pop).get(),
                 size,
                 end,
-                s.window,
+                s.popover_room(),
                 (corner, offset),
                 Msg::Pop(None),
                 s.rise(),

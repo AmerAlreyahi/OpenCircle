@@ -129,14 +129,21 @@ pub fn track<'a, Message: 'a>(
 /// The card's top-left for a card `size` hung under (or, with no room below, over) the
 /// `button`, its end edge on the button's end edge (`end`) or its start edge on the
 /// button's start edge, kept `GAP` inside `window`. Right-to-left mirrors the edges.
+#[cfg(test)]
 pub fn place(button: Rectangle, size: Size, end: bool, window: Size) -> Point {
+    place_in(button, size, end, Rectangle::new(Point::ORIGIN, window))
+}
+
+/// `place` inside `free` (the window less a side panel the card must not cover).
+pub fn place_in(button: Rectangle, size: Size, end: bool, free: Rectangle) -> Point {
     const GAP: f32 = 6.0;
+    let window = Size::new(free.x + free.width, free.y + free.height);
     let right_edge = end != dir::rtl();
     let x = match right_edge {
         true => button.x + button.width - size.width,
         false => button.x,
     };
-    let x = x.min(window.width - size.width - GAP).max(GAP);
+    let x = x.min(window.width - size.width - GAP).max(free.x + GAP);
     let below = button.y + button.height + 4.0;
     let y = match below + size.height + GAP <= window.height {
         true => below,
@@ -158,7 +165,7 @@ pub fn anchored_rising<'a, Message: Clone + 'a>(
     button: Rectangle,
     size: Size,
     end: bool,
-    window: Size,
+    free: Rectangle,
     fallback: (Corner, Padding),
     close: Message,
     rise: f32,
@@ -170,7 +177,7 @@ pub fn anchored_rising<'a, Message: Clone + 'a>(
         };
         return over(base, content, fallback.0, lower, close);
     }
-    let mut at = place(button, size, end, window);
+    let mut at = place_in(button, size, end, free);
     at.y += rise;
     let card = card(content, close.clone());
     let catch = mouse_area(
