@@ -1021,6 +1021,19 @@ production systems.
   clickable HTML file; tool options unfolded; both side panels collapsible; more advanced than the 2026-11-11 design) is
   queued for the next free worker slot; nothing is built before his OK.
 
+- Enhancements release (owner, 2026-11-24): the release after v0.4.0 is ENHANCEMENTS ONLY, no new features: #221 Translate slow
+  since v0.2.0, UX study F1-F15 (#206-#220), #200 Snip enhancements, #202 Ctrl+wheel resize. #201, #203, #204 wait. Video + audio
+  recording in Snip (#168) comes in the releases after it.
+- UX study owner calls (owner, 2026-11-24; SUPERSEDE the older decisions they name):
+  C1 main bar keeps Copy image = Ctrl+C / Save = Ctrl+S without buttons; the key hint (F3) shows them.
+  C2 the pinned AI chat gets an x that closes it; the pin only pins / unpins (supersedes "no x, the pin closes", 2026-10-28).
+  C3 Studio: Ctrl+= / Ctrl+- zoom the PICTURE, Ctrl+0 fits; UI size moves to Preferences > Appearance and the View menu
+  (supersedes 2026-11-20).
+  C4 Snip shows the active tool's options at once in a slim row under its toolbar, like the Studio (supersedes the second click, 2026-11-02).
+  C5 kept: with a drawing tool a drag draws; Select or Ctrl+drag moves; a one-time hint "Ctrl+drag moves" on the first drag over a shape.
+  C6 a quiet x at the end of the Snip toolbar and the translate pill; Esc keeps working (supersedes "Esc only", 2026-11-02).
+  C7 from Settings v2 now: toggle switches instead of Off | On segments, and each page's preview folded into one "Play preview" row.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
