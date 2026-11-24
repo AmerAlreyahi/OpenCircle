@@ -863,7 +863,7 @@ fn key_msg(
 
 /// The Studio's own keys (those its editor's canvas didn't take): Ctrl+O, Ctrl+V,
 /// the panels (Ctrl+B / Ctrl+Alt+B / Ctrl+\, by physical key), the zoom
-/// (Ctrl+= / Ctrl+- / Ctrl+0 / Ctrl+1); and files dragged over or dropped on it.
+/// (Ctrl+= / Ctrl+- zoom the picture, Ctrl+0 fits, Ctrl+1 is 100 %); and files dragged over or dropped on it.
 pub(super) fn studio_events(waiting: bool, recording: bool) -> iced::Subscription<Msg> {
     // the unsaved copy's debounce runs on a clock, only while an edit waits for its copy
     let tick = match waiting {
@@ -1070,12 +1070,11 @@ mod key_tests {
         is(k::PASTE, |m| matches!(m, studio::Msg::Paste));
         is(k::CLOSE, |m| matches!(m, studio::Msg::Caption(_)));
         is(k::STEPS_SIDEBAR, |m| matches!(m, studio::Msg::Library));
-        is(k::UI_LARGER, |m| matches!(m, studio::Msg::UiScale(1)));
-        is(k::UI_SMALLER, |m| matches!(m, studio::Msg::UiScale(-1)));
-        is(k::UI_RESET, |m| matches!(m, studio::Msg::UiScale(0)));
         is(k::PREFERENCES, |m| matches!(m, studio::Msg::OpenPrefs));
         is(k::SHORTCUTS, |m| matches!(m, studio::Msg::Shortcuts(true)));
         is(k::ZOOM_IN, |m| matches!(m, studio::Msg::ZoomIn));
+        // C3: Ctrl++ where "+" needs Shift
+        is("Ctrl+Shift+=", |m| matches!(m, studio::Msg::ZoomIn));
         is(k::ZOOM_OUT, |m| matches!(m, studio::Msg::ZoomOut));
         is(k::FIT, |m| matches!(m, studio::Msg::Fit));
         is(k::ACTUAL, |m| matches!(m, studio::Msg::Actual));

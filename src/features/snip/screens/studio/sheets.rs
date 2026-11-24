@@ -121,14 +121,6 @@ pub fn shortcuts<'a>(s: &super::Studio, window: iced::Size) -> Element<'a, Msg> 
                 k::of(k::Cmd::Actual),
             ],
         ),
-        row(
-            tr(S::st_sc_ui),
-            &[
-                k::of(k::Cmd::UiLarger),
-                k::of(k::Cmd::UiSmaller),
-                k::of(k::Cmd::UiReset),
-            ],
-        ),
         row(tr(S::st_sc_pan), &[k::PAN]),
         row(
             tr(S::st_sc_file),

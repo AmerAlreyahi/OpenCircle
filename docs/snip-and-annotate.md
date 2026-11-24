@@ -156,8 +156,8 @@ time: opening it again brings it to the front and opens the new picture in it.
   (Cut, Crossfade, Slide, Push, Zoom or Wipe) of 0.3, 0.5 or 1 s; the sheet shows the
   file's expected size. The sidebar starts closed while there are no steps and opens with the first one; `Ctrl+B` hides or shows it.
 - **Zoom:** the mouse wheel zooms the picture at the pointer, a middle-button drag or
-  `Space`+drag pans, `Shift+1` fits, `Ctrl+1` shows 100 %. `Ctrl+=` / `Ctrl+-` /
-  `Ctrl+0` scale the Studio's own text and controls.
+  `Space`+drag pans, `Ctrl+=` / `Ctrl+-` zoom it, `Ctrl+0` fits, `Ctrl+1` shows 100 %.
+  The Studio's own text and controls scale in Preferences > Appearance and the View menu.
 - **Preferences:** `Ctrl+,` (File > Preferences, or Settings > Studio > Open Studio
   preferences): theme, where the Steps sidebar sits, saving and export defaults,
   copy and paste, editing, and every shortcut. Settings > Studio can keep unsaved

@@ -1640,6 +1640,70 @@ fn v3_edit_and_view_menus_are_complete() {
     assert!(view.iter().any(|r| r.label == "Pixel grid at high zoom"));
 }
 
+/// C3: Ctrl+= / Ctrl+- zoom the picture and Ctrl+0 fits it; the UI size has no key but is
+/// in the View menu and Preferences > Appearance.
+#[test]
+fn c3_ctrl_zoom_keys_move_the_picture_and_the_ui_size_has_menu_rows() {
+    assert_eq!(keys::of(keys::Cmd::ZoomIn), "Ctrl+=");
+    assert_eq!(keys::of(keys::Cmd::ZoomOut), "Ctrl+-");
+    assert_eq!(keys::of(keys::Cmd::Fit), "Ctrl+0");
+    assert!(matches!(keys::Cmd::ZoomIn.msg(), Msg::ZoomIn));
+    assert!(matches!(keys::Cmd::Fit.msg(), Msg::Fit));
+    let s = studio_on(640, 400);
+    let view = menu_bar::items(Menu::View, &s);
+    for l in [
+        "Interface larger",
+        "Interface smaller",
+        "Interface size: reset",
+    ] {
+        assert!(view.iter().any(|r| r.label == l), "{l}");
+    }
+    // the Preferences row sets the size and the Studio keeps it
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::OpenPrefs);
+    let out = s.update(Msg::Prefs(preferences::Msg::UiZoom(125)));
+    assert!(matches!(out, Outcome::Panels(_, p) if p.ui_zoom == 125));
+    assert_eq!(s.ui_zoom, 125);
+}
+
+/// C3: Ctrl+Shift+= is zoom in's alias in the key table (it acts, and no other command may take
+/// it) while zoom in keeps its key; rebinding zoom in moves both.
+#[test]
+fn c3_ctrl_shift_equals_is_zoom_ins_alias() {
+    use super::keys::{Cmd, Taken, ZOOM_IN_ALIAS, command_for, taken};
+    assert_eq!(command_for(ZOOM_IN_ALIAS), Some(Cmd::ZoomIn));
+    assert_eq!(
+        taken(Cmd::Fit, ZOOM_IN_ALIAS),
+        Some(Taken::Command(Cmd::ZoomIn))
+    );
+    assert!(taken(Cmd::ZoomIn, ZOOM_IN_ALIAS).is_none());
+    let mut cfg = config::Config::default();
+    cfg.studio
+        .shortcuts
+        .insert("zoom_in".into(), "Ctrl+Alt+9".into());
+    config::with_test_config(cfg, || {
+        assert_eq!(command_for("Ctrl+Alt+9"), Some(Cmd::ZoomIn));
+        assert_eq!(
+            command_for(ZOOM_IN_ALIAS),
+            None,
+            "rebound: the alias goes too"
+        );
+    });
+}
+
+/// C3: a config from before (the UI size had keys `ui_larger` / `ui_smaller` / `ui_reset`) loads
+/// without a warning; the three lines are ignored.
+#[test]
+fn c3_an_old_config_with_the_ui_size_keys_loads_without_error() {
+    let text = "[studio.shortcuts]\nui_larger = \"Ctrl+=\"\nui_smaller = \"Ctrl+-\"\nui_reset = \"Ctrl+0\"\nopen = \"Ctrl+O\"\n";
+    let (cfg, warnings) = config::Config::parse(text);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    config::with_test_config(cfg, || {
+        assert_eq!(keys::of(keys::Cmd::ZoomIn), "Ctrl+=");
+        assert_eq!(keys::of(keys::Cmd::Fit), "Ctrl+0");
+    });
+}
+
 /// §5: Open recent lists the recent files; the title carries the document name;
 /// Clear empties the list.
 #[test]

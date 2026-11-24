@@ -147,14 +147,7 @@ pub enum KeyMessage {
 }
 
 /// A chat text size (`config::CHAT_ZOOM`, percent), shown as "N %".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChatZoom(pub u16);
-
-impl fmt::Display for ChatZoom {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} %", self.0)
-    }
-}
+pub use crate::shared::config::ZoomStep as ChatZoom;
 
 /// What a keyring call answered: the status now, or why it failed. Never the key.
 #[derive(Debug, Clone)]

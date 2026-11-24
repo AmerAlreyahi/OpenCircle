@@ -2521,6 +2521,8 @@ strings! {
         | "التحرير";
     pf_theme: "Theme"
         | "السمة";
+    pf_ui_size_d: "Text and controls of the Studio window; also in the View menu"
+        | "نصوص نافذة الاستوديو وعناصر التحكم فيها؛ وهي أيضاً في قائمة عرض";
     pf_theme_d: "Follow OpenCircle, or give the Studio its own theme"
         | "مثل OpenCircle، أو سمة خاصة بالاستوديو";
     pf_theme_follow: "Follow OpenCircle"

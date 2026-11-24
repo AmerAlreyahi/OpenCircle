@@ -1471,6 +1471,12 @@ impl Studio {
                 let Some(d) = &mut self.prefs else {
                     return Outcome::None;
                 };
+                if let preferences::Msg::UiZoom(z) = m {
+                    // the Studio's own size, kept like the View menu's (C3)
+                    d.ui_zoom = z;
+                    (self.ui_zoom, self.panels.ui_zoom) = (z, z);
+                    return Outcome::Panels(old_panels, self.panels);
+                }
                 if matches!(m, preferences::Msg::ResetToolStyles) {
                     self.reset_styles = true;
                 }

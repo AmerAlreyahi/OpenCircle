@@ -401,7 +401,7 @@ pub struct AiConfig {
     pub provider: Provider,
     pub base_url: String,
     pub model: String,
-    /// The AI chat's text zoom in percent (`CHAT_ZOOM`; Ctrl+= / Ctrl+- / Ctrl+0).
+    /// The AI chat's text zoom in percent (`CHAT_ZOOM`; also Ctrl+= / Ctrl+- / Ctrl+0 in the chat).
     #[serde(skip_serializing_if = "default_chat_zoom")]
     pub chat_zoom: u16,
     /// Ask AI may search the web (`ask_ai::web`): `None` = not asked yet
@@ -410,11 +410,35 @@ pub struct AiConfig {
     pub web_search: Option<bool>,
 }
 
-/// The AI chat's zoom steps (percent; 100 = none).
+/// The zoom steps of the AI chat's text and the Studio's interface (percent; 100 = none).
 pub const CHAT_ZOOM: [u16; 7] = [80, 90, 100, 110, 125, 140, 160];
 
+/// A `CHAT_ZOOM` step (percent) as a choice, shown as "N %" (Settings > Ask AI, Studio
+/// Preferences > Appearance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZoomStep(pub u16);
+
+impl ZoomStep {
+    pub const ALL: [ZoomStep; 7] = [
+        ZoomStep(CHAT_ZOOM[0]),
+        ZoomStep(CHAT_ZOOM[1]),
+        ZoomStep(CHAT_ZOOM[2]),
+        ZoomStep(CHAT_ZOOM[3]),
+        ZoomStep(CHAT_ZOOM[4]),
+        ZoomStep(CHAT_ZOOM[5]),
+        ZoomStep(CHAT_ZOOM[6]),
+    ];
+}
+
+impl std::fmt::Display for ZoomStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} %", self.0)
+    }
+}
+
 /// The step after `zoom` (percent) in `CHAT_ZOOM`: `by` > 0 a step larger, < 0
-/// smaller, 0 back to 100 % (the AI chat's and the Studio's Ctrl+= / Ctrl+- / Ctrl+0).
+/// smaller, 0 back to 100 % (the AI chat's Ctrl+= / Ctrl+- / Ctrl+0; the Studio's interface size
+/// in its View menu).
 pub fn zoom_step(zoom: u16, by: i8) -> u16 {
     let steps = CHAT_ZOOM;
     let at = (steps.iter().position(|&z| z >= zoom)).unwrap_or(steps.len() - 1);
@@ -511,7 +535,7 @@ pub struct StudioConfig {
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
     pub walk_format: u8,
-    /// The Studio's UI scale, percent (`CHAT_ZOOM` steps; Ctrl+= / Ctrl+- / Ctrl+0).
+    /// The Studio's UI scale, percent (`CHAT_ZOOM` steps; View menu and Preferences > Appearance).
     pub ui_zoom: u16,
     /// The walkthrough's last transition (`Transition::ALL` index; 1 = Crossfade) and its
     /// length in ms (one of `WALK_MS`).

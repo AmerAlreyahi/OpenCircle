@@ -67,21 +67,11 @@ fn chat_rows(state: &State) -> Element<'_, Message> {
         boolean([t!(c_off), t!(c_on)], on, on, 1.0, Message::WebSearch),
     );
     // the chat's text zoom (also Ctrl+= / Ctrl+- / Ctrl+0 in the chat)
-    const Z: [u16; 7] = crate::shared::config::CHAT_ZOOM;
-    const ZOOMS: [ChatZoom; 7] = [
-        ChatZoom(Z[0]),
-        ChatZoom(Z[1]),
-        ChatZoom(Z[2]),
-        ChatZoom(Z[3]),
-        ChatZoom(Z[4]),
-        ChatZoom(Z[5]),
-        ChatZoom(Z[6]),
-    ];
     let zoom = setting_row::row(
         title(t!(ai_zoom)),
         t!(ai_zoom_desc),
         dropdown(
-            &ZOOMS,
+            &ChatZoom::ALL,
             Some(ChatZoom(state.draft.ai.chat_zoom)),
             "",
             Message::ChatZoom,

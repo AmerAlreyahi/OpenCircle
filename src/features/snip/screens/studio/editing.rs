@@ -27,8 +27,6 @@ pub enum Action {
 pub enum Chord {
     Ctrl(char),
     CtrlShift(char),
-    /// Shift alone (Fit: Shift+1).
-    Shift(char),
     Delete,
 }
 
@@ -127,7 +125,7 @@ pub fn picture_menu(e: &Annotator) -> Vec<Entry> {
             false,
         ),
         row(Action::CopyPicture, Chord::CtrlShift('C'), true, true),
-        row(Action::Fit, Chord::Shift('1'), true, false),
+        row(Action::Fit, Chord::Ctrl('0'), true, false),
         row(Action::Shortcuts, Chord::Ctrl('/'), true, true),
     ]
 }

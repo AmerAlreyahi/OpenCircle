@@ -21,15 +21,16 @@ pub const SELECT_ALL: &str = "Ctrl+A";
 pub const DESELECT: &str = "Esc";
 pub const ADD_STEPS: &str = "Ctrl+Enter";
 pub const STEPS_SIDEBAR: &str = "Ctrl+B";
-/// The picture's zoom: the status bar's buttons and the View menu (the wheel
-/// zooms at the pointer). Ctrl+= / Ctrl+- / Ctrl+0 scale the Studio's UI.
-pub const ZOOM_IN: &str = "Ctrl+Shift+=";
-pub const ZOOM_OUT: &str = "Ctrl+Shift+-";
-pub const FIT: &str = "Shift+1";
+/// The picture's zoom: Ctrl+= / Ctrl+- zoom it, Ctrl+0 fits it (owner call C3); the
+/// status bar's buttons and the View menu too (the wheel zooms at the pointer).
+/// The UI size has no key: Preferences > Appearance and the View menu.
+pub const ZOOM_IN: &str = "Ctrl+=";
+pub const ZOOM_OUT: &str = "Ctrl+-";
+pub const FIT: &str = "Ctrl+0";
+/// Ctrl++ on layouts where "+" needs Shift: zoom in's alias while zoom in keeps its own key
+/// (rebinding zoom in moves both).
+pub const ZOOM_IN_ALIAS: &str = "Ctrl+Shift+=";
 pub const ACTUAL: &str = "Ctrl+1";
-pub const UI_LARGER: &str = "Ctrl+=";
-pub const UI_SMALLER: &str = "Ctrl+-";
-pub const UI_RESET: &str = "Ctrl+0";
 pub const NUDGE: &str = "←↑→↓";
 pub const NUDGE_FAR: &str = "Shift+←↑→↓";
 pub const FORWARD: &str = "Ctrl+]";
@@ -44,7 +45,6 @@ pub fn chord_caps(k: super::editing::Chord) -> Vec<String> {
     match k {
         C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
         C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
-        C::Shift(c) => vec!["Shift".into(), c.to_string()],
         C::Delete => vec!["Delete".into()],
     }
 }
@@ -66,13 +66,10 @@ pub enum Cmd {
     ZoomOut,
     Fit,
     Actual,
-    UiLarger,
-    UiSmaller,
-    UiReset,
 }
 
 impl Cmd {
-    pub const ALL: [Cmd; 12] = [
+    pub const ALL: [Cmd; 9] = [
         Cmd::Open,
         Cmd::SaveAs,
         Cmd::Preferences,
@@ -82,9 +79,6 @@ impl Cmd {
         Cmd::ZoomOut,
         Cmd::Fit,
         Cmd::Actual,
-        Cmd::UiLarger,
-        Cmd::UiSmaller,
-        Cmd::UiReset,
     ];
 
     /// The key in `[studio.shortcuts]`.
@@ -99,9 +93,6 @@ impl Cmd {
             Cmd::ZoomOut => "zoom_out",
             Cmd::Fit => "fit",
             Cmd::Actual => "actual",
-            Cmd::UiLarger => "ui_larger",
-            Cmd::UiSmaller => "ui_smaller",
-            Cmd::UiReset => "ui_reset",
         }
     }
 
@@ -117,9 +108,6 @@ impl Cmd {
             Cmd::ZoomOut => ZOOM_OUT,
             Cmd::Fit => FIT,
             Cmd::Actual => ACTUAL,
-            Cmd::UiLarger => UI_LARGER,
-            Cmd::UiSmaller => UI_SMALLER,
-            Cmd::UiReset => UI_RESET,
         }
     }
 
@@ -136,9 +124,6 @@ impl Cmd {
             Cmd::ZoomOut => Msg::ZoomOut,
             Cmd::Fit => Msg::Fit,
             Cmd::Actual => Msg::Actual,
-            Cmd::UiLarger => Msg::UiScale(1),
-            Cmd::UiSmaller => Msg::UiScale(-1),
-            Cmd::UiReset => Msg::UiScale(0),
         }
     }
 
@@ -155,9 +140,6 @@ impl Cmd {
             Cmd::ZoomOut => S::st_zoom_out,
             Cmd::Fit => S::st_fit,
             Cmd::Actual => S::st_actual,
-            Cmd::UiLarger => S::st_ui_larger,
-            Cmd::UiSmaller => S::st_ui_smaller,
-            Cmd::UiReset => S::st_ui_reset,
         }
     }
 }
@@ -210,9 +192,16 @@ pub fn of(cmd: Cmd) -> &'static str {
     }
 }
 
-/// The command a chord triggers, if any (as `of` says).
+/// The command a chord triggers, if any (as `of` says, and zoom in's alias).
 pub fn command_for(chord: &str) -> Option<Cmd> {
-    Cmd::ALL.into_iter().find(|c| of(*c) == chord)
+    Cmd::ALL
+        .into_iter()
+        .find(|c| of(*c) == chord || alias_of(*c) == Some(chord))
+}
+
+/// The second key of `cmd` (zoom in's Ctrl+Shift+=), only while it keeps its default key.
+fn alias_of(cmd: Cmd) -> Option<&'static str> {
+    (cmd == Cmd::ZoomIn && of(cmd) == cmd.default_chord()).then_some(ZOOM_IN_ALIAS)
 }
 
 /// Why `chord` can't be `cmd`'s key: taken by another command or a fixed key.
@@ -222,7 +211,7 @@ pub fn taken(cmd: Cmd, chord: &str) -> Option<Taken> {
     }
     Cmd::ALL
         .into_iter()
-        .find(|c| *c != cmd && of(*c) == chord)
+        .find(|c| *c != cmd && (of(*c) == chord || alias_of(*c) == Some(chord)))
         .map(Taken::Command)
 }
 

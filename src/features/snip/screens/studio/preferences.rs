@@ -13,6 +13,7 @@ use iced::{Element, Fill, Length, Size, widget::tooltip::Position};
 
 use crate::features::snip::screens::studio::keys;
 use crate::shared::app_language::{S, tr};
+use crate::shared::config::ZoomStep;
 use crate::shared::config::{
     self, Config, EditorConfig, Format, STUDIO_THEME_FOLLOW, StudioBackdrop, StudioOpenIn,
     StudioPrefs, StudioSide, StudioWheel, StudioZoom,
@@ -106,6 +107,8 @@ pub enum Msg {
     BrowseFolder,
     ClearFolder,
     ResetToolStyles,
+    /// Interface size (percent, one of `CHAT_ZOOM`): the Studio sets it (C3).
+    UiZoom(u16),
     /// Keyboard shortcuts: record a new key for a command (its field was pressed), the
     /// chord pressed, back to the default key, every key back to the defaults.
     Record(keys::Cmd),
@@ -151,6 +154,8 @@ pub struct Dialog {
     opened: (StudioPrefs, u32),
     default_folder: Option<String>,
     themes: Vec<Choice>,
+    /// The Studio's interface size now, percent (the Studio keeps it: `Msg::UiZoom`).
+    pub ui_zoom: u16,
     /// The command whose new key is awaited, and a chord that was refused (and why).
     recording: Option<keys::Cmd>,
     refused: Option<(keys::Cmd, String, keys::Taken)>,
@@ -185,6 +190,7 @@ impl Dialog {
             opened: (c.studio.clone(), c.snip.max_edge),
             default_folder: None,
             themes,
+            ui_zoom: c.snip.studio.ui_zoom,
             recording: None,
             refused: None,
         }
@@ -217,6 +223,10 @@ impl Dialog {
             Msg::MaxEdge(px) => {
                 self.max_edge = px;
                 Out::Changed
+            }
+            Msg::UiZoom(z) => {
+                self.ui_zoom = z; // (the Studio acts on it before this)
+                Out::None
             }
             Msg::BrowseFolder => Out::Browse,
             Msg::ClearFolder => {
@@ -504,6 +514,13 @@ impl Dialog {
                             t!(pf_theme_d),
                             dropdown(&self.themes, chosen, t!(pf_theme_follow), move |c| {
                                 edit(&|s| s.theme = c.id.to_string())
+                            }),
+                        ),
+                        row(
+                            t!(st_sc_ui),
+                            t!(pf_ui_size_d),
+                            dropdown(&ZoomStep::ALL, Some(ZoomStep(self.ui_zoom)), "", |z| {
+                                Msg::UiZoom(z.0)
                             }),
                         ),
                         row(

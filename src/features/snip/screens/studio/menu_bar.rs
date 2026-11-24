@@ -195,6 +195,10 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
                 ),
                 item(S::st_snap, "", Msg::Snap, true),
                 item(S::st_grid, "", Msg::Grid, false),
+                // the UI size has no key (C3): here and in Preferences > Appearance
+                item(S::st_ui_larger, "", Msg::UiScale(1), true),
+                item(S::st_ui_smaller, "", Msg::UiScale(-1), false),
+                item(S::st_ui_reset, "", Msg::UiScale(0), false),
             ];
             v[0].checked = p.library;
             v[5].checked = s.snap;
