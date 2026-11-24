@@ -318,7 +318,16 @@ impl App {
             .map(Message::Windows)
     }
 
-    /// The pinned chat's pin: it closes (its window with it, `sync_chat_window`).
+    /// A chat that was unpinned (C2) is a quick chat again: a new overlay, a new capture's question
+    /// or a question from a window opens a fresh one, so it goes (with its window).
+    pub(crate) fn release_unpinned_chat(&mut self) {
+        if self.chat.as_ref().is_some_and(|c| !c.panel.pinned()) {
+            crate::log!("[opencircle] unpinned AI chat released");
+            self.chat = None;
+        }
+    }
+
+    /// The pinned chat's x: it closes (its window with it, `sync_chat_window`).
     pub(crate) fn drop_chat(&mut self) -> Task<Message> {
         if self.chat.take().is_some() {
             crate::log!("[opencircle] AI chat unpinned and closed");
@@ -464,6 +473,7 @@ impl App {
         crop: Crop,
         from: Option<window::Id>,
     ) -> Task<Message> {
+        self.release_unpinned_chat();
         if let Some(chat) = &mut self.chat {
             let id = chat.id;
             return (chat.panel.ask_about(crop, None, true)).map(move |m| Message::AiChat(id, m));
@@ -803,6 +813,7 @@ impl App {
     /// pinned chat: its window's spot is out of the frame (`chat_hole`), and
     /// it stays where it is, live above the overlay (#170 C4).
     pub(crate) fn find_chat(&mut self, origin: Point) {
+        self.release_unpinned_chat();
         let found = (self.chat_win.as_ref())
             .filter(|_| self.chat.is_some())
             .map(|c| Rectangle::new(c.at - (origin - Point::ORIGIN), c.size));
@@ -886,8 +897,15 @@ impl App {
                 return self.update(Message::Field(keys::Keyed::Copy));
             }
             ai_chat::Msg::Key(_) => {}
-            // pinned: its pin is the way out
-            ai_chat::Msg::Pin if resident => return self.drop_chat(),
+            // the x: a pinned chat and its window go; so does a quick one (the overlay stays)
+            ai_chat::Msg::Close if resident => return self.drop_chat(),
+            ai_chat::Msg::Close => self.o.ai_chat = None,
+            // on a pinned chat the pin unpins it (the panel); it stays open
+            ai_chat::Msg::Pin if resident => {
+                let _ = panel.update(msg);
+                // unpin = really leaves pinned mode: not on top any more (pin: on top again)
+                return chat_level(self.chat_win.as_ref().map(|w| w.id), panel.pinned());
+            }
             ai_chat::Msg::OpenAiSettings => {
                 let settings = self.windows.open(windows::Kind::Settings);
                 let section =
@@ -911,7 +929,13 @@ impl App {
                 let pins = (asks || by_hand) && !resident && !panel.pinned();
                 // a chat pinned before this overlay opened (C4c)
                 let into_pinned = asks && resident && came_pinned;
+                let was_pinned = panel.pinned();
                 let task = panel.update(msg);
+                // a follow-up in an unpinned chat pins it again: on top again
+                let level = match resident && was_pinned != panel.pinned() {
+                    true => chat_level(self.chat_win.as_ref().map(|w| w.id), panel.pinned()),
+                    false => Task::none(),
+                };
                 // the chat's Include screen is the AI field's (one state)
                 if let (Some(on), true) = (panel.include(), open) {
                     self.o.include = on;
@@ -930,7 +954,7 @@ impl App {
                 if by_hand && pins && self.chat.is_some() {
                     self.o.close_when_idle = true;
                 }
-                return task;
+                return Task::batch([task, level]);
             }
         }
         Task::none()
@@ -1163,4 +1187,16 @@ impl App {
     pub(crate) fn chat_opening(&self) -> bool {
         self.o.frame.is_some() && self.o.ai_chat.is_some() && self.chat_grown() < 1.0
     }
+}
+
+/// The chat window `id` on top of other windows while pinned, an ordinary window once unpinned.
+fn chat_level(id: Option<window::Id>, pinned: bool) -> Task<Message> {
+    let Some(id) = id else {
+        return Task::none();
+    };
+    let level = match pinned {
+        true => window::Level::AlwaysOnTop,
+        false => window::Level::Normal,
+    };
+    window::set_level(id, level)
 }

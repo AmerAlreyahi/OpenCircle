@@ -181,8 +181,7 @@ impl AiChat {
             edge: self.edge,
         };
         if chatting {
-            // the header's end: a new chat and the pin (no close button: Esc
-            // or a click outside closes an unpinned chat; a pinned one, its pin)
+            // the header's end: a new chat, the pin (pins / unpins) and the x (C2)
             let new = button(label(t!(chat_new)), Kind::Elevated, Some(Msg::NewChat));
             let new = hint(new, t!(chat_new_tip), Why::Icon, Position::Bottom);
             let state = icon_button::State {
@@ -196,7 +195,9 @@ impl AiChat {
             };
             let pin = icon_button(glyph.glyph(), state, Some(Msg::Pin));
             let pin = hint(pin, tip, Why::Icon, Position::Bottom);
-            let ends = dir::row([new, pin]).spacing(space::GAP).align_y(Center);
+            let x = icon_button(Icon::Close.glyph(), Default::default(), Some(Msg::Close));
+            let x = hint(x, t!(chat_close), Why::Icon, Position::Bottom);
+            let ends = dir::row([new, pin, x]).spacing(space::GAP).align_y(Center);
             let card = frame::chat_frame(
                 header,
                 Some(ends.into()),

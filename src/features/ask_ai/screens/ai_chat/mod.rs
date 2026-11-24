@@ -163,8 +163,10 @@ pub enum Msg {
     EditTurn(usize),
     /// Ask the last question again (also Retry after an error).
     Regenerate,
-    /// The header's pin: pins the chat; on a pinned one, closes it (the App).
+    /// The header's pin: pins the chat; on a pinned one, unpins it.
     Pin,
+    /// The header's x: closes the chat (the App).
+    Close,
     /// The drawer opens on a tab, or closes (`None`).
     Drawer(Option<Tab>),
     /// The drawer's "AI chat stays open".
@@ -491,7 +493,8 @@ impl AiChat {
         match (&mut self.state, msg) {
             (_, Msg::Edit(action)) => self.input.perform(action),
             (_, Msg::FocusInput) => return operation::focus(INPUT),
-            (_, Msg::Pin) => self.pinned = true,
+            (_, Msg::Pin) => self.pinned = !self.pinned,
+            (_, Msg::Close) => {} // the App closes it
             (State::Ask { .. }, Msg::Card(Event::Menu)) => {
                 let tab = match self.drawer {
                     Some(_) => None,

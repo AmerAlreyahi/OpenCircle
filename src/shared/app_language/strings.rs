@@ -1509,8 +1509,10 @@ strings! {
         | "+ جديدة";
     chat_new_tip: "New chat"
         | "محادثة جديدة";
-    chat_unpin: "Unpin and close"
-        | "إلغاء التثبيت والإغلاق";
+    chat_unpin: "Unpin chat"
+        | "إلغاء تثبيت المحادثة";
+    chat_close: "Close chat"
+        | "إغلاق المحادثة";
     chat_pin: "Pin chat"
         | "تثبيت المحادثة";
     chat_ready: "Getting ready…"

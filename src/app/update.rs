@@ -256,7 +256,11 @@ impl App {
                 self.pointer_on(window, Instant::now());
                 Task::none()
             }
-            Message::Escape if self.o.is_none() => Task::none(),
+            // an unpinned chat (C2) with no overlay is a normal window: Esc closes it
+            Message::Escape if self.o.is_none() => {
+                self.release_unpinned_chat();
+                Task::none()
+            }
             // the right-click menu's Esc closes it, not the overlay
             Message::Escape | Message::EscapeTaken if self.close_context() => Task::none(),
             Message::ContextMenu(msg) => self.on_context_menu(msg),

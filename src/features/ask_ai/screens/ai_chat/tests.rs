@@ -702,12 +702,32 @@ fn the_pin_looks_different_once_pinned() {
     let _ = panel.update(Msg::Pin);
     crate::shared::kit::tooltip::SHOWN.with(|s| s.borrow_mut().clear());
     assert_eq!(glyphs(&panel), (false, true), "pinned: pin-off");
-    assert!(shown().iter().any(|t| t == "Unpin and close"));
+    assert!(shown().iter().any(|t| t == "Unpin chat"));
     shot::save(
         "chat-header-pinned",
         panel.view(header, SCREEN, false),
         size,
     );
+}
+
+/// C2: the header has an x that closes the chat, and the pin only pins / unpins.
+#[test]
+fn c2_the_header_has_a_close_x_and_the_pin_toggles() {
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::tooltip::tests_support::shown;
+    let mut panel = api_chat();
+    let has_x = |p: &AiChat| {
+        let texts = shot::texts(p.view(at(SCREEN), SCREEN, false));
+        texts.iter().any(|t| t.contains(Icon::Close.glyph()))
+    };
+    crate::shared::kit::tooltip::SHOWN.with(|s| s.borrow_mut().clear());
+    assert!(has_x(&panel), "the x is in the header");
+    assert!(shown().iter().any(|t| t == "Close chat"));
+    let _ = panel.update(Msg::Pin);
+    assert!(panel.pinned());
+    assert!(has_x(&panel), "pinned: the x stays");
+    let _ = panel.update(Msg::Pin);
+    assert!(!panel.pinned(), "the pin on a pinned chat unpins it");
 }
 
 /// "Thought for N s" only when the model sent reasoning (an empty piece from

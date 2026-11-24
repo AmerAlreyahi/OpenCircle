@@ -529,24 +529,30 @@ impl App {
                 closing.chain(settings.map(Message::Windows))
             }
             // The word card goes on as an Ask AI chat (its crop, its explanation).
-            pill::Msg::Ask => match session.take_chat() {
-                // one chat: the explanation goes on in the pinned one
-                Some((_, chat)) if self.chat.is_some() => {
-                    if let Some(open) = &mut self.chat {
-                        open.panel.append(chat);
+            pill::Msg::Ask => {
+                // an unpinned chat (C2) is a quick chat again: the explanation opens a fresh one
+                if self.chat.as_ref().is_some_and(|c| !c.panel.pinned()) {
+                    self.chat = None;
+                }
+                match session.take_chat() {
+                    // one chat: the explanation goes on in the pinned one
+                    Some((_, chat)) if self.chat.is_some() => {
+                        if let Some(open) = &mut self.chat {
+                            open.panel.append(chat);
+                        }
+                        Task::none()
                     }
-                    Task::none()
+                    Some((crop, chat)) => {
+                        self.panels = self.panels.wrapping_add(1);
+                        let id = self.panels;
+                        let (panel, task) = ai_chat::AiChat::open_chat(crop, chat, self.o.include);
+                        self.o.ai_chat = Some((id, panel));
+                        self.keep_chat();
+                        task.map(move |msg| Message::AiChat(id, msg))
+                    }
+                    None => Task::none(),
                 }
-                Some((crop, chat)) => {
-                    self.panels = self.panels.wrapping_add(1);
-                    let id = self.panels;
-                    let (panel, task) = ai_chat::AiChat::open_chat(crop, chat, self.o.include);
-                    self.o.ai_chat = Some((id, panel));
-                    self.keep_chat();
-                    task.map(move |msg| Message::AiChat(id, msg))
-                }
-                None => Task::none(),
-            },
+            }
             msg => {
                 let task = session
                     .update(msg)

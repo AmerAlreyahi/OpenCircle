@@ -5038,16 +5038,16 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
     assert!(!overlay_texts(&app).iter().any(|t| t.starts_with("Open ")));
 }
 
-/// The result cards have no close button (the design has none): the AI chat
-/// keeps its "+ New"; Esc closes, and so does a click on the frozen screen
-/// outside the card.
+/// The result cards have no close button (the design has none); the AI chat
+/// has its "+ New" and, since C2, an x. Esc closes, and so does a click on the
+/// frozen screen outside the card.
 #[test]
 fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     let close = crate::shared::kit::icon::Icon::Close.glyph().to_string();
     let (app, _) = app_with_ask_panel();
     let texts = texts_of(&app, chat_window(&app).unwrap());
     assert!(texts.contains(&"+ New".to_string()), "{texts:?}");
-    assert!(!texts.contains(&close), "a close button: {texts:?}");
+    assert!(texts.contains(&close), "C2: the chat's x: {texts:?}");
     // Esc
     let mut esc = app_with_ask_panel().0;
     let _ = esc.update(Message::Escape);
@@ -5059,7 +5059,7 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     event(&mut out, overlay::Event::Press { at, shift: false });
     event(&mut out, overlay::Event::Release);
     assert!(out.o.ai_chat.is_none(), "the click closes the card");
-    // the Lens card too
+    // the Lens card too (it is the same chat)
     let mut lens = open_app(800, 600, 1.0);
     drag(
         &mut lens,
@@ -5070,7 +5070,7 @@ fn result_cards_have_no_close_button_esc_and_an_outside_click_close_them() {
     let crop = lens.crop().unwrap();
     let _ = lens.open_chat(crop, None);
     let _ = lens.sync_chat_window();
-    assert!(!texts_of(&lens, chat_window(&lens).unwrap()).contains(&close));
+    assert!(texts_of(&lens, chat_window(&lens).unwrap()).contains(&close));
 }
 
 /// #149: the Copy / Save pill goes beside the selection (below it, else above
@@ -5397,6 +5397,55 @@ fn the_follow_up_that_pins_the_chat_closes_the_overlay() {
     assert!(app.o.is_some() && app.chat.is_some(), "mid-drag: open");
 }
 
+/// C2: unpin really leaves pinned mode. The chat is no longer kept (a new overlay, or Esc with no
+/// overlay, releases it), it follows the pin button back and forth, and the x still closes it.
+#[test]
+fn c2_unpin_leaves_pinned_mode_and_the_next_question_is_a_fresh_chat() {
+    // unpin, then Esc with no overlay: the chat (a normal window now) closes
+    let (mut app, id) = chat_asked();
+    pin_kept_open(&mut app, id);
+    assert!(app.chat.as_ref().is_some_and(|c| c.panel.pinned()));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    assert!(
+        app.chat.as_ref().is_some_and(|c| !c.panel.pinned()),
+        "unpinned, still open"
+    );
+    let _ = app.update(Message::Escape); // the overlay closes
+    assert!(app.o.is_none() && app.chat.is_some(), "it stays a window");
+    let _ = app.update(Message::Escape);
+    assert!(
+        app.chat.is_none() && chat_window(&app).is_none(),
+        "Esc closes the unpinned chat"
+    );
+
+    // unpin, then the next overlay: it is not found pinned, it is released
+    let (mut app, id) = chat_asked();
+    pin_kept_open(&mut app, id);
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    app.find_chat(Point::ORIGIN);
+    assert!(app.chat.is_none(), "not kept across questions");
+    assert!(app.o.chat_fixed.is_none() && !app.o.chat_came_pinned);
+
+    // pinned again by the pin button: kept
+    let (mut app, id) = chat_asked();
+    pin_kept_open(&mut app, id);
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    app.find_chat(Point::ORIGIN);
+    assert!(app.chat.is_some(), "pinned again: found pinned");
+}
+
+/// C2: the x on a chat not pinned yet closes the chat (and its window); the overlay stays.
+#[test]
+fn c2_the_x_closes_an_unpinned_chat_but_not_the_overlay() {
+    let (mut app, id) = chat_asked();
+    assert!(chat_window(&app).is_some());
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Close));
+    assert!(app.o.ai_chat.is_none() && app.chat.is_none());
+    assert!(chat_window(&app).is_none(), "its window goes too");
+    assert!(app.o.is_some(), "the overlay stays");
+}
+
 /// The chat is never drawn on the overlay where it has its own window: the
 /// overlay leaves it out and the chat's window draws it, quick or pinned; the
 /// overlay still lays its bar out beside it. A chat closed (a click outside,
@@ -5423,7 +5472,10 @@ fn the_chat_is_drawn_by_its_own_window_only() {
         "pinned: not drawn either"
     );
     assert!(asked(texts_of(&app, window)));
-    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin)); // unpin = close
+    // C2: the pin only unpins; the x closes
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    assert!(app.chat.is_some(), "unpinned: still open");
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Close));
     assert!(
         app.chat.is_none() && chat_window(&app).is_none(),
         "gone with it"
@@ -5509,8 +5561,8 @@ fn a_pinned_chat_outlives_the_overlay_and_takes_the_next_capture() {
     let texts = texts_of(&app, window);
     assert!(texts.iter().any(|t| t == "Is this the same?"), "{texts:?}");
     let _ = app.update(Message::AiChat(id, ai_chat::Msg::Answered(Ok(()))));
-    // the pin closes it, and its window
-    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Pin));
+    // the x closes it, and its window
+    let _ = app.update(Message::AiChat(id, ai_chat::Msg::Close));
     assert!(app.chat.is_none() && chat_window(&app).is_none());
 }
 
