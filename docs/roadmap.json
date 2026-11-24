@@ -94,7 +94,7 @@
       "name": "Enhancements (no new features)",
       "status": "active",
       "why": "Make what exists familiar, fast and dependable before anything new (owner 2026-11-24).",
-      "outcome": "Translate is fast again; every tool behaves like the apps people know; the kit's checks guard every commit.",
+      "outcome": "Translate is fast again; every tool behaves like the apps people know; the kit's checks guard every commit. Estimate 2026-11-24 from real worker times: about 13-17 agent-hours left, 1.5-2 days with 2-3 workers if owner answers within hours.",
       "items": [
         {
           "id": "K-01",
@@ -131,13 +131,13 @@
         },
         {
           "id": "E-08",
-          "title": "Right-click menu on selected text (#201): study, owner approves the actions, then build",
-          "status": "todo"
+          "title": "Right-click menu on selected text v1 (#201) + Ctrl+wheel resize (#202): building",
+          "status": "in-progress"
         },
         {
           "id": "E-03",
-          "title": "UX batch 1 (#206-#220) + F7 Original toggle: review fix round",
-          "status": "in-progress"
+          "title": "UX batch 1 (#206-#220) + F7 Original toggle: merged (c7403f77)",
+          "status": "done"
         },
         {
           "id": "E-04",
@@ -157,12 +157,12 @@
         {
           "id": "E-07",
           "title": "Ctrl + mouse wheel resizes the selected shape (#202)",
-          "status": "todo"
+          "status": "in-progress"
         },
         {
           "id": "E-09",
           "title": "CI audit: url 2.5.9 (RUSTSEC-2026-0592, #223)",
-          "status": "in-progress"
+          "status": "done"
         }
       ],
       "gate": [
@@ -193,8 +193,8 @@
       "items": [
         {
           "id": "N-01",
-          "title": "Design round: the new design, approved on the canvas before any build (after Q-03)",
-          "status": "todo"
+          "title": "Design stage 1: prototypes of the recording widgets + Open with (owner OK), then stage 2: all of Settings",
+          "status": "in-progress"
         },
         {
           "id": "R-01",
@@ -376,6 +376,10 @@
     }
   ],
   "changelog": [
+    {
+      "date": "2026-11-24",
+      "change": "UX batch 1 merged; CI green; right-click menu building; design prototypes started (3rd worker allowed)."
+    },
     {
       "date": "2026-11-24",
       "change": "Owner approved the kit roadmap; right-click menu moved into 0.5.0; translate measured, fixes started."
