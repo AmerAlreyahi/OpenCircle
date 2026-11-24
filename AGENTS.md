@@ -1136,6 +1136,8 @@ production systems.
   .claude/artifacts/design/render/out/w101/settings-sample-daylight.png. Lead defaults for its questions: one "AI and Search"
   page; the preview = a slim row at the top (hover/focus plays a silent ~5 s loop, still under reduced motion) whose text
   describes the FEATURE, never the design; two-option choices stay segmented, on/off = toggle switches. Next: every page.
+  UPDATE (owner, same day): one "AI and Search" page = yes; the preview presentation and the Browser | AI provider control are
+  OPEN: he picks from a comparison sheet (5-6 preview methods, 3-4 choice controls). Do NOT draw all pages yet.
 
 ## Domain quirks
 
