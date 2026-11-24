@@ -220,6 +220,26 @@ fn actions(s: &Studio) -> Element<'_, Msg> {
         press: (!editing && !acts.translated && s.cut_phase() == super::CutPhase::Idle)
             .then_some(Msg::CutOut),
     }));
+    // A selected shape, pen stroke or arrow: a Hide over it (Blur rework)
+    if let Some(both) = s.editor.as_ref().and_then(|e| e.hideable()) {
+        for (label, outline) in [
+            (crate::shared::app_language::S::sn_hide_shape, false),
+            (crate::shared::app_language::S::sn_hide_outline, true),
+        ]
+        .into_iter()
+        .filter(|&(_, outline)| both || !outline)
+        {
+            rows = rows.push(option_list::action(option_list::ActionRow {
+                lead: option_list::glyph('\u{e0b8}', false), // the Hide drop
+                label: tr(label),
+                external: false,
+                caps: Vec::new(),
+                reading: false,
+                focused: false,
+                press: Some(Msg::Editor(Message::HideShape(outline))),
+            }));
+        }
+    }
     rows.into()
 }
 

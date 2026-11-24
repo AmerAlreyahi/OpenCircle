@@ -20,6 +20,9 @@ pub enum Action {
     CopyPicture,
     Fit,
     Shortcuts,
+    /// A Hide over the selected shape / its outline only (Blur rework).
+    HideShape,
+    HideOutline,
 }
 
 /// A row's key, drawn as key caps by the view (no words here).
@@ -28,6 +31,8 @@ pub enum Chord {
     Ctrl(char),
     CtrlShift(char),
     Delete,
+    /// No key.
+    None,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +59,8 @@ impl Action {
             Action::Back => Message::Order(Order::Back),
             Action::SelectAll => Message::SelectAll,
             Action::CopyPicture => Message::Copy,
+            Action::HideShape => Message::HideShape(false),
+            Action::HideOutline => Message::HideShape(true),
             Action::Paste | Action::Fit | Action::Shortcuts => return None,
         })
     }
@@ -75,7 +82,7 @@ pub fn object_menu(e: &Annotator) -> Vec<Entry> {
         sel.last().is_some_and(|&i| i + 1 == items) && sel.len() == 1,
         sel.first() == Some(&0) && sel.len() == 1,
     );
-    vec![
+    let mut rows = vec![
         row(Action::Cut, Chord::Ctrl('X'), !sel.is_empty(), false),
         row(Action::Copy, Chord::Ctrl('C'), !sel.is_empty(), false),
         row(Action::Paste, Chord::Ctrl('V'), true, false),
@@ -105,7 +112,15 @@ pub fn object_menu(e: &Annotator) -> Vec<Entry> {
             !sel.is_empty() && !bottom,
             false,
         ),
-    ]
+    ];
+    // "Hide this shape" for a rectangle, ellipse, pen stroke or arrow
+    if let Some(both) = e.hideable() {
+        rows.push(row(Action::HideShape, Chord::None, true, true));
+        if both {
+            rows.push(row(Action::HideOutline, Chord::None, true, false));
+        }
+    }
+    rows
 }
 
 /// The menu for a right-click on the empty picture.

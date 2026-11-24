@@ -261,6 +261,7 @@ impl Item {
                 kind: *kind,
                 outline: *outline,
                 ramp,
+                source: None,
             }),
             Shape::Arrow {
                 a, b, bend, text, ..
@@ -1006,6 +1007,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
                     kind: *kind,
                     outline: *outline,
                     ramp,
+                    source: Some(image),
                 };
                 blur::paint(&mut layer, &fp, *cell, *style, seed)
             }

@@ -282,20 +282,6 @@ fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
             if e.blur_style.is_look() {
                 o.push(group(vec![caption(t!(sn_looks_note))], false));
             }
-            if let Some(both) = e.hideable() {
-                o.push(toggle(
-                    t!(sn_hide_shape),
-                    false,
-                    Some(Message::HideShape(false)),
-                ));
-                if both {
-                    o.push(toggle(
-                        t!(sn_hide_outline),
-                        false,
-                        Some(Message::HideShape(true)),
-                    ));
-                }
-            }
             o
         }
         Tool::Eraser => {

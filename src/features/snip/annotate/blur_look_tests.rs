@@ -161,8 +161,13 @@ fn w102_4e_style_applies_to_the_selected_hide_and_progressive_has_handles() {
     assert_eq!(*style, blur::Style::Soft);
     e.update(Message::BlurStyle(blur::Style::Progressive));
     let handles = select::handles(&e.doc.items[0]);
-    assert_eq!(handles.len(), 2, "start and end");
-    let moved = select::dragged(&e.doc.items[0], handles[1].0, pt(40.0, 60.0));
+    assert_eq!(handles.len(), 6, "four corners, then start and end");
+    let end = handles
+        .iter()
+        .find(|(h, _)| matches!(h, select::Handle::End(1)))
+        .expect("the end handle")
+        .0;
+    let moved = select::dragged(&e.doc.items[0], end, pt(40.0, 60.0));
     let Shape::Blur { ramp, .. } = &moved.shape else {
         panic!()
     };

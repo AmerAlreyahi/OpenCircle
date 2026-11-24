@@ -183,3 +183,146 @@ fn w102_2e_hide_this_shape_fills_or_follows_the_outline() {
     fill.update(Message::Undo);
     assert_eq!(fill.doc.items.len(), 1, "one undo step");
 }
+
+/// W102-2.f: dragging with the ellipse or rectangle shape draws one Hide of
+/// that shape (and Shift makes it a circle / square).
+#[test]
+fn w102_2f_dragging_draws_the_chosen_shape() {
+    for (kind, shift) in [
+        (BlurShape::Ellipse, false),
+        (BlurShape::Rect, false),
+        (BlurShape::Ellipse, true),
+    ] {
+        let mut e = Annotator::new(image_of(400, 300, |_, _| [250, 250, 250, 255]), 1.0);
+        e.update(Message::Tool(Tool::Blur));
+        e.update(Message::BlurShape(kind));
+        e.update(Message::Shift(shift));
+        e.update(Message::Press(pt(100.0, 100.0)));
+        e.update(Message::Move(pt(180.0, 140.0)));
+        e.update(Message::Move(pt(260.0, 180.0)));
+        e.update(Message::Release);
+        assert_eq!(e.doc.items.len(), 1, "{kind:?}");
+        let Shape::Blur {
+            points, kind: got, ..
+        } = &e.doc.items[0].shape
+        else {
+            panic!("a blur")
+        };
+        assert_eq!(*got, kind);
+        let end = *points.last().unwrap();
+        match shift {
+            false => assert_eq!(end, pt(260.0, 180.0)),
+            true => assert_eq!((end.x - 100.0).abs(), (end.y - 100.0).abs(), "a circle"),
+        }
+    }
+}
+
+/// W102-2.g: a Hide takes its background from the picture, not from the
+/// annotations under it (it covers them): over a thick red ring on white it is
+/// white-ish, not red.
+#[test]
+fn w102_2g_hide_over_an_annotation_takes_the_pictures_background() {
+    let ring = Item {
+        width: 20.0,
+        ..item(Shape::Ellipse {
+            a: pt(40.0, 30.0),
+            b: pt(180.0, 130.0),
+        })
+    };
+    let hide = item(Shape::Blur {
+        points: vec![pt(40.0, 30.0), pt(180.0, 130.0)],
+        size: 16.0,
+        cell: 8.0,
+        style: blur::Style::Frost,
+        kind: blur::Kind::Ellipse,
+        outline: 24.0,
+        ramp: Vec::new(),
+    });
+    let out = rendered(
+        image_of(240, 160, |_, _| [250, 250, 250, 255]),
+        4,
+        vec![ring, hide],
+    );
+    let p = px(&out, 40, 80);
+    assert!(
+        p[0] > 200 && p[1] > 200 && p[2] > 200,
+        "white-ish, got {p:?}"
+    );
+}
+
+/// W102-2.h: a ring along a coloured border (the owner's circle) takes the
+/// surroundings' background, not the border's own red: it hides the border
+/// (a soft pale ring), it does not just smooth it.
+#[test]
+fn w102_2h_a_ring_over_a_border_hides_the_border() {
+    // A white picture with a baked red ring, 8 px wide, radius 60 about (120, 80).
+    let picture = image_of(240, 160, |x, y| {
+        let r = ((x as f32 - 120.0).powi(2) + (y as f32 - 80.0).powi(2)).sqrt();
+        if (r - 60.0).abs() <= 4.0 {
+            [230, 30, 60, 255]
+        } else {
+            [250, 250, 250, 255]
+        }
+    });
+    let hide = item(Shape::Blur {
+        points: vec![pt(60.0, 20.0), pt(180.0, 140.0)],
+        size: 16.0,
+        cell: 8.0,
+        style: blur::Style::Frost,
+        kind: blur::Kind::Ellipse,
+        outline: 14.0,
+        ramp: Vec::new(),
+    });
+    let out = rendered(picture, 4, vec![hide]);
+    let p = px(&out, 180, 80);
+    assert!(
+        p[1] > 180 && p[2] > 180,
+        "pale, not the border's red: {p:?}"
+    );
+}
+
+/// W102-3.a (lead decision): a Hide rectangle / ellipse has corner handles like any
+/// box (the same handle code); dragging one resizes it, keeping its strength and ring.
+#[test]
+fn w102_corner_handles_resize_a_hide_rectangle_and_ellipse() {
+    for kind in [blur::Kind::Rect, blur::Kind::Ellipse] {
+        let it = item(Shape::Blur {
+            points: vec![pt(40.0, 30.0), pt(140.0, 90.0)],
+            size: 16.0,
+            cell: 8.0,
+            style: blur::Style::Frost,
+            kind,
+            outline: 12.0,
+            ramp: Vec::new(),
+        });
+        let handles = select::handles(&it);
+        assert_eq!(handles.len(), 4, "{kind:?}");
+        // the corner at the box's bottom-right is where the shape ends
+        let (h, at) = handles[2];
+        assert_eq!(at, pt(140.0, 90.0));
+        let moved = select::dragged(&it, h, pt(200.0, 120.0));
+        let Shape::Blur {
+            points,
+            cell,
+            size,
+            outline,
+            ..
+        } = &moved.shape
+        else {
+            panic!()
+        };
+        assert_eq!((points[0], points[1]), (pt(40.0, 30.0), pt(200.0, 120.0)));
+        assert_eq!((*cell, *size, *outline), (8.0, 16.0, 12.0));
+    }
+    // a brush has none
+    let brush = item(Shape::Blur {
+        points: vec![pt(1.0, 1.0), pt(50.0, 1.0)],
+        size: 16.0,
+        cell: 8.0,
+        style: blur::Style::Frost,
+        kind: blur::Kind::Brush,
+        outline: 0.0,
+        ramp: Vec::new(),
+    });
+    assert!(select::handles(&brush).is_empty());
+}

@@ -73,21 +73,15 @@ fn w102_5b_custom_strength_overrides_and_a_preset_takes_it_back() {
     assert_eq!(cell_after(&mut e), 4.0 * e.capture_scale);
 }
 
-/// W102-5.c: while Hide is on, R / E / P pick the shape, 1-3 the strength,
-/// Shift+B cycles the styles (plain B stays the tool's key).
+/// W102-5.c: while Hide is on, 1-3 pick the strength and Shift+B cycles the
+/// styles (plain B stays the tool's key; R / E / P keep their tools).
 #[test]
 fn w102_5c_hide_keys() {
     let mut e = editor(1.0);
-    for (letter, kind) in [
-        ('r', BlurShape::Rect),
-        ('e', BlurShape::Ellipse),
-        ('p', BlurShape::Brush),
-    ] {
+    // R / O / P stay the Rect / Ellipse / Pen tools (the shape is an option).
+    for (letter, tool) in [('r', Tool::Rect), ('o', Tool::Ellipse), ('p', Tool::Pen)] {
         let m = press(&mut e, letter, false);
-        assert!(
-            matches!(m, Some(Message::BlurShape(k)) if k == kind),
-            "{letter}"
-        );
+        assert!(matches!(m, Some(Message::Tool(t)) if t == tool), "{letter}");
     }
     for (d, w) in ['1', '2', '3'].into_iter().zip(Width::ALL) {
         let m = press(&mut e, d, false);

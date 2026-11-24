@@ -1551,6 +1551,7 @@ impl Annotator {
             kind: blur::Kind::Rect,
             outline: 0.0,
             ramp: &ramp,
+            source: None,
         };
         blur::paint(&mut layer, &fp, strength, style, self.doc.seed);
         handle(layer.pm)

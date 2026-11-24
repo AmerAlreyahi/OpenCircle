@@ -1955,6 +1955,7 @@ fn v3_key_names_have_one_source() {
         A::CopyPicture => keys::COPY_PICTURE,
         A::Fit => keys::FIT,
         A::Shortcuts => keys::SHORTCUTS,
+        A::HideShape | A::HideOutline => "", // no key
     };
     for r in rows {
         assert_eq!(
@@ -4308,4 +4309,51 @@ fn c5_the_studio_says_ctrl_drag_moves_on_the_first_drag_over_a_shape() {
         let out = s.update(Msg::Editor(Message::Move(Point::new(70.0, 50.0))));
         assert!(matches!(&out, Outcome::Say(t) if t == "Ctrl+drag moves"));
     });
+}
+
+/// W102: "Hide this shape" lives in the Actions menu and the right-click menu of a selected
+/// shape (not in the option bar, which stays as approved); a pick adds the Hide and closes the menu.
+#[test]
+fn hide_this_shape_is_in_the_actions_menu_and_the_right_click_menu() {
+    use crate::features::snip::annotate::{Edit, Item, Shape};
+    let mut s = boxed(300, 200);
+    let ed = s.editor.as_mut().unwrap();
+    let a = Point::new(40.0, 40.0);
+    ed.doc.exec(Edit::Insert(
+        0,
+        Item {
+            shape: Shape::Ellipse {
+                a,
+                b: Point::new(120.0, 100.0),
+            },
+            colour: [255, 0, 0, 255],
+            width: 4.0,
+            outline: false,
+            fill: false,
+            hidden: false,
+        },
+    ));
+    ed.doc.select_one(Some(0));
+    let actions = editing::object_menu(ed)
+        .iter()
+        .map(|r| r.action)
+        .collect::<Vec<_>>();
+    assert!(actions.contains(&editing::Action::HideShape));
+    assert!(actions.contains(&editing::Action::HideOutline));
+    s.popover = Some(popovers::Pop::Actions);
+    let _ = s.update(Msg::Editor(annotate::Message::HideShape(true)));
+    assert!(s.popover.is_none(), "a pick closes the Actions menu");
+    let ed = s.editor.as_ref().unwrap();
+    assert!(matches!(
+        ed.doc.items.last().unwrap().shape,
+        Shape::Blur { .. }
+    ));
+    // a text object has neither row
+    let mut s = boxed(300, 200);
+    assert!(
+        !editing::object_menu(s.editor.as_ref().unwrap())
+            .iter()
+            .any(|r| r.action == editing::Action::HideShape)
+    );
+    let _ = &mut s;
 }

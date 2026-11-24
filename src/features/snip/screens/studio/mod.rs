@@ -1328,7 +1328,11 @@ impl Studio {
             Msg::Act(_)
                 | Msg::EditText
                 | Msg::CutOut
-                | Msg::Editor(annotate::Message::Order(_) | annotate::Message::Merge)
+                | Msg::Editor(
+                    annotate::Message::Order(_)
+                        | annotate::Message::Merge
+                        | annotate::Message::HideShape(_)
+                )
         ) {
             self.popover = None;
         }

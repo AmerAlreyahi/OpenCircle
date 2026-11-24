@@ -179,14 +179,12 @@ impl Annotator {
                 _ => {}
             }
         }
-        // Hide's own keys while its tool is on: R / E / P its shape, 1-3 its
-        // strength, Shift+B the next style (plain B is the tool's own key).
+        // Hide's own keys while its tool is on: 1-3 its strength, Shift+B the
+        // next style (plain B is the tool's own key; R / E / P stay the Rect /
+        // Ellipse / Pen tools: Hide's shape is picked in its options).
         if self.tool == Tool::Blur && !modifiers.command() && !modifiers.alt() {
             let letter = latin.map(|c| c.to_ascii_lowercase());
             let own = match (letter, modifiers.shift()) {
-                (Some('r'), _) => Some(Message::BlurShape(super::BlurShape::Rect)),
-                (Some('e'), _) => Some(Message::BlurShape(super::BlurShape::Ellipse)),
-                (Some('p'), _) => Some(Message::BlurShape(super::BlurShape::Brush)),
                 (Some('b'), true) => Some(Message::BlurCycle),
                 (Some(d @ '1'..='3'), _) => Some(Message::BlurCell(
                     super::Width::ALL[d as usize - '1' as usize],

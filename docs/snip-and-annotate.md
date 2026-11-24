@@ -106,7 +106,7 @@ Every tool has a key:
 | Text | `T` |
 | Callout | `C` |
 | Numbered step | `N` |
-| Blur | `B` |
+| Hide (blur) | `B` |
 | Redact | `K` |
 | Spotlight (dims everything else) | `S` |
 | Magnifier | `M` |
@@ -117,11 +117,32 @@ or save. With a drawing tool a plain drag always draws; to move an annotation,
 use **Select** or hold `Ctrl` and drag. A selected annotation shows only its own
 small handles. OpenCircle remembers your last tool, colour, sizes and options.
 
-**Blur or Redact.** Blur is a fine pixel mosaic along a text line, sized to the
-line (or set by hand in its options). It is a soft pixel mosaic that hides the
-text so it can't be recovered. **Redact** is a solid box, for when you want no
-trace at all. If the stroke overshoots, slide the pointer back and the blur
-follows it.
+**Hide (Blur) or Redact.** Hide covers what you don't want read, in Snip and in
+the Studio alike. Its options row has:
+
+- **Style.** *Hide* (the default) is a smooth, calm frost made from the colour
+  of the area's background; *Pixelate* is a fine pixel mosaic. Neither one ever
+  looks at the text, so the text cannot be worked back out of them: every Hide in
+  a picture shares one texture, so lines and overlapping strokes match. *Soft*,
+  *Frosted* and *Progressive* (a blur that fades from one handle to the other;
+  drag the two handles to change where it starts and ends) are **looks, not
+  for secrets**: they blur what is there, and with a known font a blurred code can
+  be recovered. They are never the default, and Copy text and Ask AI still skip
+  everything you hid.
+- **Shape.** *Brush* (a stroke with soft round ends, sized to the text line under
+  it unless you pick a size; line help keeps it on its line, and sliding back
+  along a held line un-hides what you left), *Rectangle* or *Ellipse* (hold
+  `Shift` for a square or a circle; drag a corner handle to resize). Edges fade
+  outward only, so what is inside the shape is always fully covered. **Hide this
+  shape** (Snip: under the Hide options; the Studio: the Actions menu or the
+  right-click menu) covers a selected rectangle, ellipse, pen stroke or arrow,
+  or only its outline.
+- **Strength.** Light, Medium or Strong (a quarter, a half, or one text height),
+  the same at any zoom; the Studio also has a Custom slider. While Hide is the
+  tool, `1`, `2`, `3` pick the strength and `Shift+B` goes to the next style.
+
+**Redact** is a solid box (or an ellipse, if you redact an ellipse), for when you
+want no trace at all.
 
 **Eraser.** Drag over a pen or highlighter stroke to take off only the part
 under the brush; any other drawing it touches goes whole. Turn on **Whole

@@ -46,6 +46,7 @@ pub fn chord_caps(k: super::editing::Chord) -> Vec<String> {
         C::Ctrl(c) => vec!["Ctrl".into(), c.to_string()],
         C::CtrlShift(c) => vec!["Ctrl".into(), "Shift".into(), c.to_string()],
         C::Delete => vec!["Delete".into()],
+        C::None => Vec::new(),
     }
 }
 

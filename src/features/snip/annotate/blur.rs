@@ -102,6 +102,9 @@ pub struct Footprint<'a> {
     /// Progressive: where the blur is strongest, then where it is gone (two
     /// points; none: even).
     pub ramp: &'a [Point],
+    /// Hide reads its two colours from this picture (what is under the
+    /// annotations, which the Hide covers anyway); `None`: from the layer.
+    pub source: Option<&'a super::document::Image>,
 }
 
 impl<'a> Footprint<'a> {
@@ -114,6 +117,7 @@ impl<'a> Footprint<'a> {
             kind: Kind::Brush,
             outline: 0.0,
             ramp: &[],
+            source: None,
         }
     }
 
@@ -240,20 +244,50 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
         );
     }
 
+    // A ring (a shape's outline) is mostly the very thing it hides: its
+    // background is read over a band three times as wide, so the surroundings
+    // outweigh it (the ring itself still gives the ink colour).
+    let wide = (fp.kind != Kind::Brush && fp.outline > 0.0).then(|| {
+        let halo = Footprint {
+            outline: fp.outline * 3.0,
+            ..*fp
+        };
+        let (rx0, ry0, rx1, ry1) = clip(frame(&halo));
+        let mut mask = Mask::new((rx1 - rx0).max(1) as u32, (ry1 - ry0).max(1) as u32);
+        if let (Some(m), Some(path)) = (mask.as_mut(), halo.path()) {
+            let to = Transform::from_translate(-(ox + rx0 as f32), -(oy + ry0 as f32));
+            m.fill_path(&path, FillRule::Winding, false, to);
+        }
+        ((rx0, ry0, rx1, ry1), mask)
+    });
+
     // 1. The ONLY reading of the source: the background and the ink colour.
     let fill = {
         let data = layer.pm.data();
+        let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
+        let ((rx0, ry0, rx1, ry1), mask) = match &wide {
+            Some((region, Some(mask))) => (*region, mask),
+            _ => ((ax0, ay0, ax1, ay1), &hard),
+        };
+        let rw = (rx1 - rx0).max(0) as usize;
         // (A big footprint is sampled: a drag repaints it every frame, and two
         // colours need no more than a few thousand pixels.)
-        let step = (aw * ah / SAMPLES).max(1);
-        let under = (ay0..ay1)
-            .flat_map(|y| (ax0..ax1).map(move |x| (x, y)))
+        let step = (rw * (ry1 - ry0).max(0) as usize / SAMPLES).max(1);
+        let under = (ry0..ry1)
+            .flat_map(|y| (rx0..rx1).map(move |x| (x, y)))
             .enumerate()
             .filter(|(n, _)| n % step == 0)
             .filter_map(|(_, (x, y))| {
-                let m = hard.data()[(y - ay0) as usize * aw + (x - ax0) as usize];
+                let m = mask.data()[(y - ry0) as usize * rw + (x - rx0) as usize];
                 let i = ((y * w + x) * 4) as usize;
-                (m > 0).then(|| [data[i], data[i + 1], data[i + 2]])
+                let at = |px: &[u8]| [px[0], px[1], px[2]];
+                let picture = fp.source.and_then(|img| {
+                    let (ix, iy) = (x + oxi, y + oyi);
+                    let j = ((iy * i64::from(img.width) + ix) * 4) as usize;
+                    (ix >= 0 && iy >= 0 && ix < i64::from(img.width) && iy < i64::from(img.height))
+                        .then(|| at(&img.rgba[j..j + 3]))
+                });
+                (m > 0).then(|| picture.unwrap_or_else(|| at(&data[i..i + 3])))
             });
         let (ink, bg) = colours(under);
         [0, 1, 2].map(|k| bg[k] * (1.0 - DARKEN) + ink[k] * DARKEN)

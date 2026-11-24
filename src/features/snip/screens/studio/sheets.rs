@@ -237,6 +237,8 @@ pub(super) fn words(a: editing::Action) -> S {
         A::CopyPicture => S::st_copy_picture,
         A::Fit => S::st_fit,
         A::Shortcuts => S::st_shortcuts,
+        A::HideShape => S::sn_hide_shape,
+        A::HideOutline => S::sn_hide_outline,
     }
 }
 

@@ -150,7 +150,8 @@
 //! 12 moves the old default Translate / Live translate keys Ctrl+Shift+T / L to Alt+Shift+T / L (unless taken; a user's own
 //! key stays). 13: Online translation left Labs; an older file's `translate.engine = "online"` stays Online only
 //! when its `[labs] online` was on (it translated locally while off: no text goes to Google unasked); `[labs] online`
-//! is then dropped on save. A file older than `VERSION` is copied to
+//! is then dropped on save. 14: Hide's strength is Light / Medium / Strong now (0.25 / 0.5 / 1.0 of the text height): the old
+//! default `editor.blur_cell = "thin"` (every user had it written) moves to "medium" once, any other value stays. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -180,7 +181,7 @@ pub use store::{
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 14;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 
 /// The OS's language as the language table has it, else English

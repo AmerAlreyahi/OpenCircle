@@ -168,6 +168,12 @@ impl Config {
             c.editor.fill = get(t, p, "fill", None, &mut w);
             c.editor.blur_size = get(t, p, "blur_size", None, &mut w);
             c.editor.blur_cell = get(t, p, "blur_cell", None, &mut w);
+            // Schema 14: the old written default (thin) is Medium now; other values stay.
+            if file_version < Some(14)
+                && c.editor.blur_cell == Some(crate::features::snip::annotate::Width::Thin)
+            {
+                c.editor.blur_cell = Some(crate::features::snip::annotate::Width::Medium);
+            }
             let in_range = within(STROKE, " px");
             c.editor.stroke = get_checked(t, p, "stroke", None, &mut w, |n| {
                 n.as_ref().map_or(Ok(()), &in_range)
