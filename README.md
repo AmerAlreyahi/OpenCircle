@@ -238,9 +238,9 @@ operating it. See the [Privacy](docs/privacy.md) page.
 
 | Action | Shortcut |
 |---|---|
-| Circle to search | `Ctrl+Shift+Space` |
+| Circle to Search | `Ctrl+Shift+Space` |
 | Translate the whole screen | `Alt+Shift+T` |
-| Circle, then explain with AI | `Ctrl+Shift+E` |
+| Circle, then Ask AI | `Ctrl+Shift+E` |
 | Circle, then copy its text | `Ctrl+Shift+X` |
 | Snip | `Alt+A` |
 
@@ -260,7 +260,7 @@ Games must run in borderless or windowed mode for the translation to appear
 over them. Linux reads text with
 OpenCircle's own reader, a little slower than Windows OCR; on Wayland the
 overlay can take about half a second to appear and popups are square.
-AI-provider translation can be slower than the offline engine and may show the
+AI-provider translation can be slower than the Local engine and may show the
 whole result at once.
 
 ## Lightweight

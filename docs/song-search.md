@@ -25,7 +25,7 @@ an account.
 
 ## Use it
 
-Open OpenCircle (`Ctrl+Shift+Space`) and press the music note at the bottom.
+Open Circle to Search (`Ctrl+Shift+Space`) and press the music note at the bottom.
 OpenCircle listens for 10 seconds ("Listening… 8 s", with Cancel), then shows
 the song: cover, title, artist, album and year, with Spotify, YouTube and More
 links. A link opens in your browser only when you click it.

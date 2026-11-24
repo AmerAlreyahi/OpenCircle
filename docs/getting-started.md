@@ -30,7 +30,7 @@ in **Settings > General**.
 ## First run
 
 A short setup asks your language first (it becomes the translate target, and
-the step names the offline model your first translation downloads; pick
+the step names the local model your first translation downloads; pick
 Arabic and the rest of the setup, and the app, turn Arabic at once), then shows
 your shortcut, an optional AI provider, a theme (12 to pick from) and whether
 OpenCircle starts with Windows. On Linux under Wayland it also asks the desktop
@@ -162,7 +162,7 @@ on (the default) the selected area goes with it; off sends only your question.
 Pick the languages in **Settings > Translate**. The target is the language you
 chose in the first-run setup. The translate pill's Snip button takes the
 translated page into Snip.
-Translation runs on your PC by default (Settings > Translate > Engine: Offline); choose AI there to send page text to your AI provider. See [Translate](translate.md).
+Translation runs on your PC by default (Settings > Translate > Engine: Local); choose AI there to send page text to your AI provider. See [Translate](translate.md).
 
 ## Snip and annotate
 

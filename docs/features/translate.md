@@ -9,7 +9,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 ## How to
 
 1. The first-run setup asks for your language and makes it the target; change it in **Settings › Translate**. The picture shows English → Arabic.
-2. Leave the default setup for offline translation, or choose **Offline** under **Engine** to keep translation on your PC even if you have set up AI.
+2. Leave the default setup for offline translation, or choose **Local** under **Engine** to keep translation on your PC even if you have set up AI.
 3. Show the page you want to read and press `Alt+Shift+T`.
 4. On first use, accept the model download. It is downloaded once for that language direction and reused.
 5. Wait as translated blocks appear from the top of the screen. Press `Esc` when you are done.
@@ -25,7 +25,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 
 ## Tips
 
-- The offline engine is the fastest choice for this flow. An AI provider can be slower, especially over the internet.
+- The Local engine is the fastest choice for this flow. An AI provider can be slower, especially over the internet.
 - With the default setup and no AI provider configured, translation runs offline. No key or account is needed.
 - Choose the source language yourself if automatic detection reads the wrong script.
 - A browser's address bar, file names and e-mail addresses are left as they are, and big outlined subtitles (a film's, a game's) are erased and redrawn at their size. See [Translate](../translate.md).
@@ -39,7 +39,7 @@ Translate the whole screen in place, offline by default, with the words drawn wh
 - The first model download needs internet access and adds time before the first translation.
 - Offline translation supports a limited set of language directions. Settings tells you when a pair is unavailable.
 - Text recognition and translation can make mistakes. Offline wording can be literal.
-- Blocks appear progressively with the offline engine. An AI provider may return the whole result together.
+- Blocks appear progressively with the Local engine. An AI provider may return the whole result together.
 - This is a single captured screen. Open it again after the page changes.
 
 ---

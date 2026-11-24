@@ -63,7 +63,7 @@ on. Hebrew, Hindi, Thai and Korean can be targets but not sources yet.
 
 Choose one in **Settings → Translate → Engine**.
 
-- **Offline** (the default) needs no key and no account, and nothing leaves your PC. It is a
+- **Local** (the default) needs no key and no account, and nothing leaves your PC. It is a
   small neural translation model (OPUS-MT, by the University of Helsinki) that
   runs on your CPU: about a third of a second for 20 game lines, fast enough
   for game text. It is more literal than AI, can miss the game meaning of a

@@ -282,7 +282,7 @@ fn conflicts_show_inline_and_do_not_assign() {
     press(&mut s, chord(true, true, "Space"));
     assert_eq!(
         s.shortcut_error,
-        Some((Slot::Quick(0), "Already used by Open OpenCircle".into()))
+        Some((Slot::Quick(0), "Already used by Circle to Search".into()))
     );
     assert_eq!(s.draft.quick_actions[0].shortcut, "Alt+Shift+T");
     // Quick vs quick: "Translate (live, Beta)" owns Alt+Shift+L.
@@ -1384,8 +1384,8 @@ fn the_model_row_says_what_is_left_and_updates_it() {
     update(&mut s, Message::Section(Section::Translate));
     let texts = |s: &State| shot::texts(view(s));
     let row = "Translation models";
-    let optima = "Offline translation runs on OptimaMT models: OPUS-MT with a lighter decoder \
-                  (the same translations, less memory).";
+    let optima =
+        "Local translation runs on OptimaMT models stored on this PC. Credits are in About.";
     let t = texts(&s);
     assert!(!t.iter().any(|t| t == row), "nothing installed: {t:?}");
     assert!(t.iter().any(|t| t == optima) && t.iter().any(|t| t == "OptimaMT on Hugging Face"));
@@ -1393,7 +1393,7 @@ fn the_model_row_says_what_is_left_and_updates_it() {
     let t = texts(&s);
     for want in [
         row,
-        "3 of 15 still use the older, heavier decoder",
+        "3 of 15 are an older, heavier version",
         "Update now (about 178 MB)",
     ] {
         assert!(t.iter().any(|t| t == want), "{want}: {t:?}");
@@ -2065,7 +2065,7 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
             "Ask AI",
             "Translate",
             "Snip",
-            "Studio",
+            "OpenCircle Studio",
             "History",
             "Shortcuts",
             "Privacy",
@@ -4284,4 +4284,34 @@ fn f10_default_action_names_say_what_they_do() {
         DefaultAction::Text,
         "kept, not migrated"
     );
+}
+
+/// F1 (#206): one name per feature on every surface: Settings > Shortcuts uses the bar's
+/// and the tray's names, the sidebar and the tray say OpenCircle Studio, and the engine
+/// is "Local" (no "On-device" / decoder wording).
+#[test]
+fn f1_one_name_per_feature_everywhere() {
+    use crate::shared::app_language::{S, tr};
+    let (mut s, _) = state(None);
+    s.draft.labs = Labs::all_on();
+    let texts = page(&mut s, Section::Shortcuts);
+    let has = |w: &str| texts.iter().any(|t| t == w);
+    for want in ["Circle to Search", "Ask AI", "Search in browser"] {
+        assert!(has(want), "{want}: {texts:?}");
+    }
+    for old in ["Open OpenCircle", "Explain with AI", "Search with Lens"] {
+        assert!(!has(old), "{old}: {texts:?}");
+    }
+    assert_eq!(tr(S::tray_studio), "OpenCircle Studio");
+    assert_eq!(tr(S::nav_studio), "OpenCircle Studio");
+    assert_eq!(tr(S::tray_circle), tr(S::k_open), "tray = Shortcuts");
+    assert_eq!(tr(S::act_search), tr(S::k_lens));
+    assert_eq!(tr(S::md_header), "Local models");
+    for jargon in [S::tr_optima, S::tr_models_old] {
+        let line = tr(jargon);
+        assert!(
+            !line.contains("decoder") && !line.contains("OPUS"),
+            "{line}"
+        );
+    }
 }

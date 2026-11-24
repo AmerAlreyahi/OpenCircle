@@ -7,9 +7,9 @@ The Song search shortcut is hidden (not registered) until you turn Song search o
 
 | Action | Default | What it does |
 |---|---|---|
-| Circle to search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |
+| Circle to Search | `Ctrl+Shift+Space` | Freeze the screen, then select and act |
 | Translate full screen | `Alt+Shift+T` | Translate the whole screen at once |
-| Explain with AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
+| Ask AI | `Ctrl+Shift+E` | Circle something; the AI explains it |
 | Copy text | `Ctrl+Shift+X` | Circle something; its text is copied |
 | Search in browser | unset | Circle something; it opens in Google Lens in your browser |
 | Snip | `Alt+A` | Hover a window and click, or drag an area; `Enter` = full screen |

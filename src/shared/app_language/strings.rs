@@ -548,20 +548,20 @@ strings! {
         | "عادت الاختصارات إلى قيمتها الافتراضية";
     k_reset_undo: "Undo"
         | "تراجع";
-    k_open: "Open OpenCircle"
-        | "فتح OpenCircle";
-    k_open_desc: "Starts a capture"
-        | "يبدأ الالتقاط";
+    k_open: "Circle to Search"
+        | "البحث بالدائرة";
+    k_open_desc: "Freezes the screen so you can circle or select"
+        | "يجمّد الشاشة لتحيط شيئًا بدائرة أو تحدده";
     k_whole: "Whole screen"
         | "الشاشة كاملة";
-    k_explain: "Explain with AI"
-        | "الشرح بالذكاء الاصطناعي";
+    k_explain: "Ask AI"
+        | "اسأل الذكاء الاصطناعي";
     k_circle: "The area you circle"
         | "المنطقة التي تحيطها بدائرة";
     k_copytext: "Copy text"
         | "نسخ النص";
-    k_lens: "Search with Lens"
-        | "البحث باستخدام Lens";
+    k_lens: "Search in browser"
+        | "بحث في المتصفح";
     k_colour: "Pick a colour"
         | "التقاط لون";
     k_colour_desc: "Click copies HEX, Shift+click RGB"
@@ -907,8 +907,8 @@ strings! {
         | "حذف الكل";
     h_delete_ask: "Delete every kept capture and chat? This can't be undone"
         | "هل تحذف كل اللقطات والمحادثات المحفوظة؟ لا يمكن التراجع عن ذلك";
-    k_open_tip: "Open OpenCircle shortcut"
-        | "اختصار فتح OpenCircle";
+    k_open_tip: "Circle to Search shortcut"
+        | "اختصار البحث بالدائرة";
     k_esc: "Esc cancels"
         | "Esc يلغي";
     cu_choose: "Choose colours"
@@ -1119,8 +1119,8 @@ strings! {
         | "{} مستخدم في تطبيق آخر: اختر مفتاحًا آخر في الإعدادات";
     pill_taken_many: "{} are taken by another app: pick another key in Settings"
         | "{} مستخدمة في تطبيق آخر: اختر مفاتيح أخرى في الإعدادات";
-    md_header: "On-device models"
-        | "النماذج على الجهاز";
+    md_header: "Local models"
+        | "النماذج المحلية";
     md_ocr_name: "Text recognition"
         | "التعرّف على النص";
     md_ocr_title: "Text recognition needs a small download"
@@ -1754,8 +1754,8 @@ strings! {
         | "الرسم كاملًا";
     sn_eraser_undo: "Ctrl+Z brings them back"
         | "Ctrl+Z يعيدها";
-    tray_studio: "Studio"
-        | "الاستوديو";
+    tray_studio: "OpenCircle Studio"
+        | "استوديو OpenCircle";
     st_title: "OpenCircle Studio"
         | "استوديو OpenCircle";
     st_empty_title: "No picture open"
@@ -2080,16 +2080,16 @@ strings! {
         | "توقّف تحديث النموذج مؤقتًا · يُستأنف في المرة القادمة";
     tr_models: "Translation models"
         | "نماذج الترجمة";
-    tr_models_old: "{} of {} still use the older, heavier decoder"
-        | "{} من أصل {} ما زالت تستخدم المفكّك الأقدم والأثقل";
+    tr_models_old: "{} of {} are an older, heavier version"
+        | "{} من أصل {} نسخة أقدم وأثقل";
     tr_models_update: "Update now (about {})"
         | "التحديث الآن (نحو {})";
     tr_models_updating: "Updating · {} of {}"
         | "جارٍ التحديث · {} من {}";
     tr_models_current: "Your translation models are up to date."
         | "نماذج الترجمة لديك محدّثة.";
-    tr_optima: "Offline translation runs on OptimaMT models: OPUS-MT with a lighter decoder (the same translations, less memory)."
-        | "تعمل الترجمة دون إنترنت بنماذج OptimaMT: نماذج OPUS-MT بمفكّك أخف (الترجمات نفسها بذاكرة أقل).";
+    tr_optima: "Local translation runs on OptimaMT models stored on this PC. Credits are in About."
+        | "تعمل الترجمة المحلية بنماذج OptimaMT المخزّنة على جهازك. الشكر في «حول».";
     tr_optima_link: "OptimaMT on Hugging Face"
         | "OptimaMT على Hugging Face";
     // the per-game glossary (0.2.0, planning #13)
@@ -2200,8 +2200,8 @@ strings! {
         | "لقطة OpenCircle";
     lc_what_ocr: "the {} text-recognition model"
         | "نموذج التعرّف على النص ({})";
-    lc_what_pair: "the {} → {} offline translation model"
-        | "نموذج الترجمة دون إنترنت {} ← {}";
+    lc_what_pair: "the {} → {} local translation model"
+        | "نموذج الترجمة المحلي {} ← {}";
     sc_latin: "Latin"
         | "اللاتينية";
     sc_arabic: "Arabic"
@@ -2406,8 +2406,8 @@ strings! {
         | "تجاهل";
     st_actual: "Actual size"
         | "الحجم الفعلي";
-    nav_studio: "Studio"
-        | "الاستوديو";
+    nav_studio: "OpenCircle Studio"
+        | "استوديو OpenCircle";
     ss_quick: "Quick widget"
         | "الأداة السريعة";
     ss_studio: "Studio"

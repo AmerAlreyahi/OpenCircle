@@ -8,7 +8,7 @@ a question.
 ## Browser (no key): the default
 
 Nothing to set up. In **Settings → Ask AI**, **Browser** is the default. When you
-press `Enter` in the bar's AI field (or use the **Explain with AI** quick
+press `Enter` in the bar's AI field (or use the **Ask AI** quick
 action), OpenCircle opens your question in your default browser. Nothing opens
 in your browser by itself: only asking does it.
 
@@ -98,7 +98,7 @@ server with a key must use `https://`.
 ## Using it
 
 Circle something and type in the bar's AI field, or press `A` (or use the
-**Explain with AI** quick action, `Ctrl+Shift+E`). With a provider and key, the
+**Ask AI** quick action, `Ctrl+Shift+E`). With a provider and key, the
 answer streams into a chat with markdown, and you can ask follow-up questions: a
 follow-up pins the chat: it becomes its own window, the overlay closes by itself,
 the chat stays open above other apps and a new capture asks into the same chat
