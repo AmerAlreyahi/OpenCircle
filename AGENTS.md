@@ -1034,6 +1034,11 @@ production systems.
   C6 a quiet x at the end of the Snip toolbar and the translate pill; Esc keeps working (supersedes "Esc only", 2026-11-02).
   C7 from Settings v2 now: toggle switches instead of Off | On segments, and each page's preview folded into one "Play preview" row.
 
+- Next release after the enhancements (owner, 2026-11-24): Snip audio + video recording (#168) AND the new design. The widget
+  changes with the mode: record mode (audio or video) shows only the recording controls, never the picture editing tools.
+  The new design is not approved yet: its design round comes directly after the enhancements release, approved on the
+  canvas (COM-08) before recording UI or any new UI is built.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
