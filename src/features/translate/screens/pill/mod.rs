@@ -1,7 +1,7 @@
 //! Translate in place (DESIGN.md "Full-screen translate"): the frozen frame, or
 //! the selection in it, is translated on a thread (`translate::pipeline`) and
 //! swapped in where it was, top first as the blocks are ready (#27).
-//! Hold Alt = the original. Click a translated block = its word card, whose
+//! The Original button shows the page as it was. Click a translated block = its word card, whose
 //! Explain (an explicit click) asks the AI; `A` continues as an Ask AI chat.
 use std::sync::Arc;
 
@@ -44,6 +44,9 @@ pub enum Msg {
     Add(glossary::AddMsg),
     /// Declined the download, or closed an error: the overlay closes.
     Close,
+    /// The pill's Original button (F7): the original page while it is on, the translation again
+    /// when pressed again. Esc still ends the translation; Alt never peeks.
+    Original,
     /// The pill's Snip button: Snip takes the page as translated (the App
     /// does what Alt+A does).
     Snip,
@@ -170,6 +173,8 @@ pub struct Session {
     /// The whole frame was asked for (no selection to outline).
     whole: bool,
     phase: Phase,
+    /// The Original button is on: the page shows as it was (F7).
+    original: bool,
     card: Option<Card>,
     cache: Arc<Cache>,
     /// The download / translation; dropping it stops the thread's messages.
@@ -257,6 +262,7 @@ impl Session {
             area,
             whole,
             phase: Phase::Consent(None),
+            original: false,
             card: None,
             cache,
             work: None,
@@ -309,11 +315,11 @@ impl Session {
     }
 
     /// What to show instead of the original frame: the translation, once
-    /// it is ready. Alt changes nothing (owner, 2026-11-18: no frame of the
-    /// original until Esc).
+    /// it is ready, unless the Original button is on. Alt changes nothing (owner, 2026-11-18:
+    /// no peek; the owner's 2026-11-24 button is the way to see the original).
     pub fn image(&self) -> Option<&image::Handle> {
         match &self.phase {
-            Phase::Shown(shown) => Some(&shown.image),
+            Phase::Shown(shown) if !self.original => Some(&shown.image),
             _ => None,
         }
     }
@@ -366,6 +372,8 @@ impl Session {
     /// `None` = nothing translated on screen yet.
     pub fn seen(&self) -> Option<image::Handle> {
         match &self.phase {
+            // (the Original button is on: what is seen is the original page)
+            Phase::Shown(_) if self.original => Some(self.frame.clone()),
             Phase::Shown(shown) => Some(shown.image.clone()),
             Phase::Translating => {
                 let part = self.partial.as_ref()?;
@@ -525,6 +533,9 @@ impl Session {
                     return self.update_models(pairs);
                 }
             }
+            Msg::Original => {
+                self.original = matches!(self.phase, Phase::Shown(_)) && !self.original
+            }
             Msg::ModelUpdate(share) => {
                 if let Some((_, at)) = &mut self.updating {
                     *at = share;
@@ -591,6 +602,10 @@ impl Session {
         if self.picker.is_open() || self.glossary.is_open() {
             self.picker.close();
             self.glossary.close();
+            return;
+        }
+        // (the original page shows: no translated block to tap)
+        if self.original {
             return;
         }
         let (
@@ -806,6 +821,7 @@ impl Session {
     /// for them (`self.offline`); otherwise the thread asks (`Msg::Offline`),
     /// also when the text turned out to need another pair ("auto").
     fn run(&mut self, download: bool) -> Task<Msg> {
+        self.original = false; // a new translation shows itself
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
         let (agreed, scale, readers) = (self.offline, self.scale, self.readers.is_some());

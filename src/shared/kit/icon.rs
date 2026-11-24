@@ -59,11 +59,13 @@ pub enum Icon {
     Alert,
     /// lucide "book-a" (the translate pill's glossary).
     Glossary,
+    /// lucide "eye" (the translate pill's Original toggle).
+    Eye,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 28] = [
+    pub const ALL: [Icon; 29] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -92,6 +94,7 @@ impl Icon {
         Icon::External,
         Icon::Alert,
         Icon::Glossary,
+        Icon::Eye,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -134,6 +137,7 @@ impl Icon {
             Icon::External => '\u{e0bd}',
             Icon::Alert => '\u{e07b}',
             Icon::Glossary => '\u{e548}',
+            Icon::Eye => '\u{e0be}',
         }
     }
 }

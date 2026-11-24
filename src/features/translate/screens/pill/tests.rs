@@ -88,6 +88,7 @@ fn session(models: bool) -> Session {
         } else {
             Phase::Consent(None)
         },
+        original: false,
         card: None,
         cache: Arc::new(Cache::new(8)),
         work: None,
@@ -206,8 +207,8 @@ fn a_problem_is_a_note_under_the_pill_that_never_moves() {
         let pill = view::pill_at(Rectangle::with_size(size));
         let (rows, cols) = (
             (view::PILL_TOP + picker::PILL.height) as usize,
-            // (the Snip button and the glossary's, which never changes)
-            (pill.x + picker::PILL.width) as usize - 78,
+            // (the Original, Snip and glossary buttons, which never change)
+            (pill.x + picker::PILL.width) as usize - 116,
         );
         for y in 0..rows {
             let at = y * 1280 * 4;
@@ -1420,4 +1421,51 @@ fn lost_parts_offer_retry() {
     );
     let _ = s.update(Msg::Retry);
     assert!(!s.is_shown(), "translating again");
+}
+
+/// F7 (#212): the pill's Original button, first of the three after the chips: dimmed until a
+/// translation is shown; a press shows the original page, a second press the translation
+/// again; a new translation starts on the translation.
+#[test]
+fn f7_the_original_button_toggles_the_page() {
+    use crate::shared::kit::testing::shot;
+    let size = Size::new(1280.0, 200.0);
+    let at = card::place(size, None, None);
+    let mut s = session(true);
+    let pill = Rectangle::new(view::pill_at(Rectangle::with_size(size)), picker::PILL);
+    let icon = crate::shared::kit::tokens::size::ICON_BUTTON;
+    let button = Point::new(
+        pill.x + pill.width - 6.0 - (3.0 * icon + 2.0 * picker::SPACING) + icon / 2.0,
+        pill.y + pill.height / 2.0,
+    );
+    let press = |s: &Session| -> Vec<Msg> { shot::click(s.view(size, at, false), size, button) };
+    assert!(press(&s).is_empty(), "nothing translated yet: dimmed");
+    let _ = s.update(shown(Vec::new()));
+    assert!(s.image().is_some(), "the translation shows");
+    assert!(matches!(press(&s)[..], [Msg::Original]), "{:?}", press(&s));
+    let _ = s.update(Msg::Original);
+    assert!(s.image().is_none(), "the original page shows");
+    let _ = s.update(Msg::Original);
+    assert!(s.image().is_some(), "pressed again: the translation");
+    let _ = s.update(Msg::Original);
+    let _ = s.run(false);
+    assert!(!s.original, "a new translation starts on the translation");
+}
+
+/// F7: while the Original button is on, Snip sees the original page (`seen`, so the session
+/// stays to return to), and a tap on a block opens no word card.
+#[test]
+fn f7_original_on_snip_sees_the_original_and_taps_open_nothing() {
+    let mut s = session(true);
+    let _ = s.update(shown(vec![block("a", "b", [60.0, 20.0, 40.0, 20.0])]));
+    let translated = s.seen();
+    assert_ne!(translated, Some(s.frame.clone()), "the translated page");
+    let _ = s.update(Msg::Original);
+    assert_eq!(s.seen(), Some(s.frame.clone()), "the original frame");
+    s.click(Point::new(80.0, 30.0));
+    assert!(s.take_chat().is_none(), "no word card over the original");
+    let _ = s.update(Msg::Original);
+    assert_eq!(s.seen(), translated, "back to the translated page");
+    s.click(Point::new(80.0, 30.0));
+    assert!(s.take_chat().is_some(), "the word card again");
 }

@@ -173,11 +173,39 @@ impl Session {
         )
     }
 
-    /// The pill's buttons after the chips: Snip, then the glossary.
+    /// The Original toggle (F7): on while the original page shows; dim until a translation is
+    /// there. Its name is the same string as Snip More's "Show original" row.
+    fn original_button(&self) -> Element<'_, Msg> {
+        let shown = matches!(self.phase, Phase::Shown(_));
+        let button = icon_button(
+            crate::shared::kit::icon::Icon::Eye.glyph(),
+            State {
+                active: self.original,
+                ..State::default()
+            },
+            shown.then_some(Msg::Original),
+        );
+        let name = match self.original {
+            true => t!(tp_show_translation),
+            false => t!(sn_show_original),
+        };
+        hint(
+            button,
+            name,
+            Why::Icon,
+            iced::widget::tooltip::Position::Bottom,
+        )
+    }
+
+    /// The pill's buttons after the chips: Original, Snip, then the glossary.
     fn tail(&self) -> Element<'_, Msg> {
-        dir::row([self.snip_button(), self.glossary.button()])
-            .spacing(picker::SPACING)
-            .into()
+        dir::row([
+            self.original_button(),
+            self.snip_button(),
+            self.glossary.button(),
+        ])
+        .spacing(picker::SPACING)
+        .into()
     }
 
     /// The pill with the offer beside it: "Spanish text found" and its Get.

@@ -1419,6 +1419,8 @@ strings! {
         | "نسخ النص";
     act_translate: "Translate"
         | "ترجمة";
+    tp_show_translation: "Show translation"
+        | "إظهار الترجمة";
     st_not_for_tool: "Not for this tool"
         | "لا ينطبق على هذه الأداة";
     sn_why_capturing:"Finish the long capture first"
