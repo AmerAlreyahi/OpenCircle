@@ -1067,6 +1067,13 @@ production systems.
 - Ctrl+wheel (owner, 2026-11-24, #202): over a selected shape it resizes the shape (Studio and Snip editor); elsewhere in the
   Studio it keeps zooming the picture.
 
+- Three workers allowed for this round (owner, 2026-11-24, "for the design start 3rd worker"): the 2-worker cap is raised to 3
+  while the design worker runs; at most 2 of them heavy builders (ORC-11).
+- Next-release design (owner, 2026-11-24): prototypes FIRST, only the new parts, for his OK: the Snip widget per mode (picture
+  tools / audio recording / video recording; record modes never show picture tools) and "Open with" for a capture or recording
+  (installed editors such as CapCut, Filmora). Never a rewrite of everything up front. After he approves the prototypes, the
+  full Claude Design for all of Settings. Shown on the Claude Design canvas.
+
 ## Domain quirks
 
 - Wayland can't hide windows (set_visible(false) is a no-op): close them and
