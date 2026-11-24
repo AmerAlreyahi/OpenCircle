@@ -115,7 +115,16 @@ impl SnipToolbar {
         {
             // Snip's toolbar: Tab walks it, Enter / Space press what it is on.
             let message = match message {
+                // an arrow in the options row: a Tab step (Left / Up back; mirrored in Arabic)
+                Message::RowStep(dx, dy) => {
+                    let back = match dx {
+                        0 => dy < 0,
+                        _ => (dx < 0) != crate::shared::kit::dir::rtl(),
+                    };
+                    return self.update(Message::Focus(back));
+                }
                 Message::Focus(back) => {
+                    self.annotator.row_at = toolbar::bar_stops(&self.annotator).len();
                     let n = toolbar::stops(&self.annotator).len();
                     let next = match (self.annotator.focus, back) {
                         (None, false) => 0,
@@ -215,6 +224,14 @@ impl SnipToolbar {
         toolbar::size_for(&self.annotator)
     }
 
+    /// What the toolbar docks with: the toolbar and the room under it for the
+    /// options row (UX C4), always the same, so the toolbar never jumps when a
+    /// tool has no options.
+    pub fn dock_size(&self) -> Size {
+        let bar = self.bar_size();
+        Size::new(bar.width, bar.height + toolbar::ROW_ROOM)
+    }
+
     /// The canvas over its place and the toolbar with its top-left at
     /// `toolbar` (`None`: not shown, e.g. while the bar turns into it, or on
     /// another screen); a press on the toolbar outside its buttons sends `grab`
@@ -267,19 +284,52 @@ impl SnipToolbar {
         }
         if let Some(at) = toolbar {
             let size = toolbar::size_for(&self.annotator);
+            // the options row under it (C4): lined up with the toolbar's start edge, moved over
+            // far enough to fit the screen, scrolling across only past that
+            let rtl = crate::shared::kit::dir::rtl();
+            let wide = toolbar::ROW_WIDE.min(screen.width - 2.0 * GAP);
+            let (x0, x1) = match rtl {
+                false => {
+                    let x0 = at.x.min(screen.width - GAP - wide).max(GAP);
+                    (x0, screen.width - GAP)
+                }
+                true => (
+                    GAP,
+                    (at.x + size.width).max(GAP + wide).min(screen.width - GAP),
+                ),
+            };
+            let row = toolbar::options_row(&self.annotator, x1 - x0);
+            let room = if row.is_some() {
+                toolbar::ROW_ROOM
+            } else {
+                0.0
+            };
             // its tooltips and panels away from the area: above it when docked above
-            let side = match at.y + size.height <= canvas.y {
+            let side = match at.y + size.height + room <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
                 false => iced::widget::tooltip::Position::Bottom,
             };
-            let (toolbar, popover) =
-                toolbar::view_at(&self.annotator, Rectangle::new(at, size), side);
+            // (panels below clear the row)
+            let held = Rectangle::new(at, Size::new(size.width, size.height + room));
+            let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side);
             let toolbar = mouse_area(toolbar.map(map))
-                .on_press(grab)
+                .on_press(grab.clone())
                 .interaction(mouse::Interaction::Move);
-            layers = layers
-                .push(pin(toolbar).position(at))
-                .extend(popover.map(|p| p.map(map)));
+            layers = layers.push(pin(toolbar).position(at));
+            if let Some(row) = row {
+                let row = mouse_area(row.map(map))
+                    .on_press(grab)
+                    .interaction(mouse::Interaction::Move);
+                // (only the row takes presses, not the strip around it)
+                let row = match rtl {
+                    false => container(row),
+                    true => container(row).align_right(x1 - x0),
+                }
+                .width(x1 - x0);
+                let y = at.y + size.height + toolbar::ROW_GAP;
+                layers = layers.push(pin(row).position(Point::new(x0, y)));
+            }
+            layers = layers.extend(popover.map(|p| p.map(map)));
         }
         layers.into()
     }
@@ -303,7 +353,7 @@ impl SnipToolbar {
 /// most `max_zoom`): centred, scaled down to leave room for Snip's toolbar
 /// docked under it.
 fn fit(size: Size, screen: Size, max_zoom: f32) -> (Point, f32) {
-    let toolbar = toolbar::size().height;
+    let toolbar = toolbar::size().height + toolbar::ROW_ROOM;
     let room = Size::new(
         screen.width - 2.0 * GAP,
         screen.height - 2.0 * GAP - BOTTOM_GAP - toolbar,
@@ -340,6 +390,51 @@ mod tests {
         assert_eq!((e.image().width, e.image().height), (40, 30));
         e.reopen();
         assert!(e.is_open());
+    }
+
+    /// C4-6: the toolbar docks with the room of its options row under it, the
+    /// same for every tool (it never jumps), and the row sits inside that room.
+    #[test]
+    fn c4_6_the_dock_has_room_for_the_row() {
+        let mut e = SnipToolbar::fitted(crop(40, 30), Size::new(1920.0, 1080.0), 1.0);
+        let room = e.dock_size();
+        assert_eq!(room.height, e.bar_size().height + toolbar::ROW_ROOM);
+        e.annotator.tool = annotate::Tool::Pen;
+        assert_eq!(e.dock_size(), room, "the same for every tool");
+        // a picture is fitted with the row's room too
+        let (at, zoom) = fit(Size::new(780.0, 6000.0), Size::new(1920.0, 1080.0), 1.0);
+        assert!(at.y + 6000.0 * zoom + GAP + room.height <= 1080.0 - BOTTOM_GAP + 1e-3);
+    }
+
+    /// C4-7: on a 1280 x 720 screen Hide's row (the widest) is lined up with the toolbar and reaches no
+    /// further than the screen's margin, whether the toolbar is at the left or at the right edge (it moves
+    /// over to fit); right to left the same mirrored. Goldens show it.
+    #[test]
+    fn c4_7_hides_row_fits_a_1280_screen_wherever_the_toolbar_is() {
+        use crate::shared::kit::testing::golden;
+        let screen = Size::new(1280.0, 720.0);
+        let mut failed = Vec::new();
+        for rtl in [false, true] {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            for (name, x) in [("left", 64.0), ("right", 1280.0 - 16.0 - 676.0)] {
+                let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
+                e.annotator
+                    .update(annotate::Message::Tool(annotate::Tool::Blur));
+                let at = Point::new(x, 560.0);
+                let dir = if rtl { "-ar" } else { "" };
+                let file = format!("snip-row-fit-{name}{dir}-sapphire");
+                failed.extend(golden::check("screens", &file, screen, &[1.0], || {
+                    e.view(
+                        screen,
+                        Some(at),
+                        canvas::ScreenMap::ONE,
+                        |m| m,
+                        annotate::Message::Grab,
+                    )
+                }));
+            }
+        }
+        assert!(failed.is_empty(), "{failed:#?}");
     }
 
     #[test]

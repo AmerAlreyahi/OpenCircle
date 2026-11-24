@@ -200,3 +200,40 @@ fn w102_5f_cycling_never_restyles_an_existing_hide() {
     };
     assert_eq!(style, blur::Style::Soft, "a click on a card restyles it");
 }
+
+/// W104 (review): the style pictures follow the drawing with the pointer kept STILL: while a Hide is
+/// dragged, after it is let go, and after Undo / Redo they equal a fresh build.
+#[test]
+fn w104_style_pictures_follow_the_drawing_with_the_pointer_still() {
+    let mut e = editor(1.0);
+    let pics = |e: &Annotator| -> Vec<Vec<u8>> {
+        e.style_thumbs()
+            .iter()
+            .map(|h| match h {
+                iced::widget::image::Handle::Rgba { pixels, .. } => pixels.to_vec(),
+                _ => panic!("pixels"),
+            })
+            .collect()
+    };
+    let fresh = |e: &Annotator| {
+        e.thumbs.borrow_mut().take();
+        pics(e)
+    };
+    e.update(Message::Move(pt(200.0, 100.0)));
+    let before = pics(&e);
+    e.update(Message::Press(pt(40.0, 100.0)));
+    e.update(Message::Move(pt(360.0, 100.0))); // (the pointer is not moved after this)
+    e.hover = Some(pt(200.0, 100.0));
+    let during = pics(&e);
+    assert_eq!(during, fresh(&e), "while dragging");
+    assert_ne!(during[0], before[0], "the Hide being drawn shows");
+    e.update(Message::Release);
+    let after = pics(&e);
+    assert_eq!(after, fresh(&e), "after Release");
+    e.update(Message::Undo);
+    assert_eq!(pics(&e), fresh(&e), "after Undo");
+    assert_eq!(pics(&e)[0], before[0], "the bare picture is back");
+    e.update(Message::Redo);
+    assert_eq!(pics(&e), fresh(&e), "after Redo");
+    assert_eq!(pics(&e)[0], after[0]);
+}

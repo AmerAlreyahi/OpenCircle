@@ -116,7 +116,6 @@ pub(super) mod touch {
         match m {
             M::Colour(_) | M::Hex(_) => COLOUR,
             M::Width(_) => STROKE | TEXT,
-            M::Stroke(_) => STROKE,
             M::TextSize(_) | M::TextStyle(_) => TEXT,
             M::BlurSize(_) | M::BlurCell(_) | M::BlurCustom(_) => BLUR,
             M::BlurStyle(_) => BLUR,

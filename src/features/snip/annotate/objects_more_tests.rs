@@ -44,8 +44,8 @@ fn s1_4_every_option_writes_to_a_single_selection() {
     assert!(e.doc.items[0].outline);
     e.update(Message::Fill(true));
     assert!(e.doc.items[0].fill);
-    e.update(Message::Stroke(12));
-    assert_eq!(e.doc.items[0].width, 12.0);
+    e.update(Message::Width(Width::Thick));
+    assert_eq!(e.doc.items[0].width, Width::Thick.stroke());
     e.update(Message::Colour(BLUE));
     assert_eq!(e.doc.items[0].colour, BLUE);
     e.update(Message::Outline(false));
@@ -79,10 +79,11 @@ fn s1_4_every_option_writes_to_a_mixed_selection_and_only_it() {
     assert_eq!(after[1].1, 8.0);
     // stroke
     let mut e = mixed();
-    e.update(Message::Stroke(10));
+    e.update(Message::Width(Width::Thick));
+    let thick = Width::Thick.stroke();
     assert_eq!(
         boxes(&e).iter().map(|s| s.1).collect::<Vec<_>>(),
-        [10.0, 10.0]
+        [thick, thick]
     );
     assert_eq!(boxes(&e)[1].0, GREEN, "colour stays mixed");
     assert!(boxes(&e)[1].2 && !boxes(&e)[0].2, "outline stays mixed");

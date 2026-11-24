@@ -293,7 +293,11 @@ impl App {
     /// on it never starts a selection.
     // ponytail: a plain size morph; the full motion returns with the GPU renderer.
     pub(crate) fn morphing_bar(&self, at: Point) -> Element<'_, Message> {
-        let size = self.dock_size();
+        let mut size = self.dock_size();
+        // (Snip's toolbar docks with the room of its options row under it)
+        if let Some(edit) = self.o.edit.as_ref().filter(|e| e.annotator.movable) {
+            size.height = edit.bar_size().height;
+        }
         let shape = surface(Material::Widget, radius::WINDOW, space())
             .width(size.width)
             .height(size.height);

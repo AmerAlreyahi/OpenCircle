@@ -12,7 +12,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::share;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
-    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, Width, dragout, info,
+    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, dragout, info,
 };
 use crate::features::snip::snip_more::{self, Read, Row};
 use crate::shared::app_language::{S, fmt, tr};
@@ -24,7 +24,7 @@ use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{
-    button, chip, colour, divider, grip, keycap, option_list, segmented, slider, thumb,
+    button, chip, colour, divider, grip, keycap, option_list, segmented, slider,
 };
 use crate::t;
 
@@ -117,6 +117,18 @@ fn steps_on(e: &Annotator) -> bool {
 /// What Tab walks on the toolbar, in its order (left to right), and what
 /// Enter / Space on each sends.
 pub fn stops(e: &Annotator) -> Vec<Message> {
+    let mut stops = bar_stops(e);
+    // the options row's controls follow the toolbar's (C4)
+    if !e.capturing {
+        stops.extend(crate::features::snip::screens::options_row::snip_row_stops(
+            e,
+        ));
+    }
+    stops
+}
+
+/// The toolbar's own stops (the row's come after them).
+pub fn bar_stops(e: &Annotator) -> Vec<Message> {
     let mut stops: Vec<Message> = e.last.iter().map(|&t| Message::Slot(t)).collect();
     stops.extend([
         Message::Picker,
@@ -569,14 +581,46 @@ fn sizes<'a>(
 /// The slider's room beside the presets.
 const SLIDER_W: f32 = size::PANEL - 2.0 * space::PANEL - 102.0 - SPACING;
 
+/// The row under the toolbar (UX C4): its room, and the gap above it.
+pub const ROW_GAP: f32 = 6.0;
+pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 8.0;
+pub const ROW_ROOM: f32 = ROW_GAP + ROW_H;
+
+/// The widest an options row is meant to get (Hide's, at 100 %): the room the host keeps for it.
+pub const ROW_WIDE: f32 = 1250.0;
+
+/// The active tool's options in a slim row, at most `max_w` wide (it scrolls across past that, as the
+/// Studio's bar does; `None`: it has none, or a long capture is running): the Studio's option parts,
+/// on the toolbar's surface.
+pub fn options_row(e: &Annotator, max_w: f32) -> Option<Element<'_, Message>> {
+    if e.capturing {
+        return None;
+    }
+    // the focus ring on the row's control the keyboard is on
+    let on = e.focus.and_then(|f| f.checked_sub(bar_stops(e).len()));
+    let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
+    Some(
+        surface(
+            Material::Widget,
+            radius::WINDOW,
+            crate::shared::kit::scroll::across(row),
+        )
+        .padding([4.0, bar::PAD])
+        .height(ROW_H)
+        .max_width(max_w)
+        .align_y(iced::Center)
+        .into(),
+    )
+}
+
 /// A tool's name in the panel.
 fn name_of(tool: Tool) -> &'static str {
     tr(info(tool).name)
 }
 
-/// A group's panel (a click on its active button): the group's tools, the
-/// current one's name and key, then its options. They apply to the next
-/// item and to the selected one.
+/// A group's panel (a click on its active button): the group's tools and the
+/// current one's name and key. Its options show at once in the row under the
+/// toolbar (`options_row`).
 fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
     let base = info(info(e.tool).slot);
     let tools = group
@@ -597,186 +641,9 @@ fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
         container(keycap::keycap(key)).width(KEY_W).into(),
     ])
     .width(Fill);
-    let mut parts: Vec<Element<'_, Message>> = vec![line(tools).into(), named.into()];
-    let options = tool_options(e, base.tool);
-    if !options.is_empty() {
-        parts.push(divider::divider());
-        parts.extend(options);
-    }
+    // (the tool's options, Hide's live style pictures too, are the row under the toolbar, C4)
+    let parts: Vec<Element<'_, Message>> = vec![line(tools).into(), named.into()];
     surface::panel(column(parts).spacing(SPACING + 2.0)).into()
-}
-
-/// `tool`'s options (one design for every tool).
-pub fn tool_options(e: &Annotator, tool: Tool) -> Vec<Element<'_, Message>> {
-    let width_at = Width::ALL.iter().position(|&w| w == e.width);
-    let stroke = || {
-        let px = e.stroke.round() as u8;
-        let chosen = Width::ALL.iter().position(|w| w.stroke() == e.stroke);
-        let presets = segmented::presets(chosen, None, false, |i| Message::Width(Width::ALL[i]));
-        let slider = slider::bare(
-            crate::shared::config::STROKE,
-            px,
-            SLIDER_W,
-            false,
-            Message::Stroke,
-        );
-        sizes(t!(sn_size), format!("{px} px"), presets, Some(slider))
-    };
-    let font = || text_size_option(e.text_size);
-    let outline = || {
-        switch(
-            t!(sn_outline),
-            None,
-            e.outline,
-            Some(Message::Outline(!e.outline)),
-        )
-    };
-    // a flipped option of the tool (an arrow's label, a step's pointer)
-    let variant = |name, plain: Tool, other: Tool| {
-        let on = e.tool == other;
-        let to = if on { plain } else { other };
-        switch(name, None, on, Some(Message::Tool(to)))
-    };
-    match tool {
-        Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow => {
-            let shape = crate::features::snip::annotate::fills_inside(tool);
-            let mut o = vec![stroke(), outline()];
-            // shown dimmed for lines, so the panel doesn't jump
-            let note = (!shape).then(|| t!(sn_fill_note));
-            let fill = shape.then_some(Message::Fill(!e.fill));
-            o.push(switch(t!(sn_fill), note, e.fill && shape, fill));
-            if tool == Tool::Arrow {
-                o.push(variant(t!(sn_label), Tool::Arrow, Tool::ArrowLabel));
-            }
-            o
-        }
-        Tool::Pen | Tool::Highlighter => vec![stroke()],
-        Tool::Text => {
-            use crate::features::snip::annotate::{TextBack as B, TextFont as F, TextStyle};
-            let style = e.text_style;
-            let faces = [
-                (F::Sans, t!(sn_sans)),
-                (F::Serif, t!(sn_serif)),
-                (F::Mono, t!(sn_mono)),
-            ];
-            let backs = [
-                (B::None, t!(sn_none)),
-                (B::Outline, t!(sn_back_outline)),
-                (B::Box, t!(sn_box)),
-            ];
-            let face = segmented::inline(&faces, style.font, style.font, 1.0, move |font| {
-                Message::TextStyle(TextStyle { font, ..style })
-            });
-            let back = segmented::inline(&backs, style.back, style.back, 1.0, move |back| {
-                Message::TextStyle(TextStyle { back, ..style })
-            });
-            vec![
-                font(),
-                option(t!(sn_font), None, None, Some(face)),
-                bold_option(style),
-                option(t!(sn_back), None, None, Some(back)),
-            ]
-        }
-        Tool::Callout => vec![font(), outline()],
-        Tool::Step => {
-            let presets =
-                segmented::presets(width_at, None, false, |i| Message::Width(Width::ALL[i]));
-            vec![
-                sizes(t!(sn_size), String::new(), presets, None),
-                variant(t!(sn_pointer), Tool::Step, Tool::Pointer),
-                switch(t!(sn_legend), None, e.doc.legend, Some(Message::Legend)),
-            ]
-        }
-        Tool::Blur => {
-            let auto = e.blur_size.is_none();
-            let at = e
-                .blur_size
-                .and_then(|w| Width::ALL.iter().position(|&x| x == w));
-            let brush =
-                segmented::presets(at, None, auto, |i| Message::BlurSize(Some(Width::ALL[i])));
-            let to = if auto { Some(Width::Medium) } else { None };
-            let chip = button::switch(t!(sn_auto), auto, Message::BlurSize(to));
-            let value = if auto { t!(sn_line) } else { "" };
-            let strengths = crate::features::snip::annotate::blur_strengths();
-            let cells = segmented::inline(&strengths, e.blur_cell, e.blur_cell, 1.0, |w| {
-                Message::BlurCell(w)
-            });
-            let px = e.blur_cell.cell().round();
-            let shapes = crate::features::snip::annotate::blur_shapes();
-            let shape = segmented::inline(&shapes, e.blur_shape, e.blur_shape, 1.0, |kind| {
-                Message::BlurShape(kind)
-            });
-            // The styles as cards, each showing what it does to the area under
-            // the pointer: Hide (never reads the text) and Pixelate, then the
-            // looks, with their one-line note.
-            let styles = crate::features::snip::annotate::blur_styles();
-            let thumbs = e.style_thumbs();
-            let card = |i: usize| {
-                let (style, words) = styles[i];
-                thumb::style_card(
-                    thumbs[i].clone(),
-                    words,
-                    e.blur_style == style,
-                    Message::BlurStyle(style),
-                )
-            };
-            let mut o = vec![
-                line((0..2).map(card).collect()).into(),
-                line((2..5).map(card).collect()).into(),
-            ];
-            if e.blur_style.is_look() {
-                o.push(muted(Role::META, t!(sn_looks_note)).into());
-            }
-            o.extend([
-                sizes(t!(sn_shape), String::new(), shape, None),
-                column![
-                    option(t!(sn_brush), None, Some(value.into()), Some(chip)),
-                    line(vec![brush]),
-                ]
-                .spacing(SPACING)
-                .into(),
-                sizes(t!(sn_strength), format!("{px} px"), cells, None),
-                switch(
-                    t!(sn_line_help),
-                    Some(t!(sn_stays)),
-                    e.assist,
-                    Some(Message::Assist),
-                ),
-            ]);
-            if let Some(both) = e.hideable() {
-                let mut chips = vec![button::switch(
-                    t!(sn_hide_shape),
-                    false,
-                    Message::HideShape(false),
-                )];
-                if both {
-                    chips.push(button::switch(
-                        t!(sn_hide_outline),
-                        false,
-                        Message::HideShape(true),
-                    ));
-                }
-                o.push(line(chips).into());
-            }
-            o
-        }
-        Tool::Redact => vec![muted(Role::META, t!(sn_uses_colour)).into()],
-        Tool::Eraser => {
-            use crate::features::snip::annotate::ERASER_SIZES;
-            let px = e.eraser.round() as u8;
-            let chosen = ERASER_SIZES.iter().position(|&s| s == e.eraser);
-            let presets = segmented::presets(chosen, None, false, |i| {
-                Message::EraserSize(ERASER_SIZES[i])
-            });
-            let whole = Message::EraserWhole(!e.eraser_whole);
-            vec![
-                sizes(t!(sn_size), format!("{px} px"), presets, None),
-                switch(t!(sn_whole_drawing), None, e.eraser_whole, Some(whole)),
-                muted(Role::META, t!(sn_eraser_undo)).into(),
-            ]
-        }
-        _ => Vec::new(),
-    }
 }
 
 /// Undo's second click: Undo, Redo and where the history is.
@@ -947,7 +814,7 @@ fn colour_panel(e: &Annotator) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::snip::annotate::Image;
+    use crate::features::snip::annotate::{Image, Output};
     use crate::features::snip::snip_more::Info;
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
@@ -1078,6 +945,253 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
+    fn row_texts(e: &Annotator) -> Option<Vec<String>> {
+        options_row(e, 4000.0).map(crate::shared::kit::testing::shot::texts)
+    }
+
+    /// C4-1: picking a tool shows its options at once in the row under the
+    /// toolbar: no second click, no panel opened for them.
+    #[test]
+    fn c4_1_picking_a_tool_shows_its_row_at_once() {
+        for (tool, word) in [
+            (Tool::Rect, "Fill"),
+            (Tool::Arrow, "Label"),
+            (Tool::Pen, "Size"),
+            (Tool::Text, "Bold"),
+            (Tool::Callout, "Outline"),
+            (Tool::Step, "Legend"),
+            (Tool::Blur, "Pixelate"),
+            (Tool::Eraser, "Whole drawing"),
+        ] {
+            let mut e = editor();
+            e.update(Message::Tool(tool));
+            assert_eq!(e.menu, None, "{tool:?}: no panel");
+            let texts = row_texts(&e).unwrap_or_else(|| panic!("{tool:?}: no row"));
+            assert!(texts.iter().any(|t| t == word), "{tool:?} {texts:?}");
+        }
+    }
+
+    /// C4-2: the row is the ACTIVE tool's: it changes with the tool, and a
+    /// tool without options (Select) shows none.
+    #[test]
+    fn c4_2_the_row_follows_the_active_tool() {
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Select));
+        assert!(options_row(&e, 4000.0).is_none());
+        e.update(Message::Tool(Tool::Text));
+        let text = row_texts(&e).unwrap();
+        e.update(Message::Tool(Tool::Pen));
+        assert_ne!(row_texts(&e).unwrap(), text);
+        // a long capture running: the toolbar alone
+        e.capturing = true;
+        assert!(options_row(&e, 4000.0).is_none());
+    }
+
+    /// C4-3: the row never delays the copy: Copy works with any tool picked,
+    /// the row open or not.
+    #[test]
+    fn c4_3_copy_is_one_press_with_the_row_open() {
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Blur));
+        assert!(options_row(&e, 4000.0).is_some());
+        assert!(matches!(e.update(Message::Copy), Some(Output::Copy(_))));
+    }
+
+    /// C4-4: the row's controls send the editor's own messages (Studio parts,
+    /// one component) and the group panel (a second click) keeps only the
+    /// group's tools, not the options.
+    #[test]
+    fn c4_4_the_panel_keeps_the_tools_and_the_row_has_the_options() {
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Text));
+        e.update(Message::Slot(Tool::Text));
+        let panel = crate::shared::kit::testing::shot::texts(view(&e));
+        assert!(!panel.iter().any(|t| t == "Bold"), "{panel:?}");
+        assert!(row_texts(&e).unwrap().iter().any(|t| t == "Bold"));
+    }
+
+    /// C4-5: goldens: each tool's row, English and Arabic (right to left).
+    #[test]
+    fn c4_5_the_options_rows_match_their_golden_images() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for rtl in [false, true] {
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
+                let dir = if rtl { "-ar" } else { "" };
+                for (name, tool) in [
+                    ("rect", Tool::Rect),
+                    ("arrow", Tool::Arrow),
+                    ("pen", Tool::Pen),
+                    ("text", Tool::Text),
+                    ("callout", Tool::Callout),
+                    ("step", Tool::Step),
+                    ("hide", Tool::Blur),
+                    ("redact", Tool::Redact),
+                    ("eraser", Tool::Eraser),
+                ] {
+                    let mut e = editor();
+                    e.update(Message::Tool(tool));
+                    let file = format!("snip-row-{name}{dir}-{}", theme.id);
+                    let at = Size::new(1260.0, ROW_H);
+                    failed.extend(golden::check("screens", &file, at, &[1.0], || {
+                        options_row(&e, 4000.0).unwrap()
+                    }));
+                }
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// C4-8: the row's controls join the toolbar's Tab ring after the toolbar's own: Tab reaches the first
+    /// of them, Enter / Space on it acts (here: a width), and the ring wraps back to the toolbar.
+    #[test]
+    fn c4_8_the_rows_controls_are_in_the_tab_ring() {
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Rect));
+        let bar = bar_stops(&e).len();
+        let all = stops(&e);
+        assert!(all.len() > bar + 3, "{} stops, {bar} in the bar", all.len());
+        // the first control of the row is Rect's first size dot
+        assert!(matches!(all[bar], Message::Width(_)), "{:?}", all[bar]);
+        // a long capture running: the toolbar alone
+        e.capturing = true;
+        assert_eq!(stops(&e).len(), bar_stops(&e).len());
+    }
+
+    /// C4-9: Tab walks into the row, the focus ring shows on its control, and the arrow keys walk the
+    /// row while the focus is in it (Right on in English, Left on in Arabic); Enter acts.
+    #[test]
+    fn c4_9_tab_and_arrows_walk_the_row_and_enter_acts() {
+        use crate::features::snip::screens::snip_toolbar::SnipToolbar;
+        use iced::keyboard::{Key, Modifiers, key::Named};
+        let arrow =
+            |e: &Annotator, named| e.key(&Key::Named(named), None, Modifiers::empty(), None);
+        for rtl in [false, true] {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            let mut t = SnipToolbar::fitted(
+                crate::shared::picture::Crop {
+                    width: 40,
+                    height: 30,
+                    rgba: vec![255; 40 * 30 * 4],
+                },
+                Size::new(1920.0, 1080.0),
+                1.0,
+            );
+            t.annotator.update(Message::Tool(Tool::Rect));
+            let bar = bar_stops(&t.annotator).len();
+            // arrows in the toolbar are the area's nudges
+            assert!(matches!(
+                arrow(&t.annotator, Named::ArrowRight),
+                Some(Message::Nudge(..))
+            ));
+            for _ in 0..=bar {
+                t.update(Message::Focus(false));
+            }
+            assert_eq!(t.annotator.focus, Some(bar), "Tab reached the row");
+            let on = if rtl {
+                Named::ArrowLeft
+            } else {
+                Named::ArrowRight
+            };
+            let off = if rtl {
+                Named::ArrowRight
+            } else {
+                Named::ArrowLeft
+            };
+            assert!(matches!(
+                arrow(&t.annotator, on),
+                Some(Message::RowStep(..))
+            ));
+            assert!(matches!(
+                arrow(&t.annotator, off),
+                Some(Message::RowStep(..))
+            ));
+            let dx = if rtl { -1 } else { 1 };
+            t.update(Message::RowStep(dx, 0));
+            assert_eq!(
+                t.annotator.focus,
+                Some(bar + 1),
+                "the reading direction goes on"
+            );
+            t.update(Message::RowStep(-dx, 0));
+            assert_eq!(t.annotator.focus, Some(bar));
+            // Enter acts on the focused control: a size
+            t.annotator.focus = Some(bar + 2);
+            t.update(Message::Activate);
+            assert_eq!(
+                t.annotator.width,
+                crate::features::snip::annotate::Width::Thick
+            );
+        }
+    }
+
+    /// C4-10: Hide's styles are small live pictures in the row (one place; the group panel has no
+    /// cards any more), the look note shows when a look is picked.
+    #[test]
+    fn c4_10_hides_styles_are_pictures_in_the_row_only() {
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Blur));
+        let texts = row_texts(&e).unwrap();
+        for style in ["Hide", "Pixelate", "Soft", "Frosted", "Progressive"] {
+            assert!(texts.iter().any(|t| t == style), "{style}: {texts:?}");
+        }
+        e.update(Message::Slot(Tool::Blur));
+        let panel = crate::shared::kit::testing::shot::texts(view(&e));
+        assert!(!panel.iter().any(|t| t == "Pixelate"), "{panel:?}");
+        e.update(Message::BlurStyle(
+            crate::features::snip::annotate::blur_styles()[2].0,
+        ));
+        assert!(
+            row_texts(&e).unwrap().iter().any(|t| t.contains("looks")),
+            "the look note"
+        );
+    }
+
+    /// C4-11 (review): Hide's stops are each control once, in the order they are drawn: the five styles
+    /// (not built twice), the three shapes, the strengths, line help, the brush; Text's: size dots,
+    /// faces, Bold, backdrops.
+    #[test]
+    fn c4_11_hides_and_texts_stops_have_no_duplicates_and_follow_the_visual_order() {
+        let kinds = |tool: Tool| -> Vec<&'static str> {
+            let mut e = editor();
+            e.update(Message::Tool(tool));
+            let bar = bar_stops(&e).len();
+            stops(&e)[bar..]
+                .iter()
+                .map(|m| match m {
+                    Message::BlurStyle(_) => "style",
+                    Message::BlurShape(_) => "shape",
+                    Message::BlurCell(_) => "strength",
+                    Message::Assist => "assist",
+                    Message::BlurSize(_) => "brush",
+                    Message::TextSize(_) => "size",
+                    Message::TextStyle(_) => "text",
+                    _ => "other",
+                })
+                .collect()
+        };
+        let hide = kinds(Tool::Blur);
+        let styles = crate::features::snip::annotate::blur_styles().len();
+        assert_eq!(
+            hide.iter().filter(|k| **k == "style").count(),
+            styles,
+            "{hide:?}"
+        );
+        let mut flat = hide.clone();
+        flat.dedup();
+        assert_eq!(
+            flat,
+            ["style", "shape", "strength", "assist", "brush"],
+            "{hide:?}"
+        );
+        let mut text = kinds(Tool::Text);
+        text.dedup();
+        assert_eq!(text, ["size", "text"], "{text:?}");
+        assert_eq!(kinds(Tool::Text).len(), 3 + 3 + 1 + 3);
+    }
+
     /// W91.2: the Studio button sits before Copy / Save (Tab reaches it), More has no
     /// Studio row any more, and the one-time hint shows only while asked for.
     #[test]
@@ -1139,7 +1253,7 @@ mod tests {
     #[test]
     fn c6_the_toolbar_ends_with_a_quiet_x() {
         let mut e = editor();
-        assert_eq!(stops(&e).last(), Some(&Message::Close));
+        assert_eq!(bar_stops(&e).last(), Some(&Message::Close));
         assert!(matches!(
             e.update(Message::Close),
             Some(crate::features::snip::annotate::Output::Close)

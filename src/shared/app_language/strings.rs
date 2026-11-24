@@ -1717,8 +1717,6 @@ strings! {
         | "الإطار";
     sn_fill: "Fill"
         | "التعبئة";
-    sn_fill_note: "rectangle, ellipse"
-        | "مستطيل، شكل بيضاوي";
     sn_label: "Label"
         | "تسمية";
     sn_sans: "Sans"
@@ -1733,32 +1731,22 @@ strings! {
         | "إطار";
     sn_box: "Box"
         | "مربع";
-    sn_font: "Font"
-        | "الخط";
     sn_bold: "Bold"
         | "عريض";
-    sn_back: "Back"
-        | "خلف";
     sn_pointer: "Pointer"
         | "مؤشر";
     sn_legend: "Legend"
         | "وسيلة الإيضاح";
     sn_auto: "Auto"
         | "تلقائي";
-    sn_line: "line"
-        | "السطر";
     sn_brush: "Brush"
         | "الفرشاة";
-    sn_strength: "Strength"
-        | "القوة";
     sn_light: "Light"
         | "خفيف";
     sn_medium: "Medium"
         | "متوسط";
     sn_strong: "Strong"
         | "قوي";
-    sn_shape: "Shape"
-        | "الشكل";
     sn_style_hide: "Hide"
         | "إخفاء";
     sn_style_pixelate: "Pixelate"
@@ -1777,8 +1765,6 @@ strings! {
         | "حدّه";
     sn_line_help: "Line help"
         | "مساعدة السطر";
-    sn_stays: "stays on the line"
-        | "تبقى على السطر";
     sn_uses_colour: "Uses the colour"
         | "يستخدم اللون";
     sn_steps_of: "{} of {} steps"
@@ -1803,8 +1789,6 @@ strings! {
         | "ممحاة";
     sn_whole_drawing: "Whole drawing"
         | "الرسم كاملًا";
-    sn_eraser_undo: "Ctrl+Z brings them back"
-        | "Ctrl+Z يعيدها";
     tray_studio: "OpenCircle Studio"
         | "استوديو OpenCircle";
     st_title: "OpenCircle Studio"

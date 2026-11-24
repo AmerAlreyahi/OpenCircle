@@ -149,7 +149,7 @@ impl App {
         let i = bar::dock_screen(edit.canvas_rect(), &rects);
         let (work, k) = works[i];
         // its own logical width there, back in the starting screen's px
-        let size = edit.bar_size() * (1.0 / k);
+        let size = edit.dock_size() * (1.0 / k);
         Some((i.checked_sub(1), work, size))
     }
 

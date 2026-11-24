@@ -398,8 +398,6 @@ pub enum Message {
     Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
-    /// The line width of shapes, arrows, pen (display px; its slider).
-    Stroke(u8),
     /// A shape's, arrow's or callout's outline (its halo) on / off.
     Outline(bool),
     /// A rectangle's or ellipse's tint inside on / off.
@@ -517,6 +515,8 @@ pub enum Message {
     /// Snip's toolbar: Tab / Shift+Tab (`true`) walks its controls; Enter /
     /// Space presses the focused one (the host knows the toolbar's order).
     Focus(bool),
+    /// An arrow key while the focus is in the options row (dx, dy): the toolbar turns it into a Tab step.
+    RowStep(i8, i8),
     /// The More menu's arrow keys: the next row (`true`: the one before).
     MenuStep(bool),
     /// Home / End in More: the first (`false`) or last (`true`) live row.
@@ -615,7 +615,10 @@ struct AreaDrag {
 }
 
 /// The style cards' pictures and what they were made for (place, strength).
-type Thumbs = ((i32, i32, u32), Vec<image::Handle>);
+type Thumbs = (ThumbKey, Vec<image::Handle>);
+/// (place, strength, the drawing's history state, the item being drawn's frame): a picture of
+/// the area is made again when any of them changes, so a card never shows bare pixels under a Hide.
+type ThumbKey = (i32, i32, u32, u64, [u32; 4]);
 
 pub struct Annotator {
     pub doc: Document,
@@ -754,6 +757,9 @@ pub struct Annotator {
     /// Snip's toolbar control Tab is on (its index in the toolbar's order);
     /// a press anywhere drops it.
     pub focus: Option<usize>,
+    /// Where the options row's stops begin in the Tab ring (the toolbar's own come first): while the
+    /// focus is in the row the arrow keys walk it. 0 = not known yet.
+    pub row_at: usize,
     /// Snip's arrow-key hint shows (after the first arrow key).
     pub nudged: bool,
     /// The host drags the toolbar (its grip): it shows lifted.
@@ -891,6 +897,7 @@ impl Annotator {
             own_image: false,
             area_drag: None,
             focus: None,
+            row_at: 0,
             nudged: false,
             held: false,
             steps: None,
@@ -1006,6 +1013,7 @@ impl Annotator {
                 | Message::Cancel
                 | Message::Shift(_)
                 | Message::Focus(_)
+                | Message::RowStep(..)
                 | Message::MenuStep(_)
                 | Message::MenuEdge(_)
                 | Message::Activate
@@ -1079,14 +1087,6 @@ impl Annotator {
             Message::Colour(c) => self.set_colour(c),
             Message::Width(w) => {
                 self.set_width(w);
-                self.restyle();
-            }
-            Message::Stroke(px) => {
-                self.stroke = f32::from(px);
-                let off = |w: &Width| (w.stroke() - self.stroke).abs();
-                if let Some(&w) = Width::ALL.iter().min_by(|a, b| off(a).total_cmp(&off(b))) {
-                    self.width = w;
-                }
                 self.restyle();
             }
             Message::BlurSize(size) => {
@@ -1328,6 +1328,7 @@ impl Annotator {
             }
             Message::Grab
             | Message::Focus(_)
+            | Message::RowStep(..)
             | Message::MenuStep(_)
             | Message::MenuEdge(_)
             | Message::Activate => {}
@@ -1567,7 +1568,17 @@ impl Annotator {
         let view = self.doc.view();
         let at = self.hover.unwrap_or_else(|| view.center());
         let strength = self.blur_strength();
-        let key = ((at.x / 8.0) as i32, (at.y / 8.0) as i32, strength.to_bits());
+        let drawn = (self.pending.as_ref()).map_or([0; 4], |p| {
+            let f = p.item.frame();
+            [f.x, f.y, f.width, f.height].map(f32::to_bits)
+        });
+        let key = (
+            (at.x / 8.0) as i32,
+            (at.y / 8.0) as i32,
+            strength.to_bits(),
+            self.doc.state(),
+            drawn,
+        );
         if let Some((k, all)) = &*self.thumbs.borrow()
             && *k == key
         {
@@ -1592,7 +1603,15 @@ impl Annotator {
         let region = document::int_rect(Rectangle::new(from, iced::Size::new(w, h)), view);
         // the picture as the editor shows it (every item, as flatten draws it): the
         // half "as it is" never shows the bare pixels under an existing Hide
-        let layers: Vec<_> = self.doc.items.iter().map(|i| (i, true)).collect();
+        // (the item being drawn too: a Hide under the pointer is already a Hide)
+        let mut items = self.doc.items.clone();
+        if let Some(p) = &self.pending {
+            match p.index.filter(|i| *i < items.len()) {
+                Some(i) => items[i] = p.item.clone(),
+                None => items.push(p.item.clone()),
+            }
+        }
+        let layers: Vec<_> = items.iter().map(|i| (i, true)).collect();
         let pm = self.doc.paint(&layers, region, None);
         let mut layer = document::Layer {
             pm,
@@ -2491,6 +2510,7 @@ impl Annotator {
     /// Repaints the base (all items but a hidden pending one, the legend), then
     /// the live layer.
     pub(crate) fn refresh(&mut self) {
+        *self.thumbs.borrow_mut() = None; // (the style pictures follow the drawing)
         let hide = self
             .pending
             .as_ref()

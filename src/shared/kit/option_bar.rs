@@ -10,6 +10,54 @@ use super::dir;
 use super::themes::{c, on};
 use super::tokens::{Role, radius};
 
+/// What a Snip options row records while it is built (`scope`): every live cell in order, as the
+/// keyboard's stops, and which one the focus is on (a ring round it).
+struct Rec {
+    stops: Vec<Box<dyn std::any::Any>>,
+    focus: Option<usize>,
+    light: bool,
+}
+
+thread_local! {
+    static REC: std::cell::RefCell<Option<Rec>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `build` with the focus ring on stop number `focus`; returns what it built and every live
+/// cell's message, in build order (reading order: right to left in Arabic). `light`: only the
+/// stops are wanted (`lightly` tells the builder to skip costly pictures).
+pub fn scope<R>(
+    focus: Option<usize>,
+    light: bool,
+    build: impl FnOnce() -> R,
+) -> (R, Vec<Box<dyn std::any::Any>>) {
+    let before = REC.with(|r| {
+        r.replace(Some(Rec {
+            stops: Vec::new(),
+            focus,
+            light,
+        }))
+    });
+    let built = build();
+    let rec = REC.with(|r| r.replace(before));
+    (built, rec.map(|r| r.stops).unwrap_or_default())
+}
+
+/// A `scope` that wants only the stops is running.
+pub fn lightly() -> bool {
+    REC.with(|r| r.borrow().as_ref().is_some_and(|r| r.light))
+}
+
+/// Notes a live cell's `press`; true when the focus is on it.
+fn note<Message: Clone + 'static>(press: &Message) -> bool {
+    REC.with(|r| match r.borrow_mut().as_mut() {
+        Some(rec) => {
+            rec.stops.push(Box::new(press.clone()));
+            rec.focus == Some(rec.stops.len() - 1)
+        }
+        None => false,
+    })
+}
+
 /// The control height (a group) and its cells' (the group less its padding).
 pub const HEIGHT: f32 = 32.0;
 pub const CELL: f32 = 28.0;
@@ -53,7 +101,7 @@ pub fn hairline<'a, Message: 'a>() -> Element<'a, Message> {
 
 /// A 28 px cell around `content`, raised while `on`, shaded under the pointer;
 /// no `press` = dimmed to 38 %. `width` None = as wide as its content.
-fn cell<'a, Message: Clone + 'a>(
+fn cell<'a, Message: Clone + 'static>(
     content: Element<'a, Message>,
     width: Option<f32>,
     on_: bool,
@@ -61,6 +109,7 @@ fn cell<'a, Message: Clone + 'a>(
     press: Option<Message>,
 ) -> Element<'a, Message> {
     let live = press.is_some();
+    let ring = press.as_ref().is_some_and(note);
     let pad = if width.is_some() { 0.0 } else { WORDS_PAD };
     let body = container(content).center_y(Fill).padding([0.0, pad]);
     let b = button(body)
@@ -90,7 +139,13 @@ fn cell<'a, Message: Clone + 'a>(
             button::Style {
                 background: fill.map(Into::into),
                 text_color: ink,
-                border: Border::default().rounded(radius::PILL).width(1).color(edge),
+                border: match ring {
+                    true => Border::default()
+                        .rounded(radius::PILL)
+                        .width(2)
+                        .color(c().accent),
+                    false => Border::default().rounded(radius::PILL).width(1).color(edge),
+                },
                 ..button::Style::default()
             }
         });
@@ -107,7 +162,7 @@ fn label<'a, Message: 'a>(words: &'a str, strong: bool) -> Element<'a, Message> 
 }
 
 /// A text cell (Outline, Fill, Bold ...): `on` raises it.
-pub fn text_cell<'a, Message: Clone + 'a>(
+pub fn text_cell<'a, Message: Clone + 'static>(
     words: &'a str,
     on: bool,
     press: Option<Message>,
@@ -116,7 +171,7 @@ pub fn text_cell<'a, Message: Clone + 'a>(
 }
 
 /// A square cell around a glyph of the icon font.
-pub fn glyph_cell<'a, Message: Clone + 'a>(
+pub fn glyph_cell<'a, Message: Clone + 'static>(
     glyph: char,
     on: bool,
     press: Option<Message>,
@@ -132,7 +187,7 @@ pub fn glyph_cell<'a, Message: Clone + 'a>(
 }
 
 /// The Done group's cell: words on the accent fill.
-pub fn accent_cell<'a, Message: Clone + 'a>(
+pub fn accent_cell<'a, Message: Clone + 'static>(
     words: &'a str,
     press: Option<Message>,
 ) -> Element<'a, Message> {
@@ -140,7 +195,7 @@ pub fn accent_cell<'a, Message: Clone + 'a>(
 }
 
 /// A colour: a 16 px dot, ringed and raised while picked.
-pub fn swatch<'a, Message: Clone + 'a>(
+pub fn swatch<'a, Message: Clone + 'static>(
     colour: Color,
     picked: bool,
     press: Option<Message>,
@@ -179,7 +234,7 @@ pub fn swatch<'a, Message: Clone + 'a>(
 }
 
 /// A swatch of an RGBA colour (grey when the selection mixes colours).
-pub fn swatch_of<'a, Message: Clone + 'a>(
+pub fn swatch_of<'a, Message: Clone + 'static>(
     rgba: Option<[u8; 4]>,
     picked: bool,
     press: Option<Message>,
@@ -191,7 +246,7 @@ pub fn swatch_of<'a, Message: Clone + 'a>(
 }
 
 /// A size dot (`DOTS[i]` px across), raised while picked.
-pub fn dot<'a, Message: Clone + 'a>(
+pub fn dot<'a, Message: Clone + 'static>(
     i: usize,
     picked: bool,
     press: Option<Message>,
@@ -209,6 +264,27 @@ pub fn dot<'a, Message: Clone + 'a>(
         false,
         press,
     )
+}
+
+/// A cell with a small live picture and its name (Hide's styles: what each does to the picture).
+pub fn picture_cell<'a, Message: Clone + 'static>(
+    picture: iced::widget::image::Handle,
+    words: &'a str,
+    on_: bool,
+    press: Option<Message>,
+) -> Element<'a, Message> {
+    let shown = container(iced::widget::image(picture).content_fit(iced::ContentFit::Cover))
+        .width(20)
+        .height(14)
+        .clip(true)
+        .style(|_| container::Style {
+            border: Border::default().rounded(4).width(1).color(c().divider),
+            ..container::Style::default()
+        });
+    let body = dir::row(vec![shown.into(), label(words, false)])
+        .spacing(3)
+        .align_y(Center);
+    cell(body.into(), None, on_, false, press)
 }
 
 /// A value read out (mono 11.5): not pressable.

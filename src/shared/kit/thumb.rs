@@ -149,52 +149,6 @@ fn build<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// A style card: a small picture of what the style does to the area under the
-/// pointer, its name under it; the picked one has the accent ring.
-pub fn style_card<'a, Message: Clone + 'a>(
-    picture: image::Handle,
-    label: &'a str,
-    picked: bool,
-    on_press: Message,
-) -> Element<'a, Message> {
-    use button::Status;
-    let well = container(image(picture).content_fit(ContentFit::Cover))
-        .width(STYLE_WELL.width)
-        .height(STYLE_WELL.height)
-        .clip(true)
-        .style(move |_| container::Style {
-            background: Some(c().track.into()),
-            border: Border::default()
-                .rounded(CORNER)
-                .width(if picked { 2 } else { 1 })
-                .color(if picked { c().accent } else { c().divider }),
-            ..container::Style::default()
-        });
-    let words = text(label)
-        .size(super::text::size(Role::META))
-        .font(font(Role::META))
-        .color(if picked { c().text } else { c().text_muted });
-    super::focus::press(
-        button(
-            iced::widget::column![well, words]
-                .spacing(4)
-                .align_x(Center),
-        )
-        .padding(0)
-        .style(|_, status| button::Style {
-            background: matches!(status, Status::Hovered).then(|| c().hover.into()),
-            border: Border::default().rounded(CORNER),
-            ..button::Style::default()
-        }),
-        CORNER,
-        Some(on_press),
-    )
-    .into()
-}
-
-/// A style card's picture.
-pub const STYLE_WELL: Size = Size::new(72.0, 44.0);
-
 /// The small x: a 20 px circle, a 12 px x in `text_muted` (`text` on `hover`
 /// under the cursor), on the widget surface with a `rim` edge (it reads over
 /// a thumbnail too).

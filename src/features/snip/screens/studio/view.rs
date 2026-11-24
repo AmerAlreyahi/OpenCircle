@@ -382,7 +382,10 @@ fn edit_bar(x: &super::edit_text::Session) -> Element<'_, Msg> {
         (_, None) => muted(Role::ROW_DESC, t!(st_edit_pick)).into(),
         _ => {
             let now = x.colour();
-            let swatches = (style::ANNOTATION.iter().take(super::options_bar::SWATCHES)).map(|c| {
+            let swatches = (style::ANNOTATION
+                .iter()
+                .take(crate::features::snip::screens::options_row::SWATCHES))
+            .map(|c| {
                 let rgba = c.into_rgba8();
                 colour::swatch(*c, rgba[..3] == now[..3], Some(Message::Colour(rgba)))
             });

@@ -1761,14 +1761,11 @@ fn fill_is_greyed_for_lines_and_arrows() {
         assert_eq!(fills_inside(tool), fills, "{tool:?}");
         let mut e = editor(100, 100);
         e.update(Message::Tool(tool));
-        e.update(Message::Slot(tool));
-        let texts = shot::texts(e.toolbar());
+        // (C4: the tool's options are the row under the toolbar, no second click)
+        let row = crate::features::snip::screens::snip_toolbar::toolbar::options_row(&e, 4000.0)
+            .expect("shapes have options");
+        let texts = shot::texts(row);
         assert!(texts.iter().any(|t| t == "Fill"), "{texts:?}");
-        assert_eq!(
-            texts.iter().any(|t| t == "rectangle, ellipse"),
-            !fills,
-            "{texts:?}"
-        );
     }
 }
 
@@ -1811,7 +1808,7 @@ fn the_toolbar_has_a_quiet_close_button() {
     assert!(tips.contains(&"Save · Ctrl+S".to_string()), "{tips:?}");
     assert!(tips.contains(&"Move toolbar".to_string()), "{tips:?}");
     assert!(tips.contains(&"Shapes · Arrow (A)".to_string()), "{tips:?}");
-    let stops = toolbar::stops(&e);
+    let stops = toolbar::bar_stops(&e);
     assert!(!stops.iter().any(|m| matches!(m, Message::Back)));
     assert_eq!(stops.last(), Some(&Message::Close));
 }

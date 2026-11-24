@@ -38,7 +38,7 @@ const WIDTH: f32 = 300.0;
 const FIELD_LABEL: f32 = 14.0;
 
 /// The shape's tool (its icon and name); one the list doesn't know is Select.
-pub(super) fn tool_of(shape: &Shape) -> Tool {
+pub(crate) fn tool_of(shape: &Shape) -> Tool {
     match shape {
         Shape::Rect { .. } => Tool::Rect,
         Shape::Ellipse { .. } => Tool::Ellipse,
@@ -250,7 +250,10 @@ pub fn content<'a>(s: &'a Studio, pop: Pop) -> Element<'a, Msg> {
         Pop::Position => position(s),
         Pop::Info => picture_info(s),
         Pop::Colours => match &s.editor {
-            Some(e) => super::options_bar::colour_group(e, super::options_bar::SWATCHES),
+            Some(e) => super::options_bar::colour_group(
+                e,
+                crate::features::snip::screens::options_row::SWATCHES,
+            ),
             None => Space::new().into(),
         },
         Pop::More => match &s.editor {
