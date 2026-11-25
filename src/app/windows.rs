@@ -178,6 +178,8 @@ pub struct Windows {
     chrome: HashMap<window::Id, Chrome>,
     /// The Steps strip and its window (none until its first step is packed).
     steps: Option<(Option<window::Id>, Strip)>,
+    /// Where the strip was dragged to, per screen (by its origin): a new strip opens there.
+    strip_spots: HashMap<(i32, i32), Point>,
     /// Our floating windows taken out of a grab (Linux, `leave_frame`).
     out: Option<Out>,
     /// OpenCircle Studio, at most one.
@@ -547,7 +549,11 @@ impl Windows {
             // a cleared strip's steps go now (its window shows the new strip)
             let id = self.steps.take().and_then(|(id, _)| id);
             let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
-            self.steps = Some((id, Strip::new(monitor, inset, rtl)));
+            let mut strip = Strip::new(monitor, inset, rtl);
+            if let Some(&at) = self.strip_spots.get(&monitor.origin) {
+                strip.set_spot(at);
+            }
+            self.steps = Some((id, strip));
         }
         if let (None, Some((_, s))) = (update, &mut self.studio) {
             s.step_pending(1);
@@ -627,7 +633,14 @@ impl Windows {
             steps::Msg::Clear if self.studio.is_some() => {
                 return window.map_or_else(Task::none, close);
             }
-            msg => strip.update(msg),
+            msg => {
+                let todo = strip.update(msg);
+                // where the user left it on this screen: the next strip opens there
+                if let Some((screen, at)) = strip.spot() {
+                    self.strip_spots.insert(screen, at);
+                }
+                todo
+            }
         };
         let Some(todo) = todo else {
             return Task::none();
@@ -656,6 +669,7 @@ impl Windows {
                 let _ = tx.unbounded_send(());
             })
             .map(move |()| Msg::Steps(steps::Msg::Settle(moves))),
+            (steps::Do::OpenStudio, _) => self.open_studio(None),
             (steps::Do::Edit(i), _) => Task::done(Msg::EditStep(i)),
             (steps::Do::Copy(i), _) => {
                 let ok = strip.crop(i).is_some_and(copy_image);

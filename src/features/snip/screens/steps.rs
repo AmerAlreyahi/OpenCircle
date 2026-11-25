@@ -19,6 +19,7 @@ use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
 use crate::shared::kit::button::{self, Kind};
+use crate::shared::kit::icon::Icon;
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
 use crate::shared::kit::tokens::radius;
@@ -39,6 +40,8 @@ pub const THUMB: (u32, u32) = (192, 120);
 pub const RADIUS: f32 = radius::TRACK;
 /// lucide "copy"
 const COPY: char = '\u{e0a2}';
+/// The strip's foot: Copy all and Open in OpenCircle Studio, one under the other.
+const FOOT: f32 = 2.0 * crate::shared::kit::tokens::size::ICON_BUTTON + PAD;
 /// "Steps cleared · Undo" stays this long, then the steps are gone.
 pub const UNDO_MS: u64 = 5000;
 
@@ -129,6 +132,8 @@ pub enum Msg {
     /// A click on the failed step's placeholder: it goes.
     FailedSeen,
     CopyAll,
+    /// Open in OpenCircle Studio: the Studio takes the steps over.
+    OpenStudio,
     Hover(usize, bool),
     Press(usize),
     /// The pointer over the strip (window px).
@@ -181,6 +186,8 @@ pub enum Do {
     /// Copy this step.
     Copy(usize),
     CopyAll,
+    /// Open the Studio with the steps (the strip closes).
+    OpenStudio,
     /// Edit this step in Snip.
     Edit(usize),
     /// The strip changed size (resize and place the window).
@@ -216,8 +223,9 @@ pub struct Strip {
     pub rtl: bool,
     /// Docked at the left edge.
     left: bool,
-    /// Its top (logical px from the work area's top) once dragged; else centred.
-    top: Option<f32>,
+    /// Where it was dragged to (logical px from the work area's corner); else docked
+    /// at its edge, centred.
+    spot: Option<Point>,
     /// Its monitor and the taskbar's share of its bottom (logical px).
     monitor: Place,
     inset: f32,
@@ -239,7 +247,7 @@ impl Strip {
             moved_to: Point::ORIGIN,
             rtl,
             left: rtl,
-            top: None,
+            spot: None,
             monitor,
             inset,
         }
@@ -360,6 +368,7 @@ impl Strip {
             }
             Msg::Undo => return self.undo(),
             Msg::CopyAll => return (!self.steps.is_empty()).then_some(Do::CopyAll),
+            Msg::OpenStudio => return Some(Do::OpenStudio),
             Msg::Hover(i, on) => {
                 self.hover = match on {
                     true => Some(i),
@@ -456,13 +465,13 @@ impl Strip {
         let n = (self.steps.len() + usize::from(self.failed)).max(1) as f32;
         let thumbs = n * WELL.height + (n - 1.0) * PAD;
         let room = self.work().height - 2.0 * MARGIN;
-        let h = TOP + thumbs + PAD + crate::shared::kit::tokens::size::ICON_BUTTON + PAD;
+        let h = TOP + thumbs + PAD + FOOT + PAD;
         Size::new(WELL.width + 2.0 * PAD, h.min(room))
     }
 
     /// The thumbnails' room (they scroll when the strip would not fit).
     fn thumbs_height(&self) -> f32 {
-        self.size().height - TOP - 2.0 * PAD - crate::shared::kit::tokens::size::ICON_BUTTON
+        self.size().height - TOP - 2.0 * PAD - FOOT
     }
 
     /// Its monitor's work area, logical px from the monitor's origin.
@@ -474,7 +483,7 @@ impl Strip {
     /// Where the window goes: at its edge, 12 px in, centred (or where it was
     /// dragged to), kept inside the work area. Physical px.
     pub fn place(&self) -> Place {
-        place(self.monitor, self.work(), self.left, self.top, self.size())
+        place(self.monitor, self.work(), self.left, self.spot, self.size())
     }
 
     /// The window stopped at `at` (logical desktop px): dragged there, it
@@ -502,10 +511,18 @@ impl Strip {
             self.monitor.origin.0 as f32 / k,
             self.monitor.origin.1 as f32 / k,
         );
-        let mid = at.x - origin.x + self.size().width / 2.0;
-        self.left = mid < self.work().width / 2.0;
-        self.top = Some(at.y - origin.y);
+        self.spot = Some(Point::new(at.x - origin.x, at.y - origin.y));
         true
+    }
+
+    /// Its monitor's origin and where it was dragged to there (to remember per screen).
+    pub fn spot(&self) -> Option<((i32, i32), Point)> {
+        Some((self.monitor.origin, self.spot?))
+    }
+
+    /// Opens where the user left a strip on this screen before.
+    pub fn set_spot(&mut self, spot: Point) {
+        self.spot = Some(spot);
     }
 
     /// Where a pill under the strip goes (`size` logical): centred under it,
@@ -587,7 +604,16 @@ impl Strip {
             false,
             Some(Msg::CopyAll),
         );
-        let strip = column![top, column![thumbs, copy].spacing(PAD)];
+        let studio = button::labelled(
+            Icon::Picture.glyph(),
+            t!(ss_studio),
+            WELL.width,
+            Kind::Elevated,
+            false,
+            Some(Msg::OpenStudio),
+        );
+        let studio = tip(studio, t!(sn_studio_btn), Side::Top);
+        let strip = column![top, column![thumbs, copy, studio].spacing(PAD)];
         let strip = surface(Material::Widget, corners, strip)
             .padding(Padding {
                 top: 0.0,
@@ -710,16 +736,18 @@ struct Words {
 }
 
 /// The strip's window on `monitor` (work area `work`, logical): `size`
-/// (logical) at the left or right edge, `MARGIN` in, at `top` or centred,
+/// (logical) at the left or right edge, `MARGIN` in, or at `spot` (dragged), centred vertically,
 /// inside the work area. Physical px.
-fn place(monitor: Place, work: Size, left: bool, top: Option<f32>, size: Size) -> Place {
-    let x = match left {
-        true => MARGIN,
-        false => work.width - MARGIN - size.width,
+fn place(monitor: Place, work: Size, left: bool, spot: Option<Point>, size: Size) -> Place {
+    let far = work.width - MARGIN - size.width;
+    let x = match (spot, left) {
+        (Some(at), _) => at.x.min(far).max(MARGIN.min(far)),
+        (None, true) => MARGIN,
+        (None, false) => far,
     };
     let centred = (work.height - size.height) / 2.0;
-    let y = top
-        .unwrap_or(centred)
+    let y = spot
+        .map_or(centred, |at| at.y)
         .min(work.height - MARGIN - size.height)
         .max(MARGIN.min(centred));
     let k = monitor.scale;
@@ -883,12 +911,12 @@ mod tests {
 
     #[test]
     fn sizes_and_place_follow_the_spec() {
-        // 1 step 104 x 124, 4 steps 104 x 316
-        assert_eq!(strip(1).size(), Size::new(104.0, 124.0));
-        assert_eq!(strip(4).size(), Size::new(104.0, 316.0));
+        // 1 step 104 x 162, 4 steps 104 x 354 (the foot: Copy all, Open in Studio)
+        assert_eq!(strip(1).size(), Size::new(104.0, 162.0));
+        assert_eq!(strip(4).size(), Size::new(104.0, 354.0));
         // at the right edge, 12 px in, centred in the work area (1040 high)
         let p = strip(1).place();
-        assert_eq!(p.origin, (1920 - 12 - 104, (1040 - 124) / 2));
+        assert_eq!(p.origin, (1920 - 12 - 104, (1040 - 162) / 2));
         // right to left: the left edge
         let mut rtl = Strip::new(MONITOR, 40.0, true);
         rtl.push(step(10, 10, 1));
@@ -910,7 +938,7 @@ mod tests {
     /// physical window is the logical size times the scale.
     #[test]
     fn copy_all_always_fits_the_window() {
-        let icon = crate::shared::kit::tokens::size::ICON_BUTTON;
+        let icon = FOOT;
         for k in [1.0, 1.25, 1.5, 2.0] {
             for n in 1..=MAX {
                 let mut s = strip(n);
@@ -927,26 +955,27 @@ mod tests {
         }
     }
 
-    /// Dragged near the other edge it docks there and keeps its height.
+    /// Dragged anywhere it stays where it was dropped, inside the screen.
     #[test]
-    fn a_dragged_strip_docks_to_the_nearer_edge() {
+    fn a_dragged_strip_stays_where_it_is_dropped() {
         let mut s = strip(2);
         // its own placement settling: it stays centred as it grows (VM: it
         // grew down from a pinned top before)
         let p = s.place().origin;
         assert!(!s.dock_on(Point::new(p.0 as f32, p.1 as f32), 1.0, &[]));
         s.push(step(8, 8, 1));
-        assert_eq!(s.place().origin.1, (1040 - 252) / 2);
+        assert_eq!(s.place().origin.1, (1040 - 290) / 2);
         s.update(Msg::Delete(2));
         assert!(s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         let p = s.place();
-        assert_eq!(p.origin, (12, 200));
+        assert_eq!(p.origin, (300, 200));
         // its own placement settling: no second move
-        assert!(!s.dock_on(Point::new(12.0, 200.0), 1.0, &[]));
-        // dragged off the bottom: kept inside
+        assert!(!s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
+        // dragged off the bottom and the right: kept inside
         s.dock_on(Point::new(1500.0, 5000.0), 1.0, &[]);
-        let p = s.place();
-        assert_eq!(p.origin, (1920 - 12 - 104, 1040 - 12 - 188));
+        assert_eq!(s.place().origin, (1500, 1040 - 12 - 226));
+        s.dock_on(Point::new(5000.0, 400.0), 1.0, &[]);
+        assert_eq!(s.place().origin, (1920 - 12 - 104, 400));
     }
 
     /// Dragged onto another monitor (another DPI) it docks to THAT monitor's
@@ -964,12 +993,12 @@ mod tests {
         assert!(s.dock_on(Point::new(1100.0, 300.0), 2.0, &monitors));
         assert_eq!(s.monitor, right);
         let p = s.place();
-        // the near (left) edge of the right monitor, 12 logical px in, at 200 %
-        assert_eq!(p.origin, (1920 + 24, 600));
+        // where it was dropped on the right monitor (140 logical px in, at 200 %)
+        assert_eq!(p.origin, (1920 + 280, 600));
         assert_eq!(p.scale, 2.0);
         // and back
         assert!(s.dock_on(Point::new(500.0, 300.0), 1.0, &monitors));
-        assert_eq!(s.place().origin, (12, 300));
+        assert_eq!(s.place().origin, (500, 300));
     }
 
     #[test]
@@ -1118,6 +1147,24 @@ mod tests {
     /// The strip with 1 and 4 steps, a step under the cursor, one lifted,
     /// the keyboard's, the cleared pill: Sapphire and Daylight, Latin and
     /// Arabic.
+    #[test]
+    fn open_in_studio_asks_the_window_owner() {
+        let mut s = strip(2);
+        assert_eq!(s.update(Msg::OpenStudio), Some(Do::OpenStudio));
+    }
+
+    #[test]
+    fn a_strip_remembers_where_it_was_left_on_its_screen() {
+        let mut s = strip(2);
+        assert_eq!(s.spot(), None);
+        s.dock_on(Point::new(700.0, 300.0), 1.0, &[]);
+        let (screen, at) = s.spot().unwrap();
+        assert_eq!((screen, at), ((0, 0), Point::new(700.0, 300.0)));
+        let mut next = strip(1);
+        next.set_spot(at);
+        assert_eq!(next.place().origin, (700, 300));
+    }
+
     #[test]
     fn the_strip_matches_its_golden_images() {
         golden::each_theme(|theme, failed| {

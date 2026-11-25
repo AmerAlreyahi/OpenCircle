@@ -1044,3 +1044,16 @@ mod studio_steps {
         assert!(w.steps.is_none());
     }
 }
+
+#[test]
+fn w108_the_strip_opens_where_the_user_left_it_on_that_screen() {
+    let mut w = Windows::default();
+    w.strip_spots.insert((0, 0), Point::new(640.0, 200.0));
+    let place = platform::monitor::Place {
+        origin: (0, 0),
+        px: (1920, 1080),
+        scale: 1.0,
+    };
+    let _ = w.add_step(picture(60, 40), None, place, 0.0);
+    assert_eq!(w.steps.as_ref().unwrap().1.place().origin, (640, 200));
+}
