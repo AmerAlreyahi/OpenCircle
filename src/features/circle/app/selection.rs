@@ -22,13 +22,6 @@ impl App {
             self.o.alt = alt;
             return Task::none();
         }
-        // a press on the screen puts the menu's Translate card away (Esc does too)
-        if matches!(
-            event,
-            overlay::Event::Press { .. } | overlay::Event::Context(_)
-        ) {
-            self.o.text_card = None;
-        }
         // The right-click menu: opens on a right press on the selected text, then drives itself.
         match event {
             _ if self.o.menu.is_some() => {
@@ -204,6 +197,16 @@ impl App {
                     ctrl: false,
                 } if session.has_card() => {
                     return self.on_translate(id, pill::Msg::Ask);
+                }
+                // Selected words translated in place: Ctrl+C copies the TRANSLATED text (W112)
+                overlay::Event::Key {
+                    letter: 'c',
+                    ctrl: true,
+                } if session.text_only() => {
+                    return match session.translated_text() {
+                        Some(text) => self.copy_text(text),
+                        None => Task::none(),
+                    };
                 }
                 // Snip's key (the bar's Snip, hidden under the translation)
                 overlay::Event::Key { letter, ctrl }

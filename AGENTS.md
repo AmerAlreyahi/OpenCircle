@@ -1070,9 +1070,11 @@ production systems.
   from this menu sends the selected TEXT (the picture only when there is no text) by OPENING the chat with that text attached for
   the user to type (no automatic Explain request; lead default 2026-11-24); the bar's Ask AI keeps sending the picture
   (2026-11-08). Menu key + Shift+F10 open it with arrow keys; Copy/Search/link close the overlay, Ask AI/Translate keep it.
-  Translate from the menu (lead 2026-11-25, after the owner found it broken) translates the SELECTED TEXT and shows it in a small
-  card beside the selection (word card look) with Copy, not the whole picture. The bar's Translate (R) with words selected does
-  the same (one path); with an area and no words it translates the picture in place.
+  Translate from the menu (lead 2026-11-25, owner: "I assumed the new translation replaces the original text, not a widget";
+  SUPERSEDES the small card) translates the SELECTED TEXT IN PLACE: only the selected span of each line is erased and the
+  translation drawn over it by the one-shot translate (several lines = one text, laid back into those lines), with the translate
+  pill (chips, Original, Esc); Ctrl+C copies the translated text. The bar's Translate (R) with words selected does the same (one
+  path); with an area and no words it translates the picture in place.
   Surfaces v1: main overlay selection + select-text mode; pill, Snip area, circled area without words later.
 - Ctrl+wheel (owner, 2026-11-24, #202): over a selected shape it resizes the shape (Studio and Snip editor); elsewhere in the
   Studio it keeps zooming the picture.

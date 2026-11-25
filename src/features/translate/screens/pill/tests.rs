@@ -83,6 +83,7 @@ fn session(models: bool) -> Session {
         frame: frame(200, 100),
         area: [0, 0, 200, 100],
         whole: true,
+        only: None,
         phase: if models {
             Phase::Translating
         } else {

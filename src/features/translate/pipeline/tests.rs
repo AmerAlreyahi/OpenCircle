@@ -1638,8 +1638,18 @@ fn one_call_at_a_time_still_fails_whole() {
 #[test]
 fn closing_stops_the_calls() {
     let (deps, img) = slow(3);
-    let out =
-        translate_until(&img, 400, 400, "ar", &Cache::new(8), &deps, |_| {}, || true).unwrap();
+    let out = translate_until(
+        &img,
+        400,
+        400,
+        "ar",
+        &Cache::new(8),
+        &deps,
+        None,
+        |_| {},
+        || true,
+    )
+    .unwrap();
     assert!(deps.asked.borrow().is_empty());
     assert!(out.blocks.iter().all(|b| b.translation.is_empty()));
 }
@@ -1689,4 +1699,56 @@ fn ac2_the_warm_up_is_sent_before_warm_returns_on_the_calling_thread() {
         Err::<(), _>(OcrError::Engine("no helper".into()))
     });
     assert_eq!(sent, [(true, true, here)]);
+}
+
+/// W112: with the selected words' lines given, nothing is read; only those lines are
+/// translated (two lines of one sentence as one text) and drawn over the original, and the
+/// rest of the frame stays exactly as it was.
+#[test]
+fn selected_words_are_translated_in_place_and_nothing_else_is_read_or_touched() {
+    let (w, h) = (800, 450);
+    // the page: two lines of a sentence, the first one longer than the selected words
+    let img = frame(
+        w,
+        h,
+        &[
+            [40.0, 40.0, 300.0, 30.0],
+            [40.0, 72.0, 160.0, 30.0],
+            [40.0, 300.0, 200.0, 30.0],
+        ],
+    );
+    let fake = Fake::new(|_, _, _| panic!("the selection is not read again"));
+    // the second line of a sentence and the start of the next line: one text
+    let picked = vec![
+        tb("Bring the", [40.0, 40.0, 140.0, 30.0]),
+        tb("Sunstone now", [40.0, 72.0, 160.0, 30.0]),
+    ];
+    let out = translate_until(
+        &img,
+        w,
+        h,
+        "ar",
+        &Cache::new(8),
+        &fake,
+        Some(picked),
+        |_| {},
+        || false,
+    )
+    .unwrap();
+    assert!(fake.ocr_calls.borrow().is_empty());
+    assert_eq!(
+        *fake.ai_calls.borrow(),
+        vec![vec!["Bring the Sunstone now".to_string()]]
+    );
+    assert!(out.rgba != img);
+    // below the selected lines nothing moved
+    let from = (110 * w * 4) as usize;
+    assert!(
+        out.rgba[from..] == img[from..],
+        "the rest of the frame is untouched"
+    );
+    // right of the selected span (the unselected words of the line) nothing moved either
+    let row = (50 * w * 4) as usize;
+    let right = row + 320 * 4;
+    assert!(out.rgba[right..right + 400] == img[right..right + 400]);
 }

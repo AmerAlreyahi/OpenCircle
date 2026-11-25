@@ -794,6 +794,19 @@ impl Picked {
         rects.iter().fold(first, |all, r| all.union(r))
     }
 
+    /// The selected span of each line: its text and the box around it (image px), in
+    /// reading order. A partly selected line gives only the selected words' box.
+    pub fn segments(&self) -> Vec<(String, Rectangle)> {
+        (self.spans().into_iter())
+            .filter_map(|(l, first, last)| {
+                let line = &self.lines[l];
+                let text: String = line.text.chars().skip(first).take(last - first).collect();
+                let text = text.trim().to_string();
+                (!text.is_empty()).then(|| (text, between(line, first, last)))
+            })
+            .collect()
+    }
+
     /// The selected text, a line break between lines.
     pub fn text(&self) -> String {
         let lines = self.spans().into_iter().map(|(l, first, last)| {
@@ -1112,6 +1125,22 @@ mod tests {
     /// The caret before char `c` of paragraph line `l` (image px, mid-height).
     fn at(l: usize, c: f32) -> Point {
         Point::new(100.0 + 10.0 * c, 110.0 + 24.0 * l as f32)
+    }
+
+    /// W112: the segments are the selected span of each line, with the box around only those
+    /// words: a partly selected first and last line give their selected words' box.
+    #[test]
+    fn segments_are_the_selected_span_of_each_line() {
+        // from "brown" (line 0) to char 12 of line 1
+        let mut p = press(paragraph(), at(0, 10.0), Unit::Word).unwrap();
+        assert!(p.extend(at(1, 12.0)));
+        let seg = p.segments();
+        let texts: Vec<_> = seg.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["brown fox", "jumps over t"]);
+        // the first line: from char 10 to its end; the second: from its start to char 12
+        assert_eq!((seg[0].1.x, seg[0].1.x + seg[0].1.width), (200.0, 290.0));
+        assert_eq!((seg[1].1.x, seg[1].1.x + seg[1].1.width), (100.0, 220.0));
+        assert_eq!(seg[0].1.y, 100.0);
     }
 
     #[test]

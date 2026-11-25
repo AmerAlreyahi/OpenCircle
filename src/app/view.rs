@@ -373,11 +373,6 @@ impl App {
                     .on_right_press(Message::ContextMenu(context_menu::Msg::Close)),
             ));
         }
-        // Translate's card beside the selected text: it takes its own presses
-        if let Some(t) = &self.o.text_card {
-            let card = opaque(t.view().map(Message::TextCard));
-            layers = layers.push(pin(card).position(t.at(self.o.screen)));
-        }
         layers.extend(self.pill_view()).into()
     }
 

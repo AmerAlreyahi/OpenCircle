@@ -844,15 +844,6 @@ impl Pair {
     pub fn ensure(&'static self, progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
         models::ensure(&self.needed(verified), progress)
     }
-
-    /// `ensure` that stops soon after `stop` is set (`OcrError::Stopped`), keeping its `.part`.
-    pub fn ensure_until(
-        &'static self,
-        progress: impl FnMut(u64, u64),
-        stop: &AtomicBool,
-    ) -> Result<(), OcrError> {
-        models::ensure_until(&self.needed(verified), progress, stop)
-    }
 }
 
 /// `files` without `decoder` when its previous version `v1` is on disk and

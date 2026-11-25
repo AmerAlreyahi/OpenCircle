@@ -2882,7 +2882,7 @@ fn w106_the_main_bar_has_a_quiet_x_that_closes_the_overlay() {
         got.iter().any(|m| matches!(m, Message::BarClose)),
         "{got:?}"
     );
-    // the x is Esc: with the menu's Translate card up, it puts the card away first
+    // the x is Esc: with the menu's Translate in place on screen, it ends the translation
     let (mut with_card, on) = menu_app();
     let _ = with_card.update(Message::Overlay(overlay::Event::Context(on)));
     let i = row_at(
@@ -2892,11 +2892,9 @@ fn w106_the_main_bar_has_a_quiet_x_that_closes_the_overlay() {
     let _ = with_card.update(Message::ContextMenu(
         crate::features::circle::screens::context_menu::Msg::Pick(i),
     ));
-    assert!(with_card.o.text_card.is_some());
+    assert!(with_card.o.translate.is_some());
     let _ = with_card.update(Message::BarClose);
-    assert!(with_card.o.text_card.is_none() && !with_card.o.is_none());
-    let _ = with_card.update(Message::BarClose);
-    assert!(with_card.o.is_none(), "the next one closes the overlay");
+    assert!(with_card.o.is_none(), "the x ends the translation like Esc");
     // and Tab reaches it, Enter presses it
     let _ = app.update(Message::Overlay(overlay::Event::Tab { back: true }));
     assert_eq!(app.o.bar_focus, Some(bar::Stop::Close));
@@ -6464,80 +6462,99 @@ fn w98_201_14_presses_on_the_menu_never_reach_the_overlay() {
     );
 }
 
-/// W106: Translate from the right-click menu translates the SELECTED TEXT into a small card beside
-/// the selection (not the picture's pipeline): "Translating..." first, then the translation with
-/// Copy; the overlay stays; a failure is the error card; Esc / a press elsewhere puts it away; an
-/// older request's answer is dropped.
+/// W112 (supersedes W106's card): Translate from the right-click menu translates the SELECTED
+/// words IN PLACE: only their lines go to the translation, drawn over the original by the one-shot
+/// translate (its pill follows); the overlay stays; no card, no picture pipeline over the page.
 #[test]
-fn w106_the_menus_translate_shows_the_selected_texts_translation_in_a_card() {
+fn w106_the_menus_translate_draws_the_selected_words_translation_in_place() {
     use crate::features::circle::screens::context_menu::{Msg, Row};
-    use crate::features::circle::screens::text_card::{self, State};
+    let (mut app, on) = menu_app();
+    let want = app.picked_text().expect("words are selected");
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    assert!(!app.o.is_none(), "the overlay stays");
+    assert!(
+        app.o.menu.is_none() && app.o.word.is_none(),
+        "the selection is spent"
+    );
+    let (_, session) = app
+        .o
+        .translate
+        .as_ref()
+        .expect("the in-place translate runs");
+    assert!(session.text_only(), "only the selected words");
+    assert_eq!(session.only_text().join("\n"), want);
+    // the pill (language chips, Original) is the full-screen translate's
+    let texts = texts_of(&app, app.overlay);
+    assert!(texts.iter().any(|t| t == "Translating…"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Detect"),
+        "language chips: {texts:?}"
+    );
+    // Esc ends it, as it ends a full-screen translate
+    let _ = app.update(Message::Escape);
+    assert!(app.o.is_none());
+}
+
+/// W112: Ctrl+C over words translated in place copies the TRANSLATED text (the overlay closes
+/// with the Copied pill, as every text copy); over a page translate it does nothing.
+#[test]
+fn w106_ctrl_c_copies_the_translated_text_of_words_translated_in_place() {
+    use crate::features::circle::screens::context_menu::{Msg, Row};
+    use crate::features::translate::pipeline::Translation;
     let (mut app, on) = menu_app();
     let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
     let i = row_at(&app, &Row::Translate);
     let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    assert!(app.o.translate.is_none(), "no picture translation starts");
-    assert!(!app.o.is_none(), "the overlay stays");
-    let card = app.o.text_card.as_ref().expect("the card opens at once");
-    assert_eq!(card.state, State::Translating);
-    let id = card.id;
-    let texts = texts_of(&app, app.overlay);
-    assert!(texts.iter().any(|t| t == "Translating…"), "{texts:?}");
-    // an older request's answer is ignored
-    let _ = app.update(Message::TextTranslated(id + 7, Ok("late".into())));
-    assert_eq!(app.o.text_card.as_ref().unwrap().state, State::Translating);
-    // the answer: its words and a Copy button
-    let _ = app.update(Message::TextTranslated(id, Ok("hola mundo".into())));
-    let texts = texts_of(&app, app.overlay);
-    assert!(texts.iter().any(|t| t == "hola mundo"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Copy"), "{texts:?}");
-    let _ = app.update(Message::TextCard(text_card::Msg::Copy));
-    assert!(app.o.text_card.as_ref().unwrap().copied);
-    // Esc puts the card away and the overlay stays
-    let _ = app.update(Message::Escape);
-    assert!(app.o.text_card.is_none() && !app.o.is_none());
-    // a failure is the one error card
-    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
-    let i = row_at(&app, &Row::Translate);
-    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    let id = app.o.text_card.as_ref().unwrap().id;
-    let _ = app.update(Message::TextTranslated(
+    let id = app.o.translate.as_ref().unwrap().0;
+    let ctrl_c = overlay::Event::Key {
+        letter: 'c',
+        ctrl: true,
+    };
+    // before the translation is shown: nothing to copy, the overlay stays
+    let _ = app.update(Message::Overlay(ctrl_c));
+    assert!(!app.o.is_none(), "nothing to copy yet");
+    let block = Translation {
+        bounds: [0.0, 0.0, 10.0, 10.0],
+        original: "hello".into(),
+        translation: "hola".into(),
+    };
+    let _ = app.update(Message::Translate(
         id,
-        Err(crate::features::translate::TextError::Failed(
-            "No offline model".into(),
-        )),
+        pill::Session::done_for_test(vec![block]),
     ));
-    let texts = texts_of(&app, app.overlay);
-    assert!(
-        texts.iter().any(|t| t == "Translation could not finish"),
-        "{texts:?}"
+    assert_eq!(
+        app.o
+            .translate
+            .as_ref()
+            .unwrap()
+            .1
+            .translated_text()
+            .as_deref(),
+        Some("hola")
     );
-    // a press on the screen puts it away
-    let _ = app.update(Message::Overlay(overlay::Event::Press {
-        at: Point::new(5.0, 5.0),
-        shift: false,
-    }));
-    assert!(app.o.text_card.is_none());
+    let _ = app.update(Message::Overlay(ctrl_c));
+    assert!(app.o.is_none(), "the copy closed the overlay");
 }
 
-/// W106 (owner shot, 2026-11-25): with words selected, the BAR's Translate (the pill, key R) is the
-/// same as the menu's row: the selected text in the card with Copy, never the page-translate pill
-/// that translated nothing. With an area and no words it still translates the picture in place.
+/// W112 (owner shot, 2026-11-25): with words selected, the BAR's Translate (the pill, key R) is the
+/// same as the menu's row: the words translated in place. With an area and no words it still
+/// translates the picture in place, as before.
 #[test]
-fn w106_the_bars_translate_with_words_selected_opens_the_text_card() {
+fn w106_the_bars_translate_with_words_selected_translates_them_in_place() {
     use crate::features::settings::labs::BarButton;
     // the pill
     let (mut app, _) = menu_app();
     let _ = app.update(Message::Pill(BarButton::Translate));
-    assert!(app.o.translate.is_none(), "no empty page-translate pill");
-    assert!(app.o.text_card.is_some(), "the card with the selected text");
+    assert!(app.o.translate.as_ref().is_some_and(|(_, s)| s.text_only()));
     // the key R
     let (mut app, _) = menu_app();
     let _ = app.update(Message::Overlay(overlay::Event::Key {
         letter: 'r',
         ctrl: false,
     }));
-    assert!(app.o.translate.is_none() && app.o.text_card.is_some());
+    assert!(app.o.translate.as_ref().is_some_and(|(_, s)| s.text_only()));
     // an area with no words: the picture is translated in place, as before
     let mut app = open_app(800, 600, 1.0);
     drag(
@@ -6547,115 +6564,11 @@ fn w106_the_bars_translate_with_words_selected_opens_the_text_card() {
         false,
     );
     let _ = app.update(Message::Pill(BarButton::Translate));
-    assert!(app.o.translate.is_some() && app.o.text_card.is_none());
-}
-
-/// W106: text already in the target language is shown as it is with a quiet note, never as an
-/// error card; and Copy copies that text.
-#[test]
-fn w106_text_already_in_the_target_is_shown_not_failed() {
-    use crate::features::circle::screens::context_menu::{Msg, Row};
-    use crate::features::circle::screens::text_card::State;
-    use crate::features::translate::TextError;
-    let (mut app, on) = menu_app();
-    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
-    let i = row_at(&app, &Row::Translate);
-    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    let id = app.o.text_card.as_ref().unwrap().id;
-    let words = app.o.text_card.as_ref().unwrap().text.clone();
-    let note = "This text is already in English";
-    let _ = app.update(Message::TextTranslated(
-        id,
-        Err(TextError::Same(note.into())),
-    ));
-    assert_eq!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::Same(note.into())
-    );
-    let texts = texts_of(&app, app.overlay);
-    assert!(texts.iter().any(|t| t == note), "{texts:?}");
     assert!(
-        texts.contains(&words),
-        "the selected text itself: {texts:?}"
-    );
-    assert!(!texts.iter().any(|t| t == "Translation could not finish"));
-}
-
-/// W106: when the offline model for the pair is not on disk the card offers the download (the
-/// one download card, with its size) instead of an error; after it, the card translates.
-#[test]
-fn w106_the_menus_translate_offers_the_model_download_when_it_is_missing() {
-    use crate::features::circle::screens::context_menu::{Msg, Row};
-    use crate::features::circle::screens::text_card::{self, Download, State};
-    use crate::features::translate::{Model, TextError};
-    let (mut app, on) = menu_app();
-    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
-    let i = row_at(&app, &Row::Translate);
-    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    let id = app.o.text_card.as_ref().unwrap().id;
-    let model = Model::of("en", "ar").expect("a pair");
-    let _ = app.update(Message::TextTranslated(id, Err(TextError::Missing(model))));
-    let card = app.o.text_card.as_ref().unwrap();
-    assert_eq!(card.state, State::NeedsModel(model.bytes()));
-    let texts = texts_of(&app, app.overlay);
-    assert!(
-        texts.iter().any(|t| t == "Download"),
-        "the download card asks: {texts:?}"
-    );
-    // Download starts it (the task is not run here: no network); shares move the bar
-    let _ = app.update(Message::TextCard(text_card::Msg::Download));
-    assert_eq!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::Downloading(0.0)
-    );
-    let _ = app.update(Message::TextModel(id, Download::Progress(0.5)));
-    assert_eq!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::Downloading(0.5)
-    );
-    // a second press while it runs starts nothing (the share is kept)
-    let _ = app.update(Message::TextCard(text_card::Msg::Download));
-    assert_eq!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::Downloading(0.5)
-    );
-    // a failure offers it again; an older request's news is dropped
-    let _ = app.update(Message::TextModel(
-        id,
-        Download::Done(Err("offline".into())),
-    ));
-    assert_eq!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::DownloadFailed("offline".into())
-    );
-    let _ = app.update(Message::TextModel(id + 9, Download::Done(Ok(()))));
-    assert!(matches!(
-        app.o.text_card.as_ref().unwrap().state,
-        State::DownloadFailed(_)
-    ));
-    // done: it translates
-    let _ = app.update(Message::TextModel(id, Download::Done(Ok(()))));
-    assert_eq!(app.o.text_card.as_ref().unwrap().state, State::Translating);
-    // Not now puts the card away and stops its download
-    let stop = app.o.text_card.as_ref().unwrap().stop.clone();
-    assert!(!stop.load(std::sync::atomic::Ordering::Relaxed));
-    let _ = app.update(Message::TextCard(text_card::Msg::Dismiss));
-    assert!(app.o.text_card.is_none() && !app.o.is_none());
-    assert!(
-        stop.load(std::sync::atomic::Ordering::Relaxed),
-        "the download was told to stop"
-    );
-    // a new request's card replaces the old one the same way (never two downloads of one pair)
-    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
-    let i = row_at(&app, &Row::Translate);
-    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    let first = app.o.text_card.as_ref().unwrap().stop.clone();
-    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
-    let i = row_at(&app, &Row::Translate);
-    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
-    assert!(
-        first.load(std::sync::atomic::Ordering::Relaxed),
-        "replaced: stopped"
+        app.o
+            .translate
+            .as_ref()
+            .is_some_and(|(_, s)| !s.text_only())
     );
 }
 

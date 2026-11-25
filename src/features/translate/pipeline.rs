@@ -1765,11 +1765,23 @@ pub fn translate_progressively(
     deps: &(impl Deps + Sync),
     shown: impl FnMut(&Translated) + Send,
 ) -> Result<Translated, Error> {
-    translate_until(rgba, width, height, target, cache, deps, shown, || false)
+    translate_until(
+        rgba,
+        width,
+        height,
+        target,
+        cache,
+        deps,
+        None,
+        shown,
+        || false,
+    )
 }
 
 /// `translate_progressively`; `stop() == true` (the overlay closed) starts no
-/// more calls and drops the answers that are still on their way.
+/// more calls and drops the answers that are still on their way. `read`: the lines are
+/// already known (the words the user selected, in this frame's pixels): nothing is
+/// read, only those lines are translated and drawn back (W112).
 #[allow(clippy::too_many_arguments)]
 pub fn translate_until(
     rgba: &[u8],
@@ -1778,25 +1790,37 @@ pub fn translate_until(
     target: &str,
     cache: &Cache,
     deps: &(impl Deps + Sync),
+    read: Option<Vec<TextBlock>>,
     mut shown: impl FnMut(&Translated) + Send,
     stop: impl Fn() -> bool + Sync,
 ) -> Result<Translated, Error> {
     let start = Instant::now();
     check_frame(rgba, width, height)?;
     deps.warm(target);
-    let found = deps.recognize(rgba, width, height).map_err(Error::Ocr)?;
+    let known = read.is_some();
+    let found = match read {
+        Some(lines) => lines,
+        None => deps.recognize(rgba, width, height).map_err(Error::Ocr)?,
+    };
     let lines: Vec<Line> = (found.into_iter())
-        .filter(|b| !cut_off(b, (width, height)))
+        .filter(|b| known || !cut_off(b, (width, height)))
         .map(|b| to_line(b, width, height))
         .collect();
-    let lines = split_fields(rgba, width as usize, height as usize, &lines);
+    // (words the user selected are translated as they are: no field split, no chrome rules)
+    let lines = match known {
+        true => lines,
+        false => split_fields(rgba, width as usize, height as usize, &lines),
+    };
     let lines: Vec<Line> = (lines.into_iter())
-        .filter(|l| !os_watermark(l, (width, height)))
+        .filter(|l| known || !os_watermark(l, (width, height)))
         .collect();
     let ocr = start.elapsed();
     // the glossary applies on a game screen only: decided on what the frame shows
     super::glossary::screen::saw_frame(has_address_bar(&lines, height));
-    let blocks = group_blocks(&without_chrome(lines, height));
+    let blocks = group_blocks(&match known {
+        true => lines,
+        false => without_chrome(lines, height),
+    });
     // repeated names become suggestions (a game screen's, counted in the background)
     super::glossary::suggest::observe(
         (blocks.iter())

@@ -199,8 +199,6 @@ pub(crate) struct App {
     pub(crate) regions: Vec<(Point, Rectangle)>,
     /// Translate sessions started (numbers them).
     pub(crate) translates: u32,
-    /// Right-click Translate requests made (numbers them).
-    pub(crate) text_cards: u32,
     /// The Studio's translation: its id, the picture's epoch, the session.
     /// The picture whose text-reader download the Studio's card waits on.
     pub(crate) studio_reader: Option<u32>,
@@ -321,7 +319,6 @@ impl App {
             windows: windows::Windows::default(),
             regions: Vec::new(),
             translates: 0,
-            text_cards: 0,
             studio_reader: None,
             studio_translate: None,
             cache: Arc::new(Cache::new(8)),

@@ -13,6 +13,7 @@ use crate::features::ask_ai::AiError;
 use crate::features::ask_ai::ask::{self, Chat, Status};
 
 use crate::features::circle::actions;
+use crate::features::text_reading::TextBlock;
 use crate::features::text_reading::models;
 use crate::features::text_reading::screens::model_download::{self, Fetching, Which};
 use crate::features::translate::mt::Pair;
@@ -176,6 +177,9 @@ pub struct Session {
     area: [u32; 4],
     /// The whole frame was asked for (no selection to outline).
     whole: bool,
+    /// Selected words only (W112): their lines (frame pixels) are translated and drawn over
+    /// the original, nothing else is read.
+    only: Option<Vec<TextBlock>>,
     phase: Phase,
     /// The Original button is on: the page shows as it was (F7).
     original: bool,
@@ -248,6 +252,55 @@ impl Session {
         models: bool,
         taskbar: u32,
     ) -> (Session, Task<Msg>) {
+        Self::start_with(frame, area, scale, cache, models, taskbar, None)
+    }
+
+    /// The selected words' lines (frame pixels) translated in place: the area is their box, a
+    /// little wider (the erase needs background around the text).
+    pub fn start_text(
+        frame: image::Handle,
+        lines: Vec<TextBlock>,
+        scale: f32,
+        cache: Arc<Cache>,
+    ) -> Option<(Session, Task<Msg>)> {
+        let image::Handle::Rgba { width, height, .. } = &frame else {
+            return None;
+        };
+        let first = lines.first()?.bounds;
+        let [x0, y0, x1, y1] = lines.iter().fold(
+            [first[0], first[1], first[0] + first[2], first[1] + first[3]],
+            |a, l| {
+                let [x, y, w, h] = l.bounds;
+                [a[0].min(x), a[1].min(y), a[2].max(x + w), a[3].max(y + h)]
+            },
+        );
+        let pad = TEXT_PAD as f32;
+        let area = [
+            (x0 - pad).max(0.0) as u32,
+            (y0 - pad).max(0.0) as u32,
+            ((x1 + pad).ceil() as u32).min(*width),
+            ((y1 + pad).ceil() as u32).min(*height),
+        ];
+        Some(Self::start_with(
+            frame,
+            area,
+            scale,
+            cache,
+            true,
+            0,
+            Some(lines),
+        ))
+    }
+
+    fn start_with(
+        frame: image::Handle,
+        area: [u32; 4],
+        scale: f32,
+        cache: Arc<Cache>,
+        models: bool,
+        taskbar: u32,
+        only: Option<Vec<TextBlock>>,
+    ) -> (Session, Task<Msg>) {
         let cfg = crate::shared::config::current().translate;
         // a new capture: its screen is decided once its frame is read
         crate::features::translate::glossary::screen::begin();
@@ -256,7 +309,7 @@ impl Session {
             image::Handle::Rgba { width, height, .. } => (*width, *height),
             _ => (0, 0),
         };
-        let whole = area == [0, 0, size.0, size.1];
+        let whole = only.is_none() && area == [0, 0, size.0, size.1];
         let area = match whole && taskbar < size.1 {
             true => [0, 0, size.0, size.1 - taskbar],
             false => area,
@@ -265,6 +318,7 @@ impl Session {
             frame,
             area,
             whole,
+            only,
             phase: Phase::Consent(None),
             original: false,
             card: None,
@@ -832,81 +886,131 @@ impl Session {
         let (frame, area, cache) = (self.frame.clone(), self.area, self.cache.clone());
         let (source, target) = (self.picker.source.clone(), self.picker.target.clone());
         let (agreed, scale, readers) = (self.offline, self.scale, self.readers.is_some());
-        let (task, handle) =
-            background(move |tx| {
-                let deps = crate::features::translate::action::deps_for(&source, &target, true)
-                    .map(|(mut real, target)| {
-                        real.scale = scale;
-                        (real, target)
-                    });
-                let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
-                if download {
-                    let progress = |done: u64, total: u64| {
-                        let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
-                    };
-                    let got = match readers {
-                        true => crate::features::translate::action::download_readers(progress),
-                        false => {
-                            crate::features::translate::action::download(&source, agreed, progress)
-                        }
-                    };
-                    if let Err(e) = got {
-                        let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
-                        return;
-                    }
-                    let _ = tx.unbounded_send(Msg::Translating);
-                }
-                let ask = |pair: &'static Pair| {
-                    let missing = pair.missing_bytes();
-                    (missing > 0).then(|| {
-                        crate::log!(
-                            "[opencircle] translate asks for {} ({missing} bytes)",
-                            pair.label()
-                        );
-                        tx.unbounded_send(Msg::Offline(pair, missing))
-                    })
+        let only = self.only.clone();
+        let (task, handle) = background(move |tx| {
+            let deps = crate::features::translate::action::deps_for(&source, &target, true).map(
+                |(mut real, target)| {
+                    real.scale = scale;
+                    (real, target)
+                },
+            );
+            let offline = deps.as_ref().is_ok_and(|(real, _)| real.offline());
+            if download {
+                let progress = |done: u64, total: u64| {
+                    let _ = tx.unbounded_send(Msg::Progress(done as f32 / total.max(1) as f32));
                 };
-                let expected = offline.then(|| asked_first(&source, &target)).flatten();
-                if expected.and_then(ask).is_some() {
+                let got = match readers {
+                    true => crate::features::translate::action::download_readers(progress),
+                    false => {
+                        crate::features::translate::action::download(&source, agreed, progress)
+                    }
+                };
+                if let Err(e) = got {
+                    let _ = tx.unbounded_send(Msg::DownloadFailed(model_download::why(&e)));
                     return;
                 }
-                let partial = |shown| {
-                    let _ = tx.unbounded_send(Msg::Partial(shown));
-                };
-                let result = translate(&frame, area, &cache, &deps, partial, || tx.is_closed())
-                    .map(|mut shown| {
-                        if let Ok((real, target)) = &deps {
-                            shown.offer = real.held().map(|h| {
-                                let source = h.0.source;
-                                Box::new(Offer::new(h, source, target))
-                            });
-                            shown.outdated = real.outdated().into();
-                            shown.local = real.fell_back();
-                        }
-                        shown
-                    });
-                // "auto" read another language than expected: ask for its pair;
-                // a page read as noise: the readers for other scripts
-                if result.is_err()
-                    && let Ok((real, _)) = &deps
-                {
-                    if real.missing().and_then(ask).is_some() {
-                        return;
-                    }
-                    if real.wants_readers() {
-                        let (bytes, names) = (
-                            crate::features::translate::action::readers_bytes(),
-                            crate::features::text_reading::models::missing_other_scripts(),
-                        );
-                        let _ = tx.unbounded_send(Msg::Readers(bytes, names));
-                        return;
-                    }
-                }
-                let _ = tx.unbounded_send(Msg::Done(result));
+                let _ = tx.unbounded_send(Msg::Translating);
+            }
+            let ask = |pair: &'static Pair| {
+                let missing = pair.missing_bytes();
+                (missing > 0).then(|| {
+                    crate::log!(
+                        "[opencircle] translate asks for {} ({missing} bytes)",
+                        pair.label()
+                    );
+                    tx.unbounded_send(Msg::Offline(pair, missing))
+                })
+            };
+            let expected = offline.then(|| asked_first(&source, &target)).flatten();
+            if expected.and_then(ask).is_some() {
+                return;
+            }
+            let partial = |shown| {
+                let _ = tx.unbounded_send(Msg::Partial(shown));
+            };
+            let result = translate_with(&frame, area, &cache, &deps, only, partial, || {
+                tx.is_closed()
             })
-            .abortable();
+            .map(|mut shown| {
+                if let Ok((real, target)) = &deps {
+                    shown.offer = real.held().map(|h| {
+                        let source = h.0.source;
+                        Box::new(Offer::new(h, source, target))
+                    });
+                    shown.outdated = real.outdated().into();
+                    shown.local = real.fell_back();
+                }
+                shown
+            });
+            // "auto" read another language than expected: ask for its pair;
+            // a page read as noise: the readers for other scripts
+            if result.is_err()
+                && let Ok((real, _)) = &deps
+            {
+                if real.missing().and_then(ask).is_some() {
+                    return;
+                }
+                if real.wants_readers() {
+                    let (bytes, names) = (
+                        crate::features::translate::action::readers_bytes(),
+                        crate::features::text_reading::models::missing_other_scripts(),
+                    );
+                    let _ = tx.unbounded_send(Msg::Readers(bytes, names));
+                    return;
+                }
+            }
+            let _ = tx.unbounded_send(Msg::Done(result));
+        })
+        .abortable();
         self.work = Some(handle.abort_on_drop());
         task
+    }
+}
+
+/// Background kept around selected words (frame px).
+const TEXT_PAD: u32 = 8;
+
+impl Session {
+    /// Selected-words mode (W112).
+    pub fn text_only(&self) -> bool {
+        self.only.is_some()
+    }
+
+    /// The lines (their text) a selected-words session translates (tests).
+    #[cfg(test)]
+    pub fn only_text(&self) -> Vec<String> {
+        (self.only.iter().flatten())
+            .map(|l| l.text.clone())
+            .collect()
+    }
+
+    /// A finished translation of `blocks` (tests).
+    #[cfg(test)]
+    pub fn done_for_test(blocks: Vec<Translation>) -> Msg {
+        Msg::Done(Ok(Shown {
+            image: image::Handle::from_rgba(4, 4, vec![7u8; 64]),
+            blocks,
+            offer: None,
+            outdated: Box::default(),
+            failed: 0,
+            local: false,
+        }))
+    }
+
+    /// The translated text (a block left as it was gives its original), one paragraph per line:
+    /// what Ctrl+C copies. `None` until it is shown.
+    pub fn translated_text(&self) -> Option<String> {
+        let Phase::Shown(shown) = &self.phase else {
+            return None;
+        };
+        let text = (shown.blocks.iter())
+            .map(|b| match b.translation.is_empty() {
+                true => b.original.as_str(),
+                false => b.translation.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        (!text.trim().is_empty()).then_some(text)
     }
 }
 
@@ -935,11 +1039,25 @@ fn asked_first(source: &str, target: &str) -> Option<&'static Pair> {
 /// Runs the pipeline on `area` of `frame` and pastes the result back into a
 /// copy of the frame; `partial` gets just the translated area so far.
 /// `deps` = `actions::translate::deps()`. Blocking (OCR helper, HTTP).
+#[cfg(test)]
 fn translate(
     frame: &image::Handle,
     area: [u32; 4],
     cache: &Cache,
     deps: &Result<(impl Deps + Sync, String), String>,
+    partial: impl FnMut(Part) + Send,
+    stop: impl Fn() -> bool + Sync,
+) -> Result<Shown, Problem> {
+    translate_with(frame, area, cache, deps, None, partial, stop)
+}
+
+/// `translate`; `only`: the selected words' lines (frame pixels) instead of reading the area.
+fn translate_with(
+    frame: &image::Handle,
+    area: [u32; 4],
+    cache: &Cache,
+    deps: &Result<(impl Deps + Sync, String), String>,
+    only: Option<Vec<TextBlock>>,
     mut partial: impl FnMut(Part) + Send,
     stop: impl Fn() -> bool + Sync,
 ) -> Result<Shown, Problem> {
@@ -993,6 +1111,16 @@ fn translate(
         target,
         cache,
         deps,
+        // (the lines in the crop's own pixels)
+        only.map(|lines| {
+            (lines.into_iter())
+                .map(|mut l| {
+                    l.bounds[0] -= x0 as f32;
+                    l.bounds[1] -= y0 as f32;
+                    l
+                })
+                .collect()
+        }),
         |out| {
             partial(Part {
                 image: image::Handle::from_rgba(crop.width, crop.height, out.rgba.clone()),

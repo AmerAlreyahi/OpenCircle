@@ -4,14 +4,11 @@
 use iced::{Point, Rectangle, Task};
 
 use crate::app::App;
-use crate::app::background::background;
 use crate::app::message::{Message, Purpose};
-use crate::features::circle::actions::copy;
 use crate::features::circle::actions::entities::{self, Kind};
 use crate::features::circle::actions::{self, Action};
 use crate::features::circle::screens::context_menu::{Key, Menu, Msg, Outcome, Row};
 use crate::features::circle::screens::overlay::{self, Event};
-use crate::features::circle::screens::text_card::{self, State, TextCard};
 use crate::shared::kit::option_list::place;
 
 /// The menu keeps this far from the screen's edges.
@@ -104,7 +101,7 @@ impl App {
 
     /// Esc.
     pub(crate) fn close_context(&mut self) -> bool {
-        self.o.menu.take().is_some() || self.o.text_card.take().is_some()
+        self.o.menu.take().is_some()
     }
 
     fn menu_outcome(&mut self, outcome: Option<Outcome>) -> Task<Message> {
@@ -134,143 +131,26 @@ impl App {
         match row {
             Row::Copy => self.press(actions::by_id("copy")),
             Row::Search => self.press(actions::by_id("lens")),
-            Row::Translate => self.translate_text_card(),
+            Row::Translate => self.translate_selected(),
             Row::Ask => self.ask_selected_text(),
             Row::SelectAll => self.select_all_text(),
             Row::Open(entity) => self.open_entity(entity),
         }
     }
 
-    /// Translate: the SELECTED TEXT into the user's target language with the configured engine,
-    /// in a small card beside the selection (the overlay stays). Not the picture (owner, 2026-11-25).
-    pub(crate) fn translate_text_card(&mut self) -> Task<Message> {
-        let (Some(text), Some(near)) = (self.menu_text(), self.selection_screen_rect()) else {
-            return Task::none();
-        };
-        self.text_cards = self.text_cards.wrapping_add(1);
-        let id = self.text_cards;
-        self.o.text_card = Some(TextCard::new(id, text.clone(), near));
-        self.run_text_translate(id, text)
-    }
-
-    /// Translates `text` for the card of request `id` on a thread.
-    fn run_text_translate(&self, id: u32, text: String) -> Task<Message> {
-        // (tests drive the card through its messages: no real thread, engine or download)
-        if cfg!(test) {
-            return Task::none();
+    /// The selected span of each line (text, image px box): the picked words', else select-text
+    /// mode's whole box lines. What Translate draws over (W112).
+    pub(crate) fn menu_segments(&self) -> Vec<(String, Rectangle)> {
+        let picked =
+            (self.o.text_mode.as_ref().and_then(|m| m.picked.as_ref())).or(self.o.word.as_ref());
+        if let Some(picked) = picked {
+            return picked.segments();
         }
-        let cfg = crate::shared::config::current();
-        let (source, target) = (cfg.translate.source.clone(), cfg.translate.target.clone());
-        background(move |tx| {
-            let result = crate::features::translate::translate_text(&text, &source, &target);
-            if let Err(e) = &result {
-                crate::log!("[opencircle] translate selected text failed: {e:?}");
-            }
-            let _ = tx.unbounded_send(result);
-        })
-        .map(move |result| Message::TextTranslated(id, result))
-    }
-
-    /// The selected words' box on screen (screen px).
-    fn selection_screen_rect(&self) -> Option<Rectangle> {
-        let rects = self.menu_target();
-        let first = *rects.first()?;
-        let all = rects.iter().fold(first, |a, r| a.union(r));
-        Some(self.o.view.rect_to_screen(all))
-    }
-
-    /// The translation (or why not) of request `id`; an older request's answer is dropped.
-    pub(crate) fn text_translated(
-        &mut self,
-        id: u32,
-        result: Result<String, crate::features::translate::TextError>,
-    ) -> Task<Message> {
-        use crate::features::translate::TextError;
-        if let Some(card) = self.o.text_card.as_mut().filter(|c| c.id == id) {
-            card.state = match result {
-                Ok(text) => State::Done(text),
-                // the pair is not on disk: the download card asks (its size), then it translates
-                Err(TextError::Missing(model)) => {
-                    card.model = Some(model);
-                    State::NeedsModel(model.bytes())
-                }
-                Err(TextError::Failed(e)) => State::Failed(e),
-                Err(TextError::Ai(e)) => {
-                    State::Failed(crate::features::translate::failure_text(&e))
-                }
-                Err(TextError::Same(note)) => State::Same(note),
-            };
-        }
-        Task::none()
-    }
-
-    /// The card's model download: its share, then done (it translates) or why it stopped.
-    pub(crate) fn text_model(&mut self, id: u32, news: text_card::Download) -> Task<Message> {
-        let Some(card) = self.o.text_card.as_mut().filter(|c| c.id == id) else {
-            return Task::none();
-        };
-        match news {
-            text_card::Download::Progress(share) => card.state = State::Downloading(share),
-            text_card::Download::Done(Err(why)) => card.state = State::DownloadFailed(why),
-            text_card::Download::Done(Ok(())) => {
-                card.state = State::Translating;
-                let text = card.text.clone();
-                return self.run_text_translate(id, text);
-            }
-        }
-        Task::none()
-    }
-
-    /// The card's Copy (the overlay stays) and its error details.
-    pub(crate) fn on_text_card(&mut self, msg: text_card::Msg) -> Task<Message> {
-        let Some(card) = self.o.text_card.as_mut() else {
-            return Task::none();
-        };
-        match msg {
-            text_card::Msg::Details => card.details = !card.details,
-            // Not now / Cancel: the card goes and its download stops (`TextCard::drop`)
-            text_card::Msg::Dismiss => self.o.text_card = None,
-            // Download / Try again: only what the user asked for is fetched, once (a press while it
-            // is running does nothing)
-            text_card::Msg::Download => {
-                if !matches!(card.state, State::NeedsModel(_) | State::DownloadFailed(_)) {
-                    return Task::none();
-                }
-                let (id, Some(model)) = (card.id, card.model) else {
-                    return Task::none();
-                };
-                card.state = State::Downloading(0.0);
-                if cfg!(test) {
-                    return Task::none(); // (no real download from a test)
-                }
-                let stop = card.stop.clone();
-                return background(move |tx| {
-                    let got = model.download(
-                        |done, total| {
-                            let share = done as f32 / total.max(1) as f32;
-                            let _ = tx.unbounded_send(text_card::Download::Progress(share));
-                        },
-                        &stop,
-                    );
-                    let _ = tx.unbounded_send(text_card::Download::Done(got));
-                })
-                .map(move |news| Message::TextModel(id, news));
-            }
-            text_card::Msg::Copy => {
-                let text = match &card.state {
-                    State::Done(text) => Some(text.clone()),
-                    State::Same(_) => Some(card.text.clone()),
-                    _ => None,
-                };
-                if let Some(text) = text {
-                    match copy::text(text) {
-                        Ok(()) => card.copied = true,
-                        Err(e) => crate::log!("[opencircle] copy translation failed: {e}"),
-                    }
-                }
-            }
-        }
-        Task::none()
+        let lines = (self.o.text_mode.as_ref()).and_then(|m| m.lines.as_ref());
+        (lines.into_iter().flatten())
+            .filter(|l| !l.text.trim().is_empty())
+            .map(|l| (l.text.trim().to_string(), l.bounds))
+            .collect()
     }
 
     /// Ask AI about the selected text: the text goes with the question, not the picture (the

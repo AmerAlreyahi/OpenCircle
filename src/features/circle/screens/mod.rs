@@ -3,4 +3,3 @@ pub(crate) mod bar;
 pub(crate) mod context_menu;
 pub(crate) mod edge;
 pub(crate) mod overlay;
-pub(crate) mod text_card;

@@ -65,8 +65,6 @@ pub(crate) struct Opening {
     pub(crate) word: Option<word::Picked>,
     /// The right-click menu on the selected text, while it is open (#201).
     pub(crate) menu: Option<crate::features::circle::screens::context_menu::Menu>,
-    /// The menu's Translate: the selected text's translation beside it.
-    pub(crate) text_card: Option<crate::features::circle::screens::text_card::TextCard>,
     /// Main mode: the frame's text lines (image px), read on demand band by
     /// band (#123): never at open, the band the user touches first.
     pub(crate) screen_text: word::Screen,
@@ -271,7 +269,6 @@ impl Default for Opening {
             zoom: None,
             word: None,
             menu: None,
-            text_card: None,
             screen_text: word::Screen::default(),
             reading: None,
             other_read: false,

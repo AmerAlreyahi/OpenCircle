@@ -173,13 +173,13 @@ impl App {
             return self.search_text(text);
         }
         // Translate with words selected (the bar's pill, key R, the menu's row: one path): the
-        // selected text in the card with Copy, never the picture's page-translate pill (it found
-        // nothing to translate in a few words). An area with no words still translates in place.
+        // selected text is translated and drawn over the original (W112). An area with no
+        // words still translates the picture in place.
         if action.id == crate::features::translate::action::ACTION.id
             && self.o.edit.is_none()
             && self.picked_text().is_some()
         {
-            return self.translate_text_card();
+            return self.translate_selected();
         }
         match action.run {
             // Snip is one flow: from main mode its selection is the pick.
@@ -484,6 +484,42 @@ impl App {
             self.o.selection = None;
             self.o.stroke.clear();
         }
+        self.translates = self.translates.wrapping_add(1);
+        let id = self.translates;
+        self.o.translate = Some((id, session));
+        task.map(move |msg| Message::Translate(id, msg))
+    }
+
+    /// Translate the SELECTED WORDS in place (W112): their lines are translated (one text over
+    /// several lines) and drawn over the original, only where the words are, by the same erase
+    /// and redraw as the full-screen translate; its pill follows (chips, Original, Esc).
+    pub(crate) fn translate_selected(&mut self) -> Task<Message> {
+        let scale = self.o.scale;
+        let Some(frame) = self.o.frame.clone() else {
+            return Task::none();
+        };
+        let lines: Vec<crate::features::text_reading::TextBlock> =
+            (self.menu_segments().into_iter())
+                .map(|(text, r)| crate::features::text_reading::TextBlock {
+                    text,
+                    bounds: [r.x * scale, r.y * scale, r.width * scale, r.height * scale],
+                    confidence: 1.0,
+                    words: Vec::new(),
+                })
+                .collect();
+        let Some((session, task)) = (!lines.is_empty())
+            .then(|| pill::Session::start_text(frame, lines, scale, self.cache.clone()))
+            .flatten()
+        else {
+            return Task::none();
+        };
+        self.o.menu = None;
+        self.o.word = None;
+        self.o.text_mode = None;
+        self.o.ai_chat = None;
+        self.o.edit = None;
+        self.o.view = self.o.view.reset(); // the translation is drawn at 1x
+        self.o.zoom = None;
         self.translates = self.translates.wrapping_add(1);
         let id = self.translates;
         self.o.translate = Some((id, session));
