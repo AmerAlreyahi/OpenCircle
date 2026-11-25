@@ -1,7 +1,7 @@
 # OpenCircle settings. Invalid values fall back to defaults.
 # API keys are never stored here (OS keyring only).
 
-version = 14
+version = 15
 theme = "system"
 glass_effect = true
 shortcut = "Ctrl+Shift+Space"

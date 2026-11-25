@@ -179,7 +179,6 @@ pub enum Msg {
     /// the folder picker's answer.
     OpenPrefs,
     Prefs(preferences::Msg),
-    Browsed(Option<PathBuf>),
     OpenRecent(PathBuf),
     Recent(Vec<(PathBuf, image::Handle)>, Vec<String>),
     /// The window's px per logical px, and its size.
@@ -307,8 +306,8 @@ pub enum Outcome {
     PickFile,
     /// The preferences dialog changed something: write it (`Studio::apply_prefs`).
     ApplyPrefs,
-    /// Show the folder picker; answer `Msg::Browsed`.
-    PrefsBrowse,
+    /// Open Settings > General (the Save folder).
+    PrefsOpenGeneral,
     /// The open-file dialog for several pictures, then `Msg::AddFiles`.
     PickFiles,
     /// Read these files and add each as a step.
@@ -1467,9 +1466,7 @@ impl Studio {
             Msg::OpenPrefs => {
                 self.popover = None;
                 self.menu = None;
-                self.prefs = Some(preferences::Dialog::open(
-                    crate::shared::paths::pictures_folder(),
-                ));
+                self.prefs = Some(preferences::Dialog::open());
                 Outcome::None
             }
             Msg::Prefs(m) => {
@@ -1488,17 +1485,13 @@ impl Studio {
                 match d.update(m) {
                     preferences::Out::None => Outcome::None,
                     preferences::Out::Changed => Outcome::ApplyPrefs,
-                    preferences::Out::Browse => Outcome::PrefsBrowse,
+                    preferences::Out::OpenGeneral => Outcome::PrefsOpenGeneral,
                     preferences::Out::Close => {
                         self.prefs = None;
                         Outcome::None
                     }
                 }
             }
-            Msg::Browsed(dir) => match self.prefs.as_mut().map(|d| d.set_folder(dir)) {
-                Some(preferences::Out::Changed) => Outcome::ApplyPrefs,
-                _ => Outcome::None,
-            },
             Msg::OverSidebar(on) => {
                 self.over_sidebar = on;
                 Outcome::None

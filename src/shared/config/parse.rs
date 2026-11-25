@@ -497,6 +497,20 @@ impl Config {
                 }
             }
         }
+        // Schema 15 (F11): one Picture size (Save followed `save_original`; it
+        // now follows `max_edge` like Copy: an Original Save makes both Original)
+        // and one Save folder (General's; Studio's own moves there if General's
+        // is empty).
+        if file_version < Some(15) {
+            if c.snip.save_original {
+                c.snip.max_edge = 0;
+            }
+            c.snip.save_original = false;
+            let studio = std::mem::take(&mut c.studio.folder);
+            if c.general.save_folder.is_empty() {
+                c.general.save_folder = studio;
+            }
+        }
         // Schema 4: translate is on-device unless the user chose AI for it.
         // Before, "ai" was the default and only ever ran with an API provider
         // (the browser one fell back to on-device); kept that way, picking a

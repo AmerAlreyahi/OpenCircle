@@ -1,5 +1,5 @@
 //! Save: the crop as a PNG (or JPEG, `snip.format`) in Settings -> General's save
-//! folder (else Pictures/OpenCircle), named OpenCircle-date-time. Scaled to `snip.max_edge` unless `snip.save_original`.
+//! folder (else Pictures/OpenCircle), named OpenCircle-date-time. Scaled to `snip.max_edge` (the one Picture size; `snip.save_original` is read only to migrate old files).
 use std::path::{Path, PathBuf};
 
 use super::{Action, Key};
@@ -81,7 +81,7 @@ pub fn short_path(folder: &Path) -> String {
 
 /// What Save writes: the crop at the export size (or original), and its format.
 fn export(crop: Crop, snip: &SnipConfig) -> (Crop, Format) {
-    let max = if snip.save_original { 0 } else { snip.max_edge };
+    let max = snip.max_edge; // F11: one Picture size; `save_original` is read only to migrate it
     (
         crate::shared::picture::fit_long_edge(crop, max),
         snip.format,
@@ -261,7 +261,7 @@ mod tests {
         snip.max_edge = 1568;
         let (c, f) = super::export(crop(), &snip);
         assert_eq!((c.width, c.height, f), (1568, 523, Format::Png));
-        snip.save_original = true;
+        snip.max_edge = 0; // F11: the one Picture size (Original) is Save's too
         snip.format = Format::Jpeg;
         let (c, f) = super::export(crop(), &snip);
         assert_eq!((c.width, c.height, f), (3000, 1000, Format::Jpeg));

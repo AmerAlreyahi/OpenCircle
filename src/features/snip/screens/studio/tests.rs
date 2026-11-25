@@ -2642,7 +2642,7 @@ fn v31_edit_text_replaces_the_options_bar() {
 }
 
 /// W91 wiring: File > Preferences (Ctrl+,) opens the dialog over the Studio; a change in
-/// it asks the host to write the config; Esc closes it; Out::Browse asks for a folder.
+/// it asks the host to write the config; Esc closes it; its Save folder button opens General.
 #[test]
 fn v31_the_preferences_dialog_opens_over_the_studio_and_closes_on_esc() {
     let mut s = studio_on(640, 400);
@@ -2665,11 +2665,11 @@ fn v31_the_preferences_dialog_opens_over_the_studio_and_closes_on_esc() {
         s.update(Msg::Prefs(preferences::Msg::Prefs(Box::new(p)))),
         Outcome::ApplyPrefs
     ));
+    // F11: the Save folder's button opens Settings > General
     assert!(matches!(
-        s.update(Msg::Prefs(preferences::Msg::BrowseFolder)),
-        Outcome::PrefsBrowse
+        s.update(Msg::Prefs(preferences::Msg::OpenGeneral)),
+        Outcome::PrefsOpenGeneral
     ));
-    assert!(matches!(s.update(Msg::Browsed(None)), Outcome::None));
     let _ = s.update(Msg::Cancel);
     assert!(s.prefs.is_none());
     assert!(!s.editor.as_ref().unwrap().keys_blocked);
@@ -3080,7 +3080,7 @@ fn w90b_studio_settings_are_a_familiar_settings_window() {
 #[test]
 fn w90b_studio_shortcuts_can_be_recorded_refused_and_reset() {
     use super::keys::{Cmd, Taken};
-    let mut d = preferences::Dialog::open(None);
+    let mut d = preferences::Dialog::open();
     // record Open as Ctrl+Shift+O
     assert!(matches!(
         d.update(preferences::Msg::Record(Cmd::Open)),
@@ -3365,7 +3365,7 @@ fn w90c_resetting_every_shortcut_leaves_the_file() {
     with_config(
         |c| *c = file.clone(),
         || {
-            let mut d = preferences::Dialog::open(None);
+            let mut d = preferences::Dialog::open();
             let _ = d.update(preferences::Msg::ResetKey(Cmd::Open));
             let mut c = file.clone();
             d.apply(&mut c);

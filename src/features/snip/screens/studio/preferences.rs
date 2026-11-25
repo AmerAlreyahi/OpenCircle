@@ -6,8 +6,7 @@
 //! The host (the Studio window) owns a `Dialog` while it is open:
 //! `Dialog::open(default_folder)`, show `view(window)` mapped to its own message, feed every `Msg` to
 //! `update`, and act on the `Out` (`Changed`: persist with
-//! `config::update(|c| dialog.apply(c))`; `Browse`: pick a folder, answer with
-//! `set_folder`; `Close`: drop it). `theme_of` gives the Studio window's theme.
+//! `config::update(|c| dialog.apply(c))`; `OpenGeneral`: open Settings > General; `Close`: drop it). `theme_of` gives the Studio window's theme.
 use iced::widget::{column, container};
 use iced::{Element, Fill, Length, Size, widget::tooltip::Position};
 
@@ -104,8 +103,8 @@ pub enum Msg {
     Prefs(Box<StudioPrefs>),
     /// Save size (`snip.max_edge`).
     MaxEdge(u32),
-    BrowseFolder,
-    ClearFolder,
+    /// Save folder's button: Settings opens on General (the one home of the folder).
+    OpenGeneral,
     ResetToolStyles,
     /// Interface size (percent, one of `CHAT_ZOOM`): the Studio sets it (C3).
     UiZoom(u16),
@@ -124,8 +123,8 @@ pub enum Out {
     None,
     /// Something changed: persist with `Dialog::apply` and re-read the config.
     Changed,
-    /// Show the folder picker; answer `Dialog::set_folder`.
-    Browse,
+    /// Open Settings > General (the Save folder).
+    OpenGeneral,
     Close,
 }
 
@@ -152,7 +151,6 @@ pub struct Dialog {
     /// What this dialog last read or wrote: `apply` lays only what differs from it
     /// on the file, so a setting changed elsewhere meanwhile survives.
     opened: (StudioPrefs, u32),
-    default_folder: Option<String>,
     themes: Vec<Choice>,
     /// The Studio's interface size now, percent (the Studio keeps it: `Msg::UiZoom`).
     pub ui_zoom: u16,
@@ -162,12 +160,9 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// Opens on General with the running config; `default_folder`: where Save starts when
-    /// no folder is set (`circle::actions::save::default_folder`, which the host knows).
-    pub fn open(default_folder: Option<std::path::PathBuf>) -> Self {
-        let mut d = Self::from(&config::current());
-        d.default_folder = default_folder.map(|p| p.to_string_lossy().into_owned());
-        d
+    /// Opens on General with the running config.
+    pub fn open() -> Self {
+        Self::from(&config::current())
     }
 
     fn from(c: &Config) -> Self {
@@ -188,7 +183,6 @@ impl Dialog {
             tool_styles_set: c.editor != default_styles(&c.editor),
             reset_styles: false,
             opened: (c.studio.clone(), c.snip.max_edge),
-            default_folder: None,
             themes,
             ui_zoom: c.snip.studio.ui_zoom,
             recording: None,
@@ -228,11 +222,7 @@ impl Dialog {
                 self.ui_zoom = z; // (the Studio acts on it before this)
                 Out::None
             }
-            Msg::BrowseFolder => Out::Browse,
-            Msg::ClearFolder => {
-                self.prefs.folder.clear();
-                Out::Changed
-            }
+            Msg::OpenGeneral => Out::OpenGeneral,
             Msg::ResetToolStyles => {
                 (self.reset_styles, self.tool_styles_set) = (true, false);
                 Out::Changed
@@ -291,17 +281,6 @@ impl Dialog {
     /// Esc while a key is awaited: stop waiting (the dialog stays).
     pub fn stop_recording(&mut self) {
         self.recording = None;
-    }
-
-    /// The folder picker's answer (`None`: cancelled).
-    pub fn set_folder(&mut self, dir: Option<std::path::PathBuf>) -> Out {
-        match dir {
-            Some(dir) => {
-                self.prefs.folder = dir.to_string_lossy().into_owned();
-                Out::Changed
-            }
-            None => Out::None,
-        }
     }
 
     /// Lays the dialog's changes on `c` (what `Out::Changed` asks for): only the keys
@@ -559,7 +538,6 @@ impl Dialog {
                     (
                         t!(pf_grp_where),
                         vec![
-                            row(t!(ss_folder), t!(ss_folder_d), self.folder()),
                             row(t!(ss_name), t!(ss_name_d), name.spacing(space::GAP).into()),
                             switch(t!(ss_ask_where), t!(ss_ask_where_d), p.ask_where, |s, v| {
                                 s.ask_where = v
@@ -595,6 +573,15 @@ impl Dialog {
                                     self.max_edge,
                                     1.0,
                                     Msg::MaxEdge,
+                                ),
+                            ),
+                            row(
+                                t!(ss_folder),
+                                t!(ss_folder_d),
+                                setting_row::action(
+                                    t!(ss_folder_open),
+                                    Kind::Elevated,
+                                    Some(Msg::OpenGeneral),
                                 ),
                             ),
                         ],
@@ -780,31 +767,6 @@ impl Dialog {
             ("", vec![reset_all]),
         ]
     }
-
-    /// The default folder: the field (Browse… too), Browse… and Reset.
-    fn folder(&self) -> Element<'_, Msg> {
-        let folder = self.prefs.folder.as_str();
-        let shown = match folder.is_empty() {
-            true => (self.default_folder.clone()).unwrap_or_else(|| t!(g_folder_system).into()),
-            false => folder.to_string(),
-        };
-        let value =
-            container(field(&shown, None::<fn(String) -> Msg>, Msg::BrowseFolder)).width(Fill);
-        let browse = button::button(label(t!(c_browse)), Kind::Elevated, Some(Msg::BrowseFolder));
-        let reset = button::button(
-            label(t!(c_reset)),
-            Kind::Elevated,
-            (!folder.is_empty()).then_some(Msg::ClearFolder),
-        );
-        setting_row::field_with(
-            tip(value, t!(g_folder), Position::Top),
-            [
-                tip(browse, t!(g_folder_tip_browse), Position::Bottom),
-                tip(reset, t!(g_folder_tip_reset), Position::Bottom),
-            ],
-        )
-        .into()
-    }
 }
 
 /// `c`'s editor options back at the defaults (Line assist is a setting, not a tool style).
@@ -851,7 +813,7 @@ mod tests {
         assert_eq!(c.snip.studio, Config::default().snip.studio);
     }
 
-    /// W91.1: the six tabs, the folder picker's round trip, Close.
+    /// W91.1: the six tabs, the Save folder's button (F11: it opens General), Close.
     #[test]
     fn tabs_folder_and_close() {
         let mut d = dialog();
@@ -860,17 +822,7 @@ mod tests {
             assert_eq!(d.update(Msg::Tab(tab)), Out::None);
             assert_eq!(d.tab(), tab);
         }
-        assert_eq!(d.update(Msg::BrowseFolder), Out::Browse);
-        let dir = std::env::temp_dir();
-        assert_eq!(d.set_folder(Some(dir.clone())), Out::Changed);
-        assert_eq!(d.prefs().folder, dir.to_string_lossy());
-        assert_eq!(
-            d.set_folder(None),
-            Out::None,
-            "a cancelled picker changes nothing"
-        );
-        assert_eq!(d.update(Msg::ClearFolder), Out::Changed);
-        assert_eq!(d.prefs().folder, "");
+        assert_eq!(d.update(Msg::OpenGeneral), Out::OpenGeneral);
         assert_eq!(d.update(Msg::Close), Out::Close);
     }
 

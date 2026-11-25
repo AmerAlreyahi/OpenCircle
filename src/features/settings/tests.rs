@@ -1548,7 +1548,7 @@ fn snip_section_edits_the_snip_choices() {
     let texts = shot::texts(view(&s));
     for label in [
         "Copy when picked",
-        "Image size",
+        "Picture size",
         "Save as",
         "Recent captures",
     ] {
@@ -4292,6 +4292,30 @@ fn the_studio_page_matches_its_golden_images() {
 }
 
 /// Settings > Studio is one button that asks the app to open the Studio's preferences.
+/// F11-1: Snip has ONE Picture size row and no Save size; F11-2: its Save folder
+/// is a button to General, whose folder row stays the one home.
+#[test]
+fn f11_snip_has_one_picture_size_row_and_links_to_general_for_the_folder() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Snip));
+    let words = shot::texts(view(&s));
+    let count = |w: &str| words.iter().filter(|t| *t == w).count();
+    assert_eq!(count("Picture size"), 1, "{words:?}");
+    assert_eq!(count("Save size"), 0, "{words:?}");
+    assert_eq!(count("Image size"), 0, "{words:?}");
+    assert_eq!(count("Save folder"), 1, "{words:?}");
+    assert_eq!(
+        count("Browse…"),
+        0,
+        "the picker is General's only: {words:?}"
+    );
+    let open = (words.iter()).any(|t| t == "Open General");
+    assert!(open, "{words:?}");
+    update(&mut s, Message::Section(Section::General));
+    let words = shot::texts(view(&s));
+    assert!(words.iter().any(|t| t == "Save folder"), "{words:?}");
+}
+
 /// F6-4: General's "Show welcome again" asks the shell to open the tour.
 #[test]
 fn f6_general_has_show_welcome_again() {

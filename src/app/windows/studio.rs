@@ -436,13 +436,12 @@ impl Windows {
                 }
                 Task::none()
             }
-            Outcome::PrefsBrowse => crate::app::background::background(|tx| {
-                let picked = rfd::FileDialog::new()
-                    .set_title(crate::t!(dlg_folder))
-                    .pick_folder();
-                let _ = tx.unbounded_send(picked);
-            })
-            .map(|dir| Msg::Studio(studio::Msg::Browsed(dir))),
+            Outcome::PrefsOpenGeneral => Task::batch([
+                self.open(Kind::Settings),
+                Task::done(Msg::Settings(crate::features::settings::Message::Section(
+                    crate::features::settings::Section::General,
+                ))),
+            ]),
             Outcome::AddStepDoc(doc) => {
                 // (the strip opens on the first screen when there is none yet)
                 match crate::shared::platform::monitor::places()
@@ -518,19 +517,19 @@ impl Windows {
 /// to save"). Blocking; `None`: the dialog was cancelled. Ok / Err = the pill.
 fn save_file(crop: Crop) -> Option<Result<String, String>> {
     let config = crate::shared::config::current();
-    save_to(
-        crop,
-        &config.studio,
-        config.snip.max_edge,
-        |folder, name, how| {
-            rfd::FileDialog::new()
-                .set_title(crate::t!(st_export_where))
-                .set_directory(folder)
-                .set_file_name(name)
-                .add_filter(how.format.name(), &[how.format.ext()])
-                .save_file()
-        },
-    )
+    // F11: the one Save folder is General's
+    let prefs = crate::shared::config::StudioPrefs {
+        folder: config.general.save_folder.clone(),
+        ..config.studio.clone()
+    };
+    save_to(crop, &prefs, config.snip.max_edge, |folder, name, how| {
+        rfd::FileDialog::new()
+            .set_title(crate::t!(st_export_where))
+            .set_directory(folder)
+            .set_file_name(name)
+            .add_filter(how.format.name(), &[how.format.ext()])
+            .save_file()
+    })
 }
 
 /// The Studio's Save: the folder, the name pattern (`{date}` `{time}`), the format
@@ -694,13 +693,9 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
             studio_stem(&crate::shared::config::current().studio.file_name)
         ))
         .add_filter(how.format.name(), &[ext]);
-    // Studio preferences' folder, else the general Save folder
-    let config = crate::shared::config::current();
-    let configured = match config.studio.folder.is_empty() {
-        true => &config.general.save_folder,
-        false => &config.studio.folder,
-    };
-    if let Some(folder) = save::start_folder(configured) {
+    // F11: the one Save folder (General)
+    if let Some(folder) = save::start_folder(&crate::shared::config::current().general.save_folder)
+    {
         dialog = dialog.set_directory(folder);
     }
     let path = export::with_ext(dialog.save_file()?, how.format);

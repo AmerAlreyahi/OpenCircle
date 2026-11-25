@@ -467,7 +467,7 @@ strings! {
         | "النسخ عند التحديد";
     s_copy_desc: "The picked area is also copied, ready to paste into an AI chat"
         | "تُنسخ المنطقة المحددة أيضًا، جاهزة للصق في محادثة ذكاء اصطناعي";
-    s_size: "Image size"
+    s_size: "Picture size"
         | "حجم الصورة";
     s_size_desc: "Long edge for Copy and Save; AI chats shrink bigger ones anyway"
         | "الضلع الأطول عند النسخ والحفظ؛ محادثات الذكاء الاصطناعي تصغّر الأكبر منه على أي حال";
@@ -481,10 +481,6 @@ strings! {
         | "PNG";
     s_jpeg: "JPEG"
         | "JPEG";
-    s_save_size: "Save size"
-        | "حجم الحفظ";
-    s_save_size_desc: "Copy always uses the image size"
-        | "يستخدم النسخ دائمًا «حجم الصورة»";
     s_pointer: "Mouse pointer"
         | "مؤشر الماوس";
     s_pointer_desc: "Draw the pointer into the capture"
@@ -2491,10 +2487,12 @@ strings! {
         | "الملفات الأخيرة المعروضة";
     ss_recent_d: "0 hides the list"
         | "القيمة 0 تخفي القائمة";
-    ss_folder: "Default folder"
-        | "المجلد الافتراضي";
-    ss_folder_d: "Where Save starts. Empty uses Pictures/OpenCircle"
-        | "يبدأ الحفظ من هنا. وإن كان فارغا فمجلد الصور/OpenCircle";
+    ss_folder: "Save folder"
+        | "مجلد الحفظ";
+    ss_folder_d: "Set once in General"
+        | "يُضبط مرة واحدة في عام";
+    ss_folder_open: "Open General"
+        | "فتح عام";
     ss_name: "File name"
         | "اسم الملف";
     ss_name_d: "{date} and {time} are filled in when you save"
@@ -2507,10 +2505,10 @@ strings! {
         | "الجودة";
     ss_quality_d: "For JPEG; higher is larger"
         | "لصيغة JPEG؛ الأعلى أكبر حجما";
-    ss_size: "Size"
-        | "الحجم";
-    ss_size_d: "The long edge of a saved or copied picture; Original keeps it whole"
-        | "الضلع الأطول للصورة المحفوظة أو المنسوخة؛ الأصلي يبقيها كاملة";
+    ss_size: "Picture size"
+        | "حجم الصورة";
+    ss_size_d: "Same setting as in Snip"
+        | "الإعداد نفسه الموجود في اللقطة";
     ss_ask_where: "Ask where to save every time"
         | "السؤال عن مكان الحفظ كل مرة";
     ss_ask_where_d: "Always show the Save dialog"

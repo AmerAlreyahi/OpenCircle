@@ -9,8 +9,8 @@ use crate::t;
 use iced::Element;
 use iced::widget::column;
 
-use super::super::state::{Message, Slot, State};
-use super::{general, history, shortcuts};
+use super::super::state::{Message, Section, Slot, State};
+use super::{history, shortcuts};
 use crate::shared::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
 use crate::shared::kit::button::Kind;
 use crate::shared::kit::segmented::{boolean, segmented};
@@ -91,18 +91,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 move |format| edit(&|s| s.format = format),
             ),
         ),
+        // F11: the Save folder lives in General only
         pick(
-            t!(s_save_size),
-            t!(s_save_size_desc),
-            segmented(
-                &[(false, t!(s_size)), (true, t!(s_original))],
-                d.save_original,
-                d.save_original,
-                1.0,
-                move |original| edit(&|s| s.save_original = original),
+            t!(ss_folder),
+            t!(ss_folder_d),
+            setting_row::action(
+                t!(ss_folder_open),
+                crate::shared::kit::button::Kind::Elevated,
+                Some(Message::Section(Section::General)),
             ),
         ),
-        general::folder_row(state),
         pick(
             t!(s_pointer),
             t!(s_pointer_desc),
