@@ -284,34 +284,38 @@ impl SnipToolbar {
         }
         if let Some(at) = toolbar {
             let size = toolbar::size_for(&self.annotator);
-            // the options row under it (C4): lined up with the toolbar's start edge, moved over
-            // far enough to fit the screen, scrolling across only past that
+            // the options row (C4, W107): one piece with the toolbar, on its start edge (or its end
+            // edge when the row is too wide to fit from there), never offset
             let rtl = crate::shared::kit::dir::rtl();
-            let wide = toolbar::ROW_WIDE.min(screen.width - 2.0 * GAP);
-            let (x0, x1) = match rtl {
-                false => {
-                    let x0 = at.x.min(screen.width - GAP - wide).max(GAP);
-                    (x0, screen.width - GAP)
-                }
-                true => (
-                    GAP,
-                    (at.x + size.width).max(GAP + wide).min(screen.width - GAP),
-                ),
-            };
+            let (x0, x1, at_end) = toolbar::row_span(
+                at.x,
+                size.width,
+                screen.width,
+                toolbar::row_need(&self.annotator),
+                rtl,
+            );
             let row = toolbar::options_row(&self.annotator, x1 - x0);
             let room = if row.is_some() {
                 toolbar::ROW_ROOM
             } else {
                 0.0
             };
+            // under the toolbar; above it when the screen has no room under it
+            let above = row.is_some() && at.y + size.height + room > screen.height;
             // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height + room <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
                 false => iced::widget::tooltip::Position::Bottom,
             };
+            // its tooltips never fall on the row: on the toolbar's other side
+            let tips = match (row.is_some(), above) {
+                (true, false) => iced::widget::tooltip::Position::Top,
+                (true, true) => iced::widget::tooltip::Position::Bottom,
+                _ => side,
+            };
             // (panels below clear the row)
             let held = Rectangle::new(at, Size::new(size.width, size.height + room));
-            let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side);
+            let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side, tips);
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab.clone())
                 .interaction(mouse::Interaction::Move);
@@ -321,12 +325,15 @@ impl SnipToolbar {
                     .on_press(grab)
                     .interaction(mouse::Interaction::Move);
                 // (only the row takes presses, not the strip around it)
-                let row = match rtl {
+                let row = match at_end {
                     false => container(row),
                     true => container(row).align_right(x1 - x0),
                 }
                 .width(x1 - x0);
-                let y = at.y + size.height + toolbar::ROW_GAP;
+                let y = match above {
+                    false => at.y + size.height + toolbar::ROW_GAP,
+                    true => at.y - toolbar::ROW_GAP - toolbar::ROW_H,
+                };
                 layers = layers.push(pin(row).position(Point::new(x0, y)));
             }
             layers = layers.extend(popover.map(|p| p.map(map)));
@@ -434,6 +441,45 @@ mod tests {
                 }));
             }
         }
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W107-1: the toolbar and its options row as the user sees them (goldens: Shapes, Pen, Hide;
+    /// English and Arabic, both themes), the toolbar centred near the bottom as in the owner's shot.
+    #[test]
+    fn w107_1_toolbar_and_row_goldens() {
+        use crate::shared::kit::testing::golden;
+        use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+        let screen = Size::new(1600.0, 420.0);
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for rtl in [false, true] {
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
+                for (name, tool) in [
+                    ("shapes", annotate::Tool::Rect),
+                    ("pen", annotate::Tool::Pen),
+                    ("hide", annotate::Tool::Blur),
+                ] {
+                    let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
+                    e.annotator.update(annotate::Message::Tool(tool));
+                    let bar = e.bar_size();
+                    let at = Point::new((screen.width - bar.width) / 2.0, 320.0 - bar.height);
+                    let dir = if rtl { "-ar" } else { "" };
+                    let file = format!("snip-dock-{name}{dir}-{}", theme.id);
+                    failed.extend(golden::check("screens", &file, screen, &[1.0], || {
+                        e.view(
+                            screen,
+                            Some(at),
+                            canvas::ScreenMap::ONE,
+                            |m| m,
+                            annotate::Message::Grab,
+                        )
+                    }));
+                }
+            }
+        }
+        themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }
 

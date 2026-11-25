@@ -281,13 +281,14 @@ pub fn view(e: &Annotator) -> Element<'_, Message> {
 /// The toolbar shown at `bar` (screen px) and its open panel as a floating
 /// layer for the host to put over the whole screen at (0, 0): laid out there
 /// at its full size, then moved by `place_popover` (`side`: where the
-/// tooltips and the panel go, away from Snip's area).
+/// panel goes, away from Snip's area; `tips`: where the tooltips go, away from the row too).
 pub fn view_at(
     e: &Annotator,
     bar: Rectangle,
     side: tooltip::Position,
+    tips: tooltip::Position,
 ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-    let (toolbar, panel) = build(e, side);
+    let (toolbar, panel) = build(e, tips);
     let above = side == tooltip::Position::Top;
     let panel = panel.map(|(panel, left)| {
         iced::widget::float(panel)
@@ -588,6 +589,33 @@ pub const ROW_ROOM: f32 = ROW_GAP + ROW_H;
 
 /// The widest an options row is meant to get (Hide's, at 100 %): the room the host keeps for it.
 pub const ROW_WIDE: f32 = 1250.0;
+
+/// About how wide the active tool's row is (the room the host asks for it; the row itself is as wide
+/// as its content, and scrolls only past what the screen gives): Hide's is the widest, Text's next.
+pub fn row_need(e: &Annotator) -> f32 {
+    match crate::features::snip::screens::options_row::base_tool(e) {
+        Tool::Blur => ROW_WIDE,
+        Tool::Text => 860.0,
+        _ => 620.0,
+    }
+}
+
+/// Where the row goes along the screen (W107): `(x0, x1, at_end)`, the strip it may use and whether it
+/// is aligned to that strip's right edge. It lines up with the toolbar's START edge (left, or right in
+/// Arabic) when `need` fits from there; else with the toolbar's END edge, growing the other way; at
+/// the screen's margin at most. Never an arbitrary offset.
+pub fn row_span(at_x: f32, bar_w: f32, screen_w: f32, need: f32, rtl: bool) -> (f32, f32, bool) {
+    use crate::features::circle::screens::bar::geometry::GAP;
+    let (lo, hi) = (GAP, screen_w - GAP);
+    let need = need.min(hi - lo);
+    let end = at_x + bar_w;
+    match rtl {
+        false if at_x + need <= hi => (at_x.max(lo), hi, false),
+        false => (lo, end.clamp(lo + need, hi), true),
+        true if end - need >= lo => (lo, end.min(hi), true),
+        true => (at_x.min(hi - need).max(lo), hi, false),
+    }
+}
 
 /// The active tool's options in a slim row, at most `max_w` wide (it scrolls across past that, as the
 /// Studio's bar does; `None`: it has none, or a long capture is running): the Studio's option parts,
@@ -943,6 +971,43 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W107-1: the row is one piece with the toolbar: on its start edge when it fits from there (left,
+    /// right in Arabic), else on its end edge, never an arbitrary offset, always inside the screen's margin
+    /// and given its room (or the whole strip).
+    #[test]
+    fn w107_1_the_row_lines_up_with_the_toolbar_edge() {
+        use crate::features::circle::screens::bar::geometry::GAP;
+        // the owner's shot: a centred toolbar, a short row: starts at the toolbar's left edge
+        assert_eq!(
+            row_span(400.0, 900.0, 1600.0, 620.0, false),
+            (400.0, 1600.0 - GAP, false)
+        );
+        // Arabic: the row's right edge is the toolbar's right edge
+        assert_eq!(
+            row_span(400.0, 900.0, 1600.0, 620.0, true),
+            (GAP, 1300.0, true)
+        );
+        // too wide to fit from the start edge: lined up with the end edge instead
+        let (x0, x1, end) = row_span(1000.0, 900.0, 1600.0, 1250.0, false);
+        assert!(end && x1 == 1600.0 - GAP && x0 == GAP, "{x0} {x1} {end}");
+        for rtl in [false, true] {
+            for need in [560.0, 620.0, 860.0, ROW_WIDE] {
+                for (at, bar, screen) in [
+                    (8.0, 676.0, 1280.0),
+                    (600.0, 676.0, 1280.0),
+                    (400.0, 900.0, 1600.0),
+                ] {
+                    let (x0, x1, _) = row_span(at, bar, screen, need, rtl);
+                    assert!(x0 >= GAP && x1 <= screen - GAP, "{x0} {x1}");
+                    assert!(
+                        x1 - x0 + 0.5 >= need.min(screen - 2.0 * GAP),
+                        "{rtl} {need} {at}: {x0} {x1}"
+                    );
+                }
+            }
+        }
     }
 
     fn row_texts(e: &Annotator) -> Option<Vec<String>> {

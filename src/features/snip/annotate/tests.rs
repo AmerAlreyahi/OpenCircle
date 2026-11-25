@@ -20,7 +20,12 @@ impl Annotator {
     }
 
     fn toolbar_at(&self, at: Rectangle) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-        toolbar::view_at(self, at, iced::widget::tooltip::Position::Bottom)
+        toolbar::view_at(
+            self,
+            at,
+            iced::widget::tooltip::Position::Bottom,
+            iced::widget::tooltip::Position::Bottom,
+        )
     }
 
     /// The canvas above the toolbar.
