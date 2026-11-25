@@ -24,7 +24,17 @@ Select text from what you can see, even when the original app will not let you c
 | `Shift+click` | Extend the text selection |
 | `Ctrl+C` | Copy selected text |
 | `Ctrl+A` | Select all recognised screen text |
+| Right-click on the selection (or the Menu key / `Shift+F10`) | Copy, Search the web, Ask AI, Translate, Select all text; Open link or Send email when the selection is one |
 | `Esc` | Close the overlay; leave the question field first if focused |
+
+## Right-click menu
+
+Right-click on selected text for the actions you would look for: **Copy**,
+**Search the web**, **Ask AI** (opens the chat with the selected text attached, for
+you to type your question), **Translate** and **Select all text**; a selected web
+address or email also offers **Open link** / **Send email**. It opens only on the
+selection: right-drag to pan and double right-click to reset the zoom work
+everywhere else. Arrow keys and `Enter` work in it, `Esc` closes it.
 
 ## Tips
 

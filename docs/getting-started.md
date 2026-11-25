@@ -34,8 +34,10 @@ the step names the local model your first translation downloads; pick
 Arabic and the rest of the setup, and the app, turn Arabic at once), then shows
 your shortcut, an optional AI provider, a theme (12 to pick from) and whether
 OpenCircle starts with Windows. On Linux under Wayland it also asks the desktop
-for screenshot permission once. Skip any of it; everything can change
-later in **Settings** (tray menu). If a second launch finds it already running,
+for screenshot permission once. A **Try it** step lets you press your own
+shortcuts for Circle to Search, Snip and Translate and ticks each one (the
+shortcuts only tick here; nothing opens). Skip any of it; everything can change
+later in **Settings** (tray menu); `Ctrl+F` there searches every setting. If a second launch finds it already running,
 it opens Settings.
 
 Auto-update is asked about once, on first run, where the switch starts on; you
@@ -174,8 +176,10 @@ ready to paste into an AI chat.
 - More has Copy text, Ask AI and Translate for the area, Long capture (scroll
   the page yourself), Add to steps (several snips as one numbered image), Pin,
   Colour picker and Screen ruler.
-- Blur is a soft pixel mosaic that hides text so it can't be recovered; Redact is
-  a solid box, for when you want no trace at all.
+- Hide (Blur) is a smooth frost made from the area's background, so the text
+  under it can't be recovered (*Pixelate* is a fine mosaic; the look styles are
+  not for secrets); Redact is a solid box, for when you want no trace at all.
+  The active tool's options show in a slim row under the toolbar.
 - Song search and pins are in
   **Settings > Labs**, off by default.
 
