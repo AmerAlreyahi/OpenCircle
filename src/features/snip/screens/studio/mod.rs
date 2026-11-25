@@ -1334,6 +1334,7 @@ impl Studio {
                     annotate::Message::Order(_)
                         | annotate::Message::Merge
                         | annotate::Message::HideShape(_)
+                        | annotate::Message::Eyedropper
                 )
         ) {
             self.popover = None;

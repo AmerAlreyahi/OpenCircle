@@ -4534,4 +4534,55 @@ fn studio_crop_frame_times() {
         }
         println!("{w}x{h}:\n  {}", report.join("\n  "));
     }
+
+/// W108 (owner round 3): the colour row ends with a custom colour ("+") that opens the SAME colour
+/// picker Snip's toolbar has (HEX field, eyedropper, presets): one component; a colour typed there
+/// is the drawing colour, and the row then shows it as picked.
+#[test]
+fn w108_the_colour_row_ends_with_a_custom_colour_that_opens_snips_picker() {
+    use crate::shared::kit::testing::shot;
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = s.update(Msg::Resized(SIZE));
+    let opens = |s: &Studio| {
+        let e = s.editor.as_ref().unwrap();
+        let size = Size::new(s.window.width - 54.0, 48.0);
+        (0..(size.width / 4.0) as usize).any(|i| {
+            let at = Point::new(4.0 * i as f32, 24.0);
+            shot::click(options_bar::view(s, e), size, at)
+                .iter()
+                .any(|m| matches!(m, Msg::Pop(Some(popovers::Pop::Custom))))
+        })
+    };
+    assert!(opens(&s), "the \"+\" is on the bar");
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Custom)));
+    let words = shot::texts(popovers::content(&s, popovers::Pop::Custom));
+    assert!(
+        words.iter().any(|w| w == "Copy style"),
+        "Snip's own panel: {words:?}"
+    );
+    let _ = s.update(Msg::Editor(Message::Hex("#12AB34".into())));
+    let e = s.editor.as_ref().unwrap();
+    assert_eq!(e.colour, [0x12, 0xAB, 0x34, 255], "the typed colour draws");
+    assert!(opens(&s), "the custom swatch still opens the picker");
+    // the eyedropper closes the popover: the next click picks from the picture
+    let _ = s.update(Msg::Editor(Message::Eyedropper));
+    assert_eq!(s.popover, None);
+}
+
+/// Narrow bar: the Colour popover holds the eight and the custom one.
+#[test]
+fn w108_the_narrow_colour_popover_has_the_custom_colour_too() {
+    use crate::shared::kit::testing::shot;
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = s.update(Msg::Resized(super::MIN));
+    let size = Size::new(400.0, 48.0);
+    let got = (0..50).any(|i| {
+        let at = Point::new(8.0 * i as f32, 24.0);
+        shot::click(popovers::content(&s, popovers::Pop::Colours), size, at)
+            .iter()
+            .any(|m| matches!(m, Msg::Pop(Some(popovers::Pop::Custom))))
+    });
+    assert!(got);
 }

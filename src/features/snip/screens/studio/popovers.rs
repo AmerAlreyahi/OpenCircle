@@ -25,6 +25,8 @@ pub enum Pop {
     More,
     /// The narrow bar's colour swatches.
     Colours,
+    /// The custom colour: Snip's colour picker (HEX, eyedropper, presets), one component.
+    Custom,
 }
 
 /// Edit text's glyph (lucide "pencil", in the subset font).
@@ -250,18 +252,33 @@ pub fn content<'a>(s: &'a Studio, pop: Pop) -> Element<'a, Msg> {
         Pop::Position => position(s),
         Pop::Info => picture_info(s),
         Pop::Colours => match &s.editor {
-            Some(e) => super::options_bar::colour_group(
-                e,
-                crate::features::snip::screens::options_row::SWATCHES,
-            ),
+            Some(e) => {
+                let n = crate::features::snip::screens::options_row::SWATCHES;
+                let swatches = super::options_bar::colour_group(e, n);
+                let custom = super::options_bar::custom_colour(s, e, true);
+                crate::shared::kit::dir::row([swatches, custom])
+                    .spacing(crate::shared::kit::option_bar::GROUP_GAP)
+                    .into()
+            }
             None => Space::new().into(),
         },
         Pop::More => match &s.editor {
             Some(e) => super::options_bar::tool_group(e),
             None => Space::new().into(),
         },
+        Pop::Custom => match &s.editor {
+            Some(e) => Element::from(
+                crate::features::snip::screens::snip_toolbar::toolbar::colour_panel(e),
+            )
+            .map(Msg::Editor),
+            None => Space::new().into(),
+        },
     };
-    container(body).width(WIDTH).into()
+    let width = match pop {
+        Pop::Custom => crate::shared::kit::colour::PICKER_W,
+        _ => WIDTH,
+    };
+    container(body).width(width).into()
 }
 
 /// Where each popover's opener was last drawn (the popover hangs from it).
@@ -271,6 +288,7 @@ pub struct Anchors {
     position: crate::shared::kit::popover::Anchor,
     more: crate::shared::kit::popover::Anchor,
     colours: crate::shared::kit::popover::Anchor,
+    custom: crate::shared::kit::popover::Anchor,
     info: crate::shared::kit::popover::Anchor,
 }
 
@@ -281,6 +299,7 @@ impl Anchors {
             Pop::Position => &self.position,
             Pop::More => &self.more,
             Pop::Colours => &self.colours,
+            Pop::Custom => &self.custom,
             Pop::Info => &self.info,
         }
     }
@@ -295,7 +314,11 @@ impl Pop {
             Pop::Actions => (iced::Size::new(WIDTH + pad, 5.0 * 32.0 + pad), true),
             Pop::Position => (iced::Size::new(WIDTH + pad, 270.0), true),
             Pop::More => (iced::Size::new(WIDTH + pad, 160.0), true),
-            Pop::Colours => (iced::Size::new(8.0 * 30.0 + pad, 32.0 + pad), false),
+            Pop::Colours => (iced::Size::new(8.0 * 30.0 + 40.0 + pad, 32.0 + pad), false),
+            Pop::Custom => (
+                iced::Size::new(crate::shared::kit::colour::PICKER_W + pad, 400.0),
+                false,
+            ),
             Pop::Info => (iced::Size::new(WIDTH + pad, 70.0), false),
         }
     }

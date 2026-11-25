@@ -22,9 +22,26 @@ use crate::t;
 
 use crate::features::snip::screens::options_row::*;
 
-/// The colour swatches alone (the Colour popover's content; the tests click them).
+/// The colour swatches alone (the tests click them).
 pub(super) fn colour_group(e: &Annotator, n: usize) -> Element<'_, Msg> {
     Element::from(colours(e, n, true)).map(Msg::Editor)
+}
+
+/// lucide "plus": the custom colour's mark while the colour is one of the eight.
+const PLUS: char = '\u{e140}';
+
+/// The end of the colour row: "+" (or the colour itself when it is none of the eight, ringed)
+/// opens Snip's colour picker, the same component (HEX, eyedropper, presets).
+pub(super) fn custom_colour<'a>(s: &Studio, e: &Annotator, live: bool) -> Element<'a, Msg> {
+    let on = s.popover == Some(Pop::Custom);
+    let press = live.then_some(Msg::Pop(Some(Pop::Custom)));
+    let now = shown(e).colour;
+    let preset = |rgba: [u8; 4]| style::ANNOTATION.iter().any(|c| c.into_rgba8() == rgba);
+    let cell = match now.filter(|c| !preset(*c)) {
+        Some(rgba) => swatch_of(Some(rgba), true, press),
+        None => glyph_cell(PLUS, on, press),
+    };
+    popover::track(group(vec![cell], false), s.anchors.of(Pop::Custom))
 }
 
 /// The tool's own groups as one element (the More popover's content).
@@ -53,7 +70,7 @@ struct Plan {
 const W_FIXED: f32 = 177.0 + 219.0 + 101.0 + 98.0 + 97.0; // Size, Opacity, Outline/Fill, Position, Actions
 const W_NAME: f32 = 105.0;
 const W_ICON: f32 = 34.0;
-const W_COLOURS: f32 = 240.0;
+const W_COLOURS: f32 = 240.0 + 40.0; // the eight and the custom one
 const W_COLOUR_BUTTON: f32 = 48.0;
 const W_OWN: f32 = 290.0;
 const W_MORE: f32 = 90.0;
@@ -193,7 +210,13 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     };
     items.push(why(
         match plan.colours_inline {
-            true => ed(colours(e, SWATCHES, c.colour)),
+            true => dir::row([
+                ed(colours(e, SWATCHES, c.colour)),
+                custom_colour(s, e, c.colour),
+            ])
+            .spacing(GROUP_GAP)
+            .align_y(Center)
+            .into(),
             false => colour_button(s, e, c.colour),
         },
         c.colour,
@@ -231,6 +254,7 @@ pub fn empty<'a>(s: &'a Studio) -> Element<'a, Msg> {
         .collect();
     let items = vec![
         ed(group(swatches, false)),
+        ed(group(vec![glyph_cell(PLUS, false, None)], false)),
         ed(dots(None, "5 px".into(), false, true, |i| {
             Message::Width(Width::ALL[i])
         })),

@@ -771,7 +771,7 @@ pub fn place_popover(at: Rectangle, bar_height: f32, screen: Rectangle) -> Vecto
 
 /// The kit's colour picker with the eyedropper, the presets (keys 1-9) and
 /// copy / paste style under its hex field.
-fn colour_panel(e: &Annotator) -> Element<'_, Message> {
+pub(crate) fn colour_panel(e: &Annotator) -> Element<'_, Message> {
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
         t!(sn_pick_image),
