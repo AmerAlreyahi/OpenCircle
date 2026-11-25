@@ -1,7 +1,7 @@
 //! What translate in place shows over the frame (the design's "Translate
 //! screen" states), from kit parts only: the language pill (source → target,
 //! the status), and the result card for its prompts, errors and the word card.
-use iced::widget::{column, container, mouse_area, opaque, pin, row, stack};
+use iced::widget::{column, container, mouse_area, opaque, pin, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::glossary::{AddForm, AddMsg};
@@ -33,8 +33,8 @@ const TAG_PAD: [f32; 2] = [3.0, 10.0];
 const TAG_SPACING: f32 = 8.0;
 /// Between a card's blocks.
 const STACK: f32 = 10.0;
-/// The note under the pill (`surface::hint`'s padding).
-const NOTE_PAD: [f32; 2] = [8.0, 14.0];
+/// The error card's width under the pill.
+const ERROR_W: f32 = 400.0;
 
 /// A problem's first sentence: the rest is how-to the "Set up AI" action covers.
 fn gist(message: &str) -> &str {
@@ -91,16 +91,30 @@ impl Session {
             // Already in the target, no offline model, an AI error: one soft line
             // under the pill, never a card, and the pill stays put (owner,
             // 2026-11-04). The picker stays: another pair may work offline.
+            // F12: the one error card (what happened, what to do, one fix button,
+            // the full message folded)
             Phase::Failed(problem) => {
-                let mut line = row![note(gist(&problem.message))]
-                    .spacing(TAG_SPACING)
-                    .align_y(Center);
-                if problem.setup {
-                    let set_up = button_label(t!(tp_set_up_ai));
-                    line = line.push(button(set_up, Kind::Quiet, Some(Msg::OpenSettings)));
-                }
-                let below = surface(Material::Widget, radius::FULL, line).padding(NOTE_PAD);
-                self.pill(whole, None, None, Some(below.into()))
+                use crate::shared::kit::error_card::{ErrorCard, error_card};
+                let hint = gist(&problem.message);
+                let more = (hint.len() < problem.message.trim_end_matches('.').len())
+                    .then(|| problem.message.clone());
+                let card = error_card(ErrorCard {
+                    headline: t!(tp_failed).into(),
+                    hint: hint.to_string(),
+                    detail: more.unwrap_or_default(),
+                    width: ERROR_W,
+                    open: self.details,
+                    on_details: Msg::ErrorDetails,
+                    fix: problem.setup.then(|| (t!(tp_set_up_ai), Msg::OpenSettings)),
+                    retry: None,
+                    words: crate::shared::theme::error_words(),
+                });
+                self.pill(
+                    whole,
+                    None,
+                    None,
+                    Some(container(card).width(ERROR_W).into()),
+                )
             }
             // lines kept in their own language: a quiet offer in the pill
             Phase::Shown(shown) if self.card.is_none() && shown.offer.is_some() => {

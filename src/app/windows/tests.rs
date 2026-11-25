@@ -876,3 +876,66 @@ mod studio_window {
         assert!(!w.studio.as_ref().unwrap().1.probe().1);
     }
 }
+
+/// F12-2: a failure card window: folded at first, Show details opens it (one
+/// window replaces the other), the fix closes it and runs its trigger, Esc closes it.
+#[test]
+fn f12_the_failure_card_folds_its_details_and_its_fix_runs_then_closes_it() {
+    use super::failure::Failure;
+    let failure = Failure {
+        headline: "A step could not be added".into(),
+        hint: "Capture it again; your other steps are safe.".into(),
+        detail: "no pixels".into(),
+        fix: Some(("Capture again", crate::Trigger::Quit)),
+    };
+    let mut windows = Windows::default();
+    let _ = windows.failure(failure.clone());
+    let (_, open) = windows.failure_open().unwrap();
+    assert!(!open, "folded at first");
+    assert!(
+        failure.size(true).height > failure.size(false).height,
+        "the open card is taller"
+    );
+    let _ = windows.update(Msg::FailureDetails);
+    assert!(windows.failure_open().unwrap().1, "details open");
+    let _ = windows.update(Msg::FailureDetails);
+    assert!(!windows.failure_open().unwrap().1, "and folded again");
+    // the fix: the card goes
+    let _ = windows.update(Msg::FailureFix);
+    assert!(windows.failure_open().is_none());
+    // a new failure replaces an open one; Esc closes it
+    let _ = windows.failure(failure.clone());
+    let _ = windows.failure(failure);
+    let _ = windows.update(Msg::FailureEsc);
+    assert!(windows.failure_open().is_none());
+}
+
+/// F12-3: a step that could not be made stays as a red placeholder in the
+/// strip (its window grows by one place) and says so on the one error card;
+/// the next step added, or a click on the placeholder, takes it away.
+#[test]
+fn f12_a_failed_step_stays_as_a_placeholder_with_the_error_card() {
+    use crate::features::snip::screens::steps::Msg as S;
+    let (mut windows, _, _) = floating_windows();
+    let step = crate::features::snip::screens::steps::Step::new(&picture(200, 100)).unwrap();
+    assert!(
+        windows
+            .steps
+            .as_mut()
+            .unwrap()
+            .1
+            .push(std::sync::Arc::new(step))
+    );
+    let before = windows.steps.as_ref().unwrap().1.size();
+    let _ = windows.update(Msg::Steps(S::Failed("no pixels".into())));
+    let strip = &windows.steps.as_ref().unwrap().1;
+    assert!(strip.failed, "the placeholder stays");
+    assert!(strip.size().height > before.height, "one more place");
+    let (card, open) = windows.failure_open().expect("the error card");
+    assert_eq!(card.headline, "A step could not be added");
+    assert_eq!(card.detail, "no pixels");
+    assert!(!open);
+    // a click on the placeholder takes it away
+    let _ = windows.update(Msg::Steps(S::FailedSeen));
+    assert!(!windows.steps.as_ref().unwrap().1.failed);
+}

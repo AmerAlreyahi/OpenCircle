@@ -6448,3 +6448,19 @@ fn w98_201_11_a_link_in_the_selection_adds_its_row() {
         "{texts:?}"
     );
 }
+
+/// F12-4: a capture that failed for a reason that is not the desktop's permission
+/// (which has its own window) is no longer silent: the one error card says so,
+/// with the system's own text folded under Show details and a Try again.
+#[test]
+fn f12_a_failed_capture_shows_the_error_card() {
+    let mut app = App::idle(window::Id::unique());
+    let _ = app.open(
+        Instant::now(),
+        Err(CaptureError::from("no frame came".to_string())),
+    );
+    let (card, open) = app.windows.failure_open().expect("the error card");
+    assert_eq!(card.headline, "OpenCircle could not capture the screen");
+    assert!(card.detail.contains("no frame came"), "{}", card.detail);
+    assert!(card.fix.is_some() && !open);
+}

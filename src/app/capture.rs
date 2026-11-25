@@ -243,7 +243,9 @@ impl App {
                 crate::log!("capture failed: {e}");
                 self.next = Purpose::Search;
                 if !e.is_refused() {
-                    return Task::none();
+                    // F12: the one error card says so (a silent failure looked like nothing happened)
+                    let card = crate::app::windows::capture_failed(e.to_string());
+                    return self.windows.failure(card).map(Message::Windows);
                 }
                 // Wayland: the desktop asks for permission only while we are in front.
                 return self

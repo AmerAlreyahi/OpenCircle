@@ -429,6 +429,7 @@ fn error_card_sheet() {
             };
             error_card(ErrorCard {
                 headline: headline.into(),
+                hint: String::new(),
                 detail: detail.into(),
                 width: 388.0,
                 open,

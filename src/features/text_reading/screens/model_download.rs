@@ -278,6 +278,24 @@ pub fn card<'a, M: Clone + 'a>(
     stage: Stage<'_>,
     on: On<M>,
 ) -> Element<'a, M> {
+    // F12: a failed download is the one error card (what happened, what to do,
+    // one fix button)
+    if let Stage::Failed(why) = stage {
+        use crate::shared::kit::error_card::{ErrorCard, error_card};
+        let again = on.download;
+        let card = error_card(ErrorCard {
+            headline: t!(md_failed).into(),
+            hint: why.to_string(),
+            detail: String::new(),
+            width: WIDTH,
+            open: false,
+            on_details: again.clone(),
+            fix: Some((t!(md_try_again), again)),
+            retry: None,
+            words: crate::shared::theme::error_words(),
+        });
+        return container(card).width(WIDTH).into();
+    }
     let header = row![
         container(crate::shared::kit::text::muted(Role::META, t!(md_header)))
             .width(Fill)

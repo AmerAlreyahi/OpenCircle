@@ -141,6 +141,10 @@ pub enum Msg {
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
+    /// The failure card's Show / Hide details, its fix, and Esc on it.
+    FailureDetails,
+    FailureFix,
+    FailureEsc,
     /// A toast's action word was pressed (`Windows::toast_with`; the App decides).
     ToastAction,
     /// A walkthrough's encoder: a frame done, or its end.
@@ -155,6 +159,8 @@ pub struct Windows {
     pins: Vec<Pin>,
     /// Small message windows (a pill each) and their text.
     toasts: Vec<(window::Id, String, Tone, Option<&'static str>)>,
+    /// The failure card window (`failure`), and whether its details are open.
+    failure: Option<(window::Id, failure::Failure, bool)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// The update pill above the tray, at most one, and when it opened (the
@@ -544,7 +550,7 @@ impl Windows {
             Ok(step) => Msg::Steps(steps::Msg::Ready(step, update)),
             Err(e) => {
                 crate::log!("[opencircle] step not added: {e}");
-                Msg::Steps(steps::Msg::Failed)
+                Msg::Steps(steps::Msg::Failed(e))
             }
         })
     }
@@ -555,7 +561,16 @@ impl Windows {
         };
         let window = *id;
         let todo = match msg {
-            steps::Msg::Failed => return Task::none(),
+            // F12: the step's place stays, red, and the one error card says what to do
+            steps::Msg::Failed(why) => {
+                strip.failed = true;
+                let place = strip.place();
+                let resize = match window {
+                    Some(id) => self.place_steps(id, place),
+                    None => Task::none(),
+                };
+                return Task::batch([resize, self.failure(failure::step_failed(why))]);
+            }
             steps::Msg::Ready(step, update) => {
                 match update {
                     Some(i) => strip.replace(i, step),
@@ -563,6 +578,7 @@ impl Windows {
                     None => crate::log!("[opencircle] steps full: not added"),
                 }
                 strip.cleared = false;
+                strip.failed = false;
                 crate::log!(
                     "[opencircle] steps: {} ({} KB in memory)",
                     strip.len(),
@@ -1463,7 +1479,7 @@ impl Windows {
             Msg::Steps(msg) => {
                 // a step made for the Studio's sidebar arrived (or failed): its place goes
                 if let (true, Some((_, s))) = (
-                    matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed),
+                    matches!(msg, steps::Msg::Ready(_, None) | steps::Msg::Failed(_)),
                     &mut self.studio,
                 ) {
                     s.step_pending(-1);
@@ -1520,6 +1536,9 @@ impl Windows {
                 return self.studio_outcome(out);
             }
             Msg::StudioDownload | Msg::StudioDismiss | Msg::ToastAction => {}
+            Msg::FailureDetails => return self.failure_details(),
+            Msg::FailureFix => return self.failure_fix(),
+            Msg::FailureEsc => return self.failure_close(),
             Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioWalk(walked) => return self.on_walked(walked),
             Msg::StudioToast(done) => {
@@ -1662,6 +1681,9 @@ impl Windows {
                 platform::windows::forget(id);
                 self.chrome.remove(&id);
                 self.toasts.retain(|(t, ..)| *t != id);
+                if self.failure.as_ref().is_some_and(|(f, ..)| *f == id) {
+                    self.failure = None;
+                }
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
                     self.update_card = None;
                 }
@@ -1868,6 +1890,9 @@ impl Windows {
         if let Some((_, menu)) = self.tray_menu.as_ref().filter(|(m, _)| *m == window) {
             return Some(spoken(|| tray_menu::view(menu)).map(Msg::TrayMenu));
         }
+        if let Some(card) = self.failure_view(window) {
+            return Some(card);
+        }
         if let Some((_, text, tone, action)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             let radius = shape::radius(toast::RADIUS);
             return Some(match action {
@@ -1995,6 +2020,16 @@ impl Windows {
             },
             match self.tray_menu {
                 Some(_) => tray_menu_events(),
+                None => Subscription::none(),
+            },
+            match self.failure {
+                Some(_) => iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                        key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                        ..
+                    }) => Some(Msg::FailureEsc),
+                    _ => None,
+                }),
                 None => Subscription::none(),
             },
             match self.steps_window() {
@@ -2356,6 +2391,8 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     }
 }
 
+mod failure;
+pub use failure::capture_failed;
 mod studio;
 #[cfg(test)]
 mod tests;

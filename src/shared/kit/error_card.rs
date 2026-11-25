@@ -26,6 +26,11 @@ pub const LINES: usize = 2;
 /// What the card says and offers.
 pub struct ErrorCard<M> {
     pub headline: String,
+    /// What to do about it (F12): shown whole under the headline. With a hint
+    /// the card is the one failure card: `detail` (the system's own text) is
+    /// folded behind "Show details" next to the buttons. Empty: the AI chat's
+    /// card, whose detail shows two lines until opened.
+    pub hint: String,
     pub detail: String,
     /// The card's width (px), to clamp the detail to `LINES`.
     pub width: f32,
@@ -92,23 +97,29 @@ pub fn error_card<'a, M: Clone + 'a>(card: ErrorCard<M>) -> Element<'a, M> {
         .spacing(STACK)
         .width(Fill)
         .align_x(super::dir::start());
-    if !card.detail.is_empty() {
+    let folded = !card.hint.is_empty();
+    let word = match card.open {
+        true => card.words.hide,
+        false => card.words.show,
+    };
+    let mut toggle = None;
+    if folded {
+        body = body.push(detail_text(card.hint));
+        if !card.detail.is_empty() {
+            toggle = Some(button(label(word), Kind::Quiet, Some(card.on_details)));
+        }
+    } else if !card.detail.is_empty() {
         let short = (!card.open)
             .then(|| clamp(&card.detail, detail_width(card.width)))
             .flatten();
         let long = card.open || short.is_some();
         let shown: Element<'a, M> = match short {
             Some(short) => detail_text(short),
-            None => detail_text(card.detail),
+            None => detail_text(card.detail.clone()),
         };
         body = body.push(shown);
         if long {
-            let toggle = if card.open {
-                card.words.hide
-            } else {
-                card.words.show
-            };
-            body = body.push(button(label(toggle), Kind::Quiet, Some(card.on_details)));
+            body = body.push(button(label(word), Kind::Quiet, Some(card.on_details)));
         }
     }
     let mut actions = super::dir::row([]).spacing(ACTIONS_GAP).align_y(Center);
@@ -118,7 +129,27 @@ pub fn error_card<'a, M: Clone + 'a>(card: ErrorCard<M>) -> Element<'a, M> {
     if let Some(retry) = card.retry {
         actions = actions.push(button(label(card.words.retry), Kind::Quiet, Some(retry)));
     }
+    if let Some(toggle) = toggle {
+        actions = actions.push(toggle);
+    }
     body = body.push(container(actions).padding([4, 0]));
+    if folded && card.open && !card.detail.is_empty() {
+        body = body.push(
+            container(
+                text::own(Role::NOTE, card.detail)
+                    .font(super::text::mono(iced::font::Weight::Normal))
+                    .color(c().text_muted)
+                    .width(Fill),
+            )
+            .padding([6, 8])
+            .width(Fill)
+            .style(|_| container::Style {
+                background: Some(c().track.into()),
+                border: Border::default().rounded(radius::TRACK),
+                ..container::Style::default()
+            }),
+        );
+    }
     let mark = container(icon(Icon::Alert, size::ICON).color(fixed::DANGER)).padding([1, 0]);
     container(crate::dir_row![mark, body].spacing(ICON_GAP))
         .padding(PAD)
@@ -151,6 +182,7 @@ mod tests {
         let card = |open| {
             let card = error_card(ErrorCard {
                 headline: "This model isn't available".into(),
+                hint: String::new(),
                 detail: long.into(),
                 width: 300.0 + 2.0 * PAD + size::ICON + ICON_GAP,
                 open,
@@ -179,5 +211,48 @@ mod tests {
             open.iter().any(|t| t == long) && open.iter().any(|t| t == "Hide details"),
             "{open:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod f12_tests {
+    use super::*;
+
+    /// F12-1: with a hint the card is the one failure card: headline, what to
+    /// do, the fix button; the system's own text stays folded until Show details.
+    #[test]
+    fn f12_the_system_text_is_folded_behind_show_details() {
+        let card = |open| {
+            let card = error_card(ErrorCard {
+                headline: "Download could not finish".into(),
+                hint: "Try again in a minute.".into(),
+                detail: "response 1 (cancelled)".into(),
+                width: 400.0,
+                open,
+                on_details: (),
+                fix: Some(("Try again", ())),
+                retry: None,
+                words: Words {
+                    show: "Show details",
+                    hide: "Hide details",
+                    retry: "Retry",
+                },
+            });
+            super::super::testing::shot::texts(card)
+        };
+        let has = |t: &[String], s: &str| t.iter().any(|x| x == s);
+        let closed = card(false);
+        for want in [
+            "Download could not finish",
+            "Try again in a minute.",
+            "Try again",
+            "Show details",
+        ] {
+            assert!(has(&closed, want), "{want}: {closed:?}");
+        }
+        assert!(!has(&closed, "response 1 (cancelled)"), "{closed:?}");
+        let open = card(true);
+        assert!(has(&open, "response 1 (cancelled)"), "{open:?}");
+        assert!(has(&open, "Hide details"), "{open:?}");
     }
 }

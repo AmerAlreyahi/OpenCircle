@@ -250,6 +250,16 @@ pub fn kit_look(theme: config::LookTheme) -> Option<&'static crate::shared::kit:
     })
 }
 
+/// The error card's words in the app's language (`kit::error_card`).
+pub fn error_words() -> crate::shared::kit::error_card::Words {
+    use crate::shared::app_language::{S, tr};
+    crate::shared::kit::error_card::Words {
+        show: tr(S::err_details),
+        hide: tr(S::err_hide),
+        retry: tr(S::fix_retry),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

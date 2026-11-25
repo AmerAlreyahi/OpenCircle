@@ -103,6 +103,7 @@ fn session(models: bool) -> Session {
         updating: None,
         update_work: None,
         update_paused: false,
+        details: false,
     }
 }
 

@@ -92,6 +92,30 @@ pub fn pending<'a, Message: 'a>(number: usize, size: Size) -> Element<'a, Messag
     .into()
 }
 
+/// The place of a step that could not be made (F12): the empty well with a red edge
+/// and a "!" mark; it stays until the user acts on it. (A solid edge: the renderer
+/// draws no dashes.)
+pub fn failed<'a, Message: 'a>(size: Size) -> Element<'a, Message> {
+    container(
+        text(Icon::Alert.glyph())
+            .font(FONT)
+            .size(NUMBER)
+            .color(super::tokens::fixed::DANGER),
+    )
+    .center(Fill)
+    .width(size.width)
+    .height(size.height)
+    .style(move |_| container::Style {
+        background: Some(c().track.into()),
+        border: Border::default()
+            .rounded(CORNER)
+            .width(1)
+            .color(super::tokens::fixed::DANGER),
+        ..container::Style::default()
+    })
+    .into()
+}
+
 fn build<'a, Message: Clone + 'a>(
     picture: image::Handle,
     number: usize,

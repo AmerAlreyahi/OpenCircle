@@ -28,6 +28,8 @@ const CONTEXT: u32 = 8;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
+    /// The error card's Show / Hide details.
+    ErrorDetails,
     /// The user agreed to the OCR (or offline translation) download.
     Download,
     /// Translation will be offline and this pair's models are missing
@@ -167,6 +169,8 @@ enum Phase {
 
 pub struct Session {
     /// The original frame (shared bytes, never copied whole here).
+    /// The error card's details are open.
+    details: bool,
     frame: image::Handle,
     /// What is translated, frame pixels: x0, y0, x1, y1 (ends exclusive).
     area: [u32; 4],
@@ -280,6 +284,7 @@ impl Session {
             updating: None,
             update_work: None,
             update_paused: false,
+            details: false,
         };
         let task = session.begin(models);
         (session, task)
@@ -435,6 +440,7 @@ impl Session {
     /// The App handles `Close`, `OpenSettings` and `Ask` first.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
+            Msg::ErrorDetails => self.details = !self.details,
             Msg::Download if matches!(self.phase, Phase::Consent(_) | Phase::DownloadFailed(_)) => {
                 // Try again fetches what was asked for before
                 self.offline = match self.phase {

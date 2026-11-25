@@ -1209,6 +1209,8 @@ strings! {
         | "تنزيل {} ← {}";
     tp_translating: "Translating…"
         | "جارٍ الترجمة…";
+    tp_failed: "Translation could not finish"
+        | "تعذّر إكمال الترجمة";
     tp_set_up_ai: "Set up AI"
         | "إعداد الذكاء الاصطناعي";
     tp_thinking: "Thinking…"
@@ -2011,6 +2013,18 @@ strings! {
         | "الالتقاط خلال {} ث · افتح قائمة الآن";
     sn_snapped: "Snapped"
         | "ملتقطة";
+    sn_step_failed: "This step could not be added"
+        | "تعذّرت إضافة هذه الخطوة";
+    sn_step_failed_h: "A step could not be added"
+        | "تعذّرت إضافة خطوة";
+    sn_step_failed_d: "Capture it again; your other steps are safe."
+        | "التقطها مرة أخرى؛ خطواتك الأخرى بأمان.";
+    sn_step_again: "Capture again"
+        | "التقاط مرة أخرى";
+    cap_failed: "OpenCircle could not capture the screen"
+        | "تعذّر على OpenCircle التقاط الشاشة";
+    cap_failed_d: "Your desktop said no. Try again; if it keeps failing, allow it in the desktop's screen sharing settings."
+        | "رفض سطح المكتب الطلب. حاول مرة أخرى؛ وإن استمر الفشل فاسمح بذلك من إعدادات مشاركة الشاشة.";
     sn_steps_cleared: "Steps cleared"
         | "مُسحت الخطوات";
     sn_step_copy_all: "Copy all"

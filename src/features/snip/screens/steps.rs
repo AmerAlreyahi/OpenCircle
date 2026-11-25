@@ -126,6 +126,8 @@ pub enum Msg {
     Clear,
     /// The pill's Undo.
     Undo,
+    /// A click on the failed step's placeholder: it goes.
+    FailedSeen,
     CopyAll,
     Hover(usize, bool),
     Press(usize),
@@ -142,7 +144,7 @@ pub enum Msg {
     /// (`Windows::add_step`).
     Ready(Arc<Step>, Option<usize>),
     /// The step could not be made (the Studio's place for it goes).
-    Failed,
+    Failed(String),
     /// The window moved (logical desktop px): it docks once it stops.
     Moved(Point),
     /// No move since the `n`th: dock now.
@@ -202,6 +204,9 @@ pub struct Strip {
     pick: Reorder,
     /// "Steps cleared · Undo" shows instead of the strip.
     pub cleared: bool,
+    /// A step could not be made (F12): its red placeholder stays under the last one
+    /// until a step is added, the strip is cleared or the user clicks it.
+    pub failed: bool,
     /// Clears so far (an old clear's expiry does nothing).
     pub clears: u32,
     /// Moves so far (only the last one's settle docks), and where the last went.
@@ -228,6 +233,7 @@ impl Strip {
             focus: None,
             pick: Reorder::default(),
             cleared: false,
+            failed: false,
             clears: 0,
             moves: 0,
             moved_to: Point::ORIGIN,
@@ -323,6 +329,7 @@ impl Strip {
     }
 
     fn clear(&mut self) -> Option<Do> {
+        self.failed = false;
         if !self.cleared {
             if !self.steps.is_empty() {
                 self.remember();
@@ -347,6 +354,10 @@ impl Strip {
         match msg {
             Msg::Grab => return Some(Do::Drag),
             Msg::Clear => return self.clear(),
+            Msg::FailedSeen => {
+                self.failed = false;
+                return Some(Do::Resize);
+            }
             Msg::Undo => return self.undo(),
             Msg::CopyAll => return (!self.steps.is_empty()).then_some(Do::CopyAll),
             Msg::Hover(i, on) => {
@@ -396,7 +407,7 @@ impl Strip {
             Msg::Settle(_)
             | Msg::Docked(..)
             | Msg::Ready(..)
-            | Msg::Failed
+            | Msg::Failed(_)
             | Msg::Expire(_)
             | Msg::Copied(_) => {}
         }
@@ -442,7 +453,7 @@ impl Strip {
             let (label, action) = self.cleared_words();
             return toast::size_with_action(label, action);
         }
-        let n = self.steps.len().max(1) as f32;
+        let n = (self.steps.len() + usize::from(self.failed)).max(1) as f32;
         let thumbs = n * WELL.height + (n - 1.0) * PAD;
         let room = self.work().height - 2.0 * MARGIN;
         let h = TOP + thumbs + PAD + crate::shared::kit::tokens::size::ICON_BUTTON + PAD;
@@ -561,7 +572,12 @@ impl Strip {
                 .on_exit(Msg::Hover(i, false));
             tip(step, self.words().step, Side::Bottom)
         });
-        let thumbs = scroll::quiet(column(thumbs).spacing(PAD)).height(self.thumbs_height());
+        let lost = self.failed.then(|| {
+            let hole = mouse_area(thumb::failed(WELL)).on_press(Msg::FailedSeen);
+            tip(hole, t!(sn_step_failed), Side::Bottom)
+        });
+        let thumbs =
+            scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height());
         let words = self.words();
         let copy = button::labelled(
             COPY,

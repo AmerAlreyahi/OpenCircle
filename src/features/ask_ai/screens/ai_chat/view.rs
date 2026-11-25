@@ -652,6 +652,7 @@ pub fn ai_error<'a, M: Clone + 'a>(
     let retry = matches!(fix, Some(f) if f != Fix::Retry);
     error_card(ErrorCard {
         headline: e.headline(provider),
+        hint: String::new(),
         detail: e.detail(),
         width,
         open,
