@@ -1967,8 +1967,8 @@ fn shortcut_boxes_draw_one_cap_per_key_and_no_padding() {
     let (mut s, _) = state(None);
     s.draft.quick_actions[0].shortcut = "Ctrl+T".into();
     let texts = page(&mut s, Section::Shortcuts);
-    let at = texts.iter().position(|t| t == "Ctrl").unwrap();
-    assert_eq!(texts[at..at + 3], ["Ctrl", "Shift", "Space"]);
+    // (the header's search shows its own "Ctrl F" first)
+    assert!(texts.windows(3).any(|w| w == ["Ctrl", "Shift", "Space"]));
     assert!(!texts.iter().any(|t| t == "—"), "{texts:?}");
     let two = texts.iter().position(|t| t == "T").unwrap();
     assert_eq!(texts[two - 1], "Ctrl");
@@ -4684,4 +4684,66 @@ fn f13_arabic_search_ignores_alef_forms_vowel_marks_and_case() {
     assert_eq!(fold("على"), fold("علي"));
     assert_eq!(fold("كَتَبَ"), fold("كتب"));
     assert_eq!(fold("Language"), fold("language"));
+}
+
+/// W107-3: goldens of the Settings title bar, English and Arabic (the same layout, only the text),
+/// light and dark, at the smallest and the usual width.
+#[test]
+fn w107_3_the_title_bar_matches_its_golden_images() {
+    use crate::features::settings::state::MIN_WIDTH;
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    golden::each_theme(|theme, failed| {
+        for language in ["en", "ar"] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice(language)));
+            for width in [MIN_WIDTH, WINDOW_SIZE.width] {
+                let file = format!("settings-titlebar-{language}-{width}-{}", theme.id);
+                let size = Size::new(width, 64.0);
+                failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            }
+        }
+    });
+    app_language::set(Lang::En);
+}
+
+/// W107-3: the Settings search sits EXACTLY on the window's middle, English and Arabic, at the smallest,
+/// the usual and a wide window; it clears the title (at the left) and the caption buttons (at the
+/// right), and the title bar is the same in Arabic: logo and title at the left, only the text differs.
+#[test]
+fn w107_3_the_search_is_centred_and_the_title_bar_is_never_mirrored() {
+    use crate::features::settings::state::MIN_WIDTH;
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::tokens::size::CAPTION_BUTTON;
+    use iced::keyboard::key::Named;
+    let tab = shot::named(Named::Tab, false)[1].clone();
+    for language in ["en", "ar"] {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::AppLanguage(Choice(language)));
+        for width in [MIN_WIDTH, WINDOW_SIZE.width, 1400.0] {
+            let size = Size::new(width, WINDOW_SIZE.height);
+            let (_, at) = shot::focus_walk(|| view(&s), size, std::slice::from_ref(&tab));
+            let field = at[0].expect("Tab focuses the search first");
+            let middle = field.x + field.width / 2.0;
+            assert!(
+                (middle - width / 2.0).abs() < 0.51,
+                "{language} {width}: the search is at {middle}, the window's middle is {}",
+                width / 2.0
+            );
+            assert!(
+                field.x + field.width <= width - 2.0 * CAPTION_BUTTON - CAPTION_BUTTON,
+                "{language} {width}: clear of the buttons: {field:?}"
+            );
+            let title = shot::texts_at(view(&s), size)
+                .into_iter()
+                .find(|(_, t)| t.contains("OpenCircle"))
+                .expect("the title")
+                .0;
+            assert!(
+                title.x < 60.0 && title.x + title.width < field.x,
+                "{language} {width}: the title is at the left, clear of the search: {title:?} {field:?}"
+            );
+        }
+    }
+    app_language::set(Lang::En);
 }

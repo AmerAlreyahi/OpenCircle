@@ -45,12 +45,13 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     let header = regular(
         logo,
         t!(win_title),
-        crate::dir_row![search_field(state), pill(state)]
-            .spacing(space::GAP)
-            .align_y(Center),
+        pill(state),
         Some(maximised),
         Message::Caption,
     );
+    // the search sits EXACTLY on the window's middle (W107): a layer over the whole header, kept clear
+    // of the title and of the buttons by the same margin on both sides, narrower when the window is
+    let header = crate::shared::kit::header::with_centre(header, search_field(state), SEARCH_W);
     let body: Element<'_, Message> = crate::dir_row![nav(state), page(state)].height(Fill).into();
     // F13: the hits hang from the field, over the page
     let body = match search_hits(state) {
@@ -75,20 +76,21 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     }
 }
 
-/// The search field's width (F13).
+/// The search field's widest (F13).
 const SEARCH_W: f32 = 240.0;
 /// The hits' list width, and the gap between its rows.
 const HITS_W: f32 = 420.0;
 const HITS_GAP: f32 = 2.0;
 
-/// The header's search (Ctrl+F focuses it): typing opens the search.
+/// The header's search (Ctrl+F focuses it), centred on the window: typing opens the search; the keys
+/// are shown at its end while it is empty.
 fn search_field(state: &State) -> Element<'_, Message> {
     let query = state.search.as_ref().map_or("", |s| s.query.as_str());
     let field = crate::shared::kit::field::search(t!(win_search_ph), query)
         .id(super::search::FIELD)
         .on_input(Message::SearchInput)
         .on_submit(Message::SearchGo);
-    container(field).width(SEARCH_W).into()
+    crate::shared::kit::keycap::at_end(field, &["Ctrl", "F"], query.is_empty())
 }
 
 /// The list of hits under the header (none while nothing is typed): "row title .

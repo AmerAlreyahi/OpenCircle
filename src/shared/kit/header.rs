@@ -73,12 +73,10 @@ pub fn with_menu<'a, Message: Clone + 'a>(
         false => Icon::Maximise,
     });
     let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
-    // right to left: the header's content is mirrored, the caption buttons keep
-    // their normal place (top right, close outermost) in every window
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
     let has_menu = menu.is_some();
     let name: Element<'a, Message> = match menu {
-        None => crate::dir_row![mark, name_text]
+        None => row![mark, name_text]
             .spacing(LOGO_GAP)
             .align_y(Center)
             .into(),
@@ -112,7 +110,7 @@ pub fn with_menu<'a, Message: Clone + 'a>(
         .width(Fill)
         .align_x(match has_menu {
             true => iced::alignment::Horizontal::Center,
-            false => super::dir::start(),
+            false => iced::alignment::Horizontal::Left,
         });
     parts.extend([
         mouse_area(name).on_press(on(Caption::Drag)).into(), // mouse only: drags the window
@@ -128,16 +126,9 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     )];
     buttons.extend(restore);
     buttons.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
-    // (a plain row: never mirrored)
-    let content: Element<'a, Message> = match has_menu {
-        // (a menu bar's header is laid out as in English: logo, menus, title, buttons)
-        true => row(parts).width(Fill).height(H).align_y(Center).into(),
-        false => super::dir::row(parts)
-            .width(Fill)
-            .height(H)
-            .align_y(Center)
-            .into(),
-    };
+    // (a plain row: a title bar is never mirrored, in any language: logo and title at the left,
+    // the buttons at the right; only the text is the language's)
+    let content: Element<'a, Message> = row(parts).width(Fill).height(H).align_y(Center).into();
     row![content, row(buttons)].height(H).align_y(Center).into()
 }
 
@@ -149,7 +140,7 @@ pub fn compact<'a, Message: Clone + 'a>(
     on_close: Message,
 ) -> Element<'a, Message> {
     const H: f32 = size::HEADER_COMPACT;
-    // right to left: the title mirrored, the close button keeps its place (right)
+    // (never mirrored: the title at the left, the close button at the right)
     row![
         mouse_area(
             container(
@@ -161,7 +152,7 @@ pub fn compact<'a, Message: Clone + 'a>(
             .padding([0, 14])
             .center_y(H)
             .width(Fill)
-            .align_x(super::dir::start())
+            .align_x(iced::alignment::Horizontal::Left)
         )
         .on_press(on_drag), // mouse only: drags the window
         caption(Icon::Close, 14.0, H, true, on_close),
@@ -286,6 +277,24 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
         corner(Direction::SouthEast, Down),
     ];
     column![top, middle, bottom].into()
+}
+
+/// What a header keeps clear on each side of the window's middle for a centred part: the title and the
+/// logo at the left, the caption buttons (and a status) at the right; the same both sides, so the part
+/// is centred on the window itself.
+const CENTRE_MARGIN: f32 = 200.0;
+
+/// `header` with `centre` EXACTLY on the window's middle, as wide as `widest` and narrower when the window
+/// is (never reaching the title or the buttons): a layer over the whole header that takes only the
+/// presses of the part itself.
+pub fn with_centre<'a, Message: 'a>(
+    header: Element<'a, Message>,
+    centre: Element<'a, Message>,
+    widest: f32,
+) -> Element<'a, Message> {
+    let part = container(centre).max_width(widest).width(Fill);
+    let layer = container(part).padding([0.0, CENTRE_MARGIN]).center(Fill);
+    stack![header, layer].height(size::HEADER).into()
 }
 
 #[cfg(test)]
