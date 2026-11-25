@@ -274,7 +274,8 @@ impl App {
             // the right-click menu's Esc closes it, not the overlay
             Message::Escape | Message::EscapeTaken if self.close_context() => Task::none(),
             Message::ContextMenu(msg) => self.on_context_menu(msg),
-            Message::BarClose => self.close(),
+            // the quiet x is Esc (the card, the menu, the picker, the translation ... first)
+            Message::BarClose => self.update(Message::Escape),
             Message::TextCard(msg) => self.on_text_card(msg),
             Message::TextTranslated(id, result) => self.text_translated(id, result),
             Message::TextModel(id, news) => self.text_model(id, news),

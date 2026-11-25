@@ -199,7 +199,10 @@ impl App {
             Icon::Close.glyph(),
             t!(sn_close),
             "",
-            Default::default(),
+            icon_button::State {
+                active: false,
+                focused: kbd(Stop::Close),
+            },
             Some(Message::BarClose),
         ));
         // Held: the design's accent ring round it.

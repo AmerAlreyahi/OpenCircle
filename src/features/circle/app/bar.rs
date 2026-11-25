@@ -345,6 +345,7 @@ impl App {
                 Some(message) => self.update(message),
                 None => Task::none(),
             },
+            bar::Stop::Close => self.update(Message::BarClose),
             bar::Stop::Field => Task::none(), // the field's own Enter submits
         }
     }

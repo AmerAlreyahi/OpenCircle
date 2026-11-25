@@ -2880,6 +2880,24 @@ fn w106_the_main_bar_has_a_quiet_x_that_closes_the_overlay() {
         got.iter().any(|m| matches!(m, Message::BarClose)),
         "{got:?}"
     );
+    // the x is Esc: with the menu's Translate card up, it puts the card away first
+    let (mut with_card, on) = menu_app();
+    let _ = with_card.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(
+        &with_card,
+        &crate::features::circle::screens::context_menu::Row::Translate,
+    );
+    let _ = with_card.update(Message::ContextMenu(
+        crate::features::circle::screens::context_menu::Msg::Pick(i),
+    ));
+    assert!(with_card.o.text_card.is_some());
+    let _ = with_card.update(Message::BarClose);
+    assert!(with_card.o.text_card.is_none() && !with_card.o.is_none());
+    let _ = with_card.update(Message::BarClose);
+    assert!(with_card.o.is_none(), "the next one closes the overlay");
+    // and Tab reaches it, Enter presses it
+    let _ = app.update(Message::Overlay(overlay::Event::Tab { back: true }));
+    assert_eq!(app.o.bar_focus, Some(bar::Stop::Close));
     let _ = app.update(Message::BarClose);
     assert!(app.o.is_none(), "the x closes the overlay");
     // Arabic: the bar is mirrored, so its end (the x) is at the left
@@ -3730,8 +3748,8 @@ fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
         let _ = app.on_overlay(overlay::Event::Tab { back });
         app.o.bar_focus
     };
-    use bar::Stop::{Badge, Button, Field, Include, Logo};
-    let forward: Vec<_> = (0..9).map(|_| tab(&mut app, false)).collect();
+    use bar::Stop::{Badge, Button, Close, Field, Include, Logo};
+    let forward: Vec<_> = (0..10).map(|_| tab(&mut app, false)).collect();
     let order = [
         Logo,
         Field,
@@ -3741,10 +3759,11 @@ fn tab_walks_the_bar_in_the_designs_order_and_enter_or_space_press() {
         Button(BarButton::Live),
         Button(BarButton::Song),
         Button(BarButton::Edit),
-        Logo, // and round again
+        Close, // the quiet x
+        Logo,  // and round again
     ];
     assert_eq!(forward, order.map(Some));
-    assert_eq!(tab(&mut app, true), Some(Button(BarButton::Edit)));
+    assert_eq!(tab(&mut app, true), Some(Close));
     // Tab events come from the key itself, Shift+Tab goes back
     let (messages, _) = feed(
         &app,

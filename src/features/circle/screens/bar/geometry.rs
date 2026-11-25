@@ -62,6 +62,8 @@ pub enum Stop {
     /// The "AI ↵" badge.
     Badge,
     Button(BarButton),
+    /// The quiet x at the bar's end.
+    Close,
 }
 
 /// The Tab order, as the design's DOM: logo, AI field, AI badge, the pills,
@@ -75,6 +77,7 @@ pub fn stops(selected: bool, shown: &[BarButton]) -> Vec<Stop> {
     [Stop::Logo, Stop::Field, Stop::Include, Stop::Badge]
         .into_iter()
         .chain(pills.chain(icons).map(|b| Stop::Button(*b)))
+        .chain([Stop::Close])
         .collect()
 }
 
@@ -339,6 +342,7 @@ mod tests {
                 b(BarButton::Live),
                 b(BarButton::Song),
                 b(BarButton::Edit),
+                Stop::Close,
             ]
         );
         assert_eq!(
@@ -352,9 +356,9 @@ mod tests {
         // forward and back wrap; with no focus yet, first / last
         let s = order(false);
         assert_eq!(tab(&s, None, false), Some(Stop::Logo));
-        assert_eq!(tab(&s, None, true), Some(b(BarButton::Edit)));
-        assert_eq!(tab(&s, Some(b(BarButton::Edit)), false), Some(Stop::Logo));
-        assert_eq!(tab(&s, Some(Stop::Logo), true), Some(b(BarButton::Edit)));
+        assert_eq!(tab(&s, None, true), Some(Stop::Close));
+        assert_eq!(tab(&s, Some(Stop::Close), false), Some(Stop::Logo));
+        assert_eq!(tab(&s, Some(Stop::Logo), true), Some(Stop::Close));
         // a stop that is gone (a pill dimmed meanwhile) starts over
         assert_eq!(tab(&s, Some(b(BarButton::Search)), false), Some(Stop::Logo));
     }
