@@ -520,7 +520,7 @@ fn every_step_in_arabic_matches_its_golden_image() {
 }
 
 /// W108 (owner round 3): the step tabs fit one line each in every language, on Linux's
-/// Wayland step list too (no wrapped "4. ربط الذكاء الاصطناعي").
+/// Wayland step list too (no wrapped "4. ربط الذكاء الاصطناعي"). Uses the kit's own layout.
 #[test]
 fn the_step_tabs_fit_on_one_line_in_every_language() {
     use crate::shared::app_language::{self, Lang};
@@ -529,27 +529,29 @@ fn the_step_tabs_fit_on_one_line_in_every_language() {
         for wayland in [false, true] {
             let s = state(None).on_wayland(wayland);
             let labels = s.tab_labels();
-            assert!(!labels.is_empty());
-            assert!(
-                crate::shared::kit::segmented::spread_fits(flow::tabs_width(), &labels),
-                "{lang:?} wayland {wayland}: {labels:?}"
-            );
+            let (widths, fits) =
+                crate::shared::kit::segmented::spread_layout(flow::tabs_width(), &labels);
+            assert!(fits, "{lang:?} wayland {wayland}: {labels:?}");
+            // the pills fill the track, the longest label has the widest pill
+            let longest = (0..labels.len())
+                .max_by_key(|&i| labels[i].chars().count())
+                .unwrap();
+            let widest = (0..widths.len())
+                .max_by(|&a, &b| widths[a].total_cmp(&widths[b]))
+                .unwrap();
+            assert_eq!(longest, widest, "{labels:?} {widths:?}");
         }
     }
     app_language::set(Lang::En);
 }
 
+/// Too little room: every pill shrinks alike and the answer says it does not fit.
 #[test]
-fn a_tab_is_as_wide_as_its_label_and_the_rest_is_shared() {
-    use crate::shared::kit::segmented::spread_widths_for_test as widths;
-    let w = widths(300.0, &[40.0, 100.0]);
-    assert_eq!(w.iter().sum::<f32>(), 300.0);
-    assert!(
-        w[1] - w[0] == 60.0,
-        "the longer label keeps its extra width: {w:?}"
+fn tabs_that_do_not_fit_say_so_and_shrink_alike() {
+    let (w, fits) = crate::shared::kit::segmented::spread_layout(
+        120.0,
+        &["1. Welcome to it", "2. Try it out now"],
     );
-    // too little room: still one line each, shrunk alike
-    let tight = widths(100.0, &[60.0, 60.0]);
-    assert_eq!(tight[0], tight[1]);
-    assert!((tight.iter().sum::<f32>() - 100.0).abs() < 0.01);
+    assert!(!fits);
+    assert!(w[0] < w[1] && w.iter().sum::<f32>() < 120.0);
 }

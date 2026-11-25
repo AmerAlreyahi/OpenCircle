@@ -64,54 +64,35 @@ pub fn spread<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
     glide: f32,
     on: impl Fn(T) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let n = options.len().max(1) as f32;
-    let inner = width - 2.0 * (space::TRACK_PAD + 1.0) - space::TRACK_GAP * (n - 1.0);
-    let drawn: Vec<f32> = options
-        .iter()
-        .map(|&(_, l)| {
-            let role = Role::STEP;
-            super::text::width(l, super::text::size(role), super::text::font(role)).ceil()
-        })
-        .collect();
-    let widths = spread_widths(inner, &drawn);
+    let labels: Vec<&str> = options.iter().map(|&(_, l)| l).collect();
+    let (widths, _) = spread_layout(width, &labels);
     track(options, &widths, Role::STEP, chosen, from, glide, on)
 }
 
-/// The room `inner` shared between pills whose labels are `drawn` wide: each is as wide
-/// as its label (and `SPREAD_PAD` each side) and the rest is shared equally, so a long
-/// label never wraps (a tab as wide as the others' share broke "4. ربط الذكاء الاصطناعي"
-/// onto two lines). Too little room: every pill shrinks the same way and the text is cut
-/// rather than wrapped.
-fn spread_widths(inner: f32, drawn: &[f32]) -> Vec<f32> {
-    let need: Vec<f32> = drawn.iter().map(|d| d + 2.0 * SPREAD_PAD).collect();
-    let spare = inner - need.iter().sum::<f32>();
-    let n = need.len().max(1) as f32;
-    match spare >= 0.0 {
-        true => need.iter().map(|w| w + spare / n).collect(),
-        false => need.iter().map(|w| w * inner / (inner - spare)).collect(),
-    }
-}
-
-/// Whether `labels` fit one line each in a `spread` track `width` across (tests).
-#[cfg(test)]
-pub fn spread_fits(width: f32, labels: &[&str]) -> bool {
+/// `spread`'s pill widths for `labels` in a track `width` across, and whether each label
+/// fits its pill on one line: each pill is as wide as its label (and `SPREAD_PAD` each
+/// side) and the spare room is shared equally, so a long label never wraps (a tab as wide
+/// as the others' share broke "4. ربط الذكاء الاصطناعي" onto two lines). Too little room:
+/// every pill shrinks alike (`false`) and the text is cut rather than wrapped.
+pub fn spread_layout(width: f32, labels: &[&str]) -> (Vec<f32>, bool) {
     let n = labels.len().max(1) as f32;
     let inner = width - 2.0 * (space::TRACK_PAD + 1.0) - space::TRACK_GAP * (n - 1.0);
     let role = Role::STEP;
-    let need: f32 = labels
+    let need: Vec<f32> = labels
         .iter()
         .map(|l| {
-            super::text::width(l, super::text::size(role), super::text::font(role)).ceil()
-                + 2.0 * SPREAD_PAD
+            let drawn = super::text::width(l, super::text::size(role), super::text::font(role));
+            drawn.ceil() + 2.0 * SPREAD_PAD
         })
-        .sum();
-    need <= inner
-}
-
-/// `spread_widths` for another module's test.
-#[cfg(test)]
-pub fn spread_widths_for_test(inner: f32, drawn: &[f32]) -> Vec<f32> {
-    spread_widths(inner, drawn)
+        .collect();
+    let spare = inner - need.iter().sum::<f32>();
+    match spare >= 0.0 {
+        true => (need.iter().map(|w| w + spare / n).collect(), true),
+        false => (
+            need.iter().map(|w| w * inner / (inner - spare)).collect(),
+            false,
+        ),
+    }
 }
 
 /// A `spread` pill's room on each side of its label.
