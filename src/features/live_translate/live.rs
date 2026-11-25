@@ -224,7 +224,15 @@ impl<D: Deps> Reader for Read<'_, D> {
                 .map(|b| {
                     let [x, y, w, h] = b.bounds;
                     let bounds = [x + c.at.x as f32, y + c.at.y as f32, w, h];
-                    to_line(TextBlock { bounds, ..b }, self.size.0, self.size.1)
+                    to_line(
+                        TextBlock {
+                            bounds,
+                            words: Vec::new(), // (in the crop's px, not the frame's)
+                            ..b
+                        },
+                        self.size.0,
+                        self.size.1,
+                    )
                 })
                 .collect();
             texts[i] = text_of(&lines);
@@ -410,6 +418,7 @@ fn read_regions(
                 let [x, y, w, h] = b.bounds;
                 let b = TextBlock {
                     bounds: [x + r[0] as f32, y + r[1] as f32, w, h],
+                    words: Vec::new(), // (in the crop's px, not the frame's)
                     ..b
                 };
                 (!cut_off(&b, (width, fh))).then(|| to_line(b, width, fh))

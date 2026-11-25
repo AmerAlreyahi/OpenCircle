@@ -579,12 +579,17 @@ fn latin_choice(loaded: Option<usize>, last: usize, ok: impl Fn(usize) -> bool) 
         .find(|&i| ok(i))
 }
 
+/// `left` of `all` lines are few (a fifth or less): read them all at once.
+fn few_left(left: usize, all: usize) -> bool {
+    left * 5 <= all
+}
+
 fn few(
     strips: Vec<(u32, u32)>,
     left: Vec<[f32; 4]>,
     all: usize,
 ) -> (Vec<(u32, u32)>, Vec<[f32; 4]>) {
-    match left.len() * 5 <= all {
+    match few_left(left.len(), all) {
         true => (Vec::new(), left),
         false => (owning(strips, &left), Vec::new()),
     }
@@ -599,9 +604,8 @@ fn part_plan(
     left: Vec<[f32; 4]>,
     all: usize,
 ) -> (Vec<(u32, u32)>, Vec<[f32; 4]>, bool) {
-    let few_left = left.len() * 5 <= all;
+    let done = few_left(left.len(), all);
     let (full, direct) = few(strips, left, all);
-    let done = few_left && full.is_empty();
     (full, direct, done)
 }
 
@@ -1022,7 +1026,7 @@ impl Engine {
                 match latin_screen {
                     true => (Vec::new(), lines),
                     false => {
-                        let strips = match lines.len() * 5 <= boxes.len() || others.is_empty() {
+                        let strips = match few_left(lines.len(), boxes.len()) || others.is_empty() {
                             true => Vec::new(),
                             false => strips(h, self.grid(f, rows)?.owned, rows),
                         };
@@ -1039,7 +1043,7 @@ impl Engine {
                 // (judged on the whole screen: a few left are read all at
                 // once, in one run, whatever the rows; the English page's
                 // second reader read them band by band in 1641 ms, at once 963)
-                let strips = match left.len() * 5 <= all {
+                let strips = match few_left(left.len(), all) {
                     true => Vec::new(),
                     false => strips(h, self.grid(f, rows)?.owned, rows),
                 };

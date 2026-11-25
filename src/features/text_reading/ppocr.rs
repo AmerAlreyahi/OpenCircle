@@ -556,10 +556,18 @@ impl Recognizer {
             .fold(REC_W as f32 / REC_H as f32, f32::max);
         let width = ((REC_H as f32 * ratio) as usize).min(REC_MAX_W);
         let plane = REC_H * width;
+        // each crop is stretched to this many of the model's columns
+        let widths: Vec<usize> = (crops.iter())
+            .map(|c| {
+                let r = c.width() as f32 / c.height().max(1) as f32;
+                ((REC_H as f32 * r).ceil() as usize).min(width)
+            })
+            .collect();
         let mut data = vec![0.0f32; crops.len() * 3 * plane];
-        for (crop, dst) in crops.iter().zip(data.chunks_exact_mut(3 * plane)) {
-            let r = crop.width() as f32 / crop.height() as f32;
-            let w = ((REC_H as f32 * r).ceil() as usize).min(width);
+        for ((crop, dst), &w) in (crops.iter())
+            .zip(data.chunks_exact_mut(3 * plane))
+            .zip(&widths)
+        {
             let line = image::imageops::resize(crop, w as u32, REC_H as u32, Triangle);
             let px = line.as_raw();
             // BGR planes, each value to -1..1
@@ -574,12 +582,6 @@ impl Recognizer {
         }
         let n = crops.len();
         let chars = &self.chars;
-        let widths: Vec<usize> = (crops.iter())
-            .map(|c| {
-                let r = c.width() as f32 / c.height().max(1) as f32;
-                ((REC_H as f32 * r).ceil() as usize).min(width)
-            })
-            .collect();
         let read = run(
             &mut self.session,
             [n, 3, REC_H, width],

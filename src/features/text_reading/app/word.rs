@@ -103,6 +103,28 @@ pub fn measure(lines: &mut [Line], rgba: &[u8], width: u32, height: u32, scale: 
     }
 }
 
+/// The carets of an unmeasured line laid out as `cells` does (the even share
+/// in visual order, so a Latin run inside an Arabic line keeps its order):
+/// each character's start edge, a word's end index its last character's end.
+fn visual_carets(line: &Line) -> Vec<f32> {
+    let cells = cells(line);
+    let levels = levels(&line.text);
+    let start = |i: usize| match levels[i].is_rtl() {
+        true => cells[i].1,
+        false => cells[i].0,
+    };
+    let end = |i: usize| match levels[i].is_rtl() {
+        true => cells[i].0,
+        false => cells[i].1,
+    };
+    let mut out: Vec<f32> = (0..cells.len()).map(start).collect();
+    out.push(cells.last().map_or(line.bounds.x, |_| end(cells.len() - 1)));
+    for (_, c1, ..) in word_spans(&line.text) {
+        out[c1] = end(c1 - 1);
+    }
+    out
+}
+
 /// A word's text for matching it with the reader's: letters and digits only,
 /// lower case, Arabic marks and tatweel dropped, the alef forms one.
 fn key(word: &str) -> String {
@@ -134,7 +156,7 @@ fn place_reads(line: &mut Line) {
     }
     let count = line.text.chars().count();
     if line.carets.len() != count + 1 {
-        line.carets = carets(line);
+        line.carets = visual_carets(line);
     }
     let centres: Vec<f32> = words(line).iter().map(|(r, _)| r.center_x()).collect();
     let levels = levels(&line.text);
@@ -1541,6 +1563,28 @@ mod tests {
             "Arabic runs right to left: {c:?}"
         );
         assert!(c[5] < c[6], "Latin runs left to right: {c:?}");
+    }
+
+    /// W110 review: reader words that match nothing must not change how an
+    /// unmeasured mixed line is laid out (a Latin run in an Arabic line kept
+    /// its order; the even share in logical order swapped "Hi" and "Yo").
+    #[test]
+    fn unmatched_reads_keep_a_mixed_lines_visual_layout() {
+        let blank = vec![255u8; 300 * 30 * 4];
+        let mut plain = vec![line("عربي Hi Yo كلمة", 0.0, 0.0)];
+        let mut other = plain.clone();
+        other[0].reads = vec![("zzz".into(), 0.0, 10.0)];
+        measure(&mut plain, &blank, 300, 30, 1.0);
+        measure(&mut other, &blank, 300, 30, 1.0);
+        let boxes = |l: &Line| -> Vec<(String, f32, f32)> {
+            (words(l).into_iter())
+                .map(|(r, t)| (t.to_string(), r.x, r.x + r.width))
+                .collect()
+        };
+        let want = boxes(&plain[0]);
+        assert_eq!(boxes(&other[0]), want);
+        let x = |t: &str| want.iter().find(|w| w.0 == t).unwrap().1;
+        assert!(x("Hi") < x("Yo"), "Latin run runs left to right: {want:?}");
     }
 
     /// W110: a block's words move with its crop and scale like its box.
