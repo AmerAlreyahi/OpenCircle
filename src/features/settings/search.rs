@@ -188,9 +188,8 @@ pub(super) fn rows(state: &State) -> Vec<Entry> {
 fn index(state: &State) -> Vec<Entry> {
     use crate::shared::config::Provider;
     // Building a State applies the language its config derives, which can differ from what the
-    // window speaks: every build puts the window's own language back (W112: search turned the
-    // Settings window English), and even the first rows come from a State made now, so the quick
-    // actions' names are in that language too.
+    // window speaks: every throwaway build puts the window's own language back (W112: search
+    // turned the Settings window English) and writes its quick actions' names in it.
     let spoken = crate::shared::app_language::snapshot();
     let keep = || crate::shared::app_language::restore(spoken);
     // (the window's own rows come from the live state: its song token, its update status, its

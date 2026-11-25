@@ -1981,6 +1981,12 @@ fn lines_of(blocks: &[Block], tr: &[String]) -> (Vec<Block>, Vec<String>) {
             false => split_words(t, &widths),
         };
         for (l, piece) in b.lines.iter().zip(pieces) {
+            // a translated block erases EVERY selected span, even one whose share is empty (an
+            // invisible mark is drawn there), so no line keeps its original text
+            let piece = match piece.is_empty() && !t.trim().is_empty() {
+                true => "\u{200B}".to_string(),
+                false => piece,
+            };
             out.push(Block {
                 lines: vec![l.clone()],
                 text: l.text.clone(),
@@ -1992,10 +1998,14 @@ fn lines_of(blocks: &[Block], tr: &[String]) -> (Vec<Block>, Vec<String>) {
     (out, words)
 }
 
-/// `text`'s words dealt to `widths.len()` lines, each its share of the characters by its width
-/// (a word is never cut; the last line takes the rest).
+/// `text` dealt to `widths.len()` lines, each its share by its width. Words are never cut; a text
+/// that writes without spaces (Chinese, Japanese, Thai) or has fewer words than lines is dealt by
+/// characters (a mark stays with its letter).
 fn split_words(text: &str, widths: &[f32]) -> Vec<String> {
     let all: Vec<&str> = text.split_whitespace().collect();
+    if all.len() < widths.len() || text.chars().any(unspaced) {
+        return split_chars(text, widths);
+    }
     let chars: usize = all.iter().map(|w| w.chars().count() + 1).sum();
     let total: f32 = widths.iter().sum::<f32>().max(1.0);
     let (mut out, mut at, mut used, mut share) = (Vec::new(), 0, 0, 0.0);
@@ -2009,6 +2019,46 @@ fn split_words(text: &str, widths: &[f32]) -> Vec<String> {
             at += 1;
         }
         out.push(line.join(" "));
+    }
+    out
+}
+
+/// A letter of a script written without spaces between words (kana, Han, Thai).
+fn unspaced(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}' | '\u{0E00}'..='\u{0E7F}')
+}
+
+/// A mark that goes with the letter before it (accents, Thai vowels and tones, Arabic points).
+// ponytail: a few ranges, not full grapheme segmentation; add unicode-segmentation if a script needs it.
+fn mark(c: char) -> bool {
+    matches!(c, '\u{0300}'..='\u{036F}' | '\u{064B}'..='\u{065F}' | '\u{0E31}'
+        | '\u{0E34}'..='\u{0E3A}' | '\u{0E47}'..='\u{0E4E}' | '\u{3099}' | '\u{309A}')
+}
+
+/// `text`'s characters (letters with their marks) dealt to the lines in proportion to their
+/// widths; every line gets at least one while there are enough.
+fn split_chars(text: &str, widths: &[f32]) -> Vec<String> {
+    let mut units: Vec<String> = Vec::new();
+    for c in text.chars().filter(|c| !c.is_whitespace()) {
+        match (mark(c), units.last_mut()) {
+            (true, Some(last)) => last.push(c),
+            _ => units.push(c.to_string()),
+        }
+    }
+    let (n, lines) = (units.len(), widths.len());
+    let total: f32 = widths.iter().sum::<f32>().max(1.0);
+    let (mut out, mut from, mut share) = (Vec::new(), 0, 0.0);
+    for (k, w) in widths.iter().enumerate() {
+        share += w / total;
+        let left = lines - k - 1;
+        let to = match left {
+            0 => n,
+            _ => ((share * n as f32).round() as usize)
+                .max((from + 1).min(n))
+                .min(n.saturating_sub(left).max(from)),
+        };
+        out.push(units[from..to].concat());
+        from = to;
     }
     out
 }

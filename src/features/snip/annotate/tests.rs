@@ -3732,9 +3732,10 @@ fn w112_the_picker_recolours_the_selected_object_in_one_undo_step() {
         );
         e.update(Message::HsvDone);
         assert_eq!(e.doc.items[0].colour[..3], last);
-        if !studio {
-            e.update(Message::Undo);
-            assert_eq!(e.doc.items[0].colour, before, "undone in one step");
-        }
+        e.update(Message::Undo);
+        assert_eq!(
+            e.doc.items[0].colour, before,
+            "studio {studio}: undone in one step"
+        );
     }
 }

@@ -1169,6 +1169,17 @@ pub struct EditorConfig {
     pub eraser_whole: Option<bool>,
 }
 
+/// How many recent colours the colour picker keeps (`editor.recent`).
+pub const RECENT_COLOURS: usize = 8;
+
+/// `item` goes first in a recent list: once, newest first, at most `RECENT_COLOURS`. The one
+/// rule of Snip's, the Studio's and Settings' pickers.
+pub fn remember_recent<T: PartialEq>(list: &mut Vec<T>, item: T) {
+    list.retain(|c| *c != item);
+    list.insert(0, item);
+    list.truncate(RECENT_COLOURS);
+}
+
 /// `editor.text_size`'s range (display px).
 pub const TEXT_SIZE: std::ops::RangeInclusive<u8> = 8..=96;
 /// `editor.stroke`'s range (display px).

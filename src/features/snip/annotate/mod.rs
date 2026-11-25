@@ -112,8 +112,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::shared::config::{EditorConfig, Rgb};
 
-/// How many recent colours the picker keeps.
-pub(crate) const RECENT: usize = 8;
+use crate::shared::config::{RECENT_COLOURS as RECENT, remember_recent};
 use crate::shared::picture::Crop;
 use document::int_rect;
 
@@ -656,6 +655,8 @@ pub struct Annotator {
     hsv_drag: bool,
     /// Snip: the selected item as it was when the picker's drag began (one drag = one undo step).
     drag_item: Option<(usize, Item)>,
+    /// The Studio's selection as it was when the picker's drag began (the same, for `set_items`).
+    drag_items: Option<Vec<Item>>,
     /// The colours the user picked lately, newest first (remembered, `RECENT`).
     pub(crate) recent: Vec<[u8; 3]>,
     /// Display px per image px.
@@ -866,6 +867,7 @@ impl Annotator {
             picked_from: colour,
             hsv_drag: false,
             drag_item: None,
+            drag_items: None,
             recent: (saved.recent.iter().flatten())
                 .filter_map(|s| parse_hex(s))
                 .map(|[r, g, b, _]| [r, g, b])
@@ -1515,6 +1517,11 @@ impl Annotator {
     /// of the whole drag is ONE undo step.
     fn end_hsv_drag(&mut self) {
         self.hsv_drag = false;
+        if let Some(before) = self.drag_items.take() {
+            let after = std::mem::replace(&mut self.doc.items, before.clone());
+            self.doc.exec(Edit::Items(before, after));
+            self.refresh();
+        }
         if let Some((i, before)) = self.drag_item.take()
             && i < self.doc.items.len()
         {
@@ -1528,9 +1535,7 @@ impl Annotator {
     /// The colour now goes first in the recent colours.
     fn remember_colour(&mut self) {
         let [r, g, b, _] = self.colour;
-        self.recent.retain(|c| *c != [r, g, b]);
-        self.recent.insert(0, [r, g, b]);
-        self.recent.truncate(RECENT);
+        remember_recent(&mut self.recent, [r, g, b]);
     }
 
     /// The picker's `[hue, saturation, brightness]` when the colour is the one it set last (a grey

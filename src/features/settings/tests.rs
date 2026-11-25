@@ -4926,3 +4926,21 @@ fn w112_the_custom_look_colour_uses_the_one_picker() {
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
 }
+
+/// W112 review: the search index reads the window's OWN rows from the live state (here the
+/// Updates line, which only the live state knows), not from a throwaway copy of the draft.
+#[test]
+fn w112_the_index_reads_the_live_state_for_the_windows_own_rows() {
+    use crate::shared::app_language::{S, tr};
+    let (mut s, _) = state(None);
+    s.update_status = Some(super::state::UpdateLine::Checking);
+    let words = tr(S::key_checking);
+    let mut find = super::search::Search::open(&s);
+    find.typed(words.to_string());
+    assert!(
+        find.all_hits()
+            .iter()
+            .any(|e| e.section == Section::General),
+        "the live Updates line is searchable"
+    );
+}

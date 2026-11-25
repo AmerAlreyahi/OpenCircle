@@ -1653,20 +1653,18 @@ fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     }
 }
 
-/// Applies `message`; in the real window (`auto`) a change that leaves the draft
-/// valid is written at once, so nothing is lost on close (#136). A draft with
-/// problems is held back (the footer says why) and closing asks about it.
-/// The write itself runs off the UI thread (`Outcome::Write`).
 /// The colour the picker has now goes first in the recent colours (shared with Snip's picker).
 fn remember_colour(state: &mut State) {
     let Some(i) = state.picker else { return };
     let hex = state.draft.look.custom.colours[i].hex(true);
     let recent = state.draft.editor.recent.get_or_insert_with(Vec::new);
-    recent.retain(|c| !c.eq_ignore_ascii_case(&hex));
-    recent.insert(0, hex);
-    recent.truncate(8);
+    config::remember_recent(recent, hex);
 }
 
+/// Applies `message`; in the real window (`auto`) a change that leaves the draft
+/// valid is written at once, so nothing is lost on close (#136). A draft with
+/// problems is held back (the footer says why) and closing asks about it.
+/// The write itself runs off the UI thread (`Outcome::Write`).
 pub fn update(state: &mut State, message: Message) -> Outcome {
     // (the app's language may have changed from elsewhere: the action names follow it)
     if state.quick_lang != crate::shared::app_language::current() {

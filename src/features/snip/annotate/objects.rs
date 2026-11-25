@@ -248,6 +248,16 @@ impl Annotator {
     // if documents with thousands of objects ever matter.
     fn set_items(&mut self, after: Vec<Item>, sel: &[usize]) {
         self.commit();
+        // the colour picker's drag: shown live, ONE undo step when it ends (`end_hsv_drag`)
+        if self.hsv_drag && after != self.doc.items {
+            if self.drag_items.is_none() {
+                self.drag_items = Some(self.doc.items.clone());
+            }
+            self.doc.items = after;
+            self.doc.select(sel);
+            self.refresh();
+            return;
+        }
         if after != self.doc.items {
             let before = self.doc.items.clone();
             let frames: Vec<Rectangle> = (after.iter().filter(|i| !i.hidden))

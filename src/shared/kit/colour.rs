@@ -11,7 +11,7 @@ use super::tokens::{radius, size, space};
 
 const DOT: f32 = 18.0;
 const CHIP: f32 = 22.0;
-/// `picker_with`'s width: its rows of controls, and the padding.
+/// The colour picker's width (`colour_picker::WIDTH`): the popovers that hold it are this wide.
 pub const PICKER_W: f32 = super::colour_picker::WIDTH;
 
 /// A round dot of `colour` with a `rim` edge (white reads on a light page).

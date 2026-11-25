@@ -1825,3 +1825,55 @@ fn a_selection_starting_mid_line_is_one_text() {
         vec![vec!["Bring the Sunstone now".to_string()]]
     );
 }
+
+/// W112 review: a translation written without spaces (Chinese) is dealt to the lines by
+/// characters in proportion to the spans, and no selected line keeps its original text.
+#[test]
+fn a_spaceless_translation_is_dealt_by_characters_and_every_line_is_replaced() {
+    let parts = split_words("把太阳石带到老地方", &[300.0, 120.0]);
+    assert_eq!(parts, ["把太阳石带到", "老地方"]);
+    // fewer words than lines: by characters too
+    assert!(
+        split_words("Sunstone", &[100.0, 100.0])
+            .iter()
+            .all(|p| !p.is_empty())
+    );
+    // a mark stays with its letter
+    let thai = split_chars("ก\u{0E34}ข", &[100.0, 100.0]);
+    assert_eq!(thai, ["ก\u{0E34}", "ข"]);
+
+    let (w, h) = (800u32, 450u32);
+    let img = frame(
+        w,
+        h,
+        &[[40.0, 40.0, 300.0, 30.0], [40.0, 72.0, 300.0, 30.0]],
+    );
+    let mut fake = Fake::new(|_, _, _| panic!("not read"));
+    fake.answer = |_| "把太阳石带到老地方".to_string();
+    let picked = vec![
+        tb("Bring the Sunstone to", [40.0, 40.0, 300.0, 30.0]),
+        tb("the old place", [40.0, 72.0, 120.0, 30.0]),
+    ];
+    let out = translate_until(
+        &img,
+        w,
+        h,
+        "zh",
+        &Cache::new(8),
+        &fake,
+        Some(picked),
+        |_| {},
+        || false,
+    )
+    .unwrap();
+    for (name, rows, cols) in [
+        ("line 0", 44..66u32, 40..340u32),
+        ("line 1", 76..98, 40..160),
+    ] {
+        let changed = rows
+            .flat_map(|y| cols.clone().map(move |x| (y * w + x) as usize * 4))
+            .filter(|&i| out.rgba[i..i + 3] != img[i..i + 3])
+            .count();
+        assert!(changed > 0, "{name} kept its original text");
+    }
+}

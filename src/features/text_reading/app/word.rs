@@ -813,7 +813,12 @@ impl Picked {
             .flat_map(|(l, first, last)| {
                 let line = &self.lines[l];
                 let chars: Vec<char> = line.text.chars().collect();
-                (pieces_of(line, first, last).into_iter())
+                let mut found = pieces_of(line, first, last);
+                // reading (logical) order, not left to right: an Arabic line with English in it
+                // reads right to left
+                found.sort_by_key(|(_, held)| held.iter().copied().min());
+                found
+                    .into_iter()
                     .filter_map(|(rect, mut held)| {
                         held.sort_unstable();
                         let text: String = held.iter().map(|&i| chars[i]).collect();
@@ -1195,6 +1200,28 @@ mod tests {
             );
         }
         assert_eq!(seg[0].0, "one");
+    }
+
+    /// W112 review: an Arabic line with English in it gives its pieces in reading order.
+    #[test]
+    fn segments_of_an_arabic_line_with_english_are_in_reading_order() {
+        let l = line(
+            "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627} Bob \u{0643}\u{064A}\u{0641}",
+            100.0,
+            100.0,
+        );
+        let mut p = press(vec![l], Point::new(100.0, 110.0), Unit::Caret).unwrap();
+        (p.anchor, p.end) = ((0, 0), (0, 8));
+        let seg = p.segments();
+        let text = seg
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            text, "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627} Bo",
+            "{seg:?}"
+        );
     }
 
     #[test]

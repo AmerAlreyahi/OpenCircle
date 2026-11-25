@@ -1884,7 +1884,13 @@ fn the_editors_recent_colours_are_read_skipped_by_entry_and_round_trip() {
     let (c, w) = Config::parse("[editor]\nrecent = \"#0A84FF\"\n");
     assert!(c.editor.recent.is_none() && !w.is_empty(), "{w:?}");
     // a save and load keeps them; a default file writes no key
-    let dir = std::env::temp_dir().join(format!("oc-recent-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "oc-recent-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
     let path = dir.join("config.toml");
     let mut c = Config::default();
     c.editor.recent = Some(vec!["#0A84FF".into(), "#1C1C1E".into()]);
@@ -1892,8 +1898,10 @@ fn the_editors_recent_colours_are_read_skipped_by_entry_and_round_trip() {
     let (back, w) = Config::load_from(&path);
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(back.editor.recent, c.editor.recent);
-    let plain = dir.join("plain.toml");
-    Config::default().save_to(&plain).unwrap();
-    assert!(!std::fs::read_to_string(&plain).unwrap().contains("recent"));
+    assert!(
+        !toml::to_string_pretty(&Config::default())
+            .unwrap()
+            .contains("recent")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
