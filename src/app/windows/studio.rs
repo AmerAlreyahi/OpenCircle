@@ -414,15 +414,7 @@ impl Windows {
                 }
             })
             .map(Msg::StudioExported),
-            Outcome::NewSnip => Task::done(Msg::Run(crate::Trigger::Quick(
-                std::time::Instant::now(),
-                crate::shared::config::QuickAction {
-                    action: "snip".into(),
-                    shortcut: String::new(),
-                    target: crate::shared::config::Target::Circle,
-                    live: false,
-                },
-            ))),
+            Outcome::NewSnip => Task::done(super::start_snip()),
             Outcome::ApplyPrefs => {
                 if let Some((_, s)) = &mut self.studio {
                     if let Err(e) = crate::shared::config::update(|c| s.apply_prefs(c)) {

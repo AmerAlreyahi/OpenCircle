@@ -1038,6 +1038,57 @@ mod studio_steps {
     }
 
     #[test]
+    fn closing_the_studio_that_held_the_steps_drops_them() {
+        let (mut w, strip) = with_steps(2);
+        let _ = w.open_studio(None);
+        let studio = w.studio_window().unwrap();
+        let _ = w.update(Msg::Closed(strip));
+        assert_eq!(held(&w), 2, "kept while the Studio is open");
+        let _ = w.update(Msg::Closed(studio));
+        assert!(w.steps.is_none());
+        w.pins.clear(); // (the helper's pin is not what this is about)
+        assert!(!w.busy(), "nothing of ours is left open");
+        assert_eq!(w.steps(), None, "Snip no longer offers Add step N");
+    }
+
+    #[test]
+    fn the_cleared_pill_open_while_the_studio_opens_ends_with_nothing_kept() {
+        let (mut w, _) = with_steps(2);
+        let _ = w.update(Msg::Steps(S::Clear)); // the pill: Steps cleared . Undo
+        let pill = w.steps_window().unwrap(); // (where windows can't resize, a new one)
+        let _ = w.open_studio(None);
+        let studio = w.studio_window().unwrap();
+        let _ = w.update(Msg::Closed(pill)); // the pill's time is over
+        let _ = w.update(Msg::Closed(studio));
+        assert!(w.steps.is_none());
+        w.pins.clear();
+        assert!(!w.busy());
+    }
+
+    /// The strip's "+" makes Windows start the Snip (the tray's one: a quick action "snip").
+    #[test]
+    fn the_strips_plus_starts_a_snip() {
+        let (mut w, _) = with_steps(1);
+        let task = w.update(Msg::Steps(S::AddStep));
+        let sent: Vec<Msg> = iced_runtime::task::into_stream(task)
+            .map(iced::futures::executor::block_on_stream)
+            .into_iter()
+            .flatten()
+            .filter_map(|a| match a {
+                iced_runtime::Action::Output(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        let snip =
+            |m: &Msg| matches!(m, Msg::Run(crate::Trigger::Quick(_, q)) if q.action == "snip");
+        assert!(
+            sent.iter().any(snip),
+            "{} messages, none starts a Snip",
+            sent.len()
+        );
+    }
+
+    #[test]
     fn closing_the_strip_without_a_studio_still_drops_the_steps() {
         let (mut w, strip) = with_steps(2);
         let _ = w.update(Msg::Closed(strip));

@@ -686,15 +686,7 @@ impl Windows {
             .map(move |()| Msg::Steps(steps::Msg::Settle(moves))),
             (steps::Do::OpenStudio, _) => self.open_studio(None),
             // the same Snip as the shortcut: its toolbar then offers "Add step N"
-            (steps::Do::AddStep, _) => Task::done(Msg::Run(crate::Trigger::Quick(
-                Instant::now(),
-                crate::shared::config::QuickAction {
-                    action: "snip".into(),
-                    shortcut: String::new(),
-                    target: crate::shared::config::Target::Circle,
-                    live: false,
-                },
-            ))),
+            (steps::Do::AddStep, _) => Task::done(start_snip()),
             (steps::Do::Edit(i), _) => Task::done(Msg::EditStep(i)),
             (steps::Do::Copy(i), _) => {
                 let ok = strip.crop(i).is_some_and(copy_image);
@@ -762,6 +754,20 @@ impl Windows {
         let at = strip.under(toast_size(text));
         self.toast(text, ok, Some(at), TOAST_MS)
     }
+}
+
+/// The message that starts a Snip (what the tray's Snip does): the Steps strip's "+" and the
+/// Studio's New snip send it.
+fn start_snip() -> Msg {
+    Msg::Run(crate::Trigger::Quick(
+        Instant::now(),
+        crate::shared::config::QuickAction {
+            action: "snip".into(),
+            shortcut: String::new(),
+            target: crate::shared::config::Target::Circle,
+            live: false,
+        },
+    ))
 }
 
 /// The strip's saved spot (`snip.steps_spot`) when it was left on the screen at `origin`.
@@ -1862,6 +1868,11 @@ impl Windows {
                         stop.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     self.studio = None; // its picture and history are freed
+                    // the steps it held (no strip window) go with it: the Studio owned them,
+                    // and its own Save / Don't save question covered unsaved work
+                    if self.steps.as_ref().is_some_and(|(w, _)| w.is_none()) {
+                        self.steps = None;
+                    }
                     crate::features::snip::annotate::clear_clipboard();
                     crate::shared::platform::sys::mem::trim_heap_soon();
                     return Task::none();
