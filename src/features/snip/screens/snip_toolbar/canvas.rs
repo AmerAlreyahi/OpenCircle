@@ -474,6 +474,8 @@ impl canvas::Program<Message> for Input<'_> {
 
 #[cfg(test)]
 mod key_tests;
+#[cfg(test)]
+mod w111_tests;
 
 #[cfg(test)]
 mod tests {

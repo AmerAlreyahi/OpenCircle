@@ -73,6 +73,8 @@ mod text;
 mod wheel;
 pub use wheel::WHEEL_PX;
 #[cfg(test)]
+mod w111_tests;
+#[cfg(test)]
 mod wheel_tests;
 
 pub use document::rounded as rounded_path;
@@ -2637,6 +2639,12 @@ impl Annotator {
         self.display = None;
         self.crisp = false;
         self.update_live();
+    }
+
+    /// The pending item's painted layer (the tests).
+    #[cfg(test)]
+    fn live_layer(&self) -> Option<(Rectangle, image::Handle)> {
+        self.live.clone()
     }
 
     /// Snip's live area with nothing on it: the overlay's frozen frame under

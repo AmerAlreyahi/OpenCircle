@@ -246,32 +246,40 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
         );
     }
 
-    // A ring (a shape's outline) is mostly the very thing it hides: its
-    // background is read over a band three times as wide, so the surroundings
-    // outweigh it (the ring itself still gives the ink colour).
-    let wide = (fp.kind != Kind::Brush && fp.outline > 0.0).then(|| {
-        let halo = Footprint {
+    // 1. The ONLY reading of the source: the background and the ink colour. They are read over the
+    // WHOLE footprint, never only over the part a repaint's region holds (W111: a pen stroke's live
+    // layer cut a Hide's footprint, its two colours came from the cut and the Hide changed look while
+    // the stroke was drawn). A ring (a shape's outline) is mostly the very thing it hides: its
+    // background is read over a band three times as wide, so the surroundings outweigh it (the ring
+    // itself still gives the ink colour).
+    let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
+    let fill = {
+        let halo = (fp.kind != Kind::Brush && fp.outline > 0.0).then_some(Footprint {
             outline: fp.outline * 3.0,
             ..*fp
+        });
+        let reading = halo.as_ref().unwrap_or(fp);
+        // image px: the picture it reads (else the layer, which sits at (oxi, oyi))
+        let (iw, ih) = match fp.source {
+            Some(img) => (i64::from(img.width), i64::from(img.height)),
+            None => (w + oxi, h + oyi),
         };
-        let (rx0, ry0, rx1, ry1) = clip(frame(&halo));
+        let r = frame(reading);
+        let (rx0, ry0) = (
+            (r.x.floor() as i64).clamp(0, iw),
+            (r.y.floor() as i64).clamp(0, ih),
+        );
+        let (rx1, ry1) = (
+            ((r.x + r.width).ceil() as i64).clamp(0, iw),
+            ((r.y + r.height).ceil() as i64).clamp(0, ih),
+        );
+        let rw = (rx1 - rx0).max(0) as usize;
         let mut mask = Mask::new((rx1 - rx0).max(1) as u32, (ry1 - ry0).max(1) as u32);
-        if let (Some(m), Some(path)) = (mask.as_mut(), halo.path()) {
-            let to = Transform::from_translate(-(ox + rx0 as f32), -(oy + ry0 as f32));
+        if let (Some(m), Some(path)) = (mask.as_mut(), reading.path()) {
+            let to = Transform::from_translate(-(rx0 as f32), -(ry0 as f32));
             m.fill_path(&path, FillRule::Winding, false, to);
         }
-        ((rx0, ry0, rx1, ry1), mask)
-    });
-
-    // 1. The ONLY reading of the source: the background and the ink colour.
-    let fill = {
         let data = layer.pm.data();
-        let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
-        let ((rx0, ry0, rx1, ry1), mask) = match &wide {
-            Some((region, Some(mask))) => (*region, mask),
-            _ => ((ax0, ay0, ax1, ay1), &hard),
-        };
-        let rw = (rx1 - rx0).max(0) as usize;
         // (A big footprint is sampled: a drag repaints it every frame, and two
         // colours need no more than a few thousand pixels.)
         let step = (rw * (ry1 - ry0).max(0) as usize / SAMPLES).max(1);
@@ -280,23 +288,29 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
             .enumerate()
             .filter(|(n, _)| n % step == 0)
             .filter_map(|(_, (x, y))| {
-                let m = mask.data()[(y - ry0) as usize * rw + (x - rx0) as usize];
-                let i = ((y * w + x) * 4) as usize;
+                let m = mask.as_ref()?.data()[(y - ry0) as usize * rw + (x - rx0) as usize];
                 let at = |px: &[u8]| [px[0], px[1], px[2]];
-                let picture = fp.source.and_then(|img| {
-                    let (ix, iy) = (x + oxi, y + oyi);
-                    let j = ((iy * i64::from(img.width) + ix) * 4) as usize;
-                    (ix >= 0 && iy >= 0 && ix < i64::from(img.width) && iy < i64::from(img.height))
-                        .then(|| at(&img.rgba[j..j + 3]))
+                let picture = fp.source.map(|img| {
+                    let j = ((y * i64::from(img.width) + x) * 4) as usize;
+                    at(&img.rgba[j..j + 3])
                 });
-                (m > 0).then(|| picture.unwrap_or_else(|| at(&data[i..i + 3])))
+                let here = || {
+                    let (lx, ly) = (x - oxi, y - oyi);
+                    (lx >= 0 && ly >= 0 && lx < w && ly < h).then(|| {
+                        let i = ((ly * w + lx) * 4) as usize;
+                        at(&data[i..i + 3])
+                    })
+                };
+                if m == 0 {
+                    return None;
+                }
+                picture.or_else(here)
             });
         let (ink, bg) = colours(under);
         // The ink term is quantised coarsely (a fringe's few levels of the ink read
         // no longer reach the fill); the background stays exact, so a pastel stays pastel.
         [0, 1, 2].map(|k| bg[k] * (1.0 - DARKEN) + (ink[k] / INK_STEP).round() * INK_STEP * DARKEN)
     };
-    let (oxi, oyi) = (ox.round() as i64, oy.round() as i64);
 
     // 2. The texture, from the seed and image coordinates only.
     let tone: Box<dyn Fn(i64, i64) -> f32> = match style {
