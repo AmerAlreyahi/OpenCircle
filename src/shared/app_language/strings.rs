@@ -1705,6 +1705,8 @@ strings! {
         | "اللون";
     sn_undo: "Undo"
         | "تراجع";
+    sn_closed: "Snip closed"
+        | "أُغلقت اللقطة";
     sn_redo: "Redo"
         | "إعادة";
     sn_more: "More"

@@ -90,6 +90,15 @@ impl App {
             Message::Windows(windows::Msg::StudioCutOut) => self.studio_cut_out(),
             Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
             Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),
+            Message::Windows(windows::Msg::ToastAction) | Message::SnipUndo => {
+                self.snip_undo_restore()
+            }
+            Message::SnipUndoGone(n) => {
+                if self.snip_undo.as_ref().is_some_and(|(k, _)| *k == n) {
+                    self.snip_undo = None;
+                }
+                Task::none()
+            }
             Message::Windows(windows::Msg::UpdatePill(msg)) => self.on_update_pill(msg),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
@@ -911,6 +920,8 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)
+            | Message::SnipUndo
+            | Message::SnipUndoGone(_)
             | Message::StudioTranslate(..)
             | Message::ChatHome(_)
             | Message::StudioReader(..)

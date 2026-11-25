@@ -169,6 +169,10 @@ pub(crate) struct App {
     /// Linux: when the last opening's windows were closed (or hidden); the desktop
     /// still fades them out a moment, so a grab then waits (`grab_wait`).
     pub(crate) overlay_gone: Option<Instant>,
+    /// Snip closed with drawings: the editor kept for the "Snip closed . Undo" pill, and the
+    /// pill's number (`Message::SnipUndoGone`).
+    pub(crate) snip_undo: Option<(u32, Box<crate::features::snip::annotate::Annotator>)>,
+    pub(crate) snip_undos: u32,
     /// `can_hide_windows()`, read once at boot.
     pub(crate) can_hide: bool,
     /// The number of the capture running on its thread. Cleared by Esc or the
@@ -300,6 +304,8 @@ impl App {
             overlay,
             overlay_open: true,
             overlay_gone: None,
+            snip_undo: None,
+            snip_undos: 0,
             can_hide: true,
             capturing: None,
             pre_shown: false,
@@ -472,7 +478,26 @@ impl App {
             ]),
             None => Subscription::none(),
         };
+        // "Snip closed . Undo": Ctrl+Z in any of our windows presses it too.
+        let undo_key = match self.snip_undo {
+            Some(_) => iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                    key,
+                    physical_key,
+                    modifiers,
+                    ..
+                }) if modifiers.command()
+                    && !modifiers.shift()
+                    && key.to_latin(physical_key) == Some('z') =>
+                {
+                    Some(Message::SnipUndo)
+                }
+                _ => None,
+            }),
+            None => Subscription::none(),
+        };
         let triggers = Subscription::batch([
+            undo_key,
             Subscription::run(triggers).map(Message::Trigger),
             self.windows.subscription().map(Message::Windows),
             moved,

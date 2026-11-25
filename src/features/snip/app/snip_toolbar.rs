@@ -483,6 +483,53 @@ mod tests {
         app
     }
 
+    /// Draws one rectangle on the open Snip editor.
+    fn draw_rect(app: &mut App) {
+        use crate::features::snip::annotate::{Message as M, Tool};
+        let _ = app.on_snip_toolbar(M::Tool(Tool::Rect));
+        let _ = app.on_snip_toolbar(M::Press(Point::new(150.0, 120.0)));
+        let _ = app.on_snip_toolbar(M::Move(Point::new(260.0, 200.0)));
+        let _ = app.on_snip_toolbar(M::Release);
+        assert!(!app.o.edit.as_ref().unwrap().annotator.doc.items.is_empty());
+    }
+
+    /// F5-1: the x of a Snip with drawings closes it with a "Snip closed . Undo"
+    /// pill that keeps the drawings; F5-2: Undo opens them again in the Studio.
+    #[test]
+    fn f5_closing_a_snip_with_drawings_offers_undo_and_undo_restores_them() {
+        let mut app = snip_toolbar_open();
+        draw_rect(&mut app);
+        // (the task holds the pill's 8 s clock: not run here)
+        let _task = app.on_snip_toolbar(E::Close);
+        assert!(app.hiding != Hiding::No, "Snip closed");
+        assert!(app.snip_undo.is_some(), "the drawings are kept");
+        let words = app.windows.toasts();
+        assert_eq!(words.len(), 1, "the pill");
+        assert_eq!(words[0].0, "Snip closed");
+        let task = app.update(crate::app::message::Message::SnipUndo);
+        run_task(&mut app, task);
+        assert!(app.snip_undo.is_none());
+        assert!(app.windows.studio_mut().is_some(), "the picture is back");
+    }
+
+    /// F5-3: no drawings, no pill (Esc closes silently as before); F5-4: when
+    /// the pill is over, the kept drawings go (an older pill's end changes nothing).
+    #[test]
+    fn f5_no_drawings_no_pill_and_the_kept_drawings_go_with_the_pill() {
+        let mut app = snip_toolbar_open();
+        let task = app.on_snip_toolbar(E::Close);
+        run_task(&mut app, task);
+        assert!(app.snip_undo.is_none() && app.windows.toasts().is_empty());
+        let mut app = snip_toolbar_open();
+        draw_rect(&mut app);
+        let _task = app.on_snip_toolbar(E::Close);
+        let n = app.snip_undo.as_ref().unwrap().0;
+        let _ = app.update(crate::app::message::Message::SnipUndoGone(n + 1));
+        assert!(app.snip_undo.is_some());
+        let _ = app.update(crate::app::message::Message::SnipUndoGone(n));
+        assert!(app.snip_undo.is_none());
+    }
+
     /// A keyboard nudge after a pause: the toolbar's glide logs only its own
     /// frames, not the idle time before it (the VM's "bar glide ... max
     /// 2001 ms apart" was the wait between two nudges); docked by OPEN.

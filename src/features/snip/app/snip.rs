@@ -269,6 +269,11 @@ impl App {
     /// started from (same window, same frame, same pill: no untranslated frame in between), else
     /// the overlay closes. Esc at the pick step, the end of a Copy / Save / Copy text pill.
     pub(crate) fn end_snip(&mut self) -> Task<Message> {
+        let undo = self.snip_undo_offer();
+        Task::batch([undo, self.end_snip_now()])
+    }
+
+    fn end_snip_now(&mut self) -> Task<Message> {
         let Some(view) = self.o.translated_view.take() else {
             crate::log!("[opencircle] Snip ended: overlay closed");
             return self.close();
@@ -840,4 +845,51 @@ fn copy_snip(crop: Crop) -> Task<Message> {
             crate::log!("copy failed: {e}");
         }
     })
+}
+
+/// "Snip closed . Undo" shows this long (then the kept drawings go).
+pub(crate) const UNDO_MS: u64 = 8000;
+
+impl App {
+    /// Snip is closing with drawings on the picture: the editor is kept and the
+    /// "Snip closed . Undo" pill offers it back. No drawings (or a translated
+    /// view to go back to): nothing, as before.
+    pub(crate) fn snip_undo_offer(&mut self) -> Task<Message> {
+        let drawn = self.o.translated_view.is_none()
+            && matches!(self.o.purpose, Purpose::Snip(_))
+            && (self.o.edit.as_ref()).is_some_and(|e| !e.annotator.doc.items.is_empty());
+        let Some(edit) = self.o.edit.take().filter(|_| drawn) else {
+            return Task::none();
+        };
+        self.snip_undos = self.snip_undos.wrapping_add(1);
+        let n = self.snip_undos;
+        self.snip_undo = Some((n, Box::new(edit.annotator)));
+        let pill = (self.windows)
+            .toast_with(
+                crate::t!(sn_closed),
+                crate::app::screens::toast::Tone::Neutral,
+                None,
+                UNDO_MS,
+                Some(crate::t!(sn_undo)),
+            )
+            .map(Message::Windows);
+        let over = background(move |tx| {
+            std::thread::sleep(Duration::from_millis(UNDO_MS));
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::SnipUndoGone(n));
+        Task::batch([pill, over])
+    }
+
+    /// The pill's Undo (or Ctrl+Z): the capture and its drawings open again, in
+    /// the Studio (where Snip's own "Open in Studio" takes them).
+    pub(crate) fn snip_undo_restore(&mut self) -> Task<Message> {
+        let Some((_, annotator)) = self.snip_undo.take() else {
+            return Task::none();
+        };
+        use crate::features::snip::screens::studio::Picture;
+        (self.windows)
+            .open_studio(Some(Picture::Editor(annotator)))
+            .map(Message::Windows)
+    }
 }

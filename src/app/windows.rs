@@ -141,6 +141,8 @@ pub enum Msg {
     /// The Studio's download card: Download / Try again, and dismissed.
     StudioDownload,
     StudioDismiss,
+    /// A toast's action word was pressed (`Windows::toast_with`; the App decides).
+    ToastAction,
     /// A walkthrough's encoder: a frame done, or its end.
     StudioWalk(studio::Walked),
 }
@@ -152,7 +154,7 @@ pub struct Windows {
     permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
     /// Small message windows (a pill each) and their text.
-    toasts: Vec<(window::Id, String, Tone)>,
+    toasts: Vec<(window::Id, String, Tone, Option<&'static str>)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// The update pill above the tray, at most one, and when it opened (the
@@ -906,7 +908,23 @@ impl Windows {
         at: Option<platform::monitor::Place>,
         ms: u64,
     ) -> Task<Msg> {
-        let size = toast_size(text);
+        self.toast_with(text, tone, at, ms, None)
+    }
+
+    /// `toast` with an action word after the text ("Snip closed . Undo"):
+    /// pressing it sends `Msg::ToastAction`.
+    pub fn toast_with(
+        &mut self,
+        text: &str,
+        tone: impl Into<Tone>,
+        at: Option<platform::monitor::Place>,
+        ms: u64,
+        action: Option<&'static str>,
+    ) -> Task<Msg> {
+        let size = match action {
+            Some(a) => spoken(|| crate::shared::kit::toast::size_with_action(text, a)),
+            None => toast_size(text),
+        };
         let (id, open) = floating(
             window::Settings {
                 size,
@@ -933,7 +951,8 @@ impl Windows {
                 .discard(),
             None => open.discard(),
         };
-        self.toasts.push((id, text.to_string(), tone.into()));
+        self.toasts
+            .push((id, text.to_string(), tone.into(), action));
         // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
@@ -947,7 +966,7 @@ impl Windows {
     #[cfg(test)]
     pub fn toasts(&self) -> Vec<(String, bool)> {
         (self.toasts.iter())
-            .map(|(_, text, tone)| (text.clone(), *tone == Tone::Ok))
+            .map(|(_, text, tone, _)| (text.clone(), *tone == Tone::Ok))
             .collect()
     }
 
@@ -1495,7 +1514,7 @@ impl Windows {
                 };
                 return self.studio_outcome(out);
             }
-            Msg::StudioDownload | Msg::StudioDismiss => {}
+            Msg::StudioDownload | Msg::StudioDismiss | Msg::ToastAction => {}
             Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioWalk(walked) => return self.on_walked(walked),
             Msg::StudioToast(done) => {
@@ -1844,9 +1863,14 @@ impl Windows {
         if let Some((_, menu)) = self.tray_menu.as_ref().filter(|(m, _)| *m == window) {
             return Some(spoken(|| tray_menu::view(menu)).map(Msg::TrayMenu));
         }
-        if let Some((_, text, tone)) = self.toasts.iter().find(|(t, ..)| *t == window) {
+        if let Some((_, text, tone, action)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             let radius = shape::radius(toast::RADIUS);
-            return Some(spoken(|| toast::view(text, *tone, radius)));
+            return Some(match action {
+                Some(a) => spoken(|| {
+                    crate::shared::kit::toast::with_action(text, *tone, radius, a, Msg::ToastAction)
+                }),
+                None => spoken(|| toast::view(text, *tone, radius)),
+            });
         }
         if let Some((id, state)) = &self.settings
             && *id == window
