@@ -1935,3 +1935,50 @@ fn hide_options_round_trip_through_the_file() {
         assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
     }
 }
+
+/// W114: an older config holding `blur_style = "soft"` maps to Blur (look only) so
+/// nobody's look silently changes; the new secure Soft serializes as `"soft_hide"`,
+/// remembered choices stay, and an unset config opens on the new secure Soft.
+#[test]
+fn w114_old_soft_config_maps_to_blur_look_only_and_new_soft_round_trips() {
+    use crate::features::snip::annotate::blur::Style;
+    // Older config with "soft" -> Blur (look only), zero warnings.
+    let (old, w) = Config::parse("[editor]\nblur_style = \"soft\"\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(old.editor.blur_style, Some(Style::Blur));
+    assert!(old.editor.blur_style.unwrap().is_look());
+
+    // Remembered Frost / Pixelate / Frosted / Progressive stay untouched.
+    for (raw, want) in [
+        ("frost", Style::Frost),
+        ("pixelate", Style::Pixelate),
+        ("blur", Style::Blur),
+        ("frosted", Style::Frosted),
+        ("progressive", Style::Progressive),
+        ("soft_hide", Style::Soft),
+    ] {
+        let (c, w) = Config::parse(&format!("[editor]\nblur_style = \"{raw}\"\n"));
+        assert!(w.is_empty(), "{raw}: {w:?}");
+        assert_eq!(c.editor.blur_style, Some(want), "{raw}");
+    }
+
+    // Round-trip of the new secure Soft writes "soft_hide", never "soft".
+    let mut c = Config::default();
+    c.editor.blur_style = Some(Style::Soft);
+    let saved = toml::to_string_pretty(&c).unwrap();
+    assert!(saved.contains("blur_style = \"soft_hide\""), "{saved}");
+    let (back, w) = Config::parse(&saved);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.editor.blur_style, Some(Style::Soft));
+
+    // Unset config opens on the new secure Soft.
+    let fresh = Config::default();
+    assert_eq!(fresh.editor.blur_style, None);
+    let img = crate::features::snip::annotate::Image {
+        width: 40,
+        height: 40,
+        rgba: vec![250; 40 * 40 * 4],
+    };
+    let e = crate::features::snip::annotate::Annotator::restored(img, 1.0, fresh.editor);
+    assert_eq!(e.blur_style, Style::Soft);
+}

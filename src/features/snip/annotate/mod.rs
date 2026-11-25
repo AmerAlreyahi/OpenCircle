@@ -2806,14 +2806,15 @@ pub(crate) fn tool_of(shape: &Shape) -> Tool {
 }
 
 /// Hide's styles and their words, in the order of the options row (Snip's
-/// panel and the Studio's bar both show this one list): the two that never
+/// panel and the Studio's bar both show this one list): the three that never
 /// read the text, then the looks.
-pub fn blur_styles() -> [(blur::Style, &'static str); 5] {
+pub fn blur_styles() -> [(blur::Style, &'static str); 6] {
     use crate::t;
     [
-        (blur::Style::Frost, t!(sn_style_hide)),
-        (blur::Style::Pixelate, t!(sn_style_pixelate)),
         (blur::Style::Soft, t!(sn_style_soft)),
+        (blur::Style::Frost, t!(sn_style_frost)),
+        (blur::Style::Pixelate, t!(sn_style_pixelate)),
+        (blur::Style::Blur, t!(sn_style_blur)),
         (blur::Style::Frosted, t!(sn_style_frosted)),
         (blur::Style::Progressive, t!(sn_style_progressive)),
     ]

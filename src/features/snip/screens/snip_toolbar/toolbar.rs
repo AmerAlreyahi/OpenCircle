@@ -1344,7 +1344,7 @@ mod tests {
         let panel = crate::shared::kit::testing::shot::texts(view(&e));
         assert!(!panel.iter().any(|t| t == "Pixelate"), "{panel:?}");
         e.update(Message::BlurStyle(
-            crate::features::snip::annotate::blur_styles()[2].0,
+            crate::features::snip::annotate::blur_styles()[3].0,
         ));
         assert!(
             row_texts(&e).unwrap().iter().any(|t| t.contains("looks")),

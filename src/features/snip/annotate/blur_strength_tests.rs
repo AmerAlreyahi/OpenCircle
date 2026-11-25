@@ -93,17 +93,18 @@ fn w102_5c_hide_keys() {
         Some(Message::Tool(Tool::Blur))
     ));
     // The cycle walks the whole list and comes back round.
+    let n = blur_styles().len();
     let first = e.blur_style;
     let mut seen = vec![first];
-    for _ in 0..5 {
+    for _ in 0..n {
         e.update(Message::BlurCycle);
         seen.push(e.blur_style);
     }
-    assert_eq!(seen[5], first);
+    assert_eq!(seen[n], first);
     seen.pop();
     seen.sort_by_key(|s| *s as usize);
     seen.dedup();
-    assert_eq!(seen.len(), 5, "every style once");
+    assert_eq!(seen.len(), n, "every style once");
     // With another tool the keys are the tools' own.
     e.update(Message::Tool(Tool::Arrow));
     assert!(!matches!(
@@ -186,19 +187,19 @@ fn w102_5f_cycling_never_restyles_an_existing_hide() {
     e.update(Message::Move(pt(200.0, 100.0)));
     e.update(Message::Release);
     e.doc.select_one(Some(0));
-    for _ in 0..4 {
+    for _ in 0..5 {
         e.update(Message::BlurCycle);
         let Shape::Blur { style, .. } = e.doc.items[0].shape else {
             panic!()
         };
-        assert_eq!(style, blur::Style::Frost, "after {:?}", e.blur_style);
+        assert_eq!(style, blur::Style::Soft, "after {:?}", e.blur_style);
     }
-    assert_ne!(e.blur_style, blur::Style::Frost);
-    e.update(Message::BlurStyle(blur::Style::Soft));
+    assert_ne!(e.blur_style, blur::Style::Soft);
+    e.update(Message::BlurStyle(blur::Style::Blur));
     let Shape::Blur { style, .. } = e.doc.items[0].shape else {
         panic!()
     };
-    assert_eq!(style, blur::Style::Soft, "a click on a card restyles it");
+    assert_eq!(style, blur::Style::Blur, "a click on a card restyles it");
 }
 
 /// W104 (review): the style pictures follow the drawing with the pointer kept STILL: while a Hide is

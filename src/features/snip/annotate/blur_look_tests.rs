@@ -41,17 +41,21 @@ fn variation(c: &Crop, y0: u32, y1: u32) -> f32 {
 /// picture, so two pictures differ), and its note is "for looks".
 #[test]
 fn w102_4a_soft_reads_the_picture_and_is_a_look() {
-    assert!(blur::Style::Soft.is_look() && !blur::Style::Frost.is_look());
+    assert!(
+        blur::Style::Blur.is_look()
+            && !blur::Style::Soft.is_look()
+            && !blur::Style::Frost.is_look()
+    );
     let (a, b) = (
         rendered(
             stripes(240, 160, 0),
             1,
-            vec![look(blur::Style::Soft, vec![])],
+            vec![look(blur::Style::Blur, vec![])],
         ),
         rendered(
             stripes(240, 160, 2),
             1,
-            vec![look(blur::Style::Soft, vec![])],
+            vec![look(blur::Style::Blur, vec![])],
         ),
     );
     assert_ne!(a.rgba, b.rgba, "a look reads the picture");
@@ -79,7 +83,7 @@ fn w102_4b_frosted_adds_a_light_tint() {
     let soft = rendered(
         stripes(240, 160, 0),
         1,
-        vec![look(blur::Style::Soft, vec![])],
+        vec![look(blur::Style::Blur, vec![])],
     );
     let frosted = rendered(
         stripes(240, 160, 0),
@@ -126,12 +130,12 @@ fn w102_4c_progressive_fades_from_the_start_handle_to_clear() {
 fn w102_4d_looks_are_hidden_from_text_reading_and_never_the_default() {
     let doc = {
         let mut d = Document::new(stripes(240, 160, 0));
-        d.exec(Edit::Insert(0, look(blur::Style::Soft, vec![])));
+        d.exec(Edit::Insert(0, look(blur::Style::Blur, vec![])));
         d
     };
     assert!(super::hidden(&doc).covers(100.0, 80.0));
     let e = Annotator::new(stripes(240, 160, 0), 1.0);
-    assert_eq!(e.blur_style, blur::Style::Frost);
+    assert_eq!(e.blur_style, blur::Style::Soft);
     let styles = blur_styles();
     assert_eq!(styles.iter().filter(|(s, _)| s.is_look()).count(), 3);
     assert!(
@@ -155,11 +159,11 @@ fn w102_4e_style_applies_to_the_selected_hide_and_progressive_has_handles() {
     ));
     e.doc.select_one(Some(0));
     e.update(Message::Tool(Tool::Select)); // (the bar shows the selected Hide's row)
-    e.update(Message::BlurStyle(blur::Style::Soft));
+    e.update(Message::BlurStyle(blur::Style::Blur));
     let Shape::Blur { style, .. } = &e.doc.items[0].shape else {
         panic!()
     };
-    assert_eq!(*style, blur::Style::Soft);
+    assert_eq!(*style, blur::Style::Blur);
     e.update(Message::BlurStyle(blur::Style::Progressive));
     let handles = select::handles(&e.doc.items[0]);
     assert_eq!(handles.len(), 6, "four corners, then start and end");

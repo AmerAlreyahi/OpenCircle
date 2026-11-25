@@ -218,10 +218,10 @@ fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
         );
         e.update(Message::Tool(Tool::Blur));
         e.update(Message::Move(pt(110.0, 105.0)));
-        // Frost and Pixelate (the first two) never read the annotations
+        // Soft, Frost and Pixelate (the first three) never read the annotations
         assert_eq!(
-            thumb_pixels(&e)[..2],
-            thumbs0[..2],
+            thumb_pixels(&e)[..3],
+            thumbs0[..3],
             "{tool:?} {from:?}: the style pictures are as they were"
         );
     }

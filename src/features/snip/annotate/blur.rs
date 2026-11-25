@@ -46,17 +46,40 @@ pub const BLOCK_NOISE: f32 = 8.0;
 /// Pixelate: secret tone jitter per cell, ± levels.
 pub const JITTER: f32 = 6.0;
 
-/// How a hidden area looks. Both never read the covered text.
+/// Soft: how far toward a neutral veil the ring colour shifts (so uniform
+/// white or dark cards still read as gently blurred, not erased).
+pub const SOFT_VEIL: f32 = 0.11;
+/// Soft: the veil's neutral mid-tone (smooth across all luminances, no step).
+const SOFT_TARGET: f32 = 136.0;
+/// Soft: silky two-octave quintic texture reach, ± levels.
+const SOFT_WAVE_A: f32 = 5.0;
+const SOFT_WAVE_B: f32 = 2.2;
+/// Soft: max side and minimum cell width (image px) of the harmonic ring grid.
+/// Cells >= 14 px wide with per-cell median + 3x3 ring median reject unhidden
+/// text glyphs touching the Hide's edge while keeping gradients & photos smooth.
+const SOFT_GRID: usize = 32;
+const SOFT_CELL_MIN: f32 = 14.0;
+/// Soft: exact 1:1 exterior-ring mask up to this many pixels (larger areas use
+/// a conservative stride so 4K/8K drags stay sub-millisecond).
+const SOFT_EXACT_AREA: usize = 262_144;
+
+/// How a hidden area looks. The first three never read the covered text.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Style {
-    /// A smooth, secure frost (the default).
+    /// A smooth, pretty soft blur built ONLY from the exterior ring (never the
+    /// covered content): the default.
     #[default]
+    #[serde(rename = "soft_hide")]
+    Soft,
+    /// A smooth, secure frost.
     Frost,
     /// A fine pixel mosaic (the look of the first secure blur).
     Pixelate,
-    /// A look: a soft Gaussian blur of what is there.
-    Soft,
+    /// A look: a soft Gaussian blur of what is there (old "soft" configs map
+    /// here so nobody's look silently changes).
+    #[serde(rename = "blur", alias = "soft")]
+    Blur,
     /// A look: a blur with a light tint, a little more colour and fine noise
     /// (the Acrylic recipe).
     Frosted,
@@ -68,7 +91,7 @@ impl Style {
     /// A look reads what it covers: for looks, not for secrets (the lab got a
     /// 6-digit code back 100 % through any such blur).
     pub fn is_look(self) -> bool {
-        matches!(self, Style::Soft | Style::Frosted | Style::Progressive)
+        matches!(self, Style::Blur | Style::Frosted | Style::Progressive)
     }
 }
 
@@ -230,7 +253,15 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
     let cover: Vec<f32> = cover
         .iter()
         .zip(hard.data())
-        .map(|(&[soft], &m)| (soft * 2.0).min(1.0).max(f32::from(m) / 255.0))
+        .map(|(&[soft], &m)| {
+            let rim = (soft * 2.0).min(1.0);
+            let rim = if style == Style::Soft {
+                rim * rim * (3.0 - 2.0 * rim)
+            } else {
+                rim
+            };
+            rim.max(f32::from(m) / 255.0)
+        })
         .collect();
 
     if style.is_look() {
@@ -244,6 +275,10 @@ pub fn paint(layer: &mut Layer, fp: &Footprint, cell_px: f32, style: Style, seed
             seed,
             clip(area.expand(3.0 * sigma(cell_px).ceil() + 1.0)),
         );
+    }
+
+    if style == Style::Soft {
+        return soft_hide(layer, fp, &cover, (ax0, ay0, ax1, ay1), cell_px, seed);
     }
 
     // 1. The ONLY reading of the source: the background and the ink colour. They are read over the
@@ -433,7 +468,7 @@ fn look(
             );
             let t = strength - lo as f32;
             let mut c = [0, 1, 2].map(|k| blurred[lo][at][k] * (1.0 - t) + blurred[hi][at][k] * t);
-            if style != Style::Soft {
+            if style != Style::Blur {
                 // Frosted: tint + colour boost + grain; Progressive: the same
                 // tint, fading with the blur.
                 let fade = strength / levels as f32;
@@ -460,11 +495,13 @@ fn look(
     }
 }
 
-/// Smooth value noise in -1..=1 on a lattice of `l` px anchored to image
-/// coordinates (smoothstep between hashed corners): the Frost texture. The
-/// corners over a region are hashed once.
+/// Smooth value noise in -1..=1 on a lattice of `(lx, ly)` px anchored to image
+/// coordinates (cubic smoothstep for Frost, C2 quintic for Soft). The corners
+/// over a region are hashed once.
 struct Lattice {
-    l: i64,
+    lx: i64,
+    ly: i64,
+    quintic: bool,
     /// The first corner column and row, and the columns per row.
     gx0: i64,
     gy0: i64,
@@ -473,16 +510,30 @@ struct Lattice {
 }
 
 impl Lattice {
-    /// Covers image px `(x0, y0)..(x1, y1)`.
-    fn new(seed: u64, l: i64, (x0, y0, x1, y1): (i64, i64, i64, i64)) -> Self {
-        let (gx0, gy0) = (x0.div_euclid(l), y0.div_euclid(l));
-        let (gx1, gy1) = (x1.div_euclid(l) + 1, y1.div_euclid(l) + 1);
+    /// Covers image px `(x0, y0)..(x1, y1)` with square cells of side `l`.
+    fn new(seed: u64, l: i64, bounds: (i64, i64, i64, i64)) -> Self {
+        Self::with(seed, l, l, false, bounds)
+    }
+
+    /// Covers image px `(x0, y0)..(x1, y1)` with `(lx, ly)` cells.
+    fn with(
+        seed: u64,
+        lx: i64,
+        ly: i64,
+        quintic: bool,
+        (x0, y0, x1, y1): (i64, i64, i64, i64),
+    ) -> Self {
+        let (lx, ly) = (lx.max(1), ly.max(1));
+        let (gx0, gy0) = (x0.div_euclid(lx), y0.div_euclid(ly));
+        let (gx1, gy1) = (x1.div_euclid(lx) + 1, y1.div_euclid(ly) + 1);
         let corners = (gy0..=gy1)
             .flat_map(|gy| (gx0..=gx1).map(move |gx| (gx, gy)))
             .map(|(gx, gy)| unit(mix(seed ^ mix(gx as u64 ^ (gy as u64) << 32))))
             .collect();
         Lattice {
-            l,
+            lx,
+            ly,
+            quintic,
             gx0,
             gy0,
             gw: (gx1 - gx0 + 1) as usize,
@@ -491,19 +542,446 @@ impl Lattice {
     }
 
     fn at(&self, x: i64, y: i64) -> f32 {
-        let l = self.l;
-        let smooth = |v: i64| {
+        let smooth = |v: i64, l: i64| {
             let t = v.rem_euclid(l) as f32 / l as f32;
-            t * t * (3.0 - 2.0 * t)
+            match self.quintic {
+                true => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
+                false => t * t * (3.0 - 2.0 * t),
+            }
         };
-        let (tx, ty) = (smooth(x), smooth(y));
-        let at = ((y.div_euclid(l) - self.gy0) as usize * self.gw)
-            + (x.div_euclid(l) - self.gx0) as usize;
+        let (tx, ty) = (smooth(x, self.lx), smooth(y, self.ly));
+        let at = ((y.div_euclid(self.ly) - self.gy0) as usize * self.gw)
+            + (x.div_euclid(self.lx) - self.gx0) as usize;
         let c = &self.corners;
         let top = c[at] * (1.0 - tx) + c[at + 1] * tx;
         let bottom = c[at + self.gw] * (1.0 - tx) + c[at + self.gw + 1] * tx;
         top * (1.0 - ty) + bottom * ty
     }
+}
+
+/// Smooth harmonic RGB field interpolated strictly from the exterior ring
+/// around `fp` (never reading a single pixel inside `fp`).
+struct SoftField {
+    rx0: i64,
+    ry0: i64,
+    bw: f32,
+    bh: f32,
+    gw: usize,
+    gh: usize,
+    grid: Vec<[f32; 3]>,
+}
+
+impl SoftField {
+    fn at(&self, ix: i64, iy: i64) -> [f32; 3] {
+        let fx = (((ix - self.rx0) as f32 + 0.5) * self.gw as f32 / self.bw - 0.5)
+            .clamp(0.0, (self.gw - 1) as f32);
+        let fy = (((iy - self.ry0) as f32 + 0.5) * self.gh as f32 / self.bh - 0.5)
+            .clamp(0.0, (self.gh - 1) as f32);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.gw - 1), (y0 + 1).min(self.gh - 1));
+        let (wx, wy) = (fx - x0 as f32, fy - y0 as f32);
+        let c00 = self.grid[y0 * self.gw + x0];
+        let c10 = self.grid[y0 * self.gw + x1];
+        let c01 = self.grid[y1 * self.gw + x0];
+        let c11 = self.grid[y1 * self.gw + x1];
+        [0, 1, 2].map(|k| {
+            let top = c00[k] * (1.0 - wx) + c10[k] * wx;
+            let bot = c01[k] * (1.0 - wx) + c11[k] * wx;
+            top * (1.0 - wy) + bot * wy
+        })
+    }
+}
+
+/// Secure Soft Hide: samples ONLY a thin ring strictly OUTSIDE `fp` from the
+/// original picture (falling back to the exact mode background colour if the
+/// footprint fills the entire picture, never ink), interpolates a smooth
+/// harmonic gradient across the area, applies a gentle luminance-continuous
+/// veil and silky two-octave quintic texture anchored to image coordinates.
+fn soft_hide(
+    layer: &mut Layer,
+    fp: &Footprint,
+    cover: &[f32],
+    (ax0, ay0, ax1, ay1): (i64, i64, i64, i64),
+    cell_px: f32,
+    seed: u64,
+) {
+    let (w, h) = (layer.pm.width() as i64, layer.pm.height() as i64);
+    let (oxi, oyi) = (layer.origin.x.round() as i64, layer.origin.y.round() as i64);
+    let field = build_soft_field(layer, fp, cell_px, (oxi, oyi));
+
+    let c = cell(cell_px);
+    let bounds = (ax0 + oxi, ay0 + oyi, ax1 + oxi, ay1 + oyi);
+    let wave_a = Lattice::with(seed, (c * 4).max(10), (c * 3).max(8), true, bounds);
+    let wave_b = Lattice::with(
+        seed ^ 0x517c_c1b7_2722_0a95,
+        (c * 2).max(5),
+        (c * 2).max(5),
+        true,
+        bounds,
+    );
+
+    let aw = (ax1 - ax0) as usize;
+    let data = layer.pm.data_mut();
+    let _ = h;
+    for y in ay0..ay1 {
+        for x in ax0..ax1 {
+            let m = cover[(y - ay0) as usize * aw + (x - ax0) as usize];
+            if m <= 0.001 {
+                continue;
+            }
+            let (ix, iy) = (x + oxi, y + oyi);
+            let base = field.at(ix, iy);
+            let t = SOFT_WAVE_A * wave_a.at(ix, iy) + SOFT_WAVE_B * wave_b.at(ix, iy);
+            let i = ((y * w + x) * 4) as usize;
+            for k in 0..3 {
+                let v =
+                    (base[k] * (1.0 - SOFT_VEIL) + SOFT_TARGET * SOFT_VEIL + t).clamp(0.0, 255.0);
+                data[i + k] = (v * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
+            }
+            data[i + 3] = 255;
+        }
+    }
+}
+
+/// Builds the exterior-ring harmonic field over the WHOLE footprint (in image
+/// coordinates, never clipped to a partial repaint crop).
+fn build_soft_field(
+    layer: &Layer,
+    fp: &Footprint,
+    cell_px: f32,
+    (oxi, oyi): (i64, i64),
+) -> SoftField {
+    let (lw, lh) = (layer.pm.width() as i64, layer.pm.height() as i64);
+    let (iw, ih) = match fp.source {
+        Some(img) => (i64::from(img.width), i64::from(img.height)),
+        None => (lw + oxi, lh + oyi),
+    };
+    let ring_w = (cell_px * 1.5).round().clamp(10.0, 22.0);
+    let pad = feather(cell_px) + ring_w;
+    let r = frame(fp).expand(pad);
+    let (rx0, ry0) = (
+        (r.x.floor() as i64).clamp(0, iw),
+        (r.y.floor() as i64).clamp(0, ih),
+    );
+    let (rx1, ry1) = (
+        ((r.x + r.width).ceil() as i64).clamp(0, iw),
+        ((r.y + r.height).ceil() as i64).clamp(0, ih),
+    );
+    let (bw, bh) = ((rx1 - rx0).max(1) as usize, (ry1 - ry0).max(1) as usize);
+
+    let stride = if bw * bh <= SOFT_EXACT_AREA {
+        1usize
+    } else {
+        ((bw * bh) as f32 / SOFT_EXACT_AREA as f32).sqrt().ceil() as usize
+    };
+    let (mw, mh) = (bw.div_ceil(stride).max(1), bh.div_ceil(stride).max(1));
+
+    // Rasterise the forbidden interior mask. At stride == 1 this is exact 1:1
+    // (hard, non-AA); at stride > 1 we rasterise AA and conservatively dilate
+    // by 1 coarse cell so no full-res interior pixel can ever be sampled.
+    let mut inside = vec![false; mw * mh];
+    if let (Some(mut mask), Some(path)) = (Mask::new(mw as u32, mh as u32), fp.path()) {
+        let s = 1.0 / stride as f32;
+        let to = Transform::from_translate(-(rx0 as f32), -(ry0 as f32)).post_scale(s, s);
+        mask.fill_path(&path, FillRule::Winding, stride > 1, to);
+        for (dst, &m) in inside.iter_mut().zip(mask.data()) {
+            *dst = m > 0;
+        }
+        if stride > 1 {
+            inside = dilate_mask(&inside, mw, mh, 1);
+        }
+    }
+
+    let ring_r = (ring_w / stride as f32).round().max(2.0) as usize;
+    let dilated = dilate_mask(&inside, mw, mh, ring_r);
+
+    let cell_side = (bw.max(bh) as f32 / SOFT_GRID as f32).max(SOFT_CELL_MIN);
+    let gw = ((bw as f32 / cell_side).ceil() as usize).clamp(1, SOFT_GRID);
+    let gh = ((bh as f32 / cell_side).ceil() as usize).clamp(1, SOFT_GRID);
+
+    let layer_data = layer.pm.data();
+    let sample_rgb = |ix: i64, iy: i64| -> Option<[u8; 3]> {
+        if let Some(img) = fp.source {
+            if ix >= 0 && iy >= 0 && ix < i64::from(img.width) && iy < i64::from(img.height) {
+                let j = ((iy * i64::from(img.width) + ix) * 4) as usize;
+                return Some([img.rgba[j], img.rgba[j + 1], img.rgba[j + 2]]);
+            }
+            return None;
+        }
+        let (lx, ly) = (ix - oxi, iy - oyi);
+        (lx >= 0 && ly >= 0 && lx < lw && ly < lh).then(|| {
+            let i = ((ly * lw + lx) * 4) as usize;
+            [layer_data[i], layer_data[i + 1], layer_data[i + 2]]
+        })
+    };
+
+    let mut buckets: Vec<Vec<[u8; 3]>> = vec![Vec::new(); gw * gh];
+    let mut total_ring = 0usize;
+    let ring_step = ((mw * mh) / (SAMPLES * 2)).max(1);
+    let mut seen = 0usize;
+    for my in 0..mh {
+        let iy = (ry0 + (my * stride) as i64).min(ry1 - 1);
+        let gy = ((my * stride) * gh / bh).min(gh - 1);
+        for mx in 0..mw {
+            let idx = my * mw + mx;
+            if inside[idx] || !dilated[idx] {
+                continue;
+            }
+            seen += 1;
+            if !seen.is_multiple_of(ring_step) {
+                continue;
+            }
+            let ix = (rx0 + (mx * stride) as i64).min(rx1 - 1);
+            let Some(px) = sample_rgb(ix, iy) else {
+                continue;
+            };
+            let gx = ((mx * stride) * gw / bw).min(gw - 1);
+            buckets[gy * gw + gx].push(px);
+            total_ring += 1;
+        }
+    }
+
+    if total_ring == 0 {
+        // Fallback when the Hide fills the whole image: exact mode background
+        // colour only (never ink, never mean).
+        let step = ((mw * mh) / SAMPLES).max(1);
+        let mut counts = std::collections::HashMap::new();
+        for (n, idx) in (0..mw * mh).enumerate() {
+            if !n.is_multiple_of(step) || !inside[idx] {
+                continue;
+            }
+            let (mx, my) = (idx % mw, idx / mw);
+            let ix = (rx0 + (mx * stride) as i64).min(rx1 - 1);
+            let iy = (ry0 + (my * stride) as i64).min(ry1 - 1);
+            if let Some(px) = sample_rgb(ix, iy) {
+                *counts.entry(px).or_insert(0u32) += 1;
+            }
+        }
+        let bg = counts
+            .into_iter()
+            .max_by_key(|&(p, n)| (n, std::cmp::Reverse(p)))
+            .map_or([128.0; 3], |(p, _)| p.map(f32::from));
+        return SoftField {
+            rx0,
+            ry0,
+            bw: bw as f32,
+            bh: bh as f32,
+            gw: 1,
+            gh: 1,
+            grid: vec![bg],
+        };
+    }
+
+    // Per-cell luma-median rejects thin text glyphs sitting just outside the Hide.
+    let luma_key = |p: [u8; 3]| {
+        (
+            299u32 * u32::from(p[0]) + 587 * u32::from(p[1]) + 114 * u32::from(p[2]),
+            p,
+        )
+    };
+    let mut raw_grid = vec![[0.0f32; 3]; gw * gh];
+    let mut known = vec![false; gw * gh];
+    for (i, bucket) in buckets.iter_mut().enumerate() {
+        if !bucket.is_empty() {
+            let mid = bucket.len() / 2;
+            let (_, &mut med, _) = bucket.select_nth_unstable_by_key(mid, |&p| luma_key(p));
+            raw_grid[i] = med.map(f32::from);
+            known[i] = true;
+        }
+    }
+    // 3x3 median over known ring cells cleans any isolated cap cell sitting on
+    // a dense text line while keeping smooth gradients and split backgrounds exact.
+    let mut grid = raw_grid.clone();
+    let mut nbrs = Vec::with_capacity(9);
+    for y in 0..gh {
+        for x in 0..gw {
+            let i = y * gw + x;
+            if !known[i] {
+                continue;
+            }
+            nbrs.clear();
+            for dy in y.saturating_sub(1)..=(y + 1).min(gh - 1) {
+                for dx in x.saturating_sub(1)..=(x + 1).min(gw - 1) {
+                    let ni = dy * gw + dx;
+                    if known[ni] {
+                        nbrs.push(raw_grid[ni]);
+                    }
+                }
+            }
+            nbrs.sort_by(|a, b| luma(*a).total_cmp(&luma(*b)));
+            grid[i] = nbrs[nbrs.len() / 2];
+        }
+    }
+
+    // Pull-push pyramid: coarse-to-fine harmonic initialisation.
+    struct Level {
+        w: usize,
+        h: usize,
+        grid: Vec<[f32; 3]>,
+        known: Vec<bool>,
+    }
+    let mut pyr = vec![Level {
+        w: gw,
+        h: gh,
+        grid: grid.clone(),
+        known: known.clone(),
+    }];
+    loop {
+        let cur = pyr.last().unwrap();
+        let (cw, ch) = (cur.w, cur.h);
+        if cw == 1 && ch == 1 {
+            break;
+        }
+        let (nw, nh) = (cw.div_ceil(2), ch.div_ceil(2));
+        let mut ng = vec![[0.0f32; 3]; nw * nh];
+        let mut nk = vec![false; nw * nh];
+        for ny in 0..nh {
+            for nx in 0..nw {
+                let mut acc = [0.0f32; 3];
+                let mut n = 0u32;
+                for dy in 0..2 {
+                    let sy = (ny * 2 + dy).min(ch - 1);
+                    for dx in 0..2 {
+                        let sx = (nx * 2 + dx).min(cw - 1);
+                        let si = sy * cw + sx;
+                        if cur.known[si] {
+                            (0..3).for_each(|k| acc[k] += cur.grid[si][k]);
+                            n += 1;
+                        }
+                    }
+                }
+                if n > 0 {
+                    ng[ny * nw + nx] = acc.map(|v| v / n as f32);
+                    nk[ny * nw + nx] = true;
+                }
+            }
+        }
+        pyr.push(Level {
+            w: nw,
+            h: nh,
+            grid: ng,
+            known: nk,
+        });
+    }
+
+    let mut fill = pyr.last().unwrap().grid.clone();
+    let (mut pw, mut ph) = (pyr.last().unwrap().w, pyr.last().unwrap().h);
+    for lvl in (0..pyr.len() - 1).rev() {
+        let cur = &pyr[lvl];
+        let (lw, lh) = (cur.w, cur.h);
+        let mut next = vec![[0.0f32; 3]; lw * lh];
+        for y in 0..lh {
+            let fy = (y as f32 * 0.5).min((ph - 1) as f32);
+            let y0 = fy.floor() as usize;
+            let y1 = (y0 + 1).min(ph - 1);
+            let wy = fy - y0 as f32;
+            for x in 0..lw {
+                let li = y * lw + x;
+                if cur.known[li] {
+                    next[li] = cur.grid[li];
+                    continue;
+                }
+                let fx = (x as f32 * 0.5).min((pw - 1) as f32);
+                let x0 = fx.floor() as usize;
+                let x1 = (x0 + 1).min(pw - 1);
+                let wx = fx - x0 as f32;
+                let c00 = fill[y0 * pw + x0];
+                let c10 = fill[y0 * pw + x1];
+                let c01 = fill[y1 * pw + x0];
+                let c11 = fill[y1 * pw + x1];
+                next[li] = [0, 1, 2].map(|k| {
+                    let top = c00[k] * (1.0 - wx) + c10[k] * wx;
+                    let bot = c01[k] * (1.0 - wx) + c11[k] * wx;
+                    top * (1.0 - wy) + bot * wy
+                });
+            }
+        }
+        fill = next;
+        pw = lw;
+        ph = lh;
+    }
+
+    // Harmonic relaxation (Gauss-Seidel, known ring cells pinned), then two
+    // gentle unpinned smoothing passes so stray glyphs outside the rim melt.
+    for _ in 0..24 {
+        for y in 0..gh {
+            let ym = y.saturating_sub(1);
+            let yp = (y + 1).min(gh - 1);
+            for x in 0..gw {
+                let i = y * gw + x;
+                if known[i] {
+                    continue;
+                }
+                let xm = x.saturating_sub(1);
+                let xp = (x + 1).min(gw - 1);
+                let (u, d, l, r) = (
+                    fill[ym * gw + x],
+                    fill[yp * gw + x],
+                    fill[y * gw + xm],
+                    fill[y * gw + xp],
+                );
+                fill[i] = [0, 1, 2].map(|k| 0.25 * (u[k] + d[k] + l[k] + r[k]));
+            }
+        }
+    }
+    blur2d(&mut fill, gw, gh, 1, 2);
+
+    SoftField {
+        rx0,
+        ry0,
+        bw: bw as f32,
+        bh: bh as f32,
+        gw,
+        gh,
+        grid: fill,
+    }
+}
+
+/// Separable square dilation of a binary mask by radius `r` in O(w * h).
+fn dilate_mask(mask: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
+    if r == 0 || w == 0 || h == 0 {
+        return mask.to_vec();
+    }
+    let mut horiz = vec![false; w * h];
+    let r = r as isize;
+    for y in 0..h {
+        let row = &mask[y * w..(y + 1) * w];
+        let out = &mut horiz[y * w..(y + 1) * w];
+        let mut count = 0usize;
+        for &cell in row.iter().take(r.min(w as isize - 1) as usize + 1) {
+            count += usize::from(cell);
+        }
+        for (x, cell) in out.iter_mut().enumerate() {
+            *cell = count > 0;
+            let add = x as isize + r + 1;
+            if add < w as isize {
+                count += usize::from(row[add as usize]);
+            }
+            let sub = x as isize - r;
+            if sub >= 0 {
+                count -= usize::from(row[sub as usize]);
+            }
+        }
+    }
+    let mut vert = vec![false; w * h];
+    for x in 0..w {
+        let mut count = 0usize;
+        for y in 0..=r.min(h as isize - 1) as usize {
+            count += usize::from(horiz[y * w + x]);
+        }
+        for y in 0..h {
+            vert[y * w + x] = count > 0;
+            let add = y as isize + r + 1;
+            if add < h as isize {
+                count += usize::from(horiz[add as usize * w + x]);
+            }
+            let sub = y as isize - r;
+            if sub >= 0 {
+                count -= usize::from(horiz[sub as usize * w + x]);
+            }
+        }
+    }
+    vert
 }
 
 /// The Pixelate texture over the layer region `(x0, y0, x1, y1)`: tone offsets

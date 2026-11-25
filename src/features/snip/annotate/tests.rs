@@ -732,7 +732,7 @@ fn blur_mosaic_resists_a_candidate_scoring_attack() {
 
 #[test]
 fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
-    for style in [blur::Style::Frost, blur::Style::Pixelate] {
+    for style in [blur::Style::Soft, blur::Style::Frost, blur::Style::Pixelate] {
         repaint_of_a_crop(style);
     }
 }

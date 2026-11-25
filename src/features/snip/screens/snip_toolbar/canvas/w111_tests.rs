@@ -210,6 +210,11 @@ fn w111_tool_frame_times() {
             Box::new(hide(Kind::Brush, Style::Soft)),
         ),
         (
+            "hide brush blur",
+            Tool::Blur,
+            Box::new(hide(Kind::Brush, Style::Blur)),
+        ),
+        (
             "hide rect frost",
             Tool::Blur,
             Box::new(hide(Kind::Rect, Style::Frost)),
