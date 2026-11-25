@@ -71,6 +71,7 @@ impl Windows {
             s.open(picture);
         }
         self.studio = Some((id, s));
+        let strip = self.strip_yields_to_studio();
         self.chrome.insert(id, Default::default());
         let to = |m: studio::Msg| Msg::Studio(m);
         let scale = window::scale_factor(id).map(move |f| to(studio::Msg::Scale(f)));
@@ -86,6 +87,7 @@ impl Windows {
             open.discard().chain(window::gain_focus(id)).chain(scale),
             size,
             recent,
+            strip,
         ])
     }
 

@@ -987,3 +987,60 @@ fn f6_the_try_it_step_holds_the_global_shortcuts_off_and_gives_them_back() {
     );
     assert!(!suspended(), "closed: back on");
 }
+
+/// W108 (owner round 3): the Studio's steps are never lost by the strip's x or by the
+/// strip going away; once the Studio holds the steps the strip's window is gone.
+mod studio_steps {
+    use super::*;
+    use crate::features::snip::screens::steps::{Msg as S, Step};
+    use std::sync::Arc;
+
+    fn with_steps(n: usize) -> (Windows, window::Id) {
+        let (mut w, _, strip) = floating_windows();
+        for _ in 0..n {
+            let step = Arc::new(Step::new(&picture(60, 40)).unwrap());
+            assert!(w.steps.as_mut().unwrap().1.push(step));
+        }
+        (w, strip)
+    }
+
+    fn held(w: &Windows) -> usize {
+        w.steps.as_ref().map_or(0, |(_, s)| s.steps().len())
+    }
+
+    #[test]
+    fn opening_the_studio_closes_the_strip_and_keeps_its_steps() {
+        let (mut w, strip) = with_steps(2);
+        let _ = w.open_studio(None);
+        let _ = w.update(Msg::Closed(strip)); // the window we asked to close is gone
+        assert_eq!(w.steps_window(), None, "no strip window beside the Studio");
+        assert_eq!(held(&w), 2, "the Studio's sidebar still has both steps");
+    }
+
+    #[test]
+    fn the_strips_x_never_wipes_an_open_studios_steps() {
+        let (mut w, _) = with_steps(2);
+        let _ = w.open_studio(None);
+        let _ = w.update(Msg::Steps(S::Clear));
+        assert_eq!(held(&w), 2);
+        assert!(!w.steps.as_ref().unwrap().1.cleared);
+    }
+
+    #[test]
+    fn a_later_step_joins_the_open_studio_and_no_strip_comes_back() {
+        let (mut w, strip) = with_steps(1);
+        let _ = w.open_studio(None);
+        let _ = w.update(Msg::Closed(strip));
+        let step = Arc::new(Step::new(&picture(60, 40)).unwrap());
+        let _ = w.update(Msg::Steps(S::Ready(step, None)));
+        assert_eq!(held(&w), 2);
+        assert_eq!(w.steps_window(), None);
+    }
+
+    #[test]
+    fn closing_the_strip_without_a_studio_still_drops_the_steps() {
+        let (mut w, strip) = with_steps(2);
+        let _ = w.update(Msg::Closed(strip));
+        assert!(w.steps.is_none());
+    }
+}

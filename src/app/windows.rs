@@ -503,6 +503,15 @@ impl Windows {
         Some(strip.len())
     }
 
+    /// The Studio holds the steps from now on: the strip's window goes, the steps stay
+    /// (`Msg::Closed` keeps them while a Studio is open).
+    pub(super) fn strip_yields_to_studio(&mut self) -> Task<Msg> {
+        match self.steps.as_ref() {
+            Some((Some(id), strip)) if !strip.cleared => close(*id),
+            _ => Task::none(),
+        }
+    }
+
     /// The strip's `i`th step's capture (to edit it).
     pub fn step_crop(&self, i: usize) -> Option<Crop> {
         self.steps.as_ref()?.1.crop(i)
@@ -590,7 +599,11 @@ impl Windows {
                 );
                 let place = strip.place();
                 let Some(id) = window else {
-                    return self.open_steps(place);
+                    // an open Studio is the one place for the steps
+                    return match self.studio {
+                        Some(_) => Task::none(),
+                        None => self.open_steps(place),
+                    };
                 };
                 return self.place_steps(id, place);
             }
@@ -609,6 +622,10 @@ impl Windows {
                     }
                     None => Task::none(),
                 };
+            }
+            // the Studio's steps are never lost by the strip's x: its window just goes
+            steps::Msg::Clear if self.studio.is_some() => {
+                return window.map_or_else(Task::none, close);
             }
             msg => strip.update(msg),
         };
@@ -1728,7 +1745,11 @@ impl Windows {
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
                 if self.steps_window() == Some(id) {
-                    self.steps = None; // the steps go with it (memory only)
+                    match self.studio {
+                        // the Studio holds the steps now: only the strip's window goes
+                        Some(_) => self.steps.iter_mut().for_each(|(w, _)| *w = None),
+                        None => self.steps = None, // the steps go with it (memory only)
+                    }
                 }
                 if self.id(Kind::Permission) == Some(id) {
                     self.permission = None;
