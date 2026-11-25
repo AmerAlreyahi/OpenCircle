@@ -1264,6 +1264,11 @@ impl State {
         self.revalidate();
     }
 
+    /// The quick actions' words again, in the language spoken now.
+    pub(super) fn refresh_quick_text(&mut self) {
+        self.quick_text = quick_text(&self.draft);
+    }
+
     /// Puts `ai` back (onboarding's Skip), its key looked up again.
     pub fn set_ai(&mut self, ai: config::AiConfig) {
         self.draft.ai = ai;

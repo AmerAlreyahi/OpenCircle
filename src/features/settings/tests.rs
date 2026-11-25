@@ -4839,3 +4839,45 @@ fn the_report_popup_centres_its_buttons() {
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// W112 part A: opening and typing in the Settings search never changes the UI language
+/// (Arabic stays Arabic, even when the draft derives another one), and the hits are in it.
+#[test]
+fn w112_search_keeps_the_app_language_and_lists_arabic_titles() {
+    use crate::shared::app_language::{self, Lang};
+    // the window was made in English (its quick actions' words are English) ...
+    let (s, _) = state(None);
+    // ... and speaks Arabic now, though the draft says nothing of it
+    app_language::set(Lang::Ar);
+    let mut find = super::search::Search::open(&s);
+    assert_eq!(app_language::current(), Lang::Ar, "opening the search");
+    find.typed("a".into());
+    let _ = find.all_hits();
+    assert_eq!(app_language::current(), Lang::Ar, "typing");
+    // the titles are the Arabic ones, the quick actions' too
+    let titles = find.index_titles();
+    let english = [
+        "Snip",
+        "Translate",
+        "Ask AI",
+        "Copy text",
+        "Search in browser",
+        "Pick a colour",
+        "Measure the screen",
+    ];
+    for t in english {
+        assert!(
+            !titles.iter().any(|x| x == t),
+            "{t:?} is English in an Arabic index"
+        );
+    }
+    // an Arabic term finds the Arabic page title
+    let title_ar = crate::shared::app_language::tr(pages::of(Section::Ai).title);
+    find.typed(title_ar.to_string());
+    assert!(
+        find.all_hits()
+            .iter()
+            .any(|e| e.is_page && e.section == Section::Ai)
+    );
+    app_language::set(Lang::En);
+}

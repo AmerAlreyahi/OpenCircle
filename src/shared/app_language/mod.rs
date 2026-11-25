@@ -107,6 +107,18 @@ pub fn apply(general: &crate::shared::config::GeneralConfig) {
     set(of_config(general));
 }
 
+/// What this thread speaks now (the language and what "your language" is), to put back
+/// after code that builds throwaway states (`apply` derives them from a config).
+pub fn snapshot() -> (Lang, Lang) {
+    (current(), yours())
+}
+
+/// Puts a `snapshot` back exactly.
+pub fn restore((lang, yours): (Lang, Lang)) {
+    YOURS.set(yours);
+    set(lang);
+}
+
 /// The UI language "your language" means now (the onboarding pick, else
 /// the OS's; English when the app doesn't speak it).
 pub fn yours() -> Lang {

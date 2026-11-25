@@ -187,7 +187,19 @@ pub(super) fn rows(state: &State) -> Vec<Entry> {
 /// Every page and every row: as the pages show now, then what only a choice reveals.
 fn index(state: &State) -> Vec<Entry> {
     use crate::shared::config::Provider;
-    let mut all = rows(state);
+    // Building a State applies the language its config derives, which can differ from what the
+    // window speaks: every build puts the window's own language back (W112: search turned the
+    // Settings window English), and even the first rows come from a State made now, so the quick
+    // actions' names are in that language too.
+    let spoken = crate::shared::app_language::snapshot();
+    let keep = || crate::shared::app_language::restore(spoken);
+    let fresh = |cfg: crate::shared::config::Config| {
+        let mut s = State::new(cfg, Vec::new(), None, Box::new(NoKeys));
+        keep();
+        s.refresh_quick_text();
+        s
+    };
+    let mut all = rows(&fresh(state.draft.clone()));
     let provider_row = {
         let ((), found) = setting_row::harvest(|| drop(pages::rows::provider_row(state)));
         found.into_iter().next().map(|(t, _)| t)
@@ -195,7 +207,7 @@ fn index(state: &State) -> Vec<Entry> {
     let variant = |change: &dyn Fn(&mut crate::shared::config::Config)| {
         let mut cfg = state.draft.clone();
         change(&mut cfg);
-        State::new(cfg, Vec::new(), None, Box::new(NoKeys))
+        fresh(cfg)
     };
     let variants = [
         // Labs features on: their pages and rows (listed under Labs, marking their switch)
@@ -235,6 +247,13 @@ fn index(state: &State) -> Vec<Entry> {
         }
     }
     crate::shared::theme::apply(state.draft.theme);
-    crate::shared::app_language::apply(&state.draft.general);
+    keep();
     all
+}
+
+#[cfg(test)]
+impl Search {
+    pub(super) fn index_titles(&self) -> Vec<String> {
+        self.index.iter().map(|e| e.title.clone()).collect()
+    }
 }
