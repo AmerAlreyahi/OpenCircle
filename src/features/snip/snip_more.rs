@@ -282,6 +282,7 @@ mod tests {
             text: text.into(),
             bounds,
             confidence: 1.0,
+            words: Vec::new(),
         }
     }
 

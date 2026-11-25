@@ -435,6 +435,7 @@ mod tests {
             text: text.into(),
             bounds: [x, y, 100.0, 12.0],
             confidence: 1.0,
+            words: Vec::new(),
         }
     }
 

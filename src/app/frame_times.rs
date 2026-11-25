@@ -442,6 +442,7 @@ fn the_opening_stays_within_its_frame_budget() {
                 text: format!("{words} {i} ").repeat(8),
                 bounds: [40.0, 20.0 + 11.5 * i as f32, 1200.0, 10.0],
                 confidence: 1.0,
+                words: Vec::new(),
             })
             .collect();
         word::lines(blocks, [0, 0], 1.0)

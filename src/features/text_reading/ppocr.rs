@@ -510,6 +510,18 @@ fn unclip(poly: &[Pt; 4], ratio: f32) -> Vec<Pt> {
     if points.len() < 3 { Vec::new() } else { points }
 }
 
+/// What a recognizer read from one crop.
+pub(crate) struct Reading {
+    pub text: String,
+    /// Mean character confidence (0 when nothing is read).
+    pub confidence: f32,
+    /// Where each character of `text` was read, as a share (0..1) of the
+    /// crop's width from its left edge: the CTC step that kept it.
+    pub at: Vec<f32>,
+    /// One CTC step as a share of the crop's width.
+    pub step: f32,
+}
+
 /// A text recognizer and its alphabet.
 pub(crate) struct Recognizer {
     session: Session,
@@ -531,10 +543,11 @@ impl Recognizer {
         })
     }
 
-    /// Reads each crop (one line of text each): its text and its mean
-    /// character confidence (0 when nothing is read). One batch: the crops
-    /// are padded to the widest one's width (at least 320 / 48).
-    pub(crate) fn read(&mut self, crops: &[RgbImage]) -> Result<Vec<(String, f32)>, OcrError> {
+    /// Reads each crop (one line of text each): its text, its mean
+    /// character confidence (0 when nothing is read) and where its characters
+    /// are. One batch: the crops are padded to the widest one's width (at
+    /// least 320 / 48).
+    pub(crate) fn read(&mut self, crops: &[RgbImage]) -> Result<Vec<Reading>, OcrError> {
         if crops.is_empty() {
             return Ok(Vec::new());
         }
@@ -561,6 +574,12 @@ impl Recognizer {
         }
         let n = crops.len();
         let chars = &self.chars;
+        let widths: Vec<usize> = (crops.iter())
+            .map(|c| {
+                let r = c.width() as f32 / c.height().max(1) as f32;
+                ((REC_H as f32 * r).ceil() as usize).min(width)
+            })
+            .collect();
         let read = run(
             &mut self.session,
             [n, 3, REC_H, width],
@@ -571,8 +590,21 @@ impl Recognizer {
                 };
                 let (t, k) = (t as usize, k as usize);
                 (b as usize == n).then(|| {
-                    out.chunks_exact(t * k)
-                        .map(|seq| ctc(seq, k, chars))
+                    (out.chunks_exact(t * k).zip(&widths))
+                        .map(|(seq, &w)| {
+                            // the crop was stretched to `w` of the model's `width` columns
+                            let step = width as f32 / w.max(1) as f32 / t.max(1) as f32;
+                            let (text, confidence, steps) = ctc(seq, k, chars);
+                            let at = (steps.iter())
+                                .map(|&s| ((s as f32 + 0.5) * step).min(1.0))
+                                .collect();
+                            Reading {
+                                text,
+                                confidence,
+                                at,
+                                step,
+                            }
+                        })
                         .collect()
                 })
             },
@@ -582,11 +614,12 @@ impl Recognizer {
 }
 
 /// Greedy CTC: each step's best class (the last of equal ones), repeats
-/// and blanks dropped; the confidence is the kept steps' mean.
-fn ctc(seq: &[f32], classes: usize, chars: &[char]) -> (String, f32) {
-    let (mut text, mut probs) = (String::new(), Vec::new());
+/// and blanks dropped; the confidence is the kept steps' mean; the third is
+/// the step of each kept character.
+fn ctc(seq: &[f32], classes: usize, chars: &[char]) -> (String, f32, Vec<usize>) {
+    let (mut text, mut probs, mut steps) = (String::new(), Vec::new(), Vec::new());
     let mut prev = 0;
-    for step in seq.chunks_exact(classes) {
+    for (at, step) in seq.chunks_exact(classes).enumerate() {
         let (i, p) = (step.iter().copied().enumerate())
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or((0, 0.0));
@@ -596,6 +629,7 @@ fn ctc(seq: &[f32], classes: usize, chars: &[char]) -> (String, f32) {
         {
             text.push(c);
             probs.push(p);
+            steps.push(at);
         }
         prev = i;
     }
@@ -604,7 +638,7 @@ fn ctc(seq: &[f32], classes: usize, chars: &[char]) -> (String, f32) {
     } else {
         probs.iter().sum::<f32>() / probs.len() as f32
     };
-    (text, conf)
+    (text, conf, steps)
 }
 
 #[cfg(test)]
@@ -623,10 +657,15 @@ mod tests {
                 row
             })
             .collect();
-        let (text, conf) = ctc(&seq, 4, &chars);
+        let (text, conf, steps) = ctc(&seq, 4, &chars);
         assert_eq!(text, "aab ");
         assert!((conf - (0.9 + 0.5 + 0.9 + 0.9) / 4.0).abs() < 1e-6);
-        assert_eq!(ctc(&[0.9, 0.1, 0.0, 0.0], 4, &chars), (String::new(), 0.0));
+        // W110: each kept character's step (the repeat and the blank dropped)
+        assert_eq!(steps, [0, 3, 4, 6]);
+        assert_eq!(
+            ctc(&[0.9, 0.1, 0.0, 0.0], 4, &chars),
+            (String::new(), 0.0, Vec::new())
+        );
     }
 
     /// A solid text core gives one box: the core grown by area x 1.5 /

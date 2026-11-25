@@ -571,6 +571,7 @@ impl Deps for Fake {
             text: "Quit".into(),
             bounds: [20.0, 10.0, 40.0, 20.0],
             confidence: 0.9,
+            words: Vec::new(),
         }])
     }
     fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
@@ -667,6 +668,7 @@ impl Deps for Two {
                 text: text.into(),
                 bounds: [20.0, y, 40.0, 20.0],
                 confidence: 0.9,
+                words: Vec::new(),
             })
             .collect())
     }

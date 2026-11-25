@@ -27,6 +27,7 @@ fn blocks(name: &str, (w, h): (usize, usize)) -> (Vec<Block>, Vec<String>) {
             bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
             text: l[4].as_str().unwrap().into(),
             confidence: 0.9,
+            words: Vec::new(),
         })
         .map(|b| super::super::pipeline::to_line(b, w as u32, h as u32))
         .collect();

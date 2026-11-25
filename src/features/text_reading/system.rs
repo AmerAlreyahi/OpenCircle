@@ -45,12 +45,15 @@ pub fn blocks(lines: Vec<Vec<Word>>) -> Vec<TextBlock> {
 fn block(words: Vec<Word>) -> TextBlock {
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     let mut text = String::new();
+    let mut read = Vec::new();
     for (word, [x, y, w, h]) in words {
         let joined = |a: Option<char>, b: Option<char>| a.is_some_and(cjk) && b.is_some_and(cjk);
         if !text.is_empty() && !joined(text.chars().last(), word.chars().next()) {
             text.push(' ');
         }
-        text.push_str(&comma(word.trim()));
+        let word = comma(word.trim());
+        text.push_str(&word);
+        read.push((word.into_owned(), x, x + w));
         (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + w), y1.max(y + h));
     }
     TextBlock {
@@ -58,6 +61,8 @@ fn block(words: Vec<Word>) -> TextBlock {
         bounds: [x0, y0, x1 - x0, y1 - y0],
         // Windows gives no confidence; what it returns it stands by.
         confidence: 1.0,
+        // (Windows' own word boxes: Select-text puts its boxes on them)
+        words: read,
     }
 }
 
@@ -429,6 +434,24 @@ mod imp {
 
 #[cfg(test)]
 mod tests {
+    /// W110: a line keeps Windows' own word boxes (their left and right x).
+    #[test]
+    fn a_line_keeps_the_word_boxes_windows_gave() {
+        let line = vec![
+            ("Fabrikam,".to_string(), [10.0, 5.0, 60.0, 20.0]),
+            ("VPN".to_string(), [80.0, 5.0, 30.0, 20.0]),
+        ];
+        let blocks = super::blocks(vec![line]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0].words,
+            [
+                ("Fabrikam,".into(), 10.0, 70.0),
+                ("VPN".into(), 80.0, 110.0)
+            ]
+        );
+    }
+
     #[test]
     fn noise_is_not_plain() {
         assert!(super::plain("Activate Windows"));

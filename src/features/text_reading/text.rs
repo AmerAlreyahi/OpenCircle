@@ -176,6 +176,7 @@ mod tests {
             text: text.into(),
             bounds: [x, y, 80.0, 20.0],
             confidence: 1.0,
+            words: Vec::new(),
         }
     }
 
@@ -204,6 +205,7 @@ mod tests {
             text: text.into(),
             bounds: [x, 50.0, w, 20.0],
             confidence,
+            words: Vec::new(),
         };
         let bar = [
             at("C", 10.0, 12.0, 0.95),

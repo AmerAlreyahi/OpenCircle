@@ -93,6 +93,7 @@ fn novel_buttons(tr: [&str; 3], light: bool) -> (Vec<u8>, (usize, usize), Drawn)
         text: t.into(),
         bounds: [b[0] - 750.0, b[1] - 440.0, b[2], b[3]],
         confidence: 1.0,
+        words: Vec::new(),
     };
     let lines: Vec<_> = [
         read("Bien sür que oui.", [809.0, 455.0, 300.0, 42.0]),

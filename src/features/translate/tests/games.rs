@@ -307,6 +307,7 @@ fn a_line_both_readers_read_is_kept_once() {
         bounds: b,
         text: t.into(),
         confidence,
+        words: Vec::new(),
     };
     let win = vec![tb("• Atacar", [68.0, 719.0, 141.0, 39.0], 1.0)];
     let pp = vec![tb("Atacar", [98.0, 743.0, 117.0, 41.0], 0.99)];
@@ -322,6 +323,7 @@ fn a_reading_pp_ocr_is_sure_of_replaces_a_quiet_misread() {
         bounds: [x, 100.0, 300.0, 40.0],
         text: t.into(),
         confidence,
+        words: Vec::new(),
     };
     for (win, pp, want) in [
         (

@@ -1947,6 +1947,7 @@ mod text_tests {
             text: text.into(),
             bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
             carets: Vec::new(),
+            reads: Vec::new(),
         }
     }
 

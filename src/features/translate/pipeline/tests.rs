@@ -74,6 +74,7 @@ pub fn tb(text: &str, bounds: [f32; 4]) -> TextBlock {
         text: text.into(),
         bounds,
         confidence: 0.9,
+        words: Vec::new(),
     }
 }
 

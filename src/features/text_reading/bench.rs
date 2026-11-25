@@ -317,6 +317,7 @@ fn read_joined(
                 text,
                 bounds: boxes[k],
                 confidence: conf,
+                words: Vec::new(),
             })
         })
         .collect()

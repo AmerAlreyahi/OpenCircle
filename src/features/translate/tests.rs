@@ -1361,6 +1361,7 @@ mod real {
                 bounds: [0, 1, 2, 3].map(|k| l[k].as_f64().unwrap() as f32),
                 text: l[4].as_str().unwrap().into(),
                 confidence: 0.9,
+                words: Vec::new(),
             })
             .collect()
     }
@@ -1787,6 +1788,7 @@ mod real {
             bounds: [10.0, y, 100.0, 20.0],
             text: "x".into(),
             confidence: 0.9,
+            words: Vec::new(),
         };
         let f = (300, 200);
         assert!(cut_off(&tb(0.0), f) && cut_off(&tb(180.0), f));

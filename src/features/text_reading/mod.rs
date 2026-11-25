@@ -334,6 +334,7 @@ fn joined(mut parts: Vec<TextBlock>, b: [f32; 4], rtl: bool) -> Option<TextBlock
         text: text.join(" "),
         bounds: b,
         confidence,
+        words: parts.into_iter().flat_map(|p| p.words).collect(),
     })
 }
 
@@ -345,6 +346,44 @@ pub struct TextBlock {
     pub bounds: [f32; 4],
     /// Recognizer confidence, 0..1.
     pub confidence: f32,
+    /// The words as the reader placed them: logical text and the left and
+    /// right x (the box's px), in no set order. Empty when the reader gave
+    /// none (Select-text then measures the ink: `app::word::measure`).
+    #[serde(default)]
+    pub words: Vec<ReadWord>,
+}
+
+/// One word the reader placed: its text, and the x of its left and right edge.
+pub type ReadWord = (String, f32, f32);
+
+/// The words of a line a recognizer read from `piece` (x, y, w, h): its visual
+/// `text` split at spaces, each word where its characters' CTC steps are
+/// (`at`: each character's x as a share of the piece's width; `step`: one
+/// CTC step's share), padded by most of a step; text in logical order for a
+/// right-to-left reader.
+fn read_words(text: &str, at: &[f32], step: f32, piece: [f32; 4], rtl: bool) -> Vec<ReadWord> {
+    let mut words: Vec<(String, f32, f32)> = Vec::new();
+    let mut open = false;
+    for (c, &x) in text.chars().zip(at) {
+        match (c.is_whitespace(), open, words.last_mut()) {
+            (true, ..) => open = false,
+            (false, true, Some((w, a, b))) => {
+                w.push(c);
+                (*a, *b) = (a.min(x), b.max(x));
+            }
+            _ => {
+                words.push((c.to_string(), x, x));
+                open = true;
+            }
+        }
+    }
+    let x = |share: f32| piece[0] + share.clamp(0.0, 1.0) * piece[2];
+    (words.into_iter())
+        .map(|(w, a, b)| {
+            let w = if rtl { reverse_rtl(&w) } else { w };
+            (w, x(a - step * 0.8), x(b + step * 0.8))
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -1447,13 +1486,14 @@ impl Engine {
                     image::imageops::crop_imm(img, x, y, w, h).to_image()
                 })
                 .collect();
-            for (&j, (text, confidence)) in run.iter().zip(rec.read(&crops)?) {
-                if !text.trim().is_empty() {
-                    let text = text.trim();
+            for (&j, r) in run.iter().zip(rec.read(&crops)?) {
+                if !r.text.trim().is_empty() {
+                    let text = r.text.trim();
                     read[owner[j]].push(TextBlock {
                         text: if rtl { reverse_rtl(text) } else { text.into() },
                         bounds: pieces[j],
-                        confidence,
+                        confidence: r.confidence,
+                        words: read_words(&r.text, &r.at, r.step, pieces[j], rtl),
                     });
                 }
             }
@@ -1581,6 +1621,7 @@ mod tests {
             text: text.into(),
             bounds: [x, y, 50.0, 20.0],
             confidence: 1.0,
+            words: Vec::new(),
         }
     }
 
@@ -1731,6 +1772,7 @@ mod tests {
             text: text.into(),
             bounds: [x, 0.0, 100.0, 20.0],
             confidence: 0.5 + x / 1000.0,
+            words: Vec::new(),
         };
         let parts = vec![piece("b", 100.0), piece("a", 0.0)];
         let ltr = joined(parts.clone(), line, false).unwrap();
@@ -1774,6 +1816,28 @@ mod tests {
         assert_eq!(few(strips(1080, 256, None), lines.to_vec(), 9).0.len(), 2);
         assert!(holds(&[0.0, 0.0, 100.0, 20.0], &[40.0, 5.0, 10.0, 10.0]));
         assert!(!holds(&[0.0, 0.0, 100.0, 20.0], &[95.0, 5.0, 20.0, 10.0]));
+    }
+
+    /// W110 fix 1: a reader's words are where its characters' CTC steps are:
+    /// split at spaces, padded by most of a step, text in logical order for
+    /// a right-to-left reader, positions in the piece's px.
+    #[test]
+    fn a_readers_words_come_from_its_character_steps() {
+        // visual text of two Arabic words (a right-to-left reader reads them
+        // left to right on the picture): 3 characters, 0.05 of a 200 px
+        // piece (at x 100) apart
+        let at = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35];
+        let words = read_words("بتك ملس", &at, 0.05, [100.0, 0.0, 200.0, 20.0], true);
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].0, "كتب");
+        assert!(near(words[0].1, 100.0 + 200.0 * (0.05 - 0.04)));
+        assert!(near(words[0].2, 100.0 + 200.0 * (0.15 + 0.04)));
+        assert_eq!(words[1].0, "سلم");
+        assert!(near(words[1].1, 100.0 + 200.0 * (0.25 - 0.04)));
+        // a left-to-right reader keeps the text; the box stays inside the piece
+        let words = read_words("ab", &[0.0, 1.0], 0.1, [100.0, 0.0, 200.0, 20.0], false);
+        assert_eq!(words, [("ab".into(), 100.0, 300.0)]);
     }
 
     /// W110 fix 2: a part whose strips own none of the lines still to read
@@ -1900,6 +1964,7 @@ mod tests {
             text: text.into(),
             bounds: [0.0; 4],
             confidence,
+            words: Vec::new(),
         };
         assert!(sure(&line("Landfall light", 0.998)));
         assert!(!sure(&line("lgsi", 0.93)) && !sure(&line("bliso ab", 0.86)));

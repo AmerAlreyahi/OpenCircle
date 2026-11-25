@@ -32,6 +32,9 @@ pub struct Line {
     /// between each two, after the last (`chars + 1` of them, decreasing on an
     /// RTL line). Measured on the frame by `measure`; empty = an even share.
     pub carets: Vec<f32>,
+    /// The words as the reader placed them (text, left x, right x; image px):
+    /// `measure` puts the matching words' carets there. Empty = none given.
+    pub reads: Vec<text_reading::ReadWord>,
 }
 
 impl Line {
@@ -44,6 +47,9 @@ impl Line {
             self.bounds.size() * k,
         );
         self.carets.iter_mut().for_each(|c| *c = x(*c));
+        self.reads
+            .iter_mut()
+            .for_each(|r| (r.1, r.2) = (x(r.1), x(r.2)));
         self
     }
 }
@@ -67,10 +73,14 @@ pub fn lines(blocks: Vec<TextBlock>, origin: [u32; 2], scale: f32) -> Vec<Line> 
         .map(|b| {
             let [x, y, w, h] = b.bounds;
             let frame = Rectangle::new(Point::new(x, y) + offset, Size::new(w, h));
+            let x = |v: f32| (v + offset.x) / scale;
             Line {
                 text: b.text,
                 bounds: frame * (1.0 / scale),
                 carets: Vec::new(),
+                reads: (b.words.into_iter())
+                    .map(|(t, a, b)| (t, x(a), x(b)))
+                    .collect(),
             }
         })
         .collect()
@@ -89,6 +99,69 @@ pub fn lines(blocks: Vec<TextBlock>, origin: [u32; 2], scale: f32) -> Vec<Line> 
 pub fn measure(lines: &mut [Line], rgba: &[u8], width: u32, height: u32, scale: f32) {
     for line in lines {
         line.carets = on_frame(line, rgba, width, height, scale).unwrap_or_default();
+        place_reads(line);
+    }
+}
+
+/// A word's text for matching it with the reader's: letters and digits only,
+/// lower case, Arabic marks and tatweel dropped, the alef forms one.
+fn key(word: &str) -> String {
+    (word.chars())
+        .filter(|c| !matches!(*c as u32, 0x064B..=0x065F | 0x0670 | 0x0640))
+        .map(|c| {
+            if matches!(c, '\u{623}' | '\u{625}' | '\u{622}') {
+                '\u{627}'
+            } else {
+                c
+            }
+        })
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Puts each word of `line` that the reader placed (`reads`, matched by its
+/// text) where the reader says: its characters evenly between the word's
+/// edges, right to left in a right-to-left word. A word the reader gave no
+/// match keeps what `on_frame` made of it (the ink, or the even share).
+/// Of equal words the one nearest the word's own place is taken. The words
+/// are the reader's own positions: the ink's guess shifts every box after one
+/// word the reader missed or merged (33-47 % of boxes on their word against
+/// 96-100 %, W109).
+fn place_reads(line: &mut Line) {
+    if line.reads.is_empty() {
+        return;
+    }
+    let count = line.text.chars().count();
+    if line.carets.len() != count + 1 {
+        line.carets = carets(line);
+    }
+    let centres: Vec<f32> = words(line).iter().map(|(r, _)| r.center_x()).collect();
+    let levels = levels(&line.text);
+    let mut used = vec![false; line.reads.len()];
+    for (k, (c0, c1, b0, b1)) in word_spans(&line.text).into_iter().enumerate() {
+        let want = key(&line.text[b0..b1]);
+        if want.is_empty() {
+            continue;
+        }
+        let best = (0..line.reads.len())
+            .filter(|&r| !used[r] && key(&line.reads[r].0) == want)
+            .min_by(|&p, &q| {
+                let off = |r: usize| ((line.reads[r].1 + line.reads[r].2) / 2.0 - centres[k]).abs();
+                off(p).total_cmp(&off(q))
+            });
+        let Some(r) = best else { continue };
+        used[r] = true;
+        let (x0, x1) = (line.reads[r].1, line.reads[r].2);
+        let rtl = levels[c0].is_rtl();
+        for i in c0..=c1 {
+            let share = (i - c0) as f32 / (c1 - c0) as f32;
+            line.carets[i] = if rtl {
+                x1 - (x1 - x0) * share
+            } else {
+                x0 + (x1 - x0) * share
+            };
+        }
     }
 }
 
@@ -407,11 +480,15 @@ pub fn within<'a>(lines: impl IntoIterator<Item = &'a Line>, area: Rectangle) ->
         out.push(Line {
             text: line.text[b0..b1].to_string(),
             bounds: between(line, c0, c1),
-            // (a mixed line's carets aren't in visual order: laid out again)
-            carets: match levels(&line.text).windows(2).all(|w| w[0] == w[1]) {
+            // (a mixed line's even-share carets aren't in visual order: laid
+            // out again; measured or reader-placed ones are each word's own)
+            carets: match levels(&line.text).windows(2).all(|w| w[0] == w[1])
+                || line.carets.len() == line.text.chars().count() + 1
+            {
                 true => carets(line)[c0..=c1].to_vec(),
                 false => Vec::new(),
             },
+            reads: line.reads.clone(),
         });
     }
     out
@@ -889,6 +966,7 @@ mod tests {
             text: text.into(),
             bounds: Rectangle::new(Point::new(x, y), Size::new(w, 20.0)),
             carets: Vec::new(),
+            reads: Vec::new(),
         }
     }
 
@@ -1168,6 +1246,7 @@ mod tests {
             text: "كلمة Hi Yo عربي".into(),
             bounds: Rectangle::new(Point::new(5.0, 2.0), Size::new(250.0, 16.0)),
             carets: Vec::new(),
+            reads: Vec::new(),
         }];
         measure(&mut lines, &rgba, w, h, 1.0);
         let got: Vec<(&str, f32, f32)> = (words(&lines[0]).into_iter())
@@ -1276,6 +1355,7 @@ mod tests {
             text: "Hi".into(),
             bounds: [10.0, 4.0, 40.0, 20.0],
             confidence: 1.0,
+            words: Vec::new(),
         };
         let got = lines(vec![block], [200, 100], 2.0);
         let want = Rectangle::new(Point::new(105.0, 52.0), Size::new(20.0, 10.0));
@@ -1351,6 +1431,7 @@ mod tests {
                 text: WORDS.join(" "),
                 bounds,
                 carets: Vec::new(),
+                reads: Vec::new(),
             }];
             let even = words(&lines[0])
                 .iter()
@@ -1400,5 +1481,83 @@ mod tests {
             .collect();
         measure(&mut busy, &noise, 100, 20, 1.0);
         assert!(busy[0].carets.is_empty());
+    }
+
+    /// W110: the boxes of a line's words come from the positions the reader
+    /// gave (here on a blank frame, where the ink says nothing); a word it
+    /// gave no match keeps the even share.
+    #[test]
+    fn a_readers_word_positions_place_the_word_boxes() {
+        let blank = vec![255u8; 400 * 30 * 4];
+        let mut lines = vec![line("one two three", 0.0, 0.0)];
+        lines[0].reads = vec![
+            ("three".into(), 300.0, 350.0),
+            ("One".into(), 12.0, 60.0), // (case does not matter)
+        ];
+        measure(&mut lines, &blank, 400, 30, 1.0);
+        let got: Vec<(&str, f32, f32)> = (words(&lines[0]).into_iter())
+            .map(|(r, t)| (t, r.x, r.x + r.width))
+            .collect();
+        assert_eq!((got[0].1, got[0].2), (12.0, 60.0));
+        assert_eq!((got[2].1, got[2].2), (300.0, 350.0));
+        // "two" has no match: where an even share of the line puts it
+        assert_eq!((got[1].1, got[1].2), (40.0, 70.0));
+        // each caret inside a word is an even share of the reader's box
+        let c = carets(&lines[0]);
+        assert_eq!((c[1] - 12.0, c[2] - 12.0), (16.0, 32.0));
+    }
+
+    /// W110: a right-to-left line with a left-to-right run in it: every word
+    /// where the reader put it, Arabic carets running right to left, the
+    /// Latin run left to right; two equal words each take their own place.
+    #[test]
+    fn readers_positions_hold_on_a_right_to_left_line_with_latin_runs() {
+        let blank = vec![255u8; 300 * 30 * 4];
+        let mut lines = vec![line("كلمة Hi Hi عربي", 5.0, 2.0)];
+        lines[0].bounds.width = 250.0;
+        lines[0].reads = vec![
+            ("عربي".into(), 10.0, 60.0),
+            ("Hi".into(), 100.0, 130.0),
+            ("Hi".into(), 70.0, 95.0),
+            ("كلمة".into(), 200.0, 250.0),
+        ];
+        measure(&mut lines, &blank, 300, 30, 1.0);
+        let mut got: Vec<(&str, f32, f32)> = (words(&lines[0]).into_iter())
+            .map(|(r, t)| (t, r.x, r.x + r.width))
+            .collect();
+        got.sort_by(|a, b| a.1.total_cmp(&b.1));
+        assert_eq!(
+            got,
+            [
+                ("عربي", 10.0, 60.0),
+                ("Hi", 70.0, 95.0),
+                ("Hi", 100.0, 130.0),
+                ("كلمة", 200.0, 250.0),
+            ]
+        );
+        let c = carets(&lines[0]);
+        assert!(
+            c[0] > c[2] && c[0] == 250.0,
+            "Arabic runs right to left: {c:?}"
+        );
+        assert!(c[5] < c[6], "Latin runs left to right: {c:?}");
+    }
+
+    /// W110: a block's words move with its crop and scale like its box.
+    #[test]
+    fn a_blocks_word_positions_follow_its_crop_and_scale() {
+        let block = TextBlock {
+            text: "ab cd".into(),
+            bounds: [20.0, 10.0, 100.0, 20.0],
+            confidence: 1.0,
+            words: vec![("ab".into(), 20.0, 60.0), ("cd".into(), 80.0, 120.0)],
+        };
+        let lines = lines(vec![block], [100, 40], 2.0);
+        assert_eq!(
+            lines[0].reads,
+            [("ab".into(), 60.0, 80.0), ("cd".into(), 90.0, 110.0)]
+        );
+        let moved = lines[0].clone().mapped(0.5, Vector::new(10.0, 0.0));
+        assert_eq!(moved.reads[0].1, 40.0);
     }
 }

@@ -212,6 +212,7 @@ fn line(text: &str) -> crate::features::text_reading::TextBlock {
         text: text.into(),
         bounds: [20.0, 20.0, 200.0, 14.0],
         confidence: 1.0,
+        words: Vec::new(),
     }
 }
 

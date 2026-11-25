@@ -1630,6 +1630,7 @@ fn a_tapped_word_is_the_selection() {
         text: "Press any key".into(),
         bounds: [20.0, 20.0, 260.0, 40.0],
         confidence: 1.0,
+        words: Vec::new(),
     };
     app.taps = 7;
     let at = Point::new(135.0, 40.0); // image px: on "any" (image x 120..150)
@@ -1670,6 +1671,7 @@ fn text_blocks() -> Vec<TextBlock> {
             text: (*t).into(),
             bounds: [60.0, 43.0 + 32.0 * i as f32, t.len() as f32 * CHAR, 26.0],
             confidence: 1.0,
+            words: Vec::new(),
         })
         .collect()
 }
@@ -5060,6 +5062,7 @@ fn a_link_in_the_selected_words_gets_a_click_only_chip() {
             text: line.into(),
             bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
             confidence: 1.0,
+            words: Vec::new(),
         };
         let what = WordRead {
             id: app.taps,
@@ -5216,6 +5219,7 @@ fn select_text_mode_picks_the_words_windows_ocr_read() {
         text: LINE.into(),
         bounds: [60.0 * s, 43.0 * s, LINE.len() as f32 * CHAR * s, 26.0 * s],
         confidence: 1.0,
+        words: Vec::new(),
     };
     let mut lines = word::lines(vec![block], [0, 0], s);
     if let Some(image::Handle::Rgba { pixels, .. }) = &app.o.frame {
@@ -6352,6 +6356,7 @@ fn link_menu_app() -> (App, Point) {
         text: line.into(),
         bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
         confidence: 1.0,
+        words: Vec::new(),
     };
     let what = WordRead {
         id: app.taps,
@@ -6687,6 +6692,7 @@ fn w98_201_11_a_link_in_the_selection_adds_its_row() {
         text: line.into(),
         bounds: [60.0, 43.0, line.len() as f32 * CHAR, 26.0],
         confidence: 1.0,
+        words: Vec::new(),
     };
     let what = WordRead {
         id: app.taps,

@@ -29,6 +29,7 @@ fn ocr(l: Line) -> Line {
         bounds: l.bounds,
         text: l.text,
         confidence: 0.9,
+        words: Vec::new(),
     };
     super::super::pipeline::to_line(b, W as u32, H as u32)
 }
