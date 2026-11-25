@@ -53,6 +53,8 @@ pub enum Step {
     /// What text is translated into (and, later, the app language).
     Language,
     Welcome,
+    /// The user's own shortcuts, ticked when pressed.
+    Try,
     /// Wayland only: the desktop's screenshot permission, asked while we have the focus.
     Screenshots,
     Ai,
@@ -78,9 +80,10 @@ const fn page(id: Step, label: S, view: for<'a> fn(&'a State) -> Element<'a, Mes
 }
 
 /// In the design's order. A new step = one entry here + one view file.
-pub const STEPS: [Page; 6] = [
+pub const STEPS: [Page; 7] = [
     page(Step::Language, S::o_s_language, steps::language::view),
     page(Step::Welcome, S::o_s_welcome, steps::welcome::view),
+    page(Step::Try, S::o_s_try, steps::try_it::view),
     Page {
         wayland: true,
         ..page(Step::Screenshots, S::o_s_shots, steps::screenshots::view)
@@ -89,6 +92,38 @@ pub const STEPS: [Page; 6] = [
     page(Step::Look, S::o_s_look, steps::look::view),
     page(Step::Done, S::o_s_done, steps::done::view),
 ];
+
+/// One row of the Try it step: what it is called and says.
+pub struct TryRow {
+    pub title: S,
+    pub desc: S,
+}
+
+/// Circle to Search, Snip, Translate (`State::try_key` finds each one's key).
+pub const TRY_ROWS: [TryRow; 3] = [
+    TryRow {
+        title: S::k_open,
+        desc: S::o_try_circle_d,
+    },
+    TryRow {
+        title: S::nav_snip,
+        desc: S::o_try_snip_d,
+    },
+    TryRow {
+        title: S::nav_translate,
+        desc: S::o_try_translate_d,
+    },
+];
+
+/// The same keys, whatever their case or order ("alt+a" = "Alt+A").
+fn same_keys(a: &str, b: &str) -> bool {
+    let parts = |s: &str| {
+        let mut v: Vec<String> = s.split('+').map(str::to_lowercase).collect();
+        v.sort();
+        v
+    };
+    !a.is_empty() && parts(a) == parts(b)
+}
 
 pub struct State {
     /// The Settings state whose rows the steps show: its draft is what Finish writes.
@@ -106,6 +141,8 @@ pub struct State {
     pub(super) error: Option<String>,
     /// The last step change (the step it left, and when): the thumb glides.
     moved: Option<(Step, Instant)>,
+    /// The Try it rows whose key was pressed.
+    tried: [bool; 3],
     /// The track's labels, numbered ("1. Welcome"), in the app's language.
     labels: Vec<(Step, String)>,
 }
@@ -134,6 +171,8 @@ pub enum Message {
     Allowed(Result<(), crate::shared::platform::capture::CaptureError>),
     /// The Language step's list.
     Language(picker::Msg),
+    /// A key pressed on the Try it step.
+    Pressed(settings::Chord),
     /// A Settings row (the same messages as in Settings).
     Settings(settings::Message),
     /// The header: drag, minimise, close (the shell does them).
@@ -189,6 +228,7 @@ impl State {
             picker,
             error: None,
             moved: None,
+            tried: [false; 3],
             labels: Vec::new(),
         };
         s.number();
@@ -217,6 +257,33 @@ impl State {
     pub(super) fn steps(&self) -> impl Iterator<Item = &'static Page> {
         let wayland = self.wayland;
         STEPS.iter().filter(move |p| wayland || !p.wayland)
+    }
+
+    /// The key of Try it's row `i`, as the draft config has it ("" = not bound).
+    pub(super) fn try_key(&self, i: usize) -> String {
+        use crate::shared::platform::hotkey::QuickId;
+        let c = self.settings.draft();
+        let quick = |id: QuickId| {
+            (c.quick_actions.iter())
+                .find(|q| q.action == id && !q.live)
+                .map(|q| q.shortcut.clone())
+                .unwrap_or_default()
+        };
+        match i {
+            0 => c.shortcut.clone(),
+            1 => quick(QuickId::Snip),
+            _ => quick(QuickId::Translate),
+        }
+    }
+
+    pub(super) fn tried(&self, i: usize) -> bool {
+        self.tried[i]
+    }
+
+    /// The Try it step is showing: the global shortcuts are held off so the
+    /// keys reach this window and nothing opens.
+    pub fn trying(&self) -> bool {
+        self.step == Step::Try
     }
 
     #[cfg(test)]
@@ -289,6 +356,15 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
                 state.picker.update(picker::Msg::Open(Side::Target));
             }
         }
+        Message::Pressed(chord) => {
+            if let Some(key) = chord.shortcut().filter(|_| state.trying()) {
+                for i in 0..state.tried.len() {
+                    if same_keys(&key, &state.try_key(i)) {
+                        state.tried[i] = true;
+                    }
+                }
+            }
+        }
         Message::Caption(_) => {}
         Message::Tick => {
             if state
@@ -326,8 +402,16 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         Some(_) => motion::frames().map(|_| Message::Tick),
         None => Subscription::none(),
     };
+    // Try it: the keys pressed in this window
+    let keys = match state.trying() {
+        true => {
+            iced::event::listen_with(|event, _, _| settings::chord_of(event).map(Message::Pressed))
+        }
+        false => Subscription::none(),
+    };
     Subscription::batch([
         own,
+        keys,
         settings::subscription(&state.settings).map(Message::Settings),
     ])
 }

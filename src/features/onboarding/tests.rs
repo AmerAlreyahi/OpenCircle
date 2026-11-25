@@ -45,6 +45,48 @@ fn texts(s: &State) -> Vec<String> {
     shot::texts(view(s))
 }
 
+/// F6-1: "Try it" comes right after Welcome; F6-2: a row ticks "Tried" when
+/// its own key is pressed (not before the step, not another key), and the
+/// global shortcuts are held off only on that step; F6-3: Welcome no longer
+/// asks the Snap choice.
+#[test]
+fn f6_try_it_ticks_the_pressed_keys() {
+    use crate::features::settings::Chord;
+    let key = |ctrl: bool, alt: bool, shift: bool, k: &str| {
+        Message::Pressed(Chord {
+            ctrl,
+            alt,
+            shift,
+            logo: false,
+            key: k.into(),
+        })
+    };
+    let mut s = state(None);
+    assert_eq!(STEPS[2].id, Step::Try, "right after Welcome");
+    assert!(!s.trying());
+    update(&mut s, key(true, false, true, "Space"));
+    assert!(!s.tried(0), "not before the step");
+    next(&mut s, 1);
+    assert!(
+        !texts(&s).iter().any(|t| t == "Selection"),
+        "Welcome keeps only Keep up to date: {:?}",
+        texts(&s)
+    );
+    next(&mut s, 1);
+    assert_eq!(s.step(), Step::Try);
+    assert!(s.trying());
+    assert!(texts(&s).iter().any(|t| t == "Press it to try"));
+    update(&mut s, key(false, true, false, "KeyA")); // Alt+A = Snip
+    assert_eq!((s.tried(0), s.tried(1), s.tried(2)), (false, true, false));
+    update(&mut s, key(false, false, false, "KeyA"));
+    update(&mut s, key(true, false, true, "Space")); // Ctrl+Shift+Space
+    update(&mut s, key(false, true, true, "KeyT")); // Alt+Shift+T
+    assert_eq!((s.tried(0), s.tried(1), s.tried(2)), (true, true, true));
+    assert!(texts(&s).iter().any(|t| t == "Tried"));
+    next(&mut s, 1);
+    assert!(!s.trying(), "the shortcuts work again");
+}
+
 /// Back is off on the first step (a click does nothing), Next stops at Done,
 /// a pill of the track jumps to its step.
 #[test]
@@ -70,14 +112,15 @@ fn the_browser_is_preselected_and_steps_stay_in_range() {
         Point::new(50.0, WINDOW_SIZE.height - 30.0),
     );
     assert!(matches!(back[..], [Message::Back]), "{back:?}");
-    // the track: "1. Language" … "5. Done", each a jump
+    // the track: "1. Language" … "6. Done", each a jump
     let t = texts(&s);
     for label in [
         "1. Language",
         "2. Welcome",
-        "3. Connect AI",
-        "4. Look",
-        "5. Done",
+        "3. Try it",
+        "4. Connect AI",
+        "5. Look",
+        "6. Done",
     ] {
         assert!(t.iter().any(|x| x == label), "{label}: {t:?}");
     }
@@ -91,12 +134,12 @@ fn the_browser_is_preselected_and_steps_stay_in_range() {
 #[test]
 fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
     let mut s = state(None);
-    next(&mut s, 2);
+    next(&mut s, 3);
     assert_eq!(s.step(), Step::Ai, "no Screenshots step off Wayland");
     let mut s = state(None).on_wayland(true);
-    next(&mut s, 2);
+    next(&mut s, 3);
     assert_eq!(s.step(), Step::Screenshots);
-    assert!(texts(&s).iter().any(|t| t == "3. Screenshots"));
+    assert!(texts(&s).iter().any(|t| t == "4. Screenshots"));
 
     // Allow sends one request; a second click while it is out sends none.
     assert_eq!(update(&mut s, Message::Allow), Outcome::AskScreenshot);
@@ -153,7 +196,7 @@ fn wayland_adds_the_screenshot_step_and_asks_once_at_a_time() {
 fn finish_writes_the_picked_config() {
     let path = tmp("onboarding-claude");
     let mut s = state(Some(path.clone()));
-    next(&mut s, 2);
+    next(&mut s, 3);
     row(&mut s, settings::Message::Provider(Provider::Anthropic));
     row(
         &mut s,
@@ -270,7 +313,7 @@ fn the_switches_are_settings_rows_and_kept() {
     assert!(texts(&s).iter().any(|t| t == "Keep OpenCircle up to date"));
     row(&mut s, settings::Message::AutoUpdate(false));
     assert_eq!(s.config().update.auto, Some(false));
-    next(&mut s, 3);
+    next(&mut s, 4);
     assert_eq!(s.step(), Step::Done);
     let t = texts(&s);
     assert!(
@@ -289,7 +332,7 @@ fn the_switches_are_settings_rows_and_kept() {
 fn a_local_preset_and_skip() {
     let path = tmp("onboarding-ollama");
     let mut s = state(Some(path.clone()));
-    next(&mut s, 2);
+    next(&mut s, 3);
     row(
         &mut s,
         settings::Message::Provider(Provider::OpenaiCompatible),
@@ -309,7 +352,7 @@ fn a_local_preset_and_skip() {
     assert!(!cfg.ai.model.is_empty());
     // Skip: the AI settings as they were, on to the next step
     let mut s = state(Some(path.clone()));
-    next(&mut s, 2);
+    next(&mut s, 3);
     row(&mut s, settings::Message::Provider(Provider::Anthropic));
     update(&mut s, Message::Skip);
     assert_eq!(s.step(), Step::Look);

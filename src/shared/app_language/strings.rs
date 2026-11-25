@@ -706,6 +706,28 @@ strings! {
         | "اللغة";
     o_s_welcome: "Welcome"
         | "الترحيب";
+    g_welcome: "Welcome tour"
+        | "جولة الترحيب";
+    g_welcome_desc: "Replays the quick tour of your shortcuts"
+        | "تعيد الجولة السريعة لاختصاراتك";
+    g_welcome_again: "Show welcome again"
+        | "عرض الترحيب مرة أخرى";
+    o_s_try: "Try it"
+        | "جرّبها";
+    o_try_title: "Try your shortcuts"
+        | "جرّب اختصاراتك";
+    o_try_desc: "These are your shortcuts. Press each one to tick it off; nothing is sent and nothing opens. You can change them any time in Settings > Shortcuts."
+        | "هذه اختصاراتك. اضغط كل واحد لتعليمه؛ لا يُرسل شيء ولا يُفتح شيء. يمكنك تغييرها في أي وقت من الإعدادات > الاختصارات.";
+    o_try_circle_d: "Freezes the screen so you can circle or select"
+        | "يجمّد الشاشة لتحيط بدائرة أو تحدّد";
+    o_try_snip_d: "Click a window or drag an area"
+        | "انقر نافذة أو اسحب منطقة";
+    o_try_translate_d: "The whole screen"
+        | "الشاشة كاملة";
+    o_tried: "Tried"
+        | "جُرّب";
+    o_try_press: "Press it to try"
+        | "اضغطه لتجرّبه";
     o_s_ai: "Connect AI"
         | "ربط الذكاء الاصطناعي";
     o_s_look: "Look"

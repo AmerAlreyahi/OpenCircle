@@ -1,5 +1,5 @@
-//! Welcome (step 2): what OpenCircle does, then Settings' Selection and Keep up
-//! to date rows.
+//! Welcome (step 2): what OpenCircle does, then Settings' Keep up to date row
+//! (the Snap choice lives in Settings > Circle to Search).
 use crate::t;
 use iced::widget::{Space, column};
 use iced::{Element, Fill};
@@ -15,7 +15,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     column![
         super::logo_card(LOGO, t!(o_title), t!(o_welcome_desc), None,),
         Space::new().height(Fill),
-        Element::from(column![rows::selection_row(s), rows::update_row(s)]).map(Message::Settings),
+        Element::from(column![rows::update_row(s)]).map(Message::Settings),
     ]
     .into()
 }

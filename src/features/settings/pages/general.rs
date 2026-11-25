@@ -48,11 +48,25 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         )
     ];
+    rows = rows.push(welcome_row());
     rows = rows.push(start_row(state));
     rows = rows.push(folder_row(state));
     rows = rows.push(update_row(state));
     rows = rows.push(updates_row(state));
     rows.into()
+}
+
+/// F6: the welcome tour again.
+fn welcome_row<'a>() -> Element<'a, Message> {
+    setting_row::row(
+        title(t!(g_welcome)),
+        t!(g_welcome_desc),
+        setting_row::action(
+            t!(g_welcome_again),
+            crate::shared::kit::button::Kind::Elevated,
+            Some(Message::ShowWelcome),
+        ),
+    )
 }
 
 /// App language (owner, 2026-11-11): "Your language (…)" (follows the

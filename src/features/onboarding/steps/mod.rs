@@ -4,6 +4,7 @@ pub mod done;
 pub mod language;
 pub mod look;
 pub mod screenshots;
+pub mod try_it;
 pub mod welcome;
 
 use iced::Element;

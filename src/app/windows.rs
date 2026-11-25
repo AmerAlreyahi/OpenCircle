@@ -1292,7 +1292,9 @@ impl Windows {
         let task = self.handle(msg);
         // A shortcut field that records gets the keys: the global shortcuts are
         // held off until it stops (a key set, Esc, another page, the window closed).
-        let recording = self.settings.as_ref().is_some_and(|(_, s)| s.recording());
+        // The Try it step of onboarding gets them too (it ticks the pressed key).
+        let recording = self.settings.as_ref().is_some_and(|(_, s)| s.recording())
+            || (self.onboarding.as_ref()).is_some_and(|(_, s)| s.trying());
         crate::shared::platform::hotkey::suspend(recording);
         task
     }
@@ -1340,6 +1342,9 @@ impl Windows {
                         }
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
                         // Settings > Studio's button: the Studio opens with its preferences dialog
+                        settings::Outcome::ShowWelcome => {
+                            return Task::batch([keys, self.open(Kind::Onboarding)]);
+                        }
                         settings::Outcome::OpenStudioPreferences => {
                             return Task::batch([
                                 keys,

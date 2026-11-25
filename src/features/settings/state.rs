@@ -479,7 +479,7 @@ impl Chord {
     }
 
     /// "Ctrl+Shift+T" for `parse_shortcut`; `None` for a lone modifier key.
-    pub(super) fn shortcut(&self) -> Option<String> {
+    pub(crate) fn shortcut(&self) -> Option<String> {
         let key = self.key.as_str();
         let modifier = ["Control", "Shift", "Alt", "Meta", "Super", "Fn", "CapsLock"]
             .iter()
@@ -732,6 +732,8 @@ pub enum Message {
     Autostart(bool),
     /// Settings > Studio: open the Studio's preferences dialog.
     OpenStudioPreferences,
+    /// Settings > General: open the welcome tour again.
+    ShowWelcome,
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -937,6 +939,8 @@ pub enum Outcome {
     Browse,
     /// Open OpenCircle Studio with its preferences dialog.
     OpenStudioPreferences,
+    /// Open the welcome tour (onboarding) again.
+    ShowWelcome,
     /// Open this link in the browser (the user clicked it on the About page).
     OpenLink(String),
     /// Copy the diagnostics report (the shell does it and shows the pill).
@@ -1913,6 +1917,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.draft.snip = snip;
         }
         Message::OpenStudioPreferences => return Outcome::OpenStudioPreferences,
+        Message::ShowWelcome => return Outcome::ShowWelcome,
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(dir) => {
             if let Some(dir) = dir {
@@ -2224,7 +2229,7 @@ pub fn copy_key(state: &State) -> Option<Message> {
 /// The chord a key event records: a key going down, and Print Screen going
 /// up: Windows sends no key-down for it (alone or with Alt / Ctrl), only its
 /// key-up, so Print Screen and Alt+Print Screen could never be recorded.
-pub(super) fn chord_of(event: iced::Event) -> Option<Chord> {
+pub(crate) fn chord_of(event: iced::Event) -> Option<Chord> {
     use keyboard::key::{Code, Physical};
     match event {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {

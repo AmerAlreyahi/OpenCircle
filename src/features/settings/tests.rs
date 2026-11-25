@@ -4292,6 +4292,16 @@ fn the_studio_page_matches_its_golden_images() {
 }
 
 /// Settings > Studio is one button that asks the app to open the Studio's preferences.
+/// F6-4: General's "Show welcome again" asks the shell to open the tour.
+#[test]
+fn f6_general_has_show_welcome_again() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    let words = crate::shared::kit::testing::shot::texts(view(&s));
+    assert!(words.iter().any(|t| t == "Show welcome again"), "{words:?}");
+    assert_eq!(update(&mut s, Message::ShowWelcome), Outcome::ShowWelcome);
+}
+
 #[test]
 fn the_studio_page_opens_the_studio_preferences() {
     let (mut s, _) = state(None);
