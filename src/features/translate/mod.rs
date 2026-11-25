@@ -8,6 +8,7 @@
 //! its engines in `live_translate::live`) per region whose text changed.
 
 pub(crate) mod action;
+pub(crate) use action::translate_text;
 mod draw;
 mod erase;
 mod glossary;

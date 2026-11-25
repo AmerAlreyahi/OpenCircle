@@ -6398,6 +6398,57 @@ fn w98_201_14_presses_on_the_menu_never_reach_the_overlay() {
     );
 }
 
+/// W106: Translate from the right-click menu translates the SELECTED TEXT into a small card beside
+/// the selection (not the picture's pipeline): "Translating..." first, then the translation with
+/// Copy; the overlay stays; a failure is the error card; Esc / a press elsewhere puts it away; an
+/// older request's answer is dropped.
+#[test]
+fn w106_the_menus_translate_shows_the_selected_texts_translation_in_a_card() {
+    use crate::features::circle::screens::context_menu::{Msg, Row};
+    use crate::features::circle::screens::text_card::{self, State};
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    assert!(app.o.translate.is_none(), "no picture translation starts");
+    assert!(!app.o.is_none(), "the overlay stays");
+    let card = app.o.text_card.as_ref().expect("the card opens at once");
+    assert_eq!(card.state, State::Translating);
+    let id = card.id;
+    let texts = texts_of(&app, app.overlay);
+    assert!(texts.iter().any(|t| t == "Translating…"), "{texts:?}");
+    // an older request's answer is ignored
+    let _ = app.update(Message::TextTranslated(id + 7, Ok("late".into())));
+    assert_eq!(app.o.text_card.as_ref().unwrap().state, State::Translating);
+    // the answer: its words and a Copy button
+    let _ = app.update(Message::TextTranslated(id, Ok("hola mundo".into())));
+    let texts = texts_of(&app, app.overlay);
+    assert!(texts.iter().any(|t| t == "hola mundo"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Copy"), "{texts:?}");
+    let _ = app.update(Message::TextCard(text_card::Msg::Copy));
+    assert!(app.o.text_card.as_ref().unwrap().copied);
+    // Esc puts the card away and the overlay stays
+    let _ = app.update(Message::Escape);
+    assert!(app.o.text_card.is_none() && !app.o.is_none());
+    // a failure is the one error card
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    let id = app.o.text_card.as_ref().unwrap().id;
+    let _ = app.update(Message::TextTranslated(id, Err("No offline model".into())));
+    let texts = texts_of(&app, app.overlay);
+    assert!(
+        texts.iter().any(|t| t == "Translation could not finish"),
+        "{texts:?}"
+    );
+    // a press on the screen puts it away
+    let _ = app.update(Message::Overlay(overlay::Event::Press {
+        at: Point::new(5.0, 5.0),
+        shift: false,
+    }));
+    assert!(app.o.text_card.is_none());
+}
+
 /// 201.10: select-text mode: the box answers (all its text), Select all text picks every word and
 /// then its row is gone.
 #[test]

@@ -51,6 +51,9 @@ pub(crate) enum Message {
     Overlay(overlay::Event),
     /// The right-click menu's row clicked (#201).
     ContextMenu(crate::features::circle::screens::context_menu::Msg),
+    /// The menu's Translate card: its Copy / details, and request `.0`'s answer.
+    TextCard(crate::features::circle::screens::text_card::Msg),
+    TextTranslated(u32, Result<String, String>),
     /// Another monitor's frame of capture number `.0` landed (`app::screens`).
     Screen(u32, pick::Place, image::Handle),
     /// From another monitor's overlay window (its logical px).

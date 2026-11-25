@@ -22,6 +22,13 @@ impl App {
             self.o.alt = alt;
             return Task::none();
         }
+        // a press on the screen puts the menu's Translate card away (Esc does too)
+        if matches!(
+            event,
+            overlay::Event::Press { .. } | overlay::Event::Context(_)
+        ) {
+            self.o.text_card = None;
+        }
         // The right-click menu: opens on a right press on the selected text, then drives itself.
         match event {
             _ if self.o.menu.is_some() => {

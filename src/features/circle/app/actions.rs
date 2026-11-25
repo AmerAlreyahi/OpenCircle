@@ -161,11 +161,6 @@ impl App {
         }
     }
 
-    /// The bar's Translate on the picked words (the right-click menu's row).
-    pub(crate) fn translate_picked(&mut self) -> Task<Message> {
-        self.on_pill(BarButton::Translate)
-    }
-
     /// Runs `action` on the selection: a finishing action closes the overlay first
     /// (so dialogs aren't hidden under it); a panel action opens its panel; Edit
     /// turns the bar into the editing toolbar. No selection yet = nothing to do.

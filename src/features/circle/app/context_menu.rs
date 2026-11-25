@@ -4,11 +4,14 @@
 use iced::{Point, Rectangle, Task};
 
 use crate::app::App;
+use crate::app::background::background;
 use crate::app::message::{Message, Purpose};
+use crate::features::circle::actions::copy;
 use crate::features::circle::actions::entities::{self, Kind};
 use crate::features::circle::actions::{self, Action};
 use crate::features::circle::screens::context_menu::{Key, Menu, Msg, Outcome, Row};
 use crate::features::circle::screens::overlay::{self, Event};
+use crate::features::circle::screens::text_card::{self, State, TextCard};
 use crate::shared::kit::option_list::place;
 
 /// The menu keeps this far from the screen's edges.
@@ -101,7 +104,7 @@ impl App {
 
     /// Esc.
     pub(crate) fn close_context(&mut self) -> bool {
-        self.o.menu.take().is_some()
+        self.o.menu.take().is_some() || self.o.text_card.take().is_some()
     }
 
     fn menu_outcome(&mut self, outcome: Option<Outcome>) -> Task<Message> {
@@ -131,11 +134,74 @@ impl App {
         match row {
             Row::Copy => self.press(actions::by_id("copy")),
             Row::Search => self.press(actions::by_id("lens")),
-            Row::Translate => self.translate_picked(),
+            Row::Translate => self.translate_text_card(),
             Row::Ask => self.ask_selected_text(),
             Row::SelectAll => self.select_all_text(),
             Row::Open(entity) => self.open_entity(entity),
         }
+    }
+
+    /// Translate: the SELECTED TEXT into the user's target language with the configured engine,
+    /// in a small card beside the selection (the overlay stays). Not the picture (owner, 2026-11-25).
+    fn translate_text_card(&mut self) -> Task<Message> {
+        let (Some(text), Some(near)) = (self.menu_text(), self.selection_screen_rect()) else {
+            return Task::none();
+        };
+        self.text_cards = self.text_cards.wrapping_add(1);
+        let id = self.text_cards;
+        self.o.text_card = Some(TextCard::new(id, near));
+        let cfg = crate::shared::config::current();
+        let (source, target) = (cfg.translate.source.clone(), cfg.translate.target.clone());
+        background(move |tx| {
+            let result = crate::features::translate::translate_text(&text, &source, &target);
+            if let Err(e) = &result {
+                crate::log!("[opencircle] translate selected text failed: {e}");
+            }
+            let _ = tx.unbounded_send(result);
+        })
+        .map(move |result| Message::TextTranslated(id, result))
+    }
+
+    /// The selected words' box on screen (screen px).
+    fn selection_screen_rect(&self) -> Option<Rectangle> {
+        let rects = self.menu_target();
+        let first = *rects.first()?;
+        let all = rects.iter().fold(first, |a, r| a.union(r));
+        Some(self.o.view.rect_to_screen(all))
+    }
+
+    /// The translation (or why not) of request `id`; an older request's answer is dropped.
+    pub(crate) fn text_translated(
+        &mut self,
+        id: u32,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        if let Some(card) = self.o.text_card.as_mut().filter(|c| c.id == id) {
+            card.state = match result {
+                Ok(text) => State::Done(text),
+                Err(e) => State::Failed(e),
+            };
+        }
+        Task::none()
+    }
+
+    /// The card's Copy (the overlay stays) and its error details.
+    pub(crate) fn on_text_card(&mut self, msg: text_card::Msg) -> Task<Message> {
+        let Some(card) = self.o.text_card.as_mut() else {
+            return Task::none();
+        };
+        match msg {
+            text_card::Msg::Details => card.details = !card.details,
+            text_card::Msg::Copy => {
+                if let State::Done(text) = &card.state {
+                    match copy::text(text.clone()) {
+                        Ok(()) => card.copied = true,
+                        Err(e) => crate::log!("[opencircle] copy translation failed: {e}"),
+                    }
+                }
+            }
+        }
+        Task::none()
     }
 
     /// Ask AI about the selected text: the text goes with the question, not the picture (the

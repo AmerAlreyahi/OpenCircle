@@ -37,6 +37,28 @@ pub fn deps_for(source: &str, target: &str, one_shot: bool) -> Result<(Real, Str
     Ok((Real::new(source, via), target.to_string()))
 }
 
+/// `text` (the right-click menu's selected words) translated into `target` with the configured
+/// engine: offline by default, the AI provider or the online service as chosen. Blocking.
+/// `Err` = what to tell the user. Text already in the target comes back as it is.
+pub fn translate_text(text: &str, source: &str, target: &str) -> Result<String, String> {
+    use crate::features::translate::Block;
+    use crate::features::translate::pipeline::{Cache, Deps, translate_blocks};
+    let (real, target) = deps_for(source, target, true)?;
+    real.read(&[text]);
+    let block = Block {
+        lines: Vec::new(),
+        text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+        bounds: [0.0; 4],
+    };
+    let out =
+        translate_blocks(&[block], &target, &Cache::new(8), &real).map_err(|e| e.to_string())?;
+    Ok(out
+        .into_iter()
+        .next()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| text.to_string()))
+}
+
 /// The engine, without the keyring: `Some` when translation will surely be
 /// offline (chosen, or the browser provider, which can't translate), with
 /// the model it will most likely need next (`mt::next`; English for

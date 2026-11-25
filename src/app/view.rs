@@ -11,9 +11,9 @@ use crate::shared::config;
 use crate::app::message::{Message, Purpose};
 use crate::app::screens::toast;
 use crate::features::circle::screens::bar::geometry as bar;
-use crate::features::circle::screens::context_menu;
 use crate::features::circle::screens::edge as border;
 use crate::features::circle::screens::overlay;
+use crate::features::circle::screens::{context_menu, text_card};
 use crate::features::snip::screens::pick;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading::app::word;
@@ -372,6 +372,22 @@ impl App {
                     .on_press(Message::ContextMenu(context_menu::Msg::Close))
                     .on_right_press(Message::ContextMenu(context_menu::Msg::Close)),
             ));
+        }
+        // Translate's card beside the selected text: it takes its own presses
+        if let Some(t) = &self.o.text_card {
+            let screen = self.o.screen;
+            let h = t.height();
+            let x = t
+                .near
+                .x
+                .clamp(8.0, (screen.width - text_card::WIDTH - 8.0).max(8.0));
+            let below = t.near.y + t.near.height + 8.0;
+            let y = match below + h <= screen.height - 8.0 {
+                true => below,
+                false => (t.near.y - 8.0 - h).max(8.0),
+            };
+            let card = opaque(t.view().map(Message::TextCard));
+            layers = layers.push(pin(card).position(Point::new(x, y)));
         }
         layers.extend(self.pill_view()).into()
     }
