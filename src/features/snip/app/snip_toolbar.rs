@@ -144,7 +144,7 @@ impl App {
         }
         // The AI chat asked from More is a quick question: Esc closes both.
         if matches!(msg, annotate::Message::Back) && self.o.ai_chat.is_some() {
-            return self.close();
+            return self.cancel_close();
         }
         // Snip's live area: the frame times of each drag on it (the log).
         let live = self.o.edit.as_ref().is_some_and(|e| e.annotator.movable);
@@ -230,13 +230,13 @@ impl App {
                 .map(Message::Windows),
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
-            Some(Output::Back) if edit.annotator.updating.is_some() => self.close(),
+            Some(Output::Back) if edit.annotator.updating.is_some() => self.cancel_close(),
             // Drawings never get lost: Esc with drawings closes Snip with the Undo pill
             Some(Output::Back)
                 if matches!(o.purpose, Purpose::Snip(_))
                     && !edit.annotator.doc.items.is_empty() =>
             {
-                self.end_snip()
+                self.cancel_snip()
             }
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
@@ -252,7 +252,7 @@ impl App {
                 Task::none()
             }
             // the quiet x: as Esc does (C6)
-            Some(Output::Close) => self.end_snip(),
+            Some(Output::Close) => self.cancel_snip(),
             Some(Output::CopyText) => self.more_copy_text(),
             Some(Output::AskAi(crop)) => self.open_chat(crop, None),
             Some(Output::Translate) => self.more_translate(),
@@ -533,6 +533,29 @@ mod tests {
         assert!(app.snip_undo.is_none() && app.windows.toasts().is_empty());
         assert!(app.o.edit.is_none(), "back to picking, as before");
         assert!(app.hiding == Hiding::No, "still open");
+    }
+
+    /// F5-7: the Undo pill is only for a CANCEL. A finishing action (Copy, Save,
+    /// Copy text ...) ends Snip with its own pill and never the Undo one, also on
+    /// Wayland, where the overlay stays up and `ToastDone` ends it.
+    #[test]
+    fn f5_a_finishing_action_never_shows_the_undo_pill_not_even_on_wayland() {
+        use crate::shared::app_language::Said;
+        let mut app = snip_toolbar_open();
+        app.can_hide = false; // Wayland: the overlay holds the frame behind the Copied pill
+        draw_rect(&mut app);
+        let _task = app.on_snip_toolbar(E::Copy);
+        assert!(
+            app.o.edit.is_some(),
+            "the overlay stays up until the pill is read"
+        );
+        app.o.toast = Some(Said(crate::shared::app_language::S::pill_copied));
+        let _ = app.update(crate::app::message::Message::ToastDone);
+        assert!(app.snip_undo.is_none(), "Copy is not a cancel");
+        assert!(
+            app.windows.toasts().iter().all(|(t, _)| t != "Snip closed"),
+            "no Undo pill"
+        );
     }
 
     /// F5-3: no drawings, no pill (Esc closes silently as before); F5-4: when

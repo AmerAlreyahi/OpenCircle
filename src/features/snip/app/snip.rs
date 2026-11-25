@@ -268,12 +268,9 @@ impl App {
     /// Snip is done and the overlay has nothing more to show for it: back to the translation it
     /// started from (same window, same frame, same pill: no untranslated frame in between), else
     /// the overlay closes. Esc at the pick step, the end of a Copy / Save / Copy text pill.
+    ///
+    /// A finishing action (Copy, Save, Copy text, ...) ends here too: no Undo pill then.
     pub(crate) fn end_snip(&mut self) -> Task<Message> {
-        let undo = self.snip_undo_offer();
-        Task::batch([undo, self.end_snip_now()])
-    }
-
-    fn end_snip_now(&mut self) -> Task<Message> {
         let Some(view) = self.o.translated_view.take() else {
             crate::log!("[opencircle] Snip ended: overlay closed");
             return self.close();
@@ -845,6 +842,22 @@ fn copy_snip(crop: Crop) -> Task<Message> {
             crate::log!("copy failed: {e}");
         }
     })
+}
+
+impl App {
+    /// The user cancels Snip (x, Esc): `end_snip`, and drawings on the picture stay
+    /// for the "Snip closed . Undo" pill.
+    pub(crate) fn cancel_snip(&mut self) -> Task<Message> {
+        let undo = self.snip_undo_offer();
+        Task::batch([undo, self.end_snip()])
+    }
+
+    /// The user cancels by a path that closes the overlay itself (an edited step's Esc,
+    /// Esc with More's AI chat open): `close`, with the same Undo pill.
+    pub(crate) fn cancel_close(&mut self) -> Task<Message> {
+        let undo = self.snip_undo_offer();
+        Task::batch([undo, self.close()])
+    }
 }
 
 /// "Snip closed . Undo" shows this long (then the kept drawings go).

@@ -303,7 +303,7 @@ impl App {
                 self.o.esc_back = false;
                 Task::none()
             }
-            Message::Escape => self.end_snip(),
+            Message::Escape => self.cancel_snip(),
             Message::EscapeTaken
                 if self.o.edit.is_some()
                     || self.o.esc_back
