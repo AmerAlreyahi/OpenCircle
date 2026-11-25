@@ -4697,6 +4697,7 @@ fn w107_3_the_title_bar_matches_its_golden_images() {
         for language in ["en", "ar"] {
             let (mut s, _) = state(None);
             update(&mut s, Message::AppLanguage(Choice(language)));
+            crate::shared::kit::themes::set(theme); // (after the language: it reloads the look)
             for width in [MIN_WIDTH, WINDOW_SIZE.width] {
                 let file = format!("settings-titlebar-{language}-{width}-{}", theme.id);
                 let size = Size::new(width, 64.0);

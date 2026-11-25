@@ -56,7 +56,8 @@ pub fn at_end<'a, Message: 'a>(
     if !shown {
         return field;
     }
-    let caps = super::dir::row(
+    // (a plain row: keys read in their own order, "Ctrl F", in every language)
+    let caps = iced::widget::Row::with_children(
         keys.iter()
             .map(|k| {
                 let width = 12.0 + 7.0 * k.chars().count() as f32;
