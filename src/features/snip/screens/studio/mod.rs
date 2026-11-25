@@ -2330,8 +2330,10 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
         .min(1.0 / scale.max(0.1))
 }
 
-/// A picture over this many pixels is drawn from a copy of its shown size when shown small.
-const MIP_MIN_PIXELS: u32 = 3_000_000;
+/// A picture over this many pixels is drawn from a copy of its shown size when shown small. 1 Mpx, not
+/// 3 (W107-4): a 1640 x 1270 picture, the size of a typical snip, drew whole through the linear pipeline
+/// on every crop frame (release, drag mean 6.1 ms, worst 13.7, against 1.0 with the copy; 4K already had it).
+const MIP_MIN_PIXELS: u32 = 1_000_000;
 
 /// The copy of one base picture at about the size the stage shows it, made on a thread.
 pub(super) struct Mips {

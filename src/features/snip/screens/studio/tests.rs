@@ -4414,3 +4414,107 @@ fn hide_this_shape_is_in_the_actions_menu_and_the_right_click_menu() {
     );
     let _ = &mut s;
 }
+
+/// W107-4: the FIRST crop is as smooth as the later ones: a picture of a typical snip's size (1640 x
+/// 1270, over 1 Mpx) shown smaller than itself is drawn from a stage copy made on a thread when it opens
+/// (not whole through the linear pipeline on every frame of the crop drag, which cost 6.1 ms a frame in
+/// release against 0.4 for the already-cropped, smaller picture), as a 4K one already was; a small one
+/// is itself. The timings: `studio_crop_frame_times`.
+#[test]
+fn w107_4_a_snip_sized_picture_gets_its_stage_copy_before_the_first_crop() {
+    for (w, h, copy) in [(1640, 1270, true), (3840, 2160, true), (1200, 800, false)] {
+        let mut s = studio_on(w, h);
+        for _ in 0..500 {
+            let _ = s.update(Msg::Frame(std::time::Instant::now()));
+            if s.mips.as_ref().is_none_or(|m| m.pending.is_none()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let e = s.editor.as_ref().unwrap();
+        assert!(e.zoom < 0.9, "{w}x{h} is shown smaller: {}", e.zoom);
+        assert_eq!(e.display.is_some(), copy, "{w}x{h}");
+        assert_eq!(e.crisp, copy, "{w}x{h}");
+    }
+}
+
+/// A picture with detail (not flat: a flat one hides what costs).
+fn photo(width: u32, height: u32) -> Crop {
+    let mut c = crop(width, height);
+    for (i, px) in c.rgba.chunks_mut(4).enumerate() {
+        let (x, y) = (i as u32 % width, i as u32 / width);
+        let n = (x.wrapping_mul(2654435761) ^ y.wrapping_mul(40503)) >> 24;
+        px.copy_from_slice(&[
+            (x * 255 / width) as u8,
+            (y * 255 / height) as u8,
+            n as u8,
+            255,
+        ]);
+    }
+    c
+}
+
+/// The Studio's crop, the FIRST one of a picture and the next ones (W107-4): each frame of a drag
+/// and of the release that applies it, in milliseconds (state change + layout + draw + raster).
+/// Measurement: `cargo test --release studio_crop_frame_times -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn studio_crop_frame_times() {
+    for (w, h) in [(1640, 1270), (3840, 2160)] {
+        let mut s = Studio::new(StudioConfig::default());
+        s.open(Picture::Crop(photo(w, h)));
+        s.settle_open();
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Crop)));
+        // (the stage copy a big picture draws from is made on a thread: the app's frames collect it)
+        for _ in 0..500 {
+            let _ = s.update(Msg::Frame(std::time::Instant::now()));
+            if s.mips.as_ref().is_none_or(|m| m.pending.is_none()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let window = s.window;
+        let mut report = Vec::new();
+        for round in 0..3 {
+            let (x, y) = (200.0 + 40.0 * round as f32, 150.0 + 30.0 * round as f32);
+            let frames = crate::shared::kit::testing::shot::frames_of(window, 34, |i, show| {
+                let m = match i {
+                    0 => Some(Message::Press(Point::new(x, y))),
+                    1..=24 => Some(Message::Move(Point::new(
+                        x + 20.0 * i as f32,
+                        y + 14.0 * i as f32,
+                    ))),
+                    25 => Some(Message::Release),
+                    _ => None,
+                };
+                if let Some(m) = m {
+                    let _ = s.update(Msg::Editor(m));
+                }
+                if i > 25 {
+                    let _ = s.update(Msg::Tick);
+                }
+                show(view(&s, &[], false));
+            });
+            let ms = |f: &crate::shared::kit::testing::shot::Frame| f.draw_ms + f.raster_ms;
+            let drag = frames[1..25].iter().map(ms).collect::<Vec<_>>();
+            let mean = drag.iter().sum::<f64>() / drag.len() as f64;
+            let worst = drag.iter().cloned().fold(0.0, f64::max);
+            let apply = ms(&frames[25]);
+            let after = frames[26..].iter().map(ms).fold(0.0, f64::max);
+            let area: f32 = frames[1..25]
+                .iter()
+                .map(|f| f.damage.iter().map(|r| r.width * r.height).sum::<f32>())
+                .sum::<f32>()
+                / 24.0;
+            report.push(format!(
+                "(crop set: {}, damage/frame {:.0} px, window {:?})\n  crop {}: first drag frame {:.1} ms, drag mean {mean:.1} / worst {worst:.1}, release {apply:.1}, after worst {after:.1}",
+                s.editor.as_ref().unwrap().doc.crop.is_some(),
+                area,
+                window,
+                round + 1,
+                ms(&frames[1])
+            ));
+        }
+        println!("{w}x{h}:\n  {}", report.join("\n  "));
+    }
+}
