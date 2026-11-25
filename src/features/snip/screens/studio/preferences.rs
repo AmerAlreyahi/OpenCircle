@@ -37,7 +37,7 @@ const HEIGHT: f32 = 640.0;
 const WIDE: f32 = 1280.0;
 const TALL: f32 = 900.0;
 /// The section list's width.
-const NAV: f32 = 210.0;
+const NAV: f32 = 232.0;
 const MARGIN: f32 = 12.0;
 
 /// The card's size: `WIDTH` x `HEIGHT` in a normal window, growing with a big one (half
@@ -52,6 +52,8 @@ fn card_size(window: Size) -> (f32, f32) {
     )
 }
 
+/// The rows' column never grows past this: a label and its control stay together in a big window.
+const CONTENT: f32 = 720.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     General,
@@ -81,6 +83,18 @@ impl Tab {
             Tab::CopyPaste => t!(pf_sub_copy),
             Tab::Editing => t!(pf_sub_editing),
             Tab::Shortcuts => t!(pf_sub_shortcuts),
+        }
+    }
+
+    /// Its icon (lucide, from the bundled subset).
+    fn icon(self) -> char {
+        match self {
+            Tab::General => '\u{e157}',    // settings
+            Tab::Appearance => '\u{e5a0}', // blend
+            Tab::Saving => '\u{e0b6}',     // download
+            Tab::CopyPaste => '\u{e3eb}',  // clipboard-paste
+            Tab::Editing => '\u{e1f8}',    // pencil
+            Tab::Shortcuts => '\u{e0a5}',  // corner-down-left (the Enter key)
         }
     }
 
@@ -339,16 +353,10 @@ impl Dialog {
     /// one-line subtitle with the X at the top, then its rows in small-headed groups.
     pub fn view(&self, window: Size) -> Element<'_, Msg> {
         let nav = column(Tab::ALL.map(|t| {
-            let kind = match t == self.tab {
-                true => Kind::Elevated,
-                false => Kind::Quiet,
-            };
-            container(button::button(label(t.name()), kind, Some(Msg::Tab(t))))
-                .width(Fill)
-                .into()
+            crate::shared::kit::side_panel::section(t.icon(), t.name(), t == self.tab, Msg::Tab(t))
         }))
-        .spacing(space::GAP / 2.0)
-        .padding(space::PAGE[1]);
+        .spacing(crate::shared::kit::side_panel::SECTION_GAP)
+        .padding(space::SIDEBAR_PAD);
         // the list is part of the card, not a box beside it: a recessed column on the card's
         // start side, as tall as the card, its outer corners the card's own
         let nav =
@@ -359,8 +367,10 @@ impl Dialog {
             Msg::Close,
         ))
         .padding([space::PAGE[1], space::PAGE[1]]);
-        let body =
-            scroll(container(self.rows()).padding([0.0, space::PAGE[1]])).height(Length::Fill);
+        // the rows sit in one centred column at most CONTENT wide, so a label and its control
+        // stay together however wide the dialog grows
+        let page = container(container(self.rows()).width(Fill).max_width(CONTENT)).center_x(Fill);
+        let body = scroll(container(page).padding([0.0, space::PAGE[1]])).height(Length::Fill);
         let page = column![head, divider::divider(), body].width(Fill);
         let content = crate::dir_row![nav, divider::vertical(Fill), page];
         let (w, h) = card_size(window);
@@ -378,7 +388,7 @@ impl Dialog {
             change(&mut next);
             Msg::Prefs(Box::new(next))
         };
-        let row = |name, desc, control| setting_row::row(title(name), desc, control);
+        let row = |name, desc, control| setting_row::plain(title(name), desc, control);
         let switch = move |name, desc, on: bool, set: fn(&mut StudioPrefs, bool)| {
             row(
                 name,
@@ -681,13 +691,14 @@ impl Dialog {
         };
         let mut page = column![].spacing(space::PAGE[1]);
         for (heading, rows) in groups {
-            page = page.push(
-                column![
-                    container(muted(Role::SECTION, heading)).padding([space::GAP, 0.0]),
-                    column(rows)
-                ]
-                .spacing(space::GAP),
-            );
+            let mut group = column![]
+                .spacing(space::GAP)
+                .align_x(crate::shared::kit::dir::start());
+            if !heading.is_empty() {
+                group =
+                    group.push(container(muted(Role::SECTION, heading)).padding([0.0, space::GAP]));
+            }
+            page = page.push(group.push(setting_row::card(rows)));
         }
         container(page).padding([space::PAGE[1], 0.0]).into()
     }
@@ -737,7 +748,7 @@ impl Dialog {
                     }
                     None => String::new(),
                 };
-                setting_row::row(title(tr(cmd.name())), desc, control)
+                setting_row::plain(title(tr(cmd.name())), desc, control)
             })
             .collect();
         let fixed: Vec<Element<'_, Msg>> = keys::FIXED_ROWS
@@ -749,10 +760,10 @@ impl Dialog {
                 }))
                 .spacing(space::GAP)
                 .wrap();
-                setting_row::row(title(tr(*what)), "", caps)
+                setting_row::plain(title(tr(*what)), "", caps)
             })
             .collect();
-        let reset_all = setting_row::row(
+        let reset_all = setting_row::plain(
             title(t!(pf_keys_reset_all)),
             t!(pf_keys_note),
             setting_row::action(
@@ -933,6 +944,37 @@ mod tests {
             }
             app_language::set(Lang::En);
         });
+    }
+
+    /// W106.2: in a big window a row's label and its control stay together (the rows' column is
+    /// at most CONTENT wide), and in Arabic the label is at the right, the control at the left.
+    #[test]
+    fn w106_a_label_and_its_control_stay_together_and_mirror() {
+        use crate::shared::kit::testing::shot;
+        crate::shared::kit::text::load();
+        let size = Size::new(3440.0, 1440.0);
+        let rect_of = |texts: &[(iced::Rectangle, String)], s: &str| {
+            texts
+                .iter()
+                .find(|(_, t)| t == s)
+                .map(|(r, _)| *r)
+                .unwrap_or_else(|| panic!("{s:?} not drawn: {texts:?}"))
+        };
+        for (lang, rtl) in [(Lang::En, false), (Lang::Ar, true)] {
+            app_language::set(lang);
+            let d = dialog();
+            let texts = shot::texts_at(d.view(size), size);
+            let label = rect_of(&texts, tr(S::ss_open_in));
+            let control = rect_of(&texts, tr(S::ss_quick));
+            let span = label.x.max(control.x + control.width) - label.x.min(control.x);
+            assert!(span <= CONTENT, "{lang:?}: label to control spans {span}");
+            assert_eq!(
+                label.x > control.x,
+                rtl,
+                "{lang:?}: the label {label:?} / control {control:?} sit at the wrong ends"
+            );
+        }
+        app_language::set(Lang::En);
     }
 
     /// W91.1: apply writes only what the dialog changed; a value changed elsewhere

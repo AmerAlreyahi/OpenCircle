@@ -99,6 +99,14 @@ fn ruled<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     marked: bool,
 ) -> Element<'a, Message> {
+    ruled_with(content, marked, true)
+}
+
+fn ruled_with<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    marked: bool,
+    rule: bool,
+) -> Element<'a, Message> {
     let row = container(content).padding([space::ROW_Y, 0.0]);
     let row = match marked {
         true => row
@@ -110,7 +118,10 @@ fn ruled<'a, Message: 'a>(
             }),
         false => row,
     };
-    column![row, divider()].into()
+    match rule {
+        true => column![row, divider()].into(),
+        false => row.into(),
+    }
 }
 
 /// The text, then the control in the page's control column.
@@ -118,6 +129,40 @@ pub fn row<'a, Message: 'a>(
     title: Element<'a, Message>,
     desc: impl IntoFragment<'a>,
     control: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    row_with(title, desc, control, true)
+}
+
+/// `row` without its hairline: for `card`, which rules between its rows only.
+pub fn plain<'a, Message: 'a>(
+    title: Element<'a, Message>,
+    desc: impl IntoFragment<'a>,
+    control: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    row_with(title, desc, control, false)
+}
+
+/// `rows` (made with `plain`) in one card: a hairline between them, none after the last.
+pub fn card<'a, Message: 'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    use super::surface::{Material, surface};
+    let mut list = column![];
+    for (i, row) in rows.into_iter().enumerate() {
+        if i > 0 {
+            list = list.push(divider());
+        }
+        list = list.push(row);
+    }
+    surface(Material::Tile, super::tokens::radius::CARD, list)
+        .padding([0.0, space::PAGE[0]])
+        .width(Fill)
+        .into()
+}
+
+fn row_with<'a, Message: 'a>(
+    title: Element<'a, Message>,
+    desc: impl IntoFragment<'a>,
+    control: impl Into<Element<'a, Message>>,
+    rule: bool,
 ) -> Element<'a, Message> {
     let desc = desc.into_fragment();
     let marked = note(&desc);
@@ -128,7 +173,7 @@ pub fn row<'a, Message: 'a>(
     let control = container(control)
         .id(Id::new(CONTROL))
         .width(size::CONTROL_COLUMN);
-    ruled(
+    ruled_with(
         // (the strut keeps a short row at the least height)
         crate::dir_row![
             Space::new().height(size::ROW_MIN),
@@ -138,6 +183,7 @@ pub fn row<'a, Message: 'a>(
         ]
         .align_y(iced::Center),
         marked,
+        rule,
     )
 }
 
