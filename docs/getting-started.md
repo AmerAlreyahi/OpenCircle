@@ -37,7 +37,7 @@ OpenCircle starts with Windows. On Linux under Wayland it also asks the desktop
 for screenshot permission once. A **Try it** step lets you press your own
 shortcuts for Circle to Search, Snip and Translate and ticks each one (the
 shortcuts only tick here; nothing opens). Skip any of it; everything can change
-later in **Settings** (tray menu); `Ctrl+F` there searches every setting. If a second launch finds it already running,
+later in **Settings** (tray menu); `Ctrl+K` there searches every setting. If a second launch finds it already running,
 it opens Settings.
 
 Auto-update is asked about once, on first run, where the switch starts on; you

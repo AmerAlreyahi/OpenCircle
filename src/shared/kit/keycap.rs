@@ -45,7 +45,7 @@ fn cap<'a, Message: 'a>(label: String, alpha: f32) -> Element<'a, Message> {
         .into()
 }
 
-/// `field` with `keys` drawn at its end while `shown` (a search field's "Ctrl F"): one small cap per
+/// `field` with `keys` drawn at its end while `shown` (a search field's "Ctrl K"): one small cap per
 /// key, over the field, never taking a press from it.
 pub fn at_end<'a, Message: 'a>(
     field: impl Into<Element<'a, Message>>,
@@ -56,7 +56,7 @@ pub fn at_end<'a, Message: 'a>(
     if !shown {
         return field;
     }
-    // (a plain row: keys read in their own order, "Ctrl F", in every language)
+    // (a plain row: keys read in their own order, "Ctrl K", in every language)
     let caps = iced::widget::Row::with_children(
         keys.iter()
             .map(|k| {

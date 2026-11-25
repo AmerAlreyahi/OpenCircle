@@ -1,4 +1,4 @@
-//! Settings search (F13, Ctrl+F): over the page titles and every row's title and
+//! Settings search (F13, Ctrl+K; Ctrl+F too): over the page titles and every row's title and
 //! description, in the app's language. The index is read from the pages themselves
 //! (`setting_row::harvest`: no second list of words to keep), built once when the
 //! search opens, for the pages as they show now and for the rows only a choice
@@ -9,7 +9,7 @@ use super::state::{Section, State};
 use crate::shared::app_language::tr;
 use crate::shared::kit::setting_row;
 
-/// The search field's id (it takes the focus on Ctrl+F).
+/// The search field's id (it takes the focus on Ctrl+K / Ctrl+F).
 pub const FIELD: &str = "settings-search";
 /// The most hits listed.
 pub const MAX_HITS: usize = 8;

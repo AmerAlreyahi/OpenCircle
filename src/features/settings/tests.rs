@@ -1967,7 +1967,7 @@ fn shortcut_boxes_draw_one_cap_per_key_and_no_padding() {
     let (mut s, _) = state(None);
     s.draft.quick_actions[0].shortcut = "Ctrl+T".into();
     let texts = page(&mut s, Section::Shortcuts);
-    // (the header's search shows its own "Ctrl F" first)
+    // (the header's search shows its own "Ctrl K" first)
     assert!(texts.windows(3).any(|w| w == ["Ctrl", "Shift", "Space"]));
     assert!(!texts.iter().any(|t| t == "—"), "{texts:?}");
     let two = texts.iter().position(|t| t == "T").unwrap();
@@ -4444,7 +4444,7 @@ fn f13_search_reads_the_arabic_words_too() {
 }
 
 /// F13-3: Enter (or a click) on a hit opens its page and marks the row; the
-/// arrows move the choice; Esc closes; Ctrl+F opens.
+/// arrows move the choice; Esc closes; Ctrl+K (or Ctrl+F) opens.
 #[test]
 fn f13_enter_jumps_to_the_row_and_marks_it_and_the_keys_work() {
     let (mut s, _) = state(None);
@@ -4469,7 +4469,7 @@ fn f13_enter_jumps_to_the_row_and_marks_it_and_the_keys_work() {
     update(&mut s, Message::SearchInput("language".into()));
     update(&mut s, Message::SearchClose);
     assert!(s.search.is_none());
-    // Ctrl+F, and the arrows only while it is open
+    // Ctrl+K / Ctrl+F, and the arrows only while it is open
     use iced::keyboard::{self, Key, Modifiers, key::Physical};
     let press = |code, modifiers| {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -4483,10 +4483,13 @@ fn f13_enter_jumps_to_the_row_and_marks_it_and_the_keys_work() {
         })
     };
     use keyboard::key::Code;
-    assert!(matches!(
-        super::find_key(press(Code::KeyF, Modifiers::CTRL), false),
-        Some(Message::SearchOpen)
-    ));
+    // Ctrl+K is the shown key, Ctrl+F keeps working
+    for code in [Code::KeyK, Code::KeyF] {
+        assert!(matches!(
+            super::find_key(press(code, Modifiers::CTRL), false),
+            Some(Message::SearchOpen)
+        ));
+    }
     assert!(super::find_key(press(Code::ArrowDown, Modifiers::empty()), false).is_none());
     assert!(matches!(
         super::find_key(press(Code::ArrowDown, Modifiers::empty()), true),

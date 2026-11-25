@@ -82,7 +82,7 @@ const SEARCH_W: f32 = 240.0;
 const HITS_W: f32 = 420.0;
 const HITS_GAP: f32 = 2.0;
 
-/// The header's search (Ctrl+F focuses it), centred on the window: typing opens the search; the keys
+/// The header's search (Ctrl+K, or Ctrl+F, focuses it), centred on the window: typing opens the search; the keys
 /// are shown at its end while it is empty.
 fn search_field(state: &State) -> Element<'_, Message> {
     let query = state.search.as_ref().map_or("", |s| s.query.as_str());
@@ -90,7 +90,7 @@ fn search_field(state: &State) -> Element<'_, Message> {
         .id(super::search::FIELD)
         .on_input(Message::SearchInput)
         .on_submit(Message::SearchGo);
-    crate::shared::kit::keycap::at_end(field, &["Ctrl", "F"], query.is_empty())
+    crate::shared::kit::keycap::at_end(field, &["Ctrl", "K"], query.is_empty())
 }
 
 /// The list of hits under the header (none while nothing is typed): "row title .

@@ -729,7 +729,7 @@ static EDITOR_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 #[derive(Debug, Clone)]
 pub enum Message {
     Section(Section),
-    /// Settings search (F13): Ctrl+F, typing, up / down, Enter, a click, Esc.
+    /// Settings search (F13): Ctrl+K / Ctrl+F, typing, up / down, Enter, a click, Esc.
     SearchOpen,
     SearchInput(String),
     SearchMove(i32),
@@ -2281,7 +2281,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         });
         return Subscription::batch([esc, clock]);
     }
-    // F13: Ctrl+F opens the search; with it open the arrows move, Esc closes
+    // F13: Ctrl+K (Ctrl+F too) opens the search; with it open the arrows move, Esc closes
     let find = match state.search.is_some() {
         true => event::listen_with(|event, _status, _window| find_key(event, true)),
         false => event::listen_with(|event, _status, _window| find_key(event, false)),
@@ -2298,7 +2298,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([keys, clock])
 }
 
-/// F13: Ctrl+F opens Settings search; with it `open`, the arrows move and Esc closes it.
+/// F13: Ctrl+K (and Ctrl+F) opens Settings search; with it `open`, the arrows move and Esc closes it.
 pub(super) fn find_key(event: iced::Event, open: bool) -> Option<Message> {
     use keyboard::key::{Code, Physical};
     let iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -2311,7 +2311,9 @@ pub(super) fn find_key(event: iced::Event, open: bool) -> Option<Message> {
     };
     let bare = modifiers.is_empty();
     match code {
-        Code::KeyF if modifiers.control() && !modifiers.alt() && !modifiers.shift() => {
+        Code::KeyK | Code::KeyF
+            if modifiers.control() && !modifiers.alt() && !modifiers.shift() =>
+        {
             Some(Message::SearchOpen)
         }
         Code::ArrowDown if open && bare => Some(Message::SearchMove(1)),
