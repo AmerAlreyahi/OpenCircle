@@ -416,6 +416,19 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     ])
 }
 
+/// The step tabs' track: the window across, less its rim and padding.
+pub(super) fn tabs_width() -> f32 {
+    WINDOW_SIZE.width - 2.0 * RIM - PAD.left - PAD.right
+}
+
+#[cfg(test)]
+impl State {
+    /// The tabs' labels as drawn ("1. Welcome").
+    pub(super) fn tab_labels(&self) -> Vec<&str> {
+        self.labels.iter().map(|(_, l)| l.as_str()).collect()
+    }
+}
+
 pub fn view(state: &State) -> Element<'_, Message> {
     // the whole window in the app's language and direction
     let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
@@ -428,7 +441,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let options: Vec<(Step, &str)> = (state.labels.iter())
         .map(|(s, l)| (*s, l.as_str()))
         .collect();
-    let across = WINDOW_SIZE.width - 2.0 * RIM - PAD.left - PAD.right;
+    let across = tabs_width();
     let track = spread(across, &options, state.step, from, glide, Message::Go);
     let page = STEPS
         .iter()

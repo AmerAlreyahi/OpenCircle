@@ -66,9 +66,56 @@ pub fn spread<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
 ) -> Element<'a, Message> {
     let n = options.len().max(1) as f32;
     let inner = width - 2.0 * (space::TRACK_PAD + 1.0) - space::TRACK_GAP * (n - 1.0);
-    let widths = vec![inner / n; options.len()];
+    let drawn: Vec<f32> = options
+        .iter()
+        .map(|&(_, l)| {
+            let role = Role::STEP;
+            super::text::width(l, super::text::size(role), super::text::font(role)).ceil()
+        })
+        .collect();
+    let widths = spread_widths(inner, &drawn);
     track(options, &widths, Role::STEP, chosen, from, glide, on)
 }
+
+/// The room `inner` shared between pills whose labels are `drawn` wide: each is as wide
+/// as its label (and `SPREAD_PAD` each side) and the rest is shared equally, so a long
+/// label never wraps (a tab as wide as the others' share broke "4. ربط الذكاء الاصطناعي"
+/// onto two lines). Too little room: every pill shrinks the same way and the text is cut
+/// rather than wrapped.
+fn spread_widths(inner: f32, drawn: &[f32]) -> Vec<f32> {
+    let need: Vec<f32> = drawn.iter().map(|d| d + 2.0 * SPREAD_PAD).collect();
+    let spare = inner - need.iter().sum::<f32>();
+    let n = need.len().max(1) as f32;
+    match spare >= 0.0 {
+        true => need.iter().map(|w| w + spare / n).collect(),
+        false => need.iter().map(|w| w * inner / (inner - spare)).collect(),
+    }
+}
+
+/// Whether `labels` fit one line each in a `spread` track `width` across (tests).
+#[cfg(test)]
+pub fn spread_fits(width: f32, labels: &[&str]) -> bool {
+    let n = labels.len().max(1) as f32;
+    let inner = width - 2.0 * (space::TRACK_PAD + 1.0) - space::TRACK_GAP * (n - 1.0);
+    let role = Role::STEP;
+    let need: f32 = labels
+        .iter()
+        .map(|l| {
+            super::text::width(l, super::text::size(role), super::text::font(role)).ceil()
+                + 2.0 * SPREAD_PAD
+        })
+        .sum();
+    need <= inner
+}
+
+/// `spread_widths` for another module's test.
+#[cfg(test)]
+pub fn spread_widths_for_test(inner: f32, drawn: &[f32]) -> Vec<f32> {
+    spread_widths(inner, drawn)
+}
+
+/// A `spread` pill's room on each side of its label.
+const SPREAD_PAD: f32 = 6.0;
 
 /// A pill's height: 12 px x 1.25 and 6 px above and below.
 const PILL: f32 = 27.0;
@@ -129,6 +176,7 @@ fn track<'a, Message: Clone + 'a, T: Copy + PartialEq + 'a>(
                     .size(super::text::size(role))
                     .font(super::text::font(role))
                     .line_height(1.25)
+                    .wrapping(text::Wrapping::None)
                     .width(drawn.ceil()),
             )
             .center_x(Fill),

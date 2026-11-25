@@ -518,3 +518,38 @@ fn every_step_in_arabic_matches_its_golden_image() {
     theme::apply(Theme::Dark);
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// W108 (owner round 3): the step tabs fit one line each in every language, on Linux's
+/// Wayland step list too (no wrapped "4. ربط الذكاء الاصطناعي").
+#[test]
+fn the_step_tabs_fit_on_one_line_in_every_language() {
+    use crate::shared::app_language::{self, Lang};
+    for lang in Lang::ALL {
+        app_language::set(lang);
+        for wayland in [false, true] {
+            let s = state(None).on_wayland(wayland);
+            let labels = s.tab_labels();
+            assert!(!labels.is_empty());
+            assert!(
+                crate::shared::kit::segmented::spread_fits(flow::tabs_width(), &labels),
+                "{lang:?} wayland {wayland}: {labels:?}"
+            );
+        }
+    }
+    app_language::set(Lang::En);
+}
+
+#[test]
+fn a_tab_is_as_wide_as_its_label_and_the_rest_is_shared() {
+    use crate::shared::kit::segmented::spread_widths_for_test as widths;
+    let w = widths(300.0, &[40.0, 100.0]);
+    assert_eq!(w.iter().sum::<f32>(), 300.0);
+    assert!(
+        w[1] - w[0] == 60.0,
+        "the longer label keeps its extra width: {w:?}"
+    );
+    // too little room: still one line each, shrunk alike
+    let tight = widths(100.0, &[60.0, 60.0]);
+    assert_eq!(tight[0], tight[1]);
+    assert!((tight.iter().sum::<f32>() - 100.0).abs() < 0.01);
+}
