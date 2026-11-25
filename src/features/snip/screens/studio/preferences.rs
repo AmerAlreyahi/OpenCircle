@@ -371,7 +371,10 @@ impl Dialog {
         // stay together however wide the dialog grows
         let page = container(container(self.rows()).width(Fill).max_width(CONTENT)).center_x(Fill);
         let body = scroll(container(page).padding([0.0, space::PAGE[1]])).height(Length::Fill);
-        let page = column![head, divider::divider(), body].width(Fill);
+        let page = crate::shared::kit::side_panel::pane(
+            column![head, divider::divider(), body].width(Fill).into(),
+            radius::CARD - 1.0,
+        );
         let content = crate::dir_row![nav, divider::vertical(Fill), page];
         let (w, h) = card_size(window);
         surface(Material::Widget, radius::CARD, content)

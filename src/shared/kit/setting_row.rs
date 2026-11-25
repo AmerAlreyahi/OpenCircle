@@ -152,7 +152,12 @@ pub fn card<'a, Message: 'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Mes
         }
         list = list.push(row);
     }
-    surface(Material::Tile, super::tokens::radius::CARD, list)
+    // white cards on the grey pane in a light theme (`side_panel::pane`), tiles in a dark one
+    let fill = match super::themes::current().light {
+        true => Material::Widget,
+        false => Material::Tile,
+    };
+    surface(fill, super::tokens::radius::CARD, list)
         .padding([0.0, space::PAGE[0]])
         .width(Fill)
         .into()

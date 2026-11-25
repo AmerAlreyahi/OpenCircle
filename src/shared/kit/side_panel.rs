@@ -168,3 +168,27 @@ pub fn section<'a, Message: Clone + 'a>(
     )
     .into()
 }
+
+/// The page beside an `inset` list, inside the same card: on a light theme a grey pane (the
+/// window's own fill) so white cards (`setting_row::card`) stand on it, its outer corners the
+/// card's own; dark themes keep the card's surface.
+pub fn pane<'a, Message: 'a>(content: Element<'a, Message>, corner: f32) -> Element<'a, Message> {
+    let outer = match super::dir::rtl() {
+        true => [corner, 0.0, 0.0, corner],
+        false => [0.0, corner, corner, 0.0],
+    };
+    container(content)
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| container::Style {
+            background: super::themes::current().light.then(|| c().bg.into()),
+            border: Border::default().rounded(iced::border::Radius {
+                top_left: outer[0],
+                top_right: outer[1],
+                bottom_right: outer[2],
+                bottom_left: outer[3],
+            }),
+            ..container::Style::default()
+        })
+        .into()
+}
