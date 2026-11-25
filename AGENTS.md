@@ -1034,6 +1034,8 @@ production systems.
   C4 Snip shows the active tool's options at once in a slim row under its toolbar, like the Studio (supersedes the second click, 2026-11-02).
   C5 kept: with a drawing tool a drag draws; Select or Ctrl+drag moves; a one-time hint "Ctrl+drag moves" on the first drag over a shape.
   C6 a quiet x at the end of the Snip toolbar and the translate pill; Esc keeps working (supersedes "Esc only", 2026-11-02).
+  The main Ctrl+Shift+Space bar gets the same quiet x (owner 2026-11-25: mouse users can't close it otherwise).
+  Studio > Preferences moves into the approved Settings shell look (owner 2026-11-25: it looks bad in EN, worse in AR).
   C7 from Settings v2 now: toggle switches instead of Off | On segments, and each page's preview folded into one "Play preview" row.
 
 - Next release after the enhancements (owner, 2026-11-24): Snip audio + video recording (#168) AND the new design. The widget
@@ -1068,6 +1070,8 @@ production systems.
   from this menu sends the selected TEXT (the picture only when there is no text) by OPENING the chat with that text attached for
   the user to type (no automatic Explain request; lead default 2026-11-24); the bar's Ask AI keeps sending the picture
   (2026-11-08). Menu key + Shift+F10 open it with arrow keys; Copy/Search/link close the overlay, Ask AI/Translate keep it.
+  Translate from the menu (lead 2026-11-25, after the owner found it broken) translates the SELECTED TEXT and shows it in a small
+  card beside the selection (word card look) with Copy, not the whole picture.
   Surfaces v1: main overlay selection + select-text mode; pill, Snip area, circled area without words later.
 - Ctrl+wheel (owner, 2026-11-24, #202): over a selected shape it resizes the shape (Studio and Snip editor); elsewhere in the
   Studio it keeps zooming the picture.
