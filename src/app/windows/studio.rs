@@ -822,6 +822,10 @@ fn key_msg(
     if *key == keyboard::Key::Named(Named::Escape) && modifiers.is_empty() {
         return Some(studio::Msg::Cancel);
     }
+    // F10 enters menu mode as Alt does (and leaves it)
+    if *key == keyboard::Key::Named(Named::F10) && modifiers.is_empty() {
+        return Some(studio::Msg::MenuKey(studio::Nav::Alt));
+    }
     // the menu bar: Alt opens it on its release (the Alt key itself is the
     // closure's), the arrows walk it (ignored while it is closed)
     if modifiers.is_empty() || modifiers == keyboard::Modifiers::ALT {

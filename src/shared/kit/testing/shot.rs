@@ -368,6 +368,23 @@ pub fn click<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -
     messages
 }
 
+/// The messages the pointer produces by coming to `at` in `view` (no button).
+pub fn hover<Message>(view: Element<'_, Message>, size: Size, at: iced::Point) -> Vec<Message> {
+    use iced::advanced::clipboard;
+    use iced::{Event, mouse::Event as Mouse};
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    ui.update(
+        &[Event::Mouse(Mouse::CursorMoved { position: at })],
+        mouse::Cursor::Available(at),
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    messages
+}
+
 /// The messages of a left press at `from` and a move to `to` (the button stays down).
 pub fn press_move<Message>(
     view: Element<'_, Message>,

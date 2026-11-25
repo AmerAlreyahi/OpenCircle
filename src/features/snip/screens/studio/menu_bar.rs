@@ -262,7 +262,15 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
     let open = s.menu.map(|(m, _)| m);
     let row = Menu::ALL.map(|m| {
         let on = open == Some(m);
-        side_panel::menu_opener(m.name(), on, Msg::Menu(if on { None } else { Some(m) }))
+        // a click on another title opens it at once; on the open one it closes; while a menu is
+        // open, hovering another title switches to it (menu mode, as in every desktop app)
+        let hover = (open.is_some() && !on).then_some(Msg::Menu(Some(m)));
+        side_panel::menu_opener(
+            m.name(),
+            on,
+            Msg::Menu(if on { None } else { Some(m) }),
+            hover,
+        )
     });
     // the gear: Studio preferences, at the menus' end (the familiar spot for settings)
     let gear = crate::shared::kit::tooltip::hint(
@@ -287,8 +295,21 @@ pub fn bar(s: &Studio) -> Element<'_, Msg> {
         .into()
 }
 
+/// Where the openers (and the gear after them) end, from the header's start edge.
+fn openers_end() -> f32 {
+    let role = Role::NAV;
+    Menu::ALL
+        .iter()
+        .fold(crate::shared::kit::header::MENU_X, |x, m| {
+            x + text::width(m.name(), text::size(role), text::font(role)).ceil()
+                + OPENER_PAD
+                + OPENER_GAP
+        })
+        + crate::shared::kit::tokens::size::ICON_BUTTON
+}
+
 /// Where the opener of `menu` starts, from the header's start edge.
-fn offset(menu: Menu) -> f32 {
+pub(super) fn offset(menu: Menu) -> f32 {
     let role = Role::NAV;
     let mut x = crate::shared::kit::header::MENU_X;
     for m in Menu::ALL {
@@ -355,9 +376,20 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
             .on_press(Msg::Menu(None))
             .on_right_press(Msg::Menu(None))
     };
-    // (the header row too, but never the caption buttons: they keep working)
+    // (the header row too, but never the caption buttons (they keep working) nor the openers:
+    // a press on another title opens its menu, the pointer over it switches to it)
+    let catch_w = |w: f32| {
+        iced::widget::mouse_area(iced::widget::Space::new().width(w).height(HEADER_BELOW))
+            .on_press(Msg::Menu(None))
+            .on_right_press(Msg::Menu(None))
+    };
+    let openers = openers_end();
     let outside = iced::widget::column![
         iced::widget::row![
+            catch_w(crate::shared::kit::header::MENU_X),
+            iced::widget::Space::new()
+                .width(openers - crate::shared::kit::header::MENU_X)
+                .height(HEADER_BELOW),
             catch(HEADER_BELOW.into()),
             iced::widget::Space::new()
                 .width(crate::shared::kit::tokens::size::CAPTION_BUTTON * 3.0)

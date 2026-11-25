@@ -1848,10 +1848,10 @@ fn side_panel_sheet() {
     use super::super::side_panel::menu_opener;
     let rows = vec![
         row("opener", Act::Rest, |ar| {
-            menu_opener(s(ar, "File", "ملف"), false, ())
+            menu_opener(s(ar, "File", "ملف"), false, (), None)
         }),
         row("opener open", Act::Rest, |ar| {
-            menu_opener(s(ar, "File", "ملف"), true, ())
+            menu_opener(s(ar, "File", "ملف"), true, (), None)
         }),
     ];
     sheet("side_panel", Size::new(240.0, 40.0), &rows);

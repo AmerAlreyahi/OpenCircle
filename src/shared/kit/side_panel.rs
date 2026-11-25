@@ -51,6 +51,7 @@ pub fn menu_opener<'a, Message: Clone + 'a>(
     words: &'a str,
     open: bool,
     press: Message,
+    hover: Option<Message>,
 ) -> Element<'a, Message> {
     let label = super::text::text(Role::NAV, words);
     let b = button(container(label).center_y(Fill).padding([0.0, 11.0]))
@@ -70,7 +71,12 @@ pub fn menu_opener<'a, Message: Clone + 'a>(
                 ..button::Style::default()
             }
         });
-    super::focus::press(b, OPENER_R, Some(press)).into()
+    let opener = super::focus::press(b, OPENER_R, Some(press));
+    // (menu mode: the pointer coming over another title switches to its menu)
+    match hover {
+        Some(on_enter) => iced::widget::mouse_area(opener).on_enter(on_enter).into(),
+        None => opener.into(),
+    }
 }
 
 /// A column inside a card, on its start side (the left, or the right right to left): `width`

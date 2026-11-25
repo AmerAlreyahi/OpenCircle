@@ -2323,6 +2323,57 @@ fn v31_an_open_menu_closes_on_an_outside_click() {
     assert!(s.menu.is_none());
 }
 
+/// W106 (owner, 2026-11-25): with a menu open, a click on another title opens that menu at once
+/// (it used to close the first and need a second click); the pointer over another title switches
+/// to it (menu mode); a click on the open menu's own title or Esc closes it; F10 enters menu mode
+/// and Left / Right walk the menus. Also in Arabic (the bar keeps its order).
+#[test]
+fn w106_the_menu_bar_switches_menus_by_click_and_hover() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::shot;
+    for lang in [Lang::En, Lang::Ar] {
+        app_language::set(lang);
+        let title = |m: Menu| Point::new(super::menu_bar::offset(m) + 12.0, 20.0);
+        let mut s = studio_on(640, 400);
+        // no menu open: hovering a title does nothing
+        let got = shot::hover(view(&s, &[], false), SIZE, title(Menu::Edit));
+        assert!(got.is_empty(), "{lang:?}: {got:?}");
+        let _ = s.update(Msg::Menu(Some(Menu::File)));
+        // File open: a click on Edit opens Edit at once
+        let got = click_view(&s, (title(Menu::Edit).x, title(Menu::Edit).y));
+        // (the pointer arriving switches too, then the press: both say Edit, never a close)
+        assert!(
+            !got.is_empty() && got.iter().all(|m| matches!(m, Msg::Menu(Some(Menu::Edit)))),
+            "{lang:?}: {got:?}"
+        );
+        // and the pointer over it switches
+        let got = shot::hover(view(&s, &[], false), SIZE, title(Menu::View));
+        assert!(
+            got.iter().any(|m| matches!(m, Msg::Menu(Some(Menu::View)))),
+            "{lang:?}: {got:?}"
+        );
+        // the open menu's own title closes it
+        let got = click_view(&s, (title(Menu::File).x, title(Menu::File).y));
+        assert!(
+            matches!(got.as_slice(), [Msg::Menu(None)]),
+            "{lang:?}: {got:?}"
+        );
+        // Esc closes; Left / Right walk the menus (wrapping)
+        let _ = s.update(Msg::Menu(Some(Menu::Edit)));
+        let _ = s.update(Msg::MenuKey(Nav::Next));
+        assert_eq!(s.menu.map(|m| m.0), Some(Menu::View));
+        let _ = s.update(Msg::MenuKey(Nav::Prev));
+        let _ = s.update(Msg::MenuKey(Nav::Prev));
+        assert_eq!(s.menu.map(|m| m.0), Some(Menu::File));
+        let _ = s.update(Msg::Cancel);
+        assert!(s.menu.is_none());
+        // F10 and Alt enter menu mode
+        let _ = s.update(Msg::MenuKey(Nav::Alt));
+        assert_eq!(s.menu.map(|m| m.0), Some(Menu::File));
+    }
+    app_language::set(Lang::En);
+}
+
 /// v3.1 item 5: a popover closes on an outside press and on Esc; a press on its
 /// own row acts.
 #[test]
