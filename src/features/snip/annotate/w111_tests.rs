@@ -4,7 +4,7 @@ use super::tests::image_of;
 use super::*;
 
 /// Text-like bars on a pale page (a Hide's colours depend on where it looks).
-fn page() -> Image {
+pub(super) fn page() -> Image {
     image_of(600, 300, |x, y| {
         if (y / 10) % 2 == 0 && x % 6 < 3 && (20..150).contains(&x) {
             [30, 30, 40, 255]
@@ -14,7 +14,7 @@ fn page() -> Image {
     })
 }
 
-fn live_pixels(e: &Annotator) -> Option<(Rectangle, Vec<u8>)> {
+pub(super) fn live_pixels(e: &Annotator) -> Option<(Rectangle, Vec<u8>)> {
     let (r, h) = e.live_layer()?;
     match h {
         image::Handle::Rgba { pixels, .. } => Some((r, pixels.to_vec())),
@@ -22,7 +22,7 @@ fn live_pixels(e: &Annotator) -> Option<(Rectangle, Vec<u8>)> {
     }
 }
 
-fn hide_one() -> Annotator {
+pub(super) fn hide_one() -> Annotator {
     let mut e = Annotator::new(page(), 1.0);
     e.assist = false;
     e.update(Message::Tool(Tool::Blur));

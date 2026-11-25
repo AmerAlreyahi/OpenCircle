@@ -38,6 +38,39 @@ fn w113_2_a_drawing_tool_never_restyles_the_old_selection() {
     }
 }
 
+/// Review 5: through an OPAQUE live layer (a magnifier's box cuts a committed Hide's footprint) the
+/// Hide's pixels in the box's four corners (outside the lens) equal the committed picture's. Fails
+/// with `blur.rs` reading its two colours only from the part the layer holds.
+#[test]
+fn w113_5_an_opaque_layer_that_cuts_a_hide_leaves_it_as_committed() {
+    use super::w111_tests::{hide_one, live_pixels};
+    let mut e = hide_one();
+    let committed = e.base_pixels();
+    e.update(Message::Tool(Tool::Magnifier));
+    e.update(Message::Press(pt(240.0, 125.0)));
+    e.update(Message::Move(pt(240.0, 155.0)));
+    let (r, live) = live_pixels(&e).expect("a live layer");
+    let (w, x0, y0) = (r.width as usize, r.x as usize, r.y as usize);
+    let (mut seen, mut differing) = (0, 0);
+    // (the top corners, 6 wide and 16 deep: outside the lens, over the Hide's first rows)
+    for cx in [0, w - 6] {
+        for (dx, dy) in (0..16).flat_map(|y| (0..6).map(move |x| (x, y))) {
+            let cy = 0;
+            let (lx, ly) = (cx + dx, cy + dy);
+            let at = ((y0 + ly) * 600 + x0 + lx) * 4;
+            // (only the rows the Hide covers)
+            if !(100..=110).contains(&(y0 + ly)) {
+                continue;
+            }
+            seen += 1;
+            let i = (ly * w + lx) * 4;
+            differing += usize::from(live[i..i + 3] != committed[at..at + 3]);
+        }
+    }
+    assert!(seen > 0, "no Hide in the corners of {r:?}");
+    assert_eq!(differing, 0, "of {seen} Hide pixels in the corners");
+}
+
 /// Review 3: an item picked up (Select press) is still in the base until its first move; a live
 /// layer then would paint it a second time (a held highlighter looked darker).
 #[test]
