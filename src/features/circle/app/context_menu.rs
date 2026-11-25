@@ -155,6 +155,10 @@ impl App {
 
     /// Translates `text` for the card of request `id` on a thread.
     fn run_text_translate(&self, id: u32, text: String) -> Task<Message> {
+        // (tests drive the card through its messages: no real thread, engine or download)
+        if cfg!(test) {
+            return Task::none();
+        }
         let cfg = crate::shared::config::current();
         let (source, target) = (cfg.translate.source.clone(), cfg.translate.target.clone());
         background(move |tx| {
@@ -227,6 +231,9 @@ impl App {
                     return Task::none();
                 };
                 card.state = State::Downloading(0.0);
+                if cfg!(test) {
+                    return Task::none(); // (no real download from a test)
+                }
                 return background(move |tx| {
                     let got = model.download(|done, total| {
                         let share = done as f32 / total.max(1) as f32;
