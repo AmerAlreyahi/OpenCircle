@@ -176,9 +176,9 @@ fn place_reads(line: &mut Line) {
         used[r] = true;
         let (x0, x1) = (line.reads[r].1, line.reads[r].2);
         let rtl = levels[c0].is_rtl();
-        for i in c0..=c1 {
-            let share = (i - c0) as f32 / (c1 - c0) as f32;
-            line.carets[i] = if rtl {
+        for (i, caret) in line.carets[c0..=c1].iter_mut().enumerate() {
+            let share = i as f32 / (c1 - c0) as f32;
+            *caret = if rtl {
                 x1 - (x1 - x0) * share
             } else {
                 x0 + (x1 - x0) * share
