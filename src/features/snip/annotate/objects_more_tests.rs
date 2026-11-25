@@ -21,6 +21,7 @@ fn mixed() -> Annotator {
         text: "hi".into(),
         size: 14.0,
         style: TextStyle::default(),
+        wrap: None,
     });
     e.doc.exec(Edit::Insert(2, text));
     e.refresh();

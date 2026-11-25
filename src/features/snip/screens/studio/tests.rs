@@ -1744,13 +1744,18 @@ fn v3_snap_lands_drawing_and_moving_on_edges() {
         ] {
             let _ = s.update(Msg::Editor(m));
         }
-        let f = s.editor.as_ref().unwrap().doc.items[0].frame();
-        f.x + f.width
+        let item = &s.editor.as_ref().unwrap().doc.items[0];
+        let f = item.frame();
+        // (the picture cannot grow: the line's own half-width stays inside, #200)
+        f.x + f.width + item.width / 2.0
     };
-    assert!((draw_rect(true) - 640.0).abs() < 1.0, "lands on the edge");
     assert!(
-        (draw_rect(false) - 637.0).abs() < 1.0,
-        "off: where the pointer was"
+        (draw_rect(true) - 639.0).abs() < 0.5,
+        "lands on the edge, 1 px in for its line"
+    );
+    assert!(
+        (draw_rect(false) - 639.0).abs() < 0.5,
+        "off: where the pointer was (held inside by its line)"
     );
 }
 

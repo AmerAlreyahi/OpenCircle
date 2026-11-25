@@ -20,6 +20,7 @@ mod eraser;
 pub use eraser::SIZES as ERASER_SIZES;
 mod highlighter;
 mod input;
+mod inside;
 mod label;
 mod legend;
 mod lines;
@@ -54,6 +55,8 @@ mod blur_speed_tests;
 mod blur_strength_tests;
 #[cfg(test)]
 mod blur_tests;
+#[cfg(test)]
+mod inside_tests;
 #[cfg(test)]
 mod objects_api_tests;
 #[cfg(test)]
@@ -2025,6 +2028,7 @@ impl Annotator {
             },
             _ => (p, None),
         };
+        let (inside, view) = (self.keeps_inside(), self.doc.view());
         let Some(pending) = &mut self.pending else {
             return;
         };
@@ -2043,6 +2047,11 @@ impl Annotator {
             Drag::Handle(handle, original) => select::dragged(original, *handle, p),
             Drag::Type => return,
         };
+        // where the picture cannot grow, a drawing stops at its last pixels
+        if inside && matches!(pending.drag, Drag::Draw) {
+            inside::keep_inside(&mut pending.item, view);
+        }
+        inside::fit_wrap(&mut pending.item, view, inside);
         if pending.hidden || pending.index.is_none() {
             self.update_live();
         } else {
@@ -2200,7 +2209,8 @@ impl Annotator {
         let Some(pending) = self.pending.take() else {
             return;
         };
-        let item = pending.item;
+        let mut item = pending.item;
+        inside::fit_wrap(&mut item, self.doc.view(), self.keeps_inside());
         let empty = matches!(&item.shape,
             Shape::Text { text, .. } | Shape::Callout { text, .. } | Shape::Label { text, .. }
                 if text.trim().is_empty());
@@ -2355,6 +2365,7 @@ impl Annotator {
             && let Some(text) = text_mut(&mut item.shape)
         {
             f(text);
+            self.wrap_typed();
             self.update_live();
         }
     }
@@ -2393,6 +2404,7 @@ impl Annotator {
                 text: String::new(),
                 size: self.text_size / z,
                 style: self.text_style,
+                wrap: None,
             },
             Tool::Label => Shape::Label {
                 at: p,

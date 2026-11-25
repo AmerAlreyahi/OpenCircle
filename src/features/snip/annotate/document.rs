@@ -57,6 +57,10 @@ pub enum Shape {
         text: String,
         size: f32,
         style: text::Style,
+        /// Set soft wrap at this width (px): where the picture cannot grow, a text breaks before
+        /// the area's edge when drawn (the text itself keeps no break the user did not type).
+        #[serde(default)]
+        wrap: Option<f32>,
     },
     /// A numbered badge; its number is its place among the steps. Its `note`
     /// shows in the legend.
@@ -225,9 +229,11 @@ impl Shape {
             Shape::Pen(points) | Shape::Highlighter(points) => {
                 points.iter_mut().for_each(|p| *p = f(*p))
             }
-            Shape::Text { at, size, .. } | Shape::Label { at, size, .. } => {
-                (*at, *size) = (f(*at), (*size * k).max(6.0))
+            Shape::Text { at, size, wrap, .. } => {
+                (*at, *size) = (f(*at), (*size * k).max(6.0));
+                *wrap = wrap.map(|w| w * k);
             }
+            Shape::Label { at, size, .. } => (*at, *size) = (f(*at), (*size * k).max(6.0)),
             Shape::Step { at, radius, .. } | Shape::Pointer { at, radius } => {
                 (*at, *radius) = (f(*at), (*radius * k).max(4.0))
             }
@@ -280,7 +286,8 @@ impl Item {
                 text,
                 size,
                 style,
-            } => Rectangle::new(*at, text::measure_styled(text, *size, *style)),
+                wrap,
+            } => Rectangle::new(*at, text::measure_styled(text, *size, *style, *wrap)),
             Shape::Label { at, text, size } => label::bubble(*at, text, *size),
             Shape::Pointer { at, radius } => pointer::frame(*at, *radius),
             Shape::Step { at, radius, .. } | Shape::Magnifier { at, radius } => Rectangle::new(
@@ -988,7 +995,8 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
                 text,
                 size,
                 style,
-            } => text::paint_styled(&mut layer, *at, text, *size, c, *style),
+                wrap,
+            } => text::paint_styled(&mut layer, *at, text, *size, c, *style, *wrap),
             Shape::Step { at, radius, .. } => step::paint(&mut layer, *at, *radius, steps, c),
             Shape::Label { at, text, size } => label::paint(&mut layer, *at, text, *size, c, true),
             Shape::Pointer { at, radius } => pointer::paint(&mut layer, *at, *radius, c, w),

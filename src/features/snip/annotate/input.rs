@@ -86,7 +86,8 @@ impl Annotator {
                 text,
                 size,
                 style,
-            } => Some((*at + text::caret_styled(text, *size, *style), *size)),
+                wrap,
+            } => Some((*at + text::caret_styled(text, *size, *style, *wrap), *size)),
             Shape::Callout { at, text, size, .. } => {
                 Some(at_end(callout::text_origin(*at, text, *size), text, *size))
             }

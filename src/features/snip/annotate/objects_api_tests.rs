@@ -108,6 +108,7 @@ fn s1_6_annotations_round_trip_through_json() {
             text: "hi".into(),
             size: 14.0,
             style: TextStyle::default(),
+            wrap: None,
         }),
     ));
     e.paste_clipboard(Some(Crop {

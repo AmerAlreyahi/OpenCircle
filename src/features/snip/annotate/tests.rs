@@ -1284,8 +1284,8 @@ fn text_options_style_the_text() {
     e.update(Message::Undo);
     assert!(matches!(e.doc.items[0].shape, Shape::Text { style, .. } if style == boxed));
     // Bold is wider than regular.
-    let regular = text::measure_styled("Note", 38.0, none);
-    let bold = text::measure_styled("Note", 38.0, TextStyle { bold: true, ..none });
+    let regular = text::measure_styled("Note", 38.0, none, None);
+    let bold = text::measure_styled("Note", 38.0, TextStyle { bold: true, ..none }, None);
     assert!(bold.width > regular.width);
 }
 
@@ -3284,7 +3284,8 @@ fn ctrl_v_pastes_the_clipboard_text() {
         Some(Shape::Text { at, text, .. }) => (*at, text.clone()),
         other => panic!("not a text: {other:?}"),
     };
-    let mut e = editor(200, 200);
+    // (wide: a text on a picture that cannot grow wraps at its edge, `inside`)
+    let mut e = editor(800, 200);
     e.update(Message::Tool(Tool::Arrow));
     assert_eq!(ctrl_v(&e), Some(Message::Paste(None)));
     crate::features::circle::actions::copy::copied::set_paste("hello\r\nworld\t!\n\n");

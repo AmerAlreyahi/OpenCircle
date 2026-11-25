@@ -78,20 +78,21 @@ const SANS: Family<'static> = Family::Name("Inter");
 
 /// Labels, callouts, steps, the legend: semibold sans.
 fn layout(text: &str, size: f32) -> Buffer {
-    shape(text, size, SANS, Weight::SEMIBOLD)
+    shape(text, size, SANS, Weight::SEMIBOLD, None)
 }
 
-fn styled(text: &str, size: f32, style: Style) -> Buffer {
+fn styled(text: &str, size: f32, style: Style, wrap: Option<f32>) -> Buffer {
     let weight = if style.bold {
         Weight::BOLD
     } else {
         Weight::NORMAL
     };
-    shape(text, size, style.font.family(), weight)
+    shape(text, size, style.font.family(), weight, wrap)
 }
 
-/// `text` shaped at `size`, unwrapped.
-fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
+/// `text` shaped at `size`, unwrapped, or soft-wrapped at `wrap` px (drawn so; the text itself
+/// keeps no break the user did not type).
+fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight, wrap: Option<f32>) -> Buffer {
     let mut fonts = font_system().write().expect("font system");
     // Inter is there before the first text (the UI loads it at start; this is
     // for a text shaped before that, e.g. in tests: never a fallback face).
@@ -125,7 +126,7 @@ fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
     });
     let fs = fonts.raw();
     let mut buf = Buffer::new(fs, Metrics::new(size, line_height(size)));
-    buf.set_size(fs, None, None);
+    buf.set_size(fs, wrap, None);
     let attrs = Attrs::new().family(family).weight(weight);
     buf.set_text(fs, text, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(fs, false);
@@ -134,20 +135,23 @@ fn shape(text: &str, size: f32, family: Family<'_>, weight: Weight) -> Buffer {
 
 /// The box of `buf` holding `text` (an empty text still has one line, and some
 /// width for the caret).
-fn extent(buf: &Buffer, text: &str, size: f32) -> Size {
+fn extent(buf: &Buffer, text: &str, size: f32, wrapped: bool) -> Size {
     let width = buf.layout_runs().map(|r| r.line_w).fold(0.0, f32::max);
-    let lines = text.split('\n').count() as f32;
+    let lines = match wrapped {
+        true => buf.layout_runs().count().max(text.split('\n').count()) as f32,
+        false => text.split('\n').count() as f32,
+    };
     Size::new(width.max(size * 0.3), lines * line_height(size))
 }
 
 /// The text's box (an empty text still has one line, and some width for the caret).
 pub fn measure(text: &str, size: f32) -> Size {
-    extent(&layout(text, size), text, size)
+    extent(&layout(text, size), text, size, false)
 }
 
 /// `measure` for a text set in `style`.
-pub fn measure_styled(text: &str, size: f32, style: Style) -> Size {
-    extent(&styled(text, size, style), text, size)
+pub fn measure_styled(text: &str, size: f32, style: Style, wrap: Option<f32>) -> Size {
+    extent(&styled(text, size, style, wrap), text, size, wrap.is_some())
 }
 
 /// Where the caret goes after the last character, from the text's top-left.
@@ -156,8 +160,18 @@ pub fn caret(text: &str, size: f32) -> Vector {
 }
 
 /// `caret` for a text set in `style`.
-pub fn caret_styled(text: &str, size: f32, style: Style) -> Vector {
-    caret_with(text, size, |last| measure_styled(last, size, style).width)
+pub fn caret_styled(text: &str, size: f32, style: Style, wrap: Option<f32>) -> Vector {
+    if wrap.is_some() {
+        // the end of the last drawn line
+        let buf = styled(text, size, style, wrap);
+        let runs = buf.layout_runs().count().max(text.split('\n').count());
+        let last = buf.layout_runs().last().map_or(0.0, |r| r.line_w);
+        let x = if text.ends_with('\n') { 0.0 } else { last };
+        return Vector::new(x, (runs as f32 - 1.0) * line_height(size));
+    }
+    caret_with(text, size, |last| {
+        measure_styled(last, size, style, None).width
+    })
 }
 
 fn caret_with(text: &str, size: f32, width: impl Fn(&str) -> f32) -> Vector {
@@ -183,14 +197,15 @@ pub fn paint_styled(
     size: f32,
     colour: [u8; 4],
     style: Style,
+    wrap: Option<f32>,
 ) {
     if text.is_empty() {
         return;
     }
-    let buf = styled(text, size, style);
+    let buf = styled(text, size, style, wrap);
     if style.back == Back::Box {
         let pad = size * 0.15;
-        let body = iced::Rectangle::new(at, extent(&buf, text, size)).expand(pad);
+        let body = iced::Rectangle::new(at, extent(&buf, text, size, wrap.is_some())).expand(pad);
         if let Some(shape) = rounded(body, size * 0.3) {
             let [r, g, b, _] = halo(colour);
             layer.fill(&shape, [r, g, b, 255]);
