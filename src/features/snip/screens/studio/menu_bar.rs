@@ -26,6 +26,8 @@ pub enum Menu {
 pub enum Sub {
     Recent,
     Arrange,
+    /// The style presets (Red box, Highlight, ...), keys 1-9.
+    Presets,
 }
 
 impl Menu {
@@ -163,6 +165,10 @@ pub fn items(menu: Menu, s: &Studio) -> Vec<Item<'_>> {
             action(s, Action::Delete, false),
             action(s, Action::SelectAll, true),
             item(S::st_deselect, keys::DESELECT, ed(Message::Deselect), false),
+            // (not in the colour picker, W112; Snip has their keys)
+            item(S::sn_copy_style, "Alt+C", ed(Message::CopyStyle), true),
+            item(S::sn_paste_style, "Alt+V", ed(Message::PasteStyle), false),
+            opens(S::sn_presets, Sub::Presets, false),
             opens(S::st_arrange, Sub::Arrange, true),
         ],
         Menu::View => {
@@ -220,6 +226,16 @@ pub fn sub_items(sub: Sub, s: &Studio) -> Vec<Item<'_>> {
         .into_iter()
         .map(|a| action(s, a, false))
         .collect(),
+        Sub::Presets => (crate::features::snip::annotate::PRESETS.iter().enumerate())
+            .map(|(i, p)| Item {
+                label: tr(p.name),
+                keys: p.key.to_string(),
+                checked: false,
+                press: Msg::Editor(Message::Preset(i)),
+                sep: false,
+                sub: None,
+            })
+            .collect(),
         Sub::Recent => s
             .recent
             .iter()

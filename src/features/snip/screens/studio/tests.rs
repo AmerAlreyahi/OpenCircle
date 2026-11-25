@@ -4561,10 +4561,11 @@ fn w108_the_colour_row_ends_with_a_custom_colour_that_opens_snips_picker() {
     };
     assert!(opens(&s), "the \"+\" is on the bar");
     let _ = s.update(Msg::Pop(Some(popovers::Pop::Custom)));
+    // the one picker: the square and its recent colours, not the style tools (W112)
     let words = shot::texts(popovers::content(&s, popovers::Pop::Custom));
     assert!(
-        words.iter().any(|w| w == "Copy style"),
-        "Snip's own panel: {words:?}"
+        !words.iter().any(|w| w == "Copy style" || w == "Presets"),
+        "no style tools in the picker: {words:?}"
     );
     let _ = s.update(Msg::Editor(Message::Hex("#12AB34".into())));
     let e = s.editor.as_ref().unwrap();

@@ -3647,3 +3647,49 @@ fn f2_snip_pastes_a_picture_as_an_image_object_and_text_as_text() {
     assert!(studio.update(Message::Paste(None)).is_none());
     assert!(studio.typing());
 }
+
+/// W112: dragging the picker's square or slider changes the drawing colour live and keeps its
+/// hue; only the end of the drag (or a typed hex, a key, the eyedropper) puts the colour in the
+/// recent row: newest first, once, at most eight; and it is written for the next editor.
+#[test]
+fn w112_the_picker_moves_the_colour_live_and_remembers_it_when_done() {
+    use crate::shared::kit::colour_picker::Hsv;
+    let mut e = editor(100, 80);
+    let before = e.colour;
+    let green = Hsv {
+        h: 120.0,
+        s: 1.0,
+        v: 1.0,
+    };
+    e.update(Message::Hsv(green.array(), green.rgb()));
+    assert_eq!(e.colour, [0, 255, 0, 255], "live");
+    assert!(e.recent.is_empty(), "not remembered while dragging");
+    assert_eq!(
+        e.picked_from(),
+        iced::Color::from_rgb8(before[0], before[1], before[2])
+    );
+    // a grey keeps the slider's hue
+    let grey = Hsv {
+        h: 120.0,
+        s: 0.0,
+        v: 0.5,
+    };
+    e.update(Message::Hsv(grey.array(), grey.rgb()));
+    assert_eq!(e.hsv().map(|h| h[0]), Some(120.0));
+    e.update(Message::HsvDone);
+    assert_eq!(e.recent, vec![[128, 128, 128]]);
+    // once, newest first, at most eight
+    for i in 0..10u8 {
+        e.update(Message::Hex(format!("#{i:02X}0000")));
+    }
+    assert_eq!(e.recent.len(), RECENT);
+    assert_eq!(e.recent[0], [9, 0, 0]);
+    e.update(Message::Hex("#050000".into()));
+    assert_eq!(e.recent[0], [5, 0, 0]);
+    assert_eq!(e.recent.iter().filter(|c| **c == [5, 0, 0]).count(), 1);
+    // the editor remembers them for the next one
+    let saved = e.remembered();
+    assert_eq!(saved.recent.as_ref().map(Vec::len), Some(RECENT));
+    let next = Annotator::restored(checker(100, 80), 1.0, saved);
+    assert_eq!(next.recent, e.recent);
+}

@@ -17,6 +17,7 @@ pub mod card;
 pub mod chip;
 pub mod code_colors;
 pub mod colour;
+pub mod colour_picker;
 pub mod dir;
 pub mod divider;
 pub mod dotted;

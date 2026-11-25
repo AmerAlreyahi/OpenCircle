@@ -111,6 +111,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::shared::config::{EditorConfig, Rgb};
+
+/// How many recent colours the picker keeps.
+pub(crate) const RECENT: usize = 8;
 use crate::shared::picture::Crop;
 use document::int_rect;
 
@@ -421,6 +424,12 @@ pub enum Message {
     TextStyle(TextStyle),
     /// The picker's custom colour field.
     Hex(String),
+    /// The picker's square or hue slider is being dragged (not written, not in the recent
+    /// colours yet), and the drag ended; a key moved it (a finished change).
+    /// `[hue, saturation, brightness]` and the RGB colour it is (the picker works it out).
+    Hsv([f32; 3], [u8; 3]),
+    HsvDone,
+    HsvSet([f32; 3], [u8; 3]),
     /// The next click on the image picks its colour.
     Eyedropper,
     /// A style preset (`PRESETS`).
@@ -639,6 +648,14 @@ pub struct Annotator {
     pub(crate) text_style: TextStyle,
     pub(crate) menu: Option<Menu>,
     pub(crate) hex: String,
+    /// The picker's square and slider: the colour with its hue (a grey has none in RGB).
+    hsv: Option<([f32; 3], [u8; 3])>,
+    /// The colour before the picker's last change (its preview's "old" half).
+    picked_from: [u8; 4],
+    /// A drag on the picker is on.
+    hsv_drag: bool,
+    /// The colours the user picked lately, newest first (remembered, `RECENT`).
+    pub(crate) recent: Vec<[u8; 3]>,
     /// Display px per image px.
     pub(crate) zoom: f32,
     shift: bool,
@@ -843,6 +860,14 @@ impl Annotator {
             },
             menu: None,
             hex: hex(colour),
+            hsv: None,
+            picked_from: colour,
+            hsv_drag: false,
+            recent: (saved.recent.iter().flatten())
+                .filter_map(|s| parse_hex(s))
+                .map(|[r, g, b, _]| [r, g, b])
+                .take(RECENT)
+                .collect(),
             zoom,
             shift: false,
             picking: false,
@@ -947,6 +972,11 @@ impl Annotator {
                 .then_some(self.tool)
                 .or(self.saved.tool),
             colour: Some(hex(d.colour)),
+            recent: (!self.recent.is_empty()).then(|| {
+                (self.recent.iter())
+                    .map(|&[r, g, b]| hex([r, g, b, 255]))
+                    .collect()
+            }),
             size: Some(d.width),
             text_size: Some(d.text_size.round().clamp(8.0, 96.0) as u8),
             outline: Some(d.outline),
@@ -1137,10 +1167,23 @@ impl Annotator {
             }
             Message::Hex(s) => {
                 if let Some(c) = parse_hex(&s) {
+                    self.picked_from = self.colour;
                     self.colour = c;
+                    self.hsv = None;
                     self.restyle();
+                    self.remember_colour();
                 }
                 self.hex = s;
+            }
+            Message::Hsv(hsv, rgb) => self.set_hsv(hsv, rgb),
+            Message::HsvDone => {
+                self.hsv_drag = false;
+                self.remember_colour();
+            }
+            Message::HsvSet(hsv, rgb) => {
+                self.set_hsv(hsv, rgb);
+                self.hsv_drag = false;
+                self.remember_colour();
             }
             Message::Eyedropper => {
                 self.picking = !self.picking;
@@ -1449,9 +1492,47 @@ impl Annotator {
     }
 
     fn set_colour(&mut self, c: [u8; 4]) {
+        if c != self.colour {
+            self.picked_from = self.colour;
+        }
         self.colour = c;
+        self.hsv = None;
         self.hex = hex(c);
         self.restyle();
+    }
+
+    /// The picker's square or slider moved the colour to `hsv` (its `rgb`; the alpha stays).
+    fn set_hsv(&mut self, hsv: [f32; 3], [r, g, b]: [u8; 3]) {
+        if !self.hsv_drag {
+            (self.hsv_drag, self.picked_from) = (true, self.colour);
+        }
+        self.hsv = Some((hsv, [r, g, b]));
+        self.colour = [r, g, b, self.colour[3]];
+        self.hex = hex(self.colour);
+        self.restyle();
+    }
+
+    /// The colour now goes first in the recent colours.
+    fn remember_colour(&mut self) {
+        let [r, g, b, _] = self.colour;
+        self.recent.retain(|c| *c != [r, g, b]);
+        self.recent.insert(0, [r, g, b]);
+        self.recent.truncate(RECENT);
+    }
+
+    /// The picker's `[hue, saturation, brightness]` when the colour is the one it set last (a grey
+    /// or a black has no hue in RGB); `None`: the colour came another way (the picker works it out).
+    pub(crate) fn hsv(&self) -> Option<[f32; 3]> {
+        let [r, g, b, _] = self.colour;
+        self.hsv
+            .filter(|(_, rgb)| *rgb == [r, g, b])
+            .map(|(h, _)| h)
+    }
+
+    /// The colour before the picker's last change.
+    pub(crate) fn picked_from(&self) -> iced::Color {
+        let [r, g, b, _] = self.picked_from;
+        iced::Color::from_rgb8(r, g, b)
     }
 
     /// "Hide this shape": a Hide over the selected rectangle, ellipse, pen
@@ -1732,6 +1813,7 @@ impl Annotator {
             self.picking = false;
             if let Some(c) = sample(&self.doc.image, p) {
                 self.set_colour(c);
+                self.remember_colour();
             }
             return;
         }

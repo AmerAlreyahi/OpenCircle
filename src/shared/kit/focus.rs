@@ -91,6 +91,24 @@ pub fn key(event: &Event, rtl: bool, up_is_on: bool) -> Option<Key> {
     })
 }
 
+/// An arrow key as `(dx, dy)` as seen (right and up positive; Shift = 10), none with Ctrl / Alt / Logo.
+pub(super) fn arrow_dir(event: &Event) -> Option<(i32, i32)> {
+    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+    let by = if modifiers.shift() { 10 } else { 1 };
+    match key {
+        keyboard::Key::Named(Named::ArrowRight) => Some((by, 0)),
+        keyboard::Key::Named(Named::ArrowLeft) => Some((-by, 0)),
+        keyboard::Key::Named(Named::ArrowUp) => Some((0, by)),
+        keyboard::Key::Named(Named::ArrowDown) => Some((0, -by)),
+        _ => None,
+    }
+}
+
 /// A control's focus (iced's `Focusable`, so the walk and `focus(id)` reach it).
 #[derive(Debug, Default)]
 pub struct State {
@@ -150,12 +168,18 @@ pub fn shade(renderer: &mut R, bounds: Rectangle, radius: f32, fill: Option<iced
     );
 }
 
+/// What the arrows send (`Stop::arrows`).
+type Arrows<'a, Message> = Box<dyn Fn(i32, i32) -> Option<Message> + 'a>;
+
 /// A focusable control: `content` and what its keys send.
 pub struct Stop<'a, Message> {
     content: Element<'a, Message>,
     radius: f32,
     press: Option<Message>,
     steps: Option<Box<dyn Fn(Step) -> Option<Message> + 'a>>,
+    /// The arrows in two dimensions (a colour square): `(dx, dy)` as seen, right and up
+    /// positive, 10 with Shift; `(0, 0)` = Enter / Space.
+    arrows: Option<Arrows<'a, Message>>,
     up_is_on: bool,
     rtl: bool,
     id: Option<Id>,
@@ -178,6 +202,7 @@ pub fn stop<'a, Message: 'a>(
         radius,
         press,
         steps: None,
+        arrows: None,
         up_is_on: false,
         rtl: super::dir::rtl(),
         id: None,
@@ -201,6 +226,11 @@ impl<'a, Message: 'a> Stop<'a, Message> {
         self.steps = Some(Box::new(steps));
         self
     }
+    /// The arrows move a handle in two dimensions (a colour square): what each step sends.
+    pub fn arrows(mut self, arrows: impl Fn(i32, i32) -> Option<Message> + 'a) -> Self {
+        self.arrows = Some(Box::new(arrows));
+        self
+    }
     /// Up is more (a slider), not back.
     pub fn up_is_on(mut self) -> Self {
         self.up_is_on = true;
@@ -222,7 +252,7 @@ impl<'a, Message: 'a> Stop<'a, Message> {
         self
     }
     fn live(&self) -> bool {
-        self.press.is_some() || self.steps.is_some()
+        self.press.is_some() || self.steps.is_some() || self.arrows.is_some()
     }
 }
 
@@ -338,6 +368,15 @@ impl<Message: Clone> Widget<Message, T, R> for Stop<'_, Message> {
         let state = tree.state.downcast_mut::<State>();
         state.on_mouse(event, shell);
         if !state.focused || shell.is_event_captured() {
+            return;
+        }
+        if let (Some(arrows), Some((dx, dy))) = (&self.arrows, arrow_dir(event)) {
+            lead(true);
+            if let Some(m) = arrows(dx, dy) {
+                shell.publish(m);
+            }
+            shell.capture_event();
+            shell.request_redraw();
             return;
         }
         let sent = match key(event, self.rtl, self.up_is_on) {

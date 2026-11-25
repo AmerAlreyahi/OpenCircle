@@ -16,7 +16,7 @@ const CHIP: f32 = 22.0;
 const PER_ROW: usize = 6;
 const PAD: f32 = 10.0;
 /// `picker_with`'s width: its rows of controls, and the padding.
-pub const PICKER_W: f32 = 256.0;
+pub const PICKER_W: f32 = super::colour_picker::WIDTH;
 
 /// A round dot of `colour` with a `rim` edge (white reads on a light page).
 fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {

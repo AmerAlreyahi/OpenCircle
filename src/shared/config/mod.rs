@@ -1129,6 +1129,9 @@ pub struct EditorConfig {
     /// `#RRGGBB`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colour: Option<String>,
+    /// The colours picked lately, newest first (the colour picker's recent row), `#RRGGBB` each.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recent: Option<Vec<String>>,
     /// The shared size (pen, arrows, shapes, steps, callouts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<crate::features::snip::annotate::Width>,
@@ -1176,6 +1179,7 @@ impl Default for EditorConfig {
             line_assist: true,
             tool: None,
             colour: None,
+            recent: None,
             size: None,
             text_size: None,
             outline: None,

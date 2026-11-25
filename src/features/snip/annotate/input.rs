@@ -243,6 +243,14 @@ impl Annotator {
                 _ => {}
             }
         }
+        // Alt+C / Alt+V: copy and paste an item's style (they are not in the colour picker)
+        if modifiers.alt() && !modifiers.command() {
+            match latin.map(|c| c.to_ascii_lowercase()) {
+                Some('c') => return Some(Message::CopyStyle),
+                Some('v') => return Some(Message::PasteStyle),
+                _ => {}
+            }
+        }
         match key {
             Key::Named(Named::Escape) if self.picking => Some(Message::Eyedropper),
             Key::Named(Named::Escape) => match self.menu {

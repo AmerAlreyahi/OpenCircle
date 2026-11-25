@@ -13,7 +13,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::share;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
-    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, dragout, info,
+    Annotator, Group, Menu, Message, ScreenTool, Tool, ToolInfo, dragout, info,
 };
 use crate::features::snip::snip_more::{self, Read, Row};
 use crate::shared::app_language::{S, fmt, tr};
@@ -24,7 +24,9 @@ use crate::shared::kit::surface::{self, Material, surface};
 use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{button, chip, colour, divider, grip, option_list, segmented, slider};
+use crate::shared::kit::{
+    button, chip, colour, colour_picker, divider, grip, option_list, segmented, slider,
+};
 use crate::t;
 
 const SPACING: f32 = bar::SPACING;
@@ -769,46 +771,36 @@ pub fn place_popover(at: Rectangle, bar_height: f32, screen: Rectangle) -> Vecto
     p - at.position()
 }
 
-/// The kit's colour picker with the eyedropper, the presets (keys 1-9) and
-/// copy / paste style under its hex field.
+/// The kit's colour picker (the square, the hue slider, the preview, the recent colours and
+/// the preset swatches) with the eyedropper. Copy / Paste style and the style presets are
+/// not in it (W112): the Studio's Edit menu has them, Snip has their keys.
 pub(crate) fn colour_panel(e: &Annotator) -> Element<'_, Message> {
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
         t!(sn_pick_image),
         Why::Keys("D"),
     );
-    let style = line(vec![
-        eyedropper,
-        chip::action(t!(sn_copy_style).into(), Message::CopyStyle),
-        chip::action(t!(sn_paste_style).into(), Message::PasteStyle),
-    ]);
-    let preset = |i: usize| -> Element<'_, Message> {
-        let p = &PRESETS[i];
-        hinted(
-            chip::action(tr(p.short).into(), Message::Preset(i)),
-            tr(p.name),
-            Why::Keys(p.key),
-        )
-    };
-    let pairs = (0..PRESETS.len())
-        .collect::<Vec<_>>()
-        .chunks(2)
-        .map(|pair| line(pair.iter().map(|&i| preset(i)).collect()).into())
-        .collect::<Vec<Element<'_, Message>>>();
-    let more = column![
-        style,
-        caption(Role::SECTION, t!(sn_presets)),
-        column(pairs).spacing(SPACING)
-    ]
-    .spacing(SPACING);
-    colour::picker_with(
-        &crate::features::snip::annotate::style::ANNOTATION,
-        e.ink(),
-        &e.hex,
-        |c| Message::Colour(c.into_rgba8()),
-        Message::Hex,
-        Some(more.into()),
-    )
+    let hsv = e.hsv().map_or_else(
+        || {
+            let [r, g, b, _] = e.colour;
+            colour_picker::Hsv::of([r, g, b])
+        },
+        colour_picker::Hsv::from_array,
+    );
+    colour_picker::view(colour_picker::Picker {
+        hsv,
+        old: e.picked_from(),
+        hex: &e.hex,
+        presets: &crate::features::snip::annotate::style::ANNOTATION,
+        recent: &e.recent,
+        eyedropper: Some(eyedropper),
+        recent_label: t!(cp_recent),
+        on_hsv: std::rc::Rc::new(|h| Message::Hsv(h.array(), h.rgb())),
+        done: Message::HsvDone,
+        on_set: std::rc::Rc::new(|h| Message::HsvSet(h.array(), h.rgb())),
+        on_rgb: std::rc::Rc::new(|[r, g, b]| Message::Colour([r, g, b, 255])),
+        on_hex: std::rc::Rc::new(Message::Hex),
+    })
 }
 
 #[cfg(test)]
@@ -927,6 +919,49 @@ mod tests {
                     let at = Size::new(size_for(&e).width, height);
                     failed.extend(golden::check("screens", &file, at, &[1.0], || view(&e)));
                 }
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W112: the familiar colour picker (square, hue slider, before | now preview, eyedropper, the
+    /// hex as a small read-out, recent colours, presets) in Sapphire and Daylight, Latin and
+    /// Arabic; the same panel the Studio's "+" opens. No style tools in it.
+    #[test]
+    fn w112_the_colour_picker_matches_its_golden_images() {
+        use crate::shared::kit::colour_picker::Hsv;
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for rtl in [false, true] {
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
+                let mut e = editor();
+                e.update(Message::Colour([0xff, 0x95, 0x00, 255]));
+                let blue = Hsv {
+                    h: 212.0,
+                    s: 0.82,
+                    v: 0.96,
+                };
+                e.update(Message::HsvSet(blue.array(), blue.rgb()));
+                e.recent = vec![
+                    [0x0a, 0x84, 0xff],
+                    [0x34, 0xc7, 0x59],
+                    [0xaf, 0x52, 0xde],
+                    [0xff, 0x2d, 0x9a],
+                    [0x1c, 0x1c, 0x1e],
+                ];
+                let words = crate::shared::kit::testing::shot::texts(colour_panel(&e));
+                assert!(
+                    !words.iter().any(|w| w == "Copy style" || w == "Presets"),
+                    "{words:?}"
+                );
+                let dir = if rtl { "-ar" } else { "" };
+                let file = format!("snip-colour-picker{dir}-{}", theme.id);
+                let at = Size::new(colour::PICKER_W, 336.0);
+                failed.extend(golden::check("screens", &file, at, &[1.0], || {
+                    colour_panel(&e)
+                }));
             }
         }
         themes::set(&SAPPHIRE);

@@ -1233,6 +1233,48 @@ fn colour_sheet() {
     sheet("colour", Size::new(220.0, 110.0), &rows);
 }
 
+#[test]
+fn colour_picker_sheet() {
+    use super::super::colour_picker::{Hsv, Picker, view};
+    use iced::Color;
+    use std::rc::Rc;
+    static PRESETS: [Color; 6] = [
+        Color::from_rgb8(0xff, 0x3b, 0x30),
+        Color::from_rgb8(0xff, 0x95, 0x00),
+        Color::from_rgb8(0xff, 0xd6, 0x0a),
+        Color::from_rgb8(0x34, 0xc7, 0x59),
+        Color::from_rgb8(0x0a, 0x84, 0xff),
+        Color::from_rgb8(0x1c, 0x1c, 0x1e),
+    ];
+    let picker = |recent: &'static [[u8; 3]]| -> Element<'static, ()> {
+        view(Picker {
+            hsv: Hsv {
+                h: 212.0,
+                s: 0.82,
+                v: 0.96,
+            },
+            old: Color::from_rgb8(0xff, 0x95, 0x00),
+            hex: "#2C8AF5",
+            presets: &PRESETS,
+            recent,
+            eyedropper: None,
+            recent_label: "Recent",
+            on_hsv: Rc::new(|_| ()),
+            done: (),
+            on_set: Rc::new(|_| ()),
+            on_rgb: Rc::new(|_| ()),
+            on_hex: Rc::new(|_| ()),
+        })
+    };
+    let rows = vec![
+        row("recent", Act::Rest, move |_| {
+            picker(&[[59, 130, 246], [239, 68, 68], [255; 3]])
+        }),
+        row("none yet", Act::Rest, move |_| picker(&[])),
+    ];
+    sheet("colour_picker", Size::new(264.0, 330.0), &rows);
+}
+
 /// `field::input`, the design's `.oc-input` (Settings' URL, model and key).
 #[test]
 fn field_input_sheet() {
