@@ -2669,6 +2669,7 @@ impl Annotator {
             .collect();
         self.legend = self.doc.legend_layout();
         if self.bare() {
+            self.update_live(); // (a cancelled press leaves no layer behind, W113)
             return; // nothing to paint: the frozen frame under it is the area
         }
         let pm = self.doc.flatten(&layers, self.legend.as_ref());
@@ -2708,9 +2709,12 @@ impl Annotator {
     }
 
     /// The pending item changed: its layer is painted when next asked for.
+    /// A picked-up item (a press with Select or Ctrl) has no layer until it is hidden from the base
+    /// (its first move): the layer over the base would paint it twice (W113).
     fn update_live(&mut self) {
-        self.live_stale.set(self.pending.is_some());
-        if self.pending.is_none() {
+        let shown = (self.pending.as_ref()).is_some_and(|p| p.index.is_none() || p.hidden);
+        self.live_stale.set(shown);
+        if !shown {
             *self.live.get_mut() = None;
         }
     }
