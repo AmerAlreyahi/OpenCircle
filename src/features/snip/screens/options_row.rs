@@ -1,19 +1,21 @@
 //! The options bar's parts, shared by the Studio's bar and Snip's options row (UX C4): one component.
 //! The groups read the editor's current values and send the editor's own messages; Snip's row
 //! (`snip_row_focused`) is built from the same parts.
-use iced::widget::container;
+use iced::widget::{container, tooltip};
 use iced::{Center, Element};
 
 use crate::features::snip::annotate::{
     Annotator, ERASER_SIZES, Message, STRENGTH_RANGE, TextStyle, Tool, Width, fills_inside, info,
     style,
 };
+use crate::features::snip::screens::snip_toolbar::toolbar::tip;
 use crate::shared::app_language::tr;
 use crate::shared::kit::option_bar::{
-    GROUP_GAP, caption, dot, group, hairline, swatch, text_cell, value,
+    GROUP_GAP, caption, dot, glyph_cell, group, hairline, swatch, text_cell, value,
 };
 use crate::shared::kit::text::text;
 use crate::shared::kit::tokens::{Role, size, space};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{dir, keycap, slider};
 use crate::t;
 
@@ -340,6 +342,19 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
             Some(Message::Tool(if on { plain } else { other })),
         )
     };
+    // the tool's choices lead the row (built first: the Tab ring walks in this order)
+    let mut lead: Vec<El<'_>> = Vec::new();
+    let choices: Vec<_> = info(tool).group.tools().collect();
+    if choices.len() > 1 {
+        let cells = choices
+            .into_iter()
+            .map(|t| {
+                let cell = glyph_cell(t.icon, t.tool == tool, Some(Message::Tool(t.tool)));
+                hint(cell, tip(t), Why::Icon, tooltip::Position::Bottom)
+            })
+            .collect();
+        lead.extend([group(cells, false), hairline()]);
+    }
     let mut g: Vec<El<'_>> = match tool {
         Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow => {
             let mut g = vec![stroke(e, true, true), outline_fill(e, tool, c)];
@@ -458,20 +473,23 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
         Tool::Eraser => own_groups(e, Tool::Eraser),
         _ => Vec::new(),
     };
-    if g.is_empty() {
+    // (a tool with no options of its own, Spotlight, still shows its group's choices: the way to the others)
+    if g.is_empty() && lead.is_empty() {
         return None;
     }
-    // the tool's name and key first (what the row is for)
+    // the tool's choices first (its group's tools: a Shapes row offers rectangle, ellipse, line,
+    // arrow, W107), then its name and key (what the row is for)
     let base = info(info(e.tool).slot);
     let mut head: Vec<El<'_>> = vec![text(Role::ROW_TITLE, tr(info(tool).name)).into()];
     if e.selection().is_empty() {
         let cap = keycap::keycap(base.key.to_ascii_uppercase().to_string());
         head.push(container(cap).width(size::KEYCAP_H).into());
     }
-    let mut items: Vec<El<'_>> = vec![
+    let mut items = lead;
+    items.extend([
         dir::row(head).spacing(space::GAP).align_y(Center).into(),
         hairline(),
-    ];
+    ]);
     items.append(&mut g);
     Some(dir::row(items).spacing(GROUP_GAP).align_y(Center).into())
 }

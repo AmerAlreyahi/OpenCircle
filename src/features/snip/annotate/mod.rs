@@ -200,11 +200,6 @@ impl Group {
         (TOOLS.iter()).filter(move |t| t.group == self && t.slot == t.tool && t.tool != Tool::Crop)
     }
 
-    /// Its button opens a panel (Select has nothing to choose).
-    pub fn has_panel(self) -> bool {
-        self != Group::Select
-    }
-
     /// `tools` is one tool of each group, in order (a remembered `group_tools`).
     pub fn valid(tools: &[Tool]) -> bool {
         tools.len() == Group::ALL.len()
@@ -362,9 +357,6 @@ impl Width {
 pub enum Menu {
     /// Colour, eyedropper, presets, copy / paste style.
     Colour,
-    /// A group button's panel (a click on the active one): the group's
-    /// tools, then the current tool's options.
-    Options(Group),
     /// Undo's second click: Undo, Redo and where in the history.
     Undo,
     /// More: long capture, pin, share, the screen tools.
@@ -1075,14 +1067,13 @@ impl Annotator {
             }),
             Message::Finish => self.commit(),
             Message::Tool(tool) => self.pick_tool(tool),
-            // First click: the group's tool; a click on the active one: its panel.
+            // The group's tool; on the active group nothing more: its choices and options are
+            // in the row under the toolbar already (W107), no panel, no second click.
             Message::Slot(tool) if info(self.tool).group != info(tool).group => {
                 self.pick_tool(tool)
             }
-            Message::Slot(tool) => {
-                let group = info(tool).group;
-                let open = self.menu == Some(Menu::Options(group));
-                self.menu = (group.has_panel() && !open).then_some(Menu::Options(group));
+            Message::Slot(_) => {
+                self.menu = None;
                 self.picking = false;
             }
             Message::Picker => self.toggle(Menu::Colour),
@@ -1438,8 +1429,7 @@ impl Annotator {
         self.row = None;
     }
 
-    /// Picks `tool`, its group's last from now on; its group's open panel
-    /// stays (it shows this tool's options), any other closes.
+    /// Picks `tool`, its group's last from now on; an open panel closes (the colour's too).
     fn pick_tool(&mut self, tool: Tool) {
         self.commit();
         self.tool = tool;
@@ -1447,7 +1437,7 @@ impl Annotator {
         if tool != Tool::Crop {
             self.last[group as usize] = tool;
         }
-        self.menu = self.menu.filter(|m| *m == Menu::Options(group));
+        self.menu = None;
         self.picking = false;
     }
 

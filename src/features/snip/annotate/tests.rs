@@ -1248,9 +1248,8 @@ fn popovers_open_above_a_toolbar_at_the_bottom_and_stay_on_screen() {
 fn text_options_style_the_text() {
     let mut e = editor(400, 200);
     e.update(Message::Slot(Tool::Text));
-    e.update(Message::Slot(Tool::Text)); // the active tool: its options
-    assert_eq!(e.menu, Some(Menu::Options(Group::Text)));
-    let _ = e.toolbar(); // the options build
+    e.update(Message::Slot(Tool::Text)); // the active tool: nothing opens (its options are the row)
+    assert_eq!(e.menu, None);
     e.update(Message::TextSize(38.0));
     let boxed = TextStyle {
         font: text::Font::Serif,
@@ -1689,25 +1688,22 @@ fn pointer_and_label_are_drawn_and_editable() {
 }
 
 /// The grouped toolbar (owner, 2026-11-02): a group button picks its last
-/// tool; a click on the active one opens its panel, where another of the
-/// group's tools switches and keeps it open; Esc closes it first.
+/// tool; a click on the active one opens nothing (W107: the group's tools are in the row under the
+/// toolbar, one click each); Esc leaves the editor.
 #[test]
-fn group_buttons_pick_their_last_tool_and_open_one_panel() {
+fn group_buttons_pick_their_last_tool_and_open_no_panel() {
     let mut e = editor(100, 100);
     assert_eq!(e.tool, Tool::Arrow);
     assert_eq!(
         e.last,
         [Tool::Select, Tool::Arrow, Tool::Pen, Tool::Text, Tool::Blur]
     );
-    // The active group's button: its panel; again: closed.
+    // The active group's button: nothing opens (W107-2)
     e.update(Message::Slot(Tool::Arrow));
-    assert_eq!(e.menu, Some(Menu::Options(Group::Shapes)));
-    // a tool of the panel's row: switched, the panel stays (its options)
+    assert_eq!((e.tool, e.menu), (Tool::Arrow, None));
+    // a tool of the row's choices: switched at once
     e.update(Message::Tool(Tool::Rect));
-    assert_eq!(
-        (e.tool, e.menu),
-        (Tool::Rect, Some(Menu::Options(Group::Shapes)))
-    );
+    assert_eq!((e.tool, e.menu), (Tool::Rect, None));
     e.update(Message::Slot(Tool::Rect));
     assert_eq!(e.menu, None);
     // Hide's button shows Blur; its first click picks it, no panel.
@@ -1724,18 +1720,9 @@ fn group_buttons_pick_their_last_tool_and_open_one_panel() {
     // Text's option Background is Label: the Text button stays its group.
     e.update(Message::Tool(Tool::Label));
     e.update(Message::Slot(e.last[Group::Text as usize]));
-    assert_eq!(
-        (e.tool, e.menu),
-        (Tool::Label, Some(Menu::Options(Group::Text)))
-    );
-    let _ = e.toolbar(); // the panel builds
-    // Esc closes a panel before it leaves the editor; Select has none.
+    assert_eq!((e.tool, e.menu), (Tool::Label, None));
+    // with no panel open Esc leaves the editor
     let esc = |e: &Annotator| e.key(&Key::Named(Named::Escape), None, Modifiers::empty(), None);
-    assert!(matches!(
-        esc(&e),
-        Some(Message::Menu(Menu::Options(Group::Text)))
-    ));
-    e.update(Message::Menu(Menu::Options(Group::Text)));
     assert!(matches!(esc(&e), Some(Message::Back)));
     e.update(Message::Slot(Tool::Select));
     e.update(Message::Slot(Tool::Select));
@@ -2321,10 +2308,9 @@ fn the_blur_brush_is_sized_to_its_line_auto_or_picked() {
     assert!(size_of(&e, 2).1.iter().any(|p| p.y != c + 3.0));
     e.update(Message::Shift(false));
 
-    // Its options: a click on the active Blur button; a size there overrides Auto.
+    // Its options (the row, no panel): a size there overrides Auto.
     e.update(Message::Slot(Tool::Blur));
-    assert_eq!(e.menu, Some(Menu::Options(Group::Hide)));
-    let _ = e.toolbar(); // they build
+    assert_eq!(e.menu, None);
     e.update(Message::BlurSize(Some(Width::Thick)));
     drag(&mut e, pt(15.0, c), &[], pt(220.0, c));
     assert_eq!(size_of(&e, 3).0, Width::Thick.brush());
@@ -2457,10 +2443,7 @@ fn options_open_on_the_second_click_and_outlines_are_off_by_default() {
         "first click: the tool"
     );
     e.update(Message::Slot(Tool::Rect));
-    assert_eq!(e.menu, Some(Menu::Options(Group::Shapes)));
-    let _ = e.toolbar();
-    e.update(Message::Slot(Tool::Rect));
-    assert_eq!(e.menu, None);
+    assert_eq!(e.menu, None, "no panel on a second click (W107-2)");
     for tool in [Tool::Rect, Tool::Arrow, Tool::Callout] {
         e.update(Message::Tool(tool));
         e.update(Message::Press(pt(30.0, 150.0)));

@@ -2,8 +2,9 @@
 //! SNIP_TOOLBAR_SPEC), composed from kit parts only. One bar, always the same:
 //! grip (moves the toolbar) · size chip (drags the picture out) · Select ·
 //! Shapes · Draw · Text · Hide · Colour · Undo · More · Copy · Save. A group
-//! button shows its last tool; a click on the active one opens ONE panel by
-//! it (the group's tools, then that tool's options). No ×: Esc closes.
+//! button shows its last tool; the active tool's choices (its group's tools)
+//! and options are in the row under the bar (`options_row`), no panel, no second click.
+//! The quiet x at the end, and Esc, close.
 use iced::widget::{Space, column, container, tooltip};
 #[cfg(test)]
 use iced::widget::{Space as Gap, row};
@@ -23,9 +24,7 @@ use crate::shared::kit::surface::{self, Material, surface};
 use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{
-    button, chip, colour, divider, grip, keycap, option_list, segmented, slider,
-};
+use crate::shared::kit::{button, chip, colour, divider, grip, option_list, segmented, slider};
 use crate::t;
 
 const SPACING: f32 = bar::SPACING;
@@ -43,8 +42,6 @@ const PIPETTE: char = crate::features::snip::screens::tools::picker::ICON;
 const SHARE: char = '\u{e158}'; // lucide "share"
 const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
 const LIST_PLUS: char = '\u{e23e}'; // lucide "list-plus"
-/// A tool's keycap in its panel.
-const KEY_W: f32 = 22.0;
 /// The Text tool's size presets (display px).
 const TEXT_PRESETS: [f32; 3] = [16.0, 26.0, 38.0];
 
@@ -390,7 +387,6 @@ fn build(
         let shown = info(info(last).slot);
         let m = Message::Slot(last);
         let s = state(idle && current == g, &m);
-        at.push((Menu::Options(g), items.len()));
         // "Shapes · Arrow (A)"; Select's own name once
         let (label, why) = match g.name() == shown.name {
             true => (tip(shown), Why::Icon),
@@ -478,7 +474,6 @@ fn build(
     };
     let (panel, width) = match menu {
         Menu::Colour => (colour_panel(e), colour::PICKER_W),
-        Menu::Options(group) => (options_panel(e, group), size::PANEL),
         Menu::Undo => (undo_panel(e), size::PANEL),
         Menu::More => (more_panel(e), option_list::MENU_WIDTH),
     };
@@ -639,39 +634,6 @@ pub fn options_row(e: &Annotator, max_w: f32) -> Option<Element<'_, Message>> {
         .align_y(iced::Center)
         .into(),
     )
-}
-
-/// A tool's name in the panel.
-fn name_of(tool: Tool) -> &'static str {
-    tr(info(tool).name)
-}
-
-/// A group's panel (a click on its active button): the group's tools and the
-/// current one's name and key. Its options show at once in the row under the
-/// toolbar (`options_row`).
-fn options_panel(e: &Annotator, group: Group) -> Element<'_, Message> {
-    let base = info(info(e.tool).slot);
-    let tools = group
-        .tools()
-        .map(|t| {
-            icon(
-                t.icon,
-                base.tool == t.tool,
-                Some(Message::Tool(t.tool)),
-                tip(t),
-            )
-        })
-        .collect();
-    let key = base.key.to_ascii_uppercase().to_string();
-    let named = line(vec![
-        sub(Role::META, name_of(base.tool)).into(),
-        Space::new().width(Fill).into(),
-        container(keycap::keycap(key)).width(KEY_W).into(),
-    ])
-    .width(Fill);
-    // (the tool's options, Hide's live style pictures too, are the row under the toolbar, C4)
-    let parts: Vec<Element<'_, Message>> = vec![line(tools).into(), named.into()];
-    surface::panel(column(parts).spacing(SPACING + 2.0)).into()
 }
 
 /// Undo's second click: Undo, Redo and where the history is.
@@ -886,12 +848,6 @@ mod tests {
     #[test]
     fn the_toolbar_matches_its_golden_images() {
         let mut failed = Vec::new();
-        let panel = |tool: Tool| {
-            let mut e = editor();
-            e.update(Message::Tool(tool));
-            e.update(Message::Slot(tool));
-            e
-        };
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
             for rtl in [false, true] {
@@ -946,12 +902,6 @@ mod tests {
                     ("add-step-more", add_more, 430.0),
                     ("bar", editor(), 60.0),
                     ("held", held, 60.0),
-                    ("shapes", panel(Tool::Arrow), 330.0),
-                    ("rect", panel(Tool::Rect), 330.0),
-                    ("draw", panel(Tool::Pen), 230.0),
-                    ("text", panel(Tool::Text), 360.0),
-                    ("steps", panel(Tool::Step), 330.0),
-                    ("hide", panel(Tool::Blur), 520.0),
                     ("colour", colour, 440.0),
                     ("undo", undo, 130.0),
                     ("more", more, 430.0),
@@ -1062,17 +1012,61 @@ mod tests {
         assert!(matches!(e.update(Message::Copy), Some(Output::Copy(_))));
     }
 
-    /// C4-4: the row's controls send the editor's own messages (Studio parts,
-    /// one component) and the group panel (a second click) keeps only the
-    /// group's tools, not the options.
+    /// C4-4: the row's controls send the editor's own messages (Studio parts, one component) and a
+    /// second click on the group's button opens no panel at all (W107-2).
     #[test]
-    fn c4_4_the_panel_keeps_the_tools_and_the_row_has_the_options() {
+    fn c4_4_a_second_click_opens_no_panel_and_the_row_has_the_options() {
         let mut e = editor();
         e.update(Message::Tool(Tool::Text));
         e.update(Message::Slot(Tool::Text));
-        let panel = crate::shared::kit::testing::shot::texts(view(&e));
-        assert!(!panel.iter().any(|t| t == "Bold"), "{panel:?}");
+        assert_eq!(e.menu, None);
         assert!(row_texts(&e).unwrap().iter().any(|t| t == "Bold"));
+    }
+
+    /// W107-2: the active tool's choices are the FIRST group of its row: Shapes offers rectangle,
+    /// ellipse, line and arrow (each one click, each its own message, the tooltip `Name (K)`); Draw and
+    /// Hide offer their two, Text its three; Select has no row; no panel opens in between.
+    #[test]
+    fn w107_2_the_rows_first_group_is_the_tools_choices() {
+        let choices = |tool: Tool| -> Vec<Tool> {
+            let mut e = editor();
+            e.update(Message::Tool(tool));
+            let bar = bar_stops(&e).len();
+            stops(&e)[bar..]
+                .iter()
+                .map_while(|m| match m {
+                    Message::Tool(t) => Some(*t),
+                    _ => None,
+                })
+                .collect()
+        };
+        for tool in [Tool::Rect, Tool::Arrow] {
+            let all = [Tool::Rect, Tool::Ellipse, Tool::Line, Tool::Arrow];
+            assert_eq!(choices(tool), all);
+        }
+        assert_eq!(
+            choices(Tool::Pen),
+            [Tool::Pen, Tool::Highlighter, Tool::Eraser]
+        );
+        assert_eq!(
+            choices(Tool::Blur),
+            [Tool::Blur, Tool::Redact, Tool::Spotlight, Tool::Magnifier]
+        );
+        // a tool with no options of its own (Spotlight) still shows the choices: the way to the others
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Spotlight));
+        assert!(row_texts(&e).is_some());
+        assert_eq!(choices(Tool::Text), [Tool::Text, Tool::Callout, Tool::Step]);
+        // a click on a choice switches at once and the row follows (no panel in between)
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Rect));
+        e.update(Message::Tool(Tool::Ellipse));
+        assert_eq!((e.tool, e.menu), (Tool::Ellipse, None));
+        // the tooltips name the tool and its key
+        assert_eq!(tip(info(Tool::Ellipse)), "Ellipse (O)");
+        // Select has nothing to choose
+        e.update(Message::Tool(Tool::Select));
+        assert!(options_row(&e, 4000.0).is_none());
     }
 
     /// C4-5: goldens: each tool's row, English and Arabic (right to left).
@@ -1118,8 +1112,17 @@ mod tests {
         let bar = bar_stops(&e).len();
         let all = stops(&e);
         assert!(all.len() > bar + 3, "{} stops, {bar} in the bar", all.len());
-        // the first control of the row is Rect's first size dot
-        assert!(matches!(all[bar], Message::Width(_)), "{:?}", all[bar]);
+        // the row opens with the four shapes, then the first size dot
+        assert!(
+            matches!(all[bar], Message::Tool(Tool::Rect)),
+            "{:?}",
+            all[bar]
+        );
+        assert!(
+            matches!(all[bar + 4], Message::Width(_)),
+            "{:?}",
+            all[bar + 4]
+        );
         // a long capture running: the toolbar alone
         e.capturing = true;
         assert_eq!(stops(&e).len(), bar_stops(&e).len());
@@ -1183,7 +1186,7 @@ mod tests {
             t.update(Message::RowStep(-dx, 0));
             assert_eq!(t.annotator.focus, Some(bar));
             // Enter acts on the focused control: a size
-            t.annotator.focus = Some(bar + 2);
+            t.annotator.focus = Some(bar + 4 + 2); // (after the four shapes)
             t.update(Message::Activate);
             assert_eq!(
                 t.annotator.width,
@@ -1226,6 +1229,7 @@ mod tests {
             stops(&e)[bar..]
                 .iter()
                 .map(|m| match m {
+                    Message::Tool(_) => "choice",
                     Message::BlurStyle(_) => "style",
                     Message::BlurShape(_) => "shape",
                     Message::BlurCell(_) => "strength",
@@ -1248,13 +1252,13 @@ mod tests {
         flat.dedup();
         assert_eq!(
             flat,
-            ["style", "shape", "strength", "assist", "brush"],
+            ["choice", "style", "shape", "strength", "assist", "brush"],
             "{hide:?}"
         );
         let mut text = kinds(Tool::Text);
         text.dedup();
-        assert_eq!(text, ["size", "text"], "{text:?}");
-        assert_eq!(kinds(Tool::Text).len(), 3 + 3 + 1 + 3);
+        assert_eq!(text, ["choice", "size", "text"], "{text:?}");
+        assert_eq!(kinds(Tool::Text).len(), 3 + 3 + 3 + 1 + 3);
     }
 
     /// W91.2: the Studio button sits before Copy / Save (Tab reaches it), More has no
