@@ -29,7 +29,12 @@ const RIM: f32 = 1.0;
 /// Under the page's title (`mb-1.5`).
 const TITLE_GAP: f32 = 6.0;
 /// The longest the header pill's line gets (characters), before "…".
-const PILL_MAX: usize = 48;
+const PILL_MAX: usize = 22;
+/// About how wide a header pill is per character, and its dot and padding (the search keeps clear of it).
+const PILL_CHAR: f32 = 7.0;
+const PILL_PAD: f32 = 28.0;
+/// The caption buttons and the gap before them.
+const BUTTONS: f32 = 3.0 * 46.0 + 8.0;
 
 /// The page's content box (the tests find its width by this id).
 pub(super) const PAGE_ID: &str = "settings-page";
@@ -51,7 +56,12 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     );
     // the search sits EXACTLY on the window's middle (W107): a layer over the whole header, kept clear
     // of the title and of the buttons by the same margin on both sides, narrower when the window is
-    let header = crate::shared::kit::header::with_centre(header, search_field(state), SEARCH_W);
+    let header = crate::shared::kit::header::with_centre(
+        header,
+        search_field(state),
+        SEARCH_W,
+        search_margin(state),
+    );
     let body: Element<'_, Message> = crate::dir_row![nav(state), page(state)].height(Fill).into();
     // F13: the hits hang from the field, over the page
     let body = match search_hits(state) {
@@ -157,7 +167,7 @@ fn report_dialog<'a>() -> Element<'a, Message> {
 
 /// The header pill, only when something needs the user (owner, 2026-10-29:
 /// changes save by themselves, so "Auto-save active" / "Saved" say nothing).
-fn pill(state: &State) -> Element<'_, Message> {
+fn pill_line(state: &State) -> Option<(String, Tone)> {
     let n = state.problems.len();
     let (line, tone) = if n > 0 {
         let forms = [
@@ -172,9 +182,26 @@ fn pill(state: &State) -> Element<'_, Message> {
     } else if state.asking_close {
         (t!(win_ask_close).into(), Tone::Error)
     } else {
-        return Space::new().into();
+        return None;
     };
-    status(cut(&line), tone)
+    Some((cut(&line), tone))
+}
+
+fn pill(state: &State) -> Element<'_, Message> {
+    match pill_line(state) {
+        Some((line, tone)) => status(line, tone),
+        None => Space::new().into(),
+    }
+}
+
+/// What the search keeps clear on each side of the window's middle: the title (left) and the buttons
+/// with a shown pill (right), the same on both sides so it stays centred; the pill wins (the field
+/// narrows, down to its icon and keys).
+fn search_margin(state: &State) -> f32 {
+    let pill = pill_line(state).map_or(0.0, |(line, _)| {
+        line.chars().count() as f32 * PILL_CHAR + PILL_PAD
+    });
+    crate::shared::kit::header::CENTRE_MARGIN.max(BUTTONS + pill)
 }
 
 fn cut(line: &str) -> String {

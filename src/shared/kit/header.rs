@@ -282,18 +282,20 @@ fn edges<'a, Message: Clone + 'a>(on: &impl Fn(Event) -> Message) -> Element<'a,
 /// What a header keeps clear on each side of the window's middle for a centred part: the title and the
 /// logo at the left, the caption buttons (and a status) at the right; the same both sides, so the part
 /// is centred on the window itself.
-const CENTRE_MARGIN: f32 = 200.0;
+pub const CENTRE_MARGIN: f32 = 200.0;
 
 /// `header` with `centre` EXACTLY on the window's middle, as wide as `widest` and narrower when the window
 /// is (never reaching the title or the buttons): a layer over the whole header that takes only the
-/// presses of the part itself.
+/// presses of the part itself. `margin`: what it keeps clear on each side (at least `CENTRE_MARGIN`); the part
+/// narrows (the window's smallest width leaves it 100 px) before it would reach anything.
 pub fn with_centre<'a, Message: 'a>(
     header: Element<'a, Message>,
     centre: Element<'a, Message>,
     widest: f32,
+    margin: f32,
 ) -> Element<'a, Message> {
     let part = container(centre).max_width(widest).width(Fill);
-    let layer = container(part).padding([0.0, CENTRE_MARGIN]).center(Fill);
+    let layer = container(part).padding([0.0, margin]).center(Fill);
     stack![header, layer].height(size::HEADER).into()
 }
 

@@ -4710,6 +4710,47 @@ fn w107_report_dialog_header_is_never_mirrored() {
     app_language::set(Lang::En);
 }
 
+/// W107 fix 1: a header pill ("N problems to fix", a notice, the close question) is never covered by the
+/// search: at the smallest, the usual and a wide window the field stays centred within 0.5 px, clear of the
+/// pill, which is clear of the buttons.
+#[test]
+fn w107_the_search_never_covers_the_header_pill() {
+    use crate::features::settings::state::MIN_WIDTH;
+    use crate::shared::kit::tokens::size::CAPTION_BUTTON;
+    use iced::keyboard::key::Named;
+    let tab = shot::named(Named::Tab, false)[1].clone();
+    for notice in [
+        "Saving failed",
+        "A very long notice that does not fit in the header at all",
+    ] {
+        let (mut s, _) = state(None);
+        s.notice = Some(notice.to_string());
+        for width in [MIN_WIDTH, WINDOW_SIZE.width, 1000.0] {
+            let size = Size::new(width, WINDOW_SIZE.height);
+            let (_, at) = shot::focus_walk(|| view(&s), size, std::slice::from_ref(&tab));
+            let field = at[0].expect("Tab focuses the search first");
+            assert!(
+                (field.x + field.width / 2.0 - width / 2.0).abs() < 0.51,
+                "{width}: centred: {field:?}"
+            );
+            assert!(
+                field.width >= 60.0,
+                "{width}: the field keeps its icon and keys: {field:?}"
+            );
+            let pill = shot::texts_at(view(&s), size)
+                .into_iter()
+                .find(|(_, t)| t.starts_with(&notice[..6]))
+                .expect("the pill's text")
+                .0;
+            assert!(
+                field.x + field.width <= pill.x
+                    && pill.x + pill.width <= width - 3.0 * CAPTION_BUTTON,
+                "{width}: {notice:?}: search {field:?}, pill {pill:?}"
+            );
+        }
+    }
+}
+
 /// W107-3: goldens of the Settings title bar, English and Arabic (the same layout, only the text),
 /// light and dark, at the smallest and the usual width.
 #[test]
