@@ -96,8 +96,8 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
         true => iced::widget::space().into(),
         false => stack(e.patch.iter().map(|p| Element::from(place(p)))).into(),
     });
-    layers.push(match e.live.as_ref() {
-        Some(live) => place(live).into(),
+    layers.push(match e.live_layer() {
+        Some(live) => place(&live).into(),
         None => iced::widget::space().into(),
     });
     layers.push(

@@ -93,6 +93,28 @@ pub(super) fn frame_times(
         .collect()
 }
 
+/// Where a 4K pen frame goes: the live layer's paint alone, at the end of the drag.
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn w111_live_layer_paint_time() {
+    let mut e = Annotator::new(photo(3840, 2160), 0.5);
+    e.update(Message::Tool(Tool::Pen));
+    let pts = path(Tool::Pen, 3840.0, 2160.0, 90);
+    e.update(Message::Press(pts[0]));
+    for p in &pts[1..] {
+        e.update(Message::Move(*p));
+    }
+    let t = std::time::Instant::now();
+    for i in 0..10 {
+        e.update(Message::Move(pts[90] + iced::Vector::new(i as f32, 0.0)));
+        let _ = e.live_layer();
+    }
+    println!(
+        "live layer paint: {:.1} ms",
+        t.elapsed().as_secs_f64() * 100.0
+    );
+}
+
 fn stats(mut v: Vec<f64>) -> String {
     v.sort_by(f64::total_cmp);
     let mean = v.iter().sum::<f64>() / v.len() as f64;

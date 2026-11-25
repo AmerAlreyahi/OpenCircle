@@ -1380,11 +1380,31 @@ fn steps_number_themselves_and_renumber_after_delete() {
 // ---- live layer == committed result ------------------------------------------------
 
 fn live_pixels(e: &Annotator) -> (Rectangle, Vec<u8>) {
-    let (r, handle) = e.live.as_ref().expect("live layer");
+    let (r, handle) = e.live_layer().expect("live layer");
     let image::Handle::Rgba { pixels, .. } = handle else {
         panic!()
     };
-    (*r, pixels.to_vec())
+    // what the window shows: the layer over the picture under it
+    let base = e.base_pixels();
+    let width = e.doc.image.width as usize;
+    let shown = pixels
+        .chunks(4)
+        .enumerate()
+        .flat_map(|(i, p)| {
+            let at = ((r.y as usize + i / r.width as usize) * width
+                + r.x as usize
+                + i % r.width as usize)
+                * 4;
+            let a = u32::from(p[3]);
+            (0..3)
+                .map(|k| {
+                    ((u32::from(p[k]) * a + u32::from(base[at + k]) * (255 - a) + 127) / 255) as u8
+                })
+                .chain([255])
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    (r, shown)
 }
 
 #[test]
@@ -1409,7 +1429,8 @@ fn the_live_preview_matches_the_committed_result() {
         let differ = live
             .chunks(4)
             .zip(region.chunks(4))
-            .filter(|(a, b)| a != b)
+            // (a see-through layer loses a level or two in its straight alpha)
+            .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 3))
             .inspect(|(a, b)| {
                 let off = a.iter().zip(*b).map(|(x, y)| x.abs_diff(*y)).max();
                 assert!(off < Some(32), "{tool:?}: {a:?} vs {b:?}");

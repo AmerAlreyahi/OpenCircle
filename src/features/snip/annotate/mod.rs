@@ -680,7 +680,10 @@ pub struct Annotator {
     /// The legend as the base shows it (placed among the committed items).
     legend: Option<legend::Legend>,
     /// The pending item's region (image px) painted with it.
-    pub(crate) live: Option<(Rectangle, image::Handle)>,
+    /// Painted when asked for (`live_layer`), once per change: pointer moves only mark it stale,
+    /// so the several moves of one frame cost one paint (W111).
+    live: std::cell::RefCell<Option<(Rectangle, image::Handle)>>,
+    live_stale: std::cell::Cell<bool>,
     /// Hides committed since the picture was last painted whole: their region
     /// of it, drawn over `base` (see `patch_over`; see-through where unpainted).
     pub(crate) patch: Vec<(Rectangle, image::Handle)>,
@@ -802,6 +805,8 @@ pub struct Annotator {
     stash: Option<objects::DrawStyle>,
     /// What the options message being handled changes (`objects::touch`).
     touch: u8,
+    /// Live layers painted so far (the tests count them).
+    paints: std::cell::Cell<usize>,
 }
 
 impl Annotator {
@@ -883,7 +888,8 @@ impl Annotator {
             display: None,
             crisp: false,
             legend: None,
-            live: None,
+            live: std::cell::RefCell::new(None),
+            live_stale: std::cell::Cell::new(false),
             patch: Vec::new(),
             pending: None,
             cropping: None,
@@ -936,6 +942,7 @@ impl Annotator {
             wheel: None,
             stash: None,
             touch: 0,
+            paints: std::cell::Cell::new(0),
             saved,
         };
         match base {
@@ -2130,9 +2137,10 @@ impl Annotator {
         let Some(pending) = &mut self.pending else {
             return;
         };
-        pending.item = match &pending.drag {
+        // (a stroke grows in place: no copy of its points per pointer move)
+        match &pending.drag {
             Drag::Draw => grow(
-                &pending.item,
+                &mut pending.item,
                 pending.start,
                 drawn_to,
                 self.zoom,
@@ -2140,11 +2148,15 @@ impl Annotator {
                 self.lock.is_some(),
             ),
             // A click that wobbles a pixel is not a move.
-            Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => from.clone(),
-            Drag::Move { from, .. } => select::moved(from, moved_by.unwrap_or(p - pending.start)),
-            Drag::Handle(handle, original) => select::dragged(original, *handle, p),
+            Drag::Move { from, .. } if p.distance(pending.start) * self.zoom < SLOP => {
+                pending.item = from.clone()
+            }
+            Drag::Move { from, .. } => {
+                pending.item = select::moved(from, moved_by.unwrap_or(p - pending.start))
+            }
+            Drag::Handle(handle, original) => pending.item = select::dragged(original, *handle, p),
             Drag::Type => return,
-        };
+        }
         // where the picture cannot grow, a drawing stops at its last pixels
         if inside && matches!(pending.drag, Drag::Draw) {
             inside::keep_inside(&mut pending.item, view);
@@ -2304,6 +2316,14 @@ impl Annotator {
 
     /// Ends the pending change: one undoable edit (or none if nothing changed).
     fn commit(&mut self) {
+        // (a new Hide keeps its live layer as a patch: paint it while the item is still pending)
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| matches!(p.item.shape, Shape::Blur { .. }))
+        {
+            let _ = self.live_layer();
+        }
         let Some(pending) = self.pending.take() else {
             return;
         };
@@ -2353,11 +2373,11 @@ impl Annotator {
             }
         }
         if patch && self.patch_over() {
-            self.live = None;
+            self.clear_live();
         } else if repaint {
             self.refresh();
         } else {
-            self.live = None;
+            self.clear_live();
         }
     }
 
@@ -2368,13 +2388,13 @@ impl Annotator {
     /// space between them. `false`: it can't (no live layer, no base shown, a
     /// legend, or `MAX_PATCHES` already), then repaint.
     fn patch_over(&mut self) -> bool {
-        let (Some(live), false, None) = (&self.live, self.bare(), &self.legend) else {
+        let (Some(live), false, None) = (self.live_layer(), self.bare(), &self.legend) else {
             return false;
         };
         if self.patch.len() >= MAX_PATCHES {
             return false;
         }
-        self.patch.push(live.clone());
+        self.patch.push(live);
         true
     }
 
@@ -2647,10 +2667,25 @@ impl Annotator {
         self.update_live();
     }
 
-    /// The pending item's painted layer (the tests).
+    /// The pending item's painted layer (its region and picture), painted now if it changed
+    /// since it was last asked for.
+    pub(crate) fn live_layer(&self) -> Option<(Rectangle, image::Handle)> {
+        if self.live_stale.replace(false) {
+            self.paints.set(self.paints.get() + 1);
+            *self.live.borrow_mut() = self.paint_live();
+        }
+        self.live.borrow().clone()
+    }
+
+    /// How many times a live layer was painted (the tests).
     #[cfg(test)]
-    fn live_layer(&self) -> Option<(Rectangle, image::Handle)> {
-        self.live.clone()
+    fn live_paints(&self) -> usize {
+        self.paints.get()
+    }
+
+    fn clear_live(&mut self) {
+        self.live_stale.set(false);
+        *self.live.get_mut() = None;
     }
 
     /// Snip's live area with nothing on it: the overlay's frozen frame under
@@ -2660,10 +2695,25 @@ impl Annotator {
         self.movable && !self.own_image && self.doc.items.is_empty() && self.pending.is_none()
     }
 
-    /// Repaints the pending item's region with it in place.
+    /// The pending item changed: its layer is painted when next asked for.
     fn update_live(&mut self) {
-        self.live = self.pending.as_ref().map(|pending| {
-            let mut layers: Vec<_> = self.doc.items.iter().map(|item| (item, true)).collect();
+        self.live_stale.set(self.pending.is_some());
+        if self.pending.is_none() {
+            *self.live.get_mut() = None;
+        }
+    }
+
+    /// Paints the pending item's region with it in place. A shape, a stroke, a text: only what the
+    /// item itself paints, over see-through (the picture under it is the base's, never drawn a
+    /// second time, W111). Hide, spotlight and magnifier read or change what is under them: they
+    /// are painted on the picture with every item, as the committed picture has them.
+    fn paint_live(&self) -> Option<(Rectangle, image::Handle)> {
+        self.pending.as_ref().map(|pending| {
+            let reads = matches!(
+                pending.item.shape,
+                Shape::Blur { .. } | Shape::Spotlight { .. } | Shape::Magnifier { .. }
+            );
+            let mut layers: Vec<_> = self.doc.items.iter().map(|item| (item, reads)).collect();
             match pending.index {
                 Some(i) => layers[i] = (&pending.item, true),
                 None => layers.push((&pending.item, true)),
@@ -2681,9 +2731,12 @@ impl Annotator {
                 Point::new(r.x() as f32, r.y() as f32),
                 Size::new(r.width() as f32, r.height() as f32),
             );
-            let pm = self.doc.paint(&layers, r, self.legend.as_ref());
-            (rect, handle(pm))
-        });
+            let handle = match reads {
+                true => handle(self.doc.paint(&layers, r, self.legend.as_ref())),
+                false => straight(self.doc.paint_bare(&layers, r)),
+            };
+            (rect, handle)
+        })
     }
 }
 
@@ -2809,8 +2862,7 @@ fn sample(image: &Image, p: Point) -> Option<[u8; 4]> {
 
 /// The new item `item` (started at `start`) dragged to `p`; `shift` keeps lines
 /// and arrows at 0/45/90°.
-fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: bool) -> Item {
-    let mut item = item.clone();
+fn grow(item: &mut Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: bool) {
     match &mut item.shape {
         Shape::Rect { b, .. }
         | Shape::Ellipse { b, .. }
@@ -2872,7 +2924,22 @@ fn grow(item: &Item, start: Point, p: Point, zoom: f32, shift: bool, line_help: 
         Shape::Step { at, .. } | Shape::Callout { at, .. } | Shape::Pointer { at, .. } => *at = p,
         Shape::Magnifier { radius, .. } => *radius = start.distance(p).max(20.0 / zoom),
     }
-    item
+}
+
+/// A see-through pixmap as an iced image (straight alpha).
+fn straight(pm: tiny_skia::Pixmap) -> image::Handle {
+    let (w, h) = (pm.width(), pm.height());
+    let mut rgba = pm.take();
+    // (in place; most pixels are fully see-through or fully covered and need no division)
+    for px in rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(px[3]);
+        if a != 0 && a != 255 {
+            for c in &mut px[..3] {
+                *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+    }
+    image::Handle::from_rgba(w, h, rgba)
 }
 
 /// A painted pixmap as an iced image (premultiplied = straight: the image is opaque).

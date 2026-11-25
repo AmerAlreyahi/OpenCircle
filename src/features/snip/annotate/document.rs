@@ -555,6 +555,11 @@ impl Document {
         pm
     }
 
+    /// `paint` on a see-through pixmap: only what `layers` paint (no legend: the base holds it).
+    pub fn paint_bare(&self, layers: &[(&Item, bool)], region: IntRect) -> Pixmap {
+        paint_on(&self.image, layers, region, self.seed, true)
+    }
+
     /// The whole view with `layers`, the legend in its corner or in a band under it.
     pub fn flatten(&self, layers: &[(&Item, bool)], legend: Option<&Legend>) -> Pixmap {
         let view = self.view();
@@ -911,6 +916,18 @@ pub fn oval_path(r: Rectangle) -> Option<Path> {
 /// Paints `region` (image px, inside the image) of the image with `items` over it.
 /// `(item, false)` = hidden (being edited live), but it still counts as a step.
 pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64) -> Pixmap {
+    paint_on(image, items, region, seed, false)
+}
+
+/// `paint`, `bare`: on a see-through pixmap instead of the picture, so it holds only what the
+/// items paint (W111: the live layer of a shape never draws a second copy of the picture).
+pub fn paint_on(
+    image: &Image,
+    items: &[(&Item, bool)],
+    region: IntRect,
+    seed: u64,
+    bare: bool,
+) -> Pixmap {
     let (w, h) = (region.width(), region.height());
     let premultiply = |px: &mut [u8]| {
         // Screen captures are opaque (one cheap look says so); premultiply anything that is not.
@@ -925,6 +942,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
     };
     let whole = (region.x(), region.y(), w, h) == (0, 0, image.width, image.height);
     let pm = match whole.then(|| tiny_skia::IntSize::from_wh(w, h)).flatten() {
+        _ if bare => Pixmap::new(w, h).expect("non-empty region"),
         // the whole picture: one copy (a new pixmap is zeroed first, 8K: a pass of 130 MB)
         Some(size) => {
             let mut data = image.rgba.clone();

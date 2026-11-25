@@ -68,6 +68,38 @@ fn w111_3_a_pen_stroke_crossing_a_hide_leaves_the_hide_alone_while_drawn() {
     assert_eq!(differing, 0, "of {seen} Hide pixels in the live layer");
 }
 
+/// W111-2: the live layer holds only what the pending item paints: where it paints nothing it is
+/// see-through, so the picture under it is never drawn a second time.
+#[test]
+fn w111_2_the_live_layer_of_a_rectangle_is_see_through_inside() {
+    let mut e = Annotator::new(page(), 1.0);
+    e.update(Message::Tool(Tool::Rect));
+    e.update(Message::Press(pt(100.0, 100.0)));
+    e.update(Message::Move(pt(300.0, 220.0)));
+    let (r, live) = live_pixels(&e).expect("a live layer");
+    let w = r.width as usize;
+    let mid = ((r.height as usize / 2) * w + w / 2) * 4;
+    assert_eq!(live[mid + 3], 0, "the middle of the square is see-through");
+    // and its edge is drawn
+    assert!(live.chunks(4).any(|p| p[3] == 255), "the outline is there");
+}
+
+/// W111-1: pointer moves are cheap: the live layer is only painted when it is asked for.
+#[test]
+fn w111_1_moves_do_not_paint_until_the_live_layer_is_asked_for() {
+    let mut e = Annotator::new(page(), 1.0);
+    e.update(Message::Tool(Tool::Pen));
+    e.update(Message::Press(pt(10.0, 10.0)));
+    e.update(Message::Move(pt(20.0, 20.0)));
+    let before = e.live_paints();
+    e.update(Message::Move(pt(30.0, 25.0)));
+    e.update(Message::Move(pt(40.0, 30.0)));
+    assert_eq!(e.live_paints(), before, "two moves painted nothing");
+    let _ = e.live_layer();
+    let _ = e.live_layer();
+    assert_eq!(e.live_paints(), before + 1, "asking twice paints once");
+}
+
 /// W111-4: every pointer point of a stroke reaches the pen and the painted stroke covers each.
 #[test]
 fn w111_4_the_pen_stroke_runs_through_the_pointer_path() {
