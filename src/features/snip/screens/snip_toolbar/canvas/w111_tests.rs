@@ -45,6 +45,9 @@ pub(super) fn path(tool: Tool, w: f32, h: f32, n: usize) -> Vec<Point> {
                 }
                 // a text line's height, left to right (the brush)
                 Tool::Blur => Point::new(w * (0.1 + 0.8 * t), h * 0.3),
+                // a lens grown from its centre to 300 image px (W113: the corner-to-corner drag made
+                // a lens as big as the picture, 4K: p95 160 ms, which nobody draws)
+                Tool::Magnifier => Point::new(w * 0.5 + 300.0 * t, h * 0.4),
                 // a corner to the opposite corner
                 _ => Point::new(w * (0.1 + 0.7 * t), h * (0.15 + 0.7 * t)),
             }
@@ -52,23 +55,69 @@ pub(super) fn path(tool: Tool, w: f32, h: f32, n: usize) -> Vec<Point> {
         .collect()
 }
 
+/// What the Studio's stage does for a picture (W113: W111's numbers lacked it): shown 1:1 or magnified
+/// it draws nearest (`crisp`); a big picture shown smaller draws from a copy of about the shown width.
+fn stage(e: &mut Annotator) {
+    let iced::widget::image::Handle::Rgba {
+        width,
+        height,
+        pixels,
+        ..
+    } = &e.base
+    else {
+        return;
+    };
+    let want = (*width as f32 * e.zoom).round().max(1.0) as u32;
+    e.crisp = true;
+    if want * 5 < *width * 4 {
+        let src = ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(
+            *width,
+            *height,
+            pixels.as_ref(),
+        )
+        .unwrap();
+        let th = (*height as f32 * want as f32 / *width as f32)
+            .round()
+            .max(1.0) as u32;
+        let small = ::image::imageops::thumbnail(&src, want, th);
+        e.display = Some(iced::widget::image::Handle::from_rgba(
+            want,
+            th,
+            small.into_raw(),
+        ));
+    }
+}
+
 /// Ms per frame of a drag of `tool` over a `w` x `h` picture shown at `zoom`: `per` pointer events
 /// a frame. `setup` picks the tool's options first.
 pub(super) fn frame_times(
-    (w, h, zoom): (u32, u32, f32),
+    dims: (u32, u32, f32),
     tool: Tool,
     setup: impl Fn(&mut Annotator),
     per: usize,
 ) -> Vec<f64> {
+    (frames(dims, tool, setup, per).iter())
+        .map(|f| f.draw_ms + f.raster_ms)
+        .collect()
+}
+
+/// The pointer-driven frames of the drag, with their draw / raster split and damage.
+pub(super) fn frames(
+    (w, h, zoom): (u32, u32, f32),
+    tool: Tool,
+    setup: impl Fn(&mut Annotator),
+    per: usize,
+) -> Vec<shot::Frame> {
     let mut e = Annotator::new(photo(w, h), zoom);
     e.studio = true;
     e.assist = false;
+    stage(&mut e);
     e.update(Message::Tool(tool));
     setup(&mut e);
     let size = e.size();
     let pts = path(tool, w as f32, h as f32, 90 * per);
     let mut at = 0;
-    let frames = shot::frames_of(Size::new(size.width, size.height), 92, |i, show| {
+    let mut frames = shot::frames_of(Size::new(size.width, size.height), 92, |i, show| {
         match i {
             0 => {}
             1..=90 => {
@@ -87,10 +136,7 @@ pub(super) fn frame_times(
         show(canvas(&e, 0.0, ScreenMap::ONE));
     });
     // (the update time is inside `draw_ms`: `frames_of` times the step and the view together)
-    frames[1..91]
-        .iter()
-        .map(|f| f.draw_ms + f.raster_ms)
-        .collect()
+    frames.drain(1..91).collect()
 }
 
 /// Where a 4K pen frame goes: the live layer's paint alone, at the end of the drag.
@@ -188,5 +234,33 @@ fn w111_tool_frame_times() {
                 println!("{label:<22} x{per}  {}", stats(t));
             }
         }
+    }
+}
+
+/// W113: where a 4K frame goes: draw (update, view, layout, draw) and raster (the damage), mean ms,
+/// and the damaged area as a share of one 1080p screen.
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn w113_frame_split() {
+    for (label, tool) in [
+        ("pen", Tool::Pen),
+        ("rect", Tool::Rect),
+        ("step", Tool::Step),
+    ] {
+        let f = frames((3840, 2160, 0.5), tool, |_| {}, 1);
+        let n = f.len() as f64;
+        let area = |f: &shot::Frame| {
+            f.damage
+                .iter()
+                .map(|r| f64::from(r.width * r.height))
+                .sum::<f64>()
+        };
+        println!(
+            "{label:<6} draw {:5.1}  raster {:5.1} (finding the damage {:5.1})  damage {:4.0}% of 1920x1080",
+            f.iter().map(|f| f.draw_ms).sum::<f64>() / n,
+            f.iter().map(|f| f.raster_ms).sum::<f64>() / n,
+            f.iter().map(|f| f.damage_ms).sum::<f64>() / n,
+            f.iter().map(area).sum::<f64>() / n / (1920.0 * 1080.0) * 100.0,
+        );
     }
 }

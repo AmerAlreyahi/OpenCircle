@@ -242,6 +242,8 @@ pub fn frame_times<'a, Message: 'a>(
 pub struct Frame {
     pub draw_ms: f64,
     pub raster_ms: f64,
+    /// The part of `raster_ms` spent finding the damage (cloning the layers and comparing them).
+    pub damage_ms: f64,
     pub damage: Vec<Rectangle>,
 }
 
@@ -292,6 +294,7 @@ pub fn frames_of<Message>(
             None => vec![all],
         };
         let changed = damage::group(changed, all);
+        let t_damage = std::time::Instant::now();
         if !changed.is_empty() {
             renderer.draw(
                 &mut window.as_mut(),
@@ -305,6 +308,7 @@ pub fn frames_of<Message>(
         out.push(Frame {
             draw_ms: (t1 - t0).as_secs_f64() * 1e3,
             raster_ms: (t2 - t1).as_secs_f64() * 1e3,
+            damage_ms: (t_damage - t1).as_secs_f64() * 1e3,
             damage: changed,
         });
         last = Some(layers);
