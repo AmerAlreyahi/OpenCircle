@@ -1784,31 +1784,34 @@ fn the_old_default_blur_strength_moves_to_medium_once() {
 #[test]
 fn f11_one_picture_size_and_one_save_folder_migrate_once() {
     let parse = |text: &str| Config::parse(text).0;
-    let c = parse(
-        "version = 14\n[snip]\nmax_edge = 1568\nsave_original = true\n[studio]\nfolder = \"/pics/studio\"\n",
+    // absolute on every OS (a Windows path must have a drive): TOML literal strings keep backslashes
+    let tmp = std::env::temp_dir();
+    let (studio, general) = (
+        tmp.join("studio").to_string_lossy().into_owned(),
+        tmp.join("general").to_string_lossy().into_owned(),
     );
+    let c = parse(&format!(
+        "version = 14\n[snip]\nmax_edge = 1568\nsave_original = true\n[studio]\nfolder = '{studio}'\n"
+    ));
     assert_eq!(c.snip.max_edge, 0, "Save was original: both are");
     assert!(!c.snip.save_original);
-    assert_eq!(c.general.save_folder, "/pics/studio");
+    assert_eq!(c.general.save_folder, studio);
     assert_eq!(c.studio.folder, "");
     assert_eq!(
         c.general.folder_note, "",
         "moved, nothing replaced: no note"
     );
-    let c = parse(
-        "version = 14\n[snip]\nmax_edge = 1568\n[general]\nsave_folder = \"/pics/general\"\n[studio]\nfolder = \"/pics/studio\"\n",
-    );
+    let c = parse(&format!(
+        "version = 14\n[snip]\nmax_edge = 1568\n[general]\nsave_folder = '{general}'\n[studio]\nfolder = '{studio}'\n"
+    ));
     assert_eq!(c.snip.max_edge, 1568, "a chosen size stays");
-    assert_eq!(c.general.save_folder, "/pics/general", "General's wins");
+    assert_eq!(c.general.save_folder, general, "General's wins");
     assert_eq!(c.studio.folder, "");
-    assert_eq!(c.general.folder_note, "/pics/studio", "told once");
+    assert_eq!(c.general.folder_note, studio, "told once");
     let text = toml::to_string_pretty(&c).unwrap();
     assert!(text.contains("folder_note"), "{text}");
     let back = parse(&text);
-    assert_eq!(
-        back.general.folder_note, "/pics/studio",
-        "kept until dismissed"
-    );
+    assert_eq!(back.general.folder_note, studio, "kept until dismissed");
     // already schema 15: nothing moves
     let c = parse("version = 15\n[snip]\nmax_edge = 1568\nsave_original = true\n");
     assert_eq!((c.snip.max_edge, c.snip.save_original), (1568, true));
