@@ -877,6 +877,8 @@ impl App {
         self.snip_undos = self.snip_undos.wrapping_add(1);
         let n = self.snip_undos;
         self.snip_undo = Some((n, Box::new(edit.annotator)));
+        // a second snip's pill replaces the first one (its Undo is the first one's no more)
+        let older = self.windows.close_action_toasts().map(Message::Windows);
         let pill = (self.windows)
             .toast_with(
                 crate::t!(sn_closed),
@@ -891,7 +893,7 @@ impl App {
             let _ = tx.unbounded_send(());
         })
         .map(move |()| Message::SnipUndoGone(n));
-        Task::batch([pill, over])
+        Task::batch([older, pill, over])
     }
 
     /// The pill's Undo (or Ctrl+Z): the capture and its drawings open again, in
@@ -901,8 +903,11 @@ impl App {
             return Task::none();
         };
         use crate::features::snip::screens::studio::Picture;
-        (self.windows)
+        // the pill goes with its Undo
+        let pill = self.windows.close_action_toasts().map(Message::Windows);
+        let open = (self.windows)
             .open_studio(Some(Picture::Editor(annotator)))
-            .map(Message::Windows)
+            .map(Message::Windows);
+        Task::batch([pill, open])
     }
 }

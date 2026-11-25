@@ -985,6 +985,18 @@ impl Windows {
         open.chain(Task::future(wait).then(move |_| close(id)))
     }
 
+    /// Closes the toasts that carry an action word (the "Snip closed . Undo" pill): one
+    /// slot, one pill on screen.
+    pub fn close_action_toasts(&mut self) -> Task<Msg> {
+        let gone: Vec<window::Id> = (self.toasts.iter())
+            .filter(|(.., action)| action.is_some())
+            .map(|(id, ..)| *id)
+            .collect();
+        self.toasts.retain(|(.., action)| action.is_none());
+        self.toast_clock.clear();
+        Task::batch(gone.into_iter().map(close))
+    }
+
     /// The open toasts' text and whether each says done (tests).
     #[cfg(test)]
     pub fn toasts(&self) -> Vec<(String, bool)> {

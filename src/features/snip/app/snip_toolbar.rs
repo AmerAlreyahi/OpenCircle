@@ -558,6 +558,23 @@ mod tests {
         );
     }
 
+    /// F5-8: one slot, one pill: a second snip's pill replaces the first, Undo restores
+    /// the second's picture, and the pill closes when Undo is pressed.
+    #[test]
+    fn f5_one_undo_pill_at_a_time_and_it_closes_on_undo() {
+        let mut app = snip_toolbar_open();
+        draw_rect(&mut app);
+        let _t = app.on_snip_toolbar(E::Close);
+        assert_eq!(app.windows.toasts().len(), 1);
+        let mut again = snip_toolbar_open_with(std::mem::take(&mut app.windows));
+        draw_rect(&mut again);
+        let _t = again.on_snip_toolbar(E::Close);
+        assert_eq!(again.windows.toasts().len(), 1, "the first pill went");
+        assert!(again.snip_undo.is_some(), "its own picture");
+        let _t = again.update(crate::app::message::Message::SnipUndo);
+        assert!(again.windows.toasts().is_empty(), "the pill closes on Undo");
+    }
+
     /// F5-3: no drawings, no pill (Esc closes silently as before); F5-4: when
     /// the pill is over, the kept drawings go (an older pill's end changes nothing).
     #[test]
