@@ -975,7 +975,7 @@ mod tests {
             (Tool::Text, "Bold"),
             (Tool::Callout, "Outline"),
             (Tool::Step, "Legend"),
-            (Tool::Blur, "Pixelate"),
+            (Tool::Blur, "Brush"),
             (Tool::Eraser, "Whole drawing"),
         ] {
             let mut e = editor();
@@ -1195,16 +1195,52 @@ mod tests {
         }
     }
 
+    /// W107-5: every tool's row, at its natural width, fits a 1280 px screen's margins (1248 px) in
+    /// English and Arabic: no scrolling, no spanning the margin.
+    #[test]
+    fn w107_5_every_row_fits_a_1280_screen() {
+        use crate::features::circle::screens::bar::geometry::GAP;
+        let room = 1280.0 - 2.0 * GAP;
+        let mut wide = Vec::new();
+        for rtl in [false, true] {
+            let _ar = rtl.then(crate::shared::kit::testing::arabic);
+            for tool in [
+                Tool::Rect,
+                Tool::Arrow,
+                Tool::Pen,
+                Tool::Text,
+                Tool::Callout,
+                Tool::Step,
+                Tool::Blur,
+                Tool::Redact,
+                Tool::Eraser,
+            ] {
+                let mut e = editor();
+                e.update(Message::Tool(tool));
+                let row = options_row(&e, 4000.0).unwrap();
+                let natural =
+                    crate::shared::kit::testing::shot::right_edge(row, Size::new(4000.0, ROW_H));
+                if natural > room {
+                    wide.push(format!("{tool:?} rtl={rtl}: {natural:.0} > {room}"));
+                }
+            }
+        }
+        assert!(wide.is_empty(), "{wide:#?}");
+    }
+
     /// C4-10: Hide's styles are small live pictures in the row (one place; the group panel has no
     /// cards any more), the look note shows when a look is picked.
     #[test]
     fn c4_10_hides_styles_are_pictures_in_the_row_only() {
         let mut e = editor();
         e.update(Message::Tool(Tool::Blur));
-        let texts = row_texts(&e).unwrap();
-        for style in ["Hide", "Pixelate", "Soft", "Frosted", "Progressive"] {
-            assert!(texts.iter().any(|t| t == style), "{style}: {texts:?}");
-        }
+        // (picture-only cells, their names are the tooltips: the row fits a 1280 px screen, W107-5)
+        let bar = bar_stops(&e).len();
+        let styles = stops(&e)[bar..]
+            .iter()
+            .filter(|m| matches!(m, Message::BlurStyle(_)))
+            .count();
+        assert_eq!(styles, crate::features::snip::annotate::blur_styles().len());
         e.update(Message::Slot(Tool::Blur));
         let panel = crate::shared::kit::testing::shot::texts(view(&e));
         assert!(!panel.iter().any(|t| t == "Pixelate"), "{panel:?}");

@@ -266,7 +266,8 @@ pub fn dot<'a, Message: Clone + 'static>(
     )
 }
 
-/// A cell with a small live picture and its name (Hide's styles: what each does to the picture).
+/// A cell with a small live picture of what it does (Hide's styles); its name is the tooltip, so
+/// the row stays narrow enough for a 1280 px screen.
 pub fn picture_cell<'a, Message: Clone + 'static>(
     picture: iced::widget::image::Handle,
     words: &'a str,
@@ -274,18 +275,30 @@ pub fn picture_cell<'a, Message: Clone + 'static>(
     press: Option<Message>,
 ) -> Element<'a, Message> {
     let shown = container(iced::widget::image(picture).content_fit(iced::ContentFit::Cover))
-        .width(20)
-        .height(14)
+        .width(24)
+        .height(16)
         .clip(true)
         .style(|_| container::Style {
             border: Border::default().rounded(4).width(1).color(c().divider),
             ..container::Style::default()
         });
-    let body = dir::row(vec![shown.into(), label(words, false)])
-        .spacing(3)
-        .align_y(Center);
-    cell(body.into(), None, on_, false, press)
+    let cell = cell(
+        container(shown).center_x(PICTURE_CELL).into(),
+        Some(PICTURE_CELL),
+        on_,
+        false,
+        press,
+    );
+    super::tooltip::hint(
+        cell,
+        words,
+        super::tooltip::Why::Icon,
+        iced::widget::tooltip::Position::Bottom,
+    )
 }
+
+/// A picture cell's width.
+const PICTURE_CELL: f32 = 36.0;
 
 /// A value read out (mono 11.5): not pressable.
 pub fn value<'a, Message: 'a>(words: String) -> Element<'a, Message> {

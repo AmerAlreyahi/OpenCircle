@@ -896,6 +896,26 @@ pub fn containers<Message>(
     find.1
 }
 
+/// The right edge of the widest container of `view` laid out in `size`: how wide a shrink-wrapped
+/// view (a row) really is.
+pub fn right_edge<Message>(view: Element<'_, Message>, size: Size) -> f32 {
+    use iced::advanced::widget::{Id, Operation};
+    struct Widest(f32);
+    impl Operation for Widest {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+        fn container(&mut self, _: Option<&Id>, bounds: Rectangle) {
+            self.0 = self.0.max(bounds.x + bounds.width);
+        }
+    }
+    let mut renderer = renderer();
+    let mut ui = UserInterface::build(view, size, Cache::default(), &mut renderer);
+    let mut widest = Widest(0.0);
+    ui.operate(&renderer, &mut widest);
+    widest.0
+}
+
 /// The texts of `view` laid out in `size` that the user can't bring into
 /// view: squeezed to nothing, or outside the window and not in a scroll area.
 pub fn out_of_reach<Message>(view: Element<'_, Message>, size: Size) -> Vec<String> {

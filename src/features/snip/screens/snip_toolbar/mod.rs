@@ -450,32 +450,41 @@ mod tests {
     fn w107_1_toolbar_and_row_goldens() {
         use crate::shared::kit::testing::golden;
         use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-        let screen = Size::new(1600.0, 420.0);
         let mut failed = Vec::new();
-        for theme in [&SAPPHIRE, &DAYLIGHT] {
-            themes::set(theme);
-            for rtl in [false, true] {
-                let _ar = rtl.then(crate::shared::kit::testing::arabic);
-                for (name, tool) in [
-                    ("shapes", annotate::Tool::Rect),
-                    ("pen", annotate::Tool::Pen),
-                    ("hide", annotate::Tool::Blur),
-                ] {
-                    let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
-                    e.annotator.update(annotate::Message::Tool(tool));
-                    let bar = e.bar_size();
-                    let at = Point::new((screen.width - bar.width) / 2.0, 320.0 - bar.height);
-                    let dir = if rtl { "-ar" } else { "" };
-                    let file = format!("snip-dock-{name}{dir}-{}", theme.id);
-                    failed.extend(golden::check("screens", &file, screen, &[1.0], || {
-                        e.view(
-                            screen,
-                            Some(at),
-                            canvas::ScreenMap::ONE,
-                            |m| m,
-                            annotate::Message::Grab,
-                        )
-                    }));
+        // (a 1600 px screen, and a 1280 px one: every row fits it, W107-5)
+        for (screen, tag) in [
+            (Size::new(1600.0, 420.0), ""),
+            (Size::new(1280.0, 420.0), "1280-"),
+        ] {
+            for theme in [&SAPPHIRE, &DAYLIGHT] {
+                themes::set(theme);
+                for rtl in [false, true] {
+                    let _ar = rtl.then(crate::shared::kit::testing::arabic);
+                    for (name, tool) in [
+                        ("shapes", annotate::Tool::Rect),
+                        ("pen", annotate::Tool::Pen),
+                        ("text", annotate::Tool::Text),
+                        ("hide", annotate::Tool::Blur),
+                    ] {
+                        if tag.is_empty() && name == "text" {
+                            continue;
+                        }
+                        let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
+                        e.annotator.update(annotate::Message::Tool(tool));
+                        let bar = e.bar_size();
+                        let at = Point::new((screen.width - bar.width) / 2.0, 320.0 - bar.height);
+                        let dir = if rtl { "-ar" } else { "" };
+                        let file = format!("snip-dock-{tag}{name}{dir}-{}", theme.id);
+                        failed.extend(golden::check("screens", &file, screen, &[1.0], || {
+                            e.view(
+                                screen,
+                                Some(at),
+                                canvas::ScreenMap::ONE,
+                                |m| m,
+                                annotate::Message::Grab,
+                            )
+                        }));
+                    }
                 }
             }
         }
