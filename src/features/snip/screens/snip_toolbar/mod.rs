@@ -299,18 +299,14 @@ impl SnipToolbar {
                 0.0
             };
             // under the toolbar; above it when the screen has no room under it
-            let above = row.is_some() && at.y + size.height + room > screen.height;
+            let above = row.is_some() && row_above(at.y, size.height, room, screen.height);
             // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height + room <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
                 false => iced::widget::tooltip::Position::Bottom,
             };
             // its tooltips never fall on the row: on the toolbar's other side
-            let tips = match (row.is_some(), above) {
-                (true, false) => iced::widget::tooltip::Position::Top,
-                (true, true) => iced::widget::tooltip::Position::Bottom,
-                _ => side,
-            };
+            let tips = toolbar_tips(row.is_some(), above, side);
             // (panels below clear the row)
             let held = Rectangle::new(at, Size::new(size.width, size.height + room));
             let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side, tips);
@@ -324,10 +320,7 @@ impl SnipToolbar {
                     .interaction(mouse::Interaction::Move);
                 // (only the row takes presses, not the strip around it)
                 let row = container(row).center_x(x1 - x0);
-                let y = match above {
-                    false => at.y + size.height + toolbar::ROW_GAP,
-                    true => at.y - toolbar::ROW_GAP - toolbar::ROW_H,
-                };
+                let y = row_y(at.y, size.height, above);
                 layers = layers.push(pin(row).position(Point::new(x0, y)));
             }
             layers = layers.extend(popover.map(|p| p.map(map)));
@@ -347,6 +340,33 @@ impl SnipToolbar {
             .position(r.position())
             .into(),
         )
+    }
+}
+
+/// The row goes above the toolbar when the screen has no room under it (`room`: the row's).
+fn row_above(bar_y: f32, bar_h: f32, room: f32, screen_h: f32) -> bool {
+    bar_y + bar_h + room > screen_h
+}
+
+/// The row's top: under the toolbar, or above it.
+fn row_y(bar_y: f32, bar_h: f32, above: bool) -> f32 {
+    match above {
+        false => bar_y + bar_h + toolbar::ROW_GAP,
+        true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H,
+    }
+}
+
+/// Where the toolbar's tooltips open: never on its row, so on its other side; with no row, `side`.
+fn toolbar_tips(
+    row: bool,
+    above: bool,
+    side: iced::widget::tooltip::Position,
+) -> iced::widget::tooltip::Position {
+    use iced::widget::tooltip::Position::{Bottom, Top};
+    match (row, above) {
+        (true, false) => Top,
+        (true, true) => Bottom,
+        _ => side,
     }
 }
 
@@ -484,6 +504,44 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W107 fix 2: the row goes ABOVE the toolbar when the toolbar is near the screen's bottom (the row's
+    /// top, the tooltips' side), under it otherwise; in the drawn view the row is where the rule says.
+    #[test]
+    fn w107_the_row_goes_above_a_toolbar_near_the_screen_bottom() {
+        use iced::widget::tooltip::Position::{Bottom, Top};
+        let room = toolbar::ROW_ROOM;
+        let bar_h = toolbar::size().height;
+        assert!(!row_above(300.0, bar_h, room, 720.0));
+        assert!(row_above(720.0 - bar_h - 4.0, bar_h, room, 720.0));
+        assert!(row_y(300.0, bar_h, false) > 300.0 + bar_h);
+        assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0);
+        // the tooltips go to the other side of the row; with no row, where they were
+        assert_eq!(toolbar_tips(true, false, Bottom), Top);
+        assert_eq!(toolbar_tips(true, true, Top), Bottom);
+        assert_eq!(toolbar_tips(false, false, Bottom), Bottom);
+        // as drawn: the row's name sits under the toolbar, or above it near the bottom
+        let screen = Size::new(1280.0, 720.0);
+        for (y, above) in [(400.0, false), (720.0 - bar_h - 4.0, true)] {
+            let mut e = SnipToolbar::fitted(crop(300, 200), screen, 1.0);
+            e.annotator
+                .update(annotate::Message::Tool(annotate::Tool::Rect));
+            let at = Point::new(300.0, y);
+            let view = e.view(
+                screen,
+                Some(at),
+                canvas::ScreenMap::ONE,
+                |m| m,
+                annotate::Message::Grab,
+            );
+            let name = crate::shared::kit::testing::shot::texts_at(view, screen)
+                .into_iter()
+                .find(|(_, t)| t == "Rectangle")
+                .expect("the row's tool name")
+                .0;
+            assert_eq!(name.y < y, above, "toolbar at {y}: row text at {}", name.y);
+        }
     }
 
     #[test]
