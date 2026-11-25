@@ -24,6 +24,8 @@ pub enum State {
     Translating,
     Done(String),
     Failed(String),
+    /// The text is already in the target language: shown as it is, with this quiet note.
+    Same(String),
     /// The offline pair is not on disk: the download card asks (its size in bytes).
     NeedsModel(u64),
     /// Downloading it, this share done.
@@ -88,6 +90,7 @@ impl TextCard {
         let chars = match &self.state {
             State::Translating => 12,
             State::Done(t) | State::Failed(t) => t.chars().count(),
+            State::Same(_) => self.text.chars().count() + 24,
             State::NeedsModel(_) | State::Downloading(_) | State::DownloadFailed(_) => 150,
         };
         let lines = (chars as f32 * 7.0 / (WIDTH - 2.0 * PAD))
@@ -167,6 +170,26 @@ impl TextCard {
                 .spacing(GAP)
                 .into()
             }
+            State::Same(note) => {
+                let label = tr(if self.copied {
+                    S::pill_copied
+                } else {
+                    S::c_copy
+                });
+                column![
+                    own(Role::ROW_TITLE, self.text.as_str())
+                        .width(Fill)
+                        .align_x(crate::shared::kit::dir::start()),
+                    muted(Role::NOTE, note.as_str())
+                        .width(Fill)
+                        .align_x(crate::shared::kit::dir::start()),
+                    container(regular(label, false, Some(Msg::Copy)))
+                        .width(Fill)
+                        .align_x(crate::shared::kit::dir::start()),
+                ]
+                .spacing(GAP)
+                .into()
+            }
             State::Failed(message) => {
                 let first = message.lines().next().unwrap_or_default().to_string();
                 let more = (first.len() < message.trim().len()).then(|| message.clone());
@@ -236,11 +259,18 @@ mod tests {
                         "error",
                         State::Failed("No internet connection. Reconnect, then try again.".into()),
                     ),
+                    (
+                        "same",
+                        State::Same("This text is already in English".into()),
+                    ),
                     ("download", State::NeedsModel(81_000_000)),
                 ];
                 for (name, state) in states {
                     let mut card = TextCard::new(1, "x".into(), Rectangle::default());
                     card.state = state;
+                    if name == "same" {
+                        card.text = "Hello, how are you today?".into();
+                    }
                     if name == "result" && lang == Lang::Ar {
                         card.state = State::Done("مرحبا، كيف حالك اليوم؟".into());
                     }

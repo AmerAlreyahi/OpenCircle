@@ -195,6 +195,10 @@ impl App {
                     State::NeedsModel(model.bytes())
                 }
                 Err(TextError::Failed(e)) => State::Failed(e),
+                Err(TextError::Ai(e)) => {
+                    State::Failed(crate::features::translate::failure_text(&e))
+                }
+                Err(TextError::Same(note)) => State::Same(note),
             };
         }
         Task::none()
@@ -253,8 +257,13 @@ impl App {
                 .map(move |news| Message::TextModel(id, news));
             }
             text_card::Msg::Copy => {
-                if let State::Done(text) = &card.state {
-                    match copy::text(text.clone()) {
+                let text = match &card.state {
+                    State::Done(text) => Some(text.clone()),
+                    State::Same(_) => Some(card.text.clone()),
+                    _ => None,
+                };
+                if let Some(text) = text {
+                    match copy::text(text) {
                         Ok(()) => card.copied = true,
                         Err(e) => crate::log!("[opencircle] copy translation failed: {e}"),
                     }

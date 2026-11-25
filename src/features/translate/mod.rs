@@ -9,6 +9,7 @@
 
 pub(crate) mod action;
 pub(crate) use action::{Model, TextError, translate_text};
+pub(crate) use screens::pill::failure_text;
 mod draw;
 mod erase;
 mod glossary;

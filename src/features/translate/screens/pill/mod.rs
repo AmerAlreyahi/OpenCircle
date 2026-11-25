@@ -910,6 +910,19 @@ impl Session {
     }
 }
 
+/// What the user reads for a failed translation: an AI provider's error as its short plain
+/// headline (the error card's wording), the offline engine's own words otherwise. The page
+/// Translate and the right-click card say it the same way.
+pub fn failure_text(e: &crate::features::ask_ai::AiError) -> String {
+    use crate::features::ask_ai::AiError;
+    match e {
+        AiError::Offline(_) | AiError::AlreadyIn(_) => e.to_string(),
+        ai => ai.headline(&crate::features::ask_ai::screens::ai_chat::provider_name(
+            &crate::shared::config::current().ai,
+        )),
+    }
+}
+
 /// The offline pair asked for before the screen is read: a set source's.
 /// "auto" asks only for what the page turns out to need (a guessed English
 /// pair asked a French page into German for en-de first, then for fr-de).
@@ -997,11 +1010,7 @@ fn translate(
         // an AI provider's error: the error card's short headline (owner, 2026-11-10)
         let message = match &e {
             Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
-            Error::Ai(ai) => {
-                ai.headline(&crate::features::ask_ai::screens::ai_chat::provider_name(
-                    &crate::shared::config::current().ai,
-                ))
-            }
+            Error::Ai(ai) => failure_text(ai),
             _ => e.to_string(),
         };
         problem(message, setup)

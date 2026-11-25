@@ -44,6 +44,10 @@ pub enum TextError {
     Missing(Model),
     /// What to tell the user (its first line is the short reason).
     Failed(String),
+    /// The engine failed (the screen words it: `translate::failure_text`).
+    Ai(crate::features::ask_ai::AiError),
+    /// The text is already in the target language: nothing to translate (the quiet note says so).
+    Same(String),
 }
 
 /// An offline translation pair that can be downloaded: its size and the download.
@@ -92,17 +96,22 @@ pub fn translate_text(text: &str, source: &str, target: &str) -> Result<String, 
         text: text.split_whitespace().collect::<Vec<_>>().join(" "),
         bounds: [0.0; 4],
     };
-    let out = translate_blocks(&[block], &target, &Cache::new(8), &real).map_err(|e| match real
-        .missing()
-    {
-        Some(pair) => TextError::Missing(Model(pair)),
-        None => TextError::Failed(e.to_string()),
+    let out = translate_blocks(&[block], &target, &Cache::new(8), &real).map_err(|e| {
+        use crate::features::ask_ai::AiError;
+        match (&e, real.missing()) {
+            (AiError::AlreadyIn(_), _) => TextError::Same(e.headline("")),
+            (_, Some(pair)) => TextError::Missing(Model(pair)),
+            _ => TextError::Ai(e),
+        }
     })?;
-    Ok(out
-        .into_iter()
+    // nothing came back: the text needs no translation into the target
+    out.into_iter()
         .next()
         .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| text.to_string()))
+        .ok_or_else(|| {
+            let name = lang::find(&target).map_or("", |l| l.name);
+            TextError::Same(crate::features::ask_ai::AiError::AlreadyIn(name).headline(""))
+        })
 }
 
 /// The engine, without the keyring: `Some` when translation will surely be

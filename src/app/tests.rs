@@ -6545,6 +6545,37 @@ fn w106_the_bars_translate_with_words_selected_opens_the_text_card() {
     assert!(app.o.translate.is_some() && app.o.text_card.is_none());
 }
 
+/// W106: text already in the target language is shown as it is with a quiet note, never as an
+/// error card; and Copy copies that text.
+#[test]
+fn w106_text_already_in_the_target_is_shown_not_failed() {
+    use crate::features::circle::screens::context_menu::{Msg, Row};
+    use crate::features::circle::screens::text_card::State;
+    use crate::features::translate::TextError;
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    let id = app.o.text_card.as_ref().unwrap().id;
+    let words = app.o.text_card.as_ref().unwrap().text.clone();
+    let note = "This text is already in English";
+    let _ = app.update(Message::TextTranslated(
+        id,
+        Err(TextError::Same(note.into())),
+    ));
+    assert_eq!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::Same(note.into())
+    );
+    let texts = texts_of(&app, app.overlay);
+    assert!(texts.iter().any(|t| t == note), "{texts:?}");
+    assert!(
+        texts.contains(&words),
+        "the selected text itself: {texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t == "Translation could not finish"));
+}
+
 /// W106: when the offline model for the pair is not on disk the card offers the download (the
 /// one download card, with its size) instead of an error; after it, the card translates.
 #[test]
