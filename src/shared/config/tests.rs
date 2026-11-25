@@ -1823,3 +1823,25 @@ fn f11_an_old_file_is_backed_up_when_it_moves_to_schema_15() {
     assert!(dir.join("config.toml.bak-v14").exists(), "the backup");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// F11-5: the frozen schema 14 default file loads without warnings, is copied to
+/// `config.toml.bak-v14` byte for byte, and is rewritten as the schema 15 default.
+#[test]
+fn f11_the_v14_default_file_migrates_to_the_v15_one_with_an_identical_backup() {
+    let v14 = fixture("default-v14.toml");
+    let (dir, path) = config_with("f11-v14", &v14);
+    let (c, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(c.version, VERSION);
+    assert_eq!(
+        fs_text(&dir.join("config.toml.bak-v14")),
+        v14,
+        "the backup is the old file"
+    );
+    assert_eq!(
+        fs_text(&path),
+        fixture("default-v15.toml"),
+        "the new schema's default"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
