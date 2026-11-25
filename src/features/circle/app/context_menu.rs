@@ -143,7 +143,7 @@ impl App {
 
     /// Translate: the SELECTED TEXT into the user's target language with the configured engine,
     /// in a small card beside the selection (the overlay stays). Not the picture (owner, 2026-11-25).
-    fn translate_text_card(&mut self) -> Task<Message> {
+    pub(crate) fn translate_text_card(&mut self) -> Task<Message> {
         let (Some(text), Some(near)) = (self.menu_text(), self.selection_screen_rect()) else {
             return Task::none();
         };

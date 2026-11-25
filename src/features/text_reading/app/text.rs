@@ -848,6 +848,11 @@ impl App {
         if act == PickAct::Search {
             return self.search_text(picked.text());
         }
+        // Translate: the picked words' text in the card (the same path as the bar's pill and the
+        // menu's row), the box stays as it is
+        if act == PickAct::Translate {
+            return self.translate_text_card();
+        }
         // Words picked in a snapped box: their box becomes the selection (a
         // word selection already is it).
         if self.o.text_mode.take().is_some() {

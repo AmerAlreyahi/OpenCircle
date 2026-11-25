@@ -172,6 +172,15 @@ impl App {
         {
             return self.search_text(text);
         }
+        // Translate with words selected (the bar's pill, key R, the menu's row: one path): the
+        // selected text in the card with Copy, never the picture's page-translate pill (it found
+        // nothing to translate in a few words). An area with no words still translates in place.
+        if action.id == crate::features::translate::action::ACTION.id
+            && self.o.edit.is_none()
+            && self.picked_text().is_some()
+        {
+            return self.translate_text_card();
+        }
         match action.run {
             // Snip is one flow: from main mode its selection is the pick.
             Run::Snip if matches!(self.o.purpose, Purpose::Snip(_)) => {

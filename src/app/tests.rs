@@ -6496,6 +6496,36 @@ fn w106_the_menus_translate_shows_the_selected_texts_translation_in_a_card() {
     assert!(app.o.text_card.is_none());
 }
 
+/// W106 (owner shot, 2026-11-25): with words selected, the BAR's Translate (the pill, key R) is the
+/// same as the menu's row: the selected text in the card with Copy, never the page-translate pill
+/// that translated nothing. With an area and no words it still translates the picture in place.
+#[test]
+fn w106_the_bars_translate_with_words_selected_opens_the_text_card() {
+    use crate::features::settings::labs::BarButton;
+    // the pill
+    let (mut app, _) = menu_app();
+    let _ = app.update(Message::Pill(BarButton::Translate));
+    assert!(app.o.translate.is_none(), "no empty page-translate pill");
+    assert!(app.o.text_card.is_some(), "the card with the selected text");
+    // the key R
+    let (mut app, _) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Key {
+        letter: 'r',
+        ctrl: false,
+    }));
+    assert!(app.o.translate.is_none() && app.o.text_card.is_some());
+    // an area with no words: the picture is translated in place, as before
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(300.0, 200.0),
+        false,
+    );
+    let _ = app.update(Message::Pill(BarButton::Translate));
+    assert!(app.o.translate.is_some() && app.o.text_card.is_none());
+}
+
 /// W106: when the offline model for the pair is not on disk the card offers the download (the
 /// one download card, with its size) instead of an error; after it, the card translates.
 #[test]
