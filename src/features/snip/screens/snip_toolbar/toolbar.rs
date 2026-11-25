@@ -614,10 +614,21 @@ pub fn row_span(at_x: f32, bar_w: f32, screen_w: f32, need: f32) -> (f32, f32) {
 /// The active tool's options in a slim row, at most `max_w` wide (it scrolls across past that, as the
 /// Studio's bar does; `None`: it has none, or a long capture is running): the Studio's option parts,
 /// on the toolbar's surface.
+#[cfg(test)]
 pub fn options_row(e: &Annotator, max_w: f32) -> Option<Element<'_, Message>> {
+    options_row_tips(e, max_w, tooltip::Position::Bottom)
+}
+
+/// `options_row`, its tooltips opening on `tips` (away from the toolbar and the area).
+pub fn options_row_tips(
+    e: &Annotator,
+    max_w: f32,
+    tips: tooltip::Position,
+) -> Option<Element<'_, Message>> {
     if e.capturing {
         return None;
     }
+    crate::shared::kit::option_bar::set_tips(tips);
     // the focus ring on the row's control the keyboard is on
     let on = e.focus.and_then(|f| f.checked_sub(bar_stops(e).len()));
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;

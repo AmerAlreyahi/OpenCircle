@@ -19,6 +19,9 @@ struct Rec {
 }
 
 thread_local! {
+    /// Where the tooltips of the row being built open (the host sets it: away from its toolbar).
+    static TIPS: std::cell::Cell<iced::widget::tooltip::Position> =
+        const { std::cell::Cell::new(iced::widget::tooltip::Position::Bottom) };
     static REC: std::cell::RefCell<Option<Rec>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -266,6 +269,15 @@ pub fn dot<'a, Message: Clone + 'static>(
     )
 }
 
+/// The side the row's tooltips open on, and the host's say over it.
+pub fn tips() -> iced::widget::tooltip::Position {
+    TIPS.get()
+}
+
+pub fn set_tips(side: iced::widget::tooltip::Position) {
+    TIPS.set(side);
+}
+
 /// A cell with a small live picture of what it does (Hide's styles); its name is the tooltip, so
 /// the row stays narrow enough for a 1280 px screen.
 pub fn picture_cell<'a, Message: Clone + 'static>(
@@ -289,12 +301,7 @@ pub fn picture_cell<'a, Message: Clone + 'static>(
         false,
         press,
     );
-    super::tooltip::hint(
-        cell,
-        words,
-        super::tooltip::Why::Icon,
-        iced::widget::tooltip::Position::Bottom,
-    )
+    super::tooltip::hint(cell, words, super::tooltip::Why::Icon, tips())
 }
 
 /// A picture cell's width.

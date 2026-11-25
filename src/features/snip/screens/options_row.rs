@@ -1,7 +1,7 @@
 //! The options bar's parts, shared by the Studio's bar and Snip's options row (UX C4): one component.
 //! The groups read the editor's current values and send the editor's own messages; Snip's row
 //! (`snip_row_focused`) is built from the same parts.
-use iced::widget::{container, tooltip};
+use iced::widget::container;
 use iced::{Center, Element};
 
 use crate::features::snip::annotate::{
@@ -350,7 +350,12 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
             .into_iter()
             .map(|t| {
                 let cell = glyph_cell(t.icon, t.tool == tool, Some(Message::Tool(t.tool)));
-                hint(cell, tip(t), Why::Icon, tooltip::Position::Bottom)
+                hint(
+                    cell,
+                    tip(t),
+                    Why::Icon,
+                    crate::shared::kit::option_bar::tips(),
+                )
             })
             .collect();
         lead.extend([group(cells, false), hairline()]);

@@ -292,14 +292,16 @@ impl SnipToolbar {
                 screen.width,
                 toolbar::row_need(&self.annotator),
             );
-            let row = toolbar::options_row(&self.annotator, x1 - x0);
+            // (the row's tooltips open away from the toolbar: down under it, up above it)
+            let row_above_bar = row_above(at.y, size.height, toolbar::ROW_ROOM, screen.height);
+            let row = toolbar::options_row_tips(&self.annotator, x1 - x0, row_tips(row_above_bar));
             let room = if row.is_some() {
                 toolbar::ROW_ROOM
             } else {
                 0.0
             };
             // under the toolbar; above it when the screen has no room under it
-            let above = row.is_some() && row_above(at.y, size.height, room, screen.height);
+            let above = row.is_some() && row_above_bar;
             // its tooltips and panels away from the area: above it when docked above
             let side = match at.y + size.height + room <= canvas.y {
                 true => iced::widget::tooltip::Position::Top,
@@ -353,6 +355,14 @@ fn row_y(bar_y: f32, bar_h: f32, above: bool) -> f32 {
     match above {
         false => bar_y + bar_h + toolbar::ROW_GAP,
         true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H,
+    }
+}
+
+/// Where the row's tooltips open: away from the toolbar.
+fn row_tips(above: bool) -> iced::widget::tooltip::Position {
+    match above {
+        true => iced::widget::tooltip::Position::Top,
+        false => iced::widget::tooltip::Position::Bottom,
     }
 }
 
@@ -521,6 +531,11 @@ mod tests {
         assert_eq!(toolbar_tips(true, false, Bottom), Top);
         assert_eq!(toolbar_tips(true, true, Top), Bottom);
         assert_eq!(toolbar_tips(false, false, Bottom), Bottom);
+        // the row's own tooltips: down under the toolbar, up above it; the row builds with the host's side
+        assert_eq!((row_tips(false), row_tips(true)), (Bottom, Top));
+        let e = SnipToolbar::fitted(crop(300, 200), Size::new(1280.0, 720.0), 1.0);
+        let _ = toolbar::options_row_tips(&e.annotator, 900.0, Top);
+        assert_eq!(crate::shared::kit::option_bar::tips(), Top);
         // as drawn: the row's name sits under the toolbar, or above it near the bottom
         let screen = Size::new(1280.0, 720.0);
         for (y, above) in [(400.0, false), (720.0 - bar_h - 4.0, true)] {
