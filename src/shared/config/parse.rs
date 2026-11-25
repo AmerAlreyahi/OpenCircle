@@ -122,6 +122,7 @@ impl Config {
                 get(t, "general.", "shortcuts_taken_shown", vec![], &mut w);
             c.general.pin_hint_seen = get(t, "general.", "pin_hint_seen", false, &mut w);
             c.general.ctrl_hint_seen = get(t, "general.", "ctrl_hint_seen", false, &mut w);
+            c.general.folder_note = get(t, "general.", "folder_note", String::new(), &mut w);
         }
         // `[results]` (schema 1-2: the web view card's side and size) is ignored.
         if let Some(t) = section(&root, "bar", &mut w) {
@@ -509,6 +510,9 @@ impl Config {
             let studio = std::mem::take(&mut c.studio.folder);
             if c.general.save_folder.is_empty() {
                 c.general.save_folder = studio;
+            } else if !studio.is_empty() && studio != c.general.save_folder {
+                // Studio's own folder is replaced: Settings > General says so once
+                c.general.folder_note = studio;
             }
         }
         // Schema 4: translate is on-device unless the user chose AI for it.

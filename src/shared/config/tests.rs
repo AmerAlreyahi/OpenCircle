@@ -1791,12 +1791,24 @@ fn f11_one_picture_size_and_one_save_folder_migrate_once() {
     assert!(!c.snip.save_original);
     assert_eq!(c.general.save_folder, "/pics/studio");
     assert_eq!(c.studio.folder, "");
+    assert_eq!(
+        c.general.folder_note, "",
+        "moved, nothing replaced: no note"
+    );
     let c = parse(
         "version = 14\n[snip]\nmax_edge = 1568\n[general]\nsave_folder = \"/pics/general\"\n[studio]\nfolder = \"/pics/studio\"\n",
     );
     assert_eq!(c.snip.max_edge, 1568, "a chosen size stays");
     assert_eq!(c.general.save_folder, "/pics/general", "General's wins");
     assert_eq!(c.studio.folder, "");
+    assert_eq!(c.general.folder_note, "/pics/studio", "told once");
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("folder_note"), "{text}");
+    let back = parse(&text);
+    assert_eq!(
+        back.general.folder_note, "/pics/studio",
+        "kept until dismissed"
+    );
     // already schema 15: nothing moves
     let c = parse("version = 15\n[snip]\nmax_edge = 1568\nsave_original = true\n");
     assert_eq!((c.snip.max_edge, c.snip.save_original), (1568, true));

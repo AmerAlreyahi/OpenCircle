@@ -27,6 +27,7 @@
 //! shortcuts_taken_shown = []        # the shortcuts another app held when the one-time notice said so
 //!                                   # (written only when not empty)
 //! pin_hint_seen = true              # the one-time "Pinned" hint of the AI chat was shown (written only when true)
+//! folder_note = ""                 # schema 15: the Studio folder General's replaced (shown once; written only while set)
 //! ctrl_hint_seen = true             # the one-time "Ctrl+drag moves" hint of the editor was shown (written only when true)
 //!
 //! [bar]                             # the overlay's action bar, where the user docked it
@@ -828,6 +829,10 @@ pub struct GeneralConfig {
     /// The one-time "Ctrl+drag moves" hint (a drag began on a shape with a drawing tool) was shown (C5).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub ctrl_hint_seen: bool,
+    /// Schema 15 (F11): the Studio folder that General's replaced; Settings > General says so
+    /// once until it is dismissed (written only while set).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub folder_note: String,
 }
 
 impl Default for GeneralConfig {
@@ -841,6 +846,7 @@ impl Default for GeneralConfig {
             shortcuts_taken_shown: Vec::new(),
             pin_hint_seen: false,
             ctrl_hint_seen: false,
+            folder_note: String::new(),
         }
     }
 }

@@ -51,9 +51,30 @@ pub fn view(state: &State) -> Element<'_, Message> {
     rows = rows.push(welcome_row());
     rows = rows.push(start_row(state));
     rows = rows.push(folder_row(state));
+    if !general.folder_note.is_empty() {
+        rows = rows.push(folder_note_row(state));
+    }
     rows = rows.push(update_row(state));
     rows = rows.push(updates_row(state));
     rows.into()
+}
+
+/// F11: after the migration replaced a Studio folder: one line, dismissible.
+fn folder_note_row(state: &State) -> Element<'_, Message> {
+    let folder = state.draft.general.save_folder.as_str();
+    let old = state.draft.general.folder_note.as_str();
+    setting_row::row(
+        title(crate::shared::app_language::fmt(
+            S::g_folder_note,
+            &[&folder],
+        )),
+        crate::shared::app_language::fmt(S::g_folder_note_d, &[&old]),
+        setting_row::action(
+            t!(g_folder_note_ok),
+            crate::shared::kit::button::Kind::Elevated,
+            Some(Message::DismissFolderNote),
+        ),
+    )
 }
 
 /// F6: the welcome tour again.

@@ -708,6 +708,12 @@ strings! {
         | "اللغة";
     o_s_welcome: "Welcome"
         | "الترحيب";
+    g_folder_note: "Saving now uses one folder: {}"
+        | "الحفظ يستخدم الآن مجلدًا واحدًا: {}";
+    g_folder_note_d: "The Studio's own folder ({}) is no longer used."
+        | "لم يعد مجلد الاستوديو الخاص ({}) مستخدمًا.";
+    g_folder_note_ok: "Got it"
+        | "حسنًا";
     g_welcome: "Welcome tour"
         | "جولة الترحيب";
     g_welcome_desc: "Replays the quick tour of your shortcuts"

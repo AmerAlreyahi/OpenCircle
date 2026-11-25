@@ -746,6 +746,8 @@ pub enum Message {
     OpenStudioPreferences,
     /// Settings > General: open the welcome tour again.
     ShowWelcome,
+    /// General's "Saving now uses one folder" line: dismissed.
+    DismissFolderNote,
     /// The Browse button: the shell opens the folder picker.
     BrowseFolder,
     /// The picker's answer (`None` = cancelled).
@@ -971,10 +973,10 @@ pub enum Outcome {
     Fetch(&'static str, Vec<&'static str>),
     /// Give this field the keyboard focus.
     Focus(&'static str),
-    /// Ask the provider for its models on a worker thread (`ModelsJob::run`)
-    /// and answer `Message::ModelsLoaded`.
     /// Scroll the page to this share of its length (a search hit).
     ScrollTo(f32),
+    /// Ask the provider for its models on a worker thread (`ModelsJob::run`)
+    /// and answer `Message::ModelsLoaded`.
     LoadModels(super::model_list::ModelsJob),
     /// Update the decoders of the installed pairs still on v1 on a worker
     /// thread (`mt::update`), answering `Message::ModelsProgress`, then
@@ -1154,9 +1156,9 @@ impl State {
             section: Section::General,
             search: None,
             marked: None,
+            marked_at: None,
             saved: config.clone(),
             draft: config,
-            marked_at: None,
             path,
             store,
             recording: None,
@@ -1987,6 +1989,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::OpenStudioPreferences => return Outcome::OpenStudioPreferences,
         Message::ShowWelcome => return Outcome::ShowWelcome,
+        Message::DismissFolderNote => state.draft.general.folder_note.clear(),
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(dir) => {
             if let Some(dir) = dir {
@@ -2075,15 +2078,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     state.played = None;
                 }
             }
-            // the longest of them: the glide (the page rises in `MORPH`)
-            if state
-                .moved
             if state
                 .marked_at
                 .is_some_and(|t| t.elapsed() >= super::search::MARK)
             {
                 (state.marked, state.marked_at) = (None, None);
             }
+            // the longest of them: the glide (the page rises in `MORPH`)
+            if state
+                .moved
                 .is_some_and(|(_, t)| t.elapsed() >= motion::GLIDE)
             {
                 state.moved = None;
