@@ -595,21 +595,20 @@ pub fn row_need(e: &Annotator) -> f32 {
     }
 }
 
-/// Where the row goes along the screen (W107): `(x0, x1, at_end)`, the strip it may use and whether it
-/// is aligned to that strip's right edge. It lines up with the toolbar's START edge (left, or right in
-/// Arabic) when `need` fits from there; else with the toolbar's END edge, growing the other way; at
-/// the screen's margin at most. Never an arbitrary offset.
-pub fn row_span(at_x: f32, bar_w: f32, screen_w: f32, need: f32, rtl: bool) -> (f32, f32, bool) {
+/// Where the row goes along the screen (W107, owner 2026-11-25): `(x0, x1)`, the strip it is centred in.
+/// Its centre is the toolbar's centre (the same right to left); only when that would push it off the
+/// screen's margins does it shift inward, still under the toolbar.
+pub fn row_span(at_x: f32, bar_w: f32, screen_w: f32, need: f32) -> (f32, f32) {
     use crate::features::circle::screens::bar::geometry::GAP;
     let (lo, hi) = (GAP, screen_w - GAP);
     let need = need.min(hi - lo);
-    let end = at_x + bar_w;
-    match rtl {
-        false if at_x + need <= hi => (at_x.max(lo), hi, false),
-        false => (lo, end.clamp(lo + need, hi), true),
-        true if end - need >= lo => (lo, end.min(hi), true),
-        true => (at_x.min(hi - need).max(lo), hi, false),
+    let centre = at_x + bar_w / 2.0;
+    let half = (centre - lo).min(hi - centre);
+    if half * 2.0 >= need {
+        return (centre - half, centre + half);
     }
+    let x0 = (centre - need / 2.0).clamp(lo, hi - need);
+    (x0, x0 + need)
 }
 
 /// The active tool's options in a slim row, at most `max_w` wide (it scrolls across past that, as the
@@ -923,39 +922,33 @@ mod tests {
         assert!(failed.is_empty(), "{failed:#?}");
     }
 
-    /// W107-1: the row is one piece with the toolbar: on its start edge when it fits from there (left,
-    /// right in Arabic), else on its end edge, never an arbitrary offset, always inside the screen's margin
-    /// and given its room (or the whole strip).
+    /// W107-1: the row is one piece with the toolbar: its centre on the toolbar's centre, the same in
+    /// Arabic; shifted inward only when centring would leave the screen's margins, and always given its room.
     #[test]
-    fn w107_1_the_row_lines_up_with_the_toolbar_edge() {
+    fn w107_1_the_row_is_centred_on_the_toolbar() {
         use crate::features::circle::screens::bar::geometry::GAP;
-        // the owner's shot: a centred toolbar, a short row: starts at the toolbar's left edge
-        assert_eq!(
-            row_span(400.0, 900.0, 1600.0, 620.0, false),
-            (400.0, 1600.0 - GAP, false)
+        // the owner's shot: a centred toolbar, a short row: the strip is symmetric about the toolbar's centre
+        let (x0, x1) = row_span(400.0, 900.0, 1600.0, 620.0);
+        assert_eq!((x0 + x1) / 2.0, 850.0, "{x0} {x1}");
+        assert!(x1 - x0 >= 620.0);
+        // a toolbar near the left edge: the row moves inward, never off the margin
+        let (x0, x1) = row_span(8.0, 676.0, 1280.0, 1000.0);
+        assert!(
+            x0 >= GAP && x1 - x0 >= 1000.0 && x1 <= 1280.0 - GAP,
+            "{x0} {x1}"
         );
-        // Arabic: the row's right edge is the toolbar's right edge
-        assert_eq!(
-            row_span(400.0, 900.0, 1600.0, 620.0, true),
-            (GAP, 1300.0, true)
-        );
-        // too wide to fit from the start edge: lined up with the end edge instead
-        let (x0, x1, end) = row_span(1000.0, 900.0, 1600.0, 1250.0, false);
-        assert!(end && x1 == 1600.0 - GAP && x0 == GAP, "{x0} {x1} {end}");
-        for rtl in [false, true] {
-            for need in [560.0, 620.0, 860.0, ROW_WIDE] {
-                for (at, bar, screen) in [
-                    (8.0, 676.0, 1280.0),
-                    (600.0, 676.0, 1280.0),
-                    (400.0, 900.0, 1600.0),
-                ] {
-                    let (x0, x1, _) = row_span(at, bar, screen, need, rtl);
-                    assert!(x0 >= GAP && x1 <= screen - GAP, "{x0} {x1}");
-                    assert!(
-                        x1 - x0 + 0.5 >= need.min(screen - 2.0 * GAP),
-                        "{rtl} {need} {at}: {x0} {x1}"
-                    );
-                }
+        for need in [560.0, 620.0, 860.0, ROW_WIDE] {
+            for (at, bar, screen) in [
+                (8.0, 676.0, 1280.0),
+                (600.0, 676.0, 1280.0),
+                (400.0, 900.0, 1600.0),
+            ] {
+                let (x0, x1) = row_span(at, bar, screen, need);
+                assert!(x0 >= GAP && x1 <= screen - GAP, "{x0} {x1}");
+                assert!(
+                    x1 - x0 + 0.5 >= need.min(screen - 2.0 * GAP),
+                    "{need} {at}: {x0} {x1}"
+                );
             }
         }
     }
@@ -1220,6 +1213,12 @@ mod tests {
                 let row = options_row(&e, 4000.0).unwrap();
                 let natural =
                     crate::shared::kit::testing::shot::right_edge(row, Size::new(4000.0, ROW_H));
+                if natural > row_need(&e) + 0.5 {
+                    wide.push(format!(
+                        "{tool:?} rtl={rtl}: {natural:.0} over its estimate {}",
+                        row_need(&e)
+                    ));
+                }
                 if natural > room {
                     wide.push(format!("{tool:?} rtl={rtl}: {natural:.0} > {room}"));
                 }

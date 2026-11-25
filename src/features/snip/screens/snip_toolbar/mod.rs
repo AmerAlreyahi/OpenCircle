@@ -284,15 +284,13 @@ impl SnipToolbar {
         }
         if let Some(at) = toolbar {
             let size = toolbar::size_for(&self.annotator);
-            // the options row (C4, W107): one piece with the toolbar, on its start edge (or its end
-            // edge when the row is too wide to fit from there), never offset
-            let rtl = crate::shared::kit::dir::rtl();
-            let (x0, x1, at_end) = toolbar::row_span(
+            // the options row (C4, W107): one piece with the toolbar, centred on it (the same right to
+            // left), shifted inward only to stay inside the screen's margins
+            let (x0, x1) = toolbar::row_span(
                 at.x,
                 size.width,
                 screen.width,
                 toolbar::row_need(&self.annotator),
-                rtl,
             );
             let row = toolbar::options_row(&self.annotator, x1 - x0);
             let room = if row.is_some() {
@@ -325,11 +323,7 @@ impl SnipToolbar {
                     .on_press(grab)
                     .interaction(mouse::Interaction::Move);
                 // (only the row takes presses, not the strip around it)
-                let row = match at_end {
-                    false => container(row),
-                    true => container(row).align_right(x1 - x0),
-                }
-                .width(x1 - x0);
+                let row = container(row).center_x(x1 - x0);
                 let y = match above {
                     false => at.y + size.height + toolbar::ROW_GAP,
                     true => at.y - toolbar::ROW_GAP - toolbar::ROW_H,
