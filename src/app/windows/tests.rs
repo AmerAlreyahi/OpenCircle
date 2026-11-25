@@ -953,3 +953,37 @@ fn f5_an_action_toast_has_a_timer_line_that_goes_with_it() {
     let _ = windows.update(Msg::Closed(id));
     assert!(windows.toast_clock.is_empty());
 }
+
+/// F6-5: the Try it step holds the global shortcuts off (so a press ticks its row and
+/// opens nothing); leaving the step, going back and closing the window give them back.
+#[test]
+fn f6_the_try_it_step_holds_the_global_shortcuts_off_and_gives_them_back() {
+    use crate::features::onboarding::{Message as O, State};
+    use crate::shared::platform::hotkey::suspended;
+    let mut windows = Windows::default();
+    let id = window::Id::unique();
+    let state = State::new(
+        crate::shared::config::Config::default(),
+        None,
+        Box::new(crate::shared::secrets::MemoryStore::default()),
+    );
+    windows.onboarding = Some((id, state));
+    let go = |windows: &mut Windows, m: O| {
+        let _ = windows.update(Msg::Onboarding(m));
+    };
+    go(&mut windows, O::Tick);
+    assert!(!suspended(), "the Language step: shortcuts work");
+    go(&mut windows, O::Next);
+    go(&mut windows, O::Next);
+    assert!(suspended(), "Try it: held off");
+    go(&mut windows, O::Next);
+    assert!(!suspended(), "leaving the step gives them back");
+    go(&mut windows, O::Back);
+    assert!(suspended(), "back on Try it");
+    let _ = windows.update(Msg::Closed(id));
+    assert!(
+        windows.onboarding.is_none() || !suspended(),
+        "closing the window"
+    );
+    assert!(!suspended(), "closed: back on");
+}
