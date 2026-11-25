@@ -252,7 +252,26 @@ pub(crate) fn own_groups_with<'a>(
                     shapes
                         .iter()
                         .map(|&(kind, words)| {
-                            text_cell(words, e.blur_shape == kind, Some(Message::BlurShape(kind)))
+                            // icons, like the Shapes row (W111): the brush is Hide's own glyph
+                            let icon = info(match kind {
+                                crate::features::snip::annotate::blur::Kind::Brush => Tool::Blur,
+                                crate::features::snip::annotate::blur::Kind::Rect => Tool::Rect,
+                                crate::features::snip::annotate::blur::Kind::Ellipse => {
+                                    Tool::Ellipse
+                                }
+                            })
+                            .icon;
+                            let cell = glyph_cell(
+                                icon,
+                                e.blur_shape == kind,
+                                Some(Message::BlurShape(kind)),
+                            );
+                            hint(
+                                cell,
+                                words,
+                                Why::Icon,
+                                crate::shared::kit::option_bar::tips(),
+                            )
                         })
                         .collect(),
                     false,

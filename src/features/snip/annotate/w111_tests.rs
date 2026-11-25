@@ -124,3 +124,91 @@ fn w111_5_the_row_follows_the_active_tool_not_the_last_drawing() {
         assert_eq!(base_tool(&e), Tool::Arrow);
     }
 }
+
+fn thumb_pixels(e: &Annotator) -> Vec<Vec<u8>> {
+    e.style_thumbs()
+        .into_iter()
+        // the hidden half (right of the middle): the left half shows the drawing as it is
+        .map(|h| match h {
+            image::Handle::Rgba { pixels, width, .. } => {
+                let w = width as usize;
+                (pixels.chunks(w * 4))
+                    .flat_map(|row| row[(w / 2 + 1) * 4..].iter().copied())
+                    .collect()
+            }
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// W111-1b (owner 2026-11-25): adding any item (a pen stroke, a shape, another Hide; far away or
+/// over it) never changes an existing Hide's pixels, nor the Hide row's style pictures: the fill
+/// of Frost and Pixelate reads the picture as captured, never the annotations drawn on it.
+#[test]
+fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
+    let hide_area = |px: &[u8], skip: Rectangle| -> Vec<u8> {
+        let mut out = Vec::new();
+        for y in 95..116usize {
+            for x in 100..300usize {
+                if !skip.contains(Point::new(x as f32, y as f32)) {
+                    out.extend_from_slice(&px[(y * 600 + x) * 4..(y * 600 + x) * 4 + 4]);
+                }
+            }
+        }
+        out
+    };
+    // (tool, from, to): far away, over the Hide, and a second Hide overlapping it
+    let adds = [
+        (Tool::Pen, pt(40.0, 200.0), pt(120.0, 260.0)),
+        (Tool::Pen, pt(100.0, 70.0), pt(115.0, 140.0)),
+        (Tool::Rect, pt(90.0, 90.0), pt(130.0, 125.0)),
+        (Tool::Pen, pt(180.0, 60.0), pt(230.0, 160.0)),
+        (Tool::Rect, pt(400.0, 40.0), pt(500.0, 120.0)),
+        (Tool::Rect, pt(150.0, 80.0), pt(260.0, 140.0)),
+        (Tool::Blur, pt(300.0, 220.0), pt(450.0, 220.0)),
+        (Tool::Blur, pt(240.0, 105.0), pt(400.0, 105.0)),
+    ];
+    for (tool, from, to) in adds {
+        let mut e = hide_one();
+        e.update(Message::Move(pt(110.0, 105.0)));
+        let (px0, thumbs0) = (e.base_pixels(), thumb_pixels(&e));
+        e.update(Message::Tool(tool));
+        e.update(Message::Press(from));
+        e.update(Message::Move(from + (to - from) * 0.5));
+        e.update(Message::Move(to));
+        e.update(Message::Release);
+        e.refresh();
+        let skip = e.doc.items.last().unwrap().frame().expand(8.0);
+        assert_eq!(
+            hide_area(&e.base_pixels(), skip),
+            hide_area(&px0, skip),
+            "{tool:?} {from:?}: the Hide is as it was"
+        );
+        e.update(Message::Tool(Tool::Blur));
+        e.update(Message::Move(pt(110.0, 105.0)));
+        // Frost and Pixelate (the first two) never read the annotations
+        assert_eq!(
+            thumb_pixels(&e)[..2],
+            thumbs0[..2],
+            "{tool:?} {from:?}: the style pictures are as they were"
+        );
+    }
+}
+
+/// W111-6 (owner 2026-11-25): Hide's style, shape and strength are remembered like the other
+/// tools' options: an editor opened with what the last one remembered has the same.
+#[test]
+fn w111_6_hides_style_shape_and_strength_are_remembered() {
+    let mut e = Annotator::new(page(), 1.0);
+    e.update(Message::Tool(Tool::Blur));
+    e.update(Message::BlurShape(blur::Kind::Ellipse));
+    e.update(Message::BlurStyle(blur::Style::Pixelate));
+    e.update(Message::BlurCell(Width::Thick));
+    let next = Annotator::restored(page(), 1.0, e.remembered());
+    assert_eq!(next.blur_shape, blur::Kind::Ellipse);
+    assert_eq!(next.blur_style, blur::Style::Pixelate);
+    assert_eq!(next.blur_cell, Width::Thick);
+    e.update(Message::BlurCustom(Some(11)));
+    let next = Annotator::restored(page(), 1.0, e.remembered());
+    assert_eq!(next.blur_custom, Some(11));
+}

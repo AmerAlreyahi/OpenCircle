@@ -1167,6 +1167,14 @@ pub struct EditorConfig {
     pub eraser: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eraser_whole: Option<bool>,
+    /// Hide's look, shape and the Studio's custom strength (px at scale 1): kept like the
+    /// other tools' options (W111).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_style: Option<crate::features::snip::annotate::blur::Style>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_shape: Option<crate::features::snip::annotate::blur::Kind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_custom: Option<u8>,
 }
 
 /// How many recent colours the colour picker keeps (`editor.recent`).
@@ -1205,6 +1213,9 @@ impl Default for EditorConfig {
             group_tools: None,
             eraser: None,
             eraser_whole: None,
+            blur_style: None,
+            blur_shape: None,
+            blur_custom: None,
         }
     }
 }

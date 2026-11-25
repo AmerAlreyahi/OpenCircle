@@ -908,11 +908,11 @@ impl Annotator {
             lock: None,
             blur_size: saved.blur_size,
             blur_cell: saved.blur_cell.unwrap_or(Width::Medium),
-            blur_custom: None,
+            blur_custom: saved.blur_custom,
             hover: None,
             thumbs: std::cell::RefCell::new(None),
-            blur_style: blur::Style::default(),
-            blur_shape: blur::Kind::default(),
+            blur_style: saved.blur_style.unwrap_or_default(),
+            blur_shape: saved.blur_shape.unwrap_or_default(),
             style_picked: false,
             capture_scale,
             eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
@@ -965,6 +965,8 @@ impl Annotator {
             (fresh.text_size, fresh.text_style, fresh.hex);
         (self.assist, self.blur_size, self.blur_cell) =
             (fresh.assist, fresh.blur_size, fresh.blur_cell);
+        (self.blur_style, self.blur_shape, self.blur_custom) =
+            (fresh.blur_style, fresh.blur_shape, fresh.blur_custom);
         (self.eraser, self.eraser_whole, self.saved) =
             (fresh.eraser, fresh.eraser_whole, fresh.saved);
     }
@@ -997,6 +999,9 @@ impl Annotator {
             group_tools: Some(self.last.to_vec()),
             eraser: Some(self.eraser.round().clamp(1.0, 255.0) as u8),
             eraser_whole: Some(self.eraser_whole),
+            blur_style: Some(self.blur_style),
+            blur_shape: Some(self.blur_shape),
+            blur_custom: self.blur_custom,
         }
     }
 
@@ -1724,7 +1729,8 @@ impl Annotator {
             kind: blur::Kind::Rect,
             outline: 0.0,
             ramp: &ramp,
-            source: None,
+            // the picture as captured: Frost and Pixelate never read the annotations (W111)
+            source: Some(&self.doc.image),
         };
         blur::paint(&mut layer, &fp, strength, style, self.doc.seed);
         handle(layer.pm)

@@ -1071,7 +1071,7 @@ mod tests {
             (Tool::Text, "Bold"),
             (Tool::Callout, "Outline"),
             (Tool::Step, "Legend"),
-            (Tool::Blur, "Brush"),
+            (Tool::Blur, "Strong"),
             (Tool::Eraser, "Whole drawing"),
         ] {
             let mut e = editor();
