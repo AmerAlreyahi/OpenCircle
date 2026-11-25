@@ -859,7 +859,8 @@ impl Annotator {
     /// (`touch`) goes to every selected item, in one undo step; everything
     /// else, mixed values included, stays as it is.
     pub(super) fn restyle_selection(&mut self, styled: &dyn Fn(&Item, &Annotator) -> Item) {
-        let sel = self.doc.selection();
+        let mut sel = self.doc.selection();
+        sel.retain(|&i| self.row_is_for(&self.doc.items[i]));
         let t = std::mem::take(&mut self.touch);
         if sel.is_empty() || t == 0 {
             return;

@@ -7,7 +7,7 @@ use iced::widget::{Space, column, container};
 use iced::{Center, Element, Fill};
 
 use super::{Msg, Studio};
-use crate::features::snip::annotate::{Message, Order, Shape, Tool};
+use crate::features::snip::annotate::{Message, Order};
 use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, label};
@@ -39,22 +39,7 @@ pub(super) const ACTS: [Row; 3] = [Row::CopyText, Row::Translate, Row::AskAi];
 const WIDTH: f32 = 300.0;
 const FIELD_LABEL: f32 = 14.0;
 
-/// The shape's tool (its icon and name); one the list doesn't know is Select.
-pub(crate) fn tool_of(shape: &Shape) -> Tool {
-    match shape {
-        Shape::Rect { .. } => Tool::Rect,
-        Shape::Ellipse { .. } => Tool::Ellipse,
-        Shape::Arrow { .. } => Tool::Arrow,
-        Shape::Pen(_) => Tool::Pen,
-        Shape::Highlighter(_) => Tool::Highlighter,
-        Shape::Text { .. } => Tool::Text,
-        Shape::Step { .. } => Tool::Step,
-        Shape::Blur { .. } => Tool::Blur,
-        Shape::Redact { .. } => Tool::Redact,
-        Shape::Spotlight { .. } => Tool::Spotlight,
-        _ => Tool::Select,
-    }
-}
+pub(crate) use crate::features::snip::annotate::tool_of;
 
 impl Studio {
     /// The selection's X, Y, W, H (picture pixels), when something is selected.

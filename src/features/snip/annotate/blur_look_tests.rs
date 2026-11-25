@@ -154,6 +154,7 @@ fn w102_4e_style_applies_to_the_selected_hide_and_progressive_has_handles() {
         ),
     ));
     e.doc.select_one(Some(0));
+    e.update(Message::Tool(Tool::Select)); // (the bar shows the selected Hide's row)
     e.update(Message::BlurStyle(blur::Style::Soft));
     let Shape::Blur { style, .. } = &e.doc.items[0].shape else {
         panic!()

@@ -75,6 +75,8 @@ pub use wheel::WHEEL_PX;
 #[cfg(test)]
 mod w111_tests;
 #[cfg(test)]
+mod w113_tests;
+#[cfg(test)]
 mod wheel_tests;
 
 pub use document::rounded as rounded_path;
@@ -2582,6 +2584,14 @@ impl Annotator {
         }
     }
 
+    /// The bar's controls are this item's: Select is active, or the active tool's row is the
+    /// item's own (a pen stroke with the Pen out), never another tool's (the stroke after a
+    /// switch to Shapes: Thick or Fill must not change what the bar no longer shows, W113).
+    pub(super) fn row_is_for(&self, item: &Item) -> bool {
+        let slot = |t: Tool| info(info(t).slot).tool;
+        self.tool == Tool::Select || slot(self.tool) == slot(tool_of(&item.shape))
+    }
+
     /// The colour/width picked while an item is selected (or typed) applies to it.
     fn restyle(&mut self) {
         let styled = |item: &Item, editor: &Annotator| {
@@ -2627,7 +2637,9 @@ impl Annotator {
             self.update_live();
         } else if self.studio {
             self.restyle_selection(&styled);
-        } else if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
+        } else if let Some(i) = (self.doc.selected)
+            .filter(|&i| i < self.doc.items.len() && self.row_is_for(&self.doc.items[i]))
+        {
             let before = self.doc.items[i].clone();
             let after = styled(&before, self);
             if after != before && self.hsv_drag {
@@ -2737,6 +2749,23 @@ impl Annotator {
             };
             (rect, handle)
         })
+    }
+}
+
+/// The shape's tool (its icon and name); one the list doesn't know is Select.
+pub(crate) fn tool_of(shape: &Shape) -> Tool {
+    match shape {
+        Shape::Rect { .. } => Tool::Rect,
+        Shape::Ellipse { .. } => Tool::Ellipse,
+        Shape::Arrow { .. } => Tool::Arrow,
+        Shape::Pen(_) => Tool::Pen,
+        Shape::Highlighter(_) => Tool::Highlighter,
+        Shape::Text { .. } => Tool::Text,
+        Shape::Step { .. } => Tool::Step,
+        Shape::Blur { .. } => Tool::Blur,
+        Shape::Redact { .. } => Tool::Redact,
+        Shape::Spotlight { .. } => Tool::Spotlight,
+        _ => Tool::Select,
     }
 }
 
