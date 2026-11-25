@@ -134,6 +134,8 @@ pub enum Msg {
     CopyAll,
     /// Open in OpenCircle Studio: the Studio takes the steps over.
     OpenStudio,
+    /// The strip's "+": a new Snip whose pick is the next step.
+    AddStep,
     Hover(usize, bool),
     Press(usize),
     /// The pointer over the strip (window px).
@@ -188,6 +190,8 @@ pub enum Do {
     CopyAll,
     /// Open the Studio with the steps (the strip closes).
     OpenStudio,
+    /// Start a Snip for the next step.
+    AddStep,
     /// Edit this step in Snip.
     Edit(usize),
     /// The strip changed size (resize and place the window).
@@ -369,6 +373,7 @@ impl Strip {
             Msg::Undo => return self.undo(),
             Msg::CopyAll => return (!self.steps.is_empty()).then_some(Do::CopyAll),
             Msg::OpenStudio => return Some(Do::OpenStudio),
+            Msg::AddStep => return (!self.is_full()).then_some(Do::AddStep),
             Msg::Hover(i, on) => {
                 self.hover = match on {
                     true => Some(i),
@@ -565,6 +570,14 @@ impl Strip {
         let top = vec![
             grip::small(Msg::Grab),
             Space::new().width(Fill).into(),
+            tip(
+                thumb::add((!self.is_full()).then_some(Msg::AddStep)),
+                match self.is_full() {
+                    true => t!(sn_steps_full_tip),
+                    false => t!(sn_add_step),
+                },
+                Side::Bottom,
+            ),
             tip(thumb::close(Msg::Clear), self.words().clear, Side::Bottom),
         ];
         let top = container(iced::widget::Row::with_children(dir::order(top)).align_y(Center))
@@ -1147,6 +1160,18 @@ mod tests {
     /// The strip with 1 and 4 steps, a step under the cursor, one lifted,
     /// the keyboard's, the cleared pill: Sapphire and Daylight, Latin and
     /// Arabic.
+    #[test]
+    fn the_plus_asks_for_a_snip_and_says_full_at_twelve() {
+        let mut s = strip(2);
+        assert_eq!(s.update(Msg::AddStep), Some(Do::AddStep));
+        let mut full = strip(MAX);
+        assert_eq!(
+            full.update(Msg::AddStep),
+            None,
+            "full: the plus does nothing"
+        );
+    }
+
     #[test]
     fn open_in_studio_asks_the_window_owner() {
         let mut s = strip(2);

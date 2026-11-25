@@ -177,21 +177,35 @@ fn build<'a, Message: Clone + 'a>(
 /// under the cursor), on the widget surface with a `rim` edge (it reads over
 /// a thumbnail too).
 pub fn close<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
+    round(Icon::Close.glyph(), Some(on_press))
+}
+
+/// lucide "plus": the small round "+" beside the x (no press: dimmed, the strip is full).
+pub fn add<'a, Message: Clone + 'a>(on_press: Option<Message>) -> Element<'a, Message> {
+    round('\u{e140}', on_press)
+}
+
+fn round<'a, Message: Clone + 'a>(glyph: char, on_press: Option<Message>) -> Element<'a, Message> {
     use button::Status;
+    let live = on_press.is_some();
     super::focus::press(
         button(
-            container(text(Icon::Close.glyph()).font(FONT).size(12))
+            container(text(glyph).font(FONT).size(12))
                 .center(Fill)
                 .align_y(Center),
         )
         .width(X)
         .height(X)
         .padding(0)
-        .style(|_, status| {
+        .style(move |_, status| {
             let hot = matches!(status, Status::Hovered | Status::Pressed);
             button::Style {
                 background: Some(if hot { c().hover } else { c().widget }.into()),
-                text_color: if hot { c().text } else { c().text_muted },
+                text_color: match (live, hot) {
+                    (false, _) => c().text_muted.scale_alpha(0.4),
+                    (_, true) => c().text,
+                    _ => c().text_muted,
+                },
                 border: Border::default()
                     .rounded(radius::FULL)
                     .width(1)
@@ -200,7 +214,7 @@ pub fn close<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message>
             }
         }),
         radius::FULL,
-        Some(on_press),
+        on_press,
     )
     .into()
 }

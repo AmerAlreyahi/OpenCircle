@@ -678,6 +678,16 @@ impl Windows {
             })
             .map(move |()| Msg::Steps(steps::Msg::Settle(moves))),
             (steps::Do::OpenStudio, _) => self.open_studio(None),
+            // the same Snip as the shortcut: its toolbar then offers "Add step N"
+            (steps::Do::AddStep, _) => Task::done(Msg::Run(crate::Trigger::Quick(
+                Instant::now(),
+                crate::shared::config::QuickAction {
+                    action: "snip".into(),
+                    shortcut: String::new(),
+                    target: crate::shared::config::Target::Circle,
+                    live: false,
+                },
+            ))),
             (steps::Do::Edit(i), _) => Task::done(Msg::EditStep(i)),
             (steps::Do::Copy(i), _) => {
                 let ok = strip.crop(i).is_some_and(copy_image);
