@@ -4511,3 +4511,77 @@ fn f13_the_results_match_their_golden_image() {
         }));
     });
 }
+
+/// F13-5: a hit scrolls the page to its row (the share of the page it sits at: the first
+/// row 0, the last 1) and the mark fades by itself after a moment.
+#[test]
+fn f13_a_hit_scrolls_to_its_row_and_the_mark_fades() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::SearchInput("language".into()));
+    let first = s.search.as_ref().unwrap().hits()[0].clone();
+    let Outcome::ScrollTo(y) = update(&mut s, Message::SearchGo) else {
+        panic!("the page scrolls to the row");
+    };
+    assert!((0.0..=1.0).contains(&y) && (y - first.at).abs() < f32::EPSILON);
+    assert!(s.animating(), "the mark needs the frame clock");
+    // the offsets run from the page's first row (0) to its last (1)
+    update(&mut s, Message::SearchOpen);
+    update(&mut s, Message::SearchInput("a".into()));
+    let rows: Vec<f32> = s
+        .search
+        .as_ref()
+        .unwrap()
+        .hits()
+        .iter()
+        .filter(|e| e.section == Section::General && !e.is_page)
+        .map(|e| e.at)
+        .collect();
+    assert!(rows.iter().all(|a| (0.0..=1.0).contains(a)), "{rows:?}");
+    // a page hit only opens the page
+    update(&mut s, Message::SearchInput("snip".into()));
+    let at = s
+        .search
+        .as_ref()
+        .unwrap()
+        .hits()
+        .iter()
+        .position(|e| e.is_page)
+        .unwrap();
+    assert_eq!(update(&mut s, Message::SearchPick(at)), Outcome::None);
+    // the mark fades after its time
+    update(&mut s, Message::SearchInput("language".into()));
+    update(&mut s, Message::SearchGo);
+    assert!(s.marked.is_some());
+    s.marked_at = Instant::now().checked_sub(super::search::MARK * 2);
+    update(&mut s, Message::Tick);
+    assert!(s.marked.is_none() && s.marked_at.is_none());
+}
+
+/// F11-4: after the migration replaced a Studio folder, General says so once;
+/// "Got it" dismisses it (the key is written only while set).
+#[test]
+fn f11_general_says_once_that_saving_uses_one_folder() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    let words = shot::texts(view(&s));
+    assert!(
+        !words.iter().any(|t| t.starts_with("Saving now uses")),
+        "{words:?}"
+    );
+    s.draft.general.save_folder = "/pics/general".into();
+    s.draft.general.folder_note = "/pics/studio".into();
+    let words = shot::texts(view(&s));
+    assert!(
+        words
+            .iter()
+            .any(|t| t == "Saving now uses one folder: /pics/general"),
+        "{words:?}"
+    );
+    update(&mut s, Message::DismissFolderNote);
+    assert!(s.draft.general.folder_note.is_empty());
+    let words = shot::texts(view(&s));
+    assert!(
+        !words.iter().any(|t| t.starts_with("Saving now uses")),
+        "{words:?}"
+    );
+}

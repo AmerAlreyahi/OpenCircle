@@ -238,7 +238,11 @@ fn page(state: &State) -> Element<'_, Message> {
         .padding(space::PAGE)
         .width(Fill)
         .align_x(crate::shared::kit::dir::start());
-    scroll(body).width(Fill).height(Fill).into()
+    scroll(body)
+        .id(super::search::PAGE)
+        .width(Fill)
+        .height(Fill)
+        .into()
 }
 
 /// Closing with changes that can't be saved yet: Save / Discard / Keep editing.

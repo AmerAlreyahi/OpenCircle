@@ -578,6 +578,8 @@ pub struct State {
     /// Settings search (F13): the open search, and the row a hit marked.
     pub(super) search: Option<super::search::Search>,
     pub(super) marked: Option<String>,
+    /// When the row was marked (the mark fades after `search::MARK`).
+    pub(super) marked_at: Option<Instant>,
     pub(super) draft: Config,
     pub(super) saved: Config,
     /// `None` = the real config path.
@@ -971,6 +973,8 @@ pub enum Outcome {
     Focus(&'static str),
     /// Ask the provider for its models on a worker thread (`ModelsJob::run`)
     /// and answer `Message::ModelsLoaded`.
+    /// Scroll the page to this share of its length (a search hit).
+    ScrollTo(f32),
     LoadModels(super::model_list::ModelsJob),
     /// Update the decoders of the installed pairs still on v1 on a worker
     /// thread (`mt::update`), answering `Message::ModelsProgress`, then
@@ -1152,6 +1156,7 @@ impl State {
             marked: None,
             saved: config.clone(),
             draft: config,
+            marked_at: None,
             path,
             store,
             recording: None,
@@ -1622,7 +1627,12 @@ fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     state.search = None;
     let out = update(state, Message::Section(hit.section));
     state.marked = (!hit.is_page).then_some(hit.title);
-    out
+    state.marked_at = state.marked.as_ref().map(|_| Instant::now());
+    match (out, state.marked.is_some()) {
+        // the page scrolls to the row (a row down the page: where it is in the list)
+        (Outcome::None, true) => Outcome::ScrollTo(hit.at),
+        (out, _) => out,
+    }
 }
 
 pub fn update(state: &mut State, message: Message) -> Outcome {
@@ -2068,6 +2078,12 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             // the longest of them: the glide (the page rises in `MORPH`)
             if state
                 .moved
+            if state
+                .marked_at
+                .is_some_and(|t| t.elapsed() >= super::search::MARK)
+            {
+                (state.marked, state.marked_at) = (None, None);
+            }
                 .is_some_and(|(_, t)| t.elapsed() >= motion::GLIDE)
             {
                 state.moved = None;
@@ -2336,7 +2352,10 @@ pub(crate) fn chord_of(event: iced::Event) -> Option<Chord> {
 impl State {
     /// Something moves by the clock: a glide, a preview.
     pub fn animating(&self) -> bool {
-        self.moved.is_some() || self.picked.is_some() || self.played.is_some()
+        self.moved.is_some()
+            || self.picked.is_some()
+            || self.played.is_some()
+            || self.marked_at.is_some()
     }
 
     /// The page's previews playing `clips` (as if downloaded), as if they

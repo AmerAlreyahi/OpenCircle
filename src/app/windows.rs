@@ -1419,6 +1419,19 @@ impl Windows {
                                 .map(move |ok| Msg::Settings(settings::Message::Fetched(key, ok)));
                             return Task::batch([keys, done]);
                         }
+                        settings::Outcome::ScrollTo(y) => {
+                            let to = iced::widget::scrollable::RelativeOffset {
+                                x: Some(0.0),
+                                y: Some(y),
+                            };
+                            return Task::batch([
+                                keys,
+                                iced::widget::operation::snap_to(
+                                    crate::features::settings::search::PAGE,
+                                    to,
+                                ),
+                            ]);
+                        }
                         settings::Outcome::Focus(field) => {
                             return Task::batch([keys, iced::widget::operation::focus(field)]);
                         }
@@ -1688,6 +1701,7 @@ impl Windows {
                 platform::windows::forget(id);
                 self.chrome.remove(&id);
                 self.toasts.retain(|(t, ..)| *t != id);
+                self.toast_clock.retain(|(t, ..)| *t != id);
                 if self.failure.as_ref().is_some_and(|(f, ..)| *f == id) {
                     self.failure = None;
                 }
@@ -1701,7 +1715,6 @@ impl Windows {
                     self.tray_menu = None;
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
-                self.toast_clock.retain(|(t, ..)| *t != id);
                 if self.steps_window() == Some(id) {
                     self.steps = None; // the steps go with it (memory only)
                 }
@@ -2059,6 +2072,12 @@ impl Windows {
                 Some(_) => tray_menu_events(),
                 None => Subscription::none(),
             },
+            match self.toast_clock.is_empty() {
+                false if !crate::shared::kit::motion::reduced() => {
+                    crate::shared::kit::motion::frames().map(|_| Msg::ToastFrame)
+                }
+                _ => Subscription::none(),
+            },
             match self.failure {
                 Some(_) => iced::event::listen_with(|event, _, _| match event {
                     iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -2072,12 +2091,6 @@ impl Windows {
             match self.steps_window() {
                 Some(_) => steps_events(),
                 None => Subscription::none(),
-            match self.toast_clock.is_empty() {
-                false if !crate::shared::kit::motion::reduced() => {
-                    crate::shared::kit::motion::frames().map(|_| Msg::ToastFrame)
-                }
-                _ => Subscription::none(),
-            },
             },
             match &self.studio {
                 Some((_, s)) => studio::studio_events(s.waiting(), s.recording()),
@@ -2310,6 +2323,9 @@ fn settings_placement() -> (Size, Size, Option<Point>) {
 /// How long a confirmation toast shows (the design's 1800 ms).
 pub const TOAST_MS: u64 = 1800;
 
+/// The timer line's thickness on an action toast.
+const TIMER_H: f32 = 2.0;
+
 /// How long the first-run tray notice shows (longer than a confirmation: it is read).
 pub const NOTICE_MS: u64 = 6000;
 
@@ -2323,9 +2339,6 @@ pub fn tray_notice(shortcut: &str) -> String {
 /// The start notice for shortcuts another app holds (`taken`); none when
 /// `told` (the last notice's) names them all.
 pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
-/// The timer line's thickness on an action toast.
-const TIMER_H: f32 = 2.0;
-
     if taken.iter().all(|k| told.contains(k)) {
         return None;
     }

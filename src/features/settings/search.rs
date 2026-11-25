@@ -12,9 +12,13 @@ use crate::shared::kit::setting_row;
 pub const FIELD: &str = "settings-search";
 /// The most hits listed.
 pub const MAX_HITS: usize = 8;
+/// The page's scroll area (`operation::snap_to`).
+pub const PAGE: &str = "settings-page-scroll";
+/// The marked row stays marked this long.
+pub const MARK: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// One thing the search can find.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub section: Section,
     /// The page's title (the breadcrumb).
@@ -24,6 +28,8 @@ pub struct Entry {
     pub desc: String,
     /// A page, not a row.
     pub is_page: bool,
+    /// Where the row is down its page, 0 (first row) to 1 (last): the scroll to it.
+    pub at: f32,
 }
 
 #[derive(Debug, Default)]
@@ -107,15 +113,22 @@ fn index(state: &State) -> Vec<Entry> {
             title: name.to_string(),
             desc: String::new(),
             is_page: true,
+            at: 0.0,
         });
         let ((), rows) = setting_row::harvest(|| drop((page.view)(state)));
-        all.extend(rows.into_iter().map(|(title, desc)| Entry {
-            section: page.id,
-            page: name,
-            title,
-            desc,
-            is_page: false,
-        }));
+        let last = rows.len().saturating_sub(1).max(1) as f32;
+        all.extend(
+            rows.into_iter()
+                .enumerate()
+                .map(|(i, (title, desc))| Entry {
+                    section: page.id,
+                    page: name,
+                    title,
+                    desc,
+                    is_page: false,
+                    at: i as f32 / last,
+                }),
+        );
     }
     all
 }

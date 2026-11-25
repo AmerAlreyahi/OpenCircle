@@ -44,6 +44,11 @@ impl<'a, Message: 'a> Scroll<'a, Message> {
         self.inner = self.inner.height(height);
         self
     }
+    /// For `operation::snap_to` / `scroll_to`.
+    pub fn id(mut self, id: impl Into<iced::widget::Id>) -> Self {
+        self.inner = self.inner.id(id);
+        self
+    }
 }
 
 impl<'a, Message: 'a> From<Scroll<'a, Message>> for Element<'a, Message> {
