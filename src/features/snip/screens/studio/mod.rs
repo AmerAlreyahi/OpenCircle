@@ -2362,6 +2362,7 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
     } = &e.base
     else {
         (e.display, e.crisp) = (None, false);
+        *mips = None;
         return;
     };
     let want = (*width as f32 * e.zoom * scale).round().max(1.0);
@@ -2370,6 +2371,8 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
         // (a small or hardly-shrunk picture: itself; at 100 % and magnified 200 % and more, as
         // the editors do, pixel for pixel: no copy and the fast path)
         (e.display, e.crisp) = (None, actual || e.zoom * scale >= 2.0);
+        // (the copy of an earlier, bigger picture goes: it holds its memory and its thread's result)
+        *mips = None;
         return;
     }
     let want = want as u32;

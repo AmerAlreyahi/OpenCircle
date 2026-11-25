@@ -4438,6 +4438,23 @@ fn w107_4_a_snip_sized_picture_gets_its_stage_copy_before_the_first_crop() {
     }
 }
 
+/// W107 fix 5: opening a picture below the stage-copy line drops the earlier picture's copy.
+#[test]
+fn w107_a_small_picture_drops_the_old_stage_copy() {
+    let mut s = studio_on(1640, 1270);
+    for _ in 0..500 {
+        let _ = s.update(Msg::Frame(std::time::Instant::now()));
+        if s.mips.as_ref().is_some_and(|m| m.pending.is_none()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(s.mips.is_some(), "the big picture has its copy");
+    s.open(Picture::Crop(crop(300, 200)));
+    s.settle_open();
+    assert!(s.mips.is_none(), "a small picture frees it");
+}
+
 /// A picture with detail (not flat: a flat one hides what costs).
 fn photo(width: u32, height: u32) -> Crop {
     let mut c = crop(width, height);
