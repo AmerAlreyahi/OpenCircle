@@ -1201,6 +1201,8 @@ strings! {
         | "جارٍ فحص السلامة والإعداد على هذا الجهاز…";
     md_try_again: "Try again"
         | "حاول مرة أخرى";
+    md_failed_hint: "Try again in a minute. If it keeps failing, check your internet connection."
+        | "حاول مرة أخرى بعد دقيقة. وإن استمر الفشل فتحقق من اتصالك بالإنترنت.";
     md_err_server: "The download server had a problem. Try again in a minute."
         | "واجه خادم التنزيل مشكلة. حاول مرة أخرى بعد دقيقة.";
     md_err_offline: "Could not reach the download server. Check your internet connection, then try again in a minute."

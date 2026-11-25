@@ -363,6 +363,7 @@ impl Session {
             share,
             failed,
             provider: asked.is_some(),
+            details: self.details,
         })
     }
 

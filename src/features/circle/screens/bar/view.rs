@@ -259,6 +259,7 @@ impl App {
             download: Message::ReaderDownload,
             dismiss,
             provider: None,
+            details: None,
         };
         Some(download::card(&model, bytes, stage, on))
     }

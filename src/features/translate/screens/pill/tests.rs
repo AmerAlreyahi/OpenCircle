@@ -441,13 +441,24 @@ fn a_failed_download_offers_try_again() {
         card::place(size, None, None),
         false,
     ));
-    for want in [
-        "Download could not finish",
-        "No internet connection.",
-        "Try again",
-    ] {
+    for want in ["Download could not finish", "Try again", "Show details"] {
         assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
     }
+    assert!(
+        !texts.iter().any(|t| t == "No internet connection."),
+        "folded: {texts:?}"
+    );
+    // Show details opens what the system said
+    let _ = s.update(Msg::ErrorDetails);
+    let open = crate::shared::kit::testing::shot::texts(s.view(
+        size,
+        card::place(size, None, None),
+        false,
+    ));
+    assert!(
+        open.iter().any(|t| t == "No internet connection."),
+        "{open:?}"
+    );
     let _ = s.update(Msg::Download);
     assert!(matches!(s.phase, Phase::Downloading(_)));
     assert!(

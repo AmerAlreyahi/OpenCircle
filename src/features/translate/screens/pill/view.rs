@@ -79,7 +79,12 @@ impl Session {
             // the download card (`model_download`): asks, its progress, why it failed
             Phase::Consent(_) | Phase::Downloading(_) | Phase::DownloadFailed(_) => {
                 let fetching = self.fetching().unwrap_or_else(Fetching::reader);
-                let card = fetching.card(Msg::Download, Msg::Close, Msg::OpenSettings);
+                let card = fetching.card(
+                    Msg::Download,
+                    Msg::Close,
+                    Msg::OpenSettings,
+                    Msg::ErrorDetails,
+                );
                 let pill = Rectangle::new(pill_at(whole), picker::PILL);
                 stack![
                     model_download::floating(card, screen, pill),

@@ -272,7 +272,13 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         Some(card) => iced::widget::stack![
             main,
             iced::widget::opaque(
-                container(card.card(Msg::Download, Msg::DismissCard, Msg::Provider)).center(Fill)
+                container(card.card(
+                    Msg::Download,
+                    Msg::DismissCard,
+                    Msg::Provider,
+                    Msg::CardDetails
+                ))
+                .center(Fill)
             )
         ]
         .into(),

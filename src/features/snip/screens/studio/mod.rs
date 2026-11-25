@@ -195,6 +195,8 @@ pub enum Msg {
     Download,
     DismissCard,
     Provider,
+    /// A failed download card's Show / Hide details.
+    CardDetails,
     /// The window has / lost the keyboard (the quick-action keys act on it).
     Focus(bool),
     /// The panel's Edit text row; a line picked on the picture; its new text;
@@ -1621,6 +1623,12 @@ impl Studio {
                 Outcome::Download
             }
             Msg::Download => Outcome::None,
+            Msg::CardDetails => {
+                if let Some(card) = &mut self.card {
+                    card.details = !card.details;
+                }
+                Outcome::None
+            }
             Msg::DismissCard | Msg::Provider => {
                 self.card = None;
                 self.busy = None;

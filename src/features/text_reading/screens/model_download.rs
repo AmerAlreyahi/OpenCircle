@@ -115,6 +115,8 @@ pub struct On<M> {
     pub dismiss: Option<M>,
     /// "Use an AI provider instead" (translation).
     pub provider: Option<M>,
+    /// A failed download's Show / Hide details: whether they are open, and the press.
+    pub details: Option<(bool, M)>,
 }
 
 /// The card's width (`.oc-model-card`; less when the room is narrower).
@@ -192,6 +194,8 @@ pub struct Fetching {
     pub share: Option<f32>,
     pub failed: Option<String>,
     pub provider: bool,
+    /// The failure's own text is shown (a failed download's Show details).
+    pub details: bool,
 }
 
 impl Fetching {
@@ -204,6 +208,7 @@ impl Fetching {
             share: None,
             failed: None,
             provider: false,
+            details: false,
         }
     }
 
@@ -236,7 +241,13 @@ impl Fetching {
 
     /// The card: `download` is Download / Try again, `dismiss` Not now /
     /// Cancel, `provider` the AI link.
-    pub fn card<'a, M: Clone + 'a>(&self, download: M, dismiss: M, provider: M) -> Element<'a, M> {
+    pub fn card<'a, M: Clone + 'a>(
+        &self,
+        download: M,
+        dismiss: M,
+        provider: M,
+        details: M,
+    ) -> Element<'a, M> {
         let stage = match (&self.failed, self.share) {
             (Some(why), _) => Stage::Failed(why),
             (None, Some(share)) => Stage::at(share),
@@ -246,6 +257,7 @@ impl Fetching {
             download,
             dismiss: Some(dismiss),
             provider: self.provider.then_some(provider),
+            details: Some((self.details, details)),
         };
         let does;
         let scripts;
@@ -283,13 +295,23 @@ pub fn card<'a, M: Clone + 'a>(
     if let Stage::Failed(why) = stage {
         use crate::shared::kit::error_card::{ErrorCard, error_card};
         let again = on.download;
+        // a host without a Show details press (the bar's note) says the reason itself
+        let (open, toggle, hint, detail) = match on.details {
+            Some((open, toggle)) => (
+                open,
+                toggle,
+                t!(md_failed_hint).to_string(),
+                why.to_string(),
+            ),
+            None => (false, again.clone(), why.to_string(), String::new()),
+        };
         let card = error_card(ErrorCard {
             headline: t!(md_failed).into(),
-            hint: why.to_string(),
-            detail: String::new(),
+            hint,
+            detail,
             width: WIDTH,
-            open: false,
-            on_details: again.clone(),
+            open,
+            on_details: toggle,
             fix: Some((t!(md_try_again), again)),
             retry: None,
             words: crate::shared::theme::error_words(),
@@ -473,6 +495,7 @@ mod tests {
             download: 1,
             dismiss: Some(2),
             provider: provider.then_some(3),
+            details: Some((false, 4)),
         };
         card(model, 15_000_000, stage, on)
     }
@@ -530,12 +553,43 @@ mod tests {
         }
         assert!(texts(Stage::Ask, false).iter().all(|t| !t.contains("AI")));
         let failed = texts(Stage::Failed(FAILED), false);
-        assert!(failed.iter().any(|t| t == "Try again") && failed.iter().any(|t| t == FAILED));
+        assert!(failed.iter().any(|t| t == "Try again"));
+        assert!(failed.iter().any(|t| t == "Show details"), "{failed:?}");
+        assert!(
+            !failed.iter().any(|t| t == FAILED),
+            "the system's text is folded: {failed:?}"
+        );
         let downloading = texts(Stage::Downloading(0.5), false);
         assert!(downloading.iter().any(|t| t == "50%"), "{downloading:?}");
         assert!(
             downloading.iter().any(|t| t == "7.5 / 15 MB"),
             "{downloading:?}"
+        );
+    }
+
+    /// F12-6: a failed download says what to do; what the server or the disk said is
+    /// folded behind Show details and shows when opened.
+    #[test]
+    fn a_failed_download_folds_the_systems_words() {
+        let on = |open| On {
+            download: 1u8,
+            dismiss: Some(2),
+            provider: None,
+            details: Some((open, 4)),
+        };
+        let texts = |open| shot::texts(card(&OCR, 15_000_000, Stage::Failed(FAILED), on(open)));
+        let closed = texts(false);
+        assert!(
+            closed
+                .iter()
+                .any(|t| t.starts_with("Try again in a minute")),
+            "{closed:?}"
+        );
+        assert!(!closed.iter().any(|t| t == FAILED), "{closed:?}");
+        let open = texts(true);
+        assert!(
+            open.iter().any(|t| t == FAILED) && open.iter().any(|t| t == "Hide details"),
+            "{open:?}"
         );
     }
 
@@ -546,6 +600,7 @@ mod tests {
             download: 1u8,
             dismiss: None,
             provider: None,
+            details: None,
         };
         let size = Size::new(WIDTH, 200.0);
         let view = || card(&OCR, 1, Stage::Downloading(0.5), On { ..on.clone() });

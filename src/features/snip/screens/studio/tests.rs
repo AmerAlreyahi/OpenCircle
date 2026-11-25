@@ -559,6 +559,7 @@ fn the_panel_and_card_match_their_golden_images() {
             share: None,
             failed: None,
             provider: true,
+            details: false,
         }));
         let file = format!("studio-card-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
