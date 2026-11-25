@@ -4424,12 +4424,14 @@ fn hide_this_shape_is_in_the_actions_menu_and_the_right_click_menu() {
 fn w107_4_a_snip_sized_picture_gets_its_stage_copy_before_the_first_crop() {
     for (w, h, copy) in [(1640, 1270, true), (3840, 2160, true), (1200, 800, false)] {
         let mut s = studio_on(w, h);
-        for _ in 0..500 {
+        // the copy is made on a thread: a slow CI runner needs more than a second for 4K (CI 45588669323)
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < until {
             let _ = s.update(Msg::Frame(std::time::Instant::now()));
             if s.mips.as_ref().is_none_or(|m| m.pending.is_none()) {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let e = s.editor.as_ref().unwrap();
         assert!(e.zoom < 0.9, "{w}x{h} is shown smaller: {}", e.zoom);
@@ -4483,12 +4485,14 @@ fn studio_crop_frame_times() {
         s.settle_open();
         let _ = s.update(Msg::Editor(Message::Tool(Tool::Crop)));
         // (the stage copy a big picture draws from is made on a thread: the app's frames collect it)
-        for _ in 0..500 {
+        // the copy is made on a thread: a slow CI runner needs more than a second for 4K (CI 45588669323)
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < until {
             let _ = s.update(Msg::Frame(std::time::Instant::now()));
             if s.mips.as_ref().is_none_or(|m| m.pending.is_none()) {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let window = s.window;
         let mut report = Vec::new();
