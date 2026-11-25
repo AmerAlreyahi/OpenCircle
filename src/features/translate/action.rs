@@ -62,11 +62,20 @@ impl Model {
         self.0.full_size()
     }
 
-    /// Downloads the pair's missing files (blocking; `progress(done, total)`); `Err` = why not.
-    pub fn download(&self, progress: impl FnMut(u64, u64)) -> Result<(), String> {
-        self.0
-            .ensure(progress)
-            .map_err(|e| crate::features::text_reading::model_download::why(&e))
+    /// Downloads the pair's missing files (blocking; `progress(done, total)`) until `stop` is
+    /// set (its `.part` stays for the next try); `Err` = why not (empty: stopped on request).
+    /// One download at a time: a second waits for the first (never two writers of one file).
+    pub fn download(
+        &self,
+        progress: impl FnMut(u64, u64),
+        stop: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String> {
+        static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+        self.0.ensure_until(progress, stop).map_err(|e| match e {
+            crate::features::text_reading::OcrError::Stopped => String::new(),
+            e => crate::features::text_reading::model_download::why(&e),
+        })
     }
 }
 

@@ -37,9 +37,11 @@ pub enum Download {
 }
 
 /// The open card: which request it answers, what it shows, and the selection it sits by (screen px).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TextCard {
     pub id: u32,
+    /// Set when the card goes (Not now, Esc, a new request): its download stops.
+    pub stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The selected words.
     pub text: String,
     /// The pair to download, when it is missing.
@@ -58,10 +60,17 @@ pub enum Msg {
     Dismiss,
 }
 
+impl Drop for TextCard {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 impl TextCard {
     pub fn new(id: u32, text: String, near: Rectangle) -> Self {
         TextCard {
             id,
+            stop: Default::default(),
             text,
             model: None,
             state: State::Translating,

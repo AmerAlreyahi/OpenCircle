@@ -6528,6 +6528,12 @@ fn w106_the_menus_translate_offers_the_model_download_when_it_is_missing() {
         app.o.text_card.as_ref().unwrap().state,
         State::Downloading(0.5)
     );
+    // a second press while it runs starts nothing (the share is kept)
+    let _ = app.update(Message::TextCard(text_card::Msg::Download));
+    assert_eq!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::Downloading(0.5)
+    );
     // a failure offers it again; an older request's news is dropped
     let _ = app.update(Message::TextModel(
         id,
@@ -6545,9 +6551,27 @@ fn w106_the_menus_translate_offers_the_model_download_when_it_is_missing() {
     // done: it translates
     let _ = app.update(Message::TextModel(id, Download::Done(Ok(()))));
     assert_eq!(app.o.text_card.as_ref().unwrap().state, State::Translating);
-    // Not now puts the card away
+    // Not now puts the card away and stops its download
+    let stop = app.o.text_card.as_ref().unwrap().stop.clone();
+    assert!(!stop.load(std::sync::atomic::Ordering::Relaxed));
     let _ = app.update(Message::TextCard(text_card::Msg::Dismiss));
     assert!(app.o.text_card.is_none() && !app.o.is_none());
+    assert!(
+        stop.load(std::sync::atomic::Ordering::Relaxed),
+        "the download was told to stop"
+    );
+    // a new request's card replaces the old one the same way (never two downloads of one pair)
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    let first = app.o.text_card.as_ref().unwrap().stop.clone();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    assert!(
+        first.load(std::sync::atomic::Ordering::Relaxed),
+        "replaced: stopped"
+    );
 }
 
 /// 201.10: select-text mode: the box answers (all its text), Select all text picks every word and

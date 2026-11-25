@@ -224,9 +224,14 @@ impl App {
         };
         match msg {
             text_card::Msg::Details => card.details = !card.details,
+            // Not now / Cancel: the card goes and its download stops (`TextCard::drop`)
             text_card::Msg::Dismiss => self.o.text_card = None,
-            // Download / Try again: only what the user asked for is fetched
+            // Download / Try again: only what the user asked for is fetched, once (a press while it
+            // is running does nothing)
             text_card::Msg::Download => {
+                if !matches!(card.state, State::NeedsModel(_) | State::DownloadFailed(_)) {
+                    return Task::none();
+                }
                 let (id, Some(model)) = (card.id, card.model) else {
                     return Task::none();
                 };
@@ -234,11 +239,15 @@ impl App {
                 if cfg!(test) {
                     return Task::none(); // (no real download from a test)
                 }
+                let stop = card.stop.clone();
                 return background(move |tx| {
-                    let got = model.download(|done, total| {
-                        let share = done as f32 / total.max(1) as f32;
-                        let _ = tx.unbounded_send(text_card::Download::Progress(share));
-                    });
+                    let got = model.download(
+                        |done, total| {
+                            let share = done as f32 / total.max(1) as f32;
+                            let _ = tx.unbounded_send(text_card::Download::Progress(share));
+                        },
+                        &stop,
+                    );
                     let _ = tx.unbounded_send(text_card::Download::Done(got));
                 })
                 .map(move |news| Message::TextModel(id, news));
