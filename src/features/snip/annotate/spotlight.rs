@@ -6,6 +6,8 @@ use super::document::{Layer, rounded, solid};
 
 /// The dim outside the spotlights.
 pub const DIM: [u8; 4] = [0, 0, 0, 140];
+/// The corners of a hole, image px (the live dim round a hole uses it too).
+pub const RADIUS: f32 = 10.0;
 
 pub fn paint(layer: &mut Layer, holes: &[Rectangle]) {
     let (w, h) = (layer.pm.width(), layer.pm.height());
@@ -14,7 +16,7 @@ pub fn paint(layer: &mut Layer, holes: &[Rectangle]) {
     };
     let t = layer.t();
     for hole in holes {
-        if let Some(path) = rounded(*hole, 10.0) {
+        if let Some(path) = rounded(*hole, RADIUS) {
             mask.fill_path(&path, FillRule::Winding, true, t);
         }
     }

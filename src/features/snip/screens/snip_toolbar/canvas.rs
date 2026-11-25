@@ -13,7 +13,7 @@ use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
     BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK, SPOTLIGHT_DIM,
 };
-use crate::features::snip::annotate::{Annotator, Group, Message, info};
+use crate::features::snip::annotate::{Annotator, Group, Message, info, spotlight};
 
 /// Room around the image for Snip's live area handles (display px; none
 /// otherwise): the canvas is this much bigger on every side.
@@ -408,8 +408,12 @@ impl canvas::Program<Message> for Input<'_> {
         if let Some(hole) = e.spotlight_hole() {
             let outside = Path::new(|p| {
                 p.rectangle(Point::ORIGIN, e.size());
-                // (the painted dim's corners: 10 image px)
-                p.rounded_rectangle(hole.position(), hole.size(), (10.0 * e.zoom).into());
+                // (the painted dim's corners)
+                p.rounded_rectangle(
+                    hole.position(),
+                    hole.size(),
+                    (spotlight::RADIUS * e.zoom).into(),
+                );
             });
             frame.fill(
                 &outside,

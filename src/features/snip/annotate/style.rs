@@ -27,7 +27,12 @@ pub const ANNOTATION: [Color; 12] = [
 /// the dim outside a crop, the handles and crop edge, a step's note pill.
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 /// The dim outside a spotlight while it is dragged (`spotlight.rs`'s `DIM`, as a colour).
-pub const SPOTLIGHT_DIM: Color = Color::from_rgba(0.0, 0.0, 0.0, 140.0 / 255.0);
+pub const SPOTLIGHT_DIM: Color = Color::from_rgba8(
+    super::spotlight::DIM[0],
+    super::spotlight::DIM[1],
+    super::spotlight::DIM[2],
+    super::spotlight::DIM[3] as f32 / 255.0,
+);
 /// The rubber band's fill (the accent at this alpha).
 pub const BAND_ALPHA: f32 = 0.12;
 pub const HANDLE: Color = Color::WHITE;

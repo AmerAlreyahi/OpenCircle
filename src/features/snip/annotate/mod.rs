@@ -31,7 +31,7 @@ mod pen;
 mod pointer;
 mod select;
 mod shape;
-mod spotlight;
+pub(crate) mod spotlight;
 pub(crate) mod step;
 pub mod style;
 /// Pasted text as a text item takes it: Windows line ends made `\n`, other
@@ -2698,6 +2698,8 @@ impl Annotator {
     /// The pending item's painted layer (its region and picture), painted now if it changed
     /// since it was last asked for.
     pub(crate) fn live_layer(&self) -> Option<(Rectangle, image::Handle)> {
+        // (also when a stroke that was tiles turns into one layer mid-drag, the stage copy going or
+        // coming: no layer was painted for it yet)
         if self.live_stale.replace(false) || (self.live_on && self.live.borrow().is_none()) {
             self.paints.set(self.paints.get() + 1);
             *self.live.borrow_mut() = self.paint_live();

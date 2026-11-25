@@ -5,18 +5,22 @@ use iced::{Point, Rectangle, Size};
 use super::{Annotator, Shape, select, text};
 
 impl Annotator {
-    /// A FIRST spotlight being dragged: its hole (display px). The dim around it is four boxes the
-    /// canvas fills (W113: a layer of the whole picture repainted at every move cost 47 ms on 4K);
-    /// with a spotlight already in the picture, the base is dimmed round that one and the live layer
-    /// paints the union (`None`).
+    /// The only item, a spotlight, being dragged: its hole (display px), clipped to the picture. The
+    /// dim round it is filled by the canvas OVER the base (W113: a layer of the whole picture
+    /// repainted at every move cost 47 ms on 4K). That is right only when the base holds the bare
+    /// picture: the committed picture dims the picture and draws every other item on top, undimmed,
+    /// so over any other item, or a Hide's patch, the canvas dim would darken them until the release.
+    /// With anything else in the picture (`None`) the live layer paints the union as before.
     pub fn spotlight_hole(&self) -> Option<Rectangle> {
         let pending = self.pending.as_ref().filter(|_| self.live_on)?;
         let Shape::Spotlight { a, b } = pending.item.shape else {
             return None;
         };
-        let other = (self.doc.items.iter().enumerate())
-            .any(|(i, it)| Some(i) != pending.index && matches!(it.shape, Shape::Spotlight { .. }));
-        (!other).then(|| self.to_display(super::span(&[a, b])))
+        let alone = (self.doc.items.iter().enumerate()).all(|(i, _)| Some(i) == pending.index);
+        let picture = Rectangle::with_size(self.size());
+        (alone && self.patch.is_empty())
+            .then(|| self.to_display(super::span(&[a, b])).intersection(&picture))
+            .flatten()
     }
 
     /// The crop being dragged.
