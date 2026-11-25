@@ -147,6 +147,8 @@ pub enum Msg {
     FailureEsc,
     /// A toast's action word was pressed (`Windows::toast_with`; the App decides).
     ToastAction,
+    /// A frame while an action toast's timer line runs.
+    ToastFrame,
     /// A walkthrough's encoder: a frame done, or its end.
     StudioWalk(studio::Walked),
 }
@@ -161,6 +163,8 @@ pub struct Windows {
     toasts: Vec<(window::Id, String, Tone, Option<&'static str>)>,
     /// The failure card window (`failure`), and whether its details are open.
     failure: Option<(window::Id, failure::Failure, bool)>,
+    /// Action toasts' timer lines (F5): window, since when, how long (ms).
+    toast_clock: Vec<(window::Id, Instant, u64)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// The update pill above the tray, at most one, and when it opened (the
@@ -969,6 +973,9 @@ impl Windows {
         };
         self.toasts
             .push((id, text.to_string(), tone.into(), action));
+        if action.is_some() {
+            self.toast_clock.push((id, Instant::now(), ms));
+        }
         // gone after `ms` (a thread sleeps, the UI never waits): fades out
         let (done, wait) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
@@ -1535,7 +1542,7 @@ impl Windows {
                 };
                 return self.studio_outcome(out);
             }
-            Msg::StudioDownload | Msg::StudioDismiss | Msg::ToastAction => {}
+            Msg::StudioDownload | Msg::StudioDismiss | Msg::ToastAction | Msg::ToastFrame => {}
             Msg::FailureDetails => return self.failure_details(),
             Msg::FailureFix => return self.failure_fix(),
             Msg::FailureEsc => return self.failure_close(),
@@ -1694,6 +1701,7 @@ impl Windows {
                     self.tray_menu = None;
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
+                self.toast_clock.retain(|(t, ..)| *t != id);
                 if self.steps_window() == Some(id) {
                     self.steps = None; // the steps go with it (memory only)
                 }
@@ -1897,7 +1905,36 @@ impl Windows {
             let radius = shape::radius(toast::RADIUS);
             return Some(match action {
                 Some(a) => spoken(|| {
-                    crate::shared::kit::toast::with_action(text, *tone, radius, a, Msg::ToastAction)
+                    let pill = crate::shared::kit::toast::with_action(
+                        text,
+                        *tone,
+                        radius,
+                        a,
+                        Msg::ToastAction,
+                    );
+                    // the thin timer line along the pill's foot, running out
+                    let left = (self.toast_clock.iter().find(|(t, ..)| *t == window)).map_or(
+                        1.0,
+                        |(_, since, ms)| {
+                            (1.0 - since.elapsed().as_secs_f32() * 1000.0 / *ms as f32)
+                                .clamp(0.0, 1.0)
+                        },
+                    );
+                    let full =
+                        crate::shared::kit::toast::size_with_action(text, a).width - 2.0 * radius;
+                    let line = container(iced::widget::Space::new())
+                        .width((full * left).max(0.0))
+                        .height(TIMER_H)
+                        .style(|_| {
+                            container::Style::default()
+                                .background(crate::shared::kit::themes::c().accent)
+                        });
+                    let line = container(line)
+                        .width(Fill)
+                        .height(Fill)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Bottom);
+                    stack![pill, line].into()
                 }),
                 None => spoken(|| toast::view(text, *tone, radius)),
             });
@@ -2035,6 +2072,12 @@ impl Windows {
             match self.steps_window() {
                 Some(_) => steps_events(),
                 None => Subscription::none(),
+            match self.toast_clock.is_empty() {
+                false if !crate::shared::kit::motion::reduced() => {
+                    crate::shared::kit::motion::frames().map(|_| Msg::ToastFrame)
+                }
+                _ => Subscription::none(),
+            },
             },
             match &self.studio {
                 Some((_, s)) => studio::studio_events(s.waiting(), s.recording()),
@@ -2280,6 +2323,9 @@ pub fn tray_notice(shortcut: &str) -> String {
 /// The start notice for shortcuts another app holds (`taken`); none when
 /// `told` (the last notice's) names them all.
 pub fn taken_notice(taken: &[String], told: &[String]) -> Option<String> {
+/// The timer line's thickness on an action toast.
+const TIMER_H: f32 = 2.0;
+
     if taken.iter().all(|k| told.contains(k)) {
         return None;
     }

@@ -231,6 +231,13 @@ impl App {
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
             Some(Output::Back) if edit.annotator.updating.is_some() => self.close(),
+            // Drawings never get lost: Esc with drawings closes Snip with the Undo pill
+            Some(Output::Back)
+                if matches!(o.purpose, Purpose::Snip(_))
+                    && !edit.annotator.doc.items.is_empty() =>
+            {
+                self.end_snip()
+            }
             // Snip has no action bar: back to picking an area.
             Some(Output::Back) if matches!(o.purpose, Purpose::Snip(_)) => {
                 self.more_reset();
@@ -510,6 +517,22 @@ mod tests {
         run_task(&mut app, task);
         assert!(app.snip_undo.is_none());
         assert!(app.windows.studio_mut().is_some(), "the picture is back");
+    }
+
+    /// F5-5: Esc in the editor with drawings closes Snip with the Undo pill (they
+    /// are never dropped silently); with no drawings Esc goes back to picking as before.
+    #[test]
+    fn f5_esc_with_drawings_closes_with_the_undo_pill_and_without_goes_back() {
+        let mut app = snip_toolbar_open();
+        draw_rect(&mut app);
+        let _task = app.on_snip_toolbar(E::Back);
+        assert!(app.hiding != Hiding::No, "Snip closed");
+        assert!(app.snip_undo.is_some(), "the drawings are kept");
+        let mut app = snip_toolbar_open();
+        let _task = app.on_snip_toolbar(E::Back);
+        assert!(app.snip_undo.is_none() && app.windows.toasts().is_empty());
+        assert!(app.o.edit.is_none(), "back to picking, as before");
+        assert!(app.hiding == Hiding::No, "still open");
     }
 
     /// F5-3: no drawings, no pill (Esc closes silently as before); F5-4: when

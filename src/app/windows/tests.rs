@@ -939,3 +939,17 @@ fn f12_a_failed_step_stays_as_a_placeholder_with_the_error_card() {
     let _ = windows.update(Msg::Steps(S::FailedSeen));
     assert!(!windows.steps.as_ref().unwrap().1.failed);
 }
+
+/// F5-6: an action toast ("Snip closed . Undo") has a timer line (a clock that runs
+/// while it shows); a plain toast has none; the clock goes with the window.
+#[test]
+fn f5_an_action_toast_has_a_timer_line_that_goes_with_it() {
+    let mut windows = Windows::default();
+    let _ = windows.toast("Copied", true, None, 1000);
+    assert!(windows.toast_clock.is_empty());
+    let _ = windows.toast_with("Snip closed", true, None, 8000, Some("Undo"));
+    assert_eq!(windows.toast_clock.len(), 1);
+    let id = windows.toast_clock[0].0;
+    let _ = windows.update(Msg::Closed(id));
+    assert!(windows.toast_clock.is_empty());
+}
