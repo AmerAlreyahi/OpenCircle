@@ -1613,11 +1613,8 @@ pub(super) fn issue(problems: &[Problem], key: &str) -> Option<String> {
     problems.iter().find(|p| p.key == key).map(Problem::words)
 }
 
-/// Applies `message`; in the real window (`auto`) a change that leaves the draft
-/// valid is written at once, so nothing is lost on close (#136). A draft with
-/// problems is held back (the footer says why) and closing asks about it.
-/// The write itself runs off the UI thread (`Outcome::Write`).
-/// Settings search: opens the `at`th hit's page and marks its row.
+/// Settings search: opens the `at`th hit's page and marks its row (or the choice that
+/// reveals it), scrolling to it.
 fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     let hit = (state.search.as_ref())
         .zip(at)
@@ -1637,6 +1634,10 @@ fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     }
 }
 
+/// Applies `message`; in the real window (`auto`) a change that leaves the draft
+/// valid is written at once, so nothing is lost on close (#136). A draft with
+/// problems is held back (the footer says why) and closing asks about it.
+/// The write itself runs off the UI thread (`Outcome::Write`).
 pub fn update(state: &mut State, message: Message) -> Outcome {
     let change = !matches!(
         message,

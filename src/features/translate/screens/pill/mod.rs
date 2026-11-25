@@ -168,9 +168,9 @@ enum Phase {
 }
 
 pub struct Session {
-    /// The original frame (shared bytes, never copied whole here).
-    /// The error card's details are open.
+    /// The error card's details are open (the failure card and the download card).
     details: bool,
+    /// The original frame (shared bytes, never copied whole here).
     frame: image::Handle,
     /// What is translated, frame pixels: x0, y0, x1, y1 (ends exclusive).
     area: [u32; 4],
