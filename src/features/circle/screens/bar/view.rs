@@ -191,11 +191,17 @@ impl App {
         let mut row = crate::dir_row![grip::grip(Message::BarGrab), field, line(), pills]
             .spacing(bar::SPACING)
             .align_y(iced::Center);
-        if !icons.is_empty() {
-            row = icons
-                .into_iter()
-                .fold(row.push(line()), |row, icon| row.push(icon));
-        }
+        row = icons
+            .into_iter()
+            .fold(row.push(line()), |row, icon| row.push(icon));
+        // the quiet x at the end: closes the overlay (Esc keeps working)
+        row = row.push(bar_button(
+            Icon::Close.glyph(),
+            t!(sn_close),
+            "",
+            Default::default(),
+            Some(Message::BarClose),
+        ));
         // Held: the design's accent ring round it.
         let material = match self.o.bar_drag {
             Some(_) => Material::Held,

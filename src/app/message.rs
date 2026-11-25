@@ -179,6 +179,8 @@ pub(crate) enum Message {
     TextLines(Rectangle, Result<Vec<word::Line>, String>),
     /// The bottom bar's handle went down / the pointer moved / it was let go.
     BarGrab,
+    /// The quiet x at the bar's end: closes the overlay (Esc does too).
+    BarClose,
     BarMoved(Point),
     /// The pointer moved in that window (its px), while the bar may be held.
     BarMovedOn(window::Id, Point),

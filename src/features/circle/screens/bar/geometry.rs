@@ -101,13 +101,11 @@ pub(crate) fn key_hint(key: Key) -> String {
     }
 }
 
-/// The bar without its field: grip, dividers, `pills` and `bubbles` round buttons.
+/// The bar without its field: grip, dividers, `pills`, `bubbles` round buttons and the quiet x
+/// that always ends it (after its own divider).
 fn fixed(pills: [f32; 3], bubbles: f32) -> f32 {
     let pills: f32 = pills.iter().sum::<f32>() + 2.0 * PILL_GAP;
-    let buttons = match bubbles > 0.0 {
-        true => SPACING + DIVIDER + bubbles * (BUBBLE + SPACING),
-        false => 0.0,
-    };
+    let buttons = SPACING + DIVIDER + (bubbles + 1.0) * (BUBBLE + SPACING);
     2.0 * PAD + HANDLE + 3.0 * SPACING + DIVIDER + pills + buttons
 }
 

@@ -2738,7 +2738,12 @@ fn hidden_features_have_no_bar_button_and_turning_them_on_brings_them_back() {
     let rest: Vec<_> = names.iter().filter(|n| !n.starts_with("Snip")).collect();
     assert_eq!(
         rest,
-        ["Ask AI", "Open OpenCircle AI chat", "Screen included"],
+        [
+            "Ask AI",
+            "Close",
+            "Open OpenCircle AI chat",
+            "Screen included"
+        ],
         "{names:?}"
     );
     let texts = overlay_texts(&app);
@@ -2858,6 +2863,42 @@ fn a_hidden_features_trigger_does_nothing() {
     );
 }
 
+/// W106 (owner, 2026-11-25): the main bar ends in a quiet x (tooltip "Close") that closes the
+/// overlay for a mouse user; it is the bar's LAST button, so at the left end in Arabic.
+#[test]
+fn w106_the_main_bar_has_a_quiet_x_that_closes_the_overlay() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::shot;
+    let mut app = open_app(1280, 800, 1.0);
+    settle_bar(&mut app);
+    let icons = labs::bar(&app.o.labs)
+        .iter()
+        .filter(|b| !b.is_pill())
+        .count();
+    let got = shot::click(app.view(app.overlay), app.o.screen, bar_button(&app, icons));
+    assert!(
+        got.iter().any(|m| matches!(m, Message::BarClose)),
+        "{got:?}"
+    );
+    let _ = app.update(Message::BarClose);
+    assert!(app.o.is_none(), "the x closes the overlay");
+    // Arabic: the bar is mirrored, so its end (the x) is at the left
+    app_language::set(Lang::Ar);
+    let mut app = open_app(1280, 800, 1.0);
+    settle_bar(&mut app);
+    let at = app.bar_at();
+    let on = Point::new(
+        at.x + bar::PAD + bar::BUBBLE / 2.0,
+        at.y + app.bar_size().1.height / 2.0,
+    );
+    let got = shot::click(app.view(app.overlay), app.o.screen, on);
+    app_language::set(Lang::En);
+    assert!(
+        got.iter().any(|m| matches!(m, Message::BarClose)),
+        "Arabic: {got:?}"
+    );
+}
+
 /// #144: the ask field's placeholder fits its text area at every bar width,
 /// in the UI font on this machine (Inter here, Segoe UI on Windows).
 #[test]
@@ -2910,6 +2951,7 @@ fn the_bar_is_the_designs_and_nothing_is_sent_before_a_choice() {
         names,
         [
             "Ask AI",
+            "Close",
             "Live translate (Beta)",
             "Open OpenCircle AI chat",
             "Screen included",
@@ -3065,8 +3107,8 @@ fn the_bar_drags_by_its_handle_and_docks_at_the_nearest_spot() {
     let before = app.bar_at();
     let _ = app.update(Message::BarGrab);
     let _ = app.update(Message::BarMoved(handle));
-    let _ = app.update(Message::BarMoved(handle - Vector::new(100.0, 560.0)));
-    let held = before - Vector::new(100.0, 560.0);
+    let _ = app.update(Message::BarMoved(handle - Vector::new(60.0, 560.0)));
+    let held = before - Vector::new(60.0, 560.0);
     assert_eq!(app.bar_target(), held);
     // ...eased there on the frame clock, never jumping per mouse event
     assert_eq!(app.bar_at(), before, "no jump before a frame");
