@@ -149,13 +149,18 @@ impl App {
         };
         self.text_cards = self.text_cards.wrapping_add(1);
         let id = self.text_cards;
-        self.o.text_card = Some(TextCard::new(id, near));
+        self.o.text_card = Some(TextCard::new(id, text.clone(), near));
+        self.run_text_translate(id, text)
+    }
+
+    /// Translates `text` for the card of request `id` on a thread.
+    fn run_text_translate(&self, id: u32, text: String) -> Task<Message> {
         let cfg = crate::shared::config::current();
         let (source, target) = (cfg.translate.source.clone(), cfg.translate.target.clone());
         background(move |tx| {
             let result = crate::features::translate::translate_text(&text, &source, &target);
             if let Err(e) = &result {
-                crate::log!("[opencircle] translate selected text failed: {e}");
+                crate::log!("[opencircle] translate selected text failed: {e:?}");
             }
             let _ = tx.unbounded_send(result);
         })
@@ -174,13 +179,36 @@ impl App {
     pub(crate) fn text_translated(
         &mut self,
         id: u32,
-        result: Result<String, String>,
+        result: Result<String, crate::features::translate::TextError>,
     ) -> Task<Message> {
+        use crate::features::translate::TextError;
         if let Some(card) = self.o.text_card.as_mut().filter(|c| c.id == id) {
             card.state = match result {
                 Ok(text) => State::Done(text),
-                Err(e) => State::Failed(e),
+                // the pair is not on disk: the download card asks (its size), then it translates
+                Err(TextError::Missing(model)) => {
+                    card.model = Some(model);
+                    State::NeedsModel(model.bytes())
+                }
+                Err(TextError::Failed(e)) => State::Failed(e),
             };
+        }
+        Task::none()
+    }
+
+    /// The card's model download: its share, then done (it translates) or why it stopped.
+    pub(crate) fn text_model(&mut self, id: u32, news: text_card::Download) -> Task<Message> {
+        let Some(card) = self.o.text_card.as_mut().filter(|c| c.id == id) else {
+            return Task::none();
+        };
+        match news {
+            text_card::Download::Progress(share) => card.state = State::Downloading(share),
+            text_card::Download::Done(Err(why)) => card.state = State::DownloadFailed(why),
+            text_card::Download::Done(Ok(())) => {
+                card.state = State::Translating;
+                let text = card.text.clone();
+                return self.run_text_translate(id, text);
+            }
         }
         Task::none()
     }
@@ -192,6 +220,22 @@ impl App {
         };
         match msg {
             text_card::Msg::Details => card.details = !card.details,
+            text_card::Msg::Dismiss => self.o.text_card = None,
+            // Download / Try again: only what the user asked for is fetched
+            text_card::Msg::Download => {
+                let (id, Some(model)) = (card.id, card.model) else {
+                    return Task::none();
+                };
+                card.state = State::Downloading(0.0);
+                return background(move |tx| {
+                    let got = model.download(|done, total| {
+                        let share = done as f32 / total.max(1) as f32;
+                        let _ = tx.unbounded_send(text_card::Download::Progress(share));
+                    });
+                    let _ = tx.unbounded_send(text_card::Download::Done(got));
+                })
+                .map(move |news| Message::TextModel(id, news));
+            }
             text_card::Msg::Copy => {
                 if let State::Done(text) = &card.state {
                     match copy::text(text.clone()) {

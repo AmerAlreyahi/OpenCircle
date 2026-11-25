@@ -11,9 +11,9 @@ use crate::shared::config;
 use crate::app::message::{Message, Purpose};
 use crate::app::screens::toast;
 use crate::features::circle::screens::bar::geometry as bar;
+use crate::features::circle::screens::context_menu;
 use crate::features::circle::screens::edge as border;
 use crate::features::circle::screens::overlay;
-use crate::features::circle::screens::{context_menu, text_card};
 use crate::features::snip::screens::pick;
 use crate::features::snip::screens::snip_toolbar::canvas::ScreenMap;
 use crate::features::text_reading::app::word;
@@ -380,7 +380,7 @@ impl App {
             let x = t
                 .near
                 .x
-                .clamp(8.0, (screen.width - text_card::WIDTH - 8.0).max(8.0));
+                .clamp(8.0, (screen.width - t.width() - 8.0).max(8.0));
             let below = t.near.y + t.near.height + 8.0;
             let y = match below + h <= screen.height - 8.0 {
                 true => below,

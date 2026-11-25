@@ -37,21 +37,58 @@ pub fn deps_for(source: &str, target: &str, one_shot: bool) -> Result<(Real, Str
     Ok((Real::new(source, via), target.to_string()))
 }
 
+/// Why `translate_text` gave no translation.
+#[derive(Debug, Clone)]
+pub enum TextError {
+    /// The offline pair's models are not on disk: the user may download them (`Model`).
+    Missing(Model),
+    /// What to tell the user (its first line is the short reason).
+    Failed(String),
+}
+
+/// An offline translation pair that can be downloaded: its size and the download.
+#[derive(Debug, Clone, Copy)]
+pub struct Model(&'static mt::Pair);
+
+impl Model {
+    /// The pair `source` -> `target`, if there is one.
+    #[cfg(test)]
+    pub fn of(source: &str, target: &str) -> Option<Model> {
+        mt::pair(source, target).map(Model)
+    }
+
+    /// The whole pair's size (what the download card says).
+    pub fn bytes(&self) -> u64 {
+        self.0.full_size()
+    }
+
+    /// Downloads the pair's missing files (blocking; `progress(done, total)`); `Err` = why not.
+    pub fn download(&self, progress: impl FnMut(u64, u64)) -> Result<(), String> {
+        self.0
+            .ensure(progress)
+            .map_err(|e| crate::features::text_reading::model_download::why(&e))
+    }
+}
+
 /// `text` (the right-click menu's selected words) translated into `target` with the configured
 /// engine: offline by default, the AI provider or the online service as chosen. Blocking.
 /// `Err` = what to tell the user. Text already in the target comes back as it is.
-pub fn translate_text(text: &str, source: &str, target: &str) -> Result<String, String> {
+pub fn translate_text(text: &str, source: &str, target: &str) -> Result<String, TextError> {
     use crate::features::translate::Block;
     use crate::features::translate::pipeline::{Cache, Deps, translate_blocks};
-    let (real, target) = deps_for(source, target, true)?;
+    let (real, target) = deps_for(source, target, true).map_err(TextError::Failed)?;
     real.read(&[text]);
     let block = Block {
         lines: Vec::new(),
         text: text.split_whitespace().collect::<Vec<_>>().join(" "),
         bounds: [0.0; 4],
     };
-    let out =
-        translate_blocks(&[block], &target, &Cache::new(8), &real).map_err(|e| e.to_string())?;
+    let out = translate_blocks(&[block], &target, &Cache::new(8), &real).map_err(|e| match real
+        .missing()
+    {
+        Some(pair) => TextError::Missing(Model(pair)),
+        None => TextError::Failed(e.to_string()),
+    })?;
     Ok(out
         .into_iter()
         .next()

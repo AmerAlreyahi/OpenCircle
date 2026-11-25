@@ -6477,7 +6477,12 @@ fn w106_the_menus_translate_shows_the_selected_texts_translation_in_a_card() {
     let i = row_at(&app, &Row::Translate);
     let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
     let id = app.o.text_card.as_ref().unwrap().id;
-    let _ = app.update(Message::TextTranslated(id, Err("No offline model".into())));
+    let _ = app.update(Message::TextTranslated(
+        id,
+        Err(crate::features::translate::TextError::Failed(
+            "No offline model".into(),
+        )),
+    ));
     let texts = texts_of(&app, app.overlay);
     assert!(
         texts.iter().any(|t| t == "Translation could not finish"),
@@ -6489,6 +6494,60 @@ fn w106_the_menus_translate_shows_the_selected_texts_translation_in_a_card() {
         shift: false,
     }));
     assert!(app.o.text_card.is_none());
+}
+
+/// W106: when the offline model for the pair is not on disk the card offers the download (the
+/// one download card, with its size) instead of an error; after it, the card translates.
+#[test]
+fn w106_the_menus_translate_offers_the_model_download_when_it_is_missing() {
+    use crate::features::circle::screens::context_menu::{Msg, Row};
+    use crate::features::circle::screens::text_card::{self, Download, State};
+    use crate::features::translate::{Model, TextError};
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(&app, &Row::Translate);
+    let _ = app.update(Message::ContextMenu(Msg::Pick(i)));
+    let id = app.o.text_card.as_ref().unwrap().id;
+    let model = Model::of("en", "ar").expect("a pair");
+    let _ = app.update(Message::TextTranslated(id, Err(TextError::Missing(model))));
+    let card = app.o.text_card.as_ref().unwrap();
+    assert_eq!(card.state, State::NeedsModel(model.bytes()));
+    let texts = texts_of(&app, app.overlay);
+    assert!(
+        texts.iter().any(|t| t == "Download"),
+        "the download card asks: {texts:?}"
+    );
+    // Download starts it (the task is not run here: no network); shares move the bar
+    let _ = app.update(Message::TextCard(text_card::Msg::Download));
+    assert_eq!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::Downloading(0.0)
+    );
+    let _ = app.update(Message::TextModel(id, Download::Progress(0.5)));
+    assert_eq!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::Downloading(0.5)
+    );
+    // a failure offers it again; an older request's news is dropped
+    let _ = app.update(Message::TextModel(
+        id,
+        Download::Done(Err("offline".into())),
+    ));
+    assert_eq!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::DownloadFailed("offline".into())
+    );
+    let _ = app.update(Message::TextModel(id + 9, Download::Done(Ok(()))));
+    assert!(matches!(
+        app.o.text_card.as_ref().unwrap().state,
+        State::DownloadFailed(_)
+    ));
+    // done: it translates
+    let _ = app.update(Message::TextModel(id, Download::Done(Ok(()))));
+    assert_eq!(app.o.text_card.as_ref().unwrap().state, State::Translating);
+    // Not now puts the card away
+    let _ = app.update(Message::TextCard(text_card::Msg::Dismiss));
+    assert!(app.o.text_card.is_none() && !app.o.is_none());
 }
 
 /// 201.10: select-text mode: the box answers (all its text), Select all text picks every word and
