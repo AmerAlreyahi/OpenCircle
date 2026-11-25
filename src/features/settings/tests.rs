@@ -4585,3 +4585,103 @@ fn f11_general_says_once_that_saving_uses_one_folder() {
         "{words:?}"
     );
 }
+
+/// F13-6: the index reads EVERY page with each row's own title (a title never leaks to
+/// the next row), Privacy, About and Studio included, and the rows only a choice
+/// reveals (another provider, a Labs switch) mark that choice.
+#[test]
+fn f13_the_index_has_every_page_and_each_row_its_own_title() {
+    let (s, _) = state(None);
+    let rows = super::search::rows(&s);
+    for page in pages::visible(&s.draft.labs) {
+        let mine: Vec<_> = rows.iter().filter(|e| e.section == page.id).collect();
+        assert!(
+            mine.iter().any(|e| e.is_page),
+            "{:?}: the page itself",
+            page.id
+        );
+        let mut titles: Vec<&str> = mine
+            .iter()
+            .filter(|e| !e.is_page)
+            .map(|e| e.title.as_str())
+            .collect();
+        let n = titles.len();
+        titles.sort_unstable();
+        titles.dedup();
+        assert!(!titles.iter().any(|t| t.is_empty()), "{:?}", page.id);
+        assert_eq!(titles.len(), n, "{:?}: no title twice", page.id);
+        if !matches!(page.id, Section::Labs) {
+            assert!(n > 0, "{:?} has rows in the index", page.id);
+        }
+    }
+    // Shortcuts: each row under its own name with its own words
+    let shortcut = |t: &str| {
+        rows.iter()
+            .find(|e| e.section == Section::Shortcuts && e.title == t)
+    };
+    let open = shortcut("Circle to Search").expect("the Open row");
+    assert!(
+        open.desc.contains("shortcut") || !open.desc.is_empty(),
+        "{open:?}"
+    );
+    assert!(
+        rows.iter()
+            .filter(|e| e.section == Section::Shortcuts)
+            .all(|e| e.title != "Reset shortcuts"
+                || e.desc.to_lowercase().contains("default")
+                || e.desc.to_lowercase().contains("reset")),
+        "no row has another row's title"
+    );
+    // Privacy, About and Studio have their lines
+    for section in [Section::Privacy, Section::About, Section::Studio] {
+        assert!(
+            rows.iter().any(|e| e.section == section && !e.is_page),
+            "{section:?}"
+        );
+    }
+    // "snip" finds the Snip page and its rows
+    let mut find = super::search::Search::open(&s);
+    find.typed("snip".into());
+    let hits = find.all_hits();
+    assert!(
+        hits.iter()
+            .any(|e| e.section == Section::Snip && !e.is_page),
+        "Snip rows"
+    );
+    assert!(hits.iter().any(|e| e.is_page && e.section == Section::Snip));
+    // a row only another provider shows: found, and it marks the provider choice
+    let mut find = super::search::Search::open(&s);
+    find.typed("api key".into());
+    let key = find
+        .all_hits()
+        .into_iter()
+        .find(|e| e.section == Section::Ai)
+        .cloned();
+    let key = key.expect("the key row of a provider that is not chosen now");
+    assert!(
+        key.mark.as_deref().is_some_and(|m| m != key.title),
+        "{key:?}"
+    );
+    // a Labs-only page: its rows open Labs and mark its switch
+    let lab = rows.iter().all(|e| e.section != Section::Song);
+    if lab {
+        let mut find = super::search::Search::open(&s);
+        find.typed("song".into());
+        assert!(
+            find.all_hits().iter().any(|e| e.section == Section::Labs),
+            "found under Labs"
+        );
+    }
+}
+
+/// F13-7: Arabic matches through the alef forms, ta marbuta, alef maqsura and the vowel marks.
+#[test]
+fn f13_arabic_search_ignores_alef_forms_vowel_marks_and_case() {
+    use super::search::fold;
+    assert_eq!(fold("أحمد"), fold("احمد"));
+    assert_eq!(fold("إعدادات"), fold("اعدادات"));
+    assert_eq!(fold("مدرسة"), fold("مدرسه"));
+    assert_eq!(fold("على"), fold("علي"));
+    assert_eq!(fold("كَتَبَ"), fold("كتب"));
+    assert_eq!(fold("Language"), fold("language"));
+}

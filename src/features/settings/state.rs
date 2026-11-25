@@ -1628,7 +1628,7 @@ fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     };
     state.search = None;
     let out = update(state, Message::Section(hit.section));
-    state.marked = (!hit.is_page).then_some(hit.title);
+    state.marked = hit.mark;
     state.marked_at = state.marked.as_ref().map(|_| Instant::now());
     match (out, state.marked.is_some()) {
         // the page scrolls to the row (a row down the page: where it is in the list)

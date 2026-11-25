@@ -238,6 +238,15 @@ fn headed<'a>(
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    // the search finds the cards' words and every credit, shown or folded
+    let p = profile();
+    crate::shared::kit::setting_row::indexed("OpenCircle", t!(ab_what));
+    crate::shared::kit::setting_row::indexed(&p.name, &p.bio);
+    crate::shared::kit::setting_row::indexed(t!(ab_others), t!(ab_others_desc));
+    for (what, by, licence) in made_by() {
+        crate::shared::kit::setting_row::indexed(what, &format!("{by} {licence}"));
+    }
+    crate::shared::kit::setting_row::indexed(t!(ab_no_telemetry), "");
     let mut page = column![app(), developer(), others(state)];
     if let Some(credits) = clip_notice(state) {
         page = page.push(credits);

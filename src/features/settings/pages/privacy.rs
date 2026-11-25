@@ -10,6 +10,7 @@ use crate::shared::app_language::{S, tr};
 use crate::shared::kit::card::card;
 use crate::shared::kit::dir;
 use crate::shared::kit::divider::divider;
+use crate::shared::kit::setting_row;
 use crate::shared::kit::text::{sub, text};
 use crate::shared::kit::tokens::{Role, space};
 use crate::t;
@@ -32,6 +33,10 @@ const ONLINE: (S, S, S) = (S::p_online_a, S::p_online_b, S::p_online_c);
 const WEB: (S, S, S) = (S::p_web_a, S::p_web_b, S::p_web_c);
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    // the search finds every line, also those this state hides
+    for (feature, leaves, goes) in ROWS.iter().chain([&SONG, &ONLINE, &WEB]) {
+        setting_row::indexed(tr(*feature), &format!("{} {}", tr(*leaves), tr(*goes)));
+    }
     let mut lines = ROWS.to_vec();
     if state.draft.labs.has(Feature::Song) {
         lines.insert(lines.len() - 1, SONG);

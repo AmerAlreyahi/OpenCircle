@@ -12,7 +12,7 @@ use super::super::state::{Message, Slot, State, key_labels};
 use crate::shared::kit::button::Kind as Button;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::shortcut_field::{self, shortcut_field};
-use crate::shared::kit::text::{error, text};
+use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
 
@@ -87,8 +87,7 @@ pub(super) fn row(state: &State, slot: Slot) -> Element<'_, Message> {
         Message::Record(slot),
     );
     // the problem under the name, above the hint
-    let mut name_block =
-        column![text(Role::ROW_TITLE, label)].align_x(crate::shared::kit::dir::start());
+    let mut name_block = column![title(label)].align_x(crate::shared::kit::dir::start());
     if let Some(p) = problem {
         name_block = name_block.push(error(Role::ROW_DESC, p));
     }

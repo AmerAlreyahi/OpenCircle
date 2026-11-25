@@ -58,15 +58,26 @@ pub fn highlighting<T>(title: Option<&str>, build: impl FnOnce() -> T) -> T {
     built
 }
 
-/// Notes the row just built (its title is `LAST_TITLE`): for `harvest` and `highlighting`.
+/// Notes the row just built: its title is the one `title` set for it (taken here, so
+/// a row built without one is not given the last row's), for `harvest` and `highlighting`.
 fn note(desc: &str) -> bool {
-    let title = LAST_TITLE.with(|t| t.borrow().clone());
+    let title = LAST_TITLE.with(|t| std::mem::take(&mut *t.borrow_mut()));
     HARVEST.with(|h| {
         if let Some(found) = h.borrow_mut().as_mut() {
             found.push((title.clone(), desc.to_string()));
         }
     });
-    HIGHLIGHT.with(|h| h.borrow().as_deref() == Some(title.as_str()))
+    !title.is_empty() && HIGHLIGHT.with(|h| h.borrow().as_deref() == Some(title.as_str()))
+}
+
+/// A line of a page that is not a `row` (a Privacy table line, an About credit) but can be
+/// found by the search: its title and words. Draws nothing.
+pub fn indexed(title: &str, desc: &str) {
+    HARVEST.with(|h| {
+        if let Some(found) = h.borrow_mut().as_mut() {
+            found.push((title.to_string(), desc.to_string()));
+        }
+    });
 }
 
 fn text_block<'a, Message: 'a>(
