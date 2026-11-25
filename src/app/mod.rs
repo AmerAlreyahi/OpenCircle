@@ -480,17 +480,18 @@ impl App {
         };
         // "Snip closed . Undo": Ctrl+Z in any of our windows presses it too.
         let undo_key = match self.snip_undo {
-            Some(_) => iced::event::listen_with(|event, _, _| match event {
+            Some(_) => iced::event::listen_with(|event, status, _| match event {
                 iced::Event::Keyboard(keyboard::Event::KeyPressed {
                     key,
                     physical_key,
                     modifiers,
                     ..
-                }) if modifiers.command()
+                }) if status == iced::event::Status::Ignored
+                    && modifiers.command()
                     && !modifiers.shift()
                     && key.to_latin(physical_key) == Some('z') =>
                 {
-                    Some(Message::SnipUndo)
+                    Some(Message::SnipUndoKey)
                 }
                 _ => None,
             }),

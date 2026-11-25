@@ -896,6 +896,18 @@ impl App {
         Task::batch([older, pill, over])
     }
 
+    /// Another OpenCircle window that has its own Ctrl+Z (the Studio, Settings, the AI
+    /// chat) is open: the key is theirs, never the pill's as well.
+    pub(crate) fn undo_key_is_taken(&mut self) -> bool {
+        self.windows.studio_mut().is_some()
+            || self
+                .windows
+                .id(crate::app::windows::Kind::Settings)
+                .is_some()
+            || self.chat.is_some()
+            || self.chat_win.is_some()
+    }
+
     /// The pill's Undo (or Ctrl+Z): the capture and its drawings open again, in
     /// the Studio (where Snip's own "Open in Studio" takes them).
     pub(crate) fn snip_undo_restore(&mut self) -> Task<Message> {

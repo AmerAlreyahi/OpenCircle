@@ -90,9 +90,10 @@ impl App {
             Message::Windows(windows::Msg::StudioCutOut) => self.studio_cut_out(),
             Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
             Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),
-            Message::Windows(windows::Msg::ToastAction) | Message::SnipUndo => {
-                self.snip_undo_restore()
-            }
+            Message::Windows(windows::Msg::ToastAction) => self.snip_undo_restore(),
+            // never alongside another undo: the Studio, Settings or the chat may mean it
+            Message::SnipUndoKey if self.undo_key_is_taken() => Task::none(),
+            Message::SnipUndoKey => self.snip_undo_restore(),
             Message::SnipUndoGone(n) => {
                 if self.snip_undo.as_ref().is_some_and(|(k, _)| *k == n) {
                     self.snip_undo = None;
@@ -920,7 +921,7 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::CardMovedOn(..)
             | Message::ChatFrame(_)
             | Message::Windows(_)
-            | Message::SnipUndo
+            | Message::SnipUndoKey
             | Message::SnipUndoGone(_)
             | Message::StudioTranslate(..)
             | Message::ChatHome(_)

@@ -513,7 +513,9 @@ mod tests {
         let words = app.windows.toasts();
         assert_eq!(words.len(), 1, "the pill");
         assert_eq!(words[0].0, "Snip closed");
-        let task = app.update(crate::app::message::Message::SnipUndo);
+        let task = app.update(crate::app::message::Message::Windows(
+            crate::app::windows::Msg::ToastAction,
+        ));
         run_task(&mut app, task);
         assert!(app.snip_undo.is_none());
         assert!(app.windows.studio_mut().is_some(), "the picture is back");
@@ -571,8 +573,28 @@ mod tests {
         let _t = again.on_snip_toolbar(E::Close);
         assert_eq!(again.windows.toasts().len(), 1, "the first pill went");
         assert!(again.snip_undo.is_some(), "its own picture");
-        let _t = again.update(crate::app::message::Message::SnipUndo);
+        let _t = again.update(crate::app::message::Message::Windows(
+            crate::app::windows::Msg::ToastAction,
+        ));
         assert!(again.windows.toasts().is_empty(), "the pill closes on Undo");
+    }
+
+    /// F5-9: Ctrl+Z undoes the pill only when nothing else could mean it: not while the
+    /// Studio (or Settings, or the chat) is open, never alongside another undo.
+    #[test]
+    fn f5_ctrl_z_is_the_pills_only_when_no_other_window_could_mean_it() {
+        use crate::app::message::Message as M;
+        let mut app = snip_toolbar_open();
+        draw_rect(&mut app);
+        let _t = app.on_snip_toolbar(E::Close);
+        let _ = app.windows.open_studio(None);
+        let _ = app.update(M::SnipUndoKey);
+        assert!(
+            app.snip_undo.is_some(),
+            "the Studio's own Ctrl+Z, not the pill's"
+        );
+        let _ = app.update(M::Windows(crate::app::windows::Msg::ToastAction));
+        assert!(app.snip_undo.is_none(), "the pill's own word still works");
     }
 
     /// F5-3: no drawings, no pill (Esc closes silently as before); F5-4: when

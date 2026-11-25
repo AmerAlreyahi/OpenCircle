@@ -111,8 +111,8 @@ pub(crate) enum Message {
     SearchOpened(Result<(), String>),
     /// The toast has been shown long enough.
     ToastDone,
-    /// Undo on the "Snip closed" pill (or Ctrl+Z): the capture comes back with its drawings.
-    SnipUndo,
+    /// Ctrl+Z that nothing took: Undo only when no other OpenCircle window could mean it.
+    SnipUndoKey,
     /// The "Snip closed" pill `.0` is over: the kept drawings go.
     SnipUndoGone(u32),
     /// The selection with this area was scanned (a stale area is ignored).

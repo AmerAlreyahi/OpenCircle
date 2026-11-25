@@ -786,7 +786,7 @@ impl Windows {
     }
 
     /// The open window of this kind, if any.
-    fn id(&self, kind: Kind) -> Option<window::Id> {
+    pub(crate) fn id(&self, kind: Kind) -> Option<window::Id> {
         match kind {
             Kind::Settings => self.settings.as_ref().map(|(id, _)| *id),
             Kind::Onboarding => self.onboarding.as_ref().map(|(id, _)| *id),
