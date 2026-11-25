@@ -1192,7 +1192,8 @@ production systems.
   rule, Redo, double-click to Studio, AI chat, download card, tray, Arabic, start with Windows. Decisions:
   - TITLE BARS are NEVER mirrored in Arabic, in every window (Settings, Studio, onboarding, dialogs): same layout as English;
     the Settings search sits EXACTLY in the centre of the title bar.
-  - Report a problem popup opens CENTRED in its window.
+  - Report a problem popup: its BUTTONS are centred inside the popup (owner correction).
+  - Studio colour row gets a custom colour ("+") that opens Snip's colour picker (one shared component).
   - After any export finishes: a small card with Open and Show in folder (familiar "Exported" toast).
   - Onboarding step tabs fit on one line in every language (no wrapped tab like "4. ربط الذكاء الاصطناعي").
   - Steps strip (planning #204 is now IN this release, owner): "Open in OpenCircle Studio" on the strip; the strip can be dragged
