@@ -4686,6 +4686,27 @@ fn f13_arabic_search_ignores_alef_forms_vowel_marks_and_case() {
     assert_eq!(fold("Language"), fold("language"));
 }
 
+/// W107 (follow-up): a dialog's header acts as a title bar and is never mirrored either: in the Report a
+/// problem dialog the title is at the left and the x at the right in Arabic too (goldens, EN + AR).
+#[test]
+fn w107_report_dialog_header_is_never_mirrored() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    golden::each_theme(|theme, failed| {
+        for language in ["en", "ar"] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice(language)));
+            crate::shared::kit::themes::set(theme);
+            s.reporting = true;
+            let file = format!("settings-report-{language}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+        }
+    });
+    app_language::set(Lang::En);
+}
+
 /// W107-3: goldens of the Settings title bar, English and Arabic (the same layout, only the text),
 /// light and dark, at the smallest and the usual width.
 #[test]

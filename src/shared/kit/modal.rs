@@ -13,7 +13,7 @@ use super::surface::{Material, surface};
 use super::text::{sub, text};
 use super::tokens::{Role, fixed, radius, space};
 
-/// The dialog's top line: `title` (and a grey one-line `subtitle`) and the X.
+/// The dialog's top line (it acts as a title bar): `title` (and a grey one-line `subtitle`) and the X.
 pub fn header<'a, Message: Clone + 'a>(
     title: &'a str,
     subtitle: Option<&'a str>,
@@ -28,7 +28,8 @@ pub fn header<'a, Message: Clone + 'a>(
         None => Element::from(text(Role::CARD_HEADING, title)),
     };
     let x = icon_button::square(Icon::Close.glyph(), State::default(), Some(close));
-    crate::dir_row![container(words).width(Fill), x]
+    // (never mirrored, like a title bar: the title at the left, the x at the right, in every language)
+    iced::widget::row![container(words).width(Fill), x]
         .spacing(space::GAP)
         .align_y(Center)
         .into()
