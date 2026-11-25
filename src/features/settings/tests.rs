@@ -4813,3 +4813,29 @@ fn w107_3_the_search_is_centred_and_the_title_bar_is_never_mirrored() {
     }
     app_language::set(Lang::En);
 }
+
+/// W108 (owner round 3): the Report a problem popup's buttons are centred inside it, in both
+/// languages and themes.
+#[test]
+fn the_report_popup_centres_its_buttons() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let mut failed = Vec::new();
+    for language in ["en", "ar"] {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice(language)));
+            update(&mut s, Message::Section(Section::General));
+            update(&mut s, Message::ReportOpen);
+            themes::set(theme);
+            let file = format!("settings-report-popup-{language}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+        }
+    }
+    themes::set(&SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
