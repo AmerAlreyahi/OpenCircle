@@ -96,3 +96,31 @@ fn w111_4_the_pen_stroke_runs_through_the_pointer_path() {
         assert_eq!(base[at..at + 3], c[..3], "the stroke covers {p:?}");
     }
 }
+
+/// W111-5 (owner 2026-11-25): one click on another tool makes it the row's tool at once, even with
+/// a drawing selected; picking a sub-tool in the row updates its group's button before any drawing.
+#[test]
+fn w111_5_the_row_follows_the_active_tool_not_the_last_drawing() {
+    use crate::features::snip::screens::options_row::base_tool;
+    for studio in [false, true] {
+        let mut e = Annotator::new(page(), 1.0);
+        e.studio = studio;
+        e.update(Message::Tool(Tool::Pen));
+        e.update(Message::Press(pt(50.0, 50.0)));
+        e.update(Message::Move(pt(120.0, 90.0)));
+        e.update(Message::Release);
+        assert_eq!(base_tool(&e), Tool::Pen);
+        e.update(Message::Slot(Tool::Rect));
+        assert_eq!(e.tool, Tool::Rect);
+        assert_eq!(
+            base_tool(&e),
+            Tool::Rect,
+            "studio {studio}: the row is Shapes'"
+        );
+        // a sub-tool picked in the row shows on its group's button at once
+        e.update(Message::Tool(Tool::Arrow));
+        let group = crate::features::snip::annotate::info(Tool::Arrow).group as usize;
+        assert_eq!(e.last[group], Tool::Arrow, "studio {studio}");
+        assert_eq!(base_tool(&e), Tool::Arrow);
+    }
+}

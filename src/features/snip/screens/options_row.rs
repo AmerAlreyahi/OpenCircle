@@ -105,10 +105,14 @@ pub(crate) fn can(e: &Annotator, tool: Tool) -> Can {
     }
 }
 
-/// The tool the bar is for: the selected object's, else the active tool's.
+/// The tool the bar is for: the active tool's, except with Select, where it is the selected
+/// object's (W111: a drawing the last tool left selected never keeps its options on the bar
+/// after the user picks another tool; one click on a tool shows that tool's options at once).
 pub(crate) fn base_tool(e: &Annotator) -> Tool {
     let sel = e.selection();
-    let item = (sel.len() == 1).then(|| e.doc.items.get(sel[0])).flatten();
+    let item = (sel.len() == 1 && e.tool == Tool::Select)
+        .then(|| e.doc.items.get(sel[0]))
+        .flatten();
     match item {
         Some(item) => info(info(super::studio::tool_of(&item.shape)).slot).tool,
         None => info(info(e.tool).slot).tool,
