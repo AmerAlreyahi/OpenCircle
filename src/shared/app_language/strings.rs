@@ -29,6 +29,12 @@ macro_rules! strings {
 }
 
 strings! {
+    win_search_ph: "Search settings"
+        | "ابحث في الإعدادات";
+    win_search_none: "Nothing found"
+        | "لا نتائج";
+    win_search_keys: "Enter opens · ↑↓ move · Esc closes"
+        | "Enter للفتح · ↑↓ للتنقل · Esc للإغلاق";
     win_title: "OpenCircle Settings"
         | "إعدادات OpenCircle";
     win_pill_one: "1 problem to fix before saving"

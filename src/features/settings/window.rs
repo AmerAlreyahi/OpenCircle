@@ -45,11 +45,19 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     let header = regular(
         logo,
         t!(win_title),
-        pill(state),
+        crate::dir_row![search_field(state), pill(state)]
+            .spacing(space::GAP)
+            .align_y(Center),
         Some(maximised),
         Message::Caption,
     );
-    let mut main = column![crate::dir_row![nav(state), page(state)].height(Fill)];
+    let body: Element<'_, Message> = crate::dir_row![nav(state), page(state)].height(Fill).into();
+    // F13: the hits hang from the field, over the page
+    let body = match search_hits(state) {
+        Some(hits) => iced::widget::stack![body, hits].into(),
+        None => body,
+    };
+    let mut main = column![body];
     if state.asking_close {
         main = main.push(close_question());
     }
@@ -65,6 +73,64 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         true => modal::over(window, report_dialog(), REPORT_W, Message::Dismiss),
         false => window,
     }
+}
+
+/// The search field's width (F13).
+const SEARCH_W: f32 = 240.0;
+/// The hits' list width, and the gap between its rows.
+const HITS_W: f32 = 420.0;
+const HITS_GAP: f32 = 2.0;
+
+/// The header's search (Ctrl+F focuses it): typing opens the search.
+fn search_field(state: &State) -> Element<'_, Message> {
+    let query = state.search.as_ref().map_or("", |s| s.query.as_str());
+    let field = crate::shared::kit::field::search(t!(win_search_ph), query)
+        .id(super::search::FIELD)
+        .on_input(Message::SearchInput)
+        .on_submit(Message::SearchGo);
+    container(field).width(SEARCH_W).into()
+}
+
+/// The list of hits under the header (none while nothing is typed): "row title .
+/// page", the arrows' row marked, a hint line at its foot.
+fn search_hits(state: &State) -> Option<Element<'_, Message>> {
+    use crate::shared::kit::option_list::item;
+    let search = state
+        .search
+        .as_ref()
+        .filter(|s| !s.query.trim().is_empty())?;
+    let hits = search.hits();
+    let mut list = column![].spacing(HITS_GAP);
+    if hits.is_empty() {
+        list = list.push(sub(Role::ROW_DESC, t!(win_search_none)));
+    }
+    for (i, e) in hits.iter().enumerate() {
+        let hint = (!e.is_page).then(|| e.page.to_string());
+        list = list.push(item(
+            &e.title,
+            false,
+            hint,
+            i == search.at,
+            Message::SearchPick(i),
+        ));
+    }
+    list = list
+        .push(divider())
+        .push(sub(Role::ROW_DESC, t!(win_search_keys)));
+    let panel = surface(
+        Material::Widget,
+        crate::shared::kit::tokens::radius::CARD,
+        list,
+    )
+    .padding(space::GAP)
+    .width(HITS_W);
+    Some(
+        container(iced::widget::opaque(panel))
+            .padding(Padding::ZERO.top(space::GAP))
+            .width(Fill)
+            .center_x(Fill)
+            .into(),
+    )
 }
 
 /// The dialog's width.
@@ -160,7 +226,10 @@ fn page(state: &State) -> Element<'_, Message> {
             .push(previews::view(state).filter(|_| {
                 !(state.section == Section::Translate && state.glossaries.is_editing())
             }))
-            .push((page.view)(state));
+            .push(crate::shared::kit::setting_row::highlighting(
+                state.marked.as_deref(),
+                || (page.view)(state),
+            ));
     // at most `PAGE_MAX` wide, at the start edge (a maximised window)
     let body = (container(body).id(PAGE_ID))
         .width(Fill)

@@ -3779,12 +3779,18 @@ fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
         let rtl = app_language::rtl();
         assert_eq!(rtl, language == "ar");
         let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
-        let tabs = vec![key(Named::Tab); shown.len() + 6];
+        // (F13: the header's search field is the first stop)
+        let tabs = vec![key(Named::Tab); shown.len() + 7];
         let (_, at) = shot::focus_walk(|| view(&s), WINDOW_SIZE, &tabs);
-        let at: Vec<_> = at
+        let mut at: Vec<_> = at
             .into_iter()
             .map(|r| r.expect("Tab always focuses"))
             .collect();
+        let search = at.remove(0);
+        assert!(
+            search.y < 40.0,
+            "{language}: the search field, in the header"
+        );
         let side = |r: &iced::Rectangle| match rtl {
             false => r.x + r.width <= SIDEBAR + 1.0,
             true => r.x >= WINDOW_SIZE.width - SIDEBAR - 1.0,
@@ -3803,7 +3809,12 @@ fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
             "{language}: the page top to bottom {page:#?}"
         );
         // Enter on the second item opens its page
-        let events = [key(Named::Tab), key(Named::Tab), key(Named::Enter)];
+        let events = [
+            key(Named::Tab),
+            key(Named::Tab),
+            key(Named::Tab),
+            key(Named::Enter),
+        ];
         let (sent, _) = shot::focus_walk(|| view(&s), WINDOW_SIZE, &events);
         assert!(
             matches!(sent.as_slice(), [Message::Section(p)] if *p == shown[1]),
@@ -4383,4 +4394,120 @@ fn f1_one_name_per_feature_everywhere() {
             "{line}"
         );
     }
+}
+
+/// F13-1: the search finds page titles, row titles and row descriptions (every
+/// word of the query), title matches first, each hit with its page.
+#[test]
+fn f13_search_finds_rows_by_title_and_description_with_their_page() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::SearchOpen);
+    update(&mut s, Message::SearchInput("language".into()));
+    let search = s.search.as_ref().unwrap();
+    let hits: Vec<_> = search
+        .hits()
+        .iter()
+        .map(|e| (e.page, e.title.as_str()))
+        .collect();
+    assert!(hits.contains(&("General", "App language")), "{hits:?}");
+    assert!(
+        hits.iter().any(|(page, _)| *page == "Translate"),
+        "{hits:?}"
+    );
+    // a page title, and a word of a description only
+    update(&mut s, Message::SearchInput("snip".into()));
+    let search = s.search.as_ref().unwrap();
+    assert!(search.hits().iter().any(|e| e.is_page && e.page == "Snip"));
+    update(&mut s, Message::SearchInput("zzzz".into()));
+    assert!(s.search.as_ref().unwrap().hits().is_empty());
+    // every word must match
+    update(&mut s, Message::SearchInput("save folder".into()));
+    let search = s.search.as_ref().unwrap();
+    assert!(search.hits().iter().all(|e| {
+        let all = format!("{} {} {}", e.page, e.title, e.desc).to_lowercase();
+        all.contains("save") && all.contains("folder")
+    }));
+    assert!(!search.hits().is_empty());
+}
+
+/// F13-2: the same in Arabic, from the string table.
+#[test]
+fn f13_search_reads_the_arabic_words_too() {
+    use crate::shared::app_language::{self, Lang};
+    let (mut s, _) = state(None);
+    app_language::set(Lang::Ar);
+    update(&mut s, Message::SearchOpen);
+    update(&mut s, Message::SearchInput("اللغة".into()));
+    let found = s.search.as_ref().unwrap().hits().len();
+    app_language::set(Lang::En);
+    assert!(found > 0, "the Arabic rows are searchable");
+}
+
+/// F13-3: Enter (or a click) on a hit opens its page and marks the row; the
+/// arrows move the choice; Esc closes; Ctrl+F opens.
+#[test]
+fn f13_enter_jumps_to_the_row_and_marks_it_and_the_keys_work() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    update(&mut s, Message::SearchInput("source language".into()));
+    let target = s.search.as_ref().unwrap().hits()[0].clone();
+    update(&mut s, Message::SearchGo);
+    assert!(s.search.is_none(), "the list closes");
+    assert_eq!(s.section, target.section);
+    assert_eq!(s.marked.as_deref(), Some(target.title.as_str()));
+    // another page: the mark goes
+    update(&mut s, Message::Section(Section::About));
+    assert!(s.marked.is_none());
+    // the arrows move, a click picks
+    update(&mut s, Message::SearchInput("language".into()));
+    update(&mut s, Message::SearchMove(1));
+    assert_eq!(s.search.as_ref().unwrap().at, 1);
+    update(&mut s, Message::SearchMove(-5));
+    assert_eq!(s.search.as_ref().unwrap().at, 0);
+    update(&mut s, Message::SearchPick(1));
+    assert!(s.search.is_none());
+    update(&mut s, Message::SearchInput("language".into()));
+    update(&mut s, Message::SearchClose);
+    assert!(s.search.is_none());
+    // Ctrl+F, and the arrows only while it is open
+    use iced::keyboard::{self, Key, Modifiers, key::Physical};
+    let press = |code, modifiers| {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Unidentified,
+            modified_key: Key::Unidentified,
+            physical_key: Physical::Code(code),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    };
+    use keyboard::key::Code;
+    assert!(matches!(
+        super::find_key(press(Code::KeyF, Modifiers::CTRL), false),
+        Some(Message::SearchOpen)
+    ));
+    assert!(super::find_key(press(Code::ArrowDown, Modifiers::empty()), false).is_none());
+    assert!(matches!(
+        super::find_key(press(Code::ArrowDown, Modifiers::empty()), true),
+        Some(Message::SearchMove(1))
+    ));
+}
+
+/// F13-4: the results as drawn (the field in the header, the hits under it).
+#[test]
+fn f13_the_results_match_their_golden_image() {
+    use crate::shared::kit::testing::{golden, shot};
+    use crate::shared::kit::themes;
+    golden::each_theme(|theme, failed| {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::SearchInput("language".into()));
+        themes::set(theme);
+        let words = shot::texts(view(&s));
+        assert!(words.iter().any(|t| t == "App language"), "{words:?}");
+        let file = format!("settings-search-{}", theme.id);
+        failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+            view(&s)
+        }));
+    });
 }

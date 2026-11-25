@@ -575,6 +575,9 @@ fn quick_text(config: &Config) -> Vec<SlotText> {
 
 pub struct State {
     pub(super) section: Section,
+    /// Settings search (F13): the open search, and the row a hit marked.
+    pub(super) search: Option<super::search::Search>,
+    pub(super) marked: Option<String>,
     pub(super) draft: Config,
     pub(super) saved: Config,
     /// `None` = the real config path.
@@ -724,6 +727,13 @@ static EDITOR_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 #[derive(Debug, Clone)]
 pub enum Message {
     Section(Section),
+    /// Settings search (F13): Ctrl+F, typing, up / down, Enter, a click, Esc.
+    SearchOpen,
+    SearchInput(String),
+    SearchMove(i32),
+    SearchGo,
+    SearchPick(usize),
+    SearchClose,
     /// The header: drag, minimise, maximise, close (the shell does them).
     Caption(Caption),
     DefaultAction(DefaultAction),
@@ -1138,6 +1148,8 @@ impl State {
         let (recognizers, profile) = crate::features::text_reading::system::windows_languages();
         let mut s = State {
             section: Section::General,
+            search: None,
+            marked: None,
             saved: config.clone(),
             draft: config,
             path,
@@ -1598,6 +1610,21 @@ pub(super) fn issue(problems: &[Problem], key: &str) -> Option<String> {
 /// valid is written at once, so nothing is lost on close (#136). A draft with
 /// problems is held back (the footer says why) and closing asks about it.
 /// The write itself runs off the UI thread (`Outcome::Write`).
+/// Settings search: opens the `at`th hit's page and marks its row.
+fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
+    let hit = (state.search.as_ref())
+        .zip(at)
+        .and_then(|(s, i)| s.hit(i))
+        .cloned();
+    let Some(hit) = hit else {
+        return Outcome::None;
+    };
+    state.search = None;
+    let out = update(state, Message::Section(hit.section));
+    state.marked = (!hit.is_page).then_some(hit.title);
+    out
+}
+
 pub fn update(state: &mut State, message: Message) -> Outcome {
     let change = !matches!(
         message,
@@ -1614,6 +1641,12 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Height(_)
             | Message::Step(..)
             | Message::Caption(_)
+            | Message::SearchOpen
+            | Message::SearchInput(_)
+            | Message::SearchMove(_)
+            | Message::SearchGo
+            | Message::SearchPick(_)
+            | Message::SearchClose
             | Message::CloseSave
             | Message::CloseDiscard
             | Message::CloseKeep
@@ -1655,7 +1688,33 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
     }
     match message {
         Message::Caption(_) => {}
+        Message::SearchOpen => {
+            if state.search.is_none() {
+                state.search = Some(super::search::Search::open(state));
+            }
+            return Outcome::Focus(super::search::FIELD);
+        }
+        Message::SearchInput(q) => {
+            if state.search.is_none() {
+                state.search = Some(super::search::Search::open(state));
+            }
+            if let Some(s) = &mut state.search {
+                s.typed(q);
+            }
+        }
+        Message::SearchMove(by) => {
+            if let Some(s) = &mut state.search {
+                s.step(by);
+            }
+        }
+        Message::SearchClose => state.search = None,
+        Message::SearchGo => {
+            let at = state.search.as_ref().map(|s| s.at);
+            return open_hit(state, at);
+        }
+        Message::SearchPick(i) => return open_hit(state, Some(i)),
         Message::Section(s) => {
+            state.marked = None;
             if s != state.section {
                 state.moved = Some((state.section, Instant::now()));
             }
@@ -2202,8 +2261,13 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         });
         return Subscription::batch([esc, clock]);
     }
+    // F13: Ctrl+F opens the search; with it open the arrows move, Esc closes
+    let find = match state.search.is_some() {
+        true => event::listen_with(|event, _status, _window| find_key(event, true)),
+        false => event::listen_with(|event, _status, _window| find_key(event, false)),
+    };
     if state.recording.is_none() {
-        return clock;
+        return Subscription::batch([clock, find]);
     }
     let keys = event::listen_with(|event, _status, _window| {
         if let iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) = event {
@@ -2212,6 +2276,29 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         chord_of(event).map(Message::Key)
     });
     Subscription::batch([keys, clock])
+}
+
+/// F13: Ctrl+F opens Settings search; with it `open`, the arrows move and Esc closes it.
+pub(super) fn find_key(event: iced::Event, open: bool) -> Option<Message> {
+    use keyboard::key::{Code, Physical};
+    let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        physical_key: Physical::Code(code),
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+    let bare = modifiers.is_empty();
+    match code {
+        Code::KeyF if modifiers.control() && !modifiers.alt() && !modifiers.shift() => {
+            Some(Message::SearchOpen)
+        }
+        Code::ArrowDown if open && bare => Some(Message::SearchMove(1)),
+        Code::ArrowUp if open && bare => Some(Message::SearchMove(-1)),
+        Code::Escape if open && bare => Some(Message::SearchClose),
+        _ => None,
+    }
 }
 
 /// Esc while a question asks (Reset shortcuts, Clear all, closing): cancel it.

@@ -5,6 +5,7 @@ pub(crate) mod labs;
 mod model_list;
 mod pages;
 pub(crate) mod previews;
+pub(crate) mod search;
 mod state;
 #[cfg(test)]
 pub(crate) mod tests;

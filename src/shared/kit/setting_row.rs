@@ -24,7 +24,49 @@ pub const ACTION: &str = "setting-row-action";
 
 /// A row's title: `ROW_TITLE` text.
 pub fn title<'a, Message: 'a>(s: impl IntoFragment<'a>) -> Element<'a, Message> {
+    let s = s.into_fragment();
+    LAST_TITLE.with(|t| *t.borrow_mut() = s.to_string());
     super::text::text(Role::ROW_TITLE, s).into()
+}
+
+// ---- Settings search (F13): the rows' own words, no second list to keep ----
+
+thread_local! {
+    /// The title of the row being built (set by `title`).
+    static LAST_TITLE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    /// While `harvest` runs: every (title, description) built.
+    static HARVEST: std::cell::RefCell<Option<Vec<(String, String)>>> = const { std::cell::RefCell::new(None) };
+    /// The row title `highlighting` marks.
+    static HIGHLIGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `build` and returns what it built plus the (title, description) of every
+/// `row` / `block` in it, in order. ponytail: a row built without `title` + `row` / `block`
+/// is not listed; add when a page needs it.
+pub fn harvest<T>(build: impl FnOnce() -> T) -> (T, Vec<(String, String)>) {
+    HARVEST.with(|h| *h.borrow_mut() = Some(Vec::new()));
+    let built = build();
+    let found = HARVEST.with(|h| h.borrow_mut().take()).unwrap_or_default();
+    (built, found)
+}
+
+/// Runs `build`; the row titled `title` is drawn marked (a search hit).
+pub fn highlighting<T>(title: Option<&str>, build: impl FnOnce() -> T) -> T {
+    HIGHLIGHT.with(|h| *h.borrow_mut() = title.map(str::to_string));
+    let built = build();
+    HIGHLIGHT.with(|h| *h.borrow_mut() = None);
+    built
+}
+
+/// Notes the row just built (its title is `LAST_TITLE`): for `harvest` and `highlighting`.
+fn note(desc: &str) -> bool {
+    let title = LAST_TITLE.with(|t| t.borrow().clone());
+    HARVEST.with(|h| {
+        if let Some(found) = h.borrow_mut().as_mut() {
+            found.push((title.clone(), desc.to_string()));
+        }
+    });
+    HIGHLIGHT.with(|h| h.borrow().as_deref() == Some(title.as_str()))
 }
 
 fn text_block<'a, Message: 'a>(
@@ -42,8 +84,22 @@ fn text_block<'a, Message: 'a>(
     block
 }
 
-fn ruled<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    column![container(content).padding([space::ROW_Y, 0.0]), divider()].into()
+fn ruled<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    marked: bool,
+) -> Element<'a, Message> {
+    let row = container(content).padding([space::ROW_Y, 0.0]);
+    let row = match marked {
+        true => row
+            .padding([space::ROW_Y, space::GAP])
+            .style(|_| iced::widget::container::Style {
+                background: Some(super::themes::c().accent_soft.into()),
+                border: iced::Border::default().rounded(super::tokens::radius::CONTROL),
+                ..Default::default()
+            }),
+        false => row,
+    };
+    column![row, divider()].into()
 }
 
 /// The text, then the control in the page's control column.
@@ -52,6 +108,8 @@ pub fn row<'a, Message: 'a>(
     desc: impl IntoFragment<'a>,
     control: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    let desc = desc.into_fragment();
+    let marked = note(&desc);
     let text = container(text_block(title, desc))
         .width(Fill)
         .align_x(super::dir::start())
@@ -68,6 +126,7 @@ pub fn row<'a, Message: 'a>(
             control
         ]
         .align_y(iced::Center),
+        marked,
     )
 }
 
@@ -134,9 +193,11 @@ pub fn block<'a, Message: 'a>(
     desc: &'a str,
     content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    let marked = note(desc);
     ruled(
         column![text_block(title, desc), content.into()]
             .spacing(BLOCK_GAP)
             .align_x(super::dir::start()),
+        marked,
     )
 }
