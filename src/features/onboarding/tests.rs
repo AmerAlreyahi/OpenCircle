@@ -550,9 +550,9 @@ fn the_step_tabs_fit_on_one_line_in_every_language() {
 fn tabs_that_do_not_fit_say_so_and_shrink_alike() {
     let (w, fits) = crate::shared::kit::segmented::spread_layout(
         120.0,
-        &["1. Welcome to it", "2. Try it out now"],
+        // one label clearly longer in any font (Windows measures with another font than Linux)
+        &["1. Go", "2. A much longer label than the first"],
     );
     assert!(!fits);
-    // text widths differ slightly per OS (Windows CI measured both labels alike): the longer is never narrower
-    assert!(w[0] <= w[1] && w.iter().sum::<f32>() < 120.0, "{w:?}");
+    assert!(w[0] < w[1] && w.iter().sum::<f32>() < 120.0, "{w:?}");
 }
