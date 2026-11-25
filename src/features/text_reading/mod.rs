@@ -551,6 +551,21 @@ fn few(
     }
 }
 
+/// What a part's second read does: `few`'s choice and whether it ends the
+/// second reader. Only "few lines left: read them all" ends it: a part whose
+/// strips own no line still to read has nothing to read and must not stop the
+/// parts after it (a browser page's Arabic CER 0.80 -> 0.33).
+fn part_plan(
+    strips: Vec<(u32, u32)>,
+    left: Vec<[f32; 4]>,
+    all: usize,
+) -> (Vec<(u32, u32)>, Vec<[f32; 4]>, bool) {
+    let few_left = left.len() * 5 <= all;
+    let (full, direct) = few(strips, left, all);
+    let done = few_left && full.is_empty();
+    (full, direct, done)
+}
+
 /// Of `strips`, those that own the middle of one of `lines`.
 fn owning(strips: Vec<(u32, u32)>, lines: &[[f32; 4]]) -> Vec<(u32, u32)> {
     let owns = |&(a, b): &(u32, u32)| {
@@ -989,8 +1004,8 @@ impl Engine {
                     true => Vec::new(),
                     false => strips(h, self.grid(f, rows)?.owned, rows),
                 };
-                match few(strips, left, all) {
-                    (full, direct) if full.is_empty() => {
+                match part_plan(strips, left, all) {
+                    (full, direct, true) => {
                         let direct: Vec<[f32; 4]> = (direct.into_iter())
                             .filter(|b| !f.read.contains(b))
                             .collect();
@@ -998,7 +1013,7 @@ impl Engine {
                         f.done = true;
                         (full, direct)
                     }
-                    (full, _) => (full, Vec::new()),
+                    (full, _, false) => (full, Vec::new()),
                 }
             }
             (None, true) => (strips(h, self.grid(f, rows)?.owned, rows), Vec::new()),
@@ -1759,6 +1774,23 @@ mod tests {
         assert_eq!(few(strips(1080, 256, None), lines.to_vec(), 9).0.len(), 2);
         assert!(holds(&[0.0, 0.0, 100.0, 20.0], &[40.0, 5.0, 10.0, 10.0]));
         assert!(!holds(&[0.0, 0.0, 100.0, 20.0], &[95.0, 5.0, 20.0, 10.0]));
+    }
+
+    /// W110 fix 2: a part whose strips own none of the lines still to read
+    /// reads nothing and must not stop the second reader; only "few lines
+    /// left: read them all" ends it.
+    #[test]
+    fn a_part_with_nothing_to_read_does_not_end_the_second_reader() {
+        let lines = [[0.0, 900.0, 50.0, 20.0]; 5];
+        // 5 of 10 left (not few), the part's strips (rows 0..100) own none
+        let (full, direct, done) = part_plan(vec![(0, 100)], lines.to_vec(), 10);
+        assert!(full.is_empty() && direct.is_empty());
+        assert!(!done, "an empty part ended the read");
+        // 5 of 30 left (few): read them all at once, and that is the end
+        let (full, direct, done) = part_plan(vec![(0, 100)], lines.to_vec(), 30);
+        assert!(full.is_empty() && direct.len() == 5 && done);
+        // lines to read at full size: not the end
+        assert!(!part_plan(vec![(768, 1024)], lines.to_vec(), 10).2);
     }
 
     /// #169: full-size detection runs in strips of `STRIP` rows; only those
