@@ -55,6 +55,23 @@ pub fn open_link(url: &str) -> io::Result<()> {
     spawn(std::ffi::OsStr::new(url))
 }
 
+/// Open a file or folder we wrote in its default app (the "Exported" card's Open).
+pub fn open_file(path: &std::path::Path) -> io::Result<()> {
+    spawn(path.as_os_str())
+}
+
+/// Show `path` in the file manager: Explorer with the file selected; elsewhere the
+/// folder that holds it (a folder `path` opens its parent: it is shown inside it).
+pub fn show_in_folder(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(all(windows, not(test)))]
+    if test_browser().is_none() {
+        let mut explorer = Command::new("explorer.exe");
+        explorer.arg(format!("/select,{}", path.display()));
+        return reap(&mut explorer);
+    }
+    spawn(path.parent().unwrap_or(path).as_os_str())
+}
+
 /// Open a new message to `address` (the email chip) in the default
 /// mail app. `address` must be a plain address: no `?subject=`, `&`/`=` headers,
 /// `%` escapes that could smuggle them in, or anything but printable ASCII.

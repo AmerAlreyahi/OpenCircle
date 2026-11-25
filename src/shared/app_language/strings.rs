@@ -1955,16 +1955,12 @@ strings! {
         | "الجودة";
     st_original: "Original"
         | "الأصلي";
-    st_exported_steps: "Exported {} to {}"
-        | "صُدّرت {} إلى {}";
-    st_steps_one: "1 step"
-        | "خطوة واحدة";
-    st_steps_two: "2 steps"
-        | "خطوتان";
-    st_steps_few: "{} steps"
-        | "{} خطوات";
-    st_steps_many: "{} steps"
-        | "{} خطوة";
+    st_exported_card: "Exported · {}"
+        | "تم التصدير · {}";
+    st_card_open: "Open"
+        | "فتح";
+    st_show_folder: "Show in folder"
+        | "إظهار في المجلد";
     st_export_webp_big: "WebP can't hold a picture over 16,384 px on a side. Pick a smaller size, or another format."
         | "لا يتّسع WebP لصورة يتجاوز ضلعها 16384 بكسل. اختر حجمًا أصغر أو صيغة أخرى.";
     st_export_pdf_wide: "A PDF page can't be wider than 19,200 px. Pick a smaller size."

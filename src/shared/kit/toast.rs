@@ -41,14 +41,22 @@ pub fn size(label: &str) -> Size {
 
 /// `with_action`'s size: the pill and its action after the label.
 pub fn size_with_action(label: &str, action: &str) -> Size {
+    size_with_actions(label, &[action])
+}
+
+/// `with_actions`' size: the pill and its action words after the label.
+pub fn size_with_actions(label: &str, actions: &[&str]) -> Size {
     let pill = size(label);
-    let more = GAP + width(action, super::text::size(Role::NOTE), font(Role::CTA));
+    let more: f32 = actions
+        .iter()
+        .map(|a| GAP + width(a, super::text::size(Role::NOTE), font(Role::CTA)))
+        .sum();
     Size::new((pill.width + more).ceil(), pill.height)
 }
 
 /// The pill with `label`, corners of `radius` (the window's cut).
 pub fn toast<'a, Message: 'a>(label: &'a str, tone: Tone, radius: f32) -> Element<'a, Message> {
-    made(label, tone, radius, None, size(label))
+    made(label, tone, radius, Vec::new(), size(label))
 }
 
 /// The pill with an action after its label ("Steps cleared · Undo"): the
@@ -60,30 +68,44 @@ pub fn with_action<'a, Message: Clone + 'a>(
     action: &'a str,
     on_press: Message,
 ) -> Element<'a, Message> {
+    with_actions(label, tone, radius, vec![(action, on_press)])
+}
+
+/// The pill with several actions after its label ("Exported . Open  Show in
+/// folder"), each an accent word.
+pub fn with_actions<'a, Message: Clone + 'a>(
+    label: &'a str,
+    tone: Tone,
+    radius: f32,
+    actions: Vec<(&'a str, Message)>,
+) -> Element<'a, Message> {
     use iced::widget::button;
-    let word = button(
-        super::text::text(Role::NOTE, action)
-            .font(font(Role::CTA))
-            .line_height(iced::Pixels(LINE)),
-    )
-    .padding(0)
-    .style(|_, status| button::Style {
-        text_color: match status {
-            button::Status::Hovered | button::Status::Pressed => c().text,
-            _ => c().accent,
-        },
-        ..button::Style::default()
+    let words: Vec<&str> = actions.iter().map(|(a, _)| *a).collect();
+    let at = size_with_actions(label, &words);
+    let words = actions.into_iter().map(|(action, on_press)| {
+        let word = button(
+            super::text::text(Role::NOTE, action)
+                .font(font(Role::CTA))
+                .line_height(iced::Pixels(LINE)),
+        )
+        .padding(0)
+        .style(|_, status| button::Style {
+            text_color: match status {
+                button::Status::Hovered | button::Status::Pressed => c().text,
+                _ => c().accent,
+            },
+            ..button::Style::default()
+        });
+        super::focus::press(word, super::tokens::radius::CONTROL, Some(on_press)).into()
     });
-    let word = super::focus::press(word, super::tokens::radius::CONTROL, Some(on_press));
-    let at = size_with_action(label, action);
-    made(label, tone, radius, Some(word.into()), at)
+    made(label, tone, radius, words.collect(), at)
 }
 
 fn made<'a, Message: 'a>(
     label: &'a str,
     tone: Tone,
     radius: f32,
-    action: Option<Element<'a, Message>>,
+    actions: Vec<Element<'a, Message>>,
     at: Size,
 ) -> Element<'a, Message> {
     let dot = match tone {
@@ -102,13 +124,10 @@ fn made<'a, Message: 'a>(
     let line = super::text::text(Role::NOTE, label)
         .line_height(iced::Pixels(LINE))
         .wrapping(iced::widget::text::Wrapping::None);
-    let content = super::dir::row(
-        [Some(dot.into()), Some(line.into()), action]
-            .into_iter()
-            .flatten(),
-    )
-    .spacing(GAP)
-    .align_y(Center);
+    let lead: [Element<'a, Message>; 2] = [dot.into(), line.into()];
+    let content = super::dir::row(lead.into_iter().chain(actions))
+        .spacing(GAP)
+        .align_y(Center);
     material(container(content).padding(PAD), radius, at)
 }
 
@@ -205,6 +224,7 @@ pub fn banner<'a, Message: 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::kit::testing::golden;
 
     /// The window fits the line: longer text, a wider pill; Arabic is measured
     /// as shaped (not by its character count).
@@ -218,5 +238,26 @@ mod tests {
         assert!(ar.width > 50.0 && ar.width < short.width + 40.0, "{ar:?}");
         assert_eq!(Tone::from(true), Tone::Ok);
         assert_eq!(Tone::from(false), Tone::Error);
+    }
+
+    /// W108: the "Exported" card, two actions after the label, English and Arabic, both themes.
+    #[test]
+    fn the_card_with_two_actions_matches_its_golden_images() {
+        golden::each_theme(|theme, failed| {
+            for ar in [false, true] {
+                let _dir = ar.then(crate::shared::kit::testing::arabic);
+                let (label, actions) = match ar {
+                    false => ("Exported · steps-1.md", ["Open", "Show in folder"]),
+                    true => ("تم التصدير · steps-1.md", ["فتح", "إظهار في المجلد"]),
+                };
+                let at = size_with_actions(label, &actions);
+                let file = format!("toast-exported{}-{}", if ar { "-ar" } else { "" }, theme.id);
+                let view = || {
+                    let pairs = actions.iter().map(|a| (*a, ())).collect();
+                    with_actions(label, Tone::Ok, 10.0, pairs)
+                };
+                failed.extend(golden::check("screens", &file, at, &[1.0], view));
+            }
+        });
     }
 }

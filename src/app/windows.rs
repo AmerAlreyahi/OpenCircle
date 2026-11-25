@@ -127,6 +127,12 @@ pub enum Msg {
     StudioStepPasted(Option<Crop>),
     StudioSaved(Result<String, String>, bool),
     StudioToast(Result<String, String>),
+    /// An export finished (the picture, the steps, a walkthrough): the file or folder it
+    /// made, or why not. A card with Open and Show in folder follows.
+    StudioExported(Result<std::path::PathBuf, String>),
+    /// The "Exported" card's Open (the default app) and Show in folder.
+    ExportedOpen,
+    ExportedShow,
     /// A picture-panel action (the App runs it: `snip::app::studio_acts`).
     StudioAct(crate::features::snip::snip_more::Row),
     /// Copy text's text, read (the Studio): the clipboard, then the pill.
@@ -165,6 +171,8 @@ pub struct Windows {
     failure: Option<(window::Id, failure::Failure, bool)>,
     /// Action toasts' timer lines (F5): window, since when, how long (ms).
     toast_clock: Vec<(window::Id, Instant, u64)>,
+    /// The "Exported" card (a toast window with two actions): its window and what it made.
+    exported: Option<(window::Id, std::path::PathBuf)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// The update pill above the tray, at most one, and when it opened (the
@@ -976,6 +984,56 @@ impl Windows {
             Some(a) => spoken(|| crate::shared::kit::toast::size_with_action(text, a)),
             None => toast_size(text),
         };
+        self.toast_window(text, tone, at, ms, action, size).1
+    }
+
+    /// "Exported . <name>" with Open and Show in folder, for what an export made at
+    /// `path`; it dismisses itself (one card at a time).
+    pub fn exported(&mut self, path: std::path::PathBuf) -> Task<Msg> {
+        let name = path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let text = crate::shared::app_language::fmt(
+            crate::shared::app_language::S::st_exported_card,
+            &[&name],
+        );
+        let old = self.exported.take().map(|(id, _)| close(id));
+        let size = spoken(|| {
+            crate::shared::kit::toast::size_with_actions(
+                &text,
+                &[t!(st_card_open), t!(st_show_folder)],
+            )
+        });
+        let (id, open) = self.toast_window(&text, true, None, EXPORTED_MS, None, size);
+        self.exported = Some((id, path));
+        Task::batch([old.unwrap_or_else(Task::none), open])
+    }
+
+    /// The card's Open (`open`) or Show in folder; the card goes.
+    fn exported_act(&mut self, open: bool) -> Task<Msg> {
+        let Some((id, path)) = self.exported.take() else {
+            return Task::none();
+        };
+        let done = match open {
+            true => platform::sys::open::open_file(&path),
+            false => platform::sys::open::show_in_folder(&path),
+        };
+        if let Err(e) = done {
+            crate::log!("[opencircle] cannot open {}: {e}", path.display());
+        }
+        close(id)
+    }
+
+    /// The toast window of `size`: its pill is `text`, gone after `ms`.
+    fn toast_window(
+        &mut self,
+        text: &str,
+        tone: impl Into<Tone>,
+        at: Option<platform::monitor::Place>,
+        ms: u64,
+        action: Option<&'static str>,
+        size: Size,
+    ) -> (window::Id, Task<Msg>) {
         let (id, open) = floating(
             window::Settings {
                 size,
@@ -1013,7 +1071,7 @@ impl Windows {
             std::thread::sleep(Duration::from_millis(ms));
             let _ = done.send(());
         });
-        open.chain(Task::future(wait).then(move |_| close(id)))
+        (id, open.chain(Task::future(wait).then(move |_| close(id))))
     }
 
     /// Closes the toasts that carry an action word (the "Snip closed . Undo" pill): one
@@ -1604,6 +1662,10 @@ impl Windows {
             Msg::FailureEsc => return self.failure_close(),
             Msg::StudioText(epoch, read) => return self.studio_copy_text(epoch, read),
             Msg::StudioWalk(walked) => return self.on_walked(walked),
+            Msg::StudioExported(Ok(path)) => return self.exported(path),
+            Msg::StudioExported(Err(e)) => return self.toast(&e, false, None, TOAST_MS),
+            Msg::ExportedOpen => return self.exported_act(true),
+            Msg::ExportedShow => return self.exported_act(false),
             Msg::StudioToast(done) => {
                 let ok = done.is_ok();
                 let text = done.unwrap_or_else(|e| e);
@@ -1742,6 +1804,9 @@ impl Windows {
             }
             Msg::Closed(id) => {
                 platform::windows::forget(id);
+                if self.exported.as_ref().is_some_and(|(e, _)| *e == id) {
+                    self.exported = None;
+                }
                 self.chrome.remove(&id);
                 self.toasts.retain(|(t, ..)| *t != id);
                 self.toast_clock.retain(|(t, ..)| *t != id);
@@ -1960,6 +2025,24 @@ impl Windows {
         }
         if let Some(card) = self.failure_view(window) {
             return Some(card);
+        }
+        if let (Some((id, _)), Some((_, text, tone, _))) = (
+            &self.exported,
+            self.toasts.iter().find(|(t, ..)| *t == window),
+        ) && *id == window
+        {
+            let radius = shape::radius(toast::RADIUS);
+            return Some(spoken(|| {
+                crate::shared::kit::toast::with_actions(
+                    text,
+                    *tone,
+                    radius,
+                    vec![
+                        (t!(st_card_open), Msg::ExportedOpen),
+                        (t!(st_show_folder), Msg::ExportedShow),
+                    ],
+                )
+            }));
         }
         if let Some((_, text, tone, action)) = self.toasts.iter().find(|(t, ..)| *t == window) {
             let radius = shape::radius(toast::RADIUS);
@@ -2369,6 +2452,8 @@ fn settings_placement() -> (Size, Size, Option<Point>) {
 
 /// How long a confirmation toast shows (the design's 1800 ms).
 pub const TOAST_MS: u64 = 1800;
+/// The "Exported" card stays this long (it has buttons to reach).
+const EXPORTED_MS: u64 = 8000;
 
 /// The timer line's thickness on an action toast.
 const TIMER_H: f32 = 2.0;

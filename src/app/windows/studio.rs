@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Debug, Clone)]
 pub enum Walked {
     Progress(usize, usize),
-    /// Done: the pill's text; `None`: cancelled.
-    End(Option<Result<String, String>>),
+    /// Done: what it wrote, or why not; `None`: cancelled.
+    End(Option<Result<std::path::PathBuf, String>>),
 }
 
 impl Windows {
@@ -32,17 +32,11 @@ impl Windows {
                 let closes = matches!(done, Some(Ok(_)));
                 let ended = self.on_studio(studio::Msg::WalkEnded(closes));
                 match done {
-                    Some(done) => Task::batch([ended, self.toast_of(done)]),
+                    Some(done) => Task::batch([ended, Task::done(Msg::StudioExported(done))]),
                     None => ended,
                 }
             }
         }
-    }
-
-    fn toast_of(&mut self, done: Result<String, String>) -> Task<Msg> {
-        let ok = done.is_ok();
-        let text = done.unwrap_or_else(|e| e);
-        self.toast(&text, ok, None, TOAST_MS)
     }
 
     /// Opens the Studio (empty, or on `picture`), or brings the open one forward
@@ -390,7 +384,7 @@ impl Windows {
                         let _ = tx.unbounded_send(done);
                     }
                 })
-                .map(Msg::StudioToast)
+                .map(Msg::StudioExported)
             }
             Outcome::ExportWalkthrough(how, frames) => {
                 // one encode at a time: a second one never takes the first's stop flag
@@ -419,7 +413,7 @@ impl Windows {
                     let _ = tx.unbounded_send(done);
                 }
             })
-            .map(Msg::StudioToast),
+            .map(Msg::StudioExported),
             Outcome::NewSnip => Task::done(Msg::Run(crate::Trigger::Quick(
                 std::time::Instant::now(),
                 crate::shared::config::QuickAction {
@@ -676,7 +670,7 @@ fn studio_save(crop: Crop, then: bool) -> Task<Msg> {
 
 /// Blocking: where to put the exported picture (the save dialog, in Save's
 /// folder), then the file; `None`: the dialog was cancelled. Ok / Err = the pill.
-fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, String>> {
+fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<std::path::PathBuf, String>> {
     let ext = how.format.ext();
     // a size the format can't hold: say so before asking where, never a bare "Not saved"
     match export::problem(crop.width, crop.height, how) {
@@ -704,10 +698,7 @@ fn export_picture(crop: Crop, how: export::Picture) -> Option<Result<String, Str
     let written = export::encode(crop, how)
         .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()));
     Some(match written {
-        Ok(()) => {
-            let folder = path.parent().unwrap_or(&path);
-            Ok(fmt(S::pill_saved, &[&save::short_path(folder)]))
-        }
+        Ok(()) => Ok(path),
         Err(e) => {
             crate::log!("[opencircle] export failed: {e}");
             Err(crate::t!(pill_not_saved).to_string())
@@ -724,7 +715,7 @@ fn export_walkthrough(
     how: export::Walkthrough,
     cancel: &AtomicBool,
     tx: &iced::futures::channel::mpsc::UnboundedSender<Walked>,
-) -> Option<Result<String, String>> {
+) -> Option<Result<std::path::PathBuf, String>> {
     let ext = how.movie.ext();
     let mut dialog = rfd::FileDialog::new()
         .set_title(crate::t!(st_walk_where))
@@ -752,10 +743,7 @@ fn export_walkthrough(
         Err(e) => Err(e),
     };
     Some(match written {
-        Ok(()) => Ok(fmt(
-            S::pill_saved,
-            &[&save::short_path(path.parent().unwrap_or(&path))],
-        )),
+        Ok(()) => Ok(path),
         Err(e) => {
             crate::log!("[opencircle] walkthrough export failed: {e}");
             Err(crate::t!(pill_not_saved).to_string())
@@ -765,7 +753,10 @@ fn export_walkthrough(
 
 /// Blocking: a folder for the steps (the folder dialog, from Save's folder),
 /// then a new folder in it with the steps; `None`: cancelled.
-fn export_steps(steps: &[Arc<Step>], how: export::Steps) -> Option<Result<String, String>> {
+fn export_steps(
+    steps: &[Arc<Step>],
+    how: export::Steps,
+) -> Option<Result<std::path::PathBuf, String>> {
     let mut dialog = rfd::FileDialog::new().set_title(crate::t!(st_export_folder));
     let config = crate::shared::config::current();
     if let Some(folder) = save::start_folder(&config.general.save_folder) {
@@ -781,7 +772,7 @@ fn export_steps(steps: &[Arc<Step>], how: export::Steps) -> Option<Result<String
     let name = save::stamped_name("steps-");
     Some(
         match export::write_steps(&parent, &name, &pngs, how, &words) {
-            Ok(folder) => Ok(exported_steps(steps.len(), &save::short_path(&folder))),
+            Ok(folder) => Ok(folder),
             Err(e) => {
                 crate::log!("[opencircle] steps export failed: {e}");
                 Err(crate::t!(pill_not_saved).to_string())
@@ -1082,24 +1073,8 @@ mod key_tests {
     }
 }
 
-/// "Exported 1 step to <folder>" (and Arabic's forms).
-fn exported_steps(n: usize, folder: &str) -> String {
-    let count = crate::shared::app_language::count(
-        n,
-        [
-            S::st_steps_one,
-            S::st_steps_two,
-            S::st_steps_few,
-            S::st_steps_many,
-        ],
-    );
-    fmt(S::st_exported_steps, &[&count, &folder])
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::shared::app_language::{Lang, set};
-
     fn picture() -> crate::shared::picture::Crop {
         crate::shared::picture::Crop {
             width: 8,
@@ -1223,18 +1198,6 @@ mod tests {
         let got = super::write_file(&path, b"new", false).unwrap();
         assert_eq!(got, dir.join("a-3.png"));
         assert_eq!(std::fs::read(&path).unwrap(), b"1");
-    }
-
-    #[test]
-    fn the_exported_steps_message_counts_in_the_apps_language() {
-        set(Lang::En);
-        assert_eq!(super::exported_steps(1, "d"), "Exported 1 step to d");
-        assert_eq!(super::exported_steps(5, "d"), "Exported 5 steps to d");
-        set(Lang::Ar);
-        let ar = |n| super::exported_steps(n, "d");
-        assert!(ar(1).contains("خطوة واحدة") && ar(2).contains("خطوتان"));
-        assert!(ar(5).contains("5 خطوات") && ar(12).contains("12 خطوة"));
-        set(Lang::En);
     }
 }
 

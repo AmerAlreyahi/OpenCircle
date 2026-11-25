@@ -1057,3 +1057,57 @@ fn w108_the_strip_opens_where_the_user_left_it_on_that_screen() {
     let _ = w.add_step(picture(60, 40), None, place, 0.0);
     assert_eq!(w.steps.as_ref().unwrap().1.place().origin, (640, 200));
 }
+
+/// W108 (owner round 3): after an export a small card "Exported · name" with Open and
+/// Show in folder; it is the kit toast with two actions and goes by itself.
+mod exported_card {
+    use super::*;
+    use crate::shared::platform::sys::open::launched;
+
+    fn card() -> (Windows, std::path::PathBuf) {
+        let mut w = Windows::default();
+        let path = std::env::temp_dir().join("oc-w108-steps-1.md");
+        let _ = w.update(Msg::StudioExported(Ok(path.clone())));
+        (w, path)
+    }
+
+    #[test]
+    fn an_export_shows_the_card_with_its_name() {
+        let (w, _) = card();
+        let want = vec![("Exported · oc-w108-steps-1.md".to_string(), true)];
+        assert_eq!(w.toasts(), want);
+        assert!(w.exported.is_some());
+    }
+
+    #[test]
+    fn open_runs_the_default_app_and_the_card_goes() {
+        let (mut w, path) = card();
+        let _ = w.update(Msg::ExportedOpen);
+        assert!(launched().contains(&path.to_string_lossy().into_owned()));
+        assert!(w.exported.is_none());
+    }
+
+    #[test]
+    fn show_in_folder_opens_the_folder_that_holds_it() {
+        let (mut w, path) = card();
+        let _ = w.update(Msg::ExportedShow);
+        let dir = path.parent().unwrap().to_string_lossy().into_owned();
+        assert!(launched().contains(&dir));
+    }
+
+    #[test]
+    fn a_failed_export_is_the_plain_error_pill() {
+        let mut w = Windows::default();
+        let _ = w.update(Msg::StudioExported(Err("Not saved".into())));
+        assert_eq!(w.toasts(), vec![("Not saved".to_string(), false)]);
+        assert!(w.exported.is_none());
+    }
+
+    #[test]
+    fn a_new_export_replaces_the_card() {
+        let (mut w, _) = card();
+        let first = w.exported.as_ref().unwrap().0;
+        let _ = w.update(Msg::StudioExported(Ok("export-b.png".into())));
+        assert_ne!(w.exported.as_ref().unwrap().0, first);
+    }
+}
