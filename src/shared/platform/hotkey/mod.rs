@@ -18,6 +18,7 @@ pub use quick_id::QuickId;
 pub use socket::{Command, forward, forward_or_start, is_older, listen, running, running_version};
 
 use std::cell::RefCell;
+#[cfg(not(test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
@@ -660,7 +661,20 @@ pub fn reload(cfg: &Config) {
 }
 
 /// Set while a shortcut field records (`suspend`).
+#[cfg(not(test))]
 static SUSPENDED: AtomicBool = AtomicBool::new(false);
+// Tests run in parallel and every `Windows::update` calls `suspend`: one flag per test thread.
+#[cfg(test)]
+thread_local! {
+    static SUSPENDED_T: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn swap_suspended(on: bool) -> bool {
+    #[cfg(not(test))]
+    return SUSPENDED.swap(on, Ordering::SeqCst);
+    #[cfg(test)]
+    return SUSPENDED_T.replace(on);
+}
 
 /// Holds every global shortcut off while `on`, back on after: a shortcut field
 /// that is recording must get the keys, never start an action with them.
@@ -668,7 +682,7 @@ static SUSPENDED: AtomicBool = AtomicBool::new(false);
 /// window); Wayland's portal can't, so its presses are dropped. Only a change
 /// does anything. Call from the thread that called `start`.
 pub fn suspend(on: bool) {
-    if SUSPENDED.swap(on, Ordering::SeqCst) == on {
+    if swap_suspended(on) == on {
         return;
     }
     crate::log!(
@@ -689,7 +703,10 @@ pub fn suspend(on: bool) {
 
 /// Whether the global shortcuts are held off (`suspend`).
 pub fn suspended() -> bool {
-    SUSPENDED.load(Ordering::SeqCst)
+    #[cfg(not(test))]
+    return SUSPENDED.load(Ordering::SeqCst);
+    #[cfg(test)]
+    return SUSPENDED_T.get();
 }
 
 /// Replaces what the grab holds with `planned`. A shortcut another app already owns is
