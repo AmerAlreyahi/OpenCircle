@@ -1071,7 +1071,8 @@ production systems.
   the user to type (no automatic Explain request; lead default 2026-11-24); the bar's Ask AI keeps sending the picture
   (2026-11-08). Menu key + Shift+F10 open it with arrow keys; Copy/Search/link close the overlay, Ask AI/Translate keep it.
   Translate from the menu (lead 2026-11-25, after the owner found it broken) translates the SELECTED TEXT and shows it in a small
-  card beside the selection (word card look) with Copy, not the whole picture.
+  card beside the selection (word card look) with Copy, not the whole picture. The bar's Translate (R) with words selected does
+  the same (one path); with an area and no words it translates the picture in place.
   Surfaces v1: main overlay selection + select-text mode; pill, Snip area, circled area without words later.
 - Ctrl+wheel (owner, 2026-11-24, #202): over a selected shape it resizes the shape (Studio and Snip editor); elsewhere in the
   Studio it keeps zooming the picture.
@@ -1179,6 +1180,24 @@ production systems.
   edit text, cut out. Extensions: meeting captions, live/game translation + glossaries, song search, colour picker, ruler, pin
   live region, QR/barcodes, quick convert, advanced paste, actions on detected things, local offline AI model, dictation, read
   aloud, writing assist, privacy curtain. The name OpenCircle stays; the tagline is being chosen.
+
+- Snip options row + Settings search, owner 2026-11-25 (after trying dev 11886be; shot docs/internal/owner-shots/2026-11-25/
+  snip-row-and-search.webp): the options row must sit DIRECTLY under (or above, when no room) the Snip toolbar, attached and aligned
+  with it as one piece, never offset; no separate "Shapes · Rectangle (R)" pill; the active tool's CHOICES are IN the row (Shapes:
+  rectangle, ellipse, line, arrow, then size, outline/fill; same idea for every tool with sub-types) - no separate pop-up panel and
+  no second click (familiar: Paint, Snagit, CleanShot). The Settings search sits CENTRED in the title bar (approved shell), never
+  squeezed against the window buttons.
+
+- Owner try of dev 11886be, round 3 (2026-11-25; shots docs/internal/owner-shots/2026-11-25/round3-*): works: steps export, paste
+  rule, Redo, double-click to Studio, AI chat, download card, tray, Arabic, start with Windows. Decisions:
+  - TITLE BARS are NEVER mirrored in Arabic, in every window (Settings, Studio, onboarding, dialogs): same layout as English;
+    the Settings search sits EXACTLY in the centre of the title bar.
+  - Report a problem popup opens CENTRED in its window.
+  - After any export finishes: a small card with Open and Show in folder (familiar "Exported" toast).
+  - Onboarding step tabs fit on one line in every language (no wrapped tab like "4. ربط الذكاء الاصطناعي").
+  - Steps strip (planning #204 is now IN this release, owner): "Open in OpenCircle Studio" on the strip; the strip can be dragged
+    anywhere (position remembered); once the Studio holds the steps the strip closes; BUG to fix first: x on the strip wiped the
+    steps from an open Studio (data loss) - the Studio's steps must never be lost by closing the strip.
 
 ## Domain quirks
 
