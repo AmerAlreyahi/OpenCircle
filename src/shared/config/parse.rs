@@ -181,6 +181,9 @@ impl Config {
             c.editor.fill = get(t, p, "fill", None, &mut w);
             c.editor.blur_size = get(t, p, "blur_size", None, &mut w);
             c.editor.blur_cell = get(t, p, "blur_cell", None, &mut w);
+            c.editor.blur_style = get(t, p, "blur_style", None, &mut w);
+            c.editor.blur_shape = get(t, p, "blur_shape", None, &mut w);
+            c.editor.blur_custom = get(t, p, "blur_custom", None, &mut w);
             // Schema 14: the old written default (thin) is Medium now; other values stay.
             if file_version < Some(14)
                 && c.editor.blur_cell == Some(crate::features::snip::annotate::Width::Thin)

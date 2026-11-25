@@ -1905,3 +1905,33 @@ fn the_editors_recent_colours_are_read_skipped_by_entry_and_round_trip() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// W113 (review of W111): Hide's remembered style, shape and custom strength are READ back from the
+/// file (they were written but never parsed, so a restart forgot them); a bad value is the default
+/// with a warning.
+#[test]
+fn hide_options_round_trip_through_the_file() {
+    use crate::features::snip::annotate::blur::{Kind, Style};
+    let mut c = Config::default();
+    c.editor.blur_style = Some(Style::Progressive);
+    c.editor.blur_shape = Some(Kind::Ellipse);
+    c.editor.blur_custom = Some(11);
+    let saved = toml::to_string_pretty(&c).unwrap();
+    let (back, w) = Config::parse(&saved);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        (
+            back.editor.blur_style,
+            back.editor.blur_shape,
+            back.editor.blur_custom
+        ),
+        (Some(Style::Progressive), Some(Kind::Ellipse), Some(11))
+    );
+    let (bad, w) =
+        Config::parse("[editor]\nblur_style = \"gloss\"\nblur_shape = 4\nblur_custom = \"x\"\n");
+    assert_eq!(bad.editor, EditorConfig::default());
+    for key in ["blur_style", "blur_shape", "blur_custom"] {
+        let key = format!("editor.{key}");
+        assert!(w.iter().any(|w| w.starts_with(&key)), "{key}: {w:?}");
+    }
+}
