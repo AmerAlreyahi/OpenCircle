@@ -69,10 +69,7 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
         true => iced::widget::space().into(),
         false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
-            .filter_method(match e.crisp {
-                true => iced::widget::image::FilterMethod::Nearest,
-                false => iced::widget::image::FilterMethod::Linear,
-            })
+            .filter_method(filter(e))
             .width(size.width)
             .height(size.height)
             .content_fit(ContentFit::Fill))
@@ -87,6 +84,7 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let place = |(r, handle): &(Rectangle, image::Handle)| {
         let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
         pin(image(handle.clone())
+            .filter_method(filter(e))
             .width(r.width * z)
             .height(r.height * z)
             .content_fit(ContentFit::Fill))
@@ -111,6 +109,15 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
         .into(),
     );
     stack(layers).width(outer.width).height(outer.height).into()
+}
+
+/// How the picture and every layer over it are drawn: the same, or an opaque layer (Hide, Spotlight,
+/// Magnifier) shows a differently filtered copy of the picture (W113: the frozen-square artefact).
+pub(super) fn filter(e: &Annotator) -> iced::widget::image::FilterMethod {
+    match e.crisp {
+        true => iced::widget::image::FilterMethod::Nearest,
+        false => iced::widget::image::FilterMethod::Linear,
+    }
 }
 
 struct Input<'a> {
@@ -476,6 +483,8 @@ impl canvas::Program<Message> for Input<'_> {
 mod key_tests;
 #[cfg(test)]
 mod w111_tests;
+#[cfg(test)]
+mod w113_tests;
 
 #[cfg(test)]
 mod tests {
