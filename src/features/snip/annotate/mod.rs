@@ -916,7 +916,9 @@ impl Annotator {
             lock: None,
             blur_size: saved.blur_size,
             blur_cell: saved.blur_cell.unwrap_or(Width::Medium),
-            blur_custom: saved.blur_custom,
+            blur_custom: saved
+                .blur_custom
+                .map(|v| v.clamp(*STRENGTH_RANGE.start(), *STRENGTH_RANGE.end())),
             hover: None,
             thumbs: std::cell::RefCell::new(None),
             blur_style: saved.blur_style.unwrap_or_default(),
@@ -2588,8 +2590,7 @@ impl Annotator {
     /// item's own (a pen stroke with the Pen out), never another tool's (the stroke after a
     /// switch to Shapes: Thick or Fill must not change what the bar no longer shows, W113).
     pub(super) fn row_is_for(&self, item: &Item) -> bool {
-        let slot = |t: Tool| info(info(t).slot).tool;
-        self.tool == Tool::Select || slot(self.tool) == slot(tool_of(&item.shape))
+        self.tool == Tool::Select || info(self.tool).slot == info(tool_of(&item.shape)).slot
     }
 
     /// The colour/width picked while an item is selected (or typed) applies to it.
@@ -2712,7 +2713,11 @@ impl Annotator {
     /// A picked-up item (a press with Select or Ctrl) has no layer until it is hidden from the base
     /// (its first move): the layer over the base would paint it twice (W113).
     fn update_live(&mut self) {
-        let shown = (self.pending.as_ref()).is_some_and(|p| p.index.is_none() || p.hidden);
+        let shown = (self.pending.as_ref()).is_some_and(|p| match &p.drag {
+            // an Alt+drag copy sits on its original (which the base paints) until it has moved
+            Drag::Move { from, .. } if p.index.is_none() => p.item != *from,
+            _ => p.index.is_none() || p.hidden,
+        });
         self.live_stale.set(shown);
         if !shown {
             *self.live.get_mut() = None;
@@ -2761,10 +2766,15 @@ pub(crate) fn tool_of(shape: &Shape) -> Tool {
     match shape {
         Shape::Rect { .. } => Tool::Rect,
         Shape::Ellipse { .. } => Tool::Ellipse,
+        Shape::Arrow { head: false, .. } => Tool::Line,
         Shape::Arrow { .. } => Tool::Arrow,
         Shape::Pen(_) => Tool::Pen,
         Shape::Highlighter(_) => Tool::Highlighter,
         Shape::Text { .. } => Tool::Text,
+        Shape::Label { .. } => Tool::Label,
+        Shape::Callout { .. } => Tool::Callout,
+        Shape::Pointer { .. } => Tool::Pointer,
+        Shape::Magnifier { .. } => Tool::Magnifier,
         Shape::Step { .. } => Tool::Step,
         Shape::Blur { .. } => Tool::Blur,
         Shape::Redact { .. } => Tool::Redact,

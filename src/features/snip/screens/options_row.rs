@@ -114,8 +114,8 @@ pub(crate) fn base_tool(e: &Annotator) -> Tool {
         .then(|| e.doc.items.get(sel[0]))
         .flatten();
     match item {
-        Some(item) => info(info(super::studio::tool_of(&item.shape)).slot).tool,
-        None => info(info(e.tool).slot).tool,
+        Some(item) => info(super::studio::tool_of(&item.shape)).slot,
+        None => info(e.tool).slot,
     }
 }
 
