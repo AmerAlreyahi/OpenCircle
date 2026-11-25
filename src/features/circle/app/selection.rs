@@ -153,14 +153,14 @@ impl App {
         // Snip: the loupe follows the pointer; a drag's ends snap to edges.
         let event = match (&mut self.o.purpose, event) {
             (Purpose::Snip(snip), overlay::Event::Press { at, shift }) => {
-                snip.hover(at);
+                snip.point(at);
                 overlay::Event::Press {
                     at: snip.press(at),
                     shift,
                 }
             }
             (Purpose::Snip(snip), overlay::Event::Move(at)) => {
-                snip.hover(at);
+                snip.point(at);
                 overlay::Event::Move(snip.snap(at))
             }
             (Purpose::Snip(snip), overlay::Event::Hover(at)) => {

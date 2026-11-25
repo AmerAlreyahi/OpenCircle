@@ -302,6 +302,9 @@ impl App {
                 .filter(|(p, _)| p.origin != start.origin)
                 .collect();
             snip.set_monitors(self.monitors());
+            if let Some(frame) = &self.o.frame {
+                snip.set_frame(frame.clone(), self.o.scale);
+            }
             first = snip.start(kind, size); // Full = the whole screen at once
             let wait = config::current().snip.delay;
             let tool = self.tool_next.take();

@@ -19,6 +19,7 @@ use iced::widget::{canvas, column, container, image, row};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use crate::features::circle::screens::overlay;
+use crate::features::snip::capture::detect;
 use crate::features::snip::{SNAP, snap};
 use crate::shared::config::{SnipAfter, Target};
 use crate::shared::kit::button;
@@ -97,6 +98,10 @@ pub enum Msg {
 
 /// The freeze hint shows this long (or until a drag starts).
 pub const HINT_SECS: u64 = 2;
+/// The pointer moves this far (logical px) before the finder reads again.
+const FOUND_STEP: f32 = 3.0;
+/// How many nested pixel regions (button, panel, menu) one hover looks for.
+const LEVELS: usize = 3;
 /// The info chip's ladder (the wheel's steps).
 /// (the English names label a target: ids the chip's words are chosen by)
 const LADDER: [&str; 3] = ["Element", "Window", "Screen"];
@@ -237,6 +242,16 @@ pub struct Snip {
     /// overlay too, and held its first frame back ~130 ms on the VM.
     later: Option<(Sender<isize>, usize)>,
     asked: Vec<isize>,
+    /// The starting monitor's frozen frame and its scale: what the pixel
+    /// finder (`capture::detect`) reads for straight edges and for the panel
+    /// under the pointer where the OS names no control.
+    pic: Option<(image::Handle, f32)>,
+    /// The region the pixels show under the pointer (a panel, button, menu),
+    /// logical px, found at the last hover.
+    found: Vec<Rectangle>,
+    /// Where `found` was read: the finder runs again only after the pointer
+    /// moved a few px (a hover is many events).
+    found_at: Option<Point>,
     /// Where the button went down: as pressed, and as snapped.
     press: Option<(Point, Point)>,
     /// The pointer (logical px), for the loupe.
@@ -277,6 +292,9 @@ impl Snip {
             reader: None,
             later: None,
             asked: Vec::new(),
+            pic: None,
+            found: Vec::new(),
+            found_at: None,
             press: None,
             pointer: None,
             countdown: None,
@@ -287,6 +305,82 @@ impl Snip {
         };
         snip.relocal();
         snip
+    }
+
+    /// The frozen frame of the starting monitor (`scale` physical px per
+    /// logical px): the pixel finder's input.
+    pub fn set_frame(&mut self, frame: image::Handle, scale: f32) {
+        self.pic = Some((frame, scale));
+    }
+
+    /// `f` on the frame's pixels, `None` without a frame.
+    fn with_pic<T>(&self, f: impl FnOnce(detect::Pic<'_>, f32) -> T) -> Option<T> {
+        let (
+            image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            },
+            scale,
+        ) = self.pic.as_ref().map(|(h, s)| (h, *s))?
+        else {
+            return None;
+        };
+        Some(f(
+            detect::Pic {
+                rgba: pixels,
+                width: *width,
+                height: *height,
+            },
+            scale,
+        ))
+    }
+
+    /// The regions the pixels show under `p` (logical px), smallest first: a
+    /// button, the panel round it, the menu round that (at most `LEVELS`), each
+    /// kept inside the window there. Empty: nothing, or no frame.
+    fn detect(&self, p: Point) -> Vec<Rectangle> {
+        let window = (self.windows.iter().find(|w| w.rect.contains(p))).map(|w| w.rect);
+        let found = self.with_pic(|pic, k| {
+            let mut out: Vec<(i32, i32, i32, i32)> = Vec::new();
+            let mut seed = Some(((p.x * k) as i32, (p.y * k) as i32));
+            while let Some((x, y)) = seed.take().filter(|_| out.len() < LEVELS) {
+                let Some(r) = detect::region(pic, x, y) else {
+                    break;
+                };
+                // the next level up is read from just outside this one: left of
+                // it, else above it (the pointer is inside it, so no help)
+                let (x0, y0, x1, y1) = r;
+                let wider =
+                    |q: &(i32, i32, i32, i32)| q.0 <= x0 && q.1 <= y0 && q.2 >= x1 && q.3 >= y1;
+                if out
+                    .last()
+                    .is_some_and(|q| *q == r || !wider(&r) && !wider(q))
+                {
+                    break;
+                }
+                out.push(r);
+                seed = [(x0 - 3, (y0 + y1) / 2), ((x0 + x1) / 2, y0 - 3)]
+                    .into_iter()
+                    .find(|&(sx, sy)| sx >= 0 && sy >= 0);
+            }
+            out.into_iter()
+                .map(|(x0, y0, x1, y1)| {
+                    Rectangle::new(
+                        Point::new(x0 as f32 / k, y0 as f32 / k),
+                        Size::new((x1 - x0) as f32 / k, (y1 - y0) as f32 / k),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        (found.unwrap_or_default().into_iter())
+            .filter(|r| r.contains(p))
+            .filter_map(|r| match window {
+                Some(w) => r.intersection(&w),
+                None => Some(r),
+            })
+            .collect()
     }
 
     /// The topmost window under `area`'s centre (logical px, this screen): the
@@ -413,6 +507,20 @@ impl Snip {
                 .collect(),
             None => Vec::new(),
         };
+        // what the pixels show (a panel, a button, a menu) where the OS names
+        // no such control; never the window itself or a control already there
+        let same = |a: &Rectangle, b: &Rectangle| {
+            (a.x - b.x).abs() < 3.0
+                && (a.y - b.y).abs() < 3.0
+                && (a.width - b.width).abs() < 6.0
+                && (a.height - b.height).abs() < 6.0
+        };
+        for r in self.found.iter().filter(|r| r.contains(p)) {
+            let known = chain.iter().chain(top).any(|t| same(&t.rect, r));
+            if !known {
+                chain.push(Pick::control(*r, "area", top.map_or(0, |w| w.window)));
+            }
+        }
         let area = |t: &Pick| t.rect.width * t.rect.height;
         chain.sort_by(|a, b| area(a).total_cmp(&area(b)));
         chain.extend(top.cloned());
@@ -437,6 +545,19 @@ impl Snip {
     /// smallest target there when that changed.
     /// A window not read yet has its controls asked for.
     pub fn hover(&mut self, p: Point) {
+        // (only a hover with no button down looks at the pixels: never a press or a drag)
+        if self.kind == Kind::Region
+            && !self.shift
+            && self.press.is_none()
+            && self.found_at.is_none_or(|q| q.distance(p) >= FOUND_STEP)
+        {
+            (self.found, self.found_at) = (self.detect(p), Some(p));
+        }
+        self.point(p);
+    }
+
+    /// The pointer is at `p` (a press or a drag): as `hover`, without the pixel finder.
+    pub fn point(&mut self, p: Point) {
         self.pointer = Some(p);
         let under = (self.windows.iter())
             .find(|w| w.rect.contains(p))
@@ -498,7 +619,27 @@ impl Snip {
             return at;
         }
         let rects = self.windows.iter().chain(&self.controls).map(|t| &t.rect);
-        snap(p, rects, SNAP)
+        let by_rect = snap(p, rects, SNAP);
+        // where no window or control edge is near, a straight edge of the
+        // picture itself catches (the same on every platform)
+        let by_pixels = self.with_pic(|pic, k| {
+            let reach = (SNAP * k).round() as i32;
+            let (x, y) = detect::edges(pic, (p.x * k) as i32, (p.y * k) as i32, reach);
+            (x.map(|x| x as f32 / k), y.map(|y| y as f32 / k))
+        });
+        let (ex, ey) = by_pixels.unwrap_or((None, None));
+        Point::new(
+            if by_rect.x != p.x {
+                by_rect.x
+            } else {
+                ex.unwrap_or(p.x)
+            },
+            if by_rect.y != p.y {
+                by_rect.y
+            } else {
+                ey.unwrap_or(p.y)
+            },
+        )
     }
 
     /// Every window and control rectangle (starting monitor's logical px): what
@@ -1575,5 +1716,154 @@ mod tests {
         assert_eq!(s.pick(selection, up, SCREEN), Some(Next::Edit(window)));
         // A real drag still snaps its end.
         assert_eq!(s.snap(Point::new(118.0, 113.0)), Point::new(116.0, 116.0));
+    }
+
+    /// A 400 x 300 frame: white page, a grey panel (100, 60)-(300, 200) with a
+    /// blue button (120, 150)-(180, 180) (the pixel finder's own test picture).
+    fn frame(scale: f32) -> Snip {
+        let (w, h) = (400u32, 300u32);
+        let mut rgba = vec![255u8; (w * h * 4) as usize];
+        for (x0, y0, x1, y1, c) in [
+            (100, 60, 300, 200, [225u8, 225, 230]),
+            (120, 150, 180, 180, [40, 110, 230]),
+        ] {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = ((y * w + x) * 4) as usize;
+                    rgba[i..i + 3].copy_from_slice(&c);
+                }
+            }
+        }
+        let mut s = Snip::new(
+            Vec::new(),
+            Place {
+                origin: (0, 0),
+                px: (w, h),
+                scale,
+            },
+            false,
+            None,
+        );
+        s.set_frame(image::Handle::from_rgba(w, h, rgba), scale);
+        s
+    }
+
+    /// 200-6: where no window or control edge is near (Wayland: none exist),
+    /// a dragged edge is caught by the straight edge in the picture; Shift
+    /// frees it.
+    #[test]
+    fn g200_6_a_dragged_edge_is_caught_by_the_pictures_own_edges() {
+        let mut s = frame(1.0);
+        assert_eq!(s.snap(Point::new(104.0, 130.0)), Point::new(100.0, 130.0));
+        assert_eq!(s.snap(Point::new(250.0, 66.0)), Point::new(250.0, 60.0));
+        assert_eq!(s.snap(Point::new(20.0, 20.0)), Point::new(20.0, 20.0));
+        s.set_shift(true);
+        assert_eq!(s.snap(Point::new(104.0, 130.0)), Point::new(104.0, 130.0));
+    }
+
+    /// 200-7: the wheel steps element -> window -> screen, also with no window
+    /// list: the panel, the button inside it (finer), and the screen up.
+    #[test]
+    fn g200_7_the_wheel_walks_pixel_elements_without_any_window_list() {
+        let mut s = frame(1.0);
+        let p = Point::new(150.0, 165.0);
+        s.hover(p);
+        // no windows: the screen is the default, a click takes it as before
+        assert_eq!(s.outlined().unwrap().label, "Screen");
+        s.walk(-1.0);
+        assert_eq!(s.outlined().unwrap().rect, rect(100.0, 60.0, 200.0, 140.0));
+        s.walk(-1.0);
+        assert_eq!(s.outlined().unwrap().rect, rect(120.0, 150.0, 60.0, 30.0));
+        s.walk(1.0);
+        s.walk(1.0);
+        assert_eq!(s.outlined().unwrap().label, "Screen");
+    }
+
+    /// 200-8: a window's own control is never doubled by a pixel element of the
+    /// same size; a pixel element never leaves its window.
+    #[test]
+    fn g200_8_pixel_elements_stay_in_their_window_and_do_not_double_controls() {
+        let mut s = frame(1.0);
+        let window = rect(110.0, 50.0, 100.0, 200.0); // cuts the panel
+        s.desktop = wins(&[window]);
+        s.relocal();
+        s.add_controls(vec![Pick::control(
+            rect(120.0, 150.0, 60.0, 30.0),
+            "button",
+            1,
+        )]);
+        s.hover(Point::new(150.0, 165.0));
+        let chain = s.chain(Point::new(150.0, 165.0));
+        let rects: Vec<Rectangle> = chain.iter().map(|t| t.rect).collect();
+        // the control, the panel cut to the window, the window, the screen
+        assert_eq!(rects[0], rect(120.0, 150.0, 60.0, 30.0));
+        assert_eq!(rects[1], rect(110.0, 60.0, 100.0, 140.0));
+        assert_eq!(rects.len(), 4, "{rects:?}");
+    }
+
+    /// 200-9: on a scaled screen the finder reads frame pixels and answers in
+    /// logical px.
+    #[test]
+    fn g200_9_a_scaled_screen_answers_in_logical_px() {
+        let mut s = frame(2.0);
+        // the frame's panel (100, 60)-(300, 200) px is (50, 30)-(150, 100) logical
+        s.hover(Point::new(75.0, 50.0));
+        s.walk(-1.0);
+        assert_eq!(s.outlined().unwrap().rect, rect(50.0, 30.0, 100.0, 70.0));
+    }
+
+    /// 200-10: hovering a busy full-HD page (text everywhere, a few cards) costs
+    /// little: every hover of a sweep over it stays within a frame's time even
+    /// in a debug build's slowness (10 x), and the result never leaves the page.
+    #[test]
+    fn g200_10_hovering_a_busy_page_stays_cheap() {
+        let (w, h) = (1920u32, 1080u32);
+        let mut rgba = vec![255u8; (w * h * 4) as usize];
+        for y in (40..1040).step_by(18) {
+            for x in (60..1860).step_by(14) {
+                for dy in 0..3 {
+                    for dx in 0..8 {
+                        let i = (((y + dy) * w + x + dx) * 4) as usize;
+                        rgba[i..i + 3].copy_from_slice(&[40, 40, 40]);
+                    }
+                }
+            }
+        }
+        let mut s = Snip::new(
+            Vec::new(),
+            Place {
+                origin: (0, 0),
+                px: (w, h),
+                scale: 1.0,
+            },
+            false,
+            None,
+        );
+        s.set_frame(image::Handle::from_rgba(w, h, rgba), 1.0);
+        let t = std::time::Instant::now();
+        let n = 40;
+        for i in 0..n {
+            s.hover(Point::new(
+                100.0 + i as f32 * 37.0,
+                300.0 + (i % 7) as f32 * 61.0,
+            ));
+            let _ = s.snap(Point::new(100.0 + i as f32 * 37.0, 300.0));
+        }
+        let each = t.elapsed().as_millis() / n as u128;
+        assert!(each < 120, "{each} ms per hover (debug build)");
+    }
+
+    /// 200-17 (review): only a hover runs the pixel finder, never a press or a drag.
+    #[test]
+    fn g200_17_only_a_hover_looks_at_the_pixels() {
+        let mut s = frame(1.0);
+        s.point(Point::new(150.0, 165.0));
+        assert!(s.found.is_empty(), "a drag or press point");
+        let _ = s.press(Point::new(150.0, 165.0));
+        s.hover(Point::new(250.0, 100.0));
+        assert!(s.found.is_empty(), "a hover with the button down");
+        let mut s = frame(1.0);
+        s.hover(Point::new(150.0, 165.0));
+        assert!(!s.found.is_empty(), "a plain hover");
     }
 }
