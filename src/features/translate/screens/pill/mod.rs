@@ -1015,8 +1015,8 @@ impl Session {
 }
 
 /// What the user reads for a failed translation: an AI provider's error as its short plain
-/// headline (the error card's wording), the offline engine's own words otherwise. The page
-/// Translate and the right-click card say it the same way.
+/// headline (the error card's wording), the offline engine's own words otherwise. Every
+/// translate (the page, the selected words) says it the same way.
 pub fn failure_text(e: &crate::features::ask_ai::AiError) -> String {
     use crate::features::ask_ai::AiError;
     match e {

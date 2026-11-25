@@ -1752,3 +1752,76 @@ fn selected_words_are_translated_in_place_and_nothing_else_is_read_or_touched() 
     let right = row + 320 * 4;
     assert!(out.rgba[right..right + 400] == img[right..right + 400]);
 }
+
+/// W112 review: a selection of a whole line and the start of the next never draws over the
+/// words beside the selection: the translation goes into each selected span only, for a
+/// right-to-left and a left-to-right target.
+#[test]
+fn the_translation_stays_in_the_selected_spans() {
+    let (w, h) = (800u32, 450u32);
+    // line 0 fully selected (x 40..340); line 1 selected only at x 40..160, its words go on to 340
+    let img = frame(
+        w,
+        h,
+        &[[40.0, 40.0, 300.0, 30.0], [40.0, 72.0, 300.0, 30.0]],
+    );
+    for target in ["ar", "fr"] {
+        let fake = Fake::new(|_, _, _| panic!("not read"));
+        let picked = vec![
+            tb("Bring the Sunstone to", [40.0, 40.0, 300.0, 30.0]),
+            tb("the old", [40.0, 72.0, 120.0, 30.0]),
+        ];
+        let out = translate_until(
+            &img,
+            w,
+            h,
+            target,
+            &Cache::new(8),
+            &fake,
+            Some(picked),
+            |_| {},
+            || false,
+        )
+        .unwrap();
+        assert!(out.rgba != img, "{target}: something was drawn");
+        // line 1's unselected words (x 175..340, rows 76..98) are exactly as they were
+        let changed = (76..98u32)
+            .flat_map(|y| (175..340u32).map(move |x| (y * w + x) as usize * 4))
+            .filter(|&i| out.rgba[i..i + 3] != img[i..i + 3])
+            .count();
+        assert_eq!(changed, 0, "{target}: the unselected words were drawn over");
+    }
+}
+
+/// W112 review: a selection that starts mid-line (its first line a part at the right) and
+/// goes on to the start of the next line is ONE text, whatever the x of the first part.
+#[test]
+fn a_selection_starting_mid_line_is_one_text() {
+    let (w, h) = (800u32, 450u32);
+    let img = frame(
+        w,
+        h,
+        &[[200.0, 40.0, 140.0, 30.0], [40.0, 72.0, 120.0, 30.0]],
+    );
+    let fake = Fake::new(|_, _, _| panic!("not read"));
+    let picked = vec![
+        tb("Bring the", [200.0, 40.0, 140.0, 30.0]),
+        tb("Sunstone now", [40.0, 72.0, 120.0, 30.0]),
+    ];
+    translate_until(
+        &img,
+        w,
+        h,
+        "ar",
+        &Cache::new(8),
+        &fake,
+        Some(picked),
+        |_| {},
+        || false,
+    )
+    .unwrap();
+    assert_eq!(
+        *fake.ai_calls.borrow(),
+        vec![vec!["Bring the Sunstone now".to_string()]]
+    );
+}

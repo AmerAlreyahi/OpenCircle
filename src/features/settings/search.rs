@@ -193,13 +193,15 @@ fn index(state: &State) -> Vec<Entry> {
     // actions' names are in that language too.
     let spoken = crate::shared::app_language::snapshot();
     let keep = || crate::shared::app_language::restore(spoken);
+    // (the window's own rows come from the live state: its song token, its update status, its
+    // sign-in texts; only the rows a choice reveals come from throwaway states)
     let fresh = |cfg: crate::shared::config::Config| {
         let mut s = State::new(cfg, Vec::new(), None, Box::new(NoKeys));
         keep();
         s.refresh_quick_text();
         s
     };
-    let mut all = rows(&fresh(state.draft.clone()));
+    let mut all = rows(state);
     let provider_row = {
         let ((), found) = setting_row::harvest(|| drop(pages::rows::provider_row(state)));
         found.into_iter().next().map(|(t, _)| t)

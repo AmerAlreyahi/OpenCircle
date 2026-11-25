@@ -42,8 +42,8 @@ pub const NOTE_FONT: iced::Font = iced::Font {
 };
 
 pub struct Preset {
-    /// Its tooltip (with its key, `key`).
-    pub name: S,
+    /// Its name in a menu (the string table).
+    pub short: S,
     pub key: &'static str,
     /// Index into `ANNOTATION`.
     pub colour: usize,
@@ -56,7 +56,7 @@ pub struct Preset {
 /// Keys 1–9 pick these, in order.
 pub const PRESETS: &[Preset] = &[
     Preset {
-        name: S::ps_red,
+        short: S::ps_red_short,
         key: "1",
         colour: 0,
         width: Width::Medium,
@@ -71,7 +71,7 @@ pub const PRESETS: &[Preset] = &[
         ],
     },
     Preset {
-        name: S::ps_hl,
+        short: S::ps_hl_short,
         key: "2",
         colour: 2,
         width: Width::Medium,
@@ -79,7 +79,7 @@ pub const PRESETS: &[Preset] = &[
         keeps: &[Tool::Highlighter],
     },
     Preset {
-        name: S::ps_call,
+        short: S::tl_callout,
         key: "3",
         colour: 5,
         width: Width::Medium,
@@ -87,7 +87,7 @@ pub const PRESETS: &[Preset] = &[
         keeps: &[Tool::Callout, Tool::Label, Tool::ArrowLabel],
     },
     Preset {
-        name: S::ps_redact,
+        short: S::tl_redact,
         key: "4",
         colour: 11,
         width: Width::Medium,

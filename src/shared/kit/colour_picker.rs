@@ -126,7 +126,7 @@ pub struct Picker<'a, Message> {
     /// The few preset swatches.
     pub presets: &'a [Color],
     /// The user's recent colours, newest first.
-    pub recent: &'a [[u8; 3]],
+    pub recent: Vec<[u8; 3]>,
     /// The eyedropper button (the caller's, so it can pick from its own picture).
     pub eyedropper: Option<Element<'a, Message>>,
     /// The caption over the recent colours.
@@ -157,9 +157,14 @@ pub fn view<'a, Message: Clone + 'a>(p: Picker<'a, Message>) -> Element<'a, Mess
     let slider = {
         let rtl = super::dir::rtl();
         let (on, set) = (p.on_hsv.clone(), p.on_set.clone());
-        let strip = canvas::Canvas::new(Strip { hsv, rtl, on })
-            .width(Fill)
-            .height(HUE_H);
+        let strip = canvas::Canvas::new(Strip {
+            hsv,
+            rtl,
+            on,
+            done: p.done.clone(),
+        })
+        .width(Fill)
+        .height(HUE_H);
         focus::stop(strip, radius::FULL, None).steps(move |step| {
             let by = match step {
                 focus::Step::On => HUE_NUDGE,
@@ -399,6 +404,7 @@ struct Strip<'a, Message> {
     hsv: Hsv,
     rtl: bool,
     on: Rc<dyn Fn(Hsv) -> Message + 'a>,
+    done: Message,
 }
 
 impl<Message: Clone> canvas::Program<Message> for Strip<'_, Message> {
@@ -412,8 +418,10 @@ impl<Message: Clone> canvas::Program<Message> for Strip<'_, Message> {
         cursor: Cursor,
     ) -> Option<Action<Message>> {
         let (at, _) = drag.follow(event, bounds, cursor)?;
-        // (the end of a drag needs no message here: the square's `done` is the same one)
-        let p = at?;
+        // (the end of a drag: the colour is remembered)
+        let Some(p) = at else {
+            return Some(Action::publish(self.done.clone()).and_capture());
+        };
         let share = (p.x / bounds.width).clamp(0.0, 1.0);
         let share = if self.rtl { 1.0 - share } else { share };
         Some(Action::publish((self.on)(self.hsv.with_hue(share * 360.0))).and_capture())
@@ -505,7 +513,7 @@ mod tests {
             old: Color::BLACK,
             hex: "#000000",
             presets: &PRESETS,
-            recent: &[[1, 2, 3]],
+            recent: vec![[1, 2, 3]],
             eyedropper: None,
             recent_label: "Recent",
             on_hsv: Rc::new(M::Hsv),
@@ -641,6 +649,21 @@ mod tests {
         }
         assert!(seen.contains(&M::Rgb([1, 2, 3])), "the recent colour");
         assert!(seen.contains(&M::Rgb([255, 59, 48])), "a preset");
+    }
+
+    /// W112 review: a drag on the hue slider ends with `done` too (the colour is remembered).
+    #[test]
+    fn a_hue_drag_ends_with_done() {
+        let y = PAD + SQUARE_H + space::GAP + HUE_H / 2.0;
+        let (got, _) = shot::drag(
+            || picker(start()),
+            SIZE,
+            (Point::new(60.0, y), Point::new(150.0, y), 1),
+            &[],
+            &mut shot::Clip::default(),
+        );
+        assert!(got.iter().any(|m| matches!(m, M::Hsv(_))), "{got:?}");
+        assert_eq!(got.last(), Some(&M::Done), "{got:?}");
     }
 
     #[test]

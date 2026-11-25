@@ -6534,7 +6534,14 @@ fn w106_ctrl_c_copies_the_translated_text_of_words_translated_in_place() {
             .as_deref(),
         Some("hola")
     );
-    let _ = app.update(Message::Overlay(ctrl_c));
+    let _ = copy::copied::text();
+    let task = app.update(Message::Overlay(ctrl_c));
+    run_task(&mut app, task);
+    assert_eq!(
+        copy::copied::text().as_deref(),
+        Some("hola"),
+        "the clipboard has the translation"
+    );
     assert!(app.o.is_none(), "the copy closed the overlay");
 }
 

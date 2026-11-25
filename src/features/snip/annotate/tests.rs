@@ -3693,3 +3693,48 @@ fn w112_the_picker_moves_the_colour_live_and_remembers_it_when_done() {
     let next = Annotator::restored(checker(100, 80), 1.0, saved);
     assert_eq!(next.recent, e.recent);
 }
+
+/// A rectangle drawn and selected (Snip, or the Studio with `studio`).
+fn selected_rect(studio: bool) -> Annotator {
+    let mut e = editor(300, 200);
+    e.studio = studio;
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(50.0, 50.0), &[], pt(150.0, 120.0));
+    e.update(Message::Tool(Tool::Select));
+    e.update(Message::Press(pt(100.0, 50.0)));
+    e.update(Message::Release);
+    assert!(!e.doc.selection().is_empty(), "the rectangle is selected");
+    e
+}
+
+/// W112 review: dragging the picker's square recolours the SELECTED objects, in the Studio
+/// and in Snip; in Snip the whole drag is ONE undo step.
+#[test]
+fn w112_the_picker_recolours_the_selected_object_in_one_undo_step() {
+    use crate::shared::kit::colour_picker::Hsv;
+    for studio in [true, false] {
+        let mut e = selected_rect(studio);
+        let before = e.doc.items[0].colour;
+        let mut last = [0; 3];
+        for s in [0.2, 0.5, 0.8, 1.0] {
+            let h = Hsv {
+                h: 120.0,
+                s,
+                v: 1.0,
+            };
+            last = h.rgb();
+            e.update(Message::Hsv(h.array(), last));
+        }
+        assert_eq!(
+            e.doc.items[0].colour[..3],
+            last,
+            "studio {studio}: live recolour"
+        );
+        e.update(Message::HsvDone);
+        assert_eq!(e.doc.items[0].colour[..3], last);
+        if !studio {
+            e.update(Message::Undo);
+            assert_eq!(e.doc.items[0].colour, before, "undone in one step");
+        }
+    }
+}

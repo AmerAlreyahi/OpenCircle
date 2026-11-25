@@ -1215,17 +1215,13 @@ fn slider_sheet() {
 
 #[test]
 fn colour_sheet() {
-    use super::super::colour::{picker, recent, swatch};
+    use super::super::colour::{recent, swatch};
     use iced::Color;
     const RED: Color = Color::from_rgb(0.94, 0.27, 0.27);
-    const BLUE: Color = Color::from_rgb(0.23, 0.51, 0.96);
     let rows = vec![
         row("swatch", Act::Rest, |_| swatch(RED, false, Some(()))),
         row("hover", Act::Hover, |_| swatch(RED, false, Some(()))),
         row("open", Act::Rest, |_| swatch(RED, true, Some(()))),
-        row("picker", Act::Rest, |_| {
-            picker(&[RED, BLUE, Color::WHITE], RED, "#EF4444", |_| (), |_| ())
-        }),
         row("recent", Act::Rest, |_| {
             recent(&[[59, 130, 246], [239, 68, 68], [255; 3], [0; 3]], |_| ())
         }),
@@ -1246,7 +1242,7 @@ fn colour_picker_sheet() {
         Color::from_rgb8(0x0a, 0x84, 0xff),
         Color::from_rgb8(0x1c, 0x1c, 0x1e),
     ];
-    let picker = |recent: &'static [[u8; 3]]| -> Element<'static, ()> {
+    let picker = |recent: Vec<[u8; 3]>| -> Element<'static, ()> {
         view(Picker {
             hsv: Hsv {
                 h: 212.0,
@@ -1268,9 +1264,9 @@ fn colour_picker_sheet() {
     };
     let rows = vec![
         row("recent", Act::Rest, move |_| {
-            picker(&[[59, 130, 246], [239, 68, 68], [255; 3]])
+            picker(vec![[59, 130, 246], [239, 68, 68], [255; 3]])
         }),
-        row("none yet", Act::Rest, move |_| picker(&[])),
+        row("none yet", Act::Rest, move |_| picker(vec![])),
     ];
     sheet("colour_picker", Size::new(264.0, 330.0), &rows);
 }

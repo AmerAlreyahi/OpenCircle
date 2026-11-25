@@ -1863,3 +1863,37 @@ fn w108_the_steps_spot_round_trips_and_is_additive() {
     assert_eq!(back.snip.steps_spot, Some([1920, 0, 1700, 300]));
     assert!(warnings.is_empty(), "{warnings:?}");
 }
+
+/// W112 review: `[editor] recent` (the colour picker's recent colours): a valid list is read in
+/// order, a bad entry is warned about and skipped alone, and the list survives a save and load.
+#[test]
+fn the_editors_recent_colours_are_read_skipped_by_entry_and_round_trip() {
+    let (c, w) = Config::parse("[editor]\nrecent = [\"#0A84FF\", \"#34C759\"]\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        c.editor.recent,
+        Some(vec!["#0A84FF".to_string(), "#34C759".to_string()])
+    );
+    let (c, w) = Config::parse("[editor]\nrecent = [\"#0A84FF\", \"purple\", \"#34C759\"]\n");
+    assert_eq!(
+        c.editor.recent,
+        Some(vec!["#0A84FF".to_string(), "#34C759".to_string()]),
+        "only the bad entry goes"
+    );
+    assert!(w.len() == 1 && w[0].contains("purple"), "{w:?}");
+    let (c, w) = Config::parse("[editor]\nrecent = \"#0A84FF\"\n");
+    assert!(c.editor.recent.is_none() && !w.is_empty(), "{w:?}");
+    // a save and load keeps them; a default file writes no key
+    let dir = std::env::temp_dir().join(format!("oc-recent-{}", std::process::id()));
+    let path = dir.join("config.toml");
+    let mut c = Config::default();
+    c.editor.recent = Some(vec!["#0A84FF".into(), "#1C1C1E".into()]);
+    c.save_to(&path).unwrap();
+    let (back, w) = Config::load_from(&path);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.editor.recent, c.editor.recent);
+    let plain = dir.join("plain.toml");
+    Config::default().save_to(&plain).unwrap();
+    assert!(!std::fs::read_to_string(&plain).unwrap().contains("recent"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

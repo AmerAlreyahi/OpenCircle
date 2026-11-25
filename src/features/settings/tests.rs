@@ -4840,21 +4840,22 @@ fn the_report_popup_centres_its_buttons() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// W112 part A: opening and typing in the Settings search never changes the UI language
-/// (Arabic stays Arabic, even when the draft derives another one), and the hits are in it.
+/// W112 part A: opening and typing in the Settings search never changes the UI language (Arabic
+/// stays Arabic, even when the draft derives another one), the hits are in it, and so are the
+/// window's own Shortcuts rows: the window follows a language changed from elsewhere.
 #[test]
 fn w112_search_keeps_the_app_language_and_lists_arabic_titles() {
     use crate::shared::app_language::{self, Lang};
     // the window was made in English (its quick actions' words are English) ...
-    let (s, _) = state(None);
+    let (mut s, _) = state(None);
     // ... and speaks Arabic now, though the draft says nothing of it
     app_language::set(Lang::Ar);
-    let mut find = super::search::Search::open(&s);
-    assert_eq!(app_language::current(), Lang::Ar, "opening the search");
-    find.typed("a".into());
-    let _ = find.all_hits();
+    update(&mut s, Message::SearchInput("a".into()));
     assert_eq!(app_language::current(), Lang::Ar, "typing");
+    // the window's own Shortcuts rows follow the language
+    assert_ne!(s.label(Slot::Quick(0)), "Snip");
     // the titles are the Arabic ones, the quick actions' too
+    let find = s.search.as_ref().expect("the search is open");
     let titles = find.index_titles();
     let english = [
         "Snip",
@@ -4871,7 +4872,18 @@ fn w112_search_keeps_the_app_language_and_lists_arabic_titles() {
             "{t:?} is English in an Arabic index"
         );
     }
+    // the language of the draft ("Your language" following onboarding) and a language chosen in General
+    for (language, app) in [("ar", ""), ("", "ar")] {
+        let (mut s, _) = state(None);
+        s.draft.general.language = language.into();
+        s.draft.general.app_language = app.into();
+        app_language::apply(&s.draft.general);
+        update(&mut s, Message::SearchInput("a".into()));
+        assert_eq!(app_language::current(), Lang::Ar, "{language:?} {app:?}");
+    }
     // an Arabic term finds the Arabic page title
+    app_language::set(Lang::Ar);
+    let mut find = super::search::Search::open(&s);
     let title_ar = crate::shared::app_language::tr(pages::of(Section::Ai).title);
     find.typed(title_ar.to_string());
     assert!(
@@ -4880,4 +4892,37 @@ fn w112_search_keeps_the_app_language_and_lists_arabic_titles() {
             .any(|e| e.is_page && e.section == Section::Ai)
     );
     app_language::set(Lang::En);
+}
+
+/// W112 review: the custom look's colour uses the same picker as Snip: a drag on its square sets
+/// the colour live without writing the file, the end of the drag (or a key) saves it and puts it
+/// first in the recent colours (shared with Snip's picker).
+#[test]
+fn w112_the_custom_look_colour_uses_the_one_picker() {
+    use crate::shared::kit::colour_picker::Hsv;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Look(LookTheme::Custom));
+    update(
+        &mut s,
+        Message::Palette(PaletteChoice(ColourSet::TwoColour)),
+    );
+    update(&mut s, Message::Section(Section::Appearance));
+    update(&mut s, Message::Picker(0));
+    let green = Hsv {
+        h: 120.0,
+        s: 1.0,
+        v: 1.0,
+    };
+    let out = update(&mut s, Message::Hsv(green));
+    assert_eq!(out, Outcome::None, "a drag writes nothing");
+    assert_eq!(s.draft.look.custom.colours[0], Rgb([0, 255, 0]));
+    assert!(s.draft.editor.recent.is_none(), "not remembered mid-drag");
+    update(&mut s, Message::HsvDone);
+    assert_eq!(s.draft.editor.recent, Some(vec!["#00FF00".to_string()]));
+    // a key moves it and remembers at once; the list holds a colour once
+    update(&mut s, Message::HsvSet(green));
+    assert_eq!(s.draft.editor.recent.as_ref().map(Vec::len), Some(1));
+    // the old hex + swatch grid is gone: the picker has the preview and the recent row
+    let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Recent"), "{texts:?}");
 }

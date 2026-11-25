@@ -2077,14 +2077,10 @@ strings! {
         | "النقر ينسخ HEX";
     sn_pick_recent: "Picked colours show here"
         | "تظهر هنا الألوان المختارة";
-    ps_red: "Red box + arrow"
-        | "مربع أحمر + سهم";
-    ps_hl: "Highlight yellow"
-        | "تمييز أصفر";
-    ps_call: "Blue callout"
-        | "فقاعة زرقاء";
-    ps_redact: "Redact: a solid black box; on a selected box, fills it"
-        | "حجب: مربع أسود مصمت؛ وعلى مربع محدد يملؤه";
+    ps_red_short: "Red box"
+        | "مربع أحمر";
+    ps_hl_short: "Highlight"
+        | "تمييز";
     sn_pick_image: "Pick a colour from the image"
         | "اختر لونًا من الصورة";
     cp_recent: "Recent"

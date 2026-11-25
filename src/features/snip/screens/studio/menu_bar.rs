@@ -228,7 +228,7 @@ pub fn sub_items(sub: Sub, s: &Studio) -> Vec<Item<'_>> {
         .collect(),
         Sub::Presets => (crate::features::snip::annotate::PRESETS.iter().enumerate())
             .map(|(i, p)| Item {
-                label: tr(p.name),
+                label: tr(p.short),
                 keys: p.key.to_string(),
                 checked: false,
                 press: Msg::Editor(Message::Preset(i)),

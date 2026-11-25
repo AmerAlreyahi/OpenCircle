@@ -438,21 +438,32 @@ fn cells(line: &Line) -> Vec<(f32, f32)> {
 /// direction change is two pieces or more; spaces join the characters
 /// beside them and never make a piece of their own.
 fn pieces(line: &Line, a: usize, b: usize) -> Vec<Rectangle> {
+    pieces_of(line, a, b).into_iter().map(|(r, _)| r).collect()
+}
+
+/// `pieces`, each with the characters (indices) it holds.
+fn pieces_of(line: &Line, a: usize, b: usize) -> Vec<(Rectangle, Vec<usize>)> {
     let cells = cells(line);
     let chars: Vec<char> = line.text.chars().collect();
-    let mut shown: Vec<(f32, f32, bool)> = (0..chars.len())
+    let mut shown: Vec<(f32, f32, bool, usize)> = (0..chars.len())
         .filter(|&i| !chars[i].is_whitespace())
-        .map(|i| (cells[i].0, cells[i].1, (a..b).contains(&i)))
+        .map(|i| (cells[i].0, cells[i].1, (a..b).contains(&i), i))
         .collect();
     shown.sort_by(|p, q| p.0.total_cmp(&q.0));
-    let mut out: Vec<Rectangle> = Vec::new();
+    let mut out: Vec<(Rectangle, Vec<usize>)> = Vec::new();
     let mut last_in = false;
-    for (l, r, inside) in shown {
+    for (l, r, inside, i) in shown {
         match (inside, last_in, out.last_mut()) {
-            (true, true, Some(piece)) => piece.width = r - piece.x,
-            (true, ..) => out.push(Rectangle::new(
-                Point::new(l, line.bounds.y),
-                Size::new(r - l, line.bounds.height),
+            (true, true, Some((piece, held))) => {
+                piece.width = r - piece.x;
+                held.push(i);
+            }
+            (true, ..) => out.push((
+                Rectangle::new(
+                    Point::new(l, line.bounds.y),
+                    Size::new(r - l, line.bounds.height),
+                ),
+                vec![i],
             )),
             _ => {}
         }
@@ -794,15 +805,28 @@ impl Picked {
         rects.iter().fold(first, |all, r| all.union(r))
     }
 
-    /// The selected span of each line: its text and the box around it (image px), in
-    /// reading order. A partly selected line gives only the selected words' box.
+    /// The selected span of each line: its text and the box around only those words (image px),
+    /// in reading order. A line selected across a change of direction gives one segment per
+    /// visual piece, so no box covers the unselected words between or beside them.
     pub fn segments(&self) -> Vec<(String, Rectangle)> {
         (self.spans().into_iter())
-            .filter_map(|(l, first, last)| {
+            .flat_map(|(l, first, last)| {
                 let line = &self.lines[l];
-                let text: String = line.text.chars().skip(first).take(last - first).collect();
-                let text = text.trim().to_string();
-                (!text.is_empty()).then(|| (text, between(line, first, last)))
+                let chars: Vec<char> = line.text.chars().collect();
+                (pieces_of(line, first, last).into_iter())
+                    .filter_map(|(rect, mut held)| {
+                        held.sort_unstable();
+                        let text: String = held.iter().map(|&i| chars[i]).collect();
+                        // (the spaces inside a piece are in its box: put them back)
+                        let (from, to) = (*held.first()?, *held.last()? + 1);
+                        let text = match text.chars().count() == to - from {
+                            true => text,
+                            false => chars[from..to].iter().collect(),
+                        };
+                        let text = text.trim().to_string();
+                        (!text.is_empty()).then_some((text, rect))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect()
     }
@@ -1141,6 +1165,36 @@ mod tests {
         assert_eq!((seg[0].1.x, seg[0].1.x + seg[0].1.width), (200.0, 290.0));
         assert_eq!((seg[1].1.x, seg[1].1.x + seg[1].1.width), (100.0, 220.0));
         assert_eq!(seg[0].1.y, 100.0);
+    }
+
+    /// W112 review: a mixed-direction line selected across its change of direction gives one
+    /// segment per visual piece; no box covers the unselected words between them.
+    #[test]
+    fn segments_of_a_mixed_line_leave_the_unselected_words_between_alone() {
+        // logical "one مرحبا two": the Arabic run is shown reversed between "one" and "two"
+        let l = line(
+            "one \u{0645}\u{0631}\u{062D}\u{0628}\u{0627} two",
+            100.0,
+            100.0,
+        );
+        let mut p = press(vec![l.clone()], Point::new(100.0, 110.0), Unit::Caret).unwrap();
+        // "one " and the first two Arabic letters (the right end of the Arabic run)
+        (p.anchor, p.end) = ((0, 0), (0, 6));
+        let seg = p.segments();
+        assert_eq!(seg.len(), 2, "{seg:?}");
+        let cells = cells(&l);
+        // the unselected Arabic letters (logical 6..9) sit between the two boxes
+        let (x0, x1) = (
+            cells[6..9].iter().map(|c| c.0).fold(f32::MAX, f32::min),
+            cells[6..9].iter().map(|c| c.1).fold(f32::MIN, f32::max),
+        );
+        for (_, r) in &seg {
+            assert!(
+                r.x + r.width <= x0 + 0.5 || r.x >= x1 - 0.5,
+                "{r:?} covers the unselected letters {x0}..{x1}"
+            );
+        }
+        assert_eq!(seg[0].0, "one");
     }
 
     #[test]

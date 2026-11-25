@@ -1,20 +1,16 @@
 //! The one colour control (owner rule: a colour button opening a picker, not
 //! a row of swatches; the design has none): `swatch`, a 34x34 `.oc-btn` with
 //! the colour as an 18 px dot (`accent` edge while its picker is open), and
-//! `picker`, the colours in rows of 6 and a hex field, on the `dropdown`
-//! material with a `rim` edge, radius 14. `recent`: the screen colour
+//! the picker itself is `colour_picker`. `recent`: the screen colour
 //! picker's last colours, the picker's dots in one row.
-use iced::widget::{Space, button, column, container, row};
+use iced::widget::{Space, button, container, row};
 use iced::{Border, Color, Element, Fill};
 
-use super::field::input;
 use super::themes::c;
 use super::tokens::{radius, size, space};
 
 const DOT: f32 = 18.0;
 const CHIP: f32 = 22.0;
-const PER_ROW: usize = 6;
-const PAD: f32 = 10.0;
 /// `picker_with`'s width: its rows of controls, and the padding.
 pub const PICKER_W: f32 = super::colour_picker::WIDTH;
 
@@ -86,52 +82,6 @@ pub fn swatch<'a, Message: Clone + 'a>(
         on_press,
     )
     .into()
-}
-
-/// `colours` to pick from (the chosen one ringed in `text`), and `hex` as typed.
-pub fn picker<'a, Message: Clone + 'a>(
-    colours: &[Color],
-    current: Color,
-    hex: &str,
-    on_colour: impl Fn(Color) -> Message,
-    on_hex: impl Fn(String) -> Message + 'a,
-) -> Element<'a, Message> {
-    picker_with(colours, current, hex, on_colour, on_hex, None)
-}
-
-/// `picker` with more controls under the hex field (the editor's stroke
-/// weight, eyedropper and presets).
-pub fn picker_with<'a, Message: Clone + 'a>(
-    colours: &[Color],
-    current: Color,
-    hex: &str,
-    on_colour: impl Fn(Color) -> Message,
-    on_hex: impl Fn(String) -> Message + 'a,
-    more: Option<Element<'a, Message>>,
-) -> Element<'a, Message> {
-    let chip = |&colour: &Color| chip(colour, colour == current, on_colour(colour));
-    let rows =
-        (colours.chunks(PER_ROW)).map(|r| row(r.iter().map(chip)).spacing(space::GAP).into());
-    let hex = input("#RRGGBB", hex, true, false).on_input(on_hex);
-    let mut body = column(rows).push(hex).spacing(space::GAP);
-    // The hex field fills its row: with more controls the picker is as wide
-    // as they need (a window floating it would otherwise stretch it).
-    let wide = more.is_some();
-    if let Some(more) = more {
-        body = body.push(more);
-    }
-    let picker = container(body).padding(PAD).style(|_| container::Style {
-        background: Some(c().dropdown.into()),
-        border: Border::default()
-            .rounded(radius::DROPDOWN)
-            .width(1)
-            .color(c().rim),
-        ..container::Style::default()
-    });
-    match wide {
-        true => picker.width(PICKER_W).into(),
-        false => picker.into(),
-    }
 }
 
 /// One colour to pick: a 22 px dot, ringed in `text` when `chosen`.

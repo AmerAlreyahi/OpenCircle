@@ -1507,3 +1507,53 @@ fn f7_original_on_snip_sees_the_original_and_taps_open_nothing() {
     s.click(Point::new(80.0, 30.0));
     assert!(s.take_chat().is_some(), "the word card again");
 }
+
+fn selected_words() -> Vec<crate::features::text_reading::TextBlock> {
+    vec![crate::features::text_reading::TextBlock {
+        text: "Bring the Sunstone".into(),
+        bounds: [20.0, 20.0, 120.0, 20.0],
+        confidence: 1.0,
+        words: Vec::new(),
+    }]
+}
+
+fn card_texts(s: &Session) -> Vec<String> {
+    let size = Size::new(1920.0, 1080.0);
+    crate::shared::kit::testing::shot::texts(s.view(size, card::place(size, None, None), false))
+}
+
+/// W112 review (replaces W106's download-card test): selected words translated in place with no
+/// model on disk get the full-screen translate's download card, and stay selected-words mode.
+#[test]
+fn selected_words_without_the_model_get_the_download_card() {
+    let (mut s, _) = Session::start_text(
+        frame(200, 100),
+        selected_words(),
+        1.0,
+        Arc::new(Cache::new(8)),
+    )
+    .expect("a session");
+    assert!(s.text_only());
+    let _ = s.update(Msg::Offline(en_ar(), 117_600_822));
+    assert!(matches!(&s.phase, Phase::Consent(Some((_, 117_600_822)))));
+    assert!(s.text_only(), "still the selected words");
+    let texts = card_texts(&s);
+    assert!(texts.iter().any(|t| t == "Download"), "{texts:?}");
+}
+
+/// W112 review (replaces W106's "already in" test): text already in the target language says so
+/// quietly (the pill's one card), it is not a crash and not a drawn translation.
+#[test]
+fn selected_words_already_in_the_target_say_so() {
+    let (mut s, _) = Session::start_text(
+        frame(200, 100),
+        selected_words(),
+        1.0,
+        Arc::new(Cache::new(8)),
+    )
+    .expect("a session");
+    let note = "This text is already in English";
+    let _ = s.update(Msg::Done(Err(problem(note.into(), false))));
+    assert!(s.translated_text().is_none(), "nothing was drawn");
+    assert!(card_texts(&s).iter().any(|t| t == note));
+}

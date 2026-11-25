@@ -115,6 +115,7 @@
 //! text_bold = true                  # the Text tool's weight
 //! text_back = "none"                # behind the glyphs: none | outline | box
 //! group_tools = ["select", "arrow", "pen", "text", "blur"]  # each toolbar group's last tool
+//! recent = ["#0A84FF", "#34C759"]   # the colour picker's recent colours, newest first (8 at most)
 //!
 //! [labs]                            # unfinished features: off = hidden everywhere, settings kept
 //! song = false                      # song search

@@ -603,6 +603,9 @@ pub struct State {
     /// thread (`take_key_jobs`) and sends each answer back as a `KeyMessage::Done`.
     pub(super) key_jobs: Vec<(bool, KeyJob)>,
     pub(super) quick_text: Vec<SlotText>,
+    /// The language `quick_text` was written in: when the app speaks another one (changed
+    /// from elsewhere), the next message writes it again.
+    quick_lang: crate::shared::app_language::Lang,
     /// What the live-interval field shows (kept as typed).
     pub(super) interval: String,
     /// "key: reason" lines from `Config`'s own validation of the draft.
@@ -621,6 +624,9 @@ pub struct State {
     pub(super) edge_mode: EdgeMode,
     pub(super) picker: Option<usize>,
     pub(super) hex: String,
+    /// The picker's square and slider (a grey has no hue in RGB), and the colour before its last change.
+    pub(super) hsv: Option<crate::shared::kit::colour_picker::Hsv>,
+    pub(super) picked_from: [u8; 3],
     /// The last Check now's result (`None` = not checked in this window).
     pub(super) update_status: Option<UpdateLine>,
     /// The update waiting (its version, how it installs) and when GitHub last
@@ -850,6 +856,10 @@ pub enum Message {
     Picker(usize),
     PickColour(Color),
     Hex(String),
+    /// The colour picker's square or slider is dragged (not saved until it ends), it ended, a key moved it.
+    Hsv(crate::shared::kit::colour_picker::Hsv),
+    HsvDone,
+    HsvSet(crate::shared::kit::colour_picker::Hsv),
     /// The Snip section's choices.
     Snip(SnipConfig),
     /// About: keep OpenCircle up to date, Check now, and that check's result.
@@ -1175,6 +1185,7 @@ impl State {
             sign_in_error: None,
             key_jobs: Vec::new(),
             quick_text,
+            quick_lang: crate::shared::app_language::current(),
             interval,
             problems: Vec::new(),
             notice: warnings
@@ -1185,6 +1196,8 @@ impl State {
             edge_mode: EdgeMode::Overlay,
             picker: None,
             hex: String::new(),
+            hsv: None,
+            picked_from: [0; 3],
             update_status: None,
             update_waiting: None,
             update_checked: None,
@@ -1267,6 +1280,7 @@ impl State {
     /// The quick actions' words again, in the language spoken now.
     pub(super) fn refresh_quick_text(&mut self) {
         self.quick_text = quick_text(&self.draft);
+        self.quick_lang = crate::shared::app_language::current();
     }
 
     /// Puts `ai` back (onboarding's Skip), its key looked up again.
@@ -1643,7 +1657,21 @@ fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
 /// valid is written at once, so nothing is lost on close (#136). A draft with
 /// problems is held back (the footer says why) and closing asks about it.
 /// The write itself runs off the UI thread (`Outcome::Write`).
+/// The colour the picker has now goes first in the recent colours (shared with Snip's picker).
+fn remember_colour(state: &mut State) {
+    let Some(i) = state.picker else { return };
+    let hex = state.draft.look.custom.colours[i].hex(true);
+    let recent = state.draft.editor.recent.get_or_insert_with(Vec::new);
+    recent.retain(|c| !c.eq_ignore_ascii_case(&hex));
+    recent.insert(0, hex);
+    recent.truncate(8);
+}
+
 pub fn update(state: &mut State, message: Message) -> Outcome {
+    // (the app's language may have changed from elsewhere: the action names follow it)
+    if state.quick_lang != crate::shared::app_language::current() {
+        state.refresh_quick_text();
+    }
     let change = !matches!(
         message,
         Message::Save
@@ -1655,6 +1683,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::ModelQuery(_)
             | Message::LoadModels
             | Message::ModelsLoaded(..)
+            | Message::Hsv(_)
             | Message::Scale(_)
             | Message::Height(_)
             | Message::Step(..)
@@ -1886,7 +1915,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.draft.general.app_language = code.0.into();
             // every window speaks it at its next redraw (no restart)
             crate::shared::app_language::apply(&state.draft.general);
-            state.quick_text = quick_text(&state.draft);
+            state.refresh_quick_text();
         }
         Message::SelectStyle(v) => state.draft.selection.style = v,
         Message::TextReader(v) => state.draft.selection.text_reader = v,
@@ -1952,21 +1981,38 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::EdgeMode(m) => state.edge_mode = m,
         Message::Picker(i) => {
             state.picker = (state.picker != Some(i)).then_some(i);
-            state.hex = state.draft.look.custom.colours[i.min(1)].hex(false);
+            let now = state.draft.look.custom.colours[i.min(1)];
+            (state.hex, state.hsv, state.picked_from) = (now.hex(false), None, now.0);
         }
         Message::Hex(hex) => {
             if let (Some(i), Some(c)) = (state.picker, Rgb::parse(&hex)) {
+                state.picked_from = state.draft.look.custom.colours[i].0;
                 state.draft.look.custom.colours[i] = c;
+                state.hsv = None;
             }
             state.hex = hex;
         }
         Message::PickColour(c) => {
             if let Some(i) = state.picker {
                 let [r, g, b, _] = c.into_rgba8();
+                state.picked_from = state.draft.look.custom.colours[i].0;
                 state.draft.look.custom.colours[i] = Rgb([r, g, b]);
                 state.hex = Rgb([r, g, b]).hex(false);
+                state.hsv = None;
             }
         }
+        Message::Hsv(hsv) | Message::HsvSet(hsv) => {
+            if let Some(i) = state.picker {
+                let rgb = hsv.rgb();
+                state.draft.look.custom.colours[i] = Rgb(rgb);
+                state.hex = Rgb(rgb).hex(false);
+                state.hsv = Some(hsv);
+            }
+            if matches!(message, Message::HsvSet(_)) {
+                remember_colour(state);
+            }
+        }
+        Message::HsvDone => remember_colour(state),
         Message::Palette(_)
         | Message::Glow(_)
         | Message::Dim(_)

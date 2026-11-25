@@ -114,7 +114,7 @@ pub(super) mod touch {
 
     pub fn of(m: &M) -> u8 {
         match m {
-            M::Colour(_) | M::Hex(_) => COLOUR,
+            M::Colour(_) | M::Hex(_) | M::Hsv(..) | M::HsvSet(..) => COLOUR,
             M::Width(_) => STROKE | TEXT,
             M::TextSize(_) | M::TextStyle(_) => TEXT,
             M::BlurSize(_) | M::BlurCell(_) | M::BlurCustom(_) => BLUR,

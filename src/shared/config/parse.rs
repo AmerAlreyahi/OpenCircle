@@ -160,19 +160,18 @@ impl Config {
                         false => Err("expected #RRGGBB".into()),
                     }
                 });
-            c.editor.recent = get_checked(
-                t,
-                p,
-                "recent",
-                None,
-                &mut w,
-                |l: &Option<Vec<String>>| match (l.iter().flatten())
-                    .all(|s| crate::features::snip::annotate::parse_hex(s).is_some())
-                {
-                    true => Ok(()),
-                    false => Err("expected a list of #RRGGBB".into()),
-                },
-            );
+            // a bad entry is warned about and skipped; the others stay
+            c.editor.recent = get::<Option<Vec<String>>>(t, p, "recent", None, &mut w).map(|l| {
+                (l.into_iter())
+                    .filter(|s| {
+                        let ok = crate::features::snip::annotate::parse_hex(s).is_some();
+                        if !ok {
+                            w.push(format!("{p}recent: \"{s}\" is not #RRGGBB; skipped"));
+                        }
+                        ok
+                    })
+                    .collect()
+            });
             c.editor.size = get(t, p, "size", None, &mut w);
             let in_range = within(TEXT_SIZE, " px");
             c.editor.text_size = get_checked(t, p, "text_size", None, &mut w, |n| {

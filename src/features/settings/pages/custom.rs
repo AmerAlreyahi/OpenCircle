@@ -8,8 +8,9 @@ use iced::widget::tooltip::Position;
 
 use super::super::state::{BARS, BarChoice, Message, PALETTES, PaletteChoice, State};
 use crate::features::settings::labs::{Feature, Labs};
-use crate::shared::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle};
-use crate::shared::kit::colour::{picker, swatch};
+use crate::shared::config::{BracketColour, BracketStyle, ColourSet, EdgeMode, EdgeStyle, Rgb};
+use crate::shared::kit::colour::swatch;
+use crate::shared::kit::colour_picker::{self, Hsv};
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::segmented::segmented;
 use crate::shared::kit::setting_row::{self, title};
@@ -55,13 +56,25 @@ pub fn rows(state: &State) -> Vec<Element<'_, Message>> {
         ]
         .spacing(space::GAP);
         if let Some(i) = state.picker {
-            control = control.push(picker(
-                &theme::ANNOTATION,
-                rgb(i),
-                &state.hex,
-                Message::PickColour,
-                Message::Hex,
-            ));
+            let now = c.colours[i].0;
+            let recent: Vec<[u8; 3]> = (state.draft.editor.recent.iter().flatten())
+                .filter_map(|s| Rgb::parse(s).map(|c| c.0))
+                .collect();
+            let hsv = (state.hsv.filter(|h| h.rgb() == now)).unwrap_or_else(|| Hsv::of(now));
+            control = control.push(colour_picker::view(colour_picker::Picker {
+                hsv,
+                old: theme::rgb(Rgb(state.picked_from)),
+                hex: &state.hex,
+                presets: &theme::ANNOTATION,
+                recent,
+                eyedropper: None,
+                recent_label: t!(cp_recent),
+                on_hsv: std::rc::Rc::new(Message::Hsv),
+                done: Message::HsvDone,
+                on_set: std::rc::Rc::new(Message::HsvSet),
+                on_rgb: std::rc::Rc::new(|rgb| Message::PickColour(theme::rgb(Rgb(rgb)))),
+                on_hex: std::rc::Rc::new(Message::Hex),
+            }));
         }
         rows.push(row_of(t!(cu_two), t!(cu_two_desc), control.into()));
     }

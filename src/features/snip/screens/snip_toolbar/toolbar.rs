@@ -13,7 +13,7 @@ use iced::{Element, Fill, Point, Rectangle, Size, Vector};
 use crate::features::circle::actions::share;
 use crate::features::circle::screens::bar::geometry as bar;
 use crate::features::snip::annotate::{
-    Annotator, Group, Menu, Message, ScreenTool, Tool, ToolInfo, dragout, info,
+    Annotator, Group, Menu, Message, PRESETS, ScreenTool, Tool, ToolInfo, dragout, info,
 };
 use crate::features::snip::snip_more::{self, Read, Row};
 use crate::shared::app_language::{S, fmt, tr};
@@ -177,6 +177,8 @@ impl MoreRow {
 
 /// The rows before the hairline: Copy text, Ask AI, Translate.
 pub const TEXT_ROWS: usize = 3;
+/// The style rows at the foot of More (a hairline above them): Copy style, Paste style, the presets.
+pub const STYLE_ROWS: usize = 2 + PRESETS.len();
 
 /// More's rows (Labs and platform rows only where they work): the three
 /// picture actions first (each shows the user's own shortcut), then today's.
@@ -251,6 +253,27 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         None,
         live(Message::ScreenTool(ScreenTool::Ruler)),
     ));
+    // the style tools (not in the colour picker): copy and paste a style, the presets (keys 1-4)
+    rows.push(MoreRow::plain(
+        COPY,
+        S::sn_copy_style,
+        Some("Alt+C"),
+        live(Message::CopyStyle),
+    ));
+    rows.push(MoreRow::plain(
+        LIST_PLUS,
+        S::sn_paste_style,
+        Some("Alt+V"),
+        live(Message::PasteStyle),
+    ));
+    for (i, p) in PRESETS.iter().enumerate() {
+        rows.push(MoreRow::plain(
+            crate::features::snip::annotate::info(p.tool).icon,
+            p.short,
+            Some(p.key),
+            live(Message::Preset(i)),
+        ));
+    }
     // a dimmed row says why in its tooltip (F15)
     for r in rows
         .iter_mut()
@@ -717,8 +740,10 @@ pub const MORE_W_AR: f32 = 304.0;
 fn more_panel(e: &Annotator) -> Element<'_, Message> {
     let rtl = dir::rtl();
     let mut items: Vec<Element<'_, Message>> = Vec::new();
-    for (i, r) in more_rows(e).into_iter().enumerate() {
-        if i == TEXT_ROWS {
+    let all = more_rows(e);
+    let n = all.len();
+    for (i, r) in all.into_iter().enumerate() {
+        if i == TEXT_ROWS || i + STYLE_ROWS == n {
             items.push(option_list::separator());
         }
         let label = tr(r.name);
@@ -773,7 +798,7 @@ pub fn place_popover(at: Rectangle, bar_height: f32, screen: Rectangle) -> Vecto
 
 /// The kit's colour picker (the square, the hue slider, the preview, the recent colours and
 /// the preset swatches) with the eyedropper. Copy / Paste style and the style presets are
-/// not in it (W112): the Studio's Edit menu has them, Snip has their keys.
+/// not in it (W112): they are rows of Snip's More and of the Studio's Edit menu.
 pub(crate) fn colour_panel(e: &Annotator) -> Element<'_, Message> {
     let eyedropper = hinted(
         icon_button::square(PIPETTE, State::default(), Some(Message::Eyedropper)),
@@ -792,7 +817,7 @@ pub(crate) fn colour_panel(e: &Annotator) -> Element<'_, Message> {
         old: e.picked_from(),
         hex: &e.hex,
         presets: &crate::features::snip::annotate::style::ANNOTATION,
-        recent: &e.recent,
+        recent: e.recent.clone(),
         eyedropper: Some(eyedropper),
         recent_label: t!(cp_recent),
         on_hsv: std::rc::Rc::new(|h| Message::Hsv(h.array(), h.rgb())),
@@ -901,17 +926,17 @@ mod tests {
                     ("add-step", with(Some(1), None), 60.0),
                     ("steps-full", with(Some(12), None), 60.0),
                     ("update-step", with(Some(3), Some(1)), 60.0),
-                    ("add-step-more", add_more, 430.0),
+                    ("add-step-more", add_more, 560.0),
                     ("bar", editor(), 60.0),
                     ("held", held, 60.0),
                     ("colour", colour, 440.0),
                     ("undo", undo, 130.0),
-                    ("more", more, 430.0),
-                    ("more-reading", more_reading, 430.0),
-                    ("more-notext", more_notext, 430.0),
-                    ("more-browser", more_browser, 430.0),
-                    ("more-long", more_long, 430.0),
-                    ("more-original", more_original, 430.0),
+                    ("more", more, 560.0),
+                    ("more-reading", more_reading, 560.0),
+                    ("more-notext", more_notext, 560.0),
+                    ("more-browser", more_browser, 560.0),
+                    ("more-long", more_long, 560.0),
+                    ("more-original", more_original, 560.0),
                 ];
                 let dir = if rtl { "-ar" } else { "" };
                 for (name, e, height) in cases {
@@ -966,6 +991,38 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// W112 review: Copy style, Paste style and the four style presets are rows of More (one list,
+    /// a hairline above them), each with its key; they send their messages and are not in the picker.
+    #[test]
+    fn w112_more_has_the_style_rows() {
+        let e = editor();
+        let rows = more_rows(&e);
+        let style = &rows[rows.len() - STYLE_ROWS..];
+        let names: Vec<&str> = style.iter().map(|r| tr(r.name)).collect();
+        assert_eq!(
+            names,
+            [
+                "Copy style",
+                "Paste style",
+                "Red box",
+                "Highlight",
+                "Callout",
+                "Redact"
+            ]
+        );
+        assert_eq!(style[0].message, Some(Message::CopyStyle));
+        assert_eq!(style[1].message, Some(Message::PasteStyle));
+        for (i, r) in style[2..].iter().enumerate() {
+            assert_eq!(r.message, Some(Message::Preset(i)));
+            assert_eq!(r.caps, vec![PRESETS[i].key.to_string()]);
+        }
+        assert_eq!(style[0].caps, vec!["Alt".to_string(), "C".to_string()]);
+        let mut open = editor();
+        open.update(Message::Menu(Menu::More));
+        let words = crate::shared::kit::testing::shot::texts(more_panel(&open));
+        assert!(words.iter().any(|w| w == "Copy style"), "{words:?}");
     }
 
     /// W107-1: the row is one piece with the toolbar: its centre on the toolbar's centre, the same in

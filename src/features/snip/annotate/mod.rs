@@ -654,6 +654,8 @@ pub struct Annotator {
     picked_from: [u8; 4],
     /// A drag on the picker is on.
     hsv_drag: bool,
+    /// Snip: the selected item as it was when the picker's drag began (one drag = one undo step).
+    drag_item: Option<(usize, Item)>,
     /// The colours the user picked lately, newest first (remembered, `RECENT`).
     pub(crate) recent: Vec<[u8; 3]>,
     /// Display px per image px.
@@ -863,6 +865,7 @@ impl Annotator {
             hsv: None,
             picked_from: colour,
             hsv_drag: false,
+            drag_item: None,
             recent: (saved.recent.iter().flatten())
                 .filter_map(|s| parse_hex(s))
                 .map(|[r, g, b, _]| [r, g, b])
@@ -1176,14 +1179,10 @@ impl Annotator {
                 self.hex = s;
             }
             Message::Hsv(hsv, rgb) => self.set_hsv(hsv, rgb),
-            Message::HsvDone => {
-                self.hsv_drag = false;
-                self.remember_colour();
-            }
+            Message::HsvDone => self.end_hsv_drag(),
             Message::HsvSet(hsv, rgb) => {
                 self.set_hsv(hsv, rgb);
-                self.hsv_drag = false;
-                self.remember_colour();
+                self.end_hsv_drag();
             }
             Message::Eyedropper => {
                 self.picking = !self.picking;
@@ -1510,6 +1509,20 @@ impl Annotator {
         self.colour = [r, g, b, self.colour[3]];
         self.hex = hex(self.colour);
         self.restyle();
+    }
+
+    /// The picker's drag (or key) is over: the colour is remembered, and a selected item's change
+    /// of the whole drag is ONE undo step.
+    fn end_hsv_drag(&mut self) {
+        self.hsv_drag = false;
+        if let Some((i, before)) = self.drag_item.take()
+            && i < self.doc.items.len()
+        {
+            let after = std::mem::replace(&mut self.doc.items[i], before.clone());
+            self.doc.exec(Edit::Change(i, before, after));
+            self.refresh();
+        }
+        self.remember_colour();
     }
 
     /// The colour now goes first in the recent colours.
@@ -2584,7 +2597,14 @@ impl Annotator {
         } else if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
             let before = self.doc.items[i].clone();
             let after = styled(&before, self);
-            if after != before {
+            if after != before && self.hsv_drag {
+                // the picker's drag: shown live, made one undo step at its end
+                if self.drag_item.is_none() {
+                    self.drag_item = Some((i, before));
+                }
+                self.doc.items[i] = after;
+                self.refresh();
+            } else if after != before {
                 self.doc.exec(Edit::Change(i, before, after));
                 self.refresh();
             }

@@ -1817,10 +1817,10 @@ pub fn translate_until(
     let ocr = start.elapsed();
     // the glossary applies on a game screen only: decided on what the frame shows
     super::glossary::screen::saw_frame(has_address_bar(&lines, height));
-    let blocks = group_blocks(&match known {
-        true => lines,
-        false => without_chrome(lines, height),
-    });
+    let blocks = match known {
+        true => group_known(&lines),
+        false => group_blocks(&without_chrome(lines, height)),
+    };
     // repeated names become suggestions (a game screen's, counted in the background)
     super::glossary::suggest::observe(
         (blocks.iter())
@@ -1845,7 +1845,7 @@ pub fn translate_until(
                 while let Ok(newer) = todo.try_recv() {
                     tr = newer;
                 }
-                let partial = draw(rgba, (width, height), target, blocks, &tr, &mut t);
+                let partial = draw(rgba, (width, height), target, blocks, &tr, &mut t, known);
                 if t.first.is_zero() {
                     t.first = start.elapsed();
                 }
@@ -1927,11 +1927,90 @@ pub fn translate_until(
     let (drawn, failed) = drawn;
     timings.render = drawn.render;
     timings.first = drawn.first;
-    let mut out = draw(rgba, (width, height), target, &blocks, &tr, &mut timings);
+    let mut out = draw(
+        rgba,
+        (width, height),
+        target,
+        &blocks,
+        &tr,
+        &mut timings,
+        known,
+    );
     timings.total = start.elapsed();
     out.timings = timings;
     out.failed = failed;
     Ok(out)
+}
+
+/// The selected words' lines (reading order) as blocks: consecutive lines go on while the gap
+/// between them is under one line height, whatever their x (a selection may start mid-line).
+fn group_known(lines: &[Line]) -> Vec<Block> {
+    let mut out: Vec<Block> = Vec::new();
+    for l in lines {
+        let goes_on = out.last().and_then(|b| b.lines.last()).is_some_and(|p| {
+            let gap = l.bounds[1] - (p.bounds[1] + p.bounds[3]);
+            gap < p.bounds[3].max(l.bounds[3]) && l.bounds[1] >= p.bounds[1]
+        });
+        match (goes_on, out.last_mut()) {
+            (true, Some(b)) => {
+                b.lines.push(l.clone());
+                b.text = format!("{} {}", b.text, l.text);
+                let [x0, y0] = [b.bounds[0].min(l.bounds[0]), b.bounds[1].min(l.bounds[1])];
+                let x1 = (b.bounds[0] + b.bounds[2]).max(l.bounds[0] + l.bounds[2]);
+                let y1 = (b.bounds[1] + b.bounds[3]).max(l.bounds[1] + l.bounds[3]);
+                b.bounds = [x0, y0, x1 - x0, y1 - y0];
+            }
+            _ => out.push(Block {
+                lines: vec![l.clone()],
+                text: l.text.clone(),
+                bounds: l.bounds,
+            }),
+        }
+    }
+    out
+}
+
+/// Each line of each block as a block of its own, its share of the block's translation (the
+/// words go to the lines in proportion to their widths: a line holds what its span can).
+fn lines_of(blocks: &[Block], tr: &[String]) -> (Vec<Block>, Vec<String>) {
+    let (mut out, mut words) = (Vec::new(), Vec::new());
+    for (b, t) in blocks.iter().zip(tr) {
+        let widths: Vec<f32> = b.lines.iter().map(|l| l.bounds[2]).collect();
+        let pieces = match t.trim().is_empty() {
+            true => vec![String::new(); b.lines.len()],
+            false => split_words(t, &widths),
+        };
+        for (l, piece) in b.lines.iter().zip(pieces) {
+            out.push(Block {
+                lines: vec![l.clone()],
+                text: l.text.clone(),
+                bounds: l.bounds,
+            });
+            words.push(piece);
+        }
+    }
+    (out, words)
+}
+
+/// `text`'s words dealt to `widths.len()` lines, each its share of the characters by its width
+/// (a word is never cut; the last line takes the rest).
+fn split_words(text: &str, widths: &[f32]) -> Vec<String> {
+    let all: Vec<&str> = text.split_whitespace().collect();
+    let chars: usize = all.iter().map(|w| w.chars().count() + 1).sum();
+    let total: f32 = widths.iter().sum::<f32>().max(1.0);
+    let (mut out, mut at, mut used, mut share) = (Vec::new(), 0, 0, 0.0);
+    for (k, w) in widths.iter().enumerate() {
+        share += w / total;
+        let upto = (share * chars as f32).round() as usize;
+        let mut line = Vec::new();
+        while at < all.len() && (k + 1 == widths.len() || line.is_empty() || used < upto) {
+            used += all[at].chars().count() + 1;
+            line.push(all[at]);
+            at += 1;
+        }
+        out.push(line.join(" "));
+    }
+    out
 }
 
 /// The original frame with `tr` (one per block, "" = as it was) drawn in.
@@ -1942,10 +2021,17 @@ fn draw(
     blocks: &[Block],
     tr: &[String],
     timings: &mut Timings,
+    per_line: bool,
 ) -> Translated {
     let t = Instant::now();
     let mut out = rgba.to_vec();
-    let drawn = render(&mut out, width, height, blocks, tr, is_rtl(target));
+    // selected words: each line is drawn in its own span, never over the words beside it
+    let lined = per_line.then(|| lines_of(blocks, tr));
+    let (drawing, words) = match &lined {
+        Some((b, t)) => (b.as_slice(), t.as_slice()),
+        None => (blocks, tr),
+    };
+    let drawn = render(&mut out, width, height, drawing, words, is_rtl(target));
     timings.render += t.elapsed();
     Translated {
         rgba: out,
