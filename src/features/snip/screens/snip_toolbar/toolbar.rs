@@ -1208,20 +1208,17 @@ mod tests {
         let mut wide = Vec::new();
         for rtl in [false, true] {
             let _ar = rtl.then(crate::shared::kit::testing::arabic);
-            for tool in [
-                Tool::Rect,
-                Tool::Arrow,
-                Tool::Pen,
-                Tool::Text,
-                Tool::Callout,
-                Tool::Step,
-                Tool::Blur,
-                Tool::Redact,
-                Tool::Eraser,
-            ] {
+            // EVERY tool (the options too: Label, Pointer, Arrow's label ...): a tool without a row has none
+            for tool in crate::features::snip::annotate::TOOLS
+                .iter()
+                .map(|t| t.tool)
+                .filter(|t| *t != Tool::Crop)
+            {
                 let mut e = editor();
                 e.update(Message::Tool(tool));
-                let row = options_row(&e, 4000.0).unwrap();
+                let Some(row) = options_row(&e, 4000.0) else {
+                    continue;
+                };
                 let natural =
                     crate::shared::kit::testing::shot::right_edge(row, Size::new(4000.0, ROW_H));
                 if natural > row_need(&e) + 0.5 {
