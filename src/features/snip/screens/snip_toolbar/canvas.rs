@@ -11,7 +11,7 @@ use iced::{ContentFit, Element, Point, Rectangle, Renderer, Size, Theme, Vector}
 
 use crate::features::snip::annotate::area::REACH;
 use crate::features::snip::annotate::style::{
-    BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK,
+    BAND_ALPHA, DIM_OUTSIDE, GRID, HANDLE, NOTE_FILL, NOTE_FONT, NOTE_HINT, NOTE_INK, SPOTLIGHT_DIM,
 };
 use crate::features::snip::annotate::{Annotator, Group, Message, info};
 
@@ -94,9 +94,14 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
         true => iced::widget::space().into(),
         false => stack(e.patch.iter().map(|p| Element::from(place(p)))).into(),
     });
-    layers.push(match e.live_layer() {
-        Some(live) => place(&live).into(),
-        None => iced::widget::space().into(),
+    // (a long stroke: its tiles, nested in the one layer; every other item: its one layer)
+    layers.push(match e.live_tiles() {
+        Some(tiles) => stack(tiles.iter().map(|t| Element::from(place(t)))).into(),
+        None if e.spotlight_hole().is_some() => iced::widget::space().into(),
+        None => match e.live_layer() {
+            Some(live) => place(&live).into(),
+            None => iced::widget::space().into(),
+        },
     });
     layers.push(
         iced::widget::canvas(Input {
@@ -399,6 +404,20 @@ impl canvas::Program<Message> for Input<'_> {
                 c().accent.scale_alpha(BAND_ALPHA),
             );
             frame.stroke(&Path::rectangle(band.position(), band.size()), accent);
+        }
+        if let Some(hole) = e.spotlight_hole() {
+            let outside = Path::new(|p| {
+                p.rectangle(Point::ORIGIN, e.size());
+                // (the painted dim's corners: 10 image px)
+                p.rounded_rectangle(hole.position(), hole.size(), (10.0 * e.zoom).into());
+            });
+            frame.fill(
+                &outside,
+                Fill {
+                    style: canvas::Style::Solid(SPOTLIGHT_DIM),
+                    rule: fill::Rule::EvenOdd,
+                },
+            );
         }
         if let Some(keep) = e.crop_preview() {
             let outside = Path::new(|p| {

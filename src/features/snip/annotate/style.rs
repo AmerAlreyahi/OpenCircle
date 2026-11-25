@@ -26,6 +26,8 @@ pub const ANNOTATION: [Color; 12] = [
 /// What the canvas draws over the image (the chrome, the same in both themes):
 /// the dim outside a crop, the handles and crop edge, a step's note pill.
 pub const DIM_OUTSIDE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
+/// The dim outside a spotlight while it is dragged (`spotlight.rs`'s `DIM`, as a colour).
+pub const SPOTLIGHT_DIM: Color = Color::from_rgba(0.0, 0.0, 0.0, 140.0 / 255.0);
 /// The rubber band's fill (the accent at this alpha).
 pub const BAND_ALPHA: f32 = 0.12;
 pub const HANDLE: Color = Color::WHITE;

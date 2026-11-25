@@ -24,6 +24,7 @@ mod inside;
 mod label;
 mod legend;
 mod lines;
+mod live_tiles;
 mod magnifier;
 mod objects;
 mod pen;
@@ -686,6 +687,14 @@ pub struct Annotator {
     /// so the several moves of one frame cost one paint (W111).
     live: std::cell::RefCell<Option<(Rectangle, image::Handle)>>,
     live_stale: std::cell::Cell<bool>,
+    /// A pending item is shown over the base (`update_live`).
+    live_on: bool,
+    /// A long stroke's live layer as tiles (W113, `live_tiles.rs`).
+    tiles: std::cell::RefCell<live_tiles::LiveTiles>,
+    tiles_stale: std::cell::Cell<bool>,
+    /// The tests: one layer for every stroke.
+    #[cfg(test)]
+    pub(crate) one_layer: bool,
     /// Hides committed since the picture was last painted whole: their region
     /// of it, drawn over `base` (see `patch_over`; see-through where unpainted).
     pub(crate) patch: Vec<(Rectangle, image::Handle)>,
@@ -892,6 +901,11 @@ impl Annotator {
             legend: None,
             live: std::cell::RefCell::new(None),
             live_stale: std::cell::Cell::new(false),
+            live_on: false,
+            tiles: std::cell::RefCell::default(),
+            tiles_stale: std::cell::Cell::new(false),
+            #[cfg(test)]
+            one_layer: false,
             patch: Vec::new(),
             pending: None,
             cropping: None,
@@ -2684,7 +2698,7 @@ impl Annotator {
     /// The pending item's painted layer (its region and picture), painted now if it changed
     /// since it was last asked for.
     pub(crate) fn live_layer(&self) -> Option<(Rectangle, image::Handle)> {
-        if self.live_stale.replace(false) {
+        if self.live_stale.replace(false) || (self.live_on && self.live.borrow().is_none()) {
             self.paints.set(self.paints.get() + 1);
             *self.live.borrow_mut() = self.paint_live();
         }
@@ -2699,7 +2713,10 @@ impl Annotator {
 
     fn clear_live(&mut self) {
         self.live_stale.set(false);
+        self.tiles_stale.set(false);
+        self.live_on = false;
         *self.live.get_mut() = None;
+        self.tiles.get_mut().clear();
     }
 
     /// Snip's live area with nothing on it: the overlay's frozen frame under
@@ -2719,8 +2736,11 @@ impl Annotator {
             _ => p.index.is_none() || p.hidden,
         });
         self.live_stale.set(shown);
+        self.tiles_stale.set(shown);
+        self.live_on = shown;
         if !shown {
             *self.live.get_mut() = None;
+            self.tiles.get_mut().clear();
         }
     }
 

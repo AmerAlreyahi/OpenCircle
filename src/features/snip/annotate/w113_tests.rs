@@ -187,3 +187,100 @@ fn w113_4_a_cancelled_press_leaves_no_live_layer() {
     e.update(Message::Cancel);
     assert!(e.live_layer().is_none());
 }
+
+fn big() -> Annotator {
+    let mut e = Annotator::new(
+        super::tests::image_of(1400, 800, |x, y| {
+            [(x % 251) as u8, (y % 241) as u8, 200, 255]
+        }),
+        1.0,
+    );
+    e.studio = true;
+    e.crisp = true;
+    e
+}
+
+/// The tiles laid over a transparent picture-sized buffer, as straight RGBA.
+fn composite(tiles: &[(Rectangle, image::Handle)], w: usize, h: usize) -> Vec<u8> {
+    let mut out = vec![0u8; w * h * 4];
+    for (r, handle) in tiles {
+        let image::Handle::Rgba { pixels, .. } = handle else {
+            panic!()
+        };
+        let (x0, y0, tw) = (r.x as usize, r.y as usize, r.width as usize);
+        for (i, px) in pixels.as_chunks::<4>().0.iter().enumerate() {
+            let at = ((y0 + i / tw) * w + x0 + i % tw) * 4;
+            out[at..at + 4].copy_from_slice(px);
+        }
+    }
+    out
+}
+
+/// A long stroke's tiles hold what one layer holds, after every move (pen and highlighter), and a
+/// move repaints only the tiles it touches: the others keep their very image.
+#[test]
+fn w113_a_long_strokes_tiles_equal_one_layer_and_only_the_touched_ones_repaint() {
+    for tool in [Tool::Pen, Tool::Highlighter] {
+        let mut e = big();
+        e.update(Message::Tool(tool));
+        let at = |i: usize| {
+            let t = i as f32 / 60.0;
+            pt(80.0 + 1240.0 * t, 400.0 + 250.0 * (t * 9.0).sin())
+        };
+        e.update(Message::Press(at(0)));
+        let mut before: Vec<(Rectangle, image::Handle)> = Vec::new();
+        for i in 1..=60 {
+            e.update(Message::Move(at(i)));
+            let tiles = e.live_tiles().expect("tiled");
+            let ids = |t: &[(Rectangle, image::Handle)]| -> Vec<_> {
+                t.iter()
+                    .map(|(r, h)| (r.x as i32, r.y as i32, h.id()))
+                    .collect()
+            };
+            if i > 1 {
+                let old = ids(&before);
+                let kept = ids(&tiles).iter().filter(|t| old.contains(t)).count();
+                assert!(
+                    tiles.len() - kept <= 4,
+                    "{tool:?} move {i}: {} of {} tiles repainted",
+                    tiles.len() - kept,
+                    tiles.len()
+                );
+            }
+            if i % 10 == 0 {
+                let (r, single) = live_pixels(&e).expect("one layer");
+                let (w, h) = (1400, 800);
+                let whole = composite(&tiles, w, h);
+                let mut differing = 0;
+                for (k, px) in single.as_chunks::<4>().0.iter().enumerate() {
+                    let (x, y) = (
+                        r.x as usize + k % r.width as usize,
+                        r.y as usize + k / r.width as usize,
+                    );
+                    let t = &whole[(y * w + x) * 4..][..4];
+                    // (a clipped path is rasterised a hair differently at its anti-aliased edge)
+                    let premul = |p: &[u8]| {
+                        [0, 1, 2].map(|k| (u32::from(p[k]) * u32::from(p[3]) / 255) as u8)
+                    };
+                    let alpha = px[3].abs_diff(t[3]);
+                    let off = premul(px)
+                        .iter()
+                        .zip(premul(t))
+                        .map(|(a, b)| a.abs_diff(b))
+                        .chain([alpha])
+                        .max();
+                    assert!(
+                        off < Some(40),
+                        "{tool:?} move {i}: ({x},{y}) {px:?} vs {t:?}"
+                    );
+                    differing += usize::from(off > Some(1));
+                }
+                assert!(
+                    differing < 400,
+                    "{tool:?} move {i}: {differing} pixels differ"
+                );
+            }
+            before = tiles;
+        }
+    }
+}

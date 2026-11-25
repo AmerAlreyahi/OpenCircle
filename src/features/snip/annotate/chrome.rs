@@ -5,6 +5,20 @@ use iced::{Point, Rectangle, Size};
 use super::{Annotator, Shape, select, text};
 
 impl Annotator {
+    /// A FIRST spotlight being dragged: its hole (display px). The dim around it is four boxes the
+    /// canvas fills (W113: a layer of the whole picture repainted at every move cost 47 ms on 4K);
+    /// with a spotlight already in the picture, the base is dimmed round that one and the live layer
+    /// paints the union (`None`).
+    pub fn spotlight_hole(&self) -> Option<Rectangle> {
+        let pending = self.pending.as_ref().filter(|_| self.live_on)?;
+        let Shape::Spotlight { a, b } = pending.item.shape else {
+            return None;
+        };
+        let other = (self.doc.items.iter().enumerate())
+            .any(|(i, it)| Some(i) != pending.index && matches!(it.shape, Shape::Spotlight { .. }));
+        (!other).then(|| self.to_display(super::span(&[a, b])))
+    }
+
     /// The crop being dragged.
     pub fn crop_preview(&self) -> Option<Rectangle> {
         let (a, b) = self.cropping?;
