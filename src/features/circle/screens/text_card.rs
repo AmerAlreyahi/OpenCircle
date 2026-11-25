@@ -14,6 +14,9 @@ use crate::shared::kit::tokens::{Role, radius};
 
 pub const WIDTH: f32 = 360.0;
 const PAD: f32 = 14.0;
+/// The card keeps this far from the screen's edges, and from the selected text.
+const EDGE: f32 = 8.0;
+const GAP_TO_TEXT: f32 = 8.0;
 const GAP: f32 = 10.0;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +94,24 @@ impl TextCard {
             .ceil()
             .clamp(1.0, 12.0);
         2.0 * PAD + 36.0 + lines * 20.0
+    }
+
+    /// Where the card goes on a `screen`: under the selection (above it when there is no room),
+    /// its start edge on the selection's start edge (the left one, the right one in Arabic), kept
+    /// on the screen as the menu is (`option_list::place`).
+    pub fn at(&self, screen: iced::Size) -> iced::Point {
+        use crate::shared::kit::option_list::place;
+        let size = iced::Size::new(self.width(), self.height());
+        let x = match crate::shared::kit::dir::rtl() {
+            true => self.near.x + self.near.width - size.width,
+            false => self.near.x,
+        };
+        let below = self.near.y + self.near.height + GAP_TO_TEXT;
+        let y = match below + size.height + EDGE <= screen.height {
+            true => below,
+            false => self.near.y - GAP_TO_TEXT - size.height,
+        };
+        place(iced::Point::new(x, y), size, screen, EDGE)
     }
 
     /// Its width: the download card is wider.
@@ -175,6 +196,30 @@ mod tests {
     use crate::shared::app_language::{self, Lang};
     use crate::shared::kit::testing::{golden, shot};
     use iced::Size;
+
+    /// W106: the card sits under the selection at its start edge (the right one in Arabic), above it
+    /// where there is no room, and always on the screen.
+    #[test]
+    fn the_card_sits_by_the_selection_at_its_start_edge_and_on_the_screen() {
+        use iced::{Point, Size};
+        let screen = Size::new(1280.0, 720.0);
+        let card = |near: Rectangle| {
+            let mut c = TextCard::new(1, "x".into(), near);
+            c.state = State::Done("hello".into());
+            c
+        };
+        let near = Rectangle::new(Point::new(300.0, 200.0), Size::new(400.0, 20.0));
+        assert_eq!(card(near).at(screen), Point::new(300.0, 228.0));
+        let low = Rectangle::new(Point::new(300.0, 690.0), Size::new(400.0, 20.0));
+        assert!(card(low).at(screen).y < 690.0, "above it");
+        let far = Rectangle::new(Point::new(1200.0, 200.0), Size::new(70.0, 20.0));
+        let at = card(far).at(screen);
+        assert!(at.x + WIDTH <= screen.width, "kept on the screen: {at:?}");
+        app_language::set(Lang::Ar);
+        let at = card(near).at(screen);
+        app_language::set(Lang::En);
+        assert_eq!(at.x + WIDTH, 700.0, "the right edges meet");
+    }
 
     /// The card in every state, English and Arabic, both themes (look at each after an update).
     #[test]

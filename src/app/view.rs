@@ -375,19 +375,8 @@ impl App {
         }
         // Translate's card beside the selected text: it takes its own presses
         if let Some(t) = &self.o.text_card {
-            let screen = self.o.screen;
-            let h = t.height();
-            let x = t
-                .near
-                .x
-                .clamp(8.0, (screen.width - t.width() - 8.0).max(8.0));
-            let below = t.near.y + t.near.height + 8.0;
-            let y = match below + h <= screen.height - 8.0 {
-                true => below,
-                false => (t.near.y - 8.0 - h).max(8.0),
-            };
             let card = opaque(t.view().map(Message::TextCard));
-            layers = layers.push(pin(card).position(Point::new(x, y)));
+            layers = layers.push(pin(card).position(t.at(self.o.screen)));
         }
         layers.extend(self.pill_view()).into()
     }
