@@ -60,16 +60,75 @@ pub fn open_file(path: &std::path::Path) -> io::Result<()> {
     spawn(path.as_os_str())
 }
 
-/// Show `path` in the file manager: Explorer with the file selected; elsewhere the
-/// folder that holds it (a folder `path` opens its parent: it is shown inside it).
+/// Show `path` in the file manager with it selected: Explorer on Windows, the
+/// FileManager1 D-Bus service on Linux, else (or when that fails) the folder that
+/// holds it (a folder `path` is shown inside its parent).
 pub fn show_in_folder(path: &std::path::Path) -> io::Result<()> {
     #[cfg(all(windows, not(test)))]
     if test_browser().is_none() {
+        use std::os::windows::process::CommandExt;
         let mut explorer = Command::new("explorer.exe");
-        explorer.arg(format!("/select,{}", path.display()));
+        explorer.raw_arg(explorer_select_arg(path)); // (our own quoting: names hold commas)
         return reap(&mut explorer);
     }
+    #[cfg(all(target_os = "linux", not(test)))]
+    if test_browser().is_none() {
+        match show_items(&file_uri(path)) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                crate::log!("[opencircle] FileManager1 could not show it ({e}); opening the folder")
+            }
+        }
+    }
     spawn(path.parent().unwrap_or(path).as_os_str())
+}
+
+/// Explorer's argument that selects `path`: `/select,"<path>"`. The quotes keep a comma or
+/// a space in the name from splitting it (Explorer reads the first comma only).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_select_arg(path: &std::path::Path) -> String {
+    format!("/select,\"{}\"", path.display())
+}
+
+/// `path` as the `file://` URI FileManager1 takes: everything but unreserved bytes and `/`
+/// percent-encoded.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn file_uri(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    let mut uri = String::from("file://");
+    for b in text.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                uri.push(b as char)
+            }
+            _ => uri.push_str(&format!("%{b:02X}")),
+        }
+    }
+    uri
+}
+
+/// FileManager1.ShowItems: the file manager opens the folder with `uri` selected.
+#[cfg(all(target_os = "linux", not(test)))]
+fn show_items(uri: &str) -> Result<(), String> {
+    use crate::shared::platform::capture::portal;
+    use gtk::gio::{Cancellable, DBusCallFlags};
+    use gtk::glib::ToVariant;
+
+    let args = (vec![uri.to_string()], "").to_variant();
+    portal::session_bus()?
+        .call_sync(
+            Some("org.freedesktop.FileManager1"),
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1",
+            "ShowItems",
+            Some(&args),
+            None,
+            DBusCallFlags::NONE,
+            5000,
+            None::<&Cancellable>,
+        )
+        .map(drop)
+        .map_err(|e| e.to_string())
 }
 
 /// Open a new message to `address` (the email chip) in the default
@@ -283,6 +342,20 @@ fn reap(cmd: &mut Command) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W108: Show in folder's arguments, built by pure helpers for both OS branches.
+    #[test]
+    fn show_in_folder_arguments_are_quoted_and_encoded() {
+        use std::path::Path;
+        assert_eq!(
+            explorer_select_arg(Path::new(r"C:\Users\a b\steps,1\p.png")),
+            r#"/select,"C:\Users\a b\steps,1\p.png""#
+        );
+        assert_eq!(
+            file_uri(Path::new("/home/a b/steps,1/p é.png")),
+            "file:///home/a%20b/steps%2C1/p%20%C3%A9.png"
+        );
+    }
 
     #[test]
     fn open_link_takes_only_plain_http_urls() {
