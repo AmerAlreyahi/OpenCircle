@@ -1748,14 +1748,39 @@ impl Annotator {
             Point::new(x0 + rw / 2.0, y0 + rh / 2.0),
             Point::new(x0 + rw, y0 + rh / 2.0),
         ];
+        let excludes: Vec<blur::Exclude<'_>> = items
+            .iter()
+            .filter(|item| !item.hidden)
+            .filter_map(|item| match &item.shape {
+                Shape::Blur {
+                    points,
+                    size,
+                    kind,
+                    outline,
+                    ..
+                } => Some(blur::Exclude::Blur {
+                    points,
+                    size: *size,
+                    kind: *kind,
+                    outline: *outline,
+                }),
+                Shape::Redact { a, b, oval } => Some(blur::Exclude::Redact {
+                    a: *a,
+                    b: *b,
+                    oval: *oval,
+                }),
+                _ => None,
+            })
+            .collect();
         let fp = blur::Footprint {
             points: &corners,
             size: 0.0,
             kind: blur::Kind::Rect,
             outline: 0.0,
             ramp: &ramp,
-            // the picture as captured: Frost and Pixelate never read the annotations (W111)
+            // the picture as captured: Soft, Frost and Pixelate never read the annotations (W111)
             source: Some(&self.doc.image),
+            exclude: &excludes,
         };
         blur::paint(&mut layer, &fp, strength, style, self.doc.seed);
         handle(layer.pm)

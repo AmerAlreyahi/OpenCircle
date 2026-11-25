@@ -1,20 +1,23 @@
-//! Hide (the blur brush): a content-free fill over what the user wants gone.
+//! Hide (the blur tool): a content-free fill over what the user wants gone.
 //!
 //! It must not be reversible: anything that reads the covered pixels (a
 //! Gaussian of any strength, a pixelate up to 16 px cells) was recovered 100 %
 //! by candidate matching in the W100 lab (Depix / Unredacter); only a fill
-//! that never reads the content was at chance. So the source is read ONCE per
-//! stroke for two colours only: its background (the most common colour under
-//! the footprint, which says nothing about the text) and its ink (the
-//! extreme colour away from it, whole on any stem however little text there
-//! is). The fill is the background pulled a FIXED 12 % toward the ink
-//! (`DARKEN`), plus a texture that belongs to the PICTURE: a smooth noise
-//! (Frost, the default) or a fine mosaic of cells (Pixelate, today's look), from
-//! one secret seed per document, anchored to image coordinates and a scale
-//! in image px (the capture's DPI scale, never the zoom). So two strokes on
-//! one background match within a level or two, a repaint of any crop gives
-//! the same pixels, and strokes that overlap merge. The footprint is a flat
-//! band `size` wide along the stroke (soft round ends).
+//! that never reads the content was at chance.
+//!
+//! The default style (`Soft`) samples ONLY a thin ring strictly OUTSIDE the
+//! footprint (excluding every Hide and Redact footprint in the document),
+//! rejects unhidden glyphs along the rim with a local luma-median filter,
+//! harmonically interpolates those exterior colours across the interior, blends
+//! a gentle neutral veil (`SOFT_VEIL`) and adds a silky two-octave quintic
+//! texture from the document's secret `seed` anchored to image coordinates. If
+//! the ring is empty or near-empty, it falls back to the fixed content-free
+//! neutral (`SOFT_TARGET`).
+//!
+//! `Frost` and `Pixelate` are kept as alternative secure styles (background
+//! colour pulled a fixed 12 % toward ink, plus a per-document smooth or mosaic
+//! texture). `Blur` (formerly "Soft"), `Frosted` and `Progressive` are
+//! look-only styles ("for looks, not for secrets") that blur the real pixels.
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -60,8 +63,13 @@ const SOFT_WAVE_B: f32 = 2.2;
 const SOFT_GRID: usize = 32;
 const SOFT_CELL_MIN: f32 = 14.0;
 /// Soft: exact 1:1 exterior-ring mask up to this many pixels (larger areas use
-/// a conservative stride so 4K/8K drags stay sub-millisecond).
+/// a conservative stride so building the colour field stays cheap; a full-area
+/// 4K 3000x1800 Soft paint costs ~1.2-1.8x Frost due to per-pixel field +
+/// two-octave texture evaluation).
 const SOFT_EXACT_AREA: usize = 262_144;
+/// Soft: minimum exterior-ring samples before falling back to the fixed
+/// content-free neutral `SOFT_TARGET`.
+const SOFT_MIN_RING: usize = 16;
 
 /// How a hidden area looks. The first three never read the covered text.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -93,6 +101,12 @@ impl Style {
     pub fn is_look(self) -> bool {
         matches!(self, Style::Blur | Style::Frosted | Style::Progressive)
     }
+
+    /// Older saved `Shape::Blur` records without a `style` field load as Frost
+    /// so existing saved documents keep their original look.
+    pub(crate) fn legacy_default() -> Self {
+        Self::Frost
+    }
 }
 
 /// A look's blur radius (Gaussian sigma, image px): the strength itself. Light
@@ -115,6 +129,80 @@ pub enum Kind {
     Ellipse,
 }
 
+/// Another Hide or Redact footprint excluded from Soft's exterior ring, so
+/// Hide B never reads content hidden under Hide A.
+#[derive(Clone, Copy)]
+pub enum Exclude<'a> {
+    Blur {
+        points: &'a [Point],
+        size: f32,
+        kind: Kind,
+        outline: f32,
+    },
+    Redact {
+        a: Point,
+        b: Point,
+        oval: bool,
+    },
+}
+
+impl Exclude<'_> {
+    fn frame(&self) -> Rectangle {
+        match *self {
+            Exclude::Blur {
+                points,
+                size,
+                kind,
+                outline,
+            } => {
+                let pad = match kind {
+                    Kind::Brush => size / 2.0,
+                    _ => outline / 2.0,
+                };
+                span(points).expand(pad + 1.0)
+            }
+            Exclude::Redact { a, b, .. } => span(&[a, b]).expand(1.0),
+        }
+    }
+
+    fn path(&self) -> Option<Path> {
+        match *self {
+            Exclude::Blur {
+                points,
+                size,
+                kind,
+                outline,
+            } => shape_path(points, size, kind, outline),
+            Exclude::Redact { a, b, oval } => {
+                let kind = if oval { Kind::Ellipse } else { Kind::Rect };
+                shape_path(&[a, b], 0.0, kind, 0.0)
+            }
+        }
+    }
+}
+
+fn shape_path(points: &[Point], size: f32, kind: Kind, outline: f32) -> Option<Path> {
+    let round = |width: f32| Stroke {
+        width,
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
+    if kind == Kind::Brush {
+        return pen::smooth(points)?.stroke(&round(size), 1.0);
+    }
+    let b = span(&[*points.first()?, *points.last()?]);
+    let rect = tiny_skia::Rect::from_xywh(b.x, b.y, b.width.max(0.01), b.height.max(0.01))?;
+    let path = match kind {
+        Kind::Ellipse => PathBuilder::from_oval(rect)?,
+        _ => PathBuilder::from_rect(rect),
+    };
+    match outline > 0.0 {
+        true => path.stroke(&round(outline), 1.0),
+        false => Some(path),
+    }
+}
+
 /// What a Hide covers: a brush stroke (`points`, `size` wide), or a rectangle
 /// or ellipse between `points`' first and last, filled or, when `outline` is
 /// over 0, as a ring that wide along its edge.
@@ -127,9 +215,12 @@ pub struct Footprint<'a> {
     /// Progressive: where the blur is strongest, then where it is gone (two
     /// points; none: even).
     pub ramp: &'a [Point],
-    /// Hide reads its two colours from this picture (what is under the
-    /// annotations, which the Hide covers anyway); `None`: from the layer.
+    /// Hide reads its colours from this picture (what is under the annotations,
+    /// which the Hide covers anyway); `None`: from the layer.
     pub source: Option<&'a super::document::Image>,
+    /// All Hide / Redact footprints in the document whose pixels must never be
+    /// sampled by Soft's exterior ring.
+    pub exclude: &'a [Exclude<'a>],
 }
 
 impl<'a> Footprint<'a> {
@@ -143,30 +234,13 @@ impl<'a> Footprint<'a> {
             outline: 0.0,
             ramp: &[],
             source: None,
+            exclude: &[],
         }
     }
 
     /// The outline of the covered area.
     fn path(&self) -> Option<Path> {
-        let round = |width: f32| Stroke {
-            width,
-            line_cap: LineCap::Round,
-            line_join: LineJoin::Round,
-            ..Stroke::default()
-        };
-        if self.kind == Kind::Brush {
-            return pen::smooth(self.points)?.stroke(&round(self.size), 1.0);
-        }
-        let b = span(&[*self.points.first()?, *self.points.last()?]);
-        let rect = tiny_skia::Rect::from_xywh(b.x, b.y, b.width.max(0.01), b.height.max(0.01))?;
-        let path = match self.kind {
-            Kind::Ellipse => PathBuilder::from_oval(rect)?,
-            _ => PathBuilder::from_rect(rect),
-        };
-        match self.outline > 0.0 {
-            true => path.stroke(&round(self.outline), 1.0),
-            false => Some(path),
-        }
+        shape_path(self.points, self.size, self.kind, self.outline)
     }
 }
 
@@ -541,17 +615,47 @@ impl Lattice {
         }
     }
 
+    #[inline]
+    fn fade(&self, v: i64, l: i64) -> f32 {
+        let t = v.rem_euclid(l) as f32 / l as f32;
+        match self.quintic {
+            true => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
+            false => t * t * (3.0 - 2.0 * t),
+        }
+    }
+
     fn at(&self, x: i64, y: i64) -> f32 {
-        let smooth = |v: i64, l: i64| {
-            let t = v.rem_euclid(l) as f32 / l as f32;
-            match self.quintic {
-                true => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
-                false => t * t * (3.0 - 2.0 * t),
-            }
-        };
-        let (tx, ty) = (smooth(x, self.lx), smooth(y, self.ly));
+        let (tx, ty) = (self.fade(x, self.lx), self.fade(y, self.ly));
         let at = ((y.div_euclid(self.ly) - self.gy0) as usize * self.gw)
             + (x.div_euclid(self.lx) - self.gx0) as usize;
+        let c = &self.corners;
+        let top = c[at] * (1.0 - tx) + c[at + 1] * tx;
+        let bottom = c[at + self.gw] * (1.0 - tx) + c[at + self.gw + 1] * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
+
+    fn x_table(&self, x0: i64, x1: i64) -> Vec<(usize, f32)> {
+        (x0..x1)
+            .map(|x| {
+                (
+                    (x.div_euclid(self.lx) - self.gx0) as usize,
+                    self.fade(x, self.lx),
+                )
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn row_params(&self, y: i64) -> (usize, f32) {
+        (
+            (y.div_euclid(self.ly) - self.gy0) as usize * self.gw,
+            self.fade(y, self.ly),
+        )
+    }
+
+    #[inline]
+    fn sample_row(&self, row_base: usize, ty: f32, gx: usize, tx: f32) -> f32 {
+        let at = row_base + gx;
         let c = &self.corners;
         let top = c[at] * (1.0 - tx) + c[at + 1] * tx;
         let bottom = c[at + self.gw] * (1.0 - tx) + c[at + self.gw + 1] * tx;
@@ -560,7 +664,7 @@ impl Lattice {
 }
 
 /// Smooth harmonic RGB field interpolated strictly from the exterior ring
-/// around `fp` (never reading a single pixel inside `fp`).
+/// around `fp` (never reading a single pixel inside `fp` or any other Hide).
 struct SoftField {
     rx0: i64,
     ry0: i64,
@@ -572,31 +676,51 @@ struct SoftField {
 }
 
 impl SoftField {
-    fn at(&self, ix: i64, iy: i64) -> [f32; 3] {
-        let fx = (((ix - self.rx0) as f32 + 0.5) * self.gw as f32 / self.bw - 0.5)
-            .clamp(0.0, (self.gw - 1) as f32);
-        let fy = (((iy - self.ry0) as f32 + 0.5) * self.gh as f32 / self.bh - 0.5)
-            .clamp(0.0, (self.gh - 1) as f32);
-        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
-        let (x1, y1) = ((x0 + 1).min(self.gw - 1), (y0 + 1).min(self.gh - 1));
-        let (wx, wy) = (fx - x0 as f32, fy - y0 as f32);
-        let c00 = self.grid[y0 * self.gw + x0];
-        let c10 = self.grid[y0 * self.gw + x1];
-        let c01 = self.grid[y1 * self.gw + x0];
-        let c11 = self.grid[y1 * self.gw + x1];
-        [0, 1, 2].map(|k| {
-            let top = c00[k] * (1.0 - wx) + c10[k] * wx;
-            let bot = c01[k] * (1.0 - wx) + c11[k] * wx;
-            top * (1.0 - wy) + bot * wy
-        })
+    fn x_table(&self, x0: i64, x1: i64) -> Vec<(usize, usize, f32)> {
+        let max_x = (self.gw - 1) as f32;
+        let scale = self.gw as f32 / self.bw;
+        (x0..x1)
+            .map(|ix| {
+                let fx = (((ix - self.rx0) as f32 + 0.5) * scale - 0.5).clamp(0.0, max_x);
+                let x0 = fx.floor() as usize;
+                let x1 = (x0 + 1).min(self.gw - 1);
+                (x0, x1, fx - x0 as f32)
+            })
+            .collect()
+    }
+
+    #[inline]
+    fn row_params(&self, iy: i64) -> (usize, usize, f32) {
+        let max_y = (self.gh - 1) as f32;
+        let fy =
+            (((iy - self.ry0) as f32 + 0.5) * self.gh as f32 / self.bh - 0.5).clamp(0.0, max_y);
+        let y0 = fy.floor() as usize;
+        let y1 = (y0 + 1).min(self.gh - 1);
+        (y0 * self.gw, y1 * self.gw, fy - y0 as f32)
+    }
+
+    #[inline]
+    fn sample_row(&self, r0: usize, r1: usize, wy: f32, x0: usize, x1: usize, wx: f32) -> [f32; 3] {
+        let c00 = self.grid[r0 + x0];
+        let c10 = self.grid[r0 + x1];
+        let c01 = self.grid[r1 + x0];
+        let c11 = self.grid[r1 + x1];
+        let iw = 1.0 - wx;
+        let iwy = 1.0 - wy;
+        [
+            (c00[0] * iw + c10[0] * wx) * iwy + (c01[0] * iw + c11[0] * wx) * wy,
+            (c00[1] * iw + c10[1] * wx) * iwy + (c01[1] * iw + c11[1] * wx) * wy,
+            (c00[2] * iw + c10[2] * wx) * iwy + (c01[2] * iw + c11[2] * wx) * wy,
+        ]
     }
 }
 
-/// Secure Soft Hide: samples ONLY a thin ring strictly OUTSIDE `fp` from the
-/// original picture (falling back to the exact mode background colour if the
-/// footprint fills the entire picture, never ink), interpolates a smooth
-/// harmonic gradient across the area, applies a gentle luminance-continuous
-/// veil and silky two-octave quintic texture anchored to image coordinates.
+/// Secure Soft Hide: samples ONLY a thin ring strictly OUTSIDE `fp` (excluding
+/// every Hide and Redact footprint in the document) from the original picture,
+/// falling back to the fixed content-free neutral `SOFT_TARGET` when too few
+/// ring samples remain, then interpolates a smooth harmonic gradient across the
+/// area, applies a gentle luminance-continuous veil and silky two-octave
+/// quintic texture anchored to image coordinates.
 fn soft_hide(
     layer: &mut Layer,
     fp: &Footprint,
@@ -605,12 +729,13 @@ fn soft_hide(
     cell_px: f32,
     seed: u64,
 ) {
-    let (w, h) = (layer.pm.width() as i64, layer.pm.height() as i64);
+    let w = layer.pm.width() as i64;
     let (oxi, oyi) = (layer.origin.x.round() as i64, layer.origin.y.round() as i64);
     let field = build_soft_field(layer, fp, cell_px, (oxi, oyi));
 
     let c = cell(cell_px);
-    let bounds = (ax0 + oxi, ay0 + oyi, ax1 + oxi, ay1 + oyi);
+    let (ix0, ix1) = (ax0 + oxi, ax1 + oxi);
+    let bounds = (ix0, ay0 + oyi, ix1, ay1 + oyi);
     let wave_a = Lattice::with(seed, (c * 4).max(10), (c * 3).max(8), true, bounds);
     let wave_b = Lattice::with(
         seed ^ 0x517c_c1b7_2722_0a95,
@@ -620,23 +745,37 @@ fn soft_hide(
         bounds,
     );
 
+    let fx_tab = field.x_table(ix0, ix1);
+    let xa_tab = wave_a.x_table(ix0, ix1);
+    let xb_tab = wave_b.x_table(ix0, ix1);
+
     let aw = (ax1 - ax0) as usize;
+    let keep = 1.0 - SOFT_VEIL;
+    let veil_add = SOFT_TARGET * SOFT_VEIL;
     let data = layer.pm.data_mut();
-    let _ = h;
     for y in ay0..ay1 {
-        for x in ax0..ax1 {
-            let m = cover[(y - ay0) as usize * aw + (x - ax0) as usize];
+        let iy = y + oyi;
+        let (fr0, fr1, fwy) = field.row_params(iy);
+        let (ra, tya) = wave_a.row_params(iy);
+        let (rb, tyb) = wave_b.row_params(iy);
+        let cover_row = &cover[(y - ay0) as usize * aw..][..aw];
+        let row_px = ((y * w + ax0) * 4) as usize;
+        for col in 0..aw {
+            let m = cover_row[col];
             if m <= 0.001 {
                 continue;
             }
-            let (ix, iy) = (x + oxi, y + oyi);
-            let base = field.at(ix, iy);
-            let t = SOFT_WAVE_A * wave_a.at(ix, iy) + SOFT_WAVE_B * wave_b.at(ix, iy);
-            let i = ((y * w + x) * 4) as usize;
+            let (fx0, fx1, fwx) = fx_tab[col];
+            let base = field.sample_row(fr0, fr1, fwy, fx0, fx1, fwx);
+            let (gxa, txa) = xa_tab[col];
+            let (gxb, txb) = xb_tab[col];
+            let t = SOFT_WAVE_A * wave_a.sample_row(ra, tya, gxa, txa)
+                + SOFT_WAVE_B * wave_b.sample_row(rb, tyb, gxb, txb);
+            let i = row_px + col * 4;
+            let im = 1.0 - m;
             for k in 0..3 {
-                let v =
-                    (base[k] * (1.0 - SOFT_VEIL) + SOFT_TARGET * SOFT_VEIL + t).clamp(0.0, 255.0);
-                data[i + k] = (v * m + data[i + k] as f32 * (1.0 - m)).round() as u8;
+                let v = (base[k] * keep + veil_add + t).clamp(0.0, 255.0);
+                data[i + k] = (v * m + data[i + k] as f32 * im).round() as u8;
             }
             data[i + 3] = 255;
         }
@@ -676,13 +815,14 @@ fn build_soft_field(
     };
     let (mw, mh) = (bw.div_ceil(stride).max(1), bh.div_ceil(stride).max(1));
 
-    // Rasterise the forbidden interior mask. At stride == 1 this is exact 1:1
-    // (hard, non-AA); at stride > 1 we rasterise AA and conservatively dilate
-    // by 1 coarse cell so no full-res interior pixel can ever be sampled.
+    // Rasterise this Hide's own interior mask (for dilating its ring). At
+    // stride == 1 this is exact 1:1 (hard, non-AA); at stride > 1 we rasterise
+    // AA and conservatively dilate by 1 coarse cell so no full-res interior
+    // pixel can ever be sampled.
+    let s_scale = 1.0 / stride as f32;
+    let to = Transform::from_translate(-(rx0 as f32), -(ry0 as f32)).post_scale(s_scale, s_scale);
     let mut inside = vec![false; mw * mh];
     if let (Some(mut mask), Some(path)) = (Mask::new(mw as u32, mh as u32), fp.path()) {
-        let s = 1.0 / stride as f32;
-        let to = Transform::from_translate(-(rx0 as f32), -(ry0 as f32)).post_scale(s, s);
         mask.fill_path(&path, FillRule::Winding, stride > 1, to);
         for (dst, &m) in inside.iter_mut().zip(mask.data()) {
             *dst = m > 0;
@@ -694,6 +834,35 @@ fn build_soft_field(
 
     let ring_r = (ring_w / stride as f32).round().max(2.0) as usize;
     let dilated = dilate_mask(&inside, mw, mh, ring_r);
+
+    // Exclude every other Hide / Redact footprint whose frame intersects our
+    // ring bounding box so Hide B never samples pixels covered by Hide A.
+    let mut blocked = inside;
+    let box_rect = Rectangle::new(
+        Point::new(rx0 as f32, ry0 as f32),
+        iced::Size::new((rx1 - rx0) as f32, (ry1 - ry0) as f32),
+    );
+    let mut other_mask: Option<Mask> = None;
+    for other in fp.exclude {
+        if !other.frame().intersects(&box_rect) {
+            continue;
+        }
+        let Some(path) = other.path() else {
+            continue;
+        };
+        let mask = other_mask
+            .get_or_insert_with(|| Mask::new(mw as u32, mh as u32).expect("non-empty soft mask"));
+        mask.fill_path(&path, FillRule::Winding, stride > 1, to);
+    }
+    if let Some(mask) = other_mask {
+        let mut other_inside: Vec<bool> = mask.data().iter().map(|&m| m > 0).collect();
+        if stride > 1 {
+            other_inside = dilate_mask(&other_inside, mw, mh, 1);
+        }
+        for (b, o) in blocked.iter_mut().zip(other_inside) {
+            *b |= o;
+        }
+    }
 
     let cell_side = (bw.max(bh) as f32 / SOFT_GRID as f32).max(SOFT_CELL_MIN);
     let gw = ((bw as f32 / cell_side).ceil() as usize).clamp(1, SOFT_GRID);
@@ -724,7 +893,7 @@ fn build_soft_field(
         let gy = ((my * stride) * gh / bh).min(gh - 1);
         for mx in 0..mw {
             let idx = my * mw + mx;
-            if inside[idx] || !dilated[idx] {
+            if blocked[idx] || !dilated[idx] {
                 continue;
             }
             seen += 1;
@@ -741,26 +910,9 @@ fn build_soft_field(
         }
     }
 
-    if total_ring == 0 {
-        // Fallback when the Hide fills the whole image: exact mode background
-        // colour only (never ink, never mean).
-        let step = ((mw * mh) / SAMPLES).max(1);
-        let mut counts = std::collections::HashMap::new();
-        for (n, idx) in (0..mw * mh).enumerate() {
-            if !n.is_multiple_of(step) || !inside[idx] {
-                continue;
-            }
-            let (mx, my) = (idx % mw, idx / mw);
-            let ix = (rx0 + (mx * stride) as i64).min(rx1 - 1);
-            let iy = (ry0 + (my * stride) as i64).min(ry1 - 1);
-            if let Some(px) = sample_rgb(ix, iy) {
-                *counts.entry(px).or_insert(0u32) += 1;
-            }
-        }
-        let bg = counts
-            .into_iter()
-            .max_by_key(|&(p, n)| (n, std::cmp::Reverse(p)))
-            .map_or([128.0; 3], |(p, _)| p.map(f32::from));
+    if total_ring < SOFT_MIN_RING {
+        // Content-free fallback when the exterior ring is empty or near-empty:
+        // never read pixels inside the footprint.
         return SoftField {
             rx0,
             ry0,
@@ -768,7 +920,7 @@ fn build_soft_field(
             bh: bh as f32,
             gw: 1,
             gh: 1,
-            grid: vec![bg],
+            grid: vec![[SOFT_TARGET; 3]],
         };
     }
 

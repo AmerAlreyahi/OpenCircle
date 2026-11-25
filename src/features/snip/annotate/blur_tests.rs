@@ -183,14 +183,14 @@ fn w102_1e_strength_does_not_follow_the_zoom() {
 /// W102-1.f: a saved Hide from before the style existed (and with the old
 /// per-stroke seed) still loads, as the default look.
 #[test]
-fn w102_1f_old_saved_blur_loads_as_default() {
+fn w102_1f_old_saved_blur_loads_as_frost() {
     let old = r#"{"Blur":{"points":[[1.0,2.0],[30.0,2.0]],"size":20.0,"cell":6.0,"seed":12345}}"#;
     let shape: Shape = serde_json::from_str(old).expect("old blur loads");
     assert!(
         matches!(
             shape,
             Shape::Blur {
-                style: blur::Style::Soft,
+                style: blur::Style::Frost,
                 ..
             }
         ),
@@ -544,7 +544,7 @@ fn dark_card() -> Image {
             column![
                 row_line("License ID", "OC-4420-8819-7305"),
                 row_line("Backup PIN", "482910"),
-                row_line("Owner", "amer@opencircle.dev"),
+                row_line("Owner", "alex@example.com"),
             ]
             .spacing(12),
         )
@@ -944,4 +944,116 @@ fn write_w114_sheets(light: &Image, dark: &Image, arabic: &Image) {
     }
     crate::shared::picture::write_png(&dir.join("w114-soft-strengths.png"), sw2, sh2, &buf2)
         .unwrap();
+}
+
+/// W114-6 (HIGH security review): Hide B's exterior ring MUST NOT read pixels
+/// covered by Hide A (or a Redact). Changing ink/content under A leaves B's
+/// pixels bit-for-bit identical (reproduces the y=40 / y=62 size=24 cell=8
+/// two-brush case and an adjacent-rect case).
+#[test]
+fn w114_6_adjacent_hide_never_reads_content_under_another_hide() {
+    let make = |under_a: [u8; 4]| {
+        image_of(260, 120, |x, y| {
+            if (24..216).contains(&x) && (30..50).contains(&y) {
+                under_a
+            } else {
+                [250, 250, 250, 255]
+            }
+        })
+    };
+    let a = hide_with(
+        vec![pt(20.0, 40.0), pt(220.0, 40.0)],
+        24.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Brush,
+        0.0,
+    );
+    let b = hide_with(
+        vec![pt(20.0, 62.0), pt(220.0, 62.0)],
+        24.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Brush,
+        0.0,
+    );
+    let out1 = rendered(make([20, 20, 30, 255]), 7, vec![a.clone(), b.clone()]);
+    let out2 = rendered(make([250, 250, 250, 255]), 7, vec![a, b]);
+    assert_eq!(out1.rgba, out2.rgba, "two adjacent brushes: A leaks into B");
+
+    // Adjacent rects (1 px apart): B's top ring sits squarely inside A.
+    let ra = hide_with(
+        vec![pt(20.0, 26.0), pt(220.0, 54.0)],
+        16.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Rect,
+        0.0,
+    );
+    let rb = hide_with(
+        vec![pt(20.0, 55.0), pt(220.0, 85.0)],
+        16.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Rect,
+        0.0,
+    );
+    let r1 = rendered(make([230, 30, 180, 255]), 7, vec![ra.clone(), rb.clone()]);
+    let r2 = rendered(make([250, 250, 250, 255]), 7, vec![ra, rb]);
+    assert_eq!(r1.rgba, r2.rgba, "two adjacent rects: A leaks into B");
+
+    // Soft Hide adjacent to a Redact: Redact's covered pixels never leak into Soft.
+    let redact = item(Shape::Redact {
+        a: pt(20.0, 26.0),
+        b: pt(220.0, 54.0),
+        oval: false,
+    });
+    let soft = hide_with(
+        vec![pt(20.0, 55.0), pt(220.0, 85.0)],
+        16.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Rect,
+        0.0,
+    );
+    let d1 = rendered(
+        make([15, 210, 40, 255]),
+        7,
+        vec![redact.clone(), soft.clone()],
+    );
+    let d2 = rendered(make([250, 250, 250, 255]), 7, vec![redact, soft]);
+    assert_eq!(
+        d1.rgba, d2.rgba,
+        "redact adjacent to Soft: Redact leaks into Soft"
+    );
+}
+
+/// W114-7 (MEDIUM 1 review): when the exterior ring is empty (or near-empty),
+/// Soft uses a content-free fallback (`SOFT_TARGET`), never reading pixels
+/// inside the footprint. A full-frame Rect over solid (250,250,250) and over
+/// solid (20,120,200) produces bit-for-bit identical output.
+#[test]
+fn w114_7_full_frame_fallback_is_content_free() {
+    let full_hide = hide_with(
+        vec![pt(0.0, 0.0), pt(120.0, 60.0)],
+        16.0,
+        8.0,
+        blur::Style::Soft,
+        blur::Kind::Rect,
+        0.0,
+    );
+    let white = rendered(
+        image_of(120, 60, |_, _| [250, 250, 250, 255]),
+        13,
+        vec![full_hide.clone()],
+    );
+    let blue = rendered(
+        image_of(120, 60, |_, _| [20, 120, 200, 255]),
+        13,
+        vec![full_hide],
+    );
+    assert_eq!(
+        white.rgba, blue.rgba,
+        "empty-ring fallback must be content-free"
+    );
 }

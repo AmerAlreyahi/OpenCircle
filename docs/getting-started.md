@@ -176,9 +176,11 @@ ready to paste into an AI chat.
 - More has Copy text, Ask AI and Translate for the area, Long capture (scroll
   the page yourself), Add to steps (several snips as one numbered image), Pin,
   Colour picker and Screen ruler.
-- Hide (Blur) is a smooth frost made from the area's background, so the text
-  under it can't be recovered (*Pixelate* is a fine mosaic; the look styles are
-  not for secrets); Redact is a solid box, for when you want no trace at all.
+- Hide (Blur) defaults to *Soft*, a smooth content-free blur built only from the
+  area's surroundings so the text under it can't be recovered (*Frost* and
+  *Pixelate* are alternative secure styles; *Blur (look only)*, *Frosted* and
+  *Progressive* are looks, not for secrets); Redact is a solid box, for when you
+  want no trace at all.
   The active tool's options show in a slim row under the toolbar.
 - Song search and pins are in
   **Settings > Labs**, off by default.

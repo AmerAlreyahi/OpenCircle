@@ -120,16 +120,18 @@ small handles. OpenCircle remembers your last tool, colour, sizes and options.
 **Hide (Blur) or Redact.** Hide covers what you don't want read, in Snip and in
 the Studio alike. Its options row has:
 
-- **Style.** *Hide* (the default) is a smooth, calm frost made from the colour
-  of the area's background; *Pixelate* is a fine pixel mosaic. Neither one ever
-  looks at the text, so the text cannot be worked back out of them: every Hide in
-  a picture shares one texture, so lines and overlapping strokes match. *Soft*,
-  *Frosted* and *Progressive* (a blur that fades from one handle to the other;
-  drag the two handles to change where it starts and ends) are **looks, not
-  for secrets**: they blur what is there, and with a known font a blurred code can
-  be recovered. They are never the default. Copy text and Translate skip every Hide, but
-  **Ask AI receives the picture as you see it**: with a look style that is the
-  blurred picture, so a look never keeps a secret from the AI you ask.
+- **Style.** *Soft* (the default) is a smooth, content-free blur built only from
+  the surroundings just outside the hidden area (never from any hidden area);
+  *Frost* is a calm background frost and *Pixelate* is a fine pixel mosaic. None
+  of those three ever looks at the hidden text, so the text cannot be worked back
+  out of them: every Hide in a picture shares one texture, so lines and
+  overlapping strokes match. *Blur (look only)*, *Frosted* and *Progressive* (a
+  blur that fades from one handle to the other; drag the two handles to change
+  where it starts and ends) are **looks, not for secrets**: they blur what is
+  there, and with a known font a blurred code can be recovered. They are never
+  the default. Copy text and Translate skip every Hide, but **Ask AI receives
+  the picture as you see it**: with a look style that is the blurred picture, so
+  a look never keeps a secret from the AI you ask.
 - **Shape.** *Brush* (a stroke with soft round ends, sized to the text line under
   it unless you pick a size; line help keeps it on its line, and sliding back
   along a held line un-hides what you left), *Rectangle* or *Ellipse* (hold

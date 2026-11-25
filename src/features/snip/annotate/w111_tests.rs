@@ -189,18 +189,20 @@ fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
         }
         out
     };
-    // (tool, from, to): far away, over the Hide, and a second Hide overlapping it
+    // (tool, from, to, touches_hide_ring): non-Hide items (far or over) and a far-away Hide
+    // never change an existing Hide; an overlapping/adjacent Hide is allowed to change its
+    // neighbour because Soft excludes every Hide footprint from its exterior ring (W114).
     let adds = [
-        (Tool::Pen, pt(40.0, 200.0), pt(120.0, 260.0)),
-        (Tool::Pen, pt(100.0, 70.0), pt(115.0, 140.0)),
-        (Tool::Rect, pt(90.0, 90.0), pt(130.0, 125.0)),
-        (Tool::Pen, pt(180.0, 60.0), pt(230.0, 160.0)),
-        (Tool::Rect, pt(400.0, 40.0), pt(500.0, 120.0)),
-        (Tool::Rect, pt(150.0, 80.0), pt(260.0, 140.0)),
-        (Tool::Blur, pt(300.0, 220.0), pt(450.0, 220.0)),
-        (Tool::Blur, pt(240.0, 105.0), pt(400.0, 105.0)),
+        (Tool::Pen, pt(40.0, 200.0), pt(120.0, 260.0), false),
+        (Tool::Pen, pt(100.0, 70.0), pt(115.0, 140.0), false),
+        (Tool::Rect, pt(90.0, 90.0), pt(130.0, 125.0), false),
+        (Tool::Pen, pt(180.0, 60.0), pt(230.0, 160.0), false),
+        (Tool::Rect, pt(400.0, 40.0), pt(500.0, 120.0), false),
+        (Tool::Rect, pt(150.0, 80.0), pt(260.0, 140.0), false),
+        (Tool::Blur, pt(300.0, 220.0), pt(450.0, 220.0), false),
+        (Tool::Blur, pt(240.0, 105.0), pt(400.0, 105.0), true),
     ];
-    for (tool, from, to) in adds {
+    for (tool, from, to, touches_hide_ring) in adds {
         let mut e = hide_one();
         e.update(Message::Move(pt(110.0, 105.0)));
         let (px0, thumbs0) = (e.base_pixels(), thumb_pixels(&e));
@@ -210,12 +212,14 @@ fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
         e.update(Message::Move(to));
         e.update(Message::Release);
         e.refresh();
-        let skip = e.doc.items.last().unwrap().frame().expand(8.0);
-        assert_eq!(
-            hide_area(&e.base_pixels(), skip),
-            hide_area(&px0, skip),
-            "{tool:?} {from:?}: the Hide is as it was"
-        );
+        if !touches_hide_ring {
+            let skip = e.doc.items.last().unwrap().frame().expand(8.0);
+            assert_eq!(
+                hide_area(&e.base_pixels(), skip),
+                hide_area(&px0, skip),
+                "{tool:?} {from:?}: the Hide is as it was"
+            );
+        }
         e.update(Message::Tool(Tool::Blur));
         e.update(Message::Move(pt(110.0, 105.0)));
         // Soft, Frost and Pixelate (the first three) never read the annotations

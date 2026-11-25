@@ -737,6 +737,62 @@ fn blur_brush_repaint_of_a_crop_gives_the_same_pixels() {
     }
 }
 
+/// W114 (review LOW 9): Soft crop-repaint matches a full repaint on the
+/// production path (`source: Some(image)` via `Document::paint`), both for a
+/// single Hide and with an adjacent Hide excluded from its ring.
+#[test]
+fn blur_soft_crop_repaint_with_source_matches_whole() {
+    let full = image_of(240, 120, |x, y| {
+        let tx = x as f32 / 240.0;
+        let bg = [
+            (242.0 * (1.0 - tx) + 184.0 * tx) as u8,
+            (204.0 + 20.0 * y as f32 / 120.0) as u8,
+            (220.0 * (1.0 - tx) + 248.0 * tx) as u8,
+            255,
+        ];
+        if (34..46).contains(&y) && (40..200).contains(&x) && x % 5 < 3 {
+            [20, 20, 30, 255]
+        } else {
+            bg
+        }
+    });
+    let make_hide = |y: f32| {
+        item(Shape::Blur {
+            points: vec![pt(40.0, y), pt(180.0, y)],
+            size: 20.0,
+            cell: 8.0,
+            style: blur::Style::Soft,
+            kind: blur::Kind::Brush,
+            outline: 0.0,
+            ramp: Vec::new(),
+        })
+    };
+    for items in [
+        vec![make_hide(40.0)],
+        vec![make_hide(40.0), make_hide(62.0)],
+    ] {
+        let mut doc = Document::new(full.clone());
+        doc.seed = 19;
+        for it in items {
+            doc.exec(Edit::Insert(doc.items.len(), it));
+        }
+        let layers: Vec<_> = doc.items.iter().map(|i| (i, true)).collect();
+        let whole_r = tiny_skia::IntRect::from_xywh(0, 0, full.width, full.height).unwrap();
+        let whole = doc.paint(&layers, whole_r, None);
+        let crop_r = tiny_skia::IntRect::from_xywh(90, 16, 130, 84).unwrap();
+        let crop = doc.paint(&layers, crop_r, None);
+        for y in 0..crop_r.height() {
+            for x in 0..crop_r.width() {
+                let wx = crop_r.x() as u32 + x;
+                let wy = crop_r.y() as u32 + y;
+                let a = &whole.data()[((wy * full.width + wx) * 4) as usize..][..4];
+                let b = &crop.data()[((y * crop_r.width() + x) * 4) as usize..][..4];
+                assert_eq!(a, b, "({wx}, {wy}) with {} items", doc.items.len());
+            }
+        }
+    }
+}
+
 fn repaint_of_a_crop(style: blur::Style) {
     let full = field("hunter2");
     let band = lines::detect(&full)[0];

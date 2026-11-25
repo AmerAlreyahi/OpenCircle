@@ -90,7 +90,7 @@ pub enum Shape {
         points: Vec<Point>,
         size: f32,
         cell: f32,
-        #[serde(default)]
+        #[serde(default = "blur::Style::legacy_default")]
         style: blur::Style,
         /// Brush (the points are its stroke), or a rectangle / ellipse between
         /// the first and last point.
@@ -268,6 +268,7 @@ impl Item {
                 outline: *outline,
                 ramp,
                 source: None,
+                exclude: &[],
             }),
             Shape::Arrow {
                 a, b, bend, text, ..
@@ -978,6 +979,33 @@ pub fn paint_on(
         spotlight::paint(&mut layer, &holes);
     }
 
+    // Every visible Hide / Redact footprint in the document: Soft excludes all
+    // of them from its exterior ring so Hide B never reads content under A.
+    let excludes: Vec<blur::Exclude<'_>> = items
+        .iter()
+        .filter(|(item, visible)| *visible && !item.hidden)
+        .filter_map(|(item, _)| match &item.shape {
+            Shape::Blur {
+                points,
+                size,
+                kind,
+                outline,
+                ..
+            } => Some(blur::Exclude::Blur {
+                points,
+                size: *size,
+                kind: *kind,
+                outline: *outline,
+            }),
+            Shape::Redact { a, b, oval } => Some(blur::Exclude::Redact {
+                a: *a,
+                b: *b,
+                oval: *oval,
+            }),
+            _ => None,
+        })
+        .collect();
+
     let mut steps = 0;
     for (item, visible) in items {
         if matches!(item.shape, Shape::Step { .. }) {
@@ -1034,6 +1062,7 @@ pub fn paint_on(
                     outline: *outline,
                     ramp,
                     source: Some(image),
+                    exclude: &excludes,
                 };
                 blur::paint(&mut layer, &fp, *cell, *style, seed)
             }
