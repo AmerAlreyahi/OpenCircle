@@ -197,6 +197,61 @@ pub fn place(icon: [i32; 4], work: [i32; 4], menu: (i32, i32), gap: i32) -> (i32
     )
 }
 
+/// What the menu opens beside for a click at `click` on the icon at `icon` (`[left, top, right, bottom]`,
+/// physical px): the icon itself (as always), unless the click landed in the WORK AREA of its monitor
+/// (`monitor` and `work`, the same shape) away from the icon: a tray tool that shows our icon in its own
+/// spot, while the shell still reports the icon's taskbar spot. Then the click point (planning #200).
+/// A click on the taskbar (the icon, the overflow button, a keyboard activation with the pointer over
+/// the taskbar) or off every monitor keeps the icon.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn menu_anchor(
+    icon: [i32; 4],
+    click: (i32, i32),
+    monitor: [i32; 4],
+    work: [i32; 4],
+) -> [i32; 4] {
+    let inside = |r: [i32; 4], slack: i32| {
+        click.0 >= r[0] - slack
+            && click.0 < r[2] + slack
+            && click.1 >= r[1] - slack
+            && click.1 < r[3] + slack
+    };
+    // (the taskbar is the monitor less its work area; a hidden one leaves no such strip)
+    match inside(work, 0) && !inside(icon, 2) && inside(monitor, 0) {
+        true => [click.0, click.1, click.0 + 1, click.1 + 1],
+        false => icon,
+    }
+}
+
+/// The monitor under `point` and its work area (`[left, top, right, bottom]`, physical px).
+#[cfg(windows)]
+fn screen_at(point: (i32, i32)) -> ([i32; 4], [i32; 4]) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    };
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..MONITORINFO::default()
+    };
+    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
+    unsafe {
+        let monitor = MonitorFromPoint(
+            POINT {
+                x: point.0,
+                y: point.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        );
+        let _ = GetMonitorInfoW(monitor, &mut info);
+    }
+    let (m, w) = (info.rcMonitor, info.rcWork);
+    (
+        [m.left, m.top, m.right, m.bottom],
+        [w.left, w.top, w.right, w.bottom],
+    )
+}
+
 /// The menu's window (`Place`: physical px at the icon monitor's scale) for the icon at `icon` and a menu
 /// of `size` logical px, 8 logical px off the taskbar.
 pub fn menu_place(icon: [i32; 4], size: iced::Size) -> Place {
@@ -688,16 +743,18 @@ fn on_right_click(tx: Triggers) {
             button,
             button_state,
             rect,
+            position,
             ..
         } = event
         {
+            let click = (position.x.round() as i32, position.y.round() as i32);
             let at = [
                 rect.position.x.round() as i32,
                 rect.position.y.round() as i32,
                 rect.size.width as i32,
                 rect.size.height as i32,
             ];
-            if let Some(trigger) = on_click(button, button_state, at) {
+            if let Some(trigger) = on_click(button, button_state, at, (click, screen_at(click))) {
                 let _ = tx.unbounded_send(trigger);
             }
         }
@@ -705,16 +762,23 @@ fn on_right_click(tx: Triggers) {
 }
 
 /// What a click on the tray icon does: let go of the right button = our menu at
-/// the icon (`at` = x, y, width, height); of the left button = Settings.
+/// the icon (`at` = x, y, width, height) or, when the click was elsewhere, at the
+/// click (`click`, `menu_anchor`); of the left button = Settings.
 #[cfg(windows)]
 fn on_click(
     button: tray_icon::MouseButton,
     state: tray_icon::MouseButtonState,
     [x, y, w, h]: [i32; 4],
+    (click, (monitor, work)): ((i32, i32), ([i32; 4], [i32; 4])),
 ) -> Option<Trigger> {
     use tray_icon::{MouseButton, MouseButtonState};
     match (button, state) {
-        (MouseButton::Right, MouseButtonState::Up) => Some(Trigger::TrayMenu([x, y, x + w, y + h])),
+        (MouseButton::Right, MouseButtonState::Up) => Some(Trigger::TrayMenu(menu_anchor(
+            [x, y, x + w, y + h],
+            click,
+            monitor,
+            work,
+        ))),
         (MouseButton::Left, MouseButtonState::Up) => Some(Trigger::OpenSettings),
         _ => None,
     }
@@ -1024,14 +1088,64 @@ mod tests {
         use super::Trigger;
         use tray_icon::{MouseButton, MouseButtonState};
         let at = [10, 20, 30, 40];
+        let screen = ([0, 0, 1280, 720], [0, 0, 1280, 680]);
+        let on = ((20, 30), screen);
         assert!(matches!(
-            super::on_click(MouseButton::Left, MouseButtonState::Up, at),
+            super::on_click(MouseButton::Left, MouseButtonState::Up, at, on),
             Some(Trigger::OpenSettings)
         ));
         assert!(matches!(
-            super::on_click(MouseButton::Right, MouseButtonState::Up, at),
+            super::on_click(MouseButton::Right, MouseButtonState::Up, at, on),
             Some(Trigger::TrayMenu([10, 20, 40, 60]))
         ));
-        assert!(super::on_click(MouseButton::Left, MouseButtonState::Down, at).is_none());
+        // a click elsewhere in the work area (a tool showing our icon in its own spot): the menu opens there
+        assert!(matches!(
+            super::on_click(
+                MouseButton::Right,
+                MouseButtonState::Up,
+                at,
+                ((500, 300), screen)
+            ),
+            Some(Trigger::TrayMenu([500, 300, 501, 301]))
+        ));
+        assert!(super::on_click(MouseButton::Left, MouseButtonState::Down, at, on).is_none());
+    }
+
+    /// 200-15 (review): the menu opens beside the icon, except when the click is in the monitor's
+    /// WORK AREA away from the icon (a tray tool showing our icon elsewhere): then at the click point,
+    /// above it, inside the work area. A click on the taskbar (also a keyboard activation with the
+    /// pointer over it) or off every monitor keeps the icon.
+    #[test]
+    fn g200_15_the_menu_opens_at_the_click_only_in_the_work_area_away_from_the_icon() {
+        let icon = [600, 684, 624, 708]; // the shell's spot on a bottom taskbar
+        let (monitor, work) = ([0, 0, 1280, 720], [0, 0, 1280, 680]);
+        let anchor = |c: (i32, i32)| super::menu_anchor(icon, c, monitor, work);
+        assert_eq!(anchor((610, 696)), icon, "on the icon");
+        assert_eq!(anchor((625, 709)), icon, "on its edge");
+        assert_eq!(
+            anchor((300, 700)),
+            icon,
+            "on the taskbar, off the icon (overflow, keyboard)"
+        );
+        assert_eq!(
+            anchor((900, 20)),
+            [900, 20, 901, 21],
+            "in the work area: the click"
+        );
+        assert_eq!(anchor((-5, 20)), icon, "off the monitor");
+        assert_eq!(anchor((1300, 20)), icon, "off the monitor");
+        // a hidden taskbar (work = monitor): a click away from the icon is the click
+        let hidden = super::menu_anchor(icon, (900, 20), monitor, monitor);
+        assert_eq!(hidden, [900, 20, 901, 21]);
+        // the menu opens under / above that point, inside the work area
+        let menu = (240, 200);
+        let (x, y) = place(anchor((900, 20)), work, menu, 8);
+        assert!(
+            y >= 20 && y + 200 <= 680 && x >= 8 && x + 240 <= 1272,
+            "{x},{y}"
+        );
+        assert_eq!(y, 20 + 1 + 8, "directly under the click");
+        let (_, y) = place(anchor((900, 600)), work, menu, 8);
+        assert_eq!(y, 600 - 8 - 200);
     }
 }
