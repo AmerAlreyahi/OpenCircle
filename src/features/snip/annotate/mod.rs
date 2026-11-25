@@ -1748,30 +1748,7 @@ impl Annotator {
             Point::new(x0 + rw / 2.0, y0 + rh / 2.0),
             Point::new(x0 + rw, y0 + rh / 2.0),
         ];
-        let excludes: Vec<blur::Exclude<'_>> = items
-            .iter()
-            .filter(|item| !item.hidden)
-            .filter_map(|item| match &item.shape {
-                Shape::Blur {
-                    points,
-                    size,
-                    kind,
-                    outline,
-                    ..
-                } => Some(blur::Exclude::Blur {
-                    points,
-                    size: *size,
-                    kind: *kind,
-                    outline: *outline,
-                }),
-                Shape::Redact { a, b, oval } => Some(blur::Exclude::Redact {
-                    a: *a,
-                    b: *b,
-                    oval: *oval,
-                }),
-                _ => None,
-            })
-            .collect();
+        let excludes = document::excludes(&items);
         let fp = blur::Footprint {
             points: &corners,
             size: 0.0,
@@ -2712,7 +2689,21 @@ impl Annotator {
             self.update_live(); // (a cancelled press leaves no layer behind, W113)
             return; // nothing to paint: the frozen frame under it is the area
         }
-        let pm = self.doc.flatten(&layers, self.legend.as_ref());
+        // Include the dragged Hide (at its current geometry) in the base's
+        // exclude list even while hidden from the base, so neighbours never read
+        // under it or jump on release (W114).
+        let mut excludes = document::excludes(layers.iter().filter(|(_, v)| *v).map(|(i, _)| *i));
+        if let Some(ex) = self
+            .pending
+            .as_ref()
+            .filter(|p| p.hidden)
+            .and_then(|p| p.item.exclude())
+        {
+            excludes.push(ex);
+        }
+        let pm = self
+            .doc
+            .flatten_with_excludes(&layers, &excludes, self.legend.as_ref());
         self.base = handle(pm);
         self.patch.clear();
         self.display = None;

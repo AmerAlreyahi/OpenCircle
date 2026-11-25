@@ -528,14 +528,18 @@ impl Annotator {
         let img = &self.doc.image;
         let layers: Vec<_> = layers.iter().map(|i| (*i, true)).collect();
         let whole = tiny_skia::IntRect::from_xywh(0, 0, img.width, img.height)?;
-        let rgba: Vec<u8> = super::document::paint(img, &layers, whole, self.doc.seed)
-            .pixels()
-            .iter()
-            .flat_map(|p| {
-                let c = p.demultiply();
-                [c.red(), c.green(), c.blue(), c.alpha()]
-            })
-            .collect();
+        // Exclude ALL Hides / Redacts in the whole document (including any above
+        // the merged picture) so a Soft Hide below never reads content under one above.
+        let excludes = super::document::excludes(&self.doc.items);
+        let rgba: Vec<u8> =
+            super::document::paint_with_excludes(img, &layers, &excludes, whole, self.doc.seed)
+                .pixels()
+                .iter()
+                .flat_map(|p| {
+                    let c = p.demultiply();
+                    [c.red(), c.green(), c.blue(), c.alpha()]
+                })
+                .collect();
         self.doc.rows_patch(0, &rgba)
     }
 

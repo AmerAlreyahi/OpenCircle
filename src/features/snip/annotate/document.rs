@@ -544,7 +544,19 @@ impl Document {
         region: IntRect,
         legend: Option<&Legend>,
     ) -> Pixmap {
-        let mut pm = paint(&self.image, layers, region, self.seed);
+        let ex = excludes(layers.iter().filter(|(_, v)| *v).map(|(i, _)| *i));
+        self.paint_with_excludes(layers, &ex, region, legend)
+    }
+
+    /// `paint`, excluding every Hide / Redact in `excludes` from Soft's exterior rings.
+    pub fn paint_with_excludes(
+        &self,
+        layers: &[(&Item, bool)],
+        excludes: &[blur::Exclude<'_>],
+        region: IntRect,
+        legend: Option<&Legend>,
+    ) -> Pixmap {
+        let mut pm = paint_with_excludes(&self.image, layers, excludes, region, self.seed);
         if let Some(legend) = legend.filter(|l| l.band == 0.0) {
             let mut layer = Layer {
                 pm,
@@ -558,13 +570,26 @@ impl Document {
 
     /// `paint` on a see-through pixmap: only what `layers` paint (no legend: the base holds it).
     pub fn paint_bare(&self, layers: &[(&Item, bool)], region: IntRect) -> Pixmap {
-        paint_on(&self.image, layers, region, self.seed, true)
+        let ex = excludes(layers.iter().filter(|(_, v)| *v).map(|(i, _)| *i));
+        paint_on(&self.image, layers, &ex, region, self.seed, true)
     }
 
     /// The whole view with `layers`, the legend in its corner or in a band under it.
     pub fn flatten(&self, layers: &[(&Item, bool)], legend: Option<&Legend>) -> Pixmap {
+        let ex = excludes(layers.iter().filter(|(_, v)| *v).map(|(i, _)| *i));
+        self.flatten_with_excludes(layers, &ex, legend)
+    }
+
+    /// `flatten`, with an explicit document-wide `excludes` list (e.g. including a Hide
+    /// currently being dragged so base neighbours still exclude it).
+    pub fn flatten_with_excludes(
+        &self,
+        layers: &[(&Item, bool)],
+        excludes: &[blur::Exclude<'_>],
+        legend: Option<&Legend>,
+    ) -> Pixmap {
         let view = self.view();
-        let pm = self.paint(layers, int_rect(view, view), legend);
+        let pm = self.paint_with_excludes(layers, excludes, int_rect(view, view), legend);
         let Some(legend) = legend.filter(|l| l.band > 0.0) else {
             return pm;
         };
@@ -914,10 +939,53 @@ pub fn oval_path(r: Rectangle) -> Option<Path> {
     PathBuilder::from_oval(tiny_skia::Rect::from_xywh(r.x, r.y, r.width, r.height)?)
 }
 
-/// Paints `region` (image px, inside the image) of the image with `items` over it.
-/// `(item, false)` = hidden (being edited live), but it still counts as a step.
-pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64) -> Pixmap {
-    paint_on(image, items, region, seed, false)
+impl Item {
+    /// Footprint to exclude from Soft Hide exterior-ring sampling (`None` for
+    /// non-Hide items or hidden items).
+    pub(crate) fn exclude(&self) -> Option<blur::Exclude<'_>> {
+        if self.hidden {
+            return None;
+        }
+        match &self.shape {
+            Shape::Blur {
+                points,
+                size,
+                cell,
+                kind,
+                outline,
+                ..
+            } => Some(blur::Exclude::Blur {
+                points,
+                size: *size,
+                kind: *kind,
+                outline: *outline,
+                feather: blur::feather(*cell),
+            }),
+            Shape::Redact { a, b, oval } => Some(blur::Exclude::Redact {
+                a: *a,
+                b: *b,
+                oval: *oval,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Every Hide and Redact footprint in `items` to exclude from Soft's exterior rings.
+pub(crate) fn excludes<'a>(items: impl IntoIterator<Item = &'a Item>) -> Vec<blur::Exclude<'a>> {
+    items.into_iter().filter_map(Item::exclude).collect()
+}
+
+/// `paint`, excluding every Hide / Redact in `excludes` (even ones not in `items`,
+/// such as Hides above a merged picture during bake).
+pub fn paint_with_excludes(
+    image: &Image,
+    items: &[(&Item, bool)],
+    excludes: &[blur::Exclude<'_>],
+    region: IntRect,
+    seed: u64,
+) -> Pixmap {
+    paint_on(image, items, excludes, region, seed, false)
 }
 
 /// `paint`, `bare`: on a see-through pixmap instead of the picture, so it holds only what the
@@ -925,6 +993,7 @@ pub fn paint(image: &Image, items: &[(&Item, bool)], region: IntRect, seed: u64)
 pub fn paint_on(
     image: &Image,
     items: &[(&Item, bool)],
+    excludes: &[blur::Exclude<'_>],
     region: IntRect,
     seed: u64,
     bare: bool,
@@ -978,33 +1047,6 @@ pub fn paint_on(
     if !holes.is_empty() {
         spotlight::paint(&mut layer, &holes);
     }
-
-    // Every visible Hide / Redact footprint in the document: Soft excludes all
-    // of them from its exterior ring so Hide B never reads content under A.
-    let excludes: Vec<blur::Exclude<'_>> = items
-        .iter()
-        .filter(|(item, visible)| *visible && !item.hidden)
-        .filter_map(|(item, _)| match &item.shape {
-            Shape::Blur {
-                points,
-                size,
-                kind,
-                outline,
-                ..
-            } => Some(blur::Exclude::Blur {
-                points,
-                size: *size,
-                kind: *kind,
-                outline: *outline,
-            }),
-            Shape::Redact { a, b, oval } => Some(blur::Exclude::Redact {
-                a: *a,
-                b: *b,
-                oval: *oval,
-            }),
-            _ => None,
-        })
-        .collect();
 
     let mut steps = 0;
     for (item, visible) in items {
@@ -1062,7 +1104,7 @@ pub fn paint_on(
                     outline: *outline,
                     ramp,
                     source: Some(image),
-                    exclude: &excludes,
+                    exclude: excludes,
                 };
                 blur::paint(&mut layer, &fp, *cell, *style, seed)
             }

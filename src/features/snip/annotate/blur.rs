@@ -130,7 +130,7 @@ pub enum Kind {
 }
 
 /// Another Hide or Redact footprint excluded from Soft's exterior ring, so
-/// Hide B never reads content hidden under Hide A.
+/// Hide B never reads content hidden under Hide A (including A's outward feather).
 #[derive(Clone, Copy)]
 pub enum Exclude<'a> {
     Blur {
@@ -138,6 +138,7 @@ pub enum Exclude<'a> {
         size: f32,
         kind: Kind,
         outline: f32,
+        feather: f32,
     },
     Redact {
         a: Point,
@@ -147,6 +148,32 @@ pub enum Exclude<'a> {
 }
 
 impl Exclude<'_> {
+    fn feather(&self) -> f32 {
+        match *self {
+            Exclude::Blur { feather, .. } => feather,
+            Exclude::Redact { .. } => 0.0,
+        }
+    }
+
+    fn is_self(&self, fp: &Footprint<'_>) -> bool {
+        match *self {
+            Exclude::Blur {
+                points,
+                size,
+                kind,
+                outline,
+                ..
+            } => {
+                std::ptr::eq(points.as_ptr(), fp.points.as_ptr())
+                    && points.len() == fp.points.len()
+                    && kind == fp.kind
+                    && size == fp.size
+                    && outline == fp.outline
+            }
+            Exclude::Redact { .. } => false,
+        }
+    }
+
     fn frame(&self) -> Rectangle {
         match *self {
             Exclude::Blur {
@@ -154,12 +181,13 @@ impl Exclude<'_> {
                 size,
                 kind,
                 outline,
+                feather,
             } => {
                 let pad = match kind {
                     Kind::Brush => size / 2.0,
                     _ => outline / 2.0,
                 };
-                span(points).expand(pad + 1.0)
+                span(points).expand(pad + feather + 1.0)
             }
             Exclude::Redact { a, b, .. } => span(&[a, b]).expand(1.0),
         }
@@ -172,6 +200,7 @@ impl Exclude<'_> {
                 size,
                 kind,
                 outline,
+                ..
             } => shape_path(points, size, kind, outline),
             Exclude::Redact { a, b, oval } => {
                 let kind = if oval { Kind::Ellipse } else { Kind::Rect };
@@ -836,28 +865,29 @@ fn build_soft_field(
     let dilated = dilate_mask(&inside, mw, mh, ring_r);
 
     // Exclude every other Hide / Redact footprint whose frame intersects our
-    // ring bounding box so Hide B never samples pixels covered by Hide A.
+    // ring bounding box, dilated by that Hide's outward feather so B's ring
+    // never samples pixels another Hide visibly covers.
     let mut blocked = inside;
     let box_rect = Rectangle::new(
         Point::new(rx0 as f32, ry0 as f32),
         iced::Size::new((rx1 - rx0) as f32, (ry1 - ry0) as f32),
     );
-    let mut other_mask: Option<Mask> = None;
+    let mut scratch: Option<Mask> = None;
     for other in fp.exclude {
-        if !other.frame().intersects(&box_rect) {
+        if other.is_self(fp) || !other.frame().intersects(&box_rect) {
             continue;
         }
         let Some(path) = other.path() else {
             continue;
         };
-        let mask = other_mask
+        let mask = scratch
             .get_or_insert_with(|| Mask::new(mw as u32, mh as u32).expect("non-empty soft mask"));
+        mask.clear();
         mask.fill_path(&path, FillRule::Winding, stride > 1, to);
-    }
-    if let Some(mask) = other_mask {
         let mut other_inside: Vec<bool> = mask.data().iter().map(|&m| m > 0).collect();
-        if stride > 1 {
-            other_inside = dilate_mask(&other_inside, mw, mh, 1);
+        let dil_r = (other.feather() / stride as f32).ceil() as usize + usize::from(stride > 1);
+        if dil_r > 0 {
+            other_inside = dilate_mask(&other_inside, mw, mh, dil_r);
         }
         for (b, o) in blocked.iter_mut().zip(other_inside) {
             *b |= o;

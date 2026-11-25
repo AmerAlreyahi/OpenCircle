@@ -1057,3 +1057,262 @@ fn w114_7_full_frame_fallback_is_content_free() {
         "empty-ring fallback must be content-free"
     );
 }
+
+/// W114-8 (re-review MEDIUM security): merging a pasted picture above Soft Hide B
+/// while Soft Hide C sits ABOVE that picture must still exclude C from B's ring
+/// during bake, so content under C never leaks into the baked pixels or exports.
+#[test]
+fn w114_8_merge_bake_excludes_hides_above_merged_picture() {
+    let run = |under_c: [u8; 4]| {
+        let img = image_of(260, 140, |x, y| {
+            if (24..216).contains(&x) && (26..52).contains(&y) {
+                under_c
+            } else {
+                [250, 250, 250, 255]
+            }
+        });
+        let mut e = Annotator::new(img, 1.0);
+        e.doc.seed = 21;
+        // 0: Soft Hide B (below the merged picture; its top ring reaches into C)
+        let b = hide_with(
+            vec![pt(20.0, 54.0), pt(220.0, 84.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        // 1: Pasted picture merged above B (placed in the corner so B stays visible)
+        let pic = item(Shape::Picture {
+            a: pt(230.0, 110.0),
+            b: pt(246.0, 126.0),
+            pic: document::Pic::new(16, 16, &vec![80u8; 16 * 16 * 4]),
+            lock: true,
+        });
+        // 2: Soft Hide C above the merged picture
+        let c = hide_with(
+            vec![pt(20.0, 24.0), pt(220.0, 53.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        e.doc.exec(Edit::Insert(0, b));
+        e.doc.exec(Edit::Insert(1, pic));
+        e.doc.exec(Edit::Insert(2, c));
+        e.doc.select_one(Some(1));
+        e.update(Message::Merge);
+        // Extract baked pixels in B's region (permanently written into e.doc.image)
+        let mut baked_b = Vec::new();
+        for y in 54..84usize {
+            for x in 20..220usize {
+                let i = (y * 260 + x) * 4;
+                baked_b.extend_from_slice(&e.doc.image.rgba[i..i + 4]);
+            }
+        }
+        (baked_b, render(&e.doc).rgba)
+    };
+    let (baked1, exp1) = run([20, 20, 30, 255]);
+    let (baked2, exp2) = run([250, 250, 250, 255]);
+    assert_eq!(
+        baked1, baked2,
+        "baked picture pixels under B must not read under C"
+    );
+    assert_eq!(
+        exp1, exp2,
+        "exported picture must not depend on content under C"
+    );
+}
+
+/// W114-9 (re-review LOW 1): while Hide A is dragged (hidden from the base layer),
+/// `refresh()` must still exclude Hide A at its current geometry so an adjacent
+/// Soft Hide B in the base does not read content under A or jump on release.
+#[test]
+fn w114_9_dragging_hide_stays_excluded_from_base_neighbours() {
+    let run = |under_a: [u8; 4]| {
+        let img = image_of(260, 140, |x, y| {
+            if (24..216).contains(&x) && (26..52).contains(&y) {
+                under_a
+            } else {
+                [250, 250, 250, 255]
+            }
+        });
+        let mut e = Annotator::new(img, 1.0);
+        e.doc.seed = 23;
+        let a = hide_with(
+            vec![pt(20.0, 24.0), pt(220.0, 53.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        let b = hide_with(
+            vec![pt(20.0, 54.0), pt(220.0, 84.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        e.doc.exec(Edit::Insert(0, a));
+        e.doc.exec(Edit::Insert(1, b));
+        e.refresh();
+        // Pick up Hide A and drag slightly so it becomes hidden from the base layer.
+        e.update(Message::Tool(Tool::Select));
+        e.update(Message::Press(pt(100.0, 38.0)));
+        e.update(Message::Move(pt(102.0, 38.0)));
+        assert!(
+            e.pending.as_ref().is_some_and(|p| p.hidden),
+            "dragged Hide A is hidden from base"
+        );
+        let base = e.base_pixels();
+        let mut b_px = Vec::new();
+        for y in 54..84usize {
+            for x in 20..220usize {
+                let i = (y * 260 + x) * 4;
+                b_px.extend_from_slice(&base[i..i + 4]);
+            }
+        }
+        b_px
+    };
+    assert_eq!(
+        run([20, 20, 30, 255]),
+        run([250, 250, 250, 255]),
+        "base neighbour B must not read under dragged Hide A"
+    );
+}
+
+/// W114-10 (re-review LOW 2): other Hide footprints in `blocked` are dilated by
+/// their feather so a glyph sliver just outside A's hard edge (inside A's
+/// visible outward feather) never changes an adjacent Hide B.
+#[test]
+fn w114_10_other_hide_feather_is_excluded_from_neighbours_ring() {
+    let run = |sliver: [u8; 4]| {
+        let img = image_of(260, 140, |x, y| {
+            // Sliver at y=51..62 is strictly outside A's hard edge (y=20..50)
+            // but inside A's 12 px outward feather (feather(16.0) = 12.0 -> y=50..62).
+            if (24..216).contains(&x) && (51..62).contains(&y) {
+                sliver
+            } else {
+                [250, 250, 250, 255]
+            }
+        });
+        let a = hide_with(
+            vec![pt(20.0, 20.0), pt(220.0, 50.0)],
+            16.0,
+            16.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        // B sits at y=63..95: its top ring covers y=51..63 (the sliver in A's feather).
+        let b = hide_with(
+            vec![pt(20.0, 63.0), pt(220.0, 95.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        let out = rendered(img, 29, vec![a, b]);
+        let mut b_px = Vec::new();
+        for y in 63..95u32 {
+            for x in 20..220u32 {
+                b_px.extend_from_slice(&px(&out, x, y));
+            }
+        }
+        b_px
+    };
+    assert_eq!(
+        run([20, 20, 30, 255]),
+        run([250, 250, 250, 255]),
+        "glyph sliver inside A's feather must not influence B"
+    );
+}
+
+/// W114-11 (re-review LOW 3): the Hide row's Soft style thumbnail excludes
+/// existing Hides in the document so hovering beside Hide A never leaks A's
+/// hidden content into the thumbnail.
+#[test]
+fn w114_11_style_thumb_excludes_existing_hide_content() {
+    let thumb_right = |under_a: [u8; 4]| -> Vec<u8> {
+        let img = image_of(260, 140, |x, y| {
+            if (20..120).contains(&x) && (20..120).contains(&y) {
+                under_a
+            } else {
+                [250, 250, 250, 255]
+            }
+        });
+        let mut e = Annotator::new(img, 1.0);
+        e.doc.seed = 31;
+        let a = hide_with(
+            vec![pt(16.0, 16.0), pt(124.0, 124.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        e.doc.exec(Edit::Insert(0, a));
+        e.refresh();
+        e.update(Message::Tool(Tool::Blur));
+        // Hover at x=126: thumb covers x=90..162; its hidden right half is x=126..162,
+        // whose left exterior ring (x=114..126) lands inside Hide A (x=16..124).
+        e.update(Message::Move(pt(126.0, 70.0)));
+        match &e.style_thumbs()[0] {
+            iced::widget::image::Handle::Rgba { pixels, width, .. } => {
+                let w = *width as usize;
+                pixels
+                    .chunks(w * 4)
+                    .flat_map(|row| row[(w / 2 + 1) * 4..].iter().copied())
+                    .collect()
+            }
+            _ => panic!("rgba thumb"),
+        }
+    };
+    assert_eq!(
+        thumb_right([20, 20, 30, 255]),
+        thumb_right([250, 250, 250, 255]),
+        "Soft style thumbnail must not read content under Hide A"
+    );
+}
+
+/// W114-12 (re-review LOW 3): large-area Soft Hide (`bw * bh > SOFT_EXACT_AREA`,
+/// exercising the `stride > 1` branch) excludes an adjacent Hide cleanly.
+#[test]
+fn w114_12_large_area_stride_excludes_adjacent_hide() {
+    let run = |under_a: [u8; 4]| {
+        let img = image_of(800, 620, |x, y| {
+            if (24..776).contains(&x) && (24..180).contains(&y) {
+                under_a
+            } else {
+                [250, 250, 250, 255]
+            }
+        });
+        let a = hide_with(
+            vec![pt(20.0, 20.0), pt(780.0, 184.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        // B's padded box is 798x434 = 346,332 > SOFT_EXACT_AREA (262,144), forcing stride = 2.
+        let b = hide_with(
+            vec![pt(20.0, 185.0), pt(780.0, 580.0)],
+            16.0,
+            8.0,
+            blur::Style::Soft,
+            blur::Kind::Rect,
+            0.0,
+        );
+        rendered(img, 37, vec![a, b]).rgba
+    };
+    assert_eq!(
+        run([20, 20, 30, 255]),
+        run([250, 250, 250, 255]),
+        "large-area stride > 1 Soft Hide must exclude adjacent Hide A"
+    );
+}
