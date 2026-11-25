@@ -372,6 +372,7 @@ impl Config {
                     .then_some(())
                     .ok_or_else(|| "expected 0 (off), 3, 5 or 10 seconds".to_string())
             });
+            c.snip.steps_spot = get(t, p, "steps_spot", None, &mut w);
             c.snip.long_max = get_checked(t, p, "long_max", d.snip.long_max, &mut w, |n: &u32| {
                 (LONG_MAX.contains(n))
                     .then_some(())

@@ -97,6 +97,8 @@
 //! delay = 0                         # timer before a snip: 0 (off) | 3 | 5 | 10 seconds
 //! long_max = 20000                  # a long capture stops at this height: 5000 | 10000 | 20000 px
 //!                                   # (written only when not 20000)
+//! steps_spot = [0, 0, 1700, 300]    # where the Steps strip was left: [screen x, screen y, x, y]
+//!                                   # (logical px; written only once it was dragged)
 //!
 //! [editor]                          # the annotation editor; all but line_assist written
 //! line_assist = true                # only once the editor changed them (missing = default)
@@ -527,6 +529,11 @@ pub struct SnipConfig {
     /// Written only when changed: the default file stays as it was.
     #[serde(skip_serializing_if = "is_default_long_max")]
     pub long_max: u32,
+    /// Where the Steps strip was left: its screen's origin and its place there
+    /// (`[screen x, screen y, x, y]`, logical px). A strip on another screen setup docks at
+    /// its edge as before; one left past the screen's edge is kept inside it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps_spot: Option<[i32; 4]>,
     /// OpenCircle Studio's side panels (`[snip.studio]`), written only when changed.
     #[serde(skip_serializing_if = "StudioConfig::is_default")]
     pub studio: StudioConfig,
@@ -799,6 +806,7 @@ impl Default for SnipConfig {
             history: false,
             delay: 0,
             long_max: DEFAULT_LONG_MAX,
+            steps_spot: None,
             studio: StudioConfig::default(),
         }
     }

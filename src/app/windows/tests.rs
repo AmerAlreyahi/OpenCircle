@@ -1111,3 +1111,30 @@ mod exported_card {
         assert_ne!(w.exported.as_ref().unwrap().0, first);
     }
 }
+
+/// W108: the strip opens where it was left in the last run (`snip.steps_spot`), on that
+/// screen only; one left past a smaller screen's edge is kept inside it.
+#[test]
+fn w108_the_strip_opens_at_its_saved_spot_on_that_screen_and_stays_on_screen() {
+    let screen = |origin: (i32, i32)| platform::monitor::Place {
+        origin,
+        px: (1920, 1080),
+        scale: 1.0,
+    };
+    let mut cfg = crate::shared::config::Config::default();
+    cfg.snip.steps_spot = Some([0, 0, 640, 200]);
+    let origin_of = |cfg: &crate::shared::config::Config, monitor| {
+        crate::shared::config::with_test_config(cfg.clone(), || {
+            let mut w = Windows::default();
+            let _ = w.add_step(picture(60, 40), None, monitor, 0.0);
+            w.steps.as_ref().unwrap().1.place().origin
+        })
+    };
+    assert_eq!(origin_of(&cfg, screen((0, 0))), (640, 200));
+    // another screen setup: docked at its edge as before
+    assert_eq!(origin_of(&cfg, screen((1920, 0))).0, 1920 + 1920 - 12 - 104);
+    // a spot past the edge (a smaller screen now): kept on it
+    cfg.snip.steps_spot = Some([0, 0, 9000, 9000]);
+    let p = origin_of(&cfg, screen((0, 0)));
+    assert!(p.0 <= 1920 - 104 && p.1 <= 1080 - 162, "{p:?}");
+}

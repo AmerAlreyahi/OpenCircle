@@ -1848,3 +1848,18 @@ fn f11_the_v14_default_file_migrates_to_the_v15_one_with_an_identical_backup() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// W108: where the Steps strip was left is written only once dragged, reads back, and a
+/// file without it (every older one) keeps the default.
+#[test]
+fn w108_the_steps_spot_round_trips_and_is_additive() {
+    let mut c = Config::default();
+    assert!(!toml::to_string_pretty(&c).unwrap().contains("steps_spot"));
+    assert_eq!(Config::parse("").0.snip.steps_spot, None);
+    c.snip.steps_spot = Some([1920, 0, 1700, 300]);
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(text.contains("steps_spot"), "{text}");
+    let (back, warnings) = Config::parse(&text);
+    assert_eq!(back.snip.steps_spot, Some([1920, 0, 1700, 300]));
+    assert!(warnings.is_empty(), "{warnings:?}");
+}

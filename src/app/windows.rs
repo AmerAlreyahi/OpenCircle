@@ -558,7 +558,10 @@ impl Windows {
             let id = self.steps.take().and_then(|(id, _)| id);
             let rtl = crate::shared::kit::dir::rtl(); // the strip docks on the side the text starts
             let mut strip = Strip::new(monitor, inset, rtl);
-            if let Some(&at) = self.strip_spots.get(&monitor.origin) {
+            let saved = config::current().snip.steps_spot;
+            if let Some(at) = (self.strip_spots.get(&monitor.origin).copied())
+                .or_else(|| saved_spot(saved, monitor.origin))
+            {
                 strip.set_spot(at);
             }
             self.steps = Some((id, strip));
@@ -644,8 +647,12 @@ impl Windows {
             msg => {
                 let todo = strip.update(msg);
                 // where the user left it on this screen: the next strip opens there
-                if let Some((screen, at)) = strip.spot() {
-                    self.strip_spots.insert(screen, at);
+                if let Some((screen, at)) = strip.spot()
+                    && self.strip_spots.insert(screen, at) != Some(at)
+                {
+                    // ... and in the next run too (the config's additive `snip.steps_spot`)
+                    let spot = [screen.0, screen.1, at.x.round() as i32, at.y.round() as i32];
+                    config::update_in_background(move |c| c.snip.steps_spot = Some(spot));
                 }
                 todo
             }
@@ -755,6 +762,12 @@ impl Windows {
         let at = strip.under(toast_size(text));
         self.toast(text, ok, Some(at), TOAST_MS)
     }
+}
+
+/// The strip's saved spot (`snip.steps_spot`) when it was left on the screen at `origin`.
+fn saved_spot(saved: Option<[i32; 4]>, origin: (i32, i32)) -> Option<Point> {
+    let [sx, sy, x, y] = saved?;
+    ((sx, sy) == origin).then(|| Point::new(x as f32, y as f32))
 }
 
 /// `crop` on the clipboard through THE copy path (Win+V history too).
