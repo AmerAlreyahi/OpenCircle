@@ -23,16 +23,37 @@ const STRIP: f32 = 8.0;
 const LINE_GAP: f32 = 4.0;
 
 pub fn card<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    shell(content, [PAD, PAD], |t| (t.card_idle, t.divider))
+}
+
+/// A group of setting rows (`setting_row::card`): the rows carry their own height, so only the
+/// sides are padded; white on a light theme's grey pane (`side_panel::pane`), the `hover` tile on
+/// a dark one.
+pub fn grouped<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    shell(content, [0.0, PAD], |t| {
+        match super::themes::current().light {
+            true => (t.widget, t.rim),
+            false => (t.hover, t.rim),
+        }
+    })
+}
+
+/// The one card surface: radius 12, a 1 px edge, `fill_edge` picks the fill and the edge.
+fn shell<'a, Message: 'a>(
+    content: impl Into<Element<'a, Message>>,
+    padding: [f32; 2],
+    fill_edge: impl Fn(&super::themes::Colours) -> (Color, Color) + 'a,
+) -> Element<'a, Message> {
     container(content)
-        .padding(PAD)
+        .padding(padding)
         .width(Fill)
-        .style(|_| container::Style {
-            background: Some(c().card_idle.into()),
-            border: Border::default()
-                .rounded(radius::CARD)
-                .width(1)
-                .color(c().divider),
-            ..container::Style::default()
+        .style(move |_| {
+            let (fill, edge) = fill_edge(c());
+            container::Style {
+                background: Some(fill.into()),
+                border: Border::default().rounded(radius::CARD).width(1).color(edge),
+                ..container::Style::default()
+            }
         })
         .into()
 }

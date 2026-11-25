@@ -23,6 +23,7 @@ use crate::shared::kit::field::field;
 use crate::shared::kit::scroll::scroll;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::sidebar::{Item, list};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{error, muted};
 use crate::shared::kit::themes::{self, THEMES};
@@ -352,11 +353,14 @@ impl Dialog {
     /// The dialog: a list of sections on the left; on the right the section's title and
     /// one-line subtitle with the X at the top, then its rows in small-headed groups.
     pub fn view(&self, window: Size) -> Element<'_, Msg> {
-        let nav = column(Tab::ALL.map(|t| {
-            crate::shared::kit::side_panel::section(t.icon(), t.name(), t == self.tab, Msg::Tab(t))
-        }))
-        .spacing(crate::shared::kit::side_panel::SECTION_GAP)
-        .padding(space::SIDEBAR_PAD);
+        let items = Tab::ALL.map(|t| Item {
+            label: t.name(),
+            badge: None,
+            icon: Some(t.icon()),
+        });
+        let active = Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let nav =
+            container(list(&items, active, |i| Msg::Tab(Tab::ALL[i]))).padding(space::SIDEBAR_PAD);
         // the list is part of the card, not a box beside it: a recessed column on the card's
         // start side, as tall as the card, its outer corners the card's own
         let nav =

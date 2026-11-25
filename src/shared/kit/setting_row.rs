@@ -144,7 +144,6 @@ pub fn plain<'a, Message: 'a>(
 
 /// `rows` (made with `plain`) in one card: a hairline between them, none after the last.
 pub fn card<'a, Message: 'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    use super::surface::{Material, surface};
     let mut list = column![];
     for (i, row) in rows.into_iter().enumerate() {
         if i > 0 {
@@ -152,15 +151,7 @@ pub fn card<'a, Message: 'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Mes
         }
         list = list.push(row);
     }
-    // white cards on the grey pane in a light theme (`side_panel::pane`), tiles in a dark one
-    let fill = match super::themes::current().light {
-        true => Material::Widget,
-        false => Material::Tile,
-    };
-    surface(fill, super::tokens::radius::CARD, list)
-        .padding([0.0, space::PAGE[0]])
-        .width(Fill)
-        .into()
+    super::card::grouped(list)
 }
 
 fn row_with<'a, Message: 'a>(

@@ -188,6 +188,7 @@ fn nav(state: &State) -> Element<'_, Message> {
         .map(|p| Item {
             label: tr(p.title),
             badge: p.badge.map(tr),
+            icon: None,
         })
         .collect();
     let at = |id| shown.iter().position(|p| p.id == id);
