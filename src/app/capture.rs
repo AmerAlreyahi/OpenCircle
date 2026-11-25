@@ -242,6 +242,9 @@ impl App {
                 self.unshow();
                 crate::log!("capture failed: {e}");
                 self.next = Purpose::Search;
+                if e.is_cancel() {
+                    return Task::none(); // the user closed the desktop's dialog: nothing to say
+                }
                 if !e.is_refused() {
                     // F12: the one error card says so (a silent failure looked like nothing happened)
                     let card = crate::app::windows::capture_failed(e.to_string());

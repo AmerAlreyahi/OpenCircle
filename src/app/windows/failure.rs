@@ -89,12 +89,22 @@ pub fn step_failed(why: String) -> Failure {
     }
 }
 
+/// What to do, in the words of the platform: only Wayland has a desktop that says no.
+fn capture_hint() -> &'static str {
+    use crate::t;
+    #[cfg(target_os = "linux")]
+    if crate::shared::platform::sys::session::wayland_session() {
+        return t!(cap_failed_wayland);
+    }
+    t!(cap_failed_d)
+}
+
 /// The screen could not be captured (`why`: the system's own text).
 pub fn capture_failed(why: String) -> Failure {
     use crate::t;
     Failure {
         headline: t!(cap_failed).into(),
-        hint: t!(cap_failed_d).into(),
+        hint: capture_hint().into(),
         detail: why,
         fix: Some((
             t!(md_try_again),

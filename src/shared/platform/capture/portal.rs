@@ -484,7 +484,7 @@ pub fn request(
 fn response(code: u32) -> Result<(), CaptureError> {
     match code {
         0 => Ok(()),
-        1 => Err("cancelled by the user".into()),
+        1 => Err(super::CANCELLED.into()),
         // The desktop said no (GNOME also says no when it would have to ask while
         // another app has the focus).
         _ => Err(CaptureError::Refused(
@@ -521,6 +521,11 @@ mod tests {
         assert!(response(0).is_ok());
         assert!(!response(1).unwrap_err().is_refused());
         assert!(response(1).unwrap_err().to_string().contains("cancelled"));
+        assert!(
+            response(1).unwrap_err().is_cancel(),
+            "a choice, not a failure"
+        );
+        assert!(!response(2).unwrap_err().is_cancel());
         assert!(response(2).unwrap_err().is_refused());
     }
 

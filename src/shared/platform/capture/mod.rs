@@ -25,6 +25,8 @@ use x11 as platform;
 pub(crate) mod win;
 #[cfg(windows)]
 use win as platform;
+/// What the portal's response 1 says (the user closed its dialog): `CaptureError::is_cancel`.
+pub const CANCELLED: &str = "cancelled by the user";
 
 /// Why a capture failed. `Refused` is the one the UI acts on: the desktop said no
 /// (Wayland wants permission, and GNOME asks only while one of our windows has the
@@ -40,6 +42,12 @@ pub enum CaptureError {
 impl CaptureError {
     pub fn is_refused(&self) -> bool {
         matches!(self, CaptureError::Refused(_))
+    }
+
+    /// The user closed the desktop's screenshot dialog (the portal's response 1): a
+    /// choice, not a failure; nothing is said.
+    pub fn is_cancel(&self) -> bool {
+        matches!(self, CaptureError::Failed(why) if why == CANCELLED)
     }
 }
 

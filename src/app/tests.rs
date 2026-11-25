@@ -6464,3 +6464,24 @@ fn f12_a_failed_capture_shows_the_error_card() {
     assert!(card.detail.contains("no frame came"), "{}", card.detail);
     assert!(card.fix.is_some() && !open);
 }
+
+/// F12-5: the user closing the desktop's screenshot dialog is a choice, not a failure:
+/// silent. And the card's words name no desktop on Windows or X11.
+#[test]
+fn f12_a_cancelled_capture_is_silent_and_the_card_names_no_desktop_off_wayland() {
+    let mut app = App::idle(window::Id::unique());
+    let cancelled = CaptureError::Failed(crate::shared::platform::capture::CANCELLED.into());
+    assert!(cancelled.is_cancel() && !cancelled.is_refused());
+    let _ = app.open(Instant::now(), Err(cancelled));
+    assert!(app.windows.failure_open().is_none(), "no card for a cancel");
+    let _ = app.open(
+        Instant::now(),
+        Err(CaptureError::from("no frame came".to_string())),
+    );
+    let (card, _) = app.windows.failure_open().expect("a real failure");
+    #[cfg(target_os = "linux")]
+    let wayland = crate::shared::platform::sys::session::wayland_session();
+    #[cfg(not(target_os = "linux"))]
+    let wayland = false;
+    assert!(wayland || !card.hint.contains("desktop"), "{}", card.hint);
+}

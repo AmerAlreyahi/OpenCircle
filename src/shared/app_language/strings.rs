@@ -2037,7 +2037,9 @@ strings! {
         | "التقاط مرة أخرى";
     cap_failed: "OpenCircle could not capture the screen"
         | "تعذّر على OpenCircle التقاط الشاشة";
-    cap_failed_d: "Your desktop said no. Try again; if it keeps failing, allow it in the desktop's screen sharing settings."
+    cap_failed_d: "The screen could not be read. Try again; if it keeps failing, restart OpenCircle."
+        | "تعذّرت قراءة الشاشة. حاول مرة أخرى؛ وإن استمر الفشل فأعد تشغيل OpenCircle.";
+    cap_failed_wayland: "Your desktop said no. Try again; if it keeps failing, allow it in the desktop's screen sharing settings."
         | "رفض سطح المكتب الطلب. حاول مرة أخرى؛ وإن استمر الفشل فاسمح بذلك من إعدادات مشاركة الشاشة.";
     sn_steps_cleared: "Steps cleared"
         | "مُسحت الخطوات";
