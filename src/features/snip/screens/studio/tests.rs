@@ -4534,6 +4534,7 @@ fn studio_crop_frame_times() {
         }
         println!("{w}x{h}:\n  {}", report.join("\n  "));
     }
+}
 
 /// W108 (owner round 3): the colour row ends with a custom colour ("+") that opens the SAME colour
 /// picker Snip's toolbar has (HEX field, eyedropper, presets): one component; a colour typed there
