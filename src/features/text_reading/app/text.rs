@@ -239,8 +239,9 @@ impl App {
     /// Windows OCR reads this opening's text (#62): decided at its first read,
     /// until then what `text_reading::route` says now.
     pub(crate) fn system_text(&self) -> bool {
-        let route =
-            || text_reading::route(self.o.behaviour.text_reader, text_reading::system::known());
+        let route = || {
+            text_reading::route_main(self.o.behaviour.text_reader, text_reading::system::known())
+        };
         self.o.text_by.unwrap_or_else(route) == text_reading::Source::System
     }
 
@@ -395,7 +396,7 @@ impl App {
                 );
             };
             // its language known now: a right-to-left one goes to the helper
-            if text_reading::route(setting, Some(text_reading::system::language()))
+            if text_reading::route_main(setting, Some(text_reading::system::language()))
                 == text_reading::Source::Helper
             {
                 let rtl = "Windows OCR: a right-to-left language";
@@ -460,13 +461,13 @@ impl App {
             let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
             let language = text_reading::system::known().flatten();
             let well = text_reading::system::read_well(&texts, language);
-            let known: Vec<[f32; 4]> = (lines.iter().zip(&well))
-                .filter(|(_, well)| **well)
-                .map(|(l, _)| {
+            let boxes: Vec<[f32; 4]> = (lines.iter())
+                .map(|l| {
                     let r = l.bounds * scale;
                     [r.x, r.y, r.width, r.height]
                 })
                 .collect();
+            let known = text_reading::system::known_boxes(&boxes, &well);
             crate::log!(
                 "[opencircle] Windows OCR: {} lines, {} read as words",
                 lines.len(),
@@ -502,38 +503,52 @@ impl App {
             self.o.screen_text.add_extra(band, Vec::new(), screen);
             return self.read_other_scripts();
         };
-        let known = self.o.other_known.clone().unwrap_or_default();
+        let known = with_arabic_known(
+            self.o.other_known.as_deref().map_or(&[], |k| k),
+            &self.o.screen_text.lines(),
+            scale,
+        );
+        let pp = text_reading::reads_other_scripts();
         let rows = (top * scale, bottom * scale);
         let send_frame = !std::mem::replace(&mut self.o.frame_sent, true);
+        let arabic_first = send_frame && text_reading::system::arabic_beside();
         self.o.other_reading = Some(band);
         let opening = self.opening;
         let held = (self.o.helper.as_ref())
             .map(Arc::downgrade)
             .unwrap_or_default();
         background(move |tx| {
-            let Some(_held) = held.upgrade() else {
+            let held = held.upgrade();
+            if held.is_none() && pp {
                 return; // closed meanwhile
-            };
+            }
             // Windows has Arabic too: its own recognizer reads the Arabic
-            // lines (the English and digits inside them too), all at once
-            if text_reading::system::arabic_beside() {
+            // lines (the English and digits inside them too), once, whole
+            // screen; PP-OCR then reads what is left (other scripts) without
+            // them (R-15)
+            let mut known = known;
+            let mut arabic = Vec::new();
+            if arabic_first {
                 let k = *text_reading::system::passes(scale, width, height)
                     .last()
                     .unwrap_or(&1);
                 match text_reading::system::recognize_arabic(&pixels, width, height, k) {
                     Ok(blocks) => {
-                        let arabic = |b: &text_reading::TextBlock| {
-                            b.text.chars().any(|c| matches!(c as u32, 0x0600..=0x06FF))
-                        };
-                        let blocks = blocks.into_iter().filter(arabic).collect();
-                        let mut lines = word::lines(blocks, [0, 0], scale);
-                        word::measure(&mut lines, &pixels, width, height, scale);
-                        let _ = tx.unbounded_send(Part::Done);
-                        let _ = tx.unbounded_send(Part::Read(Ok(lines)));
-                        return;
+                        let blocks = (blocks.into_iter())
+                            .filter(|b| b.text.chars().any(word::rtl_char))
+                            .collect();
+                        arabic = word::lines(blocks, [0, 0], scale);
+                        word::measure(&mut arabic, &pixels, width, height, scale);
+                        known = with_arabic_known(&known, &arabic, scale);
                     }
                     Err(e) => crate::log!("[opencircle] Windows OCR (Arabic): {e}; PP-OCR reads"),
                 }
+            }
+            if !pp {
+                // no PP-OCR models on disk: the Arabic recognizer was all there is
+                let _ = tx.unbounded_send(Part::Done);
+                let _ = tx.unbounded_send(Part::Read(Ok(arabic)));
+                return;
             }
             let key = u64::from(opening);
             let part = send_frame.then_some((0, height));
@@ -547,7 +562,16 @@ impl App {
                 }
                 let mut lines = word::lines(read.lines, [0, 0], scale);
                 word::measure(&mut lines, &pixels, width, height, scale);
+                lines.extend(arabic.clone());
                 lines
+            });
+            // (a PP-OCR failure keeps the Arabic lines)
+            let read = read.or_else(|e| {
+                if arabic.is_empty() {
+                    Err(e)
+                } else {
+                    Ok(arabic)
+                }
             });
             let _ = tx.unbounded_send(Part::Read(read.map_err(|e| e.to_string())));
         })
@@ -946,9 +970,50 @@ fn found(boxes: Vec<[f32; 4]>, scale: f32) -> Vec<Rectangle> {
         .collect()
 }
 
+/// The lines the second reader leaves alone (frame px): Windows OCR's lines
+/// read as words, and the lines Windows' Arabic recognizer read (`lines`: image
+/// px), so PP-OCR never reads an Arabic line again (R-15).
+fn with_arabic_known(known: &[[f32; 4]], lines: &[word::Line], scale: f32) -> Vec<[f32; 4]> {
+    let arabic = (lines.iter())
+        .filter(|l| l.text.chars().any(word::rtl_char))
+        .map(|l| {
+            let r = l.bounds * scale;
+            [r.x, r.y, r.width, r.height]
+        });
+    known.iter().copied().chain(arabic).collect()
+}
+
 /// Windows OCR read the screen (at least one line) and every line as real
 /// words: the second reader has nothing to add, so the helper never starts
 /// (it read and kept none of an English page's 42 lines, 554 ms).
 pub(crate) fn needs_no_second_reader(well: &[bool]) -> bool {
     !well.is_empty() && well.iter().all(|w| *w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::{Point, Rectangle, Size};
+
+    fn line(text: &str, x: f32) -> word::Line {
+        word::Line {
+            text: text.into(),
+            bounds: Rectangle::new(Point::new(x, 10.0), Size::new(100.0, 20.0)),
+            carets: Vec::new(),
+            reads: Vec::new(),
+        }
+    }
+
+    /// R-15: Windows' Arabic recognizer only replaces the Arabic lines; PP-OCR
+    /// still reads the rest (other scripts), skipping what Windows read.
+    #[test]
+    fn pp_ocr_leaves_the_lines_the_arabic_recognizer_read() {
+        let english = [[0.0, 100.0, 50.0, 10.0]];
+        let lines = [line("مرحبا بكم", 500.0), line("Settings", 0.0)];
+        let known = with_arabic_known(&english, &lines, 2.0);
+        // the English line Windows read, and the Arabic line (frame px)
+        assert_eq!(known, [english[0], [1000.0, 20.0, 200.0, 40.0]]);
+        // nothing from the Arabic recognizer: the known lines as they are
+        assert_eq!(with_arabic_known(&english, &[], 2.0), english);
+    }
 }

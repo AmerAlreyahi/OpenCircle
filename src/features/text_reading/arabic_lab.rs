@@ -399,17 +399,21 @@ fn arabic_lab() {
             let first = system::blocks(ws);
             let texts: Vec<&str> = first.iter().map(|b| b.text.as_str()).collect();
             let well = system::read_well(&texts, Some(&tag[..5]));
-            let known: Vec<[f32; 4]> = first
-                .iter()
-                .zip(&well)
-                .filter(|(_, w)| **w)
-                .map(|(b, _)| b.bounds)
-                .collect();
-            let extra = if well.iter().all(|w| *w) {
+            let boxes: Vec<[f32; 4]> = first.iter().map(|b| b.bounds).collect();
+            let known = system::known_boxes(&boxes, &well);
+            let t2 = std::time::Instant::now();
+            let forced = std::env::var_os("R15_FORCE").is_some();
+            let extra = if well.iter().all(|w| *w) && !forced {
                 Vec::new()
             } else {
                 helper_main(&mut e, &p, &known, false)
             };
+            let extra_ms = t2.elapsed().as_millis();
+            println!(
+                "R15 {name} second reader: {} lines, {extra_ms} ms, known {}",
+                extra.len(),
+                known.len()
+            );
             run(
                 &name,
                 &format!("win-{tag}+second"),

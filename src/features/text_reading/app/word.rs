@@ -344,10 +344,14 @@ fn split(chars: &[char], from: f32, to: f32, gaps: &[f32]) -> Vec<f32> {
 fn is_rtl(text: &str) -> bool {
     let letters = text.chars().filter(|c| c.is_alphabetic());
     let (all, rtl) = letters.fold((0, 0), |(all, rtl), c| {
-        let r = matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF);
-        (all + 1, rtl + usize::from(r))
+        (all + 1, rtl + usize::from(rtl_char(c)))
     });
     rtl * 2 > all
+}
+
+/// `c` is from a right-to-left script.
+pub(crate) fn rtl_char(c: char) -> bool {
+    matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
 }
 
 /// The words of `text`: (first char, end char, first byte, end byte).
@@ -872,17 +876,8 @@ pub struct Screen {
 /// pieces came out in the wrong order).
 pub(crate) fn order_rows(lines: &mut [Line]) {
     let row = |l: &Line| l.bounds.center_y().round() as i32 / 8;
-    let arabic = |l: &Line| {
-        let (ar, all) = (l.text.chars().filter(|c| c.is_alphabetic())).fold((0, 0), |(a, n), c| {
-            (
-                a + matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F) as usize,
-                n + 1,
-            )
-        });
-        ar * 2 > all
-    };
-    let rtl: Vec<(i32, bool)> = lines.iter().map(|l| (row(l), arabic(l))).collect();
-    let is_rtl = |r: i32| {
+    let rtl: Vec<(i32, bool)> = lines.iter().map(|l| (row(l), is_rtl(&l.text))).collect();
+    let row_rtl = |r: i32| {
         let (a, n) = (rtl.iter().filter(|(k, _)| *k == r))
             .fold((0, 0), |(a, n), (_, x)| (a + *x as usize, n + 1));
         a * 2 > n
@@ -891,7 +886,7 @@ pub(crate) fn order_rows(lines: &mut [Line]) {
         let r = row(l);
         (
             r,
-            if is_rtl(r) {
+            if row_rtl(r) {
                 -((l.bounds.x + l.bounds.width) as i32)
             } else {
                 l.bounds.x as i32
@@ -930,7 +925,7 @@ impl Screen {
     /// The lines read so far, in reading order.
     pub fn lines(&self) -> Vec<Line> {
         let mut lines: Vec<Line> = self.iter().cloned().collect();
-        if !self.extra.is_empty() {
+        if !self.extra.is_empty() || lines.iter().any(|l| l.text.chars().any(rtl_char)) {
             order_rows(&mut lines);
         }
         lines

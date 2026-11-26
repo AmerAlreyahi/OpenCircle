@@ -532,21 +532,30 @@ pub enum Source {
 
 /// The `setting`'s reader, given the Windows OCR language (`system::known`:
 /// `None` = not asked yet, `Some(None)` = none). Auto: Windows OCR, but not
-/// for a right-to-left language but Arabic (PP-OCR reads Hebrew better) nor without a
+/// for a right-to-left language (PP-OCR reads Arabic better) nor without a
 /// recognizer (#63; Linux never has one); not asked yet = try it (a failed
 /// read falls back to the helper). Live translate follows it too (#56, for
 /// its source language); selections and one-shot translation keep PP-OCR.
 pub fn route(setting: TextReader, system: Option<Option<&str>>) -> Source {
-    use crate::features::translate::lang::is_rtl;
     match (setting, system) {
         (TextReader::PpOcr, _) | (_, Some(None)) => Source::Helper,
-        // Windows' own Arabic recognizer reads Arabic, and the English and
-        // digits inside it, better than PP-OCR (CER 0.06-0.14 against
-        // 0.23-0.62, R-15); Hebrew, Persian and the like stay with PP-OCR
-        (TextReader::Auto, Some(Some(tag))) if is_rtl(tag) && !tag.starts_with("ar") => {
+        (TextReader::Auto, Some(Some(tag))) if crate::features::translate::lang::is_rtl(tag) => {
             Source::Helper
         }
         _ => Source::System,
+    }
+}
+
+/// `route` for MAIN MODE only (owner, 2026-11-09: Windows OCR reads main
+/// mode; selections, one-shot and live translate, Snip and the Studio keep
+/// PP-OCR): an Arabic first Windows language is read by Windows' own Arabic
+/// recognizer, which reads Arabic and the English and digits inside it better
+/// than PP-OCR (CER 0.06-0.14 against 0.23-0.62, R-15). Hebrew, Persian and
+/// the like stay with PP-OCR.
+pub fn route_main(setting: TextReader, system: Option<Option<&str>>) -> Source {
+    match (setting, system) {
+        (TextReader::Auto, Some(Some(tag))) if tag.starts_with("ar") => Source::System,
+        _ => route(setting, system),
     }
 }
 
@@ -582,16 +591,6 @@ fn sure(r: &TextBlock) -> bool {
 fn holds(k: &[f32; 4], b: &[f32; 4]) -> bool {
     let (x, y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
     (k[0]..k[0] + k[2]).contains(&x) && (k[1]..k[1] + k[3]).contains(&y)
-}
-
-/// `k` (a line the first reader read as words) covers `b` (a line the
-/// second reader found): its middle is in `k` and `k` spans most of its
-/// width. A mixed Arabic and English line has a Windows English piece over
-/// its middle: the second reader must still read the whole line (R-15; the
-/// pieces then came out as 2-3 lines, W109 cause 3).
-fn covers(k: &[f32; 4], b: &[f32; 4]) -> bool {
-    let share = ((k[0] + k[2]).min(b[0] + b[2]) - k[0].max(b[0])) / b[2].max(1.0);
-    holds(k, b) && share >= 0.6
 }
 
 /// Lines `left` of `all` for the non-Latin readers: the strips owning them
@@ -964,7 +963,7 @@ impl Engine {
             installed(i) && script(i) == Script::Latin
         })
         .filter(|_| latin);
-        let unknown = |b: &[f32; 4]| !known.iter().any(|k| covers(k, b));
+        let unknown = |b: &[f32; 4]| !known.iter().any(|k| holds(k, b));
         // (main mode's parts only: `rows`; a whole image is one call)
         let parts = rows.is_some();
         let latin_screen = parts && latin_reader.is_some() && f.latin_screen();
@@ -1353,7 +1352,7 @@ impl Engine {
         // (only once found anyway: a Latin page read in bands never needs
         // the whole screen found, ~150 ms on 2 cores at 1080p; its bands'
         // lines found so far instead)
-        let unknown = |b: &&[f32; 4]| !known.iter().any(|k| covers(k, b));
+        let unknown = |b: &&[f32; 4]| !known.iter().any(|k| holds(k, b));
         let found = (f.shrunk.as_ref().unwrap_or(&f.seen).iter())
             .filter(unknown)
             .map(|b| down(*b))
@@ -1717,7 +1716,7 @@ mod tests {
             (Auto, Some(Some("ja")), System),
             (Auto, None, System), // first opening: tried, a failure falls back
             (Auto, Some(None), Helper), // no recognizer installed (or Linux)
-            (Auto, Some(Some("ar-SA")), System),
+            (Auto, Some(Some("ar-SA")), Helper),
             (Auto, Some(Some("he")), Helper),
             (Windows, Some(Some("ar-SA")), System),
             (Windows, Some(None), Helper),
@@ -1728,15 +1727,23 @@ mod tests {
         }
     }
 
+    /// R-15: only main mode reads an Arabic Windows language with Windows OCR
+    /// (owner, 2026-11-09); every other caller of `route` keeps PP-OCR.
     #[test]
-    fn an_english_piece_over_a_mixed_lines_middle_does_not_skip_the_line() {
-        // R-15 (W109 cause 3): a whole Arabic/English line, Windows' English
-        // piece over its middle
-        let line = [100.0, 10.0, 600.0, 20.0];
-        let piece = [350.0, 8.0, 120.0, 24.0];
-        assert!(holds(&piece, &line) && !covers(&piece, &line));
-        // an English line Windows read whole is still skipped
-        assert!(covers(&[90.0, 8.0, 640.0, 24.0], &line));
+    fn main_mode_alone_reads_arabic_with_windows_ocr() {
+        use TextReader::{Auto, PpOcr, Windows};
+        let ar = Some(Some("ar-SA"));
+        assert_eq!(route_main(Auto, ar), Source::System);
+        assert_eq!(
+            route(Auto, ar),
+            Source::Helper,
+            "translate, live, Snip, Studio"
+        );
+        assert_eq!(route_main(PpOcr, ar), Source::Helper);
+        assert_eq!(route_main(Windows, ar), Source::System);
+        assert_eq!(route_main(Auto, Some(Some("he"))), Source::Helper);
+        assert_eq!(route_main(Auto, Some(Some("en-US"))), Source::System);
+        assert_eq!(route_main(Auto, Some(None)), Source::Helper);
     }
 
     #[test]

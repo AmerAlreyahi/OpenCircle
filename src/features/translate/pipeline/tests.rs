@@ -303,10 +303,9 @@ fn windows_ocr_reads_where_it_has_the_language() {
         (Auto, Some("en-GB"), "en-US", true),
         (Windows, Some("en-US"), "auto", true),
         (Auto, Some("en-US"), "fr", false), // its recognizer can't read French
-        (Auto, Some("ar-SA"), "auto", true), // Windows' Arabic recognizer (R-15)
-        (Auto, Some("he"), "auto", false),  // other right-to-left: PP-OCR reads them better
-        (Windows, Some("ar-SA"), "ar", true),
-        (Auto, None, "auto", false), // no recognizer (and Linux)
+        (Auto, Some("ar-SA"), "auto", false), // right-to-left: PP-OCR reads it better
+        (Windows, Some("ar-SA"), "ar", true), // ... unless chosen
+        (Auto, None, "auto", false),        // no recognizer (and Linux)
         (PpOcr, Some("en-US"), "auto", false),
     ] {
         assert_eq!(

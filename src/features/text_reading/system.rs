@@ -56,13 +56,13 @@ fn split(lines: Vec<Vec<Word>>, rtl: bool) -> Vec<TextBlock> {
         }
     }
     out.retain(|b| !b.text.trim().is_empty());
-    super::reading_order(out, rtl)
+    // (a right-to-left row is ordered by `Screen::lines`, row by row)
+    super::reading_order(out, false)
 }
 
 /// A word with Arabic letters.
 fn arabic(word: &str) -> bool {
-    word.chars()
-        .any(|c| matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F))
+    word.chars().any(super::app::word::rtl_char)
 }
 
 /// Words in visual order (left to right) put in logical order for a line
@@ -247,6 +247,27 @@ pub fn read_well(lines: &[&str], language: Option<&str>) -> Vec<bool> {
         Some(lang::Script::Latin) => lang::real_lines(lines),
         _ => lines.iter().map(|t| plain(t)).collect(),
     }
+}
+
+/// The lines (boxes: x, y, w, h) the second reader leaves alone: those
+/// `well` read, except a line that shares its row with one not read well. A
+/// mixed Arabic and English line comes out of Windows' English OCR as an
+/// English piece (read well) beside noise (the Arabic part): the second reader
+/// reads the whole row as one line (R-15; pieces per line 1.23 -> 1.00 on the
+/// W109 Word page). A row of English lines only is never touched.
+pub fn known_boxes(lines: &[[f32; 4]], well: &[bool]) -> Vec<[f32; 4]> {
+    let same_row = |a: &[f32; 4], b: &[f32; 4]| {
+        let overlap = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
+        overlap > 0.5 * a[3].min(b[3])
+    };
+    let noise: Vec<&[f32; 4]> = (lines.iter().zip(well))
+        .filter(|(_, w)| !**w)
+        .map(|(l, _)| l)
+        .collect();
+    (lines.iter().zip(well))
+        .filter(|(l, w)| **w && !noise.iter().any(|n| same_row(l, n)))
+        .map(|(l, _)| *l)
+        .collect()
 }
 
 /// A line read cleanly: a run of two Latin letters or digits, and mostly
@@ -616,6 +637,19 @@ mod tests {
                 .collect();
             println!("R15VM {name} {ms} {}", serde_json::to_string(&out).unwrap());
         }
+    }
+
+    /// R-15: an English piece on a row with noise is not known (the second
+    /// reader reads the whole row); a row of English lines is untouched.
+    #[test]
+    fn an_english_piece_beside_noise_is_not_known() {
+        let piece = [350.0, 8.0, 120.0, 24.0];
+        let noise = [100.0, 10.0, 240.0, 20.0];
+        let other_row = [350.0, 100.0, 120.0, 24.0];
+        let known = super::known_boxes(&[piece, noise, other_row], &[true, false, true]);
+        assert_eq!(known, [other_row]);
+        let english = [piece, other_row];
+        assert_eq!(super::known_boxes(&english, &[true, true]), english);
     }
 
     #[test]
