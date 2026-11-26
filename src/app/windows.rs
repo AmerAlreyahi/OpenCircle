@@ -572,10 +572,19 @@ impl Windows {
             }
             self.steps = Some((id, strip));
         }
-        if let (None, Some((_, s))) = (update, &mut self.studio) {
-            s.step_pending(1);
-        }
-        crate::app::background::background(move |tx| {
+        let studio_scroll = match (update, &mut self.studio) {
+            (None, Some((_, s))) => {
+                s.step_pending(1);
+                s.take_scroll().map_or_else(Task::none, |to| {
+                    iced::widget::operation::scroll_to(
+                        crate::features::snip::screens::studio::CANVAS,
+                        to,
+                    )
+                })
+            }
+            _ => Task::none(),
+        };
+        let work = crate::app::background::background(move |tx| {
             let crop = match source {
                 StepSource::Crop(crop) => crop,
                 StepSource::Doc(doc) => crate::features::snip::annotate::render(&doc),
@@ -588,7 +597,8 @@ impl Windows {
                 crate::log!("[opencircle] step not added: {e}");
                 Msg::Steps(steps::Msg::Failed(e))
             }
-        })
+        });
+        Task::batch([work, studio_scroll])
     }
 
     fn on_steps(&mut self, msg: steps::Msg) -> Task<Msg> {

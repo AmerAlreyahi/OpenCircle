@@ -1651,3 +1651,187 @@ fn ac7_repair_model_works_in_the_background_then_asks_for_the_files() {
         s.phase
     );
 }
+
+/// R-18: one selected word translated in place (e.g. Arabic heading "القهوة" -> "Coffee" /
+/// "The coffee" in a 46x45 box on a 640x160 page, or English "Coffee" -> "El café" / "Run" ->
+/// "Ejecutar") is NEVER truncated with an ellipsis: it grows into free background space like
+/// multi-word translate, and when boxed in by adjacent words it shrinks to show the whole word.
+#[test]
+fn r18_one_word_in_place_translate_never_truncates_with_ellipsis() {
+    use crate::features::translate::pipeline::Deps;
+
+    struct Fixed(String);
+    impl Deps for Fixed {
+        fn recognize(
+            &self,
+            _: &[u8],
+            _: u32,
+            _: u32,
+        ) -> Result<Vec<text_reading::TextBlock>, text_reading::OcrError> {
+            Ok(Vec::new())
+        }
+        fn translate(
+            &self,
+            texts: &[String],
+            _: &str,
+        ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
+            Ok(vec![self.0.clone(); texts.len()])
+        }
+    }
+
+    let make_page = |w: u32, h: u32, word: [u32; 4], neighbours: &[[u32; 4]]| -> image::Handle {
+        let mut rgba = vec![255u8; (w * h * 4) as usize];
+        let mut fill = |[x, y, bw, bh]: [u32; 4]| {
+            for py in y..(y + bh).min(h) {
+                for px in x..(x + bw).min(w) {
+                    let i = ((py * w + px) * 4) as usize;
+                    rgba[i] = 20;
+                    rgba[i + 1] = 20;
+                    rgba[i + 2] = 20;
+                }
+            }
+        };
+        let [wx, wy, ww, wh] = word;
+        fill([wx + 4, wy + 6, ww.saturating_sub(8), 4]);
+        fill([wx + 4, wy + wh / 2, ww.saturating_sub(8), 4]);
+        fill([wx + 4, wy + wh.saturating_sub(10), ww.saturating_sub(8), 4]);
+        for n in neighbours {
+            fill(*n);
+        }
+        image::Handle::from_rgba(w, h, rgba)
+    };
+
+    // Case 1: Arabic heading "القهوة" in a 46x45 box (the exact rel-w124 62x61 crop case) on an
+    // open white page, translated into English "Coffee" and "The coffee".
+    for translation in ["Coffee", "The coffee"] {
+        let word = [300, 50, 46, 45];
+        let img = make_page(640, 160, word, &[]);
+        let lines = vec![text_reading::TextBlock {
+            text: "القهوة".into(),
+            bounds: [
+                word[0] as f32,
+                word[1] as f32,
+                word[2] as f32,
+                word[3] as f32,
+            ],
+            confidence: 1.0,
+            words: Vec::new(),
+        }];
+        let (s, _) =
+            Session::start_text(img.clone(), lines, 1.0, Arc::new(Cache::new(8))).expect("session");
+        let deps = Ok((Fixed(translation.into()), "en".to_string()));
+        let shown = translate_with(
+            &img,
+            s.area,
+            &s.cache,
+            &deps,
+            s.only.clone(),
+            |_| {},
+            || false,
+        )
+        .expect("translated");
+        let image::Handle::Rgba { width, pixels, .. } = &shown.image else {
+            panic!("rgba");
+        };
+        let (mut min_x, mut max_x) = (u32::MAX, 0u32);
+        for py in 35..115 {
+            for px in 100..500 {
+                let i = ((py * width + px) * 4) as usize;
+                if pixels[i] < 200 {
+                    min_x = min_x.min(px);
+                    max_x = max_x.max(px);
+                }
+            }
+        }
+        assert!(min_x < max_x, "{translation}: nothing drawn");
+        let ink_w = max_x - min_x + 1;
+        assert!(
+            ink_w > 54,
+            "{translation}: drawn ink too narrow ({ink_w} px, x={min_x}..={max_x}) - truncated instead of growing into free space"
+        );
+    }
+
+    // Case 2: English single word "Coffee" -> Spanish "El café" and "Run" -> "Ejecutar"
+    // on open white background: must grow into free space and draw the whole translation.
+    for (orig, tr) in [("Coffee", "El café"), ("Run", "Ejecutar")] {
+        let word = [200, 50, 46, 36];
+        let img = make_page(640, 160, word, &[]);
+        let lines = vec![text_reading::TextBlock {
+            text: orig.into(),
+            bounds: [
+                word[0] as f32,
+                word[1] as f32,
+                word[2] as f32,
+                word[3] as f32,
+            ],
+            confidence: 1.0,
+            words: Vec::new(),
+        }];
+        let (s, _) =
+            Session::start_text(img.clone(), lines, 1.0, Arc::new(Cache::new(8))).expect("session");
+        let deps = Ok((Fixed(tr.into()), "es".to_string()));
+        let shown = translate_with(
+            &img,
+            s.area,
+            &s.cache,
+            &deps,
+            s.only.clone(),
+            |_| {},
+            || false,
+        )
+        .expect("translated");
+        let image::Handle::Rgba { width, pixels, .. } = &shown.image else {
+            panic!("rgba");
+        };
+        let (mut min_x, mut max_x) = (u32::MAX, 0u32);
+        for py in 35..105 {
+            for px in 100..500 {
+                let i = ((py * width + px) * 4) as usize;
+                if pixels[i] < 200 {
+                    min_x = min_x.min(px);
+                    max_x = max_x.max(px);
+                }
+            }
+        }
+        assert!(min_x < max_x, "{orig} -> {tr}: nothing drawn");
+        let ink_w = max_x - min_x + 1;
+        assert!(
+            ink_w > 54,
+            "{orig} -> {tr}: drawn ink too narrow ({ink_w} px, x={min_x}..={max_x}) - truncated instead of growing into free space"
+        );
+    }
+
+    // Case 3: Single selected word tightly boxed in by adjacent words on both left & right
+    // (zero free space): must still draw the translation inside its box without overlapping
+    // the neighbours and without failing or leaving it untranslated.
+    let word = [200, 50, 46, 36];
+    let left_word = [120, 50, 74, 36];
+    let right_word = [252, 50, 90, 36];
+    let img = make_page(640, 160, word, &[left_word, right_word]);
+    let lines = vec![text_reading::TextBlock {
+        text: "Run".into(),
+        bounds: [
+            word[0] as f32,
+            word[1] as f32,
+            word[2] as f32,
+            word[3] as f32,
+        ],
+        confidence: 1.0,
+        words: Vec::new(),
+    }];
+    let (sess, _) =
+        Session::start_text(img.clone(), lines, 1.0, Arc::new(Cache::new(8))).expect("session");
+    let deps = Ok((Fixed("Ejecutar".into()), "es".to_string()));
+    let shown = translate_with(
+        &img,
+        sess.area,
+        &sess.cache,
+        &deps,
+        sess.only.clone(),
+        |_| {},
+        || false,
+    )
+    .expect("boxed-in translated");
+    assert_eq!(shown.blocks.len(), 1);
+    assert_eq!(shown.blocks[0].translation, "Ejecutar");
+}

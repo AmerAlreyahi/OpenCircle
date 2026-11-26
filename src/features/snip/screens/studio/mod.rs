@@ -403,8 +403,6 @@ fn steps_slide_len(opening: bool) -> std::time::Duration {
 
 pub struct Studio {
     pub(super) editor: Option<Annotator>,
-    /// The zoom the user picked (display px per image px); `None` = fit.
-    zoom: Option<f32>,
     scale: f32,
     window: Size,
     pub(super) panels: StudioConfig,
@@ -416,6 +414,9 @@ pub struct Studio {
     pub(super) hovered: bool,
     /// The stage's scroll offset, and Ctrl held (see `Msg::Scrolled`).
     offset: Vector,
+    /// Scroll offset queued by a stage-size change (panel pin/unpin/toggle, resize, Fit)
+    /// for the host to apply to `CANVAS` alongside any other `Outcome`.
+    pending_scroll: Option<AbsoluteOffset>,
     pub(super) ctrl: bool,
     /// The picture as it was before Translate (Show original), and the
     /// editor's `own_image` before it.
@@ -554,7 +555,6 @@ impl Studio {
         panels.library |= crate::shared::config::current().studio.steps_on_start;
         Studio {
             editor: None,
-            zoom: None,
             scale: 1.0,
             window: SIZE,
             panels,
@@ -563,6 +563,7 @@ impl Studio {
             recent: Vec::new(),
             hovered: false,
             offset: Vector::ZERO,
+            pending_scroll: None,
             ctrl: false,
             original: None,
             epoch: 0,
@@ -635,6 +636,16 @@ impl Studio {
             },
             walk_tab: false,
         }
+    }
+
+    /// Sets the initial window size before opening a picture so the opening fit uses it.
+    pub fn set_window_size(&mut self, size: Size) {
+        self.window = size;
+    }
+
+    /// Any scroll offset queued by a view-preserving update (panel pin/unpin, resize, Fit).
+    pub fn take_scroll(&mut self) -> Option<AbsoluteOffset> {
+        self.pending_scroll.take()
     }
 
     /// Opens `picture` (fitted); with unsaved drawings it asks first. A big picture is prepared
@@ -751,14 +762,21 @@ impl Studio {
         self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let prefs = crate::shared::config::current().studio;
         self.prefs_into(&mut editor);
-        self.zoom = match prefs.zoom_on_open {
-            crate::shared::config::StudioZoom::Actual => Some(1.0 / self.scale),
-            crate::shared::config::StudioZoom::Fit => None,
-        };
         self.name = self.next_name.take();
         self.title = title_of(self.name.as_deref());
         self.editor = Some(editor);
-        self.fit();
+        match prefs.zoom_on_open {
+            crate::shared::config::StudioZoom::Actual => {
+                let z = 1.0 / self.scale;
+                if let Some(e) = &mut self.editor {
+                    e.zoom = z;
+                }
+                self.offset = Vector::ZERO;
+                self.pending_scroll = Some(AbsoluteOffset { x: 0.0, y: 0.0 });
+                self.sync_stage();
+            }
+            crate::shared::config::StudioZoom::Fit => self.fit_to_stage(),
+        }
         self.asked = true;
         self.sync_blocked();
         if let Some(e) = &mut self.editor {
@@ -783,7 +801,7 @@ impl Studio {
                 e.refresh(); // (a prepared picture has its base already)
             }
         }
-        self.fit(); // (the repaint cleared the stage copy)
+        self.sync_stage(); // (the repaint cleared the stage copy)
     }
 
     /// The picture Reopen last brings back (`on`: the setting): the newest recent
@@ -831,8 +849,10 @@ impl Studio {
         // the first step after an empty start opens the sidebar that was closed for want of
         // steps (F8); later steps leave it as the user has it (Ctrl+B, the setting)
         if delta > 0 && std::mem::take(&mut self.closed_for_empty) {
+            let old = self.stage();
+            let shown = self.shown_size();
             self.panels.library = true;
-            self.fit();
+            self.keep_centre(old, shown);
         }
     }
 
@@ -1245,7 +1265,7 @@ impl Studio {
         if let Some(e) = &mut self.editor {
             e.paste_clipboard(Some(clip));
         }
-        self.fit();
+        self.sync_stage();
         Outcome::None
     }
 
@@ -1477,9 +1497,11 @@ impl Studio {
             Msg::Caption(c) => Outcome::Caption(c),
             Msg::Library => self.open_steps(!self.panels.library),
             Msg::PinSteps => {
+                let old = self.stage();
+                let shown = self.shown_size();
                 self.panels.pinned = !self.panels.pinned;
                 self.steps_slide = None; // (docked or not, it simply stays where it is)
-                self.fit();
+                self.keep_centre(old, shown);
                 Outcome::Panels(old_panels, self.panels)
             }
             // a press outside the open panel: it slides away, unless it is pinned or a step
@@ -1577,6 +1599,7 @@ impl Studio {
             }
             Msg::Scrolled(offset) => {
                 self.offset = offset;
+                self.pending_scroll = None;
                 self.sync_view();
                 Outcome::None
             }
@@ -1585,9 +1608,8 @@ impl Studio {
                 Outcome::None
             }
             Msg::Fit => {
-                self.zoom = None;
-                self.fit();
-                Outcome::None
+                self.fit_to_stage();
+                self.take_scroll().map_or(Outcome::None, Outcome::ScrollTo)
             }
             Msg::Open => {
                 self.asked = true;
@@ -1646,14 +1668,23 @@ impl Studio {
                 }
             }
             Msg::Scale(s) => {
+                let old_stage = self.stage();
+                let old_shown = self.shown_size();
+                let old_scale = self.scale;
                 self.scale = s.max(0.1);
-                self.fit();
-                Outcome::None
+                if let Some(e) = &mut self.editor {
+                    let z = e.zoom * old_scale / self.scale;
+                    e.zoom = z;
+                }
+                self.keep_centre(old_stage, old_shown);
+                self.take_scroll().map_or(Outcome::None, Outcome::ScrollTo)
             }
             Msg::Resized(size) => {
+                let old_stage = self.stage();
+                let old_shown = self.shown_size();
                 self.window = size;
-                self.fit();
-                Outcome::None
+                self.keep_centre(old_stage, old_shown);
+                self.take_scroll().map_or(Outcome::None, Outcome::ScrollTo)
             }
             Msg::Act(_) if self.editor.is_none() || self.card.is_some() => Outcome::None,
             // a second Copy text while it reads would only read twice
@@ -1709,7 +1740,7 @@ impl Studio {
                     self.rise_from = None;
                 }
                 if self.mips.as_ref().is_some_and(|m| m.pending.is_some()) {
-                    self.fit(); // (the stage copy, once its thread is done)
+                    self.sync_stage(); // (the stage copy, once its thread is done)
                 }
                 if self.slide.is_some_and(|s| self.slide_done(s)) {
                     self.slide = None;
@@ -1809,13 +1840,14 @@ impl Studio {
                 let Some(last) = self.pan else {
                     return Outcome::None;
                 };
-                self.fit(); // (the stage copy, once its thread is done)
+                self.sync_stage(); // (the stage copy, once its thread is done)
                 self.pan = Some(p);
                 let off = Vector::new(
                     (self.offset.x - (p.x - last.x)).max(0.0),
                     (self.offset.y - (p.y - last.y)).max(0.0),
                 );
                 self.offset = off;
+                self.pending_scroll = None;
                 Outcome::ScrollTo(AbsoluteOffset { x: off.x, y: off.y })
             }
             Msg::Mods(ctrl, shift) => {
@@ -2122,7 +2154,7 @@ impl Studio {
         if history || size != (e.doc.image.width, e.doc.image.height) {
             self.transparent = cut::has_alpha(&e.doc.image.rgba);
         }
-        self.fit(); // a crop changes what is shown
+        self.sync_stage(); // a crop changes what is shown
         self.keep_unsaved();
         let refusal = self.editor.as_mut().and_then(|e| e.take_grow_refusal());
         let hint = self.editor.as_mut().is_some_and(|e| e.take_ctrl_hint());
@@ -2254,6 +2286,8 @@ impl Studio {
         }
         // (a slide reversed half way goes on from where the panel is, not from the edge)
         let from = self.steps_at();
+        let old_stage = self.stage();
+        let shown = self.shown_size();
         let old = self.panels;
         self.panels.library = open;
         self.closed_for_empty = false; // the user's own say now
@@ -2263,7 +2297,7 @@ impl Studio {
             self.now = std::time::Instant::now();
             self.steps_slide = Some((self.now, open, from));
         }
-        self.fit();
+        self.keep_centre(old_stage, shown);
         Outcome::Panels(old, self.panels)
     }
 
@@ -2343,17 +2377,18 @@ impl Studio {
         )))
     }
 
+    /// The picture's currently displayed size (logical px), if one is open.
+    fn shown_size(&self) -> Option<Size> {
+        self.editor.as_ref().map(Annotator::size)
+    }
+
     /// The picture point under `at` (a point of the stage): the scroll and the
     /// centring undone, the zoom divided out, the view's corner added.
     pub(super) fn image_point(&self, at: Point) -> Point {
         let Some(e) = &self.editor else {
             return at;
         };
-        let (room, shown) = (self.stage(), e.size());
-        let corner = Vector::new(
-            ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
-            ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
-        );
+        let corner = stage_corner(self.stage(), e.size());
         let d = (Vector::new(at.x, at.y) + self.offset - corner) * (1.0 / e.zoom);
         let origin = e.doc.view().position();
         Point::new(origin.x + d.x, origin.y + d.y)
@@ -2369,12 +2404,63 @@ impl Studio {
         )
     }
 
-    /// The editor's zoom: the user's, else the picture fitted to the stage,
-    /// never above 100 % (one picture px per screen px).
-    fn fit(&mut self) {
-        let (stage, scale, zoom) = (self.stage(), self.scale, self.zoom);
+    /// Fits the picture to the current stage (called ONLY on initial open and deliberate `Msg::Fit`)
+    /// and locks the resulting zoom so later panel changes and resizes never re-fit it.
+    fn fit_to_stage(&mut self) {
+        let (stage, scale) = (self.stage(), self.scale);
         if let Some(e) = &mut self.editor {
-            e.zoom = zoom.unwrap_or_else(|| fit_zoom(e.doc.view().size(), stage, scale));
+            let z = fit_zoom(e.doc.view().size(), stage, scale);
+            e.zoom = z;
+        }
+        self.offset = Vector::ZERO;
+        self.pending_scroll = Some(AbsoluteOffset { x: 0.0, y: 0.0 });
+        self.sync_stage();
+    }
+
+    /// Keeps the picture point at the centre of the visible stage steady across a stage or scale
+    /// change, leaving the zoom untouched.
+    fn keep_centre(&mut self, old_stage: Size, old_shown: Option<Size>) {
+        let new_stage = self.stage();
+        if let (Some(e), Some(old_shown)) = (&self.editor, old_shown) {
+            let new_shown = e.size();
+            let same_stage = (old_stage.width - new_stage.width).abs() < 0.01
+                && (old_stage.height - new_stage.height).abs() < 0.01;
+            let same_shown = (old_shown.width - new_shown.width).abs() < 0.01
+                && (old_shown.height - new_shown.height).abs() < 0.01;
+            if !same_stage || !same_shown {
+                let old_corner = stage_corner(old_stage, old_shown);
+                let new_corner = stage_corner(new_stage, new_shown);
+                let ratio_x = new_shown.width / old_shown.width.max(1.0);
+                let ratio_y = new_shown.height / old_shown.height.max(1.0);
+                let old_pic = Vector::new(
+                    self.offset.x + old_stage.width / 2.0 - old_corner.x,
+                    self.offset.y + old_stage.height / 2.0 - old_corner.y,
+                );
+                let new_pic = Vector::new(old_pic.x * ratio_x, old_pic.y * ratio_y);
+                let max_x =
+                    ((new_stage.width - 2.0).max(new_shown.width) - new_stage.width).max(0.0);
+                let max_y =
+                    ((new_stage.height - 2.0).max(new_shown.height) - new_stage.height).max(0.0);
+                let next = Vector::new(
+                    (new_pic.x + new_corner.x - new_stage.width / 2.0).clamp(0.0, max_x),
+                    (new_pic.y + new_corner.y - new_stage.height / 2.0).clamp(0.0, max_y),
+                );
+                if (next.x - self.offset.x).abs() > 0.01 || (next.y - self.offset.y).abs() > 0.01 {
+                    self.offset = next;
+                    self.pending_scroll = Some(AbsoluteOffset {
+                        x: next.x,
+                        y: next.y,
+                    });
+                }
+            }
+        }
+        self.sync_stage();
+    }
+
+    /// Refreshes the stage's mipmap copy and editor viewport without changing zoom or scroll.
+    fn sync_stage(&mut self) {
+        let scale = self.scale;
+        if let Some(e) = &mut self.editor {
             stage_copy(e, scale, &mut self.mips);
         }
         self.sync_view();
@@ -2394,32 +2480,34 @@ impl Studio {
     }
 
     /// The one zoom: `zoom` (display px per image px) kept in the range; with
-    /// `round` (a point in the stage) the picture point under it stays there.
+    /// `round` (a point in the stage, else the stage's centre) the picture point under it stays.
     fn zoom_to(&mut self, zoom: f32, round: Option<Point>) -> Outcome {
         let actual = 1.0 / self.scale;
         let (lo, hi) = (ZOOM_RANGE.start() * actual, ZOOM_RANGE.end() * actual);
         let Some(old) = self.editor.as_ref().map(|e| (e.zoom, e.size())) else {
             return Outcome::None;
         };
-        self.zoom = Some(zoom.clamp(lo, hi));
-        self.fit();
-        let (Some(at), Some(e)) = (round, &self.editor) else {
+        let z = zoom.clamp(lo, hi);
+        if let Some(e) = &mut self.editor {
+            e.zoom = z;
+        }
+        self.sync_stage();
+        let Some(e) = &self.editor else {
             return Outcome::None;
         };
-        // the picture's corner in the scrolled content: centred when it is smaller
         let room = self.stage();
-        let corner = |shown: Size| {
-            Vector::new(
-                ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
-                ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
-            )
-        };
+        let at = round.unwrap_or(Point::new(room.width / 2.0, room.height / 2.0));
         let ratio = e.zoom / old.0;
-        let offset = (Vector::new(at.x, at.y) + self.offset - corner(old.1)) * ratio
-            + corner(e.size())
+        let shown = e.size();
+        let max_x = ((room.width - 2.0).max(shown.width) - room.width).max(0.0);
+        let max_y = ((room.height - 2.0).max(shown.height) - room.height).max(0.0);
+        let offset = (Vector::new(at.x, at.y) + self.offset - stage_corner(room, old.1)) * ratio
+            + stage_corner(room, shown)
             - Vector::new(at.x, at.y);
-        let offset = Vector::new(offset.x.max(0.0), offset.y.max(0.0));
+        let offset = Vector::new(offset.x.clamp(0.0, max_x), offset.y.clamp(0.0, max_y));
         self.offset = offset;
+        self.pending_scroll = None;
+        self.sync_view();
         Outcome::ScrollTo(AbsoluteOffset {
             x: offset.x,
             y: offset.y,
@@ -2431,6 +2519,14 @@ impl Studio {
         let e = self.editor.as_ref()?;
         Some((e.zoom * self.scale * 100.0).round() as u32)
     }
+}
+
+/// The picture's top-left corner inside the scrollable content (centred when smaller than stage).
+fn stage_corner(room: Size, shown: Size) -> Vector {
+    Vector::new(
+        ((room.width - 2.0).max(shown.width) - shown.width) / 2.0,
+        ((room.height - 2.0).max(shown.height) - shown.height) / 2.0,
+    )
 }
 
 /// The zoom that shows `picture` (image px) whole on `stage` (logical px) with

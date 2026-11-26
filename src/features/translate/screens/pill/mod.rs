@@ -285,18 +285,16 @@ impl Session {
             return None;
         };
         let first = lines.first()?.bounds;
-        let [x0, y0, x1, y1] = lines.iter().fold(
-            [first[0], first[1], first[0] + first[2], first[1] + first[3]],
-            |a, l| {
-                let [x, y, w, h] = l.bounds;
-                [a[0].min(x), a[1].min(y), a[2].max(x + w), a[3].max(y + h)]
-            },
-        );
+        let [y0, y1] = lines.iter().fold([first[1], first[1] + first[3]], |a, l| {
+            [a[0].min(l.bounds[1]), a[1].max(l.bounds[1] + l.bounds[3])]
+        });
         let pad = TEXT_PAD as f32;
+        // Keep the full frame width so `room()` sees the real page background around the
+        // selected word(s) and `centred()` tests against the real screen width, not a tight crop.
         let area = [
-            (x0 - pad).max(0.0) as u32,
+            0,
             (y0 - pad).max(0.0) as u32,
-            ((x1 + pad).ceil() as u32).min(*width),
+            *width,
             ((y1 + pad).ceil() as u32).min(*height),
         ];
         Some(Self::start_with(

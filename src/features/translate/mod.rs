@@ -297,6 +297,9 @@ pub struct Tweak {
     pub em: Option<f32>,
     pub colour: Option<[u8; 3]>,
     pub bold: Option<bool>,
+    /// Selected words translated in place: grow into free space and shrink rather than
+    /// truncating with an ellipsis.
+    pub whole: bool,
 }
 
 /// `render` with the user's own size, colour and weight over the matched ones.
@@ -317,7 +320,7 @@ pub fn render_with(
     // the free space around each block, read before anything is erased
     report.rooms = blocks
         .iter()
-        .map(|b| room(rgba, dims, b, blocks, rtl))
+        .map(|b| room(rgba, dims, b, blocks, rtl, tweak.whole))
         .collect();
     // erase every block first, so a long translation is never erased by a neighbour
     let mut todo = Vec::new();
@@ -373,6 +376,7 @@ pub fn render_with(
             shared_em: None,
             em: tweak.em,
             bold: tweak.bold,
+            whole: tweak.whole,
         };
         placed.push((i, t, p, undo));
     }
@@ -473,6 +477,7 @@ pub fn matched(rgba: &[u8], width: u32, height: u32, line: &Line) -> Matched {
         shared_em: None,
         em: None,
         bold: None,
+        whole: false,
     };
     let em = draw::original_em(&p);
     Matched {
@@ -581,17 +586,35 @@ fn separate(
 /// a frame line stops it): for RTL out to its column's right edge, and, for a
 /// single line, one em toward the line end (left for RTL, right otherwise; a
 /// paragraph keeps its column's edge). Centred text keeps its box.
-fn room(rgba: &[u8], dims: (usize, usize), b: &Block, blocks: &[Block], rtl: bool) -> [f32; 4] {
+fn room(
+    rgba: &[u8],
+    dims: (usize, usize),
+    b: &Block,
+    blocks: &[Block],
+    rtl: bool,
+    whole: bool,
+) -> [f32; 4] {
     let [x, y, w, h] = b.bounds;
-    if centred(b, dims.0 as f32) {
-        return b.bounds;
-    }
     // ponytail: the OCR box (the line box without its padding) as one em
     let em = if b.lines.len() == 1 {
         b.lines[0].bounds[3] / 1.3
     } else {
         0.0
     };
+    let extra = if whole && b.lines.len() == 1 {
+        (3.0 * w).max(6.0 * em)
+    } else {
+        em
+    };
+    if centred(b, dims.0 as f32) {
+        if whole && b.lines.len() == 1 {
+            let left = free(rgba, dims, b, x, x - extra);
+            let right = free(rgba, dims, b, x + w, x + w + extra);
+            let sym = (x - left).min(right - (x + w));
+            return [x - sym, y, w + 2.0 * sym, h];
+        }
+        return b.bounds;
+    }
     let (mut x0, mut x1) = (x, x + w);
     if rtl {
         // not when another block shares the row on that side (captions side
@@ -606,21 +629,25 @@ fn room(rgba: &[u8], dims: (usize, usize), b: &Block, blocks: &[Block], rtl: boo
         } else {
             free(rgba, dims, b, x1, right)
         };
-        x0 = free(rgba, dims, b, x0, x0 - em);
+        x0 = free(rgba, dims, b, x0, x0 - extra);
     } else if rtl_text(&b.text) {
         // a right-to-left original keeps its right edge (`Placement::right`)
         // and grows to the left, where its lines end: to its column's left
-        // edge, a single line half its width more where that is free
-        // (English is about 1.5x as long). It had only an em to the right:
-        // the paragraphs were kept as "does not fit".
+        // edge, a single line half its width more (or `extra` for selected words)
+        // where that is free.
         let line_em = b.lines[0].bounds[3] / 1.3;
-        let left = match b.lines.len() {
-            1 => column_left(b, blocks).min(x0 - 0.5 * w),
-            _ => column_left(b, blocks),
+        let reach = if whole && b.lines.len() == 1 {
+            extra
+        } else {
+            0.5 * w + line_em
         };
-        x0 = free(rgba, dims, b, x0, left - line_em);
+        let left = match b.lines.len() {
+            1 => column_left(b, blocks).min(x0 - reach),
+            _ => column_left(b, blocks) - line_em,
+        };
+        x0 = free(rgba, dims, b, x0, left);
     } else {
-        x1 = free(rgba, dims, b, x1, x1 + em);
+        x1 = free(rgba, dims, b, x1, x1 + extra);
     }
     [x0, y, x1 - x0, h]
 }

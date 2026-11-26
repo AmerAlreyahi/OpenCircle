@@ -22,14 +22,6 @@ use crate::t;
 /// The sidebar's side padding.
 pub(super) const PAD: f32 = 12.0;
 
-/// The toggle's glyph: it points at the side the sidebar is on.
-pub(super) fn toggle_glyph(at_start: bool) -> char {
-    match at_start != dir::rtl() {
-        true => super::view::PANEL_LEFT,
-        false => super::view::PANEL_RIGHT,
-    }
-}
-
 /// The whole sidebar. `steps`: the Steps strip's steps.
 pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let wide = super::SIDEBAR - 2.0 * PAD;

@@ -44,10 +44,19 @@ impl Windows {
     pub fn open_studio(&mut self, picture: Option<Picture>) -> Task<Msg> {
         if let Some((id, s)) = &mut self.studio {
             let id = *id;
-            if let Some(picture) = picture {
-                s.open(picture);
-            }
-            return window::minimize(id, false).chain(window::gain_focus(id));
+            let scroll = match picture {
+                Some(picture) => {
+                    s.open(picture);
+                    s.take_scroll().map_or_else(Task::none, |to| {
+                        iced::widget::operation::scroll_to(studio::CANVAS, to)
+                    })
+                }
+                None => Task::none(),
+            };
+            return Task::batch([
+                window::minimize(id, false).chain(window::gain_focus(id)),
+                scroll,
+            ]);
         }
         crate::log!("[opencircle] opening OpenCircle Studio");
         #[cfg(target_os = "linux")]
@@ -56,6 +65,9 @@ impl Windows {
         let fit = super::studio_fit();
         let (id, open) = super::normal_at(Kind::Studio, fit);
         let mut s = Studio::new(crate::shared::config::current().snip.studio);
+        if let Some(f) = &fit {
+            s.set_window_size(f.fit.size);
+        }
         s.set_browser(crate::features::ask_ai::app::ai_chat::hands_off());
         s.steps_at_open(
             self.steps
@@ -64,6 +76,7 @@ impl Windows {
         );
         if let Some(picture) = picture {
             s.open(picture);
+            let _ = s.take_scroll();
         }
         self.studio = Some((id, s));
         let strip = self.strip_yields_to_studio();
@@ -193,7 +206,9 @@ impl Windows {
         match (read, &mut self.studio) {
             (Ok(crop), Some((_, s))) => {
                 s.open(Picture::Crop(crop));
-                Task::none()
+                s.take_scroll().map_or_else(Task::none, |to| {
+                    iced::widget::operation::scroll_to(studio::CANVAS, to)
+                })
             }
             (Ok(_), None) => Task::none(),
             (Err(e), _) => {
@@ -267,6 +282,17 @@ impl Windows {
     }
 
     pub(super) fn studio_outcome(&mut self, outcome: Outcome) -> Task<Msg> {
+        let scroll = self
+            .studio_mut()
+            .and_then(Studio::take_scroll)
+            .map_or_else(Task::none, |to| {
+                iced::widget::operation::scroll_to(studio::CANVAS, to)
+            });
+        let task = self.studio_outcome_inner(outcome);
+        Task::batch([task, scroll])
+    }
+
+    fn studio_outcome_inner(&mut self, outcome: Outcome) -> Task<Msg> {
         let Some(id) = self.studio_window() else {
             return Task::none();
         };

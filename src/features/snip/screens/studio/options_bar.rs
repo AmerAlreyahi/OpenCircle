@@ -9,14 +9,12 @@ use super::{Msg, Studio};
 use crate::features::snip::annotate::{Annotator, Message, Width, info, style};
 use crate::shared::app_language::{fmt, tr};
 use crate::shared::kit::icon::Icon;
-use crate::shared::kit::icon_button;
 use crate::shared::kit::option_bar::{
     GROUP_GAP, accent_cell, caption, glyph_cell, group, hairline, swatch, swatch_of, text_cell,
 };
 use crate::shared::kit::popover;
 use crate::shared::kit::text::{muted, text};
 use crate::shared::kit::tokens::{Role, size, space};
-use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{dir, keycap, scroll};
 use crate::t;
 
@@ -76,15 +74,13 @@ const W_OWN: f32 = 290.0;
 const W_MORE: f32 = 90.0;
 const W_CAPTIONS: f32 = 85.0;
 const W_GAP: f32 = 8.0;
-/// The Steps sidebar's toggle at the row's end.
-const W_TOGGLE: f32 = 36.0;
 /// The bar's side padding.
 const PAD_L: f32 = 14.0;
 const PAD_R: f32 = 12.0;
 
 impl Plan {
     fn width(self, has_own: bool, scale: f32) -> f32 {
-        let mut w = W_FIXED + W_TOGGLE;
+        let mut w = W_FIXED;
         let mut items = 6.0; // the groups, Position, Actions, the name
         w += if self.name_full { W_NAME } else { W_ICON };
         w += if self.colours_inline {
@@ -235,7 +231,7 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     }
     end.push(opener(s, t!(st_position), Pop::Position, !sel.is_empty()));
     end.push(opener(s, t!(st_actions_menu), Pop::Actions, true));
-    finish(s, items, end)
+    finish(items, end)
 }
 
 /// The bar of the empty Studio (no picture): the same row, its picture controls dimmed
@@ -271,37 +267,13 @@ pub fn empty<'a>(s: &'a Studio) -> Element<'a, Msg> {
         opener(s, t!(st_position), Pop::Position, false),
         opener(s, t!(st_actions_menu), Pop::Actions, false),
     ];
-    finish(s, items, end)
+    finish(items, end)
 }
 
-/// The row: the groups (scrolling as a last resort), then `end` and the Steps toggle.
-fn finish<'a>(
-    s: &'a Studio,
-    items: Vec<Element<'a, Msg>>,
-    end: Vec<Element<'a, Msg>>,
-) -> Element<'a, Msg> {
+/// The row: the groups (scrolling as a last resort), then `end` (Position and Actions).
+fn finish<'a>(items: Vec<Element<'a, Msg>>, end: Vec<Element<'a, Msg>>) -> Element<'a, Msg> {
     let line = dir::row(items).spacing(GROUP_GAP).align_y(Center);
     let ends = dir::row(end).spacing(GROUP_GAP).align_y(Center);
-    // the Steps sidebar's toggle: the end of the row, the same place open or closed
-    let shown = s.sidebar_shown();
-    let toggle = hint(
-        icon_button::square(
-            super::sidebar::toggle_glyph(s.sidebar_at_start()),
-            icon_button::State {
-                active: shown,
-                focused: false,
-            },
-            Some(Msg::Library),
-        ),
-        match shown {
-            true => t!(st_hide_steps),
-            false => t!(st_show_steps),
-        },
-        Why::Keys(super::keys::of(super::keys::Cmd::StepsSidebar)),
-        iced::widget::tooltip::Position::Bottom,
-    );
-    // the groups scroll (a last resort: a bar the estimates missed scrolls rather than
-    // clips); Position, Actions and the toggle stay put at the row's end
     let pad = |side: f32| iced::Padding {
         left: side,
         right: side,
@@ -317,18 +289,14 @@ fn finish<'a>(
             .center_y(super::OPTIONS),
     )
     .width(Fill);
-    let tail = container(
-        crate::dir_row![ends, toggle]
-            .spacing(GROUP_GAP)
-            .align_y(Center),
-    )
-    .padding(iced::Padding {
-        left: pad(GROUP_GAP).left,
-        right: PAD_R,
-        ..iced::Padding::ZERO
-    })
-    .height(super::OPTIONS)
-    .center_y(super::OPTIONS);
+    let tail = container(ends)
+        .padding(iced::Padding {
+            left: pad(GROUP_GAP).left,
+            right: PAD_R,
+            ..iced::Padding::ZERO
+        })
+        .height(super::OPTIONS)
+        .center_y(super::OPTIONS);
     crate::dir_row![groups, tail].width(Fill).into()
 }
 

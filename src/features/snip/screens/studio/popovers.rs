@@ -12,7 +12,7 @@ use crate::features::snip::snip_more::Row;
 use crate::shared::app_language::tr;
 use crate::shared::kit::button::{self, Kind, label};
 use crate::shared::kit::option_list;
-use crate::shared::kit::text::{muted, sub, text};
+use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::tokens::{Role, space};
 use crate::t;
 
@@ -21,7 +21,6 @@ use crate::t;
 pub enum Pop {
     Actions,
     Position,
-    Info,
     More,
     /// The narrow bar's colour swatches.
     Colours,
@@ -139,32 +138,6 @@ fn position(s: &Studio) -> Element<'_, Msg> {
     col.into()
 }
 
-/// The size and the drawings' count.
-fn picture_info(s: &Studio) -> Element<'_, Msg> {
-    let Some(e) = &s.editor else {
-        return Space::new().into();
-    };
-    let px = e.doc.view().size();
-    let kv = |name: &'static str, value: String| {
-        crate::dir_row![
-            sub(Role::ROW_DESC, name),
-            Space::new().width(Fill),
-            text(Role::ROW_DESC, value)
-        ]
-        .width(Fill)
-        .align_y(Center)
-    };
-    column![
-        kv(
-            t!(st_size),
-            format!("{} × {}", px.width.round(), px.height.round())
-        ),
-        kv(t!(st_drawings), e.doc.items.len().to_string()),
-    ]
-    .spacing(space::GAP)
-    .into()
-}
-
 /// Copy text, Translate, Ask AI (Snip More's rows, with the user's keys), Edit
 /// text and Cut out.
 fn actions(s: &Studio) -> Element<'_, Msg> {
@@ -236,7 +209,6 @@ pub fn content<'a>(s: &'a Studio, pop: Pop) -> Element<'a, Msg> {
     let body: Element<'a, Msg> = match pop {
         Pop::Actions => actions(s),
         Pop::Position => position(s),
-        Pop::Info => picture_info(s),
         Pop::Colours => match &s.editor {
             Some(e) => {
                 let n = crate::features::snip::screens::options_row::SWATCHES;
@@ -275,7 +247,6 @@ pub struct Anchors {
     more: crate::shared::kit::popover::Anchor,
     colours: crate::shared::kit::popover::Anchor,
     custom: crate::shared::kit::popover::Anchor,
-    info: crate::shared::kit::popover::Anchor,
 }
 
 impl Anchors {
@@ -286,7 +257,6 @@ impl Anchors {
             Pop::More => &self.more,
             Pop::Colours => &self.colours,
             Pop::Custom => &self.custom,
-            Pop::Info => &self.info,
         }
     }
 }
@@ -306,7 +276,6 @@ impl Pop {
                 iced::Size::new(crate::shared::kit::colour::PICKER_W, 400.0),
                 false,
             ),
-            Pop::Info => (iced::Size::new(WIDTH + pad, 70.0), false),
         }
     }
 }

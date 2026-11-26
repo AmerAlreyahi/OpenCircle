@@ -1851,8 +1851,6 @@ strings! {
         | "لصق";
     st_size: "Size"
         | "الحجم";
-    st_drawings: "Drawings"
-        | "الرسومات";
     st_edit_text: "Edit text"
         | "تحرير النص";
     st_select_text: "Select text"
@@ -2375,8 +2373,6 @@ strings! {
         | "إلى الخلفية";
     st_actions_menu: "Actions"
         | "إجراءات";
-    st_show_steps: "Show the Steps sidebar"
-        | "إظهار الشريط الجانبي للخطوات";
     st_hide_steps: "Hide the Steps sidebar"
         | "إخفاء الشريط الجانبي للخطوات";
     st_pin_steps: "Keep open · the picture makes room"
@@ -2397,8 +2393,6 @@ strings! {
         | "الموضع";
     st_more: "More"
         | "المزيد";
-    st_picture_info: "Picture info"
-        | "معلومات الصورة";
     st_recent_pictures: "Recent pictures"
         | "الصور الأخيرة";
     st_opacity: "Opacity"

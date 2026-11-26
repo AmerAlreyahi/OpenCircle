@@ -5,7 +5,6 @@ use iced::widget::tooltip::Position;
 use iced::widget::{Space, container};
 use iced::{Center, Element, Fill};
 
-use super::popovers::Pop;
 use super::view::{MINUS, PLUS};
 use super::{Msg, Studio, keys};
 use crate::features::snip::annotate::{Annotator, Message};
@@ -49,17 +48,6 @@ pub fn view<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     );
     let line = crate::dir_row![
         chip::size_handle(size_label, false, Msg::Editor(Message::DragOut)),
-        crate::shared::kit::popover::track(
-            group(
-                vec![text_cell(
-                    t!(st_picture_info),
-                    s.popover == Some(Pop::Info),
-                    Some(Msg::Pop(Some(Pop::Info)))
-                )],
-                false
-            ),
-            s.anchors.of(Pop::Info)
-        ),
         Space::new().width(Fill),
         zoom,
         Space::new().width(Fill),

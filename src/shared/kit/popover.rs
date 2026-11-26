@@ -22,6 +22,7 @@ pub enum Corner {
     /// Under the end edge (right; left in right-to-left).
     TopEnd,
     /// Over the start edge, at the bottom.
+    #[cfg(test)]
     BottomStart,
     /// Under the start edge (left; right in right-to-left).
     TopStart,
@@ -90,10 +91,13 @@ fn over_with<'a, Message: Clone + 'a>(
         .height(Fill)
         .align_x(match corner {
             Corner::TopEnd => dir::end(),
-            Corner::BottomStart | Corner::TopStart => dir::start(),
+            #[cfg(test)]
+            Corner::BottomStart => dir::start(),
+            Corner::TopStart => dir::start(),
         })
         .align_y(match corner {
             Corner::TopEnd | Corner::TopStart => iced::alignment::Vertical::Top,
+            #[cfg(test)]
             Corner::BottomStart => iced::alignment::Vertical::Bottom,
         });
     let catch = mouse_area(

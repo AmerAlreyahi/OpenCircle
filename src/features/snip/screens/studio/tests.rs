@@ -8,6 +8,7 @@ use crate::features::translate::Line;
 use crate::shared::config;
 
 mod r16;
+mod r18;
 mod w123;
 
 /// The Steps panel open and pinned (docked): the frame the older tests were written against.
@@ -66,17 +67,27 @@ fn a_picture_fits_the_stage_never_above_100_percent() {
     assert_eq!(s.percent(), Some(100));
 }
 
-/// v3.1: the one Steps sidebar toggles (Ctrl+B) and the picture gets its room back.
+/// R-18: toggling the Steps sidebar changes the stage width while keeping the picture's zoom
+/// untouched; only an explicit Fit refits the picture to the wider stage.
 #[test]
 fn hiding_the_sidebar_gives_the_picture_its_room() {
     let mut s = studio_on(3840, 2160);
     let zoom = |s: &Studio| s.editor.as_ref().unwrap().zoom;
+    let shown_stage = s.stage();
     let shown = zoom(&s);
     assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if !p.library));
-    let hidden = zoom(&s);
-    assert!(shown < hidden, "{shown} {hidden}");
+    assert!(s.stage().width > shown_stage.width, "stage got wider");
+    assert_eq!(zoom(&s), shown, "hiding the sidebar does not re-fit");
+    let _ = s.update(Msg::Fit);
+    assert!(zoom(&s) > shown, "explicit Fit uses the wider stage");
+    let fitted_wide = zoom(&s);
     assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if p.library));
-    assert_eq!(zoom(&s), shown);
+    assert_eq!(s.stage(), shown_stage);
+    assert_eq!(
+        zoom(&s),
+        fitted_wide,
+        "reopening the sidebar does not re-fit"
+    );
 }
 
 #[test]
@@ -2841,8 +2852,7 @@ fn w90b_the_rubber_band_follows_the_pointer_at_any_zoom() {
     for zoom in [0.16_f32, 1.0, 3.0] {
         let mut s = studio_on(4000, 2500);
         let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
-        s.zoom = Some(zoom);
-        s.fit();
+        let _ = s.zoom_to(zoom, None);
         s.editor.as_mut().unwrap().refresh();
         let (from, to) = (Point::new(40.0, 30.0), Point::new(300.0, 200.0));
         let size = s.editor.as_ref().unwrap().size();
@@ -2882,8 +2892,7 @@ fn w90b_the_rubber_band_in_the_window_matches_the_pointer() {
         let mut s = studio_on(4000, 2500);
         let _ = s.update(Msg::Scale(scale));
         let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
-        s.zoom = Some(zoom);
-        s.fit();
+        let _ = s.zoom_to(zoom, None);
         s.editor.as_mut().unwrap().refresh();
         let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
         let msgs =
@@ -2906,8 +2915,7 @@ fn w90b_the_rubber_band_is_right_after_a_scroll() {
     for zoom in [1.0_f32, 3.0] {
         let mut s = studio_on(4000, 2500);
         let _ = s.update(Msg::Editor(Message::Tool(Tool::Select)));
-        s.zoom = Some(zoom);
-        s.fit();
+        let _ = s.zoom_to(zoom, None);
         s.editor.as_mut().unwrap().refresh();
         let scrolled = (CANVAS, Vector::new(700.0, 500.0));
         let (from, to) = (Point::new(400.0, 300.0), Point::new(600.0, 450.0));
@@ -2998,27 +3006,12 @@ fn w90b_every_studio_sheet_closes_by_x_outside_press_and_esc() {
     assert!(!s.shortcuts, "Esc closes it");
 }
 
-/// Owner note 1: the Steps sidebar's toggle is at the END of the options bar's row, the
-/// same spot whether the sidebar is open or closed; the sidebar's header has none.
+/// R-18: the Steps slider has ONE control (the edge handle + its header arrow and Ctrl+B);
+/// the extra toggle button in the options bar is gone.
 #[test]
 fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
     let mut s = studio_on(640, 400);
-    let at_end = |s: &Studio| {
-        let e = s.editor.as_ref().unwrap();
-        let size = Size::new(SIZE.width - 54.0, 48.0);
-        // the last 40 px of the bar (its padding, then the button)
-        (0..8)
-            .filter(|i| {
-                let at = Point::new(size.width - 14.0 - 4.0 * *i as f32, 24.0);
-                crate::shared::kit::testing::shot::click(options_bar::view(s, e), size, at)
-                    .iter()
-                    .any(|m| matches!(m, Msg::Library))
-            })
-            .count()
-    };
     assert!(s.sidebar_shown());
-    assert!(at_end(&s) > 0, "open: the toggle at the row's end");
-    // the panel's own header: its arrow (the last button) hides it, the pin before it pins
     let head = |x: f32| {
         crate::shared::kit::testing::shot::click(
             sidebar::view(&s, &[]),
@@ -3038,7 +3031,6 @@ fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
     );
     let _ = s.update(Msg::Library);
     assert!(!s.sidebar_shown());
-    assert!(at_end(&s) > 0, "closed: the same spot opens it again");
 }
 
 /// Draws `s` once, so each tracked opener knows where it is.
@@ -3498,32 +3490,18 @@ fn w90c_an_alt_chord_does_not_open_the_menu_bar_on_release() {
 }
 
 /// W90c item 2: the empty Studio keeps the options bar's row with its picture controls
-/// dimmed; the Steps toggle is live at the window's end, where it is with a picture.
+/// R-18: the empty Studio dims the picture controls (Position / Actions) and has no extra
+/// Steps toggle button in the options bar.
 #[test]
 fn w90c_the_empty_studio_has_the_steps_toggle_at_the_same_spot() {
-    let toggle_at = |s: &Studio| -> Vec<f32> {
-        // the header is 40 px; the bar's row is under it
-        (0..60)
-            .map(|i| SIZE.width - 8.0 - i as f32)
-            .filter(|x| {
-                click_view(s, (*x, super::HEADER + super::OPTIONS / 2.0))
-                    .iter()
-                    .any(|m| matches!(m, Msg::Library))
-            })
-            .collect()
-    };
     let empty = Studio::new(docked());
     assert!(empty.editor.is_none());
-    let with = studio_on(640, 400);
-    let (a, b) = (toggle_at(&empty), toggle_at(&with));
-    assert!(!a.is_empty(), "the toggle is live in the empty Studio");
-    assert_eq!(a, b, "and sits where it does with a picture");
-    // the picture controls are dimmed: pressing Position / Actions does nothing
     let got = click_view(
         &empty,
-        (SIZE.width - 120.0, super::HEADER + super::OPTIONS / 2.0),
+        (SIZE.width - 60.0, super::HEADER + super::OPTIONS / 2.0),
     );
     assert!(!got.iter().any(|m| matches!(m, Msg::Pop(_))), "{got:?}");
+    assert!(!got.iter().any(|m| matches!(m, Msg::Library)), "{got:?}");
 }
 
 /// W90d.5: where the time goes, measured (not a gate): `cargo test --release --bin opencircle
@@ -3622,7 +3600,7 @@ fn studio_delay_by_action() {
         let mut m = make(w, h);
         let _ = m.update(Msg::Menu(Some(menu_bar::Menu::File)));
         let mut p = make(w, h);
-        let _ = p.update(Msg::Pop(Some(popovers::Pop::Info)));
+        let _ = p.update(Msg::Pop(Some(popovers::Pop::Actions)));
         let mut sb = make(w, h);
         let _ = sb.update(Msg::Library);
         for (what, x) in [
@@ -3664,8 +3642,7 @@ fn studio_delay_by_action() {
         for (zoom, label) in [(None, "fit"), (Some(1.0f32), "100 %")] {
             let mut s = make(w, h);
             if zoom.is_some() {
-                s.zoom = Some(1.0 / s.scale);
-                s.fit();
+                let _ = s.zoom_to(1.0 / s.scale, None);
             }
             let e = s.editor.as_ref().unwrap();
             let f = shot::frame_times(
@@ -3794,7 +3771,7 @@ fn an_action_redraws_only_what_changed() {
     let acts = [
         Msg::Menu(Some(menu_bar::Menu::File)),
         Msg::Menu(None),
-        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::Pop(Some(popovers::Pop::Actions)),
         Msg::Pop(None),
         Msg::Editor(Message::Tool(Tool::Rect)),
     ];
@@ -3936,7 +3913,7 @@ fn studio_frames_by_action() {
             (
                 "popover (rising 0)",
                 Box::new(|s| {
-                    let _ = s.update(Msg::Pop(Some(popovers::Pop::Info)));
+                    let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
                 }),
             ),
             (
@@ -4184,15 +4161,12 @@ fn adding_a_step_flattens_off_the_ui_thread_and_shows_its_place() {
 fn a_picture_at_100_percent_draws_pixel_for_pixel() {
     let mut s = studio_on(3000, 2000);
     let _ = s.update(Msg::Resized(Size::new(3440.0, 1440.0)));
-    s.zoom = Some(1.0 / s.scale);
-    s.fit();
+    let _ = s.zoom_to(1.0 / s.scale, None);
     let e = s.editor.as_ref().unwrap();
     assert!(e.crisp && e.display.is_none(), "100 %: nearest, no copy");
-    s.zoom = Some(4.0 / s.scale);
-    s.fit();
+    let _ = s.zoom_to(4.0 / s.scale, None);
     assert!(s.editor.as_ref().unwrap().crisp, "magnified 4x: pixels");
-    s.zoom = Some(1.5 / s.scale);
-    s.fit();
+    let _ = s.zoom_to(1.5 / s.scale, None);
     assert!(!s.editor.as_ref().unwrap().crisp, "1.5x stays smooth");
 }
 
@@ -4208,7 +4182,7 @@ fn menus_popovers_and_dialogs_rise_as_they_open() {
     assert!(!s.moving());
     for open in [
         Msg::Menu(Some(menu_bar::Menu::File)),
-        Msg::Pop(Some(popovers::Pop::Info)),
+        Msg::Pop(Some(popovers::Pop::Actions)),
         Msg::OpenPrefs,
     ] {
         let _ = s.update(Msg::Cancel);

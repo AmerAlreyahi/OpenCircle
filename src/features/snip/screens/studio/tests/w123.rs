@@ -98,7 +98,7 @@ fn w123_ac3_pinned_docks_and_the_canvas_makes_room() {
     assert!(s.sidebar_docked() && !s.steps_overlay());
     let (stage, zoom) = (s.stage(), s.editor.as_ref().unwrap().zoom);
     assert_eq!(stage.width, wide.0.width - (super::SIDEBAR + 1.0));
-    assert!(zoom < wide.1, "the picture refits: {zoom} < {}", wide.1);
+    assert_eq!(zoom, wide.1, "R-18: pinning keeps the zoom unchanged");
     // unpinned again: over the canvas, the picture gets its room back
     let _ = s.update(Msg::PinSteps);
     assert_eq!(s.stage(), wide.0);
@@ -112,7 +112,11 @@ fn w123_ac4_it_closes_by_every_way_it_may() {
     // the header arrow sends Library (so do the handle and Ctrl+B)
     let mut s = slider();
     let _ = s.update(Msg::Library);
-    let arrow = click_with(&s, &steps, (SIZE.width - 24.0, 60.0));
+    let arrow = click_with(
+        &s,
+        &steps,
+        (SIZE.width - 24.0, super::HEADER + super::OPTIONS + 22.0),
+    );
     assert!(arrow.iter().any(|m| matches!(m, Msg::Library)), "{arrow:?}");
     assert!(matches!(s.update(Msg::Library), Outcome::Panels(_, p) if !p.library));
     // Esc closes the open panel

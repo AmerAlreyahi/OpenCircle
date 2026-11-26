@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 pub use super::lang::is_rtl;
 use super::lang::{self, Script};
-use super::{Block, Drawn, Line, MARKUP, group_blocks, render, split_fields};
+#[cfg(test)]
+use super::render;
+use super::{Block, Drawn, Line, MARKUP, Tweak, group_blocks, render_with, split_fields};
 use crate::features::ask_ai::{self, AiError};
 use crate::features::text_reading::{self, OcrError, TextBlock};
 use crate::features::translate::mt;
@@ -2141,7 +2143,18 @@ fn draw(
         Some((b, t)) => (b.as_slice(), t.as_slice()),
         None => (blocks, tr),
     };
-    let drawn = render(&mut out, width, height, drawing, words, is_rtl(target));
+    let drawn = render_with(
+        &mut out,
+        width,
+        height,
+        drawing,
+        words,
+        is_rtl(target),
+        Tweak {
+            whole: per_line,
+            ..Tweak::default()
+        },
+    );
     timings.render += t.elapsed();
     Translated {
         rgba: out,

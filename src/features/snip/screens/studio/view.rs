@@ -30,8 +30,6 @@ use crate::shared::kit::wrap::{Hook, wrap};
 use crate::shared::kit::{colour, dir, divider, popover, scroll, segmented, slider, thumb};
 use crate::t;
 
-pub(super) const PANEL_LEFT: char = '\u{e12d}'; // lucide "panel-left"
-pub(super) const PANEL_RIGHT: char = '\u{e435}'; // lucide "panel-right"
 /// lucide "folder-open"
 pub(super) const OPEN: char = '\u{e246}';
 /// lucide "settings" (Studio preferences)
@@ -42,7 +40,7 @@ pub(super) const MINUS: char = '\u{e11f}'; // lucide "minus"
 
 /// The glyphs used here (the font test checks them).
 #[cfg(test)]
-pub const GLYPHS: &[char] = &[PANEL_LEFT, PANEL_RIGHT, OPEN, PASTE, PLUS, MINUS, GEAR];
+pub const GLYPHS: &[char] = &[OPEN, PASTE, PLUS, MINUS, GEAR];
 
 /// OpenCircle Studio's window (v3.1): the header with the menu bar; below it
 /// the tools rail (full height, at the window's edge), then the options bar
@@ -65,168 +63,169 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         Some(maximised),
         Msg::Caption,
     );
-    // Settings > Studio > Steps sidebar side: at the reading start the rail takes the
-    // other edge (the options bar always runs beside the rail, over the sidebar)
     let first = s.sidebar_at_start();
-    let side = |parts: &mut Vec<Element<'a, Msg>>| {
-        if s.sidebar_docked() {
-            let bar = [divider::vertical(Fill), super::sidebar::view(s, steps)];
-            match first {
-                true => {
-                    let stage: Vec<_> = std::mem::take(parts);
-                    parts.extend(bar.into_iter().rev());
-                    parts.extend(stage);
-                }
-                false => parts.extend(bar),
-            }
-        }
-    };
+    let side_on_left = first != dir::rtl();
+    let empty_slot = || container(Space::new());
     let body: Element<'a, Msg> = match &s.editor {
         Some(e) => {
-            let mut under: Vec<Element<'a, Msg>> = vec![
-                column![
-                    stage(s, e),
-                    divider::divider(),
-                    super::status_bar::view(s, e)
-                ]
-                .width(Fill)
-                .height(Fill)
-                .into(),
-            ];
-            side(&mut under);
+            let stage_col: Element<'a, Msg> = column![
+                stage(s, e),
+                divider::divider(),
+                super::status_bar::view(s, e)
+            ]
+            .width(Fill)
+            .height(Fill)
+            .into();
+            let left_side = match s.sidebar_docked() && side_on_left {
+                true => container(iced::widget::row![
+                    super::sidebar::view(s, steps),
+                    divider::vertical(Fill)
+                ]),
+                false => empty_slot(),
+            };
+            let right_side = match s.sidebar_docked() && !side_on_left {
+                true => container(iced::widget::row![
+                    divider::vertical(Fill),
+                    super::sidebar::view(s, steps)
+                ]),
+                false => empty_slot(),
+            };
+            let under = iced::widget::row![left_side, stage_col, right_side].height(Fill);
             let right = column![
                 match &s.edit {
                     Some(x) => edit_bar(x),
                     None => super::options_bar::view(s, e),
                 },
                 divider::divider(),
-                with_steps_panel(s, steps, dir::row(under).height(Fill).into())
+                with_steps_panel(s, steps, under.into())
             ]
             .width(Fill)
             .height(Fill);
-            let mut parts: Vec<Element<'a, Msg>> = vec![
-                rail(e, inward(rail_on_left(first, dir::rtl()))),
-                divider::vertical(Fill),
-                right.into(),
-            ];
-            if first {
-                parts.reverse();
-            }
-            dir::row(parts).height(Fill).into()
+            let rail_left = rail_on_left(first, dir::rtl());
+            let left_rail = match rail_left {
+                true => container(iced::widget::row![
+                    rail(e, inward(true)),
+                    divider::vertical(Fill)
+                ]),
+                false => empty_slot(),
+            };
+            let right_rail = match !rail_left {
+                true => container(iced::widget::row![
+                    divider::vertical(Fill),
+                    rail(e, inward(false))
+                ]),
+                false => empty_slot(),
+            };
+            iced::widget::row![left_rail, right, right_rail]
+                .height(Fill)
+                .into()
         }
         None => {
-            // no picture: the options bar's row stays (its picture controls dimmed), so the
-            // Steps toggle sits where it does with a picture; the sidebar starts under it
-            let mut parts: Vec<Element<'a, Msg>> = vec![super::start::view(s)];
-            side(&mut parts);
+            let left_side = match s.sidebar_docked() && side_on_left {
+                true => container(iced::widget::row![
+                    super::sidebar::view(s, steps),
+                    divider::vertical(Fill)
+                ]),
+                false => empty_slot(),
+            };
+            let right_side = match s.sidebar_docked() && !side_on_left {
+                true => container(iced::widget::row![
+                    divider::vertical(Fill),
+                    super::sidebar::view(s, steps)
+                ]),
+                false => empty_slot(),
+            };
+            let parts =
+                iced::widget::row![left_side, super::start::view(s), right_side].height(Fill);
             column![
                 super::options_bar::empty(s),
                 divider::divider(),
-                with_steps_panel(s, steps, dir::row(parts).height(Fill).into())
+                with_steps_panel(s, steps, parts.into())
             ]
             .width(Fill)
             .height(Fill)
             .into()
         }
     };
-    let main = column![header, divider::divider(), body];
-    let main = super::menu_bar::over(main.into(), s);
-    let main: Element<'_, Msg> = match &s.context {
-        Some(c) => iced::widget::stack![
-            main,
-            iced::widget::opaque(
-                iced::widget::mouse_area(
-                    iced::widget::pin(super::sheets::context(&c.entries))
-                        .x(c.at.x)
-                        .y(c.at.y)
-                )
-                .on_press(Msg::Cancel)
-                .on_right_press(Msg::Cancel)
+    let main: Element<'_, Msg> = column![header, divider::divider(), body].into();
+    let mut layers: Vec<Element<'_, Msg>> = vec![main];
+    let blank = || -> Element<'_, Msg> { Space::new().width(Fill).height(Fill).into() };
+    if s.menu.is_some() {
+        layers.push(super::menu_bar::over(blank(), s));
+    }
+    if let Some(c) = &s.context {
+        layers.push(iced::widget::opaque(
+            iced::widget::mouse_area(
+                iced::widget::pin(super::sheets::context(&c.entries))
+                    .x(c.at.x)
+                    .y(c.at.y),
             )
-        ]
-        .into(),
-        None => main,
-    };
-    let main = super::text_select::menu_layer(s, main);
-    let main: Element<'_, Msg> = match s.shortcuts {
-        true => modal::over_rising(
-            main,
+            .on_press(Msg::Cancel)
+            .on_right_press(Msg::Cancel),
+        ));
+    }
+    if s.text.menu.is_some() {
+        layers.push(super::text_select::menu_layer(s, blank()));
+    }
+    if s.shortcuts {
+        layers.push(modal::over_rising(
+            blank(),
             super::sheets::shortcuts(s, s.window),
             Msg::Shortcuts(false),
             s.rise(),
-        ),
-        false => main,
-    };
-    // the Studio's preferences (Ctrl+, / File > Preferences), over everything but the
-    // question; the keys are the dialog's (Esc closes it)
-    let main: Element<'_, Msg> = match &s.prefs {
-        Some(d) => modal::over_rising(
-            main,
+        ));
+    }
+    if let Some(d) = &s.prefs {
+        layers.push(modal::over_rising(
+            blank(),
             d.view(s.window).map(Msg::Prefs),
             Msg::Prefs(super::preferences::Msg::Close),
             s.rise(),
-        ),
-        None => main,
-    };
-    // a popover (Actions, Position, picture info, More) hangs from its opener
-    // (never over a slide-over: the picture must take its presses)
-    let main: Element<'_, Msg> = match s.popover.filter(|_| {
+        ));
+    }
+    if let Some(pop) = s.popover.filter(|_| {
         s.editor.is_some() && !s.exporting && s.edit.is_none() && s.comparing().is_none()
     }) {
-        Some(pop) => {
-            let (corner, offset) = match pop {
-                super::popovers::Pop::Info => (
-                    popover::Corner::BottomStart,
-                    iced::Padding {
-                        left: 12.0,
-                        right: 12.0,
-                        bottom: super::STATUS + 6.0,
-                        ..iced::Padding::ZERO
-                    },
-                ),
-                super::popovers::Pop::Colours | super::popovers::Pop::Custom => (
-                    popover::Corner::TopStart,
-                    iced::Padding {
-                        left: if first { 8.0 } else { super::RAIL + 40.0 },
-                        right: if first { super::RAIL + 40.0 } else { 8.0 },
-                        top: super::HEADER + super::OPTIONS + 4.0,
-                        ..iced::Padding::ZERO
-                    },
-                ),
-                _ => (
-                    popover::Corner::TopEnd,
-                    iced::Padding {
-                        left: 8.0,
-                        right: 8.0,
-                        top: super::HEADER + super::OPTIONS + 4.0,
-                        ..iced::Padding::ZERO
-                    },
-                ),
-            };
-            let (size, end) = pop.card();
-            // the custom colour is Snip's picker panel alone (no card, no X)
-            let place = match pop {
-                super::popovers::Pop::Custom => popover::anchored_bare,
-                _ => popover::anchored_rising,
-            };
-            place(
-                main,
-                super::popovers::content(s, pop),
-                s.anchors.of(pop).get(),
-                size,
-                end,
-                s.popover_room(),
-                (corner, offset),
-                Msg::Pop(None),
-                s.rise(),
-            )
-        }
-        None => main,
-    };
-    // after a crash: the kept copy
-    let main: Element<'_, Msg> = match s.restorable.as_ref().filter(|_| !s.later) {
-        Some(r) => modal::over(
-            main,
+        let (corner, offset) = match pop {
+            super::popovers::Pop::Colours | super::popovers::Pop::Custom => (
+                popover::Corner::TopStart,
+                iced::Padding {
+                    left: if first { 8.0 } else { super::RAIL + 40.0 },
+                    right: if first { super::RAIL + 40.0 } else { 8.0 },
+                    top: super::HEADER + super::OPTIONS + 4.0,
+                    ..iced::Padding::ZERO
+                },
+            ),
+            _ => (
+                popover::Corner::TopEnd,
+                iced::Padding {
+                    left: 8.0,
+                    right: 8.0,
+                    top: super::HEADER + super::OPTIONS + 4.0,
+                    ..iced::Padding::ZERO
+                },
+            ),
+        };
+        let (size, end) = pop.card();
+        let place = match pop {
+            super::popovers::Pop::Custom => popover::anchored_bare,
+            _ => popover::anchored_rising,
+        };
+        layers.push(place(
+            blank(),
+            super::popovers::content(s, pop),
+            s.anchors.of(pop).get(),
+            size,
+            end,
+            s.popover_room(),
+            (corner, offset),
+            Msg::Pop(None),
+            s.rise(),
+        ));
+    }
+    if let Some(r) = s.restorable.as_ref().filter(|_| !s.later) {
+        layers.push(modal::over(
+            blank(),
             super::sheets::restore(
                 r,
                 Msg::Restore,
@@ -236,77 +235,69 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             ),
             super::sheets::RESTORE_W,
             Msg::Later,
-        ),
-        None => main,
-    };
-    // the big temporary tasks slide in from the end edge: the walkthrough /
-    // picture export, Edit text and Cut out (the picture stays usable beside
-    // the last two)
-    let main: Element<'_, Msg> = match (s.exporting, &s.edit, s.comparing()) {
+        ));
+    }
+    match (s.exporting, &s.edit, s.comparing()) {
         (true, _, _) => {
             let scrim = match s.walk.busy {
                 Some(_) => Scrim::Holds,
                 None => Scrim::Closes,
             };
-            slide_over::over_wide(
-                main,
+            layers.push(slide_over::over_wide(
+                blank(),
                 t!(st_export),
                 export_sheet(s, steps),
                 Msg::WalkCancel,
                 scrim,
                 super::HEADER,
                 EXPORT_W,
-            )
+            ));
         }
-        (false, None, Some(before)) => slide_over::over(
-            main,
-            t!(st_cut_out),
-            cut_panel(before),
-            Msg::CutClose,
-            Scrim::None,
-            super::HEADER,
-        ),
-        _ => main,
-    };
-    // the question is a solid modal over the dimmed window: the picture under it takes no press
-    let main: Element<'_, Msg> = match s.asking() {
-        true => modal::over_lifted(main, question(), QUESTION_W, Msg::Cancel, s.rise()),
-        false => main,
-    };
-    // the download card (Copy text / Translate need models): over the window
-    let main: Element<'_, Msg> = match &s.card() {
-        Some(card) => iced::widget::stack![
-            main,
-            iced::widget::opaque(
-                container(card.card(
-                    Msg::Download,
-                    Msg::DismissCard,
-                    Msg::Provider,
-                    Msg::CardDetails
-                ))
-                .center(Fill)
-            )
-        ]
-        .into(),
-        None => main,
-    };
-    // a big picture is being prepared: the kit's turning logo over the window (no press blocked)
-    let main: Element<'_, Msg> = match s.opening_since() {
-        Some(since) => {
-            let turn = crate::shared::kit::spinner::turn(s.now.saturating_duration_since(since));
-            let spin = crate::shared::kit::spinner::spinner(
-                crate::shared::kit::logo::logo(56),
-                28.0,
-                turn,
-                crate::shared::kit::motion::reduced(),
-            );
-            iced::widget::stack![main, container(spin).center(Fill)].into()
+        (false, None, Some(before)) => {
+            layers.push(slide_over::over(
+                blank(),
+                t!(st_cut_out),
+                cut_panel(before),
+                Msg::CutClose,
+                Scrim::None,
+                super::HEADER,
+            ));
         }
-        None => main,
-    };
+        _ => {}
+    }
+    if s.asking() {
+        layers.push(modal::over_lifted(
+            blank(),
+            question(),
+            QUESTION_W,
+            Msg::Cancel,
+            s.rise(),
+        ));
+    }
+    if let Some(card) = &s.card() {
+        layers.push(iced::widget::opaque(
+            container(card.card(
+                Msg::Download,
+                Msg::DismissCard,
+                Msg::Provider,
+                Msg::CardDetails,
+            ))
+            .center(Fill),
+        ));
+    }
+    if let Some(since) = s.opening_since() {
+        let turn = crate::shared::kit::spinner::turn(s.now.saturating_duration_since(since));
+        let spin = crate::shared::kit::spinner::spinner(
+            crate::shared::kit::logo::logo(56),
+            28.0,
+            turn,
+            crate::shared::kit::motion::reduced(),
+        );
+        layers.push(container(spin).center(Fill).into());
+    }
     let rim = if maximised { 0.0 } else { 1.0 };
     crate::shared::kit::focus::scope(
-        surface(Material::Window, 0.0, main)
+        surface(Material::Window, 0.0, iced::widget::stack(layers))
             .padding(rim)
             .width(Fill)
             .height(Fill),
@@ -314,9 +305,6 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
 }
 
 /// Every tool on the rail, groups split by a hairline; Undo / Redo at its foot.
-/// A tooltip beside a control of a side panel, toward the picture: `on_left` = the panel
-/// is at the window's left edge. (A tooltip pointing off the window is pushed back over
-/// its own control.)
 pub(super) fn inward(on_left: bool) -> Position {
     match on_left {
         true => Position::Right,
@@ -324,9 +312,7 @@ pub(super) fn inward(on_left: bool) -> Position {
     }
 }
 
-/// `base` (the stage, with the Steps panel beside it when it is docked) with the Steps panel's
-/// other states over it: closed = its handle on the edge; open and not pinned = the panel sliding
-/// over the canvas (no canvas jump) with a catcher behind it for a press outside.
+/// `base` with the Steps panel's states over it: always a `Stack` with `base` at index 0.
 fn with_steps_panel<'a>(
     s: &'a Studio,
     steps: &'a [Arc<Step>],
@@ -338,6 +324,7 @@ fn with_steps_panel<'a>(
         true => iced::alignment::Horizontal::Left,
         false => iced::alignment::Horizontal::Right,
     };
+    let mut layers = vec![base];
     if s.steps_overlay() {
         let panel = match on_left {
             true => row![super::sidebar::view(s, steps), divider::vertical(Fill)],
@@ -349,7 +336,6 @@ fn with_steps_panel<'a>(
             s.steps_at(),
             !on_left,
         );
-        let mut layers = vec![base];
         if s.sidebar_shown() {
             layers.push(
                 mouse_area(Space::new().width(Fill).height(Fill))
@@ -364,20 +350,17 @@ fn with_steps_panel<'a>(
                 .align_x(edge)
                 .into(),
         );
-        return stack(layers).into();
+    } else if !s.sidebar_shown() {
+        layers.push(
+            container(super::sidebar::handle(steps.len(), on_left))
+                .width(Fill)
+                .height(Fill)
+                .align_x(edge)
+                .align_y(Center)
+                .into(),
+        );
     }
-    if s.sidebar_shown() {
-        return base;
-    }
-    stack![
-        base,
-        container(super::sidebar::handle(steps.len(), on_left))
-            .width(Fill)
-            .height(Fill)
-            .align_x(edge)
-            .align_y(Center)
-    ]
-    .into()
+    stack(layers).into()
 }
 
 /// Is the tools rail at the window's left edge? It takes the edge the Steps sidebar
@@ -574,20 +557,21 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         .on_scroll(|v| Msg::Scrolled(Vector::new(v.absolute_offset().x, v.absolute_offset().y)));
     // the wheel zooms the picture at the pointer (Settings > Studio: or scrolls it); Ctrl+wheel always zooms
     let zooms = s.ctrl || prefs.wheel == StudioWheel::Zoom;
-    let area: Element<'a, Msg> = match prefs.background {
-        StudioBackdrop::Checkerboard => iced::widget::stack![
-            super::cut::checker(Size::new(room.width, room.height)),
-            area
-        ]
-        .into(),
-        _ => area.into(),
+    let backdrop = match prefs.background {
+        StudioBackdrop::Checkerboard => {
+            container(super::cut::checker(Size::new(room.width, room.height)))
+                .width(Fill)
+                .height(Fill)
+        }
+        _ => container(Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill),
     };
+    let area: Element<'a, Msg> = iced::widget::stack![backdrop, area].into();
     let material = match prefs.background {
         StudioBackdrop::Dark => Material::Stage,
         _ => Material::Recessed,
     };
-    // the middle button drags the picture (Photoshop); the pointer is followed
-    // only while it does
     let stage = mouse_area(wrap(area, CtrlWheel(zooms, s.pointer.clone())))
         .on_right_press(Msg::ContextOpen)
         .on_middle_press(Msg::Middle(true))
@@ -599,19 +583,18 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
             .into(),
         false => stage.into(),
     };
-    // Space held: a layer over the picture takes the drag (a pan), not the tools
-    let stage: Element<'a, Msg> = match s.space {
-        true => iced::widget::stack![
-            stage,
+    let mut stage_layers = vec![stage];
+    if s.space {
+        stage_layers.push(
             mouse_area(Space::new().width(Fill).height(Fill))
                 .on_press(Msg::PanStart)
                 .on_release(Msg::PanEnd)
                 .on_move(Msg::Pointer)
                 .interaction(mouse::Interaction::Grab)
-        ]
-        .into(),
-        false => stage,
-    };
+                .into(),
+        );
+    }
+    let stage: Element<'a, Msg> = iced::widget::stack(stage_layers).into();
     surface(material, 0.0, stage)
         .width(Fill)
         .height(Fill)

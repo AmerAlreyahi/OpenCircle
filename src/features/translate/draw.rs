@@ -272,6 +272,9 @@ pub struct Placement {
     /// matched to the original.
     pub em: Option<f32>,
     pub bold: Option<bool>,
+    /// Selected word(s) translated in place: shrink (or wrap) to show the whole translation
+    /// instead of cutting off with an ellipsis.
+    pub whole: bool,
 }
 
 /// The laid-out translation: buffer, top-left, font size.
@@ -384,7 +387,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
         (false, false) => Align::Left,
     };
     let [bx, by, bw, bh] = p.bounds;
-    let mut try_at = |spans: &[Span], size: f32| {
+    let mut try_at_mode = |spans: &[Span], size: f32, single_line: bool| {
         let lh = pitch.map_or(size * 1.3, |pt| pt.min(size * 1.6).max(size * 1.2));
         let buf = fonts.layout(
             spans,
@@ -396,25 +399,50 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
         );
         let (w, h) = extent(&buf);
         // (a one-line label stays one line, though its box could hold two)
-        let one = n > 1 || buf.layout_runs().count() <= 1;
+        let one = !single_line || n > 1 || buf.layout_runs().count() <= 1;
         (one && w <= bw + 0.5 && h <= bh.max(lh) + 0.5).then_some((buf, h))
     };
     let floor = em * MIN_SCALE;
     let mut size = em;
     let mut found = None;
     while size >= floor {
-        if let Some(f) = try_at(&spans, size) {
+        if let Some(f) = try_at_mode(&spans, size, true) {
             found = Some((f, size));
             break;
         }
         size *= 0.95;
+    }
+    // Selected text translated in place (`p.whole`) is never cut off with an ellipsis: first allow
+    // wrapping inside a tall box at readable size, then shrink further down to 6 px so the whole
+    // translation always fits.
+    if found.is_none() && p.whole {
+        let mut wrap_size = em;
+        while wrap_size >= floor {
+            if let Some(f) = try_at_mode(&spans, wrap_size, false) {
+                found = Some((f, wrap_size));
+                break;
+            }
+            wrap_size *= 0.95;
+        }
+    }
+    if found.is_none() && p.whole {
+        let min_legible = 6.0_f32.min(floor);
+        let mut s = size;
+        while s >= min_legible {
+            if let Some(f) = try_at_mode(&spans, s, true).or_else(|| try_at_mode(&spans, s, false))
+            {
+                found = Some((f, s));
+                break;
+            }
+            s *= 0.95;
+        }
     }
     let size = size / 0.95;
     // a one-line label (a box under two lines at the floor size) that still
     // does not fit: the last resort, the text cut at a word (or, with no
     // word fitting, inside the first one) and an ellipsis. A paragraph is
     // never cut: its original stays.
-    if found.is_none() && (n == 1 || bh < 2.0 * size * 1.3) {
+    if found.is_none() && !p.whole && (n == 1 || bh < 2.0 * size * 1.3) {
         let chars: Vec<char> = spans.iter().flat_map(|(t, _)| t.chars()).collect();
         let words: Vec<usize> = (2..chars.len())
             .filter(|&k| chars[k].is_whitespace())
@@ -426,7 +454,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
             let (mut lo, mut hi, mut best) = (0, ks.len(), None);
             while lo < hi {
                 let mid = (lo + hi) / 2;
-                match try_at(&abbreviate(&spans, ks[mid]), size) {
+                match try_at_mode(&abbreviate(&spans, ks[mid]), size, true) {
                     Some(f) => (best, lo) = (Some(f), mid + 1),
                     None => hi = mid,
                 }
@@ -575,6 +603,7 @@ mod tests {
             shared_em: None,
             em: None,
             bold: None,
+            whole: false,
         }
     }
 
@@ -836,5 +865,31 @@ mod tests {
         // visual order: first word right of "E", last word left of it
         let (first, e, last) = (at(0).2, at("اضغط ".len()).2, at("اضغط E ".len()).2);
         assert!(first > e && e > last, "{first} {e} {last}");
+    }
+
+    /// R-18: when a single selected word is boxed in (zero free space on either side), it shrinks
+    /// or wraps to show the whole translation instead of cutting off with an ellipsis ("To…").
+    #[test]
+    fn r18_single_selected_word_shrinks_instead_of_ellipsis() {
+        let mut fonts = Fonts::new();
+        let b = [10.0, 10.0, 55.0, 58.0];
+        for (orig, tr, rtl) in [
+            ("القهوة", "Coffee", false),
+            ("القهوة", "The coffee", false),
+            ("Coffee", "El café", false),
+            ("Run", "Ejecutar", false),
+        ] {
+            let mut p = placement(b, 1, rtl);
+            p.texts = vec![orig.into()];
+            p.whole = true;
+            let fitted =
+                fit(&mut fonts, tr, &p).unwrap_or_else(|| panic!("{orig} -> {tr}: nothing"));
+            let drawn_text: String = fitted.0.lines.iter().map(|l| l.text()).collect();
+            assert!(
+                !drawn_text.contains('\u{2026}'),
+                "{orig} -> {tr}: truncated with ellipsis: {drawn_text:?}"
+            );
+            assert_eq!(drawn_text, tr, "{orig} -> {tr}: whole translation kept");
+        }
     }
 }
