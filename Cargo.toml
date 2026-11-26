@@ -190,6 +190,10 @@ files = { "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.
 # The AppImage's entry (same template) names Icon=com.opencircle.app: ship that icon.
 # libwayland-client is on the AppImage excludelist (the system's must be used, a bundled one
 # can mismatch the compositor's); the packager's linuxdeploy is too old to skip it itself.
+# NO Studio desktop entry here (W126): linuxdeploy links every desktop file of the AppDir
+# into its root, and AppRun runs the FIRST one (alphabetical) with the user's arguments, so
+# the Studio entry (`Exec=opencircle studio %f`, sorts first) turned `--version`, `run x`,
+# `capture`, `quit` into files for the Studio. An AppImage has no app grid; deb/rpm keep it.
 # A raw AppImage writes its own ~/.local/share/applications/com.opencircle.app.desktop
 # on first start under Wayland (capture/portal.rs).
 [package.metadata.packager.appimage]
@@ -197,7 +201,7 @@ excludedLibs = ["libwayland-client*"]
 # winit dlopens these on X11 (linuxdeploy only follows linked libs): a minimal system lacks them
 # and the app panicked at start (xkbcommon-dl).
 libs = ["libxkbcommon-x11.so*", "libxcb-xkb.so*"]
-files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml", "packaging/com.opencircle.app.studio.desktop" = "usr/share/applications/com.opencircle.app.studio.desktop" }
+files = { "assets/icons/256x256.png" = "usr/share/icons/hicolor/256x256/apps/com.opencircle.app.png", "packaging/com.opencircle.app.metainfo.xml" = "usr/share/metainfo/com.opencircle.app.metainfo.xml" }
 
 # .rpm: `cargo generate-rpm` after `cargo build --release`. Same libraries, Fedora names.
 [package.metadata.generate-rpm]

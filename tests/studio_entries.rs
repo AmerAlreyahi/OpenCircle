@@ -34,11 +34,19 @@ fn the_desktop_file_parses_and_names_the_studio() {
 }
 
 #[test]
-fn every_linux_package_ships_the_studio_desktop_file() {
+fn deb_and_rpm_ship_the_studio_desktop_file_but_the_appimage_does_not() {
     let c = read_to_string("Cargo.toml").unwrap();
     let dest = "applications/com.opencircle.app.studio.desktop";
-    // deb, AppImage and rpm
-    assert_eq!(c.matches(dest).count(), 3, "deb + AppImage + rpm");
+    // deb and rpm only. The AppImage must NOT: linuxdeploy links every desktop file into the
+    // AppDir root and AppRun runs the first one (the Studio's, `studio %f`) with the user's
+    // arguments, so `--version` / `run` / `capture` / `quit` broke in 0.5.0 (W126).
+    assert_eq!(c.matches(dest).count(), 2, "deb + rpm");
+    let a = &c[c.find("[package.metadata.packager.appimage]").unwrap()..];
+    let a = &a[..a.find("[package.metadata.generate-rpm]").unwrap()];
+    assert!(
+        !a.contains("studio.desktop\""),
+        "the AppImage ships no Studio entry"
+    );
 }
 
 #[test]

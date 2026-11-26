@@ -209,6 +209,15 @@ jobs:
             find "$RUNNER_TEMP/squashfs-root" -name "$lib.so*" | grep -q . || { echo "::error::the AppImage lacks $lib (X11 start panics without it)"; exit 1; }
           done
           test -f "$RUNNER_TEMP/squashfs-root/usr/share/metainfo/com.opencircle.app.metainfo.xml"
+          # W126: AppRun runs the first *.desktop in the AppDir root with the user's arguments. A second
+          # entry (the Studio's `Exec=opencircle studio %f`) hijacked every argument in 0.5.0. The CLI is
+          # a frozen contract: the AppImage must run the main binary, arguments unchanged.
+          [ "$(ls "$RUNNER_TEMP"/squashfs-root/*.desktop | wc -l)" = 1 ] || { echo "::error::the AppImage root must hold exactly one desktop file (AppRun runs the first)"; ls "$RUNNER_TEMP"/squashfs-root/*.desktop; exit 1; }
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          # The extracted AppRun is what picks the Exec (no FUSE needed); neither command opens a window.
+          apprun="$RUNNER_TEMP/squashfs-root/AppRun"
+          [ "$("$apprun" --version)" = "$version" ] || { echo "::error::AppImage --version is not $version"; exit 1; }
+          "$apprun" run x 2>&1 | grep -q 'unknown action' || { echo "::error::AppImage did not pass 'run x' to the main binary"; exit 1; }
           echo "bundled libraries: $(find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' | wc -l)"
           find "$RUNNER_TEMP/squashfs-root/usr/lib" -name '*.so*' -printf '%f\n' | sort | head -100
 
