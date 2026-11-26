@@ -4597,6 +4597,40 @@ fn w108_the_narrow_colour_popover_has_the_custom_colour_too() {
 /// pressing and dragging known local points on the square and hue bar puts the handle right under
 /// the pointer.
 #[test]
+fn w117_studio_magnifier_options_enable_colour_stroke_outline_zoom_and_shape() {
+    use crate::features::snip::screens::options_row::can;
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Magnifier)));
+    let e = s.editor.as_ref().unwrap();
+    let c = can(e, Tool::Magnifier);
+    assert!(c.colour && c.stroke && c.outline && !c.fill && !c.opacity);
+    // Default 1280 width: Outline inline, tool-specific groups in More (tool_group)
+    let bar = options_bar::view(&s, e);
+    let words = crate::shared::kit::testing::shot::texts(bar);
+    assert!(
+        words.iter().any(|w| w == "Outline"),
+        "missing Outline: {words:?}"
+    );
+    let more_words = crate::shared::kit::testing::shot::texts(options_bar::tool_group(e));
+    for expected in ["2×", "3×", "4×"] {
+        assert!(
+            more_words.iter().any(|w| w == expected),
+            "missing {expected} in More: {more_words:?}"
+        );
+    }
+    // Wide window: 2×/3×/4× shown inline on the bar
+    let _ = s.update(Msg::Resized(Size::new(1600.0, 820.0)));
+    let wide = options_bar::view(&s, s.editor.as_ref().unwrap());
+    let wide_words = crate::shared::kit::testing::shot::texts(wide);
+    for expected in ["Outline", "2×", "3×", "4×"] {
+        assert!(
+            wide_words.iter().any(|w| w == expected),
+            "missing {expected} inline: {wide_words:?}"
+        );
+    }
+}
+
+#[test]
 fn w117_studio_colour_picker_puts_handle_under_pointer() {
     use crate::shared::kit::testing::shot;
     use crate::shared::kit::tokens::space;

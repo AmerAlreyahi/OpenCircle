@@ -51,6 +51,8 @@ fn w113_2_a_drawing_tool_restyles_only_a_selection_of_its_own_kind() {
             Shape::Magnifier {
                 at: a,
                 radius: 30.0,
+                zoom: 2.0,
+                kind: magnifier::Kind::Circle,
             },
         ),
         (

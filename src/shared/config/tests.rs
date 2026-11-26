@@ -1982,3 +1982,42 @@ fn w114_old_soft_config_maps_to_blur_look_only_and_new_soft_round_trips() {
     let e = crate::features::snip::annotate::Annotator::restored(img, 1.0, fresh.editor);
     assert_eq!(e.blur_style, Style::Soft);
 }
+
+#[test]
+fn w117_magnifier_config_keys_round_trip_validate_and_stay_additive() {
+    use crate::features::snip::annotate::magnifier::Kind;
+
+    let default_toml = toml::to_string_pretty(&Config::default()).unwrap();
+    for key in ["magnifier_outline", "magnifier_zoom", "magnifier_shape"] {
+        assert!(!default_toml.contains(key), "default omits {key}");
+    }
+
+    let mut c = Config::default();
+    c.editor.magnifier_outline = Some(false);
+    c.editor.magnifier_zoom = Some(4);
+    c.editor.magnifier_shape = Some(Kind::RoundedSquare);
+    let saved = toml::to_string_pretty(&c).unwrap();
+    let (back, w) = Config::parse(&saved);
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(
+        (
+            back.editor.magnifier_outline,
+            back.editor.magnifier_zoom,
+            back.editor.magnifier_shape,
+        ),
+        (Some(false), Some(4), Some(Kind::RoundedSquare))
+    );
+
+    let (bad, w) = Config::parse(
+        r#"[editor]
+magnifier_outline = 7
+magnifier_zoom = 5
+magnifier_shape = "star"
+"#,
+    );
+    assert_eq!(bad.editor, EditorConfig::default());
+    for key in ["magnifier_outline", "magnifier_zoom", "magnifier_shape"] {
+        let key = format!("editor.{key}");
+        assert!(w.iter().any(|m| m.starts_with(&key)), "{key}: {w:?}");
+    }
+}

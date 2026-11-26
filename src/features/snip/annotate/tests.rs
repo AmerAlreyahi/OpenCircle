@@ -923,10 +923,95 @@ fn magnifier_shows_the_centre_zoomed() {
     let lens = item(Shape::Magnifier {
         at: pt(50.0, 50.0),
         radius: 30.0,
+        zoom: 2.0,
+        kind: magnifier::Kind::Circle,
     });
     let out = render(&doc_with(img, vec![lens]));
     assert_eq!(px(&out, 60, 50), [255; 4]);
     assert_eq!(px(&out, 40, 50), [0, 0, 0, 255]);
+}
+
+#[test]
+fn w117_magnifier_controls_zoom_shape_outline_colour_and_memory() {
+    // Left of x=50 is dark, right of x=50 is bright, and x=62.. is green so 2x vs 4x differs
+    // at x=75 (2x reads x=50+25/2=62.5 -> green; 4x reads x=50+25/4=56.25 -> bright white).
+    let img = image_of(120, 120, |x, _| {
+        if x < 50 {
+            [20, 20, 20, 255]
+        } else if x < 60 {
+            [240, 240, 240, 255]
+        } else {
+            [40, 200, 60, 255]
+        }
+    });
+
+    // 1. Zoom 2x vs 4x
+    let mut e = Annotator::restored(img.clone(), 1.0, EditorConfig::default());
+    e.studio = true;
+    e.update(Message::Tool(Tool::Magnifier));
+    assert!(e.magnifier_outline, "outline defaults on for magnifier");
+    assert!(!e.outline, "other shapes outline stays off");
+    assert_eq!(e.magnifier_zoom, 2);
+    assert_eq!(e.magnifier_shape, magnifier::Kind::Circle);
+
+    drag(&mut e, pt(50.0, 60.0), &[], pt(80.0, 60.0));
+    let out_2x = render(&e.doc);
+    let p2 = px(&out_2x, 74, 60);
+    assert!(p2[1] > 160 && p2[0] < 80, "2x reads green band: {p2:?}");
+
+    // Restyle selected magnifier to 4x, rounded square, custom colour, outline off -> on
+    e.update(Message::MagnifierZoom(4));
+    let out_4x = render(&e.doc);
+    let p4 = px(&out_4x, 74, 60);
+    assert!(
+        p4[0] > 200 && p4[1] > 200 && p4[2] > 200,
+        "4x reads white band: {p4:?}"
+    );
+
+    // 2. Circle vs Rounded square: corner at (+24, +24) is outside circle (dist 33.9 > 30)
+    // but inside rounded square (r=30, corner_r=8.4 -> corner dist inside).
+    let corner_circle = px(&out_4x, 74, 84);
+    assert!(
+        corner_circle[1] > 160 && corner_circle[0] < 80,
+        "circle leaves corner untouched (green): {corner_circle:?}"
+    );
+    e.update(Message::MagnifierShape(magnifier::Kind::RoundedSquare));
+    let out_sq = render(&e.doc);
+    let corner_sq = px(&out_sq, 74, 84);
+    assert!(
+        corner_sq[0] > 200 && corner_sq[1] > 200 && corner_sq[2] > 200,
+        "rounded square magnifies corner into white band: {corner_sq:?}"
+    );
+
+    // 3. Outline colour and toggle off
+    let blue = [30, 90, 230, 255];
+    e.update(Message::Colour(blue));
+    let out_blue = render(&e.doc);
+    let rim_on = px(&out_blue, 80, 60);
+    assert!(
+        rim_on[2] > 180 && rim_on[0] < 80,
+        "outline uses chosen colour: {rim_on:?}"
+    );
+
+    e.update(Message::Outline(false));
+    let out_no_rim = render(&e.doc);
+    let rim_off = px(&out_no_rim, 80, 60);
+    assert!(
+        rim_off[2] < 120,
+        "outline off removes coloured rim: {rim_off:?}"
+    );
+
+    // 4. Remembered across sessions (without leaking into Rect outline)
+    e.update(Message::Deselect);
+    e.update(Message::Outline(false));
+    e.update(Message::MagnifierZoom(3));
+    e.update(Message::MagnifierShape(magnifier::Kind::RoundedSquare));
+    assert!(!e.outline, "Rect outline untouched");
+    let saved = e.remembered();
+    let next = Annotator::restored(img, 1.0, saved);
+    assert!(!next.magnifier_outline);
+    assert_eq!(next.magnifier_zoom, 3);
+    assert_eq!(next.magnifier_shape, magnifier::Kind::RoundedSquare);
 }
 
 // ---- editor: every tool, undo / redo -------------------------------------------

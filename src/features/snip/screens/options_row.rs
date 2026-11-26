@@ -45,7 +45,11 @@ pub(crate) fn shown(e: &Annotator) -> Shown {
         None => Shown {
             colour: Some(e.colour),
             stroke: e.stroke,
-            outline: e.outline,
+            outline: if base_tool(e) == Tool::Magnifier {
+                e.magnifier_outline
+            } else {
+                e.outline
+            },
             fill: e.fill,
         },
     }
@@ -92,6 +96,7 @@ pub(crate) fn can(e: &Annotator, tool: Tool) -> Can {
             | Tool::Pen
             | Tool::Highlighter
             | Tool::Step
+            | Tool::Magnifier
     );
     Can {
         colour: liney || matches!(tool, Tool::Text | Tool::Callout | Tool::Redact),
@@ -99,7 +104,7 @@ pub(crate) fn can(e: &Annotator, tool: Tool) -> Can {
         opacity: false,
         outline: matches!(
             tool,
-            Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow | Tool::Callout
+            Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow | Tool::Callout | Tool::Magnifier
         ),
         fill: fills_inside(tool),
     }
@@ -310,6 +315,53 @@ pub(crate) fn own_groups_with<'a>(
             }
             o
         }
+        Tool::Magnifier => {
+            let zooms = group(
+                [(2u8, "2×"), (3, "3×"), (4, "4×")]
+                    .into_iter()
+                    .map(|(z, label)| {
+                        text_cell(
+                            label,
+                            e.magnifier_zoom == z,
+                            Some(Message::MagnifierZoom(z)),
+                        )
+                    })
+                    .collect(),
+                false,
+            );
+            let shapes = [
+                (
+                    crate::features::snip::annotate::magnifier::Kind::Circle,
+                    info(Tool::Ellipse).icon,
+                    t!(sn_mag_circle),
+                ),
+                (
+                    crate::features::snip::annotate::magnifier::Kind::RoundedSquare,
+                    info(Tool::Rect).icon,
+                    t!(sn_mag_square),
+                ),
+            ];
+            let shape_group = group(
+                shapes
+                    .into_iter()
+                    .map(|(kind, icon, words)| {
+                        let cell = glyph_cell(
+                            icon,
+                            e.magnifier_shape == kind,
+                            Some(Message::MagnifierShape(kind)),
+                        );
+                        hint(
+                            cell,
+                            words,
+                            Why::Icon,
+                            crate::shared::kit::option_bar::tips(),
+                        )
+                    })
+                    .collect(),
+                false,
+            );
+            vec![zooms, shape_group]
+        }
         Tool::Eraser => {
             let at = ERASER_SIZES.iter().position(|&s| s == e.eraser);
             vec![
@@ -503,6 +555,19 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
             g
         }
         Tool::Redact => vec![group(vec![caption(t!(sn_uses_colour))], false)],
+        Tool::Magnifier => {
+            let now = shown(e);
+            let mut g = vec![
+                stroke(e, true, true),
+                toggle(
+                    t!(sn_outline),
+                    now.outline,
+                    Some(Message::Outline(!now.outline)),
+                ),
+            ];
+            g.extend(own_groups(e, Tool::Magnifier));
+            g
+        }
         Tool::Eraser => own_groups(e, Tool::Eraser),
         _ => Vec::new(),
     };

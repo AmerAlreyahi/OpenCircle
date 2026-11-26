@@ -129,11 +129,15 @@ pub enum Shape {
         text: String,
         size: f32,
     },
-    /// Round lens over `at`: what is under it, zoomed.
+    /// Lens over `at`: what is under it, zoomed.
     Magnifier {
         #[serde(with = "pt")]
         at: Point,
         radius: f32,
+        #[serde(default = "magnifier::default_zoom")]
+        zoom: f32,
+        #[serde(default)]
+        kind: magnifier::Kind,
     },
     /// A picture pasted in (Studio): a movable object between corners `a`
     /// and `b`; its opacity is the item colour's alpha; `lock` keeps its
@@ -240,7 +244,9 @@ impl Shape {
             Shape::Callout { tip, at, size, .. } => {
                 (*tip, *at, *size) = (f(*tip), f(*at), (*size * k).max(6.0))
             }
-            Shape::Magnifier { at, radius } => (*at, *radius) = (f(*at), (*radius * k).max(8.0)),
+            Shape::Magnifier { at, radius, .. } => {
+                (*at, *radius) = (f(*at), (*radius * k).max(8.0))
+            }
         }
     }
 }
@@ -291,7 +297,7 @@ impl Item {
             } => Rectangle::new(*at, text::measure_styled(text, *size, *style, *wrap)),
             Shape::Label { at, text, size } => label::bubble(*at, text, *size),
             Shape::Pointer { at, radius } => pointer::frame(*at, *radius),
-            Shape::Step { at, radius, .. } | Shape::Magnifier { at, radius } => Rectangle::new(
+            Shape::Step { at, radius, .. } | Shape::Magnifier { at, radius, .. } => Rectangle::new(
                 *at - iced::Vector::new(*radius, *radius),
                 Size::new(2.0 * radius, 2.0 * radius),
             ),
@@ -1125,7 +1131,12 @@ pub fn paint_on(
                 text,
                 size,
             } => callout::paint(&mut layer, (*tip, *at), text, *size, c, ring),
-            Shape::Magnifier { at, radius } => magnifier::paint(&mut layer, *at, *radius, c, w),
+            Shape::Magnifier {
+                at,
+                radius,
+                zoom,
+                kind,
+            } => magnifier::paint(&mut layer, *at, *radius, *zoom, *kind, c, w, item.outline),
             Shape::Picture { a, b, pic, .. } => {
                 paint_picture(&mut layer, span(&[*a, *b]), pic, c[3])
             }

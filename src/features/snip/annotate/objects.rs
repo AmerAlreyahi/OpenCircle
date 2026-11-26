@@ -58,6 +58,9 @@ pub(crate) struct DrawStyle {
     pub(super) width: Width,
     pub(super) stroke: f32,
     pub(super) outline: bool,
+    pub(super) magnifier_outline: bool,
+    pub(super) magnifier_zoom: u8,
+    pub(super) magnifier_shape: super::magnifier::Kind,
     pub(super) fill: bool,
     pub(super) text_size: f32,
     pub(super) text_style: TextStyle,
@@ -109,6 +112,7 @@ pub(super) mod touch {
     pub const BLUR: u8 = 8;
     pub const OUTLINE: u8 = 16;
     pub const FILL: u8 = 32;
+    pub const MAGNIFIER: u8 = 64;
 
     use super::super::Message as M;
 
@@ -121,6 +125,7 @@ pub(super) mod touch {
             M::BlurStyle(_) => BLUR,
             M::Outline(_) => OUTLINE,
             M::Fill(_) => FILL,
+            M::MagnifierZoom(_) | M::MagnifierShape(_) => MAGNIFIER,
             M::Preset(_) => COLOUR | STROKE | TEXT,
             _ => 0,
         }
@@ -773,6 +778,9 @@ impl Annotator {
             width: self.width,
             stroke: self.stroke,
             outline: self.outline,
+            magnifier_outline: self.magnifier_outline,
+            magnifier_zoom: self.magnifier_zoom,
+            magnifier_shape: self.magnifier_shape,
             fill: self.fill,
             text_size: self.text_size,
             text_style: self.text_style,
@@ -793,6 +801,9 @@ impl Annotator {
         self.width = d.width;
         self.stroke = d.stroke;
         self.outline = d.outline;
+        self.magnifier_outline = d.magnifier_outline;
+        self.magnifier_zoom = d.magnifier_zoom;
+        self.magnifier_shape = d.magnifier_shape;
         self.fill = d.fill;
         self.text_size = d.text_size;
         self.text_style = d.text_style;
@@ -827,6 +838,11 @@ impl Annotator {
                     }
                     Shape::Callout { size, .. } | Shape::Label { size, .. } => {
                         self.text_size = size * z / 0.75
+                    }
+                    Shape::Magnifier { zoom, kind, .. } => {
+                        self.magnifier_outline = item.outline;
+                        self.magnifier_zoom = (zoom.round() as u8).clamp(2, 4);
+                        self.magnifier_shape = *kind;
                     }
                     _ => {}
                 }
@@ -895,6 +911,9 @@ impl Annotator {
                     item.shape = full.shape.clone();
                 }
                 Shape::Blur { .. } if t & touch::BLUR != 0 => item.shape = full.shape.clone(),
+                Shape::Magnifier { .. } if t & touch::MAGNIFIER != 0 => {
+                    item.shape = full.shape.clone();
+                }
                 Shape::Step { .. } | Shape::Pointer { .. } if t & touch::STROKE != 0 => {
                     item.shape = full.shape.clone();
                     if matches!(before.shape, Shape::Pointer { .. }) {

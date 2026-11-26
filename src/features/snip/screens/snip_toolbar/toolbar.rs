@@ -616,6 +616,7 @@ pub fn row_need(e: &Annotator) -> f32 {
     match crate::features::snip::screens::options_row::base_tool(e) {
         Tool::Blur => ROW_WIDE,
         Tool::Text => 860.0,
+        Tool::Magnifier => 760.0,
         _ => 620.0,
     }
 }
@@ -1579,6 +1580,38 @@ mod tests {
 
     /// W117: Snip's Hide row has Light / Medium / Strong and NO Custom strength slider (the slider
     /// is Studio-only), and its style swatches are fixed (identical for any captured picture).
+    #[test]
+    fn w117_snip_magnifier_row_has_outline_stroke_zoom_and_shape_controls() {
+        use crate::features::snip::annotate::magnifier::Kind;
+        use crate::features::snip::screens::options_row::snip_row_stops;
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Magnifier));
+        let words = row_texts(&e).expect("magnifier has an options row");
+        assert!(words.iter().any(|w| w == "Outline"), "{words:?}");
+        for z in ["2×", "3×", "4×"] {
+            assert!(words.iter().any(|w| w == z), "missing {z}: {words:?}");
+        }
+        let stops = snip_row_stops(&e);
+        assert!(
+            stops.iter().any(|m| matches!(m, Message::Width(_))),
+            "stroke dots: {stops:?}"
+        );
+        assert!(
+            stops.iter().any(|m| matches!(m, Message::Outline(false))),
+            "outline toggle: {stops:?}"
+        );
+        assert!(
+            stops.iter().any(|m| matches!(m, Message::MagnifierZoom(3))),
+            "zoom 3x: {stops:?}"
+        );
+        assert!(
+            stops
+                .iter()
+                .any(|m| matches!(m, Message::MagnifierShape(Kind::RoundedSquare))),
+            "rounded square: {stops:?}"
+        );
+    }
+
     #[test]
     fn w117_snip_hide_row_has_no_strength_slider_and_fixed_swatches() {
         use crate::shared::kit::testing::shot;

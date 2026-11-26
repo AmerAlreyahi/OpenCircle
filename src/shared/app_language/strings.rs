@@ -1731,6 +1731,10 @@ strings! {
         | "تسليط الضوء";
     tl_magnify: "Magnify"
         | "تكبير";
+    sn_mag_circle: "Circle"
+        | "دائرة";
+    sn_mag_square: "Rounded square"
+        | "مربع مستدير";
     grp_shapes: "Shapes"
         | "الأشكال";
     grp_draw: "Draw"

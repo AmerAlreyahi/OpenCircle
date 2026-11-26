@@ -25,7 +25,7 @@ mod label;
 mod legend;
 mod lines;
 mod live_tiles;
-mod magnifier;
+pub mod magnifier;
 mod objects;
 mod pen;
 mod pointer;
@@ -400,8 +400,12 @@ pub enum Message {
     Menu(Menu),
     Colour([u8; 4]),
     Width(Width),
-    /// A shape's, arrow's or callout's outline (its halo) on / off.
+    /// A shape's, arrow's, callout's or magnifier's outline on / off.
     Outline(bool),
+    /// Magnifier's magnification factor (`magnifier::ZOOMS`).
+    MagnifierZoom(u8),
+    /// Magnifier's lens shape (circle or rounded square).
+    MagnifierShape(magnifier::Kind),
     /// A rectangle's or ellipse's tint inside on / off.
     Fill(bool),
     /// The blur brush's size: `None` = Auto (the text line it starts on).
@@ -640,6 +644,10 @@ pub struct Annotator {
     /// New shapes, arrows and callouts get an outline / rectangles and
     /// ellipses a tint (both off by default, owner 2026-10-31).
     pub(crate) outline: bool,
+    /// Magnifier's own outline toggle (on by default), zoom factor (2/3/4) and lens shape.
+    pub(crate) magnifier_outline: bool,
+    pub(crate) magnifier_zoom: u8,
+    pub(crate) magnifier_shape: magnifier::Kind,
     pub(crate) fill: bool,
     /// The Text tool's font size (display px; a weight sets it too) and style.
     pub(crate) text_size: f32,
@@ -858,6 +866,12 @@ impl Annotator {
             row: None,
             more: Default::default(),
             outline: saved.outline.unwrap_or(false),
+            magnifier_outline: saved.magnifier_outline.unwrap_or(true),
+            magnifier_zoom: saved
+                .magnifier_zoom
+                .filter(|z| magnifier::ZOOMS.contains(z))
+                .unwrap_or(magnifier::DEFAULT_ZOOM),
+            magnifier_shape: saved.magnifier_shape.unwrap_or_default(),
             fill: saved.fill.unwrap_or(false),
             text_size: saved.text_size.map_or(width.font(), f32::from),
             text_style: {
@@ -973,6 +987,15 @@ impl Annotator {
         (self.tool, self.colour, self.width, self.stroke) =
             (fresh.tool, fresh.colour, fresh.width, fresh.stroke);
         (self.last, self.outline, self.fill) = (fresh.last, fresh.outline, fresh.fill);
+        (
+            self.magnifier_outline,
+            self.magnifier_zoom,
+            self.magnifier_shape,
+        ) = (
+            fresh.magnifier_outline,
+            fresh.magnifier_zoom,
+            fresh.magnifier_shape,
+        );
         (self.text_size, self.text_style, self.hex) =
             (fresh.text_size, fresh.text_style, fresh.hex);
         (self.assist, self.blur_size, self.blur_cell) =
@@ -1014,6 +1037,9 @@ impl Annotator {
             blur_style: Some(self.blur_style),
             blur_shape: Some(self.blur_shape),
             blur_custom: self.blur_custom,
+            magnifier_outline: Some(d.magnifier_outline),
+            magnifier_zoom: Some(d.magnifier_zoom),
+            magnifier_shape: Some(d.magnifier_shape),
         }
     }
 
@@ -1173,7 +1199,31 @@ impl Annotator {
                 return Some(Output::OpenStudio);
             }
             Message::Outline(on) => {
-                self.outline = on;
+                let mag = self.tool == Tool::Magnifier
+                    || (self.tool == Tool::Select
+                        && self
+                            .doc
+                            .selected
+                            .and_then(|i| self.doc.items.get(i))
+                            .is_some_and(|item| matches!(item.shape, Shape::Magnifier { .. })));
+                if mag {
+                    self.magnifier_outline = on;
+                    if self.studio && !self.doc.selection().is_empty() {
+                        self.outline = on;
+                    }
+                } else {
+                    self.outline = on;
+                }
+                self.restyle();
+            }
+            Message::MagnifierZoom(zoom) => {
+                if magnifier::ZOOMS.contains(&zoom) {
+                    self.magnifier_zoom = zoom;
+                    self.restyle();
+                }
+            }
+            Message::MagnifierShape(kind) => {
+                self.magnifier_shape = kind;
                 self.restyle();
             }
             Message::Fill(on) => {
@@ -2493,6 +2543,8 @@ impl Annotator {
             Tool::Magnifier => Shape::Magnifier {
                 at: p,
                 radius: 60.0 / z,
+                zoom: f32::from(self.magnifier_zoom),
+                kind: self.magnifier_shape,
             },
         };
         let width = match self.tool {
@@ -2503,7 +2555,10 @@ impl Annotator {
             shape,
             colour: self.colour,
             width,
-            outline: self.outline,
+            outline: match self.tool {
+                Tool::Magnifier => self.magnifier_outline,
+                _ => self.outline,
+            },
             fill: self.fill,
             hidden: false,
         }
@@ -2548,6 +2603,12 @@ impl Annotator {
                     if let Some(w) = editor.blur_size {
                         *size = w.brush() / z;
                     }
+                }
+                Shape::Magnifier { zoom, kind, .. } => {
+                    *zoom = f32::from(editor.magnifier_zoom);
+                    *kind = editor.magnifier_shape;
+                    new.outline = editor.magnifier_outline;
+                    new.width = editor.stroke / z;
                 }
                 _ => new.width = editor.stroke / z,
             }

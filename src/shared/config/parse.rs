@@ -210,6 +210,21 @@ impl Config {
                 n.map_or(Ok(()), |n| within(1..=64, " px")(&n))
             });
             c.editor.eraser_whole = get(t, p, "eraser_whole", None, &mut w);
+            c.editor.magnifier_outline = get(t, p, "magnifier_outline", None, &mut w);
+            c.editor.magnifier_zoom = get_checked(
+                t,
+                p,
+                "magnifier_zoom",
+                None,
+                &mut w,
+                |n: &Option<u8>| match n
+                    .is_none_or(|z| crate::features::snip::annotate::magnifier::ZOOMS.contains(&z))
+                {
+                    true => Ok(()),
+                    false => Err("expected 2, 3 or 4".into()),
+                },
+            );
+            c.editor.magnifier_shape = get(t, p, "magnifier_shape", None, &mut w);
         }
         if root.get("ai").is_some_and(|v| !v.is_table()) {
             w.push(format!("ai: expected a table; using defaults{AI_OFF}"));

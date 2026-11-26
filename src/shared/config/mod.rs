@@ -1175,6 +1175,15 @@ pub struct EditorConfig {
     pub blur_shape: Option<crate::features::snip::annotate::blur::Kind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blur_custom: Option<u8>,
+    /// Magnifier's outline on / off (`None`: on by default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub magnifier_outline: Option<bool>,
+    /// Magnifier's zoom factor (`2`, `3`, or `4`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub magnifier_zoom: Option<u8>,
+    /// Magnifier's lens shape (`circle` or `rounded_square`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub magnifier_shape: Option<crate::features::snip::annotate::magnifier::Kind>,
 }
 
 /// How many recent colours the colour picker keeps (`editor.recent`).
@@ -1216,6 +1225,9 @@ impl Default for EditorConfig {
             blur_style: None,
             blur_shape: None,
             blur_custom: None,
+            magnifier_outline: None,
+            magnifier_zoom: None,
+            magnifier_shape: None,
         }
     }
 }
