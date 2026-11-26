@@ -121,11 +121,11 @@ fn w111_4_the_pen_stroke_runs_through_the_pointer_path() {
         panic!("a pen stroke")
     };
     assert_eq!(points.len(), path.len(), "no point dropped");
-    let base = e.base_pixels();
+    let flat = render(&e.doc).rgba;
     let c = e.colour;
     for p in &path {
         let at = (p.y as usize * 600 + p.x as usize) * 4;
-        assert_eq!(base[at..at + 3], c[..3], "the stroke covers {p:?}");
+        assert_eq!(flat[at..at + 3], c[..3], "the stroke covers {p:?}");
     }
 }
 

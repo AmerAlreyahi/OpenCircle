@@ -454,7 +454,10 @@ impl Edit {
                 doc.items = after.clone();
                 doc.selected = None;
             }
-            Edit::Pixels(p) => p.write(&mut doc.image, &p.after),
+            Edit::Pixels(p) => {
+                p.write(&mut doc.image, &p.after);
+                doc.image_gen = doc.image_gen.wrapping_add(1);
+            }
             Edit::Seq(all) => all.iter().for_each(|e| e.apply(doc)),
             Edit::Canvas {
                 old,
@@ -466,6 +469,7 @@ impl Edit {
                     true => (**old).clone(),
                     false => placed(old, *size, *by),
                 };
+                doc.image_gen = doc.image_gen.wrapping_add(1);
                 doc.shift(*by);
             }
         }
@@ -494,6 +498,8 @@ pub struct Document {
     /// The picture's one secret (Hide's texture, never shown): OS-random per
     /// document, so every Hide in it matches and no two pictures share a texture.
     pub seed: u64,
+    /// Incremented whenever image pixels or dimensions change via edits (Edit::Pixels / Edit::Canvas).
+    pub image_gen: u64,
 }
 
 impl Document {
@@ -509,6 +515,7 @@ impl Document {
             undone: Vec::new(),
             made: 0,
             seed: blur::seed(),
+            image_gen: 0,
         }
     }
 

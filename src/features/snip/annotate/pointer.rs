@@ -6,7 +6,7 @@ use super::arrow;
 use super::document::{Layer, halo, span};
 
 /// Where the arrow comes from (up-left of the ring) and where it stops.
-fn arrow_ends(at: Point, radius: f32) -> (Point, Point) {
+pub(super) fn arrow_ends(at: Point, radius: f32) -> (Point, Point) {
     let dir = Vector::new(-0.6, -0.8);
     (at + dir * (radius * 3.6), at + dir * (radius * 1.3))
 }

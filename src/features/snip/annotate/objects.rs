@@ -228,7 +228,7 @@ impl Annotator {
     fn select_set(&mut self, all: &[usize]) {
         self.commit();
         self.doc.select(all);
-        self.refresh();
+        self.sync_layers();
     }
 
     pub(super) fn select_all(&mut self) {
@@ -260,7 +260,7 @@ impl Annotator {
             }
             self.doc.items = after;
             self.doc.select(sel);
-            self.refresh();
+            self.sync_layers();
             return;
         }
         if after != self.doc.items {
@@ -269,7 +269,7 @@ impl Annotator {
                 .map(Item::frame)
                 .collect();
             let Ok(grow) = self.grow_for(&frames) else {
-                self.refresh(); // refused: nothing changed
+                self.sync_layers(); // refused: nothing changed
                 return;
             };
             let edit = Edit::Items(before, after);
@@ -279,7 +279,7 @@ impl Annotator {
             });
         }
         self.doc.select(sel);
-        self.refresh();
+        self.sync_layers();
     }
 
     fn picked(&self) -> Vec<Item> {
@@ -421,7 +421,7 @@ impl Annotator {
             ..before.clone()
         };
         self.doc.exec(Edit::Change(i, before, after));
-        self.refresh();
+        self.sync_layers();
     }
 
     /// Dragging an Objects row: item `from` goes to place `to` (one undo step;
@@ -735,9 +735,7 @@ impl Annotator {
         }
         if items != self.doc.items {
             self.doc.items = items;
-            // ponytail: the whole picture is repainted per move; paint only the
-            // union of the old and new boxes if a big document drags slowly.
-            self.refresh();
+            self.sync_layers();
         }
     }
 
@@ -753,7 +751,7 @@ impl Annotator {
     pub(super) fn cancel_group(&mut self) {
         if let Some(g) = self.group.take() {
             self.doc.items = g.before;
-            self.refresh();
+            self.sync_layers();
         }
     }
 

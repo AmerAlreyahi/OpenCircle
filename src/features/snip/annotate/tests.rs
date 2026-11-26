@@ -1526,8 +1526,9 @@ fn live_pixels(e: &Annotator) -> (Rectangle, Vec<u8>) {
     let image::Handle::Rgba { pixels, .. } = handle else {
         panic!()
     };
-    // what the window shows: the layer over the picture under it
-    let base = e.base_pixels();
+    // what the window shows: the layer over the committed picture under it (base + vector tail)
+    let under = render(&e.doc).rgba;
+    let base = under;
     let width = e.doc.image.width as usize;
     let shown = pixels
         .chunks(4)

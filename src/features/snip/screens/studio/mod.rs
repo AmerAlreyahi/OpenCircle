@@ -2612,11 +2612,9 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
         let (out, (bw, bh), px) = (slot.clone(), (*width, *height), pixels.clone());
         std::thread::spawn(move || {
             let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
-            let small =
-                ::image::ImageBuffer::<::image::Rgba<u8>, &[u8]>::from_raw(bw, bh, px.as_ref())
-                    .map(|src| ::image::imageops::thumbnail(&src, want, th));
-            if let (Some(small), Ok(mut out)) = (small, out.lock()) {
-                *out = Some(image::Handle::from_rgba(want, th, small.into_raw()));
+            let small = annotate::downsample(px.as_ref(), bw, bh, want, th);
+            if let Ok(mut out) = out.lock() {
+                *out = Some(image::Handle::from_rgba(want, th, small));
             }
         });
         m.pending = Some((want, slot));

@@ -25,6 +25,7 @@ mod label;
 mod legend;
 mod lines;
 mod live_tiles;
+mod live_vector;
 pub mod magnifier;
 mod objects;
 mod pen;
@@ -815,6 +816,15 @@ pub struct Annotator {
     touch: u8,
     /// Live layers painted so far (the tests count them).
     paints: std::cell::Cell<usize>,
+    /// Visible prefix items currently baked into `base` (plus patch).
+    baked_items: Vec<Item>,
+    baked_view: Rectangle,
+    baked_image_gen: u64,
+    baked_seed: u64,
+    baked_legend: bool,
+    base_ready: bool,
+    /// Bumped whenever the committed vector tail changes (cache key for canvas).
+    vector_gen: u64,
 }
 
 impl Annotator {
@@ -962,10 +972,24 @@ impl Annotator {
             stash: None,
             touch: 0,
             paints: std::cell::Cell::new(0),
+            baked_items: Vec::new(),
+            baked_view: Rectangle::default(),
+            baked_image_gen: 0,
+            baked_seed: 0,
+            baked_legend: false,
+            base_ready: false,
+            vector_gen: 0,
             saved,
         };
         match base {
-            Some(base) => editor.base = base,
+            Some(base) => {
+                editor.base = base;
+                editor.baked_view = editor.doc.view();
+                editor.baked_image_gen = editor.doc.image_gen;
+                editor.baked_seed = editor.doc.seed;
+                editor.baked_legend = false;
+                editor.base_ready = true;
+            }
             None => editor.refresh(),
         }
         editor
@@ -1346,7 +1370,7 @@ impl Annotator {
                         self.doc.redo()
                     }
                 {
-                    self.refresh();
+                    self.sync_layers();
                 }
                 self.undid = true;
             }
@@ -1381,7 +1405,7 @@ impl Annotator {
                 if let Some(i) = self.doc.selected.filter(|&i| i < self.doc.items.len()) {
                     let item = self.doc.items[i].clone();
                     self.doc.exec(Edit::Delete(i, item));
-                    self.refresh();
+                    self.sync_layers();
                 }
             }
             Message::ScreenTool(tool) => {
@@ -1585,14 +1609,14 @@ impl Annotator {
         if let Some(before) = self.drag_items.take() {
             let after = std::mem::replace(&mut self.doc.items, before.clone());
             self.doc.exec(Edit::Items(before, after));
-            self.refresh();
+            self.sync_layers();
         }
         if let Some((i, before)) = self.drag_item.take()
             && i < self.doc.items.len()
         {
             let after = std::mem::replace(&mut self.doc.items[i], before.clone());
             self.doc.exec(Edit::Change(i, before, after));
-            self.refresh();
+            self.sync_layers();
         }
         self.remember_colour();
     }
@@ -1947,6 +1971,12 @@ impl Annotator {
             return;
         };
         pending.hidden = true;
+        let tail = self.vector_tail_start();
+        if idx >= tail && self.base_ready && self.baked_matches(tail, Some(idx)) {
+            self.vector_gen = self.vector_gen.wrapping_add(1);
+            self.update_live();
+            return;
+        }
         let can_patch = !matches!(
             self.doc.items[idx].shape,
             Shape::Spotlight { .. } | Shape::Blur { .. }
@@ -1989,11 +2019,13 @@ impl Annotator {
             Point::new(r.x() as f32, r.y() as f32),
             Size::new(r.width() as f32, r.height() as f32),
         );
+        let tail = self.vector_tail_start();
         let hide = self
             .pending
             .as_ref()
             .and_then(|p| p.index.filter(|_| p.hidden));
-        let layers: Vec<_> = (self.doc.items.iter().enumerate())
+        let prefix = &self.doc.items[..tail];
+        let layers: Vec<_> = (prefix.iter().enumerate())
             .map(|(i, item)| (item, Some(i) != hide && item.bounds().intersects(&r_rect)))
             .collect();
         let fits = |outer: Rectangle, inner: Rectangle| {
@@ -2002,7 +2034,7 @@ impl Annotator {
                 && inner.x + inner.width <= outer.x + outer.width
                 && inner.y + inner.height <= outer.y + outer.height
         };
-        let mag_clipped = (self.doc.items.iter().enumerate()).any(|(i, item)| {
+        let mag_clipped = (prefix.iter().enumerate()).any(|(i, item)| {
             if Some(i) == hide || item.hidden {
                 return false;
             }
@@ -2026,8 +2058,20 @@ impl Annotator {
         if mag_clipped {
             return false;
         }
+        let blur_clipped = (prefix.iter().enumerate()).any(|(i, item)| {
+            if Some(i) == hide || item.hidden || !matches!(item.shape, Shape::Blur { .. }) {
+                return false;
+            }
+            let Some(need) = item.bounds().intersection(&view) else {
+                return false;
+            };
+            need.intersects(&r_rect) && !fits(r_rect, need)
+        });
+        if blur_clipped {
+            return false;
+        }
         let mut excludes = document::excludes(
-            (self.doc.items.iter().enumerate())
+            (prefix.iter().enumerate())
                 .filter(|(i, _)| Some(*i) != hide)
                 .map(|(_, item)| item),
         );
@@ -2062,42 +2106,26 @@ impl Annotator {
         {
             let (dw, dh) = (*dw, *dh);
             let mut disp = disp_px.to_vec();
-            let sx = *bw as f32 / dw as f32;
-            let sy = *bh as f32 / dh as f32;
-            let dx0 = ((bx0 as f32 / sx).floor() as i32 - 1).max(0) as u32;
-            let dy0 = ((by0 as f32 / sy).floor() as i32 - 1).max(0) as u32;
-            let dx1 = (((bx0 + rw) as f32 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
-            let dy1 = (((by0 + rh) as f32 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
-            let disp_stride = dw as usize * 4;
-            for dy in dy0..dy1 {
-                let sy0 = ((dy as f32 * sy).floor() as usize).min(*bh as usize - 1);
-                let sy1 = (((dy + 1) as f32 * sy).ceil() as usize).clamp(sy0 + 1, *bh as usize);
-                for dx in dx0..dx1 {
-                    let sx0 = ((dx as f32 * sx).floor() as usize).min(*bw as usize - 1);
-                    let sx1 = (((dx + 1) as f32 * sx).ceil() as usize).clamp(sx0 + 1, *bw as usize);
-                    let (mut sr, mut sg, mut sb, mut sa, mut n) = (0u32, 0u32, 0u32, 0u32, 0u32);
-                    for y in sy0..sy1 {
-                        let row_off = y * base_stride;
-                        for x in sx0..sx1 {
-                            let o = row_off + x * 4;
-                            sr += u32::from(out[o]);
-                            sg += u32::from(out[o + 1]);
-                            sb += u32::from(out[o + 2]);
-                            sa += u32::from(out[o + 3]);
-                            n += 1;
-                        }
-                    }
-                    let d = dy as usize * disp_stride + dx as usize * 4;
-                    let half = n / 2;
-                    disp[d] = ((sr + half) / n) as u8;
-                    disp[d + 1] = ((sg + half) / n) as u8;
-                    disp[d + 2] = ((sb + half) / n) as u8;
-                    disp[d + 3] = ((sa + half) / n) as u8;
-                }
-            }
+            let sx = *bw as f64 / dw as f64;
+            let sy = *bh as f64 / dh as f64;
+            let dx0 = ((bx0 as f64 / sx).floor() as i32 - 1).max(0) as u32;
+            let dy0 = ((by0 as f64 / sy).floor() as i32 - 1).max(0) as u32;
+            let dx1 = (((bx0 + rw) as f64 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
+            let dy1 = (((by0 + rh) as f64 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
+            downsample_rect(&out, *bw, *bh, &mut disp, dw, dh, [dx0, dy0, dx1, dy1]);
             self.display = Some(image::Handle::from_rgba(dw, dh, disp));
         }
         self.base = image::Handle::from_rgba(*bw, *bh, out);
+        self.baked_items = (self.doc.items[..tail].iter().enumerate())
+            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
+            .map(|(_, item)| item.clone())
+            .collect();
+        self.baked_view = view;
+        self.baked_image_gen = self.doc.image_gen;
+        self.baked_seed = self.doc.seed;
+        self.baked_legend = false;
+        self.base_ready = true;
+        self.vector_gen = self.vector_gen.wrapping_add(1);
         true
     }
 
@@ -2346,7 +2374,7 @@ impl Annotator {
             self.cancel_group();
         } else if let Some((before, _)) = self.erasing.take() {
             self.doc.items = before;
-            self.refresh();
+            self.sync_layers();
         } else if let Some(drag) = self.area_drag.take() {
             (self.doc.crop, self.doc.items) = (Some(drag.start), drag.items);
             self.refresh();
@@ -2357,7 +2385,7 @@ impl Annotator {
                 .is_some_and(|p| !matches!(p.drag, Drag::Type))
         {
             self.pending = None;
-            self.refresh();
+            self.sync_layers();
         }
     }
 
@@ -2436,7 +2464,7 @@ impl Annotator {
         let r = self.eraser / 2.0 / self.zoom;
         if eraser::erase(&mut self.doc.items, from, p, r, self.eraser_whole) {
             self.doc.deselect();
-            self.refresh();
+            self.sync_layers();
         }
     }
 
@@ -2484,23 +2512,34 @@ impl Annotator {
                     }
                 ))
             );
+        let prev_tail = self.vector_tail_start();
+        let prev_all_baked = prev_tail == self.doc.items.len();
+        patch &= prev_all_baked;
+        let local_patchable = |shape: &Shape| {
+            !matches!(
+                shape,
+                Shape::Spotlight { .. }
+                    | Shape::Blur { .. }
+                    | Shape::Step { .. }
+                    | Shape::Redact { .. }
+            )
+        };
         let mut fast_area = match &edit {
-            Some(Edit::Insert(_, it)) if matches!(it.shape, Shape::Magnifier { .. }) => {
-                Some(it.bounds())
-            }
+            Some(Edit::Insert(_, it)) if local_patchable(&it.shape) => Some(it.bounds()),
             Some(Edit::Change(_, old, new))
-                if matches!(old.shape, Shape::Magnifier { .. })
-                    && matches!(new.shape, Shape::Magnifier { .. }) =>
+                if local_patchable(&old.shape) && local_patchable(&new.shape) =>
             {
                 Some(old.bounds().union(&new.bounds()))
             }
             _ => None,
         };
+        let mut grew = false;
         if let Some(edit) = edit {
             let grown = match &edit {
                 Edit::Insert(_, item) | Edit::Change(_, _, item) => self.grow_for(&[item.frame()]),
                 _ => Ok(None),
             };
+            grew = matches!(grown, Ok(Some(_)));
             patch &= matches!(grown, Ok(None));
             if !matches!(grown, Ok(None)) {
                 fast_area = None;
@@ -2513,14 +2552,36 @@ impl Annotator {
                 Err(()) => self.doc.exec(edit),
             }
         }
-        if patch && self.patch_over() {
+        if !grew && self.can_keep_base() {
+            self.vector_gen = self.vector_gen.wrapping_add(1);
             self.clear_live();
-        } else if let Some(area) = fast_area
-            && self.patch_base(area)
-        {
+        } else if patch && self.patch_over() {
+            if let Some(last) = self.doc.items.last().filter(|it| !it.hidden) {
+                self.baked_items.push(last.clone());
+            }
+            self.vector_gen = self.vector_gen.wrapping_add(1);
             self.clear_live();
+        } else if let Some(mut area) = fast_area {
+            let new_tail = self.vector_tail_start();
+            for item in self
+                .doc
+                .items
+                .iter()
+                .take(new_tail)
+                .skip(prev_tail)
+                .filter(|it| !it.hidden)
+            {
+                area = area.union(&item.bounds());
+            }
+            if prev_tail <= new_tail && self.patch_base(area) {
+                self.clear_live();
+            } else {
+                self.sync_layers();
+                self.clear_live();
+            }
         } else if repaint {
-            self.refresh();
+            self.sync_layers();
+            self.clear_live();
         } else {
             self.clear_live();
         }
@@ -2801,29 +2862,144 @@ impl Annotator {
                     self.drag_item = Some((i, before));
                 }
                 self.doc.items[i] = after;
-                self.refresh();
+                self.sync_layers();
             } else if after != before {
                 self.doc.exec(Edit::Change(i, before, after));
-                self.refresh();
+                self.sync_layers();
             }
         }
     }
 
-    /// Repaints the base (all items but a hidden pending one, the legend), then
-    /// the live layer.
+    /// Index in doc.items where the pure-vector tail begins: every item from this
+    /// index onward renders directly onto the canvas frame without touching `base` or
+    /// display. Any raster or pixel-reading item (or a Redact when a Blur exists
+    /// so Soft exterior rings stay exact) stays baked into `base`.
+    fn vector_tail_start_with(&self, has_legend: bool) -> usize {
+        if has_legend {
+            return self.doc.items.len();
+        }
+        let has_blur = self
+            .doc
+            .items
+            .iter()
+            .any(|item| !item.hidden && matches!(item.shape, Shape::Blur { .. }));
+        match self.doc.items.iter().rposition(|item| {
+            !item.hidden
+                && (!live_vector::supports(item)
+                    || (has_blur && matches!(item.shape, Shape::Redact { .. })))
+        }) {
+            Some(last) => last + 1,
+            None => 0,
+        }
+    }
+
+    pub(crate) fn vector_tail_start(&self) -> usize {
+        self.vector_tail_start_with(self.legend.is_some())
+    }
+
+    fn baked_matches(&self, tail: usize, hide: Option<usize>) -> bool {
+        let want = (self.doc.items[..tail].iter().enumerate())
+            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
+            .map(|(_, item)| item);
+        self.baked_items.iter().eq(want)
+    }
+
+    fn can_keep_base(&self) -> bool {
+        if !self.base_ready || self.bare() {
+            return false;
+        }
+        let legend = self.doc.legend_layout();
+        let tail = self.vector_tail_start_with(legend.is_some());
+        let hide = self
+            .pending
+            .as_ref()
+            .and_then(|p| p.index.filter(|_| p.hidden));
+        self.baked_view == self.doc.view()
+            && self.baked_image_gen == self.doc.image_gen
+            && self.baked_seed == self.doc.seed
+            && self.baked_legend == legend.is_some()
+            && self.baked_matches(tail, hide)
+    }
+
+    /// Updates display layers after an edit: skips repainting `base` and keeps display
+    /// intact whenever only the pure-vector tail changed.
+    pub(crate) fn sync_layers(&mut self) {
+        if self.can_keep_base() {
+            self.legend = self.doc.legend_layout();
+            self.vector_gen = self.vector_gen.wrapping_add(1);
+            self.update_live();
+            return;
+        }
+        self.refresh();
+    }
+
+    pub(crate) fn vector_gen(&self) -> u64 {
+        self.vector_gen
+    }
+
+    pub(crate) fn pending_hidden_index(&self) -> Option<usize> {
+        self.pending
+            .as_ref()
+            .and_then(|p| p.index.filter(|_| p.hidden))
+    }
+
+    pub(crate) fn draw_committed_vectors(
+        &self,
+        frame: &mut iced::widget::canvas::Frame,
+        margin: f32,
+        k: f32,
+    ) {
+        let tail = self.vector_tail_start();
+        if tail >= self.doc.items.len() {
+            return;
+        }
+        let hide = self.pending_hidden_index();
+        let view = self.doc.view();
+        for (i, item) in self.doc.items.iter().enumerate().skip(tail) {
+            if !item.hidden && Some(i) != hide {
+                live_vector::draw(frame, item, view, self.zoom, margin, k);
+            }
+        }
+    }
+
+    pub(crate) fn live_vector(&self) -> Option<&Item> {
+        if !self.live_on {
+            return None;
+        }
+        let item = &self.pending.as_ref()?.item;
+        (!item.hidden && live_vector::supports(item)).then_some(item)
+    }
+
+    pub(crate) fn draw_live_vector(
+        &self,
+        frame: &mut iced::widget::canvas::Frame,
+        margin: f32,
+        k: f32,
+    ) {
+        if let Some(item) = self.live_vector() {
+            live_vector::draw(frame, item, self.doc.view(), self.zoom, margin, k);
+        }
+    }
+
+    /// Repaints the base (the baked prefix of items, skipping a hidden pending one, and
+    /// any legend), then updates the live layer.
     pub(crate) fn refresh(&mut self) {
         let hide = self
             .pending
             .as_ref()
             .and_then(|p| p.index.filter(|_| p.hidden));
-        let layers: Vec<_> = (self.doc.items.iter().enumerate())
-            .map(|(i, item)| (item, Some(i) != hide))
-            .collect();
         self.legend = self.doc.legend_layout();
         if self.bare() {
+            self.base_ready = false;
+            self.baked_items.clear();
+            self.vector_gen = self.vector_gen.wrapping_add(1);
             self.update_live(); // (a cancelled press leaves no layer behind, W113)
             return; // nothing to paint: the frozen frame under it is the area
         }
+        let tail = self.vector_tail_start();
+        let layers: Vec<_> = (self.doc.items[..tail].iter().enumerate())
+            .map(|(i, item)| (item, Some(i) != hide))
+            .collect();
         // Include the dragged Hide (at its current geometry) in the base's
         // exclude list even while hidden from the base, so neighbours never read
         // under it or jump on release (W114).
@@ -2843,6 +3019,16 @@ impl Annotator {
         self.patch.clear();
         self.display = None;
         self.crisp = false;
+        self.baked_items = (self.doc.items[..tail].iter().enumerate())
+            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
+            .map(|(_, item)| item.clone())
+            .collect();
+        self.baked_view = self.doc.view();
+        self.baked_image_gen = self.doc.image_gen;
+        self.baked_seed = self.doc.seed;
+        self.baked_legend = self.legend.is_some();
+        self.base_ready = true;
+        self.vector_gen = self.vector_gen.wrapping_add(1);
         self.update_live();
     }
 
@@ -2860,7 +3046,7 @@ impl Annotator {
 
     /// How many times a live layer was painted (the tests).
     #[cfg(test)]
-    fn live_paints(&self) -> usize {
+    pub(crate) fn live_paints(&self) -> usize {
         self.paints.get()
     }
 
@@ -2990,10 +3176,12 @@ impl Annotator {
             width: pending.item.width,
             outline: rim,
         };
+        let below_end = pending.index.unwrap_or(self.doc.items.len());
         let vr = int_rect(view, view);
         if !self.bare()
             && self.patch.is_empty()
             && self.legend.is_none()
+            && self.vector_tail_start() >= below_end
             && let image::Handle::Rgba {
                 width,
                 height,
@@ -3019,7 +3207,6 @@ impl Annotator {
             Size::new(sr * 2.0, sr * 2.0),
         );
         let src_r = int_rect(src_area, view);
-        let below_end = pending.index.unwrap_or(self.doc.items.len());
         let below: Vec<_> = self.doc.items[..below_end]
             .iter()
             .map(|item| (item, true))
@@ -3367,4 +3554,117 @@ fn whole(r: Rectangle) -> Rectangle {
     let (x0, y0) = (r.x.round(), r.y.round());
     let (x1, y1) = ((r.x + r.width).round(), (r.y + r.height).round());
     Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
+}
+
+/// Exact separable area-weighted box downsampler shared by Studio stage_copy and
+/// Annotator::patch_base: updating a sub-rect with downsample_rect produces
+/// bit-for-bit identical pixels to downsample on every pixel whose source support
+/// did not change.
+pub(crate) fn downsample(src: &[u8], bw: u32, bh: u32, dw: u32, dh: u32) -> Vec<u8> {
+    let mut dst = vec![0u8; dw as usize * dh as usize * 4];
+    downsample_rect(src, bw, bh, &mut dst, dw, dh, [0, 0, dw, dh]);
+    dst
+}
+
+struct AxisSpan {
+    start: usize,
+    offset: usize,
+    len: usize,
+    sum: u64,
+}
+
+fn axis_weights(src_len: u32, dst_len: u32, lo: u32, hi: u32) -> (Vec<AxisSpan>, Vec<u64>) {
+    let mut spans = Vec::with_capacity((hi - lo) as usize);
+    let mut weights = Vec::new();
+    let scale = f64::from(src_len) / f64::from(dst_len);
+    for d in lo..hi {
+        let a = f64::from(d) * scale;
+        let b = f64::from(d + 1) * scale;
+        let i0 = (a.floor() as u32).min(src_len - 1);
+        let i1 = (b.ceil() as u32).clamp(i0 + 1, src_len);
+        let offset = weights.len();
+        let mut sum = 0u64;
+        for i in i0..i1 {
+            let ov = f64::from(i + 1).min(b) - f64::from(i).max(a);
+            let w = (ov * 256.0).round().max(1.0) as u64;
+            weights.push(w);
+            sum += w;
+        }
+        spans.push(AxisSpan {
+            start: i0 as usize,
+            offset,
+            len: (i1 - i0) as usize,
+            sum,
+        });
+    }
+    (spans, weights)
+}
+
+pub(crate) fn downsample_rect(
+    src: &[u8],
+    bw: u32,
+    bh: u32,
+    dst: &mut [u8],
+    dw: u32,
+    dh: u32,
+    [dx0, dy0, dx1, dy1]: [u32; 4],
+) {
+    if bw == 0 || bh == 0 || dw == 0 || dh == 0 || dx0 >= dx1 || dy0 >= dy1 || dx1 > dw || dy1 > dh
+    {
+        return;
+    }
+    let (xs, xw) = axis_weights(bw, dw, dx0, dx1);
+    let (ys, yw) = axis_weights(bh, dh, dy0, dy1);
+    let sy0 = ys.first().map_or(0, |s| s.start);
+    let sy1 = ys.last().map_or(0, |s| s.start + s.len);
+    let band_w = (dx1 - dx0) as usize;
+    let band_h = sy1 - sy0;
+    let src_stride = bw as usize * 4;
+
+    let mut horiz = vec![0u8; band_h * band_w * 4];
+    for sy in sy0..sy1 {
+        let src_row = &src[sy * src_stride..(sy + 1) * src_stride];
+        let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
+        for (k, sp) in xs.iter().enumerate() {
+            let (mut r, mut g, mut b, mut a) = (0u64, 0u64, 0u64, 0u64);
+            let ws = &xw[sp.offset..sp.offset + sp.len];
+            for (j, &w) in ws.iter().enumerate() {
+                let o = (sp.start + j) * 4;
+                r += u64::from(src_row[o]) * w;
+                g += u64::from(src_row[o + 1]) * w;
+                b += u64::from(src_row[o + 2]) * w;
+                a += u64::from(src_row[o + 3]) * w;
+            }
+            let half = sp.sum / 2;
+            let o = k * 4;
+            h_row[o] = ((r + half) / sp.sum) as u8;
+            h_row[o + 1] = ((g + half) / sp.sum) as u8;
+            h_row[o + 2] = ((b + half) / sp.sum) as u8;
+            h_row[o + 3] = ((a + half) / sp.sum) as u8;
+        }
+    }
+
+    let dst_stride = dw as usize * 4;
+    let h_stride = band_w * 4;
+    for (dy_i, sp) in ys.iter().enumerate() {
+        let dy = dy0 as usize + dy_i;
+        let dst_row = &mut dst[dy * dst_stride..(dy + 1) * dst_stride];
+        let ws = &yw[sp.offset..sp.offset + sp.len];
+        let half = sp.sum / 2;
+        for k in 0..band_w {
+            let (mut r, mut g, mut b, mut a) = (0u64, 0u64, 0u64, 0u64);
+            for (j, &w) in ws.iter().enumerate() {
+                let o = (sp.start + j - sy0) * h_stride + k * 4;
+                r += u64::from(horiz[o]) * w;
+                g += u64::from(horiz[o + 1]) * w;
+                b += u64::from(horiz[o + 2]) * w;
+                a += u64::from(horiz[o + 3]) * w;
+            }
+            let d = (dx0 as usize + k) * 4;
+            dst_row[d] = ((r + half) / sp.sum) as u8;
+            dst_row[d + 1] = ((g + half) / sp.sum) as u8;
+            dst_row[d + 2] = ((b + half) / sp.sum) as u8;
+            dst_row[d + 3] = ((a + half) / sp.sum) as u8;
+        }
+    }
 }

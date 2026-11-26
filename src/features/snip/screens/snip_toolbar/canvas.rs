@@ -94,13 +94,24 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
         true => iced::widget::space().into(),
         false => stack(e.patch.iter().map(|p| Element::from(place(p)))).into(),
     });
-    // (a long stroke: its tiles, nested in the one layer; every other item: its one layer)
-    layers.push(match e.live_tiles() {
-        Some(tiles) => stack(tiles.iter().map(|t| Element::from(place(t)))).into(),
-        None if e.spotlight_hole().is_some() => iced::widget::space().into(),
-        None => match e.live_layer() {
-            Some(live) => place(&live).into(),
-            None => iced::widget::space().into(),
+    // Committed pure-vector tail sits ABOVE base+patch and BELOW live raster layers (Magnifier/Blur/Text).
+    layers.push(
+        iced::widget::canvas(CommittedVectors { editor: e, map })
+            .width(outer.width)
+            .height(outer.height)
+            .into(),
+    );
+    // Vector items draw directly in the Input canvas below (zero pixmap allocation); pixel-reading
+    // and text-bearing items keep their tiles or single live layer.
+    layers.push(match e.live_vector().is_some() {
+        true => iced::widget::space().into(),
+        false => match e.live_tiles() {
+            Some(tiles) => stack(tiles.iter().map(|t| Element::from(place(t)))).into(),
+            None if e.spotlight_hole().is_some() => iced::widget::space().into(),
+            None => match e.live_layer() {
+                Some(live) => place(&live).into(),
+                None => iced::widget::space().into(),
+            },
         },
     });
     layers.push(
@@ -122,6 +133,58 @@ pub(super) fn filter(e: &Annotator) -> iced::widget::image::FilterMethod {
     match e.crisp {
         true => iced::widget::image::FilterMethod::Nearest,
         false => iced::widget::image::FilterMethod::Linear,
+    }
+}
+
+/// Layer 2: committed pure-vector annotations, cached until edited, zoomed or hidden.
+struct CommittedVectors<'a> {
+    editor: &'a Annotator,
+    map: ScreenMap,
+}
+
+#[derive(Default)]
+struct CommittedCache {
+    cache: canvas::Cache,
+    key: std::cell::Cell<Option<[u64; 6]>>,
+}
+
+impl canvas::Program<Message> for CommittedVectors<'_> {
+    type State = CommittedCache;
+
+    fn draw(
+        &self,
+        state: &CommittedCache,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let e = self.editor;
+        let m = margin(e);
+        let k = self.map.k;
+        if m == 0.0 {
+            let v = e.doc.view();
+            let key = [
+                e.vector_gen(),
+                e.pending_hidden_index().map_or(u64::MAX, |i| i as u64),
+                (u64::from(v.x.to_bits()) << 32) | u64::from(v.y.to_bits()),
+                (u64::from(v.width.to_bits()) << 32) | u64::from(v.height.to_bits()),
+                (u64::from(e.zoom.to_bits()) << 32) | u64::from(k.to_bits()),
+                (u64::from(bounds.width.to_bits()) << 32) | u64::from(bounds.height.to_bits()),
+            ];
+            if state.key.get() != Some(key) {
+                state.cache.clear();
+                state.key.set(Some(key));
+            }
+            vec![state.cache.draw(renderer, bounds.size(), |f| {
+                e.draw_committed_vectors(f, 0.0, k);
+            })]
+        } else {
+            let clip = Rectangle::new(Point::new(m * k, m * k), e.size() * k);
+            let mut cf = Frame::with_bounds(renderer, clip);
+            e.draw_committed_vectors(&mut cf, m, k);
+            vec![cf.into_geometry()]
+        }
     }
 }
 
@@ -474,7 +537,13 @@ impl canvas::Program<Message> for Input<'_> {
                 area::handle(&mut frame, at, (1, 1), area::Handle::Rest, look.0);
             }
         }
-        let mut out = Vec::with_capacity(2);
+        let k = self.map.k;
+        let clip = Rectangle::new(Point::new(m * k, m * k), e.size() * k);
+        let mut live_frame = Frame::with_bounds(renderer, clip);
+        e.draw_live_vector(&mut live_frame, m, k);
+
+        let mut out = Vec::with_capacity(3);
+        out.push(live_frame.into_geometry());
         if let Some(grid) = self.pixel_grid(pointer, renderer, bounds, m) {
             out.push(grid);
         }
