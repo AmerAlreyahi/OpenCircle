@@ -164,7 +164,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             .on_right_press(Msg::Cancel),
         ));
     }
-    if s.text.menu.is_some() {
+    if super::text_select::menu_open(s) {
         layers.push(super::text_select::menu_layer(s, blank()));
     }
     if s.shortcuts {

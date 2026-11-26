@@ -329,6 +329,11 @@ pub fn over<'a>(
     iced::widget::stack![drawn, overlay].into()
 }
 
+/// The right-click menu is open.
+pub fn menu_open(s: &Studio) -> bool {
+    s.text.menu.is_some()
+}
+
 /// `main` with the right-click menu over it while it is open (a press anywhere else closes it).
 pub fn menu_layer<'a>(s: &'a Studio, main: Element<'a, Msg>) -> Element<'a, Msg> {
     let Some(m) = &s.text.menu else {
