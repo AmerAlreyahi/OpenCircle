@@ -4,5 +4,11 @@
     "repo": "AmerAlreyahi/OpenCircle-planning"
   },
   "gate": "cargo fmt --check && cargo clippy --all-targets -- -D warnings && XDG_DATA_HOME=$(mktemp -d) XDG_CONFIG_HOME=$(mktemp -d) cargo test",
-  "build": "cargo packager --release"
+  "build": "cargo packager --release",
+  "disk": {
+    "budgetGB": 100,
+    "buildDirs": [
+      "~/.cache/opencircle-targets"
+    ]
+  }
 }
