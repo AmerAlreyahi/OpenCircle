@@ -31,12 +31,17 @@ pub enum Corner {
 pub const X_WIDTH: f32 = 36.0;
 
 /// The one card: `content` with the kit's close button at its top end (mirrored in
-/// right-to-left). Every popover gets it here: the X, Esc (the host's) and an outside press
-/// all send `close`.
-fn card<'a, Message: Clone + 'a>(
+/// right-to-left); the X, Esc (the host's) and an outside press all send `close`. Or (`x` false) the content alone: a part that is already a panel (the colour
+/// picker) is shown as it is in Snip, with no second container and no X (an outside press
+/// and Esc close it).
+fn card_with<'a, Message: Clone + 'a>(
     content: Element<'a, Message>,
     close: Message,
+    x: bool,
 ) -> Element<'a, Message> {
+    if !x {
+        return opaque(content);
+    }
     let x = icon_button::square(
         Icon::Close.glyph(),
         icon_button::State::default(),
@@ -59,6 +64,7 @@ fn card<'a, Message: Clone + 'a>(
 
 /// `base` with `content` in a card at `corner`, `gap` px in from the edges
 /// on the side it hangs from (`top`: from the base's top).
+#[cfg(test)]
 pub fn over<'a, Message: Clone + 'a>(
     base: Element<'a, Message>,
     content: Element<'a, Message>,
@@ -66,7 +72,18 @@ pub fn over<'a, Message: Clone + 'a>(
     offset: Padding,
     close: Message,
 ) -> Element<'a, Message> {
-    let card = card(content, close.clone());
+    over_with(base, content, corner, offset, close, true)
+}
+
+fn over_with<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    content: Element<'a, Message>,
+    corner: Corner,
+    offset: Padding,
+    close: Message,
+    x: bool,
+) -> Element<'a, Message> {
+    let card = card_with(content, close.clone(), x);
     let placed = container(card)
         .padding(offset)
         .width(Fill)
@@ -170,16 +187,52 @@ pub fn anchored_rising<'a, Message: Clone + 'a>(
     close: Message,
     rise: f32,
 ) -> Element<'a, Message> {
+    anchored_with(
+        base, content, button, size, end, free, fallback, close, rise, true,
+    )
+}
+
+/// `anchored_rising` for content that is already a panel: no card around it, no X.
+#[allow(clippy::too_many_arguments)]
+pub fn anchored_bare<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    content: Element<'a, Message>,
+    button: Rectangle,
+    size: Size,
+    end: bool,
+    free: Rectangle,
+    fallback: (Corner, Padding),
+    close: Message,
+    rise: f32,
+) -> Element<'a, Message> {
+    anchored_with(
+        base, content, button, size, end, free, fallback, close, rise, false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn anchored_with<'a, Message: Clone + 'a>(
+    base: Element<'a, Message>,
+    content: Element<'a, Message>,
+    button: Rectangle,
+    size: Size,
+    end: bool,
+    free: Rectangle,
+    fallback: (Corner, Padding),
+    close: Message,
+    rise: f32,
+    x: bool,
+) -> Element<'a, Message> {
     if button.width <= 0.0 {
         let lower = Padding {
             top: fallback.1.top + rise,
             ..fallback.1
         };
-        return over(base, content, fallback.0, lower, close);
+        return over_with(base, content, fallback.0, lower, close, x);
     }
     let mut at = place_in(button, size, end, free);
     at.y += rise;
-    let card = card(content, close.clone());
+    let card = card_with(content, close.clone(), x);
     let catch = mouse_area(
         container(iced::widget::Space::new())
             .width(Fill)

@@ -203,7 +203,12 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 ),
             };
             let (size, end) = pop.card();
-            popover::anchored_rising(
+            // the custom colour is Snip's picker panel alone (no card, no X)
+            let place = match pop {
+                super::popovers::Pop::Custom => popover::anchored_bare,
+                _ => popover::anchored_rising,
+            };
+            place(
                 main,
                 super::popovers::content(s, pop),
                 s.anchors.of(pop).get(),

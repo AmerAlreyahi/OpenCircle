@@ -4646,8 +4646,8 @@ fn w117_studio_colour_picker_puts_handle_under_pointer() {
     assert!(anchor.width > 0.0, "anchor tracked");
     let (card_sz, end) = popovers::Pop::Custom.card();
     let card_at = crate::shared::kit::popover::place_in(anchor, card_sz, end, s.popover_room());
-    // popover::card adds padding(space::GAP + 4.0) = 12.0; colour_picker adds PAD = 10.0
-    let pad = (space::GAP + 4.0) + 10.0;
+    // W121: no card around the picker now; only colour_picker's own PAD = 10.0
+    let pad = 10.0;
     let sq_w = crate::shared::kit::colour::PICKER_W - 20.0;
     let sq_h = 150.0_f32;
     let hue_y = card_at.y + pad + sq_h + space::GAP + 7.0;
@@ -4670,4 +4670,60 @@ fn w117_studio_colour_picker_puts_handle_under_pointer() {
     }
     let [h, _, _] = s.editor.as_ref().unwrap().hsv().expect("studio hsv hue");
     assert!((h - 0.55 * 360.0).abs() < 2.0, "studio hue: {h:.1}");
+}
+
+/// W121 (owner, 2026-11-26): the Studio's colour picker is Snip's picker panel alone: no card
+/// around it and no X of its own. Its size is the kit picker's (`colour::PICKER_W`); a press just
+/// past its end edge is outside it (it closes the popover), where the old card's padding and X were.
+#[test]
+fn w121_the_studio_picker_is_snips_panel_with_no_card_and_no_x() {
+    use crate::shared::kit::testing::shot;
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Custom)));
+    assert!(!shot::texts(popovers::content(&s, popovers::Pop::Custom)).is_empty());
+    assert_eq!(
+        popovers::Pop::Custom.card().0.width,
+        crate::shared::kit::colour::PICKER_W,
+        "the card is the picker's own width: nothing around it"
+    );
+    // not drawn yet: the fallback place, the panel's start edge at `left`
+    let left = if s.sidebar_at_start() {
+        8.0
+    } else {
+        super::RAIL + 40.0
+    };
+    let y = super::HEADER + super::OPTIONS + 4.0 + 120.0;
+    let at = |dx: f32| Point::new(left + dx, y);
+    let closes = |dx: f32| {
+        shot::click(view(&s, &[], false), SIZE, at(dx))
+            .iter()
+            .any(|m| matches!(m, Msg::Pop(None)))
+    };
+    assert!(
+        closes(crate::shared::kit::colour::PICKER_W + 3.0),
+        "a press 3 px past the picker is outside it (no card padding, no X)"
+    );
+    assert!(!closes(20.0), "a press inside the picker does not close it");
+}
+
+/// W121: the Studio's picker popover, light and dark, English and Arabic.
+#[test]
+fn w121_the_studio_picker_matches_its_golden_images() {
+    use crate::shared::kit::testing::golden;
+    crate::shared::kit::text::load();
+    golden::each_theme(|theme, failed| {
+        let mut s = studio_on(640, 400);
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+        let _ = s.update(Msg::Pop(Some(popovers::Pop::Custom)));
+        let file = format!("studio-picker-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &[], false)
+        }));
+        let _ar = crate::shared::kit::testing::arabic();
+        let file = format!("studio-picker-ar-{}", theme.id);
+        failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
+            view(&s, &[], false)
+        }));
+    });
 }

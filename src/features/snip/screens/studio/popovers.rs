@@ -300,8 +300,9 @@ impl Pop {
             Pop::Position => (iced::Size::new(WIDTH + pad, 270.0), true),
             Pop::More => (iced::Size::new(WIDTH + pad, 160.0), true),
             Pop::Colours => (iced::Size::new(8.0 * 30.0 + 40.0 + pad, 32.0 + pad), false),
+            // the picker alone, as in Snip: no card around it
             Pop::Custom => (
-                iced::Size::new(crate::shared::kit::colour::PICKER_W + pad, 400.0),
+                iced::Size::new(crate::shared::kit::colour::PICKER_W, 400.0),
                 false,
             ),
             Pop::Info => (iced::Size::new(WIDTH + pad, 70.0), false),
