@@ -2127,3 +2127,39 @@ fn w116_one_word_stages() {
         );
     }
 }
+
+/// W120: the first selected-word translate after the right-click menu opened. In process,
+/// as the helper does it: the menu's warm-up loads the model on a thread, the user's click
+/// comes `DWELL` later; what the user waits for is whatever of the load is left plus the
+/// translate. `cargo test --release w120_first_translate_after_menu -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn w120_first_translate_after_menu() {
+    use crate::features::text_reading;
+    use crate::features::translate::mt::{Translator, pair};
+    use std::time::{Duration, Instant};
+    const DWELL: Duration = Duration::from_millis(1200); // menu open -> click on Translate
+    let pair = pair("en", "ar").unwrap();
+    pair.ensure(|_, _| {}).unwrap();
+    let texts = ["Blacksmith".to_string()];
+    let dir = text_reading::models_dir();
+    for round in 0..3 {
+        // before: nothing warmed, the click pays load + translate
+        let at = Instant::now();
+        let mut tr = Translator::load(pair, &dir).unwrap();
+        let loaded = at.elapsed();
+        tr.translate(&texts).unwrap();
+        let before = at.elapsed();
+        drop(tr);
+        // after: the menu starts the load; the click finds it done
+        let warm = std::thread::spawn(move || Translator::load(pair, &text_reading::models_dir()));
+        std::thread::sleep(DWELL);
+        let mut tr = warm.join().unwrap().unwrap();
+        let click = Instant::now();
+        tr.translate(&texts).unwrap();
+        let after = click.elapsed();
+        println!(
+            "W120 round {round}: before (click -> shown) {before:?} (load {loaded:?}) | after {after:?}"
+        );
+    }
+}

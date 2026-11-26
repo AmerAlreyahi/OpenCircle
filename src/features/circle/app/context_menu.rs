@@ -9,6 +9,7 @@ use crate::features::circle::actions::entities::{self, Kind};
 use crate::features::circle::actions::{self, Action};
 use crate::features::circle::screens::context_menu::{Key, Menu, Msg, Outcome, Row};
 use crate::features::circle::screens::overlay::{self, Event};
+use crate::features::translate;
 use crate::shared::kit::option_list::place;
 
 /// The menu keeps this far from the screen's edges.
@@ -60,6 +61,14 @@ impl App {
         let mut menu = Menu::new(at, self.can_select_all(), entity, keyboard);
         menu.at = place(at, menu.size(), self.o.screen, EDGE);
         self.o.menu = Some(menu);
+        // the first Translate spends most of its time loading the model: load it now
+        let cfg = crate::shared::config::current().translate;
+        translate::pipeline::warm_for_menu(
+            &text,
+            &cfg.source,
+            &cfg.target,
+            translate::action::will_be_offline(),
+        );
         Task::none()
     }
 

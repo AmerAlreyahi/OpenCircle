@@ -1896,3 +1896,46 @@ fn w116_ac8_local_error_tells_a_failed_model_from_a_missing_one() {
     let io = OcrError::Io(std::io::Error::other("held"));
     assert!(matches!(local_error(pair, io), AiError::LocalFailed { .. }));
 }
+
+// W120: the right-click menu warms ONE pair: the selection's language -> the main target.
+mod menu_warm {
+    use super::*;
+
+    fn warmed(text: &str, source: &str, target: &str, offline: bool, on_disk: bool) -> Vec<String> {
+        let pair = menu_pair(text, source, target, offline, |_| on_disk);
+        pair.map(|p| vec![format!("{}-{}", p.source, p.target)])
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_foreign_selection_warms_its_pair_only() {
+        let fr = "Le chat dort sur le canapé du salon";
+        assert_eq!(warmed(fr, "auto", "en", true, true), ["fr-en"]);
+        // the configured source wins over the detector
+        assert_eq!(warmed(fr, "fr", "en", true, true), ["fr-en"]);
+        // a target spelled with a region is the same language
+        let en = "The cat sleeps on the living room sofa";
+        assert_eq!(warmed(en, "auto", "ar-SA", true, true), ["en-ar"]);
+    }
+
+    #[test]
+    fn nothing_is_warmed_when_it_would_not_help() {
+        let en = "The cat sleeps on the living room sofa";
+        assert!(
+            warmed(en, "auto", "en", true, true).is_empty(),
+            "same language"
+        );
+        assert!(
+            warmed(en, "auto", "ar", false, true).is_empty(),
+            "not on the device"
+        );
+        assert!(
+            warmed(en, "auto", "ar", true, false).is_empty(),
+            "not installed: no download"
+        );
+        assert!(
+            warmed("12345 !!", "auto", "ar", true, true).is_empty(),
+            "no language found"
+        );
+    }
+}

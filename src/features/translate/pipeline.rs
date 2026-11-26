@@ -1336,6 +1336,43 @@ impl Deps for Real {
     }
 }
 
+/// The one pair worth warming when the right-click menu opens on `text`
+/// (W120): the selection's language (the configured source, else the
+/// detected one) -> the main `target`, only when translation is on the device
+/// (`offline`), the languages differ and the pair is on disk (`installed`;
+/// never a download). `None` = warm nothing.
+pub(crate) fn menu_pair(
+    text: &str,
+    source: &str,
+    target: &str,
+    offline: bool,
+    installed: impl Fn(&'static mt::Pair) -> bool,
+) -> Option<&'static mt::Pair> {
+    if !offline {
+        return None;
+    }
+    let source = match source {
+        lang::AUTO => lang::guess([text])?,
+        s => s,
+    };
+    if lang::find(source)?.code == lang::find(target)?.code {
+        return None;
+    }
+    let pair = mt::route(source, target)?[0];
+    installed(pair).then_some(pair)
+}
+
+/// The menu opened on `text`: starts `menu_pair`'s warm-up on its own thread
+/// (the request waits for the helper to start; the UI never does). A failure
+/// only means a cold first translate.
+pub(crate) fn warm_for_menu(text: &str, source: &str, target: &str, offline: bool) {
+    let pair = menu_pair(text, source, target, offline, |p| p.missing_bytes() == 0);
+    if let Some(pair) = pair {
+        text_reading::keep_warm();
+        std::thread::spawn(move || Real::send_warm(pair, mt::translate));
+    }
+}
+
 /// Offline MT (Marian) drops or merges sentences of a long input and cuts it
 /// at 200 tokens: each text is split into sentences, all of them go in one
 /// call, and each text's translations are joined back, so every text gets
