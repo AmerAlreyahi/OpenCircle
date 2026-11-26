@@ -37,6 +37,10 @@ pub const DRAG_SCALE: f32 = 1.012;
 pub const DRAG_EDGE: f32 = 6.0;
 pub const DRAG_EDGE_BOTTOM: f32 = 54.0;
 
+/// A side panel sliding over its window (Studio's Steps panel): in with `Curve::Out`, out with
+/// `Curve::In`; reduced motion = no slide.
+pub const PANEL_OPEN: Duration = Duration::from_millis(220);
+pub const PANEL_CLOSE: Duration = Duration::from_millis(180);
 /// How far a menu, popover or dialog rises as it opens (px; it also keeps its place the whole
 /// time: no fade, which the CPU renderer can't do for a group).
 pub const RISE: f32 = 8.0;

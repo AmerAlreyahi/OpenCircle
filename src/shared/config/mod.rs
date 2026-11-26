@@ -84,6 +84,7 @@
 //! # theme ("follow" | a theme id), steps_side (start | end), steps_on_start, start_screen
 //!
 //! [snip.studio]                   # written only once changed
+//! # library, pinned = true         # the Studio's Steps panel: open at the Studio's start, docked (default closed, sliding)
 //! # hint_seen = true               # Snip's one-time "Edit more in OpenCircle Studio" hint was shown
 //! # walk_transition, walk_ms       # the Studio walkthrough's last transition (0 cut .. 5 wipe) and length
 //!
@@ -543,8 +544,10 @@ pub struct SnipConfig {
 /// OpenCircle Studio's side panels as the user last left them (both shown at first).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct StudioConfig {
-    /// The library (start side: Recent captures).
+    /// The Steps panel is open (key `library`: it began as the library).
     pub library: bool,
+    /// The Steps panel is pinned: docked, the canvas makes room (else it slides over it).
+    pub pinned: bool,
     /// The picture panel (end side).
     pub options: bool,
     /// The walkthrough's last file kind (0 GIF, 1 MP4, 2 WebM).
@@ -562,7 +565,8 @@ pub struct StudioConfig {
 impl Default for StudioConfig {
     fn default() -> Self {
         StudioConfig {
-            library: true,
+            library: false,
+            pinned: false,
             options: true,
             walk_format: 0,
             ui_zoom: 100,
@@ -582,6 +586,7 @@ impl StudioConfig {
         }
         take!(
             library,
+            pinned,
             options,
             walk_format,
             ui_zoom,
@@ -763,7 +768,7 @@ impl Default for StudioPrefs {
             wheel: StudioWheel::Zoom,
             theme: STUDIO_THEME_FOLLOW.into(),
             steps_side: StudioSide::End,
-            steps_on_start: true,
+            steps_on_start: false,
             start_screen: true,
             shortcuts: Default::default(),
         }

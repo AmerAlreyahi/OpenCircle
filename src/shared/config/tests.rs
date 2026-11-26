@@ -1638,6 +1638,39 @@ fn borealis_is_stored_only_when_picked() {
     assert_eq!(w.len(), 1, "{w:?}");
 }
 
+/// W123 AC6: the Studio's Steps panel is closed and sliding by default; open and pinned are
+/// additive keys of `[snip.studio]`, written once changed, read back, and an older file
+/// without them loads clean.
+#[test]
+fn w123_ac6_the_steps_panels_open_and_pinned_are_remembered_additively() {
+    let d = Config::parse("").0.snip.studio;
+    assert!(!d.library && !d.pinned, "closed, not pinned, by default");
+    assert!(!Config::default().studio.steps_on_start);
+    let (c, w) = Config::parse("version = 15\n[snip]\nlong_max = 5000\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert!(
+        !c.snip.studio.library && !c.snip.studio.pinned,
+        "an older file"
+    );
+    let (c, w) = Config::parse("[snip.studio]\nlibrary = true\npinned = true\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert!(c.snip.studio.library && c.snip.studio.pinned);
+    let text = toml::to_string_pretty(&c).unwrap();
+    assert!(
+        text.contains("pinned = true"),
+        "written once changed: {text}"
+    );
+    let back = Config::parse(&text).0;
+    assert!(back.snip.studio.library && back.snip.studio.pinned);
+    // the default file does not grow
+    let text = toml::to_string_pretty(&Config::default()).unwrap();
+    assert!(!text.contains("pinned"), "{text}");
+    // a wrong type is reported and takes the default
+    let (c, w) = Config::parse("[snip.studio]\npinned = \"yes\"\n");
+    assert!(!c.snip.studio.pinned);
+    assert!(!w.is_empty(), "the bad value is reported");
+}
+
 #[test]
 fn the_studios_last_walkthrough_format_is_kept_and_a_bad_one_is_dropped() {
     assert_eq!(Config::parse("").0.snip.studio.walk_format, 0, "GIF first");

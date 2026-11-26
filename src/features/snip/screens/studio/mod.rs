@@ -59,7 +59,7 @@ const RAIL: f32 = 52.0;
 const OPTIONS: f32 = 48.0;
 const STATUS: f32 = 44.0;
 /// The Steps sidebar's width.
-const SIDEBAR: f32 = 260.0;
+const SIDEBAR: f32 = 320.0;
 /// Room kept around a fitted picture.
 const STAGE_PAD: f32 = 24.0;
 /// One zoom step (Ctrl+= / Ctrl+-) and the zoom's range, as a share of 100 %.
@@ -75,8 +75,8 @@ pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(15
 
 /// The Steps grid: four to a row, the cell and the gap round it.
 /// The sidebar's steps: three to a row (236 px: 3 x 72 + 2 x 10), room for the number badge.
-const STEP_COLS: usize = 3;
-const STEP_CELL: Size = Size::new(72.0, 48.0);
+const STEP_COLS: usize = 4;
+const STEP_CELL: Size = Size::new(66.0, 44.0);
 const STEP_GAP: f32 = 10.0;
 
 /// What the Studio opens.
@@ -135,8 +135,12 @@ pub enum Msg {
     Frame(std::time::Instant),
     Editor(annotate::Message),
     Caption(Caption),
-    /// The Steps sidebar's toggle (its header, View menu, Ctrl+B).
+    /// The Steps panel's toggle (its handle, header arrow, View menu, Ctrl+B).
     Library,
+    /// The Steps panel's pin: docked (the canvas makes room) or sliding over it.
+    PinSteps,
+    /// A press outside the open Steps panel.
+    StepsAway,
     /// A popover opens (`Some`) or closes (v3.1).
     Pop(Option<popovers::Pop>),
     /// Steps: the file dialog (several pictures), the files it gave or that were
@@ -383,6 +387,14 @@ pub enum Outcome {
     ClearRecent,
 }
 
+/// A Steps panel slide's length, the way it goes.
+fn steps_slide_len(opening: bool) -> std::time::Duration {
+    match opening {
+        true => crate::shared::kit::motion::PANEL_OPEN,
+        false => crate::shared::kit::motion::PANEL_CLOSE,
+    }
+}
+
 pub struct Studio {
     pub(super) editor: Option<Annotator>,
     /// The zoom the user picked (display px per image px); `None` = fit.
@@ -442,6 +454,9 @@ pub struct Studio {
     /// A big picture is being prepared on a thread: when it began, where the thread leaves it.
     opening: Option<(std::time::Instant, OpenSlot)>,
     pub(super) slide: Option<Slide>,
+    /// The Steps panel sliding over the canvas: when it began and whether it opens (the frame
+    /// clock runs only while it moves; a pinned panel never slides).
+    steps_slide: Option<(std::time::Instant, bool)>,
     pub(super) now: std::time::Instant,
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
     pub(super) ui_zoom: u16,
@@ -526,8 +541,8 @@ impl Walk {
 impl Studio {
     /// The empty Studio with the user's panels.
     pub fn new(mut panels: StudioConfig) -> Self {
-        // Settings > Studio: the Steps sidebar on opening
-        panels.library = crate::shared::config::current().studio.steps_on_start;
+        // Settings > Studio: the Steps panel on opening (else as it was left: closed at first)
+        panels.library |= crate::shared::config::current().studio.steps_on_start;
         Studio {
             editor: None,
             zoom: None,
@@ -579,6 +594,7 @@ impl Studio {
             at_rest: cfg!(test),
             mips: None,
             slide: None,
+            steps_slide: None,
             now: std::time::Instant::now(),
             sub: None,
             snap: crate::shared::config::current().studio.snap,
@@ -815,12 +831,14 @@ impl Studio {
     pub fn steps_at_open(&mut self, n: usize) {
         if n == 0 && self.panels.library {
             self.panels.library = false;
-            self.closed_for_empty = true;
+            // (a panel that slides over the canvas is not reopened by itself)
+            self.closed_for_empty = self.panels.pinned;
         }
     }
 
     pub fn moving(&self) -> bool {
         self.slide.is_some()
+            || self.steps_slide.is_some()
             || self.rise_from.is_some()
             || self.opening.is_some()
             || self.mips.as_ref().is_some_and(|m| m.pending.is_some())
@@ -1440,13 +1458,19 @@ impl Studio {
             Msg::Editor(m) => self.on_editor(m),
             Msg::Caption(Caption::Close) => self.close_requested(),
             Msg::Caption(c) => Outcome::Caption(c),
-            Msg::Library => {
-                self.panels.library = !self.panels.library;
-                self.closed_for_empty = false; // the user's own say now
-                self.popover = None;
+            Msg::Library => self.open_steps(!self.panels.library),
+            Msg::PinSteps => {
+                self.panels.pinned = !self.panels.pinned;
+                self.steps_slide = None; // (docked or not, it simply stays where it is)
                 self.fit();
                 Outcome::Panels(old_panels, self.panels)
             }
+            // a press outside the open panel: it slides away, unless it is pinned or a step
+            // is being dragged
+            Msg::StepsAway => match self.pick.dragging() {
+                false => self.open_steps(false),
+                true => Outcome::None,
+            },
             Msg::Pop(p) => {
                 self.popover = p.filter(|p| self.popover != Some(*p));
                 Outcome::None
@@ -1673,6 +1697,11 @@ impl Studio {
                 if self.slide.is_some_and(|s| self.slide_done(s)) {
                     self.slide = None;
                 }
+                if let Some((start, opening)) = self.steps_slide
+                    && crate::shared::kit::motion::done(start, now, steps_slide_len(opening)) >= 1.0
+                {
+                    self.steps_slide = None;
+                }
                 Outcome::None
             }
             Msg::Cancel => {
@@ -1706,6 +1735,10 @@ impl Studio {
                 if !closed && self.restorable.is_some() && !self.later {
                     self.later = true;
                     return Outcome::None;
+                }
+                // last: Esc closes the open Steps panel (the Export page went back first)
+                if !closed && self.asking.is_none() && self.edit.is_none() && self.panels.library {
+                    return self.open_steps(false);
                 }
                 if !closed {
                     match self.asking.take() {
@@ -1830,7 +1863,7 @@ impl Studio {
                 // the stage's left edge: mirrored, the Steps sidebar sits there
                 let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
                 let left = match sidebar_left {
-                    true => (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0),
+                    true => (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0),
                     false => RAIL + 2.0,
                 };
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
@@ -2135,7 +2168,7 @@ impl Studio {
     /// The window less the Steps sidebar: a popover hangs inside it, never over the sidebar
     /// (F15: the Actions card covered the sidebar's buttons and text).
     pub(super) fn popover_room(&self) -> iced::Rectangle {
-        let side = match self.sidebar_shown() {
+        let side = match self.sidebar_docked() {
             true => SIDEBAR + 1.0,
             false => 0.0,
         };
@@ -2148,9 +2181,60 @@ impl Studio {
         )
     }
 
-    /// The Steps sidebar shows.
+    /// The Steps panel is open (docked or over the canvas).
     pub(super) fn sidebar_shown(&self) -> bool {
         self.panels.library
+    }
+
+    /// The Steps panel is docked: open and pinned, the canvas makes room for it.
+    pub(super) fn sidebar_docked(&self) -> bool {
+        self.panels.library && self.panels.pinned
+    }
+
+    /// The Steps panel is drawn over the canvas: open and not pinned, or still sliding out.
+    pub(super) fn steps_overlay(&self) -> bool {
+        !self.panels.pinned && (self.panels.library || self.steps_slide.is_some())
+    }
+
+    /// How far in the sliding panel is (0..1): the slide's own time and curve, else its rest.
+    pub(super) fn steps_at(&self) -> f32 {
+        use crate::shared::kit::motion::{Curve, progress};
+        match self.steps_slide {
+            Some((start, true)) => progress(
+                start,
+                self.now,
+                crate::shared::kit::motion::PANEL_OPEN,
+                Curve::Out,
+            ),
+            Some((start, false)) => {
+                1.0 - progress(
+                    start,
+                    self.now,
+                    crate::shared::kit::motion::PANEL_CLOSE,
+                    Curve::In,
+                )
+            }
+            None => f32::from(u8::from(self.panels.library)),
+        }
+    }
+
+    /// The Steps panel opens or closes (the handle, the toggle, Ctrl+B, Esc, a press outside):
+    /// it slides over the canvas, or at once when pinned or motion is reduced.
+    fn open_steps(&mut self, open: bool) -> Outcome {
+        if self.panels.library == open {
+            return Outcome::None;
+        }
+        let old = self.panels;
+        self.panels.library = open;
+        self.closed_for_empty = false; // the user's own say now
+        self.popover = None;
+        self.steps_slide = None;
+        if !self.panels.pinned && !crate::shared::kit::motion::reduced() {
+            self.now = std::time::Instant::now();
+            self.steps_slide = Some((self.now, open));
+        }
+        self.fit();
+        Outcome::Panels(old, self.panels)
     }
 
     /// Settings > Studio > "Keep unsaved work": every edit restarts the quiet
@@ -2248,7 +2332,7 @@ impl Studio {
     /// The stage: the window less the header, the rail, the bars and the shown panels.
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = (self.sidebar_shown() as u8 as f32) * (SIDEBAR + 1.0);
+        let side = (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),

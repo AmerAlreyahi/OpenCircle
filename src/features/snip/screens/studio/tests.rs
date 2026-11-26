@@ -7,6 +7,17 @@ use crate::features::snip::snip_more::Row;
 use crate::features::translate::Line;
 use crate::shared::config;
 
+mod w123;
+
+/// The Steps panel open and pinned (docked): the frame the older tests were written against.
+fn docked() -> StudioConfig {
+    StudioConfig {
+        library: true,
+        pinned: true,
+        ..StudioConfig::default()
+    }
+}
+
 fn crop(width: u32, height: u32) -> Crop {
     Crop {
         width,
@@ -16,7 +27,7 @@ fn crop(width: u32, height: u32) -> Crop {
 }
 
 fn studio_on(width: u32, height: u32) -> Studio {
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(crop(width, height)));
     s.settle_open();
     s
@@ -162,7 +173,7 @@ fn the_snip_widgets_editor_moves_in_with_its_drawings() {
         Size::new(300.0, 200.0),
     ));
     (snip.movable, snip.scroll, snip.steps) = (true, true, Some(2));
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Editor(Box::new(snip)));
     let e = s.editor.as_ref().unwrap();
     assert!(!e.movable && !e.scroll && e.steps.is_none());
@@ -211,7 +222,7 @@ fn ctrl_v_asks_the_host_for_a_picture_first() {
     // no picture there: the editor's own paste (text, none on the test clipboard)
     assert!(matches!(s.paste_text(at), Outcome::None));
     // the empty Studio's Paste button / Ctrl+V
-    let mut empty = Studio::new(StudioConfig::default());
+    let mut empty = Studio::new(docked());
     assert!(matches!(empty.update(Msg::Paste), Outcome::Paste(None)));
     assert!(matches!(empty.update(Msg::Open), Outcome::PickFile));
     let file = std::path::PathBuf::from("/tmp/x.png");
@@ -243,7 +254,7 @@ fn the_studio_matches_its_golden_images() {
     use crate::shared::kit::testing::golden;
     crate::shared::kit::text::load();
     golden::each_theme(|theme, failed| {
-        let empty = Studio::new(StudioConfig::default());
+        let empty = Studio::new(docked());
         let file = format!("studio-empty-{}", theme.id);
         failed.extend(golden::check("screens", &file, SIZE, &[1.0], || {
             view(&empty, &[], false)
@@ -254,7 +265,7 @@ fn the_studio_matches_its_golden_images() {
                 _ => [52, 56, 70, 255],
             })
             .collect();
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         s.open(Picture::Crop(Crop {
             width: 640,
             height: 400,
@@ -391,7 +402,7 @@ fn the_question_blocks_editing() {
 fn with_redact(px: [u8; 4]) -> Studio {
     use crate::features::snip::annotate::{Item, Shape};
     let rgba = (0..100 * 60).flat_map(|_| px).collect();
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(Crop {
         width: 100,
         height: 60,
@@ -420,7 +431,7 @@ fn a_panel_row_asks_the_host() {
     for row in Row::ALL {
         assert!(matches!(s.update(Msg::Act(row)), Outcome::Act(r) if r == row));
     }
-    let mut empty = Studio::new(StudioConfig::default());
+    let mut empty = Studio::new(docked());
     assert!(matches!(
         empty.update(Msg::Act(Row::CopyText)),
         Outcome::None
@@ -587,7 +598,7 @@ fn lined(width: u32, height: u32) -> (Studio, Line) {
             }
         }
     }
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(c));
     let line = Line {
         bounds: [16.0, 26.0, 130.0, 22.0],
@@ -958,7 +969,7 @@ fn boxed(width: u32, height: u32) -> Studio {
             c.rgba[i..i + 4].copy_from_slice(&[200, 30, 30, 255]);
         }
     }
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(c));
     s
 }
@@ -985,7 +996,7 @@ fn cut_out_row_asks_the_host_s9() {
     assert!(matches!(s.update(Msg::CutOut), Outcome::CutOut));
     let _ = s.cut_source();
     assert!(matches!(s.update(Msg::CutOut), Outcome::None), "once");
-    let mut empty = Studio::new(StudioConfig::default());
+    let mut empty = Studio::new(docked());
     assert!(matches!(empty.update(Msg::CutOut), Outcome::None));
 }
 
@@ -1038,7 +1049,7 @@ fn a_busy_background_asks_for_the_model_s9() {
     for (i, p) in c.rgba.chunks_mut(4).enumerate() {
         p[..3].fill(if (i % 100 + i / 100) % 2 == 0 { 0 } else { 255 });
     }
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(c));
     let before = pixels_of(&s);
     assert!(matches!(cut_now(&mut s), Outcome::None));
@@ -1157,7 +1168,7 @@ fn the_steps_list_opens_reorders_and_deletes_the_strips_own_steps() {
 #[test]
 fn export_asks_for_the_choices_then_hands_over_the_drawn_picture() {
     // nothing open: the sheet opens, but there is no picture to export
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     let _ = s.update(Msg::Export);
     assert!(matches!(s.update(Msg::ExportGo), Outcome::None));
     let mut s = studio_on(300, 200);
@@ -1196,7 +1207,7 @@ fn drawn(n: usize) -> Studio {
 #[test]
 fn the_walkthrough_transition_is_remembered() {
     use crate::features::snip::transition::Transition;
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     assert_eq!(s.walk.how.transition, Transition::Crossfade);
     let Outcome::Panels(_, p) = s.update(Msg::WalkTransition(Transition::Wipe)) else {
         panic!("not saved");
@@ -1214,7 +1225,7 @@ fn the_walkthrough_transition_is_remembered() {
 
 #[test]
 fn walkthrough_dialog_hands_its_choices_to_the_host() {
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     let _ = s.update(Msg::ExportWalkthrough);
     assert!(s.exporting && s.walk_tab);
     let Outcome::Panels(_, panels) = s.update(Msg::WalkFormat(export::Movie::Mp4)) else {
@@ -1351,7 +1362,7 @@ fn v3_the_sidebar_stays_at_the_smallest_window() {
     let _ = s.update(Msg::Resized(super::MIN));
     assert!(s.sidebar_shown());
     let stage = s.stage();
-    assert!(stage.width > 600.0 && stage.height > 300.0, "{stage:?}");
+    assert!(stage.width > 560.0 && stage.height > 300.0, "{stage:?}");
 }
 
 /// §6: Alt opens File, the arrows walk, Enter picks, Esc closes.
@@ -1429,7 +1440,7 @@ fn v3_the_frame_matches_its_golden_images() {
             failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
                 view(&s, &[], false)
             }));
-            let empty = Studio::new(StudioConfig::default());
+            let empty = Studio::new(docked());
             let name = format!("studio3-empty-{tag}");
             failed.extend(golden::check("screens", &name, SIZE, &[1.0], || {
                 view(&empty, &[], false)
@@ -2139,7 +2150,7 @@ fn v3_a_copy_that_cannot_be_restored_is_kept_and_says_so() {
 fn v3_a_requested_file_always_wins_over_reopen_last() {
     let h = image::Handle::from_rgba(1, 1, vec![0; 4]);
     let recent = || vec![(PathBuf::from("/x/last.png"), h.clone())];
-    let mut fresh = Studio::new(StudioConfig::default());
+    let mut fresh = Studio::new(docked());
     let _ = fresh.update(Msg::Recent(recent(), vec![String::new()]));
     assert_eq!(fresh.reopen(true), Some(PathBuf::from("/x/last.png")));
     assert_eq!(fresh.reopen(false), None, "the setting off");
@@ -2152,7 +2163,7 @@ fn v3_a_requested_file_always_wins_over_reopen_last() {
         Box::new(|s| drop(s.update(Msg::Paste))),
     ];
     for ask in asks {
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         ask(&mut s);
         let out = s.update(Msg::Recent(recent(), vec![String::new()]));
         assert!(
@@ -2284,7 +2295,7 @@ fn v3_the_shortcuts_sheet_fits_a_small_window() {
 #[test]
 fn v3_the_start_screen_lists_recent_pictures() {
     use crate::shared::kit::testing::shot;
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     let words = |s: &Studio| shot::texts(start::view(s).map(|_| ()));
     assert!(
         !words(&s)
@@ -2490,7 +2501,7 @@ fn v31_drops_follow_the_owner_rules() {
     // several: all steps
     assert!(matches!(drop(&mut s, &[&a, &b]), Outcome::AddPictures(v) if v.len() == 2));
     // empty Studio: one opens; several open the first AND are all steps
-    let mut e = Studio::new(StudioConfig::default());
+    let mut e = Studio::new(docked());
     assert!(matches!(drop(&mut e, &[&a]), Outcome::Read(p) if p == a));
     assert!(matches!(drop(&mut e, &[&a, &b]), Outcome::OpenAndAdd(v) if v.len() == 2));
     // the Open dialog's file opens at once
@@ -2513,7 +2524,7 @@ fn v31_the_ui_scale_is_remembered() {
 /// v3.1 item 4: the empty Studio shows its recent pictures big, and a click opens one.
 #[test]
 fn v31_the_start_screen_opens_a_recent_picture() {
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     let picture = iced::widget::image::Handle::from_rgba(1, 1, vec![9; 4]);
     let path = PathBuf::from("/tmp/holiday.png");
     let _ = s.update(Msg::Recent(
@@ -3006,13 +3017,24 @@ fn w90b_the_sidebar_toggle_is_at_the_end_of_the_options_bar() {
     };
     assert!(s.sidebar_shown());
     assert!(at_end(&s) > 0, "open: the toggle at the row's end");
-    // the sidebar's own header has no button
-    let side = crate::shared::kit::testing::shot::click(
-        sidebar::view(&s, &[]),
-        Size::new(super::SIDEBAR, 700.0),
-        Point::new(super::SIDEBAR - 20.0, 20.0),
+    // the panel's own header: its arrow (the last button) hides it, the pin before it pins
+    let head = |x: f32| {
+        crate::shared::kit::testing::shot::click(
+            sidebar::view(&s, &[]),
+            Size::new(super::SIDEBAR, 700.0),
+            Point::new(x, 20.0),
+        )
+    };
+    assert!(
+        head(super::SIDEBAR - 24.0)
+            .iter()
+            .any(|m| matches!(m, Msg::Library))
     );
-    assert!(!side.iter().any(|m| matches!(m, Msg::Library)), "{side:?}");
+    assert!(
+        head(super::SIDEBAR - 64.0)
+            .iter()
+            .any(|m| matches!(m, Msg::PinSteps))
+    );
     let _ = s.update(Msg::Library);
     assert!(!s.sidebar_shown());
     assert!(at_end(&s) > 0, "closed: the same spot opens it again");
@@ -3065,7 +3087,7 @@ fn w90b_a_popover_opens_under_its_own_button() {
     );
     let _ = s.update(Msg::Pop(Some(popovers::Pop::Actions)));
     let (size, end) = popovers::Pop::Actions.card();
-    let at = place(anchor, size, end, s.window);
+    let at = crate::shared::kit::popover::place_in(anchor, size, end, s.popover_room());
     let got = click_view(&s, (at.x + 60.0, at.y + 12.0 + 16.0));
     assert!(
         got.iter().any(|m| matches!(m, Msg::Act(Row::CopyText))),
@@ -3219,22 +3241,25 @@ fn w90b_every_studio_preference_acts() {
     with_config(
         |c| c.studio.start_screen = false,
         || {
-            let words = texts(&Studio::new(StudioConfig::default()));
+            let words = texts(&Studio::new(docked()));
             assert!(
                 !words.iter().any(|t| t == "Open…" || t == "Paste"),
                 "{words:?}"
             );
         },
     );
-    let words = texts(&Studio::new(StudioConfig::default()));
+    let words = texts(&Studio::new(docked()));
     assert!(words.iter().any(|t| t == "Open…"), "on: Open is there");
 
     // Show Steps when the Studio opens
     with_config(
-        |c| c.studio.steps_on_start = false,
-        || assert!(!Studio::new(StudioConfig::default()).sidebar_shown()),
+        |c| c.studio.steps_on_start = true,
+        || assert!(Studio::new(StudioConfig::default()).sidebar_shown()),
     );
-    assert!(Studio::new(StudioConfig::default()).sidebar_shown());
+    assert!(
+        !Studio::new(StudioConfig::default()).sidebar_shown(),
+        "closed by default: a handle on the edge"
+    );
 
     // Steps sidebar side: the sidebar's Add at the left, the rail at the right
     with_config(
@@ -3270,7 +3295,7 @@ fn w90b_every_studio_preference_acts() {
     assert!(!dirty().quiet.waiting());
 
     // Reopen the last picture
-    let mut fresh = Studio::new(StudioConfig::default());
+    let mut fresh = Studio::new(docked());
     let _ = fresh.update(Msg::Recent(
         vec![(
             PathBuf::from("/x/last.png"),
@@ -3281,7 +3306,7 @@ fn w90b_every_studio_preference_acts() {
     with_config(
         |c| c.studio.reopen_last = true,
         || {
-            let mut s = Studio::new(StudioConfig::default());
+            let mut s = Studio::new(docked());
             let out = s.update(Msg::Recent(
                 vec![(
                     PathBuf::from("/x/last.png"),
@@ -3486,7 +3511,7 @@ fn w90c_the_empty_studio_has_the_steps_toggle_at_the_same_spot() {
             })
             .collect()
     };
-    let empty = Studio::new(StudioConfig::default());
+    let empty = Studio::new(docked());
     assert!(empty.editor.is_none());
     let with = studio_on(640, 400);
     let (a, b) = (toggle_at(&empty), toggle_at(&with));
@@ -3509,11 +3534,11 @@ fn studio_delay_by_action() {
     use crate::shared::kit::testing::shot;
     crate::shared::kit::text::load();
     let win = Size::new(3440.0, 1440.0);
-    let mut sized = Studio::new(StudioConfig::default());
+    let mut sized = Studio::new(docked());
     let _ = sized.update(Msg::Resized(win));
     drop(sized);
     let make = |w: u32, h: u32| {
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         let _ = s.update(Msg::Resized(win));
         s.open(Picture::Crop(crop(w, h)));
         s.settle_open();
@@ -3544,7 +3569,7 @@ fn studio_delay_by_action() {
         ("8K", 7680, 4320),
     ] {
         let empty = {
-            let mut s = Studio::new(StudioConfig::default());
+            let mut s = Studio::new(docked());
             let _ = s.update(Msg::Resized(win));
             s
         };
@@ -3805,7 +3830,7 @@ fn studio_frames_by_action() {
         ("4K", 3840, 2160),
         ("8K", 7680, 4320),
     ] {
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         s.at_rest = false;
         let _ = s.update(Msg::Resized(win));
         crate::shared::kit::motion::set_reduced(false);
@@ -4022,12 +4047,12 @@ fn studio_open_cost() {
         let mut start = Vec::new();
         let mut finish = Vec::new();
         for _ in 0..3 {
-            let mut s = Studio::new(StudioConfig::default());
+            let mut s = Studio::new(docked());
             let c = crop(w, h);
             let t = std::time::Instant::now();
             s.open_in_place(c);
             before.push(t.elapsed().as_secs_f64() * 1e3);
-            let mut s = Studio::new(StudioConfig::default());
+            let mut s = Studio::new(docked());
             let c = crop(w, h);
             let t = std::time::Instant::now();
             s.open(Picture::Crop(c));
@@ -4045,7 +4070,7 @@ fn studio_open_cost() {
             v[v.len() / 2]
         };
         // Add to steps: before = flatten on the UI thread; after = a copy of the document
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         s.open(Picture::Crop(crop(w, h)));
         s.settle_open();
         let t = std::time::Instant::now();
@@ -4094,7 +4119,7 @@ fn studio_open_cost() {
 /// see-through pixels known. (The 8K stall was 157 ms on the UI thread.)
 #[test]
 fn a_big_picture_opens_off_the_ui_thread() {
-    let mut s = Studio::new(StudioConfig::default());
+    let mut s = Studio::new(docked());
     s.open(Picture::Crop(crop(3000, 2000)));
     assert!(s.editor.is_none(), "not on the UI thread");
     assert!(
@@ -4277,7 +4302,7 @@ fn f8_the_sidebar_has_one_add_step_button() {
     let labels =
         |s: &Studio| -> Vec<String> { sidebar::add_rows(s).into_iter().map(|r| r.0).collect() };
     assert_eq!(labels(&s), ["Pictures…", "Paste", "This picture"]);
-    let empty = Studio::new(StudioConfig::default());
+    let empty = Studio::new(docked());
     assert_eq!(
         labels(&empty),
         ["Pictures…", "Paste"],
@@ -4480,7 +4505,7 @@ fn photo(width: u32, height: u32) -> Crop {
 #[ignore = "timing: run by hand, in release"]
 fn studio_crop_frame_times() {
     for (w, h) in [(1640, 1270), (3840, 2160)] {
-        let mut s = Studio::new(StudioConfig::default());
+        let mut s = Studio::new(docked());
         s.open(Picture::Crop(photo(w, h)));
         s.settle_open();
         let _ = s.update(Msg::Editor(Message::Tool(Tool::Crop)));

@@ -2024,6 +2024,26 @@ fn slide_pages_sheet() {
     sheet("slide_pages", Size::new(160.0, 90.0), &rows);
 }
 
+/// `edge_slide`: a panel coming in over its window (out, halfway, in) and the closed panel's
+/// handle (with and without a count).
+#[test]
+fn edge_slide_sheet() {
+    use super::super::edge_slide::{handle, slide_in};
+    let mut rows: Vec<_> = [("out", 0.0), ("halfway", 0.5), ("in", 1.0)]
+        .into_iter()
+        .map(|(state, t)| {
+            row(state, Act::Rest, move |ar| {
+                let page = super::super::text::text(Role::CONTROL, s(ar, "Steps", "الخطوات"));
+                slide_in(page.into(), 90.0, t, !ar)
+            })
+        })
+        .collect();
+    for (state, count) in [("handle", 0), ("handle, 4", 4)] {
+        rows.push(row(state, Act::Rest, move |ar| handle(count, ar, ())));
+    }
+    sheet("edge_slide", Size::new(130.0, 90.0), &rows);
+}
+
 /// `modal`: the dialog card over a dimmed window, with its header and X.
 #[test]
 fn modal_sheet() {

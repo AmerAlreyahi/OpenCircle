@@ -69,7 +69,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
     // other edge (the options bar always runs beside the rail, over the sidebar)
     let first = s.sidebar_at_start();
     let side = |parts: &mut Vec<Element<'a, Msg>>| {
-        if s.sidebar_shown() {
+        if s.sidebar_docked() {
             let bar = [divider::vertical(Fill), super::sidebar::view(s, steps)];
             match first {
                 true => {
@@ -100,7 +100,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                     None => super::options_bar::view(s, e),
                 },
                 divider::divider(),
-                dir::row(under).height(Fill)
+                with_steps_panel(s, steps, dir::row(under).height(Fill).into())
             ]
             .width(Fill)
             .height(Fill);
@@ -122,7 +122,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             column![
                 super::options_bar::empty(s),
                 divider::divider(),
-                dir::row(parts).height(Fill)
+                with_steps_panel(s, steps, dir::row(parts).height(Fill).into())
             ]
             .width(Fill)
             .height(Fill)
@@ -321,6 +321,62 @@ pub(super) fn inward(on_left: bool) -> Position {
         true => Position::Right,
         false => Position::Left,
     }
+}
+
+/// `base` (the stage, with the Steps panel beside it when it is docked) with the Steps panel's
+/// other states over it: closed = its handle on the edge; open and not pinned = the panel sliding
+/// over the canvas (no canvas jump) with a catcher behind it for a press outside.
+fn with_steps_panel<'a>(
+    s: &'a Studio,
+    steps: &'a [Arc<Step>],
+    base: Element<'a, Msg>,
+) -> Element<'a, Msg> {
+    use iced::widget::{opaque, row, stack};
+    let on_left = s.sidebar_at_start() != dir::rtl();
+    let edge = match on_left {
+        true => iced::alignment::Horizontal::Left,
+        false => iced::alignment::Horizontal::Right,
+    };
+    if s.steps_overlay() {
+        let panel = match on_left {
+            true => row![super::sidebar::view(s, steps), divider::vertical(Fill)],
+            false => row![divider::vertical(Fill), super::sidebar::view(s, steps)],
+        };
+        let panel = crate::shared::kit::edge_slide::slide_in(
+            panel.into(),
+            super::SIDEBAR + 1.0,
+            s.steps_at(),
+            !on_left,
+        );
+        let mut layers = vec![base];
+        if s.sidebar_shown() {
+            layers.push(
+                mouse_area(Space::new().width(Fill).height(Fill))
+                    .on_press(Msg::StepsAway)
+                    .into(),
+            );
+        }
+        layers.push(
+            container(opaque(panel))
+                .width(Fill)
+                .height(Fill)
+                .align_x(edge)
+                .into(),
+        );
+        return stack(layers).into();
+    }
+    if s.sidebar_shown() {
+        return base;
+    }
+    stack![
+        base,
+        container(super::sidebar::handle(steps.len(), on_left))
+            .width(Fill)
+            .height(Fill)
+            .align_x(edge)
+            .align_y(Center)
+    ]
+    .into()
 }
 
 /// Is the tools rail at the window's left edge? It takes the edge the Steps sidebar

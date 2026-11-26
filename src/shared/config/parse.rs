@@ -411,6 +411,7 @@ impl Config {
             if let Some(s) = sub_section(t, p, "studio", &mut w) {
                 let (p, d) = ("snip.studio.", d.snip.studio);
                 c.snip.studio.library = get(s, p, "library", d.library, &mut w);
+                c.snip.studio.pinned = get(s, p, "pinned", d.pinned, &mut w);
                 c.snip.studio.options = get(s, p, "options", d.options, &mut w);
                 c.snip.studio.walk_transition = get_checked(
                     s,

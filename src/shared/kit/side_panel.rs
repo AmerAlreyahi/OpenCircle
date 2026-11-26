@@ -5,7 +5,7 @@
 //! object row, hover shade, `accent_soft` while selected) and the menu bar's
 //! opener (28 px).
 use iced::widget::{button, column, container};
-use iced::{Border, Center, Element, Fill, Length, Padding};
+use iced::{Border, Element, Fill, Length, Padding};
 
 use super::themes::c;
 use super::tokens::{Role, size};
@@ -15,23 +15,21 @@ const OPENER_H: f32 = 28.0;
 const OPENER_R: f32 = 8.0;
 const PAD: f32 = 12.0;
 
-/// The panel: `title`, a hairline, `body`. (Its show / hide button is the window's:
-/// the same place whether the panel is open or closed.)
+/// The panel: `head` (its name, and the buttons that pin or hide it, in one row), a hairline,
+/// `body`.
 pub fn panel<'a, Message: Clone + 'a>(
     width: f32,
-    title: &'a str,
+    head: Element<'a, Message>,
     body: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let head = container(
-        crate::dir_row![super::text::text(Role::CONTROL, title).width(Fill)].align_y(Center),
-    )
-    .padding(Padding {
-        left: PAD,
-        right: PAD,
-        ..Padding::ZERO
-    })
-    .height(size::HEADER)
-    .center_y(size::HEADER);
+    let head = container(head)
+        .padding(Padding {
+            left: PAD,
+            right: PAD,
+            ..Padding::ZERO
+        })
+        .height(size::HEADER)
+        .center_y(size::HEADER);
     container(column![
         head,
         divider::divider(),

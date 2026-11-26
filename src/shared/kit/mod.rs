@@ -22,6 +22,7 @@ pub mod dir;
 pub mod divider;
 pub mod dotted;
 pub mod dropdown;
+pub mod edge_slide;
 pub mod error_card;
 pub mod field;
 pub mod focus;

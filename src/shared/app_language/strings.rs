@@ -2377,6 +2377,10 @@ strings! {
         | "إظهار الشريط الجانبي للخطوات";
     st_hide_steps: "Hide the Steps sidebar"
         | "إخفاء الشريط الجانبي للخطوات";
+    st_pin_steps: "Keep open · the picture makes room"
+        | "ابقِها مفتوحة · تفسح الصورة المجال";
+    st_unpin_steps: "Unpin · slides over the picture"
+        | "إلغاء التثبيت · تنزلق فوق الصورة";
     st_step_pictures: "Pictures…"
         | "صور…";
     st_step_paste: "Paste"

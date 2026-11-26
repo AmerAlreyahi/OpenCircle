@@ -56,12 +56,71 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
             )
         }
     };
-    let panel = side_panel::panel(super::SIDEBAR, t!(st_steps), body);
+    let panel = side_panel::panel(super::SIDEBAR, head(s, steps.len()), body);
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
         .on_enter(Msg::OverSidebar(true))
         .on_exit(Msg::OverSidebar(false))
         .into()
+}
+
+/// The closed panel's handle: a slim tab on the window's edge with an arrow toward the picture
+/// and the step count; a press slides the panel in.
+pub fn handle<'a>(count: usize, on_left: bool) -> Element<'a, Msg> {
+    hint(
+        crate::shared::kit::edge_slide::handle(count, on_left, Msg::Library),
+        t!(st_steps),
+        Why::Keys(super::keys::of(super::keys::Cmd::StepsSidebar)),
+        super::view::inward(on_left),
+    )
+}
+
+/// The header: "Steps" and how many, then the pin (docked or over the picture) and the arrow
+/// that slides the panel away, toward the edge it came from.
+fn head<'a>(s: &Studio, count: usize) -> Element<'a, Msg> {
+    use crate::shared::kit::icon::Icon;
+    use crate::shared::kit::icon_button::{State, square};
+    let on_left = s.sidebar_at_start() != dir::rtl();
+    let tip = super::view::inward(on_left);
+    let pinned = s.panels.pinned;
+    let pin = hint(
+        square(
+            Icon::Pin.glyph(),
+            State {
+                active: pinned,
+                focused: false,
+            },
+            Some(Msg::PinSteps),
+        ),
+        match pinned {
+            true => t!(st_unpin_steps),
+            false => t!(st_pin_steps),
+        },
+        Why::Icon,
+        tip,
+    );
+    // the arrow points at the edge the panel hides toward
+    let away = match on_left {
+        true => Icon::Back,
+        false => Icon::Forward,
+    };
+    let away = hint(
+        square(away.glyph(), State::default(), Some(Msg::Library)),
+        t!(st_hide_steps),
+        Why::Keys(super::keys::of(super::keys::Cmd::StepsSidebar)),
+        tip,
+    );
+    dir::row([
+        crate::shared::kit::text::text(Role::CONTROL, t!(st_steps)).into(),
+        crate::shared::kit::chip::badge(count.to_string()),
+        Space::new().width(iced::Fill).into(),
+        pin,
+        away,
+    ])
+    .spacing(space::GAP / 2.0)
+    .width(iced::Fill)
+    .align_y(iced::Center)
+    .into()
 }
 
 /// The Add step menu: Pictures, Paste and, with a picture open, This picture.
