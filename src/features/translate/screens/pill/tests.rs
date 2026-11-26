@@ -1557,3 +1557,58 @@ fn selected_words_already_in_the_target_say_so() {
     assert!(s.translated_text().is_none(), "nothing was drawn");
     assert!(card_texts(&s).iter().any(|t| t == note));
 }
+
+fn local_failed(repair: Option<(&'static str, &'static str)>) -> Error {
+    Error::Ai(AiError::LocalFailed {
+        why: "Load model from C:\\Users\\x\\OptimaMT-en-es\\encoder_model_quantized.onnx failed:system error number 13"
+            .into(),
+        repair,
+    })
+}
+
+// W116 AC-4: a local model that failed is a calm card: a plain headline with
+// no raw path, the detail behind "Show details", and Try again (files fine) or
+// Repair model (a file fails its sha256): never "Set up AI".
+#[test]
+fn ac4_a_failed_local_model_offers_try_again_or_repair_never_set_up_ai() {
+    let size = Size::new(1280.0, 720.0);
+    let at = card::place(size, None, None);
+    for (repair, want, redo) in [
+        (None, "Try again", Redo::Again),
+        (Some(("en", "es")), "Repair model", Redo::Repair("en", "es")),
+    ] {
+        let p = problem_of(&local_failed(repair));
+        assert_eq!(p.redo, Some(redo));
+        assert!(!p.setup, "a local model problem is not an AI setup problem");
+        assert!(!p.message.contains("text recognition"), "{}", p.message);
+        let mut s = session(true);
+        s.phase = Phase::Failed(p);
+        let texts = crate::shared::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
+        assert!(texts.contains(want), "{texts}");
+        assert!(texts.contains("Show details"), "{texts}");
+        assert!(!texts.contains("Set up AI"), "{texts}");
+        assert!(!texts.contains("C:\\"), "no raw path while folded: {texts}");
+        assert!(!texts.contains("Local translation failed"), "{texts}");
+    }
+    // the others keep today's card
+    let missing = problem_of(&Error::Ai(AiError::Offline("x".into())));
+    assert!(missing.setup && missing.redo.is_none());
+}
+
+// W116 AC-5: Try again translates again from the failed card; a card without
+// a local fix ignores the message.
+#[test]
+fn ac5_try_again_translates_again_from_the_failed_card() {
+    let mut s = session(true);
+    s.phase = Phase::Failed(problem_of(&local_failed(None)));
+    let _ = s.update(Msg::Redo);
+    assert!(
+        matches!(s.phase, Phase::Translating | Phase::Consent(_)),
+        "{:?}",
+        s.phase
+    );
+    let mut s = session(true);
+    s.phase = Phase::Failed(problem("Already in English".into(), false));
+    let _ = s.update(Msg::Redo);
+    assert!(matches!(s.phase, Phase::Failed(_)));
+}

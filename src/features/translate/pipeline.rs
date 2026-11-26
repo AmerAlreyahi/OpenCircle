@@ -348,7 +348,7 @@ impl Real {
     /// when there is no direct one.
     fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
         self.on_device_with(texts, target, |t, pair| {
-            mt::translate(t, pair).map_err(|e| AiError::Offline(e.to_string()))
+            mt::translate(t, pair).map_err(|e| local_error(pair, e))
         })
     }
 
@@ -1708,6 +1708,20 @@ pub struct Translated {
 
 /// Translates every text block of an RGBA frame in place. An OCR or AI
 /// error returns before anything is drawn (never a half-translated frame).
+/// What an offline model's failure says (W116): a model that isn't there
+/// stays `Offline` (download it, or set up AI); one that is there but did
+/// not load or run is `LocalFailed`, which knows by its sha256 whether its
+/// files are damaged (Repair model) or not (Try again).
+pub(crate) fn local_error(pair: &'static mt::Pair, e: OcrError) -> AiError {
+    match e {
+        OcrError::Missing(_) => AiError::Offline(e.to_string()),
+        e => AiError::LocalFailed {
+            why: e.detail(),
+            repair: pair.damaged().then_some((pair.source, pair.target)),
+        },
+    }
+}
+
 /// No offline route from `source` into `target`: "already in" when they are
 /// the same language (a quiet note), else why not (offers AI).
 fn no_route(source: &str, target: &str) -> AiError {

@@ -5,7 +5,7 @@ use iced::widget::{column, container, mouse_area, opaque, pin, stack};
 use iced::{Center, Element, Fill, Point, Rectangle, Size};
 
 use super::glossary::{AddForm, AddMsg};
-use super::{Card, Msg, Phase, Session};
+use super::{Card, Msg, Phase, Redo, Session};
 use crate::features::ask_ai::Fix;
 use crate::features::ask_ai::ask::Status;
 use crate::features::ask_ai::screens::ai_chat::{actions, ai_error, card, note, provider_name};
@@ -110,7 +110,11 @@ impl Session {
                     width: ERROR_W,
                     open: self.details,
                     on_details: Msg::ErrorDetails,
-                    fix: problem.setup.then(|| (t!(tp_set_up_ai), Msg::OpenSettings)),
+                    fix: match &problem.redo {
+                        Some(Redo::Again) => Some((t!(tp_try_again), Msg::Redo)),
+                        Some(Redo::Repair(..)) => Some((t!(tp_repair), Msg::Redo)),
+                        None => problem.setup.then(|| (t!(tp_set_up_ai), Msg::OpenSettings)),
+                    },
                     retry: None,
                     words: crate::shared::theme::error_words(),
                 });

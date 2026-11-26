@@ -74,6 +74,8 @@ pub enum Msg {
     Ask,
     /// The AI is not set up: open Settings.
     OpenSettings,
+    /// The failure card's Try again / Repair model (`Problem::redo`).
+    Redo,
     /// Get the pair of the lines kept in their own language (`Offer`).
     GetHeld,
     /// "N parts not translated · Retry": translate again (the parts that
@@ -145,6 +147,17 @@ pub struct Problem {
     pub message: String,
     /// The AI is not set up (no key, provider, model): offer Settings.
     pub setup: bool,
+    /// A local model failed (W116): the card's one fix.
+    pub redo: Option<Redo>,
+}
+
+/// The fix a failed local model's card offers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Redo {
+    /// Try again: its files are fine.
+    Again,
+    /// Repair model: this pair's (source, target) files fail their sha256.
+    Repair(&'static str, &'static str),
 }
 
 /// What stops a session that has no card (`Session::stuck`).
@@ -529,6 +542,20 @@ impl Session {
                     self.phase = Phase::Downloading(0.0);
                     return self.run(true);
                 }
+            }
+            Msg::Redo if matches!(&self.phase, Phase::Failed(p) if p.redo.is_some()) => {
+                if let Phase::Failed(Problem {
+                    redo: Some(Redo::Repair(source, target)),
+                    ..
+                }) = &self.phase
+                {
+                    // its bad files go; the next run asks for them (the download card)
+                    if let Some(pair) = crate::features::translate::mt::pair(source, target) {
+                        pair.repair();
+                    }
+                }
+                let models = models::installed(models::recognizer_for(&self.picker.source));
+                return self.begin(models);
             }
             Msg::Retry if matches!(self.phase, Phase::Shown(_)) => {
                 let models = models::installed(models::recognizer_for(&self.picker.source));
@@ -1020,7 +1047,7 @@ impl Session {
 pub fn failure_text(e: &crate::features::ask_ai::AiError) -> String {
     use crate::features::ask_ai::AiError;
     match e {
-        AiError::Offline(_) | AiError::AlreadyIn(_) => e.to_string(),
+        AiError::Offline(_) | AiError::LocalFailed { .. } | AiError::AlreadyIn(_) => e.to_string(),
         ai => ai.headline(&crate::features::ask_ai::screens::ai_chat::provider_name(
             &crate::shared::config::current().ai,
         )),
@@ -1129,20 +1156,7 @@ fn translate_with(
         },
         stop,
     )
-    .map_err(|e| {
-        // Offline can't do it (no model, not downloaded): AI is the other way.
-        let setup = matches!(
-            e,
-            Error::Ai(AiError::NotConfigured(_) | AiError::Auth(..) | AiError::Offline(_))
-        );
-        // an AI provider's error: the error card's short headline (owner, 2026-11-10)
-        let message = match &e {
-            Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
-            Error::Ai(ai) => failure_text(ai),
-            _ => e.to_string(),
-        };
-        problem(message, setup)
-    })?;
+    .map_err(|e| problem_of(&e))?;
     let mut result = shown(&out);
     if out.failed > 0 {
         crate::log!("[opencircle] {} part(s) stay untranslated", out.failed);
@@ -1176,7 +1190,42 @@ fn translate_with(
 }
 
 fn problem(message: String, setup: bool) -> Problem {
-    Problem { message, setup }
+    Problem {
+        message,
+        setup,
+        redo: None,
+    }
+}
+
+/// What the failure card says and offers for `e` (the pipeline's error).
+pub(super) fn problem_of(e: &Error) -> Problem {
+    // Offline can't do it (no model, not downloaded): AI is the other way.
+    let setup = matches!(
+        e,
+        Error::Ai(AiError::NotConfigured(_) | AiError::Auth(..) | AiError::Offline(_))
+    );
+    // an AI provider's error: the error card's short headline (owner, 2026-11-10)
+    let message = match e {
+        Error::Ai(AiError::Offline(_) | AiError::LocalFailed { .. } | AiError::AlreadyIn(_)) => {
+            e.to_string()
+        }
+        Error::Ai(ai) => failure_text(ai),
+        _ => e.to_string(),
+    };
+    // a local model that is there but failed: Repair model when its files
+    // fail their pins, else Try again (never Set up AI)
+    let redo = match e {
+        Error::Ai(AiError::LocalFailed { repair, .. }) => Some(match repair {
+            Some((source, target)) => Redo::Repair(source, target),
+            None => Redo::Again,
+        }),
+        _ => None,
+    };
+    Problem {
+        message,
+        setup,
+        redo,
+    }
 }
 
 /// Copies `rgba` (the area's size) into `frame` (`width` wide) at `area`.

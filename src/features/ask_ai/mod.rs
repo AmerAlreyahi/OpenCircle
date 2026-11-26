@@ -127,6 +127,13 @@ pub enum AiError {
     BadResponse(String),
     /// The offline translation engine (`crate::features::translate::mt`) failed; no AI involved.
     Offline(String),
+    /// A translation model is on disk but would not load or run (what the
+    /// engine said). `repair`: its files fail their pins, so Repair model
+    /// (that pair's source and target); else Try again (W116).
+    LocalFailed {
+        why: String,
+        repair: Option<(&'static str, &'static str)>,
+    },
     /// Nothing to translate: the text is in the target already (its name).
     /// Not a failure: shown as a quiet note, never an error card.
     AlreadyIn(&'static str),
@@ -181,7 +188,7 @@ impl AiError {
             AiError::Network(_) => t!(err_no_conn).into(),
             AiError::Dropped(_) => t!(err_dropped).into(),
             AiError::BadResponse(_) => busy(S::err_unreadable),
-            AiError::Offline(_) => t!(err_local).into(),
+            AiError::Offline(_) | AiError::LocalFailed { .. } => t!(err_local).into(),
             AiError::AlreadyIn(name) => fmt(S::err_already, &[name]),
             AiError::Browser(_) => t!(err_browser).into(),
         }
@@ -202,6 +209,7 @@ impl AiError {
             | AiError::Dropped(why)
             | AiError::BadResponse(why)
             | AiError::Offline(why)
+            | AiError::LocalFailed { why, .. }
             | AiError::Browser(why) => why.clone(),
             AiError::AlreadyIn(_) => String::new(),
         }
@@ -259,6 +267,10 @@ impl fmt::Display for AiError {
                 write!(f, "The AI provider sent an unexpected answer: {why}")
             }
             AiError::Offline(why) => write!(f, "Local translation failed: {why}"),
+            // the first sentence is the card's plain line, the rest its folded details
+            AiError::LocalFailed { why, .. } => {
+                write!(f, "{}. {why}", crate::t!(tp_model_broke))
+            }
             AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
             AiError::Browser(why) => f.write_str(why),
         }

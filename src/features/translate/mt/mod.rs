@@ -838,12 +838,46 @@ impl Pair {
         self.files().iter().map(|(_, f)| f.size).sum()
     }
 
+    /// This pair's own files that are on disk but fail their pin (size or
+    /// sha256): what a failed load blames (W116). A v1 decoder that verifies
+    /// is not one of them.
+    fn bad_files(&'static self) -> Vec<PathBuf> {
+        failing(&self.needed(verified), &self.dir(), verified)
+    }
+
+    /// A load failed: do this pair's files still fail their pins? `false`
+    /// means the files are fine (another process held one, say): Try again.
+    pub fn damaged(&'static self) -> bool {
+        !self.bad_files().is_empty()
+    }
+
+    /// Deletes the files that fail their pin, so the next Translate asks for
+    /// them with the normal download card ("Repair model").
+    pub fn repair(&'static self) {
+        for path in self.bad_files() {
+            crate::log!("[opencircle] repair: removing {}", path.display());
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     /// Downloads and verifies whatever is missing (OCR's files too), with
     /// one `progress(done, total)`. Only after the user agreed.
     /// A v1 decoder that verifies is kept; else the v2 one replaces it.
     pub fn ensure(&'static self, progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
         models::ensure(&self.needed(verified), progress)
     }
+}
+
+/// The `files` inside `dir` that exist but fail `ok`.
+fn failing(
+    files: &[(PathBuf, &ModelFile)],
+    dir: &Path,
+    ok: impl Fn(&Path, &ModelFile) -> bool,
+) -> Vec<PathBuf> {
+    (files.iter())
+        .filter(|(p, f)| p.starts_with(dir) && p.exists() && !ok(p, f))
+        .map(|(p, _)| p.clone())
+        .collect()
 }
 
 /// `files` without `decoder` when its previous version `v1` is on disk and

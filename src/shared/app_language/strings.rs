@@ -1225,6 +1225,12 @@ strings! {
         | "جارٍ الترجمة…";
     tp_failed: "Translation could not finish"
         | "تعذّر إكمال الترجمة";
+    tp_model_broke: "The translation model on this PC could not start"
+        | "تعذّر تشغيل نموذج الترجمة على هذا الجهاز";
+    tp_try_again: "Try again"
+        | "حاول مرة أخرى";
+    tp_repair: "Repair model"
+        | "إصلاح النموذج";
     tp_set_up_ai: "Set up AI"
         | "إعداد الذكاء الاصطناعي";
     tp_thinking: "Thinking…"

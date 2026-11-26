@@ -363,7 +363,7 @@ fn heap_keeper() -> Arc<Mutex<Option<Instant>>> {
 }
 
 fn json<T: serde::Serialize>(reply: Result<T, OcrError>) -> Vec<u8> {
-    serde_json::to_vec(&reply.map_err(|e| e.to_string())).unwrap_or_default()
+    serde_json::to_vec(&reply.map_err(|e| e.detail())).unwrap_or_default()
 }
 
 fn recognize_here(body: &[u8], engine: &mut Option<Engine>) -> Result<Vec<TextBlock>, OcrError> {
@@ -671,6 +671,29 @@ impl<T: Send + 'static> Mt<T> {
     }
 }
 
+/// How long a model that would not load waits before its one second try.
+const LOAD_AGAIN: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// A model load that failed is tried once more after `wait`: its file may be
+/// held for a moment (another OpenCircle renaming the folder or swapping the
+/// decoder, antivirus scanning a new file). A missing model is not retried.
+fn load_again<T>(
+    wait: std::time::Duration,
+    mut load: impl FnMut() -> Result<T, OcrError>,
+) -> Result<T, OcrError> {
+    match load() {
+        Err(e) if !matches!(e, OcrError::Missing(_)) => {
+            crate::log!(
+                "[opencircle] model load failed ({}); trying once more",
+                e.detail()
+            );
+            std::thread::sleep(wait);
+            load()
+        }
+        done => done,
+    }
+}
+
 fn translate_here(body: &[u8], loaded: &mut Mt<Translator>) -> Result<Vec<String>, OcrError> {
     if body.len() > MAX_TEXT {
         return Err(OcrError::BadImage("too much text".into()));
@@ -682,7 +705,7 @@ fn translate_here(body: &[u8], loaded: &mut Mt<Translator>) -> Result<Vec<String
     let t = Instant::now();
     let load = move || {
         let t = Instant::now();
-        let loaded = Translator::load(pair, &models_dir());
+        let loaded = load_again(LOAD_AGAIN, || Translator::load(pair, &models_dir()));
         crate::log!(
             "[opencircle] mt {} loaded in {} ms",
             pair.label(),
@@ -897,5 +920,56 @@ mod mt_tests {
             Some(&mut 11),
             "freed, reloaded"
         );
+    }
+}
+
+#[cfg(test)]
+mod w116_tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    // W116 AC-1: a helper's Engine error crosses the pipe once: no second
+    // "text recognition failed:" label, and a translation model's failure
+    // never reads as text recognition.
+    #[test]
+    fn ac1_the_helper_reply_carries_the_error_without_its_label() {
+        let load = "Load model from X failed:system error number 13";
+        let reply = json::<Vec<String>>(Err(OcrError::Engine(load.into())));
+        let err = parse::<Vec<String>>(reply).unwrap_err();
+        assert_eq!(err.detail(), load);
+        assert_eq!(
+            err.to_string().matches("text recognition failed").count(),
+            1,
+            "{err}"
+        );
+    }
+
+    // W116 AC-2: a load that fails once is tried again; a missing model is not.
+    #[test]
+    fn ac2_a_failed_model_load_is_tried_once_more() {
+        let calls = Cell::new(0);
+        let flaky = || {
+            calls.set(calls.get() + 1);
+            match calls.get() {
+                1 => Err(OcrError::Engine("held".into())),
+                n => Ok(n),
+            }
+        };
+        assert_eq!(load_again(Duration::ZERO, flaky).unwrap(), 2);
+        let calls = Cell::new(0);
+        let broken = || -> Result<u32, OcrError> {
+            calls.set(calls.get() + 1);
+            Err(OcrError::Engine("bad".into()))
+        };
+        assert!(load_again(Duration::ZERO, broken).is_err());
+        assert_eq!(calls.get(), 2, "once more, not forever");
+        let calls = Cell::new(0);
+        let missing = || -> Result<u32, OcrError> {
+            calls.set(calls.get() + 1);
+            Err(OcrError::Missing("x".into()))
+        };
+        assert!(load_again(Duration::ZERO, missing).is_err());
+        assert_eq!(calls.get(), 1);
     }
 }

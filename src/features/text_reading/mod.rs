@@ -434,6 +434,18 @@ impl fmt::Display for OcrError {
 
 impl std::error::Error for OcrError {}
 
+impl OcrError {
+    /// What went wrong, without the "text recognition failed:" label of an
+    /// engine error: a helper's reply (translation too) carries this, so the
+    /// label is not wrapped on twice (W116).
+    pub fn detail(&self) -> String {
+        match self {
+            Self::Engine(m) => m.clone(),
+            e => e.to_string(),
+        }
+    }
+}
+
 impl From<std::io::Error> for OcrError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)

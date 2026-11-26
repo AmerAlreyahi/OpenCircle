@@ -735,3 +735,25 @@ fn real_portuguese_translates() {
         }
     }
 }
+
+// W116 AC-3: after a failed load, the pair's files that fail their pin are
+// found (and only those that exist: a missing file is the download's job).
+#[test]
+fn ac3_files_that_fail_their_pin_are_found() {
+    let dir = std::env::temp_dir().join(format!("oc-mt-w116-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let good = pinned("good.onnx", b"good bytes");
+    let bad = pinned("bad.onnx", b"the right bytes");
+    let gone = pinned("gone.onnx", b"never written");
+    std::fs::write(dir.join("good.onnx"), b"good bytes").unwrap();
+    std::fs::write(dir.join("bad.onnx"), b"the wrong bytes").unwrap();
+    let files = vec![
+        (dir.join("good.onnx"), good),
+        (dir.join("bad.onnx"), bad),
+        (dir.join("gone.onnx"), gone),
+        (std::env::temp_dir().join("elsewhere.onnx"), bad),
+    ];
+    assert_eq!(failing(&files, &dir, verified), vec![dir.join("bad.onnx")]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
