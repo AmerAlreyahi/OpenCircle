@@ -6667,3 +6667,98 @@ fn f12_a_cancelled_capture_is_silent_and_the_card_names_no_desktop_off_wayland()
     let wayland = false;
     assert!(wayland || !card.hint.contains("desktop"), "{}", card.hint);
 }
+
+/// W116 part 2: with words translated in place (a text-only session) on screen, the
+/// overlay is not stuck: the next words can be picked (drag, double-click), R translates them
+/// (replacing the first translation, the simpler rule), R with nothing picked translates the whole
+/// screen, and the pill's "Whole screen" does the same by mouse; Esc still ends it.
+fn translated_in_place() -> App {
+    let (mut app, on) = menu_app();
+    let _ = app.update(Message::Overlay(overlay::Event::Context(on)));
+    let i = row_at(
+        &app,
+        &crate::features::circle::screens::context_menu::Row::Translate,
+    );
+    let _ = app.update(Message::ContextMenu(
+        crate::features::circle::screens::context_menu::Msg::Pick(i),
+    ));
+    assert!(app.o.translate.as_ref().is_some_and(|(_, s)| s.text_only()));
+    app
+}
+
+#[test]
+fn w116_ac6_other_words_can_be_picked_while_a_translation_is_on_screen() {
+    let mut app = translated_in_place();
+    let first = app.o.translate.as_ref().unwrap().1.only_text();
+    // a drag over words on another line picks them as it does without a translation
+    stroke(&mut app, &[at_word(3, 0.0), at_word(3, 10.0)]);
+    let dragged = picked_text(&app).expect("dragged words picked");
+    assert!(dragged.contains("transl"), "{dragged}");
+    assert!(app.o.text_press.is_none(), "the drag ended");
+    assert!(
+        app.o.translate.is_some(),
+        "the translation stays until the next one"
+    );
+    // a double-click picks a word
+    app.o.word = None;
+    app.o.selection = None;
+    let p = caret(4, 8.0);
+    click_at(&mut app, p, false);
+    click_at(&mut app, p, false);
+    assert_eq!(
+        picked_text(&app).as_deref(),
+        Some("Shift"),
+        "double-click picks the word"
+    );
+    // R translates the new words: the session is replaced, not added to
+    let _ = app.update(Message::Overlay(overlay::Event::Key {
+        letter: 'r',
+        ctrl: false,
+    }));
+    let next = app.o.translate.as_ref().unwrap().1.only_text();
+    assert_ne!(next, first);
+    assert_eq!(next.join(" "), "Shift");
+    // Esc still ends it
+    let _ = app.update(Message::Escape);
+    assert!(app.o.is_none());
+}
+
+#[test]
+fn w116_ac7_r_with_nothing_picked_translates_the_whole_screen() {
+    let mut app = translated_in_place();
+    let _ = app.update(Message::Overlay(overlay::Event::Key {
+        letter: 'r',
+        ctrl: false,
+    }));
+    let (_, session) = app.o.translate.as_ref().expect("translating again");
+    assert!(!session.text_only() && session.full(), "the whole screen");
+}
+
+#[test]
+fn w116_ac8_the_pill_offers_the_whole_screen_and_original_and_x_keep_working() {
+    let mut app = translated_in_place();
+    let id = app.o.translate.as_ref().unwrap().0;
+    let block = crate::features::translate::pipeline::Translation {
+        bounds: [0.0, 0.0, 10.0, 10.0],
+        original: "hello".into(),
+        translation: "hola".into(),
+    };
+    let _ = app.update(Message::Translate(
+        id,
+        pill::Session::done_for_test(vec![block]),
+    ));
+    let texts = texts_of(&app, app.overlay);
+    assert!(texts.iter().any(|t| t == "Whole screen"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Detect"),
+        "the chips stay: {texts:?}"
+    );
+    let _ = app.update(Message::Translate(id, pill::Msg::WholeScreen));
+    let (_, session) = app.o.translate.as_ref().expect("translating the screen");
+    assert!(session.full() && !session.text_only());
+    // Original toggles on the new session as before, and x / Esc close
+    let id = app.o.translate.as_ref().unwrap().0;
+    let _ = app.update(Message::Translate(id, pill::Msg::Original));
+    let _ = app.update(Message::Translate(id, pill::Msg::Close));
+    assert!(app.o.is_none());
+}

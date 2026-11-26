@@ -515,6 +515,9 @@ impl App {
         };
         self.o.menu = None;
         self.o.word = None;
+        // (no stale selection: R with nothing picked translates the whole screen)
+        self.o.selection = None;
+        self.o.stroke.clear();
         self.o.text_mode = None;
         self.o.ai_chat = None;
         self.o.edit = None;
@@ -547,6 +550,7 @@ impl App {
             // (the cards have no close button: Esc, or a click on the screen)
             pill::Msg::Close => self.close(),
             pill::Msg::Snip => self.snip_here(None),
+            pill::Msg::WholeScreen => self.update(Message::TranslateScreen),
             // New glossary / Edit glossaries…: Settings on Translate's glossary editor
             pill::Msg::Glossary(pill::glossary::GlossaryMsg::Edit) => {
                 let closing = self.close();

@@ -53,6 +53,9 @@ pub enum Msg {
     /// The pill's Snip button: Snip takes the page as translated (the App
     /// does what Alt+A does).
     Snip,
+    /// The pill's "Whole screen" next to words translated in place: translate
+    /// the whole screen instead (the App does what the bar's Translate does).
+    WholeScreen,
     /// Model download, 0..=1.
     Progress(f32),
     /// The download failed (why).

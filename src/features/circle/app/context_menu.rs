@@ -27,7 +27,7 @@ impl App {
     pub(crate) fn menu_target(&self) -> Vec<Rectangle> {
         if !matches!(self.o.purpose, Purpose::Search)
             || self.o.edit.is_some()
-            || self.o.translate.is_some()
+            || (self.o.translate.as_ref()).is_some_and(|(_, s)| !s.text_only())
         {
             return Vec::new();
         }

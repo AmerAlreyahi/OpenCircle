@@ -1227,6 +1227,10 @@ strings! {
         | "تعذّر إكمال الترجمة";
     tp_model_broke: "The translation model on this PC could not start"
         | "تعذّر تشغيل نموذج الترجمة على هذا الجهاز";
+    tp_whole_screen: "Whole screen"
+        | "الشاشة كاملة";
+    tp_selection_only: "Selected text only"
+        | "النص المحدد فقط";
     tp_try_again: "Try again"
         | "حاول مرة أخرى";
     tp_repair: "Repair model"

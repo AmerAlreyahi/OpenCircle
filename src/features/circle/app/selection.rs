@@ -202,7 +202,7 @@ impl App {
                 overlay::Event::Key {
                     letter: 'c',
                     ctrl: true,
-                } if session.text_only() => {
+                } if session.text_only() && o.word.is_none() => {
                     return match session.translated_text() {
                         Some(text) => self.copy_text(text),
                         None => Task::none(),
@@ -216,9 +216,16 @@ impl App {
                 {
                     return self.snip_here(None);
                 }
-                overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space => {
+                // Words translated in place (W116): the keys (R, Ctrl+A ...) and the mouse go
+                // the normal way, so other words can be picked and translated (R replaces this
+                // translation; with nothing picked it translates the whole screen).
+                overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space
+                    if !session.text_only() =>
+                {
                     return Task::none();
                 }
+                // (a press on text is a selection: its release ends that, the translation stays)
+                overlay::Event::Release if session.text_only() && o.text_press.is_some() => {}
                 overlay::Event::Release if overlay::select(&o.stroke, 1.0).is_none() => {
                     let at = o.stroke.last().copied().unwrap_or(Point::ORIGIN);
                     session.click(Point::new(at.x * o.scale, at.y * o.scale));

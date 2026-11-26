@@ -129,11 +129,9 @@ impl App {
             morph: (self.o.morph.as_ref()).map(|(from, at)| (from.as_slice(), *at)),
             words: (self.o.text_mode.as_ref()).map_or(&[], |m| m.boxes.as_slice()),
             picked,
-            text: match self.o.translate {
-                None if matches!(self.o.purpose, Purpose::Search) => {
-                    self.lines_iter().map(|l| l.bounds).collect()
-                }
-                _ => Vec::new(),
+            text: match matches!(self.o.purpose, Purpose::Search) && !self.page_translated() {
+                true => self.lines_iter().map(|l| l.bounds).collect(),
+                false => Vec::new(),
             },
             waiting: self.text_waiting(),
             target: self.menu_target(),

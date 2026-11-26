@@ -147,7 +147,21 @@ impl Session {
                 }
                 // (owned text: the tag's element slot)
                 None => {
-                    let update = self.update_line().map(|l| note(l).into());
+                    // (words translated in place: the whole screen is one click away)
+                    let update = match self.update_line() {
+                        Some(l) => Some(note(l).into()),
+                        None if self.only.is_some() => {
+                            let whole = button(
+                                button_label(t!(tp_whole_screen)),
+                                Kind::Elevated,
+                                Some(Msg::WholeScreen),
+                            );
+                            let line = dir::row([note(t!(tp_selection_only)).into(), whole])
+                                .spacing(TAG_SPACING);
+                            Some(line.align_y(Center).into())
+                        }
+                        None => None,
+                    };
                     // (online didn't answer: said quietly, after any saved tag)
                     let status = self
                         .tag

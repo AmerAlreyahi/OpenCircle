@@ -43,10 +43,17 @@ impl App {
         self.read_words(word::region(at, self.o.screen), at, false)
     }
 
+    /// A whole-page translation is on screen: the page's text is the translation's, so it
+    /// is not selectable. Words translated in place (W116) leave the rest of the page as it
+    /// was: other words can be picked and translated.
+    pub(crate) fn page_translated(&self) -> bool {
+        (self.o.translate.as_ref()).is_some_and(|(_, s)| !s.text_only())
+    }
+
     /// A press at `p` (image px) on the screen's text read there (main mode
     /// only): the caret there, or its word or line (`unit`).
     pub(crate) fn text_at(&self, p: Point, unit: word::Unit) -> Option<word::Picked> {
-        let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
+        let main = matches!(self.o.purpose, Purpose::Search) && !self.page_translated();
         let read = main && self.text_known(p);
         read.then(|| word::Picked::new(self.all_lines(), self.o.desk(), p, unit))?
             .map(|picked| picked.on_screens(self.screen_areas()))
@@ -179,14 +186,14 @@ impl App {
         (self.o.ocr_ready || self.system_text())
             && self.o.frame.is_some()
             && matches!(self.o.purpose, Purpose::Search)
-            && self.o.translate.is_none()
+            && !self.page_translated()
     }
 
     /// Main mode's screen text is being read now (#169): how many of the
     /// lines found are read, of how many (`None` inside: none found yet).
     /// Windows: Windows OCR's read, then the second reader's.
     pub(crate) fn reading_text(&self) -> Option<Option<(usize, usize)>> {
-        let main = matches!(self.o.purpose, Purpose::Search) && self.o.translate.is_none();
+        let main = matches!(self.o.purpose, Purpose::Search) && !self.page_translated();
         let other = self.o.other_reading.is_some();
         (main && (self.o.reading.is_some() || other)).then(|| self.o.screen_text.progress(other))
     }
