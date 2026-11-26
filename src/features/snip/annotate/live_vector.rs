@@ -3,11 +3,11 @@
 //! items using the exact same paths, colours, halos, widths, caps and joins as the tiny-skia
 //! rasterizers (pen, highlighter, shape, `arrow`, pointer, document), avoiding
 //! per-move full-resolution pixmap allocations and full-picture flattens on commit.
-use iced::widget::canvas::{self, Fill, Frame, LineCap, LineJoin, Path, Stroke, fill};
+use iced::widget::canvas::{Frame, LineCap, LineJoin, Path, Stroke};
 use iced::{Color, Point, Rectangle, Size, Vector};
 
 use super::document::{Item, Shape, halo, span};
-use super::{arrow, highlighter, pointer, shape, spotlight, style};
+use super::{arrow, highlighter, pointer, shape};
 
 /// Whether item can be drawn directly as canvas vector geometry.
 /// Items that sample the picture (Blur, Spotlight, Magnifier), text-bearing
@@ -253,42 +253,4 @@ fn draw_arrow(
         f.fill(tip, rgba(colour));
         f.stroke(tip, round_stroke(colour, joint * z));
     }
-}
-
-/// Draws non-overlapping committed spotlight holes directly onto the vector canvas
-/// (same rounded-corner EvenOdd dim as the live spotlight overlay and spotlight::paint).
-pub(crate) fn draw_spotlight_holes(
-    frame: &mut Frame,
-    holes: &[Rectangle],
-    view: Rectangle,
-    zoom: f32,
-    margin: f32,
-    k: f32,
-) {
-    if holes.is_empty() {
-        return;
-    }
-    let z = zoom * k;
-    let off = margin * k;
-    let r = (spotlight::RADIUS * z).into();
-    let outside = Path::new(|p| {
-        p.rectangle(
-            Point::new(off, off),
-            Size::new(view.width * z, view.height * z),
-        );
-        for hole in holes {
-            p.rounded_rectangle(
-                Point::new((hole.x - view.x) * z + off, (hole.y - view.y) * z + off),
-                Size::new(hole.width * z, hole.height * z),
-                r,
-            );
-        }
-    });
-    frame.fill(
-        &outside,
-        Fill {
-            style: canvas::Style::Solid(style::SPOTLIGHT_DIM),
-            rule: fill::Rule::EvenOdd,
-        },
-    );
 }

@@ -67,34 +67,16 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
     // (Snip's bare live area: the frozen frame under it shows through)
     let z = e.zoom * k;
-    let mut layers: Vec<Element<'_, Message>> =
-        vec![match (e.bare(), &e.display, e.display_crop) {
-            (true, _, _) => iced::widget::space().into(),
-            (false, Some(disp), Some(crop)) => pin(image(disp.clone())
-                .filter_method(filter(e))
-                .width(crop.width * z)
-                .height(crop.height * z)
-                .content_fit(ContentFit::Fill))
-            .position(Point::new(
-                (crop.x - view.x) * z + m,
-                (crop.y - view.y) * z + m,
-            ))
-            .into(),
-            (false, Some(disp), None) => pin(image(disp.clone())
-                .filter_method(filter(e))
-                .width(size.width)
-                .height(size.height)
-                .content_fit(ContentFit::Fill))
-            .position(Point::new(m, m))
-            .into(),
-            (false, None, _) => pin(image(e.base.clone())
-                .filter_method(filter(e))
-                .width(size.width)
-                .height(size.height)
-                .content_fit(ContentFit::Fill))
-            .position(Point::new(m, m))
-            .into(),
-        }];
+    let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
+        true => iced::widget::space().into(),
+        false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
+            .filter_method(filter(e))
+            .width(size.width)
+            .height(size.height)
+            .content_fit(ContentFit::Fill))
+        .position(Point::new(m, m))
+        .into(),
+    }];
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
     // Always the same two layers here (the canvas keeps its index): the committed
@@ -163,8 +145,6 @@ struct CommittedVectors<'a> {
 #[derive(Default)]
 struct CommittedCache {
     view_key: std::cell::Cell<Option<[u64; 4]>>,
-    spot_holes: std::cell::RefCell<Vec<Rectangle>>,
-    spot_cache: canvas::Cache,
     /// Per-document-index cached vector geometry: moving or hiding one item
     /// keeps every unmoved item's Arc<Geometry> pointer intact (zero rebuild,
     /// zero damage outside the moved item).
@@ -196,28 +176,9 @@ impl canvas::Program<Message> for CommittedVectors<'_> {
             let mut slots = state.items.borrow_mut();
             if state.view_key.get() != Some(view_key) {
                 state.view_key.set(Some(view_key));
-                state.spot_cache.clear();
-                state.spot_holes.borrow_mut().clear();
                 slots.clear();
             }
-            let holes = e.committed_spotlight_holes();
             let mut out = Vec::new();
-            if !holes.is_empty() {
-                let mut cached_holes = state.spot_holes.borrow_mut();
-                if *cached_holes != holes {
-                    state.spot_cache.clear();
-                    *cached_holes = holes.clone();
-                }
-                out.push(state.spot_cache.draw(renderer, bounds.size(), |f| {
-                    e.draw_committed_spotlights(f, &holes, 0.0, k);
-                }));
-            } else {
-                let mut cached_holes = state.spot_holes.borrow_mut();
-                if !cached_holes.is_empty() {
-                    state.spot_cache.clear();
-                    cached_holes.clear();
-                }
-            }
             let total = e.doc.items.len();
             if slots.len() < total {
                 slots.resize_with(total, || None);

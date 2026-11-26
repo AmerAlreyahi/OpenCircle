@@ -298,10 +298,11 @@ fn summarize(vals: &[f64]) -> String {
 }
 
 #[test]
-fn r19_zoom_90_and_150_use_scaled_copy_and_keep_outside_pixels_identical() {
-    for z in [0.90f32, 1.50f32] {
+fn r19_zoom_90_and_150_keep_outside_pixels_identical_and_pan_clean() {
+    // 1) 90 % zoom: full downsampled display copy active and crisp, 0 outside pixels changed.
+    {
         let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
-        let _ = lab.s.zoom_to(z, None);
+        let _ = lab.s.zoom_to(0.90, None);
         let _ = lab.s.take_scroll();
         lab.reset_scroll();
         lab.settle_mip();
@@ -309,16 +310,12 @@ fn r19_zoom_90_and_150_use_scaled_copy_and_keep_outside_pixels_identical() {
         let e = lab.s.editor.as_ref().unwrap();
         assert!(
             e.display.is_some() && e.crisp,
-            "zoom {z}: display copy active and crisp"
+            "zoom 90%: display copy active and crisp"
         );
-        if z > 1.0 {
-            assert!(e.display_crop.is_some(), "zoom {z}: uses viewport tile");
-        }
         let pic_rect = lab.picture_phys_rect();
         let stride = lab.pixmap.width();
         let before = lab.pixels();
 
-        // Draw and commit a Rect + a Blur at this zoom; verify 0 outside pixels change.
         let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
         let _ = lab.send(Msg::Editor(Message::Press(Point::new(180.0, 140.0))));
         let _ = lab.send(Msg::Editor(Message::Move(Point::new(420.0, 320.0))));
@@ -332,7 +329,7 @@ fn r19_zoom_90_and_150_use_scaled_copy_and_keep_outside_pixels_identical() {
         let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl_r]);
         assert_eq!(
             dr, 0,
-            "zoom {z} Rect commit: {dr}/{cr} outside px changed (max={mdr})"
+            "zoom 90% Rect commit: {dr}/{cr} outside px changed (max={mdr})"
         );
 
         let before_blur = lab.pixels();
@@ -356,7 +353,49 @@ fn r19_zoom_90_and_150_use_scaled_copy_and_keep_outside_pixels_identical() {
         let (db, mdb, cb) = diff_outside(&before_blur, &lab.pixels(), stride, pic_rect, &[excl_b]);
         assert_eq!(
             db, 0,
-            "zoom {z} Blur commit: {db}/{cb} outside px changed (max={mdb})"
+            "zoom 90% Blur commit: {db}/{cb} outside px changed (max={mdb})"
+        );
+    }
+
+    // 2) 150 % zoom: keeps origin/main smooth Linear path on base (no viewport tile seam);
+    //    panning after an edit must match a fresh render bit-for-bit.
+    {
+        let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        let _ = lab.s.zoom_to(1.50, None);
+        let _ = lab.s.take_scroll();
+        lab.reset_scroll();
+        lab.settle_mip();
+        let _ = lab.render(0.0);
+        let e = lab.s.editor.as_ref().unwrap();
+        assert!(
+            e.display.is_none() && !e.crisp,
+            "zoom 150%: smooth Linear path on base"
+        );
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+        let _ = lab.send(Msg::Editor(Message::Press(Point::new(1800.0, 1100.0))));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+
+        // Pan across the canvas to where the Step sits.
+        let pan = iced::widget::scrollable::AbsoluteOffset {
+            x: 2100.0,
+            y: 1200.0,
+        };
+        lab.apply_scroll(pan);
+        let _ = lab.send(Msg::Scrolled(Vector::new(pan.x, pan.y)));
+        let _ = lab.render(0.0);
+        let panned = lab.pixels();
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+
+        lab.s.editor.as_mut().unwrap().refresh();
+        let _ = lab.render(0.0);
+        let fresh = lab.pixels();
+        let (diff, md, checked) = diff_outside(&fresh, &panned, stride, pic_rect, &[]);
+        assert_eq!(
+            diff, 0,
+            "zoom 150% pan after edit: {diff}/{checked} px differed from fresh render (max={md})"
         );
     }
 }
@@ -1588,4 +1627,258 @@ fn r19_lab_review_measure() {
             }
         }
     }
+}
+
+#[test]
+fn r19_screen_matches_export_for_mixed_spotlight_documents() {
+    use crate::features::snip::annotate::{self, Annotator, Image};
+    use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
+    use crate::shared::kit::testing::shot;
+
+    // 1) 1:1 pixel-for-pixel check: visible screen MUST equal annotate::render export
+    //    for mixed documents (Spotlight + Step + Text + Rect, with and without Blur).
+    let (w, h) = (480u32, 320u32);
+    let base_crop = detailed_crop(w, h);
+    let make = || {
+        let mut e = Annotator::new(
+            Image {
+                width: w,
+                height: h,
+                rgba: base_crop.rgba.clone(),
+            },
+            1.0,
+        );
+        e.studio = true;
+        e
+    };
+
+    type Case = (&'static str, fn(&mut Annotator));
+    let cases: &[Case] = &[
+        ("step_then_spotlight", |e| {
+            e.update(Message::Tool(Tool::Step));
+            e.update(Message::Press(Point::new(90.0, 90.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+            e.update(Message::Tool(Tool::Spotlight));
+            e.update(Message::Press(Point::new(260.0, 150.0)));
+            e.update(Message::Move(Point::new(420.0, 270.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+        }),
+        ("rect_text_step_spotlight", |e| {
+            e.update(Message::Tool(Tool::Rect));
+            e.update(Message::Press(Point::new(30.0, 200.0)));
+            e.update(Message::Move(Point::new(150.0, 290.0)));
+            e.update(Message::Release);
+            e.update(Message::Tool(Tool::Text));
+            e.update(Message::Press(Point::new(200.0, 40.0)));
+            e.update(Message::Release);
+            e.update(Message::Type("Hi".into()));
+            e.update(Message::Deselect);
+            e.update(Message::Tool(Tool::Step));
+            e.update(Message::Press(Point::new(90.0, 90.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+            e.update(Message::Tool(Tool::Spotlight));
+            e.update(Message::Press(Point::new(260.0, 150.0)));
+            e.update(Message::Move(Point::new(420.0, 270.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+        }),
+        ("rect_step_blur_spotlight", |e| {
+            e.update(Message::Tool(Tool::Rect));
+            e.update(Message::Press(Point::new(30.0, 200.0)));
+            e.update(Message::Move(Point::new(150.0, 290.0)));
+            e.update(Message::Release);
+            e.update(Message::Tool(Tool::Step));
+            e.update(Message::Press(Point::new(90.0, 90.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+            e.update(Message::Tool(Tool::Blur));
+            e.update(Message::Press(Point::new(200.0, 40.0)));
+            e.update(Message::Move(Point::new(300.0, 100.0)));
+            e.update(Message::Release);
+            e.update(Message::Tool(Tool::Spotlight));
+            e.update(Message::Press(Point::new(260.0, 150.0)));
+            e.update(Message::Move(Point::new(420.0, 270.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+        }),
+        ("rect_pen_spotlight_pure_vector", |e| {
+            e.update(Message::Tool(Tool::Rect));
+            e.update(Message::Press(Point::new(30.0, 40.0)));
+            e.update(Message::Move(Point::new(150.0, 130.0)));
+            e.update(Message::Release);
+            e.update(Message::Tool(Tool::Pen));
+            e.update(Message::Press(Point::new(40.0, 220.0)));
+            e.update(Message::Move(Point::new(160.0, 260.0)));
+            e.update(Message::Release);
+            e.update(Message::Tool(Tool::Spotlight));
+            e.update(Message::Press(Point::new(260.0, 150.0)));
+            e.update(Message::Move(Point::new(420.0, 270.0)));
+            e.update(Message::Release);
+            e.update(Message::Deselect);
+        }),
+    ];
+
+    for (name, build) in cases {
+        let mut e = make();
+        build(&mut e);
+        let screen = shot::render(canvas::canvas(&e, 1.0, ScreenMap::ONE), w, h);
+        let export = annotate::render(&e.doc);
+        let mut diff = 0usize;
+        let mut max_d = 0u8;
+        for px in 0..(w as usize * h as usize) {
+            let o = px * 4;
+            let mut d = 0u8;
+            for ch in 0..4 {
+                d = d.max(screen[o + ch].abs_diff(export.rgba[o + ch]));
+            }
+            if d > 0 {
+                diff += 1;
+                max_d = max_d.max(d);
+            }
+        }
+        assert_eq!(
+            diff, 0,
+            "{name} at 1x: screen != export ({diff} px differed, max={max_d})"
+        );
+    }
+
+    // 2) At Fit on 5K: committing a Spotlight away from a Step must NOT dim the Step!
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    let stride = lab.pixmap.width();
+    let _ = lab.render(0.0);
+    let step_at = Point::new(800.0, 700.0);
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+    let _ = lab.send(Msg::Editor(Message::Press(step_at)));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let _ = lab.render(0.0);
+    let before = lab.pixels();
+
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
+    let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let _ = lab.render(0.0);
+    let after = lab.pixels();
+
+    // The Step badge's solid centre pixel must remain undimmed (identical to before Spotlight).
+    let centre = lab.image_rect_to_phys(
+        Rectangle::new(
+            Point::new(step_at.x - 16.0, step_at.y - 16.0),
+            Size::new(32.0, 32.0),
+        ),
+        0.0,
+    );
+    let box_u32 = [
+        centre[0].max(0) as u32,
+        centre[1].max(0) as u32,
+        centre[2].max(0) as u32,
+        centre[3].max(0) as u32,
+    ];
+    let (diff, md, checked) = diff_outside(&before, &after, stride, box_u32, &[]);
+    assert_eq!(
+        diff, 0,
+        "Fit Step+Spotlight: Step badge was dimmed ({diff}/{checked} px changed, max={md})"
+    );
+}
+
+#[test]
+fn r19_stale_mip_thread_result_is_dropped_after_edit() {
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    let pic_rect = lab.picture_phys_rect();
+    let stride = lab.pixmap.width();
+    let _ = lab.render(0.0);
+
+    // Zoom slightly to spawn a background mip thread for the pre-edit picture.
+    let fit_z = lab.s.editor.as_ref().unwrap().zoom;
+    let _ = lab.s.zoom_to(fit_z * 1.35, None);
+    let _ = lab.s.take_scroll();
+    lab.reset_scroll();
+    assert!(
+        lab.s.mips.as_ref().is_some_and(|m| m.pending.is_some()),
+        "zoom change spawned a background mip thread"
+    );
+
+    // Immediately commit a Step BEFORE the background mip thread finishes.
+    let at = Point::new(900.0, 700.0);
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+    let _ = lab.send(Msg::Editor(Message::Press(at)));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+
+    // Let any in-flight mip thread finish and drain Msg::Frame.
+    lab.settle_mip();
+    let _ = lab.render(0.0);
+    let shown = lab.pixels();
+
+    // Compare against a fresh full refresh at the exact same state.
+    lab.s.editor.as_mut().unwrap().refresh();
+    lab.settle_mip();
+    let _ = lab.render(0.0);
+    let fresh = lab.pixels();
+
+    let (diff, md, checked) = diff_outside(&fresh, &shown, stride, pic_rect, &[]);
+    assert_eq!(
+        diff, 0,
+        "stale mip overwrote edit: {diff}/{checked} px differed from fresh render (max={md})"
+    );
+}
+
+#[test]
+fn r19_patch_base_does_not_clip_adjacent_blur_in_downsample_margin() {
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    let pic_rect = lab.picture_phys_rect();
+    let stride = lab.pixmap.width();
+    let _ = lab.render(0.0);
+
+    // Place a Gaussian look Blur in the centre (strong edge coupling if clipped by src_r).
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+    let _ = lab.send(Msg::Editor(Message::BlurStyle(annotate::blur::Style::Blur)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(1800.0, 1000.0))));
+    let _ = lab.send(Msg::Editor(Message::Move(Point::new(2200.0, 1400.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let _ = lab.render(0.0);
+    let blur_b = lab.s.editor.as_ref().unwrap().doc.items[0].bounds();
+
+    // Measure exact Step half-width, then place a Step just 2 image px to the right of
+    // Blur.bounds(): disjoint from Blur.bounds(), yet strictly inside the ~5-10 px Fit
+    // downsampler margin of src_r!
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+    let probe = Point::new(1000.0, 500.0);
+    let _ = lab.send(Msg::Editor(Message::Press(probe)));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let step_half = lab.s.editor.as_ref().unwrap().doc.items[1].bounds().width * 0.5;
+    let _ = lab.send(Msg::Editor(Message::Undo));
+
+    let step_at = Point::new(
+        blur_b.x + blur_b.width + step_half + 2.0,
+        blur_b.y + blur_b.height * 0.5,
+    );
+    let _ = lab.send(Msg::Editor(Message::Press(step_at)));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let step_b = lab.s.editor.as_ref().unwrap().doc.items[1].bounds();
+    let gap = step_b.x - (blur_b.x + blur_b.width);
+    assert!(
+        !blur_b.intersects(&step_b) && (0.5..=4.0).contains(&gap),
+        "Step must be disjoint yet inside Fit downsample margin: gap={gap}"
+    );
+    let _ = lab.render(0.0);
+    let patched = lab.pixels();
+
+    lab.s.editor.as_mut().unwrap().refresh();
+    let _ = lab.render(0.0);
+    let fresh = lab.pixels();
+
+    let (diff, md, checked) = diff_outside(&fresh, &patched, stride, pic_rect, &[]);
+    assert_eq!(
+        diff, 0,
+        "adjacent Blur clipped in src_r margin: {diff}/{checked} px differed (max={md})"
+    );
 }
