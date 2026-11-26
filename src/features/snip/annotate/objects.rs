@@ -830,21 +830,27 @@ impl Annotator {
                     Shape::Highlighter(_) => item.width * z / 4.0,
                     _ => item.width * z,
                 };
-                self.outline = item.outline;
                 self.fill = item.fill;
                 match &item.shape {
-                    Shape::Text { size, style, .. } => {
-                        (self.text_size, self.text_style) = (size * z, *style)
-                    }
-                    Shape::Callout { size, .. } | Shape::Label { size, .. } => {
-                        self.text_size = size * z / 0.75
-                    }
-                    Shape::Magnifier { zoom, kind, .. } => {
-                        self.magnifier_outline = item.outline;
-                        self.magnifier_zoom = (zoom.round() as u8).clamp(2, 4);
+                    Shape::Magnifier {
+                        zoom, kind, rim, ..
+                    } => {
+                        self.magnifier_outline = *rim;
+                        self.magnifier_zoom = super::magnifier::clamp_zoom(*zoom);
                         self.magnifier_shape = *kind;
                     }
-                    _ => {}
+                    _ => {
+                        self.outline = item.outline;
+                        match &item.shape {
+                            Shape::Text { size, style, .. } => {
+                                (self.text_size, self.text_style) = (size * z, *style)
+                            }
+                            Shape::Callout { size, .. } | Shape::Label { size, .. } => {
+                                self.text_size = size * z / 0.75
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             _ => {
@@ -869,7 +875,13 @@ impl Annotator {
             count: items.len(),
             colour: same(&|i| i.colour == first.colour).then_some(first.colour),
             stroke: same(&|i| i.width == first.width).then_some(first.width * z),
-            outline: same(&|i| i.outline == first.outline).then_some(first.outline),
+            outline: {
+                let rim_of = |i: &Item| match i.shape {
+                    Shape::Magnifier { rim, .. } => rim,
+                    _ => i.outline,
+                };
+                same(&|i| rim_of(i) == rim_of(first)).then_some(rim_of(first))
+            },
             fill: same(&|i| i.fill == first.fill).then_some(first.fill),
             opacity: (pics && same(&|i| i.colour[3] == first.colour[3])).then_some(first.colour[3]),
         })
@@ -898,7 +910,11 @@ impl Annotator {
                 item.colour = now.colour;
             }
             if t & touch::OUTLINE != 0 {
-                item.outline = now.outline;
+                if let Shape::Magnifier { rim, .. } = &mut item.shape {
+                    *rim = now.magnifier_outline;
+                } else {
+                    item.outline = now.outline;
+                }
             }
             if t & touch::FILL != 0 {
                 item.fill = now.fill;

@@ -317,9 +317,9 @@ pub(crate) fn own_groups_with<'a>(
         }
         Tool::Magnifier => {
             let zooms = group(
-                [(2u8, "2×"), (3, "3×"), (4, "4×")]
-                    .into_iter()
-                    .map(|(z, label)| {
+                crate::features::snip::annotate::magnifier::ZOOMS
+                    .iter()
+                    .map(|&(z, label)| {
                         text_cell(
                             label,
                             e.magnifier_zoom == z,

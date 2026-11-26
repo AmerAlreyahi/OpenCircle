@@ -868,4 +868,81 @@ mod tests {
             Some(0.85 * 360.0),
         );
     }
+
+    /// W117 review LOW: RTL (Arabic) drag on the hue bar puts the handle under the pointer
+    /// (mirrored: left = 360 deg, right = 0 deg) at any window position and scale.
+    #[test]
+    fn w117_review_rtl_drag_on_hue_bar_puts_handle_under_pointer() {
+        use iced::{Size, Vector};
+        let _ar = crate::shared::kit::testing::arabic();
+        let win = Size::new(1200.0, 900.0);
+        let sq_w = WIDTH - 2.0 * PAD;
+        let hue_y = PAD + SQUARE_H + space::GAP + HUE_H / 2.0;
+
+        let check_hue = |label: &str, got: Vec<M>, want_h: f32| {
+            let last = got
+                .into_iter()
+                .filter_map(|m| match m {
+                    M::Hsv(h) => Some(h),
+                    _ => None,
+                })
+                .next_back()
+                .unwrap_or_else(|| panic!("{label}: expected Hsv"));
+            assert!(
+                (last.h - want_h).abs() <= 4.0,
+                "{label}: hue {} vs expected {want_h}",
+                last.h
+            );
+        };
+
+        // 1. Pinned at offset in RTL
+        let off = Point::new(280.0, 170.0);
+        let h_from = Point::new(off.x + PAD + 0.80 * sq_w, off.y + hue_y);
+        let h_to = Point::new(off.x + PAD + 0.25 * sq_w, off.y + hue_y);
+        let got = shot::press_move(
+            iced::widget::pin(picker(start())).position(off).into(),
+            win,
+            h_from,
+            h_to,
+        );
+        check_hue("rtl pin hue", got, (1.0 - 0.25) * 360.0);
+
+        // 2. Floated + translated in RTL
+        let tx = Vector::new(420.0, 260.0);
+        let floated = || -> Element<'static, M> {
+            iced::widget::float(picker(start()))
+                .translate(move |_, _| tx)
+                .into()
+        };
+        let h_from = Point::new(tx.x + PAD + 0.15 * sq_w, tx.y + hue_y);
+        let h_to = Point::new(tx.x + PAD + 0.70 * sq_w, tx.y + hue_y);
+        check_hue(
+            "rtl float hue",
+            shot::press_move(floated(), win, h_from, h_to),
+            (1.0 - 0.70) * 360.0,
+        );
+
+        // 3. Floated + translated + 1.5x scaled in RTL
+        let k = 1.5_f32;
+        let scaled = || -> Element<'static, M> {
+            iced::widget::float(container(picker(start())).height(340.0))
+                .scale(k)
+                .translate(move |_, _| Vector::new(300.0, 200.0))
+                .into()
+        };
+        let centre = Point::new(WIDTH / 2.0, 170.0);
+        let map = |local: Point| {
+            Point::new(
+                centre.x + 300.0 + (local.x - centre.x) * k,
+                centre.y + 200.0 + (local.y - centre.y) * k,
+            )
+        };
+        let h_a = map(Point::new(PAD + 0.75 * sq_w, hue_y));
+        let h_b = map(Point::new(PAD + 0.30 * sq_w, hue_y));
+        check_hue(
+            "rtl scaled float hue",
+            shot::press_move(scaled(), win, h_a, h_b),
+            (1.0 - 0.30) * 360.0,
+        );
+    }
 }

@@ -218,7 +218,7 @@ impl Config {
                 None,
                 &mut w,
                 |n: &Option<u8>| match n
-                    .is_none_or(|z| crate::features::snip::annotate::magnifier::ZOOMS.contains(&z))
+                    .is_none_or(crate::features::snip::annotate::magnifier::has_zoom)
                 {
                     true => Ok(()),
                     false => Err("expected 2, 3 or 4".into()),

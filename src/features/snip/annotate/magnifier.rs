@@ -13,12 +13,27 @@ pub enum Kind {
     RoundedSquare,
 }
 
-/// Offered magnification factors (the options bar and config contract).
-pub const ZOOMS: [u8; 3] = [2, 3, 4];
-pub const DEFAULT_ZOOM: u8 = 2;
+/// Offered magnification factors and their labels (one source for UI, config and clamping).
+pub const ZOOMS: [(u8, &str); 3] = [(2, "2×"), (3, "3×"), (4, "4×")];
+pub const DEFAULT_ZOOM: u8 = ZOOMS[0].0;
+
+pub fn has_zoom(z: u8) -> bool {
+    ZOOMS.iter().any(|&(v, _)| v == z)
+}
+
+pub fn clamp_zoom(z: f32) -> u8 {
+    let lo = ZOOMS[0].0;
+    let hi = ZOOMS[ZOOMS.len() - 1].0;
+    (z.round() as u8).clamp(lo, hi)
+}
 
 pub fn default_zoom() -> f32 {
     f32::from(DEFAULT_ZOOM)
+}
+
+/// Old saved magnifiers had no rim flag and always drew their rim; default to true on load.
+pub fn default_rim() -> bool {
+    true
 }
 
 /// Corner radius of a rounded-square lens with half-size radius.
@@ -421,4 +436,139 @@ pub fn paint_live(
         }
     }
     pm
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tiny_skia::{FilterQuality, IntRect, Paint, Pattern, SpreadMode};
+
+    fn textured_pixmap(w: u32, h: u32) -> Pixmap {
+        let mut pm = Pixmap::new(w, h).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let diag = ((x + y) / 7) % 2 == 0;
+                let bar = (y / 11) % 3 == 0 && (x / 6) % 4 != 0;
+                let px = if bar {
+                    [45u8, 52, 72, 255]
+                } else if diag {
+                    [
+                        (120 + x * 100 / w) as u8,
+                        (150 + y * 80 / h) as u8,
+                        220,
+                        255,
+                    ]
+                } else {
+                    [(190 + x * 50 / w) as u8, (170 + y * 60 / h) as u8, 140, 255]
+                };
+                let o = ((y * w + x) * 4) as usize;
+                pm.data_mut()[o..o + 4].copy_from_slice(&px);
+            }
+        }
+        pm
+    }
+
+    fn paint_bicubic_ref(pm: &mut Pixmap, at: Point, radius: f32, zoom: f32, kind: Kind) {
+        let lens = lens_path(at, radius, kind).unwrap();
+        let r = radius / zoom + 1.0;
+        let x0 = (at.x - r).floor().max(0.0);
+        let y0 = (at.y - r).floor().max(0.0);
+        let x1 = (at.x + r).ceil().min(pm.width() as f32);
+        let y1 = (at.y + r).ceil().min(pm.height() as f32);
+        let rect =
+            IntRect::from_xywh(x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32).unwrap();
+        let source = pm.clone_rect(rect).unwrap();
+        let to_user = Transform::from_row(
+            zoom,
+            0.0,
+            0.0,
+            zoom,
+            at.x + (x0 - at.x) * zoom,
+            at.y + (y0 - at.y) * zoom,
+        );
+        let paint = Paint {
+            shader: Pattern::new(
+                source.as_ref(),
+                SpreadMode::Pad,
+                FilterQuality::Bicubic,
+                1.0,
+                to_user,
+            ),
+            anti_alias: true,
+            ..Paint::default()
+        };
+        pm.fill_path(
+            &lens,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
+    }
+
+    #[test]
+    fn w117_review_sampler_stays_within_tolerance_of_bicubic_at_2x_3x_4x() {
+        let base = textured_pixmap(200, 200);
+        let at = Point::new(100.0, 100.0);
+        let radius = 56.0;
+        for kind in [Kind::Circle, Kind::RoundedSquare] {
+            for &(z, _) in &ZOOMS {
+                let zoom = f32::from(z);
+                let mut fast = Layer {
+                    pm: base.clone(),
+                    origin: Point::ORIGIN,
+                };
+                paint(
+                    &mut fast,
+                    at,
+                    radius,
+                    zoom,
+                    kind,
+                    [255, 0, 0, 255],
+                    4.0,
+                    false,
+                );
+                let mut bicubic = base.clone();
+                paint_bicubic_ref(&mut bicubic, at, radius, zoom, kind);
+
+                let cr = corner_radius(radius);
+                let inner = radius - cr;
+                let (mut count, mut sum_diff, mut over_tol) = (0usize, 0u64, 0usize);
+                for y in 40..160u32 {
+                    for x in 40..160u32 {
+                        let d = lens_sdf(
+                            x as f32 + 0.5 - at.x,
+                            y as f32 + 0.5 - at.y,
+                            radius,
+                            kind,
+                            cr,
+                            inner,
+                        );
+                        if d > -2.0 {
+                            continue;
+                        }
+                        count += 1;
+                        let o = ((y * 200 + x) * 4) as usize;
+                        let a = &fast.pm.data()[o..o + 4];
+                        let b = &bicubic.data()[o..o + 4];
+                        let max_c = (0..3).map(|c| a[c].abs_diff(b[c])).max().unwrap();
+                        sum_diff += u64::from(max_c);
+                        if max_c > 24 {
+                            over_tol += 1;
+                        }
+                    }
+                }
+                let mean = sum_diff as f64 / count as f64;
+                assert!(count > 5000, "{kind:?} {z}x: too few interior px {count}");
+                assert!(
+                    mean < 4.5,
+                    "{kind:?} {z}x: mean channel diff {mean:.2} too high vs bicubic"
+                );
+                assert!(
+                    over_tol * 50 <= count,
+                    "{kind:?} {z}x: {over_tol}/{count} interior px differed > 24 vs bicubic"
+                );
+            }
+        }
+    }
 }

@@ -138,6 +138,8 @@ pub enum Shape {
         zoom: f32,
         #[serde(default)]
         kind: magnifier::Kind,
+        #[serde(default = "magnifier::default_rim")]
+        rim: bool,
     },
     /// A picture pasted in (Studio): a movable object between corners `a`
     /// and `b`; its opacity is the item colour's alpha; `lock` keeps its
@@ -1136,7 +1138,8 @@ pub fn paint_on(
                 radius,
                 zoom,
                 kind,
-            } => magnifier::paint(&mut layer, *at, *radius, *zoom, *kind, c, w, item.outline),
+                rim,
+            } => magnifier::paint(&mut layer, *at, *radius, *zoom, *kind, c, w, *rim),
             Shape::Picture { a, b, pic, .. } => {
                 paint_picture(&mut layer, span(&[*a, *b]), pic, c[3])
             }

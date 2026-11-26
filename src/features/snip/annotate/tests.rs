@@ -925,6 +925,7 @@ fn magnifier_shows_the_centre_zoomed() {
         radius: 30.0,
         zoom: 2.0,
         kind: magnifier::Kind::Circle,
+        rim: true,
     });
     let out = render(&doc_with(img, vec![lens]));
     assert_eq!(px(&out, 60, 50), [255; 4]);
@@ -3938,4 +3939,120 @@ fn w117_magnifier_hide_and_commit_patch_base_and_keep_crisp_display() {
         render(&e.doc).rgba,
         "moved patch matches render"
     );
+}
+
+/// W117 review HIGH: a v1 saved magnifier JSON has no rim field and carries outline:false,
+/// yet must still render its coloured rim exactly as before.
+#[test]
+fn w117_review_old_saved_magnifier_json_keeps_its_rim() {
+    let img = image_of(200, 200, |_, _| [240, 240, 240, 255]);
+    let mut e = Annotator::new(img, 1.0);
+    let v1 = r#"{"v":1,"items":[{"shape":{"Magnifier":{"at":[100.0,100.0],"radius":40.0}},"colour":[220,30,40,255],"width":5.0,"outline":false,"fill":false,"hidden":false}]}"#;
+    assert!(e.restore_annotations(v1));
+    let out = render(&e.doc);
+    let rim = px(&out, 140, 100);
+    assert!(
+        rim[0] > 180 && rim[1] < 80 && rim[2] < 80,
+        "v1 saved magnifier must draw its coloured rim at (140,100): got {rim:?}"
+    );
+}
+
+/// W117 review MEDIUM 1: patch_base must bail out when another overlapping magnifier extends
+/// outside the repaint rect r (even if its top-left corner lies inside r).
+#[test]
+fn w117_review_patch_base_with_overlapping_magnifier_matches_render() {
+    let mut e = Annotator::new(checker(340, 340), 1.0);
+    e.studio = true;
+    // Lens A at (80,80) r=60, Lens B at (200,200) r=80 above A; B's top-left (~113,113) is
+    // inside A's bounds (~12..148) while B extends far past it to (~287,287).
+    e.update(Message::Tool(Tool::Magnifier));
+    drag(&mut e, pt(80.0, 80.0), &[], pt(140.0, 80.0));
+    drag(&mut e, pt(200.0, 200.0), &[], pt(280.0, 200.0));
+    assert_eq!(e.doc.items.len(), 2);
+
+    // Select A (below B) at (60,60), move slightly near its start, and release.
+    e.update(Message::Tool(Tool::Select));
+    e.update(Message::Press(pt(60.0, 60.0)));
+    e.update(Message::Move(pt(72.0, 72.0)));
+    e.update(Message::Release);
+
+    let expected = render(&e.doc).rgba;
+    assert_eq!(
+        e.base_pixels(),
+        expected,
+        "base after moving A under overlapping B must equal render(&doc)"
+    );
+}
+
+/// W117 review MEDIUM 2: toggling Outline on a selected magnifier in Studio must not alter
+/// the shapes' outline default or a newly drawn rectangle's outline.
+#[test]
+fn w117_review_magnifier_outline_stays_independent_from_shapes_in_studio() {
+    let mut e = Annotator::restored(checker(240, 240), 1.0, EditorConfig::default());
+    e.studio = true;
+    assert!(!e.outline, "shapes outline starts off");
+    assert!(e.magnifier_outline, "magnifier outline starts on");
+
+    e.update(Message::Tool(Tool::Magnifier));
+    drag(&mut e, pt(80.0, 80.0), &[], pt(120.0, 80.0));
+    // Select the magnifier and toggle its outline off then back on.
+    e.update(Message::Tool(Tool::Select));
+    e.update(Message::Press(pt(80.0, 80.0)));
+    e.update(Message::Release);
+    assert_eq!(e.selection(), vec![0]);
+
+    e.update(Message::Outline(false));
+    e.update(Message::Outline(true));
+
+    // Switch to Rect and draw a new rectangle: its outline must remain false (unchanged),
+    // and remembered() must still keep shapes' outline false.
+    assert!(
+        !e.outline,
+        "self.outline must not be coupled to magnifier outline"
+    );
+    assert_eq!(e.remembered().outline, Some(false));
+    e.update(Message::Tool(Tool::Rect));
+    drag(&mut e, pt(130.0, 130.0), &[], pt(200.0, 200.0));
+    let rect = e.doc.items.last().expect("rect drawn");
+    assert!(!rect.outline, "new rectangle must keep outline off");
+}
+
+/// W117 review LOW: the fast transparent live magnifier layer composited onto base equals
+/// the committed render across shapes, zoom levels, and rim on/off.
+#[test]
+fn w117_review_fast_live_magnifier_equals_committed_pixels() {
+    for kind in [magnifier::Kind::Circle, magnifier::Kind::RoundedSquare] {
+        for &(z, _) in &magnifier::ZOOMS {
+            for rim in [true, false] {
+                let mut e = editor(240, 180);
+                e.studio = true;
+                e.update(Message::Tool(Tool::Rect));
+                drag(&mut e, pt(50.0, 40.0), &[], pt(180.0, 140.0));
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::MagnifierShape(kind));
+                e.update(Message::MagnifierZoom(z));
+                e.update(Message::Outline(rim));
+                e.update(Message::Press(pt(110.0, 90.0)));
+                e.update(Message::Move(pt(155.0, 90.0)));
+                let (r, live) = live_pixels(&e);
+                e.update(Message::Release);
+                let flat = render(&e.doc);
+                let mut differ = 0usize;
+                for ly in 0..r.height as u32 {
+                    for lx in 0..r.width as u32 {
+                        let i = ((ly * r.width as u32 + lx) * 4) as usize;
+                        let a = &live[i..i + 4];
+                        let b = px(&flat, r.x as u32 + lx, r.y as u32 + ly);
+                        if a.iter().zip(b).any(|(x, y)| x.abs_diff(y) > 3) {
+                            differ += 1;
+                        }
+                    }
+                }
+                assert_eq!(
+                    differ, 0,
+                    "{kind:?} {z}x rim={rim}: {differ} pixels differed between fast live and committed"
+                );
+            }
+        }
+    }
 }

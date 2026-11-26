@@ -869,7 +869,7 @@ impl Annotator {
             magnifier_outline: saved.magnifier_outline.unwrap_or(true),
             magnifier_zoom: saved
                 .magnifier_zoom
-                .filter(|z| magnifier::ZOOMS.contains(z))
+                .filter(|&z| magnifier::has_zoom(z))
                 .unwrap_or(magnifier::DEFAULT_ZOOM),
             magnifier_shape: saved.magnifier_shape.unwrap_or_default(),
             fill: saved.fill.unwrap_or(false),
@@ -1208,16 +1208,13 @@ impl Annotator {
                             .is_some_and(|item| matches!(item.shape, Shape::Magnifier { .. })));
                 if mag {
                     self.magnifier_outline = on;
-                    if self.studio && !self.doc.selection().is_empty() {
-                        self.outline = on;
-                    }
                 } else {
                     self.outline = on;
                 }
                 self.restyle();
             }
             Message::MagnifierZoom(zoom) => {
-                if magnifier::ZOOMS.contains(&zoom) {
+                if magnifier::has_zoom(zoom) {
                     self.magnifier_zoom = zoom;
                     self.restyle();
                 }
@@ -1999,11 +1996,34 @@ impl Annotator {
         let layers: Vec<_> = (self.doc.items.iter().enumerate())
             .map(|(i, item)| (item, Some(i) != hide && item.bounds().intersects(&r_rect)))
             .collect();
-        if layers.iter().any(|(item, vis)| {
-            *vis && !item.hidden
-                && matches!(item.shape, Shape::Magnifier { .. })
-                && !r_rect.contains(item.bounds().position())
-        }) {
+        let fits = |outer: Rectangle, inner: Rectangle| {
+            inner.x >= outer.x
+                && inner.y >= outer.y
+                && inner.x + inner.width <= outer.x + outer.width
+                && inner.y + inner.height <= outer.y + outer.height
+        };
+        let mag_clipped = (self.doc.items.iter().enumerate()).any(|(i, item)| {
+            if Some(i) == hide || item.hidden {
+                return false;
+            }
+            let Shape::Magnifier {
+                at, radius, zoom, ..
+            } = item.shape
+            else {
+                return false;
+            };
+            let sr = radius / zoom.max(1.0) + 2.0;
+            let src_rect = Rectangle::new(
+                Point::new(at.x - sr, at.y - sr),
+                Size::new(sr * 2.0, sr * 2.0),
+            );
+            let need = item.bounds().union(&src_rect);
+            let Some(need) = need.intersection(&view) else {
+                return false;
+            };
+            need.intersects(&r_rect) && !fits(r_rect, need)
+        });
+        if mag_clipped {
             return false;
         }
         let mut excludes = document::excludes(
@@ -2693,6 +2713,7 @@ impl Annotator {
                 radius: 60.0 / z,
                 zoom: f32::from(self.magnifier_zoom),
                 kind: self.magnifier_shape,
+                rim: self.magnifier_outline,
             },
         };
         let width = match self.tool {
@@ -2703,10 +2724,7 @@ impl Annotator {
             shape,
             colour: self.colour,
             width,
-            outline: match self.tool {
-                Tool::Magnifier => self.magnifier_outline,
-                _ => self.outline,
-            },
+            outline: self.outline,
             fill: self.fill,
             hidden: false,
         }
@@ -2752,10 +2770,12 @@ impl Annotator {
                         *size = w.brush() / z;
                     }
                 }
-                Shape::Magnifier { zoom, kind, .. } => {
+                Shape::Magnifier {
+                    zoom, kind, rim, ..
+                } => {
                     *zoom = f32::from(editor.magnifier_zoom);
                     *kind = editor.magnifier_shape;
-                    new.outline = editor.magnifier_outline;
+                    *rim = editor.magnifier_outline;
                     new.width = editor.stroke / z;
                 }
                 _ => new.width = editor.stroke / z,
@@ -2884,14 +2904,7 @@ impl Annotator {
     fn paint_live(&self) -> Option<(Rectangle, image::Handle)> {
         self.pending.as_ref().map(|pending| {
             let view = self.doc.view();
-            if let Shape::Magnifier {
-                at,
-                radius,
-                zoom,
-                kind,
-            } = pending.item.shape
-                && let Some(fast) = self.paint_live_magnifier(pending, view, at, radius, zoom, kind)
-            {
+            if let Some(fast) = self.paint_live_magnifier(pending, view) {
                 return fast;
             }
             let reads = matches!(
@@ -2924,11 +2937,17 @@ impl Annotator {
         &self,
         pending: &Pending,
         view: Rectangle,
-        at: Point,
-        radius: f32,
-        zoom: f32,
-        kind: magnifier::Kind,
     ) -> Option<(Rectangle, image::Handle)> {
+        let Shape::Magnifier {
+            at,
+            radius,
+            zoom,
+            kind,
+            rim,
+        } = pending.item.shape
+        else {
+            return None;
+        };
         let mut area = pending.item.bounds();
         if let Some(idx) = pending.index
             && self.doc.items[idx + 1..]
@@ -2969,7 +2988,7 @@ impl Annotator {
             kind,
             colour: pending.item.colour,
             width: pending.item.width,
-            outline: pending.item.outline,
+            outline: rim,
         };
         let vr = int_rect(view, view);
         if !self.bare()
