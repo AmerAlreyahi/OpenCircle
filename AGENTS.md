@@ -1823,3 +1823,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   fix any issues in a different session"): for v0.5.1 only, the owner's own test of the build is waived when he doesn't answer;
   every other gate still runs (CI, signed draft, update gate 0.5.0 Setup + portable -> draft, About, AppImage CLI). The kit
   guard still needs SDLC_OWNER_RELEASE=1 (or the owner's own commands) for the tag and the publish.
+- Build output never piles up (owner, 2026-11-26, "this should never ever happen", after 385 GB of old Rust build folders): every
+  worker builds in `~/.cache/opencircle-targets/<branch>` (CARGO_TARGET_DIR in every brief, never a target/ inside a worktree);
+  `docs/internal/clean-builds.sh` deletes any build folder idle > 12 h (never main's target/, never one in use, never source) and
+  runs at the end of `docs/internal/merge.sh`; the lead removes a worker's worktree, branch and build folder right after its merge.
+  Over 100 GB total = the script warns and the lead tells the owner.
