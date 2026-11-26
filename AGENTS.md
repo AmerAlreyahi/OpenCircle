@@ -1819,3 +1819,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   is done; R-15 is trimmed to (1) mixed Arabic/English lines as one line, pieces ordered right to left, and (2) Windows' Arabic
   recognizer (ar-SA) where installed; PP-OCR Arabic tuning, bold-Arabic spaces and mirrored brackets move to a later version.
   R-16 runs beside R-18 (R-18 owns the Studio view code, R-16 a new text-select file).
+- 0.5.1 publish without the owner's test (owner, 2026-11-26, "if I don't respond I'm sleeping; you can still publish, I will
+  fix any issues in a different session"): for v0.5.1 only, the owner's own test of the build is waived when he doesn't answer;
+  every other gate still runs (CI, signed draft, update gate 0.5.0 Setup + portable -> draft, About, AppImage CLI). The kit
+  guard still needs SDLC_OWNER_RELEASE=1 (or the owner's own commands) for the tag and the publish.
