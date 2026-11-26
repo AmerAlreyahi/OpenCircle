@@ -138,9 +138,14 @@ fn w123_ac4_it_closes_by_every_way_it_may() {
     assert!(s.sidebar_shown());
     let _ = s.update(Msg::StepRelease);
     assert!(matches!(s.update(Msg::StepsAway), Outcome::Panels(_, p) if !p.library));
-    // pinned: a press outside leaves it docked (no catcher is drawn)
+    // pinned: a press outside leaves it docked (no catcher is drawn), and Esc leaves it too
     let _ = s.update(Msg::Library);
     let _ = s.update(Msg::PinSteps);
+    assert!(
+        matches!(s.update(Msg::Cancel), Outcome::None),
+        "Esc keeps a pinned panel"
+    );
+    assert!(s.sidebar_docked());
     let outside = click_with(&s, &steps, (300.0, 300.0));
     assert!(
         !outside.iter().any(|m| matches!(m, Msg::StepsAway)),
@@ -174,6 +179,29 @@ fn w123_ac5_it_slides_220_in_180_out_and_not_at_all_when_motion_is_reduced() {
     let _ = s.update(Msg::Library);
     assert!(!s.moving() && s.steps_at() == 0.0 && !s.steps_overlay());
     motion::set_reduced(false);
+}
+
+/// A slide reversed half way goes on from where the panel is (not from the edge).
+#[test]
+fn w123_reversing_mid_slide_starts_from_the_current_position() {
+    motion::set_reduced(false);
+    let mut s = slider();
+    let _ = s.update(Msg::Library);
+    let t0 = s.steps_slide.unwrap().0;
+    let _ = s.update(Msg::Frame(t0 + Duration::from_millis(60)));
+    let here = s.steps_at();
+    assert!(here > 0.05 && here < 0.95, "{here}");
+    let _ = s.update(Msg::Library); // closes: from `here`, not from fully open
+    assert!(
+        (s.steps_at() - here).abs() < 0.02,
+        "{} vs {here}",
+        s.steps_at()
+    );
+    let t1 = s.steps_slide.unwrap().0;
+    let _ = s.update(Msg::Frame(t1 + Duration::from_millis(40)));
+    assert!(s.steps_at() < here);
+    let _ = s.update(Msg::Frame(t1 + Duration::from_millis(181)));
+    assert!(!s.moving() && !s.sidebar_shown());
 }
 
 #[test]

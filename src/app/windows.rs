@@ -2465,69 +2465,83 @@ fn normal_at(kind: Kind, fit: Option<StudioFit>) -> (window::Id, Task<window::Id
     platform::windows::open(settings)
 }
 
-/// Where the Studio opens: sized and centred inside the work area (taskbar and panels
-/// excluded) of the monitor under the pointer, with a margin. `place` is the same
-/// spot in physical px (Windows / X11), for the exact move after the window exists:
-/// iced's logical position is read at another monitor's scale when the DPIs differ.
+/// The work area (taskbar and panels out, on any edge) of the monitor under the pointer: the
+/// ONE place a normal window (Settings, the Studio) finds where it may open. Logical px.
+#[derive(Clone, Copy)]
+struct PointerWork {
+    at: Point,
+    work: Size,
+    /// The monitor's physical px per logical px.
+    scale: f32,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the screen the pointer is on (the machine's own is not asked).
+    static TEST_SCREEN: std::cell::Cell<Option<PointerWork>> = const { std::cell::Cell::new(None) };
+}
+
+/// `None` where screens can't be listed (the OS then centres the window).
+fn pointer_work() -> Option<PointerWork> {
+    #[cfg(test)]
+    if let Some(w) = TEST_SCREEN.with(std::cell::Cell::get) {
+        return Some(w);
+    }
+    use crate::shared::platform::capture;
+    let monitors = capture::monitor_list();
+    let m = monitors[capture::choose(&monitors, None, capture::pointer())?];
+    let (x, y, w, h) = m.rect;
+    let s = m.scale.max(0.1);
+    let origin = Point::new(x as f32 / s, y as f32 / s);
+    let full = Size::new(w as f32 / s, h as f32 / s);
+    let [l, t, r, b] = platform::monitor::work_insets(origin, full, s);
+    Some(PointerWork {
+        at: Point::new(origin.x + l, origin.y + t),
+        work: Size::new(full.width - l - r, full.height - t - b),
+        scale: s,
+    })
+}
+
+/// Where the Studio opens: sized and centred inside the pointer's work area with a margin.
+/// `place` is the same spot in physical px (Windows / X11), for the exact move after the
+/// window exists: iced's logical position is read at another monitor's scale when the DPIs
+/// differ. Wayland: the compositor places the window, only the size has to fit.
 #[derive(Clone, Copy)]
 struct StudioFit {
     fit: platform::monitor::Fit,
     place: Option<platform::monitor::Place>,
 }
 
-/// `None` where screens can't be listed (the OS then centres the default size).
 fn studio_fit() -> Option<StudioFit> {
     use crate::features::snip::screens::studio::{MIN, SIZE};
-    use crate::shared::platform::capture;
-    let monitors = capture::monitor_list();
-    let chosen = capture::choose(&monitors, None, capture::pointer())?;
-    let m = monitors[chosen];
-    let (x, y, w, h) = m.rect;
-    let s = m.scale.max(0.1);
-    let origin = Point::new(x as f32 / s, y as f32 / s);
-    let full = Size::new(w as f32 / s, h as f32 / s);
-    let [l, t, r, b] = platform::monitor::work_insets(origin, full, s);
-    let work = Size::new(full.width - l - r, full.height - t - b);
-    let fit =
-        platform::monitor::fit_window(Point::new(origin.x + l, origin.y + t), work, SIZE, MIN);
-    // Wayland: the compositor places the window; only the size has to fit
+    let w = pointer_work()?;
+    let fit = platform::monitor::fit_window(w.at, w.work, SIZE, MIN);
     let place = platform::monitor::can_hide_windows().then(|| platform::monitor::Place {
-        origin: ((fit.at.x * s).round() as i32, (fit.at.y * s).round() as i32),
-        px: (
-            (fit.size.width * s).round() as u32,
-            (fit.size.height * s).round() as u32,
+        origin: (
+            (fit.at.x * w.scale).round() as i32,
+            (fit.at.y * w.scale).round() as i32,
         ),
-        scale: s,
+        px: (
+            (fit.size.width * w.scale).round() as u32,
+            (fit.size.height * w.scale).round() as u32,
+        ),
+        scale: w.scale,
     });
     Some(StudioFit { fit, place })
 }
 
-/// Settings' opening size, smallest size and centred origin (logical px) on the screen
-/// under the pointer (primary when unknown), kept inside its usable area. The origin is
-/// `None` where screens can't be listed (the OS then centres it).
+/// Settings' opening size, smallest size and centred origin (logical px) in the pointer's
+/// work area (a taskbar or panel on any edge is out). The origin is `None` where screens
+/// can't be listed (the OS then centres it).
 fn settings_placement() -> (Size, Size, Option<Point>) {
-    let monitors = crate::shared::platform::capture::monitor_list();
-    let chosen = crate::shared::platform::capture::choose(
-        &monitors,
-        None,
-        crate::shared::platform::capture::pointer(),
-    );
-    let Some(m) = chosen.map(|i| monitors[i]) else {
+    let Some(w) = pointer_work() else {
         let (size, min) = settings::window_limits(settings::WINDOW_SIZE * 1.2);
         return (size, min, None);
     };
-    let (x, y, w, h) = m.rect;
-    let s = m.scale.max(0.1);
-    let origin = Point::new(x as f32 / s, y as f32 / s);
-    let full = Size::new(w as f32 / s, h as f32 / s);
-    let work = Size::new(
-        full.width,
-        full.height - crate::shared::platform::monitor::taskbar_inset(origin, full, s),
-    );
-    let (size, min) = settings::window_limits(work);
+    let (size, min) = settings::window_limits(w.work);
     let at = Point::new(
-        origin.x + (work.width - size.width) / 2.0,
-        origin.y + (work.height - size.height) / 2.0,
+        w.at.x + (w.work.width - size.width) / 2.0,
+        w.at.y + (w.work.height - size.height) / 2.0,
     );
     (size, min, Some(at))
 }

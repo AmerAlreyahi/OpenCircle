@@ -547,6 +547,13 @@ impl Config {
                 c.general.folder_note = studio;
             }
         }
+        // Schema 16 (W123): the Studio's Steps panel is a slider, closed by default. The old
+        // default `steps_on_start = true` (written whole with the [studio] section by any
+        // change of a preference) would open it over the canvas at every start: it moves to
+        // false once. A user who wants it open now pins it (remembered).
+        if file_version < Some(16) {
+            c.studio.steps_on_start = false;
+        }
         // Schema 4: translate is on-device unless the user chose AI for it.
         // Before, "ai" was the default and only ever ran with an API provider
         // (the browser one fell back to on-device); kept that way, picking a

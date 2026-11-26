@@ -74,7 +74,7 @@ pub const FIELD: &str = "studio-edit-field";
 pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The Steps grid: four to a row, the cell and the gap round it.
-/// The sidebar's steps: three to a row (236 px: 3 x 72 + 2 x 10), room for the number badge.
+/// The sidebar's steps: four to a row (3 x 10 + 4 x 66 = 294 px of its 296), room for the number badge.
 const STEP_COLS: usize = 4;
 const STEP_CELL: Size = Size::new(66.0, 44.0);
 const STEP_GAP: f32 = 10.0;
@@ -456,7 +456,8 @@ pub struct Studio {
     pub(super) slide: Option<Slide>,
     /// The Steps panel sliding over the canvas: when it began and whether it opens (the frame
     /// clock runs only while it moves; a pinned panel never slides).
-    steps_slide: Option<(std::time::Instant, bool)>,
+    /// (a slide that is reversed starts from where it was: the third is its start position, 0..1)
+    steps_slide: Option<(std::time::Instant, bool, f32)>,
     pub(super) now: std::time::Instant,
     /// The Studio's UI scale, percent (Ctrl+= / Ctrl+- / Ctrl+0).
     pub(super) ui_zoom: u16,
@@ -1697,7 +1698,7 @@ impl Studio {
                 if self.slide.is_some_and(|s| self.slide_done(s)) {
                     self.slide = None;
                 }
-                if let Some((start, opening)) = self.steps_slide
+                if let Some((start, opening, _)) = self.steps_slide
                     && crate::shared::kit::motion::done(start, now, steps_slide_len(opening)) >= 1.0
                 {
                     self.steps_slide = None;
@@ -1737,7 +1738,13 @@ impl Studio {
                     return Outcome::None;
                 }
                 // last: Esc closes the open Steps panel (the Export page went back first)
-                if !closed && self.asking.is_none() && self.edit.is_none() && self.panels.library {
+                // (a pinned panel is the user's own layout: only its arrow, handle or Ctrl+B close it)
+                if !closed
+                    && self.asking.is_none()
+                    && self.edit.is_none()
+                    && self.panels.library
+                    && !self.panels.pinned
+                {
                     return self.open_steps(false);
                 }
                 if !closed {
@@ -2200,19 +2207,23 @@ impl Studio {
     pub(super) fn steps_at(&self) -> f32 {
         use crate::shared::kit::motion::{Curve, progress};
         match self.steps_slide {
-            Some((start, true)) => progress(
-                start,
-                self.now,
-                crate::shared::kit::motion::PANEL_OPEN,
-                Curve::Out,
-            ),
-            Some((start, false)) => {
-                1.0 - progress(
+            Some((start, true, from)) => {
+                let t = progress(
+                    start,
+                    self.now,
+                    crate::shared::kit::motion::PANEL_OPEN,
+                    Curve::Out,
+                );
+                from + (1.0 - from) * t
+            }
+            Some((start, false, from)) => {
+                let t = progress(
                     start,
                     self.now,
                     crate::shared::kit::motion::PANEL_CLOSE,
                     Curve::In,
-                )
+                );
+                from * (1.0 - t)
             }
             None => f32::from(u8::from(self.panels.library)),
         }
@@ -2224,6 +2235,8 @@ impl Studio {
         if self.panels.library == open {
             return Outcome::None;
         }
+        // (a slide reversed half way goes on from where the panel is, not from the edge)
+        let from = self.steps_at();
         let old = self.panels;
         self.panels.library = open;
         self.closed_for_empty = false; // the user's own say now
@@ -2231,7 +2244,7 @@ impl Studio {
         self.steps_slide = None;
         if !self.panels.pinned && !crate::shared::kit::motion::reduced() {
             self.now = std::time::Instant::now();
-            self.steps_slide = Some((self.now, open));
+            self.steps_slide = Some((self.now, open, from));
         }
         self.fit();
         Outcome::Panels(old, self.panels)

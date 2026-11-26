@@ -58,7 +58,7 @@ pub fn step<'a, Message: Clone + 'a>(
     build(picture, number, look, on_delete, WELL, BADGE)
 }
 
-/// A step's cell `size` wide (the Steps sidebar's: three to a row), with a 16 px badge.
+/// A step's cell `size` wide (the Steps sidebar's: four to a row), with a 16 px badge.
 pub fn cell<'a, Message: Clone + 'a>(
     picture: image::Handle,
     number: usize,

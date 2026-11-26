@@ -156,7 +156,7 @@
 //! key stays). 13: Online translation left Labs; an older file's `translate.engine = "online"` stays Online only
 //! when its `[labs] online` was on (it translated locally while off: no text goes to Google unasked); `[labs] online`
 //! is then dropped on save. 14: Hide's strength is Light / Medium / Strong now (0.25 / 0.5 / 1.0 of the text height): the old
-//! default `editor.blur_cell = "thin"` (every user had it written) moves to "medium" once, any other value stays. 15: ONE Picture size and ONE save folder (F11): a file with `snip.save_original = true` (Save wrote the original, Copy the scaled size) gets `snip.max_edge = 0` (Original for both; nothing is ever saved smaller than it was) and `save_original = false` (the key stays, nothing reads it); a `[studio] folder` moves to `general.save_folder` when that is empty and is dropped otherwise (General's folder wins). A file older than `VERSION` is copied to
+//! default `editor.blur_cell = "thin"` (every user had it written) moves to "medium" once, any other value stays. 15: ONE Picture size and ONE save folder (F11): a file with `snip.save_original = true` (Save wrote the original, Copy the scaled size) gets `snip.max_edge = 0` (Original for both; nothing is ever saved smaller than it was) and `save_original = false` (the key stays, nothing reads it); a `[studio] folder` moves to `general.save_folder` when that is empty and is dropped otherwise (General's folder wins). 16: the Studio's Steps panel is a closed slider: a written `studio.steps_on_start = true` (the old default) moves to false once. A file older than `VERSION` is copied to
 //! `config.toml.bak-v<old>` (never over an existing copy) and then rewritten as the
 //! current version, by `migrate` (add one step there per schema change).
 
@@ -186,7 +186,7 @@ pub use store::{
 use {look::*, migrate::*, parse::*};
 
 /// Schema version this build reads and writes.
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 16;
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+Space";
 
 /// The OS's language as the language table has it, else English
@@ -541,7 +541,7 @@ pub struct SnipConfig {
     pub studio: StudioConfig,
 }
 
-/// OpenCircle Studio's side panels as the user last left them (both shown at first).
+/// OpenCircle Studio's side panels as the user last left them (the Steps panel closed at first).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct StudioConfig {
     /// The Steps panel is open (key `library`: it began as the library).

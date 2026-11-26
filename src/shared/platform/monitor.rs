@@ -163,6 +163,20 @@ pub fn place_window<T: Send + 'static>(id: window::Id, place: Place) -> Task<T> 
 // doesn't push the bar); mixed-DPI monitors map approximately.
 #[cfg(windows)]
 pub fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
+    let Some((m, w)) = monitor_rects(origin, size, scale) else {
+        return 0.0;
+    };
+    let band = [m[0], w[3], m[2], m[3]];
+    match !covered(band) {
+        true => ((m[3] - w[3]) as f32 / scale).max(0.0),
+        false => 0.0,
+    }
+}
+
+/// The monitor holding the middle of the window at `origin` (`size`, logical px at `scale`) and
+/// its work area, as `[left, top, right, bottom]` physical px; `None` when Windows won't say.
+#[cfg(windows)]
+fn monitor_rects(origin: Point, size: Size, scale: f32) -> Option<([i32; 4], [i32; 4])> {
     use ::windows::Win32::Foundation::POINT;
     use ::windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
@@ -180,16 +194,8 @@ pub fn taskbar_inset(origin: Point, size: Size, scale: f32) -> f32 {
         let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
         GetMonitorInfoW(monitor, &mut info).as_bool()
     };
-    let band = [
-        info.rcMonitor.left,
-        info.rcWork.bottom,
-        info.rcMonitor.right,
-        info.rcMonitor.bottom,
-    ];
-    match read && !covered(band) {
-        true => ((info.rcMonitor.bottom - info.rcWork.bottom) as f32 / scale).max(0.0),
-        false => 0.0,
-    }
+    let rect = |r: ::windows::Win32::Foundation::RECT| [r.left, r.top, r.right, r.bottom];
+    read.then(|| (rect(info.rcMonitor), rect(info.rcWork)))
 }
 
 /// The taskbar's band (`[left, top, right, bottom]`, physical px) is under
@@ -280,13 +286,19 @@ pub struct Fit {
 /// `want` (and `min`) shrunk to fit a work area of `work` at `work_at` with a
 /// margin all round, centred in it. The work area is what the monitor leaves after
 /// the taskbar / panels: a window taller than it opened with its top above the
-/// screen (Studio, 1280x800 on a 1280x720 logical screen).
+/// screen (Studio, 1280x800 on a 1280x720 logical screen). Below `min` only a work area smaller
+/// than `min` shrinks it (then the window is the whole work area).
 pub fn fit_window(work_at: Point, work: Size, want: Size, min: Size) -> Fit {
     let room = Size::new(
         (work.width - 2.0 * WINDOW_MARGIN).max(1.0),
         (work.height - 2.0 * WINDOW_MARGIN).max(1.0),
     );
-    let size = Size::new(want.width.min(room.width), want.height.min(room.height));
+    // the margin never squeezes it below `min` while the work area itself holds `min`
+    let floor = Size::new(min.width.min(work.width), min.height.min(work.height));
+    let size = Size::new(
+        want.width.min(room.width).max(floor.width),
+        want.height.min(room.height).max(floor.height),
+    );
     Fit {
         size,
         min: Size::new(min.width.min(size.width), min.height.min(size.height)),
@@ -297,44 +309,84 @@ pub fn fit_window(work_at: Point, work: Size, want: Size, min: Size) -> Fit {
     }
 }
 
-/// What the taskbar and panels take from the monitor at `origin` (`size`,
-/// logical px at `scale`): `[left, top, right, bottom]`. Windows only; elsewhere the
-/// desktop's panels aren't known and the window's margin has to do.
-#[cfg(windows)]
-pub fn work_insets(origin: Point, size: Size, scale: f32) -> [f32; 4] {
-    use ::windows::Win32::Foundation::POINT;
-    use ::windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-    };
-    let centre = POINT {
-        x: ((origin.x + size.width / 2.0) * scale) as i32,
-        y: ((origin.y + size.height / 2.0) * scale) as i32,
-    };
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..MONITORINFO::default()
-    };
-    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
-    let read = unsafe {
-        let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
-        GetMonitorInfoW(monitor, &mut info).as_bool()
-    };
-    if !read {
-        return [0.0; 4];
-    }
-    let (m, w) = (info.rcMonitor, info.rcWork);
-    let px = |v: i32| (v as f32 / scale).max(0.0);
+/// What the panels take from a monitor: `[left, top, right, bottom]` of `monitor` (physical px,
+/// `[left, top, right, bottom]`) that lie outside `work` (the desktop's work area, which may be
+/// bigger than the monitor: only its intersection counts).
+fn insets_of(monitor: [i32; 4], work: [i32; 4]) -> [i32; 4] {
     [
-        px(w.left - m.left),
-        px(w.top - m.top),
-        px(m.right - w.right),
-        px(m.bottom - w.bottom),
+        (work[0] - monitor[0]).max(0),
+        (work[1] - monitor[1]).max(0),
+        (monitor[2] - work[2]).max(0),
+        (monitor[3] - work[3]).max(0),
     ]
 }
 
-#[cfg(not(windows))]
-pub fn work_insets(_: Point, _: Size, _: f32) -> [f32; 4] {
-    [0.0; 4]
+/// What the taskbar and panels take from the monitor at `origin` (`size`, logical px at
+/// `scale`): `[left, top, right, bottom]` logical px. Windows: the monitor's work area (any
+/// edge); X11: `_NET_WORKAREA`; Wayland (the compositor places windows) and any failure: none.
+pub fn work_insets(origin: Point, size: Size, scale: f32) -> [f32; 4] {
+    #[cfg(windows)]
+    let px = monitor_rects(origin, size, scale).map(|(m, w)| insets_of(m, w));
+    #[cfg(target_os = "linux")]
+    let px = {
+        let at = |v: f32| (v * scale).round() as i32;
+        let m = [
+            at(origin.x),
+            at(origin.y),
+            at(origin.x + size.width),
+            at(origin.y + size.height),
+        ];
+        (can_hide_windows())
+            .then(x11_work_area)
+            .flatten()
+            .map(|w| insets_of(m, w))
+    };
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let px: Option<[i32; 4]> = {
+        let _ = (origin, size);
+        None
+    };
+    px.map_or([0.0; 4], |i| i.map(|v| v as f32 / scale))
+}
+
+/// X11's `_NET_WORKAREA` of the current desktop: `[left, top, right, bottom]` px, over every
+/// monitor together (panels' struts cut it); `None` when the window manager doesn't set it.
+#[cfg(target_os = "linux")]
+fn x11_work_area() -> Option<[i32; 4]> {
+    use xcb::{Xid, x};
+    let (conn, n) = xcb::Connection::connect(None).ok()?;
+    let root = conn.get_setup().roots().nth(n as usize)?.root();
+    let atom = |name: &[u8]| {
+        let asked = conn.send_request(&x::InternAtom {
+            only_if_exists: true,
+            name,
+        });
+        conn.wait_for_reply(asked).ok().map(|r| r.atom())
+    };
+    let cardinals = |property: x::Atom, length: u32| {
+        let asked = conn.send_request(&x::GetProperty {
+            delete: false,
+            window: root,
+            property,
+            r#type: x::ATOM_CARDINAL,
+            long_offset: 0,
+            long_length: length,
+        });
+        conn.wait_for_reply(asked)
+            .ok()
+            .map(|r| r.value::<u32>().to_vec())
+    };
+    let desktop = atom(b"_NET_CURRENT_DESKTOP")
+        .filter(|a| !a.is_none())
+        .and_then(|a| cardinals(a, 1))
+        .and_then(|v| v.first().copied())
+        .unwrap_or(0) as usize;
+    let all = cardinals(atom(b"_NET_WORKAREA").filter(|a| !a.is_none())?, 4 * 32)?;
+    let w = all
+        .get(4 * desktop..4 * desktop + 4)
+        .or_else(|| all.get(..4))?;
+    let (x, y, width, height) = (w[0] as i32, w[1] as i32, w[2] as i32, w[3] as i32);
+    (width > 0 && height > 0).then_some([x, y, x + width, y + height])
 }
 
 #[cfg(test)]
@@ -385,7 +437,8 @@ mod tests {
             Size::new(1280.0, 800.0),
             min,
         );
-        assert_eq!(tiny.min, Size::new(752.0, 452.0));
+        assert_eq!(tiny.size, Size::new(800.0, 500.0), "the whole work area");
+        assert_eq!(tiny.min, Size::new(800.0, 500.0));
     }
 
     #[test]
@@ -399,6 +452,44 @@ mod tests {
         );
         assert_eq!(f.size, Size::new(1280.0, 800.0));
         assert_eq!(f.at, Point::new(1920.0 + 320.0, 30.0 + 105.0));
+    }
+
+    #[test]
+    fn the_margin_never_squeezes_the_window_below_its_smallest_size() {
+        let min = Size::new(960.0, 600.0);
+        let want = Size::new(1280.0, 800.0);
+        // the work area holds the smallest size but not with the margin: the smallest size
+        let f = super::fit_window(Point::new(0.0, 0.0), Size::new(1000.0, 640.0), want, min);
+        assert_eq!((f.size, f.min), (min, min));
+        assert_eq!(f.at, Point::new(20.0, 20.0));
+        // a work area smaller than the smallest size: the whole work area
+        let f = super::fit_window(Point::new(0.0, 0.0), Size::new(900.0, 560.0), want, min);
+        assert_eq!(f.size, Size::new(900.0, 560.0));
+        assert_eq!(f.at, Point::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn insets_are_what_the_work_area_leaves_out_of_the_monitor() {
+        use super::insets_of;
+        // a bottom taskbar
+        assert_eq!(
+            insets_of([0, 0, 1920, 1080], [0, 0, 1920, 1040]),
+            [0, 0, 0, 40]
+        );
+        // a left dock and a top bar on the second of two monitors; the work area spans both
+        assert_eq!(
+            insets_of([1920, 0, 3840, 1080], [64, 28, 3840, 1080]),
+            [0, 28, 0, 0],
+            "the dock is on the first monitor only: its left strut is outside this one"
+        );
+        assert_eq!(
+            insets_of([0, 0, 1920, 1080], [64, 28, 3840, 1080]),
+            [64, 28, 0, 0],
+            "the right edge of a work area wider than the monitor takes nothing"
+        );
+        // a work area that is bigger or equal: nothing taken
+        assert_eq!(insets_of([0, 0, 800, 600], [0, 0, 800, 600]), [0; 4]);
+        assert_eq!(insets_of([0, 0, 800, 600], [-10, -10, 900, 700]), [0; 4]);
     }
 
     #[test]

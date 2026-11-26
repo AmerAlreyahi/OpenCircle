@@ -8,11 +8,8 @@ use iced::{Element, Length, Vector};
 
 use super::icon::{FONT, Icon};
 use super::themes::c;
-use super::tokens::{radius, size};
+use super::tokens::{radius, size, space};
 use super::wrap::{Hook, wrap};
-
-/// The handle's width and height.
-const HANDLE: (f32, f32) = (22.0, 64.0);
 
 /// The closed panel's handle: a slim tab on the window's edge (`on_left`: the left one) with an
 /// arrow toward the window and a count when there is one; a press sends `press`.
@@ -25,8 +22,8 @@ pub fn handle<'a, Message: Clone + 'a>(
         true => Icon::Forward,
         false => Icon::Back,
     };
-    let mut body = column![text(arrow.glyph()).font(FONT).size(size::ICON - 2.0)]
-        .spacing(6)
+    let mut body = column![text(arrow.glyph()).font(FONT).size(size::HANDLE_ARROW)]
+        .spacing(space::GAP)
         .align_x(iced::Center);
     if count > 0 {
         body = body.push(super::chip::count(count));
@@ -46,8 +43,8 @@ pub fn handle<'a, Message: Clone + 'a>(
         },
     };
     let tab = button(container(body).center(Length::Fill))
-        .width(HANDLE.0)
-        .height(HANDLE.1)
+        .width(size::HANDLE.0)
+        .height(size::HANDLE.1)
         .padding(0)
         .style(move |_, status| {
             let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);

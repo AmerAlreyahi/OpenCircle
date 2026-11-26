@@ -794,6 +794,44 @@ mod studio_window {
         (s.width as u32, s.height as u32)
     }
 
+    /// W123: the Studio opens inside the pointer's work area (the root cause was a fixed
+    /// 1280x800 centred on the primary monitor): `open_studio` asks for the exact physical
+    /// rect of the fitted window on the pointer's monitor, at that monitor's scale.
+    #[test]
+    fn w123_open_studio_places_the_fitted_rect_in_the_pointers_work_area() {
+        use crate::shared::platform::monitor::{PLACED, Place, can_hide_windows};
+        if !can_hide_windows() {
+            return; // Wayland: the compositor places the window (only its size is fitted)
+        }
+        // a 150 % monitor right of the first: 1280x720 logical, a 40 px taskbar at the bottom
+        super::super::TEST_SCREEN.with(|s| {
+            s.set(Some(super::super::PointerWork {
+                at: iced::Point::new(1280.0, 0.0),
+                work: iced::Size::new(1280.0, 680.0),
+                scale: 1.5,
+            }))
+        });
+        PLACED.with(|p| p.borrow_mut().clear());
+        let w = open();
+        super::super::TEST_SCREEN.with(|s| s.set(None));
+        let id = w.studio_window().unwrap();
+        let placed: Vec<Place> = PLACED.with(|p| {
+            (p.borrow().iter())
+                .filter(|(i, _)| *i == id)
+                .map(|(_, pl)| *pl)
+                .collect()
+        });
+        // 1232x632 logical (the work area less the 24 px margin), centred: (1304, 24) logical
+        assert_eq!(
+            placed,
+            [Place {
+                origin: (1956, 36),
+                px: (1848, 948),
+                scale: 1.5
+            }]
+        );
+    }
+
     #[test]
     fn opening_twice_keeps_one_studio_and_loads_the_new_picture() {
         let mut w = open();

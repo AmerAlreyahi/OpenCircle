@@ -67,6 +67,9 @@ pub mod size {
     pub const KEYCAP_H: f32 = 24.0;
     pub const CTA_H: f32 = 44.0;
     pub const ICON: f32 = 16.0;
+    /// A side panel's closed handle (`edge_slide::handle`): its width and height, and its arrow.
+    pub const HANDLE: (f32, f32) = (22.0, 64.0);
+    pub const HANDLE_ARROW: f32 = 14.0;
     pub const ICON_SMALL: f32 = 14.0;
     pub const DOT: f32 = 6.0;
     pub const TOAST_DOT: f32 = 8.0;
