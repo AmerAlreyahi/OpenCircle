@@ -304,22 +304,26 @@ fn chip<'a, Message: Clone + 'a>(colour: Color, chosen: bool, on: Message) -> El
 struct Drag(bool);
 
 impl Drag {
-    /// The point the drag is at (inside the canvas, clamped), and whether it just ended.
+    /// The point the drag is at (local to bounds), and whether it just ended.
+    /// Reads cursor (never CursorMoved::position), because Float (Snip),
+    /// Scrollable (Settings) and any parent scale transform cursor into the
+    /// canvas space while leaving the raw event position untouched. land()
+    /// keeps tracking if the pointer leaves a scrollable viewport.
     fn follow(
         &mut self,
         event: &Event,
         bounds: Rectangle,
         cursor: Cursor,
     ) -> Option<(Option<Point>, bool)> {
-        let inside = |p: Point| Point::new(p.x - bounds.x, p.y - bounds.y);
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let at = cursor.position_in(bounds)?;
                 self.0 = true;
                 Some((Some(at), false))
             }
-            Event::Mouse(mouse::Event::CursorMoved { position }) if self.0 => {
-                Some((Some(inside(*position)), false))
+            Event::Mouse(mouse::Event::CursorMoved { .. }) if self.0 => {
+                let at = cursor.land().position_from(bounds.position())?;
+                Some((Some(at), false))
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if self.0 => {
                 self.0 = false;
@@ -350,8 +354,8 @@ impl<Message: Clone> canvas::Program<Message> for Square<'_, Message> {
         let (at, ended) = drag.follow(event, bounds, cursor)?;
         let message = match (at, ended) {
             (Some(p), _) => {
-                let s = (p.x / bounds.width).clamp(0.0, 1.0);
-                let v = 1.0 - (p.y / bounds.height).clamp(0.0, 1.0);
+                let s = (p.x / bounds.width.max(1.0)).clamp(0.0, 1.0);
+                let v = 1.0 - (p.y / bounds.height.max(1.0)).clamp(0.0, 1.0);
                 (self.on)(Hsv { s, v, ..self.hsv })
             }
             (None, _) => self.done.clone(),
@@ -422,7 +426,7 @@ impl<Message: Clone> canvas::Program<Message> for Strip<'_, Message> {
         let Some(p) = at else {
             return Some(Action::publish(self.done.clone()).and_capture());
         };
-        let share = (p.x / bounds.width).clamp(0.0, 1.0);
+        let share = (p.x / bounds.width.max(1.0)).clamp(0.0, 1.0);
         let share = if self.rtl { 1.0 - share } else { share };
         Some(Action::publish((self.on)(self.hsv.with_hue(share * 360.0))).and_capture())
     }
@@ -692,6 +696,176 @@ mod tests {
         assert_eq!(
             focus::arrow_dir(&press(Named::ArrowLeft, Modifiers::CTRL)),
             None
+        );
+    }
+
+    /// W117: pressing and dragging known local points on both the saturation/brightness square
+    /// and the hue bar puts the handle right under the pointer at any window position and scale
+    /// (origin, pinned popover like Studio, floated+translated like Snip, scaled, and inside a
+    /// scrolled view like Settings).
+    #[test]
+    fn w117_pointer_maps_known_local_points_at_any_position_and_scale() {
+        use iced::{Size, Vector};
+        let win = Size::new(1200.0, 900.0);
+        let sq_w = WIDTH - 2.0 * PAD;
+        let hue_y = PAD + SQUARE_H + space::GAP + HUE_H / 2.0;
+
+        let check = |label: &str, got: Vec<M>, want_s: f32, want_v: f32, want_h: Option<f32>| {
+            let hsvs: Vec<Hsv> = got
+                .into_iter()
+                .filter_map(|m| match m {
+                    M::Hsv(h) => Some(h),
+                    _ => None,
+                })
+                .collect();
+            assert!(!hsvs.is_empty(), "{label}: no Hsv messages");
+            let last = *hsvs.last().unwrap();
+            match want_h {
+                Some(h) => assert!(
+                    (last.h - h).abs() < 2.0,
+                    "{label}: hue {:.1} != {:.1}",
+                    last.h,
+                    h
+                ),
+                None => {
+                    assert!(
+                        (last.s - want_s).abs() < 0.02 && (last.v - want_v).abs() < 0.02,
+                        "{label}: ({:.3}, {:.3}) != ({:.3}, {:.3})",
+                        last.s,
+                        last.v,
+                        want_s,
+                        want_v
+                    );
+                }
+            }
+        };
+
+        // 1. Pinned at an arbitrary window offset (Studio popover path)
+        let off = Point::new(430.0, 210.0);
+        let sq_from = Point::new(off.x + PAD + 0.25 * sq_w, off.y + PAD + 0.30 * SQUARE_H);
+        let sq_to = Point::new(off.x + PAD + 0.70 * sq_w, off.y + PAD + 0.65 * SQUARE_H);
+        let got = shot::press_move(
+            iced::widget::pin(picker(start())).position(off).into(),
+            win,
+            sq_from,
+            sq_to,
+        );
+        check("pin square", got, 0.70, 0.35, None);
+        let h_from = Point::new(off.x + PAD + 0.20 * sq_w, off.y + hue_y);
+        let h_to = Point::new(off.x + PAD + 0.75 * sq_w, off.y + hue_y);
+        let got = shot::press_move(
+            iced::widget::pin(picker(start())).position(off).into(),
+            win,
+            h_from,
+            h_to,
+        );
+        check("pin hue", got, 0.5, 0.5, Some(270.0));
+
+        // 2. Floated + translated (Snip popover path: float::translate)
+        let tx = Vector::new(460.0, 290.0);
+        let floated = || -> Element<'static, M> {
+            iced::widget::float(picker(start()))
+                .translate(move |_, _| tx)
+                .into()
+        };
+        let sq_from = Point::new(tx.x + PAD + 0.20 * sq_w, tx.y + PAD + 0.25 * SQUARE_H);
+        let sq_to = Point::new(tx.x + PAD + 0.60 * sq_w, tx.y + PAD + 0.80 * SQUARE_H);
+        check(
+            "float square",
+            shot::press_move(floated(), win, sq_from, sq_to),
+            0.60,
+            0.20,
+            None,
+        );
+        let h_from = Point::new(tx.x + PAD + 0.15 * sq_w, tx.y + hue_y);
+        let h_to = Point::new(tx.x + PAD + 0.50 * sq_w, tx.y + hue_y);
+        check(
+            "float hue",
+            shot::press_move(floated(), win, h_from, h_to),
+            0.5,
+            0.5,
+            Some(180.0),
+        );
+
+        // 3. Floated + translated + scaled (non-1.0 transformation scale)
+        // Float scales about the widget centre: screen = centre + tx + (local - centre) * k.
+        let k = 1.5_f32;
+        let scaled = || -> Element<'static, M> {
+            iced::widget::float(container(picker(start())).height(340.0))
+                .scale(k)
+                .translate(move |_, _| Vector::new(300.0, 200.0))
+                .into()
+        };
+        let centre = Point::new(WIDTH / 2.0, 170.0);
+        let map = |local: Point| {
+            Point::new(
+                centre.x + 300.0 + (local.x - centre.x) * k,
+                centre.y + 200.0 + (local.y - centre.y) * k,
+            )
+        };
+        let sq_a = map(Point::new(PAD + 0.25 * sq_w, PAD + 0.25 * SQUARE_H));
+        let sq_b = map(Point::new(PAD + 0.80 * sq_w, PAD + 0.40 * SQUARE_H));
+        check(
+            "scaled float square",
+            shot::press_move(scaled(), win, sq_a, sq_b),
+            0.80,
+            0.60,
+            None,
+        );
+        let h_a = map(Point::new(PAD + 0.25 * sq_w, hue_y));
+        let h_b = map(Point::new(PAD + 0.65 * sq_w, hue_y));
+        check(
+            "scaled float hue",
+            shot::press_move(scaled(), win, h_a, h_b),
+            0.5,
+            0.5,
+            Some(0.65 * 360.0),
+        );
+
+        // 4. Inside a scrolled view (Settings Appearance page path)
+        let scroll_y = 320.0_f32;
+        let top_pad = 400.0_f32;
+        let scrolled = || -> Element<'static, M> {
+            crate::shared::kit::scroll::scroll(iced::widget::column![
+                iced::widget::Space::new().height(top_pad),
+                picker(start()),
+                iced::widget::Space::new().height(400.0),
+            ])
+            .id("cp-scroll")
+            .width(WIDTH + 40.0)
+            .height(420.0)
+            .into()
+        };
+        let vis_y = top_pad - scroll_y;
+        let sq_a = Point::new(PAD + 0.30 * sq_w, vis_y + PAD + 0.20 * SQUARE_H);
+        let sq_b = Point::new(PAD + 0.75 * sq_w, vis_y + PAD + 0.70 * SQUARE_H);
+        check(
+            "scrolled square",
+            shot::press_move_scrolled(
+                scrolled(),
+                Size::new(WIDTH + 40.0, 420.0),
+                ("cp-scroll", Vector::new(0.0, scroll_y)),
+                sq_a,
+                sq_b,
+            ),
+            0.75,
+            0.30,
+            None,
+        );
+        let h_a = Point::new(PAD + 0.10 * sq_w, vis_y + hue_y);
+        let h_b = Point::new(PAD + 0.85 * sq_w, vis_y + hue_y);
+        check(
+            "scrolled hue",
+            shot::press_move_scrolled(
+                scrolled(),
+                Size::new(WIDTH + 40.0, 420.0),
+                ("cp-scroll", Vector::new(0.0, scroll_y)),
+                h_a,
+                h_b,
+            ),
+            0.5,
+            0.5,
+            Some(0.85 * 360.0),
         );
     }
 }

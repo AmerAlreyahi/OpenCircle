@@ -203,7 +203,7 @@ pub(crate) fn font_size(e: &Annotator) -> El<'_> {
 
 /// The tool's own groups (what the shared ones don't cover).
 pub(crate) fn own_groups(e: &Annotator, tool: Tool) -> Vec<El<'_>> {
-    own_groups_with(e, tool, None)
+    own_groups_with(e, tool, None, true)
 }
 
 /// `own_groups`, Hide's style group given (Snip's row draws it as live pictures; built in place, so
@@ -212,6 +212,7 @@ pub(crate) fn own_groups_with<'a>(
     e: &'a Annotator,
     tool: Tool,
     styles_group: Option<El<'a>>,
+    custom_slider: bool,
 ) -> Vec<El<'a>> {
     match tool {
         Tool::Text => {
@@ -289,8 +290,10 @@ pub(crate) fn own_groups_with<'a>(
                         .collect(),
                     false,
                 ),
-                // Custom: any strength between (the presets are 4, 8, 16 px)
-                group(
+            ];
+            if custom_slider {
+                // Studio only (owner 2026-11-24): Custom slider beside Light / Medium / Strong.
+                o.push(group(
                     vec![slider::bare(
                         STRENGTH_RANGE,
                         value,
@@ -299,9 +302,9 @@ pub(crate) fn own_groups_with<'a>(
                         |v| Message::BlurCustom(Some(v)),
                     )],
                     false,
-                ),
-                toggle(t!(sn_line_help), e.assist, Some(Message::Assist)),
-            ];
+                ));
+            }
+            o.push(toggle(t!(sn_line_help), e.assist, Some(Message::Assist)));
             if e.blur_style.is_look() {
                 o.push(group(vec![caption(t!(sn_looks_note))], false));
             }
@@ -434,14 +437,16 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
             toggle(t!(sn_legend), e.doc.legend, Some(Message::Legend)),
         ],
         Tool::Blur => {
-            // the styles as small live pictures (they draw the picture WITH its items,
-            // never bare pixels under a Hide: `Annotator::style_thumbs`)
+            // Fixed sample swatches per style (W117): cached per light/dark theme, never live
+            // thumbnails of the user's screenshot.
             let styles = crate::features::snip::annotate::blur_styles();
             let pictures = match crate::shared::kit::option_bar::lightly() {
                 true => {
                     vec![iced::widget::image::Handle::from_rgba(1, 1, vec![0; 4]); styles.len()]
                 }
-                false => e.style_thumbs(),
+                false => crate::features::snip::annotate::style_swatches(
+                    crate::shared::kit::themes::current().light,
+                ),
             };
             let pictured = group(
                 styles
@@ -458,7 +463,7 @@ pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
                     .collect(),
                 false,
             );
-            let mut g = own_groups_with(e, Tool::Blur, Some(pictured));
+            let mut g = own_groups_with(e, Tool::Blur, Some(pictured), false);
             // the brush: Auto (follows the text line) or three sizes
             let auto = e.blur_size.is_none();
             let at = e

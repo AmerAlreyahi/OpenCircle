@@ -622,12 +622,6 @@ struct AreaDrag {
     items: Vec<Item>,
 }
 
-/// The style cards' pictures and what they were made for (place, strength).
-type Thumbs = (ThumbKey, Vec<image::Handle>);
-/// (place, strength, the drawing's history state, the item being drawn's frame): a picture of
-/// the area is made again when any of them changes, so a card never shows bare pixels under a Hide.
-type ThumbKey = (i32, i32, u32, u64, [u32; 4]);
-
 pub struct Annotator {
     pub doc: Document,
     pub tool: Tool,
@@ -755,11 +749,6 @@ pub struct Annotator {
     pub(crate) blur_cell: Width,
     /// The Studio's custom strength (px at scale 1); `None`: the preset.
     pub(crate) blur_custom: Option<u8>,
-    /// Where the pointer last was over the picture (image px): the style cards
-    /// show what each style does to the area there.
-    hover: Option<Point>,
-    /// The style cards' pictures, made for (place, strength, style count).
-    thumbs: std::cell::RefCell<Option<Thumbs>>,
     /// Hide's look (Frost, or the Pixelate mosaic).
     pub(crate) blur_style: blur::Style,
     /// Hide's shape: the free brush, a rectangle or an ellipse.
@@ -933,8 +922,6 @@ impl Annotator {
             blur_custom: saved
                 .blur_custom
                 .map(|v| v.clamp(*STRENGTH_RANGE.start(), *STRENGTH_RANGE.end())),
-            hover: None,
-            thumbs: std::cell::RefCell::new(None),
             blur_style: saved.blur_style.unwrap_or_default(),
             blur_shape: saved.blur_shape.unwrap_or_default(),
             style_picked: false,
@@ -1115,7 +1102,6 @@ impl Annotator {
             }
             Message::Move(p) => {
                 self.ctrl_hint |= std::mem::take(&mut self.ctrl_armed);
-                self.hover = Some(p);
                 self.drag_to(p)
             }
             Message::Release => {
@@ -1682,85 +1668,6 @@ impl Annotator {
         }
         self.doc.select_one(Some(at));
         self.refresh();
-    }
-
-    /// One picture per style in `blur_styles()`: the area under the pointer
-    /// (else the picture's middle), its left half as it is and its right half
-    /// hidden in that style, at the strength now. Made again when the pointer
-    /// moves on by 8 px or the strength changes.
-    pub fn style_thumbs(&self) -> Vec<image::Handle> {
-        let view = self.doc.view();
-        let at = self.hover.unwrap_or_else(|| view.center());
-        let strength = self.blur_strength();
-        let drawn = (self.pending.as_ref()).map_or([0; 4], |p| {
-            let f = p.item.frame();
-            [f.x, f.y, f.width, f.height].map(f32::to_bits)
-        });
-        let key = (
-            (at.x / 8.0) as i32,
-            (at.y / 8.0) as i32,
-            strength.to_bits(),
-            self.doc.state(),
-            drawn,
-        );
-        if let Some((k, all)) = &*self.thumbs.borrow()
-            && *k == key
-        {
-            return all.clone();
-        }
-        let all = blur_styles()
-            .iter()
-            .map(|&(style, _)| self.style_thumb(style, at, strength))
-            .collect::<Vec<_>>();
-        *self.thumbs.borrow_mut() = Some((key, all.clone()));
-        all
-    }
-
-    fn style_thumb(&self, style: blur::Style, at: Point, strength: f32) -> image::Handle {
-        let k = self.capture_scale;
-        let (w, h) = ((72.0 * k).ceil(), (44.0 * k).ceil());
-        let view = self.doc.view();
-        let from = Point::new(
-            (at.x - w / 2.0).clamp(view.x, (view.x + view.width - w).max(view.x)),
-            (at.y - h / 2.0).clamp(view.y, (view.y + view.height - h).max(view.y)),
-        );
-        let region = document::int_rect(Rectangle::new(from, iced::Size::new(w, h)), view);
-        // the picture as the editor shows it (every item, as flatten draws it): the
-        // half "as it is" never shows the bare pixels under an existing Hide
-        // (the item being drawn too: a Hide under the pointer is already a Hide)
-        let mut items = self.doc.items.clone();
-        if let Some(p) = &self.pending {
-            match p.index.filter(|i| *i < items.len()) {
-                Some(i) => items[i] = p.item.clone(),
-                None => items.push(p.item.clone()),
-            }
-        }
-        let layers: Vec<_> = items.iter().map(|i| (i, true)).collect();
-        let pm = self.doc.paint(&layers, region, None);
-        let mut layer = document::Layer {
-            pm,
-            origin: Point::new(region.x() as f32, region.y() as f32),
-        };
-        let (x0, y0) = (region.x() as f32, region.y() as f32);
-        let (rw, rh) = (region.width() as f32, region.height() as f32);
-        let corners = [Point::new(x0 + rw / 2.0, y0), Point::new(x0 + rw, y0 + rh)];
-        let ramp = [
-            Point::new(x0 + rw / 2.0, y0 + rh / 2.0),
-            Point::new(x0 + rw, y0 + rh / 2.0),
-        ];
-        let excludes = document::excludes(&items);
-        let fp = blur::Footprint {
-            points: &corners,
-            size: 0.0,
-            kind: blur::Kind::Rect,
-            outline: 0.0,
-            ramp: &ramp,
-            // the picture as captured: Soft, Frost and Pixelate never read the annotations (W111)
-            source: Some(&self.doc.image),
-            exclude: &excludes,
-        };
-        blur::paint(&mut layer, &fp, strength, style, self.doc.seed);
-        handle(layer.pm)
     }
 
     /// Hide's strength now, image px: the preset's (or the custom slider's) times
@@ -2676,7 +2583,6 @@ impl Annotator {
     /// Repaints the base (all items but a hidden pending one, the legend), then
     /// the live layer.
     pub(crate) fn refresh(&mut self) {
-        *self.thumbs.borrow_mut() = None; // (the style pictures follow the drawing)
         let hide = self
             .pending
             .as_ref()
@@ -2819,6 +2725,91 @@ pub(crate) fn tool_of(shape: &Shape) -> Tool {
         Shape::Spotlight { .. } => Tool::Spotlight,
         _ => Tool::Select,
     }
+}
+
+/// Fixed sample swatches for each Hide style (W117): a small built-in card with grey
+/// text bars (light card in light themes, dark card in dark themes), its left half untouched and
+/// its right half hidden in that style. Rendered once per theme polarity and cached, never reading
+/// the user's screenshot.
+pub fn style_swatches(light: bool) -> Vec<image::Handle> {
+    use std::sync::OnceLock;
+    static LIGHT: OnceLock<Vec<image::Handle>> = OnceLock::new();
+    static DARK: OnceLock<Vec<image::Handle>> = OnceLock::new();
+    let cache = if light { &LIGHT } else { &DARK };
+    cache.get_or_init(|| build_style_swatches(light)).clone()
+}
+
+fn build_style_swatches(light: bool) -> Vec<image::Handle> {
+    const W: u32 = 72;
+    const H: u32 = 48;
+    const SAMPLE_SEED: u64 = 0x4f43_5357_4154_4348;
+    let bg: [u8; 4] = if light {
+        [244, 246, 250, 255]
+    } else {
+        [32, 36, 46, 255]
+    };
+    let bar_a: [u8; 4] = if light {
+        [82, 88, 104, 255]
+    } else {
+        [176, 184, 200, 255]
+    };
+    let bar_b: [u8; 4] = if light {
+        [110, 116, 132, 255]
+    } else {
+        [146, 154, 172, 255]
+    };
+    let mut rgba = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H {
+        for x in 0..W {
+            let in_bar = match y {
+                7..=11 => (6..=26).contains(&x) || (30..=64).contains(&x),
+                17..=21 => (6..=44).contains(&x) || (48..=66).contains(&x),
+                27..=31 => (6..=22).contains(&x) || (26..=56).contains(&x),
+                37..=41 => (6..=38).contains(&x) || (42..=60).contains(&x),
+                _ => false,
+            };
+            let px = if !in_bar {
+                bg
+            } else if (y / 10) % 2 == 0 {
+                bar_a
+            } else {
+                bar_b
+            };
+            let i = ((y * W + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&px);
+        }
+    }
+    let sample = Image {
+        width: W,
+        height: H,
+        rgba,
+    };
+    let (wf, hf) = (W as f32, H as f32);
+    let corners = [Point::new(wf / 2.0, 0.0), Point::new(wf, hf)];
+    let ramp = [Point::new(wf / 2.0, hf / 2.0), Point::new(wf, hf / 2.0)];
+    let strength = Width::Medium.cell();
+    let size = tiny_skia::IntSize::from_wh(W, H).expect("non-empty swatch");
+    blur_styles()
+        .iter()
+        .map(|&(style, _)| {
+            let pm = tiny_skia::Pixmap::from_vec(sample.rgba.clone(), size).expect("rgba size");
+            let mut layer = document::Layer {
+                pm,
+                origin: Point::ORIGIN,
+            };
+            let fp = blur::Footprint {
+                points: &corners,
+                size: 0.0,
+                kind: blur::Kind::Rect,
+                outline: 0.0,
+                ramp: &ramp,
+                source: Some(&sample),
+                exclude: &[],
+            };
+            blur::paint(&mut layer, &fp, strength, style, SAMPLE_SEED);
+            handle(layer.pm)
+        })
+        .collect()
 }
 
 /// Hide's styles and their words, in the order of the options row (Snip's

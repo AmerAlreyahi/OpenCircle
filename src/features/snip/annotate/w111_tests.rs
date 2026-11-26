@@ -157,22 +157,6 @@ fn w111_5_the_row_follows_the_active_tool_not_the_last_drawing() {
     }
 }
 
-fn thumb_pixels(e: &Annotator) -> Vec<Vec<u8>> {
-    e.style_thumbs()
-        .into_iter()
-        // the hidden half (right of the middle): the left half shows the drawing as it is
-        .map(|h| match h {
-            image::Handle::Rgba { pixels, width, .. } => {
-                let w = width as usize;
-                (pixels.chunks(w * 4))
-                    .flat_map(|row| row[(w / 2 + 1) * 4..].iter().copied())
-                    .collect()
-            }
-            _ => Vec::new(),
-        })
-        .collect()
-}
-
 /// W111-1b (owner 2026-11-25): adding any item (a pen stroke, a shape, another Hide; far away or
 /// over it) never changes an existing Hide's pixels, nor the Hide row's style pictures: the fill
 /// of Frost and Pixelate reads the picture as captured, never the annotations drawn on it.
@@ -205,7 +189,7 @@ fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
     for (tool, from, to, touches_hide_ring) in adds {
         let mut e = hide_one();
         e.update(Message::Move(pt(110.0, 105.0)));
-        let (px0, thumbs0) = (e.base_pixels(), thumb_pixels(&e));
+        let px0 = e.base_pixels();
         e.update(Message::Tool(tool));
         e.update(Message::Press(from));
         e.update(Message::Move(from + (to - from) * 0.5));
@@ -220,14 +204,6 @@ fn w111_1b_adding_items_changes_neither_a_hide_nor_its_style_pictures() {
                 "{tool:?} {from:?}: the Hide is as it was"
             );
         }
-        e.update(Message::Tool(Tool::Blur));
-        e.update(Message::Move(pt(110.0, 105.0)));
-        // Soft, Frost and Pixelate (the first three) never read the annotations
-        assert_eq!(
-            thumb_pixels(&e)[..3],
-            thumbs0[..3],
-            "{tool:?} {from:?}: the style pictures are as they were"
-        );
     }
 }
 

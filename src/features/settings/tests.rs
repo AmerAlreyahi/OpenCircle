@@ -4944,3 +4944,63 @@ fn w112_the_index_reads_the_live_state_for_the_windows_own_rows() {
         "the live Updates line is searchable"
     );
 }
+
+/// W117: in Settings (Appearance > Custom colour inside the scrolled page), pressing and dragging
+/// known local points on the colour square and hue bar puts the handle right under the pointer.
+#[test]
+fn w117_settings_colour_picker_puts_handle_under_pointer() {
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::tokens::space;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Appearance));
+    update(&mut s, Message::Look(LookTheme::Custom));
+    update(
+        &mut s,
+        Message::Palette(PaletteChoice(ColourSet::TwoColour)),
+    );
+    update(&mut s, Message::Picker(0));
+    // Find where the 244x150 square sits on the tall un-scrolled page, then scroll it near the top.
+    let sq_w = crate::shared::kit::colour::PICKER_W - 20.0;
+    let sq_h = 150.0_f32;
+    let tall = iced::Size::new(900.0, 2200.0);
+    let mut raw = None;
+    for y in (100..2100).step_by(40) {
+        for x in (240..860).step_by(40) {
+            let p = iced::Point::new(x as f32, y as f32);
+            if let Some(Message::Hsv(h)) = shot::press_move(view(&s), tall, p, p).into_iter().next()
+            {
+                raw = Some((p.x - h.s * sq_w, p.y - (1.0 - h.v) * sq_h));
+                break;
+            }
+        }
+        if raw.is_some() {
+            break;
+        }
+    }
+    let (x0, raw_y0) = raw.expect("colour square found on Appearance page");
+    let win = iced::Size::new(900.0, 560.0);
+    let scroll_y = (raw_y0 - 120.0).max(160.0);
+    let y0 = raw_y0 - scroll_y;
+    let scrolled = (super::search::PAGE, iced::Vector::new(0.0, scroll_y));
+    let sq_w = crate::shared::kit::colour::PICKER_W - 20.0;
+    let sq_h = 150.0_f32;
+    let from = iced::Point::new(x0 + 0.25 * sq_w, y0 + 0.30 * sq_h);
+    let to = iced::Point::new(x0 + 0.75 * sq_w, y0 + 0.70 * sq_h);
+    for m in shot::press_move_scrolled(view(&s), win, scrolled, from, to) {
+        update(&mut s, m);
+    }
+    let h = s.hsv.expect("settings hsv square");
+    assert!(
+        (h.s - 0.75).abs() < 0.02 && (h.v - 0.30).abs() < 0.02,
+        "settings square: {h:?}"
+    );
+
+    let hue_y = y0 + sq_h + space::GAP + 7.0;
+    let h_from = iced::Point::new(x0 + 0.20 * sq_w, hue_y);
+    let h_to = iced::Point::new(x0 + 0.80 * sq_w, hue_y);
+    for m in shot::press_move_scrolled(view(&s), win, scrolled, h_from, h_to) {
+        update(&mut s, m);
+    }
+    let h = s.hsv.expect("settings hsv hue");
+    assert!((h.h - 0.80 * 360.0).abs() < 2.0, "settings hue: {h:?}");
+}

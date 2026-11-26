@@ -594,6 +594,32 @@ pub fn labelled<'a, Message: Clone + 'a>(
     tooled(content, width, kind, focused, on_press)
 }
 
+/// Labelled button with the OpenCircle logo as its leading mark (Steps strip: Open in Studio).
+pub fn labelled_logo<'a, Message: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    width: f32,
+    kind: Kind,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    let live = on_press.is_some();
+    let mark = iced::widget::image(super::logo::logo(size::ICON_SMALL as u32))
+        .width(size::ICON_SMALL)
+        .height(size::ICON_SMALL)
+        .opacity(if live { 1.0 } else { 0.45_f32 });
+    let content = row![
+        mark,
+        text(label)
+            .size(super::text::size(Role::CONTROL))
+            .font(super::text::font(Role::CTA))
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    tooled(content, width, kind, focused, on_press)
+}
+
 /// A dialog's button: `label` only, centred, `width` wide, the kit's tool height, the same
 /// for every `kind` (Elevated beside Accent were two heights). `dialog_width` sizes a row of
 /// them.

@@ -19,7 +19,6 @@ use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
 use crate::shared::kit::button::{self, Kind};
-use crate::shared::kit::icon::Icon;
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
 use crate::shared::kit::tokens::radius;
@@ -617,8 +616,7 @@ impl Strip {
             false,
             Some(Msg::CopyAll),
         );
-        let studio = button::labelled(
-            Icon::Picture.glyph(),
+        let studio = button::labelled_logo(
             t!(ss_studio),
             WELL.width,
             Kind::Elevated,

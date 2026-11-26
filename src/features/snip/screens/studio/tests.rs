@@ -4592,3 +4592,48 @@ fn w108_the_narrow_colour_popover_has_the_custom_colour_too() {
     });
     assert!(got);
 }
+
+/// W117: in Studio (Pop::Custom anchored under the custom colour button, at non-100 % UI scale),
+/// pressing and dragging known local points on the square and hue bar puts the handle right under
+/// the pointer.
+#[test]
+fn w117_studio_colour_picker_puts_handle_under_pointer() {
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::tokens::space;
+    let mut s = studio_on(640, 400);
+    let _ = s.update(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = s.update(Msg::Resized(SIZE));
+    let _ = s.update(Msg::UiScale(2)); // 125 % UI zoom
+    // Render once so the custom-colour anchor records its bounds, then open Pop::Custom
+    let _ = shot::render(view(&s, &[], false), SIZE.width as u32, SIZE.height as u32);
+    let _ = s.update(Msg::Pop(Some(popovers::Pop::Custom)));
+    s.slide = None;
+    let anchor = s.anchors.of(popovers::Pop::Custom).get();
+    assert!(anchor.width > 0.0, "anchor tracked");
+    let (card_sz, end) = popovers::Pop::Custom.card();
+    let card_at = crate::shared::kit::popover::place_in(anchor, card_sz, end, s.popover_room());
+    // popover::card adds padding(space::GAP + 4.0) = 12.0; colour_picker adds PAD = 10.0
+    let pad = (space::GAP + 4.0) + 10.0;
+    let sq_w = crate::shared::kit::colour::PICKER_W - 20.0;
+    let sq_h = 150.0_f32;
+    let hue_y = card_at.y + pad + sq_h + space::GAP + 7.0;
+
+    let from = Point::new(card_at.x + pad + 0.20 * sq_w, card_at.y + pad + 0.25 * sq_h);
+    let to = Point::new(card_at.x + pad + 0.65 * sq_w, card_at.y + pad + 0.70 * sq_h);
+    for m in shot::press_move(view(&s, &[], false), SIZE, from, to) {
+        let _ = s.update(m);
+    }
+    let [_, sat, val] = s.editor.as_ref().unwrap().hsv().expect("studio hsv square");
+    assert!(
+        (sat - 0.65).abs() < 0.02 && (val - 0.30).abs() < 0.02,
+        "studio square: ({sat:.3}, {val:.3})"
+    );
+
+    let h_from = Point::new(card_at.x + pad + 0.15 * sq_w, hue_y);
+    let h_to = Point::new(card_at.x + pad + 0.55 * sq_w, hue_y);
+    for m in shot::press_move(view(&s, &[], false), SIZE, h_from, h_to) {
+        let _ = s.update(m);
+    }
+    let [h, _, _] = s.editor.as_ref().unwrap().hsv().expect("studio hsv hue");
+    assert!((h - 0.55 * 360.0).abs() < 2.0, "studio hue: {h:.1}");
+}

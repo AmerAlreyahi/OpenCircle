@@ -451,12 +451,12 @@ fn build(
         active: false,
         focused: focused(&Message::OpenStudio),
     };
+    let studio_logo = iced::widget::image(crate::shared::kit::logo::logo(size::ICON as u32))
+        .width(size::ICON)
+        .height(size::ICON)
+        .opacity(if idle { 1.0 } else { 0.45_f32 });
     items.push(hinted(
-        icon_button::option(
-            crate::shared::kit::icon::picture_pen(),
-            studio,
-            live(Message::OpenStudio),
-        ),
+        icon_button::option(studio_logo, studio, live(Message::OpenStudio)),
         t!(sn_studio_btn),
         Why::Keys("Ctrl+E"),
     ));
@@ -1505,6 +1505,138 @@ mod tests {
         assert_eq!(
             why_of(&e, S::sn_long_capture),
             Some((false, Some(S::sn_why_capturing)))
+        );
+    }
+
+    /// W117: in Snip (popover floated and translated to the toolbar position), pressing and
+    /// dragging known local points on the colour square and hue bar puts the handle right under
+    /// the pointer.
+    #[test]
+    fn w117_snip_colour_picker_puts_handle_under_pointer() {
+        use crate::shared::kit::testing::shot;
+        let mut e = editor();
+        e.update(Message::Picker);
+        assert_eq!(e.menu, Some(Menu::Colour));
+        let bar = Rectangle::new(Point::new(360.0, 220.0), size_for(&e));
+        let win = Size::new(1280.0, 800.0);
+        // Colour button index: after the 4 tool groups
+        let colour_idx = 3 + crate::features::snip::annotate::Group::ALL.len();
+        let (_, left) = centred_on(&e, colour_idx, colour::PICKER_W);
+        let top = bar.y + bar.height + POPOVER_GAP;
+        let at = Point::new(bar.x + left, top);
+        let pad = 10.0_f32;
+        let sq_w = colour::PICKER_W - 2.0 * pad;
+        let sq_h = 150.0_f32;
+        let hue_y = at.y + pad + sq_h + space::GAP + 7.0;
+
+        // Square press + drag
+        let from = Point::new(at.x + pad + 0.25 * sq_w, at.y + pad + 0.30 * sq_h);
+        let to = Point::new(at.x + pad + 0.70 * sq_w, at.y + pad + 0.65 * sq_h);
+        let (_, pop) = view_at(
+            &e,
+            bar,
+            tooltip::Position::Bottom,
+            tooltip::Position::Bottom,
+        );
+        let v_sq = iced::widget::stack![
+            iced::widget::Space::new()
+                .width(win.width)
+                .height(win.height),
+            pop.unwrap()
+        ]
+        .into();
+        for m in shot::press_move(v_sq, win, from, to) {
+            e.update(m);
+        }
+        let [_, s, v] = e.hsv().expect("hsv set by square drag");
+        assert!(
+            (s - 0.70).abs() < 0.02 && (v - 0.35).abs() < 0.02,
+            "snip square: ({s:.3}, {v:.3})"
+        );
+
+        // Hue bar press + drag
+        let h_from = Point::new(at.x + pad + 0.20 * sq_w, hue_y);
+        let h_to = Point::new(at.x + pad + 0.75 * sq_w, hue_y);
+        let (_, pop) = view_at(
+            &e,
+            bar,
+            tooltip::Position::Bottom,
+            tooltip::Position::Bottom,
+        );
+        let v_hue = iced::widget::stack![
+            iced::widget::Space::new()
+                .width(win.width)
+                .height(win.height),
+            pop.unwrap()
+        ]
+        .into();
+        for m in shot::press_move(v_hue, win, h_from, h_to) {
+            e.update(m);
+        }
+        let [h, _, _] = e.hsv().expect("hsv set by hue drag");
+        assert!((h - 270.0).abs() < 2.0, "snip hue: {h:.1}");
+    }
+
+    /// W117: Snip's Hide row has Light / Medium / Strong and NO Custom strength slider (the slider
+    /// is Studio-only), and its style swatches are fixed (identical for any captured picture).
+    #[test]
+    fn w117_snip_hide_row_has_no_strength_slider_and_fixed_swatches() {
+        use crate::shared::kit::testing::shot;
+        let mut white = editor();
+        white.update(Message::Tool(Tool::Blur));
+        let mut dark_pic = Annotator::new(
+            Image {
+                width: 688,
+                height: 330,
+                rgba: vec![15; 688 * 330 * 4],
+            },
+            1.0,
+        );
+        dark_pic.movable = true;
+        dark_pic.update(Message::Tool(Tool::Blur));
+
+        let a = shot::render(options_row(&white, 4000.0).unwrap(), 1260, ROW_H as u32);
+        let b = shot::render(options_row(&dark_pic, 4000.0).unwrap(), 1260, ROW_H as u32);
+        assert_eq!(a, b, "Hide row swatches must not depend on the screenshot");
+
+        let words = row_texts(&white).unwrap();
+        for preset in ["Light", "Medium", "Strong"] {
+            assert!(words.iter().any(|w| w == preset), "{preset} in {words:?}");
+        }
+        let mut saw_custom = false;
+        for x in (8..1240).step_by(8) {
+            let msgs = shot::click(
+                options_row(&white, 4000.0).unwrap(),
+                Size::new(1260.0, ROW_H),
+                Point::new(x as f32, ROW_H / 2.0),
+            );
+            if msgs.iter().any(|m| matches!(m, Message::BlurCustom(_))) {
+                saw_custom = true;
+            }
+        }
+        assert!(
+            !saw_custom,
+            "Snip Hide row must not have the Custom strength slider"
+        );
+
+        let mut studio_custom = false;
+        for x in (4..100).step_by(6) {
+            let msgs = shot::click(
+                crate::features::snip::screens::options_row::own_groups(&white, Tool::Blur)
+                    .into_iter()
+                    .nth(3)
+                    .unwrap(),
+                Size::new(120.0, 32.0),
+                Point::new(x as f32, 16.0),
+            );
+            if msgs.iter().any(|m| matches!(m, Message::BlurCustom(_))) {
+                studio_custom = true;
+                break;
+            }
+        }
+        assert!(
+            studio_custom,
+            "Studio Hide bar keeps the Custom strength slider"
         );
     }
 }

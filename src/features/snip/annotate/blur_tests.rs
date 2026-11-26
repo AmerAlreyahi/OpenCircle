@@ -1232,53 +1232,6 @@ fn w114_10_other_hide_feather_is_excluded_from_neighbours_ring() {
     );
 }
 
-/// W114-11 (re-review LOW 3): the Hide row's Soft style thumbnail excludes
-/// existing Hides in the document so hovering beside Hide A never leaks A's
-/// hidden content into the thumbnail.
-#[test]
-fn w114_11_style_thumb_excludes_existing_hide_content() {
-    let thumb_right = |under_a: [u8; 4]| -> Vec<u8> {
-        let img = image_of(260, 140, |x, y| {
-            if (20..120).contains(&x) && (20..120).contains(&y) {
-                under_a
-            } else {
-                [250, 250, 250, 255]
-            }
-        });
-        let mut e = Annotator::new(img, 1.0);
-        e.doc.seed = 31;
-        let a = hide_with(
-            vec![pt(16.0, 16.0), pt(124.0, 124.0)],
-            16.0,
-            8.0,
-            blur::Style::Soft,
-            blur::Kind::Rect,
-            0.0,
-        );
-        e.doc.exec(Edit::Insert(0, a));
-        e.refresh();
-        e.update(Message::Tool(Tool::Blur));
-        // Hover at x=126: thumb covers x=90..162; its hidden right half is x=126..162,
-        // whose left exterior ring (x=114..126) lands inside Hide A (x=16..124).
-        e.update(Message::Move(pt(126.0, 70.0)));
-        match &e.style_thumbs()[0] {
-            iced::widget::image::Handle::Rgba { pixels, width, .. } => {
-                let w = *width as usize;
-                pixels
-                    .chunks(w * 4)
-                    .flat_map(|row| row[(w / 2 + 1) * 4..].iter().copied())
-                    .collect()
-            }
-            _ => panic!("rgba thumb"),
-        }
-    };
-    assert_eq!(
-        thumb_right([20, 20, 30, 255]),
-        thumb_right([250, 250, 250, 255]),
-        "Soft style thumbnail must not read content under Hide A"
-    );
-}
-
 /// W114-12 (re-review LOW 3): large-area Soft Hide (`bw * bh > SOFT_EXACT_AREA`,
 /// exercising the `stride > 1` branch) excludes an adjacent Hide cleanly.
 #[test]

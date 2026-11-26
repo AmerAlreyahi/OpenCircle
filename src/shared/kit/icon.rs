@@ -152,25 +152,6 @@ pub fn glyph<'a>(glyph: char, px: f32) -> Text<'a> {
     text(glyph).font(FONT).size(px)
 }
 
-/// Snip's "Open in OpenCircle Studio": the picture with a small pen at its
-/// corner (lucide "image" and "pencil" stacked), in the colours of the button
-/// around it.
-pub fn picture_pen<'a, Message: 'a>() -> iced::Element<'a, Message> {
-    use super::tokens::size::{self, ICON};
-    use iced::widget::{container, stack};
-    // the corner pen: 5/8 of the picture's size
-    const PEN: f32 = size::ICON * 0.625;
-    let corner = |e: Text<'a>| {
-        container(e)
-            .align_x(super::dir::end())
-            .align_y(iced::Bottom)
-            .width(ICON)
-            .height(ICON)
-    };
-    let pen = text('\u{e1f8}').font(FONT).size(PEN); // lucide "pencil"
-    stack![icon(Icon::Picture, ICON), corner(pen)].into()
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
