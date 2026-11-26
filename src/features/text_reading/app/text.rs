@@ -436,7 +436,7 @@ impl App {
         {
             return Task::none();
         }
-        if !text_reading::reads_other_scripts() {
+        if !text_reading::reads_other_scripts() && !text_reading::system::arabic_beside() {
             // no reader for another script: Windows OCR's noise says one is needed
             self.o.other_read = true;
             let lines = self.o.screen_text.lines();
@@ -514,6 +514,27 @@ impl App {
             let Some(_held) = held.upgrade() else {
                 return; // closed meanwhile
             };
+            // Windows has Arabic too: its own recognizer reads the Arabic
+            // lines (the English and digits inside them too), all at once
+            if text_reading::system::arabic_beside() {
+                let k = *text_reading::system::passes(scale, width, height)
+                    .last()
+                    .unwrap_or(&1);
+                match text_reading::system::recognize_arabic(&pixels, width, height, k) {
+                    Ok(blocks) => {
+                        let arabic = |b: &text_reading::TextBlock| {
+                            b.text.chars().any(|c| matches!(c as u32, 0x0600..=0x06FF))
+                        };
+                        let blocks = blocks.into_iter().filter(arabic).collect();
+                        let mut lines = word::lines(blocks, [0, 0], scale);
+                        word::measure(&mut lines, &pixels, width, height, scale);
+                        let _ = tx.unbounded_send(Part::Done);
+                        let _ = tx.unbounded_send(Part::Read(Ok(lines)));
+                        return;
+                    }
+                    Err(e) => crate::log!("[opencircle] Windows OCR (Arabic): {e}; PP-OCR reads"),
+                }
+            }
             let key = u64::from(opening);
             let part = send_frame.then_some((0, height));
             let read = text_reading::read_screen(

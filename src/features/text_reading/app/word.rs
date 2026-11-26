@@ -489,7 +489,7 @@ fn between(line: &Line, a: usize, b: usize) -> Rectangle {
 }
 
 /// A line's words (in text order) and their boxes.
-fn words(line: &Line) -> Vec<(Rectangle, &str)> {
+pub(crate) fn words(line: &Line) -> Vec<(Rectangle, &str)> {
     (word_spans(&line.text).into_iter())
         .map(|(c0, c1, b0, b1)| (between(line, c0, c1), &line.text[b0..b1]))
         .collect()
@@ -867,6 +867,39 @@ pub struct Screen {
     found: Vec<Rectangle>,
 }
 
+/// Lines top to bottom by their middles, the pieces of one row left to right,
+/// or right to left on a row that is mostly Arabic (R-15: a mixed line's
+/// pieces came out in the wrong order).
+pub(crate) fn order_rows(lines: &mut [Line]) {
+    let row = |l: &Line| l.bounds.center_y().round() as i32 / 8;
+    let arabic = |l: &Line| {
+        let (ar, all) = (l.text.chars().filter(|c| c.is_alphabetic())).fold((0, 0), |(a, n), c| {
+            (
+                a + matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F) as usize,
+                n + 1,
+            )
+        });
+        ar * 2 > all
+    };
+    let rtl: Vec<(i32, bool)> = lines.iter().map(|l| (row(l), arabic(l))).collect();
+    let is_rtl = |r: i32| {
+        let (a, n) = (rtl.iter().filter(|(k, _)| *k == r))
+            .fold((0, 0), |(a, n), (_, x)| (a + *x as usize, n + 1));
+        a * 2 > n
+    };
+    lines.sort_by_key(|l| {
+        let r = row(l);
+        (
+            r,
+            if is_rtl(r) {
+                -((l.bounds.x + l.bounds.width) as i32)
+            } else {
+                l.bounds.x as i32
+            },
+        )
+    });
+}
+
 /// `a`'s middle is in `b`'s box (image px).
 fn over(a: &Line, b: &Line) -> bool {
     b.bounds.contains(a.bounds.center()) || a.bounds.contains(b.bounds.center())
@@ -898,9 +931,7 @@ impl Screen {
     pub fn lines(&self) -> Vec<Line> {
         let mut lines: Vec<Line> = self.iter().cloned().collect();
         if !self.extra.is_empty() {
-            // top to bottom, then left to right, by their middles
-            let key = |l: &Line| (l.bounds.center_y().round() as i32 / 8, l.bounds.x as i32);
-            lines.sort_by_key(key);
+            order_rows(&mut lines);
         }
         lines
     }
@@ -1128,6 +1159,25 @@ mod tests {
         // a band over rows already read adds nothing twice
         text.add(first, ocr(first), screen);
         assert_eq!(text.lines().len(), page.len() + 1);
+    }
+
+    #[test]
+    fn the_pieces_of_an_arabic_row_read_right_to_left() {
+        // R-15: a row of the second reader's pieces (Arabic and an English
+        // name) went left to right on an RTL page; an English row stays so
+        let mut text = Screen::default();
+        let screen = Size::new(1920.0, 1080.0);
+        let band = Rectangle::with_size(screen);
+        let row = vec![
+            line("Northwind", 100.0, 100.0),
+            line("مرحبا بكم", 400.0, 100.0),
+            line("في الشبكة", 200.0, 101.0),
+            line("two", 500.0, 300.0),
+            line("one", 100.0, 301.0),
+        ];
+        text.add_extra(band, row, screen);
+        let got: Vec<String> = text.lines().into_iter().map(|l| l.text).collect();
+        assert_eq!(got, ["مرحبا بكم", "في الشبكة", "Northwind", "one", "two"]);
     }
 
     const ALL: Rectangle = Rectangle {

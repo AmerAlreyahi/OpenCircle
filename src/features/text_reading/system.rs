@@ -23,26 +23,74 @@ pub type Word = (String, [f32; 4]);
 /// words, its words joined by a space (none between two CJK characters,
 /// which Windows returns one per word).
 pub fn blocks(lines: Vec<Vec<Word>>) -> Vec<TextBlock> {
+    split(lines, false)
+}
+
+/// `blocks` for Windows' Arabic recognizer: it returns each line's words in
+/// visual order (left to right on the screen) with their own letters in
+/// logical order. A line that is mostly Arabic reads right to left: its
+/// words are put in logical order (`logical`), and the pieces of one row
+/// right to left (R-15: the English words and digits Windows reads inside
+/// Arabic lines come out in the right place).
+pub fn blocks_rtl(lines: Vec<Vec<Word>>) -> Vec<TextBlock> {
+    split(lines, true)
+}
+
+fn split(lines: Vec<Vec<Word>>, rtl: bool) -> Vec<TextBlock> {
     let mut out = Vec::new();
-    for words in lines {
+    for mut words in lines {
+        if rtl {
+            words.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+        }
         let mut run: Vec<Word> = Vec::new();
         for word in words {
             let gap = run.last().map(|(_, b)| word.1[0] - (b[0] + b[2]));
             let tall = run.iter().map(|(_, b)| b[3]).fold(word.1[3], f32::max);
             if gap.is_some_and(|g| g > COLUMN_GAP * tall) {
-                out.push(block(std::mem::take(&mut run)));
+                out.push(block(std::mem::take(&mut run), rtl));
             }
             run.push(word);
         }
         if !run.is_empty() {
-            out.push(block(run));
+            out.push(block(run, rtl));
         }
     }
     out.retain(|b| !b.text.trim().is_empty());
-    super::reading_order(out, false)
+    super::reading_order(out, rtl)
 }
 
-fn block(words: Vec<Word>) -> TextBlock {
+/// A word with Arabic letters.
+fn arabic(word: &str) -> bool {
+    word.chars()
+        .any(|c| matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F))
+}
+
+/// Words in visual order (left to right) put in logical order for a line
+/// that reads right to left: the words reversed, but a run of words that
+/// are not Arabic (English names, numbers) keeps its own left-to-right
+/// order. A line with fewer Arabic than other letter words stays as it is.
+fn logical(words: Vec<Word>) -> Vec<Word> {
+    let letters = |w: &Word| w.0.chars().any(char::is_alphabetic);
+    let (ar, all) = (
+        words.iter().filter(|w| arabic(&w.0)).count(),
+        words.iter().filter(|w| letters(w)).count(),
+    );
+    if ar == 0 || ar * 2 < all {
+        return words;
+    }
+    let mut runs: Vec<Vec<Word>> = Vec::new();
+    for w in words {
+        let join = !arabic(&w.0) && runs.last().is_some_and(|r| !arabic(&r[0].0));
+        match (join, runs.last_mut()) {
+            (true, Some(r)) => r.push(w),
+            _ => runs.push(vec![w]),
+        }
+    }
+    runs.into_iter().rev().flatten().collect()
+}
+
+fn block(words: Vec<Word>, rtl: bool) -> TextBlock {
+    let words = if rtl { logical(words) } else { words };
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     let mut text = String::new();
     let mut read = Vec::new();
@@ -126,6 +174,9 @@ pub fn language() -> Option<&'static str> {
             None => {}
         }
         let tag = made.as_ref().map(|(_, tag)| tag.clone());
+        let first_arabic = tag.as_deref().is_some_and(|t| t.starts_with("ar"));
+        let beside = tag.is_some() && !first_arabic && imp::make_arabic().is_some();
+        let _ = ARABIC_BESIDE.set(beside);
         if let Some((engine, _)) = made {
             *lock() = Some((engine, Instant::now()));
             free_when_idle();
@@ -301,12 +352,52 @@ pub fn recognize(rgba: &[u8], width: u32, height: u32, k: u32) -> Result<Vec<Tex
     for (_, b) in lines.iter_mut().flatten() {
         *b = b.map(|v| v / k as f32);
     }
-    let out = blocks(lines);
+    let out = match language().is_some_and(|t| t.starts_with("ar")) {
+        true => blocks_rtl(lines),
+        false => blocks(lines),
+    };
     crate::log!(
         "[opencircle] windows ocr {width}x{height} (x{k}): {n} lines in {} ms",
         start.elapsed().as_millis()
     );
     Ok(out)
+}
+
+/// Windows has an Arabic recognizer beside the one it reads the first
+/// language with (an English-first PC with Arabic added): it reads the
+/// Arabic lines instead of PP-OCR (`recognize_arabic`). Known once
+/// `language` was asked; `false` before.
+static ARABIC_BESIDE: OnceLock<bool> = OnceLock::new();
+
+pub fn arabic_beside() -> bool {
+    ARABIC_BESIDE.get().copied().unwrap_or(false)
+}
+
+/// `recognize` with Windows' Arabic recognizer (ar-SA): the lines of an
+/// image, words put in logical order (`blocks_rtl`). Its own engine, made
+/// for this read and dropped after it (a screen reads once, a few ms to make).
+pub fn recognize_arabic(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    k: u32,
+) -> Result<Vec<TextBlock>, OcrError> {
+    super::check_image(rgba, width, height)?;
+    let _gently = imp::below_normal();
+    let start = Instant::now();
+    #[allow(clippy::let_unit_value)] // (no engine off Windows)
+    let engine = imp::make_arabic()
+        .ok_or_else(|| OcrError::Engine("Windows has no Arabic recognizer".into()))?;
+    let mut lines = imp::read(&engine, &grey(rgba, width, k), width * k, height * k)?;
+    for (_, b) in lines.iter_mut().flatten() {
+        *b = b.map(|v| v / k as f32);
+    }
+    crate::log!(
+        "[opencircle] windows ocr (Arabic) {width}x{height} (x{k}): {} lines in {} ms",
+        lines.len(),
+        start.elapsed().as_millis()
+    );
+    Ok(blocks_rtl(lines))
 }
 
 #[cfg(windows)]
@@ -361,6 +452,15 @@ mod imp {
         let tag = engine.RecognizerLanguage().and_then(|l| l.LanguageTag());
         let tag = tag.map(|t| t.to_string()).unwrap_or_default();
         Some((engine, tag))
+    }
+
+    /// The Arabic recognizer (ar-SA), if Windows has it.
+    pub(super) fn make_arabic() -> Option<OcrEngine> {
+        use windows::Globalization::Language;
+        use windows::core::HSTRING;
+        com();
+        let language = Language::CreateLanguage(&HSTRING::from("ar-SA")).ok()?;
+        OcrEngine::TryCreateFromLanguage(&language).ok()
     }
 
     /// Installed recognizers' tags, and the first profile language's.
@@ -423,6 +523,10 @@ mod imp {
 
     pub(super) fn below_normal() -> impl Sized {}
 
+    pub(super) fn make_arabic() -> Option<()> {
+        None
+    }
+
     pub(super) fn languages() -> (Vec<String>, Option<String>) {
         (Vec::new(), None)
     }
@@ -450,6 +554,68 @@ mod tests {
                 ("VPN".into(), 80.0, 110.0)
             ]
         );
+    }
+
+    /// R-15: Windows' Arabic recognizer gives a line's words left to right on
+    /// the screen; the line is read right to left, an English run keeps its
+    /// own order ("Contoso Identity 2026.3" inside Arabic).
+    #[test]
+    fn arabic_words_come_out_in_logical_order_with_english_runs_kept() {
+        let w = |t: &str, x: f32| (t.to_string(), [x, 5.0, 30.0, 20.0]);
+        // on screen, left to right: 4 3 | Contoso Identity 2026.3 | 2 1
+        let line = vec![
+            w("رابع", 10.0),
+            w("ثالث", 50.0),
+            w("Contoso", 90.0),
+            w("Identity", 130.0),
+            w("2026.3", 170.0),
+            w("ثان", 210.0),
+            w("أول", 250.0),
+        ];
+        let got = super::blocks_rtl(vec![line.clone()]);
+        assert_eq!(got.len(), 1, "one line");
+        assert_eq!(got[0].text, "أول ثان Contoso Identity 2026.3 ثالث رابع");
+        // the word boxes stay where the words are
+        assert!(got[0].words.contains(&("Contoso".into(), 90.0, 120.0)));
+        // an English line stays as it is
+        let en = vec![w("Main", 10.0), w("page", 50.0)];
+        assert_eq!(super::blocks_rtl(vec![en.clone()])[0].text, "Main page");
+        assert_eq!(
+            super::blocks(vec![line])[0].text.split(' ').next(),
+            Some("رابع")
+        );
+    }
+
+    /// The VM pass (R-15), by hand on Windows with Windows' Arabic recognizer
+    /// installed: `R15=<dir with the W109 pages> opencircle --ignored
+    /// r15_windows_arabic`. Prints each page's lines as JSON for scoring.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn r15_windows_arabic_reads_the_w109_pages() {
+        let dir = std::path::PathBuf::from(std::env::var("R15").unwrap());
+        for name in [
+            "word-ar-1080",
+            "word-ar-s150",
+            "browser-ar-1080",
+            "chat-ar-1080",
+        ] {
+            let img = image::open(dir.join(format!("{name}.png")))
+                .unwrap()
+                .to_rgba8();
+            let (w, h) = img.dimensions();
+            let k = *super::passes(if name.contains("s150") { 1.5 } else { 1.0 }, w, h)
+                .last()
+                .unwrap();
+            let start = Instant::now();
+            let lines = super::recognize_arabic(img.as_raw(), w, h, k).unwrap();
+            let ms = start.elapsed().as_millis();
+            let out: Vec<_> = lines
+                .iter()
+                .map(|l| serde_json::json!([l.text, l.bounds]))
+                .collect();
+            println!("R15VM {name} {ms} {}", serde_json::to_string(&out).unwrap());
+        }
     }
 
     #[test]
