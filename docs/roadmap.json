@@ -10,7 +10,7 @@
     "ref": "owner answers in chat 2026-11-24 (AGENTS.md 37f6ae38)",
     "by": "Owner"
   },
-  "updated": "2026-11-24",
+  "updated": "2026-11-26",
   "links": [
     {
       "label": "Board",
@@ -92,7 +92,7 @@
     {
       "version": "0.5.0",
       "name": "Enhancements (no new features)",
-      "status": "active",
+      "status": "shipped",
       "why": "Make what exists familiar, fast and dependable before anything new (owner 2026-11-24).",
       "outcome": "Translate is fast again; every tool behaves like the apps people know; the kit's checks guard every commit. Estimate 2026-11-24 from real worker times: about 13-17 agent-hours left, 1.5-2 days with 2-3 workers if owner answers within hours.",
       "items": [
@@ -109,12 +109,7 @@
         {
           "id": "K-03",
           "title": "Kit: handover rewritten as one current state",
-          "status": "todo"
-        },
-        {
-          "id": "K-04",
-          "title": "Kit: map the board fields so roadmap.json drives the board (sync not run yet: field names differ)",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "E-01",
@@ -190,6 +185,50 @@
       ]
     },
     {
+      "version": "0.5.1",
+      "name": "Fixes, GPU renderer and reading (before the redesign)",
+      "status": "active",
+      "why": "Owner 2026-11-24: video and audio recording in Snip next, and the design he has not approved yet is finished right after the enhancements.",
+      "outcome": "Snip records an area, a window or the screen with microphone and/or computer sound; its widget changes with the mode (record mode shows record controls only, no picture tools); the new design is approved and applied.",
+      "items": [
+        {
+          "id": "R-15",
+          "title": "Better Arabic reader: Windows' Arabic OCR (ar-SA) with each line's words put back in order; English words and digits inside Arabic lines, spaces in bold Arabic, mirrored brackets (#182)",
+          "status": "todo"
+        },
+        {
+          "id": "G-01",
+          "title": "GPU renderer: iced wgpu with automatic tiny-skia fallback, after the owner's lab-gpu test (lag at 3440x1440 / 4K, memory)",
+          "status": "todo"
+        },
+        {
+          "id": "R-16",
+          "title": "Selectable text in the Studio (#229)",
+          "status": "todo"
+        },
+        {
+          "id": "R-18",
+          "title": "0.5.x follow-ups: the Studio view NEVER moves unless the user moves it on purpose (drag to pan, wheel/scrollbars, zoom, Fit): not on right-click, pinning the Steps slider, opening Preferences, panels or window resizes; one-word in-place translate never cut off ('To...'); remove the extra slider button and Picture info",
+          "status": "todo"
+        },
+        {
+          "id": "K-04",
+          "title": "Kit: map the board fields so roadmap.json drives the board (sync not run yet: field names differ)",
+          "status": "todo"
+        }
+      ],
+      "gate": [
+        {
+          "check": "Design approved by the owner",
+          "ok": false
+        },
+        {
+          "check": "Recording proved on Windows 10, GNOME Wayland, KDE, X11",
+          "ok": false
+        }
+      ]
+    },
+    {
       "version": "0.6.0",
       "name": "Snip recording + the new design",
       "status": "next",
@@ -248,6 +287,46 @@
           "depends": [
             "R-04"
           ]
+        },
+        {
+          "id": "R-08",
+          "title": "Snip full screen easier: scroll up over a window steps out to the whole screen (click takes it); clearer Enter = full screen hint",
+          "status": "todo"
+        },
+        {
+          "id": "R-09",
+          "title": "Snip toolbar: Long capture button on the main toolbar (out of More)",
+          "status": "todo"
+        },
+        {
+          "id": "R-10",
+          "title": "Snip toolbar: one Pin button (click = still pin); options row: Pin | Live pin (Live while in Labs)",
+          "status": "todo"
+        },
+        {
+          "id": "R-11",
+          "title": "Snip: right-click on the picked area = short menu (Copy, Save, Pin, Open in Studio, Copy text, Translate, Ask AI), same list as More; right-click mid-stroke cancels; shape menu later",
+          "status": "todo"
+        },
+        {
+          "id": "R-12",
+          "title": "Live pin click-through: hold Ctrl over the pin to make it clickable; faint mark + tooltip while clicks pass through; tray row stays",
+          "status": "todo"
+        },
+        {
+          "id": "R-13",
+          "title": "Snip: pick a picture/card on the page: boxes found in the frozen screenshot (+ system controls where available); hover stays the window, scroll down = smaller part, scroll up = bigger/screen; one-time hint. Lab test first (right box on image grids/news/game menus, < 5 ms per hover), built only if it works",
+          "status": "todo"
+        },
+        {
+          "id": "R-14",
+          "title": "Right-click menus v2b: Snip picked area (with R-11), recording corner thumbnail, translated text + translate pill, AI chat (selected answer text, a message, a picture chip, the composer); study docs/internal/reports-enh/w115-right-click-study.md",
+          "status": "todo"
+        },
+        {
+          "id": "R-17",
+          "title": "Tips: one-time contextual hints in widget style E + the 'What can I do?' card; each tip once per user, existing users included (first time the feature is relevant after the update); 'Don't show tips' in Settings",
+          "status": "todo"
         }
       ],
       "gate": [
@@ -288,8 +367,8 @@
         },
         {
           "id": "L-03",
-          "title": "Steps strip: + and Open in Studio (#204)",
-          "status": "todo"
+          "title": "Steps strip: + and Open in Studio (#204) (done in 0.5.0)",
+          "status": "done"
         },
         {
           "id": "L-04",
@@ -413,6 +492,10 @@
     }
   ],
   "changelog": [
+    {
+      "date": "2026-11-26",
+      "change": "v0.5.0 published (tag v0.5.0 = ea2719d6); 0.5.1 active; K-04 moved to 0.5.1"
+    },
     {
       "date": "2026-11-25",
       "change": "All 0.5.0 items merged (2089 tests); release train started."

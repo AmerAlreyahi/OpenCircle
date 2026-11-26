@@ -97,6 +97,12 @@ where they differ.
   placeholder tag (`untagged-...`) for ~1 min, then tag_name set to v0.4.0 (lesson: a publish through the API must send
   tag_name). Published assets re-downloaded: SHA256SUMS OK, minisig OK, trusted comment "OpenCircle v0.4.0", latest = v0.4.0.
   Known issues shipped: stroke commit pause on 4K / 8K pictures, zoom not animated, a failed step's placeholder vanishes silently.
+  v0.5.0 "Enhancements" published 2026-11-26 16:54 UTC on tag v0.5.0 (ea2719d6, re-tagged after the W126 AppImage CLI fix);
+  the owner ran the two release-edit commands. Gates on the final draft: CI green, SHA256SUMS + minisig OK, update gate PASS
+  (Windows Setup + portable from 0.4.0, What's new, About v0.5.0, Setup /quiet; AppImage --version / run on Ubuntu). Published
+  assets re-downloaded: byte-identical to the gated draft, SHA256SUMS OK, minisig OK ("OpenCircle v0.5.0"), latest = v0.5.0.
+  Known issues shipped (fixed in 0.5.1 R-18; kept out of the notes by the owner's word): one-word in-place translate cut off
+  ("To..."); the Studio view moves on pin / Preferences / right-click.
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment
@@ -1188,7 +1194,8 @@ production systems.
   with it as one piece, never offset; no separate "Shapes · Rectangle (R)" pill; the active tool's CHOICES are IN the row (Shapes:
   rectangle, ellipse, line, arrow, then size, outline/fill; same idea for every tool with sub-types) - no separate pop-up panel and
   no second click (familiar: Paint, Snagit, CleanShot). The Settings search sits CENTRED in the title bar (approved shell), never
-  squeezed against the window buttons.
+  squeezed against the window buttons. UPDATE (owner 2026-11-25): the row is CENTRED under the toolbar (shifts inward only at a
+  screen edge); the Settings search key shown is Ctrl+K (Ctrl+F still works).
 
 - Owner try of dev 11886be, round 3 (2026-11-25; shots docs/internal/owner-shots/2026-11-25/round3-*): works: steps export, paste
   rule, Redo, double-click to Studio, AI chat, download card, tray, Arabic, start with Windows. Decisions:
@@ -1200,7 +1207,14 @@ production systems.
   - Onboarding step tabs fit on one line in every language (no wrapped tab like "4. ربط الذكاء الاصطناعي").
   - Steps strip (planning #204 is now IN this release, owner): "Open in OpenCircle Studio" on the strip; the strip can be dragged
     anywhere (position remembered); once the Studio holds the steps the strip closes; BUG to fix first: x on the strip wiped the
-    steps from an open Studio (data loss) - the Studio's steps must never be lost by closing the strip.
+    steps from an open Studio (data loss) - the Studio's steps must never be lost by closing the strip. Once the Studio holds the
+    steps it owns them: closing the Studio ends them (its Save / Don't save prompt covers unsaved work; lead 2026-11-25).
+
+- Arabic text reading in 0.5.0 (owner 2026-11-25, study docs/internal/reports-enh/w109-arabic-ocr.md): fix 2 (Engine::per_line stops
+  the second reader early: set `done` only when the "few left" branch was chosen) + fix 1 (word boxes from the readers' own
+  positions: CTC character steps / Windows OCR word boxes; ink gaps only as a fallback). The better Arabic reader (English and
+  digits inside Arabic lines, spaces in bold Arabic, mirrored brackets) is the NEXT release. The owner allows installing Windows'
+  Arabic OCR language (Language.OCR ar-SA) on the Windows TEST VM with one elevated step (2026-11-25).
 
 ## Domain quirks
 
@@ -1661,3 +1675,140 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Release commands for v0.4.0 (owner, 2026-11-21, "change it, I allow you"): the SDLC guard blocks `gh release` / tag pushes
   in a session not started with SDLC_OWNER_RELEASE=1; for v0.4.0 the owner allowed the lead to make the release changes
   (notes into the draft, publish after the gate passes) through `gh api` instead. Valid for v0.4.0 only; ask again next release.
+
+- Owner try of dev 4949720, round 4 (2026-11-25): "tag it", then held while he tested; NOT tagged (the kit guard also blocks a
+  tag push from this session: the owner pushes the tag or starts a session with SDLC_OWNER_RELEASE=1). Works: Snip row, centred
+  search + Ctrl K, unmirrored title bars, Steps strip, Report popup, onboarding tabs, first crop. Release blockers:
+  - Translate on SELECTED text (menu + bar R) = IN PLACE: the translation replaces the selected text on screen with the one-shot
+    erase-and-redraw, translate pill + Original + Esc, Ctrl+C copies the translation (owner expected this; SUPERSEDES the lead's
+    2026-11-25 card). W112.
+  - Colour picker (Studio "+" and Snip, one kit part) = the familiar one: saturation/brightness square + hue slider, eyedropper,
+    recent colours, preset swatches; hex optional, never the main control; no styles/presets in the picker. PNGs to the owner
+    before merge. W112.
+  - Settings search turned the Arabic UI English. W112.
+  - Drawing tools lag and don't follow the exact pointer path (Snip + Studio, every use); a pen stroke changes an existing Hide's
+    look; a new shape briefly shows a frozen copy of the picture inside it; the options row keeps the OLD tool after a click on another tool (shot round4-stale-options-row.png). Full tools health check. W111.
+- Next release Snip additions (owner, 2026-11-25, "yes pls"): R-08 scroll up over a window = whole screen + clearer Enter hint;
+  R-09 Long capture on the main Snip toolbar; R-10 one Pin button (click = still pin; options row Pin | Live pin); R-11 right-click
+  on the picked area = a short menu built from More's list (right-click mid-stroke cancels; shape menu later); R-12 live pin
+  click-through: hold Ctrl over it = clickable, a mark + tooltip (lead default: next release, Labs feature, not a 0.5.0 blocker).
+- Colour picker APPROVED (owner, 2026-11-25, on w112-picker-*.png): saturation/brightness square + hue bar, before | now preview,
+  eyedropper, small optional hex read-out, 8 recent colours, preset row; one kit part for Snip, the Studio and Settings.
+- Antigravity Neon (owner, 2026-11-25, "it is too good, reliable, fast"; SUPERSEDES "from Google use ONLY Argon" and the
+  Antigravity marketing-images-only scope): Antigravity's Neon model may be used as a worker. First job: redesign the WHOLE app
+  (brief docs/internal/briefs/design-antigravity-whole-app.md): phase 1 = a design system sheet + 5 sample screens for the
+  owner's OK, then every screen. Antigravity is a GUI IDE on the Windows host with no headless agent command, so the owner
+  starts it with the brief; the lead can't dispatch it. Workers: at most 2 at a time (owner, 2026-11-25), counting Antigravity.
+- Recording widgets APPROVED (owner, 2026-11-25, "perfect", canvas [private link: AGENTS.local.md] = the R1/S2
+  redraw, renders .claude/artifacts/design/render/out/w101/recording-r1s2-*): build exactly these states in the next release.
+- Pick a picture on the page (owner, 2026-11-25, "yes"): next release, R-13; lab test first.
+- Hide default (owner, 2026-11-25, "soft, but something secure also, I want it to look pretty"): the default Hide style is a NEW
+  secure "Soft" built only from the area's surroundings/background (never the hidden pixels), proven unrecoverable with W100's
+  candidate attack; the old content-reading Soft becomes the look style "Blur (look only)". W114 (brief rel-w114-secure-soft-hide.md).
+- Owner try of dev e193719, round 5 (2026-11-26): Soft Hide + tool fixes good; 4K speed improved. Blockers: no live picture previews
+  in the Hide row (fixed sample swatches instead); Studio Magnifier needs outline / colour / zoom controls and is still slow;
+  one-word en->es Translate failed with "system error number 13" loading the model + a wrong error card (raw path, "Set up AI");
+  after an in-place translation nothing else works until Esc (must allow a new selection and translating the whole screen).
+  W116 (translate) and W117 (Hide row + Magnifier, on Antigravity). Snip captures our recording widgets only when the user
+  hovers and clicks them; the recording bar is never inside the recorded video (existing rules).
+- Snip toolbar Studio button (owner, 2026-11-26): the "Open in Studio" button uses the OpenCircle logo instead of the Studio icon.
+  Queued for W117's next round.
+- Colour picker bug (owner, 2026-11-26): the square does not follow the pointer (handle and colour land elsewhere). Blocker; W117.
+- Settings full design (owner, 2026-11-26): a Claude designer (not Antigravity) draws the WHOLE Settings from the approved parts
+  (shell, AI and Search sample, B2, A3+A5 preview), inspired by CA Catalog Orchestrator, plus 5 more sidebar styles; on a canvas
+  for his pick. W118. No dashboard (confirmed again). Roadmap 0.6.0 gains R-14 right-click v2b, R-15 better Arabic reader,
+  R-16 Studio selectable text; L-03 Steps strip marked done (0.5.0).
+- Owner 2026-11-26 (round 5 follow-ups):
+  - Show original: while the original is shown (the pill's Original toggle), NO dim over the screen; the dim returns with the
+    translation. Queued with the W116 follow-up.
+  - Archive the old designs (gitignored, so archived outside the repo, not deleted) once W118's design lands.
+  - After W118: a design of the CURRENT real floating widgets only (bar, translate pill, Snip toolbar + row, picker, pills/toasts,
+    AI chat, Steps strip, word card, menus, update widgets, recording widgets): the widgets alone, no full-screen backgrounds. W119.
+  - The slow one-word Arabic translate: not yet measured; measure per stage (model load, OCR, translate) before 0.5.0.
+- Old designs ARCHIVED (owner, 2026-11-26): the October canvas (design/project), studio-v3, the settings-v2 round renders and
+  backups moved to /home/az_work/MainHub/Archive/OpenCircle/designs-2026-11-26/ (README there). Whole Settings design (W118):
+  canvas [private link: AGENTS.local.md], source .claude/artifacts/design-settings-full/.
+- Settings design round 2 (owner, 2026-11-26, on W118's canvas): the Appearance theme cards are disliked (redesign); EVERY
+  feature page with a preview clip shows its preview (A3+/A5+); the B2 choice-card look is used for every comparable choice; the
+  floating-card sidebar (style 2) is chosen and the CONTENT area becomes a floating card too; the "Settings › Page" breadcrumb
+  goes (lead: keep a small page title + one line); look again at CA Catalog Orchestrator's Settings and borrow more where it fits.
+- Settings search (owner, 2026-11-26; SUPERSEDES the Ctrl K keycaps in the shell's search): the search field is wider (still exactly
+  centred), shows NO Ctrl K keycaps (the key still works; tooltip only), and on open with nothing typed shows a floating card of the
+  most-used settings as quick picks with their current values; typing shows results.
+- Settings design APPROVED (owner, 2026-11-26, "design is awesome and all recommended approved"): round 2 canvas
+  [private link: AGENTS.local.md], source .claude/artifacts/design-settings-full/r2/ (r2.py), with every
+  recommended answer: Appearance option 1; drop the invented "Search opens" row; Studio's "Open pictures in" lives in Snip as
+  "After a capture" (Studio links to it); Most used = the drawn list, later ordered by real use; sidebar card 246 px; Studio demo
+  link hidden until a clip exists. Built in the next release (0.6.0), in Rust + iced (lead recommendation, see below).
+- Widget style (owner, 2026-11-26): style E "two-tone, grouped segments" (W119 canvas [private link: AGENTS.local.md])
+  for the whole widget family; the Snip options row stays ATTACHED under the toolbar as one piece (not the drawn gap).
+- Translate warm-up on the right-click menu (owner, 2026-11-26, "ok, but only the main lang"): opening the right-click menu on
+  selected text warms ONLY the model pair into the user's main language (the translate target), and only when the selection's
+  language differs from it; nothing else is pre-loaded; the warm model is freed after ~1 min unused (existing warm rules).
+- Studio colour picker (owner, 2026-11-26): looks IDENTICAL to the Snip widget's picker: no extra outer container / x around it
+  (shot owner-shots/2026-11-25/round6-studio-picker.png); one kit part, one look. Closes like Snip's (outside click / Esc).
+- Studio design (owner, 2026-11-26, on W122's canvas VgkFac5sDW1nZ4e5dKExLi): the LAYOUT is approved; the left tool rail needs
+  other ideas (round 2: several rail styles, everything as floating widgets). The drawn slider panel is NOT what he meant (it is a
+  floating card); his meaning is pending: edge drawer / bottom filmstrip / hover rail.
+- Studio slider APPROVED (owner, 2026-11-26, "the current slider is great"): build W122's slider now in today's Studio look (0.5.0)
+  with the recommended answers (overlay, remember open/pinned per window, closed by default, 320 px, no close while dragging a
+  step, Ctrl+B/Esc/handle/outside click). Studio window bug: it sometimes opens partly above / outside the screen; it must open
+  centred on its monitor, sized within the work area (taskbar excluded), like any normal program (fine in full screen). W123.
+- Studio Preferences header (owner, 2026-11-26): keeps TODAY's header exactly: no search, no Ctrl K, no extra chips; only the
+  content takes the Settings round-2 design.
+- Tips (owner, 2026-11-26): in 0.6.0 with the new design (style E) + the "What can I do?" card; every tip shown ONCE per user,
+  existing users included (the first time the feature is relevant after the update); "Don't show tips" turns all off. R-17.
+- 0.5.0 APPROVED by the owner (2026-11-26, "app approved") on the final test build 2143ff0 (main 2143ff0d, CI green): all four
+  test areas good. Next: W124 final VM pass, notes (docs/internal/release-notes-v0.5.0.md updated), then the tag (owner pushes it or
+  restarts the lead with SDLC_OWNER_RELEASE=1), signed draft, update gate on the draft, publish on his word.
+- Studio direction (owner, 2026-11-26): keep TODAY's Studio design as the base, made SOFTER; no bottom bar: its parts become
+  floating pills (size + Picture info; zoom + Save + Copy); the main content area is normal (not a card/widget); only some things
+  float on it (the slider, some options). Shots owner-shots/2026-11-25/round7-*.
+- Studio slider control (owner, 2026-11-26): ONE control only: the edge handle with its arrow (and Ctrl+B); remove the separate
+  panel toggle button from the options row. Applies to the 0.5.0 build too (follow-up) and the 0.6.0 design.
+- Studio "Picture info" (owner, 2026-11-26): REMOVED completely (button and popover); the bottom-left keeps only the size chip.
+  0.6.0 design; also removable from the 0.5.0 build with the next Studio follow-up.
+- Studio pin jump (owner, 2026-11-26, shots owner-shots/2026-11-25/round8-pin-*): pinning the Steps slider while zoomed moves the
+  picture; pinning must keep the visible part of the picture where it is. Fix in the NEXT release (owner). Roadmap R-18 with the
+  cut-off one-word translate and the two Studio removals.
+- 0.5.0 publish decision (owner, 2026-11-26, "yes"): publish as it is once the update gate passes; the cut-off one-word translate and
+  the pin jump are NOT added to the notes (the owner fixes them directly in the next release). Studio round 6 is liked; the tool rail
+  gets options (round 7).
+- 0.5.0 release (2026-11-26): tag v0.5.0 pushed by the owner on 2143ff0d; signed draft verified (SHA256SUMS + minisig "OpenCircle v0.5.0");
+  update gate W125 PASS on Windows (Setup + portable 0.4.0 -> draft, What's new, About v0.5.0, Setup /quiet). BLOCKER found: the
+  AppImage ignores CLI arguments (the Studio desktop file is picked by AppRun) = frozen CLI broken -> W126 fix, then the owner
+  re-tags (delete tag + draft), the gate re-runs incl. AppImage CLI. Owner said "publish" before this finding; lead read "+" as fix first.
+- GPU renderer lab (owner, 2026-11-26): the "simple way" = iced's wgpu renderer with automatic tiny-skia fallback; the owner tests a
+  lab build himself on his GPU PC (VMs have no GPU). The "draw the stroke as an overlay" idea is REJECTED (feels less native). W127.
+- Studio view jump (owner, 2026-11-26): opening Preferences in the Studio moves the picture too (same as pinning the slider); one fix in
+  the next release: the visible picture stays put whenever a panel opens/closes (R-18).
+- Studio tool bar (owner, 2026-11-26): round 7 option 3 "Group chips" (each tool group its own small rounded tile, no container),
+  inside the approved round-6 Studio (soft, plain canvas, floating bottom pills, one slider handle, no Picture info).
+- Studio view stays put (owner, 2026-11-26, firm, "omg"): the picture's position/zoom changes ONLY by a deliberate user action (drag to
+  pan, wheel/scrollbars, zoom keys/controls, Fit). A right-click on the picture also moved it today; pinning the slider and opening
+  Preferences too. Next release: find every path that resets or recentres the view and remove it; a test per path (right-click,
+  pin, Preferences, panel open/close, window resize keeps the visible picture centre and zoom).
+- Version plan (owner, 2026-11-26): 0.5.0 is published first (AppImage fix, re-tag, gate, publish). Then **0.5.1** = R-18 follow-ups
+  (the Studio view moves only by user action; one-word translate never cut off; remove the extra slider button + Picture info),
+  the GPU renderer (after his lab-gpu test), the better Arabic reader (R-15) and Studio selectable text (R-16, a small feature: owner's
+  exception to "features bump the middle number"). **0.6.0** = the new design (Settings r2, widgets style E, Studio r6 + group
+  chips), tips, recording, Snip/menu additions (R-08..R-14).
+- OpenRouter sign-in (owner, 2026-11-26: "should look different; I almost didn't recognise it"): in the 0.6.0 Settings design the
+  sign-in is a clear CONNECTION CARD at the top of the provider section with 4 states: not connected (one strong "Sign in with
+  OpenRouter" + what you get; model/key/test rows hidden until connected), waiting (finish in your browser, spinning logo, Cancel),
+  connected (green status "Connected · key saved on this PC", model, quiet Test / Disconnect), failed (calm error card, Try again).
+  Name only, no third-party logo. Design round first (queued for the next free slot), owner OK before building.
+- Antigravity (owner, 2026-11-26): rely on Antigravity (agy, Gemini Neon) for CODING and TESTING jobs (not for Settings/design work,
+  which stays with a Claude designer per the owner's earlier word).
+- AI setup paths (owner, 2026-11-26, SUPERSEDES the 2-option "Browser | AI provider" B2 cards): "Answers from" has THREE choice cards:
+  Browser (no setup) · "OpenRouter account" (no "Recommended" badge; its own feature: one-click sign-in connection card, then only Model + Test /
+  Disconnect) · Your own provider and key (advanced: provider dropdown, Custom server URL, API key, model, test). 0.6.0 design.
+- GPU lab 1 result (owner, 2026-11-26): crop instant (present cost solved) but the whole picture flashes on each change, a dragged
+  shape vanishes until drop, nothing follows the cursor: new image Handles per change = new texture uploads on wgpu. Lab 2
+  (Antigravity Neon, owner: "these kind of things you can rely on Neon"): stable textures + the dragged item drawn as GPU geometry
+  with identical pixels on release (test). Branch lab-gpu2, worktree ../worktrees/lab-gpu2, brief inside it.
+- Standing release authorization (owner, 2026-11-26, "I want it always"): orchestrator sessions may tag, draft and PUBLISH OpenCircle
+  releases without asking again, ONLY after every gate passes (CI green incl. audit; signed draft SHA256SUMS + minisig with the right
+  trusted comment; update gate previous Setup + portable -> draft; About on the draft exe; Linux AppImage CLI; the owner's own test of a
+  build with visible changes). Any failure = it stays a draft. The kit guard still needs SDLC_OWNER_RELEASE=1 per session; the owner
+  sets that himself (the lead may not change its own guard). Workers never tag or publish.
