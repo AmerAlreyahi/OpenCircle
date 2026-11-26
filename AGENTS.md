@@ -1828,3 +1828,6 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   `docs/internal/clean-builds.sh` deletes any build folder idle > 12 h (never main's target/, never one in use, never source) and
   runs at the end of `docs/internal/merge.sh`; the lead removes a worker's worktree, branch and build folder right after its merge.
   Over 100 GB total = the script warns and the lead tells the owner.
+- Test build at once (owner, 2026-11-26, "make it a rule, I will test with you in parallel"): as soon as a release's features are
+  merged and CI has built main, the lead sends the owner the Windows build (CI artifact) with a short what-to-try list. The owner
+  tests in PARALLEL with the VM pass; the lead never holds the build back until the VM pass or anything else is done.

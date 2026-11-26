@@ -194,7 +194,7 @@
         {
           "id": "R-15",
           "title": "Better Arabic reader: mixed Arabic/English lines read as one line in right-to-left order; Windows' Arabic OCR (ar-SA) where installed, words in visual order (PP-OCR tuning, bold spaces, brackets later)",
-          "status": "in-progress"
+          "status": "done"
         },
         {
           "id": "G-01",
@@ -204,12 +204,12 @@
         {
           "id": "R-16",
           "title": "Selectable text in the Studio (#229)",
-          "status": "in-progress"
+          "status": "done"
         },
         {
           "id": "R-18",
           "title": "0.5.x follow-ups: the Studio view NEVER moves unless the user moves it on purpose (drag to pan, wheel/scrollbars, zoom, Fit): not on right-click, pinning the Steps slider, opening Preferences, panels or window resizes; one-word in-place translate never cut off ('To...'); remove the extra slider button and Picture info",
-          "status": "in-progress"
+          "status": "done"
         },
         {
           "id": "K-04",
