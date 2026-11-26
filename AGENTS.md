@@ -1837,3 +1837,5 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   even the pen. Not new in 0.5.1 (0.5.0 had it too). Arabic reading: test page sent (his PC: OCR languages en-US + ar-SA).
 - Testing split (owner, 2026-11-26, "only test on Linux, leave Windows testing for me"): agents run Linux VM tests only (Ubuntu VM:
   GNOME/KDE, X11/Wayland); the owner tests Windows himself on the build the lead sends. No agent Windows VM passes from now on.
+  Exception (owner, same day, "agent runs it"): the release UPDATE GATE on the Windows VM (previous Setup + portable -> draft,
+  About, Setup /quiet) is still run by an agent before publishing.
