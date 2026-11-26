@@ -274,7 +274,7 @@ pub struct Placement {
     pub bold: Option<bool>,
     /// Selected word(s) translated in place: shrink (or wrap) to show the whole translation
     /// instead of cutting off with an ellipsis.
-    pub whole: bool,
+    pub selected_word: bool,
 }
 
 /// The laid-out translation: buffer, top-left, font size.
@@ -412,10 +412,10 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
         }
         size *= 0.95;
     }
-    // Selected text translated in place (`p.whole`) is never cut off with an ellipsis: first allow
+    // Selected text translated in place (`p.selected_word`) is never cut off with an ellipsis: first allow
     // wrapping inside a tall box at readable size, then shrink further down to 6 px so the whole
     // translation always fits.
-    if found.is_none() && p.whole {
+    if found.is_none() && p.selected_word {
         let mut wrap_size = em;
         while wrap_size >= floor {
             if let Some(f) = try_at_mode(&spans, wrap_size, false) {
@@ -425,7 +425,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
             wrap_size *= 0.95;
         }
     }
-    if found.is_none() && p.whole {
+    if found.is_none() && p.selected_word {
         let min_legible = 6.0_f32.min(floor);
         let mut s = size;
         while s >= min_legible {
@@ -442,7 +442,7 @@ pub fn fit(fonts: &mut Fonts, text: &str, p: &Placement) -> Option<Fit> {
     // does not fit: the last resort, the text cut at a word (or, with no
     // word fitting, inside the first one) and an ellipsis. A paragraph is
     // never cut: its original stays.
-    if found.is_none() && !p.whole && (n == 1 || bh < 2.0 * size * 1.3) {
+    if found.is_none() && !p.selected_word && (n == 1 || bh < 2.0 * size * 1.3) {
         let chars: Vec<char> = spans.iter().flat_map(|(t, _)| t.chars()).collect();
         let words: Vec<usize> = (2..chars.len())
             .filter(|&k| chars[k].is_whitespace())
@@ -603,7 +603,7 @@ mod tests {
             shared_em: None,
             em: None,
             bold: None,
-            whole: false,
+            selected_word: false,
         }
     }
 
@@ -881,7 +881,7 @@ mod tests {
         ] {
             let mut p = placement(b, 1, rtl);
             p.texts = vec![orig.into()];
-            p.whole = true;
+            p.selected_word = true;
             let fitted =
                 fit(&mut fonts, tr, &p).unwrap_or_else(|| panic!("{orig} -> {tr}: nothing"));
             let drawn_text: String = fitted.0.lines.iter().map(|l| l.text()).collect();

@@ -299,7 +299,7 @@ pub struct Tweak {
     pub bold: Option<bool>,
     /// Selected words translated in place: grow into free space and shrink rather than
     /// truncating with an ellipsis.
-    pub whole: bool,
+    pub selected_word: bool,
 }
 
 /// `render` with the user's own size, colour and weight over the matched ones.
@@ -320,7 +320,7 @@ pub fn render_with(
     // the free space around each block, read before anything is erased
     report.rooms = blocks
         .iter()
-        .map(|b| room(rgba, dims, b, blocks, rtl, tweak.whole))
+        .map(|b| room(rgba, dims, b, blocks, rtl, tweak.selected_word))
         .collect();
     // erase every block first, so a long translation is never erased by a neighbour
     let mut todo = Vec::new();
@@ -376,7 +376,7 @@ pub fn render_with(
             shared_em: None,
             em: tweak.em,
             bold: tweak.bold,
-            whole: tweak.whole,
+            selected_word: tweak.selected_word,
         };
         placed.push((i, t, p, undo));
     }
@@ -477,7 +477,7 @@ pub fn matched(rgba: &[u8], width: u32, height: u32, line: &Line) -> Matched {
         shared_em: None,
         em: None,
         bold: None,
-        whole: false,
+        selected_word: false,
     };
     let em = draw::original_em(&p);
     Matched {
@@ -592,7 +592,7 @@ fn room(
     b: &Block,
     blocks: &[Block],
     rtl: bool,
-    whole: bool,
+    selected_word: bool,
 ) -> [f32; 4] {
     let [x, y, w, h] = b.bounds;
     // ponytail: the OCR box (the line box without its padding) as one em
@@ -601,13 +601,13 @@ fn room(
     } else {
         0.0
     };
-    let extra = if whole && b.lines.len() == 1 {
+    let extra = if selected_word {
         (3.0 * w).max(6.0 * em)
     } else {
         em
     };
     if centred(b, dims.0 as f32) {
-        if whole && b.lines.len() == 1 {
+        if selected_word {
             let left = free(rgba, dims, b, x, x - extra);
             let right = free(rgba, dims, b, x + w, x + w + extra);
             let sym = (x - left).min(right - (x + w));
@@ -636,13 +636,9 @@ fn room(
         // edge, a single line half its width more (or `extra` for selected words)
         // where that is free.
         let line_em = b.lines[0].bounds[3] / 1.3;
-        let reach = if whole && b.lines.len() == 1 {
-            extra
-        } else {
-            0.5 * w + line_em
-        };
-        let left = match b.lines.len() {
-            1 => column_left(b, blocks).min(x0 - reach),
+        let left = match (b.lines.len(), selected_word) {
+            (1, true) => column_left(b, blocks).min(x0 - extra),
+            (1, false) => column_left(b, blocks).min(x0 - 0.5 * w) - line_em,
             _ => column_left(b, blocks) - line_em,
         };
         x0 = free(rgba, dims, b, x0, left);

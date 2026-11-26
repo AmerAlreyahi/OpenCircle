@@ -1673,8 +1673,9 @@ impl Studio {
                 let old_scale = self.scale;
                 self.scale = s.max(0.1);
                 if let Some(e) = &mut self.editor {
-                    let z = e.zoom * old_scale / self.scale;
-                    e.zoom = z;
+                    let actual = 1.0 / self.scale;
+                    e.zoom = (e.zoom * old_scale / self.scale)
+                        .clamp(ZOOM_RANGE.start() * actual, ZOOM_RANGE.end() * actual);
                 }
                 self.keep_centre(old_stage, old_shown);
                 self.take_scroll().map_or(Outcome::None, Outcome::ScrollTo)

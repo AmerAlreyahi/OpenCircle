@@ -135,6 +135,18 @@ fn r18_popovers_menus_and_sheets_keep_view_and_zoom() {
 }
 
 #[test]
+fn r18_dpi_change_keeps_zoom_in_range() {
+    let mut h = Harness::zoomed(3000, 2000, Vector::new(400.0, 300.0));
+    h.s.editor.as_mut().unwrap().zoom = ZOOM_RANGE.end() / h.s.scale;
+    let _ = h.send(Msg::Scale(h.s.scale / 4.0));
+    let z = h.zoom();
+    assert!(
+        z <= ZOOM_RANGE.end() / h.s.scale + 1e-4,
+        "zoom {z} over the range"
+    );
+}
+
+#[test]
 fn r18_window_resize_keeps_centre_and_zoom() {
     // Zoomed & scrolled
     let mut h = Harness::zoomed(3000, 2000, Vector::new(400.0, 300.0));

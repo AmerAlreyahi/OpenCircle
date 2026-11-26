@@ -2151,7 +2151,10 @@ fn draw(
         words,
         is_rtl(target),
         Tweak {
-            whole: per_line,
+            // one selected word: one block, one line, one word
+            selected_word: per_line
+                && matches!(blocks, [b] if b.lines.len() == 1
+                    && b.text.split_whitespace().count() == 1),
             ..Tweak::default()
         },
     );

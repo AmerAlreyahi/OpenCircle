@@ -1947,3 +1947,71 @@ mod menu_warm {
         );
     }
 }
+
+/// R-18: only ONE selected word gets the new room and shrink-to-fit; a multi-word or multi-line
+/// selection draws exactly as before (placement and drawn text).
+mod r18_selection {
+    use super::*;
+    use crate::features::translate::draw::Fonts;
+    use cosmic_text::Align;
+
+    fn page(rows: &[(&str, f32)]) -> (Vec<u8>, Vec<Line>, (u32, u32)) {
+        let (w, h) = (900usize, 200usize);
+        let mut img = vec![255u8; w * h * 4];
+        let mut f = Fonts::new();
+        let mut lines = Vec::new();
+        for (s, y) in rows {
+            let m = cosmic_text::Metrics::new(22.0, 30.0);
+            let buf = f.layout(&[((*s).into(), [30; 3])], true, m, 400, None, Align::Left);
+            let (lw, lh) = crate::features::translate::draw::extent(&buf);
+            f.draw(&buf, &mut img, (w, h), (100, *y as i32), None);
+            lines.push(Line {
+                bounds: [98.0, *y, lw + 4.0, lh],
+                text: (*s).into(),
+            });
+        }
+        (img, lines, (w as u32, h as u32))
+    }
+
+    /// What origin/main drew: `render` over the one-line blocks.
+    fn before(img: &[u8], dims: (u32, u32), blocks: &[Block], tr: &[String]) -> Vec<u8> {
+        let (b, t) = lines_of(blocks, tr);
+        let mut out = img.to_vec();
+        render(&mut out, dims.0, dims.1, &b, &t, false);
+        out
+    }
+
+    fn now(img: &[u8], dims: (u32, u32), blocks: &[Block], tr: &[String]) -> Vec<u8> {
+        draw(img, dims, "en", blocks, tr, &mut Timings::default(), true).rgba
+    }
+
+    /// A translation far longer than the original: drawn smaller or wider with more room.
+    const LONG: &str = "a considerably longer translation of the selected text";
+
+    #[test]
+    fn multi_word_selection_is_unchanged() {
+        let (img, lines, dims) = page(&[("Hello big world", 60.0)]);
+        let blocks = group_blocks(&lines);
+        assert_eq!(blocks.len(), 1);
+        let tr = vec![LONG.to_string()];
+        assert!(now(&img, dims, &blocks, &tr) == before(&img, dims, &blocks, &tr));
+    }
+
+    #[test]
+    fn multi_line_selection_is_unchanged() {
+        let (img, lines, dims) = page(&[("Hello big world", 40.0), ("and more words", 74.0)]);
+        let blocks = group_blocks(&lines);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].lines.len(), 2);
+        let tr = vec![format!("{LONG} {LONG}")];
+        assert!(now(&img, dims, &blocks, &tr) == before(&img, dims, &blocks, &tr));
+    }
+
+    #[test]
+    fn a_single_word_gets_the_new_room() {
+        let (img, lines, dims) = page(&[("Hello", 60.0)]);
+        let blocks = group_blocks(&lines);
+        let tr = vec![LONG.to_string()];
+        assert!(now(&img, dims, &blocks, &tr) != before(&img, dims, &blocks, &tr));
+    }
+}

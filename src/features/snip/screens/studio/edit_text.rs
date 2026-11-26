@@ -86,7 +86,7 @@ impl Session {
             em: self.em,
             colour: self.colour,
             bold: self.bold,
-            whole: false,
+            selected_word: false,
         }
     }
 

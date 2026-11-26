@@ -2163,3 +2163,45 @@ fn w120_first_translate_after_menu() {
         );
     }
 }
+
+/// R-18: `room()` grows only for a selected word; full-screen translate keeps origin/main's
+/// reach for a right-to-left original.
+#[test]
+fn rtl_original_room_keeps_its_reach_unless_a_selected_word() {
+    let img = vec![255u8; 900 * 200 * 4];
+    let dims = (900, 200);
+    let mk = |n: usize| {
+        let ls: Vec<Line> = (0..n)
+            .map(|k| line("كلمة طويلة", 500.0, 40.0 + 32.0 * k as f32, 120.0, 30.0))
+            .collect();
+        vec![Block {
+            text: ls
+                .iter()
+                .map(|l| l.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            bounds: [500.0, 40.0, 120.0, 30.0 + 32.0 * (n - 1) as f32],
+            lines: ls,
+        }]
+    };
+    for n in [1, 2] {
+        let blocks = mk(n);
+        let b = &blocks[0];
+        assert_eq!(b.lines.len(), n);
+        let [x, y, w, h] = b.bounds;
+        let line_em = b.lines[0].bounds[3] / 1.3;
+        let left = match n {
+            1 => column_left(b, &blocks).min(x - 0.5 * w),
+            _ => column_left(b, &blocks),
+        };
+        let x0 = free(&img, dims, b, x, left - line_em);
+        let r = room(&img, dims, b, &blocks, false, false);
+        assert_eq!(r, [x0, y, x + w - x0, h], "{n} line(s)");
+    }
+    let blocks = mk(1);
+    let (plain, word) = (
+        room(&img, dims, &blocks[0], &blocks, false, false),
+        room(&img, dims, &blocks[0], &blocks, false, true),
+    );
+    assert!(word[2] > plain[2], "{word:?} vs {plain:?}");
+}
