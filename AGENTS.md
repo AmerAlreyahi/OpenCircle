@@ -1839,3 +1839,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   GNOME/KDE, X11/Wayland); the owner tests Windows himself on the build the lead sends. No agent Windows VM passes from now on.
   Exception (owner, same day, "agent runs it"): the release UPDATE GATE on the Windows VM (previous Setup + portable -> draft,
   About, Setup /quiet) is still run by an agent before publishing.
+- 0.5.1 publish overnight (owner, 2026-11-26 ~22:45, going to sleep): once R-19 (Studio drawing delay + pixel flashing) is fixed and
+  verified ("everything works perfectly, no delay, the best possible UX"), the lead merges and PUBLISHES v0.5.1 directly, no owner
+  review. Every gate still runs: CI green, Linux VM pass, signed draft + minisig, Windows update gate (agent), AppImage CLI. A drawing
+  fix that is not measured smooth (5K/8K) or that changes picture pixels = no publish; it waits for the owner.
