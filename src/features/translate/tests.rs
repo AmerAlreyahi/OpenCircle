@@ -2027,3 +2027,103 @@ mod glossary_names;
 mod glossary_suggest;
 mod lab;
 mod subtitles;
+
+/// W116 (owner item 13): where translating ONE selected word spends its time: the model
+/// load (first use), the translate itself, the draw. In process (the helper adds a process
+/// start and a pipe); the words are given, so no OCR runs, as for selected words.
+/// `cargo test --release w116_one_word_stages -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn w116_one_word_stages() {
+    use super::pipeline::{Cache, Deps, Real, Via, translate_until};
+    use crate::features::ask_ai::AiError;
+    use crate::features::text_reading::{self, OcrError, TextBlock};
+    use crate::features::translate::pipeline::tests::Log as RefCell;
+    use std::collections::HashMap;
+    use std::time::Instant;
+    struct M {
+        real: Real,
+        models: RefCell<HashMap<&'static str, crate::features::translate::mt::Translator>>,
+        load: RefCell<Vec<std::time::Duration>>,
+    }
+    impl Deps for M {
+        fn recognize(&self, _: &[u8], _: u32, _: u32) -> Result<Vec<TextBlock>, OcrError> {
+            Ok(Vec::new())
+        }
+        fn read(&self, texts: &[&str]) {
+            self.real.read(texts)
+        }
+        fn batch(&self) -> usize {
+            self.real.batch()
+        }
+        fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
+            self.real.on_device_with(texts, target, |t, pair| {
+                let mut models = self.models.borrow_mut();
+                let key = Box::leak(format!("{}-{}", pair.source, pair.target).into_boxed_str());
+                let tr = models.entry(key).or_insert_with(|| {
+                    let at = Instant::now();
+                    let tr = crate::features::translate::mt::Translator::load(
+                        pair,
+                        &text_reading::models_dir(),
+                    )
+                    .unwrap();
+                    self.load.borrow_mut().push(at.elapsed());
+                    tr
+                });
+                tr.translate(t).map_err(|e| AiError::Offline(e.to_string()))
+            })
+        }
+    }
+    let pair = crate::features::translate::mt::pair("en", "ar").unwrap();
+    pair.ensure(|_, _| {}).unwrap();
+    let (w, h) = (1280u32, 720u32);
+    let rgba: Vec<u8> = [230u8, 230, 235, 255].repeat((w * h) as usize);
+    let word = |text: &str| TextBlock {
+        text: text.into(),
+        bounds: [600.0, 300.0, 140.0, 30.0],
+        confidence: 1.0,
+        words: Vec::new(),
+    };
+    let deps = M {
+        real: Real::new("auto", Via::Offline),
+        models: RefCell::new(HashMap::new()),
+        load: RefCell::new(Vec::new()),
+    };
+    for (label, text) in [
+        ("first use (the model loads inside)", "Blacksmith"),
+        ("warm", "Lighthouse"),
+        ("warm, another word", "Marketplace"),
+    ] {
+        let cache = Cache::new(8);
+        let at = Instant::now();
+        let out = translate_until(
+            &rgba,
+            w,
+            h,
+            "ar",
+            &cache,
+            &deps,
+            Some(vec![word(text)]),
+            |_| {},
+            || false,
+        )
+        .unwrap();
+        let t = out.timings;
+        println!(
+            "STAGES {label}: {text:?} -> {:?}: wall {:?} | read {:?}, translate {:?} (model load inside: {:?}), \
+             draw {:?}, first shown {:?}, total {:?}",
+            out.blocks.first().map(|b| b.translation.clone()),
+            at.elapsed(),
+            t.ocr,
+            t.translate,
+            deps.load
+                .borrow()
+                .last()
+                .copied()
+                .filter(|_| label.starts_with("first")),
+            t.render,
+            t.first,
+            t.total,
+        );
+    }
+}
