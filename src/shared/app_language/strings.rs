@@ -1855,6 +1855,8 @@ strings! {
         | "الرسومات";
     st_edit_text: "Edit text"
         | "تحرير النص";
+    st_select_text: "Select text"
+        | "تحديد النص";
     st_edit_pick: "Pick a line on the picture"
         | "اختر سطرًا على الصورة";
     st_edit_reading: "Finding the lines…"

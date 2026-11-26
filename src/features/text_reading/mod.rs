@@ -16,6 +16,8 @@ pub mod system;
 pub(crate) mod text;
 pub(crate) mod worker;
 
+// (R-16: the Studio's selectable text uses main mode's word selection, `Picked` and `Line`.)
+pub(crate) use app::word as words;
 pub(crate) use models::{ModelFile, ORT, ensure, missing_bytes, retrying};
 pub use models::{download_size, ensure_models, models_dir, ready};
 pub(crate) use ppocr::session as ort_session;

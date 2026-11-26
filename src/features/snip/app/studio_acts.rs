@@ -172,7 +172,7 @@ impl App {
     /// The Studio shows what the session is at: its download card (asking or
     /// fetching), the spinner while it translates; a failure has no card
     /// here, so the picture goes back and a pill says why.
-    fn studio_sync(&mut self) -> Task<Message> {
+    pub(super) fn studio_sync(&mut self) -> Task<Message> {
         let Some((_, _, session)) = self.studio_translate.as_ref() else {
             return Task::none();
         };

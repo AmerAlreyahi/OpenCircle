@@ -24,6 +24,7 @@ mod sheets;
 mod sidebar;
 mod start;
 mod status_bar;
+mod text_select;
 mod view;
 
 use std::path::PathBuf;
@@ -45,6 +46,7 @@ use crate::shared::picture::Crop;
 pub use cut::{Done as CutDone, Phase as CutPhase};
 pub use menu_bar::{Menu, Nav, Sub};
 pub use sheets::Restorable;
+pub use text_select::{Work as TextWork, lines_of as text_lines};
 #[cfg(test)]
 pub use view::GLYPHS;
 pub use view::view;
@@ -223,6 +225,8 @@ pub enum Msg {
     /// The shortcuts sheet's Edit shortcuts… (Settings); the restore sheet's Later.
     EditShortcuts,
     Later,
+    /// Selectable text: start / stop, the overlay's pointer, the menu (`text_select`).
+    Text(text_select::Ev),
     /// Right-click on the stage; the menu's row; the pointer over the stage.
     ContextOpen,
     ContextPick(usize),
@@ -354,6 +358,8 @@ pub enum Outcome {
     /// Edit text: the host reads the picture's lines (`read_picture`) and
     /// answers with `set_lines`.
     ReadLines,
+    /// Selectable text: the host reads the picture's words once, or runs a menu row on them.
+    Text(text_select::Work),
     /// The inline field takes the keyboard (`FIELD`).
     FocusField,
     /// A pill with this (an edit that could not be made).
@@ -473,6 +479,8 @@ pub struct Studio {
     /// The right-click menu, and the pointer's last place on the stage.
     pub(super) context: Option<Context>,
     pub(super) pointer: PointerCell,
+    /// Selectable text (R-16): the mode, the words read, the selection, its menu.
+    pub(super) text: text_select::State,
     /// Alt went down with nothing since: its release opens the menu bar.
     alt_clean: bool,
     /// A restore that waits for the unsaved question (Cancel gives the sheet back).
@@ -578,6 +586,7 @@ impl Studio {
             shortcuts: false,
             context: None,
             pointer: PointerCell::default(),
+            text: text_select::State::default(),
             alt_clean: false,
             restoring: None,
             bounds_draft: None,
@@ -1292,6 +1301,7 @@ impl Studio {
     pub(super) fn blocked(&self) -> bool {
         self.menu.is_some()
             || self.context.is_some()
+            || self.text.menu_open()
             || self.shortcuts
             || self.prefs.is_some()
             || self.asking()
@@ -1357,6 +1367,7 @@ impl Studio {
                 )
         ) {
             self.popover = None;
+            self.text.reset(); // (the pixels change: the words read are stale)
         }
         // the question blocks the picture: nothing changes it until answered
         if self.asking()
@@ -1451,6 +1462,8 @@ impl Studio {
                 Outcome::None
             }
             Msg::EditDone => self.finish_edit(),
+            Msg::Text(ev) => self.on_text(ev),
+            Msg::Editor(m) if self.text_takes(&m) => self.text_key(&m),
             Msg::Editor(annotate::Message::Paste(at))
                 if self.editor.as_ref().is_some_and(|e| !e.typing()) =>
             {
@@ -1728,7 +1741,8 @@ impl Studio {
                     || self.menu.take().is_some()
                     || std::mem::take(&mut self.shortcuts)
                     || self.popover.take().is_some()
-                    || self.prefs.take().is_some();
+                    || self.prefs.take().is_some()
+                    || self.text.escape(self.epoch);
                 // the export sheet (a running encoder stops), then the restore sheet (Later)
                 if !closed && self.exporting {
                     return self.update(Msg::WalkCancel);

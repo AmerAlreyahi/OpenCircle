@@ -38,6 +38,11 @@ pub fn outline(frame: &mut Frame, r: Rectangle, look: (Color, Color)) {
     stroke(frame, r, look, &[]);
 }
 
+/// `r` washed flat in `colour` (a text selection's box: no border, no rounding).
+pub fn wash(frame: &mut Frame, r: Rectangle, colour: Color) {
+    frame.fill(&Path::rectangle(r.position(), r.size()), colour);
+}
+
 /// The dash and gap of `dashed`, logical px.
 pub const DASH: [f32; 2] = [7.0, 5.0];
 

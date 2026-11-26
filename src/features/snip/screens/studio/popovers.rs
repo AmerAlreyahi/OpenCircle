@@ -207,6 +207,7 @@ fn actions(s: &Studio) -> Element<'_, Msg> {
         press: (!editing && !acts.translated && s.cut_phase() == super::CutPhase::Idle)
             .then_some(Msg::CutOut),
     }));
+    rows = rows.push(super::text_select::row(s));
     // A selected shape, pen stroke or arrow: a Hide over it (Blur rework)
     if let Some(both) = s.editor.as_ref().and_then(|e| e.hideable()) {
         for (label, outline) in [

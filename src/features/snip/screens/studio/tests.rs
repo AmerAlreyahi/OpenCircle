@@ -7,6 +7,7 @@ use crate::features::snip::snip_more::Row;
 use crate::features::translate::Line;
 use crate::shared::config;
 
+mod r16;
 mod w123;
 
 /// The Steps panel open and pinned (docked): the frame the older tests were written against.

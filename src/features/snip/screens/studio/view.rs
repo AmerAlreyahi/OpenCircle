@@ -147,6 +147,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         .into(),
         None => main,
     };
+    let main = super::text_select::menu_layer(s, main);
     let main: Element<'_, Msg> = match s.shortcuts {
         true => modal::over_rising(
             main,
@@ -562,6 +563,8 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         .into(),
         None => drawn,
     };
+    // Select text: the words' overlay (R-16)
+    let drawn = super::text_select::over(s, drawn, shown, e.doc.view().position(), e.zoom);
     // a px less than the stage: no scrollbar for a fitted picture
     let content = container(drawn)
         .center_x((room.width - 2.0).max(shown.width))

@@ -87,6 +87,7 @@ impl App {
             }
             Message::Windows(windows::Msg::StudioAct(row)) => self.studio_act(row),
             Message::Windows(windows::Msg::StudioEditText) => self.studio_edit_text(),
+            Message::Windows(windows::Msg::StudioSelect(work)) => self.studio_select(work),
             Message::Windows(windows::Msg::StudioCutOut) => self.studio_cut_out(),
             Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
             Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),

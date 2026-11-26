@@ -139,6 +139,12 @@ pub enum Msg {
     StudioText(u32, Result<String, String>),
     /// Edit text: the picture's lines read (the Studio), for that picture.
     StudioLines(u32, Result<Vec<crate::features::translate::Line>, String>),
+    /// Selectable text: the App reads the picture's words / runs a menu row; the words read, for that picture.
+    StudioSelect(crate::features::snip::screens::studio::TextWork),
+    StudioWords(
+        u32,
+        Result<Vec<crate::features::text_reading::app::word::Line>, String>,
+    ),
     /// Edit text starts (the App reads the picture: `snip::app::studio_acts`).
     StudioEditText,
     /// Cut out starts (the App cuts), and its answer for that picture.
@@ -1670,7 +1676,14 @@ impl Windows {
             Msg::StudioStepPasted(image) => return self.studio_step_pasted(image),
             Msg::StudioSaved(saved, then) => return self.studio_saved(saved, then),
             // (`app::App` takes it before here.)
-            Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut => {}
+            Msg::StudioAct(_) | Msg::StudioEditText | Msg::StudioCutOut | Msg::StudioSelect(_) => {}
+            Msg::StudioWords(epoch, read) => {
+                let out = match self.studio_mut() {
+                    Some(s) => s.set_words(epoch, read),
+                    None => return Task::none(),
+                };
+                return self.studio_outcome(out);
+            }
             Msg::StudioCut(epoch, done) => {
                 let out = match self.studio_mut() {
                     Some(s) => s.set_cut(epoch, done),
