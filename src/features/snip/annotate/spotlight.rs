@@ -226,4 +226,127 @@ mod tests {
         }
         assert_eq!(diff, 0, "spotlight mismatch: {diff} px (max={max_d})");
     }
+
+    #[test]
+    fn fast_spotlight_threaded_and_fused_paint_on_match_reference_bit_for_bit() {
+        use super::super::document::{Image, Item, Shape, paint_with_excludes};
+        use tiny_skia::IntRect;
+
+        // 640 x 512 = 327,680 px (>= 262,144 px threshold -> exercises multi-threaded paths
+        // in both spotlight::paint and document::paint_on fused copy+premultiply+dim).
+        let (w, h) = (640u32, 512u32);
+        assert!((w as usize) * (h as usize) >= 262_144);
+        let mut raw_rgba = vec![0u8; (w * h * 4) as usize];
+        let mut premul_rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let o = ((y * w + x) * 4) as usize;
+                let a = if y < 384 {
+                    255u8
+                } else {
+                    ((x % 255) as u8).max(1)
+                };
+                let r = (x.wrapping_mul(5) ^ y) as u8;
+                let g = (y.wrapping_mul(3) + x) as u8;
+                let b = (x.wrapping_add(y.wrapping_mul(7))) as u8;
+                raw_rgba[o..o + 4].copy_from_slice(&[r, g, b, a]);
+                let pm = |c: u8| {
+                    if a == 255 {
+                        c
+                    } else {
+                        ((u32::from(c) * u32::from(a)) / 255) as u8
+                    }
+                };
+                premul_rgba[o..o + 4].copy_from_slice(&[pm(r), pm(g), pm(b), a]);
+            }
+        }
+        let img = Image {
+            width: w,
+            height: h,
+            rgba: raw_rgba,
+        };
+        let layouts: &[(&str, &[Rectangle])] = &[
+            (
+                "single_centre",
+                &[Rectangle::new(
+                    Point::new(160.5, 120.25),
+                    Size::new(280.0, 220.0),
+                )],
+            ),
+            (
+                "two_disjoint",
+                &[
+                    Rectangle::new(Point::new(30.0, 24.0), Size::new(140.0, 110.0)),
+                    Rectangle::new(Point::new(420.0, 310.0), Size::new(170.0, 150.0)),
+                ],
+            ),
+            (
+                "two_overlapping",
+                &[
+                    Rectangle::new(Point::new(120.0, 90.0), Size::new(220.0, 190.0)),
+                    Rectangle::new(Point::new(240.0, 170.0), Size::new(240.0, 200.0)),
+                ],
+            ),
+            (
+                "clipped_at_edges",
+                &[
+                    Rectangle::new(Point::new(-40.0, -20.0), Size::new(180.0, 150.0)),
+                    Rectangle::new(Point::new(520.0, 410.0), Size::new(200.0, 180.0)),
+                ],
+            ),
+        ];
+
+        let whole = IntRect::from_xywh(0, 0, w, h).unwrap();
+        for (name, holes) in layouts {
+            // 1) Reference single-threaded Mask::new(w, h) + tiny_skia::fill_rect
+            let mut ref_layer = Layer {
+                pm: Pixmap::from_vec(
+                    premul_rgba.clone(),
+                    tiny_skia::IntSize::from_wh(w, h).unwrap(),
+                )
+                .unwrap(),
+                origin: Point::ORIGIN,
+            };
+            paint_reference(&mut ref_layer, holes);
+
+            // 2) Direct threaded spotlight::paint
+            let mut fast_layer = Layer {
+                pm: Pixmap::from_vec(
+                    premul_rgba.clone(),
+                    tiny_skia::IntSize::from_wh(w, h).unwrap(),
+                )
+                .unwrap(),
+                origin: Point::ORIGIN,
+            };
+            paint(&mut fast_layer, holes);
+            assert_eq!(
+                fast_layer.pm.data(),
+                ref_layer.pm.data(),
+                "threaded spotlight::paint mismatch on layout {name}"
+            );
+
+            // 3) Fused parallel document::paint_on (via paint_with_excludes)
+            let items: Vec<Item> = holes
+                .iter()
+                .map(|r| Item {
+                    shape: Shape::Spotlight {
+                        a: r.position(),
+                        b: Point::new(r.x + r.width, r.y + r.height),
+                    },
+                    colour: [0, 0, 0, 255],
+                    width: 1.0,
+                    outline: false,
+                    fill: false,
+                    hidden: false,
+                })
+                .collect();
+            let refs: Vec<(&Item, bool)> = items.iter().map(|it| (it, true)).collect();
+            let fused = paint_with_excludes(&img, &refs, &[], whole, 0);
+            assert_eq!(
+                fused.data(),
+                ref_layer.pm.data(),
+                "fused parallel paint_on mismatch on layout {name}"
+            );
+        }
+    }
 }

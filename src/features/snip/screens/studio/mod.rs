@@ -2585,8 +2585,9 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
 
     if bw * bh < MIP_MIN_PIXELS || actual || want >= bw as f32 {
         let crisp = actual || z >= 2.0;
-        if !crisp && !e.base_deltas.is_empty() {
-            // Smooth Linear path (100-200 %): fold any deltas so there is no border seam.
+        if !actual && !e.base_deltas.is_empty() {
+            // Flush deltas for every non-100 % direct-base zoom (150 %, 244 %, 305 %, small
+            // pictures) so separate delta textures never land on fractional screen pixels.
             e.flush_base_deltas();
         }
         (e.display, e.crisp) = (None, crisp);

@@ -2145,7 +2145,16 @@ impl Annotator {
         let (bx0, by0) = ((r.x() - vr.x()) as usize, (r.y() - vr.y()) as usize);
         let rw = r.width() as usize;
         let rh = r.height() as usize;
-        if (self.display.is_some() || self.crisp) && self.base_deltas.len() < 16 {
+        let scale = if self.display_scale > 0.0 {
+            self.display_scale
+        } else {
+            1.0
+        };
+        let exact_100 =
+            self.crisp && ((bw as f32 * self.zoom * scale).round() - bw as f32).abs() < 1.0;
+        let total_delta_px = self.base_delta_bytes() / 4 + rw * rh;
+        let area_ok = total_delta_px * 4 <= bw as usize * bh as usize;
+        if (self.display.is_some() || exact_100) && self.base_deltas.len() < 16 && area_ok {
             // Fast copy-on-write path: patch display directly from repainted (joint grow loop
             // guarantees r holds the full source support of [dx0..dx1, dy0..dy1]) and store
             // only the small edited rect in base_deltas — zero 59/133 MB base clone.
@@ -2203,27 +2212,8 @@ impl Annotator {
         } else {
             let mut out = base_px.to_vec();
             let base_stride = bw as usize * 4;
-            for (dr, dh) in self.base_deltas.drain(..) {
-                if let image::Handle::Rgba {
-                    width: dw,
-                    height: dh_px,
-                    pixels: dpx,
-                    ..
-                } = dh
-                {
-                    let (ox, oy) = (
-                        (dr.x as i32 - vr.x()) as usize,
-                        (dr.y as i32 - vr.y()) as usize,
-                    );
-                    let dstride = dw as usize * 4;
-                    for row in 0..dh_px as usize {
-                        let dst_off = (oy + row) * base_stride + ox * 4;
-                        let src_off = row * dstride;
-                        out[dst_off..dst_off + dstride]
-                            .copy_from_slice(&dpx[src_off..src_off + dstride]);
-                    }
-                }
-            }
+            let drained = std::mem::take(&mut self.base_deltas);
+            fold_deltas_into(&mut out, bw, vr, &drained);
             let rep_stride = rw * 4;
             let rep_data = repainted.data();
             for row in 0..rh {
@@ -2705,8 +2695,19 @@ impl Annotator {
     }
 
     /// The painted picture's bytes (the tests).
-    /// Folds any pending local base_deltas into self.base (used only when switching into
-    /// smooth Linear 100-200 % zoom so there is no border seam).
+    /// Total pixel bytes held across local base_deltas.
+    pub(crate) fn base_delta_bytes(&self) -> usize {
+        self.base_deltas
+            .iter()
+            .map(|(_, h)| match h {
+                image::Handle::Rgba { pixels, .. } => pixels.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    /// Folds any pending local base_deltas into self.base (used for every non-100 % direct-base
+    /// zoom such as 150 %, 244 %, 305 %, so separate delta textures never land on fractional pixels).
     pub(crate) fn flush_base_deltas(&mut self) {
         if self.base_deltas.is_empty() {
             return;
@@ -2725,28 +2726,8 @@ impl Annotator {
         };
         let (bw, bh) = (*bw, *bh);
         let mut out = base_px.to_vec();
-        let base_stride = bw as usize * 4;
-        for (dr, dh) in self.base_deltas.drain(..) {
-            if let image::Handle::Rgba {
-                width: dw,
-                height: dh_px,
-                pixels: dpx,
-                ..
-            } = dh
-            {
-                let (ox, oy) = (
-                    (dr.x as i32 - vr.x()) as usize,
-                    (dr.y as i32 - vr.y()) as usize,
-                );
-                let dstride = dw as usize * 4;
-                for row in 0..dh_px as usize {
-                    let dst_off = (oy + row) * base_stride + ox * 4;
-                    let src_off = row * dstride;
-                    out[dst_off..dst_off + dstride]
-                        .copy_from_slice(&dpx[src_off..src_off + dstride]);
-                }
-            }
-        }
+        let drained = std::mem::take(&mut self.base_deltas);
+        fold_deltas_into(&mut out, bw, vr, &drained);
         self.base = image::Handle::from_rgba(bw, bh, out);
     }
 
@@ -2797,28 +2778,7 @@ impl Annotator {
         let mut out = base_px.to_vec();
         if !self.base_deltas.is_empty() {
             let vr = int_rect(self.doc.view(), self.doc.view());
-            let base_stride = *bw as usize * 4;
-            for (dr, dh) in &self.base_deltas {
-                if let image::Handle::Rgba {
-                    width: dw,
-                    height: dh_px,
-                    pixels: dpx,
-                    ..
-                } = dh
-                {
-                    let (ox, oy) = (
-                        (dr.x as i32 - vr.x()) as usize,
-                        (dr.y as i32 - vr.y()) as usize,
-                    );
-                    let dstride = *dw as usize * 4;
-                    for row in 0..*dh_px as usize {
-                        let dst_off = (oy + row) * base_stride + ox * 4;
-                        let src_off = row * dstride;
-                        out[dst_off..dst_off + dstride]
-                            .copy_from_slice(&dpx[src_off..src_off + dstride]);
-                    }
-                }
-            }
+            fold_deltas_into(&mut out, *bw, vr, &self.base_deltas);
         }
         out
     }
@@ -3923,6 +3883,37 @@ fn whole(r: Rectangle) -> Rectangle {
     let (x0, y0) = (r.x.round(), r.y.round());
     let (x1, y1) = ((r.x + r.width).round(), (r.y + r.height).round());
     Rectangle::new(Point::new(x0, y0), Size::new(x1 - x0, y1 - y0))
+}
+
+/// Blits local ase_deltas into out (shared by patch_base slow path, flush_base_deltas,
+/// and base_pixels so all three stay identical).
+fn fold_deltas_into(
+    out: &mut [u8],
+    bw: u32,
+    vr: tiny_skia::IntRect,
+    deltas: &[(Rectangle, image::Handle)],
+) {
+    let base_stride = bw as usize * 4;
+    for (dr, dh) in deltas {
+        if let image::Handle::Rgba {
+            width: dw,
+            height: dh_px,
+            pixels: dpx,
+            ..
+        } = dh
+        {
+            let (ox, oy) = (
+                (dr.x as i32 - vr.x()) as usize,
+                (dr.y as i32 - vr.y()) as usize,
+            );
+            let dstride = *dw as usize * 4;
+            for row in 0..*dh_px as usize {
+                let dst_off = (oy + row) * base_stride + ox * 4;
+                let src_off = row * dstride;
+                out[dst_off..dst_off + dstride].copy_from_slice(&dpx[src_off..src_off + dstride]);
+            }
+        }
+    }
 }
 
 /// Exact separable area-weighted box downsampler shared by Studio stage_copy and

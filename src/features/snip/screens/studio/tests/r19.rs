@@ -1927,11 +1927,28 @@ fn r19_base_deltas_stay_exact_across_100_50_and_150_zoom_transitions() {
 
     // Check 1) 100 % zoom (renders base + base_deltas), 2) 50 % zoom (background mip uses
     // downsample_with_deltas), 3) 150 % zoom (flushes base_deltas for seam-free Linear).
-    for z in [1.0f32, 0.50f32, 1.50f32] {
+    for z in [1.0f32, 0.50f32, 1.50f32, 2.44f32, 3.05f32] {
         let _ = lab.s.zoom_to(z, None);
         let _ = lab.s.take_scroll();
         lab.reset_scroll();
         lab.settle_mip();
+        if z > 1.0 {
+            assert!(
+                lab.s.editor.as_ref().unwrap().base_deltas.is_empty(),
+                "zoom {z}: deltas flushed on non-100% direct-base zoom"
+            );
+            // Also make a new baked edit directly at 244 % / 305 %: must stay delta-free!
+            if z > 2.0 {
+                let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+                let _ = lab.send(Msg::Editor(Message::Press(Point::new(260.0, 220.0))));
+                let _ = lab.send(Msg::Editor(Message::Release));
+                let _ = lab.send(Msg::Editor(Message::Deselect));
+                assert!(
+                    lab.s.editor.as_ref().unwrap().base_deltas.is_empty(),
+                    "zoom {z}: new edit at fractional >200% folds into base"
+                );
+            }
+        }
         let _ = lab.render(0.0);
         let shown = lab.pixels();
         let pic_rect = lab.picture_phys_rect();
@@ -2051,4 +2068,89 @@ fn r19_patch_base_does_not_clip_adjacent_blur_in_downsample_margin() {
         diff, 0,
         "adjacent Blur clipped in src_r margin: {diff}/{checked} px differed (max={md})"
     );
+}
+
+#[test]
+fn r19_base_deltas_area_cap_and_17th_edit_fold_cleanly() {
+    // Part A: area cap (~25 % of picture): a large Blur (> 25 % of 5K) folds into base
+    // rather than storing a huge delta texture.
+    {
+        let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        let pic_bytes = 5120usize * 2880 * 4;
+        let _ = lab.render(0.0);
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+        let _ = lab.send(Msg::Editor(Message::BlurShape(annotate::blur::Kind::Rect)));
+        let _ = lab.send(Msg::Editor(Message::Press(Point::new(400.0, 300.0))));
+        let _ = lab.send(Msg::Editor(Message::Move(Point::new(3600.0, 2200.0))));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let e = lab.s.editor.as_ref().unwrap();
+        assert!(
+            e.base_delta_bytes() * 4 <= pic_bytes,
+            "big Blur delta bytes {} exceeded 25% cap ({})",
+            e.base_delta_bytes(),
+            pic_bytes / 4
+        );
+        assert!(e.display.is_some() && e.crisp, "display stays crisp");
+        let _ = lab.render(0.0);
+        let shown = lab.pixels();
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+        lab.s.editor.as_mut().unwrap().refresh();
+        let _ = lab.render(0.0);
+        let fresh = lab.pixels();
+        let (diff, md, checked) = diff_outside(&fresh, &shown, stride, pic_rect, &[]);
+        assert_eq!(
+            diff, 0,
+            "big Blur fold: {diff}/{checked} px differed (max={md})"
+        );
+    }
+
+    // Part B: 17th edit triggers the count-cap fold slow path, followed by Undo and Redo.
+    {
+        let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        let pic_bytes = 5120usize * 2880 * 4;
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+        let _ = lab.render(0.0);
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+        for i in 0..17usize {
+            let col = (i % 6) as f32;
+            let row = (i / 6) as f32;
+            let at = Point::new(500.0 + col * 720.0, 450.0 + row * 720.0);
+            let _ = lab.send(Msg::Editor(Message::Press(at)));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+            let e = lab.s.editor.as_ref().unwrap();
+            assert!(
+                e.base_delta_bytes() * 4 <= pic_bytes,
+                "step {i}: delta bytes exceeded 25% cap"
+            );
+            assert!(e.display.is_some() && e.crisp);
+        }
+        assert!(
+            lab.s.editor.as_ref().unwrap().base_deltas.is_empty(),
+            "17th edit folded base_deltas into base"
+        );
+
+        let check_matches_fresh = |lab: &mut StudioLab, phase: &str| {
+            let _ = lab.render(0.0);
+            let shown = lab.pixels();
+            let mut ref_lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+            ref_lab.s.editor.as_mut().unwrap().doc = lab.s.editor.as_ref().unwrap().doc.clone();
+            ref_lab.s.editor.as_mut().unwrap().refresh();
+            ref_lab.settle_mip();
+            let _ = ref_lab.render(0.0);
+            let fresh = ref_lab.pixels();
+            let (diff, md, checked) = diff_outside(&fresh, &shown, stride, pic_rect, &[]);
+            assert_eq!(diff, 0, "{phase}: {diff}/{checked} px differed (max={md})");
+        };
+
+        check_matches_fresh(&mut lab, "after 17th commit");
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        check_matches_fresh(&mut lab, "after undo of 17th");
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        check_matches_fresh(&mut lab, "after redo of 17th");
+    }
 }
