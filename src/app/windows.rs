@@ -2417,6 +2417,11 @@ fn apply_from(old: &Config, cfg: Config) {
 /// A normal window (Settings, Onboarding, the permission prompt): no OS title bar,
 /// our own header (`kit::header`), centred, our logo as its icon.
 fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
+    normal_at(kind, None)
+}
+
+/// `normal`, the Studio at `fit` (its monitor's work area: `studio_fit`).
+fn normal_at(kind: Kind, fit: Option<StudioFit>) -> (window::Id, Task<window::Id>) {
     let mut position = Position::Centered;
     let (size, min_size, resizable) = match kind {
         Kind::Settings => {
@@ -2426,10 +2431,16 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         }
         Kind::Onboarding => (onboarding::WINDOW_SIZE, None, false),
         Kind::Permission => (onboarding::PROMPT_SIZE, None, false),
-        Kind::Studio => {
-            use crate::features::snip::screens::studio::{MIN, SIZE};
-            (SIZE, Some(MIN), true)
-        }
+        Kind::Studio => match fit {
+            Some(f) => {
+                position = Position::Specific(f.fit.at);
+                (f.fit.size, Some(f.fit.min), true)
+            }
+            None => {
+                use crate::features::snip::screens::studio::{MIN, SIZE};
+                (SIZE, Some(MIN), true)
+            }
+        },
     };
     let settings = window::Settings {
         size,
@@ -2452,6 +2463,43 @@ fn normal(kind: Kind) -> (window::Id, Task<window::Id>) {
         ..settings
     };
     platform::windows::open(settings)
+}
+
+/// Where the Studio opens: sized and centred inside the work area (taskbar and panels
+/// excluded) of the monitor under the pointer, with a margin. `place` is the same
+/// spot in physical px (Windows / X11), for the exact move after the window exists:
+/// iced's logical position is read at another monitor's scale when the DPIs differ.
+#[derive(Clone, Copy)]
+struct StudioFit {
+    fit: platform::monitor::Fit,
+    place: Option<platform::monitor::Place>,
+}
+
+/// `None` where screens can't be listed (the OS then centres the default size).
+fn studio_fit() -> Option<StudioFit> {
+    use crate::features::snip::screens::studio::{MIN, SIZE};
+    use crate::shared::platform::capture;
+    let monitors = capture::monitor_list();
+    let chosen = capture::choose(&monitors, None, capture::pointer())?;
+    let m = monitors[chosen];
+    let (x, y, w, h) = m.rect;
+    let s = m.scale.max(0.1);
+    let origin = Point::new(x as f32 / s, y as f32 / s);
+    let full = Size::new(w as f32 / s, h as f32 / s);
+    let [l, t, r, b] = platform::monitor::work_insets(origin, full, s);
+    let work = Size::new(full.width - l - r, full.height - t - b);
+    let fit =
+        platform::monitor::fit_window(Point::new(origin.x + l, origin.y + t), work, SIZE, MIN);
+    // Wayland: the compositor places the window; only the size has to fit
+    let place = platform::monitor::can_hide_windows().then(|| platform::monitor::Place {
+        origin: ((fit.at.x * s).round() as i32, (fit.at.y * s).round() as i32),
+        px: (
+            (fit.size.width * s).round() as u32,
+            (fit.size.height * s).round() as u32,
+        ),
+        scale: s,
+    });
+    Some(StudioFit { fit, place })
 }
 
 /// Settings' opening size, smallest size and centred origin (logical px) on the screen

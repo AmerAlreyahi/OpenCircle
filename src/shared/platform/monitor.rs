@@ -266,6 +266,77 @@ pub fn taskbar_inset(_: Point, _: Size, _: f32) -> f32 {
     0.0
 }
 
+/// The air a normal window keeps from its monitor's work area (logical px).
+pub const WINDOW_MARGIN: f32 = 24.0;
+
+/// A normal window's size, smallest size and top-left corner (logical px).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    pub size: Size,
+    pub min: Size,
+    pub at: Point,
+}
+
+/// `want` (and `min`) shrunk to fit a work area of `work` at `work_at` with a
+/// margin all round, centred in it. The work area is what the monitor leaves after
+/// the taskbar / panels: a window taller than it opened with its top above the
+/// screen (Studio, 1280x800 on a 1280x720 logical screen).
+pub fn fit_window(work_at: Point, work: Size, want: Size, min: Size) -> Fit {
+    let room = Size::new(
+        (work.width - 2.0 * WINDOW_MARGIN).max(1.0),
+        (work.height - 2.0 * WINDOW_MARGIN).max(1.0),
+    );
+    let size = Size::new(want.width.min(room.width), want.height.min(room.height));
+    Fit {
+        size,
+        min: Size::new(min.width.min(size.width), min.height.min(size.height)),
+        at: Point::new(
+            work_at.x + (work.width - size.width) / 2.0,
+            work_at.y + (work.height - size.height) / 2.0,
+        ),
+    }
+}
+
+/// What the taskbar and panels take from the monitor at `origin` (`size`,
+/// logical px at `scale`): `[left, top, right, bottom]`. Windows only; elsewhere the
+/// desktop's panels aren't known and the window's margin has to do.
+#[cfg(windows)]
+pub fn work_insets(origin: Point, size: Size, scale: f32) -> [f32; 4] {
+    use ::windows::Win32::Foundation::POINT;
+    use ::windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+    };
+    let centre = POINT {
+        x: ((origin.x + size.width / 2.0) * scale) as i32,
+        y: ((origin.y + size.height / 2.0) * scale) as i32,
+    };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..MONITORINFO::default()
+    };
+    // SAFETY: plain Win32 queries; `info` is sized as cbSize says.
+    let read = unsafe {
+        let monitor = MonitorFromPoint(centre, MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(monitor, &mut info).as_bool()
+    };
+    if !read {
+        return [0.0; 4];
+    }
+    let (m, w) = (info.rcMonitor, info.rcWork);
+    let px = |v: i32| (v as f32 / scale).max(0.0);
+    [
+        px(w.left - m.left),
+        px(w.top - m.top),
+        px(m.right - w.right),
+        px(m.bottom - w.bottom),
+    ]
+}
+
+#[cfg(not(windows))]
+pub fn work_insets(_: Point, _: Size, _: f32) -> [f32; 4] {
+    [0.0; 4]
+}
+
 #[cfg(test)]
 thread_local! {
     /// Tests: every `place_window` asked (the window moved or sized).
@@ -292,6 +363,42 @@ mod tests {
                 scale: 2.0,
             },
         ]
+    }
+
+    #[test]
+    fn fit_window_shrinks_to_the_work_area_and_centres_inside_it() {
+        let min = Size::new(960.0, 600.0);
+        // 1280x720 logical screen, 40 px taskbar at the bottom: a 1280x800 window
+        let f = super::fit_window(
+            Point::new(0.0, 0.0),
+            Size::new(1280.0, 680.0),
+            Size::new(1280.0, 800.0),
+            min,
+        );
+        assert_eq!(f.size, Size::new(1232.0, 632.0));
+        assert_eq!(f.at, Point::new(24.0, 24.0));
+        assert!(f.at.y >= 0.0 && f.at.y + f.size.height <= 680.0);
+        // the smallest size never exceeds what fits
+        let tiny = super::fit_window(
+            Point::new(0.0, 0.0),
+            Size::new(800.0, 500.0),
+            Size::new(1280.0, 800.0),
+            min,
+        );
+        assert_eq!(tiny.min, Size::new(752.0, 452.0));
+    }
+
+    #[test]
+    fn fit_window_on_a_roomy_monitor_keeps_the_size_and_centres_on_that_monitor() {
+        // a second monitor right of the first, its work area below a top bar
+        let f = super::fit_window(
+            Point::new(1920.0, 30.0),
+            Size::new(1920.0, 1010.0),
+            Size::new(1280.0, 800.0),
+            Size::new(960.0, 600.0),
+        );
+        assert_eq!(f.size, Size::new(1280.0, 800.0));
+        assert_eq!(f.at, Point::new(1920.0 + 320.0, 30.0 + 105.0));
     }
 
     #[test]

@@ -53,7 +53,8 @@ impl Windows {
         #[cfg(target_os = "linux")]
         crate::shared::platform::sys::shell::leave_overview();
         super::activate_next();
-        let (id, open) = super::normal(Kind::Studio);
+        let fit = super::studio_fit();
+        let (id, open) = super::normal_at(Kind::Studio, fit);
         let mut s = Studio::new(crate::shared::config::current().snip.studio);
         s.set_browser(crate::features::ask_ai::app::ai_chat::hands_off());
         s.steps_at_open(
@@ -77,8 +78,15 @@ impl Windows {
             let _ = tx.unbounded_send((list, info));
         })
         .map(move |(r, info)| to(studio::Msg::Recent(r, info)));
+        // the exact physical spot (Windows / X11); Wayland: the compositor places it
+        let placed = fit.and_then(|f| f.place).map_or_else(Task::none, |p| {
+            crate::shared::platform::monitor::place_window(id, p)
+        });
         Task::batch([
-            open.discard().chain(window::gain_focus(id)).chain(scale),
+            open.discard()
+                .chain(placed)
+                .chain(window::gain_focus(id))
+                .chain(scale),
             size,
             recent,
             strip,
