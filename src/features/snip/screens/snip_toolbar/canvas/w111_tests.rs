@@ -269,3 +269,272 @@ fn w113_frame_split() {
         );
     }
 }
+
+fn run_magnifier_frames(
+    dims: (u32, u32, f32),
+    stage_size: Size,
+    setup: impl Fn(&mut Annotator),
+    mut act: impl FnMut(usize, &mut Annotator),
+    n: usize,
+) -> Vec<shot::Frame> {
+    let (w, h, zoom) = dims;
+    let mut e = Annotator::new(photo(w, h), zoom);
+    e.studio = true;
+    e.assist = false;
+    setup(&mut e);
+    stage(&mut e);
+    if zoom > 1.0 {
+        e.viewport = Some(iced::Rectangle::new(
+            Point::new(
+                w as f32 * 0.5 * zoom - stage_size.width * 0.5,
+                h as f32 * 0.4 * zoom - stage_size.height * 0.5,
+            ),
+            stage_size,
+        ));
+    }
+    let mut frames = shot::frames_of(stage_size, n + 2, |i, show| {
+        if (1..=n).contains(&i) {
+            act(i - 1, &mut e);
+        } else if i == n + 1 {
+            e.update(Message::Release);
+        }
+        show(canvas(&e, 0.0, ScreenMap::ONE));
+    });
+    frames.drain(1..=n).collect()
+}
+
+/// W117: real Studio Magnifier frame times (ms: mean, p95, max) on a 4K picture:
+/// large lens, zoomed in, drawing, dragging (plain and over Hide+Rect), and resizing.
+#[test]
+#[ignore = "timing: run by hand, in release"]
+fn w117_magnifier_frame_times() {
+    let n = 60usize;
+    let report = |label: &str, f: Vec<shot::Frame>| {
+        let total: Vec<f64> = f.iter().map(|x| x.draw_ms + x.raster_ms).collect();
+        let draw: Vec<f64> = f.iter().map(|x| x.draw_ms).collect();
+        let raster: Vec<f64> = f.iter().map(|x| x.raster_ms).collect();
+        println!(
+            "{label:<34} total [{}]  draw [{}]  raster [{}]",
+            stats(total),
+            stats(draw),
+            stats(raster)
+        );
+    };
+
+    report(
+        "4K 0.5x draw r=300",
+        run_magnifier_frames(
+            (3840, 2160, 0.5),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1920.0 + 300.0 * t, 864.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 0.5x draw r=600",
+        run_magnifier_frames(
+            (3840, 2160, 0.5),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1920.0 + 600.0 * t, 1080.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 0.5x move r=500",
+        run_magnifier_frames(
+            (3840, 2160, 0.5),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(1200.0, 1080.0)));
+                e.update(Message::Move(Point::new(1700.0, 1080.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1200.0 + 1200.0 * t, 1080.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 0.5x move r=500 over Hide+Rect",
+        run_magnifier_frames(
+            (3840, 2160, 0.5),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Blur));
+                e.update(Message::BlurShape(Kind::Rect));
+                e.update(Message::BlurStyle(Style::Soft));
+                e.update(Message::Press(Point::new(1100.0, 700.0)));
+                e.update(Message::Move(Point::new(2600.0, 1400.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Rect));
+                e.update(Message::Press(Point::new(1400.0, 800.0)));
+                e.update(Message::Move(Point::new(2200.0, 1300.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(1200.0, 1080.0)));
+                e.update(Message::Move(Point::new(1700.0, 1080.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1200.0 + 1200.0 * t, 1080.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 0.5x resize r=300->600",
+        run_magnifier_frames(
+            (3840, 2160, 0.5),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(1920.0, 1080.0)));
+                e.update(Message::Move(Point::new(2220.0, 1080.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(2220.0 + 300.0 * t, 1380.0 + 300.0 * t);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 2.0x draw r=350",
+        run_magnifier_frames(
+            (3840, 2160, 2.0),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1920.0 + 350.0 * t, 864.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 2.0x move r=300",
+        run_magnifier_frames(
+            (3840, 2160, 2.0),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(1700.0, 864.0)));
+                e.update(Message::Move(Point::new(2000.0, 864.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(1700.0 + 440.0 * t, 864.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 2.0x resize r=200->400",
+        run_magnifier_frames(
+            (3840, 2160, 2.0),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(1920.0, 864.0)));
+                e.update(Message::Move(Point::new(2120.0, 864.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(2120.0 + 200.0 * t, 1064.0 + 200.0 * t);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+    report(
+        "4K 2.0x on-screen move r=300",
+        run_magnifier_frames(
+            (3840, 2160, 2.0),
+            Size::new(1920.0, 1080.0),
+            |e| {
+                e.viewport = Some(iced::Rectangle::with_size(Size::new(1920.0, 1080.0)));
+                e.update(Message::Tool(Tool::Magnifier));
+                e.update(Message::Press(Point::new(360.0, 270.0)));
+                e.update(Message::Move(Point::new(660.0, 270.0)));
+                e.update(Message::Release);
+                e.update(Message::Tool(Tool::Select));
+            },
+            |i, e| {
+                e.viewport = Some(iced::Rectangle::with_size(Size::new(1920.0, 1080.0)));
+                let t = i as f32 / (n - 1) as f32;
+                let p = Point::new(360.0 + 240.0 * t, 270.0);
+                e.update(if i == 0 {
+                    Message::Press(p)
+                } else {
+                    Message::Move(p)
+                });
+            },
+            n,
+        ),
+    );
+}

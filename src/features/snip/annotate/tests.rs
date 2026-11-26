@@ -3901,3 +3901,41 @@ fn w112_the_picker_recolours_the_selected_object_in_one_undo_step() {
         );
     }
 }
+
+#[test]
+fn w117_magnifier_hide_and_commit_patch_base_and_keep_crisp_display() {
+    let mut e = Annotator::new(checker(400, 300), 0.5);
+    e.studio = true;
+    e.crisp = true;
+    e.display = Some(image::Handle::from_rgba(200, 150, vec![0; 200 * 150 * 4]));
+    e.update(Message::Tool(Tool::Magnifier));
+    drag(&mut e, pt(120.0, 120.0), &[], pt(180.0, 120.0));
+    assert!(
+        e.crisp && e.display.is_some(),
+        "commit keeps crisp display copy"
+    );
+    assert_eq!(
+        e.base_pixels(),
+        render(&e.doc).rgba,
+        "commit patch matches render"
+    );
+
+    // Moving the existing magnifier patches base on hide() without dropping crisp/display.
+    e.update(Message::Tool(Tool::Select));
+    e.update(Message::Press(pt(120.0, 120.0)));
+    e.update(Message::Move(pt(240.0, 160.0)));
+    assert!(
+        e.crisp && e.display.is_some(),
+        "hide keeps crisp display copy during drag"
+    );
+    e.update(Message::Release);
+    assert!(
+        e.crisp && e.display.is_some(),
+        "commit after move keeps crisp display copy"
+    );
+    assert_eq!(
+        e.base_pixels(),
+        render(&e.doc).rgba,
+        "moved patch matches render"
+    );
+}

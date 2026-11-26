@@ -1943,13 +1943,142 @@ impl Annotator {
 
     /// Repaints the base without the pending item (once, when it first changes).
     fn hide(&mut self) {
-        if let Some(pending) = &mut self.pending
-            && pending.index.is_some()
-            && !pending.hidden
-        {
-            pending.hidden = true;
+        let Some(pending) = &mut self.pending else {
+            return;
+        };
+        let (Some(idx), false) = (pending.index, pending.hidden) else {
+            return;
+        };
+        pending.hidden = true;
+        let can_patch = !matches!(
+            self.doc.items[idx].shape,
+            Shape::Spotlight { .. } | Shape::Blur { .. }
+        );
+        let area = self.doc.items[idx].bounds();
+        if can_patch && self.patch_base(area) {
+            self.update_live();
+        } else {
             self.refresh();
         }
+    }
+
+    /// Repaints only the changed area into base (and the mapped rect in display, keeping
+    /// crisp) instead of flattening the whole 4K/8K picture.
+    fn patch_base(&mut self, area: Rectangle) -> bool {
+        if self.bare()
+            || self.legend.is_some()
+            || !self.patch.is_empty()
+            || (self.doc.items.iter())
+                .any(|item| !item.hidden && matches!(item.shape, Shape::Spotlight { .. }))
+        {
+            return false;
+        }
+        let view = self.doc.view();
+        let vr = int_rect(view, view);
+        let image::Handle::Rgba {
+            width: bw,
+            height: bh,
+            pixels: base_px,
+            ..
+        } = &self.base
+        else {
+            return false;
+        };
+        if *bw != vr.width() || *bh != vr.height() {
+            return false;
+        }
+        let r = int_rect(area, view);
+        let r_rect = Rectangle::new(
+            Point::new(r.x() as f32, r.y() as f32),
+            Size::new(r.width() as f32, r.height() as f32),
+        );
+        let hide = self
+            .pending
+            .as_ref()
+            .and_then(|p| p.index.filter(|_| p.hidden));
+        let layers: Vec<_> = (self.doc.items.iter().enumerate())
+            .map(|(i, item)| (item, Some(i) != hide && item.bounds().intersects(&r_rect)))
+            .collect();
+        if layers.iter().any(|(item, vis)| {
+            *vis && !item.hidden
+                && matches!(item.shape, Shape::Magnifier { .. })
+                && !r_rect.contains(item.bounds().position())
+        }) {
+            return false;
+        }
+        let mut excludes = document::excludes(
+            (self.doc.items.iter().enumerate())
+                .filter(|(i, _)| Some(*i) != hide)
+                .map(|(_, item)| item),
+        );
+        if let Some(ex) = self
+            .pending
+            .as_ref()
+            .filter(|p| p.hidden)
+            .and_then(|p| p.item.exclude())
+        {
+            excludes.push(ex);
+        }
+        let repainted = self.doc.paint_with_excludes(&layers, &excludes, r, None);
+        let mut out = base_px.to_vec();
+        let (bx0, by0) = ((r.x() - vr.x()) as usize, (r.y() - vr.y()) as usize);
+        let rw = r.width() as usize;
+        let rh = r.height() as usize;
+        let base_stride = *bw as usize * 4;
+        let rep_stride = rw * 4;
+        let rep_data = repainted.data();
+        for row in 0..rh {
+            let dst_off = (by0 + row) * base_stride + bx0 * 4;
+            let src_off = row * rep_stride;
+            out[dst_off..dst_off + rep_stride]
+                .copy_from_slice(&rep_data[src_off..src_off + rep_stride]);
+        }
+        if let Some(image::Handle::Rgba {
+            width: dw,
+            height: dh,
+            pixels: disp_px,
+            ..
+        }) = &self.display
+        {
+            let (dw, dh) = (*dw, *dh);
+            let mut disp = disp_px.to_vec();
+            let sx = *bw as f32 / dw as f32;
+            let sy = *bh as f32 / dh as f32;
+            let dx0 = ((bx0 as f32 / sx).floor() as i32 - 1).max(0) as u32;
+            let dy0 = ((by0 as f32 / sy).floor() as i32 - 1).max(0) as u32;
+            let dx1 = (((bx0 + rw) as f32 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
+            let dy1 = (((by0 + rh) as f32 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
+            let disp_stride = dw as usize * 4;
+            for dy in dy0..dy1 {
+                let sy0 = ((dy as f32 * sy).floor() as usize).min(*bh as usize - 1);
+                let sy1 = (((dy + 1) as f32 * sy).ceil() as usize).clamp(sy0 + 1, *bh as usize);
+                for dx in dx0..dx1 {
+                    let sx0 = ((dx as f32 * sx).floor() as usize).min(*bw as usize - 1);
+                    let sx1 = (((dx + 1) as f32 * sx).ceil() as usize).clamp(sx0 + 1, *bw as usize);
+                    let (mut sr, mut sg, mut sb, mut sa, mut n) = (0u32, 0u32, 0u32, 0u32, 0u32);
+                    for y in sy0..sy1 {
+                        let row_off = y * base_stride;
+                        for x in sx0..sx1 {
+                            let o = row_off + x * 4;
+                            sr += u32::from(out[o]);
+                            sg += u32::from(out[o + 1]);
+                            sb += u32::from(out[o + 2]);
+                            sa += u32::from(out[o + 3]);
+                            n += 1;
+                        }
+                    }
+                    let d = dy as usize * disp_stride + dx as usize * 4;
+                    let half = n / 2;
+                    disp[d] = ((sr + half) / n) as u8;
+                    disp[d + 1] = ((sg + half) / n) as u8;
+                    disp[d + 2] = ((sb + half) / n) as u8;
+                    disp[d + 3] = ((sa + half) / n) as u8;
+                }
+            }
+            self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+        }
+        self.base = image::Handle::from_rgba(*bw, *bh, out);
+        true
     }
 
     fn grab_area(&mut self, grip: area::Grip, from: Point) {
@@ -2335,12 +2464,27 @@ impl Annotator {
                     }
                 ))
             );
+        let mut fast_area = match &edit {
+            Some(Edit::Insert(_, it)) if matches!(it.shape, Shape::Magnifier { .. }) => {
+                Some(it.bounds())
+            }
+            Some(Edit::Change(_, old, new))
+                if matches!(old.shape, Shape::Magnifier { .. })
+                    && matches!(new.shape, Shape::Magnifier { .. }) =>
+            {
+                Some(old.bounds().union(&new.bounds()))
+            }
+            _ => None,
+        };
         if let Some(edit) = edit {
             let grown = match &edit {
                 Edit::Insert(_, item) | Edit::Change(_, _, item) => self.grow_for(&[item.frame()]),
                 _ => Ok(None),
             };
             patch &= matches!(grown, Ok(None));
+            if !matches!(grown, Ok(None)) {
+                fast_area = None;
+            }
             match grown {
                 Ok(Some(grow)) => self.doc.exec(Edit::Seq(vec![edit, grow])),
                 Ok(None) => self.doc.exec(edit),
@@ -2350,6 +2494,10 @@ impl Annotator {
             }
         }
         if patch && self.patch_over() {
+            self.clear_live();
+        } else if let Some(area) = fast_area
+            && self.patch_base(area)
+        {
             self.clear_live();
         } else if repaint {
             self.refresh();
@@ -2735,6 +2883,17 @@ impl Annotator {
     /// are painted on the picture with every item, as the committed picture has them.
     fn paint_live(&self) -> Option<(Rectangle, image::Handle)> {
         self.pending.as_ref().map(|pending| {
+            let view = self.doc.view();
+            if let Shape::Magnifier {
+                at,
+                radius,
+                zoom,
+                kind,
+            } = pending.item.shape
+                && let Some(fast) = self.paint_live_magnifier(pending, view, at, radius, zoom, kind)
+            {
+                return fast;
+            }
             let reads = matches!(
                 pending.item.shape,
                 Shape::Blur { .. } | Shape::Spotlight { .. } | Shape::Magnifier { .. }
@@ -2744,10 +2903,6 @@ impl Annotator {
                 Some(i) => layers[i] = (&pending.item, true),
                 None => layers.push((&pending.item, true)),
             }
-            let view = self.doc.view();
-            // A spotlight changes the dim everywhere.
-            // ponytail: repaints the whole view per pointer move while a spotlight
-            // is dragged; dim only its old/new boxes if that is slow on 4K+.
             let area = match pending.item.shape {
                 Shape::Spotlight { .. } => view,
                 _ => pending.item.bounds(),
@@ -2763,6 +2918,103 @@ impl Annotator {
             };
             (rect, handle)
         })
+    }
+
+    fn paint_live_magnifier(
+        &self,
+        pending: &Pending,
+        view: Rectangle,
+        at: Point,
+        radius: f32,
+        zoom: f32,
+        kind: magnifier::Kind,
+    ) -> Option<(Rectangle, image::Handle)> {
+        let mut area = pending.item.bounds();
+        if let Some(idx) = pending.index
+            && self.doc.items[idx + 1..]
+                .iter()
+                .any(|item| !item.hidden && item.bounds().intersects(&area))
+        {
+            return None;
+        }
+        if let Some(vp) = self.viewport
+            && self.zoom > 1.0
+        {
+            let vp_img = Rectangle::new(
+                Point::new(view.x + vp.x / self.zoom, view.y + vp.y / self.zoom),
+                Size::new(vp.width / self.zoom, vp.height / self.zoom),
+            )
+            .expand(2.0);
+            area = area.intersection(&vp_img)?;
+        }
+        let r = int_rect(area, view);
+        let rect = Rectangle::new(
+            Point::new(r.x() as f32, r.y() as f32),
+            Size::new(r.width() as f32, r.height() as f32),
+        );
+        let target_scale = match &self.display {
+            Some(image::Handle::Rgba { width: dw, .. }) if view.width > 0.0 => {
+                (*dw as f32 / view.width).clamp(0.125, 1.0)
+            }
+            _ => 1.0,
+        };
+        let dst_w = ((r.width() as f32 * target_scale).round() as u32).max(1);
+        let dst_h = ((r.height() as f32 * target_scale).round() as u32).max(1);
+        let scale_x = dst_w as f32 / r.width() as f32;
+        let scale_y = dst_h as f32 / r.height() as f32;
+        let lens = magnifier::Lens {
+            at,
+            radius,
+            zoom,
+            kind,
+            colour: pending.item.colour,
+            width: pending.item.width,
+            outline: pending.item.outline,
+        };
+        let vr = int_rect(view, view);
+        if !self.bare()
+            && self.patch.is_empty()
+            && self.legend.is_none()
+            && let image::Handle::Rgba {
+                width,
+                height,
+                pixels,
+                ..
+            } = &self.base
+            && *width == vr.width()
+            && *height == vr.height()
+        {
+            let src = magnifier::Source {
+                rgba: pixels.as_ref(),
+                width: *width,
+                height: *height,
+                origin: Point::new(vr.x() as f32, vr.y() as f32),
+            };
+            let pm =
+                magnifier::paint_live(&src, rect.position(), dst_w, dst_h, scale_x, scale_y, &lens);
+            return Some((rect, straight(pm)));
+        }
+        let sr = radius / zoom.max(1.0) + 2.0;
+        let src_area = Rectangle::new(
+            Point::new(at.x - sr, at.y - sr),
+            Size::new(sr * 2.0, sr * 2.0),
+        );
+        let src_r = int_rect(src_area, view);
+        let below_end = pending.index.unwrap_or(self.doc.items.len());
+        let below: Vec<_> = self.doc.items[..below_end]
+            .iter()
+            .map(|item| (item, true))
+            .collect();
+        let src_pm = self.doc.paint(&below, src_r, None);
+        let src = magnifier::Source {
+            rgba: src_pm.data(),
+            width: src_pm.width(),
+            height: src_pm.height(),
+            origin: Point::new(src_r.x() as f32, src_r.y() as f32),
+        };
+        let pm =
+            magnifier::paint_live(&src, rect.position(), dst_w, dst_h, scale_x, scale_y, &lens);
+        Some((rect, straight(pm)))
     }
 }
 

@@ -2377,10 +2377,15 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
         return;
     }
     let want = want as u32;
+    let near = |w: u32| w.abs_diff(want) * 50 <= want; // within 2 %
     if mips.as_ref().is_none_or(|m| m.key != *id) {
+        let ready = match &e.display {
+            Some(h @ image::Handle::Rgba { width: dw, .. }) if near(*dw) => Some((*dw, h.clone())),
+            _ => None,
+        };
         *mips = Some(Mips {
             key: *id,
-            ready: None,
+            ready,
             pending: None,
         });
     }
@@ -2391,7 +2396,6 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
         m.ready = Some((*w, done));
         m.pending = None;
     }
-    let near = |w: u32| w.abs_diff(want) * 50 <= want; // within 2 %
     if m.ready.as_ref().is_none_or(|(w, _)| !near(*w)) && m.pending.is_none() {
         let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
         let (out, (bw, bh), px) = (slot.clone(), (*width, *height), pixels.clone());

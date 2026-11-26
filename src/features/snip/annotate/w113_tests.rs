@@ -104,18 +104,32 @@ fn w113_2_a_drawing_tool_restyles_only_a_selection_of_its_own_kind() {
 fn w113_5_an_opaque_layer_that_cuts_a_hide_leaves_it_as_committed() {
     let mut e = hide_one();
     let committed = e.base_pixels();
+    // W117: a Magnifier live layer is transparent outside the lens (never repaints the Hide).
     e.update(Message::Tool(Tool::Magnifier));
     e.update(Message::Press(pt(240.0, 125.0)));
     e.update(Message::Move(pt(240.0, 155.0)));
     let (r, live) = live_pixels(&e).expect("a live layer");
+    let w = r.width as usize;
+    for cx in [0, w - 4] {
+        for (dx, ly) in (0..4).flat_map(|y| (0..4).map(move |x| (x, y))) {
+            let i = (ly * w + cx + dx) * 4;
+            assert_eq!(live[i + 3], 0, "magnifier live corner must be transparent");
+        }
+    }
+    e.update(Message::Cancel);
+    // An opaque live layer (a second Hide whose box cuts the committed Hide) leaves the
+    // committed Hide pixels in the corners untouched.
+    e.update(Message::Tool(Tool::Blur));
+    e.update(Message::BlurShape(blur::Kind::Ellipse));
+    e.update(Message::Press(pt(210.0, 134.0)));
+    e.update(Message::Move(pt(270.0, 194.0)));
+    let (r, live) = live_pixels(&e).expect("a live layer");
     let (w, x0, y0) = (r.width as usize, r.x as usize, r.y as usize);
     let (mut seen, mut differing) = (0, 0);
-    // (6 wide and 16 deep: outside the lens, over the Hide's first rows)
     for cx in [0, w - 6] {
         for (dx, ly) in (0..16).flat_map(|y| (0..6).map(move |x| (x, y))) {
             let lx = cx + dx;
             let at = ((y0 + ly) * 600 + x0 + lx) * 4;
-            // (only the rows the Hide covers)
             if !(100..=110).contains(&(y0 + ly)) {
                 continue;
             }
