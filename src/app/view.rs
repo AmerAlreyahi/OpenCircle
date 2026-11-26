@@ -23,6 +23,15 @@ use crate::shared::kit::{motion, surface};
 use super::{App, CHIP_SPACE, LINK_WIDTH, QR_WIDTH, SELECT_WIDTH, SLIDE, TextMode};
 
 impl App {
+    /// The screen dims (outside the selection, or all of it): not while the
+    /// translation's Original shows (the page as it was), and never under a tool.
+    pub(crate) fn dims(&self) -> bool {
+        let original = (self.o.translate.as_ref()).is_some_and(|(_, s)| s.original_shown());
+        !original
+            && (self.o.translate.is_none() || self.o.selection.is_some())
+            && self.tool().is_none()
+    }
+
     /// How much of the screen edge's glow shows on `window` (`None`: the
     /// starting screen's): the mouse's screen (`screens::Glow`), and in Snip
     /// only while nothing is picked: it says "the screen is frozen"; over a
@@ -105,8 +114,7 @@ impl App {
             .map_or_else(Vec::new, word::Picked::rects);
         // The plain dim (nothing selected) while the view moves: folded into
         // the zoomed frame's drawing (`overlay::Zoomed`), one pass.
-        let dim =
-            (self.o.translate.is_none() || self.o.selection.is_some()) && self.tool().is_none();
+        let dim = self.dims();
         let dim_frame = (self.view_moving() && dim)
             .then_some(())
             .filter(|_| self.o.selection.is_none() && self.o.others.is_empty())

@@ -254,11 +254,15 @@ pub(crate) fn recognize_via(
 
 /// Translates `texts` with `pair` offline in the helper (`crate::features::translate::mt`; its
 /// models must already be present).
-pub fn translate_in_child(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
+pub fn translate_in_child(
+    texts: &[String],
+    pair: &'static Pair,
+    retry: bool,
+) -> Result<Vec<String>, OcrError> {
     if pair.missing_bytes() > 0 {
         return Err(OcrError::Missing(pair.label()));
     }
-    translate_via(session::call, texts, pair)
+    translate_via(session::call, texts, pair, retry)
 }
 
 #[cfg(test)]
@@ -267,7 +271,7 @@ pub(crate) fn translate_with(
     texts: &[String],
     pair: &Pair,
 ) -> Result<Vec<String>, OcrError> {
-    translate_via(|p| Session::worker(exe).call(p), texts, pair)
+    translate_via(|p| Session::worker(exe).call(p), texts, pair, false)
 }
 
 /// Translation through `call` (one helper request).
@@ -275,8 +279,9 @@ pub(crate) fn translate_via(
     call: impl FnOnce(&[&[u8]]) -> Result<Vec<u8>, OcrError>,
     texts: &[String],
     pair: &Pair,
+    retry: bool,
 ) -> Result<Vec<String>, OcrError> {
-    let input = serde_json::to_vec(&(pair.source, pair.target, texts))
+    let input = serde_json::to_vec(&(pair.source, pair.target, texts, retry))
         .map_err(|e| OcrError::Engine(e.to_string()))?;
     let out: Vec<String> = parse(call(&[&[TRANSLATE], &input])?)?;
     if out.len() != texts.len() {
@@ -674,20 +679,21 @@ impl<T: Send + 'static> Mt<T> {
 /// How long a model that would not load waits before its one second try.
 const LOAD_AGAIN: std::time::Duration = std::time::Duration::from_millis(600);
 
-/// A model load that failed is tried once more after `wait`: its file may be
-/// held for a moment (another OpenCircle renaming the folder or swapping the
-/// decoder, antivirus scanning a new file). A missing model is not retried.
+/// A model load that failed is tried once more after `wait` (`None`: not at
+/// all, Live's way): its file may be held for a moment (another OpenCircle
+/// renaming the folder or swapping the decoder, antivirus scanning a new
+/// file). A missing model is not retried.
 fn load_again<T>(
-    wait: std::time::Duration,
+    wait: Option<std::time::Duration>,
     mut load: impl FnMut() -> Result<T, OcrError>,
 ) -> Result<T, OcrError> {
     match load() {
-        Err(e) if !matches!(e, OcrError::Missing(_)) => {
+        Err(e) if wait.is_some() && !matches!(e, OcrError::Missing(_)) => {
             crate::log!(
                 "[opencircle] model load failed ({}); trying once more",
                 e.detail()
             );
-            std::thread::sleep(wait);
+            std::thread::sleep(wait.unwrap_or_default());
             load()
         }
         done => done,
@@ -698,14 +704,17 @@ fn translate_here(body: &[u8], loaded: &mut Mt<Translator>) -> Result<Vec<String
     if body.len() > MAX_TEXT {
         return Err(OcrError::BadImage("too much text".into()));
     }
-    let (source, target, texts): (String, String, Vec<String>) = serde_json::from_slice(body)
-        .map_err(|e| OcrError::BadImage(format!("bad request: {e}")))?;
+    let (source, target, texts, retry): (String, String, Vec<String>, bool) =
+        serde_json::from_slice(body)
+            .map_err(|e| OcrError::BadImage(format!("bad request: {e}")))?;
     let pair = mt::pair(&source, &target)
         .ok_or_else(|| OcrError::Engine(mt::unavailable(&source, &target)))?;
     let t = Instant::now();
     let load = move || {
         let t = Instant::now();
-        let loaded = load_again(LOAD_AGAIN, || Translator::load(pair, &models_dir()));
+        let loaded = load_again(retry.then_some(LOAD_AGAIN), || {
+            Translator::load(pair, &models_dir())
+        });
         crate::log!(
             "[opencircle] mt {} loaded in {} ms",
             pair.label(),
@@ -956,20 +965,46 @@ mod w116_tests {
                 n => Ok(n),
             }
         };
-        assert_eq!(load_again(Duration::ZERO, flaky).unwrap(), 2);
+        assert_eq!(load_again(Some(Duration::ZERO), flaky).unwrap(), 2);
         let calls = Cell::new(0);
         let broken = || -> Result<u32, OcrError> {
             calls.set(calls.get() + 1);
             Err(OcrError::Engine("bad".into()))
         };
-        assert!(load_again(Duration::ZERO, broken).is_err());
+        assert!(load_again(Some(Duration::ZERO), broken).is_err());
         assert_eq!(calls.get(), 2, "once more, not forever");
         let calls = Cell::new(0);
         let missing = || -> Result<u32, OcrError> {
             calls.set(calls.get() + 1);
             Err(OcrError::Missing("x".into()))
         };
-        assert!(load_again(Duration::ZERO, missing).is_err());
+        assert!(load_again(Some(Duration::ZERO), missing).is_err());
         assert_eq!(calls.get(), 1);
+        // Live: no second try, no wait
+        let calls = Cell::new(0);
+        let broken = || -> Result<u32, OcrError> {
+            calls.set(calls.get() + 1);
+            Err(OcrError::Engine("bad".into()))
+        };
+        assert!(load_again(None, broken).is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
+    // W116 AC-9: the request tells the helper whether a failed load is tried again:
+    // the one-shot Translate says yes, Live and the warm-ups say no.
+    #[test]
+    fn ac9_the_request_carries_whether_a_failed_load_is_retried() {
+        let pair = mt::pair("en", "ar").unwrap();
+        for retry in [false, true] {
+            let seen = std::cell::RefCell::new(Vec::new());
+            let call = |p: &[&[u8]]| -> Result<Vec<u8>, OcrError> {
+                *seen.borrow_mut() = p[1].to_vec();
+                Err(OcrError::Engine("stop".into()))
+            };
+            let _ = translate_via(call, &["a".to_string()], pair, retry);
+            let (_, _, _, asked): (String, String, Vec<String>, bool) =
+                serde_json::from_slice(&seen.borrow()).unwrap();
+            assert_eq!(asked, retry);
+        }
     }
 }

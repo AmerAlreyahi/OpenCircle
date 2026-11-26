@@ -111,7 +111,7 @@ impl Session {
                     open: self.details,
                     on_details: Msg::ErrorDetails,
                     fix: match &problem.redo {
-                        Some(Redo::Again) => Some((t!(tp_try_again), Msg::Redo)),
+                        Some(Redo::Again) => Some((t!(md_try_again), Msg::Redo)),
                         Some(Redo::Repair(..)) => Some((t!(tp_repair), Msg::Redo)),
                         None => problem.setup.then(|| (t!(tp_set_up_ai), Msg::OpenSettings)),
                     },
@@ -152,7 +152,7 @@ impl Session {
                         Some(l) => Some(note(l).into()),
                         None if self.only.is_some() => {
                             let whole = button(
-                                button_label(t!(tp_whole_screen)),
+                                button_label(t!(k_whole)),
                                 Kind::Elevated,
                                 Some(Msg::WholeScreen),
                             );

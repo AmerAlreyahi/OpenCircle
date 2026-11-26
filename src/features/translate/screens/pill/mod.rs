@@ -79,6 +79,8 @@ pub enum Msg {
     OpenSettings,
     /// The failure card's Try again / Repair model (`Problem::redo`).
     Redo,
+    /// Repair model's files are checked and the bad ones removed.
+    Repaired,
     /// Get the pair of the lines kept in their own language (`Offer`).
     GetHeld,
     /// "N parts not translated · Retry": translate again (the parts that
@@ -547,16 +549,29 @@ impl Session {
                 }
             }
             Msg::Redo if matches!(&self.phase, Phase::Failed(p) if p.redo.is_some()) => {
-                if let Phase::Failed(Problem {
-                    redo: Some(Redo::Repair(source, target)),
-                    ..
-                }) = &self.phase
-                {
-                    // its bad files go; the next run asks for them (the download card)
-                    if let Some(pair) = crate::features::translate::mt::pair(source, target) {
-                        pair.repair();
-                    }
-                }
+                let repair = match &self.phase {
+                    Phase::Failed(Problem {
+                        redo: Some(Redo::Repair(source, target)),
+                        ..
+                    }) => crate::features::translate::mt::pair(source, target),
+                    _ => None,
+                };
+                let Some(pair) = repair else {
+                    let models = models::installed(models::recognizer_for(&self.picker.source));
+                    return self.begin(models);
+                };
+                // its bad files are hashed and removed on a thread, then the next run asks
+                // for them (the download card)
+                self.phase = Phase::Translating;
+                let (task, handle) = background(move |tx| {
+                    pair.repair();
+                    let _ = tx.unbounded_send(Msg::Repaired);
+                })
+                .abortable();
+                self.work = Some(handle.abort_on_drop());
+                return task;
+            }
+            Msg::Repaired if matches!(self.phase, Phase::Translating) => {
                 let models = models::installed(models::recognizer_for(&self.picker.source));
                 return self.begin(models);
             }
@@ -1006,6 +1021,40 @@ impl Session {
         self.only.is_some()
     }
 
+    /// The Original button is on: the page shows as it was.
+    pub fn original_shown(&self) -> bool {
+        self.original && matches!(self.phase, Phase::Shown(_))
+    }
+
+    /// `p` (frame px) is inside a translated block that shows.
+    pub fn translated_at(&self, p: Point) -> bool {
+        match &self.phase {
+            Phase::Shown(shown) if !self.original => hit(&shown.blocks, p).is_some(),
+            _ => false,
+        }
+    }
+
+    /// The translation of the blocks that `rects` (frame px) touch, one per
+    /// line; `None` when they touch none.
+    pub fn translated_over(&self, rects: &[Rectangle]) -> Option<String> {
+        let Phase::Shown(shown) = &self.phase else {
+            return None;
+        };
+        let text = (shown.blocks.iter())
+            .filter(|b| !b.translation.is_empty())
+            .filter(|b| {
+                let r = Rectangle::new(
+                    Point::new(b.bounds[0], b.bounds[1]),
+                    Size::new(b.bounds[2], b.bounds[3]),
+                );
+                rects.iter().any(|q| q.intersects(&r))
+            })
+            .map(|b| b.translation.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (!text.is_empty()).then_some(text)
+    }
+
     /// The lines (their text) a selected-words session translates (tests).
     #[cfg(test)]
     pub fn only_text(&self) -> Vec<String> {
@@ -1201,7 +1250,14 @@ fn problem(message: String, setup: bool) -> Problem {
 }
 
 /// What the failure card says and offers for `e` (the pipeline's error).
+/// Runs on the translate thread: a failed local model's files are hashed here
+/// (never on the UI thread, never for Live).
 pub(super) fn problem_of(e: &Error) -> Problem {
+    problem_with(e, |pair| pair.damaged())
+}
+
+/// `problem_of` with `damaged` = whether a pair's files fail their pins.
+pub(super) fn problem_with(e: &Error, damaged: impl Fn(&'static Pair) -> bool) -> Problem {
     // Offline can't do it (no model, not downloaded): AI is the other way.
     let setup = matches!(
         e,
@@ -1209,19 +1265,22 @@ pub(super) fn problem_of(e: &Error) -> Problem {
     );
     // an AI provider's error: the error card's short headline (owner, 2026-11-10)
     let message = match e {
-        Error::Ai(AiError::Offline(_) | AiError::LocalFailed { .. } | AiError::AlreadyIn(_)) => {
-            e.to_string()
-        }
+        // (the card's plain first sentence, then the engine's own words behind Show details)
+        Error::Ai(AiError::LocalFailed { why, .. }) => format!("{}. {why}", t!(tp_model_broke)),
+        Error::Ai(AiError::Offline(_) | AiError::AlreadyIn(_)) => e.to_string(),
         Error::Ai(ai) => failure_text(ai),
         _ => e.to_string(),
     };
     // a local model that is there but failed: Repair model when its files
     // fail their pins, else Try again (never Set up AI)
     let redo = match e {
-        Error::Ai(AiError::LocalFailed { repair, .. }) => Some(match repair {
-            Some((source, target)) => Redo::Repair(source, target),
-            None => Redo::Again,
-        }),
+        Error::Ai(AiError::LocalFailed { pair: (s, t), .. }) => {
+            let bad = crate::features::translate::mt::pair(s, t).is_some_and(damaged);
+            Some(match bad {
+                true => Redo::Repair(s, t),
+                false => Redo::Again,
+            })
+        }
         _ => None,
     };
     Problem {

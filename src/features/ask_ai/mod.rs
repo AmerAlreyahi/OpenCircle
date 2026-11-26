@@ -128,11 +128,11 @@ pub enum AiError {
     /// The offline translation engine (`crate::features::translate::mt`) failed; no AI involved.
     Offline(String),
     /// A translation model is on disk but would not load or run (what the
-    /// engine said). `repair`: its files fail their pins, so Repair model
-    /// (that pair's source and target); else Try again (W116).
+    /// engine said), for the pair (source, target). The one-shot card decides
+    /// Try again or Repair model from the pair's files (W116).
     LocalFailed {
         why: String,
-        repair: Option<(&'static str, &'static str)>,
+        pair: (&'static str, &'static str),
     },
     /// Nothing to translate: the text is in the target already (its name).
     /// Not a failure: shown as a quiet note, never an error card.
@@ -267,10 +267,8 @@ impl fmt::Display for AiError {
                 write!(f, "The AI provider sent an unexpected answer: {why}")
             }
             AiError::Offline(why) => write!(f, "Local translation failed: {why}"),
-            // the first sentence is the card's plain line, the rest its folded details
-            AiError::LocalFailed { why, .. } => {
-                write!(f, "{}. {why}", crate::t!(tp_model_broke))
-            }
+            // (logs: the card's own words are built by the view)
+            AiError::LocalFailed { why, .. } => write!(f, "Local translation model failed: {why}"),
             AiError::AlreadyIn(name) => write!(f, "Already in {name}"),
             AiError::Browser(why) => f.write_str(why),
         }

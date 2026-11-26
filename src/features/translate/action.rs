@@ -34,7 +34,9 @@ pub fn deps_for(source: &str, target: &str, one_shot: bool) -> Result<(Real, Str
         target,
         ask::credentials,
     )?;
-    Ok((Real::new(source, via), target.to_string()))
+    let mut real = Real::new(source, via);
+    real.one_shot = one_shot;
+    Ok((real, target.to_string()))
 }
 
 /// The engine, without the keyring: `Some` when translation will surely be

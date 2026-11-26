@@ -1558,11 +1558,11 @@ fn selected_words_already_in_the_target_say_so() {
     assert!(card_texts(&s).iter().any(|t| t == note));
 }
 
-fn local_failed(repair: Option<(&'static str, &'static str)>) -> Error {
+fn local_failed() -> Error {
     Error::Ai(AiError::LocalFailed {
         why: "Load model from C:\\Users\\x\\OptimaMT-en-es\\encoder_model_quantized.onnx failed:system error number 13"
             .into(),
-        repair,
+        pair: ("en", "es"),
     })
 }
 
@@ -1573,14 +1573,20 @@ fn local_failed(repair: Option<(&'static str, &'static str)>) -> Error {
 fn ac4_a_failed_local_model_offers_try_again_or_repair_never_set_up_ai() {
     let size = Size::new(1280.0, 720.0);
     let at = card::place(size, None, None);
-    for (repair, want, redo) in [
-        (None, "Try again", Redo::Again),
-        (Some(("en", "es")), "Repair model", Redo::Repair("en", "es")),
+    for (damaged, want, redo) in [
+        (false, "Try again", Redo::Again),
+        (true, "Repair model", Redo::Repair("en", "es")),
     ] {
-        let p = problem_of(&local_failed(repair));
+        let p = problem_with(&local_failed(), |_| damaged);
         assert_eq!(p.redo, Some(redo));
         assert!(!p.setup, "a local model problem is not an AI setup problem");
         assert!(!p.message.contains("text recognition"), "{}", p.message);
+        assert!(
+            p.message
+                .starts_with("The translation model on this PC could not start. Load model"),
+            "{}",
+            p.message
+        );
         let mut s = session(true);
         s.phase = Phase::Failed(p);
         let texts = crate::shared::kit::testing::shot::texts(s.view(size, at, false)).join(" | ");
@@ -1591,8 +1597,14 @@ fn ac4_a_failed_local_model_offers_try_again_or_repair_never_set_up_ai() {
         assert!(!texts.contains("Local translation failed"), "{texts}");
     }
     // the others keep today's card
-    let missing = problem_of(&Error::Ai(AiError::Offline("x".into())));
+    let missing = problem_with(&Error::Ai(AiError::Offline("x".into())), |_| true);
     assert!(missing.setup && missing.redo.is_none());
+    // (Display is for logs: English, not the card's words)
+    assert!(
+        local_failed()
+            .to_string()
+            .starts_with("Local translation model failed")
+    );
 }
 
 // W116 AC-5: Try again translates again from the failed card; a card without
@@ -1600,7 +1612,7 @@ fn ac4_a_failed_local_model_offers_try_again_or_repair_never_set_up_ai() {
 #[test]
 fn ac5_try_again_translates_again_from_the_failed_card() {
     let mut s = session(true);
-    s.phase = Phase::Failed(problem_of(&local_failed(None)));
+    s.phase = Phase::Failed(problem_with(&local_failed(), |_| false));
     let _ = s.update(Msg::Redo);
     assert!(
         matches!(s.phase, Phase::Translating | Phase::Consent(_)),
@@ -1611,4 +1623,31 @@ fn ac5_try_again_translates_again_from_the_failed_card() {
     s.phase = Phase::Failed(problem("Already in English".into(), false));
     let _ = s.update(Msg::Redo);
     assert!(matches!(s.phase, Phase::Failed(_)));
+}
+
+// W116 AC-7: Repair model checks and removes files on a thread (never in the
+// update): the card shows the work at once, and only its end asks for the files again
+// (the normal download card: nothing of en -> es is on the test PC).
+#[test]
+fn ac7_repair_model_works_in_the_background_then_asks_for_the_files() {
+    let mut s = session(true);
+    s.phase = Phase::Failed(problem_with(&local_failed(), |_| true));
+    let task = s.update(Msg::Redo);
+    assert!(
+        matches!(s.phase, Phase::Translating) && s.work.is_some(),
+        "working, not blocked: {:?}",
+        s.phase
+    );
+    drop(task);
+    // a late Repaired changes nothing outside that wait
+    let mut other = session(true);
+    other.phase = Phase::Failed(problem("x".into(), false));
+    let _ = other.update(Msg::Repaired);
+    assert!(matches!(other.phase, Phase::Failed(_)));
+    let _ = s.update(Msg::Repaired);
+    assert!(
+        matches!(s.phase, Phase::Translating | Phase::Consent(_)),
+        "asks for the files again (the download card) or translates: {:?}",
+        s.phase
+    );
 }

@@ -637,7 +637,7 @@ mod tests {
             target: &str,
         ) -> Result<Vec<String>, crate::features::ask_ai::AiError> {
             let pair = crate::features::translate::mt::pair("en", target).expect("an offline pair");
-            super::super::worker::translate_via(&self.0, texts, pair)
+            super::super::worker::translate_via(&self.0, texts, pair, false)
                 .map_err(|e| crate::features::ask_ai::AiError::Offline(e.to_string()))
         }
     }

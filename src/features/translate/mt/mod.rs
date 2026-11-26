@@ -838,26 +838,24 @@ impl Pair {
         self.files().iter().map(|(_, f)| f.size).sum()
     }
 
-    /// This pair's own files that are on disk but fail their pin (size or
-    /// sha256): what a failed load blames (W116). A v1 decoder that verifies
-    /// is not one of them.
+    /// This pair's own files that opened and fail their pin (size or sha256):
+    /// what a failed load blames (W116). A file that cannot be opened (held by
+    /// another process) is never in it. Hashes the files: off the UI thread.
     fn bad_files(&'static self) -> Vec<PathBuf> {
-        failing(&self.needed(verified), &self.dir(), verified)
+        bad_in(&self.dir(), self.files(), &self.decoder, self.v1().as_ref())
     }
 
     /// A load failed: do this pair's files still fail their pins? `false`
     /// means the files are fine (another process held one, say): Try again.
+    /// Hashes the files: off the UI thread, and never for Live.
     pub fn damaged(&'static self) -> bool {
         !self.bad_files().is_empty()
     }
 
     /// Deletes the files that fail their pin, so the next Translate asks for
-    /// them with the normal download card ("Repair model").
+    /// them with the normal download card ("Repair model"). Off the UI thread.
     pub fn repair(&'static self) {
-        for path in self.bad_files() {
-            crate::log!("[opencircle] repair: removing {}", path.display());
-            let _ = std::fs::remove_file(path);
-        }
+        remove_all(&self.bad_files());
     }
 
     /// Downloads and verifies whatever is missing (OCR's files too), with
@@ -868,16 +866,58 @@ impl Pair {
     }
 }
 
-/// The `files` inside `dir` that exist but fail `ok`.
-fn failing(
-    files: &[(PathBuf, &ModelFile)],
+/// What opening and hashing a pinned file says.
+#[derive(Debug, PartialEq)]
+enum Check {
+    Good,
+    /// It opened and its size or sha256 differs from the pin.
+    Bad,
+    /// It could not be opened or read (another process holds it, say): says
+    /// nothing about the file.
+    Unreadable,
+}
+
+fn check(path: &Path, f: &ModelFile) -> Check {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Check::Unreadable;
+    };
+    match file.metadata() {
+        Ok(m) if m.len() != f.size => return Check::Bad,
+        Ok(_) => {}
+        Err(_) => return Check::Unreadable,
+    }
+    match crate::shared::update::verify::sha256(file) {
+        Ok(h) if h.iter().map(|b| format!("{b:02x}")).collect::<String>() == f.sha256 => {
+            Check::Good
+        }
+        Ok(_) => Check::Bad,
+        Err(_) => Check::Unreadable,
+    }
+}
+
+/// The `files` inside `dir` that opened and fail their pin; the `decoder`
+/// is not one while its `v1` file checks out.
+fn bad_in(
     dir: &Path,
-    ok: impl Fn(&Path, &ModelFile) -> bool,
+    files: Vec<(PathBuf, &ModelFile)>,
+    decoder: &ModelFile,
+    v1: Option<&ModelFile>,
 ) -> Vec<PathBuf> {
-    (files.iter())
-        .filter(|(p, f)| p.starts_with(dir) && p.exists() && !ok(p, f))
-        .map(|(p, _)| p.clone())
+    (files.into_iter())
+        .filter(|(p, _)| p.starts_with(dir) && p.exists())
+        .filter(|(p, f)| {
+            let old = std::ptr::eq(*f, decoder) && v1.is_some_and(|v1| check(p, v1) == Check::Good);
+            !old && check(p, f) == Check::Bad
+        })
+        .map(|(p, _)| p)
         .collect()
+}
+
+fn remove_all(paths: &[PathBuf]) {
+    for path in paths {
+        crate::log!("[opencircle] repair: removing {}", path.display());
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// `files` without `decoder` when its previous version `v1` is on disk and
@@ -1076,7 +1116,14 @@ fn verified(path: &Path, f: &ModelFile) -> bool {
 /// App side: translates `texts` with `pair` in the helper process. The
 /// models must be present (`Pair::ensure`).
 pub fn translate(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
-    text_reading::translate_in_child(texts, pair)
+    text_reading::translate_in_child(texts, pair, false)
+}
+
+/// `translate` for the one-shot Translate: a model that fails to load is
+/// tried once more after a short wait (W116). Never for Live: a batch must
+/// not wait.
+pub fn translate_retrying(texts: &[String], pair: &'static Pair) -> Result<Vec<String>, OcrError> {
+    text_reading::translate_in_child(texts, pair, true)
 }
 
 /// No ORT memory arena. glibc: ~350 MB less in a warm helper at the same

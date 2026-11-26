@@ -1877,3 +1877,22 @@ fn a_spaceless_translation_is_dealt_by_characters_and_every_line_is_replaced() {
         assert!(changed > 0, "{name} kept its original text");
     }
 }
+
+// W116 AC-8: a model that is there but failed is `LocalFailed` (for the pair, no
+// engine label); a missing one stays `Offline`. Nothing is hashed here (Live calls it).
+#[test]
+fn w116_ac8_local_error_tells_a_failed_model_from_a_missing_one() {
+    let pair = mt::pair("en", "es").unwrap();
+    assert!(matches!(
+        local_error(pair, OcrError::Missing("x".into())),
+        AiError::Offline(_)
+    ));
+    match local_error(pair, OcrError::Engine("Load model failed".into())) {
+        AiError::LocalFailed { why, pair } => {
+            assert_eq!((why.as_str(), pair), ("Load model failed", ("en", "es")));
+        }
+        e => panic!("{e:?}"),
+    }
+    let io = OcrError::Io(std::io::Error::other("held"));
+    assert!(matches!(local_error(pair, io), AiError::LocalFailed { .. }));
+}

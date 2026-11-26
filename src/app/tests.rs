@@ -6762,3 +6762,223 @@ fn w116_ac8_the_pill_offers_the_whole_screen_and_original_and_x_keep_working() {
     let _ = app.update(Message::Translate(id, pill::Msg::Close));
     assert!(app.o.is_none());
 }
+
+/// A block shown over line `i` of `text_app`'s page (frame px).
+fn block_on(i: usize, translation: &str) -> crate::features::translate::pipeline::Translation {
+    crate::features::translate::pipeline::Translation {
+        bounds: [60.0, 43.0 + 32.0 * i as f32, 400.0, 26.0],
+        original: TEXT[i].into(),
+        translation: translation.into(),
+    }
+}
+
+/// The page, translated whole (a session over the whole frame, shown with one block on line 1).
+fn page_translated() -> App {
+    let mut app = read_app();
+    let frame = app.o.frame.clone().unwrap();
+    let (session, _) =
+        pill::Session::start(frame, [0, 0, 960, 420], 1.0, app.cache.clone(), true, 0);
+    app.o.translate = Some((1, session));
+    let done = pill::Session::done_for_test(vec![block_on(1, "congelada")]);
+    let _ = app.update(Message::Translate(1, done));
+    assert!(
+        app.o
+            .translate
+            .as_ref()
+            .is_some_and(|(_, s)| s.is_shown() && !s.text_only())
+    );
+    app
+}
+
+/// W116 AC-10: a WHOLE-PAGE translation behaves exactly as before: every key is swallowed
+/// (R included), its text is not selectable, the right-click menu is off, and a tap on a
+/// translated block opens its word card.
+#[test]
+fn w116_ac10_a_whole_page_translation_is_unchanged() {
+    let mut app = page_translated();
+    for e in [
+        overlay::Event::Key {
+            letter: 'r',
+            ctrl: false,
+        },
+        overlay::Event::Key {
+            letter: 'a',
+            ctrl: true,
+        },
+        overlay::Event::Key {
+            letter: 'c',
+            ctrl: true,
+        },
+        overlay::Event::Enter,
+    ] {
+        let _ = app.update(Message::Overlay(e));
+        assert_eq!(
+            app.o.translate.as_ref().map(|(id, _)| *id),
+            Some(1),
+            "{e:?} swallowed"
+        );
+        assert!(!app.o.is_none() && !app.o.want_all, "{e:?}");
+    }
+    // its text is not selectable and the menu is off
+    assert!(!app.reads_text());
+    assert!(app.text_at(at_word(3, 2.0), word::Unit::Word).is_none());
+    assert!(app.menu_target().is_empty());
+    // a press on text is not a text selection; the release is a click: the card of the block
+    event(
+        &mut app,
+        overlay::Event::Press {
+            at: at_word(1, 7.0),
+            shift: false,
+        },
+    );
+    assert!(app.o.text_press.is_none() && app.o.word.is_none());
+    event(&mut app, overlay::Event::Release);
+    assert!(
+        app.o.translate.as_ref().is_some_and(|(_, s)| s.has_card()),
+        "the word card"
+    );
+    // a drag (a circle) leaves the translation, as before
+    let mut app = page_translated();
+    stroke(
+        &mut app,
+        &[Point::new(600.0, 250.0), Point::new(800.0, 400.0)],
+    );
+    assert!(app.o.translate.is_none());
+}
+
+/// W116 AC-11: with words translated in place on screen only the translate key and the
+/// selection's Ctrl+A / Ctrl+C get through; Ask AI (A), Enter, Space and the rest stay swallowed.
+#[test]
+fn w116_ac11_other_keys_stay_swallowed_over_words_translated_in_place() {
+    let mut app = translated_in_place();
+    let id = app.o.translate.as_ref().unwrap().0;
+    for e in [
+        overlay::Event::Key {
+            letter: 'a',
+            ctrl: false,
+        },
+        overlay::Event::Key {
+            letter: 'x',
+            ctrl: false,
+        },
+        overlay::Event::Key {
+            letter: 's',
+            ctrl: true,
+        },
+        overlay::Event::Enter,
+        overlay::Event::Space,
+    ] {
+        let _ = app.update(Message::Overlay(e));
+        assert_eq!(
+            app.o.translate.as_ref().map(|(i, s)| (*i, s.text_only())),
+            Some((id, true)),
+            "{e:?}"
+        );
+        assert!(app.o.ai_chat.is_none() && !app.o.is_none(), "{e:?}");
+    }
+    // Ctrl+A is the selection's: it reads all the text
+    let _ = app.update(Message::Overlay(overlay::Event::Key {
+        letter: 'a',
+        ctrl: true,
+    }));
+    assert!(
+        app.o.word.is_some(),
+        "Ctrl+A goes through: all the text is picked"
+    );
+}
+
+/// W116 AC-12: a tap INSIDE a translated block opens its word card (E / A / G are reachable);
+/// a tap on other text picks words.
+#[test]
+fn w116_ac12_a_tap_in_a_translated_block_opens_its_card_and_elsewhere_picks_words() {
+    let mut app = translated_in_place();
+    let id = app.o.translate.as_ref().unwrap().0;
+    let _ = app.update(Message::Translate(
+        id,
+        pill::Session::done_for_test(vec![block_on(2, "a través")]),
+    ));
+    // inside the block (line 2)
+    click_at(&mut app, at_word(2, 4.0), false);
+    assert!(
+        app.o.translate.as_ref().is_some_and(|(_, s)| s.has_card()),
+        "the word card"
+    );
+    assert!(
+        app.o.word.is_none() && app.o.text_press.is_none(),
+        "no words picked"
+    );
+    // on other text (line 4): a double-click picks the word and closes no translation
+    let p = caret(4, 8.0);
+    click_at(&mut app, p, false);
+    click_at(&mut app, p, false);
+    assert_eq!(picked_text(&app).as_deref(), Some("Shift"));
+    assert!(app.o.translate.is_some());
+}
+
+/// W116 AC-13: Ctrl+C over words that are translated copies the SHOWN translation, over
+/// other words their own text.
+#[test]
+fn w116_ac13_ctrl_c_over_translated_words_copies_the_translation() {
+    let ctrl_c = overlay::Event::Key {
+        letter: 'c',
+        ctrl: true,
+    };
+    let mut app = translated_in_place();
+    let id = app.o.translate.as_ref().unwrap().0;
+    let _ = app.update(Message::Translate(
+        id,
+        pill::Session::done_for_test(vec![block_on(2, "a través")]),
+    ));
+    // a drag over words of the translated line
+    stroke(&mut app, &[at_word(2, 0.0), at_word(2, 12.0)]);
+    assert!(picked_text(&app).is_some_and(|t| t.contains("the")));
+    let _ = copy::copied::text();
+    let task = app.update(Message::Overlay(ctrl_c));
+    run_task(&mut app, task);
+    assert_eq!(copy::copied::text().as_deref(), Some("a través"));
+    // words elsewhere copy as they are
+    let mut app = translated_in_place();
+    let id = app.o.translate.as_ref().unwrap().0;
+    let _ = app.update(Message::Translate(
+        id,
+        pill::Session::done_for_test(vec![block_on(2, "a través")]),
+    ));
+    stroke(&mut app, &[at_word(4, 0.0), at_word(4, 10.0)]);
+    let own = picked_text(&app).expect("words picked");
+    let _ = copy::copied::text();
+    let task = app.update(Message::Overlay(ctrl_c));
+    run_task(&mut app, task);
+    assert_eq!(copy::copied::text(), Some(own));
+}
+
+/// W116 AC-14 (owner, 2026-11-26): while the Original shows there is no dim over the
+/// screen; it returns with the translation.
+#[test]
+fn w116_ac14_no_dim_while_the_original_shows() {
+    let mut app = open_app(800, 600, 1.0);
+    drag(
+        &mut app,
+        Point::new(50.0, 50.0),
+        Point::new(300.0, 200.0),
+        false,
+    );
+    assert!(app.o.selection.is_some());
+    let frame = app.o.frame.clone().unwrap();
+    let (session, _) =
+        pill::Session::start(frame, [50, 50, 300, 200], 1.0, app.cache.clone(), true, 0);
+    app.o.translate = Some((1, session));
+    let block = crate::features::translate::pipeline::Translation {
+        bounds: [60.0, 60.0, 100.0, 20.0],
+        original: "hello".into(),
+        translation: "hola".into(),
+    };
+    let _ = app.update(Message::Translate(
+        1,
+        pill::Session::done_for_test(vec![block]),
+    ));
+    assert!(app.dims(), "the translation dims around its selection");
+    let _ = app.update(Message::Translate(1, pill::Msg::Original));
+    assert!(!app.dims(), "no dim over the original");
+    let _ = app.update(Message::Translate(1, pill::Msg::Original));
+    assert!(app.dims(), "the dim returns with the translation");
+}

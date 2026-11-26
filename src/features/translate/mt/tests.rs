@@ -736,24 +736,96 @@ fn real_portuguese_translates() {
     }
 }
 
-// W116 AC-3: after a failed load, the pair's files that fail their pin are
-// found (and only those that exist: a missing file is the download's job).
-#[test]
-fn ac3_files_that_fail_their_pin_are_found() {
-    let dir = std::env::temp_dir().join(format!("oc-mt-w116-{}", std::process::id()));
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("oc-mt-w116-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+// W116 AC-3: after a failed load, a file is blamed only when it OPENED and its
+// size or sha256 differs. A missing file is the download's job; a file that cannot
+// be opened (held by another process: the owner's error 13) is never blamed, and
+// repair never deletes it.
+#[test]
+fn ac3_only_a_file_that_opened_and_differs_is_bad() {
+    let dir = scratch("bad");
     let good = pinned("good.onnx", b"good bytes");
-    let bad = pinned("bad.onnx", b"the right bytes");
+    let wrong = pinned("wrong.onnx", b"the right bytes");
+    let short = pinned("short.onnx", b"the right bytes");
     let gone = pinned("gone.onnx", b"never written");
     std::fs::write(dir.join("good.onnx"), b"good bytes").unwrap();
-    std::fs::write(dir.join("bad.onnx"), b"the wrong bytes").unwrap();
+    std::fs::write(dir.join("wrong.onnx"), b"the wrong bytes").unwrap(); // same size, other content
+    std::fs::write(dir.join("short.onnx"), b"cut").unwrap();
+    assert_eq!(check(&dir.join("good.onnx"), good), Check::Good);
+    assert_eq!(check(&dir.join("wrong.onnx"), wrong), Check::Bad);
+    assert_eq!(check(&dir.join("short.onnx"), short), Check::Bad);
+    assert_eq!(check(&dir.join("gone.onnx"), gone), Check::Unreadable);
     let files = vec![
         (dir.join("good.onnx"), good),
-        (dir.join("bad.onnx"), bad),
+        (dir.join("wrong.onnx"), wrong),
+        (dir.join("short.onnx"), short),
         (dir.join("gone.onnx"), gone),
-        (std::env::temp_dir().join("elsewhere.onnx"), bad),
+        (std::env::temp_dir().join("elsewhere.onnx"), wrong),
     ];
-    assert_eq!(failing(&files, &dir, verified), vec![dir.join("bad.onnx")]);
+    let mut bad = bad_in(&dir, files, good, None);
+    bad.sort();
+    assert_eq!(bad, vec![dir.join("short.onnx"), dir.join("wrong.onnx")]);
+    // repair removes exactly those
+    remove_all(&bad);
+    assert_eq!(files_in(&dir), ["good.onnx"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// A file that exists but cannot be opened says nothing about its content: not
+// bad, never deleted (unix: a mode-000 file; a root-run test can open it, so skipped).
+#[cfg(unix)]
+#[test]
+fn ac3_a_file_that_cannot_be_opened_is_never_bad_or_deleted() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("held");
+    let held = pinned("held.onnx", b"the right bytes");
+    let path = dir.join("held.onnx");
+    std::fs::write(&path, b"the wrong bytes").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&path).is_ok() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return; // root: nothing is unreadable here
+    }
+    assert_eq!(check(&path, held), Check::Unreadable);
+    let bad = bad_in(&dir, vec![(path.clone(), held)], held, None);
+    assert!(bad.is_empty(), "{bad:?}");
+    remove_all(&bad);
+    assert!(path.exists());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// W116 AC-3: the v1 decoder case: a v1 decoder that verifies is not bad (the pair
+// keeps translating with it); a v1-sized file with other content is.
+#[test]
+fn ac3_a_good_v1_decoder_is_kept_and_a_corrupt_one_is_removed() {
+    let dir = scratch("v1");
+    let v2 = pinned("decoder.onnx", b"the lighter v2 bytes");
+    let v1 = pinned("decoder.onnx", b"the older v1 bytes!!!");
+    let path = dir.join("decoder.onnx");
+    let bad = |on_disk: &[u8]| {
+        std::fs::write(&path, on_disk).unwrap();
+        bad_in(&dir, vec![(path.clone(), v2)], v2, Some(v1))
+    };
+    assert!(
+        bad(b"the older v1 bytes!!!").is_empty(),
+        "a verified v1 stays"
+    );
+    assert!(bad(b"the lighter v2 bytes").is_empty(), "v2 verifies");
+    assert_eq!(
+        bad(b"the older v1 bytes???"),
+        vec![path.clone()],
+        "v1 size, other content"
+    );
+    assert_eq!(bad(b"neither"), vec![path.clone()]);
+    // no v1 pin: only the v2 content is good
+    std::fs::write(&path, b"the older v1 bytes!!!").unwrap();
+    assert_eq!(bad_in(&dir, vec![(path.clone(), v2)], v2, None), vec![path]);
     let _ = std::fs::remove_dir_all(&dir);
 }

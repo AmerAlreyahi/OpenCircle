@@ -1298,7 +1298,7 @@ fn profile_helper() {
         fn translate(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
             let pair = crate::features::translate::mt::pair("en", target).unwrap();
             by_sentence(texts, |t| {
-                worker::translate_via(|p| self.call(p), t, pair)
+                worker::translate_via(|p| self.call(p), t, pair, false)
                     .map_err(|e| AiError::Offline(e.to_string()))
             })
         }

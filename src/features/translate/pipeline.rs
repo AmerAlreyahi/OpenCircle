@@ -66,6 +66,8 @@ pub struct Real {
     pub via: Via,
     /// The monitor's scale (Windows OCR reads small text better doubled).
     pub scale: f32,
+    /// One-shot Translate (not Live): a model load that fails is tried again.
+    pub one_shot: bool,
     /// Offline: the pair a translation needed whose models are missing (the
     /// UI then asks to download it).
     missing: Mutex<Option<&'static mt::Pair>>,
@@ -113,6 +115,7 @@ impl Real {
             source: source.into(),
             via,
             scale: 1.0,
+            one_shot: false,
             missing: Mutex::new(None),
             guessed: Mutex::default(),
             held: Mutex::default(),
@@ -347,8 +350,14 @@ impl Real {
     /// `texts` into `target` with the on-device model(s): through English
     /// when there is no direct one.
     fn on_device(&self, texts: &[String], target: &str) -> Result<Vec<String>, AiError> {
-        self.on_device_with(texts, target, |t, pair| {
-            mt::translate(t, pair).map_err(|e| local_error(pair, e))
+        let one_shot = self.one_shot;
+        self.on_device_with(texts, target, move |t, pair| {
+            // (Live never waits to load a model again)
+            let got = match one_shot {
+                true => mt::translate_retrying(t, pair),
+                false => mt::translate(t, pair),
+            };
+            got.map_err(|e| local_error(pair, e))
         })
     }
 
@@ -1710,14 +1719,14 @@ pub struct Translated {
 /// error returns before anything is drawn (never a half-translated frame).
 /// What an offline model's failure says (W116): a model that isn't there
 /// stays `Offline` (download it, or set up AI); one that is there but did
-/// not load or run is `LocalFailed`, which knows by its sha256 whether its
-/// files are damaged (Repair model) or not (Try again).
+/// not load or run is `LocalFailed`. Cheap: the one-shot card checks the
+/// files' sha256 itself (Live never does).
 pub(crate) fn local_error(pair: &'static mt::Pair, e: OcrError) -> AiError {
     match e {
         OcrError::Missing(_) => AiError::Offline(e.to_string()),
         e => AiError::LocalFailed {
             why: e.detail(),
-            repair: pair.damaged().then_some((pair.source, pair.target)),
+            pair: (pair.source, pair.target),
         },
     }
 }

@@ -174,6 +174,30 @@ impl App {
         let o = &mut *self.o;
         if let Some((id, session)) = &mut o.translate {
             let id = *id;
+            let scale = o.scale;
+            let shown_copy = (session.text_only()
+                && matches!(
+                    event,
+                    overlay::Event::Key {
+                        letter: 'c',
+                        ctrl: true
+                    }
+                ))
+            .then(|| match &o.word {
+                None => session.translated_text(),
+                Some(w) => {
+                    let rects: Vec<Rectangle> = (w.rects().iter())
+                        .map(|r| {
+                            Rectangle::new(
+                                Point::new(r.x * scale, r.y * scale),
+                                Size::new(r.width * scale, r.height * scale),
+                            )
+                        })
+                        .collect();
+                    session.translated_over(&rects)
+                }
+            })
+            .flatten();
             match event {
                 // (the Add to glossary form is typing: its keys are the field's)
                 overlay::Event::Enter if session.adding() => {
@@ -198,12 +222,14 @@ impl App {
                 } if session.has_card() => {
                     return self.on_translate(id, pill::Msg::Ask);
                 }
-                // Selected words translated in place: Ctrl+C copies the TRANSLATED text (W112)
+                // Selected words translated in place: Ctrl+C copies the TRANSLATED text (W112),
+                // of every shown word when none is picked, else of the picked translated
+                // words; other picked words copy as ever
                 overlay::Event::Key {
                     letter: 'c',
                     ctrl: true,
-                } if session.text_only() && o.word.is_none() => {
-                    return match session.translated_text() {
+                } if session.text_only() && (o.word.is_none() || shown_copy.is_some()) => {
+                    return match shown_copy {
                         Some(text) => self.copy_text(text),
                         None => Task::none(),
                     };
@@ -216,19 +242,39 @@ impl App {
                 {
                     return self.snip_here(None);
                 }
-                // Words translated in place (W116): the keys (R, Ctrl+A ...) and the mouse go
-                // the normal way, so other words can be picked and translated (R replaces this
-                // translation; with nothing picked it translates the whole screen).
-                overlay::Event::Key { .. } | overlay::Event::Enter | overlay::Event::Space
-                    if !session.text_only() =>
+                // Words translated in place (W116): only the translate key (R replaces this
+                // translation; with nothing picked it translates the whole screen) and the
+                // selection's Ctrl+A / Ctrl+C go the normal way; the mouse too, so other words
+                // can be picked. Every other key stays swallowed.
+                overlay::Event::Key { letter, ctrl }
+                    if !(session.text_only()
+                        && (ctrl && matches!(letter, 'a' | 'c')
+                            || actions::for_key(&o.labs, letter, ctrl).is_some_and(|a| {
+                                a.id == crate::features::translate::action::ACTION.id
+                            }))) =>
                 {
                     return Task::none();
                 }
-                // (a press on text is a selection: its release ends that, the translation stays)
-                overlay::Event::Release if session.text_only() && o.text_press.is_some() => {}
+                overlay::Event::Enter | overlay::Event::Space => return Task::none(),
+                // (a press on text is a selection: its release ends that and the translation
+                // stays; a tap INSIDE a translated block opens its word card instead)
+                overlay::Event::Release if session.text_only() && o.text_press.is_some() => {
+                    let tap = (o.text_press.as_ref())
+                        .filter(|t| overlay::is_tap(t, o.view.zoom()))
+                        .and_then(|t| t.first().copied())
+                        .map(|p| Point::new(p.x * scale, p.y * scale))
+                        .filter(|p| session.translated_at(*p));
+                    if let Some(p) = tap {
+                        (o.text_press, o.word, o.selection) = (None, None, None);
+                        o.stroke.clear();
+                        o.drawing = false;
+                        session.click(p);
+                        return Task::none();
+                    }
+                }
                 overlay::Event::Release if overlay::select(&o.stroke, 1.0).is_none() => {
                     let at = o.stroke.last().copied().unwrap_or(Point::ORIGIN);
-                    session.click(Point::new(at.x * o.scale, at.y * o.scale));
+                    session.click(Point::new(at.x * scale, at.y * scale));
                     self.o.drawing = false;
                     self.o.stroke.clear();
                     return Task::none();
