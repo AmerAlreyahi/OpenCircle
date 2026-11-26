@@ -66,21 +66,39 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let m = margin(e) * k;
     let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
     // (Snip's bare live area: the frozen frame under it shows through)
-    let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
-        true => iced::widget::space().into(),
-        false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
-            .filter_method(filter(e))
-            .width(size.width)
-            .height(size.height)
-            .content_fit(ContentFit::Fill))
-        .position(Point::new(m, m))
-        .into(),
-    }];
+    let z = e.zoom * k;
+    let mut layers: Vec<Element<'_, Message>> =
+        vec![match (e.bare(), &e.display, e.display_crop) {
+            (true, _, _) => iced::widget::space().into(),
+            (false, Some(disp), Some(crop)) => pin(image(disp.clone())
+                .filter_method(filter(e))
+                .width(crop.width * z)
+                .height(crop.height * z)
+                .content_fit(ContentFit::Fill))
+            .position(Point::new(
+                (crop.x - view.x) * z + m,
+                (crop.y - view.y) * z + m,
+            ))
+            .into(),
+            (false, Some(disp), None) => pin(image(disp.clone())
+                .filter_method(filter(e))
+                .width(size.width)
+                .height(size.height)
+                .content_fit(ContentFit::Fill))
+            .position(Point::new(m, m))
+            .into(),
+            (false, None, _) => pin(image(e.base.clone())
+                .filter_method(filter(e))
+                .width(size.width)
+                .height(size.height)
+                .content_fit(ContentFit::Fill))
+            .position(Point::new(m, m))
+            .into(),
+        }];
     // Always a layer here, live or not: the canvas must keep its index, or iced
     // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
     // Always the same two layers here (the canvas keeps its index): the committed
     // Hides' patches (one nested stack), then the live one.
-    let z = e.zoom * k;
     let place = |(r, handle): &(Rectangle, image::Handle)| {
         let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
         pin(image(handle.clone())
@@ -144,8 +162,13 @@ struct CommittedVectors<'a> {
 
 #[derive(Default)]
 struct CommittedCache {
-    cache: canvas::Cache,
-    key: std::cell::Cell<Option<[u64; 6]>>,
+    view_key: std::cell::Cell<Option<[u64; 4]>>,
+    spot_holes: std::cell::RefCell<Vec<Rectangle>>,
+    spot_cache: canvas::Cache,
+    /// Per-document-index cached vector geometry: moving or hiding one item
+    /// keeps every unmoved item's Arc<Geometry> pointer intact (zero rebuild,
+    /// zero damage outside the moved item).
+    items: std::cell::RefCell<Vec<Option<(crate::features::snip::annotate::Item, canvas::Cache)>>>,
 }
 
 impl canvas::Program<Message> for CommittedVectors<'_> {
@@ -164,21 +187,55 @@ impl canvas::Program<Message> for CommittedVectors<'_> {
         let k = self.map.k;
         if m == 0.0 {
             let v = e.doc.view();
-            let key = [
-                e.vector_gen(),
-                e.pending_hidden_index().map_or(u64::MAX, |i| i as u64),
+            let view_key = [
                 (u64::from(v.x.to_bits()) << 32) | u64::from(v.y.to_bits()),
                 (u64::from(v.width.to_bits()) << 32) | u64::from(v.height.to_bits()),
                 (u64::from(e.zoom.to_bits()) << 32) | u64::from(k.to_bits()),
                 (u64::from(bounds.width.to_bits()) << 32) | u64::from(bounds.height.to_bits()),
             ];
-            if state.key.get() != Some(key) {
-                state.cache.clear();
-                state.key.set(Some(key));
+            let mut slots = state.items.borrow_mut();
+            if state.view_key.get() != Some(view_key) {
+                state.view_key.set(Some(view_key));
+                state.spot_cache.clear();
+                state.spot_holes.borrow_mut().clear();
+                slots.clear();
             }
-            vec![state.cache.draw(renderer, bounds.size(), |f| {
-                e.draw_committed_vectors(f, 0.0, k);
-            })]
+            let holes = e.committed_spotlight_holes();
+            let mut out = Vec::new();
+            if !holes.is_empty() {
+                let mut cached_holes = state.spot_holes.borrow_mut();
+                if *cached_holes != holes {
+                    state.spot_cache.clear();
+                    *cached_holes = holes.clone();
+                }
+                out.push(state.spot_cache.draw(renderer, bounds.size(), |f| {
+                    e.draw_committed_spotlights(f, &holes, 0.0, k);
+                }));
+            } else {
+                let mut cached_holes = state.spot_holes.borrow_mut();
+                if !cached_holes.is_empty() {
+                    state.spot_cache.clear();
+                    cached_holes.clear();
+                }
+            }
+            let total = e.doc.items.len();
+            if slots.len() < total {
+                slots.resize_with(total, || None);
+            } else if slots.len() > total {
+                slots.truncate(total);
+            }
+            for (i, item) in e.committed_vector_items() {
+                let hit = slots[i].as_ref().is_some_and(|(prev, _)| prev == item);
+                if !hit {
+                    slots[i] = Some((item.clone(), canvas::Cache::new()));
+                }
+                if let Some((_, cache)) = &slots[i] {
+                    out.push(cache.draw(renderer, bounds.size(), |f| {
+                        e.draw_one_vector(f, item, 0.0, k);
+                    }));
+                }
+            }
+            out
         } else {
             let clip = Rectangle::new(Point::new(m * k, m * k), e.size() * k);
             let mut cf = Frame::with_bounds(renderer, clip);

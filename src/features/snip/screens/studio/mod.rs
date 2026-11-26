@@ -1600,7 +1600,7 @@ impl Studio {
             Msg::Scrolled(offset) => {
                 self.offset = offset;
                 self.pending_scroll = None;
-                self.sync_view();
+                self.sync_stage();
                 Outcome::None
             }
             Msg::Ctrl(down) => {
@@ -2458,13 +2458,13 @@ impl Studio {
         self.sync_stage();
     }
 
-    /// Refreshes the stage's mipmap copy and editor viewport without changing zoom or scroll.
+    /// Refreshes the editor viewport and stage's scaled display copy without changing zoom or scroll.
     fn sync_stage(&mut self) {
+        self.sync_view();
         let scale = self.scale;
         if let Some(e) = &mut self.editor {
             stage_copy(e, scale, &mut self.mips);
         }
-        self.sync_view();
     }
 
     /// Tells the editor which part of the picture the stage shows (its pixel
@@ -2508,7 +2508,7 @@ impl Studio {
         let offset = Vector::new(offset.x.clamp(0.0, max_x), offset.y.clamp(0.0, max_y));
         self.offset = offset;
         self.pending_scroll = None;
-        self.sync_view();
+        self.sync_stage();
         Outcome::ScrollTo(AbsoluteOffset {
             x: offset.x,
             y: offset.y,
@@ -2547,81 +2547,270 @@ fn fit_zoom(picture: Size, stage: Size, scale: f32) -> f32 {
 /// on every crop frame (release, drag mean 6.1 ms, worst 13.7, against 1.0 with the copy; 4K already had it).
 const MIP_MIN_PIXELS: u32 = 1_000_000;
 
+/// A cached scaled display copy: either full-image (crop = None, shrunk < 100 %)
+/// or a smooth bilinearly-upscaled viewport tile (crop = Some, 100-200 %).
+#[derive(Clone)]
+struct MipReady {
+    width: u32,
+    crop: Option<iced::Rectangle>,
+    handle: image::Handle,
+}
+
 /// The copy of one base picture at about the size the stage shows it, made on a thread.
 pub(super) struct Mips {
     key: iced::advanced::image::Id,
-    /// The copy and its width, once made.
-    ready: Option<(u32, image::Handle)>,
-    /// The thread making one: the width it makes, and where it leaves it.
-    pending: Option<(u32, MipSlot)>,
+    /// The copy and its width/crop, once made.
+    ready: Option<MipReady>,
+    /// The thread making one: the width/crop it makes, and where it leaves it.
+    pub(super) pending: Option<(u32, Option<iced::Rectangle>, MipSlot)>,
 }
 
 /// Where the thread leaves the copy.
 type MipSlot = std::sync::Arc<std::sync::Mutex<Option<image::Handle>>>;
 
-/// Sets `e.display` and `e.crisp` for the stage's zoom. Shown at 100 % the picture itself draws
-/// pixel for pixel; shown smaller (over 25 % less) a big picture draws from a copy of about the
-/// shown size, made on a thread (box-filtered: 4K ~17 ms, 8K ~75 ms), until which the picture
-/// draws as before. The renderer's pixel-for-pixel path (nearest) then copies only the visible
-/// rows: the full 8K at the fit zoom cost 22 ms a frame through the linear pipeline, 100 % 40 ms;
-/// this ~1-3 ms (w90d report).
+fn rect_contains(outer: iced::Rectangle, inner: iced::Rectangle) -> bool {
+    inner.x >= outer.x - 0.5
+        && inner.y >= outer.y - 0.5
+        && inner.x + inner.width <= outer.x + outer.width + 0.5
+        && inner.y + inner.height <= outer.y + outer.height + 0.5
+}
+
+/// Sets e.display, e.display_crop and e.crisp for the stage's zoom.
+/// - Shown at 100 % or >= 200 %: base itself, pixel-for-pixel (Nearest, no copy).
+/// - Shown smaller (< 100 %, including 80-99 %): full box-filtered copy at shown size (Nearest).
+/// - Shown between 100 % and 200 % (e.g. 150 %): smooth bilinearly-upscaled viewport tile
+///   (Nearest blit of pre-filtered pixels; falls back to smooth Linear while building).
 fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
+    e.display_scale = scale;
     let image::Handle::Rgba {
-        id,
-        width,
-        height,
-        pixels,
+        id, width, height, ..
     } = &e.base
     else {
-        (e.display, e.crisp) = (None, false);
+        (e.display, e.display_crop, e.crisp) = (None, None, false);
         *mips = None;
         return;
     };
-    let want = (*width as f32 * e.zoom * scale).round().max(1.0);
-    let actual = (want - *width as f32).abs() < 1.0;
-    if *width * *height < MIP_MIN_PIXELS || want * 1.25 > *width as f32 {
-        // (a small or hardly-shrunk picture: itself; at 100 % and magnified 200 % and more, as
-        // the editors do, pixel for pixel: no copy and the fast path)
-        (e.display, e.crisp) = (None, actual || e.zoom * scale >= 2.0);
-        // (the copy of an earlier, bigger picture goes: it holds its memory and its thread's result)
+    let (id, bw, bh) = (*id, *width, *height);
+    let z = e.zoom * scale;
+    let want = (bw as f32 * z).round().max(1.0);
+    let actual = (want - bw as f32).abs() < 1.0;
+
+    // Small picture, 100 %, or >= 200 %: draw base directly.
+    if bw * bh < MIP_MIN_PIXELS || actual || z >= 2.0 {
+        if e.base_stale {
+            e.sync_base();
+        }
+        (e.display, e.display_crop, e.crisp) = (None, None, actual || z >= 2.0);
         *mips = None;
         return;
     }
+
+    // Smooth upscale regime: 100 % < z < 200 % (e.g. 150 %).
+    if want > bw as f32 {
+        let Some(vp) = e.viewport else {
+            if e.base_stale {
+                e.sync_base();
+            }
+            (e.display, e.display_crop, e.crisp) = (None, None, false);
+            *mips = None;
+            return;
+        };
+        let view = e.doc.view();
+        let vis_raw = iced::Rectangle::new(
+            Point::new(view.x + vp.x / e.zoom, view.y + vp.y / e.zoom),
+            Size::new(vp.width / e.zoom, vp.height / e.zoom),
+        );
+        let Some(vis) = vis_raw.intersection(&view) else {
+            (e.display, e.display_crop, e.crisp) = (None, None, false);
+            return;
+        };
+        // Padded tile around visible rect, capped to <= 3072 px per side (~36 MB max).
+        let max_img_w = (3072.0 / z).max(vis.width);
+        let max_img_h = (3072.0 / z).max(vis.height);
+        let pad_x = (vis.width * 0.5).min((max_img_w - vis.width).max(0.0) * 0.5);
+        let pad_y = (vis.height * 0.5).min((max_img_h - vis.height).max(0.0) * 0.5);
+        let x0 = (vis.x - pad_x).max(view.x).floor();
+        let y0 = (vis.y - pad_y).max(view.y).floor();
+        let x1 = (vis.x + vis.width + pad_x)
+            .min(view.x + view.width)
+            .ceil()
+            .min(x0 + max_img_w.floor());
+        let y1 = (vis.y + vis.height + pad_y)
+            .min(view.y + view.height)
+            .ceil()
+            .min(y0 + max_img_h.floor());
+        let crop = iced::Rectangle::new(
+            Point::new(x0, y0),
+            Size::new((x1 - x0).max(1.0), (y1 - y0).max(1.0)),
+        );
+        let tile_w = (crop.width * z).round().max(1.0) as u32;
+        let tile_h = (crop.height * z).round().max(1.0) as u32;
+        let matches = |r: &MipReady| {
+            let Some(rc) = r.crop else {
+                return false;
+            };
+            let expect = (rc.width * z).round().max(1.0) as u32;
+            r.width.abs_diff(expect) * 50 <= expect && rect_contains(rc, vis)
+        };
+        if mips.as_ref().is_none_or(|m| m.key != id) {
+            let ready = match (&e.display, e.display_crop) {
+                (Some(h @ image::Handle::Rgba { width: dw, .. }), Some(rc)) => {
+                    let cand = MipReady {
+                        width: *dw,
+                        crop: Some(rc),
+                        handle: h.clone(),
+                    };
+                    matches(&cand).then_some(cand)
+                }
+                _ => None,
+            };
+            *mips = Some(Mips {
+                key: id,
+                ready,
+                pending: None,
+            });
+        }
+        let Some(m) = mips else { return };
+        if let Some((pw, pcrop, slot)) = &m.pending
+            && let Some(done) = slot.lock().ok().and_then(|mut s| s.take())
+        {
+            m.ready = Some(MipReady {
+                width: *pw,
+                crop: *pcrop,
+                handle: done,
+            });
+            m.pending = None;
+        }
+        // Adopt an already-patched in-place display tile if it matches.
+        if let (Some(h @ image::Handle::Rgba { width: dw, .. }), Some(rc)) =
+            (&e.display, e.display_crop)
+        {
+            let cand = MipReady {
+                width: *dw,
+                crop: Some(rc),
+                handle: h.clone(),
+            };
+            if matches(&cand) && m.ready.as_ref().is_none_or(|r| r.handle.id() != h.id()) {
+                m.ready = Some(cand);
+            }
+        }
+        if m.ready.as_ref().is_none_or(|r| !matches(r)) && m.pending.is_none() {
+            if e.base_stale {
+                e.sync_base();
+                if let image::Handle::Rgba { id: new_id, .. } = &e.base {
+                    m.key = *new_id;
+                }
+            }
+            if let image::Handle::Rgba { pixels, .. } = &e.base {
+                let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+                let (out, px) = (slot.clone(), pixels.clone());
+                std::thread::spawn(move || {
+                    let tile = annotate::upsample_bilinear_crop(
+                        px.as_ref(),
+                        bw,
+                        bh,
+                        crop,
+                        view,
+                        tile_w,
+                        tile_h,
+                    );
+                    if let Ok(mut out) = out.lock() {
+                        *out = Some(image::Handle::from_rgba(tile_w, tile_h, tile));
+                    }
+                });
+                m.pending = Some((tile_w, Some(crop), slot));
+            }
+        }
+        if let Some(r) = m.ready.as_ref().filter(|r| matches(r)) {
+            e.display = Some(r.handle.clone());
+            e.display_crop = r.crop;
+            e.crisp = true;
+        } else {
+            if e.base_stale {
+                e.sync_base();
+            }
+            e.display = None;
+            e.display_crop = None;
+            e.crisp = false;
+        }
+        return;
+    }
+
+    // Shrunk regime (< 100 %, including Fit and 80-99 % such as 90 %).
     let want = want as u32;
     let near = |w: u32| w.abs_diff(want) * 50 <= want; // within 2 %
-    if mips.as_ref().is_none_or(|m| m.key != *id) {
-        let ready = match &e.display {
-            Some(h @ image::Handle::Rgba { width: dw, .. }) if near(*dw) => Some((*dw, h.clone())),
+    if mips.as_ref().is_none_or(|m| m.key != id) {
+        let ready = match (&e.display, e.display_crop) {
+            (Some(h @ image::Handle::Rgba { width: dw, .. }), None) if near(*dw) => {
+                Some(MipReady {
+                    width: *dw,
+                    crop: None,
+                    handle: h.clone(),
+                })
+            }
             _ => None,
         };
         *mips = Some(Mips {
-            key: *id,
+            key: id,
             ready,
             pending: None,
         });
     }
     let Some(m) = mips else { return };
-    if let Some((w, slot)) = &m.pending
+    if let Some((pw, pcrop, slot)) = &m.pending
         && let Some(done) = slot.lock().ok().and_then(|mut s| s.take())
     {
-        m.ready = Some((*w, done));
+        m.ready = Some(MipReady {
+            width: *pw,
+            crop: *pcrop,
+            handle: done,
+        });
         m.pending = None;
     }
-    if m.ready.as_ref().is_none_or(|(w, _)| !near(*w)) && m.pending.is_none() {
-        let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let (out, (bw, bh), px) = (slot.clone(), (*width, *height), pixels.clone());
-        std::thread::spawn(move || {
-            let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
-            let small = annotate::downsample(px.as_ref(), bw, bh, want, th);
-            if let Ok(mut out) = out.lock() {
-                *out = Some(image::Handle::from_rgba(want, th, small));
-            }
+    // Adopt an in-place patched full display copy (from patch_base/refresh) so no thread spawns.
+    if let (Some(h @ image::Handle::Rgba { width: dw, .. }), None) = (&e.display, e.display_crop)
+        && near(*dw)
+        && m.ready.as_ref().is_none_or(|r| r.handle.id() != h.id())
+    {
+        m.ready = Some(MipReady {
+            width: *dw,
+            crop: None,
+            handle: h.clone(),
         });
-        m.pending = Some((want, slot));
     }
-    // (an older size draws meanwhile, stretched a little; none yet: the picture as before)
-    e.display = m.ready.as_ref().map(|(_, h)| h.clone());
-    e.crisp = e.display.is_some();
+    if m.ready
+        .as_ref()
+        .is_none_or(|r| r.crop.is_some() || !near(r.width))
+        && m.pending.is_none()
+    {
+        if e.base_stale {
+            e.sync_base();
+            if let image::Handle::Rgba { id: new_id, .. } = &e.base {
+                m.key = *new_id;
+            }
+        }
+        if let image::Handle::Rgba { pixels, .. } = &e.base {
+            let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let (out, px) = (slot.clone(), pixels.clone());
+            std::thread::spawn(move || {
+                let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
+                let small = annotate::downsample(px.as_ref(), bw, bh, want, th);
+                if let Ok(mut out) = out.lock() {
+                    *out = Some(image::Handle::from_rgba(want, th, small));
+                }
+            });
+            m.pending = Some((want, None, slot));
+        }
+    }
+    if let Some(r) = m.ready.as_ref().filter(|r| r.crop.is_none()) {
+        e.display = Some(r.handle.clone());
+        e.display_crop = None;
+        e.crisp = true;
+    } else {
+        e.display = None;
+        e.display_crop = None;
+        e.crisp = false;
+    }
 }
 
 /// The unsaved copy a Tick hands the host.

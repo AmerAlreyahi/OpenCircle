@@ -679,6 +679,12 @@ pub struct Annotator {
     /// the CPU renderer redraws a downscaled 8K picture from its full pixels every frame, 25 ms, and
     /// 1 ms from this); `None`: draw `base`. Cleared whenever `base` is repainted.
     pub(crate) display: Option<image::Handle>,
+    /// When display holds a smooth upscaled viewport tile (100-200 % zoom), its source rect
+    /// in image px; None means display covers the whole doc.view().
+    pub(crate) display_crop: Option<Rectangle>,
+    /// OS scale factor last seen by Studio stage_copy (0.0 outside Studio); lets refresh()
+    /// rebuild display synchronously without dropping crisp for a frame.
+    pub(crate) display_scale: f32,
     /// Draw the picture with the renderer's pixel-for-pixel fast path (nearest, clipped rows): the
     /// Studio sets it when the picture lands 1:1 or from a copy of about its shown size, where it
     /// looks the same and costs a copy of the visible rows (a linear draw of an 8K picture: 40 ms).
@@ -817,13 +823,16 @@ pub struct Annotator {
     /// Live layers painted so far (the tests count them).
     paints: std::cell::Cell<usize>,
     /// Visible prefix items currently baked into `base` (plus patch).
-    baked_items: Vec<Item>,
+    baked_items: Vec<(usize, Item, u32)>,
+    baked_mask: Vec<bool>,
+    baked_spot_holes: Vec<Rectangle>,
+    baked_excludes: Vec<Rectangle>,
     baked_view: Rectangle,
     baked_image_gen: u64,
     baked_seed: u64,
     baked_legend: bool,
     base_ready: bool,
-    /// Bumped whenever the committed vector tail changes (cache key for canvas).
+    pub(crate) base_stale: bool,
     vector_gen: u64,
 }
 
@@ -910,6 +919,8 @@ impl Annotator {
             style: None,
             base: image::Handle::from_rgba(1, 1, vec![0; 4]),
             display: None,
+            display_crop: None,
+            display_scale: 0.0,
             crisp: false,
             legend: None,
             live: std::cell::RefCell::new(None),
@@ -973,11 +984,15 @@ impl Annotator {
             touch: 0,
             paints: std::cell::Cell::new(0),
             baked_items: Vec::new(),
+            baked_mask: Vec::new(),
+            baked_spot_holes: Vec::new(),
+            baked_excludes: Vec::new(),
             baked_view: Rectangle::default(),
             baked_image_gen: 0,
             baked_seed: 0,
             baked_legend: false,
             base_ready: false,
+            base_stale: false,
             vector_gen: 0,
             saved,
         };
@@ -1967,112 +1982,98 @@ impl Annotator {
         let Some(pending) = &mut self.pending else {
             return;
         };
-        let (Some(idx), false) = (pending.index, pending.hidden) else {
+        let (Some(_idx), false) = (pending.index, pending.hidden) else {
             return;
         };
         pending.hidden = true;
-        let tail = self.vector_tail_start();
-        if idx >= tail && self.base_ready && self.baked_matches(tail, Some(idx)) {
-            self.vector_gen = self.vector_gen.wrapping_add(1);
-            self.update_live();
-            return;
-        }
-        let can_patch = !matches!(
-            self.doc.items[idx].shape,
-            Shape::Spotlight { .. } | Shape::Blur { .. }
-        );
-        let area = self.doc.items[idx].bounds();
-        if can_patch && self.patch_base(area) {
-            self.update_live();
-        } else {
-            self.refresh();
-        }
+        self.sync_layers();
     }
 
-    /// Repaints only the changed area into base (and the mapped rect in display, keeping
-    /// crisp) instead of flattening the whole 4K/8K picture.
-    fn patch_base(&mut self, area: Rectangle) -> bool {
-        if self.bare()
-            || self.legend.is_some()
-            || !self.patch.is_empty()
-            || (self.doc.items.iter())
-                .any(|item| !item.hidden && matches!(item.shape, Shape::Spotlight { .. }))
-        {
+    /// Repaints only the changed area into display (fast path, no 133 MB base clone) or
+    /// into base when display is None, keeping crisp and all outside pixels bit-identical.
+    fn patch_base(
+        &mut self,
+        area: Rectangle,
+        want_mask: &[bool],
+        want_baked: Vec<(usize, Item, u32)>,
+        want_spot_holes: Vec<Rectangle>,
+        want_excludes: Vec<Rectangle>,
+    ) -> bool {
+        if self.bare() || self.legend.is_some() || !self.patch.is_empty() {
             return false;
         }
         let view = self.doc.view();
         let vr = int_rect(view, view);
-        let image::Handle::Rgba {
-            width: bw,
-            height: bh,
-            pixels: base_px,
-            ..
-        } = &self.base
-        else {
-            return false;
+        let (bw, bh) = (vr.width(), vr.height());
+        let Some(mut r_rect) = area.intersection(&view) else {
+            self.baked_items = want_baked;
+            self.baked_mask = want_mask.to_vec();
+            self.baked_spot_holes = want_spot_holes;
+            self.baked_excludes = want_excludes;
+            self.baked_view = view;
+            self.baked_image_gen = self.doc.image_gen;
+            self.baked_seed = self.doc.seed;
+            self.baked_legend = false;
+            self.base_ready = true;
+            self.vector_gen = self.vector_gen.wrapping_add(1);
+            return true;
         };
-        if *bw != vr.width() || *bh != vr.height() {
-            return false;
-        }
-        let r = int_rect(area, view);
-        let r_rect = Rectangle::new(
-            Point::new(r.x() as f32, r.y() as f32),
-            Size::new(r.width() as f32, r.height() as f32),
-        );
-        let tail = self.vector_tail_start();
-        let hide = self
-            .pending
-            .as_ref()
-            .and_then(|p| p.index.filter(|_| p.hidden));
-        let prefix = &self.doc.items[..tail];
-        let layers: Vec<_> = (prefix.iter().enumerate())
-            .map(|(i, item)| (item, Some(i) != hide && item.bounds().intersects(&r_rect)))
-            .collect();
         let fits = |outer: Rectangle, inner: Rectangle| {
             inner.x >= outer.x
                 && inner.y >= outer.y
                 && inner.x + inner.width <= outer.x + outer.width
                 && inner.y + inner.height <= outer.y + outer.height
         };
-        let mag_clipped = (prefix.iter().enumerate()).any(|(i, item)| {
-            if Some(i) == hide || item.hidden {
-                return false;
+        for _ in 0..4 {
+            let mut grown = false;
+            for (i, item) in self.doc.items.iter().enumerate() {
+                if !want_mask.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let need = match item.shape {
+                    Shape::Magnifier {
+                        at, radius, zoom, ..
+                    } => {
+                        let sr = radius / zoom.max(1.0) + 2.0;
+                        let src_rect = Rectangle::new(
+                            Point::new(at.x - sr, at.y - sr),
+                            Size::new(sr * 2.0, sr * 2.0),
+                        );
+                        item.bounds().union(&src_rect)
+                    }
+                    Shape::Blur { .. } => item.bounds(),
+                    _ => continue,
+                };
+                let Some(need) = need.intersection(&view) else {
+                    continue;
+                };
+                if need.intersects(&r_rect) && !fits(r_rect, need) {
+                    r_rect = r_rect.union(&need);
+                    grown = true;
+                }
             }
-            let Shape::Magnifier {
-                at, radius, zoom, ..
-            } = item.shape
-            else {
-                return false;
-            };
-            let sr = radius / zoom.max(1.0) + 2.0;
-            let src_rect = Rectangle::new(
-                Point::new(at.x - sr, at.y - sr),
-                Size::new(sr * 2.0, sr * 2.0),
-            );
-            let need = item.bounds().union(&src_rect);
-            let Some(need) = need.intersection(&view) else {
-                return false;
-            };
-            need.intersects(&r_rect) && !fits(r_rect, need)
-        });
-        if mag_clipped {
-            return false;
-        }
-        let blur_clipped = (prefix.iter().enumerate()).any(|(i, item)| {
-            if Some(i) == hide || item.hidden || !matches!(item.shape, Shape::Blur { .. }) {
-                return false;
+            if !grown {
+                break;
             }
-            let Some(need) = item.bounds().intersection(&view) else {
-                return false;
-            };
-            need.intersects(&r_rect) && !fits(r_rect, need)
-        });
-        if blur_clipped {
-            return false;
         }
+        if self.display.is_none() && self.base_stale {
+            self.sync_base();
+        }
+        let bake_spot = !want_spot_holes.is_empty();
+        let hide = self.pending_hidden_index();
+        let layers: Vec<_> = (self.doc.items.iter().enumerate())
+            .map(|(i, item)| {
+                let vis = if matches!(item.shape, Shape::Spotlight { .. }) {
+                    bake_spot && !item.hidden && Some(i) != hide
+                } else {
+                    want_mask.get(i).copied().unwrap_or(false)
+                };
+                (item, vis)
+            })
+            .collect();
         let mut excludes = document::excludes(
-            (prefix.iter().enumerate())
-                .filter(|(i, _)| Some(*i) != hide)
+            (self.doc.items.iter().enumerate())
+                .filter(|(i, it)| !it.hidden && Some(*i) != hide)
                 .map(|(_, item)| item),
         );
         if let Some(ex) = self
@@ -2083,20 +2084,8 @@ impl Annotator {
         {
             excludes.push(ex);
         }
-        let repainted = self.doc.paint_with_excludes(&layers, &excludes, r, None);
-        let mut out = base_px.to_vec();
-        let (bx0, by0) = ((r.x() - vr.x()) as usize, (r.y() - vr.y()) as usize);
-        let rw = r.width() as usize;
-        let rh = r.height() as usize;
-        let base_stride = *bw as usize * 4;
-        let rep_stride = rw * 4;
-        let rep_data = repainted.data();
-        for row in 0..rh {
-            let dst_off = (by0 + row) * base_stride + bx0 * 4;
-            let src_off = row * rep_stride;
-            out[dst_off..dst_off + rep_stride]
-                .copy_from_slice(&rep_data[src_off..src_off + rep_stride]);
-        }
+
+        let r = int_rect(r_rect, view);
         if let Some(image::Handle::Rgba {
             width: dw,
             height: dh,
@@ -2106,20 +2095,127 @@ impl Annotator {
         {
             let (dw, dh) = (*dw, *dh);
             let mut disp = disp_px.to_vec();
-            let sx = *bw as f64 / dw as f64;
-            let sy = *bh as f64 / dh as f64;
-            let dx0 = ((bx0 as f64 / sx).floor() as i32 - 1).max(0) as u32;
-            let dy0 = ((by0 as f64 / sy).floor() as i32 - 1).max(0) as u32;
-            let dx1 = (((bx0 + rw) as f64 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
-            let dy1 = (((by0 + rh) as f64 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
-            downsample_rect(&out, *bw, *bh, &mut disp, dw, dh, [dx0, dy0, dx1, dy1]);
-            self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+            if let Some(crop) = self.display_crop {
+                if let Some(inter) = r_rect.intersection(&crop) {
+                    let sx = f64::from(crop.width) / f64::from(dw);
+                    let sy = f64::from(crop.height) / f64::from(dh);
+                    let rx0 = f64::from(inter.x - crop.x);
+                    let ry0 = f64::from(inter.y - crop.y);
+                    let rx1 = f64::from(inter.x + inter.width - crop.x);
+                    let ry1 = f64::from(inter.y + inter.height - crop.y);
+                    let dx0 = ((rx0 / sx).floor() as i32 - 2).max(0) as u32;
+                    let dy0 = ((ry0 / sy).floor() as i32 - 2).max(0) as u32;
+                    let dx1 = ((rx1 / sx).ceil() as i32 + 2).min(dw as i32) as u32;
+                    let dy1 = ((ry1 / sy).ceil() as i32 + 2).min(dh as i32) as u32;
+                    if dx0 < dx1 && dy0 < dy1 {
+                        let s_x0 =
+                            (f64::from(crop.x) + (f64::from(dx0) + 0.5) * sx - 0.5).floor() as i32;
+                        let s_y0 =
+                            (f64::from(crop.y) + (f64::from(dy0) + 0.5) * sy - 0.5).floor() as i32;
+                        let s_x1 = (f64::from(crop.x) + (f64::from(dx1 - 1) + 0.5) * sx - 0.5)
+                            .ceil() as i32
+                            + 1;
+                        let s_y1 = (f64::from(crop.y) + (f64::from(dy1 - 1) + 0.5) * sy - 0.5)
+                            .ceil() as i32
+                            + 1;
+                        let need_area = Rectangle::new(
+                            Point::new(s_x0 as f32, s_y0 as f32),
+                            Size::new((s_x1 - s_x0).max(1) as f32, (s_y1 - s_y0).max(1) as f32),
+                        );
+                        let src_r = int_rect(need_area, view);
+                        let repainted = self
+                            .doc
+                            .paint_with_excludes(&layers, &excludes, src_r, None);
+                        upsample_bilinear_rect_patch(
+                            repainted.data(),
+                            bw,
+                            bh,
+                            (src_r.x() - vr.x()) as u32,
+                            (src_r.y() - vr.y()) as u32,
+                            src_r.width(),
+                            src_r.height(),
+                            crop,
+                            view,
+                            &mut disp,
+                            dw,
+                            dh,
+                            [dx0, dy0, dx1, dy1],
+                        );
+                        self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+                    }
+                }
+            } else {
+                let (bx0, by0) = ((r.x() - vr.x()) as u32, (r.y() - vr.y()) as u32);
+                let (rw, rh) = (r.width(), r.height());
+                let sx = f64::from(bw) / f64::from(dw);
+                let sy = f64::from(bh) / f64::from(dh);
+                let dx0 = ((f64::from(bx0) / sx).floor() as i32 - 1).max(0) as u32;
+                let dy0 = ((f64::from(by0) / sy).floor() as i32 - 1).max(0) as u32;
+                let dx1 = ((f64::from(bx0 + rw) / sx).ceil() as i32 + 1).min(dw as i32) as u32;
+                let dy1 = ((f64::from(by0 + rh) / sy).ceil() as i32 + 1).min(dh as i32) as u32;
+                let sx0 = (f64::from(dx0) * sx).floor().max(0.0) as u32;
+                let sy0 = (f64::from(dy0) * sy).floor().max(0.0) as u32;
+                let sx1 = ((f64::from(dx1) * sx).ceil() as u32).clamp(sx0 + 1, bw);
+                let sy1 = ((f64::from(dy1) * sy).ceil() as u32).clamp(sy0 + 1, bh);
+                let src_r = tiny_skia::IntRect::from_xywh(
+                    vr.x() + sx0 as i32,
+                    vr.y() + sy0 as i32,
+                    sx1 - sx0,
+                    sy1 - sy0,
+                )
+                .unwrap_or(r);
+                let repainted = self
+                    .doc
+                    .paint_with_excludes(&layers, &excludes, src_r, None);
+                downsample_rect_patch(
+                    repainted.data(),
+                    bw,
+                    bh,
+                    (src_r.x() - vr.x()) as usize,
+                    (src_r.y() - vr.y()) as usize,
+                    src_r.width() as usize,
+                    &mut disp,
+                    dw,
+                    dh,
+                    [dx0, dy0, dx1, dy1],
+                );
+                self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+            }
+            self.base_stale = true;
+        } else {
+            let image::Handle::Rgba {
+                width: b_w,
+                height: b_h,
+                pixels: base_px,
+                ..
+            } = &self.base
+            else {
+                return false;
+            };
+            if *b_w != bw || *b_h != bh {
+                return false;
+            }
+            let repainted = self.doc.paint_with_excludes(&layers, &excludes, r, None);
+            let mut out = base_px.to_vec();
+            let (bx0, by0) = ((r.x() - vr.x()) as usize, (r.y() - vr.y()) as usize);
+            let rw = r.width() as usize;
+            let rh = r.height() as usize;
+            let base_stride = bw as usize * 4;
+            let rep_stride = rw * 4;
+            let rep_data = repainted.data();
+            for row in 0..rh {
+                let dst_off = (by0 + row) * base_stride + bx0 * 4;
+                let src_off = row * rep_stride;
+                out[dst_off..dst_off + rep_stride]
+                    .copy_from_slice(&rep_data[src_off..src_off + rep_stride]);
+            }
+            self.base = image::Handle::from_rgba(bw, bh, out);
+            self.base_stale = false;
         }
-        self.base = image::Handle::from_rgba(*bw, *bh, out);
-        self.baked_items = (self.doc.items[..tail].iter().enumerate())
-            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
-            .map(|(_, item)| item.clone())
-            .collect();
+        self.baked_items = want_baked;
+        self.baked_mask = want_mask.to_vec();
+        self.baked_spot_holes = want_spot_holes;
+        self.baked_excludes = want_excludes;
         self.baked_view = view;
         self.baked_image_gen = self.doc.image_gen;
         self.baked_seed = self.doc.seed;
@@ -2497,10 +2593,11 @@ impl Annotator {
             Some(_) => None,
         };
         let repaint = edit.is_some() || pending.hidden;
-        // A new Hide only paints over its own region, which the live layer has
-        // just painted: patch the picture with it instead of flattening it all
-        // (an 8K picture: ~150 ms).
-        let mut patch = pending.index.is_none()
+        // Keep the patch-over path when display is None (1:1 / Snip / w102_3 tests);
+        // when a scaled display copy is active, sync_layers() patches display directly at exact
+        // display scale so outside pixels inside the Blur bounding box never mismatch filter.
+        let mut patch = self.display.is_none()
+            && pending.index.is_none()
             && !pending.hidden
             && matches!(
                 &edit,
@@ -2512,27 +2609,9 @@ impl Annotator {
                     }
                 ))
             );
-        let prev_tail = self.vector_tail_start();
-        let prev_all_baked = prev_tail == self.doc.items.len();
+        let prev_all_baked =
+            self.baked_mask.len() == self.doc.items.len() && self.baked_mask.iter().all(|&b| b);
         patch &= prev_all_baked;
-        let local_patchable = |shape: &Shape| {
-            !matches!(
-                shape,
-                Shape::Spotlight { .. }
-                    | Shape::Blur { .. }
-                    | Shape::Step { .. }
-                    | Shape::Redact { .. }
-            )
-        };
-        let mut fast_area = match &edit {
-            Some(Edit::Insert(_, it)) if local_patchable(&it.shape) => Some(it.bounds()),
-            Some(Edit::Change(_, old, new))
-                if local_patchable(&old.shape) && local_patchable(&new.shape) =>
-            {
-                Some(old.bounds().union(&new.bounds()))
-            }
-            _ => None,
-        };
         let mut grew = false;
         if let Some(edit) = edit {
             let grown = match &edit {
@@ -2541,44 +2620,23 @@ impl Annotator {
             };
             grew = matches!(grown, Ok(Some(_)));
             patch &= matches!(grown, Ok(None));
-            if !matches!(grown, Ok(None)) {
-                fast_area = None;
-            }
             match grown {
                 Ok(Some(grow)) => self.doc.exec(Edit::Seq(vec![edit, grow])),
                 Ok(None) => self.doc.exec(edit),
-                // refused: the item stays where it was put, clipped by the picture (a typed
-                // text is never lost); the reason is kept for the window's pill
                 Err(()) => self.doc.exec(edit),
             }
         }
-        if !grew && self.can_keep_base() {
-            self.vector_gen = self.vector_gen.wrapping_add(1);
-            self.clear_live();
-        } else if patch && self.patch_over() {
-            if let Some(last) = self.doc.items.last().filter(|it| !it.hidden) {
-                self.baked_items.push(last.clone());
+        if !grew && patch && self.patch_over() {
+            let idx = self.doc.items.len().saturating_sub(1);
+            if let Some(last) = self.doc.items.get(idx).filter(|it| !it.hidden) {
+                self.baked_items.push((idx, last.clone(), 0));
+                self.baked_mask.push(true);
+                if last.exclude().is_some() {
+                    self.baked_excludes.push(last.bounds());
+                }
             }
             self.vector_gen = self.vector_gen.wrapping_add(1);
             self.clear_live();
-        } else if let Some(mut area) = fast_area {
-            let new_tail = self.vector_tail_start();
-            for item in self
-                .doc
-                .items
-                .iter()
-                .take(new_tail)
-                .skip(prev_tail)
-                .filter(|it| !it.hidden)
-            {
-                area = area.union(&item.bounds());
-            }
-            if prev_tail <= new_tail && self.patch_base(area) {
-                self.clear_live();
-            } else {
-                self.sync_layers();
-                self.clear_live();
-            }
         } else if repaint {
             self.sync_layers();
             self.clear_live();
@@ -2607,6 +2665,38 @@ impl Annotator {
     /// The painted picture's bytes (the tests).
     #[cfg(test)]
     fn base_pixels(&self) -> Vec<u8> {
+        if self.base_stale && !self.bare() {
+            let hide = self.pending_hidden_index();
+            let bake_spot = !self.baked_spot_holes.is_empty();
+            let layers: Vec<_> = (self.doc.items.iter().enumerate())
+                .map(|(i, item)| {
+                    let vis = if matches!(item.shape, Shape::Spotlight { .. }) {
+                        bake_spot && !item.hidden && Some(i) != hide
+                    } else {
+                        self.baked_mask.get(i).copied().unwrap_or(false)
+                    };
+                    (item, vis)
+                })
+                .collect();
+            let mut excludes = document::excludes(
+                (self.doc.items.iter().enumerate())
+                    .filter(|(i, it)| !it.hidden && Some(*i) != hide)
+                    .map(|(_, item)| item),
+            );
+            if let Some(ex) = self
+                .pending
+                .as_ref()
+                .filter(|p| p.hidden)
+                .and_then(|p| p.item.exclude())
+            {
+                excludes.push(ex);
+            }
+            return self
+                .doc
+                .flatten_with_excludes(&layers, &excludes, self.legend.as_ref())
+                .data()
+                .to_vec();
+        }
         match &self.base {
             image::Handle::Rgba { pixels, .. } => pixels.to_vec(),
             _ => Vec::new(),
@@ -2870,71 +2960,247 @@ impl Annotator {
         }
     }
 
-    /// Index in doc.items where the pure-vector tail begins: every item from this
-    /// index onward renders directly onto the canvas frame without touching `base` or
-    /// display. Any raster or pixel-reading item (or a Redact when a Blur exists
-    /// so Soft exterior rings stay exact) stays baked into `base`.
-    fn vector_tail_start_with(&self, has_legend: bool) -> usize {
+    /// Selective baking plan: returns (baked_mask, baked_spotlight_holes).
+    /// Vector items stay in Layer 2 unless a baked item ABOVE them intersects their bounds.
+    /// Non-overlapping Spotlights stay in Layer 2 when no Blur/Magnifier exists in the doc;
+    /// otherwise Spotlights bake into base FIRST (below all other items) without forcing
+    /// earlier vector shapes to bake.
+    fn compute_baking(&self, has_legend: bool, hide: Option<usize>) -> (Vec<bool>, Vec<Rectangle>) {
+        let n = self.doc.items.len();
+        let mut holes = Vec::new();
+        let mut has_pixel_reader = false;
+        for (i, item) in self.doc.items.iter().enumerate() {
+            if item.hidden || Some(i) == hide {
+                continue;
+            }
+            match item.shape {
+                Shape::Spotlight { a, b } => holes.push(span(&[a, b])),
+                Shape::Blur { .. } | Shape::Magnifier { .. } => has_pixel_reader = true,
+                _ => {}
+            }
+        }
         if has_legend {
-            return self.doc.items.len();
+            let mask = (0..n)
+                .map(|i| {
+                    let it = &self.doc.items[i];
+                    !it.hidden && Some(i) != hide && !matches!(it.shape, Shape::Spotlight { .. })
+                })
+                .collect();
+            return (mask, holes);
         }
-        let has_blur = self
-            .doc
-            .items
+        let overlapping_holes = holes
             .iter()
-            .any(|item| !item.hidden && matches!(item.shape, Shape::Blur { .. }));
-        match self.doc.items.iter().rposition(|item| {
-            !item.hidden
-                && (!live_vector::supports(item)
-                    || (has_blur && matches!(item.shape, Shape::Redact { .. })))
-        }) {
-            Some(last) => last + 1,
-            None => 0,
+            .enumerate()
+            .any(|(i, a)| holes[i + 1..].iter().any(|b| a.intersects(b)));
+        let bake_spot = !holes.is_empty() && (has_pixel_reader || overlapping_holes);
+        let baked_holes = if bake_spot { holes } else { Vec::new() };
+
+        let mut mask = vec![false; n];
+        for (i, item) in self.doc.items.iter().enumerate() {
+            if item.hidden || Some(i) == hide || matches!(item.shape, Shape::Spotlight { .. }) {
+                continue;
+            }
+            if !live_vector::supports(item) {
+                mask[i] = true;
+            }
         }
-    }
-
-    pub(crate) fn vector_tail_start(&self) -> usize {
-        self.vector_tail_start_with(self.legend.is_some())
-    }
-
-    fn baked_matches(&self, tail: usize, hide: Option<usize>) -> bool {
-        let want = (self.doc.items[..tail].iter().enumerate())
-            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
-            .map(|(_, item)| item);
-        self.baked_items.iter().eq(want)
-    }
-
-    fn can_keep_base(&self) -> bool {
-        if !self.base_ready || self.bare() {
-            return false;
+        let mut above_baked: Vec<Rectangle> = Vec::new();
+        for i in (0..n).rev() {
+            let item = &self.doc.items[i];
+            if item.hidden || Some(i) == hide || matches!(item.shape, Shape::Spotlight { .. }) {
+                continue;
+            }
+            let b = item.bounds();
+            if mask[i] {
+                above_baked.push(b);
+            } else if above_baked.iter().any(|r| r.intersects(&b)) {
+                mask[i] = true;
+                above_baked.push(b);
+            }
         }
-        let legend = self.doc.legend_layout();
-        let tail = self.vector_tail_start_with(legend.is_some());
-        let hide = self
+        (mask, baked_holes)
+    }
+
+    fn baked_snapshot(&self, mask: &[bool]) -> Vec<(usize, Item, u32)> {
+        let mut out = Vec::new();
+        let mut steps = 0u32;
+        for (i, item) in self.doc.items.iter().enumerate() {
+            if matches!(item.shape, Shape::Step { .. }) {
+                steps += 1;
+            }
+            if mask.get(i).copied().unwrap_or(false) {
+                let num = if matches!(item.shape, Shape::Step { .. }) {
+                    steps
+                } else {
+                    0
+                };
+                out.push((i, item.clone(), num));
+            }
+        }
+        out
+    }
+
+    fn current_exclude_frames(&self, hide: Option<usize>) -> Vec<Rectangle> {
+        let mut out: Vec<Rectangle> = (self.doc.items.iter().enumerate())
+            .filter(|(i, it)| !it.hidden && Some(*i) != hide && it.exclude().is_some())
+            .map(|(_, it)| it.bounds())
+            .collect();
+        if let Some(p) = self
             .pending
             .as_ref()
-            .and_then(|p| p.index.filter(|_| p.hidden));
-        self.baked_view == self.doc.view()
+            .filter(|p| p.hidden && p.item.exclude().is_some())
+        {
+            out.push(p.item.bounds());
+        }
+        out
+    }
+
+    fn dirty_baked_area(
+        &self,
+        want_baked: &[(usize, Item, u32)],
+        want_excludes: &[Rectangle],
+    ) -> Option<Rectangle> {
+        let mut dirty: Option<Rectangle> = None;
+        let mut add = |r: Rectangle| {
+            dirty = Some(match dirty {
+                Some(d) => d.union(&r),
+                None => r,
+            });
+        };
+        let old = &self.baked_items;
+        for (oi, oitem, onum) in old {
+            let same = want_baked
+                .iter()
+                .any(|(wi, witem, wnum)| wi == oi && wnum == onum && witem == oitem);
+            if !same {
+                add(oitem.bounds());
+            }
+        }
+        for (wi, witem, wnum) in want_baked {
+            let same = old
+                .iter()
+                .any(|(oi, oitem, onum)| oi == wi && onum == wnum && oitem == witem);
+            if !same {
+                add(witem.bounds());
+            }
+        }
+        if self.baked_excludes != want_excludes {
+            let mut changed_ex: Vec<Rectangle> = Vec::new();
+            for r in &self.baked_excludes {
+                if !want_excludes.contains(r) {
+                    changed_ex.push(*r);
+                }
+            }
+            for r in want_excludes {
+                if !self.baked_excludes.contains(r) {
+                    changed_ex.push(*r);
+                }
+            }
+            for (_, item, _) in want_baked {
+                if matches!(item.shape, Shape::Blur { .. }) {
+                    let ring = item.bounds().expand(96.0);
+                    if changed_ex.iter().any(|c| c.intersects(&ring)) {
+                        add(item.bounds());
+                    }
+                }
+            }
+        }
+        dirty
+    }
+
+    /// Updates display layers after an edit:
+    /// 1) Pure Layer-2 vector/spotlight changes touch neither base nor display (0 ms).
+    /// 2) Local baked changes (Step, Blur, Text, Magnifier, Redact near Blur, Undo/Redo)
+    ///    patch only the changed area in display (or base) with zero filter flip.
+    /// 3) Global changes (canvas grow, crop, legend, baked Spotlight) rebuild base and
+    ///    synchronously rebuild display so crisp never drops for a frame.
+    pub(crate) fn sync_layers(&mut self) {
+        if self.bare() {
+            self.refresh();
+            return;
+        }
+        let legend = self.doc.legend_layout();
+        let hide = self.pending_hidden_index();
+        let (want_mask, want_spot_holes) = self.compute_baking(legend.is_some(), hide);
+        let want_baked = self.baked_snapshot(&want_mask);
+        let want_excludes = self.current_exclude_frames(hide);
+        let view = self.doc.view();
+
+        let same_global = self.base_ready
+            && self.baked_view == view
             && self.baked_image_gen == self.doc.image_gen
             && self.baked_seed == self.doc.seed
             && self.baked_legend == legend.is_some()
-            && self.baked_matches(tail, hide)
-    }
+            && self.baked_spot_holes == want_spot_holes;
 
-    /// Updates display layers after an edit: skips repainting `base` and keeps display
-    /// intact whenever only the pure-vector tail changed.
-    pub(crate) fn sync_layers(&mut self) {
-        if self.can_keep_base() {
-            self.legend = self.doc.legend_layout();
-            self.vector_gen = self.vector_gen.wrapping_add(1);
-            self.update_live();
-            return;
+        if same_global {
+            let dirty = self.dirty_baked_area(&want_baked, &want_excludes);
+            if dirty.is_none() {
+                self.legend = legend;
+                self.baked_mask = want_mask;
+                self.baked_excludes = want_excludes;
+                self.vector_gen = self.vector_gen.wrapping_add(1);
+                self.update_live();
+                return;
+            }
+            if let Some(area) = dirty
+                && self.patch.is_empty()
+                && legend.is_none()
+                && self.patch_base(area, &want_mask, want_baked, want_spot_holes, want_excludes)
+            {
+                self.legend = legend;
+                self.update_live();
+                return;
+            }
         }
         self.refresh();
     }
 
-    pub(crate) fn vector_gen(&self) -> u64 {
-        self.vector_gen
+    /// Rebuilds self.base to match the current baked_mask without dropping self.display.
+    /// Called lazily by stage_copy when switching to 100%/200%+ or building a new zoom mip.
+    pub(crate) fn sync_base(&mut self) {
+        if !self.base_stale || self.bare() {
+            self.base_stale = false;
+            return;
+        }
+        let hide = self.pending_hidden_index();
+        let bake_spot = !self.baked_spot_holes.is_empty();
+        let layers: Vec<_> = (self.doc.items.iter().enumerate())
+            .map(|(i, item)| {
+                let vis = if matches!(item.shape, Shape::Spotlight { .. }) {
+                    bake_spot && !item.hidden && Some(i) != hide
+                } else {
+                    self.baked_mask.get(i).copied().unwrap_or(false)
+                };
+                (item, vis)
+            })
+            .collect();
+        let mut excludes = document::excludes(
+            (self.doc.items.iter().enumerate())
+                .filter(|(i, it)| !it.hidden && Some(*i) != hide)
+                .map(|(_, item)| item),
+        );
+        if let Some(ex) = self
+            .pending
+            .as_ref()
+            .filter(|p| p.hidden)
+            .and_then(|p| p.item.exclude())
+        {
+            excludes.push(ex);
+        }
+        let pm = self
+            .doc
+            .flatten_with_excludes(&layers, &excludes, self.legend.as_ref());
+        self.base = handle(pm);
+        self.base_stale = false;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn vector_tail_start(&self) -> usize {
+        self.baked_mask
+            .iter()
+            .rposition(|&b| b)
+            .map_or(0, |last| last + 1)
     }
 
     pub(crate) fn pending_hidden_index(&self) -> Option<usize> {
@@ -2943,22 +3209,67 @@ impl Annotator {
             .and_then(|p| p.index.filter(|_| p.hidden))
     }
 
+    /// Committed spotlight holes to draw in Layer 2 (empty when baked into base or none).
+    pub(crate) fn committed_spotlight_holes(&self) -> Vec<Rectangle> {
+        if !self.baked_spot_holes.is_empty() || self.legend.is_some() {
+            return Vec::new();
+        }
+        let hide = self.pending_hidden_index();
+        (self.doc.items.iter().enumerate())
+            .filter(|(i, it)| !it.hidden && Some(*i) != hide)
+            .filter_map(|(_, it)| match it.shape {
+                Shape::Spotlight { a, b } => Some(span(&[a, b])),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Unbaked visible committed vector items (index, &Item) drawn in Layer 2.
+    pub(crate) fn committed_vector_items(&self) -> Vec<(usize, &Item)> {
+        let hide = self.pending_hidden_index();
+        (self.doc.items.iter().enumerate())
+            .filter(|(i, it)| {
+                !it.hidden
+                    && Some(*i) != hide
+                    && !self.baked_mask.get(*i).copied().unwrap_or(false)
+                    && live_vector::supports(it)
+            })
+            .collect()
+    }
+
+    pub(crate) fn draw_committed_spotlights(
+        &self,
+        frame: &mut iced::widget::canvas::Frame,
+        holes: &[Rectangle],
+        margin: f32,
+        k: f32,
+    ) {
+        live_vector::draw_spotlight_holes(frame, holes, self.doc.view(), self.zoom, margin, k);
+    }
+
+    pub(crate) fn draw_one_vector(
+        &self,
+        frame: &mut iced::widget::canvas::Frame,
+        item: &Item,
+        margin: f32,
+        k: f32,
+    ) {
+        live_vector::draw(frame, item, self.doc.view(), self.zoom, margin, k);
+    }
+
     pub(crate) fn draw_committed_vectors(
         &self,
         frame: &mut iced::widget::canvas::Frame,
         margin: f32,
         k: f32,
     ) {
-        let tail = self.vector_tail_start();
-        if tail >= self.doc.items.len() {
-            return;
+        let holes = self.committed_spotlight_holes();
+        if !holes.is_empty() {
+            self.draw_committed_spotlights(frame, &holes, margin, k);
         }
-        let hide = self.pending_hidden_index();
         let view = self.doc.view();
-        for (i, item) in self.doc.items.iter().enumerate().skip(tail) {
-            if !item.hidden && Some(i) != hide {
-                live_vector::draw(frame, item, view, self.zoom, margin, k);
-            }
+        for (_, item) in self.committed_vector_items() {
+            live_vector::draw(frame, item, view, self.zoom, margin, k);
         }
     }
 
@@ -2981,29 +3292,39 @@ impl Annotator {
         }
     }
 
-    /// Repaints the base (the baked prefix of items, skipping a hidden pending one, and
-    /// any legend), then updates the live layer.
+    /// Repaints the base (the selectively baked items and any legend), synchronously
+    /// rebuilding display if a scaled copy was active so crisp never drops for a frame.
     pub(crate) fn refresh(&mut self) {
-        let hide = self
-            .pending
-            .as_ref()
-            .and_then(|p| p.index.filter(|_| p.hidden));
+        let hide = self.pending_hidden_index();
         self.legend = self.doc.legend_layout();
         if self.bare() {
             self.base_ready = false;
+            self.base_stale = false;
             self.baked_items.clear();
+            self.baked_mask.clear();
+            self.baked_spot_holes.clear();
+            self.baked_excludes.clear();
             self.vector_gen = self.vector_gen.wrapping_add(1);
-            self.update_live(); // (a cancelled press leaves no layer behind, W113)
-            return; // nothing to paint: the frozen frame under it is the area
+            self.update_live();
+            return;
         }
-        let tail = self.vector_tail_start();
-        let layers: Vec<_> = (self.doc.items[..tail].iter().enumerate())
-            .map(|(i, item)| (item, Some(i) != hide))
+        let (mask, spot_holes) = self.compute_baking(self.legend.is_some(), hide);
+        let bake_spot = !spot_holes.is_empty();
+        let layers: Vec<_> = (self.doc.items.iter().enumerate())
+            .map(|(i, item)| {
+                let vis = if matches!(item.shape, Shape::Spotlight { .. }) {
+                    bake_spot && !item.hidden && Some(i) != hide
+                } else {
+                    mask[i]
+                };
+                (item, vis)
+            })
             .collect();
-        // Include the dragged Hide (at its current geometry) in the base's
-        // exclude list even while hidden from the base, so neighbours never read
-        // under it or jump on release (W114).
-        let mut excludes = document::excludes(layers.iter().filter(|(_, v)| *v).map(|(i, _)| *i));
+        let mut excludes = document::excludes(
+            (self.doc.items.iter().enumerate())
+                .filter(|(i, it)| !it.hidden && Some(*i) != hide)
+                .map(|(_, item)| item),
+        );
         if let Some(ex) = self
             .pending
             .as_ref()
@@ -3015,15 +3336,49 @@ impl Annotator {
         let pm = self
             .doc
             .flatten_with_excludes(&layers, &excludes, self.legend.as_ref());
+        let (bw, bh) = (pm.width(), pm.height());
+        let prev_had_display = self.display.is_some();
+        let prev_crop = self.display_crop;
+        let view = self.doc.view();
+        if prev_had_display && self.display_scale > 0.0 && bw * bh >= 1_000_000 {
+            let z = self.zoom * self.display_scale;
+            let want = (bw as f32 * z).round().max(1.0);
+            let actual = (want - bw as f32).abs() < 1.0;
+            if !actual && want < bw as f32 {
+                let dw = want as u32;
+                let dh = ((bh as f32 * dw as f32 / bw as f32).round() as u32).max(1);
+                let small = downsample(pm.data(), bw, bh, dw, dh);
+                self.display = Some(image::Handle::from_rgba(dw, dh, small));
+                self.display_crop = None;
+                self.crisp = true;
+            } else if z > 1.0
+                && z < 2.0
+                && let Some(crop) = prev_crop.and_then(|c| c.intersection(&view))
+            {
+                let dw = (crop.width * z).round().max(1.0) as u32;
+                let dh = (crop.height * z).round().max(1.0) as u32;
+                let tile = upsample_bilinear_crop(pm.data(), bw, bh, crop, view, dw, dh);
+                self.display = Some(image::Handle::from_rgba(dw, dh, tile));
+                self.display_crop = Some(crop);
+                self.crisp = true;
+            } else {
+                self.display = None;
+                self.display_crop = None;
+                self.crisp = actual || z >= 2.0;
+            }
+        } else {
+            self.display = None;
+            self.display_crop = None;
+            self.crisp = false;
+        }
         self.base = handle(pm);
+        self.base_stale = false;
         self.patch.clear();
-        self.display = None;
-        self.crisp = false;
-        self.baked_items = (self.doc.items[..tail].iter().enumerate())
-            .filter(|(i, item)| !item.hidden && Some(*i) != hide)
-            .map(|(_, item)| item.clone())
-            .collect();
-        self.baked_view = self.doc.view();
+        self.baked_items = self.baked_snapshot(&mask);
+        self.baked_mask = mask;
+        self.baked_spot_holes = spot_holes;
+        self.baked_excludes = self.current_exclude_frames(hide);
+        self.baked_view = view;
         self.baked_image_gen = self.doc.image_gen;
         self.baked_seed = self.doc.seed;
         self.baked_legend = self.legend.is_some();
@@ -3178,10 +3533,16 @@ impl Annotator {
         };
         let below_end = pending.index.unwrap_or(self.doc.items.len());
         let vr = int_rect(view, view);
+        let all_below_baked = !self.base_stale
+            && self.baked_spot_holes.is_empty()
+            && self.committed_spotlight_holes().is_empty()
+            && (0..below_end).all(|i| {
+                self.doc.items[i].hidden || self.baked_mask.get(i).copied().unwrap_or(false)
+            });
         if !self.bare()
             && self.patch.is_empty()
             && self.legend.is_none()
-            && self.vector_tail_start() >= below_end
+            && all_below_baked
             && let image::Handle::Rgba {
                 width,
                 height,
@@ -3607,6 +3968,22 @@ pub(crate) fn downsample_rect(
     dst: &mut [u8],
     dw: u32,
     dh: u32,
+    rect: [u32; 4],
+) {
+    downsample_rect_patch(src, bw, bh, 0, 0, bw as usize, dst, dw, dh, rect);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn downsample_rect_patch(
+    src: &[u8],
+    bw: u32,
+    bh: u32,
+    src_ox: usize,
+    src_oy: usize,
+    src_w: usize,
+    dst: &mut [u8],
+    dw: u32,
+    dh: u32,
     [dx0, dy0, dx1, dy1]: [u32; 4],
 ) {
     if bw == 0 || bh == 0 || dw == 0 || dh == 0 || dx0 >= dx1 || dy0 >= dy1 || dx1 > dw || dy1 > dh
@@ -3619,17 +3996,17 @@ pub(crate) fn downsample_rect(
     let sy1 = ys.last().map_or(0, |s| s.start + s.len);
     let band_w = (dx1 - dx0) as usize;
     let band_h = sy1 - sy0;
-    let src_stride = bw as usize * 4;
+    let src_stride = src_w * 4;
 
     let mut horiz = vec![0u8; band_h * band_w * 4];
     for sy in sy0..sy1 {
-        let src_row = &src[sy * src_stride..(sy + 1) * src_stride];
+        let src_row = &src[(sy - src_oy) * src_stride..(sy - src_oy + 1) * src_stride];
         let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
         for (k, sp) in xs.iter().enumerate() {
             let (mut r, mut g, mut b, mut a) = (0u64, 0u64, 0u64, 0u64);
             let ws = &xw[sp.offset..sp.offset + sp.len];
             for (j, &w) in ws.iter().enumerate() {
-                let o = (sp.start + j) * 4;
+                let o = (sp.start + j - src_ox) * 4;
                 r += u64::from(src_row[o]) * w;
                 g += u64::from(src_row[o + 1]) * w;
                 b += u64::from(src_row[o + 2]) * w;
@@ -3665,6 +4042,110 @@ pub(crate) fn downsample_rect(
             dst_row[d + 1] = ((g + half) / sp.sum) as u8;
             dst_row[d + 2] = ((b + half) / sp.sum) as u8;
             dst_row[d + 3] = ((a + half) / sp.sum) as u8;
+        }
+    }
+}
+
+/// Smooth bilinear upscaler for a viewport crop (100-200 % zoom): produces a fast
+/// pixel-aligned display tile drawn via Nearest blit instead of slow Linear full-image raster.
+pub(crate) fn upsample_bilinear_crop(
+    src: &[u8],
+    bw: u32,
+    bh: u32,
+    crop: Rectangle,
+    view: Rectangle,
+    dw: u32,
+    dh: u32,
+) -> Vec<u8> {
+    let mut dst = vec![0u8; dw as usize * dh as usize * 4];
+    upsample_bilinear_rect_patch(
+        src,
+        bw,
+        bh,
+        0,
+        0,
+        bw,
+        bh,
+        crop,
+        view,
+        &mut dst,
+        dw,
+        dh,
+        [0, 0, dw, dh],
+    );
+    dst
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsample_bilinear_rect_patch(
+    src: &[u8],
+    bw: u32,
+    bh: u32,
+    src_ox: u32,
+    src_oy: u32,
+    src_w: u32,
+    src_h: u32,
+    crop: Rectangle,
+    view: Rectangle,
+    dst: &mut [u8],
+    dw: u32,
+    dh: u32,
+    [dx0, dy0, dx1, dy1]: [u32; 4],
+) {
+    if bw == 0 || bh == 0 || dw == 0 || dh == 0 || dx0 >= dx1 || dy0 >= dy1 || dx1 > dw || dy1 > dh
+    {
+        return;
+    }
+    let sx = f64::from(crop.width) / f64::from(dw);
+    let sy = f64::from(crop.height) / f64::from(dh);
+    let base_x = f64::from(crop.x - view.x);
+    let base_y = f64::from(crop.y - view.y);
+    let max_x = (bw - 1) as i32;
+    let max_y = (bh - 1) as i32;
+    let patch_x0 = src_ox as i32;
+    let patch_y0 = src_oy as i32;
+    let patch_x1 = (src_ox + src_w - 1) as i32;
+    let patch_y1 = (src_oy + src_h - 1) as i32;
+    let src_stride = src_w as usize * 4;
+    let dst_stride = dw as usize * 4;
+
+    let nx = (dx1 - dx0) as usize;
+    let mut x_tab: Vec<(usize, usize, u32)> = Vec::with_capacity(nx);
+    for dx in dx0..dx1 {
+        let fx = base_x + (f64::from(dx) + 0.5) * sx - 0.5;
+        let ix0 = (fx.floor() as i32).clamp(0, max_x);
+        let ix1 = (ix0 + 1).clamp(0, max_x);
+        let tx = ((fx - f64::from(ix0)).clamp(0.0, 1.0) * 256.0).round() as u32;
+        let lx0 = (ix0.clamp(patch_x0, patch_x1) - patch_x0) as usize * 4;
+        let lx1 = (ix1.clamp(patch_x0, patch_x1) - patch_x0) as usize * 4;
+        x_tab.push((lx0, lx1, tx));
+    }
+
+    for dy in dy0..dy1 {
+        let fy = base_y + (f64::from(dy) + 0.5) * sy - 0.5;
+        let iy0 = (fy.floor() as i32).clamp(0, max_y);
+        let iy1 = (iy0 + 1).clamp(0, max_y);
+        let ty = ((fy - f64::from(iy0)).clamp(0.0, 1.0) * 256.0).round() as u32;
+        let ity = 256 - ty;
+        let ly0 = (iy0.clamp(patch_y0, patch_y1) - patch_y0) as usize * src_stride;
+        let ly1 = (iy1.clamp(patch_y0, patch_y1) - patch_y0) as usize * src_stride;
+        let r0 = &src[ly0..ly0 + src_stride];
+        let r1 = &src[ly1..ly1 + src_stride];
+        let drow = &mut dst[dy as usize * dst_stride..(dy as usize + 1) * dst_stride];
+        for (k, &(lx0, lx1, tx)) in x_tab.iter().enumerate() {
+            let itx = 256 - tx;
+            let w00 = itx * ity;
+            let w10 = tx * ity;
+            let w01 = itx * ty;
+            let w11 = tx * ty;
+            let d = (dx0 as usize + k) * 4;
+            for c in 0..4 {
+                let v = u32::from(r0[lx0 + c]) * w00
+                    + u32::from(r0[lx1 + c]) * w10
+                    + u32::from(r1[lx0 + c]) * w01
+                    + u32::from(r1[lx1 + c]) * w11;
+                drow[d + c] = ((v + 32768) >> 16) as u8;
+            }
         }
     }
 }

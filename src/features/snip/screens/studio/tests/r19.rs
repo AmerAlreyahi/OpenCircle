@@ -298,6 +298,70 @@ fn summarize(vals: &[f64]) -> String {
 }
 
 #[test]
+fn r19_zoom_90_and_150_use_scaled_copy_and_keep_outside_pixels_identical() {
+    for z in [0.90f32, 1.50f32] {
+        let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        let _ = lab.s.zoom_to(z, None);
+        let _ = lab.s.take_scroll();
+        lab.reset_scroll();
+        lab.settle_mip();
+        let _ = lab.render(0.0);
+        let e = lab.s.editor.as_ref().unwrap();
+        assert!(
+            e.display.is_some() && e.crisp,
+            "zoom {z}: display copy active and crisp"
+        );
+        if z > 1.0 {
+            assert!(e.display_crop.is_some(), "zoom {z}: uses viewport tile");
+        }
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+        let before = lab.pixels();
+
+        // Draw and commit a Rect + a Blur at this zoom; verify 0 outside pixels change.
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+        let _ = lab.send(Msg::Editor(Message::Press(Point::new(180.0, 140.0))));
+        let _ = lab.send(Msg::Editor(Message::Move(Point::new(420.0, 320.0))));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let excl_r = lab.image_rect_to_phys(
+            Rectangle::new(Point::new(180.0, 140.0), Size::new(240.0, 180.0)),
+            48.0,
+        );
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl_r]);
+        assert_eq!(
+            dr, 0,
+            "zoom {z} Rect commit: {dr}/{cr} outside px changed (max={mdr})"
+        );
+
+        let before_blur = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+        let _ = lab.send(Msg::Editor(Message::Press(Point::new(560.0, 150.0))));
+        let _ = lab.send(Msg::Editor(Message::Move(Point::new(720.0, 290.0))));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let blur_bounds = lab
+            .s
+            .editor
+            .as_ref()
+            .unwrap()
+            .doc
+            .items
+            .last()
+            .unwrap()
+            .bounds();
+        let excl_b = lab.image_rect_to_phys(blur_bounds, 8.0);
+        let (db, mdb, cb) = diff_outside(&before_blur, &lab.pixels(), stride, pic_rect, &[excl_b]);
+        assert_eq!(
+            db, 0,
+            "zoom {z} Blur commit: {db}/{cb} outside px changed (max={mdb})"
+        );
+    }
+}
+
+#[test]
 #[ignore = "timing: run by hand, in release"]
 fn r19_lab_measure() {
     let win = SIZE;
@@ -903,4 +967,625 @@ fn r19_snip_toolbar_big_screen_drawing_clips_and_keeps_outside_pixels_identical(
         ldiff, 0,
         "Snip live drag->commit: {ldiff} untouched px changed"
     );
+}
+
+#[test]
+fn r19_step_blur_spotlight_highlighter_commit_undo_redo_outside_pixels_identical() {
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    let pic_rect = lab.picture_phys_rect();
+    let stride = lab.pixmap.width();
+    let _ = lab.render(0.0);
+
+    // Draw an earlier vector Rect in top-left so we also catch earlier shapes getting baked
+    // and changing screen pixels when Step / Blur / Spotlight / Redact commits.
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(220.0, 200.0))));
+    let _ = lab.send(Msg::Editor(Message::Move(Point::new(720.0, 560.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let _ = lab.render(0.0);
+
+    // 1) Step: click, commit (Deselect closes note typing), undo, redo (NO settle_mip!)
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+        let at = Point::new(2400.0, 1200.0);
+        let _ = lab.send(Msg::Editor(Message::Press(at)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let after_commit = lab.pixels();
+        let excl = lab.image_rect_to_phys(
+            Rectangle::new(
+                Point::new(at.x - 160.0, at.y - 160.0),
+                Size::new(320.0, 320.0),
+            ),
+            48.0,
+        );
+        let (d, md, c) = diff_outside(&before, &after_commit, stride, pic_rect, &[excl]);
+        assert_eq!(d, 0, "Step commit: {d}/{c} outside px changed (max={md})");
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Step undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(dr, 0, "Step redo: {dr}/{cr} outside px changed (max={mdr})");
+    }
+
+    // 2) Spotlight (before any Blur — pure Layer-2 vector spotlight): commit, undo, redo (NO settle_mip!)
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+        let a = Point::new(3800.0, 1700.0);
+        let b = Point::new(4700.0, 2400.0);
+        let _ = lab.send(Msg::Editor(Message::Press(a)));
+        let _ = lab.send(Msg::Editor(Message::Move(b)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let hole_in = lab.image_rect_to_phys(
+            Rectangle::new(
+                Point::new(a.x + 80.0, a.y + 80.0),
+                Size::new(b.x - a.x - 160.0, b.y - a.y - 160.0),
+            ),
+            0.0,
+        );
+        let hole_rect = [
+            hole_in[0].max(0) as u32,
+            hole_in[1].max(0) as u32,
+            hole_in[2].max(0) as u32,
+            hole_in[3].max(0) as u32,
+        ];
+        let (d, md, c) = diff_outside(&before, &lab.pixels(), stride, hole_rect, &[]);
+        assert_eq!(
+            d, 0,
+            "Spotlight(vec) commit: {d}/{c} inside-hole px changed (max={md})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Spotlight(vec) undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, hole_rect, &[]);
+        assert_eq!(
+            dr, 0,
+            "Spotlight(vec) redo: {dr}/{cr} inside-hole px changed (max={mdr})"
+        );
+        // Undo before Blur tests so the Blur/Redact checks run on an undimmed canvas
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+    }
+
+    // 3) Blur: drag, commit, undo, redo (NO settle_mip!)
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+        let a = Point::new(3000.0, 800.0);
+        let b = Point::new(3700.0, 1400.0);
+        let _ = lab.send(Msg::Editor(Message::Press(a)));
+        let _ = lab.send(Msg::Editor(Message::Move(b)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let after_commit = lab.pixels();
+        let excl = lab.image_rect_to_phys(
+            Rectangle::new(Point::new(2750.0, 550.0), Size::new(1200.0, 1100.0)),
+            64.0,
+        );
+        let (d, md, c) = diff_outside(&before, &after_commit, stride, pic_rect, &[excl]);
+        assert_eq!(d, 0, "Blur commit: {d}/{c} outside px changed (max={md})");
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Blur undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(dr, 0, "Blur redo: {dr}/{cr} outside px changed (max={mdr})");
+    }
+
+    // 4) Redact while Blur exists: commit, undo, redo (NO settle_mip!)
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Redact)));
+        let a = Point::new(1200.0, 1700.0);
+        let b = Point::new(1900.0, 2200.0);
+        let _ = lab.send(Msg::Editor(Message::Press(a)));
+        let _ = lab.send(Msg::Editor(Message::Move(b)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let excl = lab.image_rect_to_phys(Rectangle::new(a, Size::new(b.x - a.x, b.y - a.y)), 48.0);
+        let (d, md, c) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(
+            d, 0,
+            "Redact-with-Blur commit: {d}/{c} outside px changed (max={md})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Redact-with-Blur undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(
+            dr, 0,
+            "Redact-with-Blur redo: {dr}/{cr} outside px changed (max={mdr})"
+        );
+    }
+
+    // 5) Highlighter: drag, commit, undo, redo (NO settle_mip!)
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Highlighter)));
+        let a = Point::new(2200.0, 1800.0);
+        let b = Point::new(3200.0, 2000.0);
+        let _ = lab.send(Msg::Editor(Message::Press(a)));
+        let _ = lab.send(Msg::Editor(Message::Move(b)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let excl = lab.image_rect_to_phys(
+            Rectangle::new(Point::new(2050.0, 1650.0), Size::new(1300.0, 500.0)),
+            48.0,
+        );
+        let (d, md, c) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(
+            d, 0,
+            "Highlighter commit: {d}/{c} outside px changed (max={md})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Highlighter undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[excl]);
+        assert_eq!(
+            dr, 0,
+            "Highlighter redo: {dr}/{cr} outside px changed (max={mdr})"
+        );
+    }
+
+    // 6) Spotlight (with Blur present — baked Spotlight + synchronous display rebuild): commit, undo, redo!
+    {
+        let before = lab.pixels();
+        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+        let a = Point::new(3800.0, 1700.0);
+        let b = Point::new(4700.0, 2400.0);
+        let _ = lab.send(Msg::Editor(Message::Press(a)));
+        let _ = lab.send(Msg::Editor(Message::Move(b)));
+        let _ = lab.send(Msg::Editor(Message::Release));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let hole_in = lab.image_rect_to_phys(
+            Rectangle::new(
+                Point::new(a.x + 80.0, a.y + 80.0),
+                Size::new(b.x - a.x - 160.0, b.y - a.y - 160.0),
+            ),
+            0.0,
+        );
+        let hole_rect = [
+            hole_in[0].max(0) as u32,
+            hole_in[1].max(0) as u32,
+            hole_in[2].max(0) as u32,
+            hole_in[3].max(0) as u32,
+        ];
+        let (d, md, c) = diff_outside(&before, &lab.pixels(), stride, hole_rect, &[]);
+        assert_eq!(
+            d, 0,
+            "Spotlight(baked) commit: {d}/{c} inside-hole px changed (max={md})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Undo));
+        let _ = lab.render(0.0);
+        let (du, mdu, cu) = diff_outside(&before, &lab.pixels(), stride, pic_rect, &[]);
+        assert_eq!(
+            du, 0,
+            "Spotlight(baked) undo: {du}/{cu} px differed from before (max={mdu})"
+        );
+
+        let _ = lab.send(Msg::Editor(Message::Redo));
+        let _ = lab.send(Msg::Editor(Message::Deselect));
+        let _ = lab.render(0.0);
+        let (dr, mdr, cr) = diff_outside(&before, &lab.pixels(), stride, hole_rect, &[]);
+        assert_eq!(
+            dr, 0,
+            "Spotlight(baked) redo: {dr}/{cr} inside-hole px changed (max={mdr})"
+        );
+    }
+}
+
+#[test]
+fn r19_canvas_grow_commit_keeps_display_crisp_without_filter_flip() {
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    lab.s.editor.as_mut().unwrap().grow_canvas = true;
+    let _ = lab.render(0.0);
+    assert!(
+        lab.s.editor.as_ref().unwrap().display.is_some() && lab.s.editor.as_ref().unwrap().crisp
+    );
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(4800.0, 1000.0))));
+    let _ = lab.send(Msg::Editor(Message::Move(Point::new(5400.0, 1500.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.render(0.0);
+    let e = lab.s.editor.as_ref().unwrap();
+    assert!(e.doc.image.width > 5120, "canvas grew");
+    assert!(
+        e.display.is_some() && e.crisp,
+        "canvas grow must not drop display/crisp for a frame (filter flip)"
+    );
+}
+
+#[test]
+fn r19_live_vector_matches_raster_paint_pixel_for_pixel_at_1x() {
+    use crate::features::snip::annotate::{self, Annotator, Image};
+    use crate::features::snip::screens::snip_toolbar::canvas::{self, ScreenMap};
+    use crate::shared::kit::testing::shot;
+
+    let (w, h) = (320u32, 220u32);
+    let base_crop = detailed_crop(w, h);
+    let make_editor = || {
+        let mut e = Annotator::new(
+            Image {
+                width: w,
+                height: h,
+                rgba: base_crop.rgba.clone(),
+            },
+            1.0,
+        );
+        e.studio = true;
+        e.outline = false;
+        e.fill = false;
+        e
+    };
+
+    type DrawCase = (&'static str, fn(&mut Annotator));
+    let cases: &[DrawCase] = &[
+        ("pen", |e| {
+            e.update(Message::Tool(Tool::Pen));
+            e.update(Message::Press(Point::new(30.0, 40.0)));
+            e.update(Message::Move(Point::new(110.0, 95.0)));
+            e.update(Message::Move(Point::new(220.0, 60.0)));
+            e.update(Message::Move(Point::new(270.0, 150.0)));
+        }),
+        ("highlighter", |e| {
+            e.update(Message::Tool(Tool::Highlighter));
+            e.update(Message::Press(Point::new(40.0, 110.0)));
+            e.update(Message::Move(Point::new(160.0, 115.0)));
+            e.update(Message::Move(Point::new(260.0, 125.0)));
+        }),
+        ("rect_plain", |e| {
+            e.update(Message::Tool(Tool::Rect));
+            e.update(Message::Press(Point::new(45.0, 35.0)));
+            e.update(Message::Move(Point::new(235.0, 165.0)));
+        }),
+        ("rect_outline_fill", |e| {
+            e.outline = true;
+            e.fill = true;
+            e.update(Message::Tool(Tool::Rect));
+            e.update(Message::Press(Point::new(50.0, 40.0)));
+            e.update(Message::Move(Point::new(240.0, 170.0)));
+        }),
+        ("ellipse_plain", |e| {
+            e.update(Message::Tool(Tool::Ellipse));
+            e.update(Message::Press(Point::new(55.0, 35.0)));
+            e.update(Message::Move(Point::new(255.0, 175.0)));
+        }),
+        ("ellipse_outline_fill", |e| {
+            e.outline = true;
+            e.fill = true;
+            e.update(Message::Tool(Tool::Ellipse));
+            e.update(Message::Press(Point::new(55.0, 35.0)));
+            e.update(Message::Move(Point::new(255.0, 175.0)));
+        }),
+        ("arrow", |e| {
+            e.outline = true;
+            e.update(Message::Tool(Tool::Arrow));
+            e.update(Message::Press(Point::new(40.0, 170.0)));
+            e.update(Message::Move(Point::new(260.0, 50.0)));
+        }),
+        ("line", |e| {
+            e.outline = true;
+            e.update(Message::Tool(Tool::Line));
+            e.update(Message::Press(Point::new(40.0, 50.0)));
+            e.update(Message::Move(Point::new(260.0, 170.0)));
+        }),
+        ("pointer", |e| {
+            e.outline = true;
+            e.update(Message::Tool(Tool::Pointer));
+            e.update(Message::Press(Point::new(160.0, 110.0)));
+            e.update(Message::Move(Point::new(210.0, 140.0)));
+        }),
+        ("redact_rect", |e| {
+            e.update(Message::Tool(Tool::Redact));
+            e.update(Message::Press(Point::new(60.0, 50.0)));
+            e.update(Message::Move(Point::new(230.0, 160.0)));
+        }),
+        ("redact_oval", |e| {
+            e.update(Message::Tool(Tool::Redact));
+            e.update(Message::BlurShape(annotate::blur::Kind::Ellipse));
+            e.update(Message::Press(Point::new(60.0, 50.0)));
+            e.update(Message::Move(Point::new(230.0, 160.0)));
+        }),
+    ];
+
+    for (name, draw) in cases {
+        let mut e = make_editor();
+        draw(&mut e);
+        assert!(e.live_vector().is_some(), "{name}: uses live_vector");
+        e.update(Message::Release);
+        e.update(Message::Deselect);
+        assert_eq!(
+            e.vector_tail_start(),
+            0,
+            "{name}: rendered via live_vector (unbaked)"
+        );
+        let vec_px = shot::render(canvas::canvas(&e, 1.0, ScreenMap::ONE), w, h);
+        let raster = annotate::render(&e.doc);
+        assert_eq!(raster.rgba.len(), vec_px.len());
+        let mut diff = 0usize;
+        let mut max_d = 0u8;
+        for px in 0..(w as usize * h as usize) {
+            let o = px * 4;
+            let mut d = 0u8;
+            for ch in 0..4 {
+                d = d.max(vec_px[o + ch].abs_diff(raster.rgba[o + ch]));
+            }
+            if d > 0 {
+                diff += 1;
+                max_d = max_d.max(d);
+            }
+        }
+        assert_eq!(
+            diff, 0,
+            "{name} live_vector vs annotate::render: {diff} px differed (max={max_d})"
+        );
+    }
+}
+
+#[test]
+#[ignore = "lab measurement for R-19 review items 1, 3, 4"]
+fn r19_lab_review_measure() {
+    let win = Size::new(1280.0, 800.0);
+    for (tag, w, h) in [("5K", 5120u32, 2880u32), ("8K", 7680u32, 4320u32)] {
+        eprintln!(
+            "
+=== REVIEW LAB {tag} ({w}x{h}) ==="
+        );
+
+        // Part A: Item 3 — 30 mixed annotations: single-item select-drag + 2-item group-drag
+        {
+            let mut lab = StudioLab::open(w, h, win, 1.0);
+            let _ = lab.render(0.0);
+            let tools = [
+                Tool::Rect,
+                Tool::Ellipse,
+                Tool::Arrow,
+                Tool::Pen,
+                Tool::Highlighter,
+                Tool::Pointer,
+                Tool::Redact,
+            ];
+            for i in 0..30usize {
+                let tool = tools[i % tools.len()];
+                let _ = lab.send(Msg::Editor(Message::Tool(tool)));
+                let col = (i % 6) as f32;
+                let row = (i / 6) as f32;
+                let x0 = (w as f32) * (0.06 + col * 0.15);
+                let y0 = (h as f32) * (0.06 + row * 0.17);
+                let x1 = x0 + (w as f32) * 0.10;
+                let y1 = y0 + (h as f32) * 0.11;
+                let _ = lab.send(Msg::Editor(Message::Press(Point::new(x0, y0))));
+                if matches!(tool, Tool::Pen | Tool::Highlighter) {
+                    for s in 1..=8 {
+                        let t = s as f32 / 8.0;
+                        let _ = lab.send(Msg::Editor(Message::Move(Point::new(
+                            x0 + (x1 - x0) * t,
+                            y0 + (y1 - y0) * t + (t * 6.0).sin() * 20.0,
+                        ))));
+                    }
+                } else {
+                    let _ = lab.send(Msg::Editor(Message::Move(Point::new(x1, y1))));
+                }
+                let _ = lab.send(Msg::Editor(Message::Release));
+            }
+            let _ = lab.render(0.0);
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Select)));
+            let idx = 29usize;
+            let frame = lab.s.editor.as_ref().unwrap().doc.items[idx].frame();
+            let grab = Point::new(frame.x + 8.0, frame.y + 8.0);
+            let _ = lab.send(Msg::Editor(Message::Press(grab)));
+            let mut frames = Vec::with_capacity(30);
+            for s in 1..=30 {
+                let t = s as f32 / 30.0;
+                let p = Point::new(
+                    grab.x - t * (w as f32) * 0.12,
+                    grab.y - t * (h as f32) * 0.08,
+                );
+                let u = lab.send(Msg::Editor(Message::Move(p)));
+                frames.push(lab.render(u));
+            }
+            let uc = lab.send(Msg::Editor(Message::Release));
+            let cf = lab.render(uc);
+            let tot: Vec<f64> = frames.iter().map(StudioFrame::total_ms).collect();
+            let rast: Vec<f64> = frames.iter().map(|f| f.raster_ms).collect();
+            let ud: Vec<f64> = frames.iter().map(|f| f.update_ms + f.draw_ms).collect();
+            eprintln!(
+                "  [30-items single-drag] total [{}] upd+draw [{}] rast [{}] f1={:.1}ms commit={:.1}ms",
+                summarize(&tot),
+                summarize(&ud),
+                summarize(&rast),
+                tot[0],
+                cf.total_ms(),
+            );
+
+            // Multi-item group-drag (items 28 and 29 selected together)
+            let _ = lab.send(Msg::Editor(Message::SelectIndex(28, false)));
+            let _ = lab.send(Msg::Editor(Message::SelectIndex(29, true)));
+            let _ = lab.render(0.0);
+            let f28 = lab.s.editor.as_ref().unwrap().doc.items[28].frame();
+            let g2 = Point::new(f28.x + 12.0, f28.y + 12.0);
+            let _ = lab.send(Msg::Editor(Message::Press(g2)));
+            let mut gframes = Vec::with_capacity(30);
+            for s in 1..=30 {
+                let t = s as f32 / 30.0;
+                let p = Point::new(g2.x + t * (w as f32) * 0.05, g2.y + t * (h as f32) * 0.04);
+                let u = lab.send(Msg::Editor(Message::Move(p)));
+                gframes.push(lab.render(u));
+            }
+            let gu = lab.send(Msg::Editor(Message::Release));
+            let gf = lab.render(gu);
+            let gtot: Vec<f64> = gframes.iter().map(StudioFrame::total_ms).collect();
+            let grast: Vec<f64> = gframes.iter().map(|f| f.raster_ms).collect();
+            let gud: Vec<f64> = gframes.iter().map(|f| f.update_ms + f.draw_ms).collect();
+            eprintln!(
+                "  [30-items group-drag]  total [{}] upd+draw [{}] rast [{}] f1={:.1}ms commit={:.1}ms",
+                summarize(&gtot),
+                summarize(&gud),
+                summarize(&grast),
+                gtot[0],
+                gf.total_ms(),
+            );
+        }
+
+        // Part B: Item 4 — 90% and 150% zoom
+        for z in [0.90f32, 1.50f32] {
+            let mut lab = StudioLab::open(w, h, win, 1.0);
+            let _ = lab.s.zoom_to(z, None);
+            let _ = lab.s.take_scroll();
+            lab.reset_scroll();
+            lab.settle_mip();
+            let _ = lab.render(0.0);
+            let e = lab.s.editor.as_ref().unwrap();
+            let (has_disp, crisp) = (e.display.is_some(), e.crisp);
+            for (tname, tool) in [
+                ("rect", Tool::Rect),
+                ("arrow", Tool::Arrow),
+                ("pen", Tool::Pen),
+            ] {
+                let _ = lab.send(Msg::Editor(Message::Tool(tool)));
+                let a = Point::new(120.0, 120.0);
+                let _ = lab.send(Msg::Editor(Message::Press(a)));
+                let mut frames = Vec::with_capacity(20);
+                for s in 1..=20 {
+                    let t = s as f32 / 20.0;
+                    let p = Point::new(120.0 + 420.0 * t, 120.0 + 260.0 * t);
+                    let u = lab.send(Msg::Editor(Message::Move(p)));
+                    frames.push(lab.render(u));
+                }
+                let uc = lab.send(Msg::Editor(Message::Release));
+                let cf = lab.render(uc);
+                let tot: Vec<f64> = frames.iter().map(StudioFrame::total_ms).collect();
+                let rast: Vec<f64> = frames.iter().map(|f| f.raster_ms).collect();
+                eprintln!(
+                    "  [zoom {:3.0}% disp={} crisp={}] {:6} drag [{}] rast [{}] commit={:.1}ms",
+                    z * 100.0,
+                    has_disp,
+                    crisp,
+                    tname,
+                    summarize(&tot),
+                    summarize(&rast),
+                    cf.total_ms(),
+                );
+            }
+        }
+
+        // Part C: Item 1 — Step, Spotlight(vec), Blur, Spotlight(with Blur) commit/undo/redo timing at Fit
+        {
+            let mut lab = StudioLab::open(w, h, win, 1.0);
+            let _ = lab.render(0.0);
+            for (name, tool, a, b, desel) in [
+                (
+                    "step",
+                    Tool::Step,
+                    Point::new(w as f32 * 0.4, h as f32 * 0.4),
+                    Point::new(w as f32 * 0.4, h as f32 * 0.4),
+                    true,
+                ),
+                (
+                    "spot_vec",
+                    Tool::Spotlight,
+                    Point::new(w as f32 * 0.15, h as f32 * 0.55),
+                    Point::new(w as f32 * 0.35, h as f32 * 0.8),
+                    false,
+                ),
+                (
+                    "blur",
+                    Tool::Blur,
+                    Point::new(w as f32 * 0.55, h as f32 * 0.3),
+                    Point::new(w as f32 * 0.7, h as f32 * 0.5),
+                    false,
+                ),
+                (
+                    "spot_blur",
+                    Tool::Spotlight,
+                    Point::new(w as f32 * 0.15, h as f32 * 0.15),
+                    Point::new(w as f32 * 0.35, h as f32 * 0.35),
+                    false,
+                ),
+            ] {
+                let _ = lab.send(Msg::Editor(Message::Tool(tool)));
+                let _ = lab.send(Msg::Editor(Message::Press(a)));
+                if a != b {
+                    let _ = lab.send(Msg::Editor(Message::Move(b)));
+                }
+                let mut uc = lab.send(Msg::Editor(Message::Release));
+                if desel {
+                    uc += lab.send(Msg::Editor(Message::Deselect));
+                }
+                let fc = lab.render(uc);
+                let disp_c = lab.s.editor.as_ref().unwrap().display.is_some();
+                let uu = lab.send(Msg::Editor(Message::Undo));
+                let fu = lab.render(uu);
+                let disp_u = lab.s.editor.as_ref().unwrap().display.is_some();
+                let ur = lab.send(Msg::Editor(Message::Redo));
+                let fr = lab.render(ur);
+                let disp_r = lab.s.editor.as_ref().unwrap().display.is_some();
+                eprintln!(
+                    "  [commit/undo/redo] {:9} commit={:5.1}ms(disp={}) undo={:5.1}ms(disp={}) redo={:5.1}ms(disp={})",
+                    name,
+                    fc.total_ms(),
+                    disp_c,
+                    fu.total_ms(),
+                    disp_u,
+                    fr.total_ms(),
+                    disp_r,
+                );
+            }
+        }
+    }
 }
