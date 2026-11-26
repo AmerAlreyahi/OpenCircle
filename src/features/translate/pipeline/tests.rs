@@ -1550,6 +1550,9 @@ struct Slow {
     lines: Vec<TextBlock>,
     asked: Log<Vec<String>>,
     parallel: usize,
+    /// requests in flight now, and the most seen at once (proves the parts run together without timing)
+    now: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
 }
 
 impl Deps for Slow {
@@ -1557,9 +1560,13 @@ impl Deps for Slow {
         Ok(self.lines.clone())
     }
     fn translate(&self, texts: &[String], _: &str) -> Result<Vec<String>, AiError> {
+        use std::sync::atomic::Ordering::SeqCst;
         self.asked.borrow_mut().extend(texts.iter().cloned());
+        let n = self.now.fetch_add(1, SeqCst) + 1;
+        self.peak.fetch_max(n, SeqCst);
         let ms = if texts[0] == "Slow" { 700 } else { 60 };
         std::thread::sleep(Duration::from_millis(ms));
+        self.now.fetch_sub(1, SeqCst);
         if texts.iter().any(|t| t == "Bad") {
             return Err(AiError::Server(503, String::new()));
         }
@@ -1586,6 +1593,8 @@ fn slow(parallel: usize) -> (Slow, Vec<u8>) {
             lines,
             asked,
             parallel,
+            now: Default::default(),
+            peak: Default::default(),
         },
         img,
     )
@@ -1598,18 +1607,17 @@ fn slow(parallel: usize) -> (Slow, Vec<u8>) {
 fn ai_parts_are_drawn_as_they_arrive_and_one_failing_part_is_only_its_own() {
     let (deps, img) = slow(3);
     let mut shown: Vec<Vec<String>> = Vec::new();
-    let at = Instant::now();
     let out = translate_progressively(&img, 400, 400, "ar", &Cache::new(8), &deps, |p| {
         let done = (p.blocks.iter()).filter(|b| !b.translation.is_empty());
         shown.push(done.map(|b| b.original.clone()).collect());
     })
     .unwrap();
-    let total = at.elapsed();
     // the first picture has a fast block, not the slow top one
     assert!(!shown[0].contains(&"Slow".to_string()), "{shown:?}");
-    // all parts were asked, in flight together: ~0.7 s, not the 0.9 s in turn
+    // all parts were asked, in flight together (counted, not timed: a slow CI runner took 1.1 s, CI 45844239341)
     assert_eq!(deps.asked.borrow().len(), 4);
-    assert!(total < Duration::from_millis(1100), "{total:?}");
+    let peak = deps.peak.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(peak >= 2, "parts ran one at a time (peak {peak})");
     let got: Vec<(&str, bool)> = (out.blocks.iter())
         .map(|b| (b.original.as_str(), !b.translation.is_empty()))
         .collect();
