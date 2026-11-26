@@ -2148,11 +2148,10 @@ impl Studio {
         let Some(e) = &mut self.editor else {
             return Outcome::None;
         };
-        let history = matches!(m, annotate::Message::Undo | annotate::Message::Redo);
-        let size = (e.doc.image.width, e.doc.image.height);
+        let img_gen = e.doc.image_gen;
         let out = e.update(m);
-        // (undo / redo, or the canvas grew: a paste or a move past the edge)
-        if history || size != (e.doc.image.width, e.doc.image.height) {
+        // Only rescan image alpha when the picture pixels or canvas dimensions actually changed.
+        if img_gen != e.doc.image_gen {
             self.transparent = cut::has_alpha(&e.doc.image.rgba);
         }
         self.sync_stage(); // a crop changes what is shown
@@ -2585,7 +2584,12 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
     let actual = (want - bw as f32).abs() < 1.0;
 
     if bw * bh < MIP_MIN_PIXELS || actual || want >= bw as f32 {
-        (e.display, e.crisp) = (None, actual || z >= 2.0);
+        let crisp = actual || z >= 2.0;
+        if !crisp && !e.base_deltas.is_empty() {
+            // Smooth Linear path (100-200 %): fold any deltas so there is no border seam.
+            e.flush_base_deltas();
+        }
+        (e.display, e.crisp) = (None, crisp);
         *mips = None;
         return;
     }
@@ -2617,9 +2621,10 @@ fn stage_copy(e: &mut Annotator, scale: f32, mips: &mut Option<Mips>) {
     if m.ready.as_ref().is_none_or(|(w, _)| !near(*w)) && m.pending.is_none() {
         let slot: MipSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
         let (out, px) = (slot.clone(), pixels.clone());
+        let deltas = e.base_delta_slices();
         std::thread::spawn(move || {
             let th = ((bh as f32 * want as f32 / bw as f32).round() as u32).max(1);
-            let small = annotate::downsample(px.as_ref(), bw, bh, want, th);
+            let small = annotate::downsample_with_deltas(px.as_ref(), bw, bh, &deltas, want, th);
             if let Ok(mut out) = out.lock() {
                 *out = Some(image::Handle::from_rgba(want, th, small));
             }

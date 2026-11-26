@@ -704,6 +704,8 @@ pub struct Annotator {
     /// Hides committed since the picture was last painted whole: their region
     /// of it, drawn over `base` (see `patch_over`; see-through where unpainted).
     pub(crate) patch: Vec<(Rectangle, image::Handle)>,
+    /// Copy-on-write local base patches (avoid cloning 59/133 MB base on Step/Text/Blur edits).
+    pub(crate) base_deltas: Vec<(Rectangle, image::Handle)>,
     pending: Option<Pending>,
     /// Crop drag: from, to.
     cropping: Option<(Point, Point)>,
@@ -928,6 +930,7 @@ impl Annotator {
             #[cfg(test)]
             one_layer: false,
             patch: Vec::new(),
+            base_deltas: Vec::new(),
             pending: None,
             cropping: None,
             dragged: None,
@@ -2076,8 +2079,9 @@ impl Annotator {
                 && inner.x + inner.width <= outer.x + outer.width
                 && inner.y + inner.height <= outer.y + outer.height
         };
-        // Joint fixed-point grow loop: snap outward to any display downsampler support AND
-        // enclose any intersecting baked Blur/Magnifier so src_r never clips an adjacent reader.
+        // Joint fixed-point grow loop: snap outward to the exact display downsampler support
+        // (idempotent!) AND enclose any intersecting baked item so no Blur, Magnifier, or
+        // stroked Step/Text is ever clipped at the patch border.
         for _ in 0..8 {
             let mut grown = false;
             if let Some((dw, dh)) = disp_dims {
@@ -2085,12 +2089,10 @@ impl Annotator {
                 let (bx0, by0) = ((r.x() - vr.x()) as u32, (r.y() - vr.y()) as u32);
                 let sx = f64::from(bw) / f64::from(dw);
                 let sy = f64::from(bh) / f64::from(dh);
-                let dx0 = ((f64::from(bx0) / sx).floor() as i32 - 1).max(0) as u32;
-                let dy0 = ((f64::from(by0) / sy).floor() as i32 - 1).max(0) as u32;
-                let dx1 =
-                    ((f64::from(bx0 + r.width()) / sx).ceil() as i32 + 1).min(dw as i32) as u32;
-                let dy1 =
-                    ((f64::from(by0 + r.height()) / sy).ceil() as i32 + 1).min(dh as i32) as u32;
+                let dx0 = (f64::from(bx0) / sx).floor().max(0.0) as u32;
+                let dy0 = (f64::from(by0) / sy).floor().max(0.0) as u32;
+                let dx1 = ((f64::from(bx0 + r.width()) / sx).ceil() as u32).min(dw);
+                let dy1 = ((f64::from(by0 + r.height()) / sy).ceil() as u32).min(dh);
                 let sx0 = (f64::from(dx0) * sx).floor().max(0.0) as u32;
                 let sy0 = (f64::from(dy0) * sy).floor().max(0.0) as u32;
                 let sx1 = ((f64::from(dx1) * sx).ceil() as u32).clamp(sx0 + 1, bw);
@@ -2119,8 +2121,7 @@ impl Annotator {
                         );
                         item.bounds().union(&src_rect)
                     }
-                    Shape::Blur { .. } => item.bounds(),
-                    _ => continue,
+                    _ => item.bounds(),
                 };
                 let Some(need) = need.intersection(&view) else {
                     continue;
@@ -2141,38 +2142,116 @@ impl Annotator {
         let (layers, excludes) = self.baked_layers_and_excludes(want_mask, bake_spot, hide);
         let repainted = self.doc.paint_with_excludes(&layers, &excludes, r, None);
 
-        let mut out = base_px.to_vec();
         let (bx0, by0) = ((r.x() - vr.x()) as usize, (r.y() - vr.y()) as usize);
         let rw = r.width() as usize;
         let rh = r.height() as usize;
-        let base_stride = bw as usize * 4;
-        let rep_stride = rw * 4;
-        let rep_data = repainted.data();
-        for row in 0..rh {
-            let dst_off = (by0 + row) * base_stride + bx0 * 4;
-            let src_off = row * rep_stride;
-            out[dst_off..dst_off + rep_stride]
-                .copy_from_slice(&rep_data[src_off..src_off + rep_stride]);
+        if (self.display.is_some() || self.crisp) && self.base_deltas.len() < 16 {
+            // Fast copy-on-write path: patch display directly from repainted (joint grow loop
+            // guarantees r holds the full source support of [dx0..dx1, dy0..dy1]) and store
+            // only the small edited rect in base_deltas — zero 59/133 MB base clone.
+            if let Some(image::Handle::Rgba {
+                width: dw,
+                height: dh,
+                pixels: disp_px,
+                ..
+            }) = &self.display
+            {
+                let (dw, dh) = (*dw, *dh);
+                let mut disp = disp_px.to_vec();
+                let sx = f64::from(bw) / f64::from(dw);
+                let sy = f64::from(bh) / f64::from(dh);
+                let dx0 = if bx0 == 0 {
+                    0
+                } else {
+                    (bx0 as f64 / sx).ceil().max(0.0) as u32
+                };
+                let dy0 = if by0 == 0 {
+                    0
+                } else {
+                    (by0 as f64 / sy).ceil().max(0.0) as u32
+                };
+                let dx1 = if bx0 + rw >= bw as usize {
+                    dw
+                } else {
+                    (((bx0 + rw) as f64 / sx).floor() as i32).clamp(0, dw as i32) as u32
+                };
+                let dy1 = if by0 + rh >= bh as usize {
+                    dh
+                } else {
+                    (((by0 + rh) as f64 / sy).floor() as i32).clamp(0, dh as i32) as u32
+                };
+                downsample_rect_patch(
+                    repainted.data(),
+                    bw,
+                    bh,
+                    bx0,
+                    by0,
+                    rw,
+                    &mut disp,
+                    dw,
+                    dh,
+                    [dx0, dy0, dx1, dy1],
+                );
+                self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+            }
+            let rect = Rectangle::new(
+                Point::new(r.x() as f32, r.y() as f32),
+                Size::new(r.width() as f32, r.height() as f32),
+            );
+            let delta = image::Handle::from_rgba(r.width(), r.height(), repainted.take());
+            self.base_deltas.push((rect, delta));
+        } else {
+            let mut out = base_px.to_vec();
+            let base_stride = bw as usize * 4;
+            for (dr, dh) in self.base_deltas.drain(..) {
+                if let image::Handle::Rgba {
+                    width: dw,
+                    height: dh_px,
+                    pixels: dpx,
+                    ..
+                } = dh
+                {
+                    let (ox, oy) = (
+                        (dr.x as i32 - vr.x()) as usize,
+                        (dr.y as i32 - vr.y()) as usize,
+                    );
+                    let dstride = dw as usize * 4;
+                    for row in 0..dh_px as usize {
+                        let dst_off = (oy + row) * base_stride + ox * 4;
+                        let src_off = row * dstride;
+                        out[dst_off..dst_off + dstride]
+                            .copy_from_slice(&dpx[src_off..src_off + dstride]);
+                    }
+                }
+            }
+            let rep_stride = rw * 4;
+            let rep_data = repainted.data();
+            for row in 0..rh {
+                let dst_off = (by0 + row) * base_stride + bx0 * 4;
+                let src_off = row * rep_stride;
+                out[dst_off..dst_off + rep_stride]
+                    .copy_from_slice(&rep_data[src_off..src_off + rep_stride]);
+            }
+            if let Some(image::Handle::Rgba {
+                width: dw,
+                height: dh,
+                pixels: disp_px,
+                ..
+            }) = &self.display
+            {
+                let (dw, dh) = (*dw, *dh);
+                let mut disp = disp_px.to_vec();
+                let sx = f64::from(bw) / f64::from(dw);
+                let sy = f64::from(bh) / f64::from(dh);
+                let dx0 = ((bx0 as f64 / sx).floor() as i32 - 1).max(0) as u32;
+                let dy0 = ((by0 as f64 / sy).floor() as i32 - 1).max(0) as u32;
+                let dx1 = (((bx0 + rw) as f64 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
+                let dy1 = (((by0 + rh) as f64 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
+                downsample_rect(&out, bw, bh, &mut disp, dw, dh, [dx0, dy0, dx1, dy1]);
+                self.display = Some(image::Handle::from_rgba(dw, dh, disp));
+            }
+            self.base = image::Handle::from_rgba(bw, bh, out);
         }
-        if let Some(image::Handle::Rgba {
-            width: dw,
-            height: dh,
-            pixels: disp_px,
-            ..
-        }) = &self.display
-        {
-            let (dw, dh) = (*dw, *dh);
-            let mut disp = disp_px.to_vec();
-            let sx = f64::from(bw) / f64::from(dw);
-            let sy = f64::from(bh) / f64::from(dh);
-            let dx0 = ((bx0 as f64 / sx).floor() as i32 - 1).max(0) as u32;
-            let dy0 = ((by0 as f64 / sy).floor() as i32 - 1).max(0) as u32;
-            let dx1 = (((bx0 + rw) as f64 / sx).ceil() as i32 + 1).min(dw as i32) as u32;
-            let dy1 = (((by0 + rh) as f64 / sy).ceil() as i32 + 1).min(dh as i32) as u32;
-            downsample_rect(&out, bw, bh, &mut disp, dw, dh, [dx0, dy0, dx1, dy1]);
-            self.display = Some(image::Handle::from_rgba(dw, dh, disp));
-        }
-        self.base = image::Handle::from_rgba(bw, bh, out);
         self.baked_items = want_baked;
         self.baked_mask = want_mask.to_vec();
         self.baked_spot_holes = want_spot_holes;
@@ -2626,12 +2705,122 @@ impl Annotator {
     }
 
     /// The painted picture's bytes (the tests).
+    /// Folds any pending local base_deltas into self.base (used only when switching into
+    /// smooth Linear 100-200 % zoom so there is no border seam).
+    pub(crate) fn flush_base_deltas(&mut self) {
+        if self.base_deltas.is_empty() {
+            return;
+        }
+        let view = self.doc.view();
+        let vr = int_rect(view, view);
+        let image::Handle::Rgba {
+            width: bw,
+            height: bh,
+            pixels: base_px,
+            ..
+        } = &self.base
+        else {
+            self.base_deltas.clear();
+            return;
+        };
+        let (bw, bh) = (*bw, *bh);
+        let mut out = base_px.to_vec();
+        let base_stride = bw as usize * 4;
+        for (dr, dh) in self.base_deltas.drain(..) {
+            if let image::Handle::Rgba {
+                width: dw,
+                height: dh_px,
+                pixels: dpx,
+                ..
+            } = dh
+            {
+                let (ox, oy) = (
+                    (dr.x as i32 - vr.x()) as usize,
+                    (dr.y as i32 - vr.y()) as usize,
+                );
+                let dstride = dw as usize * 4;
+                for row in 0..dh_px as usize {
+                    let dst_off = (oy + row) * base_stride + ox * 4;
+                    let src_off = row * dstride;
+                    out[dst_off..dst_off + dstride]
+                        .copy_from_slice(&dpx[src_off..src_off + dstride]);
+                }
+            }
+        }
+        self.base = image::Handle::from_rgba(bw, bh, out);
+    }
+
+    /// Cheap refcount snapshot of base_deltas in base-local coordinates for background mip threads.
+    pub(crate) fn base_delta_slices(
+        &self,
+    ) -> Vec<(
+        usize,
+        usize,
+        usize,
+        usize,
+        iced::advanced::graphics::core::Bytes,
+    )> {
+        if self.base_deltas.is_empty() {
+            return Vec::new();
+        }
+        let vr = int_rect(self.doc.view(), self.doc.view());
+        self.base_deltas
+            .iter()
+            .filter_map(|(dr, dh)| match dh {
+                image::Handle::Rgba {
+                    width,
+                    height,
+                    pixels,
+                    ..
+                } => Some((
+                    (dr.x as i32 - vr.x()).max(0) as usize,
+                    (dr.y as i32 - vr.y()).max(0) as usize,
+                    *width as usize,
+                    *height as usize,
+                    pixels.clone(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[cfg(test)]
     fn base_pixels(&self) -> Vec<u8> {
-        match &self.base {
-            image::Handle::Rgba { pixels, .. } => pixels.to_vec(),
-            _ => Vec::new(),
+        let image::Handle::Rgba {
+            width: bw,
+            pixels: base_px,
+            ..
+        } = &self.base
+        else {
+            return Vec::new();
+        };
+        let mut out = base_px.to_vec();
+        if !self.base_deltas.is_empty() {
+            let vr = int_rect(self.doc.view(), self.doc.view());
+            let base_stride = *bw as usize * 4;
+            for (dr, dh) in &self.base_deltas {
+                if let image::Handle::Rgba {
+                    width: dw,
+                    height: dh_px,
+                    pixels: dpx,
+                    ..
+                } = dh
+                {
+                    let (ox, oy) = (
+                        (dr.x as i32 - vr.x()) as usize,
+                        (dr.y as i32 - vr.y()) as usize,
+                    );
+                    let dstride = *dw as usize * 4;
+                    for row in 0..*dh_px as usize {
+                        let dst_off = (oy + row) * base_stride + ox * 4;
+                        let src_off = row * dstride;
+                        out[dst_off..dst_off + dstride]
+                            .copy_from_slice(&dpx[src_off..src_off + dstride]);
+                    }
+                }
+            }
         }
+        out
     }
 
     /// The committed Hides' patches: each one's place (image px) and bytes (the tests).
@@ -3153,6 +3342,7 @@ impl Annotator {
         self.legend = self.doc.legend_layout();
         if self.bare() {
             self.base_ready = false;
+            self.base_deltas.clear();
             self.baked_items.clear();
             self.baked_mask.clear();
             self.baked_spot_holes.clear();
@@ -3191,6 +3381,7 @@ impl Annotator {
         }
         self.base = handle(pm);
         self.patch.clear();
+        self.base_deltas.clear();
         self.baked_items = self.baked_snapshot(&mask);
         self.baked_mask = mask;
         self.baked_spot_holes = spot_holes;
@@ -3357,6 +3548,7 @@ impl Annotator {
             });
         if !self.bare()
             && self.patch.is_empty()
+            && self.base_deltas.is_empty()
             && self.legend.is_none()
             && all_below_baked
             && let image::Handle::Rgba {
@@ -3743,14 +3935,103 @@ pub(crate) fn downsample(src: &[u8], bw: u32, bh: u32, dw: u32, dh: u32) -> Vec<
     dst
 }
 
+/// Parallel exact downsampler overlaying local base_deltas on the fly (used by Studio's
+/// background mip thread when zooming after local edits — zero 133 MB base clone).
+pub(crate) fn downsample_with_deltas(
+    src: &[u8],
+    bw: u32,
+    bh: u32,
+    deltas: &[(
+        usize,
+        usize,
+        usize,
+        usize,
+        iced::advanced::graphics::core::Bytes,
+    )],
+    dw: u32,
+    dh: u32,
+) -> Vec<u8> {
+    if deltas.is_empty() {
+        return downsample(src, bw, bh, dw, dh);
+    }
+    let mut dst = vec![0u8; dw as usize * dh as usize * 4];
+    if bw == 0 || bh == 0 || dw == 0 || dh == 0 {
+        return dst;
+    }
+    let (xs, xw) = axis_weights(bw, dw, 0, dw);
+    let (ys, yw) = axis_weights(bh, dh, 0, dh);
+    let src_stride = bw as usize * 4;
+    let dst_stride = dw as usize * 4;
+    let threads = if (bw as usize) * (bh as usize) >= 262_144 {
+        std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(1)
+    } else {
+        1
+    };
+    let rows_per = (dh as usize).div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (chunk_i, dst_chunk) in dst.chunks_mut(rows_per * dst_stride).enumerate() {
+            let dy_start = chunk_i * rows_per;
+            let dy_count = dst_chunk.len() / dst_stride;
+            let ys_slice = &ys[dy_start..dy_start + dy_count];
+            let xs_ref = &xs;
+            let xw_ref = &xw;
+            let yw_ref = &yw;
+            scope.spawn(move || {
+                let Some(first_y) = ys_slice.first() else {
+                    return;
+                };
+                let Some(last_y) = ys_slice.last() else {
+                    return;
+                };
+                let sy0 = first_y.start;
+                let sy1 = last_y.start + last_y.len;
+                let band_w = dw as usize;
+                let band_h = sy1 - sy0;
+                let mut horiz = vec![0u8; band_h * band_w * 4];
+                let mut scratch_row = Vec::new();
+                for sy in sy0..sy1 {
+                    let has_delta = deltas
+                        .iter()
+                        .any(|&(_, oy, _, dh_px, _)| sy >= oy && sy < oy + dh_px);
+                    let src_row: &[u8] = if !has_delta {
+                        &src[sy * src_stride..(sy + 1) * src_stride]
+                    } else {
+                        scratch_row.clear();
+                        scratch_row.extend_from_slice(&src[sy * src_stride..(sy + 1) * src_stride]);
+                        for &(ox, oy, dw_px, dh_px, ref dpx) in deltas {
+                            if sy >= oy && sy < oy + dh_px {
+                                let dstride = dw_px * 4;
+                                let s_off = (sy - oy) * dstride;
+                                scratch_row[ox * 4..ox * 4 + dstride]
+                                    .copy_from_slice(&dpx[s_off..s_off + dstride]);
+                            }
+                        }
+                        &scratch_row
+                    };
+                    let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
+                    downsample_horiz_row(src_row, 0, xs_ref, xw_ref, h_row);
+                }
+                let h_stride = band_w * 4;
+                for (dy_i, sp) in ys_slice.iter().enumerate() {
+                    let dst_row = &mut dst_chunk[dy_i * dst_stride..(dy_i + 1) * dst_stride];
+                    downsample_vert_row(&horiz, sy0, h_stride, band_w, sp, yw_ref, dst_row, 0);
+                }
+            });
+        }
+    });
+    dst
+}
+
 struct AxisSpan {
     start: usize,
     offset: usize,
     len: usize,
-    sum: u64,
+    sum: u32,
 }
 
-fn axis_weights(src_len: u32, dst_len: u32, lo: u32, hi: u32) -> (Vec<AxisSpan>, Vec<u64>) {
+fn axis_weights(src_len: u32, dst_len: u32, lo: u32, hi: u32) -> (Vec<AxisSpan>, Vec<u32>) {
     let mut spans = Vec::with_capacity((hi - lo) as usize);
     let mut weights = Vec::new();
     let scale = f64::from(src_len) / f64::from(dst_len);
@@ -3760,10 +4041,10 @@ fn axis_weights(src_len: u32, dst_len: u32, lo: u32, hi: u32) -> (Vec<AxisSpan>,
         let i0 = (a.floor() as u32).min(src_len - 1);
         let i1 = (b.ceil() as u32).clamp(i0 + 1, src_len);
         let offset = weights.len();
-        let mut sum = 0u64;
+        let mut sum = 0u32;
         for i in i0..i1 {
             let ov = f64::from(i + 1).min(b) - f64::from(i).max(a);
-            let w = (ov * 256.0).round().max(1.0) as u64;
+            let w = (ov * 256.0).round().max(1.0) as u32;
             weights.push(w);
             sum += w;
         }
@@ -3775,6 +4056,66 @@ fn axis_weights(src_len: u32, dst_len: u32, lo: u32, hi: u32) -> (Vec<AxisSpan>,
         });
     }
     (spans, weights)
+}
+
+#[inline]
+fn downsample_horiz_row(
+    src_row: &[u8],
+    src_ox: usize,
+    xs: &[AxisSpan],
+    xw: &[u32],
+    h_row: &mut [u8],
+) {
+    for (k, sp) in xs.iter().enumerate() {
+        let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+        let ws = &xw[sp.offset..sp.offset + sp.len];
+        let base = (sp.start - src_ox) * 4;
+        for (j, &w) in ws.iter().enumerate() {
+            let o = base + j * 4;
+            r += u32::from(src_row[o]) * w;
+            g += u32::from(src_row[o + 1]) * w;
+            b += u32::from(src_row[o + 2]) * w;
+            a += u32::from(src_row[o + 3]) * w;
+        }
+        let half = sp.sum / 2;
+        let o = k * 4;
+        h_row[o] = ((r + half) / sp.sum) as u8;
+        h_row[o + 1] = ((g + half) / sp.sum) as u8;
+        h_row[o + 2] = ((b + half) / sp.sum) as u8;
+        h_row[o + 3] = ((a + half) / sp.sum) as u8;
+    }
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn downsample_vert_row(
+    horiz: &[u8],
+    sy0: usize,
+    h_stride: usize,
+    band_w: usize,
+    sp: &AxisSpan,
+    yw: &[u32],
+    dst_row: &mut [u8],
+    dx0: usize,
+) {
+    let ws = &yw[sp.offset..sp.offset + sp.len];
+    let half = sp.sum / 2;
+    for k in 0..band_w {
+        let (mut r, mut g, mut b, mut a) = (0u32, 0u32, 0u32, 0u32);
+        let ko = k * 4;
+        for (j, &w) in ws.iter().enumerate() {
+            let o = (sp.start + j - sy0) * h_stride + ko;
+            r += u32::from(horiz[o]) * w;
+            g += u32::from(horiz[o + 1]) * w;
+            b += u32::from(horiz[o + 2]) * w;
+            a += u32::from(horiz[o + 3]) * w;
+        }
+        let d = (dx0 + k) * 4;
+        dst_row[d] = ((r + half) / sp.sum) as u8;
+        dst_row[d + 1] = ((g + half) / sp.sum) as u8;
+        dst_row[d + 2] = ((b + half) / sp.sum) as u8;
+        dst_row[d + 3] = ((a + half) / sp.sum) as u8;
+    }
 }
 
 pub(crate) fn downsample_rect(
@@ -3808,56 +4149,91 @@ fn downsample_rect_patch(
     }
     let (xs, xw) = axis_weights(bw, dw, dx0, dx1);
     let (ys, yw) = axis_weights(bh, dh, dy0, dy1);
-    let sy0 = ys.first().map_or(0, |s| s.start);
-    let sy1 = ys.last().map_or(0, |s| s.start + s.len);
     let band_w = (dx1 - dx0) as usize;
-    let band_h = sy1 - sy0;
+    let out_h = (dy1 - dy0) as usize;
     let src_stride = src_w * 4;
-
-    let mut horiz = vec![0u8; band_h * band_w * 4];
-    for sy in sy0..sy1 {
-        let src_row = &src[(sy - src_oy) * src_stride..(sy - src_oy + 1) * src_stride];
-        let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
-        for (k, sp) in xs.iter().enumerate() {
-            let (mut r, mut g, mut b, mut a) = (0u64, 0u64, 0u64, 0u64);
-            let ws = &xw[sp.offset..sp.offset + sp.len];
-            for (j, &w) in ws.iter().enumerate() {
-                let o = (sp.start + j - src_ox) * 4;
-                r += u64::from(src_row[o]) * w;
-                g += u64::from(src_row[o + 1]) * w;
-                b += u64::from(src_row[o + 2]) * w;
-                a += u64::from(src_row[o + 3]) * w;
-            }
-            let half = sp.sum / 2;
-            let o = k * 4;
-            h_row[o] = ((r + half) / sp.sum) as u8;
-            h_row[o + 1] = ((g + half) / sp.sum) as u8;
-            h_row[o + 2] = ((b + half) / sp.sum) as u8;
-            h_row[o + 3] = ((a + half) / sp.sum) as u8;
-        }
-    }
-
     let dst_stride = dw as usize * 4;
-    let h_stride = band_w * 4;
-    for (dy_i, sp) in ys.iter().enumerate() {
-        let dy = dy0 as usize + dy_i;
-        let dst_row = &mut dst[dy * dst_stride..(dy + 1) * dst_stride];
-        let ws = &yw[sp.offset..sp.offset + sp.len];
-        let half = sp.sum / 2;
-        for k in 0..band_w {
-            let (mut r, mut g, mut b, mut a) = (0u64, 0u64, 0u64, 0u64);
-            for (j, &w) in ws.iter().enumerate() {
-                let o = (sp.start + j - sy0) * h_stride + k * 4;
-                r += u64::from(horiz[o]) * w;
-                g += u64::from(horiz[o + 1]) * w;
-                b += u64::from(horiz[o + 2]) * w;
-                a += u64::from(horiz[o + 3]) * w;
-            }
-            let d = (dx0 as usize + k) * 4;
-            dst_row[d] = ((r + half) / sp.sum) as u8;
-            dst_row[d + 1] = ((g + half) / sp.sum) as u8;
-            dst_row[d + 2] = ((b + half) / sp.sum) as u8;
-            dst_row[d + 3] = ((a + half) / sp.sum) as u8;
+    let total_src_px = ys
+        .first()
+        .zip(ys.last())
+        .map_or(0, |(a, b)| (b.start + b.len - a.start) * src_w);
+    let threads = if total_src_px >= 262_144 && out_h >= 16 {
+        std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(1)
+    } else {
+        1
+    };
+
+    if threads <= 1 {
+        let sy0 = ys.first().map_or(0, |s| s.start);
+        let sy1 = ys.last().map_or(0, |s| s.start + s.len);
+        let band_h = sy1 - sy0;
+        let mut horiz = vec![0u8; band_h * band_w * 4];
+        for sy in sy0..sy1 {
+            let src_row = &src[(sy - src_oy) * src_stride..(sy - src_oy + 1) * src_stride];
+            let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
+            downsample_horiz_row(src_row, src_ox, &xs, &xw, h_row);
         }
+        let h_stride = band_w * 4;
+        for (dy_i, sp) in ys.iter().enumerate() {
+            let dy = dy0 as usize + dy_i;
+            let dst_row = &mut dst[dy * dst_stride..(dy + 1) * dst_stride];
+            downsample_vert_row(
+                &horiz,
+                sy0,
+                h_stride,
+                band_w,
+                sp,
+                &yw,
+                dst_row,
+                dx0 as usize,
+            );
+        }
+        return;
     }
+
+    let rows_per = out_h.div_ceil(threads);
+    let dst_band = &mut dst[dy0 as usize * dst_stride..dy1 as usize * dst_stride];
+    std::thread::scope(|scope| {
+        for (chunk_i, dst_chunk) in dst_band.chunks_mut(rows_per * dst_stride).enumerate() {
+            let y_off = chunk_i * rows_per;
+            let y_cnt = dst_chunk.len() / dst_stride;
+            let ys_slice = &ys[y_off..y_off + y_cnt];
+            let xs_ref = &xs;
+            let xw_ref = &xw;
+            let yw_ref = &yw;
+            scope.spawn(move || {
+                let Some(first_y) = ys_slice.first() else {
+                    return;
+                };
+                let Some(last_y) = ys_slice.last() else {
+                    return;
+                };
+                let sy0 = first_y.start;
+                let sy1 = last_y.start + last_y.len;
+                let band_h = sy1 - sy0;
+                let mut horiz = vec![0u8; band_h * band_w * 4];
+                for sy in sy0..sy1 {
+                    let src_row = &src[(sy - src_oy) * src_stride..(sy - src_oy + 1) * src_stride];
+                    let h_row = &mut horiz[(sy - sy0) * band_w * 4..(sy - sy0 + 1) * band_w * 4];
+                    downsample_horiz_row(src_row, src_ox, xs_ref, xw_ref, h_row);
+                }
+                let h_stride = band_w * 4;
+                for (dy_i, sp) in ys_slice.iter().enumerate() {
+                    let dst_row = &mut dst_chunk[dy_i * dst_stride..(dy_i + 1) * dst_stride];
+                    downsample_vert_row(
+                        &horiz,
+                        sy0,
+                        h_stride,
+                        band_w,
+                        sp,
+                        yw_ref,
+                        dst_row,
+                        dx0 as usize,
+                    );
+                }
+            });
+        }
+    });
 }

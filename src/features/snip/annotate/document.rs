@@ -1025,10 +1025,53 @@ pub fn paint_on(
             }
         }
     };
+    let holes: Vec<Rectangle> = items
+        .iter()
+        .filter(|(_, visible)| *visible)
+        .filter_map(|(item, _)| match item.shape {
+            Shape::Spotlight { a, b } if !item.hidden => Some(span(&[a, b])),
+            _ => None,
+        })
+        .collect();
+
     let whole = (region.x(), region.y(), w, h) == (0, 0, image.width, image.height);
+    let mut spotlight_done = false;
     let pm = match whole.then(|| tiny_skia::IntSize::from_wh(w, h)).flatten() {
         _ if bare => Pixmap::new(w, h).expect("non-empty region"),
-        // the whole picture: one copy (a new pixmap is zeroed first, 8K: a pass of 130 MB)
+        // Whole big picture: fuse copy + premultiply + outside-hole spotlight dim in ONE
+        // parallel pass across cores (avoids single-threaded 133 MB clone + 33 MB mask + fill_rect).
+        Some(size) if (w as usize) * (h as usize) >= 262_144 => {
+            let stride = w as usize * 4;
+            let hm = (!holes.is_empty())
+                .then(|| spotlight::build_hole_mask(w, h, Point::ORIGIN, &holes))
+                .flatten();
+            let apply_spot = !holes.is_empty();
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get().min(8))
+                .unwrap_or(1);
+            let mut data = vec![0u8; image.rgba.len()];
+            let rows_per = (h as usize).div_ceil(threads);
+            let src_all = image.rgba.as_slice();
+            let hm_ref = hm.as_ref();
+            std::thread::scope(|scope| {
+                for (chunk_i, dst_chunk) in data.chunks_mut(rows_per * stride).enumerate() {
+                    let y0 = chunk_i * rows_per;
+                    let byte0 = y0 * stride;
+                    let src_chunk = &src_all[byte0..byte0 + dst_chunk.len()];
+                    scope.spawn(move || {
+                        dst_chunk.copy_from_slice(src_chunk);
+                        premultiply(dst_chunk);
+                        if apply_spot {
+                            for (dy, row) in dst_chunk.chunks_exact_mut(stride).enumerate() {
+                                spotlight::apply_dim_to_row(y0 + dy, row, hm_ref);
+                            }
+                        }
+                    });
+                }
+            });
+            spotlight_done = apply_spot;
+            Pixmap::from_vec(data, size).expect("as many bytes as pixels")
+        }
         Some(size) => {
             let mut data = image.rgba.clone();
             premultiply(&mut data);
@@ -1051,15 +1094,7 @@ pub fn paint_on(
         origin: Point::new(region.x() as f32, region.y() as f32),
     };
 
-    let holes: Vec<Rectangle> = items
-        .iter()
-        .filter(|(_, visible)| *visible)
-        .filter_map(|(item, _)| match item.shape {
-            Shape::Spotlight { a, b } if !item.hidden => Some(span(&[a, b])),
-            _ => None,
-        })
-        .collect();
-    if !holes.is_empty() {
+    if !holes.is_empty() && !spotlight_done {
         spotlight::paint(&mut layer, &holes);
     }
 

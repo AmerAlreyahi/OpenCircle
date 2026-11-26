@@ -1563,49 +1563,63 @@ fn r19_lab_review_measure() {
             }
         }
 
-        // Part C: Item 1 — Step, Spotlight(vec), Blur, Spotlight(with Blur) commit/undo/redo timing at Fit
+        // Part C: Commit / Undo / Redo timings at Fit for Rect, Pen, Step, Text, Blur, Spotlight
         {
-            let mut lab = StudioLab::open(w, h, win, 1.0);
-            let _ = lab.render(0.0);
-            for (name, tool, a, b, desel) in [
-                (
-                    "step",
-                    Tool::Step,
-                    Point::new(w as f32 * 0.4, h as f32 * 0.4),
-                    Point::new(w as f32 * 0.4, h as f32 * 0.4),
-                    true,
-                ),
-                (
-                    "spot_vec",
-                    Tool::Spotlight,
-                    Point::new(w as f32 * 0.15, h as f32 * 0.55),
-                    Point::new(w as f32 * 0.35, h as f32 * 0.8),
-                    false,
-                ),
-                (
-                    "blur",
-                    Tool::Blur,
-                    Point::new(w as f32 * 0.55, h as f32 * 0.3),
-                    Point::new(w as f32 * 0.7, h as f32 * 0.5),
-                    false,
-                ),
-                (
-                    "spot_blur",
-                    Tool::Spotlight,
-                    Point::new(w as f32 * 0.15, h as f32 * 0.15),
-                    Point::new(w as f32 * 0.35, h as f32 * 0.35),
-                    false,
-                ),
-            ] {
-                let _ = lab.send(Msg::Editor(Message::Tool(tool)));
-                let _ = lab.send(Msg::Editor(Message::Press(a)));
-                if a != b {
-                    let _ = lab.send(Msg::Editor(Message::Move(b)));
+            for name in ["rect", "pen", "step", "text", "blur", "spotlight"] {
+                let mut lab = StudioLab::open(w, h, win, 1.0);
+                let _ = lab.render(0.0);
+                let (a, b) = (
+                    Point::new(w as f32 * 0.45, h as f32 * 0.35),
+                    Point::new(w as f32 * 0.62, h as f32 * 0.55),
+                );
+                let mut blur_paint_ms = 0.0f64;
+                match name {
+                    "rect" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        let _ = lab.send(Msg::Editor(Message::Move(b)));
+                    }
+                    "pen" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Pen)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        for i in 1..=8 {
+                            let t = i as f32 / 8.0;
+                            let _ = lab.send(Msg::Editor(Message::Move(Point::new(
+                                a.x + (b.x - a.x) * t,
+                                a.y + (b.y - a.y) * t,
+                            ))));
+                        }
+                    }
+                    "step" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        let _ = lab.send(Msg::Editor(Message::Release));
+                    }
+                    "text" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Text)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        let _ = lab.send(Msg::Editor(Message::Release));
+                        let _ = lab.send(Msg::Editor(Message::Type("Hello".into())));
+                    }
+                    "blur" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        let _ = lab.send(Msg::Editor(Message::Move(b)));
+                        let t0 = std::time::Instant::now();
+                        let _ = lab.s.editor.as_ref().unwrap().live_layer();
+                        blur_paint_ms = t0.elapsed().as_secs_f64() * 1e3;
+                    }
+                    "spotlight" => {
+                        let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+                        let _ = lab.send(Msg::Editor(Message::Press(a)));
+                        let _ = lab.send(Msg::Editor(Message::Move(b)));
+                    }
+                    _ => unreachable!(),
                 }
-                let mut uc = lab.send(Msg::Editor(Message::Release));
-                if desel {
-                    uc += lab.send(Msg::Editor(Message::Deselect));
-                }
+                let uc = match name {
+                    "step" | "text" => lab.send(Msg::Editor(Message::Deselect)),
+                    _ => lab.send(Msg::Editor(Message::Release)),
+                };
                 let fc = lab.render(uc);
                 let disp_c = lab.s.editor.as_ref().unwrap().display.is_some();
                 let uu = lab.send(Msg::Editor(Message::Undo));
@@ -1614,16 +1628,30 @@ fn r19_lab_review_measure() {
                 let ur = lab.send(Msg::Editor(Message::Redo));
                 let fr = lab.render(ur);
                 let disp_r = lab.s.editor.as_ref().unwrap().display.is_some();
-                eprintln!(
-                    "  [commit/undo/redo] {:9} commit={:5.1}ms(disp={}) undo={:5.1}ms(disp={}) redo={:5.1}ms(disp={})",
-                    name,
-                    fc.total_ms(),
-                    disp_c,
-                    fu.total_ms(),
-                    disp_u,
-                    fr.total_ms(),
-                    disp_r,
-                );
+                if name == "blur" {
+                    eprintln!(
+                        "  [commit/undo/redo] {:9} commit={:5.1}ms(disp={}, own_blur_paint={:.1}ms) undo={:5.1}ms(disp={}) redo={:5.1}ms(disp={})",
+                        name,
+                        fc.total_ms(),
+                        disp_c,
+                        blur_paint_ms,
+                        fu.total_ms(),
+                        disp_u,
+                        fr.total_ms(),
+                        disp_r,
+                    );
+                } else {
+                    eprintln!(
+                        "  [commit/undo/redo] {:9} commit={:5.1}ms(disp={}) undo={:5.1}ms(disp={}) redo={:5.1}ms(disp={})",
+                        name,
+                        fc.total_ms(),
+                        disp_c,
+                        fu.total_ms(),
+                        disp_u,
+                        fr.total_ms(),
+                        disp_r,
+                    );
+                }
             }
         }
     }
@@ -1745,45 +1773,187 @@ fn r19_screen_matches_export_for_mixed_spotlight_documents() {
         );
     }
 
-    // 2) At Fit on 5K: committing a Spotlight away from a Step must NOT dim the Step!
-    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
-    let stride = lab.pixmap.width();
-    let _ = lab.render(0.0);
-    let step_at = Point::new(800.0, 700.0);
-    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
-    let _ = lab.send(Msg::Editor(Message::Press(step_at)));
-    let _ = lab.send(Msg::Editor(Message::Release));
-    let _ = lab.send(Msg::Editor(Message::Deselect));
-    let _ = lab.render(0.0);
-    let before = lab.pixels();
-
-    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
-    let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
-    let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
-    let _ = lab.send(Msg::Editor(Message::Release));
-    let _ = lab.send(Msg::Editor(Message::Deselect));
-    let _ = lab.render(0.0);
-    let after = lab.pixels();
-
-    // The Step badge's solid centre pixel must remain undimmed (identical to before Spotlight).
-    let centre = lab.image_rect_to_phys(
-        Rectangle::new(
-            Point::new(step_at.x - 16.0, step_at.y - 16.0),
-            Size::new(32.0, 32.0),
-        ),
-        0.0,
-    );
-    let box_u32 = [
-        centre[0].max(0) as u32,
-        centre[1].max(0) as u32,
-        centre[2].max(0) as u32,
-        centre[3].max(0) as u32,
+    // 2) Full-frame Fit screen == export check across ALL 4 mixed documents on a 5K Studio canvas.
+    //    Compares every pixel of the visible Fit picture rect against annotate::downsample(export)
+    //    (exact 0-diff on the entire frame for step_then_spotlight, and 0-diff everywhere outside
+    //    the crisp Layer-2 vector strokes plus solid stroke interior parity when Layer-2 vectors exist).
+    type FitCase = (&'static str, fn(&mut StudioLab));
+    let fit_cases: &[FitCase] = &[
+        ("step_then_spotlight", |lab| {
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(800.0, 700.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+        }),
+        ("rect_text_step_spotlight", |lab| {
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(400.0, 1800.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(1400.0, 2500.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Text)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(1800.0, 400.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Type("Hello".into())));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(800.0, 700.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+        }),
+        ("rect_step_blur_spotlight", |lab| {
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(400.0, 1800.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(1400.0, 2500.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(800.0, 700.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(1900.0, 400.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(2600.0, 900.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+        }),
+        ("rect_pen_spotlight", |lab| {
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Rect)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(400.0, 400.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(1400.0, 1100.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Pen)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(500.0, 1900.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(1600.0, 2300.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Tool(Tool::Spotlight)));
+            let _ = lab.send(Msg::Editor(Message::Press(Point::new(3000.0, 1500.0))));
+            let _ = lab.send(Msg::Editor(Message::Move(Point::new(4200.0, 2400.0))));
+            let _ = lab.send(Msg::Editor(Message::Release));
+            let _ = lab.send(Msg::Editor(Message::Deselect));
+        }),
     ];
-    let (diff, md, checked) = diff_outside(&before, &after, stride, box_u32, &[]);
-    assert_eq!(
-        diff, 0,
-        "Fit Step+Spotlight: Step badge was dimmed ({diff}/{checked} px changed, max={md})"
+
+    for (name, build) in fit_cases {
+        let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+        let _ = lab.render(0.0);
+        build(&mut lab);
+        let _ = lab.render(0.0);
+        let screen = lab.pixels();
+
+        // Build exact reference: render export into a clean StudioLab at the exact same zoom/size
+        // so display downsampling, alignment, and widget framing are identical.
+        let export = annotate::render(&lab.s.editor.as_ref().unwrap().doc);
+        let mut ref_lab =
+            StudioLab::open(export.width, export.height, Size::new(1280.0, 800.0), 1.0);
+        ref_lab.s.open(Picture::Crop(export));
+        ref_lab.s.settle_open();
+        let _ = ref_lab.s.take_scroll();
+        ref_lab.settle_mip();
+        let _ = ref_lab.render(0.0);
+        let expected = ref_lab.pixels();
+
+        // Exclude only unbaked Layer-2 vector items (drawn sharply at display resolution instead
+        // of downsampled from 5K); EVERY other pixel of the entire Fit frame (Spotlight dim,
+        // Spotlight hole, Step, Text, Blur, picture) MUST match export bit-for-bit!
+        let vec_excl: Vec<[i32; 4]> = lab
+            .s
+            .editor
+            .as_ref()
+            .unwrap()
+            .committed_vector_items()
+            .into_iter()
+            .map(|(_, it)| lab.image_rect_to_phys(it.bounds(), 4.0))
+            .collect();
+        let (diff, md, checked) = diff_outside(&expected, &screen, stride, pic_rect, &vec_excl);
+        assert_eq!(
+            diff, 0,
+            "Fit {name}: full-frame screen != export ({diff}/{checked} px differed, max={md})"
+        );
+        // For any unbaked Layer-2 vector item, also verify its stroke is visibly painted on screen
+        // (matching export's colour, not missing or dimmed).
+        for rect in &vec_excl {
+            let mut lit = 0usize;
+            for y in rect[1].max(pic_rect[1] as i32)..rect[3].min(pic_rect[3] as i32) {
+                for x in rect[0].max(pic_rect[0] as i32)..rect[2].min(pic_rect[2] as i32) {
+                    let o = (y as u32 * stride + x as u32) as usize * 4;
+                    let d = (0..3)
+                        .map(|c| screen[o + c].abs_diff(expected[o + c]))
+                        .max()
+                        .unwrap();
+                    if d <= 24 {
+                        lit += 1;
+                    }
+                }
+            }
+            assert!(lit > 0, "Fit {name}: vector item missing on screen");
+        }
+    }
+}
+
+#[test]
+fn r19_base_deltas_stay_exact_across_100_50_and_150_zoom_transitions() {
+    let mut lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+    let _ = lab.render(0.0);
+
+    // Commit a Step and a Blur at Fit -> populates base_deltas without cloning 59 MB base.
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Step)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(400.0, 320.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    let _ = lab.send(Msg::Editor(Message::Tool(Tool::Blur)));
+    let _ = lab.send(Msg::Editor(Message::Press(Point::new(620.0, 260.0))));
+    let _ = lab.send(Msg::Editor(Message::Move(Point::new(820.0, 420.0))));
+    let _ = lab.send(Msg::Editor(Message::Release));
+    let _ = lab.send(Msg::Editor(Message::Deselect));
+    assert!(
+        !lab.s.editor.as_ref().unwrap().base_deltas.is_empty(),
+        "local edits used copy-on-write base_deltas"
     );
+
+    // Check 1) 100 % zoom (renders base + base_deltas), 2) 50 % zoom (background mip uses
+    // downsample_with_deltas), 3) 150 % zoom (flushes base_deltas for seam-free Linear).
+    for z in [1.0f32, 0.50f32, 1.50f32] {
+        let _ = lab.s.zoom_to(z, None);
+        let _ = lab.s.take_scroll();
+        lab.reset_scroll();
+        lab.settle_mip();
+        let _ = lab.render(0.0);
+        let shown = lab.pixels();
+        let pic_rect = lab.picture_phys_rect();
+        let stride = lab.pixmap.width();
+
+        // Compare against a fresh full refresh at this zoom.
+        let mut ref_lab = StudioLab::open(5120, 2880, Size::new(1280.0, 800.0), 1.0);
+        ref_lab.s.editor.as_mut().unwrap().doc = lab.s.editor.as_ref().unwrap().doc.clone();
+        ref_lab.s.editor.as_mut().unwrap().refresh();
+        let _ = ref_lab.s.zoom_to(z, None);
+        let _ = ref_lab.s.take_scroll();
+        ref_lab.reset_scroll();
+        ref_lab.settle_mip();
+        let _ = ref_lab.render(0.0);
+        let fresh = ref_lab.pixels();
+
+        let (diff, md, checked) = diff_outside(&fresh, &shown, stride, pic_rect, &[]);
+        assert_eq!(
+            diff, 0,
+            "zoom {z} with base_deltas: {diff}/{checked} px differed from fresh refresh (max={md})"
+        );
+    }
 }
 
 #[test]

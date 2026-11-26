@@ -67,20 +67,6 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
     let outer = Size::new(size.width + 2.0 * m, size.height + 2.0 * m);
     // (Snip's bare live area: the frozen frame under it shows through)
     let z = e.zoom * k;
-    let mut layers: Vec<Element<'_, Message>> = vec![match e.bare() {
-        true => iced::widget::space().into(),
-        false => pin(image(e.display.clone().unwrap_or_else(|| e.base.clone()))
-            .filter_method(filter(e))
-            .width(size.width)
-            .height(size.height)
-            .content_fit(ContentFit::Fill))
-        .position(Point::new(m, m))
-        .into(),
-    }];
-    // Always a layer here, live or not: the canvas must keep its index, or iced
-    // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
-    // Always the same two layers here (the canvas keeps its index): the committed
-    // Hides' patches (one nested stack), then the live one.
     let place = |(r, handle): &(Rectangle, image::Handle)| {
         let at = Point::new((r.x - view.x) * z + m, (r.y - view.y) * z + m);
         pin(image(handle.clone())
@@ -90,6 +76,44 @@ pub fn canvas(e: &Annotator, grown: f32, map: ScreenMap) -> Element<'_, Message>
             .content_fit(ContentFit::Fill))
         .position(at)
     };
+    let mut layers: Vec<Element<'_, Message>> = vec![match (e.bare(), &e.display) {
+        (true, _) => iced::widget::space().into(),
+        (false, Some(disp)) => pin(image(disp.clone())
+            .filter_method(filter(e))
+            .width(size.width)
+            .height(size.height)
+            .content_fit(ContentFit::Fill))
+        .position(Point::new(m, m))
+        .into(),
+        (false, None) if e.base_deltas.is_empty() => pin(image(e.base.clone())
+            .filter_method(filter(e))
+            .width(size.width)
+            .height(size.height)
+            .content_fit(ContentFit::Fill))
+        .position(Point::new(m, m))
+        .into(),
+        (false, None) => {
+            let mut base_stack: Vec<Element<'_, Message>> =
+                Vec::with_capacity(1 + e.base_deltas.len());
+            base_stack.push(
+                pin(image(e.base.clone())
+                    .filter_method(filter(e))
+                    .width(size.width)
+                    .height(size.height)
+                    .content_fit(ContentFit::Fill))
+                .position(Point::new(m, m))
+                .into(),
+            );
+            for d in &e.base_deltas {
+                base_stack.push(place(d).into());
+            }
+            stack(base_stack).into()
+        }
+    }];
+    // Always a layer here, live or not: the canvas must keep its index, or iced
+    // gives it a fresh state mid-drag (the press is lost, the drag draws nothing).
+    // Always the same two layers here (the canvas keeps its index): the committed
+    // Hides' patches (one nested stack), then the live one.
     layers.push(match e.patch.is_empty() {
         true => iced::widget::space().into(),
         false => stack(e.patch.iter().map(|p| Element::from(place(p)))).into(),
