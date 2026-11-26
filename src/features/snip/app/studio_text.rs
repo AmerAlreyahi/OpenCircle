@@ -11,7 +11,7 @@ use crate::app::message::Message;
 use crate::app::windows::Msg as W;
 use crate::features::circle::clipboard as copy;
 use crate::features::circle::text_menu::Row;
-use crate::features::snip::app::snip_more::{hand_off, hands_off, models_present, pill, read_crop};
+use crate::features::snip::app::snip_more::{models_present, pill, read_crop};
 use crate::features::snip::screens::studio::{Fetching, TextWork, text_lines};
 use crate::features::snip::snip_more as more;
 use crate::features::text_reading::{self, TextBlock, words::Line};
@@ -60,39 +60,20 @@ impl App {
                 let _ = tx.unbounded_send(copy::text(text).map(|()| copy::COPIED_PILL.to_string()));
             })
             .map(|r| Message::Windows(W::StudioToast(r))),
-            Row::Search => {
-                let url = crate::features::ask_ai::search_url(text.trim());
-                open_in_background(url, false)
-            }
-            Row::Open(entity) => open_in_background(
-                entity.text.clone(),
-                entity.kind == crate::features::circle::entities::Kind::Email,
-            ),
+            Row::Search => self.search_text(text),
+            Row::Open(entity) => self.open_entity(entity),
             Row::Ask => self.studio_ask_text(text),
             Row::Translate => self.studio_translate_text(segments),
             Row::SelectAll => Task::none(), // (the Studio's own)
         }
     }
 
-    /// Ask AI about the selected text: the chat opens with the text in its composer; the browser
-    /// provider takes it as the question.
+    /// Ask AI about the selected text: the text only (main mode's menu path), never the picture.
     fn studio_ask_text(&mut self, text: String) -> Task<Message> {
         let Some(crop) = self.windows.studio().and_then(|s| s.annotated()) else {
             return Task::none();
         };
-        let context = crate::features::ask_ai::text_context(&text);
-        if hands_off() {
-            return background(move |tx| {
-                let _ = tx.unbounded_send(hand_off(&crop, Some(context), false));
-            })
-            .map(|r| Message::Windows(W::StudioToast(r)));
-        }
-        let studio = self.windows.studio_id();
-        let task = self.ask_from_window(crop, studio);
-        if let Some(chat) = &mut self.chat {
-            chat.panel.prefill(&format!("{context}\n\n"));
-        }
-        task
+        self.ask_with_text(crop, crate::features::ask_ai::text_context(&text))
     }
 
     /// Translate the selected span of each line in place, as the picture panel's Translate does the
@@ -131,21 +112,6 @@ impl App {
         let task = task.map(move |m| Message::StudioTranslate(id, m));
         Task::batch([after, task])
     }
-}
-
-/// Opens a link (or a mailto) in the user's own program, a pill when it can't.
-fn open_in_background(target: String, mail: bool) -> Task<Message> {
-    background(move |tx| {
-        let opened = match mail {
-            true => crate::shared::platform::sys::open::open_mailto(&target),
-            false => crate::shared::platform::sys::open::open_link(&target),
-        };
-        if let Err(e) = opened {
-            crate::log!("[opencircle] Studio text: not opened: {e}");
-            let _ = tx.unbounded_send(Err(t!(pill_failed).to_string()));
-        }
-    })
-    .map(|r: Result<String, String>| Message::Windows(W::StudioToast(r)))
 }
 
 /// Blocking: the picture's words (hidden parts left out) as lines in image px; or why not.

@@ -258,3 +258,68 @@ fn r16_7_the_studio_with_a_selection_matches_its_golden_images() {
         }));
     });
 }
+
+/// Selected text, then Ctrl+C: the text, or None when the words no longer belong to the picture.
+fn copied_text(s: &mut Studio) -> bool {
+    let _ = s.update(Msg::Editor(Message::SelectAll));
+    matches!(
+        s.update(Msg::Editor(Message::Copy)),
+        Outcome::Text(Work::Row(menu::Row::Copy, ..))
+    )
+}
+
+/// R16.8: words read from an older picture state never copy: after a pixel edit and its undo / redo,
+/// after a crop change, and an answer read for another view is dropped.
+#[test]
+fn r16_8_stale_words_never_copy() {
+    // an edit drops them (an undo after it does not bring a stale selection back)
+    let mut s = selecting();
+    assert!(copied_text(&mut s));
+    draw(&mut s);
+    assert!(!copied_text(&mut s), "after an edit");
+    let _ = s.update(Msg::Editor(Message::Undo));
+    assert!(!copied_text(&mut s), "after its undo");
+    let _ = s.update(Msg::Editor(Message::Redo));
+    assert!(!copied_text(&mut s), "after its redo");
+    // a crop change
+    let mut s = selecting();
+    s.editor.as_mut().unwrap().doc.crop = Some(Rectangle::new(
+        Point::new(5.0, 5.0),
+        Size::new(100.0, 100.0),
+    ));
+    assert!(!copied_text(&mut s), "after a crop");
+    // an answer for another view than the request's
+    let mut s = studio_on(300, 200);
+    let _ = s.update(Msg::Text(Ev::Toggle));
+    s.editor.as_mut().unwrap().doc.crop = Some(Rectangle::new(
+        Point::new(5.0, 5.0),
+        Size::new(100.0, 100.0),
+    ));
+    let [a, _] = texts();
+    let _ = s.set_words(s.epoch(), Ok(vec![line(&a, 10.0)]));
+    assert!(
+        !s.text.active(s.epoch()) || !copied_text(&mut s),
+        "an answer for another view"
+    );
+}
+
+/// R16.1: toggling off and on during the read does not start a second read.
+#[test]
+fn r16_1_a_toggle_during_the_read_is_not_a_second_read() {
+    let mut s = studio_on(300, 200);
+    assert!(matches!(
+        s.update(Msg::Text(Ev::Toggle)),
+        Outcome::Text(Work::Read)
+    ));
+    assert!(matches!(s.update(Msg::Text(Ev::Toggle)), Outcome::None));
+    assert!(matches!(s.update(Msg::Text(Ev::Toggle)), Outcome::None));
+}
+
+/// R16.2: a click with no drag leaves no selection, so Esc leaves the mode at once.
+#[test]
+fn r16_2_a_click_leaves_no_empty_selection() {
+    let mut s = selecting();
+    drag(&mut s, 22.0, 22.0);
+    let _ = s.update(Msg::Cancel);
+    assert!(!s.text.active(s.epoch()));
+}

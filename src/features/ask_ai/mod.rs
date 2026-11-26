@@ -20,8 +20,6 @@ pub mod providers;
 pub(crate) mod screens;
 pub mod sign_in;
 pub(crate) mod web;
-// (R-16: the Studio's text menu searches the web for the selected text)
-pub(crate) use browser::search_url;
 
 use std::fmt;
 use std::io::BufRead;

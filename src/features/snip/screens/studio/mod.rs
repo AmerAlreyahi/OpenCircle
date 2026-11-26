@@ -1367,7 +1367,10 @@ impl Studio {
                 )
         ) {
             self.popover = None;
-            self.text.reset(); // (the pixels change: the words read are stale)
+        }
+        // (these change the pixels: the words read are stale)
+        if matches!(msg, Msg::EditText | Msg::CutOut | Msg::Act(Row::Translate)) {
+            self.text.reset();
         }
         // the question blocks the picture: nothing changes it until answered
         if self.asking()

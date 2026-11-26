@@ -55,6 +55,8 @@ pub struct State {
     read: Option<(u32, Vec<Line>, Size)>,
     /// The picture whose words are being read.
     reading: Option<u32>,
+    /// The picture's state (`Studio::picture_stamp`) the read was asked for: its words are only good for that.
+    stamp: u64,
     picked: Option<Picked>,
     pressed: bool,
     clicks: Option<(Instant, Point, u8)>,
@@ -88,7 +90,7 @@ impl State {
     }
 
     /// The row the Actions card shows: on while the mode is.
-    pub fn toggle(&mut self, epoch: u32) -> Option<Work> {
+    pub fn toggle(&mut self, epoch: u32, stamp: u64) -> Option<Work> {
         if self.active(epoch) {
             self.on = None;
             self.picked = None;
@@ -98,7 +100,9 @@ impl State {
         self.on = Some(epoch);
         match &self.read {
             Some((e, ..)) if *e == epoch => None, // read for this picture already
+            _ if self.reading == Some(epoch) => None, // being read: one read
             _ => {
+                self.stamp = stamp;
                 self.reading = Some(epoch);
                 Some(Work::Read)
             }
@@ -146,6 +150,10 @@ impl State {
 
     pub fn release(&mut self) {
         self.pressed = false;
+        // a click with no drag leaves no empty selection
+        if self.picked.as_ref().is_some_and(|p| p.is_empty()) {
+            self.picked = None;
+        }
     }
 
     /// Everything (Ctrl+A, the menu's Select all text).
@@ -308,13 +316,12 @@ pub fn over<'a>(
     if !s.text.active(s.epoch()) {
         return drawn;
     }
-    let (accent, _) = crate::shared::theme::accent_of(&crate::shared::config::look());
     let overlay = Overlay {
         state: &s.text,
         epoch: s.epoch(),
         origin,
         zoom,
-        fill: accent.scale_alpha(0.35),
+        fill: crate::shared::kit::tokens::fixed::TEXT_SELECTION,
     };
     let overlay = canvas::Canvas::new(overlay)
         .width(Length::Fixed(shown.width))
@@ -371,12 +378,13 @@ impl Studio {
                 if !can && !self.text.active(epoch) {
                     return Outcome::None;
                 }
-                match self.text.toggle(epoch) {
+                match self.text.toggle(epoch, self.picture_stamp()) {
                     Some(work) => Outcome::Text(work),
                     None => Outcome::None,
                 }
             }
             _ if !self.text.active(epoch) => Outcome::None,
+            Ev::Press(_) | Ev::Right(_) | Ev::Menu(_) if !self.text_fresh() => Outcome::None,
             Ev::Press(p) => {
                 self.text.press(epoch, p, Instant::now());
                 Outcome::None
@@ -424,9 +432,13 @@ impl Studio {
     }
 
     /// The picture's Ctrl+C / Ctrl+A are the words' while the mode is on (Ctrl+C: only with words selected).
-    pub(super) fn text_takes(&self, m: &crate::features::snip::annotate::Message) -> bool {
+    pub(super) fn text_takes(&mut self, m: &crate::features::snip::annotate::Message) -> bool {
         use crate::features::snip::annotate::Message as M;
+        use crate::features::snip::annotate::Message as Q;
         let epoch = self.epoch;
+        if matches!(m, Q::Copy | Q::CopySelection | Q::SelectAll) && !self.text_fresh() {
+            return false;
+        }
         let live = self.text.active(epoch) && !self.text.reading(epoch);
         live && match m {
             M::Copy | M::CopySelection => self.text.text().is_some(),
@@ -469,9 +481,43 @@ impl Studio {
         self.text.menu = Some(m);
     }
 
+    /// The picture as the reader sees it, in one number: its pixels, size, view and how many edits it has.
+    fn picture_stamp(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let Some(e) = &self.editor else {
+            return 0;
+        };
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let (d, v) = (&e.doc, e.doc.view());
+        (d.image.width, d.image.height, d.depth()).hash(&mut h);
+        [v.x, v.y, v.width, v.height].map(f32::to_bits).hash(&mut h);
+        d.image.rgba.hash(&mut h);
+        h.finish()
+    }
+
+    /// The words still belong to the picture; if not they (and the mode) are dropped. `false` = dropped.
+    fn text_fresh(&mut self) -> bool {
+        let epoch = self.epoch;
+        if self.text.active(epoch)
+            && !self.text.reading(epoch)
+            && self.text.stamp != self.picture_stamp()
+        {
+            self.text.reset();
+        }
+        self.text.active(epoch)
+    }
+
     /// The words read for picture `epoch` (the App's answer), or why none (a pill).
     pub fn set_words(&mut self, epoch: u32, read: Result<Vec<Line>, String>) -> Outcome {
-        let Some(e) = self.editor.as_ref().filter(|_| epoch == self.epoch) else {
+        if self.editor.is_none() || epoch != self.epoch {
+            return Outcome::None;
+        }
+        // the picture changed (an edit, an undo, a crop, the view) since the read began: its words are not its own
+        if self.text.stamp != self.picture_stamp() {
+            self.text.failed(epoch);
+            return Outcome::None;
+        }
+        let Some(e) = self.editor.as_ref() else {
             return Outcome::None;
         };
         // read from the clean view: back to image px
