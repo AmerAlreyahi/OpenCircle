@@ -1831,3 +1831,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Test build at once (owner, 2026-11-26, "make it a rule, I will test with you in parallel"): as soon as a release's features are
   merged and CI has built main, the lead sends the owner the Windows build (CI artifact) with a short what-to-try list. The owner
   tests in PARALLEL with the VM pass; the lead never holds the build back until the VM pass or anything else is done.
+- Owner try of the 0.5.1 test build 2177b5b (2026-11-26): GOOD: the Studio view no longer moves, the calmer Studio (no slider button,
+  no Picture info), Studio selectable text ("perfect"), one-word translate ("great"). BAD ("super bad"): drawing tools in the Studio
+  on a 5K picture: the delay is "insane", and the picture's pixels visibly change while drawing or dragging a rectangle / any shape,
+  even the pen. Not new in 0.5.1 (0.5.0 had it too). Arabic reading: test page sent (his PC: OCR languages en-US + ar-SA).
