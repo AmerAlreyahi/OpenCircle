@@ -188,13 +188,13 @@
       "version": "0.5.1",
       "name": "Fixes, GPU renderer and reading (before the redesign)",
       "status": "active",
-      "why": "Owner 2026-11-24: video and audio recording in Snip next, and the design he has not approved yet is finished right after the enhancements.",
-      "outcome": "Snip records an area, a window or the screen with microphone and/or computer sound; its widget changes with the mode (record mode shows record controls only, no picture tools); the new design is approved and applied.",
+      "why": "Owner 2026-11-26: fix what 0.5.0 users hit first (the Studio view jumping, the cut-off one-word translate) and finish the reading work, as a small fast release before the 0.6.0 redesign.",
+      "outcome": "The Studio view moves only when the user moves it; one-word translate is never cut off; the extra slider button and Picture info are gone; Arabic lines with English words and digits read as one line in the right order; text in the Studio is selectable; the GPU renderer only if the owner's lab-gpu2 test is good.",
       "items": [
         {
           "id": "R-15",
-          "title": "Better Arabic reader: Windows' Arabic OCR (ar-SA) with each line's words put back in order; English words and digits inside Arabic lines, spaces in bold Arabic, mirrored brackets (#182)",
-          "status": "todo"
+          "title": "Better Arabic reader: mixed Arabic/English lines read as one line in right-to-left order; Windows' Arabic OCR (ar-SA) where installed, words in visual order (PP-OCR tuning, bold spaces, brackets later)",
+          "status": "in-progress"
         },
         {
           "id": "G-01",
@@ -204,12 +204,12 @@
         {
           "id": "R-16",
           "title": "Selectable text in the Studio (#229)",
-          "status": "todo"
+          "status": "in-progress"
         },
         {
           "id": "R-18",
           "title": "0.5.x follow-ups: the Studio view NEVER moves unless the user moves it on purpose (drag to pan, wheel/scrollbars, zoom, Fit): not on right-click, pinning the Steps slider, opening Preferences, panels or window resizes; one-word in-place translate never cut off ('To...'); remove the extra slider button and Picture info",
-          "status": "todo"
+          "status": "in-progress"
         },
         {
           "id": "K-04",
@@ -219,11 +219,23 @@
       ],
       "gate": [
         {
-          "check": "Design approved by the owner",
+          "check": "Full gate + CI green, test count not lower",
           "ok": false
         },
         {
-          "check": "Recording proved on Windows 10, GNOME Wayland, KDE, X11",
+          "check": "A test per Studio view path (right-click, pin, Preferences, panels, window resize)",
+          "ok": false
+        },
+        {
+          "check": "Arabic reading measured before -> after (W109 set + English control)",
+          "ok": false
+        },
+        {
+          "check": "Owner tried the test build",
+          "ok": false
+        },
+        {
+          "check": "Windows VM pass + update gate (0.5.0 Setup + portable -> draft), AppImage CLI",
           "ok": false
         }
       ]

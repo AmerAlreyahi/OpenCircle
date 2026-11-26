@@ -1812,3 +1812,10 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   trusted comment; update gate previous Setup + portable -> draft; About on the draft exe; Linux AppImage CLI; the owner's own test of a
   build with visible changes). Any failure = it stays a draft. The kit guard still needs SDLC_OWNER_RELEASE=1 per session; the owner
   sets that himself (the lead may not change its own guard). Workers never tag or publish.
+- Workers (owner, 2026-11-26, SUPERSEDES "Two workers at most" and "Max 2 workers"): preferably 1 Antigravity Neon + 2 Claude
+  workers at a time, never more than 2 Neon + 2 Claude. Neon does the coding (agy pattern in AGENTS.local.md); when Neon's quota
+  runs out, a Claude builder takes over the same worktree.
+- 0.5.1 speed (owner, 2026-11-26, "small release, make it faster"): workers run in parallel and each feature merges as soon as it
+  is done; R-15 is trimmed to (1) mixed Arabic/English lines as one line, pieces ordered right to left, and (2) Windows' Arabic
+  recognizer (ar-SA) where installed; PP-OCR Arabic tuning, bold-Arabic spaces and mirrored brackets move to a later version.
+  R-16 runs beside R-18 (R-18 owns the Studio view code, R-16 a new text-select file).
