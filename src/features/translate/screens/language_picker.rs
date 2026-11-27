@@ -42,7 +42,7 @@ pub const WIDTH: f32 = 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
 const CHIPS_SEG: f32 = SEG_EXTRA + WIDTH;
 /// The tail segment width: Original, Snip, Glossary (34 px each) + quiet x (28 px).
 pub const SLOT: f32 = SEG_EXTRA + 3.0 * size::ICON_BUTTON + widget_e::QUIET_X + 3.0 * SPACING;
-/// The pill: its size never changes (style E two-segment tray, 56 px tall).
+/// The pill: its size never changes (style E two-segment tray, 52 px tall).
 pub const PILL: Size = Size::new(
     2.0 * PAD + CHIPS_SEG + space::GAP + SLOT,
     CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y,

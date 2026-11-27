@@ -19,7 +19,7 @@ use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
 use crate::shared::kit::button::{self, Kind};
-use crate::shared::kit::surface::{segment_card, tray};
+use crate::shared::kit::surface::tray;
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
 use crate::shared::kit::tokens::radius;
 use crate::shared::kit::tooltip::tip;
@@ -605,10 +605,8 @@ impl Strip {
             let hole = mouse_area(thumb::failed(WELL)).on_press(Msg::FailedSeen);
             tip(hole, t!(sn_step_failed), Side::Bottom)
         });
-        let thumbs = segment_card(
-            radius::TRACK,
-            scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height()),
-        );
+        let thumbs =
+            scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height());
         let words = self.words();
         let copy = button::labelled(
             COPY,

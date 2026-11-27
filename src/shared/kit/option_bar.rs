@@ -377,34 +377,46 @@ mod style_e_tests {
     fn style_e_scope_raises_option_groups_without_affecting_studio() {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
-            let has = |px: &[u8], col: Color| {
-                let target = col.into_rgba8();
-                px.as_chunks::<4>().0.iter().any(|p| {
-                    p[0].abs_diff(target[0]) <= 3
-                        && p[1].abs_diff(target[1]) <= 3
-                        && p[2].abs_diff(target[2]) <= 3
-                })
+            // a group's first two rows (from the first one that is not the page), down a column
+            let bg = {
+                let t = theme.c.bg.into_rgba8();
+                [t[0], t[1], t[2]]
             };
-            // Studio (outside scope): track fill
+            let near = |a: [u8; 3], b: [u8; 3]| (0..3).all(|k| a[k].abs_diff(b[k]) <= 3);
+            let rows = |px: &[u8]| -> [[u8; 3]; 2] {
+                let at = |y: usize| {
+                    let i = (y * 100 + 25) * 4;
+                    [px[i], px[i + 1], px[i + 2]]
+                };
+                let top = (0..8).find(|&y| !near(at(y), bg)).unwrap_or(0);
+                [at(top), at(top + 1)]
+            };
+            let rgb = |c: Color| {
+                let t = c.into_rgba8();
+                [t[0], t[1], t[2]]
+            };
+            // Studio (outside scope): a flat `track` group, no raised edge
             let studio_px = shot::render(
                 group(vec![text_cell("Outline", false, Some(1u8))], false),
                 100,
                 36,
             );
+            let [first, second] = rows(&studio_px);
             assert!(
-                has(&studio_px, theme.c.track),
-                "{}: studio group must keep track",
+                near(first, rgb(theme.c.track)) && near(second, rgb(theme.c.track)),
+                "{}: studio group must stay a flat track",
                 theme.id
             );
-            // Snip floating row (inside scope): raised widget fill
+            // Snip floating row (inside scope): a raised group, an edge row then `widget`
             let (snip_group, stops) = scope(None, false, || {
                 group(vec![text_cell("Outline", false, Some(1u8))], false)
             });
             assert_eq!(stops.len(), 1);
             let snip_px = shot::render(snip_group, 100, 36);
+            let [edge, fill] = rows(&snip_px);
             assert!(
-                has(&snip_px, theme.c.widget),
-                "{}: snip row group must raise to widget",
+                !near(edge, rgb(theme.c.widget)) && near(fill, rgb(theme.c.widget)),
+                "{}: snip row group must be a raised `widget` segment with an edge",
                 theme.id
             );
         }

@@ -219,10 +219,7 @@ pub fn logo<'a, Message: Clone + 'a>(
     .into()
 }
 
-/// A slot's badge (`#mainBarAiSubmitBadge`): "AI ↵" (the arrow at 75 %),
-/// mono 10 px / 600 in `accent` on `accent_soft`, 2x6 px, radius 6; stronger
-/// under the cursor; Tab's focus an `accent` edge.
-/// Style E AI field submit chip (`.aich` / `.aich.go`): muted on `hover` while
+/// Style E AI field (`#mainBarAiSubmitBadge`) submit chip (`.aich` / `.aich.go`): muted on `hover` while
 /// empty, filled with `accent` + `on(accent)` once a question is typed (`ready`).
 pub fn badge_ready<'a, Message: Clone + 'a>(
     label: &'a str,

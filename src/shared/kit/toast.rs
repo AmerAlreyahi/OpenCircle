@@ -131,22 +131,15 @@ fn made<'a, Message: 'a>(
     material(container(content).padding(PAD), radius, at)
 }
 
-/// The pill's style E tray material round `content`: `track` with `rim` edge,
-/// corners of `radius`, exactly `at` big.
+/// The pill's style E tray material round `content`, exactly `at` big.
 fn material<'a, Message: 'a>(
     content: container::Container<'a, Message>,
     radius: f32,
     at: Size,
 ) -> Element<'a, Message> {
-    content
-        .center_y(Fill)
+    super::surface::tray(false, radius, content.center_y(Fill))
         .width(at.width)
         .height(at.height)
-        .style(move |_| container::Style {
-            background: Some(c().track.into()),
-            border: Border::default().rounded(radius).width(1).color(c().rim),
-            ..container::Style::default()
-        })
         .into()
 }
 

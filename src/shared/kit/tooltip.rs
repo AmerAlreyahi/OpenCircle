@@ -42,7 +42,7 @@ pub fn hint<'a, Message: 'a>(
     };
     #[cfg(test)]
     tests_support::record_shown(&mut content, label, why, &shown);
-    let pill = iced::widget::container(super::surface::hint(shown)).padding(EDGE);
+    let pill = iced::widget::container(super::surface::tooltip_pill(shown)).padding(EDGE);
     iced::widget::tooltip(content, pill, side)
         .gap(GAP - EDGE)
         .into()
@@ -55,7 +55,7 @@ pub fn cut<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
     full: String,
 ) -> Element<'a, Message> {
-    let pill = iced::widget::container(super::surface::hint(full)).padding(EDGE);
+    let pill = iced::widget::container(super::surface::tooltip_pill(full)).padding(EDGE);
     iced::widget::tooltip(content, pill, Position::Top)
         .gap(GAP - EDGE)
         .into()

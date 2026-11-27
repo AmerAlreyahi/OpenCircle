@@ -477,7 +477,7 @@ fn notes_are_opaque_in_the_light_theme() {
     crate::shared::theme::set_light(true);
     let (text, solid) = (
         crate::shared::kit::themes::c().text,
-        crate::shared::kit::themes::c().widget,
+        crate::shared::kit::themes::c().track,
     );
     let mut s = session(false);
     for phase in [Phase::Consent(None), Phase::Downloading(0.5)] {
@@ -847,7 +847,8 @@ fn paste_puts_the_area_back_in_place() {
 fn every_translate_state_matches_its_golden_image() {
     use crate::shared::kit::testing::golden;
     const SCREEN: Size = Size::new(960.0, 600.0);
-    let at = card::place(SCREEN, None, None);
+    // (as the app places it: the card starts under the pill where they meet)
+    let at = view::clear_of_pill(card::place(SCREEN, None, None), SCREEN);
     let make = |name: &str| {
         let mut s = session(true);
         match name {
@@ -950,7 +951,7 @@ fn every_translate_state_matches_its_golden_image() {
 fn name_suggestions_match_their_golden_image() {
     use crate::shared::kit::testing::golden;
     const SCREEN: Size = Size::new(960.0, 560.0);
-    let at = card::place(SCREEN, None, None);
+    let at = view::clear_of_pill(card::place(SCREEN, None, None), SCREEN);
     let make = |ask: bool| {
         let mut s = session(true);
         let _ = s.update(shown(Vec::new()));
@@ -1850,16 +1851,15 @@ fn style_e_translate_pill_renders_two_tone_segments() {
             size.width as u32,
             size.height as u32,
         );
-        let has = |col: iced::Color| {
-            let t = col.into_rgba8();
-            px.as_chunks::<4>().0.iter().any(|p| {
-                p[0].abs_diff(t[0]) <= 3 && p[1].abs_diff(t[1]) <= 3 && p[2].abs_diff(t[2]) <= 3
-            })
-        };
-        assert!(has(theme.c.track), "{}: pill tray track missing", theme.id);
         assert!(
-            has(theme.c.widget),
-            "{}: pill segment widget missing",
+            shot::two_tone_column(
+                &px,
+                size.width as u32,
+                size.height as u32,
+                theme,
+                crate::shared::kit::tokens::widget_e::TRAY_PAD_Y,
+            ),
+            "{}: no track ring round a raised widget segment",
             theme.id
         );
     }

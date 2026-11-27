@@ -135,6 +135,15 @@ pub fn hint<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Mess
     tray(false, radius::FULL, line).padding(HINT_PAD)
 }
 
+/// A tooltip's pill (`tooltip::hint`, `tooltip::cut`): the solid `widget` pill
+/// every window's tooltip keeps (Settings, the Studio), not the style E tray.
+pub(crate) fn tooltip_pill<'a, Message: 'a>(
+    label: impl IntoFragment<'a>,
+) -> Container<'a, Message> {
+    let line = super::text::text(Role::NOTE, label);
+    surface(Material::Widget, radius::FULL, line).padding(HINT_PAD)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -64,7 +64,15 @@ impl Session {
                     edge: None,
                     logo: None,
                 };
-                card(header, body, footer, at, screen, hover, Msg::Card)
+                card(
+                    header,
+                    body,
+                    footer,
+                    clear_of_pill(at, screen),
+                    screen,
+                    hover,
+                    Msg::Card,
+                )
             };
         // the pill stays beside the card
         let with_pill = |card: Element<'a, Msg>| -> Element<'a, Msg> {

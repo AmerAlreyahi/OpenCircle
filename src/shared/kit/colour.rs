@@ -48,73 +48,60 @@ pub fn swatch<'a, Message: Clone + 'a>(
     open: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    // dimmed (no press) as the icon buttons are
-    let colour = match on_press {
-        Some(_) => colour,
-        None => colour.scale_alpha(0.4),
-    };
-    super::focus::press(
-        button(container(mark(colour, DOT)).center(Fill))
-            .width(size::ICON_BUTTON)
-            .height(size::ICON_BUTTON)
-            .padding(0)
-            .style(move |_, status| {
-                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                let fill = if hot {
-                    c().elevated_hover
-                } else {
-                    c().elevated
-                };
-                let edge = if open {
-                    c().accent
-                } else {
-                    c().elevated_border
-                };
-                button::Style {
-                    background: Some(fill.into()),
-                    border: Border::default()
-                        .rounded(radius::CONTROL)
-                        .width(1)
-                        .color(edge),
-                    ..button::Style::default()
-                }
-            }),
-        radius::FULL,
-        on_press,
-    )
-    .into()
+    swatch_face(false, colour, open, on_press)
 }
 
-/// Style E toolbar colour button (`.ib.cl2` + `.sw2`): 34x34, 10 px corners,
-/// rim border (`accent` when open), 20x20 colour swatch inside.
+/// Style E toolbar colour button (`.ib.cl2` + `.sw2`): the swatch with a 20 px
+/// mark, 10 px corners, no fill at rest and a `rim` edge (`accent` when open).
 pub fn swatch_e<'a, Message: Clone + 'a>(
     colour: Color,
     open: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    swatch_face(true, colour, open, on_press)
+}
+
+/// The swatch button; `floating` = style E (Snip's toolbar), else Settings' and the Studio's.
+fn swatch_face<'a, Message: Clone + 'a>(
+    floating: bool,
+    colour: Color,
+    open: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    // dimmed (no press) as the icon buttons are
     let colour = match on_press {
         Some(_) => colour,
         None => colour.scale_alpha(0.4),
     };
+    let corner = if floating {
+        radius::TRACK
+    } else {
+        radius::CONTROL
+    };
     super::focus::press(
-        button(container(mark(colour, DOT_E)).center(Fill))
+        button(container(mark(colour, if floating { DOT_E } else { DOT })).center(Fill))
             .width(size::ICON_BUTTON)
             .height(size::ICON_BUTTON)
             .padding(0)
             .style(move |_, status| {
                 let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                let fill = if hot { Some(c().hover) } else { None };
-                let edge = if open { c().accent } else { c().rim };
+                let (fill, rest, edge) = if floating {
+                    (c().hover, None, c().rim)
+                } else {
+                    (c().elevated_hover, Some(c().elevated), c().elevated_border)
+                };
+                let edge = if open { c().accent } else { edge };
                 button::Style {
-                    background: fill.map(Into::into),
-                    border: Border::default()
-                        .rounded(radius::TRACK)
-                        .width(1)
-                        .color(edge),
+                    background: if hot { Some(fill) } else { rest }.map(Into::into),
+                    border: Border::default().rounded(corner).width(1).color(edge),
                     ..button::Style::default()
                 }
             }),
-        radius::TRACK,
+        if floating {
+            radius::TRACK
+        } else {
+            radius::FULL
+        },
         on_press,
     )
     .into()

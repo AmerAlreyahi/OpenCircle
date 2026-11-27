@@ -864,6 +864,31 @@ mod style_e_tests {
                 assert!(texts.iter().any(|t| t == "Copy"));
                 assert!(texts.iter().any(|t| t == "English"));
                 assert!(h > 70.0);
+                // AC: the current row's accent bar sits on the START side (left in
+                // English, right in Arabic): the accent pixel nearest that edge
+                let w = MENU_WIDTH as u32;
+                let one =
+                    floating_menu(vec![floating_item("English", true, None, false, true, 2u8)]);
+                let hh = floating_menu_height(1, 0) as u32 + 2;
+                let px = shot::render(one, w, hh);
+                let t = theme.c.accent.into_rgba8();
+                let xs: Vec<u32> = px
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| (0..3).all(|k| p[k].abs_diff(t[k]) <= 3))
+                    .map(|(i, _)| i as u32 % w)
+                    .collect();
+                // the bar is the tallest accent column (the check mark is shorter)
+                let mut tall = vec![0u32; w as usize];
+                xs.iter().for_each(|&x| tall[x as usize] += 1);
+                let bar = tall.iter().enumerate().max_by_key(|(_, n)| **n).unwrap().0 as u32;
+                if ar {
+                    assert!(bar > w - w / 4, "{}: bar not at the right: {bar}", theme.id);
+                } else {
+                    assert!(bar < w / 4, "{}: bar not at the left: {bar}", theme.id);
+                }
             }
         }
         themes::set(&SAPPHIRE);

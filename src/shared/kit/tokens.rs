@@ -220,7 +220,5 @@ pub mod widget_e {
     /// Current-row start indicator bar (`.mr.cur::before`).
     pub const CURRENT_BAR_W: f32 = 3.0;
     pub const CURRENT_BAR_H: f32 = 16.0;
-    /// Inner card padding inside floating tray chrome (AI chat, What's new, cards).
-    pub const CARD_INNER_PAD: f32 = 12.0;
 }
 // === end widgets style E ===

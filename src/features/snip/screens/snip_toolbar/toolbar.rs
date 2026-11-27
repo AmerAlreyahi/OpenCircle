@@ -1696,22 +1696,22 @@ mod tests {
             let bar_sz = size_for(&e);
             let bar_px = shot::render(view(&e), bar_sz.width as u32, bar_sz.height as u32);
             let row_px = shot::render(options_row(&e, 900.0).unwrap(), 900, ROW_H as u32);
-            let has = |px: &[u8], col: iced::Color| {
-                let t = col.into_rgba8();
-                px.as_chunks::<4>().0.iter().any(|p| {
-                    p[0].abs_diff(t[0]) <= 3 && p[1].abs_diff(t[1]) <= 3 && p[2].abs_diff(t[2]) <= 3
-                })
-            };
-            assert!(has(&bar_px, theme.c.track), "{}: snip tray track", theme.id);
+            let pad = crate::shared::kit::tokens::widget_e::TRAY_PAD_Y;
             assert!(
-                has(&bar_px, theme.c.widget),
-                "{}: snip segment widget",
+                shot::two_tone_column(
+                    &bar_px,
+                    bar_sz.width as u32,
+                    bar_sz.height as u32,
+                    theme,
+                    pad
+                ),
+                "{}: snip toolbar: no track ring round a raised segment",
                 theme.id
             );
-            assert!(has(&row_px, theme.c.track), "{}: row tray track", theme.id);
+            // the row's groups are raised too: a `track` row, its group's edge, `widget`
             assert!(
-                has(&row_px, theme.c.widget),
-                "{}: row raised group widget",
+                shot::two_tone_column(&row_px, 900, ROW_H as u32, theme, 4.0),
+                "{}: options row: no track ring round a raised group",
                 theme.id
             );
         }

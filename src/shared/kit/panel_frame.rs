@@ -13,7 +13,7 @@ use iced::widget::{Space, column, container, mouse_area, opaque, pin, stack};
 use iced::{Border, Center, Element, Fill, Length, Point, Rectangle, Size, Vector, mouse};
 
 use super::icon::{Icon, icon};
-use super::surface::{Material, segment_card, surface};
+use super::surface::{Material, surface};
 use super::text::text;
 use super::themes::c;
 use super::tokens::Role;
@@ -72,13 +72,7 @@ pub fn frame<'a, Message: Clone + 'a>(
         ..iced::Padding::ZERO
     }))
     .on_press(on_drag); // mouse only: drags the panel
-    let body = segment_card(
-        super::tokens::radius::DROPDOWN,
-        super::scroll::scroll(body).height(Fill),
-    )
-    .padding(super::tokens::widget_e::CARD_INNER_PAD)
-    .width(Fill)
-    .height(Fill);
+    let body = super::scroll::scroll(body).height(Fill);
     let actions = container(actions).padding(iced::Padding {
         top: ABOVE_ACTIONS,
         ..iced::Padding::ZERO
@@ -351,11 +345,7 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
         None => crate::dir_row![heading],
     }
     .align_y(Center);
-    let framed_body = segment_card(super::tokens::radius::DROPDOWN, body)
-        .padding(super::tokens::widget_e::CARD_INNER_PAD)
-        .width(Fill)
-        .height(Fill);
-    let mut parts = column![top, framed_body].spacing(UNDER_HEADING);
+    let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
     if let Some(footer) = footer {
         // (the chat is the card with the drawer menu)
         let above = match header.menu {

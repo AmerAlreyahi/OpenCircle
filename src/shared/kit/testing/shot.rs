@@ -1158,3 +1158,37 @@ pub fn focus_walk<'a, Message>(
     }
     (messages, focused)
 }
+
+/// Style E's ring, in pixels: down some column of the middle third, the first
+/// `track` row is the tray (`pad` counts its 1 px rim), the row where `pad - 1`
+/// rows of it end is the raised segment's edge, and the next is `widget`. `old` styles (a `widget` tray, no
+/// raised segment) have no such column.
+pub fn two_tone_column(
+    px: &[u8],
+    width: u32,
+    height: u32,
+    theme: &super::super::themes::Theme,
+    pad: f32,
+) -> bool {
+    let at = |x: u32, y: u32| {
+        let i = ((y * width + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2]]
+    };
+    let is = |p: [u8; 3], col: Color| {
+        let t = col.into_rgba8();
+        (0..3).all(|k| p[k].abs_diff(t[k]) <= 3)
+    };
+    let pad = pad as u32;
+    (width / 3..2 * width / 3).any(|x| {
+        (0..height.saturating_sub(pad + 3))
+            .find(|&y| is(at(x, y), theme.c.track))
+            .is_some_and(|y| {
+                // (the tray's 1 px rim sits above `y`; `pad` counts it)
+                let edge = at(x, y + pad - 1);
+                is(at(x, y + pad - 2), theme.c.track)
+                    && !is(edge, theme.c.track)
+                    && !is(edge, theme.c.widget)
+                    && is(at(x, y + pad), theme.c.widget)
+            })
+    })
+}

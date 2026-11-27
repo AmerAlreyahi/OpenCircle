@@ -643,22 +643,17 @@ mod tests {
                     size.width as u32,
                     size.height as u32,
                 );
-                let has = |col: iced::Color| {
-                    let t = col.into_rgba8();
-                    px.as_chunks::<4>().0.iter().any(|p| {
-                        p[0].abs_diff(t[0]) <= 3
-                            && p[1].abs_diff(t[1]) <= 3
-                            && p[2].abs_diff(t[2]) <= 3
-                    })
-                };
+                // AC: the tray's `track` ring, then the raised segment's edge, then
+                // its `widget` fill, TRAY_PAD_Y further in (main drew a `widget` pill)
                 assert!(
-                    has(theme.c.track),
-                    "{} ar={ar}: tray track missing",
-                    theme.id
-                );
-                assert!(
-                    has(theme.c.widget),
-                    "{} ar={ar}: segment widget missing",
+                    crate::shared::kit::testing::shot::two_tone_column(
+                        &px,
+                        size.width as u32,
+                        size.height as u32,
+                        theme,
+                        crate::shared::kit::tokens::widget_e::TRAY_PAD_Y,
+                    ),
+                    "{} ar={ar}: no track ring round a raised widget segment",
                     theme.id
                 );
             }
