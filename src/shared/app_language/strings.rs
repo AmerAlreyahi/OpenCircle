@@ -817,8 +817,6 @@ strings! {
         | "أصلح هذا أولًا: {}";
     o_save_failed: "Could not save your settings: {}"
         | "تعذّر حفظ إعداداتك: {}";
-    lb_live_hero: "Follow game and video dialogue in your language."
-        | "تابع حوارات الألعاب والفيديو بلغتك.";
     lb_song_hero: "Name a song playing on your PC or microphone."
         | "تعرّف على أغنية تُشغَّل على جهازك أو يلتقطها الميكروفون.";
     c_preview_failed: "Couldn't download the preview. Check your connection and try again."

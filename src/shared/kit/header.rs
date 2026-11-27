@@ -56,7 +56,17 @@ pub fn regular_with_chip<'a, Message: Clone + 'a>(
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
-    bar(logo, None, title, false, Some(chip), status, maximise, on)
+    bar_sized(
+        super::tokens::settings::HEADER,
+        logo,
+        None,
+        title,
+        false,
+        Some(chip),
+        status,
+        maximise,
+        on,
+    )
 }
 
 /// `regular` with a menu bar (`menu`) between the logo and the title (Studio:
@@ -85,7 +95,31 @@ fn bar<'a, Message: Clone + 'a>(
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
-    const H: f32 = size::HEADER;
+    bar_sized(
+        size::HEADER,
+        logo,
+        menu,
+        title,
+        unsaved,
+        chip,
+        status,
+        maximise,
+        on,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bar_sized<'a, Message: Clone + 'a>(
+    h: f32,
+    logo: image::Handle,
+    menu: Option<Element<'a, Message>>,
+    title: &'a str,
+    unsaved: bool,
+    chip: Option<Element<'a, Message>>,
+    status: impl Into<Element<'a, Message>>,
+    maximise: Option<bool>,
+    on: impl Fn(Caption) -> Message,
+) -> Element<'a, Message> {
     const STATUS_GAP: f32 = 8.0;
     const DOT: f32 = 6.0;
     const GLYPH: f32 = 12.0;
@@ -98,7 +132,7 @@ fn bar<'a, Message: Clone + 'a>(
         true => Icon::Restore,
         false => Icon::Maximise,
     });
-    let restore = restore.map(|glyph| caption(glyph, GLYPH, H, false, on(Caption::Maximise)));
+    let restore = restore.map(|glyph| caption(glyph, GLYPH, h, false, on(Caption::Maximise)));
     let mut parts: Vec<Element<'a, Message>> = Vec::new();
     let has_menu = menu.is_some();
     let name: Element<'a, Message> = match menu {
@@ -113,7 +147,7 @@ fn bar<'a, Message: Clone + 'a>(
                 // order: a plain row, never mirrored; the menus' contents are the language's)
                 container(row![mark, menu].spacing(LOGO_GAP).align_y(Center))
                     .padding([0.0, PAD])
-                    .center_y(H)
+                    .center_y(h)
                     .into(),
             );
             // the document's name, centred, with a dot while it has unsaved changes
@@ -133,7 +167,7 @@ fn bar<'a, Message: Clone + 'a>(
     };
     let name = container(name)
         .padding([0.0, PAD])
-        .center_y(H)
+        .center_y(h)
         .width(Fill)
         .align_x(match has_menu {
             true => iced::alignment::Horizontal::Center,
@@ -147,16 +181,16 @@ fn bar<'a, Message: Clone + 'a>(
     let mut buttons = vec![caption(
         Icon::Minimise,
         GLYPH,
-        H,
+        h,
         false,
         on(Caption::Minimise),
     )];
     buttons.extend(restore);
-    buttons.push(caption(Icon::Close, GLYPH, H, true, on(Caption::Close)));
+    buttons.push(caption(Icon::Close, GLYPH, h, true, on(Caption::Close)));
     // (a plain row: a title bar is never mirrored, in any language: logo and title at the left,
     // the buttons at the right; only the text is the language's)
-    let content: Element<'a, Message> = row(parts).width(Fill).height(H).align_y(Center).into();
-    row![content, row(buttons)].height(H).align_y(Center).into()
+    let content: Element<'a, Message> = row(parts).width(Fill).height(h).align_y(Center).into();
+    row![content, row(buttons)].height(h).align_y(Center).into()
 }
 
 /// `title` (mono, muted) that drags the window (`on_drag` on press), and the
@@ -323,7 +357,9 @@ pub fn with_centre<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     let part = container(centre).max_width(widest).width(Fill);
     let layer = container(part).padding([0.0, margin]).center(Fill);
-    stack![header, layer].height(size::HEADER).into()
+    stack![header, layer]
+        .height(super::tokens::settings::HEADER)
+        .into()
 }
 
 #[cfg(test)]

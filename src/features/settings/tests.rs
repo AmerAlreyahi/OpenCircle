@@ -2257,7 +2257,6 @@ fn the_ported_pages_match_their_golden_images() {
         ];
         for (name, section, folder) in cases {
             let (mut s, _) = state(None);
-            s.draft.labs.song = true;
             update(&mut s, Message::Section(section));
             if !folder.is_empty() {
                 update(&mut s, Message::Folder(Some(PathBuf::from(folder))));
@@ -2397,7 +2396,9 @@ fn the_step_33_pages_match_their_golden_images() {
     golden::each_theme(|theme, failed| {
         for (name, section, height, setup) in cases {
             let (mut s, _) = state(None);
-            s.draft.labs = Labs::all_on();
+            if section == Section::Song {
+                s.draft.labs.song = true;
+            }
             s.recognizers = vec!["en-US".into()];
             update(&mut s, Message::Section(section));
             setup(&mut s);
@@ -2539,8 +2540,9 @@ fn appearance_and_look_match_their_golden_images() {
             update(&mut s, Message::Section(section));
             themes::set(theme);
             let file = format!("settings-{name}-{}", theme.id);
-            let size = Size::new(WINDOW_SIZE.width, 900.0);
-            failed.extend(golden::check("screens", &file, size, &[1.0], || view(&s)));
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
         }
     });
 }
@@ -2772,7 +2774,7 @@ fn labs_previews_show_only_while_their_switch_is_on() {
     s.draft.labs.live = true;
     let texts = page(&mut s, Section::Translate);
     assert!(
-        live(&texts) && texts.iter().any(|t| t == "Translate"),
+        !live(&texts) && texts.iter().any(|t| t == "Translate"),
         "{texts:?}"
     );
     for h in HEROES.iter().filter(|h| h.lab.is_some()) {
@@ -3252,16 +3254,19 @@ fn every_page_in_arabic_matches_its_golden_image() {
     use crate::shared::kit::themes;
     golden::each_theme(|theme, failed| {
         let (mut s, _) = state(None);
-        s.draft.labs = Labs::all_on();
         s.draft.look.theme = LookTheme::Custom;
         update(&mut s, Message::AppLanguage(Choice("ar")));
-        let shown: Vec<_> = pages::visible(&s.draft.labs).map(|p| p.id).collect();
+        let shown: Vec<_> = pages::visible(&Labs::all_on()).map(|p| p.id).collect();
         for section in shown {
+            s.draft.labs = Labs::default();
+            if section == Section::Song {
+                s.draft.labs.song = true;
+            }
             update(&mut s, Message::Section(section));
             themes::set(theme);
             let slug = format!("{section:?}").to_lowercase();
             let file = format!("settings-{slug}-ar-{}", theme.id);
-            let size = Size::new(WINDOW_SIZE.width, 900.0);
+            let size = WINDOW_SIZE;
             // nothing laid out beyond the window's edge (a wrapped Arabic
             // description stays in its column)
             let lost = shot::out_of_reach(view(&s), size);

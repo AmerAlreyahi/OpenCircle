@@ -45,6 +45,8 @@ pub mod focus {
 /// every number of the new Settings window that no other part shares.
 pub mod settings {
     /// The sidebar card's width, and its collapsed (icons only) width.
+    /// The title bar's height (`r2` `.tbar`: 48 px).
+    pub const HEADER: f32 = 48.0;
     pub const NAV: f32 = 246.0;
     pub const NAV_THIN: f32 = 60.0;
     /// The gap round and between the two floating cards.

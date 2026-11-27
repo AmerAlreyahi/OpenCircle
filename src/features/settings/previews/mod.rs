@@ -51,7 +51,7 @@ fn ai_clips(c: &Config) -> &'static [&'static str] {
 }
 
 /// In the design's order.
-pub const HEROES: [Hero; 7] = [
+pub const HEROES: [Hero; 6] = [
     Hero {
         page: Section::Look,
         key: "look",
@@ -97,16 +97,6 @@ pub const HEROES: [Hero; 7] = [
         shortcut: snip,
         clips: |_| &["snip-blur", "snip-comment", "snip-long"],
     },
-    // Live translate has no page of its own: its rows are on Translate's.
-    Hero {
-        page: Section::Translate,
-        key: "live",
-        title: S::lb_live,
-        desc: S::lb_live_hero,
-        lab: Some(Feature::Live),
-        shortcut: live,
-        clips: |_| &["live"],
-    },
     Hero {
         page: Section::Song,
         key: "song",
@@ -144,10 +134,6 @@ fn ask(c: &Config) -> &str {
 /// The region snip (the first of the three).
 fn snip(c: &Config) -> &str {
     quick(c, QuickId::Snip, false)
-}
-
-fn live(c: &Config) -> &str {
-    quick(c, QuickId::Translate, true)
 }
 
 fn song(c: &Config) -> &str {
@@ -293,7 +279,6 @@ mod tests {
     fn a_page_without_files_has_no_clips_and_a_missing_one_is_skipped() {
         let c = Config::default();
         assert!(chosen_from(hero("text_reading"), &c, bundle(&[])).is_empty());
-        assert!(chosen_from(hero("live"), &c, bundle(&["circle-1"])).is_empty());
         // Snip with only its long capture bundled: just that one
         let got = chosen_from(hero("snip"), &c, bundle(&["snip-long"]));
         assert_eq!(got, ["snip-long"]);
@@ -341,7 +326,7 @@ mod tests {
         assert!(has("ai", &c));
         c.ai.provider = Provider::Anthropic;
         assert!(has("ai", &c));
-        assert!(has("text_reading", &c) && !has("live", &c) && !has("song", &c));
+        assert!(has("text_reading", &c) && !has("song", &c));
         assert_eq!(chosen(hero("snip"), &c).len(), 3);
         assert_eq!(chosen(hero("look"), &c).len(), 3);
         assert_eq!(
