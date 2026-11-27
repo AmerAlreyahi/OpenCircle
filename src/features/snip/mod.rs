@@ -5,6 +5,7 @@ pub(crate) mod app;
 pub(crate) mod capture;
 pub(crate) mod export;
 pub(crate) mod movie;
+pub(crate) mod record;
 pub(crate) mod screens;
 pub(crate) mod snip_more;
 pub(crate) mod transition;
