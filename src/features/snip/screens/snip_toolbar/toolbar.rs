@@ -1211,6 +1211,8 @@ mod tests {
                     e.update(Message::Tool(tool));
                     // R-10: the Pin button's row (Pin | Live pin on desktops that have it)
                     if name == "pin" {
+                        crate::features::snip::capture::live::FORCED.set(true);
+                        e.scroll = true;
                         e.update(Message::PinRow);
                     }
                     let file = format!("snip-row-{name}{dir}-{}", theme.id);
@@ -1221,6 +1223,7 @@ mod tests {
                 }
             }
         }
+        crate::features::snip::capture::live::FORCED.set(false);
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }
@@ -1570,11 +1573,37 @@ mod tests {
         e.scroll = true;
         assert!(!crate::features::snip::capture::live::offered_with(false));
         assert_eq!((cells(&e, false), cells(&e, true)), (1, 2));
-        assert!(options_row(&e, 800.0).is_none() || !e.pin_row);
+        // single-choice rule: where Live pin is not offered the row never opens
+        e.update(Message::Tool(Tool::Select)); // (no row of its own)
+        e.update(Message::PinRow);
+        assert!(!e.pin_row && options_row(&e, 800.0).is_none());
+        crate::features::snip::capture::live::FORCED.set(true);
         e.update(Message::PinRow);
         assert!(e.pin_row && options_row(&e, 800.0).is_some());
-        e.update(Message::Tool(Tool::Rect));
-        assert!(!e.pin_row);
+        // the keyboard's focus on the Pin button opens it too
+        e.pin_row = false;
+        assert!(options_row(&e, 800.0).is_none());
+        e.focus = bar_stops(&e).iter().position(|m| *m == Message::PinButton);
+        assert!(options_row(&e, 800.0).is_some());
+        e.focus = None;
+        // More, Undo, the colour picker and tools close it
+        for m in [
+            Message::Menu(Menu::More),
+            Message::UndoClick,
+            Message::Picker,
+            Message::Tool(Tool::Rect),
+        ] {
+            e.update(Message::PinRow);
+            assert!(e.pin_row);
+            e.update(m);
+            assert!(!e.pin_row);
+        }
+        // Live chosen but not the live screen: Live pin is not shown as selected
+        e.pin_live = true;
+        e.scroll = false;
+        let on = crate::shared::kit::option_bar::scope(None, true, || Some(pin_row(&e, true))).1;
+        assert_eq!(on.len(), 1, "only Pin is live");
+        crate::features::snip::capture::live::FORCED.set(false);
     }
 
     /// R-10: the choice routes the button (still vs live pin), is remembered, and Live pin

@@ -269,7 +269,7 @@ impl Annotator {
                 (true, _, 's') => Some(Message::Save),
                 (true, false, 'v') => Some(Message::Paste(None)),
                 // Ctrl: plain P is the Pen tool.
-                (true, _, 'p') => Some(Message::Pin),
+                (true, _, 'p') => Some(Message::PinButton),
                 // Snip: the picture, drawings kept, into OpenCircle Studio.
                 (true, _, 'e') if self.movable && !self.capturing => Some(Message::OpenStudio),
                 (false, _, 'd') => Some(Message::Eyedropper),

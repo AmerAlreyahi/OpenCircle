@@ -1613,7 +1613,10 @@ fn keys_pick_tools_shortcuts_and_type_text() {
     assert!(matches!(key(&e, &letter("c"), ctrl), Some(Message::Copy)));
     assert!(matches!(key(&e, &letter("s"), ctrl), Some(Message::Save)));
     // Pin is Ctrl+P; plain P stays the Pen tool.
-    assert!(matches!(key(&e, &letter("p"), ctrl), Some(Message::Pin)));
+    assert!(matches!(
+        key(&e, &letter("p"), ctrl),
+        Some(Message::PinButton)
+    ));
     assert!(matches!(
         key(&e, &letter("p"), Modifiers::empty()),
         Some(Message::Tool(Tool::Pen))

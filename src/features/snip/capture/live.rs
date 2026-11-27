@@ -25,7 +25,17 @@ pub fn offered() -> bool {
 }
 
 pub(crate) fn offered_with(labs_pins: bool) -> bool {
+    #[cfg(test)]
+    if FORCED.get() {
+        return true;
+    }
     SUPPORTED && labs_pins
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: pretend this desktop has Live pin and Labs Pins is on.
+    pub(crate) static FORCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// At most this often a frame is read (~10 fps).

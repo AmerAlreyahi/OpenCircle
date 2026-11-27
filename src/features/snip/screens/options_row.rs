@@ -399,17 +399,29 @@ pub fn snip_row_stops(e: &Annotator) -> Vec<Message> {
 /// R-10: the Pin button's row: Pin | Live pin (Live pin only while Labs "Pins" is on and the
 /// desktop has it; dimmed away from the live screen). The choice is remembered.
 pub(crate) fn pin_row(e: &Annotator, live_offered: bool) -> El<'_> {
+    // (what the button will really do: Live pin only over the live screen, as `pin_route`)
+    let live_on = e.pin_live && live_offered && e.scroll;
     let mut cells = vec![text_cell(
         t!(sn_pin_still),
-        !(e.pin_live && live_offered),
+        !live_on,
         Some(Message::PinLive(false)),
     )];
     if live_offered {
-        cells.push(text_cell(
+        let cell = text_cell(
             t!(sn_live_pin),
-            e.pin_live,
+            live_on,
             e.scroll.then_some(Message::PinLive(true)),
-        ));
+        );
+        cells.push(match e.scroll {
+            true => cell,
+            // a dimmed cell says why, like Long capture
+            false => hint(
+                cell,
+                t!(sn_live_pin),
+                Why::Cut(t!(sn_why_no_long)),
+                crate::shared::kit::option_bar::tips(),
+            ),
+        });
     }
     let head = text(Role::ROW_TITLE, tr(crate::shared::app_language::S::sn_pin));
     dir::row(vec![head.into(), hairline(), group(cells, false)])
@@ -419,8 +431,16 @@ pub(crate) fn pin_row(e: &Annotator, live_offered: bool) -> El<'_> {
 }
 
 pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
-    if e.pin_row {
-        return Some(pin_row(e, crate::features::snip::capture::live::offered()));
+    // R-10: the Pin button's row (pointer on it, or the keyboard's focus on it), only where Live
+    // pin is offered
+    let offered = crate::features::snip::capture::live::offered();
+    let focused = e.focus.and_then(|f| {
+        crate::features::snip::screens::snip_toolbar::toolbar::bar_stops(e)
+            .get(f)
+            .cloned()
+    }) == Some(Message::PinButton);
+    if offered && (e.pin_row || focused) {
+        return Some(pin_row(e, true));
     }
     use crate::features::snip::annotate::{TextBack as B, TextFont as F};
     let tool = base_tool(e);

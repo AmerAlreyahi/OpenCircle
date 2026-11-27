@@ -2078,3 +2078,21 @@ magnifier_shape = "star"
         assert!(w.iter().any(|m| m.starts_with(&key)), "{key}: {w:?}");
     }
 }
+
+/// R-10: `[editor] pin_live` is additive: absent by default and in an old file, round-trips.
+#[test]
+fn r10_pin_live_key_is_additive_and_round_trips() {
+    assert!(
+        !toml::to_string_pretty(&Config::default())
+            .unwrap()
+            .contains("pin_live")
+    );
+    let (old, w) = Config::parse("[editor]\nstroke = 4\n");
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(old.editor.pin_live, None);
+    let mut c = Config::default();
+    c.editor.pin_live = Some(true);
+    let (back, w) = Config::parse(&toml::to_string_pretty(&c).unwrap());
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(back.editor.pin_live, Some(true));
+}

@@ -1349,6 +1349,13 @@ fn the_snip_toolbars_scroll_button_starts_a_scrolling_capture_of_the_area() {
     assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Save));
     let _ = app.update(stitched());
     assert!(app.o.is_none(), "finished");
+    // R-10: the bar's one Pin button finishes it as a pin (the old More row did)
+    let mut app = snipping(area);
+    app.select(area);
+    let _ = app.open_snip_toolbar();
+    let _ = app.update(Message::Annotate(annotate::Message::Scroll));
+    let _ = app.update(Message::Annotate(annotate::Message::PinButton));
+    assert_eq!(app.scroll().and_then(|l| l.then), Some(Finish::Pin));
     // Enter is Copy
     let mut app = snipping(area);
     app.select(area);

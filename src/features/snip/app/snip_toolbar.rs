@@ -190,7 +190,7 @@ impl App {
             let how = match msg {
                 annotate::Message::Copy => Finish::Copy,
                 annotate::Message::Save => Finish::Save,
-                annotate::Message::Pin => Finish::Pin,
+                annotate::Message::Pin | annotate::Message::PinButton => Finish::Pin,
                 annotate::Message::Share => Finish::Share,
                 annotate::Message::CopyText => Finish::CopyText,
                 annotate::Message::AskAi => Finish::AskAi,

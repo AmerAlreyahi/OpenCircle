@@ -1104,6 +1104,11 @@ impl Annotator {
         }
     }
 
+    /// The Pin button's row opens only where there is a choice (Live pin offered).
+    pub(crate) fn open_pin_row(&mut self, offered: bool) {
+        self.pin_row = offered;
+    }
+
     pub fn update(&mut self, message: Message) -> Option<Output> {
         // Pointer messages never write (a press can pick up an item's options;
         // they are remembered with the next choice).
@@ -1120,7 +1125,16 @@ impl Annotator {
             .then(|| (self.doc.selected, self.doc.extra.clone()));
         self.touch = objects::touch::of(&message);
         // choosing a tool closes the Pin button's row
-        if matches!(message, Message::Slot(_) | Message::Tool(_) | Message::Pin) {
+        if matches!(
+            message,
+            Message::Slot(_)
+                | Message::Tool(_)
+                | Message::Pin
+                | Message::PinButton
+                | Message::Menu(_)
+                | Message::UndoClick
+                | Message::Picker
+        ) {
             self.pin_row = false;
         }
         let out = self.handle(message);
@@ -1462,7 +1476,7 @@ impl Annotator {
             // like Long capture: the area over the live screen (Snip in place)
             Message::LivePin if self.scroll => return Some(Output::LivePin),
             Message::LivePin => {}
-            Message::PinRow => self.pin_row = true,
+            Message::PinRow => self.open_pin_row(crate::features::snip::capture::live::offered()),
             Message::PinLive(on) => self.pin_live = on,
             // the one Pin button: Live pin only when chosen, shown (Labs) and over the live screen
             Message::PinButton => {
