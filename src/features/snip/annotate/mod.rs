@@ -541,6 +541,13 @@ pub enum Message {
     /// Home / End in More: the first (`false`) or last (`true`) live row.
     MenuEdge(bool),
     Activate,
+    /// R-11: the area's right-click menu opens at this image point (`None`: the keyboard's
+    /// Menu key / Shift+F10, at the area's centre, first row on).
+    AreaMenu(Option<Point>),
+    /// The menu's row `i` was clicked.
+    AreaPick(usize),
+    /// The menu closes (Esc, Menu key again, a press outside it).
+    AreaMenuClose,
 }
 
 /// Snip's screen tools on the frozen screen (its toolbar's buttons; the
@@ -646,6 +653,9 @@ pub struct Annotator {
     pub(crate) undid: bool,
     /// The More menu's row the arrow keys are on.
     pub row: Option<usize>,
+    /// R-11: the area's right-click menu is open, anchored here (image px); its rows share
+    /// `row` with More (only one is open at a time).
+    pub area_menu: Option<Point>,
     /// What More's text rows show (the host keeps it current).
     pub more: crate::features::snip::snip_more::Info,
     /// New shapes, arrows and callouts get an outline / rectangles and
@@ -894,6 +904,7 @@ impl Annotator {
             last,
             undid: false,
             row: None,
+            area_menu: None,
             more: Default::default(),
             outline: saved.outline.unwrap_or(false),
             magnifier_outline: saved.magnifier_outline.unwrap_or(true),
@@ -1139,6 +1150,24 @@ impl Annotator {
                 | Message::Picker
         ) {
             self.pin_row = false;
+        }
+        // the area menu stays open only for its own keys and a pointer that merely moves
+        if self.area_menu.is_some()
+            && !matches!(
+                message,
+                Message::AreaMenu(_)
+                    | Message::AreaPick(_)
+                    | Message::MenuStep(_)
+                    | Message::MenuEdge(_)
+                    | Message::Activate
+                    | Message::Move(_)
+                    | Message::Release
+                    | Message::Shift(_)
+                    | Message::Cancel
+            )
+        {
+            self.area_menu = None;
+            self.row = None;
         }
         let out = self.handle(message);
         self.touch = 0;
@@ -1523,7 +1552,19 @@ impl Annotator {
             | Message::RowStep(..)
             | Message::MenuStep(_)
             | Message::MenuEdge(_)
+            | Message::AreaPick(_)
             | Message::Activate => {}
+            Message::AreaMenu(at) if self.movable && !self.studio && !self.capturing => {
+                self.commit();
+                self.menu = None;
+                self.picking = false;
+                self.pin_row = false;
+                // the keyboard's menu starts on its first row
+                self.row = at.is_none().then_some(0);
+                self.area_menu = Some(at.unwrap_or_else(|| self.doc.view().center()));
+            }
+            Message::AreaMenu(_) => {}
+            Message::AreaMenuClose => (self.area_menu, self.row) = (None, None),
             Message::Nudge(arrow, keys) if self.movable => {
                 self.commit();
                 self.nudged = true;

@@ -354,7 +354,24 @@ pub fn floating_item<'a, Message: Clone + 'a>(
         corner: radius::TRACK,
         check: size::ICON_SMALL,
     };
-    menu_row(row, label, checked, hint, focused, current, on_press)
+    menu_row(row, label, checked, hint, focused, current, Some(on_press))
+}
+
+/// A floating menu row that may be off (`on_press` `None`: dimmed, no press): the Snip area
+/// menu's rows.
+pub fn floating_item_when<'a, Message: Clone + 'a>(
+    label: &'a str,
+    hint: Option<String>,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let row = RowStyle {
+        height: widget_e::MENU_ITEM_H,
+        pad: OPENER_PAD,
+        corner: radius::TRACK,
+        check: size::ICON_SMALL,
+    };
+    menu_row(row, label, false, hint, focused, false, on_press)
 }
 
 /// The menu's width, a row's height, the room around the rows (edge + `p-1`)
@@ -406,7 +423,7 @@ pub fn item<'a, Message: Clone + 'a>(
         corner: radius::MENU_ITEM,
         check: CHECK,
     };
-    menu_row(row, label, checked, hint, focused, false, on_press)
+    menu_row(row, label, checked, hint, focused, false, Some(on_press))
 }
 
 /// A menu row's measures: what `item` (the tray and Settings menus) and
@@ -427,10 +444,13 @@ fn menu_row<'a, Message: Clone + 'a>(
     hint: Option<String>,
     focused: bool,
     current: bool,
-    on_press: Message,
+    on_press: Option<Message>,
 ) -> Element<'a, Message> {
     use button::Status;
     let (role, small) = (Role::MENU, Role::MENU_HINT);
+    // no press = a dimmed row (38 %), as More's rows
+    let live = on_press.is_some();
+    let ink = move |colour: iced::Color| if live { colour } else { faded(colour, 0.38) };
     let check = (checked || current).then(|| {
         let tick = icon(Icon::Check, row.check).color(match current {
             true => c().accent,
@@ -446,7 +466,7 @@ fn menu_row<'a, Message: Clone + 'a>(
             text(h)
                 .size(small.size)
                 .font(font(small))
-                .color(c().text_muted),
+                .color(ink(c().text_muted)),
         )
         .padding(super::dir::pad(Padding {
             left: HINT_GAP,
@@ -468,7 +488,12 @@ fn menu_row<'a, Message: Clone + 'a>(
     // (right to left: the label at the right, its key at the left)
     let content = crate::dir_row![]
         .push(bar)
-        .push(text(label).size(super::text::size(role)).font(font(role)))
+        .push(
+            text(label)
+                .size(super::text::size(role))
+                .font(font(role))
+                .color(ink(c().text)),
+        )
         .push(check)
         .push(Space::new().width(Fill))
         .push(hint)
@@ -482,7 +507,7 @@ fn menu_row<'a, Message: Clone + 'a>(
             .height(row.height)
             .padding([0.0, row.pad])
             .style(move |_, status| {
-                let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
+                let hot = focused || (live && matches!(status, Status::Hovered | Status::Pressed));
                 let fill = match () {
                     _ if current => Some(c().accent_soft),
                     _ if hot => Some(c().hover),
@@ -496,7 +521,7 @@ fn menu_row<'a, Message: Clone + 'a>(
                 }
             }),
         corner,
-        Some(on_press),
+        on_press,
     )
     .into()
 }

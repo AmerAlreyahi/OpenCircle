@@ -687,6 +687,18 @@ fn snipping(area: Rectangle) -> App {
 }
 
 /// A snip over a `w` x `h` screen (scale 1) with one window (`area`) the pointer is on.
+/// A key as the overlay's own event stream delivers it (`"menu"` = the Menu key, `"enter"`): the
+/// real path of Snip's keys while a long capture runs (the toolbar's canvas is not drawn then).
+pub(crate) fn overlay_key(app: &mut App, key: &str) {
+    use crate::features::circle::screens::overlay::Event;
+    let event = match key {
+        "menu" => Event::ContextKey,
+        "enter" => Event::Enter,
+        other => panic!("no such key: {other}"),
+    };
+    let _ = app.update(Message::Overlay(event));
+}
+
 pub(crate) fn snipping_on(w: u32, h: u32, area: Rectangle) -> App {
     let mut app = open_app(w, h, 1.0);
     let window = pick::Pick::window(area, "App", 1);

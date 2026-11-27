@@ -392,6 +392,19 @@ impl canvas::Program<Message> for Input<'_> {
                     _ => Message::Press(p),
                 }
             }
+            // R-11: a right press mid-stroke (or mid-drag of the area) cancels it, no menu; on
+            // the picked area it opens the menu there; elsewhere nothing, as before.
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                // (the Studio keeps its own right press: its context menu)
+                if !e.studio && std::mem::take(&mut pointer.down) {
+                    return Some(Action::publish(Message::Cancel).and_capture());
+                }
+                let p = self.image_at(cursor.position()?);
+                if !(e.movable && !e.studio && !e.capturing && e.doc.view().contains(p)) {
+                    return None;
+                }
+                Message::AreaMenu(Some(p))
+            }
             // Snip's live area: from the window's px, as the canvas moves with it.
             canvas::Event::Mouse(mouse::Event::CursorMoved { position })
                 if pointer.down && e.movable =>
@@ -615,6 +628,8 @@ impl canvas::Program<Message> for Input<'_> {
 
 #[cfg(test)]
 mod key_tests;
+#[cfg(test)]
+mod r11_tests;
 #[cfg(test)]
 mod w111_tests;
 #[cfg(test)]

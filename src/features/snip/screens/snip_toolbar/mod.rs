@@ -3,7 +3,7 @@
 //! places it: same anchors, same drag).
 use crate::t;
 use iced::mouse;
-use iced::widget::{container, image, mouse_area, pin, stack};
+use iced::widget::{container, image, mouse_area, opaque, pin, stack};
 use iced::{ContentFit, Element, Point, Rectangle, Size};
 
 pub mod canvas;
@@ -145,7 +145,7 @@ impl SnipToolbar {
                 }
                 // More's rows: the arrow keys walk the live ones
                 Message::MenuStep(back) => {
-                    let rows = toolbar::more_rows(&self.annotator);
+                    let rows = toolbar::open_rows(&self.annotator);
                     let live: Vec<usize> = (0..rows.len())
                         .filter(|&i| rows[i].message.is_some())
                         .collect();
@@ -166,14 +166,19 @@ impl SnipToolbar {
                     return None;
                 }
                 Message::MenuEdge(last) => {
-                    let rows = toolbar::more_rows(&self.annotator);
+                    let rows = toolbar::open_rows(&self.annotator);
                     let mut live = (0..rows.len()).filter(|&i| rows[i].message.is_some());
                     self.annotator.row = if last { live.next_back() } else { live.next() };
                     return None;
                 }
-                Message::Activate if self.annotator.menu == Some(annotate::Menu::More) => {
+                Message::Activate
+                    if self.annotator.menu == Some(annotate::Menu::More)
+                        || self.annotator.area_menu.is_some() =>
+                {
                     self.take_row()?
                 }
+                // a click on a row of the area's menu
+                Message::AreaPick(i) => self.take_pick(i)?,
                 Message::Activate => {
                     let stops = toolbar::stops(&self.annotator);
                     self.annotator.focus.and_then(|i| stops.get(i))?.clone()
@@ -187,10 +192,22 @@ impl SnipToolbar {
     /// Enter in More: closes the menu and gives the keyboard's row's message
     /// (`None`: no row, or a dimmed one).
     pub fn take_row(&mut self) -> Option<Message> {
-        let rows = toolbar::more_rows(&self.annotator);
-        let row = self.annotator.row.and_then(|i| rows.into_iter().nth(i));
-        self.annotator.menu = None;
+        self.take_pick(self.annotator.row.unwrap_or(usize::MAX))
+    }
+
+    /// Row `i` of the open menu (More's or the area's) was chosen: it closes, and the row's
+    /// message comes back (`None`: a dimmed row).
+    pub fn take_pick(&mut self, i: usize) -> Option<Message> {
+        let row = toolbar::open_rows(&self.annotator).into_iter().nth(i);
+        (self.annotator.menu, self.annotator.area_menu) = (None, None);
+        self.annotator.row = None;
         row?.message
+    }
+
+    /// R-11: where the area menu is anchored, in the starting screen's px (`None`: closed).
+    pub fn menu_at(&self) -> Option<Point> {
+        let p = self.annotator.area_menu?;
+        Some(self.origin + iced::Vector::new(p.x, p.y) * self.zoom)
     }
 
     /// The toolbar is showing (not back at the action bar).
@@ -338,6 +355,24 @@ impl SnipToolbar {
                 layers = layers.push(pin(row).position(Point::new(x0, y)));
             }
             layers = layers.extend(popover.map(|p| p.map(map)));
+        }
+        // R-11: the area's right-click menu, over everything: it takes every press on it, a
+        // press anywhere else closes it and goes no further
+        if let Some(at) = self.menu_at() {
+            let at = lens.to_window(at);
+            let inside =
+                (0.0..=screen.width).contains(&at.x) && (0.0..=screen.height).contains(&at.y);
+            if inside {
+                let (menu, size) = toolbar::area_menu(&self.annotator);
+                let at = crate::shared::kit::option_list::place(at, size, screen, 8.0);
+                let menu = opaque(menu.map(map));
+                let close = map(Message::AreaMenuClose);
+                layers = layers.push(opaque(
+                    mouse_area(pin(menu).position(at))
+                        .on_press(close.clone())
+                        .on_right_press(close),
+                ));
+            }
         }
         layers.into()
     }

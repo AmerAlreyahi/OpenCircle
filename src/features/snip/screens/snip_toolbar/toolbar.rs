@@ -157,32 +157,105 @@ pub fn row_stops_span(e: &Annotator) -> (usize, usize) {
 pub fn bar_stops(e: &Annotator) -> Vec<Message> {
     let mut stops: Vec<Message> = e.last.iter().map(|&t| Message::Slot(t)).collect();
     stops.extend([Message::Picker, Message::UndoClick]);
-    stops.push(Message::PinButton);
+    stops.push(Act::Pin.message());
     // (dimmed while a long capture runs or where there is none: Tab skips it)
     if long_capture_on(e) {
         stops.push(Message::Scroll);
     }
     stops.push(Message::Menu(Menu::More));
     // (a long capture running: Open in Studio is dimmed, so Tab skips it)
-    if !e.capturing {
-        stops.push(Message::OpenStudio);
+    if Act::Studio.live(e) {
+        stops.push(Act::Studio.message());
     }
     stops.extend([
         if steps_on(e) {
             Message::AddStep
         } else {
-            Message::Copy
+            Act::Copy.message()
         },
-        Message::Save,
+        Act::Save.message(),
         Message::Close,
     ]);
     stops
 }
 
+/// The toolbar's four finishing buttons, said once: the buttons, `bar_stops`, More's Copy row and
+/// the area's right-click menu (R-11) all read this table (name, key, message, what stays live
+/// while a long capture runs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Act {
+    Copy,
+    Save,
+    Pin,
+    Studio,
+}
+
+impl Act {
+    /// The area menu's first rows, in order.
+    pub const ALL: [Act; 4] = [Act::Copy, Act::Save, Act::Pin, Act::Studio];
+
+    /// What the button sends.
+    pub fn message(self) -> Message {
+        match self {
+            Act::Copy => Message::Copy,
+            Act::Save => Message::Save,
+            Act::Pin => Message::PinButton,
+            Act::Studio => Message::OpenStudio,
+        }
+    }
+
+    pub fn name(self) -> S {
+        match self {
+            Act::Copy => S::c_copy,
+            Act::Save => S::c_save,
+            Act::Pin => S::sn_pin,
+            Act::Studio => S::sn_studio_btn,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Act::Copy => "Ctrl+C",
+            Act::Save => "Ctrl+S",
+            Act::Pin => "Ctrl+P",
+            Act::Studio => "Ctrl+E",
+        }
+    }
+
+    /// The menu's mark; `None`: the button wears the OpenCircle logo.
+    pub fn glyph(self) -> Option<char> {
+        match self {
+            Act::Copy => Some(COPY),
+            Act::Save => Some(SAVE),
+            Act::Pin => Some(PIN),
+            Act::Studio => None,
+        }
+    }
+
+    /// Copy, Save and Pin finish a long capture; Open in Studio cannot.
+    pub fn live(self, e: &Annotator) -> bool {
+        !e.capturing || self != Act::Studio
+    }
+
+    /// The row of a menu (More's Copy, the area's list): dimmed with its reason when off.
+    pub fn row(self, e: &Annotator) -> MoreRow {
+        let live = self.live(e);
+        MoreRow {
+            glyph: self.glyph(),
+            name: self.name(),
+            caps: snip_more::caps(self.key()),
+            message: live.then(|| self.message()),
+            of: None,
+            why: None,
+        }
+    }
+}
+
 /// A row of More: glyph, name (Latin, Arabic), its static key, its key caps,
 /// what it sends (`None`: dimmed), and which of the three text rows it is.
 pub struct MoreRow {
-    pub glyph: char,
+    /// `None`: the row's mark is not a glyph (Open in Studio shows the logo).
+    pub glyph: Option<char>,
     pub name: S,
     pub caps: Vec<String>,
     pub message: Option<Message>,
@@ -194,7 +267,7 @@ pub struct MoreRow {
 impl MoreRow {
     fn plain(glyph: char, name: S, key: Option<&'static str>, message: Option<Message>) -> Self {
         MoreRow {
-            glyph,
+            glyph: Some(glyph),
             name,
             caps: key.map(snip_more::caps).unwrap_or_default(),
             message,
@@ -227,7 +300,7 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
                 (None, Row::Translate) => Some(Message::Translate),
             };
             MoreRow {
-                glyph: row.glyph(),
+                glyph: Some(row.glyph()),
                 name: row.label(info.translated),
                 caps: info.caps[i].clone(),
                 message,
@@ -244,7 +317,7 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
             Some("Ctrl+Enter"),
             live(Message::AddStep),
         ),
-        true => MoreRow::plain(COPY, S::c_copy, Some("Ctrl+C"), Some(Message::Copy)),
+        true => Act::Copy.row(e),
     });
     if share::SUPPORTED {
         rows.push(MoreRow::plain(
@@ -296,6 +369,66 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     }
     rows
 }
+
+/// R-11: the rows of the menu a right press on the picked area opens: the toolbar's own Copy,
+/// Save, Pin and Open in Studio (their messages and keys), then More's three text rows
+/// (`more_rows`: the same messages, keys and reasons), Copy text, Translate, Ask AI. While a
+/// long capture runs there is no area menu (the toolbar's Copy / Save / Pin finish it); a text
+/// row that cannot run says why (no text found).
+pub fn area_rows(e: &Annotator) -> Vec<MoreRow> {
+    let mut rows: Vec<MoreRow> = Act::ALL.iter().map(|a| a.row(e)).collect();
+    let mut text_rows = more_rows(e);
+    text_rows.truncate(TEXT_ROWS);
+    for want in [Row::CopyText, Row::Translate, Row::AskAi] {
+        if let Some(at) = text_rows.iter().position(|r| r.of == Some(want)) {
+            let mut r = text_rows.swap_remove(at);
+            r.why = snip_more::why(want, &e.more, false).map(|w| w.words());
+            rows.push(r);
+        }
+    }
+    rows
+}
+
+/// The rows the keyboard walks now: the area menu's while it is open, else More's.
+pub fn open_rows(e: &Annotator) -> Vec<MoreRow> {
+    match e.area_menu {
+        Some(_) => area_rows(e),
+        None => more_rows(e),
+    }
+}
+
+/// R-11: the area menu (style E floating menu: rows with their keys, a hairline before the text
+/// rows; a dimmed row says why in its tooltip) and its size.
+pub fn area_menu(e: &Annotator) -> (Element<'_, Message>, Size) {
+    use crate::shared::kit::option_list::{
+        floating_item_when, floating_menu, floating_menu_height, floating_separator,
+    };
+    let rows = area_rows(e);
+    let size = Size::new(widget_e::MENU_W, floating_menu_height(rows.len(), 1));
+    let mut items: Vec<Element<'_, Message>> = Vec::new();
+    for (i, r) in rows.into_iter().enumerate() {
+        if i == AREA_TEXT_AT {
+            items.push(floating_separator());
+        }
+        let keys = r.caps.join("+");
+        // the keys read left to right inside a right-to-left menu
+        let hint = match (keys.is_empty(), dir::rtl()) {
+            (true, _) => None,
+            (false, true) => Some(format!("\u{2066}{keys}\u{2069}")),
+            (false, false) => Some(keys),
+        };
+        let press = r.message.map(|_| Message::AreaPick(i));
+        let row = floating_item_when(tr(r.name), hint, e.row == Some(i), press);
+        items.push(match r.why {
+            Some(why) => crate::shared::kit::tooltip::cut(row, tr(why).to_string()),
+            None => row,
+        });
+    }
+    (floating_menu(items), size)
+}
+
+/// The area menu's hairline goes before its text rows (after Copy, Save, Pin, Studio).
+pub const AREA_TEXT_AT: usize = 4;
 
 /// Why the Long capture button is dimmed (its tooltip says it), `None` while it is live.
 fn long_capture_why(e: &Annotator) -> Option<S> {
@@ -468,11 +601,11 @@ fn build(
     let pin_btn = iced::widget::mouse_area(hinted(
         icon_button::tool_icon(
             PIN,
-            state(e.pin_row, &Message::PinButton),
-            Some(Message::PinButton),
+            state(e.pin_row, &Act::Pin.message()),
+            Some(Act::Pin.message()),
         ),
-        t!(sn_pin),
-        Why::Keys("Ctrl+P"),
+        tr(Act::Pin.name()),
+        Why::Keys(Act::Pin.key()),
     ))
     .on_enter(Message::PinRow);
     let long = long_capture_on(e);
@@ -505,7 +638,7 @@ fn build(
     // Segment 3: Studio (OpenCircle logo) + Copy/Add step + Save + quiet x
     let studio = State {
         active: false,
-        focused: focused(&Message::OpenStudio),
+        focused: focused(&Act::Studio.message()),
     };
     let studio_logo = iced::widget::image(crate::shared::kit::logo::logo(size::ICON as u32))
         .width(size::ICON)
@@ -515,21 +648,25 @@ fn build(
         SAVE,
         State {
             active: false,
-            focused: focused(&Message::Save),
+            focused: focused(&Act::Save.message()),
         },
-        Some(Message::Save),
+        Some(Act::Save.message()),
     );
     let close = Message::Close;
     let seg_actions = segment_row_pad(
         widget_e::SEGMENT_PAD_Y_SNIP,
         [
             hinted(
-                icon_button::tool_option(studio_logo, studio, live(Message::OpenStudio)),
-                t!(sn_studio_btn),
-                Why::Keys("Ctrl+E"),
+                icon_button::tool_option(
+                    studio_logo,
+                    studio,
+                    Act::Studio.live(e).then(|| Act::Studio.message()),
+                ),
+                tr(Act::Studio.name()),
+                Why::Keys(Act::Studio.key()),
             ),
             primary(e, focused(&Message::AddStep) || focused(&Message::Copy)),
-            hinted(save, t!(c_save), Why::Keys("Ctrl+S")),
+            hinted(save, tr(Act::Save.name()), Why::Keys(Act::Save.key())),
             hinted(
                 icon_button::quiet_close(focused(&close), live(close)),
                 t!(sn_close),
@@ -772,8 +909,8 @@ fn undo_panel(e: &Annotator) -> Element<'_, Message> {
 fn primary<'a>(e: &Annotator, focused: bool) -> Element<'a, Message> {
     let accent = button::Kind::Accent;
     if !steps_on(e) {
-        let copy = button::tool(COPY, accent, focused, Some(Message::Copy));
-        return hinted(copy, t!(c_copy), Why::Keys("Ctrl+C"));
+        let copy = button::tool(COPY, accent, focused, Some(Act::Copy.message()));
+        return hinted(copy, tr(Act::Copy.name()), Why::Keys(Act::Copy.key()));
     }
     let n = e.steps.unwrap_or(0);
     let (label, tip, why) = match e.updating {
@@ -822,7 +959,7 @@ fn more_panel(e: &Annotator) -> Element<'_, Message> {
         let label = tr(r.name);
         let lead = match r.of {
             Some(Row::AskAi) => option_list::logo_mark(16),
-            _ => option_list::glyph(r.glyph, false),
+            _ => option_list::glyph(r.glyph.unwrap_or(' '), false),
         };
         let reading = r.of.is_some_and(|row| {
             e.more.read == Read::Reading && matches!(row, Row::CopyText | Row::Translate)
@@ -1060,6 +1197,39 @@ mod tests {
                 failed.extend(golden::check("screens", &file, at, &[1.0], || {
                     colour_panel(&e)
                 }));
+            }
+        }
+        themes::set(&SAPPHIRE);
+        assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// R-11: the area's right-click menu (style E floating menu): the keyboard's first row on,
+    /// then no text found in the area (Copy text and Translate dimmed), light and dark, Latin
+    /// and Arabic.
+    #[test]
+    fn r11_the_area_menu_matches_its_golden_images() {
+        let mut failed = Vec::new();
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for rtl in [false, true] {
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
+                let mut plain = editor();
+                plain.more.caps = crate::features::snip::snip_more::caps_from(
+                    &crate::shared::config::Config::default(),
+                );
+                plain.update(Message::AreaMenu(None));
+                let mut notext = editor();
+                notext.more = plain.more.clone();
+                notext.more.read = Read::NoText;
+                notext.update(Message::AreaMenu(None));
+                for (name, e) in [("area-menu", plain), ("area-menu-notext", notext)] {
+                    let (_, size) = area_menu(&e);
+                    let dir = if rtl { "-ar" } else { "" };
+                    let file = format!("snip-{name}{dir}-{}", theme.id);
+                    failed.extend(golden::check("screens", &file, size, &[1.0, 2.0], || {
+                        area_menu(&e).0
+                    }));
+                }
             }
         }
         themes::set(&SAPPHIRE);

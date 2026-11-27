@@ -162,6 +162,38 @@ impl App {
     }
 
     fn on_snip_toolbar_here(&mut self, msg: annotate::Message) -> Task<Message> {
+        let task = self.on_snip_toolbar_inner(msg);
+        self.drop_unseen_area_menu();
+        task
+    }
+
+    /// R-11: an area menu anchored outside every window would be invisible yet eat the arrows
+    /// and Enter: it is closed instead of opened.
+    fn drop_unseen_area_menu(&mut self) {
+        let start = self.o.place();
+        let Some(at) = (self.o.edit.as_ref()).and_then(SnipToolbar::menu_at) else {
+            return;
+        };
+        let seen = |lens: crate::features::snip::screens::snip_toolbar::canvas::ScreenMap,
+                    size: iced::Size| {
+            let p = lens.to_window(at);
+            (0.0..=size.width).contains(&p.x) && (0.0..=size.height).contains(&p.y)
+        };
+        let anywhere = seen(
+            crate::features::snip::screens::snip_toolbar::canvas::ScreenMap::ONE,
+            self.o.screen,
+        ) || self.o.screens.iter().any(|s| {
+            seen(
+                crate::app::monitors::screen_map_of(start, s.place),
+                s.place.size(),
+            )
+        });
+        if !anywhere && let Some(edit) = &mut self.o.edit {
+            (edit.annotator.area_menu, edit.annotator.row) = (None, None);
+        }
+    }
+
+    fn on_snip_toolbar_inner(&mut self, msg: annotate::Message) -> Task<Message> {
         // A long capture running: the toolbar's finishing buttons end it, on
         // the stitched image; nothing else reaches the editor meanwhile.
         if self.scroll().is_some() {
@@ -203,10 +235,16 @@ impl App {
         let Some(edit) = &mut o.edit else {
             return Task::none();
         };
-        let opened_more = matches!(msg, annotate::Message::Menu(annotate::Menu::More));
+        let opened_more = matches!(
+            msg,
+            annotate::Message::Menu(annotate::Menu::More) | annotate::Message::AreaMenu(_)
+        );
         let out = edit.update(msg);
         let hint = edit.annotator.take_ctrl_hint();
-        let opened_more = opened_more && edit.annotator.menu == Some(annotate::Menu::More);
+        // (the area's menu reads the text too: its Copy text and Translate rows)
+        let opened_more = opened_more
+            && (edit.annotator.menu == Some(annotate::Menu::More)
+                || edit.annotator.area_menu.is_some());
         // Snip's live area moved or resized: the selection (the overlay's dim,
         // scrolling capture, pin) follows it.
         let live = edit.annotator.movable.then(|| edit.canvas_rect());

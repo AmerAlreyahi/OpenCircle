@@ -169,6 +169,32 @@ impl Annotator {
         if self.menu == Some(Menu::Colour) {
             return matches!(key, Key::Named(Named::Escape)).then_some(Message::Picker);
         }
+        // R-11: the area's menu (opened by a right press): arrows walk its rows, Enter runs
+        // one, Esc or the Menu key again closes it.
+        if self.area_menu.is_some() {
+            match key {
+                Key::Named(Named::ArrowUp) => return Some(Message::MenuStep(true)),
+                Key::Named(Named::ArrowDown) => return Some(Message::MenuStep(false)),
+                Key::Named(Named::Home) => return Some(Message::MenuEdge(false)),
+                Key::Named(Named::End) => return Some(Message::MenuEdge(true)),
+                Key::Named(Named::Enter | Named::Space) => return Some(Message::Activate),
+                Key::Named(Named::Escape | Named::ContextMenu) => {
+                    return Some(Message::AreaMenuClose);
+                }
+                Key::Named(Named::F10) if modifiers.shift() => {
+                    return Some(Message::AreaMenuClose);
+                }
+                _ => {}
+            }
+        }
+        // R-11: the Menu key / Shift+F10 opens the area's menu at its centre
+        if self.movable
+            && !self.studio
+            && (matches!(key, Key::Named(Named::ContextMenu))
+                || (matches!(key, Key::Named(Named::F10)) && modifiers.shift()))
+        {
+            return Some(Message::AreaMenu(None));
+        }
         // More's menu: arrows walk its rows, Enter runs one, Esc closes it.
         if self.menu == Some(Menu::More) {
             match key {
