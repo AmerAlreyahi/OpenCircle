@@ -32,6 +32,23 @@ pub(crate) fn offered_with(labs_pins: bool) -> bool {
     SUPPORTED && labs_pins
 }
 
+/// Tests: Live pin is offered while the guard lives.
+#[cfg(test)]
+pub(crate) struct Forced;
+#[cfg(test)]
+impl Forced {
+    pub(crate) fn on() -> Self {
+        FORCED.set(true);
+        Forced
+    }
+}
+#[cfg(test)]
+impl Drop for Forced {
+    fn drop(&mut self) {
+        FORCED.set(false);
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     /// Tests: pretend this desktop has Live pin and Labs Pins is on.

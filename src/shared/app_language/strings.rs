@@ -1482,6 +1482,8 @@ strings! {
         | "أنهِ الالتقاط الطويل أولًا";
     sn_why_no_long: "Not available on this desktop"
         | "غير متاح على سطح المكتب هذا";
+    sn_why_live_only: "Only over the live screen"
+        | "متاح فقط فوق الشاشة المباشرة";
     bar_key_copy: "copy"
         | "نسخ";
     bar_key_save: "save"

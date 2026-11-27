@@ -803,6 +803,8 @@ pub struct Annotator {
     /// Where the options row's stops begin in the Tab ring (the toolbar's own come first): while the
     /// focus is in the row the arrow keys walk it. 0 = not known yet.
     pub row_at: usize,
+    /// One past the options row's last Tab stop (with `row_at`).
+    pub row_end: usize,
     /// Snip's arrow-key hint shows (after the first arrow key).
     pub nudged: bool,
     /// The host drags the toolbar (its grip): it shows lifted.
@@ -982,6 +984,7 @@ impl Annotator {
             area_drag: None,
             focus: None,
             row_at: 0,
+            row_end: 0,
             nudged: false,
             held: false,
             steps: None,

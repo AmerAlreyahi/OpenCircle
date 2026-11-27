@@ -124,7 +124,6 @@ impl SnipToolbar {
                     return self.update(Message::Focus(back));
                 }
                 Message::Focus(back) => {
-                    self.annotator.row_at = toolbar::bar_stops(&self.annotator).len();
                     let n = toolbar::stops(&self.annotator).len();
                     let next = match (self.annotator.focus, back) {
                         (None, false) => 0,
@@ -133,6 +132,14 @@ impl SnipToolbar {
                         (Some(i), true) => (i + n - 1) % n,
                     };
                     self.annotator.focus = Some(next);
+                    // R-10: Tab onto Pin opens its row (sticky, like the pointer); its two cells
+                    // are the next stops
+                    if toolbar::stops(&self.annotator).get(next) == Some(&Message::PinButton) {
+                        self.annotator
+                            .open_pin_row(crate::features::snip::capture::live::offered());
+                    }
+                    (self.annotator.row_at, self.annotator.row_end) =
+                        toolbar::row_stops_span(&self.annotator);
                     return None;
                 }
                 // More's rows: the arrow keys walk the live ones

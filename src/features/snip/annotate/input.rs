@@ -205,7 +205,12 @@ impl Annotator {
         }
         // the focus is in the options row: the arrows walk it (the toolbar maps them to Tab steps,
         // mirrored right to left, where the row reads from the right)
-        if self.movable && self.row_at > 0 && self.focus.is_some_and(|f| f >= self.row_at) {
+        if self.movable
+            && self.row_at > 0
+            && self
+                .focus
+                .is_some_and(|f| (self.row_at..self.row_end).contains(&f))
+        {
             match key {
                 Key::Named(Named::ArrowLeft) => return Some(Message::RowStep(-1, 0)),
                 Key::Named(Named::ArrowRight) => return Some(Message::RowStep(1, 0)),

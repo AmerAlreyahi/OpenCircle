@@ -418,7 +418,7 @@ pub(crate) fn pin_row(e: &Annotator, live_offered: bool) -> El<'_> {
             false => hint(
                 cell,
                 t!(sn_live_pin),
-                Why::Cut(t!(sn_why_no_long)),
+                Why::Cut(t!(sn_why_live_only)),
                 crate::shared::kit::option_bar::tips(),
             ),
         });
@@ -431,15 +431,9 @@ pub(crate) fn pin_row(e: &Annotator, live_offered: bool) -> El<'_> {
 }
 
 pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
-    // R-10: the Pin button's row (pointer on it, or the keyboard's focus on it), only where Live
-    // pin is offered
-    let offered = crate::features::snip::capture::live::offered();
-    let focused = e.focus.and_then(|f| {
-        crate::features::snip::screens::snip_toolbar::toolbar::bar_stops(e)
-            .get(f)
-            .cloned()
-    }) == Some(Message::PinButton);
-    if offered && (e.pin_row || focused) {
+    // R-10: the Pin button's row (the pointer or the keyboard's focus reached the button), only
+    // where Live pin is offered
+    if crate::features::snip::screens::snip_toolbar::toolbar::pin_row_on(e) {
         return Some(pin_row(e, true));
     }
     use crate::features::snip::annotate::{TextBack as B, TextFont as F};

@@ -115,13 +115,42 @@ fn steps_on(e: &Annotator) -> bool {
 /// Enter / Space on each sends.
 pub fn stops(e: &Annotator) -> Vec<Message> {
     let mut stops = bar_stops(e);
-    // the options row's controls follow the toolbar's (C4)
-    if !e.capturing {
-        stops.extend(crate::features::snip::screens::options_row::snip_row_stops(
-            e,
-        ));
+    if e.capturing {
+        return stops;
+    }
+    let row = crate::features::snip::screens::options_row::snip_row_stops(e);
+    match pin_row_on(e) {
+        // R-10: the Pin button's row is the next stops after Pin, then the bar goes on
+        true => {
+            let at = stops
+                .iter()
+                .position(|m| *m == Message::PinButton)
+                .map_or(stops.len(), |i| i + 1);
+            stops.splice(at..at, row);
+        }
+        // the options row's controls follow the toolbar's (C4)
+        false => stops.extend(row),
     }
     stops
+}
+
+/// The Pin button's row is open (sticky once the pointer or the keyboard reached the button)
+/// and there is a choice in it.
+pub fn pin_row_on(e: &Annotator) -> bool {
+    e.pin_row && !e.capturing && crate::features::snip::capture::live::offered()
+}
+
+/// Where the options row's stops sit in `stops`: first index and one past the last.
+pub fn row_stops_span(e: &Annotator) -> (usize, usize) {
+    let n = crate::features::snip::screens::options_row::snip_row_stops(e).len();
+    let start = match pin_row_on(e) {
+        true => bar_stops(e)
+            .iter()
+            .position(|m| *m == Message::PinButton)
+            .map_or(0, |i| i + 1),
+        false => bar_stops(e).len(),
+    };
+    (start, start + n)
 }
 
 /// The toolbar's own stops (the row's come after them).
@@ -680,7 +709,8 @@ pub fn options_row_tips(
     }
     crate::shared::kit::option_bar::set_tips(tips);
     // the focus ring on the row's control the keyboard is on
-    let on = e.focus.and_then(|f| f.checked_sub(bar_stops(e).len()));
+    let (from, to) = row_stops_span(e);
+    let on = e.focus.filter(|f| (from..to).contains(f)).map(|f| f - from);
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
     Some(
         tray(false, radius::FULL, crate::shared::kit::scroll::across(row))
@@ -1189,6 +1219,7 @@ mod tests {
     /// C4-5: goldens: each tool's row, English and Arabic (right to left).
     #[test]
     fn c4_5_the_options_rows_match_their_golden_images() {
+        let _forced = crate::features::snip::capture::live::Forced::on(); // (the Pin row)
         let mut failed = Vec::new();
         for theme in [&SAPPHIRE, &DAYLIGHT] {
             themes::set(theme);
@@ -1211,7 +1242,6 @@ mod tests {
                     e.update(Message::Tool(tool));
                     // R-10: the Pin button's row (Pin | Live pin on desktops that have it)
                     if name == "pin" {
-                        crate::features::snip::capture::live::FORCED.set(true);
                         e.scroll = true;
                         e.update(Message::PinRow);
                     }
@@ -1223,7 +1253,6 @@ mod tests {
                 }
             }
         }
-        crate::features::snip::capture::live::FORCED.set(false);
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
     }
@@ -1577,15 +1606,9 @@ mod tests {
         e.update(Message::Tool(Tool::Select)); // (no row of its own)
         e.update(Message::PinRow);
         assert!(!e.pin_row && options_row(&e, 800.0).is_none());
-        crate::features::snip::capture::live::FORCED.set(true);
+        let _forced = crate::features::snip::capture::live::Forced::on();
         e.update(Message::PinRow);
         assert!(e.pin_row && options_row(&e, 800.0).is_some());
-        // the keyboard's focus on the Pin button opens it too
-        e.pin_row = false;
-        assert!(options_row(&e, 800.0).is_none());
-        e.focus = bar_stops(&e).iter().position(|m| *m == Message::PinButton);
-        assert!(options_row(&e, 800.0).is_some());
-        e.focus = None;
         // More, Undo, the colour picker and tools close it
         for m in [
             Message::Menu(Menu::More),
@@ -1603,7 +1626,44 @@ mod tests {
         e.scroll = false;
         let on = crate::shared::kit::option_bar::scope(None, true, || Some(pin_row(&e, true))).1;
         assert_eq!(on.len(), 1, "only Pin is live");
-        crate::features::snip::capture::live::FORCED.set(false);
+    }
+
+    /// R-10: Tab onto Pin opens its row; its two cells are the next stops (Pin, then Live pin),
+    /// Enter picks Live pin, and the ring goes on to Long capture.
+    #[test]
+    fn r10_tab_from_pin_walks_its_row() {
+        use crate::features::snip::screens::snip_toolbar::SnipToolbar;
+        let _forced = crate::features::snip::capture::live::Forced::on();
+        let mut t = SnipToolbar::fitted(
+            crate::shared::picture::Crop {
+                width: 40,
+                height: 30,
+                rgba: vec![255; 40 * 30 * 4],
+            },
+            Size::new(1920.0, 1080.0),
+            1.0,
+        );
+        t.annotator.scroll = true;
+        t.annotator.update(Message::Tool(Tool::Select));
+        let pin = bar_stops(&t.annotator)
+            .iter()
+            .position(|m| *m == Message::PinButton)
+            .unwrap();
+        for _ in 0..=pin {
+            t.update(Message::Focus(false));
+        }
+        assert_eq!(t.annotator.focus, Some(pin));
+        assert!(t.annotator.pin_row, "focus on Pin opens its row");
+        let all = stops(&t.annotator);
+        assert_eq!(all[pin + 1], Message::PinLive(false));
+        assert_eq!(all[pin + 2], Message::PinLive(true));
+        assert_eq!(all[pin + 3], Message::Scroll, "then the bar goes on");
+        t.update(Message::Focus(false));
+        t.update(Message::Focus(false));
+        assert_eq!(t.annotator.focus, Some(pin + 2));
+        t.update(Message::Activate);
+        assert!(t.annotator.pin_live, "Enter picked Live pin");
+        assert!(t.annotator.pin_row, "and the row stays");
     }
 
     /// R-10: the choice routes the button (still vs live pin), is remembered, and Live pin
