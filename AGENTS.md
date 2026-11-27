@@ -1988,3 +1988,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   and folder search (own optimised index, far faster than Windows search; Windows + Linux) + image paste into the AI chat; meeting
   captions if time allows. Game items (watch area, game launch detection) move to Later. Research + capability table + design round
   (PNGs) before any build.
+
+- Launcher decisions (owner, 2026-11-27, "yes for both"): the launcher extension stays warm ~5 minutes after use, then exits (zero
+  when idle/off); file search defaults to the no-admin crawl + change watching; the admin "fast search" (NTFS MFT/USN service, or
+  Everything when present) is a later opt-in. Research: docs/internal/reports-070/l11-research.md.
