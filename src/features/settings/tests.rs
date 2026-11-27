@@ -5466,3 +5466,31 @@ fn closing_during_a_studio_write_still_writes_the_last_value() {
     assert_eq!(Config::load_from(&path).0.studio.file_name, "abc");
     assert!(s.studio_flush().is_none(), "flushed once");
 }
+
+/// The close-flush may run BEFORE the write already in flight (two threads): the older value
+/// still never lands last.
+#[test]
+fn a_flush_that_runs_first_never_lets_the_older_write_land_last() {
+    use crate::features::snip::screens::studio::preferences::Msg;
+    let (mut s, _) = state(None);
+    let path = tmp("studio-order");
+    s.path = Some(path.clone());
+    let change = |s: &mut State, name: &str| {
+        let mut p = Config::default().studio;
+        p.file_name = name.into();
+        update(s, Message::Studio(Msg::Prefs(Box::new(p))));
+    };
+    change(&mut s, "a");
+    let first = s.studio_write().unwrap();
+    change(&mut s, "abc");
+    assert!(s.studio_write().is_none());
+    let flush = s.studio_flush().unwrap();
+    // the flush thread gets there first, the in-flight job later
+    let late = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        first.run();
+    });
+    flush.run();
+    late.join().unwrap();
+    assert_eq!(Config::load_from(&path).0.studio.file_name, "abc");
+}

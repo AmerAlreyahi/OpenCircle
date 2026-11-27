@@ -572,6 +572,8 @@ pub struct State {
     /// A Studio-rows write is on a worker thread / rows changed meanwhile (`studio_write`).
     pub(super) studio_writing: bool,
     pub(super) studio_dirty: bool,
+    studio_seq: u64,
+    studio_order: Arc<StudioOrder>,
     /// The Studio page's rows: the Studio's own preferences model, over the config; Settings
     /// keeps no copy of those values in its draft.
     pub(super) studio: crate::features::snip::screens::studio::preferences::Dialog,
@@ -1025,14 +1027,36 @@ pub enum Outcome {
 pub struct StudioWrite {
     path: Option<PathBuf>,
     dialog: Box<crate::features::snip::screens::studio::preferences::Dialog>,
+    /// This write's place in its window's order, and the count of writes finished.
+    seq: u64,
+    order: Arc<StudioOrder>,
+}
+
+/// How many of a window's Studio writes have finished (ticket order: a write waits for every
+/// older one, so an older value can never land after a newer one, whichever thread runs first).
+#[derive(Default)]
+pub(super) struct StudioOrder {
+    done: std::sync::Mutex<u64>,
+    turn: std::sync::Condvar,
 }
 
 impl StudioWrite {
-    /// Blocks on the disk (fsync): call it off the UI thread.
+    /// Blocks on the disk (fsync): call it off the UI thread. Waits for the older writes of
+    /// its window first (at most `WAIT`: a lost thread never stalls the newer writes for good).
     pub fn run(mut self) -> Message {
+        const WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+        let seq = self.seq;
+        let guard = self.order.done.lock().unwrap_or_else(|e| e.into_inner());
+        let (guard, _) = (self.order.turn)
+            .wait_timeout_while(guard, WAIT, |done| *done + 1 < seq)
+            .unwrap_or_else(|e| e.into_inner());
+        drop(guard);
         if let Err(e) = config::update_at(self.path.as_deref(), |c| self.dialog.apply(c)) {
             crate::log!("[opencircle] config: {e}");
         }
+        let mut done = self.order.done.lock().unwrap_or_else(|e| e.into_inner());
+        *done = (*done).max(seq);
+        self.order.turn.notify_all();
         Message::StudioWritten
     }
 }
@@ -1204,6 +1228,8 @@ impl State {
             section: Section::General,
             studio_writing: false,
             studio_dirty: false,
+            studio_seq: 0,
+            studio_order: Arc::default(),
             search: None,
             marked: None,
             marked_at: None,
@@ -1290,36 +1316,37 @@ impl State {
             .collect()
     }
 
+    /// The Studio dialog's pending changes as the next write in order. The dialog then counts
+    /// them as written: `apply` also moves its "last written" baseline, which is what the
+    /// throwaway config is for (a no-op for the file, not for the dialog).
+    fn studio_job(&mut self) -> StudioWrite {
+        let dialog = Box::new(self.studio.clone());
+        self.studio.apply(&mut Config::default());
+        self.studio_seq += 1;
+        StudioWrite {
+            path: self.path.clone(),
+            dialog,
+            seq: self.studio_seq,
+            order: self.studio_order.clone(),
+        }
+    }
+
     /// The window is closing: the changes a write in flight left pending, as one last write
     /// for a worker thread (`None`: nothing is pending). Closing never drops the last keys typed.
     pub fn studio_flush(&mut self) -> Option<StudioWrite> {
-        if !std::mem::take(&mut self.studio_dirty) {
-            return None;
-        }
-        let dialog = Box::new(self.studio.clone());
-        self.studio.apply(&mut Config::default());
-        Some(StudioWrite {
-            path: self.path.clone(),
-            dialog,
-        })
+        std::mem::take(&mut self.studio_dirty).then(|| self.studio_job())
     }
 
     /// The Studio rows' write for a worker thread, or `None`: one is already on its way (the
     /// next one starts when it lands, with everything typed meanwhile in one write, so a
-    /// file name typed key by key never queues a write per key and writes land in order).
+    /// file name typed key by key never queues a write per key). Writes run in ticket order.
     pub fn studio_write(&mut self) -> Option<StudioWrite> {
         if self.studio_writing {
             self.studio_dirty = true;
             return None;
         }
         self.studio_writing = true;
-        let job = self.studio.clone();
-        // the dialog now counts these changes as written (a throwaway config takes them)
-        self.studio.apply(&mut Config::default());
-        Some(StudioWrite {
-            path: self.path.clone(),
-            dialog: Box::new(job),
-        })
+        Some(self.studio_job())
     }
 
     pub(super) fn dirty(&self) -> bool {
