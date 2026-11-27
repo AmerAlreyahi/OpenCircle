@@ -1978,3 +1978,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Recording leftovers cap (lead default 2026-11-27, owner may reverse): with Recent off, unsaved recordings kept for the next
   start's offer are capped at 5 in the temp folder; beyond that the oldest is deleted at start (logged). A recording with sound
   switched off never contains system sound, not even its first samples.
+
+- R-13 dropped from 0.6.0 (owner, 2026-11-27, "drop it now"): the pick-a-picture/card lab failed on real screens (pixel-edge boxes:
+  11-16 % right box vs the 90 % line; reports-060/r13-lab.md). Not built; a later idea is the OS accessibility tree (Windows UI
+  Automation / AT-SPI), lab first.

@@ -333,7 +333,8 @@
         {
           "id": "R-13",
           "title": "Snip: pick a picture/card on the page: boxes found in the frozen screenshot (+ system controls where available); hover stays the window, scroll down = smaller part, scroll up = bigger/screen; one-time hint. Lab test first (right box on image grids/news/game menus, < 5 ms per hover), built only if it works",
-          "status": "todo"
+          "status": "dropped",
+          "note": "Dropped from 0.6.0 by the owner 2026-11-27: pixel-edge lab failed on real screens (11-16 % vs 90 %); revisit later via the OS accessibility tree."
         },
         {
           "id": "R-14",
