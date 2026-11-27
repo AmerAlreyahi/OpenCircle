@@ -1960,3 +1960,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - One build folder per source tree (2026-11-27, lesson): a reviewer that reused the builder's CARGO_TARGET_DIR for another checkout ran
   STALE binaries (cargo judges freshness by mtime): a "2382 passed" gate was a different tree's binary. Every worktree / temporary
   checkout / reviewer uses its OWN target dir (e.g. <branch>-review), deleted after; never share one between source trees.
+- Preview popup dim (owner, 2026-11-27, shot docs/internal/owner-shots/2026-11-27/preview-dim-square-corners.jpg): the dim behind the
+  maximised preview has SQUARE corners over the rounded content card: round it with the content card's own radius (all corners, also
+  where it meets the sidebar gap); if it can't be rounded, remove the dim entirely.
+- R1 bar alignment (owner, 2026-11-27, shot docs/internal/owner-shots/2026-11-27/record-bar-mic-not-centred.png): every item in the
+  recording bar shares its vertical centre line exactly (the mic device picker sat too high); folded into R-04.
