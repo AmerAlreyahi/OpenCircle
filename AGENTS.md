@@ -1954,3 +1954,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   the R1 bar steps aside into the tray's recording state (red dot + live time on the tray icon; tray menu: Pause, Stop and save
   (Alt+Shift+R), Discard, mic toggle + device); the keys keep working. Windows keeps the R1 bar; area/window recording on Linux keeps the
   R1 bar beside the area (draggable, outside the recorded pixels).
+- Recording placement constant (2026-11-27, R-02): `shared::platform::CAN_KEEP_WINDOWS_OUT_OF_CAPTURE` (cfg!(windows)) is the ONE place
+  that says whether the OS can keep OpenCircle's own window out of a whole-screen capture; the pure `placement::surface` rule uses it to
+  pick the R1 bar or the Linux tray recording state (Q1).
+- One build folder per source tree (2026-11-27, lesson): a reviewer that reused the builder's CARGO_TARGET_DIR for another checkout ran
+  STALE binaries (cargo judges freshness by mtime): a "2382 passed" gate was a different tree's binary. Every worktree / temporary
+  checkout / reviewer uses its OWN target dir (e.g. <branch>-review), deleted after; never share one between source trees.
