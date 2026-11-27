@@ -1982,3 +1982,9 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - R-13 dropped from 0.6.0 (owner, 2026-11-27, "drop it now"): the pick-a-picture/card lab failed on real screens (pixel-edge boxes:
   11-16 % right box vs the 90 % line; reports-060/r13-lab.md). Not built; a later idea is the OS accessibility tree (Windows UI
   Automation / AT-SPI), lab first.
+
+- 0.7.0 scope (owner, 2026-11-27): Extensions page + a Launcher extension (Raycast-style, OpenCircle UI logic and look, its own exe;
+  existing open-source Rust launchers such as Onagre studied for approach, code reused only where the license allows) with a FAST file
+  and folder search (own optimised index, far faster than Windows search; Windows + Linux) + image paste into the AI chat; meeting
+  captions if time allows. Game items (watch area, game launch detection) move to Later. Research + capability table + design round
+  (PNGs) before any build.

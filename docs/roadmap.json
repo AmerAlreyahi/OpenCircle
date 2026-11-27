@@ -371,12 +371,14 @@
           "status": "todo"
         },
         {
-          "id": "L-09",
-          "title": "Meeting captions add-on: live transcript + translation widget, installed on demand (after the recording release)",
-          "status": "todo",
-          "depends": [
-            "L-10"
-          ]
+          "id": "L-11",
+          "title": "Launcher extension (Raycast-style, OpenCircle look): apps, files, calculator/units, OpenCircle actions (Circle to Search, Translate, Snip, record, Ask AI, Studio), web search; own small exe, research + design round first",
+          "status": "todo"
+        },
+        {
+          "id": "L-12",
+          "title": "Fast file and folder search in the launcher: own optimised index (much faster than Windows search), Windows + Linux, research + lab first",
+          "status": "todo"
         },
         {
           "id": "L-02",
@@ -384,34 +386,12 @@
           "status": "todo"
         },
         {
-          "id": "L-03",
-          "title": "Steps strip: + and Open in Studio (#204) (done in 0.5.0)",
-          "status": "done"
-        },
-        {
-          "id": "L-04",
-          "title": "Ctrl+K in the Studio (#189)",
-          "status": "todo"
-        },
-        {
-          "id": "L-05",
-          "title": "Live page translation, new engine (#195)",
-          "status": "todo"
-        },
-        {
-          "id": "L-06",
-          "title": "Game watch area (#196)",
-          "status": "todo"
-        },
-        {
-          "id": "L-07",
-          "title": "Game mode follows a real game launch (like NVIDIA app / Discord) (#224)",
-          "status": "todo"
-        },
-        {
-          "id": "L-08",
-          "title": "Privacy curtain over an area or app for other apps' streams (Teams, Zoom), Windows + X11 first (#225)",
-          "status": "todo"
+          "id": "L-09",
+          "title": "Meeting captions add-on: live transcript + translation widget, installed on demand (after the recording release)",
+          "status": "todo",
+          "depends": [
+            "L-10"
+          ]
         }
       ],
       "gate": [
@@ -419,7 +399,9 @@
           "check": "Each item's own VM gate",
           "ok": false
         }
-      ]
+      ],
+      "title": "Extensions + Launcher",
+      "later_note": "Game items (L-06, L-07) and the rest moved to Later (owner 2026-11-27)."
     }
   ],
   "criticalPath": [
@@ -535,5 +517,32 @@
       "change": "First kit roadmap drafted during adoption; enhancements release active; recording + new design next."
     }
   ],
-  "archive": []
+  "archive": [],
+  "later": [
+    {
+      "id": "L-04",
+      "title": "Ctrl+K in the Studio (#189)",
+      "status": "todo"
+    },
+    {
+      "id": "L-05",
+      "title": "Live page translation, new engine (#195)",
+      "status": "todo"
+    },
+    {
+      "id": "L-06",
+      "title": "Game watch area (#196)",
+      "status": "todo"
+    },
+    {
+      "id": "L-07",
+      "title": "Game mode follows a real game launch (like NVIDIA app / Discord) (#224)",
+      "status": "todo"
+    },
+    {
+      "id": "L-08",
+      "title": "Privacy curtain over an area or app for other apps' streams (Teams, Zoom), Windows + X11 first (#225)",
+      "status": "todo"
+    }
+  ]
 }
