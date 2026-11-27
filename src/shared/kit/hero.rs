@@ -361,6 +361,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
                     }
                     .into(),
                 ),
+                border: Border::default().rounded(settings::CARD_RADIUS),
                 ..container::Style::default()
             }),
     )

@@ -6321,3 +6321,33 @@ fn preview_progress_track_is_visible_at_zero() {
     themes::set(&themes::SAPPHIRE);
     assert!(track > 200, "no visible track at 0: brightest {track}");
 }
+
+#[test]
+fn preview_maximised_dim_rounds_with_content_card_corners() {
+    use crate::shared::kit::themes;
+    use crate::shared::kit::tokens::settings as tok;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    themes::set(&themes::DAYLIGHT);
+    let (w, h) = (WINDOW_SIZE.width as u32, WINDOW_SIZE.height as u32);
+    let plain = shot::render(view(&s), w, h);
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    let max_img = shot::render(view(&s), w, h);
+    let at = |buf: &[u8], x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * w + x) * 4) as usize;
+        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+    };
+    let left = (tok::GUTTER + tok::NAV + tok::GUTTER) as u32;
+    let right = w - tok::GUTTER as u32;
+    let top = tok::HEADER as u32;
+    let bottom = h - tok::GUTTER as u32;
+    for (cx, cy) in [
+        (left + 1, top + 1),
+        (right - 2, top + 1),
+        (left + 1, bottom - 2),
+        (right - 2, bottom - 2),
+    ] {
+        assert_eq!(at(&plain, cx, cy), at(&max_img, cx, cy));
+    }
+    themes::set(&themes::SAPPHIRE);
+}
