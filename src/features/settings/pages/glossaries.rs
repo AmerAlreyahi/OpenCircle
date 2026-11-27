@@ -649,7 +649,7 @@ pub fn editor(state: &State) -> Element<'_, Message> {
 }
 
 /// The "More" menu's width.
-const MENU_W: f32 = 220.0;
+const MENU_W: f32 = crate::shared::kit::tokens::widget_e::MENU_W_BUTTON;
 
 /// The language table's code for `shown` (a config's "pt-BR" is "pt").
 fn code_of(shown: &str) -> Option<&'static str> {

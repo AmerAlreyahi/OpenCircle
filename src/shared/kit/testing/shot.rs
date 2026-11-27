@@ -20,6 +20,25 @@ pub fn render<Message>(view: Element<'_, Message>, width: u32, height: u32) -> V
     )
 }
 
+/// The drawn width of what stands on the window: first to last column holding a pixel unlike the
+/// top-left one (the window's), over `height` rows of `px` (RGBA, `width` wide).
+pub fn ink_width(px: &[u8], width: usize, height: usize) -> usize {
+    let cols: Vec<usize> = (0..width)
+        .filter(|&x| (0..height).any(|y| px[(y * width + x) * 4..][..4] != px[..4]))
+        .collect();
+    cols.last().map_or(0, |l| l - cols[0] + 1)
+}
+
+/// The drawn width of `view` set 20 px in from the corner of a `width` x `height` window.
+pub fn drawn_width<Message>(view: Element<'_, Message>, width: usize, height: usize) -> usize {
+    let px = render(
+        iced::widget::container(view).padding(20).into(),
+        width as u32,
+        height as u32,
+    );
+    ink_width(&px, width, height)
+}
+
 /// `view` drawn whole, then drawn again over it within
 /// `damage` only, as a window redraws what changed: (first, second).
 pub fn render_twice<Message>(

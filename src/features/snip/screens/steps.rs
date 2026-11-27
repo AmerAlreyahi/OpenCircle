@@ -610,7 +610,7 @@ impl Strip {
                 place + 1,
                 look,
                 Some(Msg::Delete(i)),
-                thumb::strip_badge(self.monitor.size().height),
+                thumb::strip_badge(self.monitor.px.1 as f32, self.monitor.scale),
             );
             let step = mouse_area(picture)
                 .on_press(Msg::Press(i))
@@ -1241,7 +1241,7 @@ mod tests {
     fn d03_2_the_badge_is_accent_with_a_ring_at_the_start() {
         let c = crate::shared::kit::themes::c();
         let s = strip(1);
-        let badge = thumb::strip_badge(s.monitor.size().height) as u32;
+        let badge = thumb::strip_badge(s.monitor.px.1 as f32, s.monitor.scale) as u32;
         let px = crate::shared::kit::testing::shot::render(s.view(RADIUS), 112, 202);
         let (x0, y) = (
             (RIM + PAD) as u32,
@@ -1278,6 +1278,36 @@ mod tests {
         assert!(near(&px, 112, (8 + 3, 156 + 18), over));
     }
 
+    /// F-04 (owner: bigger on a 5K monitor): on a 5K screen at 200 % the badge's disc is 40 physical
+    /// px across at 2x, against 18 x 2 = 36 physical px of the design's badge.
+    #[test]
+    fn f04_the_badge_on_a_5k_monitor_at_2x_is_40_physical_px() {
+        let mut s = Strip::new(
+            Place {
+                origin: (0, 0),
+                px: (5120, 2880),
+                scale: 2.0,
+            },
+            40.0,
+            false,
+        );
+        assert!(s.push(step(400, 250, 40)));
+        let size = s.size();
+        let (_, px) = crate::shared::kit::testing::shot::redrawn(
+            |i| (i == 0).then(|| s.view(RADIUS)),
+            size,
+            2.0,
+        );
+        let width = (size.width * 2.0) as usize;
+        let accent = crate::shared::kit::themes::c().accent.into_rgba8();
+        // the row through the badge's middle: top-start corner, 5 px in, 2x
+        let y = ((RIM + FIRST + 5.0 + 10.0) * 2.0) as usize;
+        let run = (0..width)
+            .filter(|&x| px[(y * width + x) * 4..(y * width + x) * 4 + 4] == accent)
+            .count();
+        assert!((36..=40).contains(&run), "{run}");
+    }
+
     #[test]
     fn the_strip_matches_its_golden_images() {
         golden::each_theme(|theme, failed| {
@@ -1307,6 +1337,22 @@ mod tests {
                     ("cleared", cleared),
                 ];
                 let dir = if rtl { "-ar" } else { "" };
+                // F-04: a 5K monitor at 200 %: the badge is 20 logical = 40 physical px, drawn at 2x
+                let mut big = Strip::new(
+                    Place {
+                        origin: (0, 0),
+                        px: (5120, 2880),
+                        scale: 2.0,
+                    },
+                    40.0,
+                    rtl,
+                );
+                big.push(step(400, 250, 40));
+                big.rtl = rtl;
+                let file = format!("steps-big-badge{dir}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, big.size(), &[2.0], || {
+                    big.view(RADIUS)
+                }));
                 for (name, s) in cases {
                     let file = format!("steps-{name}{dir}-{}", theme.id);
                     failed.extend(golden::check("screens", &file, s.size(), &[1.0], || {

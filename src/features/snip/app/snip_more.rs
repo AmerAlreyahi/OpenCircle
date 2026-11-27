@@ -544,7 +544,7 @@ mod tests {
         for cap in ["Ctrl", "Shift", "X", "E", "T"] {
             assert!(shown.iter().any(|t| t == cap), "{cap}: {shown:?}");
         }
-        assert_eq!((toolbar::MORE_W, toolbar::MORE_W_AR), (268.0, 304.0));
+        assert_eq!((toolbar::MORE_W, toolbar::MORE_W_AR), (290.0, 304.0));
     }
 
     /// Copy text copies what was read, minus every line under Blur or Redact:

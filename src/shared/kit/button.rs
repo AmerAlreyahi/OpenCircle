@@ -478,15 +478,42 @@ pub fn compact<'a, Message: Clone + 'a>(
     compact_with(glyph.into(), label, (width, COMPACT_H), state, on_press)
 }
 
-/// A round icon button `side` px across (the chat composer's send / stop, design `.send` 30 px):
-/// `compact`'s look at its own size.
+/// The chat composer's round send / stop button (design `.send`): `side` px across, the accent
+/// fill with an on-accent glyph while it can act (`on_press`), the `hover` fill with a muted glyph
+/// while it cannot (`.send.dis`).
 pub fn compact_round<'a, Message: Clone + 'a>(
     glyph: char,
     side: f32,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    use iced_button::Status;
+    let live = on_press.is_some();
     let glyph = text(glyph).font(super::icon::FONT).size(size::ICON_SMALL);
-    compact_with(glyph.into(), None, (side, side), (false, false), on_press)
+    super::focus::press(
+        iced_button(container(glyph).center(Fill))
+            .width(side)
+            .height(side)
+            .padding(0)
+            .style(move |_, status| {
+                let (fill, ink) = match live {
+                    true => (c().accent, super::themes::on(c().accent)),
+                    false => (c().hover, c().text_muted),
+                };
+                let fill = match status {
+                    Status::Hovered | Status::Pressed if live => brighter(fill),
+                    _ => fill,
+                };
+                iced_button::Style {
+                    background: Some(fill.into()),
+                    text_color: ink,
+                    border: Border::default().rounded(radius::FULL),
+                    ..iced_button::Style::default()
+                }
+            }),
+        radius::FULL,
+        on_press,
+    )
+    .into()
 }
 
 /// `compact` with the kit spinner (`spinner::spinner`, `turn` of the way
@@ -977,4 +1004,43 @@ pub fn danger_pill<'a, Message: Clone + 'a>(
         on_press,
     )
     .into()
+}
+
+#[cfg(test)]
+mod f04_tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+
+    /// F-04 (design `.send`): the chat's round send button is an accent disc while it can act and the
+    /// `hover` disc (`.send.dis`) while it cannot.
+    #[test]
+    fn f04_the_round_send_button_is_a_disc_accent_when_live_muted_when_not() {
+        let colours = crate::shared::kit::themes::c();
+        let centre = |live: bool| {
+            let px = shot::render(compact_round('\u{e0a2}', 30.0, live.then_some(())), 30, 30);
+            let at = |x: usize, y: usize| {
+                let i = (y * 30 + x) * 4;
+                [px[i], px[i + 1], px[i + 2], px[i + 3]]
+            };
+            // the disc's edge, clear of the glyph; the window behind it
+            (at(3, 15), at(0, 0))
+        };
+        let over = |fill: Color, back: [u8; 4]| {
+            let mix =
+                |f: f32, b: u8| (f * fill.a * 255.0 + b as f32 * (1.0 - fill.a)).round() as u8;
+            [
+                mix(fill.r, back[0]),
+                mix(fill.g, back[1]),
+                mix(fill.b, back[2]),
+                255,
+            ]
+        };
+        let (live, back) = centre(true);
+        assert_eq!(live, colours.accent.into_rgba8());
+        let (dead, back_dead) = centre(false);
+        // `hover` laid over the window, within one level per channel (rounding)
+        let want = over(colours.hover, back_dead);
+        assert!(dead.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 1));
+        assert_eq!(back, back_dead); // round: the corner is the window
+    }
 }

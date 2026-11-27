@@ -18,7 +18,7 @@ use crate::shared::kit::chip;
 use crate::shared::kit::header::{self as chrome, Caption};
 use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::tokens::{radius, space, widget_e};
+use crate::shared::kit::tokens::{radius, size, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
 use crate::shared::theme;
@@ -384,7 +384,7 @@ fn finish(action: &Action, crop: Crop) {
 
 /// A live pin's Opacity and Click-through glyphs (in the subset font: `tests`).
 const OPACITY_GLYPH: char = '\u{e5a0}'; // lucide "blend"
-const THROUGH: char = '\u{e5eb}'; // lucide "mouse-pointer-ban"
+const THROUGH: char = '\u{e1c2}'; // lucide "mouse-pointer-2" (the design's plain cursor, also while active)
 
 fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
     pin_view_with(pin, dragout::SUPPORTED)
@@ -451,7 +451,10 @@ fn pin_view_with(pin: &Pin, drag_out: bool) -> Element<'_, PinMsg> {
         let controls = crate::dir_row![drag, live, actions]
             .spacing(widget_e::SEGMENT_GAP)
             .align_y(iced::Center);
-        let bar = surface(Material::Tray, radius::FULL, controls).padding(space::BAR_PAD);
+        let bar = surface(Material::Tray, radius::FULL, controls).padding(iced::Padding::from([
+            (widget_e::PIN_BAR_H - size::ICON_BUTTON) / 2.0,
+            widget_e::PIN_BAR_PAD_X,
+        ]));
         layers = layers.push(
             container(bar)
                 .width(Fill)

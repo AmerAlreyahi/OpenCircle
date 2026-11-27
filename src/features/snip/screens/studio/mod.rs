@@ -1956,7 +1956,7 @@ impl Studio {
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
                 let seps = entries.iter().filter(|r| r.divider).count();
                 let menu = Size::new(
-                    crate::shared::kit::option_list::MENU_WIDTH,
+                    crate::shared::kit::tokens::widget_e::MENU_W,
                     crate::shared::kit::option_list::menu_height(entries.len(), seps),
                 );
                 let p = self.pointer.get();

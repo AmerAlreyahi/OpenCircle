@@ -308,7 +308,7 @@
         {
           "id": "R-08",
           "title": "Snip full screen easier: scroll up over a window steps out to the whole screen (click takes it); clearer Enter = full screen hint",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-09",
@@ -318,7 +318,7 @@
         {
           "id": "R-10",
           "title": "Snip toolbar: one Pin button (click = still pin); options row: Pin | Live pin (Live while in Labs)",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-11",

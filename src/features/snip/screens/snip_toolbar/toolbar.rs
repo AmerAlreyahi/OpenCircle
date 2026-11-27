@@ -692,7 +692,11 @@ fn build(
     let (panel, width, target) = match menu {
         Menu::Colour => (colour_panel(e), colour::PICKER_W, colour_at),
         Menu::Undo => (undo_panel(e), size::PANEL, undo_at),
-        Menu::More => (more_panel(e), option_list::MENU_WIDTH, more_at),
+        Menu::More => (
+            more_panel(e),
+            if dir::rtl() { MORE_W_AR } else { MORE_W },
+            more_at,
+        ),
     };
     (
         toolbar.into(),
@@ -940,9 +944,9 @@ fn step_label(words: S, n: usize) -> String {
     format!("{} {n}", tr(words))
 }
 
-/// More's width: 268 px, 304 in Arabic (the longest label grows it).
-pub const MORE_W: f32 = 268.0;
-pub const MORE_W_AR: f32 = 304.0;
+/// More's width: 290 px (the design's), 304 in Arabic (the longest label grows it).
+pub const MORE_W: f32 = widget_e::MENU_W_MORE;
+pub const MORE_W_AR: f32 = widget_e::MENU_W_MORE_AR;
 
 /// More: the three picture actions, a hairline, then long capture, pin,
 /// share, the screen tools (arrow keys walk it); its foot says why a row is
@@ -1055,6 +1059,33 @@ mod tests {
         let mut e = Annotator::new(image, 1.0);
         e.movable = true;
         e
+    }
+
+    /// F-04: the open More panel is centred on the More button, at its real width (290, Arabic 304),
+    /// in English and Arabic.
+    #[test]
+    fn f04_the_more_panel_is_centred_on_its_button() {
+        for ar in [false, true] {
+            let _dir = ar.then(crate::shared::kit::testing::arabic);
+            let mut e = editor();
+            e.update(Message::Menu(Menu::More));
+            let width = if ar { MORE_W_AR } else { MORE_W };
+            let button = centred_on(&e, (2, 2), width).0;
+            let (_, panel) = build(&e, tooltip::Position::Bottom, Join::None);
+            let Some((_, left)) = panel else { panic!() };
+            assert_eq!(left + width / 2.0, button);
+            // drawn: the panel really is that wide
+            let drawn = crate::shared::kit::testing::shot::drawn_width(more_panel(&e), 400, 600);
+            assert_eq!(drawn, width as usize);
+            assert_eq!(
+                width,
+                if ar {
+                    widget_e::MENU_W_MORE_AR
+                } else {
+                    widget_e::MENU_W_MORE
+                }
+            );
+        }
     }
 
     /// A measurement, not a check: the toolbar with its Text panel open, English

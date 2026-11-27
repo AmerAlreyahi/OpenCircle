@@ -1311,3 +1311,29 @@ fn w108_the_strip_opens_at_its_saved_spot_on_that_screen_and_stays_on_screen() {
     let p = origin_of(&cfg, screen((0, 0)));
     assert!(p.0 <= 1920 - 112 && p.1 <= 1080 - 200, "{p:?}");
 }
+
+/// F-04 (design `.pinbar`): the live pin's hover bar is 186 x 44 px (rim included), 10 px from the
+/// picture's top-end corner.
+#[test]
+fn f04_the_live_pin_hover_bar_is_186_by_44() {
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+    let px = shot::render(windows.view(id).unwrap(), 420, 260);
+    let track = crate::shared::kit::themes::c().track.into_rgba8();
+    let at = |x: usize, y: usize| {
+        let i = (y * 420 + x) * 4;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    // down the gap between two buttons: the tray's own fill, rim to rim
+    let col = 224 + 7 + 34 + 1; // the gap between the first two buttons
+    let rows = (0..260).filter(|&y| at(col, y) == track).count();
+    assert_eq!(rows, 42, "44 with the rim");
+    // along the middle row: first and last pure tray pixel
+    let on: Vec<usize> = (0..420).filter(|&x| at(x, 32) == track).collect();
+    assert_eq!(
+        (on[0], *on.last().unwrap()),
+        (226, 407),
+        "186 wide: the rounded ends are anti-aliased one pixel in"
+    );
+}

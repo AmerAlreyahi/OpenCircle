@@ -11,7 +11,7 @@ use super::keys;
 use super::{Msg, Studio};
 use crate::features::snip::annotate::Message;
 use crate::shared::app_language::{S, tr};
-use crate::shared::kit::tokens::Role;
+use crate::shared::kit::tokens::{Role, widget_e::MENU_W};
 use crate::shared::kit::{dir, option_list, side_panel, text};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -382,7 +382,7 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
     let x = offset(menu);
     let rise = s.rise();
     // under the opener at the left, kept inside the window (its contents read right to left in Arabic)
-    let room = (s.window.width - option_list::MENU_WIDTH).max(0.0);
+    let room = (s.window.width - MENU_W).max(0.0);
     let place = |panel: Element<'a, Msg>, x: f32, y: f32| -> Element<'a, Msg> {
         pin(panel).x(x.clamp(0.0, room)).y(y + rise).into()
     };
@@ -418,9 +418,9 @@ pub fn over<'a>(base: Element<'a, Msg>, s: &'a Studio) -> Element<'a, Msg> {
         let second = panel(sub_items(sub, s), None, move |i| Msg::SubPick(sub, i));
         let x = x.clamp(0.0, room);
         // (beside the first menu; at its other side when there is no room)
-        let beside = match x + 2.0 * option_list::MENU_WIDTH + SUB_GAP <= s.window.width {
-            true => x + option_list::MENU_WIDTH + SUB_GAP,
-            false => (x - option_list::MENU_WIDTH - SUB_GAP).max(0.0),
+        let beside = match x + 2.0 * MENU_W + SUB_GAP <= s.window.width {
+            true => x + MENU_W + SUB_GAP,
+            false => (x - MENU_W - SUB_GAP).max(0.0),
         };
         layers.push(place(second, beside, HEADER_BELOW + y));
     }

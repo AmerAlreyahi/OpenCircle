@@ -323,7 +323,7 @@ impl Bar {
                 Msg::Sound(false),
             ));
         }
-        option_list::floating_menu_width(280.0, rows)
+        option_list::floating_menu_width(crate::shared::kit::tokens::widget_e::MENU_W_REC, rows)
     }
 
     fn error(&self, fault: Fault) -> Element<'_, Msg> {

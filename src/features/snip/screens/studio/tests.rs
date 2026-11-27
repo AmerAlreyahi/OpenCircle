@@ -1925,7 +1925,7 @@ fn v3_context_menu_stays_inside_the_window_and_mirrors() {
         )));
         let _ = s.update(Msg::ContextOpen);
         let c = s.context.as_ref().unwrap();
-        let w = crate::shared::kit::option_list::MENU_WIDTH;
+        let w = crate::shared::kit::tokens::widget_e::MENU_W;
         assert!(
             c.at.x >= 0.0 && c.at.x + w <= SIZE.width,
             "{arabic}: x {}",
@@ -4766,4 +4766,25 @@ fn w121_the_studio_picker_matches_its_golden_images() {
             view(&s, &[], false)
         }));
     });
+}
+
+/// F-04 (design `--cvbg`): the canvas behind the picture is #eceff5 in Daylight and #08101f in Sapphire.
+#[test]
+fn f04_the_studio_canvas_takes_the_designs_tint() {
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    for (theme, want) in [
+        (&DAYLIGHT, [0xec, 0xef, 0xf5, 255]),
+        (&SAPPHIRE, [0x08, 0x10, 0x1f, 255]),
+    ] {
+        themes::set(theme);
+        let mut s = studio_on(64, 48);
+        let _ = s.update(Msg::Resized(SIZE));
+        let px = shot::render(view(&s, &[], false), SIZE.width as u32, SIZE.height as u32);
+        // inside the stage, near its top and well clear of the small centred picture
+        let (x, y) = (RAIL as usize + 60, (HEADER + OPTIONS) as usize + 40);
+        let i = (y * SIZE.width as usize + x) * 4;
+        assert_eq!(px[i..i + 4], want, "{}", theme.id);
+    }
+    themes::set(&SAPPHIRE);
 }

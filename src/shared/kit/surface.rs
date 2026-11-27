@@ -26,6 +26,8 @@ pub enum Material {
     Held,
     /// The Studio's dark stage (`canvas_dark`, divider edge).
     Stage,
+    /// The Studio's canvas behind the picture (`themes::canvas`, divider edge).
+    Canvas,
     /// Style E floating-widget recessed outer tray (`track`, rim edge).
     Tray,
     /// A quiet chip on a window (the Studio rail's group tiles): the faint `track_glass` tint, no edge.
@@ -69,6 +71,7 @@ fn corners<'a, Message: 'a>(
             Material::Window => (c().bg, c().rim),
             Material::Recessed => (c().track_glass, c().divider),
             Material::Stage => (c().canvas_dark, c().divider),
+            Material::Canvas => (themes::canvas(), c().divider),
             Material::Widget => (c().widget, c().rim),
             Material::Tile => (c().hover, c().rim),
             Material::Held => (c().widget, c().accent),

@@ -23,10 +23,14 @@ pub const STRIP_WELL: Size = Size::new(widget_e::STRIP_THUMB_W, widget_e::STRIP_
 const CELL_BADGE: f32 = 16.0;
 /// The badge's side.
 pub const BADGE: f32 = 18.0;
-/// The Steps strip's badge (owner 2026-11-27: bigger than the design's 18 px) at a 1080-logical-px-tall
-/// screen; it grows with the screen's logical height up to twice (a 5K screen at 100 % shows it small otherwise).
-pub fn strip_badge(screen_height: f32) -> f32 {
-    (20.0 * (screen_height / 1080.0).clamp(1.0, 2.0)).round()
+/// The Steps strip's badge (owner 2026-11-27: bigger than the design's 18 px, and "suitable based on
+/// screen size, on my 5K monitor it looks small"): 20 logical px on a 1080-physical-px-tall screen,
+/// growing with the monitor's PHYSICAL height (`physical_height` px, shown at `scale`) up to twice, so
+/// a 5K screen at any scale shows the same share of the screen; never under 20 logical px.
+pub fn strip_badge(physical_height: f32, scale: f32) -> f32 {
+    (20.0 * (physical_height / 1080.0).clamp(1.0, 2.0) / scale.max(1.0))
+        .max(20.0)
+        .round()
 }
 /// The small x's side.
 pub const X: f32 = 20.0;
@@ -413,13 +417,17 @@ fn round<'a, Message: Clone + 'a>(glyph: char, on_press: Option<Message>) -> Ele
 mod badge_tests {
     use super::*;
 
-    /// Owner 2026-11-27: the Steps strip's number badge is bigger and grows with the screen.
+    /// Owner 2026-11-27: the Steps strip's number badge is bigger and grows with the screen's
+    /// physical size (a 5K monitor at 1x, 1.5x or 2x scale).
     #[test]
-    fn the_strip_badge_grows_with_the_screen() {
-        assert_eq!(strip_badge(1080.0), 20.0);
-        assert_eq!(strip_badge(720.0), 20.0); // never smaller
-        assert!(strip_badge(1440.0) > 25.0 && strip_badge(1440.0) < 30.0);
-        assert_eq!(strip_badge(2880.0), 40.0); // 5K at 100 %: twice, no more
-        assert!(strip_badge(2880.0) > BADGE);
+    fn the_strip_badge_grows_with_the_monitors_physical_size() {
+        assert_eq!(strip_badge(1080.0, 1.0), 20.0);
+        assert_eq!(strip_badge(720.0, 1.0), 20.0); // never smaller
+        assert_eq!(strip_badge(1080.0, 2.0), 20.0); // never under 20 logical px
+        assert_eq!(strip_badge(2880.0, 1.0), 40.0); // 5K at 100 %: twice, no more
+        assert_eq!(strip_badge(2880.0, 2.0), 20.0); // 5K at 200 %: 40 physical px
+        assert_eq!(strip_badge(2880.0, 1.5), 27.0); // 5K at 150 %: 40 physical px
+        assert!(strip_badge(1440.0, 1.0) > 25.0 && strip_badge(1440.0, 1.0) < 30.0);
+        assert!(strip_badge(2880.0, 1.0) > BADGE);
     }
 }

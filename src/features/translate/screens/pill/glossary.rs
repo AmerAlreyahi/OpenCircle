@@ -19,7 +19,7 @@ use crate::shared::kit::field::input;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{State, pill_icon, quiet_close};
 /// The glossary menu's width (design `.mn` 272).
-const MENU_W: f32 = 272.0;
+const MENU_W: f32 = crate::shared::kit::tokens::widget_e::MENU_W_GLOSSARY;
 use crate::shared::kit::option_list::{
     floating_item, floating_menu_width, floating_separator, group,
 };

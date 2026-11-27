@@ -6,8 +6,9 @@ use iced::{Element, Size};
 
 use crate::features::settings::labs::Labs;
 use crate::shared::config::Config;
-use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
+use crate::shared::kit::option_list::{item, menu, menu_height, separator};
 use crate::shared::kit::tokens::radius;
+use crate::shared::kit::tokens::widget_e::MENU_W;
 use crate::shared::kit::tooltip::tip;
 use crate::shared::platform::tray::{Entry, entries};
 
@@ -90,7 +91,7 @@ impl Menu {
     /// The window's size (logical px).
     pub fn size(&self) -> Size {
         let separators = (0..self.rows.len()).filter(|i| self.separated(*i)).count();
-        Size::new(MENU_WIDTH, menu_height(self.rows.len(), separators))
+        Size::new(MENU_W, menu_height(self.rows.len(), separators))
     }
 
     /// The entries shown, in order.
@@ -208,7 +209,13 @@ mod tests {
         let off = Menu::new(&Labs::default(), &Config::default(), false);
         assert_eq!(off.entries().len(), 9);
         assert_eq!(off.entries()[6], Entry::WhatCanIDo);
-        assert_eq!(off.size(), Size::new(240.0, 10.0 + 9.0 * 32.0 + 2.0 * 9.0));
+        assert_eq!(
+            off.size(),
+            Size::new(
+                crate::shared::kit::tokens::widget_e::MENU_W,
+                10.0 + 9.0 * 32.0 + 2.0 * 9.0
+            )
+        );
         let on = Menu::new(&all_on(), &Config::default(), false);
         assert_eq!(on.size().height, 10.0 + 11.0 * 32.0 + 2.0 * 9.0);
     }

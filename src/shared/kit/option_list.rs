@@ -298,13 +298,13 @@ fn current_bar<'a, Message: 'a>() -> Element<'a, Message> {
     .into()
 }
 
-/// A menu (the design's tray menu): `MENU_WIDTH` wide, its `items` and
+/// A menu (the design's tray menu): `widget_e::MENU_W` wide, its `items` and
 /// `separator`s on the widget surface with `radius::MENU` corners, 4 px in
 /// (`p-1`, inside the 1 px edge). As tall as `menu_height` says.
 pub fn menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     surface(Material::Widget, radius::MENU, column(items))
         .padding(MENU_PAD)
-        .width(MENU_WIDTH)
+        .width(widget_e::MENU_W)
         .into()
 }
 
@@ -374,9 +374,8 @@ pub fn floating_item_when<'a, Message: Clone + 'a>(
     menu_row(row, label, false, hint, focused, false, on_press)
 }
 
-/// The menu's width, a row's height, the room around the rows (edge + `p-1`)
+/// A row's height, the room around the rows (edge + `p-1`)
 /// and a separator's height (1 px, `my-1`).
-pub const MENU_WIDTH: f32 = 240.0;
 pub const ITEM_H: f32 = 32.0;
 const MENU_PAD: f32 = 5.0;
 const SEPARATOR_PAD: [f32; 2] = [4.0, 8.0];
@@ -897,7 +896,7 @@ mod style_e_tests {
                 assert!(h > 70.0);
                 // AC: the current row's accent bar sits on the START side (left in
                 // English, right in Arabic): the accent pixel nearest that edge
-                let w = MENU_WIDTH as u32;
+                let w = widget_e::MENU_W as u32;
                 let one =
                     floating_menu(vec![floating_item("English", true, None, false, true, 2u8)]);
                 let hh = floating_menu_height(1, 0) as u32 + 2;
@@ -923,5 +922,33 @@ mod style_e_tests {
             }
         }
         themes::set(&SAPPHIRE);
+    }
+}
+
+#[cfg(test)]
+mod f04_tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+
+    /// F-04: every floating menu takes its width from the one token family (design `.mn` widths).
+    #[test]
+    fn f04_menus_are_drawn_at_their_token_widths() {
+        let drawn = |view: Element<'static, ()>| shot::drawn_width(view, 340, 300);
+        let rows = || vec![floating_item("Copy", false, None, false, false, ())];
+        assert_eq!(drawn(floating_menu(rows())), 244);
+        assert_eq!(drawn(menu(vec![item("Copy", false, None, false, ())])), 244);
+        assert_eq!(
+            drawn(floating_menu_width(widget_e::MENU_W_GLOSSARY, rows())),
+            272
+        );
+        assert_eq!(
+            drawn(floating_menu_width(widget_e::MENU_W_REC, rows())),
+            280
+        );
+        assert_eq!(widget_e::MENU_W, 244.0);
+        assert_eq!(widget_e::MENU_W_LANG, 264.0);
+        assert_eq!(widget_e::MENU_W_GLOSSARY, 272.0);
+        assert_eq!(widget_e::MENU_W_REC, 280.0);
+        assert_eq!(widget_e::MENU_W_MORE, 290.0);
     }
 }

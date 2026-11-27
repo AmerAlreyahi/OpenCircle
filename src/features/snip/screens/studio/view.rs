@@ -570,7 +570,7 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     let area: Element<'a, Msg> = iced::widget::stack![backdrop, area].into();
     let material = match prefs.background {
         StudioBackdrop::Dark => Material::Stage,
-        _ => Material::Recessed,
+        _ => Material::Canvas,
     };
     let stage = mouse_area(wrap(area, CtrlWheel(zooms, s.pointer.clone())))
         .on_right_press(Msg::ContextOpen)

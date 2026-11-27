@@ -79,6 +79,17 @@ pub fn c() -> &'static Colours {
     &current().c
 }
 
+/// The Studio's canvas behind the picture: the design's `--cvbg` where it has one (Daylight #eceff5,
+/// Sapphire #08101f), else the theme's `track`.
+pub fn canvas() -> Color {
+    let t = current();
+    match t.id {
+        "daylight" => Color::from_rgb8(0xec, 0xef, 0xf5),
+        "sapphire" => Color::from_rgb8(0x08, 0x10, 0x1f),
+        _ => t.c.track,
+    }
+}
+
 /// The text on a `fill` (an Accent button's): the kit's dark `ON_ACCENT`, or
 /// white where that reads under 4.5:1 (Daylight's blue: 3.9:1 dark, 5.2:1
 /// white).
@@ -586,6 +597,26 @@ pub const THEMES: [&Theme; 12] = [
 
 #[cfg(test)]
 mod tests {
+    use iced::Color;
+
+    /// F-04: every theme has a Studio canvas; Daylight and Sapphire carry the design's `--cvbg`, the
+    /// rest take their own `track`.
+    #[test]
+    fn f04_every_theme_has_a_studio_canvas() {
+        assert_eq!(super::THEMES.len(), 12);
+        for t in super::THEMES {
+            super::set(t);
+            let want = match t.id {
+                "daylight" => Color::from_rgb8(0xec, 0xef, 0xf5),
+                "sapphire" => Color::from_rgb8(0x08, 0x10, 0x1f),
+                _ => t.c.track,
+            };
+            assert_eq!(super::canvas(), want, "{}", t.id);
+            assert_eq!(super::canvas().a, 1.0, "{}: opaque", t.id);
+        }
+        super::set(&super::SAPPHIRE);
+    }
+
     /// A solid release (glass returns with the GPU renderer): no card
     /// promises glass.
     #[test]

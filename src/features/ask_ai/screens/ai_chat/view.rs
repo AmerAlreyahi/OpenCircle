@@ -53,6 +53,8 @@ const STACK: f32 = 10.0;
 const ACTIONS_GAP: f32 = 16.0;
 /// Between chips (`gap-2`).
 const CHIPS_GAP: f32 = 8.0;
+/// Between the header's New, pin and x (design `.chh` gap 10).
+const HEAD_GAP: f32 = 10.0;
 
 /// The result card for `header` at `at` on a `screen`: the kit's frame, with
 /// no close button (Esc, or a click outside it). `hover`: the pointer is on
@@ -197,10 +199,10 @@ impl AiChat {
             let pin = hint(pin, tip, Why::Icon, Position::Bottom);
             let x = quiet_close(false, Some(Msg::Close));
             let x = hint(x, t!(chat_close), Why::Icon, Position::Bottom);
-            let ends = crate::shared::kit::surface::segment_row([new, pin, x]);
+            let ends = dir::row([new, pin, x]).spacing(HEAD_GAP).align_y(Center);
             let card = frame::chat_frame(
                 header,
-                Some(ends),
+                Some(ends.into()),
                 body,
                 footer,
                 at,
@@ -440,16 +442,19 @@ impl AiChat {
     ) -> Element<'a, Msg> {
         use crate::shared::kit::button::compact_round;
         use crate::shared::kit::tokens::widget_e;
-        let round = |icon: Icon, msg| compact_round(icon.glyph(), widget_e::SEND, Some(msg));
+        let round = |icon: Icon, msg| compact_round(icon.glyph(), widget_e::SEND, msg);
         let send = match streaming {
             true => hint(
-                round(Icon::Stop, Msg::Stop),
+                round(Icon::Stop, Some(Msg::Stop)),
                 t!(chat_stop),
                 Why::Icon,
                 Position::Top,
             ),
             false => hint(
-                round(Icon::Send, Msg::Submit),
+                round(
+                    Icon::Send,
+                    (!self.input.text().trim().is_empty()).then_some(Msg::Submit),
+                ),
                 t!(chat_send),
                 Why::Keys("Enter"),
                 Position::Top,

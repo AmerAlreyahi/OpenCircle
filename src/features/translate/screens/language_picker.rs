@@ -48,7 +48,7 @@ pub const PILL: Size = Size::new(
     CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y_PILL + 2.0 * widget_e::TRAY_PAD_Y,
 );
 /// The open list (fixed) and its gap under the pill.
-pub const LIST: Size = Size::new(248.0, 350.0);
+pub const LIST: Size = Size::new(widget_e::MENU_W_LANG, 350.0);
 pub const LIST_GAP: f32 = 6.0;
 /// Inside the list: its padding, the search field, the rows' room (300).
 const LIST_PAD: f32 = 6.0;
@@ -637,6 +637,14 @@ impl Picker {
 mod tests {
     use super::*;
     use crate::shared::kit::testing::shot;
+
+    /// F-04 (design `.mn` 264): the language list is as wide as the menu token family says.
+    #[test]
+    fn f04_the_language_list_is_drawn_264_wide() {
+        assert_eq!(LIST.width, widget_e::MENU_W_LANG);
+        let p = open("en", "ar", false, Side::Source);
+        assert_eq!(shot::drawn_width(p.list().unwrap(), 320, 420), 264);
+    }
 
     fn open(source: &str, target: &str, offline: bool, side: Side) -> Picker {
         let mut p = Picker::new(source, target, offline);

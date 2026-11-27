@@ -395,6 +395,15 @@ pub mod widget_e {
     /// A floating menu's width (`.mn` 244 with the glossary's 272 / the language list's 264 apart)
     /// and its separator (`.mhr`: 1 px + 5 px above and below).
     pub const MENU_W: f32 = 244.0;
+    /// The rest of the menu width family (design widths): language list `.mn` 264, glossary 272,
+    /// recording device menu 280, the Snip More menu 290 (Arabic labels need 304).
+    pub const MENU_W_LANG: f32 = 264.0;
+    pub const MENU_W_GLOSSARY: f32 = 272.0;
+    pub const MENU_W_REC: f32 = 280.0;
+    pub const MENU_W_MORE: f32 = 290.0;
+    /// Settings' menu buttons (the glossary "More"): the design draws no width, today's 220 stays.
+    pub const MENU_W_BUTTON: f32 = 220.0;
+    pub const MENU_W_MORE_AR: f32 = 304.0;
     pub const MENU_SEP_H: f32 = 11.0;
     pub const MENU_ITEM_H: f32 = 34.0;
     /// Current-row start indicator bar (`.mr.cur::before`).
@@ -415,6 +424,9 @@ pub mod widget_e {
     /// Live pin frame border (`.pinw`) and hover toolbar inset (`.pinbar`).
     pub const PIN_BORDER: f32 = 3.0;
     pub const PIN_BAR_INSET: f32 = 10.0;
+    /// The hover bar's size (`.pinbar`: 44 high, 6 px + the rim in from its sides; 34 px buttons).
+    pub const PIN_BAR_H: f32 = 44.0;
+    pub const PIN_BAR_PAD_X: f32 = 7.0;
     /// The live pin's corner (`.pinw`, 14 px).
     pub const PIN_CORNER: f32 = super::radius::DROPDOWN;
 }
