@@ -580,7 +580,7 @@ pub fn tool<'a, Message: Clone + 'a>(
 
 /// Style E full-width strip action button (`.btnw.acc` / `.btnw.q`): 36 px tall,
 /// 11 px corners, 14 px glyph + 12 px label in reading order (`dir_row!`).
-/// `Kind::Accent` = accent fill; `Kind::Quiet` = a borderless `hover` veil over the tray (only here: Quiet elsewhere is unchanged).
+/// `Kind::Accent` = accent fill; `Kind::Quiet` = a borderless `hover` veil over the widget (only here: Quiet elsewhere is unchanged).
 pub fn strip_action<'a, Message: Clone + 'a>(
     glyph: char,
     label: impl text::IntoFragment<'a>,

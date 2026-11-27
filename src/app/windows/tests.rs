@@ -172,14 +172,14 @@ fn closing_frees_the_state() {
     assert!(windows.view(id).is_none());
 }
 
-/// A `w`x`h` picture with a diagonal gradient and a frame, so a render shows it.
+/// A `w`x`h` picture with a diagonal gradient and a dark frame (never the Active Look's colours), so a render shows it.
 fn picture(w: u32, h: u32) -> Crop {
     let rgba = (0..h)
         .flat_map(|y| (0..w).map(move |x| (x, y)))
         .flat_map(|(x, y)| {
             let edge = x < 6 || y < 6 || x >= w - 6 || y >= h - 6;
             if edge {
-                [255, 200, 40, 255]
+                [20, 40, 120, 255]
             } else {
                 [(x * 255 / w) as u8, (y * 255 / h) as u8, 160, 255]
             }
@@ -458,6 +458,7 @@ fn live(windows: &mut Windows, w: u32, h: u32, scale: f32) -> window::Id {
         opacity: 0,
         through: false,
     });
+    pin.reshape();
     pin.id
 }
 
@@ -635,6 +636,41 @@ fn d03_5_the_live_pin_bar_is_one_tray_of_five_icons() {
         .filter(|x| (0..3).all(|k| px[(row + x) * 4 + k].abs_diff(widget[k]) <= 3))
         .count();
     assert!(raised < 20, "{raised} raised pixels across the bar");
+}
+
+/// The live pin keeps the drag-out: the chip is the tray's sixth item and sends `DragOut`.
+#[test]
+fn d03_6_a_live_pin_can_still_drag_its_picture_out() {
+    use crate::shared::kit::testing::shot;
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+    let pin = windows.pins.iter().find(|p| p.id == id).unwrap();
+    let size = Size::new(420.0, 260.0);
+    let chip = shot::texts_at(pin_view_with(pin, true), size)
+        .into_iter()
+        .find(|(_, t)| t == "Drag")
+        .expect("the Drag chip is in the live pin's bar")
+        .0;
+    let sent = shot::click(pin_view_with(pin, true), size, chip.center());
+    assert!(
+        sent.iter().any(|m| matches!(m, PinMsg::DragOut)),
+        "{sent:?}"
+    );
+}
+
+/// The live picture is clipped to the frame's corners (nothing outside the ring).
+#[test]
+fn d03_7_the_live_picture_is_clipped_to_the_rounded_corners() {
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let pin = windows.pins.iter().find(|p| p.id == id).unwrap();
+    let image::Handle::Rgba { pixels, width, .. } = &pin.shown else {
+        panic!("rgba")
+    };
+    assert_eq!(pixels[3], 0, "the corner pixel is transparent");
+    let mid = ((130 * *width + 210) * 4 + 3) as usize;
+    assert_eq!(pixels[mid], 255);
 }
 
 /// The live pin's hover bar, Sapphire and Daylight.

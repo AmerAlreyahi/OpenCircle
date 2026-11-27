@@ -56,7 +56,8 @@ pub fn step<'a, Message: Clone + 'a>(
     build(picture, number, look, on_delete, Frame::legacy(WELL, BADGE))
 }
 
-/// Style E Steps strip thumbnail (`.stp`): 96x64, `radius::TRACK` (10 px)
+/// Style E Steps strip thumbnail (`.stp`): `picture` is already `strip_picture` (rounded once,
+/// when the step is made, so a redraw never copies pixels); 96x64, `radius::TRACK` (10 px)
 /// rounded picture filling the well, 1 px `rim` edge (2 px `accent` focused,
 /// 1 px `accent` hovered/lifted), 18 px accent badge with 2 px `widget` ring
 /// at top-start (`inset-inline-start: 5px`), hover delete x at top-end.
@@ -96,6 +97,11 @@ pub fn cell<'a, Message: Clone + 'a>(
         on_delete,
         Frame::legacy(size, CELL_BADGE),
     )
+}
+
+/// A step's picture for the strip: cropped to the well and corner-masked, once.
+pub fn strip_picture(handle: &image::Handle) -> image::Handle {
+    round_handle(handle, STRIP_WELL, radius::TRACK, true)
 }
 
 /// Returns a copy of an `Rgba` handle with its four corners softly alpha-masked
@@ -258,8 +264,7 @@ fn build<'a, Message: Clone + 'a>(
     let well_size = frame.well;
     let ring = look.hover || look.lifted || look.focused;
     let base: Element<'a, Message> = if frame.style_e {
-        let rounded = round_handle(&picture, well_size, frame.corner, true);
-        let photo = image(rounded)
+        let photo = image(picture)
             .width(Fill)
             .height(Fill)
             .content_fit(ContentFit::Fill)

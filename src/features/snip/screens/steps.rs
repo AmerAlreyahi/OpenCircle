@@ -21,7 +21,7 @@ use iced::{Center, Element, Fill, Point, Size};
 use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button;
-use crate::shared::kit::surface::tray;
+use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::thumb::{self, Look, STRIP_WELL};
 use crate::shared::kit::tokens::{radius, widget_e};
 use crate::shared::kit::tooltip::tip;
@@ -58,6 +58,8 @@ pub const UNDO_MS: u64 = 5000;
 pub struct Step {
     png: Vec<u8>,
     thumb: image::Handle,
+    /// The strip's rounded, well-shaped copy of `thumb` (made once).
+    strip: image::Handle,
 }
 
 impl std::fmt::Debug for Step {
@@ -70,9 +72,11 @@ impl Step {
     /// Packs `crop` (slow for a big one: off the UI thread).
     pub fn new(crop: &Crop) -> Result<Step, String> {
         let png = encode_png(crop.width, crop.height, &crop.rgba)?;
+        let thumb = thumbnail(crop);
         Ok(Step {
             png,
-            thumb: thumbnail(crop),
+            strip: thumb::strip_picture(&thumb),
+            thumb,
         })
     }
 
@@ -97,13 +101,13 @@ impl Step {
         self.thumb.clone()
     }
 
-    /// What it holds in memory (PNG + thumbnail pixels).
+    /// What it holds in memory (PNG + thumbnail pixels, plain and for the strip).
     pub fn bytes(&self) -> usize {
-        let thumb = match &self.thumb {
+        let pixels = |h: &image::Handle| match h {
             image::Handle::Rgba { pixels, .. } => pixels.len(),
             _ => 0,
         };
-        self.png.len() + thumb
+        self.png.len() + pixels(&self.thumb) + pixels(&self.strip)
     }
 }
 
@@ -601,7 +605,7 @@ impl Strip {
                 rtl: dir::rtl(),
             };
             let picture = thumb::strip_step(
-                self.steps[i].thumb.clone(),
+                self.steps[i].strip.clone(),
                 place + 1,
                 look,
                 Some(Msg::Delete(i)),
@@ -638,7 +642,7 @@ impl Strip {
         );
         let studio = tip(studio, t!(sn_studio_btn), Side::Top);
         let strip = column![top, thumbs, copy, studio].spacing(PAD);
-        let strip = tray(false, corners, strip)
+        let strip = surface(Material::Widget, corners, strip)
             .padding(PAD)
             .width(Fill)
             .height(Fill);
@@ -1211,7 +1215,7 @@ mod tests {
         golden::each_theme(|theme, _| {
             let s = strip(2);
             let px = crate::shared::kit::testing::shot::render(s.view(RADIUS), 112, 272);
-            let tray = crate::shared::kit::themes::c().track.into_rgba8();
+            let tray = crate::shared::kit::themes::c().widget.into_rgba8();
             let ok = |at| near(&px, 112, at, tray);
             assert!(
                 ok((9, FIRST as u32 + 1)),
@@ -1261,10 +1265,11 @@ mod tests {
         let c = crate::shared::kit::themes::c();
         let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 200);
         assert!(near(&px, 112, (8 + 3, 112 + 18), c.accent.into_rgba8()));
-        // `hover` is a veil: it lies over the tray
-        let (h, t) = (c.hover, c.track);
+        // `hover` is a veil: it lies over the widget
+        let (h, t) = (c.hover, c.widget);
         let mix = |a: f32, b: f32| ((h.a * a + (1.0 - h.a) * b) * 255.0).round() as u8;
         let over = [mix(h.r, t.r), mix(h.g, t.g), mix(h.b, t.b), 255];
+        assert_ne!(over, c.widget.into_rgba8(), "visible against the strip");
         assert!(near(&px, 112, (8 + 3, 156 + 18), over));
     }
 

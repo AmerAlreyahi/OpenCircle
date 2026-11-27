@@ -232,6 +232,9 @@ fn is_double_click(last: Option<Instant>, now: Instant) -> bool {
 struct Pin {
     id: window::Id,
     image: image::Handle,
+    /// What the window draws: `image`, or for a live pin the same with its corners
+    /// masked to the frame's (made when the picture or zoom changes, not per redraw).
+    shown: image::Handle,
     /// Logical size at zoom 1.
     base: Size,
     zoom: f32,
@@ -298,6 +301,19 @@ impl Pin {
         self.base * self.zoom
     }
 
+    /// `shown` again, after `image` or the zoom changed.
+    fn reshape(&mut self) {
+        self.shown = match self.live {
+            Some(_) => crate::shared::kit::thumb::round_handle(
+                &self.image,
+                self.size(),
+                shape::radius(widget_e::PIN_CORNER),
+                false,
+            ),
+            None => self.image.clone(),
+        };
+    }
+
     /// The pixels again, for Copy / Save.
     fn crop(&self) -> Option<Crop> {
         let image::Handle::Rgba {
@@ -347,10 +363,15 @@ const OPACITY_GLYPH: char = '\u{e5a0}'; // lucide "blend"
 const THROUGH: char = '\u{e5eb}'; // lucide "mouse-pointer-ban"
 
 fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
+    pin_view_with(pin, dragout::SUPPORTED)
+}
+
+/// `pin_view`, with the drag-out chip on or off (it is Windows-only today).
+fn pin_view_with(pin: &Pin, drag_out: bool) -> Element<'_, PinMsg> {
     use iced::widget::tooltip::Position as Side;
     const COPY: char = '\u{e0a2}'; // lucide "copy"
     const SAVE: char = '\u{e0b6}'; // lucide "download"
-    let picture = image(pin.image.clone())
+    let picture = image(pin.shown.clone())
         .width(Fill)
         .height(Fill)
         .content_fit(ContentFit::Fill);
@@ -367,17 +388,12 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 Side::Bottom,
             )
         };
-        // its word "Drag" says it: no tooltip (owner rule: only when it adds); the
-        // live pin's bar is the design's five icons, so no chip there
-        let drag = (pin.live.is_none() && dragout::SUPPORTED)
-            .then(|| chip::drag_out(PinMsg::DragOut, crate::t!(chip_drag)));
+        // its word "Drag" says it: no tooltip (owner rule: only when it adds). On a
+        // live pin it is a sixth item of the same tray, before the five icons.
+        let drag = drag_out.then(|| chip::drag_out(PinMsg::DragOut, crate::t!(chip_drag)));
         let live = pin.live.as_ref().map(|l| {
             let tool = |glyph, message, label, on| {
-                let state = State {
-                    active: on,
-                    ..State::default()
-                };
-                let button = icon_button::square(glyph, state, Some(message));
+                let button = icon_button::tray_tool(glyph, on, Some(message));
                 hint(button, label, Why::Icon, Side::Bottom)
             };
             row![
@@ -952,9 +968,11 @@ impl Windows {
             None => open.discard(),
         };
         crate::log!("[opencircle] pinned {}x{}", crop.width, crop.height);
+        let handle = image::Handle::from_rgba(crop.width, crop.height, crop.rgba);
         self.pins.push(Pin {
             id,
-            image: image::Handle::from_rgba(crop.width, crop.height, crop.rgba),
+            shown: handle.clone(),
+            image: handle,
             base,
             zoom,
             hover: false,
@@ -1004,6 +1022,7 @@ impl Windows {
                 opacity: 0,
                 through: false,
             });
+            pin.reshape();
         }
         crate::log!("[opencircle] live pin {}x{} of a window", pick.w, pick.h);
         let frames = Task::stream(rx).map(move |e| Msg::Pin(id, PinMsg::Live(e)));
@@ -2039,6 +2058,7 @@ impl Windows {
             }
             PinMsg::Zoom(delta) => {
                 pin.zoom = zoom_after(pin.zoom, delta);
+                pin.reshape();
                 platform::monitor::resize(id, pin.size())
             }
             PinMsg::DragOut => {
@@ -2077,11 +2097,13 @@ impl Windows {
                 };
                 let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / live.scale);
                 pin.image = image::Handle::from_rgba(crop.width, crop.height, crop.rgba);
-                if base == pin.base {
+                let resized = base != pin.base;
+                pin.base = base;
+                pin.reshape();
+                if !resized {
                     return Task::none();
                 }
                 // the window was resized or changed DPI: the pin keeps the crop's shape
-                pin.base = base;
                 platform::monitor::resize(id, pin.size())
             }
             PinMsg::Live(live::Event::Gone) => {

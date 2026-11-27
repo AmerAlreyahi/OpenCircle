@@ -136,6 +136,24 @@ pub fn quiet_small<'a, Message: Clone + 'a>(
     )
 }
 
+/// A button on a style E tray whose active state is the soft `hover` tint
+/// (the live pin's click-through, `.ib.hov`).
+pub fn tray_tool<'a, Message: Clone + 'a>(
+    glyph: char,
+    active: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let look = Look {
+        veil: true,
+        ..Look::SQUARE_E
+    };
+    let state = State {
+        active,
+        focused: false,
+    };
+    made(glyph_text(glyph), look, state, on_press)
+}
+
 fn glyph_text<'a>(glyph: char) -> iced::widget::Text<'a> {
     text(glyph).font(FONT).size(size::ICON)
 }
@@ -148,6 +166,8 @@ struct Look {
     side: f32,
     accent: bool,
     quiet: bool,
+    /// The active one shows as the `hover` tint (a tray's `.ib.hov`), not raised.
+    veil: bool,
 }
 
 impl Look {
@@ -161,6 +181,7 @@ impl Look {
             side: size::ICON_BUTTON,
             accent: false,
             quiet: false,
+            veil: false,
         }
     }
 }
@@ -184,6 +205,7 @@ fn made<'a, Message: Clone + 'a>(
                 let tinted = state.active && look.accent;
                 let fill = match () {
                     _ if tinted => Some(c().accent_soft),
+                    _ if state.active && look.veil => Some(c().hover),
                     _ if state.active => Some(c().elevated),
                     _ if state.focused => Some(c().accent_soft),
                     _ if hot => Some(c().hover),
@@ -198,7 +220,7 @@ fn made<'a, Message: Clone + 'a>(
                 };
                 let (width, edge) = match () {
                     _ if live && status == Status::Pressed => (2.0, c().widget),
-                    _ if state.active && !look.accent => (1.0, c().elevated_border),
+                    _ if state.active && !look.accent && !look.veil => (1.0, c().elevated_border),
                     _ => (0.0, c().widget),
                 };
                 button::Style {
