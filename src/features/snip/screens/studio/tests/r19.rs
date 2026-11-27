@@ -202,14 +202,16 @@ impl StudioLab {
         let sx = (left + corner.x.max(0.0)) * self.scale;
         let sy = (top + corner.y.max(0.0)) * self.scale;
         let sw = shown.width.min(room.width) * self.scale;
+        // the bottom pills float over the stage's lowest rows: not the picture's
         let sh = shown.height.min(room.height) * self.scale;
+        let above_pills = (top + room.height - super::pills::BAND) * self.scale;
         [
             sx.ceil() as u32 + 2,
             sy.ceil() as u32 + 2,
             ((sx + sw).floor() as u32)
                 .saturating_sub(2)
                 .min(self.pixmap.width()),
-            ((sy + sh).floor() as u32)
+            ((sy + sh).min(above_pills).floor() as u32)
                 .saturating_sub(2)
                 .min(self.pixmap.height()),
         ]

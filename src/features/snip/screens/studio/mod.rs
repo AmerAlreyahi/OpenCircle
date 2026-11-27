@@ -18,12 +18,12 @@ mod menu_bar;
 pub(crate) mod options_bar;
 mod popovers;
 pub(crate) use popovers::tool_of;
+mod pills;
 pub mod preferences;
 pub mod recovery;
 mod sheets;
 mod sidebar;
 mod start;
-mod status_bar;
 mod text_select;
 mod view;
 
@@ -57,9 +57,10 @@ pub const MIN: Size = Size::new(960.0, 600.0);
 
 // The regions around the canvas (logical px): the stage is what they leave.
 const HEADER: f32 = 41.0; // 40 + the hairline
+/// A hairline's width (the gap that replaced a divider).
+const HAIR: f32 = 1.0;
 const RAIL: f32 = 52.0;
 const OPTIONS: f32 = 48.0;
-const STATUS: f32 = 44.0;
 /// The Steps sidebar's width.
 const SIDEBAR: f32 = 320.0;
 /// Room kept around a fitted picture.
@@ -2408,7 +2409,7 @@ impl Studio {
         let side = (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0);
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
-            (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - (STATUS + 1.0)).max(1.0),
+            (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0)).max(1.0),
         )
     }
 

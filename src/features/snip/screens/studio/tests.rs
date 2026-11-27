@@ -8,6 +8,7 @@ use crate::features::translate::Line;
 use crate::shared::config;
 
 mod b01;
+mod d04;
 mod r16;
 mod r18;
 mod r19;
@@ -2462,7 +2463,7 @@ fn v31_the_caption_buttons_stay_right_in_arabic() {
     assert!(is_close(click_view(&s, (1256.0, 20.0))));
     assert!(!is_close(click_view(&s, (24.0, 20.0))));
     // the rail (Rectangle tool) is at the right edge, the sidebar's Add at the left
-    let rect = click_view(&s, (1252.0, 155.0));
+    let rect = click_view(&s, (1252.0, 192.0));
     assert!(
         rect.iter()
             .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect)))),
@@ -2768,7 +2769,7 @@ fn v31_the_steps_sidebar_side_is_a_setting() {
     let s = studio_on(640, 400);
     assert!(!s.sidebar_at_start());
     // End: the sidebar's Add at the right, the rail's Rectangle at the left
-    let rect = click_view(&s, (27.0, 155.0));
+    let rect = click_view(&s, (27.0, 192.0));
     assert!(
         rect.iter()
             .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))
@@ -3262,7 +3263,7 @@ fn w90b_every_studio_preference_acts() {
         || {
             let s = studio_on(640, 400);
             assert!(s.sidebar_at_start());
-            let rail = click_view(&s, (1252.0, 155.0));
+            let rail = click_view(&s, (1252.0, 192.0));
             assert!(
                 rail.iter()
                     .any(|m| matches!(m, Msg::Editor(Message::Tool(Tool::Rect))))

@@ -394,20 +394,16 @@ pub fn readout<'a, Message: 'a>(
 }
 
 /// The face of Snip's size chip: an `image` glyph and the size, mono, `live`
-/// in `accent`; `hot` (under the cursor) raised (`elevated`, its edge). The
-/// Studio's (`toolbar` false) is a `READOUT_H` readout on `track`; the Snip
-/// toolbar's (`.szc`) a `SIZE_PILL_H` capsule on `hover` inside a raised segment.
+/// in `accent`; `hot` (under the cursor) raised (`elevated`, its edge). A
+/// `SIZE_PILL_H` capsule (`.szc`) on `hover` inside a raised segment (Snip
+/// toolbar, Studio's bottom-start pill).
 fn size_face<'a, Message: 'a>(
     label: &str,
     live: bool,
-    toolbar: bool,
     hot: bool,
 ) -> container::Container<'a, Message> {
     let ink = if live { c().accent } else { c().text };
-    let (glyph, pad, height, corner) = match toolbar {
-        true => (13, 10, widget_e::SIZE_PILL_H, radius::FULL),
-        false => (12, 8, READOUT_H, radius::PILL),
-    };
+    let (glyph, pad, height, corner) = (13, 10, widget_e::SIZE_PILL_H, radius::FULL);
     let picture = text(super::icon::Icon::Picture.glyph())
         .font(super::icon::FONT)
         .size(glyph)
@@ -421,10 +417,9 @@ fn size_face<'a, Message: 'a>(
         .height(height)
         .center_y(height)
         .style(move |_| {
-            let (fill, width, edge) = match (hot, toolbar) {
-                (true, _) => (c().elevated, 1, c().elevated_border),
-                (false, true) => (c().hover, 0, c().hover),
-                (false, false) => (c().track, 1, c().divider),
+            let (fill, width, edge) = match hot {
+                true => (c().elevated, 1, c().elevated_border),
+                false => (c().hover, 0, c().hover),
             };
             container::Style {
                 background: Some(fill.into()),
@@ -434,42 +429,31 @@ fn size_face<'a, Message: 'a>(
         })
 }
 
-/// Snip's size chip, the picture's drag handle (owner, 2026-11-02): an
-/// `image` glyph and the size, as `readout` (mono on `track`, `live` in
-/// `accent`); under the cursor raised (`elevated`, its edge) with the open
-/// hand. A press starts the drag (`on_down`; a button reacts on release).
-pub fn size_handle<'a, Message: Clone + 'a>(
-    label: String,
-    live: bool,
-    on_down: Message,
-) -> Element<'a, Message> {
-    grab(label, live, false, on_down)
-}
-
-/// The Snip toolbar's size chip (`size_handle` in style E).
+/// The size chip, the picture's drag handle (owner, 2026-11-02): an `image` glyph and
+/// the size in mono (`live` in `accent`), on a raised pill (Snip toolbar, Studio's pill);
+/// under the cursor raised with the open hand. A press starts the drag (`on_down`).
 pub fn size_pill<'a, Message: Clone + 'a>(
     label: String,
     live: bool,
     on_down: Message,
 ) -> Element<'a, Message> {
-    grab(label, live, true, on_down)
+    grab(label, live, on_down)
 }
 
 /// `size_pill` at rest, no drag (OS drag-out unavailable, or capturing).
 pub fn size_pill_static<'a, Message: 'a>(label: String, live: bool) -> Element<'a, Message> {
-    size_face(&label, live, true, false).into()
+    size_face(&label, live, false).into()
 }
 
 fn grab<'a, Message: Clone + 'a>(
     label: String,
     live: bool,
-    toolbar: bool,
     on_down: Message,
 ) -> Element<'a, Message> {
     use iced::widget::{hover, mouse_area};
     mouse_area(hover(
-        size_face(&label, live, toolbar, false),
-        size_face(&label, live, toolbar, true),
+        size_face(&label, live, false),
+        size_face(&label, live, true),
     ))
     .on_press(on_down) // mouse only: drags the picture out
     .interaction(iced::mouse::Interaction::Grab)

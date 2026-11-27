@@ -24,7 +24,7 @@ use crate::shared::kit::modal;
 use crate::shared::kit::slide_over::{self, Scrim};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::{muted, sub};
-use crate::shared::kit::tokens::{Role, radius, size, space};
+use crate::shared::kit::tokens::{Role, radius, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::wrap::{Hook, wrap};
 use crate::shared::kit::{colour, dir, divider, popover, scroll, segmented, slider, thumb};
@@ -68,14 +68,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
     let empty_slot = || container(Space::new());
     let body: Element<'a, Msg> = match &s.editor {
         Some(e) => {
-            let stage_col: Element<'a, Msg> = column![
-                stage(s, e),
-                divider::divider(),
-                super::status_bar::view(s, e)
-            ]
-            .width(Fill)
-            .height(Fill)
-            .into();
+            let stage_col: Element<'a, Msg> = super::pills::over(s, e, stage(s, e));
             let left_side = match s.sidebar_docked() && side_on_left {
                 true => container(iced::widget::row![
                     super::sidebar::view(s, steps),
@@ -91,32 +84,34 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 false => empty_slot(),
             };
             let under = iced::widget::row![left_side, stage_col, right_side].height(Fill);
-            let right = column![
-                match &s.edit {
-                    Some(x) => edit_bar(x),
-                    None => super::options_bar::view(s, e),
-                },
-                divider::divider(),
-                with_steps_panel(s, steps, under.into())
-            ]
-            .width(Fill)
-            .height(Fill);
             let rail_left = rail_on_left(first, dir::rtl());
-            let left_rail = match rail_left {
-                true => container(iced::widget::row![
+            // the rail starts below the top band: the band keeps its room at the rail's edge
+            let bar = match &s.edit {
+                Some(x) => edit_bar(x),
+                None => super::options_bar::view(s, e),
+            };
+            let gap = Space::new().width(super::RAIL + 1.0);
+            let band = match rail_left {
+                true => iced::widget::row![gap, bar],
+                false => iced::widget::row![bar, gap],
+            }
+            .width(Fill);
+            let under = with_steps_panel(s, steps, under.into());
+            let low = match rail_left {
+                true => iced::widget::row![
                     rail(e, inward(true)),
-                    divider::vertical(Fill)
-                ]),
-                false => empty_slot(),
-            };
-            let right_rail = match !rail_left {
-                true => container(iced::widget::row![
-                    divider::vertical(Fill),
+                    Space::new().width(super::HAIR),
+                    under
+                ],
+                false => iced::widget::row![
+                    under,
+                    Space::new().width(super::HAIR),
                     rail(e, inward(false))
-                ]),
-                false => empty_slot(),
-            };
-            iced::widget::row![left_rail, right, right_rail]
+                ],
+            }
+            .height(Fill);
+            column![band, Space::new().height(super::HAIR), low]
+                .width(Fill)
                 .height(Fill)
                 .into()
         }
@@ -369,59 +364,82 @@ pub(super) fn rail_on_left(sidebar_first: bool, rtl: bool) -> bool {
     sidebar_first == rtl
 }
 
+/// Round 7's "Group chips": ids of the rail's tiles (one per tool group, then the Undo / Redo
+/// tile), for the tests; the rail has no container of its own.
+pub(super) const TILES: [&str; 6] = [
+    "studio-tile-0",
+    "studio-tile-1",
+    "studio-tile-2",
+    "studio-tile-3",
+    "studio-tile-4",
+    "studio-tile-foot",
+];
+
+/// A tool group as its own small rounded tile (style E tray, no container round them all).
+fn tile<'a>(id: &'static str, items: Vec<Element<'a, Msg>>) -> Element<'a, Msg> {
+    use crate::shared::kit::surface::tray;
+    tray(false, radius::CARD, column(items).align_x(Center))
+        .id(id)
+        .padding(space::TRACK_GAP)
+        .into()
+}
+
+/// Every tool group as a tile down the rail (starting below the top band); Undo / Redo in
+/// a tile of their own at its foot.
 fn rail(e: &Annotator, tip_at: Position) -> Element<'_, Msg> {
     let base = info(e.tool).slot;
-    let mut tools: Vec<Element<'_, Msg>> = Vec::new();
+    let mut tiles: Vec<Element<'_, Msg>> = Vec::new();
     for (i, g) in Group::ALL.into_iter().enumerate() {
-        if i > 0 {
-            tools.push(
-                container(divider::divider())
-                    .width(size::ICON_BUTTON)
-                    .into(),
-            );
-        }
         let mut shown: Vec<_> = g.tools().collect();
         if g == Group::Select {
             shown.push(info(Tool::Crop)); // the Studio has no area handles: Crop is a tool
         }
+        let mut tools: Vec<Element<'_, Msg>> = Vec::new();
         for t in shown {
             let state = State {
                 active: base == t.tool,
                 focused: false,
             };
             let press = Some(Message::Tool(t.tool));
-            let button = icon_button::square(t.icon, state, press).map(Msg::Editor);
+            let button = icon_button::tool_icon(t.icon, state, press).map(Msg::Editor);
             let name = match t.tool {
                 Tool::Crop => tr(t.name),
                 _ => toolbar::tip(t),
             };
             tools.push(hint(button, name, Why::Icon, tip_at));
         }
+        tiles.push(tile(TILES[i], tools));
     }
     let (done, all) = e.doc.steps();
     let undo = (done > 0).then_some(Msg::Editor(Message::Undo));
     let redo = (done < all).then_some(Msg::Editor(Message::Redo));
-    let foot = column![
-        hint(
-            icon_button::square(toolbar::UNDO, State::default(), undo),
-            t!(sn_undo),
-            Why::Keys(super::keys::UNDO),
-            tip_at,
-        ),
-        hint(
-            icon_button::square(toolbar::REDO, State::default(), redo),
-            t!(sn_redo),
-            Why::Keys(super::keys::REDO),
-            tip_at,
-        ),
-    ]
-    .spacing(space::GAP);
-    let tools = scroll::quiet(column(tools).spacing(space::GAP).align_x(Center)).height(Fill);
-    container(column![tools, foot].spacing(space::GAP).align_x(Center))
-        .padding([space::SIDEBAR_PAD, 0.0])
-        .center_x(super::RAIL)
-        .height(Fill)
-        .into()
+    let foot = tile(
+        TILES[5],
+        vec![
+            hint(
+                icon_button::tool_icon(toolbar::UNDO, State::default(), undo),
+                t!(sn_undo),
+                Why::Keys(super::keys::UNDO),
+                tip_at,
+            ),
+            hint(
+                icon_button::tool_icon(toolbar::REDO, State::default(), redo),
+                t!(sn_redo),
+                Why::Keys(super::keys::REDO),
+                tip_at,
+            ),
+        ],
+    );
+    let tiles = scroll::quiet(column(tiles).spacing(space::GAP).align_x(Center)).height(Fill);
+    container(
+        column![tiles, foot]
+            .spacing(space::GAP + 2.0)
+            .align_x(Center),
+    )
+    .padding([space::TRACK_PAD, 0.0])
+    .center_x(super::RAIL)
+    .height(Fill)
+    .into()
 }
 
 /// Edit text's bar (S8), in the options bar's place while it runs: Font size,
@@ -595,7 +613,7 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         );
     }
     let stage: Element<'a, Msg> = iced::widget::stack(stage_layers).into();
-    surface(material, 0.0, stage)
+    surface(material, radius::CARD, stage)
         .width(Fill)
         .height(Fill)
         .into()

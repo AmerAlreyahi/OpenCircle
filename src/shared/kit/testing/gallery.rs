@@ -1682,13 +1682,13 @@ fn snip_toolbar_parts_sheet() {
     use super::super::{option_list, slider};
     let rows = vec![
         row("size chip", Act::Rest, |_| {
-            chip::size_handle("688 × 330".into(), false, ())
+            chip::size_pill("688 × 330".into(), false, ())
         }),
         row("  hover", Act::Hover, |_| {
-            chip::size_handle("688 × 330".into(), false, ())
+            chip::size_pill("688 × 330".into(), false, ())
         }),
         row("  live", Act::Rest, |_| {
-            chip::size_handle("748 × 400".into(), true, ())
+            chip::size_pill("748 × 400".into(), true, ())
         }),
         row("presets", Act::Rest, |_| {
             segmented::presets(Some(1), None, false, |_| ())
