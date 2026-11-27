@@ -98,7 +98,10 @@ pub enum Event {
     Flushed,
     /// An S2 action ran, or S2 slid away; or the error card was closed.
     Dismiss,
+    #[cfg_attr(not(test), allow(dead_code))] // R-04's recorder raises it
     Fault(Fault),
+    /// The capture could not start (nothing was recorded: the card, nothing to keep).
+    StartFailed(Fault),
 }
 
 /// What the App does for a transition.
@@ -210,16 +213,15 @@ impl State {
             // stopping: a second Stop is nothing; the flush ends in the thumbnail
             (S::Stopping { audio_only }, E::Flushed) => (S::Result { audio_only }, None),
             (S::Result { .. }, E::Dismiss | E::Esc) => (S::Idle, None),
-            // the error card closed: whatever a faulted capture left is deleted (nothing: a no-op)
+            // the error card (a fault before recording: nothing was kept) closed
             (S::Error(_), E::Dismiss | E::Esc) => (S::Idle, Some(Effect::DeleteTemp)),
             // faults
-            (S::Recording { audio_only } | S::Paused { audio_only }, E::Fault(f)) => match f {
-                Fault::DiskLow | Fault::StreamEnded => {
-                    (S::Stopping { audio_only }, Some(Effect::Flush))
-                }
-                // stop capturing and close the file; leaving the card deletes it
-                Fault::Mic | Fault::Refused => (S::Error(f), Some(Effect::Flush)),
-            },
+            (S::Recording { .. }, E::StartFailed(f)) => (S::Error(f), None),
+            // mid-recording, every fault ends in what we have (a lost mic or a desktop that
+            // says no at minute 30 must not delete the recording)
+            (S::Recording { audio_only } | S::Paused { audio_only }, E::Fault(_)) => {
+                (S::Stopping { audio_only }, Some(Effect::Flush))
+            }
             (S::Picking | S::Asking | S::Countdown(_), E::Fault(f)) => (S::Error(f), None),
             _ => same,
         }
@@ -284,17 +286,14 @@ mod tests {
             (PAU, E::Discard, S::Idle, Some(F::DeleteTemp)),
             (REC, E::Fault(Fault::DiskLow), STOPPING, Some(F::Flush)),
             (PAU, E::Fault(Fault::StreamEnded), STOPPING, Some(F::Flush)),
+            (REC, E::Fault(Fault::Mic), STOPPING, Some(F::Flush)),
+            (REC, E::StartFailed(Fault::Mic), S::Error(Fault::Mic), None),
+            (PAU, E::Fault(Fault::Refused), STOPPING, Some(F::Flush)),
             (
-                REC,
-                E::Fault(Fault::Mic),
-                S::Error(Fault::Mic),
-                Some(F::Flush),
-            ),
-            (
-                PAU,
+                S::Asking,
                 E::Fault(Fault::Refused),
                 S::Error(Fault::Refused),
-                Some(F::Flush),
+                None,
             ),
             (
                 S::Error(Fault::Mic),

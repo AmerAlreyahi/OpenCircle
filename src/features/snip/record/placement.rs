@@ -85,6 +85,11 @@ impl Row {
         Row::Dismiss,
     ];
 
+    /// A note, not a button: shown greyed.
+    pub fn is_note(self) -> bool {
+        matches!(self, Row::Device | Row::ErrMic | Row::ErrRefused)
+    }
+
     /// Its text; the mic row says what a press does, Stop shows the start key.
     pub fn label(self, ctx: &Ctx) -> String {
         match self {

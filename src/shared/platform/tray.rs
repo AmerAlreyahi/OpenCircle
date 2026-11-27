@@ -441,6 +441,7 @@ pub fn recording(shown: Option<Shown>) {
                         for (row, text) in rows {
                             if let Some((_, item)) = built.rec.iter().find(|(r, _)| r == row) {
                                 item.set_text(text);
+                                item.set_enabled(!row.is_note());
                                 let _ = built.menu.append(item as &dyn IsMenuItem);
                             }
                         }

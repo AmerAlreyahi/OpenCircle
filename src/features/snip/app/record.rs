@@ -563,24 +563,29 @@ mod tests {
         assert!(app.windows.record_thumb().is_some(), "what we have is kept");
     }
 
-    /// R02-23: a Mic or Refused fault while recording stops the capture, and leaving the card
-    /// (Dismiss, Fix, Retry) deletes what the faulted capture left: nothing is orphaned.
+    /// R02-23: a fault in the middle of a recording keeps what was recorded (the thumbnail
+    /// opens, nothing is deleted); a fault before it shows the card, whose exits delete nothing real.
     #[test]
-    fn r02_23_a_fault_card_never_orphans_the_capture() {
-        for leave in [B::Cancel, B::Fix, B::Retry] {
-            for fault in [Fault::Mic, Fault::Refused] {
-                let mut app = app();
-                recording(&mut app);
-                let _ = app.record_fault(fault);
-                assert_eq!(app.rec.state, State::Error(fault));
-                let _ = app.on_record_bar(leave.clone());
-                assert_eq!(
-                    app.rec.fake.log,
-                    [Effect::Begin, Effect::Flush, Effect::DeleteTemp],
-                    "{leave:?} after {fault:?}"
-                );
-            }
+    fn r02_23_a_fault_mid_recording_keeps_the_file() {
+        for fault in [Fault::Mic, Fault::Refused] {
+            let mut app = app();
+            recording(&mut app);
+            let _ = app.record_fault(fault);
+            assert_eq!(app.rec.state, State::Result { audio_only: false });
+            assert_eq!(
+                app.rec.fake.log,
+                [Effect::Begin, Effect::Flush],
+                "{fault:?}"
+            );
+            assert!(app.windows.record_thumb().is_some());
         }
+        // before the first frame: the card, and leaving it runs the (harmless) cleanup
+        let mut app = app();
+        let _ = app.record_start_on(false, Target::Area, true);
+        let _ = app.record_fault(Fault::Mic);
+        assert_eq!(app.rec.state, State::Error(Fault::Mic));
+        let _ = app.on_record_bar(B::Cancel);
+        assert_eq!(app.rec.fake.log, [Effect::DeleteTemp]);
     }
 
     /// R02-24: in the tray (whole screen), Error and the Keep question have rows and a press on
@@ -603,8 +608,8 @@ mod tests {
         assert!(app.windows.record_thumb().is_some());
         let mut app2 = App::idle(iced::window::Id::unique());
         let _ = app2.record_start_on(false, Target::WholeScreen, false);
-        let _ = app2.on_record_row(Row::Record);
-        let _ = app2.record_fault(Fault::Refused);
+        let _ = app2.record_event(Event::Picked { ask: true }, Instant::now());
+        let _ = app2.record_event(Event::Denied, Instant::now());
         assert_eq!(
             rows(),
             Some(vec![Row::ErrRefused, Row::Retry, Row::Dismiss])

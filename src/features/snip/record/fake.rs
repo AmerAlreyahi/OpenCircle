@@ -19,7 +19,7 @@ impl Fake {
     pub fn run(&mut self, effect: Effect) -> Option<Event> {
         self.log.push(effect);
         match effect {
-            Effect::Begin => self.fail_start.take().map(Event::Fault),
+            Effect::Begin => self.fail_start.take().map(Event::StartFailed),
             Effect::Flush => Some(Event::Flushed),
             Effect::Pause | Effect::Resume | Effect::DeleteTemp => None,
         }
@@ -51,7 +51,7 @@ mod tests {
         assert_eq!(f.run(Effect::Flush), Some(Event::Flushed));
         assert_eq!(f.run(Effect::Begin), None);
         f.fail_start = Some(Fault::Mic);
-        assert_eq!(f.run(Effect::Begin), Some(Event::Fault(Fault::Mic)));
+        assert_eq!(f.run(Effect::Begin), Some(Event::StartFailed(Fault::Mic)));
         assert_eq!(f.run(Effect::Begin), None, "once");
         assert_eq!(f.log.len(), 4);
     }
