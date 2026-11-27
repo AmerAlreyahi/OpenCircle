@@ -64,28 +64,10 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
         Msg::Caption,
     );
     let first = s.sidebar_at_start();
-    let side_on_left = first != dir::rtl();
-    let empty_slot = || container(Space::new());
     let body: Element<'a, Msg> = match &s.editor {
         Some(e) => {
             let stage_col: Element<'a, Msg> = super::pills::over(s, e, stage(s, e));
-            let left_side = match s.sidebar_docked() && side_on_left {
-                true => container(iced::widget::row![
-                    super::sidebar::view(s, steps),
-                    divider::vertical(Fill),
-                    Space::new().width(super::CARD_MARGIN)
-                ]),
-                false => empty_slot(),
-            };
-            let right_side = match s.sidebar_docked() && !side_on_left {
-                true => container(iced::widget::row![
-                    Space::new().width(super::CARD_MARGIN),
-                    divider::vertical(Fill),
-                    super::sidebar::view(s, steps)
-                ]),
-                false => empty_slot(),
-            };
-            let under = iced::widget::row![left_side, stage_col, right_side].height(Fill);
+            let under = iced::widget::row![stage_col].height(Fill);
             let rail_left = rail_on_left(first, dir::rtl());
             // the rail starts below the top band: the band keeps its room at the rail's edge
             let bar = match &s.edit {
@@ -118,24 +100,7 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
                 .into()
         }
         None => {
-            let left_side = match s.sidebar_docked() && side_on_left {
-                true => container(iced::widget::row![
-                    super::sidebar::view(s, steps),
-                    divider::vertical(Fill),
-                    Space::new().width(super::CARD_MARGIN)
-                ]),
-                false => empty_slot(),
-            };
-            let right_side = match s.sidebar_docked() && !side_on_left {
-                true => container(iced::widget::row![
-                    Space::new().width(super::CARD_MARGIN),
-                    divider::vertical(Fill),
-                    super::sidebar::view(s, steps)
-                ]),
-                false => empty_slot(),
-            };
-            let parts =
-                iced::widget::row![left_side, super::start::view(s), right_side].height(Fill);
+            let parts = iced::widget::row![super::start::view(s)].height(Fill);
             column![
                 super::options_bar::empty(s),
                 divider::divider(),
@@ -317,7 +282,7 @@ fn with_steps_panel<'a>(
     steps: &'a [Arc<Step>],
     base: Element<'a, Msg>,
 ) -> Element<'a, Msg> {
-    use iced::widget::{opaque, row, stack};
+    use iced::widget::{opaque, stack};
     let on_left = s.sidebar_at_start() != dir::rtl();
     let edge = match on_left {
         true => iced::alignment::Horizontal::Left,
@@ -325,17 +290,22 @@ fn with_steps_panel<'a>(
     };
     let mut layers = vec![base];
     if s.steps_overlay() {
-        let panel = match on_left {
-            true => row![super::sidebar::view(s, steps), divider::vertical(Fill)],
-            false => row![divider::vertical(Fill), super::sidebar::view(s, steps)],
-        };
+        // the floating card: the design's margins from the stage's top, the edge and the pills' band
+        let pad = match on_left {
+            true => iced::Padding::ZERO.left(super::SLIDER_EDGE),
+            false => iced::Padding::ZERO.right(super::SLIDER_EDGE),
+        }
+        .top(super::SLIDER_TOP)
+        .bottom(super::SLIDER_BOTTOM);
+        let panel = container(super::sidebar::view(s, steps)).padding(pad);
         let panel = crate::shared::kit::edge_slide::slide_in(
             panel.into(),
-            super::SIDEBAR + 1.0,
+            super::SIDEBAR + super::SLIDER_EDGE,
             s.steps_at(),
             !on_left,
         );
-        if s.sidebar_shown() {
+        // (pinned: it stays until the user closes it, so no outside catcher)
+        if s.sidebar_shown() && !s.sidebar_docked() {
             layers.push(
                 mouse_area(Space::new().width(Fill).height(Fill))
                     .on_press(Msg::StepsAway)
@@ -623,6 +593,8 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
                 .into(),
         );
     }
+    // the card's rounded corners above the picture, whatever the zoom or scroll
+    stage_layers.push(super::corners::over(radius::CARD));
     let stage: Element<'a, Msg> = iced::widget::stack(stage_layers).into();
     surface(material, radius::CARD, stage)
         .width(Fill)

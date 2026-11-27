@@ -1,48 +1,15 @@
-//! A window's side panel (Studio's Steps sidebar): its own
-//! 40 px header (a name and the button that hides it), a hairline, and a body
-//! that scrolls, on the `sidebar` fill. Also the parts its lists are made of:
+//! The parts a window's side lists are made of:
 //! a collapsible section header (30 px), a list row (a thumbnail row or an
 //! object row, hover shade, `accent_soft` while selected) and the menu bar's
 //! opener (28 px).
-use iced::widget::{button, column, container};
-use iced::{Border, Element, Fill, Length, Padding};
+use iced::widget::{button, container};
+use iced::{Border, Element, Fill};
 
 use super::themes::c;
-use super::tokens::{Role, size};
-use super::{divider, scroll};
+use super::tokens::Role;
 
 const OPENER_H: f32 = 28.0;
 const OPENER_R: f32 = 8.0;
-const PAD: f32 = 12.0;
-
-/// The panel: `head` (its name, and the buttons that pin or hide it, in one row), a hairline,
-/// `body`.
-pub fn panel<'a, Message: Clone + 'a>(
-    width: f32,
-    head: Element<'a, Message>,
-    body: Element<'a, Message>,
-) -> Element<'a, Message> {
-    let head = container(head)
-        .padding(Padding {
-            left: PAD,
-            right: PAD,
-            ..Padding::ZERO
-        })
-        .height(size::HEADER)
-        .center_y(size::HEADER);
-    container(column![
-        head,
-        divider::divider(),
-        scroll::scroll(body).height(Fill)
-    ])
-    .width(Length::Fixed(width))
-    .height(Fill)
-    .style(|_| container::Style {
-        background: Some(c().sidebar.into()),
-        ..container::Style::default()
-    })
-    .into()
-}
 
 /// A menu bar's opener: 28 high, radius 8, raised while its menu is `open`.
 pub fn menu_opener<'a, Message: Clone + 'a>(

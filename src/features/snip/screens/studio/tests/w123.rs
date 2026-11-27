@@ -83,26 +83,16 @@ fn w123_ac2_opening_slides_over_the_canvas_without_moving_it() {
 }
 
 #[test]
-fn w123_ac3_pinned_docks_and_the_canvas_makes_room() {
+fn w123_ac3_pinned_stays_open_over_the_canvas_and_the_stage_never_changes() {
     motion::set_reduced(true);
     let mut s = slider_of(3840, 2160);
     let wide = (s.stage(), s.editor.as_ref().unwrap().zoom);
     let _ = s.update(Msg::Library);
-    assert_eq!(
-        (s.stage(), s.editor.as_ref().unwrap().zoom),
-        wide,
-        "over it"
-    );
     let out = s.update(Msg::PinSteps);
     assert!(matches!(out, Outcome::Panels(_, p) if p.library && p.pinned));
-    assert!(s.sidebar_docked() && !s.steps_overlay());
-    let (stage, zoom) = (s.stage(), s.editor.as_ref().unwrap().zoom);
-    assert_eq!(
-        stage.width,
-        wide.0.width - (super::SIDEBAR + 1.0 + super::CARD_MARGIN)
-    );
-    assert_eq!(zoom, wide.1, "R-18: pinning keeps the zoom unchanged");
-    // unpinned again: over the canvas, the picture gets its room back
+    // F-03: pinned is the same floating card (no docked column, no room taken from the stage)
+    assert!(s.sidebar_docked() && s.steps_overlay());
+    assert_eq!((s.stage(), s.editor.as_ref().unwrap().zoom), wide);
     let _ = s.update(Msg::PinSteps);
     assert_eq!(s.stage(), wide.0);
     motion::set_reduced(false);

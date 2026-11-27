@@ -10,6 +10,7 @@
 //! WebP / PDF at a size (`features::snip::export`).
 //! One Studio at a time: the host (`app::windows`) brings it forward and
 //! `open`s the next picture in it; unsaved drawings ask first.
+mod corners;
 mod cut;
 mod edit_text;
 pub(crate) mod editing;
@@ -67,8 +68,11 @@ const HAIR: f32 = 1.0;
 const PILL_EDGE: f32 = 12.0;
 const PILL_ROOM: f32 = 56.0;
 const BAND: f32 = PILL_EDGE + PILL_ROOM;
-/// The canvas card's gap to a docked Steps sidebar (to the rail it is the rail column's own room).
-const CARD_MARGIN: f32 = 8.0;
+/// The floating Steps card's margins (design r6): top and window edge, and the room left under it
+/// so the floating pills stay visible.
+pub(super) const SLIDER_TOP: f32 = 12.0;
+pub(super) const SLIDER_EDGE: f32 = 8.0;
+pub(super) const SLIDER_BOTTOM: f32 = 74.0;
 /// The gap between the rail's tiles.
 const TILE_GAP: f32 = 8.0;
 // === end Studio round 6 ===
@@ -1929,11 +1933,12 @@ impl Studio {
                     true => editing::picture_menu(e),
                     false => editing::object_menu(e),
                 };
-                // the stage's left edge: mirrored, the Steps sidebar sits there
-                let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
-                let left = match sidebar_left {
-                    true => self.side_room(),
-                    false => RAIL + 2.0,
+                // the stage's left edge: mirrored, the rail's column is at the other edge
+                let rail_left =
+                    view::rail_on_left(self.sidebar_at_start(), crate::shared::app_language::rtl());
+                let left = match rail_left {
+                    true => RAIL + 2.0,
+                    false => 0.0,
                 };
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
                 let seps = entries.iter().filter(|r| r.divider).count();
@@ -2244,8 +2249,8 @@ impl Studio {
     /// The window less the Steps sidebar: a popover hangs inside it, never over the sidebar
     /// (F15: the Actions card covered the sidebar's buttons and text).
     pub(super) fn popover_room(&self) -> iced::Rectangle {
-        let side = match self.sidebar_docked() {
-            true => SIDEBAR + 1.0,
+        let side = match self.sidebar_shown() {
+            true => SIDEBAR + SLIDER_EDGE,
             false => 0.0,
         };
         let sidebar_left =
@@ -2262,14 +2267,14 @@ impl Studio {
         self.panels.library
     }
 
-    /// The Steps panel is docked: open and pinned, the canvas makes room for it.
+    /// The Steps card is pinned open (it floats over the canvas either way; only an outside click differs).
     pub(super) fn sidebar_docked(&self) -> bool {
         self.panels.library && self.panels.pinned
     }
 
-    /// The Steps panel is drawn over the canvas: open and not pinned, or still sliding out.
+    /// The Steps card is drawn over the canvas: open (pinned or not), or still sliding.
     pub(super) fn steps_overlay(&self) -> bool {
-        !self.panels.pinned && (self.panels.library || self.steps_slide.is_some())
+        self.panels.library || self.steps_slide.is_some()
     }
 
     /// How far in the sliding panel is (0..1): the slide's own time and curve, else its rest.
@@ -2414,18 +2419,12 @@ impl Studio {
         Point::new(origin.x + d.x, origin.y + d.y)
     }
 
-    /// The Steps sidebar's room beside the stage when docked (the card's margin included).
-    pub(super) fn side_room(&self) -> f32 {
-        (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0 + CARD_MARGIN)
-    }
-
     /// The stage: the window less the header, the rail, the bars, the shown panels and the
     /// pills' band: the room a fitted picture is centred in (the canvas itself runs under the pills).
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = self.side_room();
         Size::new(
-            (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
+            (self.window.width - 2.0 - (RAIL + 1.0)).max(1.0),
             (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - BAND).max(1.0),
         )
     }

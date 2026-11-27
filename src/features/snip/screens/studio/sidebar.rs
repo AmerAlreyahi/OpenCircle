@@ -13,11 +13,15 @@ use crate::features::snip::export;
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::features::snip::screens::steps::Step;
 use crate::shared::kit::button::{self, Kind};
+use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::text::muted;
-use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{dir, dropdown, side_panel, thumb};
+use crate::shared::kit::{dir, dropdown, scroll, thumb};
 use crate::t;
+
+/// The floating card's id (the tests read its bounds).
+pub(super) const CARD: &str = "studio-steps-card";
 
 /// The sidebar's side padding.
 pub(super) const PAD: f32 = 12.0;
@@ -48,12 +52,34 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
             )
         }
     };
-    let panel = side_panel::panel(super::SIDEBAR, head(s, steps.len()), body);
+    let panel = card(head(s, steps.len()), body);
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
         .on_enter(Msg::OverSidebar(true))
         .on_exit(Msg::OverSidebar(false))
         .into()
+}
+
+/// The floating card (design r6): the header, a hairline and the scrolling body on a raised
+/// rounded card. The card is the only surface (no square fill under it), so its corners stay round.
+fn card<'a>(head: Element<'a, Msg>, body: Element<'a, Msg>) -> Element<'a, Msg> {
+    let head = container(head)
+        .padding(iced::Padding::ZERO.left(PAD).right(PAD))
+        .height(size::HEADER)
+        .center_y(size::HEADER);
+    surface(
+        Material::Widget,
+        radius::DRAWER,
+        column![
+            head,
+            crate::shared::kit::divider::divider(),
+            scroll::scroll(body).height(iced::Fill)
+        ],
+    )
+    .id(CARD)
+    .width(super::SIDEBAR)
+    .height(iced::Fill)
+    .into()
 }
 
 /// The closed panel's handle: a slim tab on the window's edge with an arrow toward the picture

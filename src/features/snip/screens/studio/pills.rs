@@ -11,7 +11,7 @@ use crate::features::snip::annotate::{Annotator, Message};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::option_bar::{glyph_cell, text_cell, value};
-use crate::shared::kit::surface::{Join, segment, segment_row, tray};
+use crate::shared::kit::surface::{Join, segment_row, tray};
 use crate::shared::kit::tokens::{radius, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{chip, dir};
@@ -45,7 +45,7 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
         text_cell(t!(st_fit), false, Some(Msg::Fit)),
     ]);
     let (save_words, copy_words) = (t!(c_save), t!(c_copy));
-    let save = segment(hint(
+    let save = hint(
         button::labelled(
             toolbar::SAVE,
             save_words,
@@ -57,7 +57,7 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
         t!(c_save),
         Why::Keys(keys::SAVE),
         Position::Top,
-    ));
+    );
     let copy = hint(
         button::labelled(
             toolbar::COPY,
@@ -75,7 +75,7 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
         false,
         radius::FULL,
         Join::None,
-        dir::row([zoom, save.into(), copy])
+        dir::row([zoom, save, copy])
             .spacing(space::GAP)
             .align_y(Center),
     )

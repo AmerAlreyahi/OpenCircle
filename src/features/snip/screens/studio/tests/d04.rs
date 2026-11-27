@@ -37,7 +37,7 @@ impl Operation for Bounds {
 }
 
 /// The bounds of every identified container / scrollable of the editor window.
-fn bounds(s: &Studio) -> Vec<(String, Rectangle)> {
+pub(super) fn bounds(s: &Studio) -> Vec<(String, Rectangle)> {
     crate::shared::kit::text::load();
     let mut renderer = crate::shared::kit::testing::shot::renderer();
     let mut ui = UserInterface::build(view(s, &[], false), SIZE, Cache::default(), &mut renderer);
@@ -46,7 +46,7 @@ fn bounds(s: &Studio) -> Vec<(String, Rectangle)> {
     op.0
 }
 
-fn find(all: &[(String, Rectangle)], id: &str) -> Rectangle {
+pub(super) fn find(all: &[(String, Rectangle)], id: &str) -> Rectangle {
     all.iter()
         .find(|(n, _)| n.contains(id))
         .unwrap_or_else(|| panic!("{id}"))

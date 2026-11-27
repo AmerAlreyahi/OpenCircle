@@ -468,10 +468,11 @@ impl Studio {
         let Some(text) = self.text.text() else {
             return;
         };
-        let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
-        let left = match sidebar_left {
-            true => self.side_room(),
-            false => super::RAIL + 2.0,
+        let rail_left =
+            super::view::rail_on_left(self.sidebar_at_start(), crate::shared::app_language::rtl());
+        let left = match rail_left {
+            true => super::RAIL + 2.0,
+            false => 0.0,
         };
         let (p, at) = (
             self.pointer.get(),
