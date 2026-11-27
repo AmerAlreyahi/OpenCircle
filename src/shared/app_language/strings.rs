@@ -2943,8 +2943,8 @@ strings! {
         | "تحديث";
     tr_m_stopped: "Stopped"
         | "متوقف";
-    tr_m_add: "+ Add a language pair"
-        | "+ إضافة زوج لغات";
+    tr_m_add: "Add a language pair"
+        | "إضافة زوج لغات";
     tr_m_get: "Download"
         | "تنزيل";
     tr_m_none: "No offline language pairs installed yet."

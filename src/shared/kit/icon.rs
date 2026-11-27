@@ -106,11 +106,13 @@ pub enum Icon {
     MicOff,
     Video,
     Waveform,
+    /// lucide "plus" (Add a language pair).
+    Plus,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 54] = [
+    pub const ALL: [Icon; 55] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -165,6 +167,7 @@ impl Icon {
         Icon::MicOff,
         Icon::Video,
         Icon::Waveform,
+        Icon::Plus,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -233,6 +236,7 @@ impl Icon {
             Icon::MicOff => '\u{e11c}',
             Icon::Video => '\u{e1a4}',
             Icon::Waveform => '\u{e55e}',
+            Icon::Plus => '\u{e140}',
         }
     }
 }

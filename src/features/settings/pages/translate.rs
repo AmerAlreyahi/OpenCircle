@@ -27,6 +27,7 @@ use crate::shared::kit::progress;
 use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{accent, error, paragraph, sub, text};
+use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius, settings, size, space};
 use crate::shared::kit::tooltip::tip;
 
@@ -439,7 +440,12 @@ fn model_row<'a>(pair: &'a PairRow, right: Element<'a, Message>) -> Element<'a, 
 /// pairs not installed; a pair picked downloads) and the "OptimaMT on Hugging Face" link.
 fn models_footer(m: &Models) -> Element<'_, Message> {
     let add = button(
-        accent(Role::CONTROL, t!(tr_m_add)),
+        crate::dir_row![
+            glyph(Icon::Plus.glyph(), size::ICON_SMALL).color(c().accent),
+            accent(Role::CONTROL, t!(tr_m_add)),
+        ]
+        .spacing(space::GAP)
+        .align_y(Center),
         Kind::Quiet,
         (!m.downloading()).then_some(Message::AddPairs(m.choose.is_none())),
     );

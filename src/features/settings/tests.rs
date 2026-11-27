@@ -5948,7 +5948,7 @@ fn offline_models_pair_states_use_native_names_and_single_cancel() {
         "expected native French pair name: {texts:?}"
     );
     assert!(
-        texts.iter().any(|t| t == "+ Add a language pair"),
+        texts.iter().any(|t| t == "Add a language pair"),
         "Add a language pair is the design's button: {texts:?}"
     );
 
@@ -6223,7 +6223,7 @@ fn add_a_language_pair_lists_the_missing_pairs_and_downloads_the_choice() {
     s.models = Models::of(0, 1, 0, Now::Idle);
     s.models.pairs = vec![PairRow::from_codes("en", "ar", 54_000_000, false, 0)];
     let has = |s: &State, w: &str| shot::texts(view(s)).iter().any(|t| t == w);
-    assert!(has(&s, "+ Add a language pair"), "the design's button");
+    assert!(has(&s, "Add a language pair"), "the design's button");
 
     let rest = candidates(&[("en", "ar")]);
     assert_eq!(rest.len(), mt::PAIRS.len() - 1);
