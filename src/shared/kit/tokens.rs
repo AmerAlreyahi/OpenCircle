@@ -102,6 +102,14 @@ pub mod settings {
     pub const DEMO_GAP: f32 = 22.0;
     pub const DEMO_PAD: f32 = 16.0;
     pub const DEMO_MEDIA_RADIUS: f32 = 11.0;
+    /// Preview maximise popup (Variant A, `design-v060-preview-max/build.py`).
+    pub const PREVIEW_MAX_MARGIN: f32 = 14.0;
+    pub const PREVIEW_MAX_RADIUS: f32 = 22.0;
+    pub const PREVIEW_MAX_H: f32 = 545.0;
+    pub const PREVIEW_BIGGER_BTN: f32 = 32.0;
+    pub const PREVIEW_BIGGER_INSET: f32 = 10.0;
+    pub const PREVIEW_MAX_CLOSE: f32 = 34.0;
+    pub const PREVIEW_MAX_PLAY: f32 = 44.0;
     /// Offline model list: icon tile, progress bar width, and row spacing (`extra.css` `.mic`, `.dlp`, `.mrow2`).
     pub const MODEL_TILE: f32 = 30.0;
     pub const MODEL_BAR_W: f32 = 150.0;
@@ -163,6 +171,8 @@ impl Role {
     pub const CHOICE_DESC: Role = role(12.0, Weight::Normal);
     /// Settings round 2: a demo block's title (`extra.css` `.rt.big`).
     pub const DEMO_TITLE: Role = role(15.5, Weight::Semibold);
+    /// Preview maximise popup title (`build.py` `.m_ttl h2`: 21 px).
+    pub const PREVIEW_MAX_TITLE: Role = role(21.0, Weight::Semibold);
     pub const ROW_TITLE: Role = role(13.0, Weight::Medium);
     pub const ROW_DESC: Role = role(11.5, Weight::Normal);
     pub const NAV: Role = role(12.5, Weight::Medium);

@@ -2963,4 +2963,8 @@ strings! {
         | "{} من {}";
     c_demo_note: "Plays once when opened, then rests on the last frame. A still picture if you reduce motion."
         | "يُعرض مرة عند الفتح ثم يتوقف عند اللقطة الأخيرة. صورة ثابتة إن قلّلت الحركة.";
+    c_bigger: "Bigger"
+        | "تكبير";
+    c_rm_still: "Reduced motion: still picture"
+        | "الحركة المخفّضة: صورة ثابتة";
 }

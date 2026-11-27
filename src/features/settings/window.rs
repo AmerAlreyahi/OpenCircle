@@ -344,7 +344,11 @@ fn page(state: &State) -> Element<'_, Message> {
                 .padding(Padding::from([CONTENT_PAD[0], settings::CLIP_PAD_X])),
         );
     }
-    floating_card(inside)
+    let content: Element<'_, Message> = match previews::maximised(state) {
+        Some(ov) => iced::widget::stack![inside, ov].into(),
+        None => inside.into(),
+    };
+    floating_card(content)
         .width(Fill)
         .height(Fill)
         .clip(true)

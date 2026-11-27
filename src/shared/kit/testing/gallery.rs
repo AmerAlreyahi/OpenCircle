@@ -1237,6 +1237,7 @@ fn hero_sheet() {
                     2 => Some((s(ar, "Downloading…", "جارٍ التنزيل…"), None)),
                     _ => None,
                 },
+                bigger: None,
                 beside: false,
                 note: (play == 3)
                     .then(|| s(ar, "Couldn't download the preview.", "تعذّر تنزيل المعاينة.")),

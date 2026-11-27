@@ -681,6 +681,10 @@ pub struct State {
     /// one row until then, whatever is on disk); never saved.
     pub(super) opened: Vec<&'static str>,
     pub(super) failed: Vec<&'static str>,
+    /// Maximised preview popup (Variant A): the hero key currently open over the content card.
+    pub(super) preview_max: Option<&'static str>,
+    /// Whether playback is paused inside the maximised preview panel.
+    pub(super) preview_paused: bool,
     /// Windows opens its own screen capture with Print Screen
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
     /// at each visit of the Snip page.
@@ -896,6 +900,10 @@ pub enum Message {
     /// A feature preview's Hide (`false`) / Show (`true`), by its
     /// `hidden_previews` name.
     Preview(&'static str, bool),
+    /// Open (`Some(key)`) or close (`None`) the Variant A maximised preview panel.
+    PreviewMax(Option<&'static str>),
+    /// Toggle pause/resume inside the maximised preview panel without restarting.
+    PreviewPause,
     /// The arrows under a preview with several clips: that many clips on
     /// (-1: back), the loop going on from there.
     Step(&'static str, isize),
@@ -1287,6 +1295,8 @@ impl State {
             fetching: Vec::new(),
             opened: previews::HEROES.iter().map(|h| h.key).collect(),
             failed: Vec::new(),
+            preview_max: None,
+            preview_paused: false,
             print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
@@ -1810,6 +1820,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Height(_)
             | Message::Width(_)
             | Message::Step(..)
+            | Message::PreviewMax(_)
+            | Message::PreviewPause
             | Message::Caption(_)
             | Message::SearchOpen
             | Message::SearchInput(_)
@@ -2272,6 +2284,15 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 }
             }
         }
+        Message::PreviewMax(key) => {
+            state.preview_max = key;
+            if key.is_none() {
+                state.preview_paused = false;
+            }
+        }
+        Message::PreviewPause => {
+            state.preview_paused = !state.preview_paused;
+        }
         Message::Fetch(key) => return start_fetch(state, key),
         Message::Fetched(key, ok) => {
             state.fetching.retain(|k| *k != key);
@@ -2284,7 +2305,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Height(h) => state.win_h = h,
         Message::Width(w) => state.win_w = w,
         Message::Tick => {
-            if let Some(t) = state.played {
+            if !state.preview_paused
+                && let Some(t) = state.played
+            {
                 let at = t.elapsed();
                 let mut playing = false;
                 for (_, p) in &mut state.players {
@@ -2327,7 +2350,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::CloseKeep => {}
         // (the close question went with every message but Save / Discard)
         Message::Dismiss => {
-            (state.resetting, state.clearing_all, state.reporting) = (false, false, false)
+            (state.resetting, state.clearing_all, state.reporting) = (false, false, false);
+            state.preview_max = None;
+            state.preview_paused = false;
         }
     }
     state.revalidate();
@@ -2504,7 +2529,12 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         true => motion::frames().map(|_| Message::Tick),
         false => Subscription::none(),
     };
-    if state.resetting || state.clearing_all || state.asking_close || state.reporting {
+    if state.resetting
+        || state.clearing_all
+        || state.asking_close
+        || state.reporting
+        || state.preview_max.is_some()
+    {
         let esc = event::listen_with(|event, status, _window| {
             (status == event::Status::Ignored).then(|| cancel_question(event))?
         });

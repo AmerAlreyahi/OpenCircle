@@ -5644,6 +5644,7 @@ fn preview_picture_clips_its_corners_to_rounded_radius() {
         shown: true,
         toggle: Some(()),
         play: Some(("Play preview", Some(()))),
+        bigger: None,
         beside: false,
         note: None,
         frame: Some(handle),
@@ -5766,4 +5767,138 @@ fn theme_mini_card_and_mode_card_have_rounded_corners() {
         "Look mini-window (0,0) corner must show bg through 9 px radius"
     );
     themes::set(&themes::SAPPHIRE);
+}
+
+// ---- F-01d: preview maximise popup (Variant A) ----
+
+#[test]
+fn preview_bigger_button_opens_variant_a_panel_and_esc_or_x_closes() {
+    use crate::shared::kit::hero::MAX_PANEL_ID;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    with_clip(&mut s);
+    // Before pressing Bigger: no maximised panel
+    assert!(shot::containers(view(&s), WINDOW_SIZE, MAX_PANEL_ID).is_empty());
+    // Open via PreviewMax
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    assert_eq!(s.preview_max, Some("look"));
+    assert!(!shot::containers(view(&s), WINDOW_SIZE, MAX_PANEL_ID).is_empty());
+    // Esc (Message::Dismiss) closes
+    update(&mut s, Message::Dismiss);
+    assert_eq!(s.preview_max, None);
+    assert!(shot::containers(view(&s), WINDOW_SIZE, MAX_PANEL_ID).is_empty());
+    // Re-open, then x (Message::PreviewMax(None)) closes
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    assert_eq!(s.preview_max, Some("look"));
+    moving_update(&mut s, Message::PreviewMax(None));
+    assert_eq!(s.preview_max, None);
+}
+
+#[test]
+fn preview_maximised_panel_stays_inside_content_card_with_14px_margin() {
+    use crate::shared::kit::hero::MAX_PANEL_ID;
+    use crate::shared::kit::tokens::settings as tok;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    with_clip(&mut s);
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    let found = shot::containers(view(&s), WINDOW_SIZE, MAX_PANEL_ID);
+    assert_eq!(found.len(), 1, "one maximised panel");
+    let r = found[0];
+    // Content card starts after outer gutter (12) + sidebar (246) + gutter (12) = 270
+    let content_left = tok::GUTTER + tok::NAV + tok::GUTTER;
+    let content_right = WINDOW_SIZE.width - tok::GUTTER;
+    assert!(
+        r.x >= content_left + tok::PREVIEW_MAX_MARGIN - 1.0,
+        "panel left {} must be inside content card ({content_left}) + 14 px margin",
+        r.x
+    );
+    assert!(
+        r.x + r.width <= content_right - tok::PREVIEW_MAX_MARGIN + 1.0,
+        "panel right {} must stay inside content card ({content_right}) - 14 px margin",
+        r.x + r.width
+    );
+    assert!(
+        r.y >= tok::HEADER + tok::PREVIEW_MAX_MARGIN - 1.0,
+        "panel top {} must stay below 48 px title bar",
+        r.y
+    );
+}
+
+#[test]
+fn preview_maximised_keeps_playback_position_across_open_and_close() {
+    use super::previews::player::{TINY_A, TINY_B};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    s.play_clip(&[TINY_A, TINY_B], Duration::from_millis(120));
+    let before_pos = s
+        .players
+        .iter()
+        .find(|(k, _)| *k == "look")
+        .unwrap()
+        .1
+        .position();
+    let before_played = s.played;
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    assert_eq!(
+        s.players
+            .iter()
+            .find(|(k, _)| *k == "look")
+            .unwrap()
+            .1
+            .position(),
+        before_pos
+    );
+    assert_eq!(s.played, before_played);
+    moving_update(&mut s, Message::PreviewMax(None));
+    assert_eq!(
+        s.players
+            .iter()
+            .find(|(k, _)| *k == "look")
+            .unwrap()
+            .1
+            .position(),
+        before_pos
+    );
+    assert_eq!(s.played, before_played);
+}
+
+#[test]
+fn preview_maximised_reduced_motion_shows_still_and_chip() {
+    use crate::shared::kit::motion;
+    motion::set_reduced(true);
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    let texts = shot::texts(view(&s));
+    assert!(
+        texts.iter().any(|t| t == "Reduced motion: still picture"),
+        "expected reduced-motion chip in {texts:?}"
+    );
+    assert!(!s.animating(), "reduced motion must not animate");
+    motion::set_reduced(false);
+}
+
+#[test]
+fn preview_maximised_matches_its_golden_images() {
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
+    let mut failed = Vec::new();
+    for (lang_code, _lang_enum, lang_slug) in [("en", Lang::En, "en"), ("ar", Lang::Ar, "ar")] {
+        for theme in [&themes::DAYLIGHT, &themes::SAPPHIRE] {
+            let (mut s, _) = state(None);
+            update(&mut s, Message::AppLanguage(Choice(lang_code)));
+            update(&mut s, Message::Section(Section::Look));
+            moving_update(&mut s, Message::PreviewMax(Some("look")));
+            themes::set(theme);
+            let file = format!("settings-preview-max-{lang_slug}-{}", theme.id);
+            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                view(&s)
+            }));
+        }
+    }
+    themes::set(&themes::SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
 }

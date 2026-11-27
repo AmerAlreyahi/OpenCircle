@@ -226,6 +226,7 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
                 shown,
                 toggle: has_clip.then_some(Message::Preview(h.key, !shown)),
                 play,
+                bigger: has_clip.then_some(Message::PreviewMax(Some(h.key))),
                 beside,
                 note: state.failed.contains(&h.key).then_some(tr(FAILED)),
                 frame: player.and_then(|(_, p)| p.frame().cloned()),
@@ -247,6 +248,7 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
                     previous: t!(c_prev_preview),
                     next: t!(c_next_preview),
                     default_note: t!(c_demo_note),
+                    bigger: t!(c_bigger),
                 },
             })
         })
@@ -257,6 +259,47 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
             .padding(Padding::ZERO.bottom(BELOW))
             .into()
     })
+}
+
+/// Variant A maximised preview panel over the content card when `state.preview_max` is open.
+pub fn maximised(state: &State) -> Option<Element<'_, Message>> {
+    let key = state.preview_max?;
+    let h = on(state, state.section).find(|h| h.key == key)?;
+    let player = state.players.iter().find(|(k, _)| *k == h.key);
+    let reduced = crate::shared::kit::motion::reduced();
+    let on_disk = player.is_some_and(|(_, p)| p.on_disk());
+    let playing = !reduced && !state.preview_paused && player.is_some_and(|(_, p)| p.playing());
+    let on_play_pause = if state.fetching.contains(&h.key) {
+        None
+    } else if !on_disk && !reduced {
+        Some(Message::Fetch(h.key))
+    } else {
+        Some(Message::PreviewPause)
+    };
+    Some(hero::maximised(hero::Maximised {
+        eyebrow: t!(c_how_it_works),
+        title: tr(h.title),
+        desc: tr(h.desc),
+        frame: player.and_then(|(_, p)| p.frame().cloned()),
+        width: (state.stage.clone(), state.scale, state.win_h),
+        playing,
+        reduced_motion: reduced,
+        rm_label: t!(c_rm_still),
+        on_play_pause,
+        on_close: Message::PreviewMax(None),
+        pager: player.and_then(|(_, p)| {
+            let (at, n) = p.position();
+            (n > 1).then_some((
+                at,
+                n,
+                Message::Step(h.key, -1),
+                Message::Step(h.key, 1),
+                crate::shared::app_language::fmt(S::c_clip_of, &[&(at + 1), &n]),
+            ))
+        }),
+        prev_tip: t!(c_prev_preview),
+        next_tip: t!(c_next_preview),
+    }))
 }
 
 #[cfg(test)]
