@@ -2204,3 +2204,45 @@ fn search_card_sheet() {
     })];
     sheet("search_card", Size::new(420.0, 190.0), &rows);
 }
+
+/// `recording`: the bar's pieces (dot, timer, Stop, the device button muted and
+/// not, the paused tag), a thumbnail's actions, the duration chip, the levels.
+#[test]
+fn recording_sheet() {
+    use super::super::icon::Icon;
+    use super::super::recording as r;
+    let rows = vec![
+        row("bar", Act::Rest, |_| {
+            iced::widget::row![r::dot(false), r::timer("00:12"), r::stop(Some(()))]
+                .align_y(iced::Center)
+                .into()
+        }),
+        row("paused", Act::Rest, |ar| {
+            iced::widget::row![r::dot(true), r::paused_tag(s(ar, "Paused", "متوقف مؤقتًا"))]
+                .spacing(6)
+                .align_y(iced::Center)
+                .into()
+        }),
+        row("device", Act::Rest, |ar| {
+            r::device(false, s(ar, "Microphone", "الميكروفون"), false, ())
+        }),
+        row("muted", Act::Rest, |ar| {
+            r::device(true, s(ar, "Mic muted", "الميكروفون مكتوم"), false, ())
+        }),
+        row("hover", Act::Hover, |_| r::stop(Some(()))),
+        row("meta", Act::Rest, |_| r::meta(1920, 1080, "30 fps".into())),
+        row("levels", Act::Rest, |_| {
+            r::levels(&[0.3, 0.6, 0.9, 0.5, 0.7, 0.4, 0.2])
+        }),
+        row("chip", Act::Rest, |_| r::duration(Icon::Video, "0:12")),
+        row("action", Act::Rest, |_| {
+            iced::widget::row![
+                r::action('\u{e0a2}', false, ()),
+                r::action('\u{e0f9}', true, ())
+            ]
+            .spacing(6)
+            .into()
+        }),
+    ];
+    sheet("recording", Size::new(200.0, 52.0), &rows);
+}

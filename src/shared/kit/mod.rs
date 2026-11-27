@@ -46,6 +46,7 @@ pub mod page_head;
 pub mod panel_frame;
 pub mod popover;
 pub mod progress;
+pub mod recording;
 pub mod scroll;
 pub mod search_card;
 pub mod section;

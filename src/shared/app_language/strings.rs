@@ -2879,4 +2879,58 @@ strings! {
         | "يُختار في «لقطة الشاشة»، ضمن «بعد الالتقاط»";
     ss_open_snip: "Open Snip"
         | "افتح لقطة الشاشة";
+    rec_pause: "Pause"
+        | "إيقاف مؤقت";
+    rec_resume: "Resume"
+        | "استئناف";
+    rec_stop: "Stop and save"
+        | "إيقاف وحفظ";
+    rec_discard: "Discard recording"
+        | "تجاهل التسجيل";
+    rec_paused: "Paused"
+        | "متوقف مؤقتًا";
+    rec_mic: "Microphone"
+        | "الميكروفون";
+    rec_mic_muted: "Mic muted"
+        | "الميكروفون مكتوم";
+    rec_fps: "fps"
+        | "إطار/ث";
+    rec_mic_pick: "Choose the microphone"
+        | "اختر الميكروفون";
+    rec_sound: "Sound from your PC"
+        | "صوت الجهاز";
+    rec_off: "Off"
+        | "إيقاف";
+    rec_record: "Record"
+        | "تسجيل";
+    rec_cancel: "Cancel"
+        | "إلغاء";
+    rec_err_mic: "No microphone found"
+        | "لم يُعثر على ميكروفون";
+    rec_err_mic_d: "Computer sound still works. Record without a microphone, or plug one in and try again."
+        | "صوت الجهاز ما زال يعمل. سجّل بدون ميكروفون، أو وصّل واحدًا وحاول مرة أخرى.";
+    rec_err_mic_fix: "Record without microphone"
+        | "سجّل بدون ميكروفون";
+    rec_try_again: "Try again"
+        | "حاول مرة أخرى";
+    rec_err_refused: "Your desktop said no"
+        | "رفض سطح المكتب الطلب";
+    rec_err_refused_d: "Nothing was recorded. Try again and allow screen sharing when the desktop asks."
+        | "لم يُسجَّل شيء. حاول مرة أخرى واسمح بمشاركة الشاشة عندما يسأل سطح المكتب.";
+    rec_copy: "Copy"
+        | "نسخ";
+    rec_save: "Save"
+        | "حفظ";
+    rec_edit: "Edit in OpenCircle Studio"
+        | "تعديل في استوديو OpenCircle";
+    rec_open_with: "Open with…"
+        | "فتح باستخدام…";
+    rec_keep_h: "Stop recording?"
+        | "إيقاف التسجيل؟";
+    rec_keep_d: "You recorded {}."
+        | "سجّلت {}.";
+    rec_keep: "Keep"
+        | "إبقاء";
+    rec_discard_btn: "Discard"
+        | "تجاهل";
 }

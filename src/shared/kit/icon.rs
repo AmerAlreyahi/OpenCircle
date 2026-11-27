@@ -97,11 +97,20 @@ pub enum Icon {
     Info,
     /// lucide "flask-conical".
     Flask,
+    /// lucide "pause", "play", "trash-2", "mic", "mic-off", "video", "audio-lines":
+    /// the recording bar and the recording thumbnail.
+    Pause,
+    Play,
+    Trash,
+    Mic,
+    MicOff,
+    Video,
+    Waveform,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 47] = [
+    pub const ALL: [Icon; 54] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -149,6 +158,13 @@ impl Icon {
         Icon::Puzzle,
         Icon::Info,
         Icon::Flask,
+        Icon::Pause,
+        Icon::Play,
+        Icon::Trash,
+        Icon::Mic,
+        Icon::MicOff,
+        Icon::Video,
+        Icon::Waveform,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -210,6 +226,13 @@ impl Icon {
             Icon::Puzzle => '\u{e29b}',
             Icon::Info => '\u{e0fe}',
             Icon::Flask => '\u{e0da}',
+            Icon::Pause => '\u{e131}',
+            Icon::Play => '\u{e13f}',
+            Icon::Trash => '\u{e18d}',
+            Icon::Mic => '\u{e11b}',
+            Icon::MicOff => '\u{e11c}',
+            Icon::Video => '\u{e1a4}',
+            Icon::Waveform => '\u{e55e}',
         }
     }
 }

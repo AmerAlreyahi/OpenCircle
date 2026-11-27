@@ -106,6 +106,12 @@ ICONS=$(printf '%s,' \
   U+E148 `# refresh-cw (Settings round 2)` \
   U+E0AD `# cpu (Settings round 2)` \
   U+E051 `# arrow-up-right (Settings round 2)` \
+  U+E131 `# pause (recording bar)` \
+  U+E18D `# trash-2 (recording bar: discard)` \
+  U+E11B `# mic (recording bar)` \
+  U+E11C `# mic-off (recording bar: muted)` \
+  U+E1A4 `# video (recording: the clip chip)` \
+  U+E55E `# audio-lines (recording: the audio chip)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

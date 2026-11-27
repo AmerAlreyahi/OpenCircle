@@ -1,4 +1,9 @@
-//! Screen and audio recording foundations (v0.6.0).
-//! R-03 provides audio mixing, mute, timestamp gap silence fill and level metering (`mix`).
+//! Screen and audio recording (v0.6.0).
+//! R-03: audio mixing, mute, timestamp gap silence fill and level metering (`mix`).
+//! R-02: the pure state machine (`state`) and the pause-aware clock (`clock`).
 
+pub mod clock;
+pub mod fake;
 pub mod mix;
+pub mod placement;
+pub mod state;
