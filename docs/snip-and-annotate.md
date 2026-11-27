@@ -198,7 +198,7 @@ On Wayland a file can't be dropped on the window yet (use `Ctrl+O` or `Ctrl+V`).
 
 ## Long capture
 
-For a page taller than the screen: pick the area, then **More > Long capture**.
+For a page taller than the screen: pick the area, then the **Long capture** button (before More).
 Scroll the page yourself (wheel, scrollbar or keys); OpenCircle stitches what
 passes through the area into one tall image and shows the whole page so far
 beside it. Scrolling back up adds nothing twice, and bars that stay put (a site's

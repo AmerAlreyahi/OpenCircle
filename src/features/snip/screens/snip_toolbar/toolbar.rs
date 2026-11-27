@@ -84,7 +84,7 @@ fn group_widths(primary: bool) -> [Vec<f32>; 4] {
     let g0 = vec![bar::HANDLE, CHIP_W];
     let mut g1: Vec<f32> = Group::ALL.map(|_| CONTROL).to_vec();
     g1.extend([CONTROL, CONTROL]); // Colour, Undo
-    let g2 = vec![CONTROL]; // More
+    let g2 = vec![CONTROL, CONTROL]; // Long capture, More
     let g3 = vec![
         CONTROL,                                   // Open in Studio
         if primary { PRIMARY_W } else { CONTROL }, // Copy / Add step N
@@ -136,11 +136,12 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
 /// The toolbar's own stops (the row's come after them).
 pub fn bar_stops(e: &Annotator) -> Vec<Message> {
     let mut stops: Vec<Message> = e.last.iter().map(|&t| Message::Slot(t)).collect();
-    stops.extend([
-        Message::Picker,
-        Message::UndoClick,
-        Message::Menu(Menu::More),
-    ]);
+    stops.extend([Message::Picker, Message::UndoClick]);
+    // (dimmed while a long capture runs or where there is none: Tab skips it)
+    if long_capture_on(e) {
+        stops.push(Message::Scroll);
+    }
+    stops.push(Message::Menu(Menu::More));
     // (a long capture running: Open in Studio is dimmed, so Tab skips it)
     if !e.capturing {
         stops.push(Message::OpenStudio);
@@ -214,12 +215,6 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
             }
         })
         .collect();
-    rows.push(MoreRow::plain(
-        SCROLL,
-        S::sn_long_capture,
-        None,
-        (e.scroll && idle).then_some(Message::Scroll),
-    ));
     // while the strip is open Copy's place adds the step: Copy moves here
     rows.push(match steps_on(e) {
         false => MoreRow::plain(
@@ -286,13 +281,14 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         .iter_mut()
         .filter(|r| r.of.is_none() && r.message.is_none())
     {
-        r.why = match (e.capturing, r.name) {
-            (true, _) => Some(S::sn_why_capturing),
-            (false, S::sn_long_capture) => Some(S::sn_why_no_long),
-            _ => None,
-        };
+        r.why = e.capturing.then_some(S::sn_why_capturing);
     }
     rows
+}
+
+/// The Long capture button is live: this desktop has it and none is running.
+fn long_capture_on(e: &Annotator) -> bool {
+    e.scroll && !e.capturing
 }
 
 /// The toolbar with its open panel by it (where nothing limits the room).
@@ -443,15 +439,33 @@ fn build(
     ));
     let seg_tools = segment_row(tools);
 
-    // Segment 2: More
+    // Segment 2: Long capture, More
+    let long = long_capture_on(e);
+    let long_why = match (long, e.capturing) {
+        (true, _) => Why::Icon,
+        (false, true) => Why::Keys(t!(sn_why_capturing)),
+        (false, false) => Why::Keys(t!(sn_why_no_long)),
+    };
+    let long_btn = hinted(
+        icon_button::tool_icon(
+            SCROLL,
+            state(false, &Message::Scroll),
+            long.then_some(Message::Scroll),
+        ),
+        t!(sn_long_capture),
+        long_why,
+    );
     let more = Message::Menu(Menu::More);
     let s = state(e.menu == Some(Menu::More), &more);
-    let more_at = (2usize, 0usize);
-    let seg_more = segment_row([hinted(
-        icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
-        t!(sn_more),
-        Why::Icon,
-    )]);
+    let more_at = (2usize, 1usize);
+    let seg_more = segment_row([
+        long_btn,
+        hinted(
+            icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
+            t!(sn_more),
+            Why::Icon,
+        ),
+    ]);
 
     // Segment 3: Studio (OpenCircle logo) + Copy/Add step + Save + quiet x
     let studio = State {
@@ -1459,7 +1473,7 @@ mod tests {
     fn the_bar_grew_by_one_button() {
         let groups = group_widths(false);
         let count: usize = groups.iter().map(Vec::len).sum();
-        assert_eq!(count, 2 + Group::ALL.len() + 2 + 1 + 4, "+ the x (C6)");
+        assert_eq!(count, 2 + Group::ALL.len() + 2 + 2 + 4, "+ the x (C6)");
     }
 
     /// C6: the toolbar ends with a quiet x (Tab reaches it last): it asks the host to end
@@ -1493,29 +1507,44 @@ mod tests {
         assert!(!matches!(key(&e), Some(Message::OpenStudio)));
     }
 
-    /// F15 (#220): a dimmed More row says why in its tooltip: a long capture running, or no
-    /// long capture on this desktop.
+    /// R-09: Long capture is a button of the bar, right before More (Tab reaches it), sends
+    /// `Message::Scroll`, is not a row of More, and says why when dimmed (F15).
     #[test]
-    fn f15_dimmed_more_rows_say_why() {
-        let why_of = |e: &Annotator, name: S| {
-            more_rows(e)
-                .into_iter()
-                .find(|r| r.name == name)
-                .map(|r| (r.message.is_some(), r.why))
-        };
+    fn r09_long_capture_is_a_bar_button_not_a_more_row() {
         let mut e = editor();
-        e.scroll = false;
-        assert_eq!(
-            why_of(&e, S::sn_long_capture),
-            Some((false, Some(S::sn_why_no_long)))
-        );
         e.scroll = true;
-        assert_eq!(why_of(&e, S::sn_long_capture), Some((true, None)));
-        e.capturing = true;
-        assert_eq!(
-            why_of(&e, S::sn_long_capture),
-            Some((false, Some(S::sn_why_capturing)))
+        let at = |e: &Annotator, m: &Message| stops(e).iter().position(|s| s == m);
+        let (long, more) = (at(&e, &Message::Scroll), at(&e, &Message::Menu(Menu::More)));
+        assert!(
+            long.is_some() && long.map(|i| i + 1) == more,
+            "right before More"
         );
+        assert!(
+            more_rows(&e).iter().all(|r| r.name != S::sn_long_capture),
+            "no second entry in More"
+        );
+        assert!(matches!(
+            e.update(Message::Scroll),
+            Some(crate::features::snip::annotate::Output::Scroll)
+        ));
+        e.scroll = false;
+        assert!(at(&e, &Message::Scroll).is_none(), "dimmed: no Tab stop");
+        e.scroll = true;
+        e.capturing = true;
+        assert!(at(&e, &Message::Scroll).is_none(), "dimmed while capturing");
+    }
+
+    /// R-09: the More panel centres on More (second item of its segment): right of Long capture
+    /// in English, left of it in Arabic (mirrored), inside the bar either way.
+    #[test]
+    fn r09_more_panel_centres_on_more_ltr_and_rtl() {
+        let e = editor();
+        let w = size_for(&e).width;
+        let (more, long) = (centred_on(&e, (2, 1), 0.0).0, centred_on(&e, (2, 0), 0.0).0);
+        assert!(long < more && more < w);
+        let _ar = crate::shared::kit::testing::arabic();
+        let (more, long) = (centred_on(&e, (2, 1), 0.0).0, centred_on(&e, (2, 0), 0.0).0);
+        assert!(more < long && more > 0.0);
     }
 
     /// W117: in Snip (popover floated and translated to the toolbar position), pressing and

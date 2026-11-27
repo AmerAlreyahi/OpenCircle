@@ -173,9 +173,9 @@ area (`Enter` takes the full screen). A toolbar opens beside it to mark it up;
 `Ctrl+C` or **Copy** puts it on the clipboard (original size, picture only),
 ready to paste into an AI chat.
 
-- More has Copy text, Ask AI and Translate for the area, Long capture (scroll
-  the page yourself), Add to steps (several snips as one numbered image), Pin,
-  Colour picker and Screen ruler.
+- More has Copy text, Ask AI and Translate for the area, Add to steps (several snips as one numbered image), Pin,
+  Colour picker and Screen ruler. Long capture (scroll the page yourself) is its
+  own button on the toolbar, just before More.
 - Hide (Blur) defaults to *Soft*, a smooth content-free blur built only from the
   area's surroundings so the text under it can't be recovered (*Frost* and
   *Pixelate* are alternative secure styles; *Blur (look only)*, *Frosted* and

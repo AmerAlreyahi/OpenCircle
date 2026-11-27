@@ -43,7 +43,7 @@ run it from a terminal to read it.
 
 ### Long capture on Wayland
 
-Pick the area, then **More > Long capture**, and scroll the page yourself. The
+Pick the area, then the **Long capture** button (before More), and scroll the page yourself. The
 desktop streams the screen to OpenCircle through the ScreenCast portal (allowed
 once, like the screen capture), only while the capture runs. A small pop-up
 beside the area shows the page so far, its height, and **Copy**, **Save**,

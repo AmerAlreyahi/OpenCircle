@@ -727,8 +727,8 @@ mod tests {
             "{names:?}"
         );
         assert!(
-            names.iter().any(|n| n.starts_with("Long capture")),
-            "{names:?}"
+            !names.iter().any(|n| n.starts_with("Long capture")),
+            "R-09: Long capture is a bar button, not a More row: {names:?}"
         );
         assert!(
             !names.iter().any(|n| n.starts_with("Live pin")),
@@ -740,7 +740,7 @@ mod tests {
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
-    /// More (owner, 2026-11-02): Long capture, Add to steps, Pin, Share (where
+    /// More (owner, 2026-11-02; Long capture moved to the bar, R-09): Add to steps, Pin, Share (where
     /// there is a sheet), the screen tools. The arrow keys walk its live
     /// rows, Enter runs one.
     #[test]
@@ -749,8 +749,11 @@ mod tests {
         let mut app = snip_toolbar_open();
         let _ = app.on_snip_toolbar(E::Menu(Menu::More));
         let texts = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
+        assert!(
+            !texts.iter().any(|t| t == "Long capture"),
+            "R-09: {texts:?}"
+        );
         for row in [
-            "Long capture",
             "Add to steps",
             "Pin to screen",
             "Colour picker",
@@ -759,9 +762,9 @@ mod tests {
             assert!(texts.iter().any(|t| t == row), "{row}: {texts:?}");
         }
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
-        // Down x6: the sixth live row (Copy text, Ask AI, Translate, Long
-        // capture, Add to steps, Pin); Enter pins (the overlay closes)
-        for _ in 0..6 {
+        // Down x5: the fifth live row (Copy text, Ask AI, Translate,
+        // Add to steps, Pin); Enter pins (the overlay closes)
+        for _ in 0..5 {
             let _ = app.on_snip_toolbar(E::MenuStep(false));
         }
         let editor = &app.o.edit.as_ref().unwrap().annotator;
