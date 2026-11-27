@@ -249,7 +249,11 @@ pub mod widget_e {
     /// Size readout pill inside a segment (`.szc`).
     pub const SIZE_PILL_H: f32 = 30.0;
     /// Menu padding and row height (`.mn` / `.mr`).
-    pub const MENU_PAD: f32 = 6.0;
+    pub const MENU_PAD: f32 = 7.0;
+    /// A floating menu's width (`.mn` 244 with the glossary's 272 / the language list's 264 apart)
+    /// and its separator (`.mhr`: 1 px + 5 px above and below).
+    pub const MENU_W: f32 = 244.0;
+    pub const MENU_SEP_H: f32 = 11.0;
     pub const MENU_ITEM_H: f32 = 34.0;
     /// Current-row start indicator bar (`.mr.cur::before`).
     pub const CURRENT_BAR_W: f32 = 3.0;
@@ -257,8 +261,11 @@ pub mod widget_e {
     /// Steps strip (`.strip`, `.sth`, `.stp`, `.btnw`): padding/gap, header,
     /// header quiet buttons, thumbnail height, badge inset, action buttons.
     pub const STRIP_PAD: f32 = 8.0;
+    /// The strip's 1 px rim (design `.strip`: 112 = 94 + 2 x 8 + 2, 418 = 4 steps).
+    pub const STRIP_RIM: f32 = 1.0;
     pub const STRIP_TOP: f32 = 24.0;
     pub const STRIP_HEAD_BTN: f32 = 22.0;
+    pub const STRIP_THUMB_W: f32 = 94.0;
     pub const STRIP_THUMB_H: f32 = 64.0;
     pub const STRIP_BADGE_INSET: f32 = 5.0;
     pub const STRIP_BTN_H: f32 = 36.0;

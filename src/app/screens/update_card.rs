@@ -28,7 +28,7 @@ const MAX_HEIGHT: f32 = 600.0;
 /// The corners the window is cut to (`.as-card`).
 pub const RADIUS: f32 = radius::DRAWER;
 /// Between the blocks, and between a bullet and its text.
-const GAP: f32 = 10.0;
+const GAP: f32 = 12.0;
 const BULLET_GAP: f32 = 8.0;
 const ACTION_GAP: f32 = 12.0;
 /// The summary and the highlights; a folded section's lines.

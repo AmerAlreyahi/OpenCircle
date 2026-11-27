@@ -26,15 +26,17 @@ impl From<bool> for Tone {
     }
 }
 
-const PAD: [f32; 2] = [8.0, 14.0];
-const GAP: f32 = 8.0;
+/// Design `.toast`: 36 px tall, 12 px before the dot, 16 px after the text.
+const PAD: [f32; 2] = [9.0, 12.0];
+const PAD_END: f32 = 16.0;
+const GAP: f32 = 9.0;
 const LINE: f32 = 16.0;
 
 /// The pill's size for `label` (logical px, whole): its window's size.
 pub fn size(label: &str) -> Size {
     let text = width(label, super::text::size(Role::NOTE), font(Role::NOTE));
     Size::new(
-        (2.0 * PAD[1] + size::TOAST_DOT + GAP + text + 2.0).ceil(),
+        (PAD[1] + PAD_END + size::TOAST_DOT + GAP + text + 2.0).ceil(),
         2.0 * PAD[0] + LINE + 2.0,
     )
 }
@@ -128,7 +130,12 @@ fn made<'a, Message: 'a>(
     let content = super::dir::row(lead.into_iter().chain(actions))
         .spacing(GAP)
         .align_y(Center);
-    material(container(content).padding(PAD), radius, at)
+    let pad = super::dir::pad(
+        iced::Padding::from([PAD[0], 0.0])
+            .left(PAD[1])
+            .right(PAD_END),
+    );
+    material(container(content).padding(pad), radius, at)
 }
 
 /// The pill's style E tray material round `content`, exactly `at` big.
@@ -151,11 +158,11 @@ fn material<'a, Message: 'a>(
 /// The two-line pill (the update's, the design's board "Update"): a round
 /// accent mark (`lead`, `LEAD` px, in `accent_soft`), a 13 px / 600 title over
 /// an 11.5 px line, and its buttons at the end, padding 14 / 12.
-const BANNER_PAD: [f32; 2] = [14.0, 12.0];
+const BANNER_PAD: [f32; 2] = [12.0, 12.0];
 const BANNER_GAP: f32 = 12.0;
-const BANNER_H: f32 = 64.0;
+const BANNER_H: f32 = 59.0;
 /// Without buttons (a status: "Updating…").
-const BANNER_LOW: f32 = 60.0;
+const BANNER_LOW: f32 = 59.0;
 const LINES_GAP: f32 = 2.0;
 /// The round mark.
 pub const LEAD: f32 = 32.0;
@@ -223,7 +230,7 @@ mod tests {
         let short = size("Copied");
         let long = size("Saved to C:\\Users\\me\\Pictures\\OpenCircle");
         assert!(long.width > short.width + 100.0, "{short:?} {long:?}");
-        assert_eq!((short.height, long.height), (34.0, 34.0));
+        assert_eq!((short.height, long.height), (36.0, 36.0));
         let ar = size("تم النسخ");
         assert!(ar.width > 50.0 && ar.width < short.width + 40.0, "{ar:?}");
         assert_eq!(Tone::from(true), Tone::Ok);

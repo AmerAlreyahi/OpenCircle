@@ -18,11 +18,16 @@ use super::tokens::{Role, radius, widget_e};
 /// A thumbnail's well (Studio walkthrough & legacy kit sheet).
 pub const WELL: Size = Size::new(96.0, 60.0);
 /// Style E Steps strip thumbnail well (`.stp`: 96x64).
-pub const STRIP_WELL: Size = Size::new(WELL.width, widget_e::STRIP_THUMB_H);
+pub const STRIP_WELL: Size = Size::new(widget_e::STRIP_THUMB_W, widget_e::STRIP_THUMB_H);
 /// The grid cell's well and its badge.
 const CELL_BADGE: f32 = 16.0;
 /// The badge's side.
 pub const BADGE: f32 = 18.0;
+/// The Steps strip's badge (owner 2026-11-27: bigger than the design's 18 px) at a 1080-logical-px-tall
+/// screen; it grows with the screen's logical height up to twice (a 5K screen at 100 % shows it small otherwise).
+pub fn strip_badge(screen_height: f32) -> f32 {
+    (20.0 * (screen_height / 1080.0).clamp(1.0, 2.0)).round()
+}
 /// The small x's side.
 pub const X: f32 = 20.0;
 /// The well's corners.
@@ -66,6 +71,7 @@ pub fn strip_step<'a, Message: Clone + 'a>(
     number: usize,
     look: Look,
     on_delete: Option<Message>,
+    badge: f32,
 ) -> Element<'a, Message> {
     build(
         picture,
@@ -74,7 +80,7 @@ pub fn strip_step<'a, Message: Clone + 'a>(
         on_delete,
         Frame {
             well: STRIP_WELL,
-            badge: BADGE,
+            badge,
             corner: radius::TRACK,
             inset: widget_e::STRIP_BADGE_INSET,
             style_e: true,
@@ -320,9 +326,13 @@ fn build<'a, Message: Clone + 'a>(
     } else {
         frame.inset
     };
+    let number_size = match frame.style_e {
+        true => frame.badge * 10.5 / 18.0,
+        false => NUMBER,
+    };
     let badge = container(
         text(number.to_string())
-            .size(if frame.style_e { 10.5 } else { NUMBER })
+            .size(number_size)
             .font(font(Role::BADGE))
             .color(super::themes::on(c().accent)),
     )
@@ -397,4 +407,19 @@ fn round<'a, Message: Clone + 'a>(glyph: char, on_press: Option<Message>) -> Ele
         on_press,
     )
     .into()
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::*;
+
+    /// Owner 2026-11-27: the Steps strip's number badge is bigger and grows with the screen.
+    #[test]
+    fn the_strip_badge_grows_with_the_screen() {
+        assert_eq!(strip_badge(1080.0), 20.0);
+        assert_eq!(strip_badge(720.0), 20.0); // never smaller
+        assert!(strip_badge(1440.0) > 25.0 && strip_badge(1440.0) < 30.0);
+        assert_eq!(strip_badge(2880.0), 40.0); // 5K at 100 %: twice, no more
+        assert!(strip_badge(2880.0) > BADGE);
+    }
 }

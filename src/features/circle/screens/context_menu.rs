@@ -9,7 +9,7 @@ use crate::features::circle::actions::entities::{Entity, Kind};
 use crate::features::circle::actions::{self, Action};
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::option_list::{
-    MENU_WIDTH, floating_item, floating_menu, floating_menu_height, separator,
+    floating_item, floating_menu, floating_menu_height, floating_separator,
 };
 use crate::shared::kit::tooltip::tip;
 
@@ -112,7 +112,7 @@ impl Menu {
     pub fn size(&self) -> Size {
         let separators = (0..self.rows.len()).filter(|i| self.separated(*i)).count();
         Size::new(
-            MENU_WIDTH,
+            crate::shared::kit::tokens::widget_e::MENU_W,
             floating_menu_height(self.rows.len(), separators),
         )
     }
@@ -163,7 +163,7 @@ pub fn view(m: &Menu) -> Element<'_, Msg> {
     let mut rows = Vec::new();
     for (i, (_, label, hint)) in m.rows.iter().enumerate() {
         if m.separated(i) {
-            rows.push(separator());
+            rows.push(floating_separator());
         }
         let row = floating_item(
             label,

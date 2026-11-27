@@ -18,7 +18,11 @@ use crate::shared::kit::dir;
 use crate::shared::kit::field::input;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{State, pill_icon, quiet_close};
-use crate::shared::kit::option_list::{MENU_WIDTH, floating_item, floating_menu, group, separator};
+/// The glossary menu's width (design `.mn` 272).
+const MENU_W: f32 = 272.0;
+use crate::shared::kit::option_list::{
+    floating_item, floating_menu_width, floating_separator, group,
+};
 use crate::shared::kit::text::text as label;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -224,7 +228,7 @@ impl Menu {
         self.open.then(|| {
             let x = match dir::rtl() {
                 true => 0.0,
-                false => picker::PILL.width - MENU_WIDTH,
+                false => picker::PILL.width - MENU_W,
             };
             Vector::new(x, picker::PILL.height + picker::LIST_GAP)
         })
@@ -242,7 +246,7 @@ impl Menu {
                 pick(""),
             )];
             if !self.items.is_empty() {
-                rows.push(separator());
+                rows.push(floating_separator());
             }
             for (slug, name, n) in &self.items {
                 let current = *slug == self.active;
@@ -256,11 +260,11 @@ impl Menu {
                 ));
             }
             if !self.names.is_empty() {
-                rows.push(separator());
+                rows.push(floating_separator());
                 rows.push(group(t!(gl_names), 24.0));
                 rows.extend(self.names.iter().take(SHOWN).map(|n| self.suggestion(n)));
             }
-            rows.push(separator());
+            rows.push(floating_separator());
             let edit = Msg::Glossary(GlossaryMsg::Edit);
             rows.push(floating_item(
                 t!(gl_new),
@@ -271,7 +275,7 @@ impl Menu {
                 edit.clone(),
             ));
             rows.push(floating_item(t!(gl_edit), false, None, false, false, edit));
-            floating_menu(rows)
+            floating_menu_width(MENU_W, rows)
         })
     }
 }

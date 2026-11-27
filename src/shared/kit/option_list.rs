@@ -309,9 +309,9 @@ pub fn menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Me
 }
 
 /// Style E floating menu (right-click context menu, glossary menu): `dropdown`
-/// surface, `rim` border, 14 px corners, 6 px padding.
+/// surface, `rim` border, 14 px corners, 7 px padding (6 + the rim).
 pub fn floating_menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    floating_menu_width(MENU_WIDTH, items)
+    floating_menu_width(widget_e::MENU_W, items)
 }
 
 /// Style E floating menu of a given `width`.
@@ -329,7 +329,13 @@ pub fn floating_menu_width<'a, Message: 'a>(
 pub fn floating_menu_height(items: usize, separators: usize) -> f32 {
     2.0 * widget_e::MENU_PAD
         + items as f32 * widget_e::MENU_ITEM_H
-        + separators as f32 * SEPARATOR_H
+        + separators as f32 * widget_e::MENU_SEP_H
+}
+
+/// A floating menu's hairline (`.mhr`: 5 px above and below, 6 px in from the rows' edge: it starts
+/// 13 px from the menu's outer edge).
+pub fn floating_separator<'a, Message: 'a>() -> Element<'a, Message> {
+    container(divider()).padding([5.0, 6.0]).into()
 }
 
 /// Style E floating menu row (`.mr`): `item` at 34 px with 10 px corners; the

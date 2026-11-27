@@ -121,18 +121,18 @@ pub struct On<M> {
 
 /// The card's width (`.oc-model-card`; less when the room is narrower).
 pub const WIDTH: f32 = 440.0;
-/// Its header (8 12 0 18) and content (16 20 20) padding.
+/// Its header and content padding: design `.cd` 16 + the 1 px rim, 12 between its parts.
 const HEADER: Padding = Padding {
-    top: 8.0,
-    right: 12.0,
+    top: 17.0,
+    right: 17.0,
     bottom: 0.0,
-    left: 18.0,
+    left: 17.0,
 };
 const CONTENT: Padding = Padding {
-    top: 16.0,
-    right: 20.0,
-    bottom: 20.0,
-    left: 20.0,
+    top: 12.0,
+    right: 17.0,
+    bottom: 17.0,
+    left: 17.0,
 };
 /// Between the emblem and the title; the title and its meta line.
 const HEADING_GAP: f32 = 12.0;
@@ -140,9 +140,9 @@ const META_GAP: f32 = 3.0;
 /// Above the description, the buttons, the provider link, the transfer
 /// lines (the progress bar keeps 6 px of its own above for its glow).
 const ABOVE_TEXT: f32 = 12.0;
-const ABOVE_BUTTONS: f32 = 18.0;
+const ABOVE_BUTTONS: f32 = 12.0;
 const ABOVE_LINK: f32 = 12.0;
-const ABOVE_TRANSFER: f32 = 14.0;
+const ABOVE_TRANSFER: f32 = 12.0;
 const ABOVE_BAR: f32 = 4.0;
 const ABOVE_CANCEL: f32 = 8.0;
 /// Between buttons.

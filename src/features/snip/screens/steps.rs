@@ -47,6 +47,7 @@ const PLUS: char = '\u{e140}';
 const FOOT: f32 = 2.0 * widget_e::STRIP_BTN_H + PAD;
 /// The strip's padding and the gap between its parts (`.strip`), its header row.
 const PAD: f32 = widget_e::STRIP_PAD;
+const RIM: f32 = widget_e::STRIP_RIM;
 const TOP: f32 = widget_e::STRIP_TOP;
 /// Where the first thumbnail starts, and the pitch between two.
 const FIRST: f32 = PAD + TOP + PAD;
@@ -481,13 +482,13 @@ impl Strip {
         let n = (self.steps.len() + usize::from(self.failed)).max(1) as f32;
         let thumbs = n * STRIP_WELL.height + (n - 1.0) * PAD;
         let room = self.work().height - 2.0 * MARGIN;
-        let h = FIRST + thumbs + PAD + FOOT + PAD;
-        Size::new(STRIP_WELL.width + 2.0 * PAD, h.min(room))
+        let h = FIRST + thumbs + PAD + FOOT + PAD + 2.0 * RIM;
+        Size::new(STRIP_WELL.width + 2.0 * (PAD + RIM), h.min(room))
     }
 
     /// The thumbnails' room (they scroll when the strip would not fit).
     fn thumbs_height(&self) -> f32 {
-        self.size().height - FIRST - 2.0 * PAD - FOOT
+        self.size().height - FIRST - 2.0 * PAD - FOOT - 2.0 * RIM
     }
 
     /// Its monitor's work area, logical px from the monitor's origin.
@@ -609,6 +610,7 @@ impl Strip {
                 place + 1,
                 look,
                 Some(Msg::Delete(i)),
+                thumb::strip_badge(self.monitor.size().height),
             );
             let step = mouse_area(picture)
                 .on_press(Msg::Press(i))
@@ -643,7 +645,7 @@ impl Strip {
         let studio = tip(studio, t!(sn_studio_btn), Side::Top);
         let strip = column![top, thumbs, copy, studio].spacing(PAD);
         let strip = surface(Material::Widget, corners, strip)
-            .padding(PAD)
+            .padding(PAD + RIM)
             .width(Fill)
             .height(Fill);
         mouse_area(strip)
@@ -936,12 +938,12 @@ mod tests {
 
     #[test]
     fn sizes_and_place_follow_the_spec() {
-        // style E: 112 wide, 1 step 112 x 200, 4 steps 112 x 416 (the foot: Copy all, Studio)
-        assert_eq!(strip(1).size(), Size::new(112.0, 200.0));
-        assert_eq!(strip(4).size(), Size::new(112.0, 416.0));
+        // style E: 112 wide, 1 step 112 x 202, 4 steps 112 x 418 (the foot: Copy all, Studio)
+        assert_eq!(strip(1).size(), Size::new(112.0, 202.0));
+        assert_eq!(strip(4).size(), Size::new(112.0, 418.0));
         // at the right edge, 12 px in, centred in the work area (1040 high)
         let p = strip(1).place();
-        assert_eq!(p.origin, (1920 - 12 - 112, (1040 - 200) / 2));
+        assert_eq!(p.origin, (1920 - 12 - 112, (1040 - 202) / 2));
         // right to left: the left edge
         let mut rtl = Strip::new(MONITOR, 40.0, true);
         rtl.push(step(10, 10, 1));
@@ -971,7 +973,7 @@ mod tests {
                 s.monitor.px = ((1280.0 * k) as u32, (720.0 * k) as u32);
                 let h = s.size().height;
                 assert!(
-                    FIRST + s.thumbs_height() + PAD + icon + PAD <= h + 0.001,
+                    FIRST + s.thumbs_height() + PAD + icon + PAD + 2.0 * RIM <= h + 0.001,
                     "k {k} n {n}"
                 );
                 let p = s.place();
@@ -989,7 +991,7 @@ mod tests {
         let p = s.place().origin;
         assert!(!s.dock_on(Point::new(p.0 as f32, p.1 as f32), 1.0, &[]));
         s.push(step(8, 8, 1));
-        assert_eq!(s.place().origin.1, (1040 - 344) / 2);
+        assert_eq!(s.place().origin.1, (1040 - 346) / 2);
         s.update(Msg::Delete(2));
         assert!(s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         let p = s.place();
@@ -998,7 +1000,7 @@ mod tests {
         assert!(!s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         // dragged off the bottom and the right: kept inside
         s.dock_on(Point::new(1500.0, 5000.0), 1.0, &[]);
-        assert_eq!(s.place().origin, (1500, 1040 - 12 - 272));
+        assert_eq!(s.place().origin, (1500, 1040 - 12 - 274));
         s.dock_on(Point::new(5000.0, 400.0), 1.0, &[]);
         assert_eq!(s.place().origin, (1920 - 12 - 112, 400));
     }
@@ -1238,32 +1240,35 @@ mod tests {
     #[test]
     fn d03_2_the_badge_is_accent_with_a_ring_at_the_start() {
         let c = crate::shared::kit::themes::c();
-        let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 200);
-        let y = FIRST as u32 + 5 + 9;
-        assert!(near(&px, 112, (8 + 5 + 2, y), c.accent.into_rgba8()));
+        let s = strip(1);
+        let badge = thumb::strip_badge(s.monitor.size().height) as u32;
+        let px = crate::shared::kit::testing::shot::render(s.view(RADIUS), 112, 202);
+        let (x0, y) = (
+            (RIM + PAD) as u32,
+            (RIM) as u32 + FIRST as u32 + 5 + badge / 2,
+        );
+        assert!(near(&px, 112, (x0 + 5 + 2, y), c.accent.into_rgba8()));
         assert!(
-            near(&px, 112, (8 + 5 - 1, y), c.widget.into_rgba8()),
+            near(&px, 112, (x0 + 5 - 1, y), c.widget.into_rgba8()),
             "the ring"
         );
+        let end = x0 + 94 - 5 - badge + 2;
         assert!(
-            !near(&px, 112, (8 + 96 - 5 - 18 + 2, y), c.accent.into_rgba8()),
+            !near(&px, 112, (end, y), c.accent.into_rgba8()),
             "not at the end"
         );
         let _ar = crate::shared::kit::testing::arabic();
         let mut rtl = strip(1);
         rtl.rtl = true;
-        let px = crate::shared::kit::testing::shot::render(rtl.view(RADIUS), 112, 200);
-        assert!(
-            near(&px, 112, (8 + 96 - 5 - 18 + 2, y), c.accent.into_rgba8()),
-            "mirrored"
-        );
+        let px = crate::shared::kit::testing::shot::render(rtl.view(RADIUS), 112, 202);
+        assert!(near(&px, 112, (end, y), c.accent.into_rgba8()), "mirrored");
     }
 
     /// D03-3: Copy all is the accent button, Studio the quiet track-filled one.
     #[test]
     fn d03_3_copy_all_is_accent_and_studio_is_quiet() {
         let c = crate::shared::kit::themes::c();
-        let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 200);
+        let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 202);
         assert!(near(&px, 112, (8 + 3, 112 + 18), c.accent.into_rgba8()));
         // `hover` is a veil: it lies over the widget
         let (h, t) = (c.hover, c.widget);
