@@ -20,7 +20,7 @@ use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
-use crate::shared::kit::surface::{self, segment_row, tray};
+use crate::shared::kit::surface::{self, Join, segment_row_pad, tray, tray_joined};
 use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -32,8 +32,8 @@ use crate::t;
 const SPACING: f32 = bar::SPACING;
 /// A button's side.
 const CONTROL: f32 = size::ICON_BUTTON;
-/// The size chip's room (fits `[picture] 9999 × 9999`).
-const CHIP_W: f32 = 112.0;
+/// The size chip's room: 4-digit x 4-digit on one line (the design's `.szc`: 106 px for 3 x 3).
+const CHIP_W: f32 = 124.0;
 pub const UNDO: char = '\u{e2a0}'; // lucide "undo-2"
 pub const REDO: char = '\u{e29f}'; // lucide "redo-2"
 pub const COPY: char = '\u{e0a2}'; // lucide "copy"
@@ -103,7 +103,7 @@ fn sized(primary: bool) -> Size {
     let groups = group_widths(primary);
     let line =
         groups.iter().map(|g| seg_width(g)).sum::<f32>() + space::GAP * (groups.len() - 1) as f32;
-    Size::new(line + 2.0 * widget_e::TRAY_PAD_X, bar::HEIGHT)
+    Size::new(line + 2.0 * widget_e::TRAY_PAD_X, bar::SNIP_HEIGHT)
 }
 
 /// The Steps strip is open, or one of its steps is edited.
@@ -351,6 +351,8 @@ pub fn view_at(
 }
 
 thread_local! {
+    /// Which edge of the toolbar the options row is attached to, for this build (the row's is the opposite).
+    static JOIN: std::cell::Cell<Join> = const { std::cell::Cell::new(Join::None) };
     /// Where tooltips go (the toolbar's side away from the area), for this build.
     static TIP_SIDE: std::cell::Cell<tooltip::Position> =
         const { std::cell::Cell::new(tooltip::Position::Bottom) };
@@ -420,10 +422,13 @@ fn build(
         ),
         false => chip::size_pill_static(label, e.area_held()),
     };
-    let seg_lead = segment_row([
-        hinted(grip::mover(Message::Grab), t!(sn_move), Why::Icon),
-        container(chip).center_x(CHIP_W).into(),
-    ]);
+    let seg_lead = segment_row_pad(
+        widget_e::SEGMENT_PAD_Y_SNIP,
+        [
+            hinted(grip::mover(Message::Grab), t!(sn_move), Why::Icon),
+            container(chip).center_x(CHIP_W).into(),
+        ],
+    );
 
     // Segment 1: tool groups + colour swatch + undo
     let mut tools: Vec<Element<'_, Message>> = Vec::new();
@@ -457,7 +462,7 @@ fn build(
         t!(sn_undo),
         Why::Keys("Ctrl+Z"),
     ));
-    let seg_tools = segment_row(tools);
+    let seg_tools = segment_row_pad(widget_e::SEGMENT_PAD_Y_SNIP, tools);
 
     // Segment 2: Pin (one button: click = pin, its row picks Pin | Live pin), Long capture, More
     let pin_btn = iced::widget::mouse_area(hinted(
@@ -484,15 +489,18 @@ fn build(
     let more = Message::Menu(Menu::More);
     let s = state(e.menu == Some(Menu::More), &more);
     let more_at = (2usize, 2usize);
-    let seg_more = segment_row([
-        pin_btn.into(),
-        long_btn,
-        hinted(
-            icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
-            t!(sn_more),
-            Why::Icon,
-        ),
-    ]);
+    let seg_more = segment_row_pad(
+        widget_e::SEGMENT_PAD_Y_SNIP,
+        [
+            pin_btn.into(),
+            long_btn,
+            hinted(
+                icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
+                t!(sn_more),
+                Why::Icon,
+            ),
+        ],
+    );
 
     // Segment 3: Studio (OpenCircle logo) + Copy/Add step + Save + quiet x
     let studio = State {
@@ -512,27 +520,30 @@ fn build(
         Some(Message::Save),
     );
     let close = Message::Close;
-    let seg_actions = segment_row([
-        hinted(
-            icon_button::tool_option(studio_logo, studio, live(Message::OpenStudio)),
-            t!(sn_studio_btn),
-            Why::Keys("Ctrl+E"),
-        ),
-        primary(e, focused(&Message::AddStep) || focused(&Message::Copy)),
-        hinted(save, t!(c_save), Why::Keys("Ctrl+S")),
-        hinted(
-            icon_button::quiet_close(focused(&close), live(close)),
-            t!(sn_close),
-            Why::Icon,
-        ),
-    ]);
+    let seg_actions = segment_row_pad(
+        widget_e::SEGMENT_PAD_Y_SNIP,
+        [
+            hinted(
+                icon_button::tool_option(studio_logo, studio, live(Message::OpenStudio)),
+                t!(sn_studio_btn),
+                Why::Keys("Ctrl+E"),
+            ),
+            primary(e, focused(&Message::AddStep) || focused(&Message::Copy)),
+            hinted(save, t!(c_save), Why::Keys("Ctrl+S")),
+            hinted(
+                icon_button::quiet_close(focused(&close), live(close)),
+                t!(sn_close),
+                Why::Icon,
+            ),
+        ],
+    );
 
     let segments = dir::row([seg_lead, seg_tools, seg_more, seg_actions])
         .spacing(space::GAP)
         .align_y(iced::Center);
-    let toolbar = tray(e.held, radius::FULL, segments)
+    let toolbar = tray_joined(e.held, radius::FULL, JOIN.get(), segments)
         .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
-        .height(bar::HEIGHT);
+        .height(bar::SNIP_HEIGHT);
     let Some(menu) = e.menu else {
         // the first Snip ever: a one-time hint by the Studio button (seg 3, item 0)
         let hint = (e.studio_hint && idle).then(|| {
@@ -657,8 +668,26 @@ const SLIDER_W: f32 = size::PANEL - 2.0 * space::PANEL - 102.0 - SPACING;
 /// The row under the toolbar (UX C4): its room, and the gap above it.
 /// Attached directly under (or above) the Snip toolbar as one piece (owner, 2026-11-26).
 pub const ROW_GAP: f32 = 0.0;
-pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 8.0;
+/// The row covers this much of the toolbar's edge so the two rims make one line.
+pub const JOIN_OVERLAP: f32 = 1.0;
+/// The row's side padding (the design's `.orow`: 10 px + the rim).
+const ROW_PAD_X: f32 = 11.0;
+pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 2.0 * widget_e::TRAY_PAD_Y;
 pub const ROW_ROOM: f32 = ROW_GAP + ROW_H;
+
+/// Tell the toolbar and its row which edge they share (before building either).
+pub fn set_join(toolbar_edge: Join) {
+    JOIN.set(toolbar_edge);
+}
+
+/// The row's own joined edge: the opposite of the toolbar's.
+fn row_join() -> Join {
+    match JOIN.get() {
+        Join::Below => Join::Above,
+        Join::Above => Join::Below,
+        Join::None => Join::None,
+    }
+}
 
 /// The widest an options row is meant to get (Hide's, at 100 %): the room the host keeps for it.
 pub const ROW_WIDE: f32 = 1250.0;
@@ -713,12 +742,17 @@ pub fn options_row_tips(
     let on = e.focus.filter(|f| (from..to).contains(f)).map(|f| f - from);
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
     Some(
-        tray(false, radius::FULL, crate::shared::kit::scroll::across(row))
-            .padding([4.0, widget_e::TRAY_PAD_X])
-            .height(ROW_H)
-            .max_width(max_w)
-            .align_y(iced::Center)
-            .into(),
+        tray_joined(
+            false,
+            radius::FULL,
+            row_join(),
+            crate::shared::kit::scroll::across(row),
+        )
+        .padding([widget_e::TRAY_PAD_Y, ROW_PAD_X])
+        .height(ROW_H)
+        .max_width(max_w)
+        .align_y(iced::Center)
+        .into(),
     )
 }
 
@@ -1924,7 +1958,7 @@ mod tests {
             );
             // the row's groups are raised too: a `track` row, its group's edge, `widget`
             assert!(
-                shot::two_tone_column(&row_px, 900, ROW_H as u32, theme, 4.0),
+                shot::two_tone_column(&row_px, 900, ROW_H as u32, theme, widget_e::TRAY_PAD_Y),
                 "{}: options row: no track ring round a raised group",
                 theme.id
             );

@@ -408,9 +408,11 @@ fn size_face<'a, Message: 'a>(
         .font(super::icon::FONT)
         .size(glyph)
         .color(if hot { c().text } else { c().text_sub });
+    // one line always (the design's `.szc`), however wide the pixels are
     let size = text(label.to_string())
         .size(11.5)
         .font(mono(Weight::Medium))
+        .wrapping(iced::widget::text::Wrapping::None)
         .color(ink);
     container(row![picture, size].spacing(space::GAP).align_y(Center))
         .padding([0, pad])

@@ -17,7 +17,7 @@ use crate::shared::kit::dir;
 use crate::shared::kit::icon_button::{State, pill_icon, quiet_close};
 use crate::shared::kit::markdown;
 use crate::shared::kit::panel_frame::{self as frame, Header};
-use crate::shared::kit::surface::{Material, segment_row, surface};
+use crate::shared::kit::surface::{Material, segment_row_pad, surface};
 use crate::shared::kit::text::{muted, text as label};
 use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius};
@@ -255,12 +255,15 @@ impl Session {
 
     /// The pill's raised action segment: Original, Snip, glossary, quiet x.
     fn tail(&self) -> Element<'_, Msg> {
-        segment_row([
-            self.original_button(),
-            self.snip_button(),
-            self.glossary.button(),
-            self.close_button(),
-        ])
+        segment_row_pad(
+            crate::shared::kit::tokens::widget_e::SEGMENT_PAD_Y_PILL,
+            [
+                self.original_button(),
+                self.snip_button(),
+                self.glossary.button(),
+                self.close_button(),
+            ],
+        )
     }
 
     /// The pill with the offer beside it: "Spanish text found" and its Get.

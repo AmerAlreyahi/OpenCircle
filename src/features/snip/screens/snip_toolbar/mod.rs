@@ -13,6 +13,7 @@ use crate::features::circle::screens::bar::geometry::{BOTTOM_GAP, GAP};
 use crate::features::snip::annotate::{self, Annotator, Image, Message, Output};
 use crate::shared::kit::chip;
 use crate::shared::kit::key_hint::{self, key_hint};
+use crate::shared::kit::surface::Join;
 use crate::shared::picture::Crop;
 
 /// Snip's keyboard hint (after an arrow key) and its position readout's width.
@@ -301,7 +302,14 @@ impl SnipToolbar {
             );
             // (the row's tooltips open away from the toolbar: down under it, up above it)
             let row_above_bar = row_above(at.y, size.height, toolbar::ROW_ROOM, screen.height);
+            toolbar::set_join(match row_above_bar {
+                true => Join::Above,
+                false => Join::Below,
+            });
             let row = toolbar::options_row_tips(&self.annotator, x1 - x0, row_tips(row_above_bar));
+            if row.is_none() {
+                toolbar::set_join(Join::None);
+            }
             let room = if row.is_some() {
                 toolbar::ROW_ROOM
             } else {
@@ -360,8 +368,8 @@ fn row_above(bar_y: f32, bar_h: f32, room: f32, screen_h: f32) -> bool {
 /// The row's top: under the toolbar, or above it.
 fn row_y(bar_y: f32, bar_h: f32, above: bool) -> f32 {
     match above {
-        false => bar_y + bar_h + toolbar::ROW_GAP,
-        true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H,
+        false => bar_y + bar_h + toolbar::ROW_GAP - toolbar::JOIN_OVERLAP,
+        true => bar_y - toolbar::ROW_GAP - toolbar::ROW_H + toolbar::JOIN_OVERLAP,
     }
 }
 
@@ -532,8 +540,11 @@ mod tests {
         let bar_h = toolbar::size().height;
         assert!(!row_above(300.0, bar_h, room, 720.0));
         assert!(row_above(720.0 - bar_h - 4.0, bar_h, room, 720.0));
-        assert_eq!(row_y(300.0, bar_h, false), 300.0 + bar_h);
-        assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0);
+        assert_eq!(
+            row_y(300.0, bar_h, false),
+            300.0 + bar_h - toolbar::JOIN_OVERLAP
+        );
+        assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0 + toolbar::JOIN_OVERLAP);
         // the tooltips go to the other side of the row; with no row, where they were
         assert_eq!(toolbar_tips(true, false, Bottom), Top);
         assert_eq!(toolbar_tips(true, true, Top), Bottom);

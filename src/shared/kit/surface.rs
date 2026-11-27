@@ -86,19 +86,89 @@ pub fn tray<'a, Message: 'a>(
     )
 }
 
+/// Which edge of a tray another tray is attached to (the Snip options row and its toolbar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Join {
+    None,
+    /// A tray sits against this one's bottom edge.
+    Below,
+    /// A tray sits against this one's top edge.
+    Above,
+}
+
+/// The corner radius on the joined edge: small, so two trays read as one piece.
+pub const JOIN_RADIUS: f32 = 8.0;
+
+/// A tray whose `join` edge is nearly square, to sit flush against its neighbour.
+pub fn tray_joined<'a, Message: 'a>(
+    held: bool,
+    radius: f32,
+    join: Join,
+    content: impl Into<Element<'a, Message>>,
+) -> Container<'a, Message> {
+    let (edge, fill) = if held {
+        (c_accent(), c().track)
+    } else {
+        (c().rim, c().track)
+    };
+    let j = JOIN_RADIUS.min(radius);
+    // top-left, top-right, bottom-right, bottom-left
+    let corners = match join {
+        Join::None => [radius; 4],
+        Join::Below => [radius, radius, j, j],
+        Join::Above => [j, j, radius, radius],
+    };
+    container(content).style(move |_| container::Style {
+        background: Some(fill.into()),
+        border: Border {
+            radius: iced::border::Radius {
+                top_left: corners[0],
+                top_right: corners[1],
+                bottom_right: corners[2],
+                bottom_left: corners[3],
+            },
+            width: 1.0,
+            color: edge,
+        },
+        ..container::Style::default()
+    })
+}
+
+fn c_accent() -> Color {
+    c().accent
+}
+
 /// Style E raised pill segment (`.gp`) inside a floating tray: `widget` fill,
 /// subtle 1 px edge, pill corners, padded for controls.
 pub fn segment<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    segment_card(radius::FULL, content).padding([widget_e::SEGMENT_PAD_Y, widget_e::SEGMENT_PAD_X])
+    segment_pad(widget_e::SEGMENT_PAD_Y, content)
+}
+
+/// `segment` with its own vertical padding (the Snip toolbar's and the translate pill's
+/// segments are shorter than the bar's: `widget_e::SEGMENT_PAD_Y_*`).
+pub fn segment_pad<'a, Message: 'a>(
+    pad_y: f32,
+    content: impl Into<Element<'a, Message>>,
+) -> Container<'a, Message> {
+    segment_card(radius::FULL, content).padding([pad_y, widget_e::SEGMENT_PAD_X])
 }
 
 /// Style E raised pill segment holding a direction-aware row of controls.
 pub fn segment_row<'a, Message: 'a>(
     items: impl IntoIterator<Item = Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    segment(
+    segment_row_pad(widget_e::SEGMENT_PAD_Y, items)
+}
+
+/// `segment_row` with its own vertical padding (see `segment_pad`).
+pub fn segment_row_pad<'a, Message: 'a>(
+    pad_y: f32,
+    items: impl IntoIterator<Item = Element<'a, Message>>,
+) -> Element<'a, Message> {
+    segment_pad(
+        pad_y,
         super::dir::row(items)
             .spacing(widget_e::SEGMENT_GAP)
             .align_y(Center),

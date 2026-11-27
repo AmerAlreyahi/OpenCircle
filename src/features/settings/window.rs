@@ -199,15 +199,10 @@ fn report_dialog<'a>() -> Element<'a, Message> {
         .into(),
         sub(Role::ROW_DESC, t!(ab_trouble_desc)).into(),
         // the buttons sit in the middle of the popup (owner, 2026-11-25)
-        crate::dir_row![
-            Space::new().width(Fill),
+        modal::buttons(vec![
             crate::shared::kit::button::regular(t!(ab_diag), true, Some(Message::CopyDiagnostics)),
             crate::shared::kit::button::regular(t!(ab_report), false, Some(Message::ReportProblem)),
-            Space::new().width(Fill),
-        ]
-        .spacing(space::GAP)
-        .align_y(Center)
-        .into(),
+        ]),
     ])
 }
 

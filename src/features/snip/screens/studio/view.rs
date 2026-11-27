@@ -975,17 +975,14 @@ const QUESTION_W: f32 = 460.0;
 fn question<'a>() -> Element<'a, Msg> {
     let labels = [t!(st_dont_save), t!(c_cancel), t!(c_save)];
     let w = button::dialog_width(&labels);
-    let buttons = crate::dir_row![
-        Space::new().width(Fill),
+    let buttons = modal::buttons(vec![
         button::dialog(labels[0], w, Kind::Elevated, Msg::DontSave),
         button::dialog(labels[1], w, Kind::Elevated, Msg::Cancel),
         button::dialog(labels[2], w, Kind::Accent, Msg::SaveFirst),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
+    ]);
     modal::pad(vec![
         modal::header(t!(st_ask_close), Some(t!(st_ask_hint)), Msg::Cancel),
-        buttons.into(),
+        buttons,
     ])
 }
 

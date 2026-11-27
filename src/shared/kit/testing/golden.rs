@@ -33,6 +33,16 @@ pub fn check<'a, Message: 'a>(
         return Vec::new();
     }
     let mut failed = Vec::new();
+    // design-fidelity sheets: also draw every view at 1x and 2x into this folder (no comparing)
+    if let Some(out) = std::env::var_os("OPENCIRCLE_RENDER_SCALES_OUT") {
+        for scale in [1.0_f32, 2.0] {
+            let (_, px) = shot::redrawn(|i| (i == 0).then(&view), size, scale);
+            let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);
+            let file = Path::new(&out).join(format!("{name}@{scale}x.png"));
+            let _ = std::fs::create_dir_all(file.parent().unwrap());
+            let _ = crate::shared::picture::write_png(&file, w, h, &px);
+        }
+    }
     for &scale in scales {
         let (_, pixels) = shot::redrawn(|i| (i == 0).then(&view), size, scale);
         let (w, h) = ((size.width * scale) as u32, (size.height * scale) as u32);

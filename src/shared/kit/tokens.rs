@@ -229,17 +229,21 @@ pub mod fixed {
 /// Floating-widget style E (two-tone, grouped segments): recessed `track`
 /// tray with raised `widget` segments. Radii and the gap reuse `radius::*` / `space::GAP`.
 pub mod widget_e {
-    /// Outer tray padding.
-    pub const TRAY_PAD_X: f32 = 5.0;
-    pub const TRAY_PAD_Y: f32 = 5.0;
+    /// Outer tray padding, rim included (design: `.ws` 1 px border + 5 px margin).
+    pub const TRAY_PAD_X: f32 = 6.0;
+    pub const TRAY_PAD_Y: f32 = 6.0;
     /// Raised segment (`.gp`) inner padding and item gap.
     pub const SEGMENT_PAD_X: f32 = 5.0;
+    /// The bar's (36 px pills in a 56 px tray); the Snip toolbar's is 3 (34 px buttons, 52 px tray),
+    /// the translate pill's 1 (34 px chips, 48 px tray).
     pub const SEGMENT_PAD_Y: f32 = 4.0;
+    pub const SEGMENT_PAD_Y_SNIP: f32 = 3.0;
+    pub const SEGMENT_PAD_Y_PILL: f32 = 1.0;
     pub const SEGMENT_GAP: f32 = 2.0;
     /// Quiet close button (`.qx`).
     pub const QUIET_X: f32 = 28.0;
     /// Action pill height inside a segment (`.pl`).
-    pub const PILL_H: f32 = 34.0;
+    pub const PILL_H: f32 = 36.0;
     /// Size readout pill inside a segment (`.szc`).
     pub const SIZE_PILL_H: f32 = 30.0;
     /// Menu padding and row height (`.mn` / `.mr`).

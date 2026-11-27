@@ -35,8 +35,12 @@ pub(crate) const ICON_PILL: f32 = 36.0;
 pub(crate) const BUBBLE: f32 = size::ICON_BUTTON;
 /// Extra width of one style E raised segment (horizontal padding each side).
 const SEG_EXTRA: f32 = 2.0 * widget_e::SEGMENT_PAD_X;
-/// The bar's height: tray padding + raised segment padding + 34 px controls (52 px).
-pub(crate) const HEIGHT: f32 = BUBBLE + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y;
+/// The bar's height: tray padding + raised segment padding + 36 px pills (56 px, the design's `.bar`).
+pub(crate) const HEIGHT: f32 =
+    widget_e::PILL_H + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y;
+/// The Snip toolbar's: 34 px buttons in 3 px segments (52 px, the design's `.stb`).
+pub(crate) const SNIP_HEIGHT: f32 =
+    BUBBLE + 2.0 * widget_e::SEGMENT_PAD_Y_SNIP + 2.0 * widget_e::TRAY_PAD_Y;
 /// The QR code chip: as tall as the bar; its padding across and the space
 /// between its parts; the longest QR text it shows, in characters.
 pub(crate) const QR_PAD: f32 = 14.0;

@@ -186,30 +186,28 @@ pub fn restore<'a>(
     later: Msg,
     failed: bool,
 ) -> Element<'a, Msg> {
-    let sized = |b: Element<'a, Msg>| container(b).width(RESTORE_BUTTON);
+    let sized = |b: Element<'a, Msg>| Element::from(container(b).width(RESTORE_BUTTON));
     let hint = match failed {
         true => t!(st_restore_failed),
         false => t!(st_restore_hint),
     };
-    let buttons = crate::dir_row![
-        iced::widget::Space::new().width(Fill),
+    let buttons = crate::shared::kit::modal::buttons(vec![
         sized(button::button(
             label(t!(st_later)),
             Kind::Quiet,
-            Some(later.clone())
+            Some(later.clone()),
         )),
         sized(button::button(
             label(t!(st_discard)),
             Kind::Elevated,
-            Some(discard)
+            Some(discard),
         )),
         sized(button::button(
             label(t!(st_restore)),
             Kind::Accent,
-            Some(restore)
+            Some(restore),
         )),
-    ]
-    .spacing(space::GAP);
+    ]);
     crate::shared::kit::modal::pad(vec![
         crate::shared::kit::modal::header(t!(st_restore_title), Some(hint), later),
         muted(
@@ -217,7 +215,7 @@ pub fn restore<'a>(
             format!("{} · {} × {}", r.name, r.size.0, r.size.1),
         )
         .into(),
-        buttons.into(),
+        buttons,
     ])
 }
 

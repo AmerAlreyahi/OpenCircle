@@ -63,7 +63,15 @@ pub fn over_lifted<'a, Message: Clone + 'a>(
     over_rising(base, card, close, rise)
 }
 
-/// The body of a small confirmation: `body` under the header, `buttons` (right) below it.
+/// A dialog's option buttons, centred across the card (owner, 2026-11-27): the one row every
+/// dialog uses, in reading order (from the right in RTL).
+pub fn buttons<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    container(super::dir::row(items).spacing(space::GAP).align_y(Center))
+        .center_x(Fill)
+        .into()
+}
+
+/// The body of a small confirmation: `body` under the header, `buttons` below it.
 pub fn pad<'a, Message: 'a>(parts: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     container(column(parts).spacing(space::PAGE[1]))
         .padding(space::PAGE)
@@ -108,4 +116,35 @@ pub fn over_rising<'a, Message: Clone + 'a>(
         .height(Fill)
         .center(Fill);
     stack![base, dim, placed].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::kit::button::{self, Kind};
+    use crate::shared::kit::testing::shot;
+    use iced::Size;
+
+    /// Owner 2026-11-27: a dialog's option buttons sit in the middle of the card, not at its end.
+    #[test]
+    fn dialog_buttons_are_centred_across_the_card() {
+        let size = Size::new(460.0, 60.0);
+        let labels = ["Don't save", "Cancel", "Save"];
+        let w = button::dialog_width(&labels);
+        let row: Element<'_, ()> = buttons(vec![
+            button::dialog(labels[0], w, Kind::Elevated, ()),
+            button::dialog(labels[1], w, Kind::Elevated, ()),
+            button::dialog(labels[2], w, Kind::Accent, ()),
+        ]);
+        let texts = shot::texts_at(row, size);
+        assert_eq!(texts.len(), 3, "{texts:?}");
+        // (the labels differ in width: compare the middles of the first and last button's words)
+        let mid = |i: usize| texts[i].0.x + texts[i].0.width / 2.0;
+        let centre = (mid(0) + mid(2)) / 2.0;
+        assert!(
+            (centre - size.width / 2.0).abs() < 2.0,
+            "buttons off centre: {centre} of {}",
+            size.width
+        );
+    }
 }

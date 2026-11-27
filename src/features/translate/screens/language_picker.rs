@@ -23,7 +23,7 @@ use crate::shared::kit::field;
 use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::option_list::{self, Look, choice, group, keyed, needs_ai, opener};
 use crate::shared::kit::scroll;
-use crate::shared::kit::surface::{segment, tray};
+use crate::shared::kit::surface::tray;
 use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
@@ -45,7 +45,7 @@ pub const SLOT: f32 = SEG_EXTRA + 3.0 * size::ICON_BUTTON + widget_e::QUIET_X + 
 /// The pill: its size never changes (style E two-segment tray, 52 px tall).
 pub const PILL: Size = Size::new(
     2.0 * PAD + CHIPS_SEG + space::GAP + SLOT,
-    CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y,
+    CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y_PILL + 2.0 * widget_e::TRAY_PAD_Y,
 );
 /// The open list (fixed) and its gap under the pill.
 pub const LIST: Size = Size::new(248.0, 350.0);
@@ -478,7 +478,11 @@ impl Picker {
         map: fn(Msg) -> M,
         tail: Element<'a, M>,
     ) -> Element<'a, M> {
-        let chips: Element<'a, M> = segment(self.chips().map(map)).into();
+        let chips: Element<'a, M> = crate::shared::kit::surface::segment_pad(
+            widget_e::SEGMENT_PAD_Y_PILL,
+            self.chips().map(map),
+        )
+        .into();
         let line = dir::row([chips, tail]).spacing(space::GAP).align_y(Center);
         tray(false, radius::FULL, line)
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
