@@ -274,7 +274,7 @@
         {
           "id": "R-03",
           "title": "Audio foundations: microphone and system audio (#118)",
-          "status": "todo",
+          "status": "done",
           "depends": [
             "R-01"
           ]
@@ -313,7 +313,7 @@
         {
           "id": "R-09",
           "title": "Snip toolbar: Long capture button on the main toolbar (out of More)",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-10",

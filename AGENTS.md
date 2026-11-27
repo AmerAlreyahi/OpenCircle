@@ -1891,3 +1891,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   corner, Copy all = accent button, the Studio button = the design's quiet secondary button with its picture icon; (2) Live pin: the
   picture with rounded corners and a thin look-coloured border (not the thick yellow one), the hover toolbar as ONE style E tray
   (link, click-through (active state), copy, save, close) as drawn.
+- Recording lab L3/L4 (2026-11-27, docs/internal/reports-060/l34-recording-lab.md): stock Ubuntu 22.04 has VP8/VP9 + Opus + mp4mux/
+  webmmux + pipewiresrc; x264 only with plugins-ugly. Capture at 1080p passes on GNOME X11 (x264 30/60 fps <= 0.25 % dropped, ~0.3/0.5
+  cores; VP8 30 fps pass, 60 fps 5-6 % dropped) and GNOME Wayland (Mutter's ScreenCast -> pipewiresrc, all cases pass, <= 1.43 cores
+  peak; Mutter delivers ~55 fps). Lead defaults (owner may reverse): 30 fps default; x264 + MP4 when present, else VP8 + WebM with an
+  explicit bitrate (VP8's default 256 kbps is too low for screens); 60 fps only behind the auto-30 fallback.
