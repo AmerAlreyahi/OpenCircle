@@ -5,6 +5,7 @@
 //! the save folder (General's, the one folder), the pointer, the timer, how
 //! tall a long capture may grow, and Recent captures (its switch is on
 //! History).
+use crate::shared::kit::icon::Icon;
 use crate::t;
 use iced::Element;
 use iced::widget::column;
@@ -61,13 +62,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let opens = [
         (
             StudioOpenIn::Quick,
-            Mark::Glyph('\u{e151}'),
+            Mark::Glyph(Icon::Scissors.glyph()),
             t!(ss_quick),
             t!(sn_widget_d),
         ),
         (
             StudioOpenIn::Studio,
-            Mark::Glyph('\u{e416}'),
+            Mark::Glyph(Icon::Sparkles.glyph()),
             t!(nav_studio),
             t!(ss_studio_d),
         ),

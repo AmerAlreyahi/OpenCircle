@@ -1,5 +1,6 @@
 //! Look & behaviour (`settings-window.js` "LOOK & BEHAVIOUR"): how a
 //! selection behaves; the looks are in Appearance, the reader in Text reading.
+use crate::shared::kit::icon::Icon;
 use crate::t;
 use iced::Element;
 use iced::widget::column;
@@ -16,13 +17,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let styles = [
         (
             SelectStyle::Snap,
-            Mark::Glyph('\u{e16a}'),
+            Mark::Glyph(Icon::Square.glyph()),
             t!(l_sel_snap),
             t!(l_sel_snap_d),
         ),
         (
             SelectStyle::Shape,
-            Mark::Glyph('\u{e07a}'),
+            Mark::Glyph(Icon::Circle.glyph()),
             t!(l_sel_drawn),
             t!(l_sel_drawn_d),
         ),

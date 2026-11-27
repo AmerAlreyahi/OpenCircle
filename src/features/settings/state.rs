@@ -34,6 +34,7 @@ use crate::shared::config::{
 use crate::shared::history::{Counts, Kind};
 use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion::{self, Curve};
+use crate::shared::kit::nav_card;
 use crate::shared::kit::themes::THEMES;
 use crate::shared::kit::tokens::{settings, size};
 use crate::shared::platform::hotkey::{DesktopKey, managed};
@@ -52,11 +53,16 @@ pub const WINDOW_SIZE: Size = Size::new(1280.0, 800.0);
 /// The sidebar card's rows the least height shows (more scroll: only on a small screen).
 const LISTED: usize = 10;
 /// The sidebar card's padding and hairlines, and its foot (two items under a hairline).
-const NAV_CHROME: f32 = 20.0 + 3.0 * 13.0 + 13.0 + 2.0 * (settings::NAV_ITEM + 2.0);
+const NAV_CHROME: f32 = 2.0 * nav_card::CARD_PAD_V
+    + 3.0 * nav_card::SEPARATOR
+    + nav_card::SEPARATOR
+    + 2.0 * (nav_card::ITEM + nav_card::ROW_GAP);
 
 /// The height that shows the title bar and every sidebar row (Labs on).
-pub const FIT_HEIGHT: f32 =
-    size::HEADER + settings::GUTTER + LISTED as f32 * (settings::NAV_ITEM + 2.0) + NAV_CHROME;
+pub const FIT_HEIGHT: f32 = size::HEADER
+    + settings::GUTTER
+    + LISTED as f32 * (nav_card::ITEM + nav_card::ROW_GAP)
+    + NAV_CHROME;
 /// The narrowest layout that keeps the label column readable beside a control (the sidebar card 246 px).
 pub(super) const MIN_WIDTH: f32 = 980.0;
 

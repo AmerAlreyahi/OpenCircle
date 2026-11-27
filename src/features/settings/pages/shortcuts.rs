@@ -16,13 +16,24 @@ use crate::shared::kit::shortcut_field::{self, shortcut_field};
 use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
+use crate::shared::platform::hotkey::QuickId;
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    // as the design draws: Open (Circle to Search, Snip), then the other quick actions. Its
+    // Recording group (record video / audio) waits: no recording key exists in the config yet.
+    let opens = |slot: &Slot| match slot {
+        Slot::Capture => true,
+        Slot::Quick(i) => state.draft.quick_actions[*i].action == QuickId::Snip,
+    };
+    let (open, quick): (Vec<Slot>, Vec<Slot>) = state.slots().partition(opens);
+    let group = |label, slots: Vec<Slot>| {
+        section(Some(label), None, move || {
+            slots.into_iter().map(|slot| row(state, slot)).collect()
+        })
+    };
     column![
-        section(None, None, || state
-            .slots()
-            .map(|slot| row(state, slot))
-            .collect()),
+        group(t!(k_group_open), open),
+        group(t!(k_group_quick), quick),
         section(None, None, || vec![reset(state)]),
     ]
     .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)

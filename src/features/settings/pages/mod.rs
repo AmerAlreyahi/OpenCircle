@@ -1,6 +1,7 @@
 //! Settings' pages, one list: the sidebar, the page shown and the Labs rule
 //! (a page of a Labs feature is listed only while its switch is on) all read
 //! `PAGES`. A new page = one entry here + one view file.
+use crate::shared::kit::icon::Icon;
 use iced::Element;
 
 use super::state::{Message, Section, State};
@@ -92,7 +93,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::General,
             S::nav_general,
-            '\u{e157}',
+            Icon::Settings.glyph(),
             0,
             S::pg_general,
             general::view,
@@ -102,7 +103,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Appearance,
             S::nav_appearance,
-            '\u{e1dc}',
+            Icon::Palette.glyph(),
             0,
             S::pg_appearance,
             appearance::view,
@@ -111,7 +112,7 @@ pub const PAGES: [Page; 15] = [
     page(
         Section::Look,
         S::nav_look,
-        '\u{e3fe}',
+        Icon::CircleArrowOut.glyph(),
         1,
         S::l_hero_desc,
         look::view,
@@ -120,7 +121,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Ai,
             S::nav_ai_search,
-            '\u{e119}',
+            Icon::Chat.glyph(),
             1,
             S::pg_ai,
             ai::view,
@@ -131,7 +132,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::TextReading,
             S::nav_text,
-            '\u{e197}',
+            Icon::Text.glyph(),
             1,
             S::l_hero_desc,
             text_reading::view,
@@ -141,7 +142,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Translate,
             S::nav_translate,
-            '\u{e103}',
+            Icon::Translate.glyph(),
             1,
             S::tr_hero_desc,
             translate::view,
@@ -150,7 +151,7 @@ pub const PAGES: [Page; 15] = [
     page(
         Section::Snip,
         S::nav_snip,
-        '\u{e151}',
+        Icon::Scissors.glyph(),
         1,
         S::s_hero_desc,
         snip::view,
@@ -158,7 +159,7 @@ pub const PAGES: [Page; 15] = [
     page(
         Section::Studio,
         S::nav_studio,
-        '\u{e416}',
+        Icon::Sparkles.glyph(),
         1,
         S::pg_studio,
         studio::view,
@@ -169,7 +170,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Song,
             S::lb_song,
-            '\u{e125}',
+            Icon::Music.glyph(),
             1,
             S::lb_song_d,
             song::view,
@@ -180,7 +181,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::History,
             S::nav_history,
-            '\u{e15b}',
+            Icon::Shield.glyph(),
             2,
             S::p_note,
             history::view,
@@ -189,7 +190,7 @@ pub const PAGES: [Page; 15] = [
     page(
         Section::Shortcuts,
         S::nav_shortcuts,
-        '\u{e283}',
+        Icon::Keyboard.glyph(),
         2,
         S::k_note,
         shortcuts::view,
@@ -197,7 +198,7 @@ pub const PAGES: [Page; 15] = [
     page(
         Section::Privacy,
         S::nav_privacy,
-        '\u{e15b}',
+        Icon::Shield.glyph(),
         2,
         S::p_note,
         privacy::view,
@@ -206,7 +207,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Extensions,
             S::nav_extensions,
-            '\u{e29b}',
+            Icon::Puzzle.glyph(),
             3,
             S::pg_extensions,
             extensions::view,
@@ -216,7 +217,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::About,
             S::nav_about,
-            '\u{e0fe}',
+            Icon::Info.glyph(),
             3,
             S::pg_about,
             about::view,
@@ -227,7 +228,7 @@ pub const PAGES: [Page; 15] = [
         ..page(
             Section::Labs,
             S::nav_labs,
-            '\u{e0da}',
+            Icon::Flask.glyph(),
             3,
             S::lb_note,
             labs::view,

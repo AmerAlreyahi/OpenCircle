@@ -6,6 +6,7 @@
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
 //! with the GPU renderer.
+use crate::shared::kit::icon::Icon;
 use iced::widget::{Space, column, container, mouse_area, row};
 use iced::{Center, Element, Fill, Padding};
 
@@ -22,7 +23,7 @@ use crate::shared::kit::page_head::page_head;
 use crate::shared::kit::scroll::scroll;
 use crate::shared::kit::search_card::{Hit, search_card};
 use crate::shared::kit::text::sub;
-use crate::shared::kit::tokens::settings::{CONTENT_MAX, CONTENT_PAD, GUTTER, SEARCH_W};
+use crate::shared::kit::tokens::settings::{self, CONTENT_MAX, CONTENT_PAD, GUTTER, SEARCH_W};
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
@@ -89,7 +90,12 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
             .height(Fill),
     );
     match state.reporting {
-        true => modal::over(window, report_dialog(), REPORT_W, Message::Dismiss),
+        true => modal::over(
+            window,
+            report_dialog(),
+            settings::REPORT_W,
+            Message::Dismiss,
+        ),
         false => window,
     }
 }
@@ -178,16 +184,13 @@ fn search_hits(state: &State) -> Option<Element<'_, Message>> {
     Some(layer.into())
 }
 
-/// The dialog's width.
-const REPORT_W: f32 = 420.0;
-
 /// "Report a problem" (owner, 2026-11-18): copy the diagnostics (the accent: the report
 /// needs them), then report; nothing is sent.
 fn report_dialog<'a>() -> Element<'a, Message> {
     modal::pad(vec![
         // the flag, then the title and the x (never mirrored, like the header)
         row![
-            crate::shared::kit::icon::glyph('\u{e0d6}', 18.0)
+            crate::shared::kit::icon::glyph(Icon::Flag.glyph(), settings::FLAG)
                 .color(crate::shared::kit::themes::c().accent),
             modal::header(t!(ab_trouble), None, Message::Dismiss),
         ]
@@ -282,25 +285,21 @@ fn nav(state: &State) -> Element<'_, Message> {
         move |i| Message::Section(ids[i]),
         Foot {
             label: t!(ab_report),
-            glyph: '\u{e0d6}',
+            glyph: Icon::Flag.glyph(),
             keys: &[],
             on_press: Message::ReportOpen,
         },
         Foot {
             label: t!(win_collapse),
-            glyph: '\u{e12d}',
+            glyph: Icon::PanelLeft.glyph(),
             keys: &["Ctrl", "B"],
             on_press: Message::ToggleNav,
         },
     )
 }
 
-/// The window width from which a page's clip stands in a column beside the settings (A5+).
-const WIDE: f32 = 1560.0;
-const CLIP_COLUMN: f32 = 380.0;
-
 fn page(state: &State) -> Element<'_, Message> {
-    let wide = state.win_w >= WIDE;
+    let wide = state.win_w >= settings::WIDE;
     let page = pages::of(state.section);
     // A3+: "See how it works" opens the clip under the head (a wide window shows it in a column)
     let see = previews::opener(state)
@@ -327,7 +326,7 @@ fn page(state: &State) -> Element<'_, Message> {
                 false => crate::shared::kit::section::framed((page.view)(state)),
             },
         ))
-        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP);
+        .spacing(settings::SECTION_GAP);
     // at most `CONTENT_MAX` wide, in the middle of the card
     let body = container(container(body).id(PAGE_ID).width(Fill))
         .padding(Padding::from([CONTENT_PAD[0], CONTENT_PAD[1]]))
@@ -343,8 +342,8 @@ fn page(state: &State) -> Element<'_, Message> {
     if let Some(clip) = beside {
         inside = inside.push(
             container(clip)
-                .width(CLIP_COLUMN)
-                .padding(Padding::from([CONTENT_PAD[0], 20.0])),
+                .width(settings::CLIP_COLUMN)
+                .padding(Padding::from([CONTENT_PAD[0], settings::CLIP_PAD_X])),
         );
     }
     floating_card(inside)

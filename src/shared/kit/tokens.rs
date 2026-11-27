@@ -51,7 +51,6 @@ pub mod settings {
     /// The gap round and between the two floating cards.
     pub const GUTTER: f32 = 12.0;
     pub const CARD_RADIUS: f32 = 18.0;
-    pub const NAV_ITEM: f32 = 38.0;
     /// The page's widest (padding included), and its padding `[top, side]`.
     pub const CONTENT_MAX: f32 = 880.0;
     pub const CONTENT_PAD: [f32; 2] = [28.0, 36.0];
@@ -61,6 +60,17 @@ pub mod settings {
     pub const SEARCH_W: f32 = 560.0;
     /// The page header's icon tile.
     pub const TILE: f32 = 40.0;
+    /// The window width from which a page's clip stands in a column beside the page, that
+    /// column's width and its side padding.
+    pub const WIDE: f32 = 1560.0;
+    pub const CLIP_COLUMN: f32 = 380.0;
+    pub const CLIP_PAD_X: f32 = 20.0;
+    /// The Report a problem dialog's width, and its flag.
+    pub const REPORT_W: f32 = 420.0;
+    pub const FLAG: f32 = 18.0;
+    /// An empty state's glyph and its vertical padding (Extensions).
+    pub const EMPTY_GLYPH: f32 = 20.0;
+    pub const EMPTY_PAD_Y: f32 = 24.0;
 }
 
 /// Fixed control sizes.

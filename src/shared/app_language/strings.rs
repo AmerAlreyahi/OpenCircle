@@ -550,6 +550,10 @@ strings! {
         | "عادت الاختصارات إلى قيمتها الافتراضية";
     k_reset_undo: "Undo"
         | "تراجع";
+    k_group_open: "Open"
+        | "فتح";
+    k_group_quick: "Quick actions"
+        | "إجراءات سريعة";
     k_open: "Circle to Search"
         | "البحث بالدائرة";
     k_open_desc: "Freezes the screen so you can circle or select"

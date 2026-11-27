@@ -3,6 +3,7 @@
 //! and a way to add a missing language. Listed on Windows only (Linux has the
 //! one reader). The design's "Keep ready", GPU and NVIDIA rows are not
 //! settings OpenCircle has.
+use crate::shared::kit::icon::Icon;
 use crate::t;
 use iced::Element;
 use iced::widget::column;
@@ -23,19 +24,19 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let engines = [
         (
             TextReader::Auto,
-            Mark::Glyph('\u{e148}'),
+            Mark::Glyph(Icon::Refresh.glyph()),
             t!(t_auto),
             t!(t_auto_d),
         ),
         (
             TextReader::Windows,
-            Mark::Glyph('\u{e1b3}'),
+            Mark::Glyph(Icon::Zap.glyph()),
             t!(t_fast),
             t!(t_fast_d),
         ),
         (
             TextReader::PpOcr,
-            Mark::Glyph('\u{e183}'),
+            Mark::Glyph(Icon::Target.glyph()),
             t!(t_accurate),
             t!(t_accurate_d),
         ),

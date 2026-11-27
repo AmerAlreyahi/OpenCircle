@@ -28,7 +28,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let actions = [
         (
             DefaultAction::Lens,
-            Mark::Glyph('\u{e154}'),
+            Mark::Glyph(Icon::Search.glyph()),
             t!(g_default_search),
             t!(g_default_search_d),
         ),
@@ -40,13 +40,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
         ),
         (
             DefaultAction::Text,
-            Mark::Glyph('\u{e197}'),
+            Mark::Glyph(Icon::Text.glyph()),
             t!(g_default_text),
             t!(g_default_text_d),
         ),
         (
             DefaultAction::Copy,
-            Mark::Glyph('\u{e0f9}'),
+            Mark::Glyph(Icon::Picture.glyph()),
             t!(g_default_copy),
             t!(g_default_copy_d),
         ),

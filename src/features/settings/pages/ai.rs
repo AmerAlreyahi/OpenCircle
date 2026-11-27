@@ -5,6 +5,7 @@
 //! code). The design's sign-in, local-model and answer-style parts belong to
 //! AI online and are not drawn.
 use crate::shared::app_language::tr;
+use crate::shared::kit::icon::Icon;
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column};
@@ -111,7 +112,7 @@ fn answer_rows(state: &State) -> Vec<Element<'_, Message>> {
     let now = path(ai);
     let cards = [
         Card {
-            mark: Mark::Glyph('\u{e154}'),
+            mark: Mark::Glyph(Icon::Search.glyph()),
             title: t!(ai_browser),
             desc: t!(ai_c_browser_d),
         },
@@ -121,7 +122,7 @@ fn answer_rows(state: &State) -> Vec<Element<'_, Message>> {
             desc: t!(ai_c_or_d),
         },
         Card {
-            mark: Mark::Glyph('\u{e119}'),
+            mark: Mark::Glyph(Icon::Chat.glyph()),
             title: t!(ai_c_own),
             desc: t!(ai_c_own_d),
         },

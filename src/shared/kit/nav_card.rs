@@ -12,7 +12,7 @@ use super::keycap::keycap;
 use super::scroll::scroll;
 use super::text::{sub, text};
 use super::themes::c;
-use super::tokens::settings::{NAV, NAV_ITEM, NAV_THIN};
+use super::tokens::settings::{NAV, NAV_THIN};
 use super::tokens::{Role, radius, size};
 use super::tooltip::{Why, hint};
 
@@ -35,6 +35,13 @@ pub struct Foot<'a, Message> {
     pub keys: &'a [&'a str],
     pub on_press: Message,
 }
+
+/// The card's vertical padding, a hairline's room (its padding and the line), the gap between
+/// rows and the rows' height: what a caller sums to size a card for its rows.
+pub const CARD_PAD_V: f32 = 10.0;
+pub const SEPARATOR: f32 = 13.0;
+pub const ROW_GAP: f32 = 2.0;
+pub const ITEM: f32 = size::NAV_ITEM;
 
 const BAR_W: f32 = 3.0;
 const BAR_H: f32 = 18.0;
@@ -98,7 +105,7 @@ fn item<'a, Message: Clone + 'a>(
     };
     let body = button(line)
         .width(Fill)
-        .height(NAV_ITEM)
+        .height(ITEM)
         .padding(super::dir::pad(Padding {
             left: PAD - 4.0,
             right: PAD + 2.0,
@@ -138,10 +145,10 @@ pub fn nav_card<'a, Message: Clone + 'a>(
     report: Foot<'a, Message>,
     collapse: Foot<'a, Message>,
 ) -> Element<'a, Message> {
-    let mut list = column![].spacing(2);
+    let mut list = column![].spacing(ROW_GAP);
     for (i, e) in entries.iter().enumerate() {
         if i > 0 && entries[i - 1].group != e.group {
-            list = list.push(container(divider()).padding([6.0, 4.0]));
+            list = list.push(container(divider()).padding([(SEPARATOR - 1.0) / 2.0, 4.0]));
         }
         list = list.push(item(
             e.glyph,
@@ -157,13 +164,13 @@ pub fn nav_card<'a, Message: Clone + 'a>(
         |f: Foot<'a, Message>| item(f.glyph, f.label, None, f.keys, false, collapsed, f.on_press);
     let body = column![
         scroll(list).height(Fill),
-        container(divider()).padding([6.0, 4.0]),
+        container(divider()).padding([(SEPARATOR - 1.0) / 2.0, 4.0]),
         foot(report),
         foot(collapse),
     ]
-    .spacing(2);
+    .spacing(ROW_GAP);
     floating_card(body)
-        .padding([10.0, 8.0])
+        .padding([CARD_PAD_V, 8.0])
         .width(if collapsed { NAV_THIN } else { NAV })
         .height(Fill)
         .into()

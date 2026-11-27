@@ -61,11 +61,47 @@ pub enum Icon {
     Glossary,
     /// lucide "eye" (the translate pill's Original toggle).
     Eye,
+    /// lucide "flag".
+    Flag,
+    /// lucide "panel-left".
+    PanelLeft,
+    /// lucide "square".
+    Square,
+    /// lucide "circle".
+    Circle,
+    /// lucide "refresh-cw".
+    Refresh,
+    /// lucide "zap".
+    Zap,
+    /// lucide "target".
+    Target,
+    /// lucide "settings".
+    Settings,
+    /// lucide "palette".
+    Palette,
+    /// lucide "circle-arrow-out-up-right".
+    CircleArrowOut,
+    /// lucide "message-circle".
+    Chat,
+    /// lucide "scissors".
+    Scissors,
+    /// lucide "sparkles".
+    Sparkles,
+    /// lucide "music".
+    Music,
+    /// lucide "keyboard".
+    Keyboard,
+    /// lucide "puzzle".
+    Puzzle,
+    /// lucide "info".
+    Info,
+    /// lucide "flask-conical".
+    Flask,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 29] = [
+    pub const ALL: [Icon; 47] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -95,6 +131,24 @@ impl Icon {
         Icon::Alert,
         Icon::Glossary,
         Icon::Eye,
+        Icon::Flag,
+        Icon::PanelLeft,
+        Icon::Square,
+        Icon::Circle,
+        Icon::Refresh,
+        Icon::Zap,
+        Icon::Target,
+        Icon::Settings,
+        Icon::Palette,
+        Icon::CircleArrowOut,
+        Icon::Chat,
+        Icon::Scissors,
+        Icon::Sparkles,
+        Icon::Music,
+        Icon::Keyboard,
+        Icon::Puzzle,
+        Icon::Info,
+        Icon::Flask,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -138,6 +192,24 @@ impl Icon {
             Icon::Alert => '\u{e07b}',
             Icon::Glossary => '\u{e548}',
             Icon::Eye => '\u{e0be}',
+            Icon::Flag => '\u{e0d6}',
+            Icon::PanelLeft => '\u{e12d}',
+            Icon::Square => '\u{e16a}',
+            Icon::Circle => '\u{e07a}',
+            Icon::Refresh => '\u{e148}',
+            Icon::Zap => '\u{e1b3}',
+            Icon::Target => '\u{e183}',
+            Icon::Settings => '\u{e157}',
+            Icon::Palette => '\u{e1dc}',
+            Icon::CircleArrowOut => '\u{e3fe}',
+            Icon::Chat => '\u{e119}',
+            Icon::Scissors => '\u{e151}',
+            Icon::Sparkles => '\u{e416}',
+            Icon::Music => '\u{e125}',
+            Icon::Keyboard => '\u{e283}',
+            Icon::Puzzle => '\u{e29b}',
+            Icon::Info => '\u{e0fe}',
+            Icon::Flask => '\u{e0da}',
         }
     }
 }

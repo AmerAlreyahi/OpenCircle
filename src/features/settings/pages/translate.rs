@@ -3,6 +3,7 @@
 //! offline models' update (while one still has the older v1 decoder) and
 //! the OptimaMT credit.
 use crate::shared::app_language::{S, fmt};
+use crate::shared::kit::icon::Icon;
 use crate::t;
 use iced::widget::tooltip::Position;
 use iced::widget::{Space, column, container};
@@ -212,14 +213,14 @@ fn language_rows(state: &State) -> Vec<Element<'_, Message>> {
     let engines = [
         (
             Engine::Offline,
-            Mark::Glyph('\u{e15b}'),
+            Mark::Glyph(Icon::Shield.glyph()),
             t!(tr_local),
             t!(tr_c_local_d),
         ),
         (Engine::Ai, Mark::Logo, t!(tr_ai), t!(tr_c_ai_d)),
         (
             Engine::Online,
-            Mark::Glyph('\u{e154}'),
+            Mark::Glyph(Icon::Search.glyph()),
             t!(tr_online),
             t!(tr_c_online_d),
         ),

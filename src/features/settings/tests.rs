@@ -365,7 +365,9 @@ fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
             FIT_HEIGHT > 400.0
                 && FIT_HEIGHT
                     <= WINDOW_SIZE.height
-                        + 2.0 * (crate::shared::kit::tokens::size::NAV_ITEM + 2.0)
+                        + 2.0
+                            * (crate::shared::kit::nav_card::ITEM
+                                + crate::shared::kit::nav_card::ROW_GAP)
         )
     };
 }
@@ -5370,4 +5372,66 @@ fn most_used_names_the_real_ai_provider() {
         .value
         .clone();
     assert_eq!(v.as_deref(), Some("Anthropic"));
+}
+
+/// Review fix 5: the settings screens draw icons through `kit::icon::Icon`, never a raw code.
+#[test]
+fn settings_screens_use_the_icon_enum_not_raw_codes() {
+    let raw = regex_lite_free_scan();
+    assert!(raw.is_empty(), "raw icon codes in screens: {raw:?}");
+}
+
+fn regex_lite_free_scan() -> Vec<String> {
+    let mut found = Vec::new();
+    let mut dirs = vec![std::path::PathBuf::from("src/features/settings")];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("tests.rs") {
+                let src = std::fs::read_to_string(&p).unwrap();
+                for (n, line) in src.lines().enumerate() {
+                    // a private-use code point of the icon font: '\u{e...}'
+                    if line.contains("'\\u{e") {
+                        found.push(format!("{}:{}", p.display(), n + 1));
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Review fix 6: Shortcuts lists OPEN (Circle to Search, Snip) then QUICK ACTIONS, as designed;
+/// there is no Recording group (no recording key exists yet).
+#[test]
+fn shortcuts_are_grouped_open_then_quick_actions() {
+    let (mut s, _) = state(None);
+    let texts = page(&mut s, Section::Shortcuts);
+    // (the sidebar repeats the names: look from the page's own first group on)
+    let up = |t: &str| t.to_uppercase();
+    let from = texts
+        .iter()
+        .position(|x| *x == up(t!(k_group_open)))
+        .unwrap();
+    let at = |t: &str| {
+        from + texts[from..]
+            .iter()
+            .position(|x| x == t || *x == up(t))
+            .unwrap_or_else(|| panic!("{t}: {texts:?}"))
+    };
+    let (open, quick) = (at(t!(k_group_open)), at(t!(k_group_quick)));
+    assert!(open < at(t!(k_open)) && at(t!(k_open)) < at(t!(nav_snip)) && at(t!(nav_snip)) < quick);
+    assert!(quick < at(t!(k_reset)));
+    assert!(!texts.iter().any(|x| x.to_lowercase().contains("recording")));
+}
+
+/// Review fix 7: the sidebar rows are one height (the kit's), the one the card sums for FIT_HEIGHT.
+#[test]
+fn the_sidebar_has_one_row_height() {
+    assert_eq!(
+        crate::shared::kit::nav_card::ITEM,
+        crate::shared::kit::tokens::size::NAV_ITEM
+    );
 }
