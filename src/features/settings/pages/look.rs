@@ -4,16 +4,40 @@ use crate::t;
 use iced::Element;
 use iced::widget::column;
 
-use super::super::state::{Message, Pick, Section, State};
+use super::super::state::{Message, Section, State};
 use crate::shared::config::SelectStyle;
 use crate::shared::kit::button::Kind;
-use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::choice_card::{Choice, Mark, choice_cards};
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let mut rows = column![selection_row(state)];
+    let style = state.draft.selection.style;
+    let styles = [
+        (
+            SelectStyle::Snap,
+            Mark::Glyph('\u{e16a}'),
+            t!(l_sel_snap),
+            t!(l_sel_snap_d),
+        ),
+        (
+            SelectStyle::Shape,
+            Mark::Glyph('\u{e07a}'),
+            t!(l_sel_drawn),
+            t!(l_sel_drawn_d),
+        ),
+    ];
+    let cards: Vec<_> = (styles.iter())
+        .map(|&(_, mark, title, desc)| Choice { mark, title, desc })
+        .collect();
+    let chosen = styles.iter().position(|s| s.0 == style).unwrap_or(0);
+    let selection = setting_row::block(
+        title(t!(l_sel)),
+        t!(l_sel_desc),
+        choice_cards(&cards, chosen, move |i| Message::SelectStyle(styles[i].0)),
+    );
     // the design's pointer to where the looks went
-    rows = rows.push(setting_row::row(
+    let themes = setting_row::row(
         title(t!(l_themes)),
         t!(l_themes_desc),
         setting_row::action(
@@ -21,29 +45,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Kind::Elevated,
             Some(Message::Section(Section::Appearance)),
         ),
-    ));
-    rows.into()
-}
-
-/// Snap to box / As drawn (Settings, and onboarding's first step).
-pub fn selection_row(state: &State) -> Element<'_, Message> {
-    let style = state.draft.selection.style;
-    let (from, t) = state.thumb(style, |p| match p {
-        Pick::Select(v) => Some(v),
-        _ => None,
-    });
-    setting_row::row(
-        title(t!(l_sel)),
-        t!(l_sel_desc),
-        segmented(
-            &[
-                (SelectStyle::Snap, t!(l_sel_snap)),
-                (SelectStyle::Shape, t!(l_sel_drawn)),
-            ],
-            style,
-            from,
-            t,
-            Message::SelectStyle,
-        ),
-    )
+    );
+    let mut page = column![section(Some(t!(l_sec)), None, || vec![selection, themes])]
+        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP);
+    // (Windows has two readers to choose from; Linux has the one)
+    if cfg!(windows) {
+        page = page.push(super::text_reading::view(state));
+    }
+    page.into()
 }

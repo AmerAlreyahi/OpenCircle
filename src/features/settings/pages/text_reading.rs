@@ -7,32 +7,46 @@ use crate::t;
 use iced::Element;
 use iced::widget::column;
 
-use super::super::state::{Message, Pick, State};
+use super::super::state::{Message, State};
 use crate::features::translate::lang;
+use crate::shared::app_language::S;
 use crate::shared::config::TextReader;
 use crate::shared::kit::button::Kind;
-use crate::shared::kit::segmented::segmented;
+use crate::shared::kit::choice_card::{Choice, Mark, choice_cards};
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::sub;
 use crate::shared::kit::tokens::{Role, space};
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let reader = state.draft.selection.text_reader;
-    let (from, t) = state.thumb(reader, |p| match p {
-        Pick::Reader(v) => Some(v),
-        _ => None,
-    });
-    let mut control = column![segmented(
-        &[
-            (TextReader::Auto, t!(t_auto)),
-            (TextReader::Windows, t!(t_fast)),
-            (TextReader::PpOcr, t!(t_accurate)),
-        ],
-        reader,
-        from,
-        t,
-        Message::TextReader,
-    )]
+    let engines = [
+        (
+            TextReader::Auto,
+            Mark::Glyph('\u{e148}'),
+            t!(t_auto),
+            t!(t_auto_d),
+        ),
+        (
+            TextReader::Windows,
+            Mark::Glyph('\u{e1b3}'),
+            t!(t_fast),
+            t!(t_fast_d),
+        ),
+        (
+            TextReader::PpOcr,
+            Mark::Glyph('\u{e183}'),
+            t!(t_accurate),
+            t!(t_accurate_d),
+        ),
+    ];
+    let cards: Vec<_> = (engines.iter())
+        .map(|&(_, mark, title, desc)| Choice { mark, title, desc })
+        .collect();
+    let chosen = engines.iter().position(|e| e.0 == reader).unwrap_or(0);
+    let mut control = column![choice_cards(&cards, chosen, move |i| Message::TextReader(
+        engines[i].0
+    ))]
     .spacing(space::GAP);
     if let Some(note) = state.reader_note() {
         let add = setting_row::action(
@@ -42,7 +56,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
         );
         control = control.push(sub(Role::ROW_DESC, note)).push(add);
     }
-    setting_row::row(title(t!(t_engine)), t!(t_engine_desc_src), control)
+    let engine = setting_row::block(title(t!(t_engine)), t!(t_engine_desc_src), control);
+    section(
+        Some(crate::shared::app_language::tr(S::nav_text)),
+        None,
+        || vec![engine],
+    )
 }
 
 /// Windows' language settings (never installs anything itself).

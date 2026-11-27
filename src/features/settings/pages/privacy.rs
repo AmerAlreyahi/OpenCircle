@@ -7,9 +7,9 @@ use iced::{Element, Fill, Length};
 use super::super::state::{Message, State};
 use crate::features::settings::labs::Feature;
 use crate::shared::app_language::{S, tr};
-use crate::shared::kit::card::card;
 use crate::shared::kit::dir;
 use crate::shared::kit::divider::divider;
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row;
 use crate::shared::kit::text::{sub, text};
 use crate::shared::kit::tokens::{Role, space};
@@ -71,5 +71,11 @@ pub fn view(state: &State) -> Element<'_, Message> {
             sub(Role::NOTE, tr(goes)).into(),
         ));
     }
-    card(table.width(Fill))
+    column![
+        section(Some(t!(p_h2)), None, || vec![table.width(Fill).into()]),
+        section(Some(t!(pv_kept)), None, || super::history::kept(state)),
+        section(None, None, || vec![super::history::clear_all(state)]),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }

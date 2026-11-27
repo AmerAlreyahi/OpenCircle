@@ -2198,7 +2198,21 @@ fn every_rows_control_shares_one_column(language: &'static str) {
                 crate::shared::app_language::tr(page.title)
             );
         }
-        columns.extend(found.into_iter().map(|b| (page.title, b.x, b.width)));
+        // (from the page box's end edge, where the control column sits: a page with a scroll bar
+        // has a narrower box)
+        let page_box = shot::containers(
+            view(&s),
+            WINDOW_SIZE,
+            crate::features::settings::window::PAGE_ID,
+        )[0];
+        let rtl = crate::shared::app_language::rtl();
+        columns.extend(found.into_iter().map(|b| {
+            let from_end = match rtl {
+                true => b.x - page_box.x,
+                false => page_box.x + page_box.width - (b.x + b.width),
+            };
+            (page.title, from_end, b.width)
+        }));
     }
     assert!(
         single_buttons >= 4,
@@ -3020,12 +3034,16 @@ fn history_counts_clears_and_asks_before_clearing_all() {
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Nothing kept"));
 }
 
-/// The switches for what is kept exist once: on History (Snip and AI link there).
+/// The switches for what is kept exist once: on History, which Privacy & data shows (Snip and AI link there).
 #[test]
 fn the_history_switches_exist_only_on_the_history_page() {
     let (mut s, _) = state(None);
     s.draft.labs = Labs::all_on();
-    for p in PAGES.iter().filter(|p| p.id != Section::History) {
+    // (Privacy & data holds them with History: the page the merge made)
+    for p in PAGES
+        .iter()
+        .filter(|p| !matches!(p.id, Section::History | Section::Privacy))
+    {
         let texts = page(&mut s, p.id);
         for old in [
             "Keep chat history",

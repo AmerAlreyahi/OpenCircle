@@ -58,7 +58,7 @@ const NAV_CHROME: f32 = 20.0 + 3.0 * 13.0 + 13.0 + 2.0 * (settings::NAV_ITEM + 2
 pub const FIT_HEIGHT: f32 =
     size::HEADER + settings::GUTTER + LISTED as f32 * (settings::NAV_ITEM + 2.0) + NAV_CHROME;
 /// The narrowest layout that keeps the label column readable beside a control (the sidebar card 246 px).
-pub(super) const MIN_WIDTH: f32 = 900.0;
+pub(super) const MIN_WIDTH: f32 = 980.0;
 
 /// The opening size and the smallest size for a screen whose usable area is `work`
 /// (logical px): the preferred size, kept clear of the screen's edges and the taskbar,
@@ -744,6 +744,8 @@ pub enum Message {
     Autostart(bool),
     /// Settings > Studio: open the Studio's preferences dialog.
     OpenStudioPreferences,
+    /// Snip's After a capture (`studio.open_in`).
+    StudioOpenIn(crate::shared::config::StudioOpenIn),
     /// Settings > General: open the welcome tour again.
     ShowWelcome,
     /// General's "Saving now uses one folder" line: dismissed.
@@ -1802,7 +1804,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                     state.print_screen_taken =
                         crate::shared::platform::hotkey::windows_snips_print_screen()
                 }
-                Section::History => return Outcome::History(Vec::new()),
+                Section::History | Section::Privacy => return Outcome::History(Vec::new()),
                 Section::Translate => {
                     state.models.recount();
                     state.glossaries =
@@ -2059,6 +2061,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.draft.snip = snip;
         }
         Message::OpenStudioPreferences => return Outcome::OpenStudioPreferences,
+        Message::StudioOpenIn(v) => state.draft.studio.open_in = v,
         Message::ShowWelcome => return Outcome::ShowWelcome,
         Message::DismissFolderNote => state.draft.general.folder_note.clear(),
         Message::BrowseFolder => return Outcome::Browse,

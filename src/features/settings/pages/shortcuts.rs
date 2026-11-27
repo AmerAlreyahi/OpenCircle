@@ -10,6 +10,7 @@ use iced::widget::tooltip::Position;
 
 use super::super::state::{Message, Slot, State, key_labels};
 use crate::shared::kit::button::Kind as Button;
+use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::shortcut_field::{self, shortcut_field};
 use crate::shared::kit::text::error;
@@ -17,8 +18,15 @@ use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::tip;
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let rows = state.slots().map(|slot| row(state, slot));
-    column(rows.chain([reset(state)])).into()
+    column![
+        section(None, None, || state
+            .slots()
+            .map(|slot| row(state, slot))
+            .collect()),
+        section(None, None, || vec![reset(state)]),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }
 
 /// The last row: Reset shortcuts. Always shown (like History's Clear all), dimmed with

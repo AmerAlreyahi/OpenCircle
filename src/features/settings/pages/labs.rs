@@ -3,34 +3,39 @@
 //! off, the feature's page, rows and shortcuts are hidden.
 use crate::shared::app_language::{S, tr};
 use crate::t;
-use iced::widget::column;
 use iced::{Center, Element};
 
 use super::super::state::{Message, State};
 use crate::features::settings::labs::Feature;
 use crate::shared::kit::chip::tag;
+use crate::shared::kit::section::section;
 use crate::shared::kit::segmented::boolean;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::tokens::space;
 
 pub fn view(state: &State) -> Element<'_, Message> {
     let labs = &state.draft.labs;
-    column(Feature::ALL.into_iter().filter(|f| f.shown()).map(|f| {
-        let on = labs.has(f);
-        let (name, blurb) = words(f);
-        let label = tr(name);
-        let name = crate::dir_row![title(label), tag(t!(lb_tag))]
-            .spacing(space::GAP)
-            .align_y(Center);
-        setting_row::row(
-            name.into(),
-            tr(blurb),
-            boolean(label, [t!(c_off), t!(c_on)], on, move |on| {
-                Message::Labs(f, on)
-            }),
-        )
-    }))
-    .into()
+    section(Some(t!(lb_tag)), None, || {
+        Feature::ALL
+            .into_iter()
+            .filter(|f| f.shown())
+            .map(|f| {
+                let on = labs.has(f);
+                let (name, blurb) = words(f);
+                let label = tr(name);
+                let name = crate::dir_row![title(label), tag(t!(lb_tag))]
+                    .spacing(space::GAP)
+                    .align_y(Center);
+                setting_row::row(
+                    name.into(),
+                    tr(blurb),
+                    boolean(label, [t!(c_off), t!(c_on)], on, move |on| {
+                        Message::Labs(f, on)
+                    }),
+                )
+            })
+            .collect()
+    })
 }
 
 /// A Labs feature's name and line in the app's language (`Feature::title`

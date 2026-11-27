@@ -2767,4 +2767,36 @@ strings! {
         | "ينسخ النص الذي حدّدته";
     g_default_copy_d: "Copies the picture"
         | "ينسخ الصورة";
+    pv_kept: "Kept on this PC"
+        | "المحفوظ على هذا الجهاز";
+    l_sec: "Selection"
+        | "التحديد";
+    l_sel_snap_d: "Snap: a rounded box with corners to drag"
+        | "الالتصاق: مربع بزوايا مستديرة قابل للسحب";
+    l_sel_drawn_d: "Keeps your own circle exactly as drawn"
+        | "يُبقي دائرتك كما رسمتها تمامًا";
+    t_auto_d: "Picks the best reader for the language on screen"
+        | "يختار أفضل قارئ للغة المعروضة على الشاشة";
+    t_fast_d: "Windows' own reader. The quickest"
+        | "قارئ Windows نفسه. الأسرع";
+    t_accurate_d: "PaddleOCR. Best on small or mixed text"
+        | "PaddleOCR. الأفضل للنص الصغير أو المختلط";
+    sn_capture: "Capture"
+        | "الالتقاط";
+    sn_picture: "Picture"
+        | "الصورة";
+    ss_after: "After a capture"
+        | "بعد الالتقاط";
+    ss_after_d: "Where a picture opens once you have picked an area"
+        | "أين تُفتح الصورة بعد اختيار منطقة";
+    sn_widget_d: "Mark it up in the small toolbar under the area."
+        | "دوّن عليها في الشريط الصغير أسفل المنطقة.";
+    ss_studio_d: "Opens the picture in the full editor window."
+        | "يفتح الصورة في نافذة المحرر الكاملة.";
+    st_opening: "Opening"
+        | "الفتح";
+    ss_open_in_snip: "Chosen in Snip, under After a capture"
+        | "يُختار في «لقطة الشاشة»، ضمن «بعد الالتقاط»";
+    ss_open_snip: "Open Snip"
+        | "افتح لقطة الشاشة";
 }

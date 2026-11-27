@@ -56,8 +56,8 @@ pub struct Page {
     pub group: u8,
     pub line: S,
     pub nav: bool,
-    /// The view lays out its own `section`s; false = the shell frames its rows in one (a page not yet
-    /// rebuilt into sections).
+    /// The view lays out its own `section`s (the default); false = the shell frames its rows in one (a
+    /// page not yet rebuilt into sections: Appearance, AI and Search, Translate, Song search, About).
     pub sectioned: bool,
 }
 
@@ -79,7 +79,7 @@ const fn page(
         group,
         line,
         nav: true,
-        sectioned: false,
+        sectioned: true,
     }
 }
 
@@ -88,7 +88,6 @@ const fn page(
 /// | Extensions, About, Labs. Song (Labs) and the two pages whose content moved have no sidebar row.
 pub const PAGES: [Page; 15] = [
     Page {
-        sectioned: true,
         ..page(
             Section::General,
             S::nav_general,
@@ -98,14 +97,17 @@ pub const PAGES: [Page; 15] = [
             general::view,
         )
     },
-    page(
-        Section::Appearance,
-        S::nav_appearance,
-        '\u{e1dc}',
-        0,
-        S::pg_appearance,
-        appearance::view,
-    ),
+    Page {
+        sectioned: false,
+        ..page(
+            Section::Appearance,
+            S::nav_appearance,
+            '\u{e1dc}',
+            0,
+            S::pg_appearance,
+            appearance::view,
+        )
+    },
     page(
         Section::Look,
         S::nav_look,
@@ -114,14 +116,17 @@ pub const PAGES: [Page; 15] = [
         S::l_hero_desc,
         look::view,
     ),
-    page(
-        Section::Ai,
-        S::nav_ai_search,
-        '\u{e119}',
-        1,
-        S::pg_ai,
-        ai::view,
-    ),
+    Page {
+        sectioned: false,
+        ..page(
+            Section::Ai,
+            S::nav_ai_search,
+            '\u{e119}',
+            1,
+            S::pg_ai,
+            ai::view,
+        )
+    },
     Page {
         nav: false,
         ..page(
@@ -133,14 +138,17 @@ pub const PAGES: [Page; 15] = [
             text_reading::view,
         )
     },
-    page(
-        Section::Translate,
-        S::nav_translate,
-        '\u{e103}',
-        1,
-        S::tr_hero_desc,
-        translate::view,
-    ),
+    Page {
+        sectioned: false,
+        ..page(
+            Section::Translate,
+            S::nav_translate,
+            '\u{e103}',
+            1,
+            S::tr_hero_desc,
+            translate::view,
+        )
+    },
     page(
         Section::Snip,
         S::nav_snip,
@@ -159,6 +167,7 @@ pub const PAGES: [Page; 15] = [
     ),
     Page {
         lab: Some(Feature::Song),
+        sectioned: false,
         ..page(
             Section::Song,
             S::lb_song,
@@ -196,7 +205,6 @@ pub const PAGES: [Page; 15] = [
         privacy::view,
     ),
     Page {
-        sectioned: true,
         ..page(
             Section::Extensions,
             S::nav_extensions,
@@ -206,14 +214,17 @@ pub const PAGES: [Page; 15] = [
             extensions::view,
         )
     },
-    page(
-        Section::About,
-        S::nav_about,
-        '\u{e0fe}',
-        3,
-        S::pg_about,
-        about::view,
-    ),
+    Page {
+        sectioned: false,
+        ..page(
+            Section::About,
+            S::nav_about,
+            '\u{e0fe}',
+            3,
+            S::pg_about,
+            about::view,
+        )
+    },
     Page {
         badge: Some(S::nav_exp),
         ..page(

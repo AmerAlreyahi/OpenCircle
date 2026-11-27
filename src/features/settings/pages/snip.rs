@@ -11,8 +11,10 @@ use iced::widget::column;
 
 use super::super::state::{Message, Section, Slot, State};
 use super::{history, shortcuts};
-use crate::shared::config::{Format, LONG_MAX, SnipAfter, SnipConfig};
+use crate::shared::config::{Format, LONG_MAX, SnipAfter, SnipConfig, StudioOpenIn};
 use crate::shared::kit::button::Kind;
+use crate::shared::kit::choice_card::{Choice, Mark, choice_cards};
+use crate::shared::kit::section::section;
 use crate::shared::kit::segmented::{boolean, segmented};
 use crate::shared::kit::setting_row::{self, title};
 
@@ -40,9 +42,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
         crate::shared::config::parse_shortcut(state.shortcut(slot)).ok()
             == super::super::state::print_screen()
     });
-    let mut rows = column(snips.into_iter().map(|slot| shortcuts::row(state, slot)));
+    let mut capture: Vec<Element<'_, Message>> = snips
+        .into_iter()
+        .map(|slot| shortcuts::row(state, slot))
+        .collect();
     if state.print_screen_taken && on_print_screen {
-        rows = rows.push(pick(
+        capture.push(pick(
             t!(s_prtsc),
             t!(s_prtsc_desc),
             crate::shared::kit::setting_row::action(
@@ -52,11 +57,65 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ));
     }
+    // After a capture (owner, 2026-11-26): the frozen `studio.open_in`, moved here from the Studio page
+    let opens = [
+        (
+            StudioOpenIn::Quick,
+            Mark::Glyph('\u{e151}'),
+            t!(ss_quick),
+            t!(sn_widget_d),
+        ),
+        (
+            StudioOpenIn::Studio,
+            Mark::Glyph('\u{e416}'),
+            t!(nav_studio),
+            t!(ss_studio_d),
+        ),
+    ];
+    let cards: Vec<_> = (opens.iter())
+        .map(|&(_, mark, title_, desc)| Choice {
+            mark,
+            title: title_,
+            desc,
+        })
+        .collect();
+    let at = opens
+        .iter()
+        .position(|o| o.0 == state.draft.studio.open_in)
+        .unwrap_or(0);
+    capture.push(setting_row::block(
+        title(t!(ss_after)),
+        t!(ss_after_d),
+        choice_cards(&cards, at, move |i| Message::StudioOpenIn(opens[i].0)),
+    ));
     let recent = match d.history {
         true => t!(s_recent_on),
         false => t!(s_recent_off),
     };
-    rows = rows.extend([
+    capture.extend([
+        pick(
+            t!(s_timer),
+            t!(s_timer_desc),
+            segmented(
+                &[
+                    (0, t!(c_off)),
+                    (3, t!(s_t3)),
+                    (5, t!(s_t5)),
+                    (10, t!(s_t10)),
+                ],
+                d.delay,
+                d.delay,
+                1.0,
+                move |delay| edit(&|s| s.delay = delay),
+            ),
+        ),
+        pick(
+            t!(s_pointer),
+            t!(s_pointer_desc),
+            boolean(t!(s_pointer), off_on(), d.cursor, move |cursor| {
+                edit(&|s| s.cursor = cursor)
+            }),
+        ),
         pick(
             t!(s_copy),
             t!(s_copy_desc),
@@ -69,6 +128,8 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 edit(&|s| s.after = after)
             }),
         ),
+    ]);
+    let picture = vec![
         pick(
             t!(s_size),
             t!(s_size_desc),
@@ -102,29 +163,6 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         pick(
-            t!(s_pointer),
-            t!(s_pointer_desc),
-            boolean(t!(s_pointer), off_on(), d.cursor, move |cursor| {
-                edit(&|s| s.cursor = cursor)
-            }),
-        ),
-        pick(
-            t!(s_timer),
-            t!(s_timer_desc),
-            segmented(
-                &[
-                    (0, t!(c_off)),
-                    (3, t!(s_t3)),
-                    (5, t!(s_t5)),
-                    (10, t!(s_t10)),
-                ],
-                d.delay,
-                d.delay,
-                1.0,
-                move |delay| edit(&|s| s.delay = delay),
-            ),
-        ),
-        pick(
             t!(s_long),
             t!(s_long_desc),
             segmented(
@@ -136,8 +174,13 @@ pub fn view(state: &State) -> Element<'_, Message> {
             ),
         ),
         history::link(t!(s_recent), recent),
-    ]);
-    rows.into()
+    ];
+    column![
+        section(Some(t!(sn_capture)), None, || capture),
+        section(Some(t!(sn_picture)), None, || picture),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }
 
 /// A long-capture limit as the page shows it.

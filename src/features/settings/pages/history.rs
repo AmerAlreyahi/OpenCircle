@@ -10,6 +10,7 @@ use iced::{Element, Fill};
 use super::super::state::{Message, Section, State};
 use crate::shared::history::Kind;
 use crate::shared::kit::button::{Kind as Button, button, label};
+use crate::shared::kit::section::section;
 use crate::shared::kit::segmented::boolean;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::{error, sub};
@@ -19,7 +20,8 @@ fn off_on() -> [&'static str; 2] {
     [t!(c_off), t!(c_on)]
 }
 
-pub fn view(state: &State) -> Element<'_, Message> {
+/// What is kept on this PC: Recent captures and Chat history, each with its switch and count.
+pub(super) fn kept(state: &State) -> Vec<Element<'_, Message>> {
     let d = &state.draft;
     let snip = d.snip.clone();
     let captures = row_of(
@@ -46,7 +48,17 @@ pub fn view(state: &State) -> Element<'_, Message> {
             Message::KeepChats,
         ),
     );
-    column![captures, chats, clear_all(state)].into()
+    vec![captures, chats]
+}
+
+/// The page as its own (the "Open history" links go here): what is kept, then Clear all.
+pub fn view(state: &State) -> Element<'_, Message> {
+    column![
+        section(Some(t!(pv_kept)), None, || kept(state)),
+        section(None, None, || vec![clear_all(state)]),
+    ]
+    .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+    .into()
 }
 
 /// A kind's row: its switch, and under it how many are kept and its Clear.
@@ -77,7 +89,7 @@ fn row_of<'a>(
 }
 
 /// Clear all: a quiet button; pressed, the row asks to be sure.
-fn clear_all(state: &State) -> Element<'_, Message> {
+pub(super) fn clear_all(state: &State) -> Element<'_, Message> {
     if state.clearing_all {
         let buttons = crate::dir_row![
             setting_row::cancel(t!(c_cancel), Message::KeepHistory),
