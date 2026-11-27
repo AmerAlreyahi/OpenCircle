@@ -1886,3 +1886,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   away) so he switches accounts; a Claude builder takes the job over only if he doesn't answer.
 - Studio zoom fix APPROVED (owner, 2026-11-27, "done and all are approved", on dev build 0a66890): drawing and moving shapes at
   110 % / 150 % zoom are smooth and the pixels don't change (B-01, merged 0a668907). Ships with the next release.
+- Widgets style E APPROVED (owner, 2026-11-27, on the D-02 design-vs-app sheets) EXCEPT two that must match the design:
+  (1) Steps strip: as drawn: header x / + / grip, rounded thumbnails with even gaps, the number badge in the thumbnail's top-end
+  corner, Copy all = accent button, the Studio button = the design's quiet secondary button with its picture icon; (2) Live pin: the
+  picture with rounded corners and a thin look-coloured border (not the thick yellow one), the hover toolbar as ONE style E tray
+  (link, click-through (active state), copy, save, close) as drawn.
