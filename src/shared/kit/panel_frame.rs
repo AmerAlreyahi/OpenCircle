@@ -73,7 +73,7 @@ pub fn frame<'a, Message: Clone + 'a>(
     }))
     .on_press(on_drag); // mouse only: drags the panel
     let body = segment_card(
-        super::tokens::widget_e::MENU_RADIUS,
+        super::tokens::radius::DROPDOWN,
         super::scroll::scroll(body).height(Fill),
     )
     .padding(super::tokens::widget_e::CARD_INNER_PAD)
@@ -351,7 +351,7 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
         None => crate::dir_row![heading],
     }
     .align_y(Center);
-    let framed_body = segment_card(super::tokens::widget_e::MENU_RADIUS, body)
+    let framed_body = segment_card(super::tokens::radius::DROPDOWN, body)
         .padding(super::tokens::widget_e::CARD_INNER_PAD)
         .width(Fill)
         .height(Fill);

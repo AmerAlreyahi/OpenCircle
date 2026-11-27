@@ -393,104 +393,87 @@ pub fn readout<'a, Message: 'a>(
         .into()
 }
 
+/// The face of Snip's size chip: an `image` glyph and the size, mono, `live`
+/// in `accent`; `hot` (under the cursor) raised (`elevated`, its edge). The
+/// Studio's (`toolbar` false) is a `READOUT_H` readout on `track`; the Snip
+/// toolbar's (`.szc`) a `SIZE_PILL_H` capsule on `hover` inside a raised segment.
+fn size_face<'a, Message: 'a>(
+    label: &str,
+    live: bool,
+    toolbar: bool,
+    hot: bool,
+) -> container::Container<'a, Message> {
+    let ink = if live { c().accent } else { c().text };
+    let (glyph, pad, height, corner) = match toolbar {
+        true => (13, 10, widget_e::SIZE_PILL_H, radius::FULL),
+        false => (12, 8, READOUT_H, radius::PILL),
+    };
+    let picture = text(super::icon::Icon::Picture.glyph())
+        .font(super::icon::FONT)
+        .size(glyph)
+        .color(if hot { c().text } else { c().text_sub });
+    let size = text(label.to_string())
+        .size(11.5)
+        .font(mono(Weight::Medium))
+        .color(ink);
+    container(row![picture, size].spacing(space::GAP).align_y(Center))
+        .padding([0, pad])
+        .height(height)
+        .center_y(height)
+        .style(move |_| {
+            let (fill, width, edge) = match (hot, toolbar) {
+                (true, _) => (c().elevated, 1, c().elevated_border),
+                (false, true) => (c().hover, 0, c().hover),
+                (false, false) => (c().track, 1, c().divider),
+            };
+            container::Style {
+                background: Some(fill.into()),
+                border: Border::default().rounded(corner).width(width).color(edge),
+                ..container::Style::default()
+            }
+        })
+}
+
 /// Snip's size chip, the picture's drag handle (owner, 2026-11-02): an
 /// `image` glyph and the size, as `readout` (mono on `track`, `live` in
 /// `accent`); under the cursor raised (`elevated`, its edge) with the open
 /// hand. A press starts the drag (`on_down`; a button reacts on release).
-/// Style E Snip toolbar size pill (`.szc`): 30 px capsule on `hover` inside a
-/// raised `widget` segment (`elevated` under the pointer), mono readout + icon.
-pub fn size_pill<'a, Message: Clone + 'a>(
-    label: String,
-    live: bool,
-    on_down: Message,
-) -> Element<'a, Message> {
-    use iced::widget::{hover, mouse_area};
-    let look = move |hot: bool| {
-        let ink = if live { c().accent } else { c().text };
-        let picture = text(super::icon::Icon::Picture.glyph())
-            .font(super::icon::FONT)
-            .size(13)
-            .color(if hot { c().text } else { c().text_sub });
-        let size = text(label.clone())
-            .size(11.5)
-            .font(mono(Weight::Medium))
-            .color(ink);
-        container(row![picture, size].spacing(space::GAP).align_y(Center))
-            .padding([0, 10])
-            .height(widget_e::SIZE_PILL_H)
-            .center_y(widget_e::SIZE_PILL_H)
-            .style(move |_| container::Style {
-                background: Some(if hot { c().elevated } else { c().hover }.into()),
-                border: Border::default()
-                    .rounded(radius::FULL)
-                    .width(if hot { 1 } else { 0 })
-                    .color(c().elevated_border),
-                ..container::Style::default()
-            })
-    };
-    mouse_area(hover(look(false), look(true)))
-        .on_press(on_down) // mouse only: drags the picture out
-        .interaction(iced::mouse::Interaction::Grab)
-        .into()
-}
-
-/// Static version of `size_pill` (when OS drag-out is unavailable or capturing).
-pub fn size_pill_static<'a, Message: 'a>(label: String, live: bool) -> Element<'a, Message> {
-    let ink = if live { c().accent } else { c().text };
-    let picture = text(super::icon::Icon::Picture.glyph())
-        .font(super::icon::FONT)
-        .size(13)
-        .color(c().text_sub);
-    let size = text(label).size(11.5).font(mono(Weight::Medium)).color(ink);
-    container(row![picture, size].spacing(space::GAP).align_y(Center))
-        .padding([0, 10])
-        .height(widget_e::SIZE_PILL_H)
-        .center_y(widget_e::SIZE_PILL_H)
-        .style(|_| container::Style {
-            background: Some(c().hover.into()),
-            border: Border::default().rounded(radius::FULL),
-            ..container::Style::default()
-        })
-        .into()
-}
-
 pub fn size_handle<'a, Message: Clone + 'a>(
     label: String,
     live: bool,
     on_down: Message,
 ) -> Element<'a, Message> {
+    grab(label, live, false, on_down)
+}
+
+/// The Snip toolbar's size chip (`size_handle` in style E).
+pub fn size_pill<'a, Message: Clone + 'a>(
+    label: String,
+    live: bool,
+    on_down: Message,
+) -> Element<'a, Message> {
+    grab(label, live, true, on_down)
+}
+
+/// `size_pill` at rest, no drag (OS drag-out unavailable, or capturing).
+pub fn size_pill_static<'a, Message: 'a>(label: String, live: bool) -> Element<'a, Message> {
+    size_face(&label, live, true, false).into()
+}
+
+fn grab<'a, Message: Clone + 'a>(
+    label: String,
+    live: bool,
+    toolbar: bool,
+    on_down: Message,
+) -> Element<'a, Message> {
     use iced::widget::{hover, mouse_area};
-    let look = move |hot: bool| {
-        let ink = if live { c().accent } else { c().text };
-        let picture = text(super::icon::Icon::Picture.glyph())
-            .font(super::icon::FONT)
-            .size(12)
-            .color(if hot { c().text } else { c().text_sub });
-        let size = text(label.clone())
-            .size(11.5)
-            .font(mono(Weight::Medium))
-            .color(ink);
-        container(row![picture, size].spacing(space::GAP).align_y(Center))
-            .padding([0, 8])
-            .height(READOUT_H)
-            .center_y(READOUT_H)
-            .style(move |_| container::Style {
-                background: Some(if hot { c().elevated } else { c().track }.into()),
-                border: Border::default()
-                    .rounded(radius::PILL)
-                    .width(1)
-                    .color(if hot {
-                        c().elevated_border
-                    } else {
-                        c().divider
-                    }),
-                ..container::Style::default()
-            })
-    };
-    mouse_area(hover(look(false), look(true)))
-        .on_press(on_down) // mouse only: drags the picture out
-        .interaction(iced::mouse::Interaction::Grab)
-        .into()
+    mouse_area(hover(
+        size_face(&label, live, toolbar, false),
+        size_face(&label, live, toolbar, true),
+    ))
+    .on_press(on_down) // mouse only: drags the picture out
+    .interaction(iced::mouse::Interaction::Grab)
+    .into()
 }
 
 /// The info chip over what a click would capture (Snip's hover): `kind`
@@ -515,6 +498,7 @@ pub fn info<'a, Message: 'a>(
         text(kind)
             .size(super::text::size(Role::CONTROL))
             .font(weight(Weight::Semibold))
+            .color(c().text)
     ]
     .spacing(8)
     .align_y(Center);
@@ -554,27 +538,9 @@ pub fn info<'a, Message: 'a>(
         })
         .into()
     });
-    let ladder = container(row(ladder).spacing(2).align_y(Center))
-        .padding([2, 4])
-        .style(|_| container::Style {
-            background: Some(c().widget.into()),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(super::surface::segment_edge()),
-            ..container::Style::default()
-        });
+    let ladder = super::surface::segment(row(ladder).spacing(2).align_y(Center)).padding([2, 4]);
     line = line.push(ladder);
-    container(line)
+    super::surface::tray(false, radius::FULL, line)
         .padding([4, 10])
-        .style(|_| container::Style {
-            background: Some(c().track.into()),
-            text_color: Some(c().text),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(c().rim),
-            ..container::Style::default()
-        })
         .into()
 }

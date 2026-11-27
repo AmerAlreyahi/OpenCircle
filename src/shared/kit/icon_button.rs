@@ -26,7 +26,7 @@ pub fn icon_button<'a, Message: Clone + 'a>(
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    made(glyph_text(glyph), size::ICON_BUTTON / 2.0, state, on_press)
+    made(glyph_text(glyph), Look::ROUND, state, on_press)
 }
 
 /// The same button with the design's square corners (r9): the editing
@@ -36,7 +36,7 @@ pub fn square<'a, Message: Clone + 'a>(
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    made(glyph_text(glyph), radius::CONTROL, state, on_press)
+    made(glyph_text(glyph), Look::SQUARE, state, on_press)
 }
 
 /// A square button around any `content` (a letter, a sample): the text of
@@ -46,56 +46,45 @@ pub fn option<'a, Message: Clone + 'a>(
     state: State,
     on_press: impl Into<Option<Message>>,
 ) -> Element<'a, Message> {
-    made(content, radius::CONTROL, state, on_press.into())
+    made(content, Look::SQUARE, state, on_press.into())
 }
 
-/// Style E floating-widget icon button (`.ib`): 34x34, 10 px corners,
+/// Style E floating-widget icon button (`.ib`): 10 px corners,
 /// `accent_soft` + `accent` when active (Translate Original/Glossary, bar Live,
-/// Chat Pin), `hover` under the cursor, dimmed to 38 % when disabled.
+/// Chat Pin), `hover` under the cursor.
 pub fn pill_icon<'a, Message: Clone + 'a>(
     glyph: char,
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    made_e(
+    made(
         glyph_text(glyph),
-        widget_e::ICON_RADIUS,
-        true,
+        Look {
+            accent: true,
+            ..Look::SQUARE_E
+        },
         state,
         on_press,
     )
 }
 
-/// Style E toolbar tool button (`.ib` with `.on`): 34x34, 10 px corners,
-/// raised `elevated` with its border when active (Snip tools), `hover` under
-/// the cursor, dimmed to 38 % when disabled.
+/// Style E toolbar tool button (`.ib` with `.on`): 10 px corners, raised
+/// `elevated` with its border when active (Snip tools).
 pub fn tool_icon<'a, Message: Clone + 'a>(
     glyph: char,
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    made_e(
-        glyph_text(glyph),
-        widget_e::ICON_RADIUS,
-        false,
-        state,
-        on_press,
-    )
+    made(glyph_text(glyph), Look::SQUARE_E, state, on_press)
 }
 
-/// Style E toolbar tool button around custom content (e.g. the OpenCircle logo).
+/// `tool_icon` around custom content (e.g. the OpenCircle logo).
 pub fn tool_option<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     state: State,
     on_press: impl Into<Option<Message>>,
 ) -> Element<'a, Message> {
-    made_e(
-        content,
-        widget_e::ICON_RADIUS,
-        false,
-        state,
-        on_press.into(),
-    )
+    made(content, Look::SQUARE_E, state, on_press.into())
 }
 
 /// Style E quiet close button (`.qx`): 28x28 round, `text_muted` at rest,
@@ -104,106 +93,72 @@ pub fn quiet_close<'a, Message: Clone + 'a>(
     focused: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    use button::Status;
-    let live = on_press.is_some();
-    let corner = radius::FULL;
-    super::focus::press(
-        button(container(glyph_text(super::icon::Icon::Close.glyph())).center(Fill))
-            .width(widget_e::QUIET_X)
-            .height(widget_e::QUIET_X)
-            .padding(0)
-            .style(move |_, status| {
-                let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-                let fill = match () {
-                    _ if focused => Some(c().accent_soft),
-                    _ if hot => Some(c().hover),
-                    _ => None,
-                };
-                let text_color = match () {
-                    _ if !live => faded(c().text_muted, 0.38),
-                    _ if hot || focused => c().text,
-                    _ => c().text_muted,
-                };
-                button::Style {
-                    background: fill.map(Into::into),
-                    text_color,
-                    border: Border::default().rounded(corner),
-                    ..button::Style::default()
-                }
-            }),
-        corner,
+    let look = Look {
+        corner: radius::FULL,
+        side: widget_e::QUIET_X,
+        quiet: true,
+        ..Look::SQUARE_E
+    };
+    let state = State {
+        active: false,
+        focused,
+    };
+    made(
+        glyph_text(super::icon::Icon::Close.glyph()),
+        look,
+        state,
         on_press,
     )
-    .into()
-}
-
-fn made_e<'a, Message: Clone + 'a>(
-    content: impl Into<Element<'a, Message>>,
-    corner: f32,
-    accent_active: bool,
-    state: State,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    use button::Status;
-    let live = on_press.is_some();
-    super::focus::press(
-        button(container(content).center(Fill))
-            .width(size::ICON_BUTTON)
-            .height(size::ICON_BUTTON)
-            .padding(0)
-            .style(move |_, status| {
-                let hot = live && matches!(status, Status::Hovered | Status::Pressed);
-                let fill = match () {
-                    _ if state.active && accent_active => Some(c().accent_soft),
-                    _ if state.active => Some(c().elevated),
-                    _ if state.focused => Some(c().accent_soft),
-                    _ if hot => Some(c().hover),
-                    _ => None,
-                };
-                let text_color = match () {
-                    _ if !live => faded(c().text_sub, 0.38),
-                    _ if state.active && accent_active => c().accent,
-                    _ if state.active || hot || state.focused => c().text,
-                    _ => c().text_sub,
-                };
-                let (width, edge) = match () {
-                    _ if live && status == Status::Pressed => (2.0, c().widget),
-                    _ if state.active && !accent_active => (1.0, c().elevated_border),
-                    _ => (0.0, c().widget),
-                };
-                button::Style {
-                    background: fill.map(Into::into),
-                    text_color,
-                    border: Border::default().rounded(corner).width(width).color(edge),
-                    ..button::Style::default()
-                }
-            }),
-        corner,
-        on_press,
-    )
-    .into()
 }
 
 fn glyph_text<'a>(glyph: char) -> iced::widget::Text<'a> {
     text(glyph).font(FONT).size(size::ICON)
 }
 
+/// How `made` draws a button: its corners and side; `accent` shows the active one
+/// as `accent_soft` + `accent` (not raised); `quiet` rests in `text_muted`.
+#[derive(Clone, Copy)]
+struct Look {
+    corner: f32,
+    side: f32,
+    accent: bool,
+    quiet: bool,
+}
+
+impl Look {
+    const ROUND: Look = Look::square(size::ICON_BUTTON / 2.0);
+    const SQUARE: Look = Look::square(radius::CONTROL);
+    const SQUARE_E: Look = Look::square(radius::TRACK);
+
+    const fn square(corner: f32) -> Look {
+        Look {
+            corner,
+            side: size::ICON_BUTTON,
+            accent: false,
+            quiet: false,
+        }
+    }
+}
+
 fn made<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
-    corner: f32,
+    look: Look,
     state: State,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     use button::Status;
     let live = on_press.is_some();
+    let corner = look.corner;
     super::focus::press(
         button(container(content).center(Fill))
-            .width(size::ICON_BUTTON)
-            .height(size::ICON_BUTTON)
+            .width(look.side)
+            .height(look.side)
             .padding(0)
             .style(move |_, status| {
                 let hot = live && matches!(status, Status::Hovered | Status::Pressed);
+                let tinted = state.active && look.accent;
                 let fill = match () {
+                    _ if tinted => Some(c().accent_soft),
                     _ if state.active => Some(c().elevated),
                     _ if state.focused => Some(c().accent_soft),
                     _ if hot => Some(c().hover),
@@ -211,12 +166,14 @@ fn made<'a, Message: Clone + 'a>(
                 };
                 let text_color = match () {
                     _ if !live => faded(c().text_muted, 0.6),
+                    _ if tinted => c().accent,
                     _ if state.active || hot || state.focused => c().text,
+                    _ if look.quiet => c().text_muted,
                     _ => c().text_sub,
                 };
                 let (width, edge) = match () {
                     _ if live && status == Status::Pressed => (2.0, c().widget),
-                    _ if state.active => (1.0, c().elevated_border),
+                    _ if state.active && !look.accent => (1.0, c().elevated_border),
                     _ => (0.0, c().widget),
                 };
                 button::Style {

@@ -8,7 +8,7 @@ use iced::{Border, Center, Color, Element, Fill, Length};
 
 use super::dir;
 use super::themes::{c, on};
-use super::tokens::{Role, radius, widget_e};
+use super::tokens::{Role, radius};
 
 /// What a Snip options row records while it is built (`scope`): every live cell in order, as the
 /// keyboard's stops, and which one the focus is on (a ring round it).
@@ -86,35 +86,22 @@ pub fn group<'a, Message: 'a>(
     cells: Vec<Element<'a, Message>>,
     accent: bool,
 ) -> Element<'a, Message> {
+    let row = dir::row(cells).spacing(GAP).align_y(Center);
     let raised = in_scope();
-    container(dir::row(cells).spacing(GAP).align_y(Center))
-        .padding(PAD)
-        .height(HEIGHT)
-        .center_y(HEIGHT)
-        .style(move |_| {
-            let fill = match (accent, raised) {
-                (true, _) => c().accent,
-                (false, true) => c().widget,
-                (false, false) => c().track,
-            };
-            let corner = match raised {
-                true => widget_e::OPTION_GROUP_RADIUS,
-                false => radius::CONTROL,
-            };
-            let border = match (accent, raised) {
-                (false, true) => Border::default()
-                    .rounded(corner)
-                    .width(1)
-                    .color(super::surface::segment_edge()),
-                _ => Border::default().rounded(corner),
-            };
-            container::Style {
-                background: Some(fill.into()),
-                border,
-                ..container::Style::default()
-            }
-        })
-        .into()
+    let group = match (raised, accent) {
+        // style E: a raised segment on the row's tray (the Done group stays `accent`)
+        (true, false) => super::surface::segment_card(radius::CARD, row),
+        _ => container(row).style(move |_| container::Style {
+            background: Some(if accent { c().accent } else { c().track }.into()),
+            border: Border::default().rounded(if raised {
+                radius::CARD
+            } else {
+                radius::CONTROL
+            }),
+            ..container::Style::default()
+        }),
+    };
+    group.padding(PAD).height(HEIGHT).center_y(HEIGHT).into()
 }
 
 /// The hairline between two groups (hidden in style E floating rows where
@@ -142,11 +129,7 @@ fn cell<'a, Message: Clone + 'static>(
 ) -> Element<'a, Message> {
     let live = press.is_some();
     let raised = in_scope();
-    let cell_r = if raised {
-        widget_e::OPTION_CELL_RADIUS
-    } else {
-        radius::PILL
-    };
+    let cell_r = if raised { radius::TRACK } else { radius::PILL };
     let ring = press.as_ref().is_some_and(note);
     let pad = if width.is_some() { 0.0 } else { WORDS_PAD };
     let body = container(content).center_y(Fill).padding([0.0, pad]);

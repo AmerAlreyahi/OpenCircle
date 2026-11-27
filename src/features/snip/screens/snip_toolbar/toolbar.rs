@@ -22,7 +22,7 @@ use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::surface::{self, segment_row, tray};
 use crate::shared::kit::text::{muted, sub, text as caption};
-use crate::shared::kit::tokens::{Role, size, space, widget_e};
+use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{
     button, chip, colour, colour_picker, grip, option_list, segmented, slider,
@@ -110,8 +110,8 @@ pub fn size_for(e: &Annotator) -> Size {
 
 fn sized(primary: bool) -> Size {
     let groups = group_widths(primary);
-    let line = groups.iter().map(|g| seg_width(g)).sum::<f32>()
-        + widget_e::TRAY_GAP * (groups.len() - 1) as f32;
+    let line =
+        groups.iter().map(|g| seg_width(g)).sum::<f32>() + space::GAP * (groups.len() - 1) as f32;
     Size::new(line + 2.0 * widget_e::TRAY_PAD_X, bar::HEIGHT)
 }
 
@@ -487,9 +487,9 @@ fn build(
     ]);
 
     let segments = dir::row([seg_lead, seg_tools, seg_more, seg_actions])
-        .spacing(widget_e::TRAY_GAP)
+        .spacing(space::GAP)
         .align_y(iced::Center);
-    let toolbar = tray(e.held, widget_e::TRAY_RADIUS, segments)
+    let toolbar = tray(e.held, radius::FULL, segments)
         .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
         .height(bar::HEIGHT);
     let Some(menu) = e.menu else {
@@ -517,7 +517,7 @@ const STUDIO_HINT_W: f32 = 232.0;
 fn studio_hint<'a>() -> Element<'a, Message> {
     tray(
         false,
-        widget_e::CARD_RADIUS,
+        radius::WINDOW,
         container(caption(Role::ROW_TITLE, t!(sn_studio_hint))).padding(space::PANEL),
     )
     .width(STUDIO_HINT_W)
@@ -530,7 +530,7 @@ fn centred_on(e: &Annotator, (seg, item): (usize, usize), width: f32) -> (f32, f
     let groups = group_widths(steps_on(e));
     let mut x = widget_e::TRAY_PAD_X;
     for g in &groups[..seg] {
-        x += seg_width(g) + widget_e::TRAY_GAP;
+        x += seg_width(g) + space::GAP;
     }
     x += widget_e::SEGMENT_PAD_X;
     let items = &groups[seg];
@@ -671,16 +671,12 @@ pub fn options_row_tips(
     let on = e.focus.and_then(|f| f.checked_sub(bar_stops(e).len()));
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
     Some(
-        tray(
-            false,
-            widget_e::TRAY_RADIUS,
-            crate::shared::kit::scroll::across(row),
-        )
-        .padding([4.0, widget_e::TRAY_PAD_X])
-        .height(ROW_H)
-        .max_width(max_w)
-        .align_y(iced::Center)
-        .into(),
+        tray(false, radius::FULL, crate::shared::kit::scroll::across(row))
+            .padding([4.0, widget_e::TRAY_PAD_X])
+            .height(ROW_H)
+            .max_width(max_w)
+            .align_y(iced::Center)
+            .into(),
     )
 }
 

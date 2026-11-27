@@ -199,22 +199,11 @@ pub mod fixed {
 
 // === widgets style E ===
 /// Floating-widget style E (two-tone, grouped segments): recessed `track`
-/// tray with raised `widget` segments, pill corners, and 10 px icon buttons.
+/// tray with raised `widget` segments. Radii and the gap reuse `radius::*` / `space::GAP`.
 pub mod widget_e {
-    /// Outer corner radii for floating surfaces.
-    pub const TRAY_RADIUS: f32 = 999.0;
-    pub const CARD_RADIUS: f32 = 16.0;
-    pub const PANEL_RADIUS: f32 = 18.0;
-    pub const MENU_RADIUS: f32 = 14.0;
-    /// Control and row radii inside floating widgets.
-    pub const ICON_RADIUS: f32 = 10.0;
-    pub const ROW_RADIUS: f32 = 10.0;
-    pub const OPTION_GROUP_RADIUS: f32 = 12.0;
-    pub const OPTION_CELL_RADIUS: f32 = 10.0;
-    /// Outer tray padding and gap between raised segments.
+    /// Outer tray padding.
     pub const TRAY_PAD_X: f32 = 5.0;
     pub const TRAY_PAD_Y: f32 = 5.0;
-    pub const TRAY_GAP: f32 = 6.0;
     /// Raised segment (`.gp`) inner padding and item gap.
     pub const SEGMENT_PAD_X: f32 = 5.0;
     pub const SEGMENT_PAD_Y: f32 = 4.0;

@@ -15,12 +15,12 @@ use crate::shared::kit::logo::logo;
 use crate::shared::kit::spinner::spinner;
 use crate::shared::kit::text::{font, width};
 use crate::shared::kit::toast::{Tone, banner, banner_size, size_with_action, with_action};
-use crate::shared::kit::tokens::{Role, size, space, widget_e};
+use crate::shared::kit::tokens::{Role, radius, size, space};
 use crate::shared::update::How;
 use crate::t;
 
 /// The corners the window is cut to (`platform::windows::floating`).
-pub const RADIUS: f32 = widget_e::PANEL_RADIUS;
+pub const RADIUS: f32 = radius::DRAWER;
 /// Between Later and the main button.
 const ACTION_GAP: f32 = space::GAP;
 

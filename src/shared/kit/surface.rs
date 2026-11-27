@@ -88,16 +88,7 @@ pub fn tray<'a, Message: 'a>(
 pub fn segment<'a, Message: 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    container(content)
-        .padding([widget_e::SEGMENT_PAD_Y, widget_e::SEGMENT_PAD_X])
-        .style(|_| container::Style {
-            background: Some(c().widget.into()),
-            border: Border::default()
-                .rounded(radius::FULL)
-                .width(1)
-                .color(segment_edge()),
-            ..container::Style::default()
-        })
+    segment_card(radius::FULL, content).padding([widget_e::SEGMENT_PAD_Y, widget_e::SEGMENT_PAD_X])
 }
 
 /// Style E raised pill segment holding a direction-aware row of controls.
@@ -132,7 +123,7 @@ pub fn segment_card<'a, Message: 'a>(
 /// `MENU_RADIUS` corners, `size::PANEL` wide.
 pub fn panel<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
     use super::tokens::{size, space};
-    tray(false, widget_e::MENU_RADIUS, segment(content))
+    tray(false, radius::DROPDOWN, segment(content))
         .padding(space::BAR_PAD)
         .width(size::PANEL)
 }
@@ -156,7 +147,7 @@ mod tests {
             themes::set(theme);
             let view: Container<'_, ()> = tray(
                 false,
-                widget_e::TRAY_RADIUS,
+                radius::FULL,
                 segment_row([super::super::text::text(Role::CONTROL, "Action").into()]),
             )
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X]);

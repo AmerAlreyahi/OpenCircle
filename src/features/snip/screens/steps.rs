@@ -21,7 +21,7 @@ use iced::{Center, Element, Fill, Padding, Point, Size};
 use crate::shared::kit::button::{self, Kind};
 use crate::shared::kit::surface::{segment_card, tray};
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
-use crate::shared::kit::tokens::{radius, widget_e};
+use crate::shared::kit::tokens::radius;
 use crate::shared::kit::tooltip::tip;
 use crate::shared::kit::{grip, scroll, toast};
 use crate::shared::picture::{Crop, encode_png, fit_long_edge};
@@ -36,7 +36,7 @@ const DRAG: f32 = 4.0;
 /// A thumbnail's pixels at most: twice the well, sharp at 200 %.
 pub const THUMB: (u32, u32) = (192, 120);
 /// The window's corners (`floating`).
-pub const RADIUS: f32 = widget_e::PANEL_RADIUS;
+pub const RADIUS: f32 = radius::DRAWER;
 /// lucide "copy"
 const COPY: char = '\u{e0a2}';
 /// The strip's foot: Copy all and Open in OpenCircle Studio, one under the other.

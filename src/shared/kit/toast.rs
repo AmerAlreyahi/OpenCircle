@@ -6,7 +6,7 @@ use iced::{Border, Center, Element, Fill, Size};
 
 use super::text::{font, width};
 use super::themes::c;
-use super::tokens::{Role, fixed, size, widget_e};
+use super::tokens::{Role, fixed, radius, size};
 
 /// What the dot says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +191,7 @@ pub fn banner<'a, Message: 'a>(
     let lead = container(lead).center(LEAD).style(|_| container::Style {
         background: Some(c().accent_soft.into()),
         text_color: Some(c().accent),
-        border: Border::default().rounded(widget_e::ICON_RADIUS),
+        border: Border::default().rounded(radius::TRACK),
         ..container::Style::default()
     });
     let none = iced::widget::text::Wrapping::None;

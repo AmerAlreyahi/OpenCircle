@@ -26,7 +26,7 @@ use crate::shared::kit::scroll;
 use crate::shared::kit::surface::{segment, tray};
 use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::themes::c;
-use crate::shared::kit::tokens::{Role, size, widget_e};
+use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
 use crate::t;
 
 /// A chip, and the gaps inside each style E segment (128 x 34 chips, 24 px arrow).
@@ -44,7 +44,7 @@ const CHIPS_SEG: f32 = SEG_EXTRA + WIDTH;
 pub const SLOT: f32 = SEG_EXTRA + 3.0 * size::ICON_BUTTON + widget_e::QUIET_X + 3.0 * SPACING;
 /// The pill: its size never changes (style E two-segment tray, 56 px tall).
 pub const PILL: Size = Size::new(
-    2.0 * PAD + CHIPS_SEG + widget_e::TRAY_GAP + SLOT,
+    2.0 * PAD + CHIPS_SEG + space::GAP + SLOT,
     CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y,
 );
 /// The open list (fixed) and its gap under the pill.
@@ -479,10 +479,8 @@ impl Picker {
         tail: Element<'a, M>,
     ) -> Element<'a, M> {
         let chips: Element<'a, M> = segment(self.chips().map(map)).into();
-        let line = dir::row([chips, tail])
-            .spacing(widget_e::TRAY_GAP)
-            .align_y(Center);
-        tray(false, widget_e::TRAY_RADIUS, line)
+        let line = dir::row([chips, tail]).spacing(space::GAP).align_y(Center);
+        tray(false, radius::FULL, line)
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
             .into()
     }
@@ -494,7 +492,7 @@ impl Picker {
         let side = self.open?;
         let rtl = dir::rtl();
         let (start, end) = match rtl {
-            true => (PAD + SLOT + widget_e::TRAY_GAP, PILL.width - PAD),
+            true => (PAD + SLOT + space::GAP, PILL.width - PAD),
             false => (PAD, PAD + CHIPS_SEG),
         };
         let x = match (side == Side::Source) != rtl {
@@ -769,7 +767,7 @@ mod tests {
         const MARGIN: f32 = 20.0;
         let from = PAD;
         let to_end = PAD + CHIPS_SEG;
-        assert_eq!(to_end, PILL.width - PAD - SLOT - widget_e::TRAY_GAP);
+        assert_eq!(to_end, PILL.width - PAD - SLOT - space::GAP);
         for rtl in [false, true] {
             for side in [Side::Source, Side::Target] {
                 let mut p = open(AUTO, "en", true, side);

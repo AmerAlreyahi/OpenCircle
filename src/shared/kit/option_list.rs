@@ -85,10 +85,10 @@ pub fn opener<'a, Message: Clone + 'a>(
                 };
                 let ring = match open {
                     true => Border::default()
-                        .rounded(widget_e::ICON_RADIUS)
+                        .rounded(radius::TRACK)
                         .width(1.5)
                         .color(c().accent),
-                    false => Border::default().rounded(widget_e::ICON_RADIUS),
+                    false => Border::default().rounded(radius::TRACK),
                 };
                 button::Style {
                     background: Some(fill.into()),
@@ -97,7 +97,7 @@ pub fn opener<'a, Message: Clone + 'a>(
                     ..button::Style::default()
                 }
             }),
-        widget_e::ICON_RADIUS,
+        radius::TRACK,
         Some(on_press),
     )
     .into()
@@ -226,13 +226,13 @@ pub fn choice<'a, Message: Clone + 'a>(
                     background: fill.map(Into::into),
                     text_color: c().text,
                     border: Border::default()
-                        .rounded(widget_e::ROW_RADIUS)
+                        .rounded(radius::TRACK)
                         .width(1)
                         .color(edge),
                     ..button::Style::default()
                 }
             }),
-        widget_e::ROW_RADIUS,
+        radius::TRACK,
         Some(on_press),
     )
     .into()
@@ -332,8 +332,8 @@ pub fn floating_menu_height(items: usize, separators: usize) -> f32 {
         + separators as f32 * SEPARATOR_H
 }
 
-/// Style E floating menu row (`.mr`): 34 px tall, 10 px corners, `hover` under
-/// cursor/focus, `accent_soft` + start accent bar + accent check when `current`.
+/// Style E floating menu row (`.mr`): `item` at 34 px with 10 px corners; the
+/// `current` one is `accent_soft` with a start accent bar and an accent check.
 pub fn floating_item<'a, Message: Clone + 'a>(
     label: &'a str,
     checked: bool,
@@ -342,64 +342,13 @@ pub fn floating_item<'a, Message: Clone + 'a>(
     current: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
-    use button::Status;
-    let (role, small) = (Role::MENU, Role::MENU_HINT);
-    let check = (checked || current).then(|| {
-        container(icon(Icon::Check, size::ICON_SMALL).color(if current {
-            c().accent
-        } else {
-            c().text_muted
-        }))
-        .padding(super::dir::pad(Padding {
-            left: CHECK_GAP,
-            ..Padding::ZERO
-        }))
-    });
-    let hint = hint.map(|h| {
-        container(
-            text(h)
-                .size(small.size)
-                .font(font(small))
-                .color(c().text_muted),
-        )
-        .padding(super::dir::pad(Padding {
-            left: HINT_GAP,
-            ..Padding::ZERO
-        }))
-    });
-    let lead = current.then(current_bar);
-    let content = crate::dir_row![]
-        .push(lead)
-        .push(text(label).size(super::text::size(role)).font(font(role)))
-        .push(Space::new().width(Fill))
-        .push(hint)
-        .push(check)
-        .spacing(space::GAP)
-        .width(Fill)
-        .align_y(Center);
-    super::focus::press(
-        button(container(content).center_y(Fill))
-            .width(Fill)
-            .height(widget_e::MENU_ITEM_H)
-            .padding([0.0, OPENER_PAD])
-            .style(move |_, status| {
-                let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
-                let fill = match () {
-                    _ if current => Some(c().accent_soft),
-                    _ if hot => Some(c().hover),
-                    _ => None,
-                };
-                button::Style {
-                    background: fill.map(Into::into),
-                    text_color: c().text,
-                    border: Border::default().rounded(widget_e::ROW_RADIUS),
-                    ..button::Style::default()
-                }
-            }),
-        widget_e::ROW_RADIUS,
-        Some(on_press),
-    )
-    .into()
+    let row = RowStyle {
+        height: widget_e::MENU_ITEM_H,
+        pad: OPENER_PAD,
+        corner: radius::TRACK,
+        check: size::ICON_SMALL,
+    };
+    menu_row(row, label, checked, hint, focused, current, on_press)
 }
 
 /// The menu's width, a row's height, the room around the rows (edge + `p-1`)
@@ -445,15 +394,46 @@ pub fn item<'a, Message: Clone + 'a>(
     focused: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
+    let row = RowStyle {
+        height: ITEM_H,
+        pad: ITEM_PAD,
+        corner: radius::MENU_ITEM,
+        check: CHECK,
+    };
+    menu_row(row, label, checked, hint, focused, false, on_press)
+}
+
+/// A menu row's measures: what `item` (the tray and Settings menus) and
+/// `floating_item` (style E) differ in.
+#[derive(Clone, Copy)]
+struct RowStyle {
+    height: f32,
+    pad: f32,
+    corner: f32,
+    check: f32,
+}
+
+/// The row both menus draw. `current`: `accent_soft`, a start accent bar, an accent check.
+fn menu_row<'a, Message: Clone + 'a>(
+    row: RowStyle,
+    label: &'a str,
+    checked: bool,
+    hint: Option<String>,
+    focused: bool,
+    current: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
     use button::Status;
     let (role, small) = (Role::MENU, Role::MENU_HINT);
-    let check = checked.then(|| {
-        container(icon(Icon::Check, CHECK).color(c().text_muted)).padding(super::dir::pad(
-            Padding {
-                left: CHECK_GAP,
-                ..Padding::ZERO
-            },
-        ))
+    let check = (checked || current).then(|| {
+        let tick = icon(Icon::Check, row.check).color(match current {
+            true => c().accent,
+            false => c().text_muted,
+        });
+        container(tick).padding(super::dir::pad(Padding {
+            left: CHECK_GAP,
+            ..Padding::ZERO
+        }))
     });
     let hint = hint.map(|h| {
         container(
@@ -467,28 +447,49 @@ pub fn item<'a, Message: Clone + 'a>(
             ..Padding::ZERO
         }))
     });
+    let bar = current.then(|| {
+        container(current_bar()).padding(super::dir::pad(Padding {
+            right: space::GAP,
+            ..Padding::ZERO
+        }))
+    });
+    // the current row's check ends the row (`.ck`), a toggle's follows its label
+    let (check, last) = if current {
+        (None, check)
+    } else {
+        (check, None)
+    };
     // (right to left: the label at the right, its key at the left)
-    let content = crate::dir_row![text(label).size(super::text::size(role)).font(font(role))]
+    let content = crate::dir_row![]
+        .push(bar)
+        .push(text(label).size(super::text::size(role)).font(font(role)))
         .push(check)
         .push(Space::new().width(Fill))
         .push(hint)
+        .push(last)
         .width(Fill)
         .align_y(Center);
+    let corner = row.corner;
     super::focus::press(
         button(container(content).center_y(Fill))
             .width(Fill)
-            .height(ITEM_H)
-            .padding([0.0, ITEM_PAD])
+            .height(row.height)
+            .padding([0.0, row.pad])
             .style(move |_, status| {
                 let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
+                let fill = match () {
+                    _ if current => Some(c().accent_soft),
+                    _ if hot => Some(c().hover),
+                    _ => None,
+                };
                 button::Style {
-                    background: hot.then(|| c().hover.into()),
+                    background: fill.map(Into::into),
                     text_color: c().text,
-                    border: Border::default().rounded(radius::MENU_ITEM),
+                    border: Border::default().rounded(corner),
                     ..button::Style::default()
                 }
             }),
-        radius::MENU_ITEM,
+        corner,
         Some(on_press),
     )
     .into()
@@ -535,7 +536,6 @@ const ACTION_GAP: f32 = 2.0;
 /// Room in an action row (`gap-2.5`, `pl-2.5 pr-2`).
 const ACTION_SPACE: f32 = 10.0;
 const ACTION_PAD: [f32; 2] = [0.0, 8.0];
-/// The action menu's inner padding (`padding: 8px 6px`).
 /// The foot's row, and its hairline's margin.
 pub const FOOT_H: f32 = 28.0;
 const FOOT_RULE: f32 = 5.0;

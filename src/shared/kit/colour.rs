@@ -7,7 +7,7 @@ use iced::widget::{Space, button, container, row};
 use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
-use super::tokens::{radius, size, space, widget_e};
+use super::tokens::{radius, size, space};
 
 const DOT: f32 = 18.0;
 const DOT_E: f32 = 20.0;
@@ -108,13 +108,13 @@ pub fn swatch_e<'a, Message: Clone + 'a>(
                 button::Style {
                     background: fill.map(Into::into),
                     border: Border::default()
-                        .rounded(widget_e::ICON_RADIUS)
+                        .rounded(radius::TRACK)
                         .width(1)
                         .color(edge),
                     ..button::Style::default()
                 }
             }),
-        widget_e::ICON_RADIUS,
+        radius::TRACK,
         on_press,
     )
     .into()

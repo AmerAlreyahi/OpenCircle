@@ -573,7 +573,7 @@ pub fn tool<'a, Message: Clone + 'a>(
         size::ICON_BUTTON,
         kind,
         focused,
-        widget_e::ICON_RADIUS,
+        radius::TRACK,
         on_press,
     )
 }
