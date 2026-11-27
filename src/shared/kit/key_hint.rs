@@ -67,12 +67,12 @@ pub fn width(groups: &[Group<'_>]) -> f32 {
 }
 
 /// A keycap as wide as its key (the kit keycap fills its cell).
-fn cap<'a, Message: 'a>(key: &str) -> Element<'a, Message> {
+pub(super) fn cap<'a, Message: 'a>(key: &str) -> Element<'a, Message> {
     container(super::keycap::keycap(key.to_string()))
         .width(cap_width(key))
         .into()
 }
 
-fn cap_width(key: &str) -> f32 {
+pub(super) fn cap_width(key: &str) -> f32 {
     (kit_text::width(key, super::text::size(Role::KEYCAP), font(Role::KEYCAP)) + 12.0).max(22.0)
 }

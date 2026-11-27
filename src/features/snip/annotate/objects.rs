@@ -514,13 +514,17 @@ impl Annotator {
     /// only the first time ever (`general.ctrl_hint_seen`, written here); the host
     /// then shows the "Ctrl+drag moves" pill.
     pub fn take_ctrl_hint(&mut self) -> bool {
-        if !std::mem::take(&mut self.ctrl_hint)
-            || crate::shared::config::current().general.ctrl_hint_seen
-        {
+        if !self.take_ctrl_drag() || crate::shared::config::current().general.ctrl_hint_seen {
             return false;
         }
         crate::shared::config::update_in_background(|c| c.general.ctrl_hint_seen = true);
         true
+    }
+
+    /// A drag began on a shape with a drawing tool: true once per such press (Snip shows the
+    /// tip then, `app::tips`: once per user by its own rule).
+    pub fn take_ctrl_drag(&mut self) -> bool {
+        std::mem::take(&mut self.ctrl_hint)
     }
 
     /// Why the last growth was refused (once): the window says so in a pill.

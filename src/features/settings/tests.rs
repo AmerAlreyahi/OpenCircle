@@ -2242,6 +2242,15 @@ fn every_rows_control_shares_one_column(language: &'static str) {
     }
 }
 
+/// General is taller than the window since the Tips card: its shots are taken on a tall window so
+/// the rows under it (the Arabic save folder, the Setup shield) are drawn.
+fn tall(page: &str) -> Size {
+    match page.starts_with("general") {
+        true => Size::new(WINDOW_SIZE.width, 1150.0),
+        false => WINDOW_SIZE,
+    }
+}
+
 /// The ported pages (General, About, Labs) as drawn, in Sapphire and
 /// Daylight; General with a Latin and an Arabic save folder.
 #[test]
@@ -2263,7 +2272,7 @@ fn the_ported_pages_match_their_golden_images() {
             }
             themes::set(theme);
             let file = format!("settings-{name}-{}", theme.id);
-            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+            failed.extend(golden::check("screens", &file, tall(name), &[1.0], || {
                 view(&s)
             }));
         }
@@ -2291,9 +2300,13 @@ fn general_shows_the_waiting_update_with_restart_now() {
             }
             assert!(!texts.iter().any(|t| t == "Check now"), "{texts:?}");
             let file = format!("settings-general-update-{name}-{}", theme.id);
-            failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
-                view(&s)
-            }));
+            failed.extend(golden::check(
+                "screens",
+                &file,
+                tall("general"),
+                &[1.0],
+                || view(&s),
+            ));
         }
     });
     let (mut s, _) = state(None);
@@ -4371,6 +4384,22 @@ fn f6_general_has_show_welcome_again() {
     let words = crate::shared::kit::testing::shot::texts(view(&s));
     assert!(words.iter().any(|t| t == "Show welcome again"), "{words:?}");
     assert_eq!(update(&mut s, Message::ShowWelcome), Outcome::ShowWelcome);
+}
+
+/// R17-AC15: General has the Tips card: "Show tips" (on by default) turns every hint off in the
+/// draft, and "What can I do?" Open asks the shell to open the card.
+#[test]
+fn r17_general_has_the_tips_card() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::General));
+    let words = crate::shared::kit::testing::shot::texts(view(&s));
+    for want in ["TIPS", "Show tips", "What can I do?", "Open"] {
+        assert!(words.iter().any(|t| t == want), "{want}: {words:?}");
+    }
+    assert!(s.draft.tips.show);
+    update(&mut s, Message::ShowTips(false));
+    assert!(!s.draft.tips.show);
+    assert_eq!(update(&mut s, Message::OpenWhatCard), Outcome::OpenWhatCard);
 }
 
 #[test]

@@ -243,6 +243,7 @@ impl App {
                     let bar = Rectangle::new(at, edit.bar_size());
                     layers = layers.push(self.beside_bar(note, bar, self.o.screen.height));
                 }
+                layers = layers.extend(self.tip_layer());
                 return layers.extend(self.pill_view()).into();
             }
             layers = layers.extend(edit.flat_view());
@@ -379,6 +380,7 @@ impl App {
                     .on_right_press(Message::ContextMenu(context_menu::Msg::Close)),
             ));
         }
+        layers = layers.extend(self.tip_layer());
         layers.extend(self.pill_view()).into()
     }
 

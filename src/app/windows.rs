@@ -23,7 +23,7 @@ use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
 use crate::shared::theme;
 use crate::{
-    app::screens::{update_card, update_pill},
+    app::screens::{update_card, update_pill, what_card},
     features::settings,
     shared::platform::shape,
 };
@@ -87,6 +87,12 @@ pub enum Msg {
     TestShot(usize, &'static str, window::Screenshot),
     /// From the update card.
     UpdateCard(update_card::Msg),
+    /// From the "What can I do?" card.
+    WhatCard(what_card::Msg),
+    /// Esc in a window: closes the card when it is the card's own.
+    WhatCardEsc(window::Id),
+    /// F1 in one of our windows: the "What can I do?" card.
+    F1,
     /// From the update pill (`app::App` decides what its buttons do).
     UpdatePill(update_pill::Msg),
     /// A frame while the Updating pill's logo spins.
@@ -183,6 +189,8 @@ pub struct Windows {
     toast_clock: Vec<(window::Id, Instant, u64)>,
     /// The "Exported" card (a toast window with two actions): its window and what it made.
     exported: Option<(window::Id, std::path::PathBuf)>,
+    /// The "What can I do?" card, at most one.
+    what_card: Option<(window::Id, what_card::Card)>,
     /// The update card (release notes), at most one.
     update_card: Option<(window::Id, update_card::Card)>,
     /// The update pill above the tray, at most one, and when it opened (the
@@ -854,6 +862,28 @@ fn copy_image(crop: Crop) -> bool {
     }
 }
 
+/// F1 (the "What can I do?" card) in whichever of our windows has the focus.
+fn help_key() -> Subscription<Msg> {
+    iced::event::listen_with(|event, _status, _window| match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::F1),
+            ..
+        }) => Some(Msg::F1),
+        _ => None,
+    })
+}
+
+/// While the card is open: Esc closes it.
+fn what_card_esc() -> Subscription<Msg> {
+    iced::event::listen_with(|event, _status, window| match event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        }) => Some(Msg::WhatCardEsc(window)),
+        _ => None,
+    })
+}
+
 /// While the tray menu is open: its keys (it has the focus; it closes when it loses it) and
 /// any window's focus loss.
 fn tray_menu_events() -> Subscription<Msg> {
@@ -1195,6 +1225,40 @@ impl Windows {
         (self.toasts.iter())
             .map(|(_, text, tone, _)| (text.clone(), *tone == Tone::Ok))
             .collect()
+    }
+
+    /// The "What can I do?" card (F1, the tray row, Settings > General > Tips): opens it
+    /// with the keys the config has now, or brings the open one forward.
+    pub fn open_what_card(&mut self) -> Task<Msg> {
+        if let Some((id, _)) = &self.what_card {
+            return window::gain_focus(*id);
+        }
+        let card = what_card::Card::new(&config::current());
+        let size = spoken(|| card.size());
+        let (id, open) = floating_in_captures(
+            window::Settings {
+                size,
+                position: Position::Centered,
+                resizable: false,
+                ..window::Settings::default()
+            },
+            what_card::RADIUS,
+            POPUP,
+        );
+        self.what_card = Some((id, card));
+        open.discard().chain(window::gain_focus(id))
+    }
+
+    /// The card's window (tests).
+    #[cfg(test)]
+    pub fn what_card_id(&self) -> Option<window::Id> {
+        self.what_card.as_ref().map(|(id, _)| *id)
+    }
+
+    /// Whether the card is open (tests).
+    #[cfg(test)]
+    pub fn what_card_open(&self) -> bool {
+        self.what_card.is_some()
     }
 
     /// The update card (release notes) with `card`; replaces an open one's content.
@@ -1575,6 +1639,9 @@ impl Windows {
                         }
                         settings::Outcome::Browse => return Task::batch([keys, pick_folder()]),
                         // Settings > Studio's button: the Studio opens with its preferences dialog
+                        settings::Outcome::OpenWhatCard => {
+                            return Task::batch([keys, self.open_what_card()]);
+                        }
                         settings::Outcome::ShowWelcome => {
                             return Task::batch([keys, self.open(Kind::Onboarding)]);
                         }
@@ -1849,6 +1916,26 @@ impl Windows {
                     }
                 }
             }
+            Msg::F1 => return self.open_what_card(),
+            Msg::WhatCardEsc(window) => {
+                if let Some((id, _)) = self.what_card.as_ref().filter(|(id, _)| *id == window) {
+                    return close(*id);
+                }
+            }
+            Msg::WhatCard(msg) => {
+                let Some((id, _)) = &self.what_card else {
+                    return Task::none();
+                };
+                match msg {
+                    what_card::Msg::Close => return close(*id),
+                    what_card::Msg::Drag => return window::drag(*id),
+                    what_card::Msg::DontShow => {
+                        crate::shared::config::update_in_background(|c| {
+                            crate::shared::tips::hide_all(&mut c.tips)
+                        });
+                    }
+                }
+            }
             Msg::UpdatePill(_) => {} // the App's (`App::on_update_pill`)
             Msg::ShowCard(card) => {
                 let pill = match self.update_pill.as_ref().is_some_and(|(_, p, _)| p.spins()) {
@@ -1977,6 +2064,9 @@ impl Windows {
                 }
                 if self.update_card.as_ref().is_some_and(|(c, _)| *c == id) {
                     self.update_card = None;
+                }
+                if self.what_card.as_ref().is_some_and(|(c, _)| *c == id) {
+                    self.what_card = None;
                 }
                 if self.update_pill.as_ref().is_some_and(|(p, ..)| *p == id) {
                     self.update_pill = None;
@@ -2190,6 +2280,9 @@ impl Windows {
             let id = pin.id;
             return Some(pin_view(pin).map(move |msg| Msg::Pin(id, msg)));
         }
+        if let Some((_, card)) = self.what_card.as_ref().filter(|(c, _)| *c == window) {
+            return Some(spoken(|| what_card::view(card)).map(Msg::WhatCard));
+        }
         if let Some((_, card)) = self.update_card.as_ref().filter(|(c, _)| *c == window) {
             let radius = shape::radius(update_card::RADIUS);
             return Some(spoken(|| update_card::view(card, radius)).map(Msg::UpdateCard));
@@ -2336,6 +2429,9 @@ impl Windows {
         if self.record_bar_window() == Some(window) || self.record_thumb_window() == Some(window) {
             return crate::t!(win_t_record);
         }
+        if self.what_card.as_ref().is_some_and(|(c, _)| *c == window) {
+            return crate::t!(wc_title);
+        }
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
             return crate::t!(win_t_update);
         }
@@ -2380,6 +2476,12 @@ impl Windows {
                 Subscription::none()
             } else {
                 pin_keys()
+            },
+            // F1 in any of our windows; Esc closes the card
+            help_key(),
+            match self.what_card {
+                Some(_) => what_card_esc(),
+                None => Subscription::none(),
             },
             match self.tray_menu {
                 Some(_) => tray_menu_events(),

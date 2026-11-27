@@ -39,13 +39,16 @@ impl App {
     /// Every message, then the chat's own window brought in line with it
     /// (`sync_chat_window`).
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+        if matches!(message, Message::Tip(_) | Message::TipFade(_)) {
+            return self.on_tip(message);
+        }
         let mut task = self.handle(message);
         self.studio_gone();
         if self.o.is_some() && self.o.close_when_idle && self.ends_tool() {
             self.o.close_when_idle = false;
             task = Task::batch([task, self.close()]);
         }
-        Task::batch([task, self.sync_chat_window()])
+        Task::batch([task, self.sync_chat_window(), self.tips_tick()])
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
@@ -70,6 +73,11 @@ impl App {
                 .map(Message::Windows),
             Message::Trigger(Trigger::OpenStudio(file)) => {
                 self.windows.open_studio_file(file).map(Message::Windows)
+            }
+            // (answered in `update`, before this)
+            Message::Tip(_) | Message::TipFade(_) => Task::none(),
+            Message::Trigger(Trigger::OpenWhatCard) => {
+                self.windows.open_what_card().map(Message::Windows)
             }
             Message::Trigger(Trigger::NoTray) => self.windows.open_main().map(Message::Windows),
             Message::Trigger(Trigger::TrayMenu(icon)) => self

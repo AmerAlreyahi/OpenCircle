@@ -11,7 +11,7 @@ use super::super::tokens::{Role, radius};
 use super::super::{
     button, card, chip, choice_card, divider, error_card, field, floating_card, header, nav_card,
     page_head, panel_frame, progress, scroll, search_card, section, segmented, setting_row,
-    surface, theme_preview, toast,
+    surface, theme_preview, tip_hint, toast, what_card,
 };
 use super::{golden, shot};
 
@@ -2247,4 +2247,97 @@ fn recording_sheet() {
         }),
     ];
     sheet("recording", Size::new(200.0, 52.0), &rows);
+}
+
+#[test]
+fn tip_hint_sheet() {
+    use tip_hint::{Run, Words, view};
+    let tip = |ar: bool| {
+        let _dir = super::super::dir::scope(ar);
+        let runs = [
+            Run::Plain(s(ar, "Hold", "اضغط")),
+            Run::Key("Ctrl"),
+            Run::Plain(s(ar, "and drag to move a shape", "واسحب لتحريك شكل")),
+        ];
+        let words = Words {
+            got_it: s(ar, "Got it", "حسنًا"),
+            dont_show: s(ar, "Don\u{2019}t show tips", "عدم إظهار النصائح"),
+        };
+        view(&runs, words, (), (), ())
+    };
+    let lead = |ar: bool| {
+        let _dir = super::super::dir::scope(ar);
+        let runs = [
+            Run::Strong(s(ar, "Original", "الأصلي")),
+            Run::Plain(s(ar, "shows the source text.", "يعرض النص المصدر.")),
+        ];
+        let words = Words {
+            got_it: s(ar, "Got it", "حسنًا"),
+            dont_show: s(ar, "Don\u{2019}t show tips", "عدم إظهار النصائح"),
+        };
+        view(&runs, words, (), (), ())
+    };
+    let rows = vec![
+        row("with a key", Act::Rest, tip),
+        row("bold lead", Act::Rest, lead),
+    ];
+    sheet("tip_hint", Size::new(620.0, 60.0), &rows);
+}
+
+#[test]
+fn what_card_sheet() {
+    use super::super::choice_card::Mark;
+    use super::super::icon::Icon;
+    use what_card::{Tile, Words, view};
+    let card = |ar: bool| {
+        let _dir = super::super::dir::scope(ar);
+        let tile = |mark, name, desc, keys: &[&str]| Tile {
+            mark,
+            name,
+            desc,
+            keys: keys.iter().map(|k| k.to_string()).collect(),
+        };
+        let tiles = [
+            tile(
+                Mark::Glyph(Icon::Focus.glyph()),
+                s(ar, "Circle to Search", "البحث بالدائرة"),
+                s(
+                    ar,
+                    "Circle, drag or tap anything on screen to search it.",
+                    "ارسم دائرة أو اسحب أو انقر أي شيء على الشاشة للبحث عنه.",
+                ),
+                &["Ctrl", "Shift", "Space"],
+            ),
+            tile(
+                Mark::Glyph(Icon::Translate.glyph()),
+                s(ar, "Translate", "الترجمة"),
+                s(
+                    ar,
+                    "Replace the text on screen with your language.",
+                    "استبدل النص على الشاشة بلغتك.",
+                ),
+                &["Alt", "Shift", "T"],
+            ),
+            tile(
+                Mark::Logo,
+                s(ar, "Ask AI", "اسأل الذكاء الاصطناعي"),
+                s(
+                    ar,
+                    "Ask about exactly what you circled.",
+                    "اسأل عن ما أحطته بدائرة بالضبط.",
+                ),
+                &["Ctrl", "Shift", "E"],
+            ),
+        ];
+        let words = Words {
+            title: s(ar, "What can I do?", "ماذا يمكنني أن أفعل؟"),
+            footer: s(ar, "Open this any time", "افتح هذه النافذة في أي وقت"),
+            key: "F1",
+            tray: s(ar, "tray menu", "قائمة الأيقونة"),
+            dont_show: s(ar, "Don\u{2019}t show tips", "عدم إظهار النصائح"),
+        };
+        view(&tiles, words, (), (), ())
+    };
+    let rows = vec![row("three tiles", Act::Rest, card)];
+    sheet("what_card", Size::new(560.0, 350.0), &rows);
 }

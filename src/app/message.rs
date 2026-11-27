@@ -88,6 +88,10 @@ pub(crate) enum Message {
     Resized(Size),
     /// Settings / onboarding windows and the OS theme (`windows.rs`).
     Windows(windows::Msg),
+    /// A one-time tip's button (`app::tips`).
+    Tip(crate::app::screens::tip::Msg),
+    /// A tip stayed `tips::FADE_MS`: it counts as seen.
+    TipFade(crate::shared::tips::Tip),
     /// From the Snip annotation editor.
     Annotate(annotate::Message),
     /// Snip's Ctrl+V: the clipboard's picture (if any) was read off the UI thread.

@@ -716,6 +716,62 @@ strings! {
         | "تعيد الجولة السريعة لاختصاراتك";
     g_welcome_again: "Show welcome again"
         | "عرض الترحيب مرة أخرى";
+    gp_tips: "Tips"
+        | "النصائح";
+    g_tips_show: "Show tips"
+        | "إظهار النصائح";
+    g_tips_show_d: "A short hint the first time a feature is useful. Never while you are in a hurry."
+        | "تلميح قصير في أول مرة تكون فيها الميزة مفيدة. لا يظهر أبدًا أثناء الاستعجال.";
+    g_tips_what_d: "Every feature with its key. Also in the tray menu."
+        | "كل ميزة مع اختصارها. موجودة أيضًا في قائمة الأيقونة.";
+    g_tips_open: "Open"
+        | "فتح";
+    tip_got_it: "Got it"
+        | "حسنًا";
+    tip_dont_show: "Don’t show tips"
+        | "عدم إظهار النصائح";
+    tip_snip_a: "Hold"
+        | "اضغط";
+    tip_snip_b: "and drag to move a shape"
+        | "واسحب لتحريك شكل";
+    tip_orig_a: "Original"
+        | "الأصلي";
+    tip_orig_b: "shows the source text. Click again to go back."
+        | "يعرض النص المصدر. انقر مرة أخرى للعودة.";
+    tip_bar_a: "Type a question or circle anything. Press"
+        | "اكتب سؤالاً أو ارسم دائرة حول أي شيء. اضغط";
+    tip_bar_b: "to see what you can do."
+        | "لمعرفة ما يمكنك فعله.";
+    wc_title: "What can I do?"
+        | "ماذا يمكنني أن أفعل؟";
+    wc_circle: "Circle to Search"
+        | "البحث بالدائرة";
+    wc_circle_d: "Circle, drag or tap anything on screen to search it."
+        | "ارسم دائرة أو اسحب أو انقر أي شيء على الشاشة للبحث عنه.";
+    wc_translate: "Translate"
+        | "الترجمة";
+    wc_translate_d: "Replace the text on screen with your language."
+        | "استبدل النص على الشاشة بلغتك.";
+    wc_ai: "Ask AI"
+        | "اسأل الذكاء الاصطناعي";
+    wc_ai_d: "Ask about exactly what you circled."
+        | "اسأل عن ما أحطته بدائرة بالضبط.";
+    wc_text: "Copy text"
+        | "نسخ النص";
+    wc_text_d: "Copy the words from any picture or video."
+        | "انسخ الكلمات من أي صورة أو فيديو.";
+    wc_snip: "Snip"
+        | "لقطة الشاشة";
+    wc_snip_d: "Capture, mark up, copy or save in seconds."
+        | "التقط وعلّق وانسخ أو احفظ في ثوانٍ.";
+    wc_record: "Record"
+        | "تسجيل";
+    wc_record_d: "Video or audio. Audio alone: Alt+Shift+M."
+        | "فيديو أو صوت. للصوت فقط: Alt+Shift+M.";
+    wc_footer: "Open this any time"
+        | "افتح هذه النافذة في أي وقت";
+    wc_tray: "tray menu"
+        | "قائمة الأيقونة";
     o_s_try: "Try it"
         | "جرّبها";
     o_try_title: "Try your shortcuts"

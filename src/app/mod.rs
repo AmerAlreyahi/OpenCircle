@@ -39,6 +39,7 @@ pub(crate) mod seen;
 pub(crate) mod shell;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod tips;
 pub(crate) mod update;
 pub(crate) mod updates;
 pub(crate) mod view;
@@ -161,6 +162,8 @@ pub(crate) struct App {
     pub(crate) o: Open,
     /// What the capture on its way opens for (`Opening::purpose` at `open`).
     pub(crate) next: Purpose,
+    /// The one-time tips (`app::tips`).
+    pub(crate) tips: tips::Tips,
     /// The overlay window's id; a closed window's while `overlay_open` is false.
     pub(crate) overlay: window::Id,
     /// The overlay window exists: always where it is pre-created and hidden
@@ -303,6 +306,7 @@ impl App {
         App {
             o: Open::default(),
             next: Purpose::Search,
+            tips: tips::Tips::idle(),
             overlay,
             overlay_open: true,
             overlay_gone: None,

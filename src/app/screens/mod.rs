@@ -2,7 +2,9 @@
 //! (no style in place: `arch_tests::screens_never_style`). The shell's own
 //! windows; each feature has its own `screens/`.
 pub mod setup;
+pub mod tip;
 pub mod toast;
 pub mod tray_menu;
 pub mod update_card;
 pub mod update_pill;
+pub mod what_card;

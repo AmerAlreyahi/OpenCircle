@@ -240,7 +240,7 @@ impl App {
             annotate::Message::Menu(annotate::Menu::More) | annotate::Message::AreaMenu(_)
         );
         let out = edit.update(msg);
-        let hint = edit.annotator.take_ctrl_hint();
+        let hint = edit.annotator.take_ctrl_drag();
         // (the area's menu reads the text too: its Copy text and Translate rows)
         let opened_more = opened_more
             && (edit.annotator.menu == Some(annotate::Menu::More)
@@ -258,14 +258,11 @@ impl App {
         match out {
             None if opened_more => self.more_opened(),
             // C5: a drag began on a shape: with a drawing tool it draws, Ctrl+drag moves (once ever)
-            None if hint => (self.windows)
-                .toast(
-                    crate::t!(pill_ctrl_moves),
-                    crate::app::screens::toast::Tone::Neutral,
-                    None,
-                    crate::app::windows::NOTICE_MS,
-                )
-                .map(Message::Windows),
+            // (R-17: the one-time tip against the toolbar, `app::tips`)
+            None if hint => {
+                self.ask_tip(crate::shared::tips::Tip::SnipMove);
+                Task::none()
+            }
             None => Task::none(),
             // a step of the Steps strip edited: Esc leaves it as it was
             Some(Output::Back) if edit.annotator.updating.is_some() => self.cancel_close(),

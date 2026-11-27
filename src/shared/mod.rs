@@ -17,5 +17,6 @@ pub(crate) mod secrets;
 pub(crate) mod setup;
 pub(crate) mod store;
 pub(crate) mod theme;
+pub(crate) mod tips;
 pub(crate) mod touch;
 pub(crate) mod update;

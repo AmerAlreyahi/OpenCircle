@@ -108,11 +108,13 @@ pub enum Icon {
     Waveform,
     /// lucide "plus" (Add a language pair).
     Plus,
+    /// lucide "focus" (Circle to Search: brackets round a small square).
+    Focus,
 }
 
 impl Icon {
     #[cfg(test)]
-    pub const ALL: [Icon; 55] = [
+    pub const ALL: [Icon; 56] = [
         Icon::Close,
         Icon::Download,
         Icon::Check,
@@ -168,6 +170,7 @@ impl Icon {
         Icon::Video,
         Icon::Waveform,
         Icon::Plus,
+        Icon::Focus,
     ];
 
     /// A directional icon as the layout direction reads it: Back and Forward
@@ -228,6 +231,7 @@ impl Icon {
             Icon::Keyboard => '\u{e283}',
             Icon::Puzzle => '\u{e29b}',
             Icon::Info => '\u{e0fe}',
+            Icon::Focus => '\u{e29d}',
             Icon::Flask => '\u{e0da}',
             Icon::Pause => '\u{e131}',
             Icon::Play => '\u{e13f}',

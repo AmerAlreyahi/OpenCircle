@@ -83,9 +83,27 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let updates = section(Some(t!(us_updates)), None, || {
         vec![updates_row(state), update_row(state)]
     });
-    column![basics, saving, updates]
+    column![basics, tips_card(state), saving, updates]
         .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
         .into()
+}
+
+/// Tips (R-17, design B3): "Show tips" and the "What can I do?" Open row, between Basics and Saving.
+fn tips_card(state: &State) -> Element<'_, Message> {
+    section(Some(t!(gp_tips)), None, || {
+        vec![
+            setting_row::row(
+                title(t!(g_tips_show)),
+                t!(g_tips_show_d),
+                switch(t!(g_tips_show), state.draft.tips.show, Message::ShowTips),
+            ),
+            setting_row::row(
+                title(t!(wc_title)),
+                t!(g_tips_what_d),
+                setting_row::action(t!(g_tips_open), Kind::Elevated, Some(Message::OpenWhatCard)),
+            ),
+        ]
+    })
 }
 
 /// F11: after the migration replaced a Studio folder: one line, dismissible.

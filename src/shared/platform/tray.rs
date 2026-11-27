@@ -30,6 +30,8 @@ pub enum Entry {
     Studio,
     Live,
     Song,
+    /// "What can I do?": the card of every feature with its key (R-17).
+    WhatCanIDo,
     /// Only while a live pin lets clicks pass through (`tray_menu::Menu::with_click_pins`;
     /// not in `ALL`): they take clicks again. `app::windows` runs it itself.
     ClickPins,
@@ -38,7 +40,7 @@ pub enum Entry {
 }
 
 impl Entry {
-    const ALL: [Entry; 9] = [
+    const ALL: [Entry; 10] = [
         Entry::Update,
         Entry::Circle,
         Entry::Translate,
@@ -46,6 +48,7 @@ impl Entry {
         Entry::Studio,
         Entry::Live,
         Entry::Song,
+        Entry::WhatCanIDo,
         Entry::Settings,
         Entry::Quit,
     ];
@@ -61,6 +64,7 @@ impl Entry {
             Entry::Studio => t!(tray_studio),
             Entry::Live => t!(lb_live),
             Entry::Song => t!(lb_song),
+            Entry::WhatCanIDo => t!(wc_title),
             Entry::ClickPins => t!(tray_click_pins),
             Entry::Settings => t!(tray_settings),
             Entry::Quit => t!(tray_quit),
@@ -70,7 +74,7 @@ impl Entry {
     /// A separator goes above it (unless it is the first row: Circle to Search
     /// is separated from the update row above it).
     pub fn separated(self) -> bool {
-        matches!(self, Entry::Settings | Entry::Circle)
+        matches!(self, Entry::WhatCanIDo | Entry::Circle | Entry::Quit)
     }
 
     /// The Labs switch that shows it (`None` = always shown).
@@ -85,14 +89,7 @@ impl Entry {
     /// The user's own shortcut for it in `cfg` (the hint at the row's end), when one is bound.
     pub fn shortcut(self, cfg: &Config) -> Option<String> {
         let quick = |action: &str, live: bool, target: Option<Target>| {
-            (cfg.quick_actions.iter())
-                .find(|q| {
-                    q.action == action
-                        && q.live == live
-                        && target.is_none_or(|t| q.target == t)
-                        && !q.shortcut.is_empty()
-                })
-                .map(|q| q.shortcut.clone())
+            quick_shortcut(cfg, action, live, target)
         };
         match self {
             Entry::Circle => Some(cfg.shortcut.clone()).filter(|s| !s.is_empty()),
@@ -100,9 +97,12 @@ impl Entry {
             Entry::Snip => quick("snip", false, None),
             Entry::Live => quick("translate", true, None),
             Entry::Song => quick("song_search", false, None),
-            Entry::Update | Entry::Studio | Entry::ClickPins | Entry::Settings | Entry::Quit => {
-                None
-            }
+            Entry::Update
+            | Entry::Studio
+            | Entry::WhatCanIDo
+            | Entry::ClickPins
+            | Entry::Settings
+            | Entry::Quit => None,
         }
     }
 
@@ -110,7 +110,12 @@ impl Entry {
     pub fn captures(self) -> bool {
         !matches!(
             self,
-            Entry::Update | Entry::Studio | Entry::ClickPins | Entry::Settings | Entry::Quit
+            Entry::Update
+                | Entry::Studio
+                | Entry::WhatCanIDo
+                | Entry::ClickPins
+                | Entry::Settings
+                | Entry::Quit
         )
     }
 
@@ -130,6 +135,7 @@ impl Entry {
             Entry::Translate => run("translate", Some(Target::FullScreen)),
             Entry::Snip => run("snip", None),
             Entry::Studio => Trigger::OpenStudio(None),
+            Entry::WhatCanIDo => Trigger::OpenWhatCard,
             Entry::Live => Trigger::Quick(
                 at,
                 crate::shared::config::QuickAction {
@@ -145,6 +151,23 @@ impl Entry {
             Entry::Quit => Trigger::Quit,
         }
     }
+}
+
+/// The key bound to quick action `action` in `cfg` (the tray's hints, the "What can I do?" card).
+pub fn quick_shortcut(
+    cfg: &Config,
+    action: &str,
+    live: bool,
+    target: Option<Target>,
+) -> Option<String> {
+    (cfg.quick_actions.iter())
+        .find(|q| {
+            q.action == action
+                && q.live == live
+                && target.is_none_or(|t| q.target == t)
+                && !q.shortcut.is_empty()
+        })
+        .map(|q| q.shortcut.clone())
 }
 
 /// The entries shown with these Labs switches: a Labs feature's only while it is
@@ -310,7 +333,7 @@ struct Built {
     menu: Menu,
     items: Vec<(Entry, MenuItem)>,
     /// Above Circle to Search (under the update row) and above Settings.
-    separators: [PredefinedMenuItem; 2],
+    separators: [PredefinedMenuItem; 3],
     /// The menu while a long capture runs (`capturing`).
     long: Vec<(Finish, MenuItem)>,
     /// The recording's rows (`recording`).
@@ -768,6 +791,7 @@ fn desktop_menu(tx: Triggers) -> Menu {
         separators: [
             PredefinedMenuItem::separator(),
             PredefinedMenuItem::separator(),
+            PredefinedMenuItem::separator(),
         ],
         long,
         rec,
@@ -1018,25 +1042,29 @@ mod tests {
         // Snip is out of Labs (N-41): always there
         assert_eq!(
             entries(&Labs::default(), false),
-            [Circle, Translate, Snip, Studio, Settings, Quit]
+            [Circle, Translate, Snip, Studio, WhatCanIDo, Settings, Quit]
         );
         let mut on = Labs::default();
         on.set(Feature::Live, true);
         assert_eq!(
             entries(&on, false),
-            [Circle, Translate, Snip, Studio, Live, Settings, Quit]
+            [
+                Circle, Translate, Snip, Studio, Live, WhatCanIDo, Settings, Quit
+            ]
         );
         on.set(Feature::Song, true);
         assert_eq!(
             entries(&on, false),
-            [Circle, Translate, Snip, Studio, Live, Song, Settings, Quit]
+            [
+                Circle, Translate, Snip, Studio, Live, Song, WhatCanIDo, Settings, Quit
+            ]
         );
         assert_eq!(
             Entry::ALL
                 .iter()
                 .filter(|e| e.separated())
                 .collect::<Vec<_>>(),
-            [&Circle, &Settings]
+            [&Circle, &WhatCanIDo, &Quit]
         );
     }
 
@@ -1047,7 +1075,9 @@ mod tests {
         use Entry::*;
         assert_eq!(
             entries(&Labs::default(), true),
-            [Update, Circle, Translate, Snip, Studio, Settings, Quit]
+            [
+                Update, Circle, Translate, Snip, Studio, WhatCanIDo, Settings, Quit
+            ]
         );
         assert!(matches!(
             Update.trigger(std::time::Instant::now()),

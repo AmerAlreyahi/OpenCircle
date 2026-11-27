@@ -64,8 +64,10 @@ pub mod text;
 pub mod text_area;
 pub mod theme_preview;
 pub mod thumb;
+pub mod tip_hint;
 pub mod toast;
 pub mod tooltip;
+pub mod what_card;
 pub mod wrap;
 
 #[cfg(test)]

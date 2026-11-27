@@ -83,6 +83,10 @@
 //! # copy_path, ctrl_c_picture, paste_movable, grow_canvas, drag_type, snap, pixel_grid, background, zoom_on_open, wheel,
 //! # theme ("follow" | a theme id), steps_side (start | end), steps_on_start, start_screen
 //!
+//! [tips]                            # one-time hints (R-17); written only once changed, additive (no schema bump)
+//! # show = false                     # "Show tips" off: no hint ever shows
+//! # seen = ["snip_move"]             # the tips already shown (each shows once per user)
+//!
 //! [snip.studio]                   # written only once changed
 //! # library, pinned = true         # the Studio's Steps panel: open at the Studio's start, docked (default closed, sliding)
 //! # hint_seen = true               # Snip's one-time "Edit more in OpenCircle Studio" hint was shown
@@ -1263,10 +1267,37 @@ pub struct Config {
     /// Written only once changed (the default file stays as frozen).
     #[serde(skip_serializing_if = "StudioPrefs::is_default")]
     pub studio: StudioPrefs,
+    /// Written only once changed (the default file stays as frozen).
+    #[serde(skip_serializing_if = "TipsConfig::is_default")]
+    pub tips: TipsConfig,
     pub quick_actions: Vec<QuickAction>,
     pub song: SongConfig,
     pub update: UpdateConfig,
     pub labs: Labs,
+}
+
+/// `[tips]`: the one-time hints (`shared::tips`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TipsConfig {
+    /// "Show tips" (Settings > General); off hides every hint.
+    pub show: bool,
+    /// Ids of the tips already shown: each shows once per user, whatever the version.
+    pub seen: Vec<String>,
+}
+
+impl TipsConfig {
+    fn is_default(&self) -> bool {
+        *self == TipsConfig::default()
+    }
+}
+
+impl Default for TipsConfig {
+    fn default() -> Self {
+        TipsConfig {
+            show: true,
+            seen: Vec::new(),
+        }
+    }
 }
 
 /// `[chat]`: the AI chat card.
@@ -1382,6 +1413,7 @@ impl Default for Config {
             translate: TranslateConfig::default(),
             snip: SnipConfig::default(),
             studio: StudioPrefs::default(),
+            tips: TipsConfig::default(),
             // DESIGN.md "Quick actions".
             quick_actions: vec![
                 qa("translate", "Alt+Shift+T", Target::FullScreen, false),

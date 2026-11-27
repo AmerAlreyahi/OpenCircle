@@ -23,6 +23,8 @@ pub enum Trigger {
     OpenSettings,
     /// Tray "Studio" or `opencircle studio [file]`: OpenCircle Studio (on that picture).
     OpenStudio(Option<std::path::PathBuf>),
+    /// Tray "What can I do?" (and F1 in our windows): the card of every feature with its key.
+    OpenWhatCard,
     /// Linux: no tray icon can show (no host, library or GTK): open a window instead (first run: the onboarding).
     NoTray,
     /// Windows, a right-click on the tray icon: open our tray menu at the icon

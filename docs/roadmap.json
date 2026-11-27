@@ -323,7 +323,7 @@
         {
           "id": "R-11",
           "title": "Snip: right-click on the picked area = short menu (Copy, Save, Pin, Open in Studio, Copy text, Translate, Ask AI), same list as More; right-click mid-stroke cancels; shape menu later",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-12",
@@ -343,7 +343,7 @@
         {
           "id": "R-17",
           "title": "Tips: one-time contextual hints in widget style E + the 'What can I do?' card; each tip once per user, existing users included (first time the feature is relevant after the update); 'Don't show tips' in Settings",
-          "status": "todo"
+          "status": "done"
         }
       ],
       "gate": [

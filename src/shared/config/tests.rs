@@ -2096,3 +2096,23 @@ fn r10_pin_live_key_is_additive_and_round_trips() {
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(back.editor.pin_live, Some(true));
 }
+
+/// R17-AC17: Settings opened on a DEFAULT config (no [tips] table) and saving "Show tips" (a rebase
+/// of its draft onto the running config) never wipes a tip marked seen while it was open.
+#[test]
+fn saving_show_tips_keeps_the_tips_seen_meanwhile() {
+    let opened = Config::default();
+    let mut draft = opened.clone();
+    draft.tips.show = false; // the user turned "Show tips" off
+    let mut now = opened.clone();
+    now.tips.seen.push("snip_move".into()); // a tip faded meanwhile: the file has a [tips] table now
+    let saved = rebase(&now, &opened, &draft);
+    assert!(!saved.tips.show);
+    assert_eq!(saved.tips.seen, ["snip_move"]);
+    // seen tips known on both sides stay once, in order
+    let mut known = opened.clone();
+    known.tips.seen = vec!["bar_f1".into()];
+    now.tips.seen.insert(0, "bar_f1".into());
+    let saved = rebase(&now, &known, &known);
+    assert_eq!(saved.tips.seen, ["bar_f1", "snip_move"]);
+}

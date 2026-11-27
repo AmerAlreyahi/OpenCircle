@@ -775,6 +775,10 @@ pub enum Message {
     StudioOpenIn(crate::shared::config::StudioOpenIn),
     /// Settings > General: open the welcome tour again.
     ShowWelcome,
+    /// Settings > General > Tips: "Show tips" (off hides every one-time hint).
+    ShowTips(bool),
+    /// Settings > General > Tips: open the "What can I do?" card.
+    OpenWhatCard,
     /// General's "Saving now uses one folder" line: dismissed.
     DismissFolderNote,
     /// The Browse button: the shell opens the folder picker.
@@ -1004,6 +1008,8 @@ pub enum Outcome {
     StudioChanged,
     /// Open the welcome tour (onboarding) again.
     ShowWelcome,
+    /// Open the "What can I do?" card.
+    OpenWhatCard,
     /// Open this link in the browser (the user clicked it on the About page).
     OpenLink(String),
     /// Copy the diagnostics report (the shell does it and shows the pill).
@@ -2253,6 +2259,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             state.saved.studio.open_in = now.studio.open_in;
         }
         Message::ShowWelcome => return Outcome::ShowWelcome,
+        Message::ShowTips(on) => state.draft.tips.show = on,
+        Message::OpenWhatCard => return Outcome::OpenWhatCard,
         Message::DismissFolderNote => state.draft.general.folder_note.clear(),
         Message::BrowseFolder => return Outcome::Browse,
         Message::Folder(dir) => {

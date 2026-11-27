@@ -151,5 +151,14 @@ pub fn rebase(base: &Config, from: &Config, to: &Config) -> Config {
     }
     let mut t = table(base);
     merge(&mut t, &table(from), &table(to));
-    toml::to_string(&t).map_or_else(|_| base.clone(), |s| Config::parse(&s).0)
+    let mut out = toml::to_string(&t).map_or_else(|_| base.clone(), |s| Config::parse(&s).0);
+    // the seen tips only ever grow: a tip marked seen while Settings was open is kept
+    // (the list is one leaf above, so the saved copy would have replaced it)
+    out.tips.seen = base.tips.seen.clone();
+    for id in &to.tips.seen {
+        if !out.tips.seen.contains(id) {
+            out.tips.seen.push(id.clone());
+        }
+    }
+    out
 }
