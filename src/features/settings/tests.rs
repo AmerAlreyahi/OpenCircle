@@ -6044,3 +6044,123 @@ fn preview_maximised_dims_full_card_and_shows_times() {
     );
     themes::set(&themes::SAPPHIRE);
 }
+
+#[test]
+fn preview_cover_fills_panel_and_block_for_4_3_and_21_9_clips() {
+    use crate::shared::kit::hero::{Hero, Maximised, Words, hero, maximised};
+    use crate::shared::kit::themes;
+    use iced::widget::image::Handle;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU32;
+
+    let solid = |w: u32, h: u32, rgba: [u8; 4]| -> Handle {
+        let mut buf = Vec::with_capacity((w * h * 4) as usize);
+        for _ in 0..(w * h) {
+            buf.extend_from_slice(&rgba);
+        }
+        Handle::from_rgba(w, h, buf)
+    };
+    let close = |got: [u8; 4], want: [u8; 4]| -> bool {
+        got[0].abs_diff(want[0]) <= 12
+            && got[1].abs_diff(want[1]) <= 12
+            && got[2].abs_diff(want[2]) <= 12
+    };
+    let px = |img: &[u8], w: u32, x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * w + x) * 4) as usize;
+        [img[i], img[i + 1], img[i + 2], img[i + 3]]
+    };
+
+    themes::set(&themes::DAYLIGHT);
+    let cases = [
+        ("4:3", 400u32, 300u32, [20u8, 210, 60, 255]),
+        ("21:9", 630u32, 270u32, [235u8, 130, 20, 255]),
+    ];
+
+    for (tag, cw, ch, colour) in cases {
+        let frame = solid(cw, ch, colour);
+        // 1. Maximised panel (1000x740 content card, 14 px margin -> panel x=14..986, y=97..642)
+        let (w, h) = (1000u32, 740u32);
+        let rendered = shot::render(
+            maximised(Maximised::<()> {
+                eyebrow: "How it works",
+                title: "Circle to Search",
+                desc: "Circle anything on screen.",
+                frame: Some(frame.clone()),
+                width: (Arc::new(AtomicU32::new(0)), 1.0, 800.0),
+                playing: true,
+                elapsed_secs: 3,
+                total_secs: 5,
+                reduced_motion: false,
+                rm_label: "Reduced motion: still picture",
+                on_play_pause: Some(()),
+                on_close: (),
+                pager: None,
+                prev_tip: "Previous",
+                next_tip: "Next",
+            }),
+            w,
+            h,
+        );
+        // Mid-height of the panel (clear of top/bottom scrims), 6 px inside left & right edges
+        let mid_y = h / 2;
+        let left_px = px(&rendered, w, 20, mid_y);
+        let right_px = px(&rendered, w, w - 21, mid_y);
+        assert!(
+            close(left_px, colour),
+            "{tag} maximised left edge must be video {colour:?}, got {left_px:?}"
+        );
+        assert!(
+            close(right_px, colour),
+            "{tag} maximised right edge must be video {colour:?}, got {right_px:?}"
+        );
+        // Corner of the 22 px rounded panel must NOT show raw video colour (clipped to dim)
+        let corner_px = px(&rendered, w, 15, 99);
+        assert!(
+            !close(corner_px, colour),
+            "{tag} maximised rounded corner must clip video, got {corner_px:?}"
+        );
+
+        // 2. Small preview block (DEMO_W=372, DEMO_H=210 inside DEMO_PAD=16)
+        let (bw, bh) = (820u32, 260u32);
+        let block = shot::render(
+            hero(Hero::<()> {
+                title: "Circle to Search",
+                desc: "Circle anything on screen.",
+                lab: false,
+                keys: vec!["Ctrl".into(), "Shift".into(), "S".into()],
+                shown: true,
+                toggle: Some(()),
+                play: Some(("Replay", Some(()))),
+                bigger: Some(()),
+                beside: false,
+                note: None,
+                frame: Some(frame),
+                width: (Arc::new(AtomicU32::new(0)), 1.0, 800.0),
+                pager: None,
+                words: Words {
+                    eyebrow: "How it works",
+                    labs: "Labs",
+                    no_shortcut: "No shortcut",
+                    previous: "Previous",
+                    next: "Next",
+                    default_note: "Plays once.",
+                    bigger: "Bigger",
+                },
+            }),
+            bw,
+            bh,
+        );
+        let b_mid_y = bh / 2;
+        let b_left = px(&block, bw, 22, b_mid_y);
+        let b_right = px(&block, bw, 16 + 372 - 6, b_mid_y);
+        assert!(
+            close(b_left, colour),
+            "{tag} small block left edge must be video {colour:?}, got {b_left:?}"
+        );
+        assert!(
+            close(b_right, colour),
+            "{tag} small block right edge must be video {colour:?}, got {b_right:?}"
+        );
+    }
+    themes::set(&themes::SAPPHIRE);
+}

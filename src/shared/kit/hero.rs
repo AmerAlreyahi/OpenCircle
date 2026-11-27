@@ -212,7 +212,8 @@ fn media_box<'a, Message: Clone + 'a>(
         win_h,
         fixed,
         radius: settings::DEMO_MEDIA_RADIUS,
-        cover: false,
+        fill_box: false,
+        cover: true,
     });
     let box_ = container(media).style(|_| container::Style {
         background: Some(c().track_glass.into()),
@@ -370,6 +371,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         win_h: m.width.2,
         fixed: None,
         radius: settings::PREVIEW_MAX_RADIUS,
+        fill_box: true,
         cover: true,
     });
     let video_layer = container(media).width(Fill).height(Fill);
@@ -666,12 +668,13 @@ struct Media {
     win_h: f32,
     fixed: Option<(f32, f32)>,
     radius: f32,
+    fill_box: bool,
     cover: bool,
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
     fn size(&self) -> Size<Length> {
-        match (self.fixed, self.cover) {
+        match (self.fixed, self.fill_box) {
             (Some((w, h)), _) => Size::new(Length::Fixed(w), Length::Fixed(h)),
             (None, true) => Size::new(Length::Fill, Length::Fill),
             (None, false) => Size::new(Length::Fill, Length::Shrink),
@@ -684,7 +687,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
         _: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let (w, h) = match (self.fixed, self.cover) {
+        let (w, h) = match (self.fixed, self.fill_box) {
             (Some((fw, fh)), _) => (fw.min(limits.max().width), fh),
             (None, true) => {
                 let max = limits.max();
