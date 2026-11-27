@@ -1315,13 +1315,15 @@ fn w108_the_strip_opens_at_its_saved_spot_on_that_screen_and_stays_on_screen() {
 }
 
 /// F-04 (design `.pinbar`): the live pin's hover bar is 186 x 44 px (rim included), 10 px from the
-/// picture's top-end corner.
+/// picture's top-end corner (the five icons; the Windows-only Drag chip widens it, so it is left out).
 #[test]
 fn f04_the_live_pin_hover_bar_is_186_by_44() {
     let mut windows = Windows::default();
     let id = live(&mut windows, 420, 260, 1.0);
     let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
-    let px = shot::render(windows.view(id).unwrap(), 420, 260);
+    // without the Windows-only Drag chip (a sixth item, D03-6): the same 186 px bar on both OSes
+    let pin = windows.pins.iter().find(|p| p.id == id).unwrap();
+    let px = shot::render(pin_view_with(pin, false), 420, 260);
     let track = crate::shared::kit::themes::c().track.into_rgba8();
     let at = |x: usize, y: usize| {
         let i = (y * 420 + x) * 4;
