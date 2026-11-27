@@ -1936,3 +1936,21 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   fades after ~8 s counts as seen; the OpenRouter waiting countdown shows only if the sign-in has a hard time limit; no "Show tips again"
   reset for now. Build order: R-17 tips + the card after F-02 (widgets fidelity) merges; the OpenRouter card after F-01 (Settings
   fidelity) merges. The Arabic sheets' mirrored title bar is NOT built (title bars never mirrored).
+- Preview video (owner, 2026-11-27): (1) the preview video/still keeps ROUNDED corners (clip the picture to the block's radius, every
+  page, every state). (2) NEW: a maximise control on the preview opens the clip in an elegant popup that almost covers the right main
+  (content) card; design shown to the owner first (COM-08), then built.
+- Soft corners everywhere (owner, 2026-11-27, on the Settings sheets: "not all edges are soft, the theme options for example"): every
+  element the approved design rounds is rounded in the app with the design's radius, INCLUDING what is drawn inside cards (theme
+  mini-window previews, look cards, preview stills/videos, thumbnails, chips), not only the outer box. Reviews check corners by pixel.
+- Preview maximise APPROVED (owner, 2026-11-27, ".claude/artifacts/design-v060-preview-max/" sheet): variant A: a rounded "Bigger"
+  button on the clip's top-end corner (start side in Arabic) opens the clip in a rounded panel over the content card only (14 px margin,
+  soft dim of the content card, sidebar visible); the video fills the panel at 16:9 with title + controls (play/pause, progress, 1 of N,
+  prev/next) overlaid; x and Esc close; reduced motion = still frame + play. Lead default (owner may reverse): no new shortcut (the
+  designer's Ctrl+M is dropped). Built after F-01 (Settings fidelity) merges.
+- R1 recording bar (owner, 2026-11-27): DRAGGABLE, top centre by default, on every platform and also for area recording (position kept
+  while recording). Q1 (Linux whole-screen: bar steps into the tray) NOT decided: the owner "still doesn't get it": the lead reminds him
+  later with a simpler explanation; until then build everything except that one case (Windows, area/window recording, R1 + S2).
+- Q1 APPROVED (owner, 2026-11-27, after the example frames .claude/artifacts/design-v060-q1/png/): recording the WHOLE screen on Linux,
+  the R1 bar steps aside into the tray's recording state (red dot + live time on the tray icon; tray menu: Pause, Stop and save
+  (Alt+Shift+R), Discard, mic toggle + device); the keys keep working. Windows keeps the R1 bar; area/window recording on Linux keeps the
+  R1 bar beside the area (draggable, outside the recorded pixels).
