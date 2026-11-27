@@ -96,17 +96,6 @@ fn map_pulse_sources(
         });
     }
 
-    if want_monitor {
-        // Only the default sink's monitor can be opened today (`PulseInput::open(Kind::System)`
-        // connects to `@DEFAULT_MONITOR@`). Upgrade path: give `Kind::System` an `Option<String>`
-        // source id, pass it through `PulseInput::open`, and remove this filter.
-        if let Some(ref def) = default_id {
-            raw.retain(|d| &d.id == def);
-        } else {
-            raw.clear();
-        }
-    }
-
     (raw, default_id)
 }
 
@@ -336,11 +325,12 @@ mod tests {
 
         let (raw_sys, def_sys) = map_pulse_sources(&server, &sources, &Kind::System);
         let sys = map_devices(raw_sys, def_sys.as_deref());
-        // Only the openable default monitor is exposed for Kind::System today.
-        assert_eq!(sys.len(), 1);
-        assert_eq!(sys[0].id, "alsa_output.hdmi.monitor");
-        assert_eq!(sys[0].name, "alsa_output.hdmi.monitor");
-        assert!(sys[0].is_default);
+        // The default-only filter for Kind::System lives in `devices_from`.
+        let hdmi = sys
+            .iter()
+            .find(|d| d.id == "alsa_output.hdmi.monitor")
+            .unwrap();
+        assert!(hdmi.is_default);
     }
 
     #[test]

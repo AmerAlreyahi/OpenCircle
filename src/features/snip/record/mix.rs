@@ -16,6 +16,12 @@ use crate::shared::platform::audio::{CHANNELS, RATE};
 /// threshold are filled to their exact frame length.
 pub const DEFAULT_GAP_TOLERANCE: Duration = Duration::from_millis(20);
 
+/// How far behind `now` a track may be before [`Mixer::drain_up_to`] pads it
+/// with silence. Packet stamps are estimates and a live source normally lags
+/// `now` by one packet (20 ms) plus server latency, so padding right at the
+/// tolerance would replace real audio that is merely in flight.
+pub const PAD_LATENCY_MARGIN: Duration = Duration::from_millis(100);
+
 /// Converts `duration` at sample rate `rate` (Hz) into an exact rounded frame count.
 pub fn frames_for_duration(duration: Duration, rate: u32) -> usize {
     let nanos = duration.as_nanos();
@@ -92,15 +98,17 @@ impl Track {
         }
 
         let slice = if at_frame < self.next_frame {
-            // Trim any overlap before `next_frame` (e.g. a late packet arriving
-            // after `pad_to` or an overlapping timestamp) so track length always
-            // matches elapsed timeline frames.
+            // Stamps are estimates, so a small overlap is jitter: keep every
+            // sample and append. Only an overlap of at least the tolerance is a
+            // real duplicate (e.g. a packet arriving after `pad_to`) and is trimmed.
             let overlap = self.next_frame - at_frame;
-            if overlap >= total_frames {
+            if overlap < gap_tol_frames {
+                &samples[..usable]
+            } else if overlap >= total_frames {
                 return;
+            } else {
+                &samples[overlap as usize * CHANNELS as usize..usable]
             }
-            let skip = overlap as usize * CHANNELS as usize;
-            &samples[skip..usable]
         } else {
             let gap = at_frame - self.next_frame;
             if gap > 0 && gap >= gap_tol_frames {
@@ -243,14 +251,15 @@ impl Mixer {
         self.drain_frames(frames, out)
     }
 
-    /// Pads any enabled track that has fallen behind `now` (at least
-    /// `gap_tolerance`) with silence, then drains all aligned frames. Keeps
+    /// Pads any enabled track that has fallen behind `now` by more than
+    /// [`PAD_LATENCY_MARGIN`] with silence, then drains all aligned frames. Keeps
     /// dual-track recording flowing when system loopback is silent.
     pub fn drain_up_to(&mut self, now: Instant, out: &mut Vec<f32>) -> usize {
         if self.origin.is_none() {
             return 0;
         }
-        let target = self.frame_at(now);
+        let margin = frames_for_duration(PAD_LATENCY_MARGIN, self.rate) as u64;
+        let target = self.frame_at(now).saturating_sub(margin);
         if self.has_mic {
             self.mic.pad_to(target, self.gap_tol_frames);
         }
@@ -350,6 +359,52 @@ mod tests {
                 [v, v]
             })
             .collect()
+    }
+
+    #[test]
+    fn jittered_late_mic_packets_lose_no_samples_and_long_gap_is_filled() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let pkt = 960usize; // 20 ms at 48 kHz
+        let mut mixer = Mixer::stereo_48k(true, false);
+        mixer.start(t0);
+        let (mut out, mut sent) = (Vec::new(), 0usize);
+        // 50 packets (1 s), stamps jittered +-5 ms, each arriving 30 ms late.
+        let mut queue: Vec<(u64, Instant)> = Vec::new();
+        for i in 0..50u64 {
+            let jitter = if i % 2 == 0 { 5 } else { 0 };
+            let stamp = t0 + ms(i * 20 + jitter) - if i % 2 == 0 { ms(10) } else { ms(0) };
+            queue.push((i * 20 + 30, stamp));
+        }
+        for tick in (0..=1100u64).step_by(10) {
+            while queue.first().is_some_and(|(due, _)| *due <= tick) {
+                let (_, stamp) = queue.remove(0);
+                mixer.push_mic(&vec![0.5; pkt * 2], stamp);
+                sent += pkt;
+            }
+            mixer.drain_up_to(t0 + ms(tick), &mut out);
+        }
+        mixer.flush(&mut out);
+        assert_eq!(
+            out.iter().filter(|&&v| v == 0.5).count(),
+            sent * 2,
+            "no audio replaced"
+        );
+        let elapsed = frames_for_duration(ms(1000), RATE);
+        let tol = frames_for_duration(DEFAULT_GAP_TOLERANCE, RATE) * 3;
+        assert!(
+            (out.len() / 2).abs_diff(elapsed)
+                <= tol.max(frames_for_duration(PAD_LATENCY_MARGIN, RATE))
+        );
+
+        // 500 ms of silence from the mic is filled once older than the margin.
+        let mut m = Mixer::stereo_48k(true, false);
+        m.start(t0);
+        let mut o = Vec::new();
+        m.push_mic(&vec![0.5; pkt * 2], t0);
+        m.drain_up_to(t0 + ms(500), &mut o);
+        let want = frames_for_duration(ms(500) - PAD_LATENCY_MARGIN, RATE);
+        assert!(o.len() / 2 >= want, "gap filled to now - margin");
     }
 
     #[test]
@@ -499,7 +554,7 @@ mod tests {
 
         let mut out = Vec::new();
         assert_eq!(mixer.drain(&mut out), 0, "waiting without now");
-        let drained = mixer.drain_up_to(t0 + Duration::from_millis(200), &mut out);
+        let drained = mixer.drain_up_to(t0 + Duration::from_millis(300), &mut out);
         assert_eq!(drained, 9_600);
         assert!(out.iter().all(|&s| (s - 0.5).abs() < 1e-6));
     }
@@ -515,7 +570,7 @@ mod tests {
         mixer.push_mic(&mic_200, t0);
         let mut out = Vec::new();
         assert_eq!(
-            mixer.drain_up_to(t0 + Duration::from_millis(200), &mut out),
+            mixer.drain_up_to(t0 + Duration::from_millis(300), &mut out),
             9_600
         );
 
@@ -553,7 +608,8 @@ mod tests {
         );
 
         // 3) Direct overlapping push on a single track trims the overlap without duplication.
-        let mut single = Mixer::stereo_48k(true, false);
+        let mut single =
+            Mixer::stereo_48k(true, false).with_gap_tolerance(Duration::from_millis(5)); // overlap >= tolerance is trimmed
         single.start(t0);
         single.push_mic(&vec![0.4f32; 960 * 2], t0); // [0, 20 ms)
         let mut overlap_pkt = vec![0.9f32; 480 * 2]; // [10 ms, 20 ms) overlap
