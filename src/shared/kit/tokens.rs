@@ -248,5 +248,19 @@ pub mod widget_e {
     /// Current-row start indicator bar (`.mr.cur::before`).
     pub const CURRENT_BAR_W: f32 = 3.0;
     pub const CURRENT_BAR_H: f32 = 16.0;
+    /// Steps strip (`.strip`, `.sth`, `.stp`, `.btnw`): padding/gap, header,
+    /// header quiet buttons, thumbnail height, badge inset, action buttons.
+    pub const STRIP_PAD: f32 = 8.0;
+    pub const STRIP_TOP: f32 = 24.0;
+    pub const STRIP_HEAD_BTN: f32 = 22.0;
+    pub const STRIP_THUMB_H: f32 = 64.0;
+    pub const STRIP_BADGE_INSET: f32 = 5.0;
+    pub const STRIP_BTN_H: f32 = 36.0;
+    pub const STRIP_BTN_RADIUS: f32 = 11.0;
+    /// Live pin frame border (`.pinw`) and hover toolbar inset (`.pinbar`).
+    pub const PIN_BORDER: f32 = 3.0;
+    pub const PIN_BAR_INSET: f32 = 10.0;
+    /// The live pin's corner (`.pinw`, 14 px).
+    pub const PIN_CORNER: f32 = super::radius::DROPDOWN;
 }
 // === end widgets style E ===

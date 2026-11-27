@@ -2057,6 +2057,8 @@ strings! {
         | "مُسحت الخطوات";
     sn_step_copy_all: "Copy all"
         | "نسخ الكل";
+    sn_step_studio: "Studio"
+        | "استوديو";
     sn_step_clear: "Clear steps"
         | "مسح الخطوات";
     sn_step_tip: "Step · click to copy · double-click to edit"

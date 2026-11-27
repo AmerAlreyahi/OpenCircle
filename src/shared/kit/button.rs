@@ -578,6 +578,42 @@ pub fn tool<'a, Message: Clone + 'a>(
     )
 }
 
+/// Style E full-width strip action button (`.btnw.acc` / `.btnw.q`): 36 px tall,
+/// 11 px corners, 14 px glyph + 12 px label in reading order (`dir_row!`).
+/// `Kind::Accent` = accent fill; `Kind::Quiet` = a borderless `hover` veil over the tray (only here: Quiet elsewhere is unchanged).
+pub fn strip_action<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: impl text::IntoFragment<'a>,
+    width: f32,
+    kind: Kind,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::{Role, space};
+    let label_role = match kind {
+        Kind::Accent => Role::CTA,
+        _ => Role::CONTROL,
+    };
+    let content = crate::dir_row![
+        text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
+        text(label)
+            .size(super::text::size(Role::CONTROL))
+            .font(super::text::font(label_role))
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(space::GAP)
+    .align_y(Center);
+    tooled_box(
+        content,
+        width,
+        (widget_e::STRIP_BTN_H, widget_e::STRIP_BTN_RADIUS),
+        kind,
+        kind == Kind::Quiet,
+        focused,
+        on_press,
+    )
+}
+
 /// `tool` with a label after its glyph, `width` wide (the Steps strip's Copy
 /// all, Snip's "Add step N" in Copy's place). No `on_press` = dimmed (.45).
 pub fn labelled<'a, Message: Clone + 'a>(
@@ -591,32 +627,6 @@ pub fn labelled<'a, Message: Clone + 'a>(
     use super::tokens::{Role, space};
     let content = row![
         text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
-        text(label)
-            .size(super::text::size(Role::CONTROL))
-            .font(super::text::font(Role::CTA))
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(space::GAP)
-    .align_y(Center);
-    tooled(content, width, kind, focused, on_press)
-}
-
-/// Labelled button with the OpenCircle logo as its leading mark (Steps strip: Open in Studio).
-pub fn labelled_logo<'a, Message: Clone + 'a>(
-    label: impl text::IntoFragment<'a>,
-    width: f32,
-    kind: Kind,
-    focused: bool,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    use super::tokens::{Role, space};
-    let live = on_press.is_some();
-    let mark = iced::widget::image(super::logo::logo(size::ICON_SMALL as u32))
-        .width(size::ICON_SMALL)
-        .height(size::ICON_SMALL)
-        .opacity(if live { 1.0 } else { 0.45_f32 });
-    let content = row![
-        mark,
         text(label)
             .size(super::text::size(Role::CONTROL))
             .font(super::text::font(Role::CTA))
@@ -743,12 +753,32 @@ fn tooled_corner<'a, Message: Clone + 'a>(
     corner: f32,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    tooled_box(
+        content,
+        width,
+        (size::ICON_BUTTON, corner),
+        kind,
+        false,
+        focused,
+        on_press,
+    )
+}
+
+fn tooled_box<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+    (height, corner): (f32, f32),
+    kind: Kind,
+    veil: bool,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     use iced_button::Status;
     let live = on_press.is_some();
     super::focus::press(
         iced_button(container(content).center(Fill))
             .width(width)
-            .height(size::ICON_BUTTON)
+            .height(height)
             .padding(0)
             .style(move |_, status| {
                 let hot = live && matches!(status, Status::Hovered | Status::Pressed);
@@ -759,6 +789,7 @@ fn tooled_corner<'a, Message: Clone + 'a>(
                     _ if accent => c().accent,
                     _ if focused => c().accent_soft,
                     _ if hot => c().elevated_hover,
+                    _ if veil => c().hover,
                     _ => c().elevated,
                 };
                 let text_color = match () {
@@ -770,7 +801,7 @@ fn tooled_corner<'a, Message: Clone + 'a>(
                 let (width, edge) = match () {
                     _ if live && status == Status::Pressed => (2.0, c().widget),
                     _ if accent && focused => (3.0, c().accent_soft),
-                    _ if accent => (0.0, c().accent),
+                    _ if accent || veil => (0.0, c().accent),
                     _ => (1.0, c().elevated_border),
                 };
                 iced_button::Style {

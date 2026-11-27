@@ -13,16 +13,14 @@ use iced::{Border, Center, ContentFit, Element, Fill, Size};
 use super::icon::{FONT, Icon};
 use super::text::font;
 use super::themes::c;
-use super::tokens::{Role, radius};
+use super::tokens::{Role, radius, widget_e};
 
-/// A thumbnail's well.
+/// A thumbnail's well (Studio walkthrough & legacy kit sheet).
 pub const WELL: Size = Size::new(96.0, 60.0);
+/// Style E Steps strip thumbnail well (`.stp`: 96x64).
+pub const STRIP_WELL: Size = Size::new(WELL.width, widget_e::STRIP_THUMB_H);
 /// The grid cell's well and its badge.
 const CELL_BADGE: f32 = 16.0;
-/// The strip's padding and the gap between its parts.
-pub const PAD: f32 = 4.0;
-/// The strip's top row (grip, x).
-pub const TOP: f32 = 22.0;
 /// The badge's side.
 pub const BADGE: f32 = 18.0;
 /// The small x's side.
@@ -55,7 +53,32 @@ pub fn step<'a, Message: Clone + 'a>(
     look: Look,
     on_delete: Option<Message>,
 ) -> Element<'a, Message> {
-    build(picture, number, look, on_delete, WELL, BADGE)
+    build(picture, number, look, on_delete, Frame::legacy(WELL, BADGE))
+}
+
+/// Style E Steps strip thumbnail (`.stp`): 96x64, `radius::TRACK` (10 px)
+/// rounded picture filling the well, 1 px `rim` edge (2 px `accent` focused,
+/// 1 px `accent` hovered/lifted), 18 px accent badge with 2 px `widget` ring
+/// at top-start (`inset-inline-start: 5px`), hover delete x at top-end.
+pub fn strip_step<'a, Message: Clone + 'a>(
+    picture: image::Handle,
+    number: usize,
+    look: Look,
+    on_delete: Option<Message>,
+) -> Element<'a, Message> {
+    build(
+        picture,
+        number,
+        look,
+        on_delete,
+        Frame {
+            well: STRIP_WELL,
+            badge: BADGE,
+            corner: radius::TRACK,
+            inset: widget_e::STRIP_BADGE_INSET,
+            style_e: true,
+        },
+    )
 }
 
 /// A step's cell `size` wide (the Steps sidebar's: four to a row), with a 16 px badge.
@@ -66,7 +89,116 @@ pub fn cell<'a, Message: Clone + 'a>(
     on_delete: Option<Message>,
     size: Size,
 ) -> Element<'a, Message> {
-    build(picture, number, look, on_delete, size, CELL_BADGE)
+    build(
+        picture,
+        number,
+        look,
+        on_delete,
+        Frame::legacy(size, CELL_BADGE),
+    )
+}
+
+/// Returns a copy of an `Rgba` handle with its four corners softly alpha-masked
+/// to `corner` logical px inside a `box_size` frame (the CPU renderer ignores
+/// `image::Image::border_radius`). When `cover` is true, centre-crops to
+/// `box_size`'s aspect ratio first so thumbnails fill their rounded frame evenly.
+pub fn round_handle(
+    handle: &image::Handle,
+    box_size: Size,
+    corner: f32,
+    cover: bool,
+) -> image::Handle {
+    if corner <= 0.0 || box_size.width <= 0.0 || box_size.height <= 0.0 {
+        return handle.clone();
+    }
+    let image::Handle::Rgba {
+        width,
+        height,
+        pixels,
+        ..
+    } = handle
+    else {
+        return handle.clone();
+    };
+    let (w, h) = (*width, *height);
+    if w == 0 || h == 0 || pixels.len() < (w as usize * h as usize * 4) {
+        return handle.clone();
+    }
+    let (sx, sy, sw, sh) = if cover {
+        let target = box_size.width / box_size.height;
+        let current = w as f32 / h as f32;
+        if current > target {
+            let cw = ((h as f32 * target).round() as u32).clamp(1, w);
+            ((w - cw) / 2, 0, cw, h)
+        } else if current < target {
+            let ch = ((w as f32 / target).round() as u32).clamp(1, h);
+            (0, (h - ch) / 2, w, ch)
+        } else {
+            (0, 0, w, h)
+        }
+    } else {
+        (0, 0, w, h)
+    };
+    let mut out = Vec::with_capacity(sw as usize * sh as usize * 4);
+    for y in sy..sy + sh {
+        let row = ((y * w + sx) * 4) as usize;
+        out.extend_from_slice(&pixels[row..row + sw as usize * 4]);
+    }
+    let rx = (corner * sw as f32 / box_size.width).min(sw as f32 * 0.5);
+    let ry = (corner * sh as f32 / box_size.height).min(sh as f32 * 0.5);
+    if rx <= 0.0 || ry <= 0.0 {
+        return image::Handle::from_rgba(sw, sh, out);
+    }
+    let rx_i = (rx.ceil() as u32).min(sw);
+    let ry_i = (ry.ceil() as u32).min(sh);
+    let r_min = rx.min(ry);
+    let mask = |buf: &mut [u8], x: u32, y: u32, dx_px: f32, dy_px: f32| {
+        if dx_px <= 0.0 || dy_px <= 0.0 {
+            return;
+        }
+        let dist = ((dx_px / rx).hypot(dy_px / ry) - 1.0) * r_min;
+        let cov = (0.5 - dist).clamp(0.0, 1.0);
+        if cov < 1.0 {
+            let i = ((y * sw + x) * 4) as usize + 3;
+            buf[i] = (buf[i] as f32 * cov).round() as u8;
+        }
+    };
+    for y in 0..ry_i {
+        let py = y as f32 + 0.5;
+        let by = sh - 1 - y;
+        let dy = ry - py;
+        for x in 0..rx_i {
+            let px = x as f32 + 0.5;
+            let bx = sw - 1 - x;
+            let dx = rx - px;
+            mask(&mut out, x, y, dx, dy);
+            mask(&mut out, bx, y, dx, dy);
+            mask(&mut out, x, by, dx, dy);
+            mask(&mut out, bx, by, dx, dy);
+        }
+    }
+    image::Handle::from_rgba(sw, sh, out)
+}
+
+#[derive(Clone, Copy)]
+struct Frame {
+    well: Size,
+    badge: f32,
+    corner: f32,
+    inset: f32,
+    style_e: bool,
+}
+
+impl Frame {
+    const fn legacy(well: Size, badge: f32) -> Self {
+        Self {
+            well,
+            badge,
+            corner: CORNER,
+            inset: INSET,
+            style_e: false,
+        }
+    }
 }
 
 /// The place of a step that is being made: an empty well, `size` wide, with its number and a
@@ -121,51 +253,99 @@ fn build<'a, Message: Clone + 'a>(
     number: usize,
     look: Look,
     on_delete: Option<Message>,
-    well_size: Size,
-    badge_side: f32,
+    frame: Frame,
 ) -> Element<'a, Message> {
+    let well_size = frame.well;
     let ring = look.hover || look.lifted || look.focused;
-    let well = container(image(picture).content_fit(ContentFit::ScaleDown))
-        .center(Fill)
+    let base: Element<'a, Message> = if frame.style_e {
+        let rounded = round_handle(&picture, well_size, frame.corner, true);
+        let photo = image(rounded)
+            .width(Fill)
+            .height(Fill)
+            .content_fit(ContentFit::Fill)
+            .border_radius(frame.corner);
+        let edge = container(iced::widget::Space::new())
+            .width(well_size.width)
+            .height(well_size.height)
+            .style(move |_| container::Style {
+                background: None,
+                border: Border::default()
+                    .rounded(frame.corner)
+                    .width(if look.focused { 2 } else { 1 })
+                    .color(if ring { c().accent } else { c().rim }),
+                ..container::Style::default()
+            });
+        stack![
+            container(photo)
+                .width(well_size.width)
+                .height(well_size.height),
+            edge,
+        ]
         .width(well_size.width)
         .height(well_size.height)
-        .style(move |_| container::Style {
-            background: Some(
-                match look.focused {
-                    true => c().accent_soft,
-                    false => c().track,
-                }
-                .into(),
-            ),
-            border: Border::default()
-                .rounded(CORNER)
-                .width(if ring { 1 } else { 0 })
-                .color(c().accent),
-            ..container::Style::default()
-        });
+        .into()
+    } else {
+        container(image(picture).content_fit(ContentFit::ScaleDown))
+            .center(Fill)
+            .width(well_size.width)
+            .height(well_size.height)
+            .style(move |_| container::Style {
+                background: Some(
+                    match look.focused {
+                        true => c().accent_soft,
+                        false => c().track,
+                    }
+                    .into(),
+                ),
+                border: Border::default()
+                    .rounded(frame.corner)
+                    .width(if ring { 1 } else { 0 })
+                    .color(c().accent),
+                ..container::Style::default()
+            })
+            .into()
+    };
+    let badge_outer = if frame.style_e {
+        frame.badge + 2.0 * RING
+    } else {
+        frame.badge
+    };
+    let badge_inset = if frame.style_e {
+        frame.inset - RING
+    } else {
+        frame.inset
+    };
     let badge = container(
         text(number.to_string())
-            .size(NUMBER)
+            .size(if frame.style_e { 10.5 } else { NUMBER })
             .font(font(Role::BADGE))
             .color(super::themes::on(c().accent)),
     )
-    .center(badge_side)
+    .center(badge_outer)
     .style(move |_| container::Style {
         background: Some(c().accent.into()),
         border: Border::default()
-            .rounded(badge_side / 2.0)
+            .rounded(badge_outer / 2.0)
             .width(RING)
             .color(c().widget),
         ..container::Style::default()
     });
-    let corner = |x: f32, side: f32| match look.rtl {
-        true => well_size.width - INSET - side - x,
-        false => INSET + x,
+    let at_start = |inset: f32, side: f32| match look.rtl {
+        true => well_size.width - inset - side,
+        false => inset,
     };
-    let mut layers = stack![well, pin(badge).x(corner(0.0, badge_side)).y(INSET)];
+    let at_end = |inset: f32, side: f32| match look.rtl {
+        true => inset,
+        false => well_size.width - inset - side,
+    };
+    let mut layers = stack![
+        base,
+        pin(badge)
+            .x(at_start(badge_inset, badge_outer))
+            .y(badge_inset)
+    ];
     if let Some(delete) = on_delete.filter(|_| look.hover) {
-        let end = well_size.width - 2.0 * INSET - X;
-        layers = layers.push(pin(close(delete)).x(corner(end, X)).y(INSET));
+        layers = layers.push(pin(close(delete)).x(at_end(frame.inset, X)).y(frame.inset));
     }
     layers
         .width(well_size.width)
@@ -178,11 +358,6 @@ fn build<'a, Message: Clone + 'a>(
 /// a thumbnail too).
 pub fn close<'a, Message: Clone + 'a>(on_press: Message) -> Element<'a, Message> {
     round(Icon::Close.glyph(), Some(on_press))
-}
-
-/// lucide "plus": the small round "+" beside the x (no press: dimmed, the strip is full).
-pub fn add<'a, Message: Clone + 'a>(on_press: Option<Message>) -> Element<'a, Message> {
-    round('\u{e140}', on_press)
 }
 
 fn round<'a, Message: Clone + 'a>(glyph: char, on_press: Option<Message>) -> Element<'a, Message> {

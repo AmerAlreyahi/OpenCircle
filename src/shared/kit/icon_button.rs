@@ -111,6 +111,31 @@ pub fn quiet_close<'a, Message: Clone + 'a>(
     )
 }
 
+/// Style E small quiet round button (Steps strip header `+` / `x`: 22x22,
+/// 14 px glyph, `text_muted` at rest, `hover` + `text` under the cursor).
+pub fn quiet_small<'a, Message: Clone + 'a>(
+    glyph: char,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let look = Look {
+        corner: radius::FULL,
+        side: widget_e::STRIP_HEAD_BTN,
+        quiet: true,
+        ..Look::SQUARE_E
+    };
+    let state = State {
+        active: false,
+        focused,
+    };
+    made(
+        text(glyph).font(FONT).size(size::ICON_SMALL),
+        look,
+        state,
+        on_press,
+    )
+}
+
 fn glyph_text<'a>(glyph: char) -> iced::widget::Text<'a> {
     text(glyph).font(FONT).size(size::ICON)
 }

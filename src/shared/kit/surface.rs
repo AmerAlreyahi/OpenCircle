@@ -138,6 +138,33 @@ pub fn hint<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Mess
     tray(false, radius::FULL, line).padding(HINT_PAD)
 }
 
+/// Style E live pin frame (`.pinw`): `content` with a `widget_e::PIN_BORDER` ring
+/// in `color` (the Active Look's) drawn over its edges, rounded to `corner`
+/// (the window itself is cut to the same corner, `windows::floating`).
+pub fn pin_frame<'a, Message: 'a>(
+    corner: f32,
+    color: iced::Color,
+    content: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let ring = container(iced::widget::Space::new())
+        .width(iced::Fill)
+        .height(iced::Fill)
+        .style(move |_| container::Style {
+            border: Border::default()
+                .rounded(corner)
+                .width(widget_e::PIN_BORDER)
+                .color(color),
+            ..container::Style::default()
+        });
+    iced::widget::stack![
+        container(content).width(iced::Fill).height(iced::Fill),
+        ring
+    ]
+    .width(iced::Fill)
+    .height(iced::Fill)
+    .into()
+}
+
 /// A tooltip's pill (`tooltip::hint`, `tooltip::cut`): the solid `widget` pill
 /// every window's tooltip keeps (Settings, the Studio), not the style E tray.
 pub(crate) fn tooltip_pill<'a, Message: 'a>(

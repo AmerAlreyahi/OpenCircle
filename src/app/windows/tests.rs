@@ -442,7 +442,7 @@ fn the_pin_bar_adds_the_shortcuts_to_its_icons() {
 
 /// A pin made live by hand (no window capture in tests): its source never runs.
 fn live(windows: &mut Windows, w: u32, h: u32, scale: f32) -> window::Id {
-    let _ = windows.open_pin(picture(w, h), None, scale);
+    let _ = windows.open_pin(picture(w, h), None, scale, 0.0);
     let pick = live::Pick {
         x: 0,
         y: 0,
@@ -595,12 +595,56 @@ fn the_live_pin_bar_and_its_glyphs() {
     assert_eq!(bare, shot::render(windows.view(id).unwrap(), 260, 200));
 }
 
+/// D03-4: a live pin has the design's thin ring in the Active Look's colour (not
+/// the thick frame), 3 px wide and only on a live pin; D03-5: its hover bar is ONE
+/// tray of the design's five icons (no drag chip beside it).
+#[test]
+fn d03_4_the_live_pin_has_a_thin_look_coloured_ring() {
+    let ring = crate::shared::theme::accent_of(&crate::shared::config::look())
+        .0
+        .into_rgba8();
+    let px = |view| shot::render(view, 420, 260);
+    let is_ring = |px: &[u8], y: usize| {
+        let at = (y * 420 + 210) * 4;
+        (0..3).all(|k| px[at + k].abs_diff(ring[k]) <= 3)
+    };
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let seen = px(windows.view(id).unwrap());
+    assert!(is_ring(&seen, 0) && is_ring(&seen, 2), "3 px of ring");
+    assert!(!is_ring(&seen, 3) && !is_ring(&seen, 5), "no thicker");
+    let mut other = Windows::default();
+    let _ = other.pin(picture(420, 260), None, 1.0);
+    let still = other.pins[0].id;
+    assert!(
+        !is_ring(&px(other.view(still).unwrap()), 0),
+        "a still pin has none"
+    );
+}
+
+#[test]
+fn d03_5_the_live_pin_bar_is_one_tray_of_five_icons() {
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
+    // no raised `widget` segment behind any icons: the bar's inside is the tray's
+    let widget = crate::shared::kit::themes::c().widget.into_rgba8();
+    let px = shot::render(windows.view(id).unwrap(), 420, 260);
+    let row = (10 + 22) * 420;
+    let raised = (200..410)
+        .filter(|x| (0..3).all(|k| px[(row + x) * 4 + k].abs_diff(widget[k]) <= 3))
+        .count();
+    assert!(raised < 20, "{raised} raised pixels across the bar");
+}
+
 /// The live pin's hover bar, Sapphire and Daylight.
 #[test]
 fn the_live_pin_matches_its_golden_images() {
     use crate::shared::kit::testing::golden;
     let mut windows = Windows::default();
     let id = live(&mut windows, 420, 260, 1.0);
+    // click-through shown in its active state, as the design draws it
+    windows.pins[0].live.as_mut().unwrap().through = true;
     let _ = windows.update(Msg::Pin(id, PinMsg::Hover(true)));
     golden::each_theme(|theme, failed| {
         let name = format!("live-pin-hover-{}", theme.id);
@@ -1225,9 +1269,9 @@ fn w108_the_strip_opens_at_its_saved_spot_on_that_screen_and_stays_on_screen() {
     };
     assert_eq!(origin_of(&cfg, screen((0, 0))), (640, 200));
     // another screen setup: docked at its edge as before
-    assert_eq!(origin_of(&cfg, screen((1920, 0))).0, 1920 + 1920 - 12 - 104);
+    assert_eq!(origin_of(&cfg, screen((1920, 0))).0, 1920 + 1920 - 12 - 112);
     // a spot past the edge (a smaller screen now): kept on it
     cfg.snip.steps_spot = Some([0, 0, 9000, 9000]);
     let p = origin_of(&cfg, screen((0, 0)));
-    assert!(p.0 <= 1920 - 104 && p.1 <= 1080 - 162, "{p:?}");
+    assert!(p.0 <= 1920 - 112 && p.1 <= 1080 - 200, "{p:?}");
 }

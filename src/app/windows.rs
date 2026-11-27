@@ -18,7 +18,7 @@ use crate::shared::kit::chip;
 use crate::shared::kit::header::{self as chrome, Caption};
 use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::tokens::{radius, space};
+use crate::shared::kit::tokens::{radius, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
 use crate::shared::theme;
@@ -367,25 +367,36 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 Side::Bottom,
             )
         };
-        // its word "Drag" says it: no tooltip (owner rule: only when it adds)
-        let drag =
-            dragout::SUPPORTED.then(|| chip::drag_out(PinMsg::DragOut, crate::t!(chip_drag)));
+        // its word "Drag" says it: no tooltip (owner rule: only when it adds); the
+        // live pin's bar is the design's five icons, so no chip there
+        let drag = (pin.live.is_none() && dragout::SUPPORTED)
+            .then(|| chip::drag_out(PinMsg::DragOut, crate::t!(chip_drag)));
         let live = pin.live.as_ref().map(|l| {
-            let tool = |glyph, message, label| {
-                let button = icon_button::square(glyph, State::default(), Some(message));
+            let tool = |glyph, message, label, on| {
+                let state = State {
+                    active: on,
+                    ..State::default()
+                };
+                let button = icon_button::square(glyph, state, Some(message));
                 hint(button, label, Why::Icon, Side::Bottom)
             };
             row![
                 tool(
                     OPACITY_GLYPH,
                     PinMsg::Opacity,
-                    crate::shared::app_language::tr(OPACITY[l.opacity].1)
+                    crate::shared::app_language::tr(OPACITY[l.opacity].1),
+                    false
                 ),
-                tool(THROUGH, PinMsg::ClickThrough, crate::t!(pin_through)),
+                tool(
+                    THROUGH,
+                    PinMsg::ClickThrough,
+                    crate::t!(pin_through),
+                    l.through
+                ),
             ]
-            .spacing(space::GAP)
+            .spacing(widget_e::SEGMENT_GAP)
         });
-        let actions = crate::shared::kit::surface::segment_row([
+        let actions = row![
             button(COPY, PinMsg::Copy, crate::t!(c_copy), "Ctrl+C"),
             button(SAVE, PinMsg::Save, crate::t!(c_save), "Ctrl+S"),
             hint(
@@ -394,9 +405,11 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 Why::Keys("Esc"),
                 Side::Bottom,
             ),
-        ]);
-        let controls = row![drag, live, actions]
-            .spacing(space::GAP)
+        ]
+        .spacing(widget_e::SEGMENT_GAP);
+        // ONE style E tray: the icons sit straight on it (no raised segments)
+        let controls = crate::dir_row![drag, live, actions]
+            .spacing(widget_e::SEGMENT_GAP)
             .align_y(iced::Center);
         let bar = surface(Material::Tray, radius::FULL, controls).padding(space::BAR_PAD);
         layers = layers.push(
@@ -405,8 +418,25 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
                 .height(Fill)
                 .align_x(iced::alignment::Horizontal::Right)
                 .align_y(iced::alignment::Vertical::Top)
-                .padding(space::PAGE[0] / 2.0),
+                .padding(widget_e::PIN_BAR_INSET),
         );
+    }
+    if pin.live.is_some() {
+        // the design's rounded frame and thin look-coloured border (the OS's own
+        // capture border, where Windows draws one, is not ours to change)
+        let color = crate::shared::theme::accent_of(&crate::shared::config::look()).0;
+        let framed = crate::shared::kit::surface::pin_frame(
+            shape::radius(widget_e::PIN_CORNER),
+            color,
+            layers,
+        );
+        return mouse_area(framed)
+            .on_press(PinMsg::Drag)
+            .on_double_click(PinMsg::Close)
+            .on_scroll(PinMsg::Zoom)
+            .on_enter(PinMsg::Hover(true))
+            .on_exit(PinMsg::Hover(false))
+            .into();
     }
     // a thin rim around the picture (a pin window has no title bar)
     let pinned = surface(Material::Widget, 0.0, layers)
@@ -877,7 +907,7 @@ impl Windows {
     /// own always-on-top window, its top-left at `at` (physical desktop px, on
     /// any monitor) or centred. Any number can be open.
     pub fn pin(&mut self, crop: Crop, at: Option<(i32, i32)>, scale: f32) -> Task<Msg> {
-        self.open_pin(crop, at, scale).1
+        self.open_pin(crop, at, scale, 0.0).1
     }
 
     fn open_pin(
@@ -885,6 +915,7 @@ impl Windows {
         crop: Crop,
         at: Option<(i32, i32)>,
         scale: f32,
+        corner: f32,
     ) -> (window::Id, Task<Msg>) {
         let scale = scale.max(0.1);
         let base = Size::new(crop.width as f32, crop.height as f32) * (1.0 / scale);
@@ -906,7 +937,7 @@ impl Windows {
                 resizable: false,
                 ..window::Settings::default()
             },
-            0.0, // a picture: square
+            corner, // a still picture: square; a live pin: the design's rounded frame
             POPUP,
         );
         // At its exact place in physical px before it shows: iced places a new
@@ -957,7 +988,7 @@ impl Windows {
             let text = t!(pill_pins_pick);
             return self.toast(text, Tone::Neutral, None, TOAST_MS);
         };
-        let (id, open) = self.open_pin(first, at, scale);
+        let (id, open) = self.open_pin(first, at, scale, shape::radius(widget_e::PIN_CORNER));
         let (tx, rx) = iced::futures::channel::mpsc::unbounded();
         let (source, run) = live::source(source, pick, move |e| tx.unbounded_send(e).is_ok());
         if let Err(e) = std::thread::Builder::new()

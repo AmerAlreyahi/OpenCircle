@@ -16,12 +16,14 @@ use std::sync::Arc;
 
 use iced::widget::tooltip::Position as Side;
 use iced::widget::{Space, column, container, image, mouse_area};
-use iced::{Center, Element, Fill, Padding, Point, Size};
+use iced::{Center, Element, Fill, Point, Size};
 
 use crate::shared::kit::button::{self, Kind};
+use crate::shared::kit::icon::Icon;
+use crate::shared::kit::icon_button;
 use crate::shared::kit::surface::tray;
-use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
-use crate::shared::kit::tokens::radius;
+use crate::shared::kit::thumb::{self, Look, STRIP_WELL};
+use crate::shared::kit::tokens::{radius, widget_e};
 use crate::shared::kit::tooltip::tip;
 use crate::shared::kit::{grip, scroll, toast};
 use crate::shared::picture::{Crop, encode_png, fit_long_edge};
@@ -34,13 +36,21 @@ const MARGIN: f32 = 12.0;
 /// A press moves this far (logical px) before it drags a step.
 const DRAG: f32 = 4.0;
 /// A thumbnail's pixels at most: twice the well, sharp at 200 %.
-pub const THUMB: (u32, u32) = (192, 120);
+pub const THUMB: (u32, u32) = (192, 128);
 /// The window's corners (`floating`).
 pub const RADIUS: f32 = radius::DRAWER;
 /// lucide "copy"
 const COPY: char = '\u{e0a2}';
+/// lucide "plus"
+const PLUS: char = '\u{e140}';
 /// The strip's foot: Copy all and Open in OpenCircle Studio, one under the other.
-const FOOT: f32 = 2.0 * crate::shared::kit::tokens::size::ICON_BUTTON + PAD;
+const FOOT: f32 = 2.0 * widget_e::STRIP_BTN_H + PAD;
+/// The strip's padding and the gap between its parts (`.strip`), its header row.
+const PAD: f32 = widget_e::STRIP_PAD;
+const TOP: f32 = widget_e::STRIP_TOP;
+/// Where the first thumbnail starts, and the pitch between two.
+const FIRST: f32 = PAD + TOP + PAD;
+const PITCH: f32 = STRIP_WELL.height + PAD;
 /// "Steps cleared · Undo" stays this long, then the steps are gone.
 pub const UNDO_MS: u64 = 5000;
 
@@ -383,9 +393,7 @@ impl Strip {
                 self.pick.press(i);
                 self.focus = Some(i);
             }
-            Msg::Move(at) => self
-                .pick
-                .moved(at, TOP, WELL.height + PAD, self.steps.len()),
+            Msg::Move(at) => self.pick.moved(at, FIRST, PITCH, self.steps.len()),
             Msg::Release => match self.pick.release()? {
                 Released::Moved(from, to) => {
                     self.move_step(from, to);
@@ -467,15 +475,15 @@ impl Strip {
             return toast::size_with_action(label, action);
         }
         let n = (self.steps.len() + usize::from(self.failed)).max(1) as f32;
-        let thumbs = n * WELL.height + (n - 1.0) * PAD;
+        let thumbs = n * STRIP_WELL.height + (n - 1.0) * PAD;
         let room = self.work().height - 2.0 * MARGIN;
-        let h = TOP + thumbs + PAD + FOOT + PAD;
-        Size::new(WELL.width + 2.0 * PAD, h.min(room))
+        let h = FIRST + thumbs + PAD + FOOT + PAD;
+        Size::new(STRIP_WELL.width + 2.0 * PAD, h.min(room))
     }
 
     /// The thumbnails' room (they scroll when the strip would not fit).
     fn thumbs_height(&self) -> f32 {
-        self.size().height - TOP - 2.0 * PAD - FOOT
+        self.size().height - FIRST - 2.0 * PAD - FOOT
     }
 
     /// Its monitor's work area, logical px from the monitor's origin.
@@ -570,14 +578,18 @@ impl Strip {
             grip::small(Msg::Grab),
             Space::new().width(Fill).into(),
             tip(
-                thumb::add((!self.is_full()).then_some(Msg::AddStep)),
+                icon_button::quiet_small(PLUS, false, (!self.is_full()).then_some(Msg::AddStep)),
                 match self.is_full() {
                     true => t!(sn_steps_full_tip),
                     false => t!(sn_add_step),
                 },
                 Side::Bottom,
             ),
-            tip(thumb::close(Msg::Clear), self.words().clear, Side::Bottom),
+            tip(
+                icon_button::quiet_small(Icon::Close.glyph(), false, Some(Msg::Clear)),
+                self.words().clear,
+                Side::Bottom,
+            ),
         ];
         let top = container(iced::widget::Row::with_children(dir::order(top)).align_y(Center))
             .height(TOP);
@@ -588,7 +600,7 @@ impl Strip {
                 focused: self.focus == Some(i) && !self.pick.dragging(),
                 rtl: dir::rtl(),
             };
-            let picture = thumb::step(
+            let picture = thumb::strip_step(
                 self.steps[i].thumb.clone(),
                 place + 1,
                 look,
@@ -602,34 +614,32 @@ impl Strip {
             tip(step, self.words().step, Side::Bottom)
         });
         let lost = self.failed.then(|| {
-            let hole = mouse_area(thumb::failed(WELL)).on_press(Msg::FailedSeen);
+            let hole = mouse_area(thumb::failed(STRIP_WELL)).on_press(Msg::FailedSeen);
             tip(hole, t!(sn_step_failed), Side::Bottom)
         });
         let thumbs =
             scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height());
         let words = self.words();
-        let copy = button::labelled(
+        let copy = button::strip_action(
             COPY,
             words.copy_all,
-            WELL.width,
+            STRIP_WELL.width,
             Kind::Accent,
             false,
             Some(Msg::CopyAll),
         );
-        let studio = button::labelled_logo(
-            t!(ss_studio),
-            WELL.width,
-            Kind::Elevated,
+        let studio = button::strip_action(
+            Icon::Picture.glyph(),
+            t!(sn_step_studio),
+            STRIP_WELL.width,
+            Kind::Quiet,
             false,
             Some(Msg::OpenStudio),
         );
         let studio = tip(studio, t!(sn_studio_btn), Side::Top);
-        let strip = column![top, column![thumbs, copy, studio].spacing(PAD)];
+        let strip = column![top, thumbs, copy, studio].spacing(PAD);
         let strip = tray(false, corners, strip)
-            .padding(Padding {
-                top: 0.0,
-                ..Padding::new(PAD)
-            })
+            .padding(PAD)
             .width(Fill)
             .height(Fill);
         mouse_area(strip)
@@ -922,12 +932,12 @@ mod tests {
 
     #[test]
     fn sizes_and_place_follow_the_spec() {
-        // 1 step 104 x 162, 4 steps 104 x 354 (the foot: Copy all, Open in Studio)
-        assert_eq!(strip(1).size(), Size::new(104.0, 162.0));
-        assert_eq!(strip(4).size(), Size::new(104.0, 354.0));
+        // style E: 112 wide, 1 step 112 x 200, 4 steps 112 x 416 (the foot: Copy all, Studio)
+        assert_eq!(strip(1).size(), Size::new(112.0, 200.0));
+        assert_eq!(strip(4).size(), Size::new(112.0, 416.0));
         // at the right edge, 12 px in, centred in the work area (1040 high)
         let p = strip(1).place();
-        assert_eq!(p.origin, (1920 - 12 - 104, (1040 - 162) / 2));
+        assert_eq!(p.origin, (1920 - 12 - 112, (1040 - 200) / 2));
         // right to left: the left edge
         let mut rtl = Strip::new(MONITOR, 40.0, true);
         rtl.push(step(10, 10, 1));
@@ -957,7 +967,7 @@ mod tests {
                 s.monitor.px = ((1280.0 * k) as u32, (720.0 * k) as u32);
                 let h = s.size().height;
                 assert!(
-                    TOP + s.thumbs_height() + PAD + icon + PAD <= h + 0.001,
+                    FIRST + s.thumbs_height() + PAD + icon + PAD <= h + 0.001,
                     "k {k} n {n}"
                 );
                 let p = s.place();
@@ -975,7 +985,7 @@ mod tests {
         let p = s.place().origin;
         assert!(!s.dock_on(Point::new(p.0 as f32, p.1 as f32), 1.0, &[]));
         s.push(step(8, 8, 1));
-        assert_eq!(s.place().origin.1, (1040 - 290) / 2);
+        assert_eq!(s.place().origin.1, (1040 - 344) / 2);
         s.update(Msg::Delete(2));
         assert!(s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         let p = s.place();
@@ -984,9 +994,9 @@ mod tests {
         assert!(!s.dock_on(Point::new(300.0, 200.0), 1.0, &[]));
         // dragged off the bottom and the right: kept inside
         s.dock_on(Point::new(1500.0, 5000.0), 1.0, &[]);
-        assert_eq!(s.place().origin, (1500, 1040 - 12 - 226));
+        assert_eq!(s.place().origin, (1500, 1040 - 12 - 272));
         s.dock_on(Point::new(5000.0, 400.0), 1.0, &[]);
-        assert_eq!(s.place().origin, (1920 - 12 - 104, 400));
+        assert_eq!(s.place().origin, (1920 - 12 - 112, 400));
     }
 
     /// Dragged onto another monitor (another DPI) it docks to THAT monitor's
@@ -1034,12 +1044,12 @@ mod tests {
         assert_eq!(s.update(Msg::Edit(1)), Some(Do::Edit(1)));
         assert_eq!(s.update(Msg::Release), None);
         // a drag of step 3 to the top (past the 4 px threshold)
-        let y3 = TOP + 2.0 * (WELL.height + PAD) + 30.0;
+        let y3 = FIRST + 2.0 * PITCH + 30.0;
         s.update(Msg::Move(Point::new(50.0, y3)));
         s.update(Msg::Press(2));
         s.update(Msg::Move(Point::new(50.0, y3 - 2.0)));
         assert!(!s.pick.dragging(), "under the threshold: still a click");
-        s.update(Msg::Move(Point::new(50.0, TOP + 10.0)));
+        s.update(Msg::Move(Point::new(50.0, FIRST + 10.0)));
         assert_eq!(s.pick.drag, Some((2, 0)));
         assert_eq!(s.shown(), vec![2, 0, 1], "renumbered live");
         assert_eq!(s.update(Msg::Release), None, "a drag copies nothing");
@@ -1188,10 +1198,82 @@ mod tests {
         assert_eq!(next.place().origin, (700, 300));
     }
 
+    /// The pixel at (x, y) of a rendered strip, within a channel of `want` (D03-1..D03-4).
+    fn near(px: &[u8], width: u32, (x, y): (u32, u32), want: [u8; 4]) -> bool {
+        let at = ((y * width + x) * 4) as usize;
+        (0..3).all(|k| px[at + k].abs_diff(want[k]) <= 3)
+    }
+
+    /// D03-1: thumbnails are rounded (the corner shows the tray), 8 px apart (the gap
+    /// is the tray), and fill the strip's 96 px width.
+    #[test]
+    fn d03_1_thumbnails_are_rounded_with_even_gaps() {
+        golden::each_theme(|theme, _| {
+            let s = strip(2);
+            let px = crate::shared::kit::testing::shot::render(s.view(RADIUS), 112, 272);
+            let tray = crate::shared::kit::themes::c().track.into_rgba8();
+            let ok = |at| near(&px, 112, at, tray);
+            assert!(
+                ok((9, FIRST as u32 + 1)),
+                "{}: the corner shows the tray",
+                theme.id
+            );
+            assert!(
+                ok((104 - 2, FIRST as u32 + 1)),
+                "{}: the end corner too",
+                theme.id
+            );
+            assert!(ok((56, FIRST as u32 + 64 + 4)), "{}: an 8 px gap", theme.id);
+            assert!(!ok((56, FIRST as u32 + 32)), "{}: the picture", theme.id);
+            assert!(!ok((9, FIRST as u32 + 32)), "{}: fills the width", theme.id);
+        });
+    }
+
+    /// D03-2: the number badge (accent, ringed in the widget colour) sits in the
+    /// thumbnail's top-start corner of the design (`inset-inline-start: 5px`).
+    #[test]
+    fn d03_2_the_badge_is_accent_with_a_ring_at_the_start() {
+        let c = crate::shared::kit::themes::c();
+        let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 200);
+        let y = FIRST as u32 + 5 + 9;
+        assert!(near(&px, 112, (8 + 5 + 2, y), c.accent.into_rgba8()));
+        assert!(
+            near(&px, 112, (8 + 5 - 1, y), c.widget.into_rgba8()),
+            "the ring"
+        );
+        assert!(
+            !near(&px, 112, (8 + 96 - 5 - 18 + 2, y), c.accent.into_rgba8()),
+            "not at the end"
+        );
+        let _ar = crate::shared::kit::testing::arabic();
+        let mut rtl = strip(1);
+        rtl.rtl = true;
+        let px = crate::shared::kit::testing::shot::render(rtl.view(RADIUS), 112, 200);
+        assert!(
+            near(&px, 112, (8 + 96 - 5 - 18 + 2, y), c.accent.into_rgba8()),
+            "mirrored"
+        );
+    }
+
+    /// D03-3: Copy all is the accent button, Studio the quiet track-filled one.
+    #[test]
+    fn d03_3_copy_all_is_accent_and_studio_is_quiet() {
+        let c = crate::shared::kit::themes::c();
+        let px = crate::shared::kit::testing::shot::render(strip(1).view(RADIUS), 112, 200);
+        assert!(near(&px, 112, (8 + 3, 112 + 18), c.accent.into_rgba8()));
+        // `hover` is a veil: it lies over the tray
+        let (h, t) = (c.hover, c.track);
+        let mix = |a: f32, b: f32| ((h.a * a + (1.0 - h.a) * b) * 255.0).round() as u8;
+        let over = [mix(h.r, t.r), mix(h.g, t.g), mix(h.b, t.b), 255];
+        assert!(near(&px, 112, (8 + 3, 156 + 18), over));
+    }
+
     #[test]
     fn the_strip_matches_its_golden_images() {
         golden::each_theme(|theme, failed| {
             for rtl in [false, true] {
+                // the Arabic goldens are drawn in Arabic, mirrored (D03)
+                let _ar = rtl.then(crate::shared::kit::testing::arabic);
                 let make = |n: usize| {
                     let mut s = strip(n);
                     s.rtl = rtl;
@@ -1201,7 +1283,7 @@ mod tests {
                 hover.update(Msg::Hover(1, true));
                 let mut lifted = make(4);
                 lifted.update(Msg::Press(3));
-                lifted.update(Msg::Move(Point::new(50.0, TOP + 70.0)));
+                lifted.update(Msg::Move(Point::new(50.0, FIRST + 70.0)));
                 let mut focused = make(4);
                 focused.update(Msg::Key(Key::Down));
                 let mut cleared = make(2);
