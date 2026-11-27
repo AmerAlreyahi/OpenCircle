@@ -5625,3 +5625,145 @@ fn previews_are_open_by_default_without_downloading() {
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "See how it works"), "{texts:?}");
 }
+
+#[test]
+fn preview_picture_clips_its_corners_to_rounded_radius() {
+    use crate::shared::kit::hero::{Hero, Words, hero};
+    use crate::shared::kit::themes;
+    themes::set(&themes::DAYLIGHT);
+    let mut red = Vec::with_capacity(372 * 210 * 4);
+    for _ in 0..(372 * 210) {
+        red.extend_from_slice(&[255, 0, 0, 255]);
+    }
+    let handle = iced::widget::image::Handle::from_rgba(372, 210, red);
+    let view = hero(Hero::<()> {
+        title: "Translate",
+        desc: "Read your screen in your language.",
+        lab: false,
+        keys: vec!["Alt".into(), "Shift".into(), "T".into()],
+        shown: true,
+        toggle: Some(()),
+        play: Some(("Play preview", Some(()))),
+        beside: false,
+        note: None,
+        frame: Some(handle),
+        width: (Default::default(), 1.0, 800.0),
+        pager: None,
+        words: Words::default(),
+    });
+    let (w, h) = (808_u32, 260_u32);
+    let px = shot::render(view, w, h);
+    let at = |x: u32, y: u32| -> [u8; 4] {
+        let i = ((y * w + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0_u32, 0_u32);
+    for y in 0..h {
+        for x in 0..w {
+            let p = at(x, y);
+            if p[0] > 220 && p[1] < 40 && p[2] < 40 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    assert!(
+        x1 > x0 + 100 && y1 > y0 + 100,
+        "red picture found: ({x0},{y0})..({x1},{y1})"
+    );
+    for (cx, cy) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+        let p = at(cx, cy);
+        assert!(
+            !(p[0] > 220 && p[1] < 40 && p[2] < 40),
+            "corner ({cx},{cy}) of preview picture was NOT rounded: {p:?}"
+        );
+    }
+    themes::set(&themes::SAPPHIRE);
+}
+
+#[test]
+fn theme_mini_card_and_mode_card_have_rounded_corners() {
+    use crate::shared::kit::theme_preview::{look_mini_card, mode_card, theme_mini_card};
+    use crate::shared::kit::themes;
+    themes::set(&themes::DAYLIGHT);
+    let bg = themes::DAYLIGHT.c.bg.into_rgba8();
+    let check_rounded = |name: &str, el: iced::Element<'static, ()>, w: u32, h: u32| {
+        let px = shot::render(el, w, h);
+        assert_eq!(
+            &px[0..4],
+            &bg,
+            "{name}: top-left corner (0,0) must show bg through radius"
+        );
+        let tr = ((w - 1) * 4) as usize;
+        assert_eq!(
+            &px[tr..tr + 4],
+            &bg,
+            "{name}: top-right corner must show bg through radius"
+        );
+        let mid = (((h / 2) * w + (w / 2)) * 4) as usize;
+        assert_ne!(&px[mid..mid + 4], &bg, "{name}: interior must be painted");
+    };
+    check_rounded(
+        "mode_card_system",
+        mode_card(
+            (&themes::DAYLIGHT, &themes::SAPPHIRE),
+            "System",
+            "Follows system",
+            true,
+            (),
+        ),
+        248,
+        196,
+    );
+    check_rounded(
+        "theme_mini_card",
+        theme_mini_card(&themes::SAPPHIRE, "Sapphire", true, ()),
+        144,
+        118,
+    );
+    check_rounded(
+        "look_mini_card",
+        look_mini_card(
+            &[
+                iced::Color::from_rgb8(0x0a, 0x84, 0xff),
+                iced::Color::from_rgb8(0x5e, 0x5c, 0xe6),
+            ],
+            "Sapphire Glow",
+            true,
+            Some(()),
+        ),
+        144,
+        118,
+    );
+    let mw_px = shot::render(
+        crate::shared::kit::theme_preview::mini_window::<()>(
+            &themes::DAYLIGHT,
+            &themes::SAPPHIRE,
+            140.0,
+        ),
+        225,
+        140,
+    );
+    assert_eq!(
+        &mw_px[0..4],
+        &bg,
+        "System mini-window (0,0) corner must show bg through 9 px radius"
+    );
+    let lk_px = shot::render(
+        crate::shared::kit::theme_preview::look_mini_window::<()>(
+            iced::Color::from_rgb8(0x0a, 0x84, 0xff),
+            iced::Color::from_rgb8(0x5e, 0x5c, 0xe6),
+            82.0,
+        ),
+        130,
+        82,
+    );
+    assert_eq!(
+        &lk_px[0..4],
+        &bg,
+        "Look mini-window (0,0) corner must show bg through 9 px radius"
+    );
+    themes::set(&themes::SAPPHIRE);
+}

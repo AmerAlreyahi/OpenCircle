@@ -3,6 +3,8 @@
 //! look mini-preview cards. `mode_card` = Light / Dark / System (System cuts diagonally from
 //! top-right to bottom-left, light upper-left and dark lower-right); `theme_mini_card` = one colour
 //! theme of a mode; `look_mini_card` = one screen-border glow preview in a 5-column grid.
+//! Both mini-windows and look previews draw true rounded contours (`radius::CONTROL`) so corners
+//! stay soft on the CPU renderer.
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::widget::{Space, button, column, container};
 use iced::{Border, Color, Element, Fill, Padding, Point, Rectangle, Size};
@@ -35,17 +37,59 @@ enum Half {
     LowerRight,
 }
 
-/// Clips a rectangle against the diagonal half-plane `x/w + y/h <= 1` (`UpperLeft`)
-/// or `x/w + y/h >= 1` (`LowerRight`).
-fn clip_rect(r: Rectangle, w: f32, h: f32, half: Half) -> Vec<Point> {
-    let pts = vec![
-        Point::new(r.x, r.y),
-        Point::new(r.x + r.width, r.y),
-        Point::new(r.x + r.width, r.y + r.height),
-        Point::new(r.x, r.y + r.height),
+/// Samples a rounded rectangle into a smooth convex polygon (8 steps per corner arc).
+fn rounded_rect_poly(r: Rectangle, rad: f32) -> Vec<Point> {
+    let rad = rad.min(r.width * 0.5).min(r.height * 0.5);
+    if rad <= 0.0 {
+        return vec![
+            Point::new(r.x, r.y),
+            Point::new(r.x + r.width, r.y),
+            Point::new(r.x + r.width, r.y + r.height),
+            Point::new(r.x, r.y + r.height),
+        ];
+    }
+    let steps = 8;
+    let mut pts = Vec::with_capacity(4 * (steps + 1));
+    let corners = [
+        (
+            r.x + r.width - rad,
+            r.y + rad,
+            -std::f32::consts::FRAC_PI_2,
+            0.0,
+        ),
+        (
+            r.x + r.width - rad,
+            r.y + r.height - rad,
+            0.0,
+            std::f32::consts::FRAC_PI_2,
+        ),
+        (
+            r.x + rad,
+            r.y + r.height - rad,
+            std::f32::consts::FRAC_PI_2,
+            std::f32::consts::PI,
+        ),
+        (
+            r.x + rad,
+            r.y + rad,
+            std::f32::consts::PI,
+            1.5 * std::f32::consts::PI,
+        ),
     ];
+    for (cx, cy, a0, a1) in corners {
+        for i in 0..=steps {
+            let a = a0 + (a1 - a0) * (i as f32 / steps as f32);
+            pts.push(Point::new(cx + rad * a.cos(), cy + rad * a.sin()));
+        }
+    }
+    pts
+}
+
+/// Clips a convex polygon against the diagonal half-plane `x/w + y/h <= 1` (`UpperLeft`)
+/// or `x/w + y/h >= 1` (`LowerRight`).
+fn clip_poly(pts: &[Point], w: f32, h: f32, half: Half) -> Vec<Point> {
     if half == Half::Full || w <= 0.0 || h <= 0.0 {
-        return pts;
+        return pts.to_vec();
     }
     let val = |p: Point| {
         let d = p.x / w + p.y / h - 1.0;
@@ -55,7 +99,7 @@ fn clip_rect(r: Rectangle, w: f32, h: f32, half: Half) -> Vec<Point> {
             Half::Full => 1.0,
         }
     };
-    let mut out = Vec::with_capacity(6);
+    let mut out = Vec::with_capacity(pts.len() + 2);
     for i in 0..pts.len() {
         let a = pts[i];
         let b = pts[(i + 1) % pts.len()];
@@ -84,7 +128,7 @@ fn fill_clipped(frame: &mut Frame, r: Rectangle, w: f32, h: f32, half: Half, col
         }
         return;
     }
-    let poly = clip_rect(r, w, h, half);
+    let poly = clip_poly(&rounded_rect_poly(r, rad), w, h, half);
     if poly.len() < 3 {
         return;
     }
@@ -117,7 +161,7 @@ fn draw_theme_window(frame: &mut Frame, size: Size, theme: &'static Theme, half:
         Color::from_rgb8(0x9f, 0xb4, 0xd8)
     };
 
-    // outer pane
+    // outer pane (soft 9 px corners, clipped cleanly on both halves of System split)
     fill_clipped(
         frame,
         Rectangle::new(Point::ORIGIN, size),
@@ -125,7 +169,7 @@ fn draw_theme_window(frame: &mut Frame, size: Size, theme: &'static Theme, half:
         h,
         half,
         pane,
-        0.0,
+        radius::CONTROL,
     );
 
     // top-left window dots (.mt: left 6%, top 6%, 4px dots, 3px gap)
@@ -252,6 +296,20 @@ impl<Message> canvas::Program<Message> for MiniWindow {
                 draw_theme_window(&mut frame, bounds.size(), self.primary, Half::Full);
             }
         }
+        let border = Path::rounded_rectangle(
+            Point::new(0.5, 0.5),
+            Size::new(
+                (bounds.width - 1.0).max(0.0),
+                (bounds.height - 1.0).max(0.0),
+            ),
+            (radius::CONTROL - 0.5).max(0.0).into(),
+        );
+        frame.stroke(
+            &border,
+            Stroke::default()
+                .with_color(Color::from_rgba8(100, 116, 139, 0.28))
+                .with_width(1.0),
+        );
         vec![frame.into_geometry()]
     }
 }
@@ -264,24 +322,13 @@ pub fn mini_window<'a, Message: 'a>(
     h: f32,
 ) -> Element<'a, Message> {
     let split = (side.id != panel.id).then_some(panel);
-    let art = iced::widget::canvas(MiniWindow {
+    iced::widget::canvas(MiniWindow {
         primary: side,
         split,
     })
     .width(Fill)
-    .height(h);
-    container(art)
-        .width(Fill)
-        .height(h)
-        .clip(true)
-        .style(|_| container::Style {
-            border: Border::default()
-                .rounded(radius::CONTROL)
-                .width(1)
-                .color(Color::from_rgba8(100, 116, 139, 0.28)),
-            ..container::Style::default()
-        })
-        .into()
+    .height(h)
+    .into()
 }
 
 struct LookMini {
@@ -303,10 +350,9 @@ impl<Message> canvas::Program<Message> for LookMini {
         let mut frame = Frame::new(renderer, bounds.size());
         let w = bounds.width;
         let h = bounds.height;
-        // dark desktop backdrop (.mw.lk)
-        frame.fill_rectangle(
-            Point::ORIGIN,
-            bounds.size(),
+        // dark desktop backdrop (.mw.lk, soft 9 px corners)
+        frame.fill(
+            &Path::rounded_rectangle(Point::ORIGIN, bounds.size(), radius::CONTROL.into()),
             Color::from_rgb8(0x0d, 0x15, 0x26),
         );
         // soft inset glow (concentric rings fading inward in `b`)
@@ -377,17 +423,9 @@ impl<Message> canvas::Program<Message> for LookMini {
 
 /// A screen-border look's mini desktop preview (`.mw.lk`).
 pub fn look_mini_window<'a, Message: 'a>(a: Color, b: Color, h: f32) -> Element<'a, Message> {
-    let art = iced::widget::canvas(LookMini { a, b })
-        .width(Fill)
-        .height(h);
-    container(art)
+    iced::widget::canvas(LookMini { a, b })
         .width(Fill)
         .height(h)
-        .clip(true)
-        .style(|_| container::Style {
-            border: Border::default().rounded(radius::CONTROL),
-            ..container::Style::default()
-        })
         .into()
 }
 

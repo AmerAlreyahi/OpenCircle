@@ -283,11 +283,8 @@ fn opener<'a, Message: 'a>(
             Some(_) => c().text,
             None => c().text_muted,
         });
-    let handle = text("▾")
-        .size(super::text::size(role))
-        .font(MONO)
-        .line_height(LINE)
-        .color(c().text);
+    let handle = super::icon::glyph(super::icon::Icon::ChevronDown.glyph(), size::ICON_SMALL)
+        .color(c().text_sub);
     let value: Element<'a, Message> = match cut {
         true => super::tooltip::cut(value, full),
         false => value.into(),

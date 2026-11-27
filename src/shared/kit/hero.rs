@@ -206,7 +206,7 @@ fn media_box<'a, Message: 'a>(
     let box_ = container(media).clip(true).style(|_| container::Style {
         background: Some(c().track_glass.into()),
         border: Border::default()
-            .rounded(radius::CARD)
+            .rounded(settings::DEMO_MEDIA_RADIUS)
             .width(1)
             .color(c().divider),
         ..container::Style::default()
@@ -331,11 +331,13 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
             return;
         };
         let bounds = layout.bounds();
+        let rounded =
+            super::thumb::round_handle(frame, bounds.size(), settings::DEMO_MEDIA_RADIUS, false);
         let image = Image {
             filter_method: FilterMethod::Linear,
-            border_radius: radius::CARD.into(),
+            border_radius: settings::DEMO_MEDIA_RADIUS.into(),
             snap: true,
-            ..Image::new(frame.clone())
+            ..Image::new(rounded)
         };
         renderer.draw_image(image, bounds, bounds);
     }

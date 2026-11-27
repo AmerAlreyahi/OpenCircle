@@ -101,6 +101,7 @@ pub mod settings {
     pub const DEMO_H: f32 = 210.0;
     pub const DEMO_GAP: f32 = 22.0;
     pub const DEMO_PAD: f32 = 16.0;
+    pub const DEMO_MEDIA_RADIUS: f32 = 11.0;
     /// Offline model list: icon tile, progress bar width, and row spacing (`extra.css` `.mic`, `.dlp`, `.mrow2`).
     pub const MODEL_TILE: f32 = 30.0;
     pub const MODEL_BAR_W: f32 = 150.0;
