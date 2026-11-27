@@ -5435,3 +5435,34 @@ fn the_sidebar_has_one_row_height() {
         crate::shared::kit::tokens::size::NAV_ITEM
     );
 }
+
+/// Closing Settings with a Studio-row write in flight and a coalesced change pending still
+/// writes the last value (the shell runs `studio_flush` on a worker thread).
+#[test]
+fn closing_during_a_studio_write_still_writes_the_last_value() {
+    use crate::features::snip::screens::studio::preferences::Msg;
+    let (mut s, _) = state(None);
+    let path = tmp("studio-close");
+    s.path = Some(path.clone());
+    let change = |s: &mut State, name: &str| {
+        let mut p = Config::default().studio;
+        p.file_name = name.into();
+        update(s, Message::Studio(Msg::Prefs(Box::new(p))));
+    };
+    assert!(
+        s.studio_flush().is_none(),
+        "nothing pending: nothing to flush"
+    );
+    change(&mut s, "a");
+    let first = s.studio_write().expect("starts");
+    change(&mut s, "abc");
+    assert!(
+        s.studio_write().is_none(),
+        "pending behind the write in flight"
+    );
+    // the window closes now: the in-flight write lands, then the flush
+    first.run();
+    s.studio_flush().expect("the pending change").run();
+    assert_eq!(Config::load_from(&path).0.studio.file_name, "abc");
+    assert!(s.studio_flush().is_none(), "flushed once");
+}

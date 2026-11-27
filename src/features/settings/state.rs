@@ -1290,6 +1290,20 @@ impl State {
             .collect()
     }
 
+    /// The window is closing: the changes a write in flight left pending, as one last write
+    /// for a worker thread (`None`: nothing is pending). Closing never drops the last keys typed.
+    pub fn studio_flush(&mut self) -> Option<StudioWrite> {
+        if !std::mem::take(&mut self.studio_dirty) {
+            return None;
+        }
+        let dialog = Box::new(self.studio.clone());
+        self.studio.apply(&mut Config::default());
+        Some(StudioWrite {
+            path: self.path.clone(),
+            dialog,
+        })
+    }
+
     /// The Studio rows' write for a worker thread, or `None`: one is already on its way (the
     /// next one starts when it lands, with everything typed meanwhile in one write, so a
     /// file name typed key by key never queues a write per key and writes land in order).

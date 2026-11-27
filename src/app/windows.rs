@@ -1919,7 +1919,14 @@ impl Windows {
                     self.id(Kind::Settings) == Some(id) || self.id(Kind::Onboarding) == Some(id);
 
                 if self.id(Kind::Settings) == Some(id) {
-                    self.settings = None;
+                    // a Studio-row change still waiting behind a write in flight lands anyway
+                    if let Some((_, mut state)) = self.settings.take()
+                        && let Some(job) = state.studio_flush()
+                    {
+                        std::thread::spawn(move || {
+                            job.run();
+                        });
+                    }
                 }
                 if self.id(Kind::Onboarding) == Some(id) {
                     self.onboarding = None;
