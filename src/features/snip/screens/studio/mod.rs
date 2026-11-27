@@ -2202,6 +2202,14 @@ impl Studio {
         self.export = export_defaults();
     }
 
+    /// The preferences changed elsewhere (Settings): the dialog and the Studio read them again.
+    pub fn prefs_reread(&mut self) {
+        if let Some(d) = &mut self.prefs {
+            d.reread();
+        }
+        self.prefs_applied();
+    }
+
     /// The dialog's changes onto `c` (the host calls this inside `config::update`).
     pub fn apply_prefs(&mut self, c: &mut crate::shared::config::Config) {
         if let Some(d) = &mut self.prefs {

@@ -62,6 +62,7 @@ pub mod surface;
 pub mod table;
 pub mod text;
 pub mod text_area;
+pub mod theme_preview;
 pub mod thumb;
 pub mod toast;
 pub mod tooltip;

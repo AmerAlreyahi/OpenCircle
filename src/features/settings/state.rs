@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
-use iced::{Color, Size, Subscription, event, keyboard};
+use iced::{Color, Element, Size, Subscription, event, keyboard};
 
 use crate::features::settings::labs::Feature;
 use crate::features::song::{self, SERVICE, Service};
@@ -563,6 +563,9 @@ fn quick_text(config: &Config) -> Vec<SlotText> {
 
 pub struct State {
     pub(super) section: Section,
+    /// The Studio page's rows: the Studio's own preferences model, over the config; Settings
+    /// keeps no copy of those values in its draft.
+    pub(super) studio: crate::features::snip::screens::studio::preferences::Dialog,
     /// Settings search (F13): the open search, and the row a hit marked.
     pub(super) search: Option<super::search::Search>,
     pub(super) marked: Option<String>,
@@ -745,6 +748,10 @@ pub enum Message {
     Autostart(bool),
     /// Settings > Studio: open the Studio's preferences dialog.
     OpenStudioPreferences,
+    /// A row of the Studio page (the Studio's own preferences model: one source).
+    Studio(crate::features::snip::screens::studio::preferences::Msg),
+    /// The Studio changed its preferences: read them again.
+    StudioRefresh,
     /// Snip's After a capture (`studio.open_in`).
     StudioOpenIn(crate::shared::config::StudioOpenIn),
     /// Settings > General: open the welcome tour again.
@@ -771,6 +778,8 @@ pub enum Message {
     Theme(Theme),
     /// A theme card (a `kit::themes` id): its mode's pick, shown at once.
     ThemeCard(&'static str),
+    /// A colour-theme card on Appearance: only its mode's pick (the Mode cards own the mode).
+    ThemePick(&'static str),
     Record(Slot),
     Key(Chord),
     /// A modifier went down (`true`) or the last one was released.
@@ -962,6 +971,8 @@ pub enum Outcome {
     Browse,
     /// Open OpenCircle Studio with its preferences dialog.
     OpenStudioPreferences,
+    /// A Studio row changed: write it (`State::apply_studio` inside `config::update`).
+    StudioChanged,
     /// Open the welcome tour (onboarding) again.
     ShowWelcome,
     /// Open this link in the browser (the user clicked it on the About page).
@@ -1162,6 +1173,7 @@ impl State {
         let interval = config.translate.live_interval_ms.to_string();
         let (recognizers, profile) = crate::features::text_reading::system::windows_languages();
         let mut s = State {
+            studio: crate::features::snip::screens::studio::preferences::Dialog::from(&config),
             section: Section::General,
             search: None,
             marked: None,
@@ -1240,6 +1252,18 @@ impl State {
     /// What look `theme` is (Custom: the draft's own).
     pub(super) fn look(&self, theme: LookTheme) -> Look {
         theme.look(&self.draft.look.custom)
+    }
+
+    /// The Studio page's rows (by title, in this order): the Studio's own preferences rows.
+    pub(super) fn studio_rows(&self, titles: &[&str]) -> Vec<Element<'_, Message>> {
+        (self.studio.rows_named(titles).into_iter())
+            .map(|e| e.map(Message::Studio))
+            .collect()
+    }
+
+    /// Lays the Studio rows' changes on `c` (the shell calls this inside `config::update`).
+    pub fn apply_studio(&mut self, c: &mut Config) {
+        self.studio.apply(c);
     }
 
     pub(super) fn dirty(&self) -> bool {
@@ -1849,6 +1873,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             theme::preview(t, &state.draft.appearance);
         }
         Message::ThemeCard(id) => pick_theme(state, id),
+        Message::ThemePick(id) => pick_for_mode(state, id),
         Message::Record(slot) => {
             state.recording = (state.recording != Some(slot)).then_some(slot);
             state.resetting = false;
@@ -2067,6 +2092,24 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         }
         Message::OpenStudioPreferences => return Outcome::OpenStudioPreferences,
         Message::StudioOpenIn(v) => state.draft.studio.open_in = v,
+        Message::Studio(m) => {
+            use crate::features::snip::screens::studio::preferences::Out;
+            return match state.studio.update(m) {
+                Out::Changed => Outcome::StudioChanged,
+                Out::OpenGeneral => {
+                    state.section = Section::General;
+                    Outcome::None
+                }
+                Out::None | Out::Close => Outcome::None,
+            };
+        }
+        Message::StudioRefresh => {
+            let now = config::current();
+            state.studio = crate::features::snip::screens::studio::preferences::Dialog::from(&now);
+            // Snip's After a capture reads the same key
+            state.saved.studio.open_in = now.studio.open_in;
+            state.draft.studio.open_in = now.studio.open_in;
+        }
         Message::ShowWelcome => return Outcome::ShowWelcome,
         Message::DismissFolderNote => state.draft.general.folder_note.clear(),
         Message::BrowseFolder => return Outcome::Browse,
@@ -2255,6 +2298,20 @@ fn pick_theme(state: &mut State, id: &str) {
         false => d.appearance.dark = t.id.into(),
     }
     d.theme = if t.light { Theme::Light } else { Theme::Dark };
+    theme::preview(d.theme, &d.appearance);
+}
+
+/// A colour-theme card of Appearance: the pick of its own mode only; the `theme` mode stays as
+/// it is (Light / Dark / System are the Mode cards' own choice).
+fn pick_for_mode(state: &mut State, id: &str) {
+    let Some(t) = THEMES.into_iter().find(|t| t.id == id) else {
+        return;
+    };
+    let d = &mut state.draft;
+    match t.light {
+        true => d.appearance.light = t.id.into(),
+        false => d.appearance.dark = t.id.into(),
+    }
     theme::preview(d.theme, &d.appearance);
 }
 

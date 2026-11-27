@@ -431,6 +431,37 @@ pub fn styled<'a, Message: 'a>(
         .into()
 }
 
+/// `s` in `role` with the byte ranges `marks` (the words a search matched) in the accent, bold
+/// (the search card's title). No marks: plain `text`.
+pub fn marked<'a, Message: 'a>(
+    role: Role,
+    s: &str,
+    marks: &[(usize, usize)],
+) -> iced::Element<'a, Message> {
+    use iced::widget::{rich_text, span};
+    if marks.is_empty() {
+        return text(role, s.to_string()).into();
+    }
+    let c = &themes::current().c;
+    let mut spans: Vec<iced::widget::text::Span<'a, ()>> = Vec::new();
+    let mut at = 0;
+    for &(a, b) in marks {
+        if a > at {
+            spans.push(span(s[at..a].to_string()).color(c.text));
+        }
+        spans.push(
+            span(s[a..b].to_string())
+                .color(c.accent)
+                .font(weight(Weight::Bold)),
+        );
+        at = b;
+    }
+    if at < s.len() {
+        spans.push(span(s[at..].to_string()).color(c.text));
+    }
+    rich_text(spans).size(size(role)).font(font(role)).into()
+}
+
 #[cfg(test)]
 mod tests {
     use iced::advanced::graphics::text::cosmic_text::{

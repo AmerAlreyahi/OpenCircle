@@ -101,6 +101,35 @@ impl Search {
         found.into_iter().map(|(_, e)| e).collect()
     }
 
+    /// The byte ranges of `title` the query's words match (the same folding as the search:
+    /// case, Arabic marks and alef forms ignored), merged and in order.
+    pub fn marks(&self, title: &str) -> Vec<(usize, usize)> {
+        // the folded title, each folded char knowing the original char it came from
+        let (mut folded, mut origin) = (String::new(), Vec::new());
+        for (at, ch) in title.char_indices() {
+            let f = fold(&ch.to_string());
+            origin.extend(f.chars().map(|_| (at, at + ch.len_utf8())));
+            folded.push_str(&f);
+        }
+        let mut found: Vec<(usize, usize)> = Vec::new();
+        for word in self.query.split_whitespace().map(fold) {
+            for (at, _) in folded.match_indices(&word) {
+                let first = folded[..at].chars().count();
+                let last = first + word.chars().count() - 1;
+                found.push((origin[first].0, origin[last].1));
+            }
+        }
+        found.sort_unstable();
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in found {
+            match out.last_mut() {
+                Some(l) if a <= l.1 => l.1 = l.1.max(b),
+                _ => out.push((a, b)),
+            }
+        }
+        out
+    }
+
     /// The hits listed (the first `MAX_HITS`).
     pub fn hits(&self) -> Vec<&Entry> {
         self.all_hits().into_iter().take(MAX_HITS).collect()

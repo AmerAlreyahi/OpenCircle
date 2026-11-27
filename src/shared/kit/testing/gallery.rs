@@ -11,7 +11,7 @@ use super::super::tokens::{Role, radius};
 use super::super::{
     button, card, chip, choice_card, divider, error_card, field, floating_card, header, nav_card,
     page_head, panel_frame, progress, scroll, search_card, section, segmented, setting_row,
-    sidebar, surface, toast,
+    sidebar, surface, theme_preview, toast,
 };
 use super::{golden, shot};
 
@@ -2173,6 +2173,50 @@ fn choice_card_sheet() {
 }
 
 #[test]
+fn theme_preview_sheet() {
+    use crate::shared::kit::themes::{DAYLIGHT, SAPPHIRE};
+    use theme_preview::{mode_card, theme_mini_card};
+    let rows = vec![
+        row("modes", Act::Rest, |ar| {
+            iced::widget::row![
+                mode_card(
+                    (&DAYLIGHT, &DAYLIGHT),
+                    s(ar, "Light", "فاتح"),
+                    s(ar, "Always light", "فاتح دائمًا"),
+                    false,
+                    ()
+                ),
+                mode_card(
+                    (&SAPPHIRE, &SAPPHIRE),
+                    s(ar, "Dark", "داكن"),
+                    s(ar, "Always dark", "داكن دائمًا"),
+                    false,
+                    ()
+                ),
+                mode_card(
+                    (&DAYLIGHT, &SAPPHIRE),
+                    s(ar, "System", "النظام"),
+                    s(ar, "Follows your system", "يتبع نظامك"),
+                    true,
+                    ()
+                ),
+            ]
+            .spacing(10)
+            .into()
+        }),
+        row("themes", Act::Rest, |ar| {
+            iced::widget::row![
+                theme_mini_card(&DAYLIGHT, s(ar, "Daylight", "ضوء النهار"), true, ()),
+                theme_mini_card(&SAPPHIRE, s(ar, "Sapphire", "ياقوتي"), false, ()),
+            ]
+            .spacing(10)
+            .into()
+        }),
+    ];
+    sheet("theme_preview", Size::new(600.0, 260.0), &rows);
+}
+
+#[test]
 fn search_card_sheet() {
     use search_card::{Hit, search_card};
     let rows = vec![row("most used", Act::Rest, |ar| {
@@ -2180,6 +2224,7 @@ fn search_card_sheet() {
             Hit {
                 glyph: '\u{e157}',
                 title: s(ar, "App language", "لغة التطبيق").into(),
+                marks: vec![(0, s(ar, "App", "لغة").len())],
                 crumb: s(ar, "General", "عام").into(),
                 value: Some("English".into()),
                 selected: true,
@@ -2188,6 +2233,7 @@ fn search_card_sheet() {
             Hit {
                 glyph: '\u{e151}',
                 title: s(ar, "Snip shortcut", "اختصار اللقطة").into(),
+                marks: vec![],
                 crumb: s(ar, "Shortcuts", "الاختصارات").into(),
                 value: None,
                 selected: false,

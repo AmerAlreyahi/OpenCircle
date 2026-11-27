@@ -457,6 +457,13 @@ impl Windows {
                     }
                     s.prefs_applied();
                 }
+                // Settings > Studio shows the same store: read it again
+                if let Some((_, state)) = &mut self.settings {
+                    crate::features::settings::update(
+                        state,
+                        crate::features::settings::Message::StudioRefresh,
+                    );
+                }
                 Task::none()
             }
             Outcome::PrefsOpenGeneral => Task::batch([

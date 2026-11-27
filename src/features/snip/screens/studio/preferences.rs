@@ -156,6 +156,9 @@ impl std::fmt::Display for Choice {
     }
 }
 
+/// A group's heading and its rows, each with its title.
+type NamedGroup<'a> = (&'static str, Vec<(&'static str, Element<'a, Msg>)>);
+
 pub struct Dialog {
     tab: Tab,
     prefs: StudioPrefs,
@@ -180,7 +183,8 @@ impl Dialog {
         Self::from(&config::current())
     }
 
-    fn from(c: &Config) -> Self {
+    /// Reads `c` (Settings > Studio holds one of these over its own config).
+    pub fn from(c: &Config) -> Self {
         let follow = Choice {
             id: STUDIO_THEME_FOLLOW,
             name: tr(S::pf_theme_follow).to_string(),
@@ -389,42 +393,98 @@ impl Dialog {
 
     /// The rows of the open section, in groups with a small heading each.
     fn rows(&self) -> Element<'_, Msg> {
+        let mut page = column![].spacing(space::PAGE[1]);
+        for (heading, rows) in self.groups(self.tab, &|_| true) {
+            let mut group = column![]
+                .spacing(space::GAP)
+                .align_x(crate::shared::kit::dir::start());
+            if !heading.is_empty() {
+                group =
+                    group.push(container(muted(Role::SECTION, heading)).padding([0.0, space::GAP]));
+            }
+            let rows = rows.into_iter().map(|(_, e)| e).collect();
+            page = page.push(group.push(setting_row::card(rows)));
+        }
+        container(page).padding([space::PAGE[1], 0.0]).into()
+    }
+
+    /// Rows of every section by their titles, in the order asked (Settings > Studio shows the
+    /// same rows this dialog does, from this one place; a title no row has is skipped).
+    pub fn rows_named(&self, titles: &[&str]) -> Vec<Element<'_, Msg>> {
+        let mut all: Vec<_> = Tab::ALL
+            .into_iter()
+            .filter(|t| *t != Tab::Shortcuts)
+            .flat_map(|t| self.groups(t, &|name| titles.contains(&name)))
+            .flat_map(|(_, rows)| rows)
+            .collect();
+        titles
+            .iter()
+            .filter_map(|t| {
+                let at = all.iter().position(|(name, _)| name == t)?;
+                Some(all.remove(at).1)
+            })
+            .collect()
+    }
+
+    /// Reads the config again (the file changed elsewhere, e.g. in Settings), staying on this section.
+    pub fn reread(&mut self) {
+        let tab = self.tab;
+        *self = Self::from(&config::current());
+        self.tab = tab;
+    }
+
+    fn groups(&self, tab: Tab, want: &dyn Fn(&str) -> bool) -> Vec<NamedGroup<'_>> {
         let p = &self.prefs;
         let edit = move |change: &dyn Fn(&mut StudioPrefs)| {
             let mut next = p.clone();
             change(&mut next);
             Msg::Prefs(Box::new(next))
         };
-        let row = |name, desc, control| setting_row::plain(title(name), desc, control);
-        let switch = move |name, desc, on: bool, set: fn(&mut StudioPrefs, bool)| {
-            row(
-                name,
-                desc,
-                boolean(name, [t!(c_off), t!(c_on)], on, move |v| {
-                    edit(&|s| set(s, v))
-                }),
-            )
-        };
-        let format_row = |label, desc, now: Format, set: fn(&mut StudioPrefs, Format)| {
-            row(
-                label,
-                desc,
-                segmented(
-                    &[(Format::Png, t!(s_png)), (Format::Jpeg, t!(s_jpeg))],
-                    now,
-                    now,
-                    1.0,
-                    move |f| edit(&|s| set(s, f)),
-                ),
-            )
-        };
-        type Group<'a> = (&'static str, Vec<Element<'a, Msg>>);
-        let groups: Vec<Group<'_>> = match self.tab {
+        // Rows are built only when `want` says so (a row builds its control, which names itself
+        // for the accessibility labels, so an unwanted one must not be built at all).
+        macro_rules! row {
+            ($name:expr, $desc:expr, $control:expr $(,)?) => {{
+                let n: &'static str = $name;
+                want(n).then(|| (n, setting_row::plain(title(n), $desc, $control)))
+            }};
+        }
+        macro_rules! switch {
+            ($name:expr, $desc:expr, $on:expr, $set:expr $(,)?) => {{
+                let n: &'static str = $name;
+                let on: bool = $on;
+                let set: fn(&mut StudioPrefs, bool) = $set;
+                row!(
+                    n,
+                    $desc,
+                    boolean(n, [t!(c_off), t!(c_on)], on, move |v| {
+                        edit(&|s| set(s, v))
+                    })
+                )
+            }};
+        }
+        macro_rules! format_row {
+            ($name:expr, $desc:expr, $now:expr, $set:expr $(,)?) => {{
+                let now: Format = $now;
+                let set: fn(&mut StudioPrefs, Format) = $set;
+                row!(
+                    $name,
+                    $desc,
+                    segmented(
+                        &[(Format::Png, t!(s_png)), (Format::Jpeg, t!(s_jpeg))],
+                        now,
+                        now,
+                        1.0,
+                        move |f| edit(&|s| set(s, f)),
+                    )
+                )
+            }};
+        }
+        let groups = match tab {
             Tab::General => vec![
                 (
                     t!(pf_grp_opening),
                     vec![
-                        row(
+                        row!(
                             t!(ss_open_in),
                             t!(ss_open_in_d),
                             segmented(
@@ -438,16 +498,16 @@ impl Dialog {
                                 move |v| edit(&|s| s.open_in = v),
                             ),
                         ),
-                        switch(t!(ss_reopen), t!(ss_reopen_d), p.reopen_last, |s, v| {
+                        switch!(t!(ss_reopen), t!(ss_reopen_d), p.reopen_last, |s, v| {
                             s.reopen_last = v
                         }),
-                        switch(
+                        switch!(
                             t!(pf_start_screen),
                             t!(pf_start_screen_d),
                             p.start_screen,
                             |s, v| s.start_screen = v,
                         ),
-                        row(
+                        row!(
                             t!(ss_recent),
                             t!(ss_recent_d),
                             segmented(
@@ -463,13 +523,13 @@ impl Dialog {
                 (
                     t!(pf_grp_sidebar),
                     vec![
-                        switch(
+                        switch!(
                             t!(pf_steps_start),
                             t!(pf_steps_start_d),
                             p.steps_on_start,
                             |s, v| s.steps_on_start = v,
                         ),
-                        row(
+                        row!(
                             t!(pf_steps_side),
                             t!(pf_steps_side_d),
                             segmented(
@@ -488,13 +548,13 @@ impl Dialog {
                 (
                     t!(pf_grp_closing),
                     vec![
-                        switch(
+                        switch!(
                             t!(ss_ask_unsaved),
                             t!(ss_ask_unsaved_d),
                             p.ask_unsaved,
                             |s, v| s.ask_unsaved = v,
                         ),
-                        switch(t!(ss_keep), t!(ss_keep_d), p.keep_unsaved, |s, v| {
+                        switch!(t!(ss_keep), t!(ss_keep_d), p.keep_unsaved, |s, v| {
                             s.keep_unsaved = v
                         }),
                     ],
@@ -505,21 +565,21 @@ impl Dialog {
                 vec![(
                     t!(pf_grp_theme),
                     vec![
-                        row(
+                        row!(
                             t!(pf_theme),
                             t!(pf_theme_d),
                             dropdown(&self.themes, chosen, t!(pf_theme_follow), move |c| {
                                 edit(&|s| s.theme = c.id.to_string())
                             }),
                         ),
-                        row(
+                        row!(
                             t!(st_sc_ui),
                             t!(pf_ui_size_d),
                             dropdown(&ZoomStep::ALL, Some(ZoomStep(self.ui_zoom)), "", |z| {
                                 Msg::UiZoom(z.0)
                             }),
                         ),
-                        row(
+                        row!(
                             t!(ss_bg),
                             t!(ss_bg_d),
                             segmented(
@@ -538,28 +598,31 @@ impl Dialog {
                 )]
             }
             Tab::Saving => {
-                let mut name = column![tip(
-                    container(field(
-                        &p.file_name,
-                        Some(move |v: String| edit(&|s| s.file_name = v.clone())),
-                        Msg::Tab(self.tab), // (Enter changes nothing; it must not close)
-                    ))
-                    .width(Fill),
-                    t!(ss_name),
-                    Position::Top
-                )];
-                if let Err(e) = config::check_studio_file_name(&p.file_name) {
-                    name = name.push(error(Role::ROW_DESC, e));
-                }
+                let name = || -> Element<'_, Msg> {
+                    let mut name = column![tip(
+                        container(field(
+                            &p.file_name,
+                            Some(move |v: String| edit(&|s| s.file_name = v.clone())),
+                            Msg::Tab(self.tab), // (Enter changes nothing; it must not close)
+                        ))
+                        .width(Fill),
+                        t!(ss_name),
+                        Position::Top
+                    )];
+                    if let Err(e) = config::check_studio_file_name(&p.file_name) {
+                        name = name.push(error(Role::ROW_DESC, e));
+                    }
+                    name.spacing(space::GAP).into()
+                };
                 vec![
                     (
                         t!(pf_grp_where),
                         vec![
-                            row(t!(ss_name), t!(ss_name_d), name.spacing(space::GAP).into()),
-                            switch(t!(ss_ask_where), t!(ss_ask_where_d), p.ask_where, |s, v| {
+                            row!(t!(ss_name), t!(ss_name_d), name()),
+                            switch!(t!(ss_ask_where), t!(ss_ask_where_d), p.ask_where, |s, v| {
                                 s.ask_where = v
                             }),
-                            switch(t!(ss_copy_path), t!(ss_copy_path_d), p.copy_path, |s, v| {
+                            switch!(t!(ss_copy_path), t!(ss_copy_path_d), p.copy_path, |s, v| {
                                 s.copy_path = v
                             }),
                         ],
@@ -567,10 +630,10 @@ impl Dialog {
                     (
                         t!(pf_grp_file),
                         vec![
-                            format_row(t!(ss_format), t!(ss_format_d), p.format, |s, f| {
+                            format_row!(t!(ss_format), t!(ss_format_d), p.format, |s, f| {
                                 s.format = f
                             }),
-                            row(
+                            row!(
                                 t!(ss_quality),
                                 t!(ss_quality_d),
                                 segmented(
@@ -581,7 +644,7 @@ impl Dialog {
                                     move |v| edit(&|s| s.quality = v),
                                 ),
                             ),
-                            row(
+                            row!(
                                 t!(ss_size),
                                 t!(ss_size_d),
                                 segmented(
@@ -592,7 +655,7 @@ impl Dialog {
                                     Msg::MaxEdge,
                                 ),
                             ),
-                            row(
+                            row!(
                                 t!(ss_folder),
                                 t!(ss_folder_d),
                                 setting_row::action(
@@ -608,7 +671,7 @@ impl Dialog {
             Tab::CopyPaste => vec![
                 (
                     t!(pf_grp_copy),
-                    vec![switch(
+                    vec![switch!(
                         t!(ss_ctrlc),
                         t!(ss_ctrlc_d),
                         p.ctrl_c_picture,
@@ -618,20 +681,20 @@ impl Dialog {
                 (
                     t!(pf_grp_paste),
                     vec![
-                        switch(
+                        switch!(
                             t!(ss_paste_obj),
                             t!(ss_paste_obj_d),
                             p.paste_movable,
                             |s, v| s.paste_movable = v,
                         ),
-                        switch(t!(ss_grow), t!(ss_grow_d), p.grow_canvas, |s, v| {
+                        switch!(t!(ss_grow), t!(ss_grow_d), p.grow_canvas, |s, v| {
                             s.grow_canvas = v
                         }),
                     ],
                 ),
                 (
                     t!(pf_grp_drag),
-                    vec![format_row(
+                    vec![format_row!(
                         t!(ss_drag),
                         t!(ss_drag_d),
                         p.drag_type,
@@ -648,13 +711,13 @@ impl Dialog {
                     (
                         t!(pf_grp_tools),
                         vec![
-                            row(
+                            row!(
                                 t!(ss_tool_styles),
                                 desc,
                                 setting_row::action(t!(c_reset), Kind::Elevated, press),
                             ),
-                            switch(t!(ss_snap), t!(ss_snap_d), p.snap, |s, v| s.snap = v),
-                            switch(t!(ss_grid), t!(ss_grid_d), p.pixel_grid, |s, v| {
+                            switch!(t!(ss_snap), t!(ss_snap_d), p.snap, |s, v| s.snap = v),
+                            switch!(t!(ss_grid), t!(ss_grid_d), p.pixel_grid, |s, v| {
                                 s.pixel_grid = v
                             }),
                         ],
@@ -662,7 +725,7 @@ impl Dialog {
                     (
                         t!(pf_grp_view),
                         vec![
-                            row(
+                            row!(
                                 t!(ss_zoom),
                                 t!(ss_zoom_d),
                                 segmented(
@@ -676,7 +739,7 @@ impl Dialog {
                                     move |v| edit(&|s| s.zoom_on_open = v),
                                 ),
                             ),
-                            row(
+                            row!(
                                 t!(ss_wheel),
                                 t!(ss_wheel_d),
                                 segmented(
@@ -694,20 +757,13 @@ impl Dialog {
                     ),
                 ]
             }
-            Tab::Shortcuts => self.shortcut_groups(),
+            Tab::Shortcuts => (self.shortcut_groups().into_iter())
+                .map(|(h, rows)| (h, rows.into_iter().map(|e| Some(("", e))).collect()))
+                .collect(),
         };
-        let mut page = column![].spacing(space::PAGE[1]);
-        for (heading, rows) in groups {
-            let mut group = column![]
-                .spacing(space::GAP)
-                .align_x(crate::shared::kit::dir::start());
-            if !heading.is_empty() {
-                group =
-                    group.push(container(muted(Role::SECTION, heading)).padding([0.0, space::GAP]));
-            }
-            page = page.push(group.push(setting_row::card(rows)));
-        }
-        container(page).padding([space::PAGE[1], 0.0]).into()
+        (groups.into_iter())
+            .map(|(h, rows): (_, Vec<Option<_>>)| (h, rows.into_iter().flatten().collect()))
+            .collect()
     }
 
     /// Keyboard shortcuts: each command's key is a field to press and record, with Reset;

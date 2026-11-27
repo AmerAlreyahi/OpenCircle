@@ -2827,6 +2827,26 @@ strings! {
         | "حافة الشاشة";
     sec_motion: "Motion"
         | "الحركة";
+    ap_mode: "Mode"
+        | "الوضع";
+    ap_mode_d: "Light, dark, or follow your system. With System you pick a theme for each."
+        | "فاتح أو داكن أو يتبع نظامك. مع «النظام» تختار سمة لكل وضع.";
+    ap_light: "Light"
+        | "فاتح";
+    ap_light_d: "Always light"
+        | "فاتح دائمًا";
+    ap_dark: "Dark"
+        | "داكن";
+    ap_dark_d: "Always dark"
+        | "داكن دائمًا";
+    ap_system: "System"
+        | "النظام";
+    ap_system_d: "Follows your system"
+        | "يتبع نظامك";
+    ap_colour: "Colour theme"
+        | "سمة الألوان";
+    ap_colour_d: "One theme for light, one for dark. The Settings window and every floating widget use them."
+        | "سمة للوضع الفاتح وأخرى للداكن. تستخدمها نافذة الإعدادات وكل عنصر عائم.";
     ap_when_light: "When it is light"
         | "عندما يكون الوضع فاتحًا";
     ap_when_dark: "When it is dark"

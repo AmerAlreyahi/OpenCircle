@@ -126,6 +126,7 @@ fn search_hits(state: &State) -> Option<Element<'_, Message>> {
                 .map(|(i, q)| Hit {
                     glyph: q.glyph,
                     title: q.title,
+                    marks: Vec::new(),
                     crumb: q.crumb,
                     value: q.value,
                     selected: i == search.at,
@@ -144,6 +145,7 @@ fn search_hits(state: &State) -> Option<Element<'_, Message>> {
                     .enumerate()
                     .map(|(i, e)| Hit {
                         glyph: glyph_of(e.section),
+                        marks: search.marks(&e.title),
                         title: e.title.clone(),
                         crumb: match e.is_page {
                             true => String::new(),

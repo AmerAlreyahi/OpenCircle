@@ -2439,8 +2439,12 @@ fn a_theme_card_picks_for_its_mode_and_shows_at_once() {
     // no OS mode or logo rows; the logo key is kept as it is
     update(&mut s, Message::Section(Section::Appearance));
     let texts = shot::texts(view(&s));
-    for gone in ["OS mode", "Logo colour", "System", "Purple"] {
+    for gone in ["OS mode", "Logo colour", "Purple"] {
         assert!(!texts.iter().any(|t| t == gone), "{gone}: {texts:?}");
+    }
+    // (the approved Appearance option 1 brings the Mode cards back: Light, Dark, System)
+    for card in ["Light", "Dark", "System"] {
+        assert!(texts.iter().any(|t| t == card), "{card}: {texts:?}");
     }
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.notice)
@@ -5036,4 +5040,158 @@ fn the_preview_is_a_head_link_or_a_wide_column() {
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
     assert!(!texts.iter().any(|t| t == "See how it works"), "{texts:?}");
+}
+
+use crate::t;
+
+// ---- D-01c: Appearance modes, Studio rows from the Studio's store, search title marks ----
+
+/// D-01c.1: the Mode cards (Light / Dark / System) set the `theme` mode and keep both colour picks.
+#[test]
+fn a_mode_card_sets_the_mode_and_keeps_the_picks() {
+    let (mut s, _) = state(None);
+    let picks = s.draft.appearance.clone();
+    for mode in [Theme::Dark, Theme::Light, Theme::System] {
+        update(&mut s, Message::Theme(mode));
+        assert_eq!(s.draft.theme, mode);
+        assert_eq!(s.draft.appearance, picks);
+    }
+}
+
+/// D-01c.2: a colour-theme card picks for its own mode only; the mode stays as the Mode cards left it.
+#[test]
+fn a_colour_theme_card_changes_only_its_mode_pick() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Theme(Theme::Dark));
+    update(&mut s, Message::ThemePick("sandstone"));
+    assert_eq!(
+        (s.draft.theme, s.draft.appearance.light.as_str()),
+        (Theme::Dark, "sandstone")
+    );
+    assert_eq!(s.draft.appearance.dark, "sapphire");
+    update(&mut s, Message::ThemePick("emerald"));
+    assert_eq!(
+        (s.draft.theme, s.draft.appearance.dark.as_str()),
+        (Theme::Dark, "emerald")
+    );
+    update(&mut s, Message::Theme(Theme::System));
+    update(&mut s, Message::ThemePick("frost"));
+    assert_eq!(s.draft.theme, Theme::System);
+}
+
+/// D-01c.3: no new config key and no migration: an old file (`theme` alone, or with the schema-4
+/// `[appearance]` picks) loads with today's look, and showing the Appearance page changes nothing.
+#[test]
+fn an_old_config_keeps_its_look_on_the_new_appearance_page() {
+    use crate::shared::kit::themes;
+    for (text, os_dark, shown) in [
+        ("version = 3\ntheme = \"dark\"\n", false, "sapphire"),
+        ("version = 3\ntheme = \"light\"\n", true, "daylight"),
+        ("version = 3\ntheme = \"system\"\n", true, "sapphire"),
+        ("version = 3\ntheme = \"system\"\n", false, "daylight"),
+        (
+            "version = 4\ntheme = \"light\"\n[appearance]\nlight = \"sandstone\"\ndark = \"emerald\"\n",
+            true,
+            "sandstone",
+        ),
+    ] {
+        let (cfg, _) = Config::parse(text);
+        assert_eq!(
+            theme::kit_theme(cfg.theme, os_dark, &cfg.appearance).id,
+            shown,
+            "{text}"
+        );
+        let mut s = State::new(cfg.clone(), vec![], None, Box::new(Shared(Arc::default())));
+        update(&mut s, Message::Section(Section::Appearance));
+        let _ = view(&s);
+        assert!(!s.dirty(), "{text}");
+        assert_eq!(s.draft.theme, cfg.theme);
+        assert_eq!(s.draft.appearance, cfg.appearance);
+    }
+    // the frozen key is still written as it was
+    let (cfg, _) = Config::parse("theme = \"light\"\n");
+    assert!(
+        toml::to_string_pretty(&cfg)
+            .unwrap()
+            .contains("theme = \"light\"")
+    );
+    let _ = themes::current();
+}
+
+/// D-01c.4: the Studio page's rows are the Studio's own preferences rows: a change is the
+/// Studio model's `Changed`, lands in the config through `apply_studio`, and the Settings draft
+/// holds no copy of it.
+#[test]
+fn the_studio_page_writes_the_studios_own_store() {
+    use crate::features::snip::screens::studio::preferences::Msg;
+    let (mut s, _) = state(None);
+    let rows = s
+        .studio_rows(&[
+            t!(ss_reopen),
+            t!(ss_snap),
+            t!(ss_wheel),
+            t!(ss_name),
+            "nonsense",
+        ])
+        .len();
+    assert_eq!(rows, 4, "every named row, an unknown title skipped");
+    let mut p = Config::default().studio;
+    p.snap = false;
+    p.reopen_last = true;
+    let out = update(&mut s, Message::Studio(Msg::Prefs(Box::new(p))));
+    assert!(matches!(out, Outcome::StudioChanged));
+    let mut cfg = Config::default();
+    s.apply_studio(&mut cfg);
+    assert!(!cfg.studio.snap && cfg.studio.reopen_last);
+    // no copy in the draft: the page's values are not part of what Settings saves
+    assert!(s.draft.studio.snap && !s.dirty());
+}
+
+/// D-01c.5: the Studio page shows every row of the design and keeps "Open Studio preferences".
+#[test]
+fn the_studio_page_has_the_designs_rows() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Studio));
+    let _ = view(&s);
+    assert!(matches!(
+        update(&mut s, Message::OpenStudioPreferences),
+        Outcome::OpenStudioPreferences
+    ));
+    let all = [
+        t!(ss_reopen),
+        t!(ss_ask_unsaved),
+        t!(ss_keep),
+        t!(ss_name),
+        t!(ss_format),
+        t!(ss_folder),
+        t!(ss_copy_path),
+        t!(ss_snap),
+        t!(ss_zoom),
+        t!(ss_wheel),
+        t!(ss_tool_styles),
+    ];
+    assert_eq!(s.studio_rows(&all).len(), all.len());
+}
+
+/// D-01c.6: the search marks the matched words of a hit's title (case, Arabic marks and alef
+/// forms ignored), merged and in order.
+#[test]
+fn the_search_marks_the_matched_words_of_a_title() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::SearchOpen);
+    update(&mut s, Message::SearchInput("SNIP key".into()));
+    let search = s.search.as_ref().unwrap();
+    let t = "Snip shortcut key";
+    assert_eq!(search.marks(t), vec![(0, 4), (14, 17)]);
+    // overlapping words merge
+    update(&mut s, Message::SearchInput("sh short".into()));
+    assert_eq!(s.search.as_ref().unwrap().marks(t), vec![(5, 10)]);
+    // Arabic: the query without marks matches the title with them
+    update(&mut s, Message::SearchInput("لغه".into()));
+    let ar = "لُغة التطبيق";
+    let m = s.search.as_ref().unwrap().marks(ar);
+    assert_eq!(m.len(), 1);
+    assert_eq!(&ar[m[0].0..m[0].1], "لُغة");
+    update(&mut s, Message::SearchInput("zzz".into()));
+    assert!(s.search.as_ref().unwrap().marks(t).is_empty());
 }

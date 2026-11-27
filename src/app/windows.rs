@@ -1509,6 +1509,17 @@ impl Windows {
                         settings::Outcome::ShowWelcome => {
                             return Task::batch([keys, self.open(Kind::Onboarding)]);
                         }
+                        // a Studio row: written like the Studio's own dialog, which reads it again
+                        settings::Outcome::StudioChanged => {
+                            if let Err(e) = crate::shared::config::update(|c| state.apply_studio(c))
+                            {
+                                crate::log!("[opencircle] config: {e}");
+                            }
+                            if let Some((_, s)) = &mut self.studio {
+                                s.prefs_reread();
+                            }
+                            return keys;
+                        }
                         settings::Outcome::OpenStudioPreferences => {
                             return Task::batch([
                                 keys,

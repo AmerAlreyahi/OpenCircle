@@ -6,7 +6,7 @@ use iced::{Border, Center, Element, Fill, Padding};
 
 use super::divider::divider;
 use super::icon::glyph;
-use super::text::{muted, sub, text};
+use super::text::{muted, sub};
 use super::themes::c;
 use super::tokens::{Role, radius, size};
 
@@ -14,6 +14,8 @@ use super::tokens::{Role, radius, size};
 pub struct Hit<Message> {
     pub glyph: char,
     pub title: String,
+    /// Byte ranges of `title` the query matched (drawn in the accent, bold).
+    pub marks: Vec<(usize, usize)>,
     pub crumb: String,
     /// The setting's current value (the quick picks').
     pub value: Option<String>,
@@ -30,8 +32,9 @@ fn row<'a, Message: Clone + 'a>(hit: Hit<Message>) -> Element<'a, Message> {
             border: Border::default().rounded(8).width(1).color(c().divider),
             ..container::Style::default()
         });
+    let title = hit.title;
     let words = column![
-        text(Role::ROW_TITLE, hit.title),
+        super::text::marked(Role::ROW_TITLE, &title, &hit.marks),
         sub(Role::ROW_DESC, hit.crumb)
     ];
     let mut parts: Vec<Element<'a, Message>> = vec![

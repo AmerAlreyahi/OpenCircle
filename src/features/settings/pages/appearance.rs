@@ -10,6 +10,7 @@ use iced::widget::column;
 
 use super::super::state::{Message, State};
 use super::custom;
+use crate::shared::config::Theme;
 use crate::shared::config::{LookTheme, PRESETS};
 use crate::shared::kit::card::{grid, look_card, theme_card};
 use crate::shared::kit::chip::{Tone, status};
@@ -17,6 +18,7 @@ use crate::shared::kit::looks::{LOOKS, Look};
 use crate::shared::kit::motion;
 use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
+use crate::shared::kit::theme_preview::{mode_card, theme_mini_card};
 use crate::shared::kit::themes::THEMES;
 use crate::shared::theme;
 
@@ -38,8 +40,16 @@ pub fn view(state: &State) -> Element<'_, Message> {
     };
     let theme = section(Some(t!(sec_theme)), None, || {
         vec![
-            themes_group(state, true, t!(ap_when_light)),
-            themes_group(state, false, t!(ap_when_dark)),
+            mode_row(state),
+            setting_row::block(
+                title(t!(ap_colour)),
+                t!(ap_colour_d),
+                column![
+                    themes_group(state, true, t!(ap_when_light)),
+                    themes_group(state, false, t!(ap_when_dark)),
+                ]
+                .spacing(crate::shared::kit::tokens::space::PAGE[1]),
+            ),
         ]
     });
     let border = section(Some(t!(sec_border)), None, || {
@@ -65,15 +75,34 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .into()
 }
 
-/// The theme cards of one mode (light, or dark) under its heading.
-fn themes_group<'a>(state: &'a State, light: bool, name: &'a str) -> Element<'a, Message> {
+/// Mode: Light / Dark / System as tiny-window cards (the mode is the config's `theme`).
+fn mode_row(state: &State) -> Element<'_, Message> {
     let d = &state.draft;
-    let shown = theme::kit_theme(d.theme, theme::os_dark(), &d.appearance).id;
-    let cards = (THEMES.into_iter().filter(|t| t.light == light)).map(|t| {
-        let words = theme_words(t.id).map_or((t.name, t.desc), |(n, d)| (tr(n), tr(d)));
-        theme_card(t, words, t.id == shown, Message::ThemeCard(t.id))
+    let light = theme::kit_theme(Theme::Light, false, &d.appearance);
+    let dark = theme::kit_theme(Theme::Dark, true, &d.appearance);
+    let cards = [
+        (Theme::Light, (light, light), t!(ap_light), t!(ap_light_d)),
+        (Theme::Dark, (dark, dark), t!(ap_dark), t!(ap_dark_d)),
+        (Theme::System, (light, dark), t!(ap_system), t!(ap_system_d)),
+    ]
+    .into_iter()
+    .map(|(mode, minis, name, desc)| {
+        mode_card(minis, name, desc, d.theme == mode, Message::Theme(mode))
     });
-    setting_row::block(title(name), "", grid(COLUMNS, cards))
+    setting_row::block(title(t!(ap_mode)), t!(ap_mode_d), grid(3, cards))
+}
+
+/// The colour themes of one mode (light, or dark) under its heading; the chosen one is the mode's pick.
+fn themes_group<'a>(state: &'a State, light: bool, name: &'a str) -> Element<'a, Message> {
+    let picks = &state.draft.appearance;
+    let shown = if light { &picks.light } else { &picks.dark };
+    let cards = (THEMES.into_iter().filter(|t| t.light == light)).map(|t| {
+        let name = theme_words(t.id).map_or(t.name, |(n, _)| tr(n));
+        theme_mini_card(t, name, t.id == shown, Message::ThemePick(t.id))
+    });
+    column![title(name), grid(if light { 3 } else { 5 }, cards)]
+        .spacing(crate::shared::kit::tokens::space::GAP)
+        .into()
 }
 
 /// The 12 theme cards (Settings, and onboarding's Look step).
