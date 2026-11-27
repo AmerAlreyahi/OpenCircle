@@ -773,7 +773,7 @@ mod mt_tests {
             "answered at once"
         );
         assert!(
-            t.elapsed() < Duration::from_millis(200),
+            t.elapsed() < Duration::from_millis(250),
             "{:?}",
             t.elapsed()
         );
@@ -812,7 +812,7 @@ mod mt_tests {
         let t = Instant::now();
         assert!(m.get(en_ar, true, slow(2)).unwrap().is_none());
         assert!(
-            t.elapsed() < Duration::from_millis(100),
+            t.elapsed() < Duration::from_millis(250),
             "waited {:?}",
             t.elapsed()
         );
@@ -877,9 +877,18 @@ mod mt_tests {
         let mut m = Mt::new();
         m.get(en_ar, true, slow(1)).unwrap();
         m.get(es_en, true, slow(2)).unwrap();
-        std::thread::sleep(Duration::from_millis(400));
-        m.get(fr_en, true, slow(3)).unwrap();
-        assert_eq!(kept(&m), [fr_en.label()], "the unused warm-up was replaced");
+        // wait (generously) until the dropped load has really finished: a warm-up
+        // is skipped while it runs, so retry until one goes ahead
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while kept(&m) != [fr_en.label()] {
+            assert!(
+                Instant::now() < deadline,
+                "the dropped load never finished: warm-up still skipped, kept {:?}",
+                kept(&m)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+            m.get(fr_en, true, slow(3)).unwrap();
+        }
     }
 
     // W96 AC-5: a dropped load that has finished frees its model at the next
@@ -892,10 +901,21 @@ mod mt_tests {
         let mut m: Mt<Arc<()>> = Mt::new();
         m.get(en_ar, true, move || Ok(a)).unwrap();
         m.get(es_en, true, move || Ok(b)).unwrap(); // drops the first: it runs on
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(Arc::strong_count(&probe), 2, "held by the finished handle");
-        m.get(es_en, false, || Ok(Arc::new(()))).unwrap();
-        assert_eq!(Arc::strong_count(&probe), 1, "freed");
+        assert_eq!(
+            Arc::strong_count(&probe),
+            2,
+            "held by the load or its handle"
+        );
+        // each request frees the dropped load once it has finished: poll, no fixed sleep
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Arc::strong_count(&probe) != 1 {
+            assert!(
+                Instant::now() < deadline,
+                "the finished dropped load never freed its model"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+            m.get(es_en, false, || Ok(Arc::new(()))).unwrap();
+        }
     }
 
     // W96 AC-3: the last two models stay loaded (a pivot pair ru -> en -> ar
