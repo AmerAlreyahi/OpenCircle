@@ -79,11 +79,15 @@ fn item<'a, Message: Clone + 'a>(
         if let Some(tail) = tail {
             parts.push(super::chip::badge(tail));
         }
-        for key in keys {
+        // (a plain row: the keys read "Ctrl B" in every language)
+        if !keys.is_empty() {
             parts.push(
-                container(keycap(*key))
-                    .width(8.0 + 7.0 * key.chars().count().max(2) as f32)
-                    .into(),
+                iced::widget::Row::with_children(keys.iter().map(|key| {
+                    let w = 8.0 + 7.0 * key.chars().count().max(2) as f32;
+                    Element::from(container(keycap(*key)).width(w))
+                }))
+                .spacing(2)
+                .into(),
             );
         }
         super::dir::row(parts)
