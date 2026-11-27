@@ -2017,8 +2017,8 @@ strings! {
         | "انقر على نافذة";
     sn_hint_drag: "Drag an area"
         | "اسحب منطقة";
-    sn_hint_full: "Full screen"
-        | "ملء الشاشة";
+    sn_hint_full: "Full screen (or wheel up)"
+        | "ملء الشاشة (أو عجلة للأعلى)";
     sn_hint_all: "All screens"
         | "كل الشاشات";
     sn_hint_cancel: "Cancel"

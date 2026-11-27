@@ -1460,6 +1460,39 @@ mod tests {
         assert_eq!(s.pick(None, p, SCREEN), Some(s.full()));
     }
 
+    /// R-08: wheel up over a window steps out to the whole screen, a click
+    /// takes it, wheel down steps back in; the hint says Enter = full screen
+    /// and wheel up.
+    #[test]
+    fn r08_wheel_up_over_a_window_steps_out_to_the_screen_and_a_click_takes_it() {
+        let mut s = desk();
+        let at = Point::new(600.0, 500.0); // over the editor, no control there
+        s.hover(at);
+        let label = |s: &Snip| s.outlined().unwrap().label;
+        assert_eq!(label(&s), "Window: App 1");
+        s.walk(1.0);
+        assert_eq!(label(&s), "Screen");
+        assert_eq!(s.outlined().unwrap().rect, Rectangle::with_size(SCREEN));
+        assert_eq!(
+            s.pick(None, at, SCREEN),
+            Some(Next::Edit(Rectangle::with_size(SCREEN)))
+        );
+        s.walk(-1.0);
+        assert_eq!(label(&s), "Window: App 1");
+    }
+
+    #[test]
+    fn r08_the_pick_hint_says_enter_is_full_screen_and_wheel_up() {
+        let s = wins(&[rect(0.0, 0.0, 10.0, 10.0)]);
+        let s = Snip::new(s, flat(SCREEN), true, None);
+        let texts = crate::shared::kit::testing::shot::texts(s.view());
+        assert!(
+            texts.iter().any(|t| t == "Full screen (or wheel up)"),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Enter"), "{texts:?}");
+    }
+
     #[test]
     fn the_wheel_walks_window_element_finer_and_back_up_to_the_screen() {
         let mut s = desk();
