@@ -2943,10 +2943,6 @@ strings! {
         | "تحديث";
     tr_m_stopped: "Stopped"
         | "متوقف";
-    tr_m_add: "Add a language pair"
-        | "إضافة زوج لغات";
-    tr_m_add_hint: "Pick a source and target above; its model downloads the first time you translate it."
-        | "اختر لغتَي المصدر والهدف أعلاه؛ يُنزَّل النموذج عند أول ترجمة.";
     tr_m_none: "No offline language pairs installed yet."
         | "لا توجد أزواج لغات مثبتة بعد.";
     tr_pair_meta: "{} → {} · {} MB"

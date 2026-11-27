@@ -296,13 +296,12 @@ fn nav(state: &State) -> Element<'_, Message> {
 fn page(state: &State) -> Element<'_, Message> {
     let wide = state.win_w >= settings::WIDE;
     let page = pages::of(state.section);
-    // A3+: "See how it works" opens the clip under the head (a wide window shows it in a column)
+    // A3+: "See how it works" / "Hide the demo" accent link with chevron (wide window shows clip in a column)
     let see = previews::opener(state)
         .filter(|_| !wide)
         .map(|(key, open)| {
-            let go = Some(Message::Preview(key, !open));
             let text = if open { t!(c_hide_demo) } else { t!(c_see_how) };
-            button(label(text), Kind::Quiet, go)
+            crate::shared::kit::page_head::link_chevron(text, Message::Preview(key, !open))
         });
     let head = page_head(page.glyph, tr(page.title), tr(page.line), see);
     let editing =
@@ -344,8 +343,12 @@ fn page(state: &State) -> Element<'_, Message> {
                 .padding(Padding::from([CONTENT_PAD[0], settings::CLIP_PAD_X])),
         );
     }
+    let inside = inside.width(Fill).height(Fill);
     let content: Element<'_, Message> = match previews::maximised(state) {
-        Some(ov) => iced::widget::stack![inside, ov].into(),
+        Some(ov) => iced::widget::stack![inside, ov]
+            .width(Fill)
+            .height(Fill)
+            .into(),
         None => inside.into(),
     };
     floating_card(content)

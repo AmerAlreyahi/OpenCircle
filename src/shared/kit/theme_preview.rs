@@ -12,9 +12,7 @@ use iced::{Border, Color, Element, Fill, Padding, Point, Rectangle, Size};
 use super::icon::glyph as icon_glyph;
 use super::text::{sub, text};
 use super::themes::{Theme, c, on};
-use super::tokens::{Role, radius, settings};
-
-const MODE_PAD: f32 = 10.0;
+use super::tokens::{Role, fixed, radius, settings};
 
 fn mix(a: Color, b: Color, t: f32) -> Color {
     Color {
@@ -307,7 +305,7 @@ impl<Message> canvas::Program<Message> for MiniWindow {
         frame.stroke(
             &border,
             Stroke::default()
-                .with_color(Color::from_rgba8(100, 116, 139, 0.28))
+                .with_color(fixed::MINI_BORDER)
                 .with_width(1.0),
         );
         vec![frame.into_geometry()]
@@ -353,7 +351,7 @@ impl<Message> canvas::Program<Message> for LookMini {
         // dark desktop backdrop (.mw.lk, soft 9 px corners)
         frame.fill(
             &Path::rounded_rectangle(Point::ORIGIN, bounds.size(), radius::CONTROL.into()),
-            Color::from_rgb8(0x0d, 0x15, 0x26),
+            fixed::LOOK_MINI_BG,
         );
         // soft inset glow (concentric rings fading inward in `b`)
         let steps = 6;
@@ -394,13 +392,13 @@ impl<Message> canvas::Program<Message> for LookMini {
         let wh = h * 0.60;
         frame.fill(
             &Path::rounded_rectangle(Point::new(wx, wy), Size::new(ww, wh), 5.0.into()),
-            Color::from_rgb8(0xe8, 0xed, 0xf6),
+            fixed::LOOK_MINI_WIN,
         );
         // two grey bars inside .lkw
         let pad_x = ww * 0.10;
         let pad_y = wh * 0.16;
         let bar_h = (wh * 0.10).clamp(3.0, 4.5);
-        let bar_col = Color::from_rgb8(0x9a, 0xa7, 0xbd);
+        let bar_col = fixed::LOOK_MINI_BAR;
         frame.fill(
             &Path::rounded_rectangle(
                 Point::new(wx + pad_x, wy + pad_y),
@@ -462,7 +460,7 @@ fn frame<'a, Message: Clone + 'a>(
                 let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
                 button::Style {
                     background: match (chosen, hot, quiet_idle) {
-                        (true, _, _) => Some(c().accent_soft.into()),
+                        (true, _, _) => Some(c().widget.into()),
                         (false, true, _) => Some(c().hover.into()),
                         (false, false, true) => None,
                         (false, false, false) => Some(c().card_idle.into()),
@@ -508,7 +506,7 @@ pub fn mode_card<'a, Message: Clone + 'a>(
         column![mini_window(side, panel, settings::MINI_MODE_H), words]
             .spacing(10)
             .into(),
-        Padding::new(MODE_PAD),
+        Padding::new(settings::MODE_CARD_PAD),
         false,
         chosen,
         Some(on_press),

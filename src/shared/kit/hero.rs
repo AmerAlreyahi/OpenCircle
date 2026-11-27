@@ -7,10 +7,11 @@ use iced::advanced::image::{FilterMethod, Image, Renderer as _};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::Tree;
 use iced::advanced::{Widget, mouse, renderer};
+use iced::widget::canvas::{self, Frame, Geometry, Path};
 use iced::widget::image::Handle;
 use iced::widget::tooltip::Position;
 use iced::widget::{Id, Space, column, container, mouse_area, row, stack};
-use iced::{Border, Center, Color, Element, Fill, Length, Rectangle, Size};
+use iced::{Border, Center, Color, Element, Fill, Length, Point, Rectangle, Size};
 
 use super::button::{Kind, button, label};
 use super::icon::{Icon, glyph};
@@ -19,7 +20,7 @@ use super::keycap::keycap;
 use super::progress;
 use super::text::{accent, muted, paragraph, sub, text};
 use super::themes::{c, current};
-use super::tokens::{Role, radius, settings, size, space};
+use super::tokens::{Role, fixed, radius, settings, size, space};
 use super::tooltip::{Why, hint};
 
 /// Container id for the maximised preview panel (layout tests check its 14 px margin).
@@ -29,9 +30,6 @@ pub const MAX_PANEL_ID: &str = "preview-max-panel";
 const CAP_PAD: f32 = 16.0;
 /// The clips' shape (1920x1080).
 const ASPECT: f32 = 16.0 / 9.0;
-/// Active / inactive pager dot sizes (`.clips i`, `.clips i.on`).
-const DOT: f32 = 6.0;
-const DOT_ON: f32 = 16.0;
 
 /// What a preview shows.
 pub struct Hero<'a, Message> {
@@ -186,7 +184,7 @@ pub fn hero<'a, Message: Clone + 'a>(h: Hero<'a, Message>) -> Element<'a, Messag
             let bg = if current().light {
                 c().bg
             } else {
-                Color::from_rgba8(5, 12, 28, 0.35)
+                fixed::DEMO_DARK_BG
             };
             container::Style {
                 background: Some(bg.into()),
@@ -214,6 +212,7 @@ fn media_box<'a, Message: Clone + 'a>(
         win_h,
         fixed,
         radius: settings::DEMO_MEDIA_RADIUS,
+        cover: false,
     });
     let box_ = container(media).style(|_| container::Style {
         background: Some(c().track_glass.into()),
@@ -231,33 +230,41 @@ fn media_box<'a, Message: Clone + 'a>(
         return base;
     };
     // Rounded "Bigger" button on the clip's top-end corner (top-start in Arabic RTL), no shortcut
-    let btn =
-        super::focus::press(
-            iced::widget::button(
-                container(glyph(Icon::Maximise.glyph(), size::ICON).color(Color::WHITE))
-                    .center(Fill),
-            )
-            .width(settings::PREVIEW_BIGGER_BTN)
-            .height(settings::PREVIEW_BIGGER_BTN)
-            .padding(0)
-            .style(|_, status| {
-                let hot = matches!(
-                    status,
-                    iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
-                );
-                iced::widget::button::Style {
-                    background: Some(
-                        Color::from_rgba8(8, 14, 30, if hot { 0.72 } else { 0.46 }).into(),
-                    ),
-                    border: Border::default().rounded(radius::TRACK).width(1).color(
-                        Color::from_rgba8(255, 255, 255, if hot { 0.38 } else { 0.20 }),
-                    ),
-                    ..iced::widget::button::Style::default()
-                }
-            }),
-            radius::TRACK,
-            Some(on_bigger),
-        );
+    let btn = super::focus::press(
+        iced::widget::button(
+            container(glyph(Icon::Maximise.glyph(), size::ICON).color(Color::WHITE)).center(Fill),
+        )
+        .width(settings::PREVIEW_BIGGER_BTN)
+        .height(settings::PREVIEW_BIGGER_BTN)
+        .padding(0)
+        .style(|_, status| {
+            let hot = matches!(
+                status,
+                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+            );
+            iced::widget::button::Style {
+                background: Some(
+                    if hot {
+                        fixed::PREVIEW_BTN_HOT
+                    } else {
+                        fixed::PREVIEW_BTN_BG
+                    }
+                    .into(),
+                ),
+                border: Border::default()
+                    .rounded(radius::TRACK)
+                    .width(1)
+                    .color(if hot {
+                        fixed::PREVIEW_WHITE_38
+                    } else {
+                        fixed::PREVIEW_WHITE_20
+                    }),
+                ..iced::widget::button::Style::default()
+            }
+        }),
+        radius::TRACK,
+        Some(on_bigger),
+    );
     let btn = hint(btn, bigger_tip, Why::Icon, Position::Bottom);
     let overlay = container(super::dir::row([Space::new().width(Fill).into(), btn]))
         .padding(settings::PREVIEW_BIGGER_INSET)
@@ -273,6 +280,8 @@ pub struct Maximised<'a, Message> {
     pub frame: Option<Handle>,
     pub width: (Arc<AtomicU32>, f32, f32),
     pub playing: bool,
+    pub elapsed_secs: u32,
+    pub total_secs: u32,
     pub reduced_motion: bool,
     pub rm_label: &'a str,
     pub on_play_pause: Option<Message>,
@@ -282,22 +291,76 @@ pub struct Maximised<'a, Message> {
     pub next_tip: &'a str,
 }
 
-/// Renders Variant A: soft dim over the content card + centred rounded panel (`14 px` margin,
-/// `22 px` radius) with the 16:9 clip filling the panel and title + controls overlaid.
-pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<'a, Message> {
-    let dim = mouse_area(container(Space::new().width(Fill).height(Fill)).style(|_| {
-        container::Style {
-            background: Some(
-                if current().light {
-                    Color::from_rgba8(15, 23, 42, 0.20)
-                } else {
-                    Color::from_rgba8(3, 8, 20, 0.46)
-                }
-                .into(),
-            ),
-            ..container::Style::default()
+fn format_mm_ss(secs: u32) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// Crisp Play triangle or two-bar Pause mark drawn in `PREVIEW_PANEL_BG` on the white button.
+struct PlayPauseMark {
+    playing: bool,
+}
+
+impl<Message> canvas::Program<Message> for PlayPauseMark {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &iced::Renderer,
+        _: &iced::Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let w = bounds.width;
+        let h = bounds.height;
+        if self.playing {
+            let bw = 3.2;
+            let bh = 13.0;
+            let gap = 3.6;
+            let y = (h - bh) * 0.5;
+            let x0 = (w - (2.0 * bw + gap)) * 0.5;
+            for x in [x0, x0 + bw + gap] {
+                frame.fill(
+                    &Path::rounded_rectangle(Point::new(x, y), Size::new(bw, bh), 1.2.into()),
+                    fixed::PREVIEW_PANEL_BG,
+                );
+            }
+        } else {
+            let tri = Path::new(|b| {
+                let cx = w * 0.5 + 1.0;
+                let cy = h * 0.5;
+                b.move_to(Point::new(cx - 5.0, cy - 6.5));
+                b.line_to(Point::new(cx + 6.5, cy));
+                b.line_to(Point::new(cx - 5.0, cy + 6.5));
+                b.close();
+            });
+            frame.fill(&tri, fixed::PREVIEW_PANEL_BG);
         }
-    }))
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Renders Variant A: soft dim over the full content card + centred rounded panel (`14 px` margin,
+/// `22 px` radius) with the 16:9 clip filling the panel (cover, no letterbox bars) and title +
+/// controls overlaid.
+pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<'a, Message> {
+    let dim = mouse_area(
+        container(Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill)
+            .style(|_| container::Style {
+                background: Some(
+                    if current().light {
+                        fixed::PREVIEW_DIM_LIGHT
+                    } else {
+                        fixed::PREVIEW_DIM_DARK
+                    }
+                    .into(),
+                ),
+                ..container::Style::default()
+            }),
+    )
     .on_press(m.on_close.clone()); // mouse only: a press on the dim closes the panel (Esc is the host's)
 
     let media: Element<'a, Message> = Element::new(Media {
@@ -307,8 +370,9 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         win_h: m.width.2,
         fixed: None,
         radius: settings::PREVIEW_MAX_RADIUS,
+        cover: true,
     });
-    let video_layer = container(media).width(Fill).height(Fill).center(Fill);
+    let video_layer = container(media).width(Fill).height(Fill);
 
     let top_text = column![
         iced::widget::text(if super::dir::rtl() {
@@ -318,7 +382,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         })
         .size(super::text::size(Role::SECTION))
         .font(super::text::font(Role::SECTION))
-        .color(Color::from_rgb8(0x7d, 0xd3, 0xfc)),
+        .color(fixed::PREVIEW_EYEBROW),
         iced::widget::text(m.title)
             .size(super::text::size(Role::PREVIEW_MAX_TITLE))
             .font(super::text::font(Role::PREVIEW_MAX_TITLE))
@@ -326,7 +390,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         iced::widget::text(m.desc)
             .size(super::text::size(Role::ROW_TITLE))
             .font(super::text::font(Role::ROW_DESC))
-            .color(Color::from_rgba8(255, 255, 255, 0.78)),
+            .color(fixed::PREVIEW_WHITE_78),
     ]
     .spacing(3)
     .width(Fill)
@@ -336,15 +400,15 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         iced::widget::text("Esc")
             .size(10.5)
             .font(super::text::MONO)
-            .color(Color::from_rgba8(255, 255, 255, 0.82)),
+            .color(fixed::PREVIEW_WHITE_82),
     )
     .padding([3, 7])
     .style(|_| container::Style {
-        background: Some(Color::from_rgba8(255, 255, 255, 0.12).into()),
+        background: Some(fixed::PREVIEW_WHITE_12.into()),
         border: Border::default()
             .rounded(radius::KEYCAP)
             .width(1)
-            .color(Color::from_rgba8(255, 255, 255, 0.20)),
+            .color(fixed::PREVIEW_WHITE_20),
         ..container::Style::default()
     });
     let close_btn = super::focus::press(
@@ -361,21 +425,25 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
             );
             iced::widget::button::Style {
                 background: Some(
-                    Color::from_rgba8(8, 14, 30, if hot { 0.78 } else { 0.50 }).into(),
+                    if hot {
+                        fixed::PREVIEW_CLOSE_HOT
+                    } else {
+                        fixed::PREVIEW_CLOSE_BG
+                    }
+                    .into(),
                 ),
                 border: Border::default()
-                    .rounded(11.0)
+                    .rounded(settings::DEMO_MEDIA_RADIUS)
                     .width(1)
-                    .color(Color::from_rgba8(
-                        255,
-                        255,
-                        255,
-                        if hot { 0.42 } else { 0.22 },
-                    )),
+                    .color(if hot {
+                        fixed::PREVIEW_WHITE_42
+                    } else {
+                        fixed::PREVIEW_WHITE_22
+                    }),
                 ..iced::widget::button::Style::default()
             }
         }),
-        11.0,
+        settings::DEMO_MEDIA_RADIUS,
         Some(m.on_close),
     );
     let top_bar = container(
@@ -392,7 +460,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
     .width(Fill)
     .padding(iced::Padding::from([20.0, 24.0]))
     .style(|_| container::Style {
-        background: Some(Color::from_rgba8(6, 10, 24, 0.62).into()),
+        background: Some(fixed::PREVIEW_SCRIM_TOP.into()),
         border: Border::default().rounded(
             iced::border::Radius::default()
                 .top_left(settings::PREVIEW_MAX_RADIUS)
@@ -401,11 +469,11 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         ..container::Style::default()
     });
 
-    let play_glyph = if m.playing { Icon::Stop } else { Icon::Forward };
     let pp_btn = super::focus::press(
         iced::widget::button(
-            container(glyph(play_glyph.glyph(), 18.0).color(Color::from_rgb8(0x0b, 0x12, 0x26)))
-                .center(Fill),
+            iced::widget::canvas(PlayPauseMark { playing: m.playing })
+                .width(Fill)
+                .height(Fill),
         )
         .width(settings::PREVIEW_MAX_PLAY)
         .height(settings::PREVIEW_MAX_PLAY)
@@ -418,8 +486,26 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         radius::FULL,
         m.on_play_pause.clone(),
     );
-    let track = container(progress::bar(if m.playing { 0.62 } else { 1.0 })).width(Fill);
-    let mut ctl_items: Vec<Element<'a, Message>> = vec![pp_btn.into(), track.into()];
+    let share = if m.total_secs > 0 && m.elapsed_secs > 0 {
+        (m.elapsed_secs as f32 / m.total_secs as f32).clamp(0.0, 1.0)
+    } else if m.playing {
+        0.62
+    } else {
+        0.0
+    };
+    let time_label = |secs: u32| {
+        iced::widget::text(format_mm_ss(secs))
+            .size(12.0)
+            .font(super::text::MONO)
+            .color(fixed::PREVIEW_WHITE_86)
+    };
+    let track = container(progress::bar(share)).width(Fill);
+    let mut ctl_items: Vec<Element<'a, Message>> = vec![
+        pp_btn.into(),
+        time_label(m.elapsed_secs).into(),
+        track.into(),
+        time_label(m.total_secs).into(),
+    ];
     if let Some((_, _, prev, next, of_text)) = m.pager {
         let nav_btn = |ic: Icon, tip_text: &'a str, msg: Message| {
             let b = super::focus::press(
@@ -430,7 +516,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
                 .height(30.0)
                 .padding(0)
                 .style(|_, _| iced::widget::button::Style {
-                    background: Some(Color::from_rgba8(255, 255, 255, 0.14).into()),
+                    background: Some(fixed::PREVIEW_WHITE_14.into()),
                     border: Border::default().rounded(radius::CONTROL),
                     ..iced::widget::button::Style::default()
                 }),
@@ -445,7 +531,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
                 iced::widget::text(of_text)
                     .size(12.0)
                     .font(super::text::MONO)
-                    .color(Color::from_rgba8(255, 255, 255, 0.86))
+                    .color(fixed::PREVIEW_WHITE_86)
                     .into(),
                 nav_btn(Icon::Forward, m.next_tip, next),
             ])
@@ -458,7 +544,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         .width(Fill)
         .padding(iced::Padding::from([16.0, 26.0]))
         .style(|_| container::Style {
-            background: Some(Color::from_rgba8(6, 10, 24, 0.72).into()),
+            background: Some(fixed::PREVIEW_SCRIM_BOTTOM.into()),
             border: Border::default().rounded(
                 iced::border::Radius::default()
                     .bottom_left(settings::PREVIEW_MAX_RADIUS)
@@ -476,11 +562,11 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         )
         .padding([6, 14])
         .style(|_| container::Style {
-            background: Some(Color::from_rgba8(8, 14, 30, 0.78).into()),
+            background: Some(fixed::PREVIEW_RM_BG.into()),
             border: Border::default()
                 .rounded(radius::FULL)
                 .width(1)
-                .color(Color::from_rgba8(255, 255, 255, 0.22)),
+                .color(fixed::PREVIEW_WHITE_22),
             ..container::Style::default()
         });
         container(rm_chip).center(Fill).into()
@@ -497,11 +583,11 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         .width(Fill)
         .height(settings::PREVIEW_MAX_H)
         .style(|_| container::Style {
-            background: Some(Color::from_rgb8(0x0b, 0x12, 0x26).into()),
+            background: Some(fixed::PREVIEW_PANEL_BG.into()),
             border: Border::default()
                 .rounded(settings::PREVIEW_MAX_RADIUS)
                 .width(1)
-                .color(Color::from_rgba8(255, 255, 255, 0.12)),
+                .color(fixed::PREVIEW_WHITE_12),
             ..container::Style::default()
         });
 
@@ -511,7 +597,7 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         .height(Fill)
         .center_y(Fill);
 
-    stack![dim, framed].into()
+    stack![dim, framed].width(Fill).height(Fill).into()
 }
 
 /// The arrows, dots (active 16 px pill in accent, inactive 6 px in rim) and "1 of N" count.
@@ -534,8 +620,12 @@ fn pager_row<'a, Message: Clone + 'a>(
     let dots = row((0..n).map(|i| {
         let on = i == at;
         container(Space::new())
-            .width(if on { DOT_ON } else { DOT })
-            .height(DOT)
+            .width(if on {
+                settings::PAGER_DOT_ON
+            } else {
+                settings::PAGER_DOT
+            })
+            .height(settings::PAGER_DOT)
             .style(move |_| container::Style {
                 background: Some(if on { c().accent } else { c().rim }.into()),
                 border: Border::default().rounded(radius::FULL),
@@ -576,13 +666,15 @@ struct Media {
     win_h: f32,
     fixed: Option<(f32, f32)>,
     radius: f32,
+    cover: bool,
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
     fn size(&self) -> Size<Length> {
-        match self.fixed {
-            Some((w, h)) => Size::new(Length::Fixed(w), Length::Fixed(h)),
-            None => Size::new(Length::Fill, Length::Shrink),
+        match (self.fixed, self.cover) {
+            (Some((w, h)), _) => Size::new(Length::Fixed(w), Length::Fixed(h)),
+            (None, true) => Size::new(Length::Fill, Length::Fill),
+            (None, false) => Size::new(Length::Fill, Length::Shrink),
         }
     }
 
@@ -592,16 +684,26 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
         _: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let (w, h) = match self.fixed {
-            Some((fw, fh)) => (fw.min(limits.max().width), fh),
-            None => {
+        let (w, h) = match (self.fixed, self.cover) {
+            (Some((fw, fh)), _) => (fw.min(limits.max().width), fh),
+            (None, true) => {
+                let max = limits.max();
+                let w = if max.width.is_finite() {
+                    max.width
+                } else {
+                    960.0
+                };
+                let h = if max.height.is_finite() {
+                    max.height
+                } else {
+                    (w / ASPECT).round()
+                };
+                (w, h)
+            }
+            (None, false) => {
                 let avail = limits.max().width;
                 let avail = if avail.is_finite() { avail } else { 340.0 };
-                let w = if self.radius >= settings::PREVIEW_MAX_RADIUS {
-                    avail
-                } else {
-                    stage_width(avail, self.win_h, self.scale)
-                };
+                let w = stage_width(avail, self.win_h, self.scale);
                 (w, (w / ASPECT).round())
             }
         };
@@ -624,7 +726,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Media {
             return;
         };
         let bounds = layout.bounds();
-        let rounded = super::thumb::round_handle(frame, bounds.size(), self.radius, false);
+        let rounded = super::thumb::round_handle(frame, bounds.size(), self.radius, self.cover);
         let image = Image {
             filter_method: FilterMethod::Linear,
             border_radius: self.radius.into(),

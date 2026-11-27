@@ -1073,6 +1073,7 @@ pub fn installed_pairs() -> Vec<InstalledPair> {
     out
 }
 
+/// Outdated installed pairs (v1 decoder) and the total count of installed pairs.
 pub fn installed() -> (Vec<&'static Pair>, usize) {
     let pairs = installed_pairs();
     let all = pairs.len();

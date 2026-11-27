@@ -36,7 +36,7 @@ use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion::{self, Curve};
 use crate::shared::kit::nav_card;
 use crate::shared::kit::themes::THEMES;
-use crate::shared::kit::tokens::{settings, size};
+use crate::shared::kit::tokens::settings;
 use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::shared::theme;
@@ -59,7 +59,7 @@ const NAV_CHROME: f32 = 2.0 * nav_card::CARD_PAD_V
     + 2.0 * (nav_card::ITEM + nav_card::ROW_GAP);
 
 /// The height that shows the title bar and every sidebar row (Labs on).
-pub const FIT_HEIGHT: f32 = size::HEADER
+pub const FIT_HEIGHT: f32 = settings::HEADER
     + settings::GUTTER
     + LISTED as f32 * (nav_card::ITEM + nav_card::ROW_GAP)
     + NAV_CHROME;
@@ -1912,6 +1912,8 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 state.moved = Some((state.section, Instant::now()));
             }
             state.section = s;
+            state.preview_max = None;
+            state.preview_paused = false;
             state.play();
             state.recording = None;
             state.shortcut_error = None;
@@ -1936,6 +1938,17 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                         super::pages::glossaries::Page::load(&state.draft.translate.target);
                 }
                 _ => {}
+            }
+            // Owner, 2026-11-27: previews open by default and download + play on page open
+            // (reduced motion stays on the bundled still with no autoplay).
+            if !crate::shared::kit::motion::reduced()
+                && let Some(key) = state
+                    .players
+                    .iter()
+                    .find(|(k, p)| !p.on_disk() && !state.failed.contains(k))
+                    .map(|(k, _)| *k)
+            {
+                return start_fetch(state, key);
             }
         }
         Message::SongKey(k) => {

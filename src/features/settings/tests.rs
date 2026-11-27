@@ -2608,21 +2608,33 @@ fn a_preview_loops_until_the_page_is_left() {
 /// click downloads that preview's clips once, shows Downloading…, then
 /// plays; a failure shows the calm note and the button again.
 #[test]
-fn play_preview_downloads_only_on_the_click() {
+fn play_preview_autoplays_on_open_and_retries_on_failure() {
     use super::previews::FAILED;
+    use crate::shared::kit::motion;
+    // Under reduced motion, opening a page never downloads and offers "Play preview" (not Replay).
+    motion::set_reduced(true);
     let (mut s, _) = state(None);
     s.draft.labs = crate::features::settings::labs::Labs::all_on();
     for page in super::pages::PAGES.iter().map(|p| p.id) {
         let out = update(&mut s, Message::Section(page));
-        assert!(!matches!(out, Outcome::Fetch(..)), "{page:?} fetched");
+        assert!(
+            !matches!(out, Outcome::Fetch(..)),
+            "{page:?} fetched under reduced motion"
+        );
     }
     update(&mut s, Message::Section(Section::Ai));
-    // a player with its still; the clips aren't here (empty data folder)
     assert!(s.players.iter().all(|(_, p)| !p.on_disk()));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
-    let out = update(&mut s, Message::Fetch("ai"));
+    assert!(
+        texts.iter().any(|t| t == "Play preview"),
+        "reduced motion missing clip must say Play preview: {texts:?}"
+    );
+    motion::set_reduced(false);
+
+    // Under normal motion, opening a page with a missing clip starts the download automatically.
+    let (mut s, _) = state(None);
+    let out = update(&mut s, Message::Section(Section::Ai));
     assert_eq!(out, Outcome::Fetch("ai", vec!["ai-browser"]));
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Downloading…"));
     assert_eq!(update(&mut s, Message::Fetch("ai")), Outcome::None, "once");
@@ -2659,7 +2671,7 @@ fn c7_switches_and_one_play_preview_row() {
     update(&mut s, Message::Section(Section::Ai));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Downloading…"), "{texts:?}");
     // folding hides the demo block and turns the header link into "See how it works"
     with_clip(&mut s);
     s.opened.clear();
@@ -2722,8 +2734,15 @@ fn with_reduced_motion_a_preview_shows_its_still() {
             .iter()
             .all(|(_, p)| !p.playing() && p.frame().is_some())
     );
-    update(&mut s, Message::Section(Section::Ai));
-    assert!(!shot::texts(view(&s)).iter().any(|t| t == "Play preview"));
+    let out = update(&mut s, Message::Section(Section::Ai));
+    assert!(
+        !matches!(out, Outcome::Fetch(..)),
+        "reduced motion must not auto-fetch"
+    );
+    assert!(
+        shot::texts(view(&s)).iter().any(|t| t == "Play preview"),
+        "reduced motion with clip not on disk shows Play preview (not Replay)"
+    );
     motion::set_reduced(false);
 }
 
@@ -4567,7 +4586,10 @@ fn f13_a_hit_scrolls_to_its_row_and_the_mark_fades() {
         .iter()
         .position(|e| e.is_page)
         .unwrap();
-    assert_eq!(update(&mut s, Message::SearchPick(at)), Outcome::None);
+    assert!(matches!(
+        update(&mut s, Message::SearchPick(at)),
+        Outcome::None | Outcome::Fetch("snip", _)
+    ));
     // the mark fades after its time
     update(&mut s, Message::SearchInput("language".into()));
     update(&mut s, Message::SearchGo);
@@ -5048,6 +5070,7 @@ fn ai_has_three_setup_path_cards() {
 fn the_preview_is_a_head_link_or_a_wide_column() {
     let (mut s, _) = state(None);
     update(&mut s, Message::Section(Section::Ai));
+    s.fetching.clear();
     with_clip(&mut s);
     s.opened.clear();
     let texts = shot::texts(view(&s));
@@ -5556,14 +5579,13 @@ fn translate_shows_offline_model_list_rows_and_glossary_note() {
     s.models = m;
     let texts = shot::texts(view(&s));
     for want in [
-        "English → Arabic",
+        "English → العربية",
         "en → ar · 74 MB",
         "Up to date",
-        "French → English",
+        "Français → English",
         "fr → en · 68 MB",
         "Older version",
         "Update",
-        "+ Add a language pair",
         "OptimaMT on Hugging Face",
         "Edit",
     ] {
@@ -5606,17 +5628,18 @@ fn circle_to_search_shows_reading_language_row_bound_to_source() {
 }
 
 #[test]
-fn previews_are_open_by_default_without_downloading() {
+fn previews_are_open_by_default_and_autoplay_on_open() {
     let (mut s, _) = state(None);
     let out = update(&mut s, Message::Section(Section::Look));
     assert!(
-        !matches!(out, Outcome::Fetch(..)),
-        "opening a page must never download a preview clip"
+        matches!(out, Outcome::Fetch("look", _)),
+        "opening a page must start downloading its preview automatically: {out:?}"
     );
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Hide the demo"), "{texts:?}");
     assert!(texts.iter().any(|t| t == "HOW IT WORKS"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Play preview"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Downloading…"), "{texts:?}");
+    update(&mut s, Message::Fetched("look", true));
     with_clip(&mut s);
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Replay"), "{texts:?}");
@@ -5901,4 +5924,123 @@ fn preview_maximised_matches_its_golden_images() {
     themes::set(&themes::SAPPHIRE);
     app_language::set(Lang::En);
     assert!(failed.is_empty(), "{failed:#?}");
+}
+
+#[test]
+fn offline_models_pair_states_use_native_names_and_single_cancel() {
+    use pages::translate::{Models, Now, PairRow};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Translate));
+    let mut m = Models::of(2, 3, 120_000_000, Now::Idle);
+    m.pairs = vec![
+        PairRow::from_codes("en", "ar", 54_000_000, false, 0),
+        PairRow::from_codes("fr", "en", 62_000_000, true, 62_000_000),
+        PairRow::from_codes("ja", "en", 58_000_000, true, 58_000_000),
+    ];
+    s.models = m;
+    let texts = shot::texts(view(&s));
+    assert!(
+        texts.iter().any(|t| t == "English \u{2192} العربية"),
+        "expected native Arabic pair name: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "Français \u{2192} English"),
+        "expected native French pair name: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains("Add a language pair")),
+        "Add a language pair must stay hidden: {texts:?}"
+    );
+
+    // While updating, Cancel appears once per outdated pair (2), never duplicated in the header.
+    s.models.now = Now::Updating(0.42);
+    let texts = shot::texts(view(&s));
+    let cancels = texts.iter().filter(|t| t.as_str() == "Cancel").count();
+    assert_eq!(
+        cancels, 2,
+        "expected exactly one Cancel per outdated pair (no duplicate header Cancel): {texts:?}"
+    );
+
+    // While failed, Try again appears once per outdated pair (2), never duplicated in the header.
+    s.models.now = Now::Failed("Offline".into());
+    let texts = shot::texts(view(&s));
+    let retries = texts.iter().filter(|t| t.as_str() == "Try again").count();
+    assert_eq!(
+        retries, 2,
+        "expected exactly one Try again per outdated pair (no duplicate header button): {texts:?}"
+    );
+}
+
+#[test]
+fn offline_models_updating_and_failed_match_golden() {
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
+    use pages::translate::{Models, Now, PairRow};
+    let mut failed = Vec::new();
+    for (slug, now) in [
+        ("updating", Now::Updating(0.42)),
+        ("failed", Now::Failed(crate::t!(md_err_offline).into())),
+    ] {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Section(Section::Translate));
+        let mut m = Models::of(1, 2, 62_000_000, now);
+        m.pairs = vec![
+            PairRow::from_codes("en", "ar", 54_000_000, false, 0),
+            PairRow::from_codes("fr", "en", 62_000_000, true, 62_000_000),
+        ];
+        s.models = m;
+        themes::set(&themes::DAYLIGHT);
+        let name = format!("settings-translate-pairs-{slug}-light");
+        failed.extend(golden::check("screens", &name, WINDOW_SIZE, &[1.0], || {
+            view(&s)
+        }));
+    }
+    themes::set(&themes::SAPPHIRE);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+#[test]
+fn fit_height_uses_settings_header_height() {
+    use crate::shared::kit::tokens::{settings as tok, size};
+    const {
+        assert!(tok::HEADER > size::HEADER);
+    }
+    let expected_min = tok::HEADER + tok::GUTTER + 10.0 * 36.0;
+    assert!(
+        std::hint::black_box(super::state::FIT_HEIGHT) > expected_min,
+        "FIT_HEIGHT ({}) should include settings::HEADER",
+        super::state::FIT_HEIGHT
+    );
+}
+
+#[test]
+fn preview_maximised_dims_full_card_and_shows_times() {
+    use crate::shared::kit::themes;
+    use crate::shared::kit::tokens::settings as tok;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    themes::set(&themes::DAYLIGHT);
+    let (w, h) = (WINDOW_SIZE.width as u32, WINDOW_SIZE.height as u32);
+    let plain = shot::render(view(&s), w, h);
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    let texts = shot::texts(view(&s));
+    assert!(
+        texts.iter().any(|t| t == "0:00") && texts.iter().any(|t| t == "0:05"),
+        "expected elapsed and total times in maximised player: {texts:?}"
+    );
+    let max_img = shot::render(view(&s), w, h);
+    let x = (tok::GUTTER + tok::NAV + tok::GUTTER + 40.0) as usize;
+    let y = (tok::HEADER + 20.0) as usize;
+    let at = |buf: &[u8]| {
+        let i = (y * w as usize + x) * 4;
+        [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+    };
+    let p_plain = at(&plain);
+    let p_max = at(&max_img);
+    let lum = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+    assert!(
+        lum(p_max) + 40 < lum(p_plain),
+        "content card top ({x},{y}) must be dimmed when preview is maximised: plain={p_plain:?} max={p_max:?}"
+    );
+    themes::set(&themes::SAPPHIRE);
 }

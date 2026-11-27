@@ -193,13 +193,10 @@ pub fn opener(state: &State) -> Option<(&'static str, bool)> {
 /// its own column and keeps its "Play preview" row; otherwise a folded preview is only the head's
 /// "See how it works" link (A3+), the stage drops in under the head once opened.
 pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
-    let reduced = crate::shared::kit::motion::reduced();
     let heroes: Vec<_> = on(state, state.section)
         .filter(|h| {
             beside
                 || !hidden(state, h)
-                || state.fetching.contains(&h.key)
-                || state.failed.contains(&h.key)
                 || (chosen(h, &state.draft).is_empty()
                     && !state.players.iter().any(|(k, _)| *k == h.key))
         })
@@ -208,14 +205,13 @@ pub fn view(state: &State, beside: bool) -> Option<Element<'_, Message>> {
             let player = (state.players.iter()).find(|(k, _)| *k == h.key);
             let has_clip = player.is_some() || !chosen(h, &state.draft).is_empty();
             let on_disk = player.is_some_and(|(_, p)| p.on_disk());
-            // Play preview downloads only on click (privacy rule); once on disk, Replay restarts it.
+            // Once on disk, Replay restarts it; while not yet on disk (including under reduced
+            // motion where autoplay is off), offer "Play preview".
             let play = match () {
                 _ if !has_clip => None,
                 _ if state.fetching.contains(&h.key) => Some((t!(c_downloading), None)),
                 _ if !shown => Some((t!(c_play_preview), Some(Message::Preview(h.key, true)))),
-                _ if !on_disk && !reduced => {
-                    Some((t!(c_play_preview), Some(Message::Fetch(h.key))))
-                }
+                _ if !on_disk => Some((t!(c_play_preview), Some(Message::Fetch(h.key)))),
                 _ => Some((t!(c_replay), Some(Message::Preview(h.key, true)))),
             };
             hero(hero::Hero {
@@ -269,9 +265,11 @@ pub fn maximised(state: &State) -> Option<Element<'_, Message>> {
     let reduced = crate::shared::kit::motion::reduced();
     let on_disk = player.is_some_and(|(_, p)| p.on_disk());
     let playing = !reduced && !state.preview_paused && player.is_some_and(|(_, p)| p.playing());
+    let elapsed_secs = player.map_or(0, |(_, p)| p.elapsed_secs());
+    let total_secs = elapsed_secs.max(5);
     let on_play_pause = if state.fetching.contains(&h.key) {
         None
-    } else if !on_disk && !reduced {
+    } else if !on_disk {
         Some(Message::Fetch(h.key))
     } else {
         Some(Message::PreviewPause)
@@ -283,6 +281,8 @@ pub fn maximised(state: &State) -> Option<Element<'_, Message>> {
         frame: player.and_then(|(_, p)| p.frame().cloned()),
         width: (state.stage.clone(), state.scale, state.win_h),
         playing,
+        elapsed_secs,
+        total_secs,
         reduced_motion: reduced,
         rm_label: t!(c_rm_still),
         on_play_pause,

@@ -44,9 +44,9 @@ pub mod focus {
 /// Settings round 2 (owner-approved floating-card design, 2026-11-26): the shell's sizes. One block:
 /// every number of the new Settings window that no other part shares.
 pub mod settings {
-    /// The sidebar card's width, and its collapsed (icons only) width.
     /// The title bar's height (`r2` `.tbar`: 48 px).
     pub const HEADER: f32 = 48.0;
+    /// The sidebar card's width, and its collapsed (icons only) width.
     pub const NAV: f32 = 246.0;
     pub const NAV_THIN: f32 = 60.0;
     /// The gap round and between the two floating cards.
@@ -93,6 +93,7 @@ pub mod settings {
     /// Appearance mini-window heights (16:10 at 3-col mode and 5-col theme/look widths) and card padding.
     pub const MINI_MODE_H: f32 = 140.0;
     pub const MINI_THEME_H: f32 = 82.0;
+    pub const MODE_CARD_PAD: f32 = 10.0;
     pub const MINI_CARD_PAD: f32 = 6.0;
     pub const MINI_CARD_PAD_BOTTOM: f32 = 8.0;
     pub const MINI_CARD_GAP: f32 = 7.0;
@@ -102,6 +103,9 @@ pub mod settings {
     pub const DEMO_GAP: f32 = 22.0;
     pub const DEMO_PAD: f32 = 16.0;
     pub const DEMO_MEDIA_RADIUS: f32 = 11.0;
+    /// Active / inactive pager dot sizes (`.clips i`, `.clips i.on`).
+    pub const PAGER_DOT: f32 = 6.0;
+    pub const PAGER_DOT_ON: f32 = 16.0;
     /// Preview maximise popup (Variant A, `design-v060-preview-max/build.py`).
     pub const PREVIEW_MAX_MARGIN: f32 = 14.0;
     pub const PREVIEW_MAX_RADIUS: f32 = 22.0;
@@ -239,6 +243,33 @@ pub mod fixed {
     pub const ON_CLOSE: Color = Color::WHITE;
     /// Text on an accent or success button (slate-950).
     pub const ON_ACCENT: Color = Color::from_rgb8(0x02, 0x06, 0x17);
+    /// Mini-window outer stroke and screen-border look preview colours (`theme_preview`).
+    pub const MINI_BORDER: Color = Color::from_rgba8(100, 116, 139, 0.28);
+    pub const LOOK_MINI_BG: Color = Color::from_rgb8(0x0d, 0x15, 0x26);
+    pub const LOOK_MINI_WIN: Color = Color::from_rgb8(0xe8, 0xed, 0xf6);
+    pub const LOOK_MINI_BAR: Color = Color::from_rgb8(0x9a, 0xa7, 0xbd);
+    /// Preview demo block (dark theme) and Variant A maximised panel surfaces (`hero`).
+    pub const DEMO_DARK_BG: Color = Color::from_rgba8(5, 12, 28, 0.35);
+    pub const PREVIEW_DIM_LIGHT: Color = Color::from_rgba8(15, 23, 42, 0.34);
+    pub const PREVIEW_DIM_DARK: Color = Color::from_rgba8(3, 8, 20, 0.56);
+    pub const PREVIEW_PANEL_BG: Color = Color::from_rgb8(0x0b, 0x12, 0x26);
+    pub const PREVIEW_EYEBROW: Color = Color::from_rgb8(0x7d, 0xd3, 0xfc);
+    pub const PREVIEW_SCRIM_TOP: Color = Color::from_rgba8(6, 10, 24, 0.62);
+    pub const PREVIEW_SCRIM_BOTTOM: Color = Color::from_rgba8(6, 10, 24, 0.72);
+    pub const PREVIEW_BTN_BG: Color = Color::from_rgba8(8, 14, 30, 0.46);
+    pub const PREVIEW_BTN_HOT: Color = Color::from_rgba8(8, 14, 30, 0.72);
+    pub const PREVIEW_CLOSE_BG: Color = Color::from_rgba8(8, 14, 30, 0.50);
+    pub const PREVIEW_CLOSE_HOT: Color = Color::from_rgba8(8, 14, 30, 0.78);
+    pub const PREVIEW_RM_BG: Color = Color::from_rgba8(8, 14, 30, 0.78);
+    pub const PREVIEW_WHITE_12: Color = Color::from_rgba8(255, 255, 255, 0.12);
+    pub const PREVIEW_WHITE_14: Color = Color::from_rgba8(255, 255, 255, 0.14);
+    pub const PREVIEW_WHITE_20: Color = Color::from_rgba8(255, 255, 255, 0.20);
+    pub const PREVIEW_WHITE_22: Color = Color::from_rgba8(255, 255, 255, 0.22);
+    pub const PREVIEW_WHITE_38: Color = Color::from_rgba8(255, 255, 255, 0.38);
+    pub const PREVIEW_WHITE_42: Color = Color::from_rgba8(255, 255, 255, 0.42);
+    pub const PREVIEW_WHITE_78: Color = Color::from_rgba8(255, 255, 255, 0.78);
+    pub const PREVIEW_WHITE_82: Color = Color::from_rgba8(255, 255, 255, 0.82);
+    pub const PREVIEW_WHITE_86: Color = Color::from_rgba8(255, 255, 255, 0.86);
     /// `.oc-code-surface`: (background, text) on dark and on light themes.
     pub const CODE_DARK: (Color, Color) = (
         Color::from_rgba8(12, 16, 26, 0.72),

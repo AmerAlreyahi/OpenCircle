@@ -59,6 +59,8 @@ pub struct Player {
     frames: Option<Receiver<Frame>>,
     /// When the frame shown ends, from the start.
     until: Duration,
+    /// Elapsed time within the current clip (reset when the clip changes).
+    elapsed: Duration,
     /// The clips are on disk (else the stage offers "Play preview").
     on_disk: bool,
     files: Vec<Clip>,
@@ -103,6 +105,7 @@ impl Player {
             shown: None,
             frames: Some(rx),
             until: Duration::ZERO,
+            elapsed: Duration::ZERO,
             on_disk,
             files,
             clip: start,
@@ -159,7 +162,11 @@ impl Player {
         {
             self.until = at;
         }
+        if f.clip != self.clip {
+            self.elapsed = Duration::ZERO;
+        }
         self.until += f.length;
+        self.elapsed += f.length;
         self.clip = f.clip;
         self.shown = Some(f.image);
     }
@@ -202,6 +209,11 @@ impl Player {
 
     pub fn on_disk(&self) -> bool {
         self.on_disk
+    }
+
+    /// Whole seconds played in the current clip.
+    pub fn elapsed_secs(&self) -> u32 {
+        self.elapsed.as_secs() as u32
     }
 
     /// The frame to show (`None`: the still isn't decoded yet).

@@ -3,6 +3,7 @@
 //! offline models list (one row per installed pair: status, Update, progress,
 //! Cancel, Add a language pair, OptimaMT link), and the Game glossaries row
 //! with its one-line note.
+use crate::features::translate::lang;
 use crate::shared::app_language::{S, fmt, language_name};
 use crate::shared::kit::icon::{Icon, glyph};
 use crate::t;
@@ -51,11 +52,8 @@ impl PairRow {
         outdated: bool,
         update_bytes: u64,
     ) -> Self {
-        let name = format!(
-            "{} \u{2192} {}",
-            language_name(source),
-            language_name(target)
-        );
+        let label = |code: &str| lang::find(code).map_or_else(|| language_name(code), |l| l.native);
+        let name = format!("{} \u{2192} {}", label(source), label(target));
         let meta = fmt(S::tr_pair_meta, &[&source, &target, &mb(total_bytes)]);
         Self {
             name,
@@ -207,7 +205,11 @@ fn models_header(m: &Models) -> Element<'_, Message> {
     } else if m.bytes > 0 && m.pairs.is_empty() {
         left = left.push(paragraph(sub(Role::ROW_DESC, &m.desc)));
     }
-    let right: Option<Element<'_, Message>> = if m.current() || (m.bytes == 0 && m.now == Now::Idle)
+    // When per-pair rows are shown, progress + Cancel and Try again live on each outdated pair row
+    // (never duplicated in the header); the header keeps the single "Update now" CTA while Idle.
+    let right: Option<Element<'_, Message>> = if m.current()
+        || (m.bytes == 0 && m.now == Now::Idle)
+        || (!m.pairs.is_empty() && !matches!(m.now, Now::Idle))
     {
         None
     } else {
@@ -301,18 +303,10 @@ fn pair_row<'a>(pair: &'a PairRow, now: &'a Now, desc: &'a str) -> Element<'a, M
     .into()
 }
 
-/// Footer of the Offline models section (`.full.add`): "+ Add a language pair" on the start side,
-/// "OptimaMT on Hugging Face" external link on the end side.
+/// Footer of the Offline models section: "OptimaMT on Hugging Face" external link.
+/// ("+ Add a language pair" stays hidden because pairs download automatically on first translate
+/// from the source/target pickers above; there is no separate add-pair flow.)
 fn models_footer<'a>() -> Element<'a, Message> {
-    let add = tip(
-        button(
-            label(format!("+ {}", t!(tr_m_add))),
-            Kind::Quiet,
-            Some(Message::Section(super::super::state::Section::Translate)),
-        ),
-        t!(tr_m_add_hint),
-        Position::Top,
-    );
     let link = button(
         crate::dir_row![
             accent(Role::CONTROL, t!(tr_optima_link)),
@@ -324,7 +318,7 @@ fn models_footer<'a>() -> Element<'a, Message> {
         Some(Message::OpenLink(OPTIMA_MT.into())),
     );
     container(
-        crate::dir_row![add, Space::new().width(Fill), link]
+        crate::dir_row![Space::new().width(Fill), link]
             .spacing(space::GAP)
             .align_y(Center),
     )

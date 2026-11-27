@@ -4,27 +4,17 @@
 //! chosen `card_selected` with an `elevated_border` edge (light themes ring it
 //! in `card_ring`). States change colour only (no lift: the CPU renderer
 //! redraws the card alone). `grid` lays cards out in equal columns.
-#[cfg(test)]
-use iced::gradient::Linear;
-use iced::widget::{Space, button, column, container, row, stack};
-use iced::{Border, Center, Color, Element, Fill};
-#[cfg(test)]
-use iced::{Gradient, Radians};
-
-#[cfg(test)]
-use super::chip::badge;
 use super::text::{sub, text};
 use super::themes::{Theme, c};
 use super::tokens::{Role, radius, space};
+use iced::widget::{Space, button, column, container, row, stack};
+use iced::{Border, Center, Color, Element, Fill};
 
 const PAD: f32 = 16.0;
 /// A theme card's dots (`w-2.5`), each 4 px over the one before (`-space-x-1`).
 const DOT: f32 = 10.0;
 const DOT_STEP: f32 = DOT - 4.0;
-/// A look card's colour strip (`h-2`).
-#[cfg(test)]
-const STRIP: f32 = 8.0;
-/// Between a theme card's lines (`gap-1`; a look card's are `GAP`).
+/// Between a theme card's lines (`gap-1`).
 const LINE_GAP: f32 = 4.0;
 
 pub fn card<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -134,42 +124,6 @@ pub fn theme_card<'a, Message: Clone + 'a>(
 /// `ActiveLookCard`: a strip of the look's colours (left to right), the name
 /// (`CARD_TITLE`) with its badge, the description (`CARD_DESC`, `text_sub`)
 /// under them. `on_press: None` = not offered (its name muted).
-#[cfg(test)]
-pub fn look_card<'a, Message: Clone + 'a>(
-    name: &'a str,
-    badge_label: &'a str,
-    desc: &'a str,
-    colours: &[Color],
-    selected: bool,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    let last = colours.len().max(2) - 1;
-    let gradient: Gradient = (colours.iter().enumerate())
-        .fold(Linear::new(Radians::PI / 2.0), |l, (i, &colour)| {
-            l.add_stop(i as f32 / last as f32, colour)
-        })
-        .into();
-    let strip =
-        container(Space::new().width(Fill).height(STRIP)).style(move |_| container::Style {
-            background: Some(gradient.into()),
-            border: Border::default().rounded(radius::FULL),
-            ..container::Style::default()
-        });
-    let mut title = text(Role::CARD_TITLE, name);
-    if on_press.is_none() {
-        title = title.color(c().text_muted);
-    }
-    // (the strip is never mirrored: it shows the screen's edge)
-    let title = container(title).width(Fill).align_x(super::dir::start());
-    let top = crate::dir_row![title, badge(badge_label)]
-        .spacing(LINE_GAP)
-        .align_y(Center);
-    let lines = column![strip, top, sub(Role::CARD_DESC, desc).line_height(1.375)]
-        .spacing(space::GAP)
-        .align_x(super::dir::start());
-    pick(lines, selected, on_press)
-}
-
 /// `cards` in rows of `columns`, each card an equal share, `GAP` apart (the
 /// design's `grid gap-1.5`); a short last row keeps the column width.
 pub fn grid<'a, Message: 'a>(

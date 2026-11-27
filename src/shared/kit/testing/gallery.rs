@@ -361,7 +361,7 @@ fn card_sheet() {
         move |ar| {
             let l = &super::super::looks::SPECTRUM;
             let name = s(ar, l.name, "طيف");
-            card::look_card(name, l.badge, l.desc, l.preview, selected, on)
+            super::super::theme_preview::look_mini_card(&l.glow, name, selected, on)
         }
     };
     let chat = |starred, selected| {

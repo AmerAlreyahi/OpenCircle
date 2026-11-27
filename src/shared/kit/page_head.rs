@@ -3,11 +3,12 @@
 use iced::widget::{Space, column, container};
 use iced::{Border, Center, Element};
 
-use super::icon::glyph as icon_glyph;
-use super::text::{sub, text};
+use super::button::{Kind, button};
+use super::icon::{Icon, glyph as icon_glyph};
+use super::text::{accent, sub, text};
 use super::themes::c;
 use super::tokens::settings::TILE;
-use super::tokens::{Role, radius};
+use super::tokens::{Role, radius, size, space};
 
 /// The tile's icon, and the gaps (tile to text, title to line).
 const ICON: f32 = 20.0;
@@ -37,4 +38,23 @@ pub fn page_head<'a, Message: 'a>(
     super::dir::row([tile.into(), body.into()])
         .spacing(GAP)
         .into()
+}
+
+/// Accent-coloured link with a small chevron beside it (`"See how it works"` / `"Hide the demo"`).
+pub fn link_chevron<'a, Message: Clone + 'a>(
+    label: &'a str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
+        super::dir::row([
+            accent(Role::CONTROL, label).into(),
+            icon_glyph(Icon::ChevronDown.glyph(), size::ICON_SMALL)
+                .color(c().accent)
+                .into(),
+        ])
+        .spacing(space::TRACK_GAP)
+        .align_y(Center),
+        Kind::Quiet,
+        Some(on_press),
+    )
 }

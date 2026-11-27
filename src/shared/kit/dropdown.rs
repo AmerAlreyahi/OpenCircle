@@ -298,7 +298,7 @@ fn opener<'a, Message: 'a>(
         .padding(PAD)
         .width(size::CONTROL_COLUMN)
         .style(|_| container::Style {
-            background: Some(c().track.into()),
+            background: Some(c().widget.into()),
             border: Border::default()
                 .rounded(radius::TRACK)
                 .width(1)

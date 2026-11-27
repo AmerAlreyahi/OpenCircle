@@ -25,10 +25,6 @@ pub const GLOW_ONLY: bool = true;
 pub struct Look {
     pub id: &'static str,
     pub name: &'static str,
-    #[allow(dead_code)]
-    pub desc: &'static str,
-    #[allow(dead_code)]
-    pub badge: &'static str,
     pub kind: Kind,
     /// `c1`, `c2`: the edge glow near the edge and further in, alpha included.
     pub glow: [Color; 2],
@@ -52,8 +48,6 @@ const fn hex(rgb: u32) -> Color {
 pub const PRISM: Look = Look {
     id: "prism",
     name: "Liquid Prism",
-    desc: "Cyan-violet glow round the screen",
-    badge: "Popular",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(125, 211, 252, 0.42),
@@ -67,8 +61,6 @@ pub const PRISM: Look = Look {
 pub const SAPPHIRE_GLOW: Look = Look {
     id: "sapphire_glow",
     name: "Sapphire Glow",
-    desc: "Sapphire blue to indigo glow round the screen",
-    badge: "Default",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(10, 132, 255, 0.42),
@@ -80,8 +72,6 @@ pub const SAPPHIRE_GLOW: Look = Look {
 pub const SPECTRUM: Look = Look {
     id: "spectrum",
     name: "Spectrum",
-    desc: "Multi-colour rainbow glow",
-    badge: "Vivid",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(155, 123, 255, 0.42),
@@ -99,8 +89,6 @@ pub const SPECTRUM: Look = Look {
 pub const AURORA: Look = Look {
     id: "aurora",
     name: "Aurora Borealis",
-    desc: "Northern emerald, teal & violet ribbon",
-    badge: "New",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(52, 211, 153, 0.42),
@@ -112,8 +100,6 @@ pub const AURORA: Look = Look {
 pub const HORIZON: Look = Look {
     id: "horizon",
     name: "Horizon Pulse",
-    desc: "Soft light along the top & bottom",
-    badge: "Calm",
     kind: Kind::Horizon,
     glow: [
         Color::from_rgba8(56, 189, 248, 0.52),
@@ -125,8 +111,6 @@ pub const HORIZON: Look = Look {
 pub const SUNSET: Look = Look {
     id: "sunset",
     name: "Sunset Flare",
-    desc: "Warm amber, coral & magenta horizon",
-    badge: "Warm",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(255, 143, 63, 0.44),
@@ -138,8 +122,6 @@ pub const SUNSET: Look = Look {
 pub const OCEAN: Look = Look {
     id: "ocean",
     name: "Ocean Ripple",
-    desc: "Bioluminescent aqua & deep azure",
-    badge: "Cool",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(42, 212, 199, 0.45),
@@ -151,8 +133,6 @@ pub const OCEAN: Look = Look {
 pub const NEON: Look = Look {
     id: "neon",
     name: "Cyber Neon",
-    desc: "High-energy electric cyan & hot pink",
-    badge: "Vibrant",
     kind: Kind::Glow,
     glow: [
         Color::from_rgba8(0, 240, 255, 0.50),
@@ -164,8 +144,6 @@ pub const NEON: Look = Look {
 pub const SOLAR: Look = Look {
     id: "solar",
     name: "Solar Gold",
-    desc: "Champagne gold & warm white lustre",
-    badge: "Luxury",
     kind: Kind::Horizon,
     glow: [
         Color::from_rgba8(251, 191, 36, 0.48),
@@ -177,8 +155,6 @@ pub const SOLAR: Look = Look {
 pub const HUD: Look = Look {
     id: "hud",
     name: "Optical HUD",
-    desc: "Precision viewfinder corner brackets",
-    badge: "Minimal",
     kind: Kind::Hud,
     glow: [
         Color::from_rgba8(255, 255, 255, 0.90),
@@ -190,8 +166,6 @@ pub const HUD: Look = Look {
 pub const FROST: Look = Look {
     id: "frost",
     name: "Stealth Frost",
-    desc: "Thin monochrome silver bezel",
-    badge: "Quiet",
     kind: Kind::Bezel,
     glow: [
         Color::from_rgba8(255, 255, 255, 0.42),
