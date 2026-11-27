@@ -275,7 +275,7 @@ fn status<'a>(text_line: String) -> Element<'a, Msg> {
     let content = row![glyph, line(Role::NOTE, text_line).width(PILL_LINE), cancel]
         .spacing(PILL_GAP)
         .align_y(Center);
-    surface(Material::Widget, radius::FULL, content)
+    surface(Material::Tray, radius::FULL, content)
         .padding(PILL_PAD)
         .into()
 }

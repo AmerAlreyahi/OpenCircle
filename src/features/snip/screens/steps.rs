@@ -19,9 +19,9 @@ use iced::widget::{Space, column, container, image, mouse_area};
 use iced::{Center, Element, Fill, Padding, Point, Size};
 
 use crate::shared::kit::button::{self, Kind};
-use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::surface::{segment_card, tray};
 use crate::shared::kit::thumb::{self, Look, PAD, TOP, WELL};
-use crate::shared::kit::tokens::radius;
+use crate::shared::kit::tokens::{radius, widget_e};
 use crate::shared::kit::tooltip::tip;
 use crate::shared::kit::{grip, scroll, toast};
 use crate::shared::picture::{Crop, encode_png, fit_long_edge};
@@ -36,7 +36,7 @@ const DRAG: f32 = 4.0;
 /// A thumbnail's pixels at most: twice the well, sharp at 200 %.
 pub const THUMB: (u32, u32) = (192, 120);
 /// The window's corners (`floating`).
-pub const RADIUS: f32 = radius::TRACK;
+pub const RADIUS: f32 = widget_e::PANEL_RADIUS;
 /// lucide "copy"
 const COPY: char = '\u{e0a2}';
 /// The strip's foot: Copy all and Open in OpenCircle Studio, one under the other.
@@ -605,8 +605,10 @@ impl Strip {
             let hole = mouse_area(thumb::failed(WELL)).on_press(Msg::FailedSeen);
             tip(hole, t!(sn_step_failed), Side::Bottom)
         });
-        let thumbs =
-            scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height());
+        let thumbs = segment_card(
+            radius::TRACK,
+            scroll::quiet(column(thumbs.chain(lost)).spacing(PAD)).height(self.thumbs_height()),
+        );
         let words = self.words();
         let copy = button::labelled(
             COPY,
@@ -625,7 +627,7 @@ impl Strip {
         );
         let studio = tip(studio, t!(sn_studio_btn), Side::Top);
         let strip = column![top, column![thumbs, copy, studio].spacing(PAD)];
-        let strip = surface(Material::Widget, corners, strip)
+        let strip = tray(false, corners, strip)
             .padding(Padding {
                 top: 0.0,
                 ..Padding::new(PAD)

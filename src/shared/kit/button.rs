@@ -11,7 +11,7 @@ use iced::{Background, Border, Center, Color, Element, Fill};
 
 use super::text::{mono, weight};
 use super::themes::c;
-use super::tokens::{fixed, radius, size};
+use super::tokens::{fixed, radius, size, widget_e};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -325,21 +325,21 @@ pub fn switch<'a, Message: Clone + 'a>(
     super::focus::press(
         iced_button(line).padding([4.0, 10.0]).style(|_, status| {
             let (fill, width, edge) = match status {
-                Status::Pressed => (c().elevated_hover, 2.0, c().widget),
-                Status::Hovered => (c().elevated_hover, 1.0, c().elevated_border),
-                _ => (c().elevated, 1.0, c().elevated_border),
+                Status::Pressed => (c().elevated_hover, 1.0, c().rim),
+                Status::Hovered => (c().elevated_hover, 1.0, c().divider),
+                _ => (c().hover, 1.0, c().divider),
             };
             iced_button::Style {
                 background: Some(fill.into()),
                 text_color: c().text,
                 border: Border::default()
-                    .rounded(radius::MENU)
+                    .rounded(radius::FULL)
                     .width(width)
                     .color(edge),
                 ..iced_button::Style::default()
             }
         }),
-        radius::MENU,
+        radius::FULL,
         Some(on_press),
     )
     .into()
@@ -465,8 +465,8 @@ pub(super) fn faded(c: Color, alpha: f32) -> Color {
     }
 }
 
-/// A compact pill's height (`.oc-btn !py-1.5 !px-2.5 !rounded-xl`).
-pub const COMPACT_H: f32 = 30.0;
+/// A compact pill's height inside a style E segment (`.pl`).
+pub const COMPACT_H: f32 = widget_e::PILL_H;
 
 /// The compact pill (the bar's Search in browser, Copy text, Translate): a
 /// 14 px glyph and an 11.5 px label (`label: None` = the glyph alone, narrow
@@ -526,31 +526,31 @@ fn compact_with<'a, Message: Clone + 'a>(
             .style(move |_, status| {
                 let hot = live && matches!(status, Status::Hovered | Status::Pressed);
                 let fill = match () {
-                    _ if active && live => c().accent_soft,
-                    _ if hot => c().elevated_hover,
-                    _ => c().elevated,
+                    _ if active && live => Some(c().accent_soft),
+                    _ if hot => Some(c().hover),
+                    _ => None,
                 };
                 let text_color = match () {
-                    _ if !live => c().text_muted,
+                    _ if !live => faded(c().text, 0.40),
                     _ if active => c().accent,
                     _ => c().text,
                 };
                 let (width, edge) = match () {
                     _ if live && status == Status::Pressed => (2.0, c().widget),
                     _ if focused => (1.0, c().accent),
-                    _ => (1.0, c().elevated_border),
+                    _ => (0.0, Color::TRANSPARENT),
                 };
                 iced_button::Style {
-                    background: Some(fill.into()),
+                    background: fill.map(Into::into),
                     text_color,
                     border: Border::default()
-                        .rounded(radius::CARD)
+                        .rounded(radius::FULL)
                         .width(width)
                         .color(edge),
                     ..iced_button::Style::default()
                 }
             }),
-        radius::CARD,
+        radius::FULL,
         on_press,
     )
     .into()
@@ -568,7 +568,14 @@ pub fn tool<'a, Message: Clone + 'a>(
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let content = text(glyph).font(super::icon::FONT).size(size::ICON);
-    tooled(content, size::ICON_BUTTON, kind, focused, on_press)
+    tooled_corner(
+        content,
+        size::ICON_BUTTON,
+        kind,
+        focused,
+        widget_e::ICON_RADIUS,
+        on_press,
+    )
 }
 
 /// `tool` with a label after its glyph, `width` wide (the Steps strip's Copy
@@ -706,10 +713,10 @@ pub fn fold<'a, Message: Clone + 'a>(
                     .into(),
                 ),
                 text_color: c().text,
-                border: Border::default().rounded(radius::CONTROL),
+                border: Border::default().rounded(radius::CARD),
                 ..iced_button::Style::default()
             }),
-        radius::CONTROL,
+        radius::CARD,
         Some(on_press),
     )
     .into()
@@ -723,6 +730,17 @@ fn tooled<'a, Message: Clone + 'a>(
     width: f32,
     kind: Kind,
     focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    tooled_corner(content, width, kind, focused, radius::CONTROL, on_press)
+}
+
+fn tooled_corner<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+    kind: Kind,
+    focused: bool,
+    corner: f32,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     use iced_button::Status;
@@ -758,14 +776,11 @@ fn tooled<'a, Message: Clone + 'a>(
                 iced_button::Style {
                     background: Some(fill.into()),
                     text_color,
-                    border: Border::default()
-                        .rounded(radius::CONTROL)
-                        .width(width)
-                        .color(edge),
+                    border: Border::default().rounded(corner).width(width).color(edge),
                     ..iced_button::Style::default()
                 }
             }),
-        radius::CONTROL,
+        corner,
         on_press,
     )
     .into()

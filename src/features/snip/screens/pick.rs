@@ -789,8 +789,14 @@ impl Snip {
             .spacing(space::GAP)
             .padding([0.0, space::GAP])
             .align_y(Center);
-            top =
-                top.push(surface(Material::Widget, radius::WINDOW, strip).padding(space::BAR_PAD));
+            top = top.push(
+                surface(
+                    Material::Tray,
+                    radius::FULL,
+                    crate::shared::kit::surface::segment(strip),
+                )
+                .padding(space::BAR_PAD),
+            );
         }
         // the freeze hint, 16 px from the top, for its 2 s
         match self.kind {
@@ -833,7 +839,7 @@ impl Snip {
             .align_y(Center);
         // Exactly the window's size when it is only this pill (`windows::cut` shapes the
         // window to it); over the frame (Wayland) it is the same flat pill, centred.
-        let pill = surface(Material::Widget, PILL_RADIUS, bar)
+        let pill = surface(Material::Tray, PILL_RADIUS, bar)
             .width(PILL.width)
             .height(PILL.height)
             .align_x(Center)

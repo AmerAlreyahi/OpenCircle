@@ -525,7 +525,7 @@ mod tests {
         let bar_h = toolbar::size().height;
         assert!(!row_above(300.0, bar_h, room, 720.0));
         assert!(row_above(720.0 - bar_h - 4.0, bar_h, room, 720.0));
-        assert!(row_y(300.0, bar_h, false) > 300.0 + bar_h);
+        assert_eq!(row_y(300.0, bar_h, false), 300.0 + bar_h);
         assert!(row_y(600.0, bar_h, true) + toolbar::ROW_H <= 600.0);
         // the tooltips go to the other side of the row; with no row, where they were
         assert_eq!(toolbar_tips(true, false, Bottom), Top);

@@ -16,7 +16,6 @@ use crate::features::onboarding;
 use crate::features::snip::screens::steps::{self, Strip};
 use crate::shared::kit::chip;
 use crate::shared::kit::header::{self as chrome, Caption};
-use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
 use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::tokens::{radius, space};
@@ -386,25 +385,20 @@ fn pin_view(pin: &Pin) -> Element<'_, PinMsg> {
             ]
             .spacing(space::GAP)
         });
-        let bar = surface(
-            Material::Widget,
-            radius::WINDOW,
-            row![
-                drag,
-                live,
-                button(COPY, PinMsg::Copy, crate::t!(c_copy), "Ctrl+C"),
-                button(SAVE, PinMsg::Save, crate::t!(c_save), "Ctrl+S"),
-                button(
-                    Icon::Close.glyph(),
-                    PinMsg::Close,
-                    crate::t!(sn_close),
-                    "Esc"
-                ),
-            ]
+        let actions = crate::shared::kit::surface::segment_row([
+            button(COPY, PinMsg::Copy, crate::t!(c_copy), "Ctrl+C"),
+            button(SAVE, PinMsg::Save, crate::t!(c_save), "Ctrl+S"),
+            hint(
+                icon_button::quiet_close(false, Some(PinMsg::Close)),
+                crate::t!(sn_close),
+                Why::Keys("Esc"),
+                Side::Bottom,
+            ),
+        ]);
+        let controls = row![drag, live, actions]
             .spacing(space::GAP)
-            .align_y(iced::Center),
-        )
-        .padding(space::BAR_PAD);
+            .align_y(iced::Center);
+        let bar = surface(Material::Tray, radius::FULL, controls).padding(space::BAR_PAD);
         layers = layers.push(
             container(bar)
                 .width(Fill)

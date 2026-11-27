@@ -8,7 +8,7 @@ use iced::{Point, Rectangle, Size};
 use crate::features::circle::actions::Key;
 use crate::features::settings::labs::BarButton;
 use crate::shared::config::BarAnchor;
-use crate::shared::kit::tokens::{size, space};
+use crate::shared::kit::tokens::{size, widget_e};
 use crate::shared::kit::{field, grip};
 
 /// Between a bar or chip and the selection, and the minimum distance to screen edges.
@@ -23,22 +23,20 @@ pub(crate) const GAP: f32 = 16.0;
 /// a pill's width with its icon alone (narrow screens).
 pub(crate) const BOTTOM_GAP: f32 = 28.0;
 pub(crate) const TOP: f32 = 84.0;
-pub(crate) const PAD: f32 = space::BAR_PAD + 1.0;
-pub(crate) const SPACING: f32 = space::GAP;
-pub(crate) const PILL_GAP: f32 = 4.0;
+pub(crate) const PAD: f32 = widget_e::TRAY_PAD_X;
+pub(crate) const SPACING: f32 = widget_e::TRAY_GAP;
+pub(crate) const PILL_GAP: f32 = widget_e::SEGMENT_GAP;
 pub(crate) const HANDLE: f32 = grip::SIZE.width;
 pub(crate) const FIELD: f32 = 270.0 + 2.0 * field::RING;
 const MIN_FIELD: f32 = 160.0;
 pub(crate) const PILLS: [f32; 3] = [132.0, 88.0, 88.0];
 pub(crate) const ICON_PILL: f32 = 36.0;
-/// The round lab buttons after the pills.
+/// The icon buttons after the pills.
 pub(crate) const BUBBLE: f32 = size::ICON_BUTTON;
-/// The thin line between the field, the pills and the icon buttons (16 px
-/// tall), and the room it takes (2 px either side).
-pub(crate) const DIVIDER_H: f32 = 16.0;
-pub(crate) const DIVIDER: f32 = 5.0;
-/// The bar's height: its tallest control (the icon buttons) and its padding.
-pub(crate) const HEIGHT: f32 = BUBBLE + 2.0 * PAD;
+/// Extra width of one style E raised segment (horizontal padding each side).
+const SEG_EXTRA: f32 = 2.0 * widget_e::SEGMENT_PAD_X;
+/// The bar's height: tray padding + raised segment padding + 34 px controls (52 px).
+pub(crate) const HEIGHT: f32 = BUBBLE + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y;
 /// The QR code chip: as tall as the bar; its padding across and the space
 /// between its parts; the longest QR text it shows, in characters.
 pub(crate) const QR_PAD: f32 = 14.0;
@@ -104,12 +102,12 @@ pub(crate) fn key_hint(key: Key) -> String {
     }
 }
 
-/// The bar without its field: grip, dividers, `pills`, `bubbles` round buttons and the quiet x
-/// that always ends it (after its own divider).
+/// The bar without its field: grip, the raised pills segment, and the raised
+/// icons + quiet-x segment (style E: no dividers).
 fn fixed(pills: [f32; 3], bubbles: f32) -> f32 {
-    let pills: f32 = pills.iter().sum::<f32>() + 2.0 * PILL_GAP;
-    let buttons = SPACING + DIVIDER + (bubbles + 1.0) * (BUBBLE + SPACING);
-    2.0 * PAD + HANDLE + 3.0 * SPACING + DIVIDER + pills + buttons
+    let pills = SEG_EXTRA + pills.iter().sum::<f32>() + 2.0 * PILL_GAP;
+    let icons = SEG_EXTRA + bubbles * BUBBLE + widget_e::QUIET_X + bubbles * PILL_GAP;
+    2.0 * PAD + HANDLE + 3.0 * SPACING + pills + icons
 }
 
 /// The pills' widths on a screen `width` wide: labelled (`PILLS`), or icons

@@ -8,7 +8,9 @@ use iced::{Element, Point, Size};
 use crate::features::circle::actions::entities::{Entity, Kind};
 use crate::features::circle::actions::{self, Action};
 use crate::shared::app_language::{S, fmt, tr};
-use crate::shared::kit::option_list::{MENU_WIDTH, item, menu, menu_height, separator};
+use crate::shared::kit::option_list::{
+    MENU_WIDTH, floating_item, floating_menu, floating_menu_height, separator,
+};
 use crate::shared::kit::tooltip::tip;
 
 use super::bar::geometry::key_hint;
@@ -109,7 +111,10 @@ impl Menu {
     /// The menu's size (logical px).
     pub fn size(&self) -> Size {
         let separators = (0..self.rows.len()).filter(|i| self.separated(*i)).count();
-        Size::new(MENU_WIDTH, menu_height(self.rows.len(), separators))
+        Size::new(
+            MENU_WIDTH,
+            floating_menu_height(self.rows.len(), separators),
+        )
     }
 
     /// The rows, in order.
@@ -160,10 +165,17 @@ pub fn view(m: &Menu) -> Element<'_, Msg> {
         if m.separated(i) {
             rows.push(separator());
         }
-        let row = item(label, false, hint.clone(), m.focus == Some(i), Msg::Pick(i));
+        let row = floating_item(
+            label,
+            false,
+            hint.clone(),
+            m.focus == Some(i),
+            false,
+            Msg::Pick(i),
+        );
         rows.push(tip(row, label, iced::widget::tooltip::Position::Left));
     }
-    menu(rows)
+    floating_menu(rows)
 }
 
 #[cfg(test)]

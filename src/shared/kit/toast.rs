@@ -1,12 +1,12 @@
 //! The toast pill (`.oc-toast`, design 11.2): an elevated pill, a dot and
 //! one 12 px line, padding 14x8. Exactly `size(label)` big: its window is the
 //! pill (cut to its corners, so nothing shows around it).
-use iced::widget::{Space, container, stack};
+use iced::widget::{Space, container};
 use iced::{Border, Center, Element, Fill, Size};
 
 use super::text::{font, width};
 use super::themes::c;
-use super::tokens::{Role, fixed, size};
+use super::tokens::{Role, fixed, size, widget_e};
 
 /// What the dot says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,30 +131,22 @@ fn made<'a, Message: 'a>(
     material(container(content).padding(PAD), radius, at)
 }
 
-/// The pill's material round `content`: elevated, its edge, corners of `radius`,
-/// exactly `at` big.
+/// The pill's style E tray material round `content`: `track` with `rim` edge,
+/// corners of `radius`, exactly `at` big.
 fn material<'a, Message: 'a>(
     content: container::Container<'a, Message>,
     radius: f32,
     at: Size,
 ) -> Element<'a, Message> {
-    let pill = content
+    content
         .center_y(Fill)
-        .width(Fill)
-        .style(move |_| container::Style {
-            background: Some(c().elevated.into()),
-            border: Border::default()
-                .rounded(radius)
-                .width(1)
-                .color(c().elevated_border),
-            ..container::Style::default()
-        });
-    // `inset 0 1px 0 --ui-elevated-hi`: a 1 px line under the top edge, between the corners
-    let hi = container(Space::new().width(Fill).height(1))
-        .style(|_| container::Style::default().background(c().elevated_hi));
-    stack![pill, container(hi).padding([1.0, radius])]
         .width(at.width)
         .height(at.height)
+        .style(move |_| container::Style {
+            background: Some(c().track.into()),
+            border: Border::default().rounded(radius).width(1).color(c().rim),
+            ..container::Style::default()
+        })
         .into()
 }
 
@@ -168,7 +160,7 @@ const BANNER_H: f32 = 64.0;
 const BANNER_LOW: f32 = 60.0;
 const LINES_GAP: f32 = 2.0;
 /// The round mark.
-pub const LEAD: f32 = 26.0;
+pub const LEAD: f32 = 32.0;
 
 /// `banner`'s size for `title`, `line` and buttons `actions` px wide (0: none).
 pub fn banner_size(title: &str, line: &str, actions: f32) -> Size {
@@ -199,7 +191,7 @@ pub fn banner<'a, Message: 'a>(
     let lead = container(lead).center(LEAD).style(|_| container::Style {
         background: Some(c().accent_soft.into()),
         text_color: Some(c().accent),
-        border: Border::default().rounded(LEAD / 2.0),
+        border: Border::default().rounded(widget_e::ICON_RADIUS),
         ..container::Style::default()
     });
     let none = iced::widget::text::Wrapping::None;

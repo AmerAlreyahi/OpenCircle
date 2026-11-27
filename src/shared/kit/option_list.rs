@@ -20,7 +20,7 @@ use super::icon::{Icon, icon};
 use super::surface::{Material, surface};
 use super::text::font;
 use super::themes::c;
-use super::tokens::{Role, radius, size, space};
+use super::tokens::{Role, radius, size, space, widget_e};
 use super::wrap::{Hook, wrap};
 
 /// A row's corners (`rounded-lg`) and its room.
@@ -85,10 +85,10 @@ pub fn opener<'a, Message: Clone + 'a>(
                 };
                 let ring = match open {
                     true => Border::default()
-                        .rounded(radius::CONTROL)
-                        .width(FOCUS_RING)
-                        .color(faded(c().accent, 0.32)),
-                    false => Border::default().rounded(radius::CONTROL),
+                        .rounded(widget_e::ICON_RADIUS)
+                        .width(1.5)
+                        .color(c().accent),
+                    false => Border::default().rounded(widget_e::ICON_RADIUS),
                 };
                 button::Style {
                     background: Some(fill.into()),
@@ -97,7 +97,7 @@ pub fn opener<'a, Message: Clone + 'a>(
                     ..button::Style::default()
                 }
             }),
-        radius::CONTROL,
+        widget_e::ICON_RADIUS,
         Some(on_press),
     )
     .into()
@@ -199,7 +199,11 @@ pub fn choice<'a, Message: Clone + 'a>(
     if look.current {
         ends.push(icon(Icon::Check, size::ICON_SMALL).color(c().accent).into());
     }
-    let mut parts = vec![name];
+    let mut parts: Vec<Element<'a, Message>> = Vec::new();
+    if look.current {
+        parts.push(current_bar());
+    }
+    parts.push(name);
     parts.extend(ends);
     if rtl {
         parts.reverse();
@@ -213,7 +217,7 @@ pub fn choice<'a, Message: Clone + 'a>(
             .style(move |_, status| {
                 let hot = look.hovered || matches!(status, button::Status::Hovered);
                 let (fill, edge) = match () {
-                    _ if look.current => (Some(c().elevated), c().elevated_border),
+                    _ if look.current => (Some(c().accent_soft), iced::Color::TRANSPARENT),
                     _ if look.ringed => (Some(c().hover), faded(c().accent, 0.32)),
                     _ if hot => (Some(c().hover), iced::Color::TRANSPARENT),
                     _ => (None, iced::Color::TRANSPARENT),
@@ -221,11 +225,14 @@ pub fn choice<'a, Message: Clone + 'a>(
                 button::Style {
                     background: fill.map(Into::into),
                     text_color: c().text,
-                    border: Border::default().rounded(ROW_RADIUS).width(1).color(edge),
+                    border: Border::default()
+                        .rounded(widget_e::ROW_RADIUS)
+                        .width(1)
+                        .color(edge),
                     ..button::Style::default()
                 }
             }),
-        ROW_RADIUS,
+        widget_e::ROW_RADIUS,
         Some(on_press),
     )
     .into()
@@ -233,8 +240,6 @@ pub fn choice<'a, Message: Clone + 'a>(
 
 /// A `choice` row's height.
 pub const CHOICE_H: f32 = 28.0;
-/// The open opener's ring.
-const FOCUS_RING: f32 = 2.0;
 /// The needs-AI mark: a 12 px ring (the OpenCircle logo's circle).
 const MARK: f32 = 12.0;
 const MARK_EDGE: f32 = 1.5;
@@ -278,6 +283,21 @@ pub fn group<'a, Message: 'a>(label: &'a str, height: f32) -> Element<'a, Messag
     line.align_bottom(height).into()
 }
 
+/// The 3x16 start-side accent bar on a current menu/list row (`.mr.cur::before`).
+fn current_bar<'a, Message: 'a>() -> Element<'a, Message> {
+    container(
+        Space::new()
+            .width(widget_e::CURRENT_BAR_W)
+            .height(widget_e::CURRENT_BAR_H),
+    )
+    .style(|_| container::Style {
+        background: Some(c().accent.into()),
+        border: Border::default().rounded(2),
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// A menu (the design's tray menu): `MENU_WIDTH` wide, its `items` and
 /// `separator`s on the widget surface with `radius::MENU` corners, 4 px in
 /// (`p-1`, inside the 1 px edge). As tall as `menu_height` says.
@@ -286,6 +306,100 @@ pub fn menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Me
         .padding(MENU_PAD)
         .width(MENU_WIDTH)
         .into()
+}
+
+/// Style E floating menu (right-click context menu, glossary menu): `dropdown`
+/// surface, `rim` border, 14 px corners, 6 px padding.
+pub fn floating_menu<'a, Message: 'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    floating_menu_width(MENU_WIDTH, items)
+}
+
+/// Style E floating menu of a given `width`.
+pub fn floating_menu_width<'a, Message: 'a>(
+    width: f32,
+    items: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    frame(column(items))
+        .padding(widget_e::MENU_PAD)
+        .width(width)
+        .into()
+}
+
+/// Height of a `floating_menu` with `items` rows and `separators` dividers.
+pub fn floating_menu_height(items: usize, separators: usize) -> f32 {
+    2.0 * widget_e::MENU_PAD
+        + items as f32 * widget_e::MENU_ITEM_H
+        + separators as f32 * SEPARATOR_H
+}
+
+/// Style E floating menu row (`.mr`): 34 px tall, 10 px corners, `hover` under
+/// cursor/focus, `accent_soft` + start accent bar + accent check when `current`.
+pub fn floating_item<'a, Message: Clone + 'a>(
+    label: &'a str,
+    checked: bool,
+    hint: Option<String>,
+    focused: bool,
+    current: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use button::Status;
+    let (role, small) = (Role::MENU, Role::MENU_HINT);
+    let check = (checked || current).then(|| {
+        container(icon(Icon::Check, size::ICON_SMALL).color(if current {
+            c().accent
+        } else {
+            c().text_muted
+        }))
+        .padding(super::dir::pad(Padding {
+            left: CHECK_GAP,
+            ..Padding::ZERO
+        }))
+    });
+    let hint = hint.map(|h| {
+        container(
+            text(h)
+                .size(small.size)
+                .font(font(small))
+                .color(c().text_muted),
+        )
+        .padding(super::dir::pad(Padding {
+            left: HINT_GAP,
+            ..Padding::ZERO
+        }))
+    });
+    let lead = current.then(current_bar);
+    let content = crate::dir_row![]
+        .push(lead)
+        .push(text(label).size(super::text::size(role)).font(font(role)))
+        .push(Space::new().width(Fill))
+        .push(hint)
+        .push(check)
+        .spacing(space::GAP)
+        .width(Fill)
+        .align_y(Center);
+    super::focus::press(
+        button(container(content).center_y(Fill))
+            .width(Fill)
+            .height(widget_e::MENU_ITEM_H)
+            .padding([0.0, OPENER_PAD])
+            .style(move |_, status| {
+                let hot = focused || matches!(status, Status::Hovered | Status::Pressed);
+                let fill = match () {
+                    _ if current => Some(c().accent_soft),
+                    _ if hot => Some(c().hover),
+                    _ => None,
+                };
+                button::Style {
+                    background: fill.map(Into::into),
+                    text_color: c().text,
+                    border: Border::default().rounded(widget_e::ROW_RADIUS),
+                    ..button::Style::default()
+                }
+            }),
+        widget_e::ROW_RADIUS,
+        Some(on_press),
+    )
+    .into()
 }
 
 /// The menu's width, a row's height, the room around the rows (edge + `p-1`)
@@ -422,7 +536,6 @@ const ACTION_GAP: f32 = 2.0;
 const ACTION_SPACE: f32 = 10.0;
 const ACTION_PAD: [f32; 2] = [0.0, 8.0];
 /// The action menu's inner padding (`padding: 8px 6px`).
-const ACTION_MENU_PAD: [f32; 2] = [8.0, 6.0];
 /// The foot's row, and its hairline's margin.
 pub const FOOT_H: f32 = 28.0;
 const FOOT_RULE: f32 = 5.0;
@@ -539,8 +652,8 @@ pub fn action_menu<'a, Message: 'a>(
     foot: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let list = column(items).spacing(ACTION_GAP);
-    surface(Material::Widget, radius::DROPDOWN, column![list].push(foot))
-        .padding(ACTION_MENU_PAD)
+    frame(column![list].push(foot))
+        .padding(widget_e::MENU_PAD)
         .width(width)
         .into()
 }
@@ -725,5 +838,34 @@ mod tests {
         assert!(at.height < 2.0 * Role::CONTROL.size, "one line: {at:?}");
         assert!(at.x + at.width <= tag.x, "{at:?} runs into {tag:?}");
         assert!(at.y + at.height <= 30.0, "{at:?} leaves the row");
+    }
+}
+
+#[cfg(test)]
+mod style_e_tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+
+    #[test]
+    fn style_e_floating_menu_renders_in_both_themes_and_rtl() {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for ar in [false, true] {
+                let _dir = ar.then(crate::shared::kit::testing::arabic);
+                let items = vec![
+                    floating_item("Copy", false, Some("Ctrl+C".into()), false, false, 1u8),
+                    separator(),
+                    floating_item("English", true, None, false, true, 2u8),
+                ];
+                let h = floating_menu_height(2, 1);
+                let m = floating_menu(items);
+                let texts = shot::texts(m);
+                assert!(texts.iter().any(|t| t == "Copy"));
+                assert!(texts.iter().any(|t| t == "English"));
+                assert!(h > 70.0);
+            }
+        }
+        themes::set(&SAPPHIRE);
     }
 }

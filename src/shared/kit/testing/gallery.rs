@@ -179,6 +179,7 @@ fn surface_sheet() {
         ("recessed", Material::Recessed),
         ("widget", Material::Widget),
         ("tile", Material::Tile),
+        ("tray", Material::Tray),
     ]
     .into_iter()
     .map(|(state, m)| {
@@ -1046,14 +1047,14 @@ fn button_compact_sheet() {
 /// AI field); typed: the switch off.
 #[test]
 fn field_slots_sheet() {
-    use field::{badge, logo, slots, toggle};
+    use field::{badge_ready, logo, slots, toggle};
     let view = |typed: bool, focused| {
         move |ar| {
             let parts = (
                 logo(crate::shared::kit::logo::logo(16), false, ()),
                 field::pair(
                     toggle(super::super::icon::Icon::Screen, !typed, false, ()),
-                    badge("AI", false, ()),
+                    badge_ready("AI", false, false, ()),
                 ),
             );
             let hint = s(ar, "Ask AI about your screen…", "اسأل عن شاشتك…");

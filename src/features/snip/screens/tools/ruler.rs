@@ -387,10 +387,14 @@ pub fn toolbar<'a>(mode: Mode, measure: Option<&Measure>) -> Element<'a, Msg> {
         .spacing(space::GAP)
         .padding([0.0, space::GAP])
         .align_y(iced::Center);
-    surface(Material::Widget, radius::WINDOW, line)
-        .padding(space::BAR_PAD)
-        .height(geometry::HEIGHT)
-        .into()
+    surface(
+        Material::Tray,
+        radius::FULL,
+        crate::shared::kit::surface::segment(line),
+    )
+    .padding(space::BAR_PAD)
+    .height(geometry::HEIGHT)
+    .into()
 }
 
 #[cfg(test)]

@@ -2172,11 +2172,12 @@ fn the_bottom_bar_is_there_from_the_first_frame() {
 
 /// Where the bottom bar's pills start (x), and its middle (y), as laid out.
 fn bar_row(app: &App) -> (f32, f32) {
+    use crate::shared::kit::tokens::widget_e;
     let (field, size) = app.bar_size();
     let at = app.bar_at();
     let x = at.x + bar::PAD + bar::HANDLE + bar::SPACING + field;
     (
-        x + bar::SPACING + bar::DIVIDER + bar::SPACING,
+        x + bar::SPACING + widget_e::SEGMENT_PAD_X,
         at.y + size.height / 2.0,
     )
 }
@@ -2199,13 +2200,15 @@ fn bar_pill(app: &App, k: usize) -> Point {
     Point::new(x + before + widths[k] / 2.0, y)
 }
 
-/// The centre of the bottom bar's round button `k` (0 = Live translate,
-/// then Song search and Edit when on), after the pills and their divider.
+/// The centre of the bottom bar's icon button `k` (0 = Live translate,
+/// then Song search and Edit when on), inside the style E icons segment.
 fn bar_button(app: &App, k: usize) -> Point {
+    use crate::shared::kit::tokens::widget_e;
     let (x, y) = bar_row(app);
     let pills: f32 = pill_widths(app).iter().sum::<f32>() + 2.0 * bar::PILL_GAP;
-    let first = x + pills + bar::SPACING + bar::DIVIDER + bar::SPACING;
-    let x = first + k as f32 * (bar::BUBBLE + bar::SPACING) + bar::BUBBLE / 2.0;
+    let seg_edge = widget_e::SEGMENT_PAD_X;
+    let first = x + pills + seg_edge + bar::SPACING + seg_edge;
+    let x = first + k as f32 * (bar::BUBBLE + bar::PILL_GAP) + bar::BUBBLE / 2.0;
     Point::new(x, y)
 }
 

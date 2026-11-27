@@ -109,7 +109,7 @@ pub fn text_area<'a, M: Clone + 'a>(
         .padding(BOX_PAD)
         .width(Fill)
         .style(|_| container::Style {
-            background: Some(c().track.into()),
+            background: Some(c().widget.into()),
             border: Border::default()
                 .rounded(radius::WINDOW)
                 .width(1)

@@ -118,10 +118,14 @@ pub fn toolbar<'a>(under: Option<[u8; 3]>, recent: &[[u8; 3]]) -> Element<'a, Ms
         .spacing(space::GAP)
         .padding([0.0, space::GAP])
         .align_y(iced::Center);
-    surface(Material::Widget, radius::WINDOW, row![line])
-        .padding(space::BAR_PAD)
-        .height(geometry::HEIGHT)
-        .into()
+    surface(
+        Material::Tray,
+        radius::FULL,
+        crate::shared::kit::surface::segment(row![line]),
+    )
+    .padding(space::BAR_PAD)
+    .height(geometry::HEIGHT)
+    .into()
 }
 
 #[cfg(test)]

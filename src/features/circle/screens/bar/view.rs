@@ -17,12 +17,12 @@ use crate::features::{
 };
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
-use crate::shared::kit::icon_button::{self, icon_button};
-use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::icon_button::{self, pill_icon, quiet_close};
+use crate::shared::kit::surface::{segment_row, tray};
 use crate::shared::kit::text::error;
-use crate::shared::kit::tokens::{Role, radius, size};
+use crate::shared::kit::tokens::{Role, size, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
-use crate::shared::kit::{button, chip, dir, divider, field, grip};
+use crate::shared::kit::{button, chip, field, grip};
 use crate::t;
 
 impl App {
@@ -46,7 +46,12 @@ impl App {
             kbd(Stop::Logo),
             Message::AskButton,
         );
-        let badge = field::badge("AI", kbd(Stop::Badge), Message::AskSubmit);
+        let badge = field::badge_ready(
+            "AI",
+            !self.o.ask.trim().is_empty(),
+            kbd(Stop::Badge),
+            Message::AskSubmit,
+        );
         let top = iced::widget::tooltip::Position::Top;
         // Include screen: accent while on, dimmed while off (the chat's own switch)
         let on = self.o.include;
@@ -149,8 +154,8 @@ impl App {
             };
             hint(pill, label, why, top)
         });
-        let pills = dir::row(pills).spacing(bar::PILL_GAP).align_y(iced::Center);
-        let icons: Vec<_> = [
+        let pills = segment_row(pills);
+        let mut icons: Vec<_> = [
             (
                 BarButton::Live,
                 LIVE,
@@ -187,31 +192,19 @@ impl App {
             bar_button(glyph, label, keys, state, self.bar_message(which))
         })
         .collect();
-        let line = || container(divider::vertical(bar::DIVIDER_H)).center_x(bar::DIVIDER);
-        let mut row = crate::dir_row![grip::grip(Message::BarGrab), field, line(), pills]
+        // the quiet x at the end: closes the overlay (Esc keeps working)
+        icons.push(hint(
+            quiet_close(kbd(Stop::Close), Some(Message::BarClose)),
+            t!(sn_close),
+            Why::Icon,
+            top,
+        ));
+        let icons = segment_row(icons);
+        let row = crate::dir_row![grip::grip(Message::BarGrab), field, pills, icons]
             .spacing(bar::SPACING)
             .align_y(iced::Center);
-        row = icons
-            .into_iter()
-            .fold(row.push(line()), |row, icon| row.push(icon));
-        // the quiet x at the end: closes the overlay (Esc keeps working)
-        row = row.push(bar_button(
-            Icon::Close.glyph(),
-            t!(sn_close),
-            "",
-            icon_button::State {
-                active: false,
-                focused: kbd(Stop::Close),
-            },
-            Some(Message::BarClose),
-        ));
-        // Held: the design's accent ring round it.
-        let material = match self.o.bar_drag {
-            Some(_) => Material::Held,
-            None => Material::Widget,
-        };
-        let shape = surface(material, radius::WINDOW, row)
-            .padding(bar::PAD)
+        let shape = tray(self.o.bar_drag.is_some(), widget_e::TRAY_RADIUS, row)
+            .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
             .height(bar::HEIGHT);
         // A press on the padding (not taken by the field or a button) drags
         // the bar too; opaque: a press on it never starts a selection.
@@ -308,7 +301,7 @@ impl App {
         if let Some(edit) = self.o.edit.as_ref().filter(|e| e.annotator.movable) {
             size.height = edit.bar_size().height;
         }
-        let shape = surface(Material::Widget, radius::WINDOW, space())
+        let shape = tray(false, widget_e::TRAY_RADIUS, space())
             .width(size.width)
             .height(size.height);
         iced::widget::pin(opaque(shape)).position(at).into()
@@ -337,7 +330,7 @@ pub(crate) fn bar_button<'a>(
         true => Why::Icon,
         false => Why::Keys(keys),
     };
-    let button = icon_button(glyph, state, on_press);
+    let button = pill_icon(glyph, state, on_press);
     hint(button, label, why, iced::widget::tooltip::Position::Top)
 }
 
@@ -369,9 +362,9 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
         // site it really opens, never cut.
         chips = chips.push(chip::action(fmt(S::bar_open_link, &[&host]), open));
     }
-    surface(
-        Material::Widget,
-        radius::WINDOW,
+    tray(
+        false,
+        widget_e::TRAY_RADIUS,
         container(chips).center_y(iced::Fill),
     )
     .height(bar::HEIGHT)
@@ -638,5 +631,42 @@ mod tests {
                 ));
             }
         });
+    }
+
+    #[test]
+    fn style_e_bar_renders_recessed_tray_and_raised_segments() {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            for ar in [false, true] {
+                let _dir = ar.then(crate::shared::kit::testing::arabic);
+                let mut app = open_app(1280, 800, 1.0);
+                app.o.labs = crate::features::settings::labs::Labs::all_on();
+                let size = app.bar_size().1;
+                let px = crate::shared::kit::testing::shot::render(
+                    app.bottom_bar(),
+                    size.width as u32,
+                    size.height as u32,
+                );
+                let has = |col: iced::Color| {
+                    let t = col.into_rgba8();
+                    px.as_chunks::<4>().0.iter().any(|p| {
+                        p[0].abs_diff(t[0]) <= 3
+                            && p[1].abs_diff(t[1]) <= 3
+                            && p[2].abs_diff(t[2]) <= 3
+                    })
+                };
+                assert!(
+                    has(theme.c.track),
+                    "{} ar={ar}: tray track missing",
+                    theme.id
+                );
+                assert!(
+                    has(theme.c.widget),
+                    "{} ar={ar}: segment widget missing",
+                    theme.id
+                );
+            }
+        }
+        themes::set(&SAPPHIRE);
     }
 }

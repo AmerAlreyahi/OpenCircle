@@ -4,10 +4,10 @@ use iced::Element;
 
 use crate::shared::kit::toast::toast;
 pub use crate::shared::kit::toast::{Tone, size};
-use crate::shared::kit::tokens::radius;
+use crate::shared::kit::tokens::widget_e;
 
 /// The corners the window is cut to (`platform::windows::floating`).
-pub const RADIUS: f32 = radius::CARD;
+pub const RADIUS: f32 = widget_e::CARD_RADIUS;
 
 /// `text` on the pill, corners of `radius` (`shape::radius(RADIUS)`: square
 /// where windows can't be cut).

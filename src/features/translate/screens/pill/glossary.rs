@@ -17,8 +17,8 @@ use crate::shared::kit::chip;
 use crate::shared::kit::dir;
 use crate::shared::kit::field::input;
 use crate::shared::kit::icon::Icon;
-use crate::shared::kit::icon_button::{State, icon_button};
-use crate::shared::kit::option_list::{MENU_WIDTH, group, item, menu, separator};
+use crate::shared::kit::icon_button::{State, pill_icon, quiet_close};
+use crate::shared::kit::option_list::{MENU_WIDTH, floating_item, floating_menu, group, separator};
 use crate::shared::kit::text::text as label;
 use crate::shared::kit::tokens::{Role, space};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -197,10 +197,10 @@ impl Menu {
             return iced::widget::Space::new().width(side).height(side).into();
         }
         let on = self.name().is_some();
-        let b = icon_button(
+        let b = pill_icon(
             Icon::Glossary.glyph(),
             State {
-                active: on,
+                active: on || self.open,
                 ..State::default()
             },
             Some(Msg::Glossary(GlossaryMsg::Toggle)),
@@ -233,22 +233,25 @@ impl Menu {
     pub fn list(&self) -> Option<Element<'_, Msg>> {
         self.open.then(|| {
             let pick = |s: &str| Msg::Glossary(GlossaryMsg::Pick(s.to_string()));
-            let mut rows = vec![item(
+            let mut rows = vec![floating_item(
                 t!(gl_none),
-                self.active.is_empty(),
+                false,
                 None,
                 false,
+                self.active.is_empty(),
                 pick(""),
             )];
             if !self.items.is_empty() {
                 rows.push(separator());
             }
             for (slug, name, n) in &self.items {
-                rows.push(item(
+                let current = *slug == self.active;
+                rows.push(floating_item(
                     name,
-                    *slug == self.active,
+                    false,
                     Some(n.to_string()),
                     false,
+                    current,
                     pick(slug),
                 ));
             }
@@ -259,9 +262,16 @@ impl Menu {
             }
             rows.push(separator());
             let edit = Msg::Glossary(GlossaryMsg::Edit);
-            rows.push(item(t!(gl_new), false, None, false, edit.clone()));
-            rows.push(item(t!(gl_edit), false, None, false, edit));
-            menu(rows)
+            rows.push(floating_item(
+                t!(gl_new),
+                false,
+                None,
+                false,
+                false,
+                edit.clone(),
+            ));
+            rows.push(floating_item(t!(gl_edit), false, None, false, false, edit));
+            floating_menu(rows)
         })
     }
 }
@@ -297,11 +307,7 @@ impl Menu {
             .into(),
         };
         // (the name, and a small x at its end: never suggested again)
-        let reject = icon_button(
-            Icon::Close.glyph(),
-            State::default(),
-            Some(msg(GlossaryMsg::Reject(name.into()))),
-        );
+        let reject = quiet_close(false, Some(msg(GlossaryMsg::Reject(name.into()))));
         let title = dir::row([
             container(label(Role::CONTROL, name)).width(Fill).into(),
             hint(reject, t!(gl_reject), Why::Icon, Position::Bottom),

@@ -45,7 +45,7 @@ pub fn key_hint<'a, Message: 'a>(groups: &[Group<'a>]) -> Element<'a, Message> {
         items.push(group);
     }
     surface(
-        Material::Widget,
+        Material::Tray,
         radius::FULL,
         row(items).spacing(8).align_y(Center),
     )

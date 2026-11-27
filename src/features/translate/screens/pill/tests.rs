@@ -1835,3 +1835,33 @@ fn r18_one_word_in_place_translate_never_truncates_with_ellipsis() {
     assert_eq!(shown.blocks.len(), 1);
     assert_eq!(shown.blocks[0].translation, "Ejecutar");
 }
+
+#[test]
+fn style_e_translate_pill_renders_two_tone_segments() {
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+    let s = session(true);
+    let size = Size::new(640.0, 120.0);
+    let at = card::place(size, None, None);
+    for theme in [&SAPPHIRE, &DAYLIGHT] {
+        themes::set(theme);
+        let px = shot::render(
+            s.view(size, at, false),
+            size.width as u32,
+            size.height as u32,
+        );
+        let has = |col: iced::Color| {
+            let t = col.into_rgba8();
+            px.as_chunks::<4>().0.iter().any(|p| {
+                p[0].abs_diff(t[0]) <= 3 && p[1].abs_diff(t[1]) <= 3 && p[2].abs_diff(t[2]) <= 3
+            })
+        };
+        assert!(has(theme.c.track), "{}: pill tray track missing", theme.id);
+        assert!(
+            has(theme.c.widget),
+            "{}: pill segment widget missing",
+            theme.id
+        );
+    }
+    themes::set(&SAPPHIRE);
+}

@@ -604,7 +604,7 @@ pub fn popup_view<'a>(
     .align_x(dir::start())
     .height(HINT_H);
     let panel = column![top, buttons, hint].spacing(PANEL_GAP);
-    let panel = surface(Material::Widget, radius::DROPDOWN, panel)
+    let panel = surface(Material::Tray, radius::DROPDOWN, panel)
         .padding(PANEL_PAD)
         .width(POPUP_PANEL.width)
         .height(POPUP_PANEL.height);

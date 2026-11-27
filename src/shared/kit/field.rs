@@ -117,7 +117,7 @@ pub fn field<'a, Message: Clone + 'a>(
 /// The slotted field's height, the focus ring round it, and its text's room
 /// left and right of the slots (`pl-8`; right: the Include screen switch and
 /// the badge).
-pub const SLOTS_H: f32 = 30.0;
+pub const SLOTS_H: f32 = 36.0;
 pub const RING: f32 = 2.0;
 pub const SLOTS_LEFT: f32 = 32.0;
 pub const SLOTS_RIGHT: f32 = 80.0;
@@ -162,13 +162,13 @@ pub fn slots<'a, Message: Clone + 'a>(
         .style(move |_, status| {
             let on = focused || matches!(status, text_input::Status::Focused { .. });
             text_input::Style {
-                background: c().track.into(),
+                background: c().widget.into(),
                 border: Border::default()
-                    .rounded(radius::CARD)
+                    .rounded(radius::FULL)
                     .width(1)
                     .color(if on { c().accent } else { c().rim }),
                 icon: c().text_sub,
-                placeholder: c().text_sub,
+                placeholder: c().text_muted,
                 value: c().text,
                 selection: c().accent_soft,
             }
@@ -182,7 +182,7 @@ pub fn slots<'a, Message: Clone + 'a>(
         .padding(RING)
         .style(move |_| container::Style {
             border: Border::default()
-                .rounded(radius::CARD + RING)
+                .rounded(radius::FULL)
                 .width(RING)
                 .color(match focused {
                     true => c().accent_soft,
@@ -222,36 +222,42 @@ pub fn logo<'a, Message: Clone + 'a>(
 /// A slot's badge (`#mainBarAiSubmitBadge`): "AI ↵" (the arrow at 75 %),
 /// mono 10 px / 600 in `accent` on `accent_soft`, 2x6 px, radius 6; stronger
 /// under the cursor; Tab's focus an `accent` edge.
-pub fn badge<'a, Message: Clone + 'a>(
+/// Style E AI field submit chip (`.aich` / `.aich.go`): muted on `hover` while
+/// empty, filled with `accent` + `on(accent)` once a question is typed (`ready`).
+pub fn badge_ready<'a, Message: Clone + 'a>(
     label: &'a str,
+    ready: bool,
     focused: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
     use iced::widget::{button, row, text};
     let font = mono(Weight::Semibold);
+    let enter_colour = match ready {
+        true => super::themes::on(c().accent),
+        false => c().text_muted,
+    };
     let line = row![
-        text(label).size(10).font(font),
-        super::icon::icon(super::icon::Icon::Enter, 10.0).color(faded(c().accent, 0.75)),
+        text(label).size(10.5).font(font),
+        super::icon::icon(super::icon::Icon::Enter, 10.0).color(enter_colour),
     ]
-    .spacing(4);
+    .spacing(4)
+    .align_y(iced::Center);
     super::focus::press(
-        button(line)
-            .padding([2, 6])
-            .style(move |_, status| button::Style {
-                background: Some(
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            faded(c().accent, 0.28)
-                        }
-                        _ => c().accent_soft,
-                    }
-                    .into(),
-                ),
-                text_color: c().accent,
+        button(line).padding([3, 8]).style(move |_, status| {
+            let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            let (fill, ink) = match (ready, hot) {
+                (true, _) => (c().accent, super::themes::on(c().accent)),
+                (false, true) => (c().accent_soft, c().accent),
+                (false, false) => (c().hover, c().text_muted),
+            };
+            button::Style {
+                background: Some(fill.into()),
+                text_color: ink,
                 border: slot_edge(focused),
                 ..button::Style::default()
-            }),
-        radius::PILL,
+            }
+        }),
+        radius::FULL,
         Some(on_press),
     )
     .into()
@@ -302,8 +308,11 @@ pub fn pair<'a, Message: 'a>(
 
 /// A slot's corners (6 px) and its edge: `accent` while Tab is on it.
 fn slot_edge(focused: bool) -> Border {
-    Border::default().rounded(6).width(1).color(match focused {
-        true => c().accent,
-        false => iced::Color::TRANSPARENT,
-    })
+    Border::default()
+        .rounded(radius::FULL)
+        .width(1)
+        .color(match focused {
+            true => c().accent,
+            false => iced::Color::TRANSPARENT,
+        })
 }

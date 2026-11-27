@@ -8,7 +8,7 @@ use iced::{Border, Center, Color, Element};
 use super::button::faded;
 use super::text::{mono, weight};
 use super::themes::c;
-use super::tokens::{fixed, radius, size, space};
+use super::tokens::{fixed, radius, size, space, widget_e};
 
 /// The design's `rounded` (4 px): a tag's and a badge's corners.
 const SMALL: f32 = 4.0;
@@ -72,7 +72,7 @@ pub fn count<'a, Message: 'a>(n: usize) -> Element<'a, Message> {
     .padding([1, 5])
     .style(|_| container::Style {
         background: Some(c().accent.into()),
-        text_color: Some(c().bg),
+        text_color: Some(super::themes::on(c().accent)),
         border: Border::default().rounded(radius::FULL),
         ..container::Style::default()
     })
@@ -301,8 +301,8 @@ pub fn floating<'a, Message: Clone + 'a>(
             .style(|_, status| button::Style {
                 background: Some(
                     match status {
-                        button::Status::Hovered | button::Status::Pressed => c().elevated_hover,
-                        _ => c().widget,
+                        button::Status::Hovered | button::Status::Pressed => c().widget,
+                        _ => c().track,
                     }
                     .into(),
                 ),
@@ -397,6 +397,63 @@ pub fn readout<'a, Message: 'a>(
 /// `image` glyph and the size, as `readout` (mono on `track`, `live` in
 /// `accent`); under the cursor raised (`elevated`, its edge) with the open
 /// hand. A press starts the drag (`on_down`; a button reacts on release).
+/// Style E Snip toolbar size pill (`.szc`): 30 px capsule on `hover` inside a
+/// raised `widget` segment (`elevated` under the pointer), mono readout + icon.
+pub fn size_pill<'a, Message: Clone + 'a>(
+    label: String,
+    live: bool,
+    on_down: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{hover, mouse_area};
+    let look = move |hot: bool| {
+        let ink = if live { c().accent } else { c().text };
+        let picture = text(super::icon::Icon::Picture.glyph())
+            .font(super::icon::FONT)
+            .size(13)
+            .color(if hot { c().text } else { c().text_sub });
+        let size = text(label.clone())
+            .size(11.5)
+            .font(mono(Weight::Medium))
+            .color(ink);
+        container(row![picture, size].spacing(space::GAP).align_y(Center))
+            .padding([0, 10])
+            .height(widget_e::SIZE_PILL_H)
+            .center_y(widget_e::SIZE_PILL_H)
+            .style(move |_| container::Style {
+                background: Some(if hot { c().elevated } else { c().hover }.into()),
+                border: Border::default()
+                    .rounded(radius::FULL)
+                    .width(if hot { 1 } else { 0 })
+                    .color(c().elevated_border),
+                ..container::Style::default()
+            })
+    };
+    mouse_area(hover(look(false), look(true)))
+        .on_press(on_down) // mouse only: drags the picture out
+        .interaction(iced::mouse::Interaction::Grab)
+        .into()
+}
+
+/// Static version of `size_pill` (when OS drag-out is unavailable or capturing).
+pub fn size_pill_static<'a, Message: 'a>(label: String, live: bool) -> Element<'a, Message> {
+    let ink = if live { c().accent } else { c().text };
+    let picture = text(super::icon::Icon::Picture.glyph())
+        .font(super::icon::FONT)
+        .size(13)
+        .color(c().text_sub);
+    let size = text(label).size(11.5).font(mono(Weight::Medium)).color(ink);
+    container(row![picture, size].spacing(space::GAP).align_y(Center))
+        .padding([0, 10])
+        .height(widget_e::SIZE_PILL_H)
+        .center_y(widget_e::SIZE_PILL_H)
+        .style(|_| container::Style {
+            background: Some(c().hover.into()),
+            border: Border::default().rounded(radius::FULL),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 pub fn size_handle<'a, Message: Clone + 'a>(
     label: String,
     live: bool,
@@ -497,13 +554,26 @@ pub fn info<'a, Message: 'a>(
         })
         .into()
     });
-    line = line.push(row(ladder).spacing(2).align_y(Center));
-    container(line)
-        .padding([5, 10])
+    let ladder = container(row(ladder).spacing(2).align_y(Center))
+        .padding([2, 4])
         .style(|_| container::Style {
             background: Some(c().widget.into()),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(super::surface::segment_edge()),
+            ..container::Style::default()
+        });
+    line = line.push(ladder);
+    container(line)
+        .padding([4, 10])
+        .style(|_| container::Style {
+            background: Some(c().track.into()),
             text_color: Some(c().text),
-            border: Border::default().rounded(10.0).width(1).color(c().rim),
+            border: Border::default()
+                .rounded(radius::FULL)
+                .width(1)
+                .color(c().rim),
             ..container::Style::default()
         })
         .into()

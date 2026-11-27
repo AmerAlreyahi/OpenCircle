@@ -14,10 +14,10 @@ use crate::features::translate::screens::language_picker as picker;
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::button::{Kind, button, label as button_label, regular};
 use crate::shared::kit::dir;
-use crate::shared::kit::icon_button::{State, icon_button};
+use crate::shared::kit::icon_button::{State, pill_icon, quiet_close};
 use crate::shared::kit::markdown;
 use crate::shared::kit::panel_frame::{self as frame, Header};
-use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::surface::{Material, segment_row, surface};
 use crate::shared::kit::text::{muted, text as label};
 use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius};
@@ -193,7 +193,7 @@ impl Session {
     /// Snip would take), dimmed before.
     fn snip_button(&self) -> Element<'_, Msg> {
         let on = self.seen().map(|_| Msg::Snip);
-        let button = icon_button(
+        let button = pill_icon(
             crate::features::snip::action::ACTION.icon,
             State::default(),
             on,
@@ -214,7 +214,7 @@ impl Session {
     /// there. Its name is the same string as Snip More's "Show original" row.
     fn original_button(&self) -> Element<'_, Msg> {
         let shown = matches!(self.phase, Phase::Shown(_));
-        let button = icon_button(
+        let button = pill_icon(
             crate::shared::kit::icon::Icon::Eye.glyph(),
             State {
                 active: self.original,
@@ -236,11 +236,7 @@ impl Session {
 
     /// The quiet x at the pill's end (C6): closes the translation (Esc keeps working).
     fn close_button(&self) -> Element<'_, Msg> {
-        let x = icon_button(
-            crate::shared::kit::icon::Icon::Close.glyph(),
-            State::default(),
-            Some(Msg::Close),
-        );
+        let x = quiet_close(false, Some(Msg::Close));
         hint(
             x,
             t!(sn_close),
@@ -249,16 +245,14 @@ impl Session {
         )
     }
 
-    /// The pill's buttons after the chips: Original, Snip, the glossary, then the x.
+    /// The pill's raised action segment: Original, Snip, glossary, quiet x.
     fn tail(&self) -> Element<'_, Msg> {
-        dir::row([
+        segment_row([
             self.original_button(),
             self.snip_button(),
             self.glossary.button(),
             self.close_button(),
         ])
-        .spacing(picker::SPACING)
-        .into()
     }
 
     /// The pill with the offer beside it: "Spanish text found" and its Get.

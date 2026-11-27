@@ -196,3 +196,42 @@ pub mod fixed {
         Color::from_rgb8(0xd4, 0xd4, 0xd8),
     );
 }
+
+// === widgets style E ===
+/// Floating-widget style E (two-tone, grouped segments): recessed `track`
+/// tray with raised `widget` segments, pill corners, and 10 px icon buttons.
+pub mod widget_e {
+    /// Outer corner radii for floating surfaces.
+    pub const TRAY_RADIUS: f32 = 999.0;
+    pub const CARD_RADIUS: f32 = 16.0;
+    pub const PANEL_RADIUS: f32 = 18.0;
+    pub const MENU_RADIUS: f32 = 14.0;
+    /// Control and row radii inside floating widgets.
+    pub const ICON_RADIUS: f32 = 10.0;
+    pub const ROW_RADIUS: f32 = 10.0;
+    pub const OPTION_GROUP_RADIUS: f32 = 12.0;
+    pub const OPTION_CELL_RADIUS: f32 = 10.0;
+    /// Outer tray padding and gap between raised segments.
+    pub const TRAY_PAD_X: f32 = 5.0;
+    pub const TRAY_PAD_Y: f32 = 5.0;
+    pub const TRAY_GAP: f32 = 6.0;
+    /// Raised segment (`.gp`) inner padding and item gap.
+    pub const SEGMENT_PAD_X: f32 = 5.0;
+    pub const SEGMENT_PAD_Y: f32 = 4.0;
+    pub const SEGMENT_GAP: f32 = 2.0;
+    /// Quiet close button (`.qx`).
+    pub const QUIET_X: f32 = 28.0;
+    /// Action pill height inside a segment (`.pl`).
+    pub const PILL_H: f32 = 34.0;
+    /// Size readout pill inside a segment (`.szc`).
+    pub const SIZE_PILL_H: f32 = 30.0;
+    /// Menu padding and row height (`.mn` / `.mr`).
+    pub const MENU_PAD: f32 = 6.0;
+    pub const MENU_ITEM_H: f32 = 34.0;
+    /// Current-row start indicator bar (`.mr.cur::before`).
+    pub const CURRENT_BAR_W: f32 = 3.0;
+    pub const CURRENT_BAR_H: f32 = 16.0;
+    /// Inner card padding inside floating tray chrome (AI chat, What's new, cards).
+    pub const CARD_INNER_PAD: f32 = 12.0;
+}
+// === end widgets style E ===

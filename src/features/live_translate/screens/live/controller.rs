@@ -208,7 +208,7 @@ impl Controller {
         }
         let body = body.push(controls);
         let size = self.size();
-        surface(Material::Widget, RADIUS, body)
+        surface(Material::Tray, RADIUS, body)
             .padding(PAD)
             .width(size.width)
             .height(size.height)

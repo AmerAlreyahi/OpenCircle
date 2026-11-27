@@ -14,10 +14,10 @@ use crate::shared::kit::chip::emblem;
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::progress;
-use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::surface::{segment_card, tray};
 use crate::shared::kit::text::paragraph;
 use crate::shared::kit::text::{accent, sub};
-use crate::shared::kit::tokens::{Role, radius};
+use crate::shared::kit::tokens::{Role, widget_e};
 use crate::t;
 
 /// A model the card offers (the design's `models` catalog).
@@ -325,10 +325,20 @@ pub fn card<'a, M: Clone + 'a>(
     ]
     .padding(dir::pad(HEADER))
     .align_y(Center);
-    let content = column![heading(model, bytes, stage)]
-        .push(body(model, bytes, stage, on))
-        .padding(dir::pad(CONTENT));
-    surface(Material::Widget, radius::WINDOW, column![header, content])
+    let content = segment_card(
+        widget_e::MENU_RADIUS,
+        column![heading(model, bytes, stage)]
+            .push(body(model, bytes, stage, on))
+            .padding(dir::pad(CONTENT)),
+    )
+    .width(Fill);
+    let inner = container(content).padding(Padding {
+        top: widget_e::TRAY_GAP,
+        right: widget_e::TRAY_PAD_X,
+        bottom: widget_e::TRAY_PAD_Y,
+        left: widget_e::TRAY_PAD_X,
+    });
+    tray(false, widget_e::CARD_RADIUS, column![header, inner])
         .width(WIDTH)
         .into()
 }

@@ -13,7 +13,7 @@ use iced::widget::{Space, column, container, mouse_area, opaque, pin, stack};
 use iced::{Border, Center, Element, Fill, Length, Point, Rectangle, Size, Vector, mouse};
 
 use super::icon::{Icon, icon};
-use super::surface::{Material, surface};
+use super::surface::{Material, segment_card, surface};
 use super::text::text;
 use super::themes::c;
 use super::tokens::Role;
@@ -72,12 +72,18 @@ pub fn frame<'a, Message: Clone + 'a>(
         ..iced::Padding::ZERO
     }))
     .on_press(on_drag); // mouse only: drags the panel
-    let body = super::scroll::scroll(body).height(Fill);
+    let body = segment_card(
+        super::tokens::widget_e::MENU_RADIUS,
+        super::scroll::scroll(body).height(Fill),
+    )
+    .padding(super::tokens::widget_e::CARD_INNER_PAD)
+    .width(Fill)
+    .height(Fill);
     let actions = container(actions).padding(iced::Padding {
         top: ABOVE_ACTIONS,
         ..iced::Padding::ZERO
     });
-    surface(Material::Widget, radius, column![heading, body, actions])
+    surface(Material::Tray, radius, column![heading, body, actions])
         .padding(PAD)
         .width(Fill)
         .height(Fill)
@@ -345,7 +351,11 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
         None => crate::dir_row![heading],
     }
     .align_y(Center);
-    let mut parts = column![top, container(body).height(Fill)].spacing(UNDER_HEADING);
+    let framed_body = segment_card(super::tokens::widget_e::MENU_RADIUS, body)
+        .padding(super::tokens::widget_e::CARD_INNER_PAD)
+        .width(Fill)
+        .height(Fill);
+    let mut parts = column![top, framed_body].spacing(UNDER_HEADING);
     if let Some(footer) = footer {
         // (the chat is the card with the drawer menu)
         let above = match header.menu {
@@ -355,8 +365,8 @@ pub fn chat_frame<'a, Message: Clone + 'a>(
         parts = column![parts.height(Fill), footer].spacing(above);
     }
     let material = match header.held {
-        true => Material::Held,
-        false => Material::Widget,
+        true => Material::TrayHeld,
+        false => Material::Tray,
     };
     let card = surface(material, CARD_RADIUS, parts)
         .padding(PAD)
@@ -431,7 +441,7 @@ pub fn drawer<'a, Message: 'a>(
         drawer_room(at) + 2.0 * DRAWER_PAD,
         (at.height - 2.0 * DRAWER_INSET).max(0.0),
     );
-    let panel = surface(Material::Widget, CARD_RADIUS, content)
+    let panel = surface(Material::Tray, CARD_RADIUS, content)
         .padding(DRAWER_PAD)
         .width(size.width)
         .height(size.height);

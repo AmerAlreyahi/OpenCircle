@@ -7,9 +7,10 @@ use iced::widget::{Space, button, container, row};
 use iced::{Border, Color, Element, Fill};
 
 use super::themes::c;
-use super::tokens::{radius, size, space};
+use super::tokens::{radius, size, space, widget_e};
 
 const DOT: f32 = 18.0;
+const DOT_E: f32 = 20.0;
 const CHIP: f32 = 22.0;
 /// The colour picker's width (`colour_picker::WIDTH`): the popovers that hold it are this wide.
 pub const PICKER_W: f32 = super::colour_picker::WIDTH;
@@ -29,8 +30,8 @@ fn dot<'a, Message: 'a>(colour: Color, d: f32) -> Element<'a, Message> {
 }
 
 /// The swatch's mark: the colour as a filled rounded square (a round dot read as a record
-fn mark<'a, Message: 'a>(colour: Color) -> Element<'a, Message> {
-    container(Space::new().width(DOT).height(DOT))
+fn mark<'a, Message: 'a>(colour: Color, side: f32) -> Element<'a, Message> {
+    container(Space::new().width(side).height(side))
         .style(move |_| container::Style {
             background: Some(colour.into()),
             border: Border::default()
@@ -53,7 +54,7 @@ pub fn swatch<'a, Message: Clone + 'a>(
         None => colour.scale_alpha(0.4),
     };
     super::focus::press(
-        button(container(mark(colour)).center(Fill))
+        button(container(mark(colour, DOT)).center(Fill))
             .width(size::ICON_BUTTON)
             .height(size::ICON_BUTTON)
             .padding(0)
@@ -79,6 +80,41 @@ pub fn swatch<'a, Message: Clone + 'a>(
                 }
             }),
         radius::FULL,
+        on_press,
+    )
+    .into()
+}
+
+/// Style E toolbar colour button (`.ib.cl2` + `.sw2`): 34x34, 10 px corners,
+/// rim border (`accent` when open), 20x20 colour swatch inside.
+pub fn swatch_e<'a, Message: Clone + 'a>(
+    colour: Color,
+    open: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let colour = match on_press {
+        Some(_) => colour,
+        None => colour.scale_alpha(0.4),
+    };
+    super::focus::press(
+        button(container(mark(colour, DOT_E)).center(Fill))
+            .width(size::ICON_BUTTON)
+            .height(size::ICON_BUTTON)
+            .padding(0)
+            .style(move |_, status| {
+                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                let fill = if hot { Some(c().hover) } else { None };
+                let edge = if open { c().accent } else { c().rim };
+                button::Style {
+                    background: fill.map(Into::into),
+                    border: Border::default()
+                        .rounded(widget_e::ICON_RADIUS)
+                        .width(1)
+                        .color(edge),
+                    ..button::Style::default()
+                }
+            }),
+        widget_e::ICON_RADIUS,
         on_press,
     )
     .into()

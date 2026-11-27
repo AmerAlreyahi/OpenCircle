@@ -20,12 +20,12 @@ use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
-use crate::shared::kit::surface::{self, Material, surface};
+use crate::shared::kit::surface::{self, segment_row, tray};
 use crate::shared::kit::text::{muted, sub, text as caption};
-use crate::shared::kit::tokens::{Role, radius, size, space};
+use crate::shared::kit::tokens::{Role, size, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::kit::{
-    button, chip, colour, colour_picker, divider, grip, option_list, segmented, slider,
+    button, chip, colour, colour_picker, grip, option_list, segmented, slider,
 };
 use crate::t;
 
@@ -74,22 +74,28 @@ fn live_pin() -> bool {
 /// (fits "Update step 12").
 const PRIMARY_W: f32 = 128.0;
 
-/// The bar's items' widths, in order (`build`); `primary`: the labelled one.
-fn widths(primary: bool) -> Vec<f32> {
-    let mut w = vec![bar::HANDLE, CHIP_W, bar::DIVIDER];
-    w.extend(Group::ALL.map(|_| CONTROL));
-    w.extend([
-        CONTROL,
-        CONTROL,
-        bar::DIVIDER,
-        CONTROL,
-        bar::DIVIDER,
-        CONTROL,
-        if primary { PRIMARY_W } else { CONTROL },
-        CONTROL,
-        CONTROL, // the quiet x
-    ]);
-    w
+/// Extra width added by one style E raised segment (padding + 1 px border each side).
+const SEG_EXTRA: f32 = 2.0 * widget_e::SEGMENT_PAD_X;
+const SEG_GAP: f32 = widget_e::SEGMENT_GAP;
+
+/// The four raised segments' widths, and within each segment its items' widths,
+/// matching `build` so `size()` and `centred_on()` stay exact.
+fn group_widths(primary: bool) -> [Vec<f32>; 4] {
+    let g0 = vec![bar::HANDLE, CHIP_W];
+    let mut g1: Vec<f32> = Group::ALL.map(|_| CONTROL).to_vec();
+    g1.extend([CONTROL, CONTROL]); // Colour, Undo
+    let g2 = vec![CONTROL]; // More
+    let g3 = vec![
+        CONTROL,                                   // Open in Studio
+        if primary { PRIMARY_W } else { CONTROL }, // Copy / Add step N
+        CONTROL,                                   // Save
+        widget_e::QUIET_X,                         // quiet x
+    ];
+    [g0, g1, g2, g3]
+}
+
+fn seg_width(items: &[f32]) -> f32 {
+    SEG_EXTRA + items.iter().sum::<f32>() + SEG_GAP * items.len().saturating_sub(1) as f32
 }
 
 /// The toolbar's size (one line, the same in every state)...
@@ -103,9 +109,10 @@ pub fn size_for(e: &Annotator) -> Size {
 }
 
 fn sized(primary: bool) -> Size {
-    let w = widths(primary);
-    let line = w.iter().sum::<f32>() + SPACING * (w.len() - 1) as f32;
-    Size::new(line + 2.0 * bar::PAD, bar::HEIGHT)
+    let groups = group_widths(primary);
+    let line = groups.iter().map(|g| seg_width(g)).sum::<f32>()
+        + widget_e::TRAY_GAP * (groups.len() - 1) as f32;
+    Size::new(line + 2.0 * widget_e::TRAY_PAD_X, bar::HEIGHT)
 }
 
 /// The Steps strip is open, or one of its steps is edited.
@@ -368,14 +375,8 @@ fn icon<'a>(glyph: char, on: bool, message: Option<Message>, tip: &'a str) -> El
     hinted(icon_button::square(glyph, state, message), tip, Why::Icon)
 }
 
-/// A divider between parts of the bar.
-fn divide<'a>() -> Element<'a, Message> {
-    container(divider::vertical(bar::DIVIDER_H))
-        .center_x(bar::DIVIDER)
-        .into()
-}
-
-/// The toolbar, and the open panel with its left edge (from the toolbar's).
+/// The toolbar (style E: four raised `widget` segments on a recessed `track`
+/// tray, no dividers), and the open panel with its left edge (from the toolbar's).
 #[allow(clippy::type_complexity)]
 fn build(
     e: &Annotator,
@@ -391,22 +392,25 @@ fn build(
     // a long capture running: only what finishes it stays live
     let idle = !e.capturing;
     let live = |m: Message| idle.then_some(m);
-    let mut items: Vec<Element<'_, Message>> =
-        vec![hinted(grip::mover(Message::Grab), t!(sn_move), Why::Icon)];
+
+    // Segment 0: drag grip + size pill
     let px = e.doc.view().size();
     let label = format!("{} × {}", px.width.round(), px.height.round());
     let chip = match dragout::SUPPORTED && idle {
         true => hinted(
-            chip::size_handle(label, e.area_held(), Message::DragOut),
+            chip::size_pill(label, e.area_held(), Message::DragOut),
             t!(sn_drag_out),
             Why::Drag,
         ),
-        false => chip::readout(label, e.area_held(), None),
+        false => chip::size_pill_static(label, e.area_held()),
     };
-    items.push(container(chip).center_x(CHIP_W).into());
-    items.push(divide());
-    // where each panel's button is (its index among the items)
-    let mut at: Vec<(Menu, usize)> = Vec::new();
+    let seg_lead = segment_row([
+        hinted(grip::mover(Message::Grab), t!(sn_move), Why::Icon),
+        container(chip).center_x(CHIP_W).into(),
+    ]);
+
+    // Segment 1: tool groups + colour swatch + undo
+    let mut tools: Vec<Element<'_, Message>> = Vec::new();
     let current = info(e.tool).group;
     for (g, &last) in Group::ALL.into_iter().zip(&e.last) {
         let shown = info(info(last).slot);
@@ -417,36 +421,39 @@ fn build(
             true => (tip(shown), Why::Icon),
             false => (tr(g.name()), Why::Keys(tip(shown))),
         };
-        items.push(hinted(
-            icon_button::square(shown.icon, s, live(m)),
+        tools.push(hinted(
+            icon_button::tool_icon(shown.icon, s, live(m)),
             label,
             why,
         ));
     }
-    at.push((Menu::Colour, items.len()));
-    items.push(hinted(
-        colour::swatch(e.ink(), e.menu == Some(Menu::Colour), live(Message::Picker)),
+    let colour_at = (1usize, tools.len());
+    tools.push(hinted(
+        colour::swatch_e(e.ink(), e.menu == Some(Menu::Colour), live(Message::Picker)),
         t!(sn_colour),
         Why::Icon,
     ));
     let undo = Message::UndoClick;
     let s = state(e.undid || e.menu == Some(Menu::Undo), &undo);
-    at.push((Menu::Undo, items.len()));
-    items.push(hinted(
-        icon_button::square(UNDO, s, live(undo)),
+    let undo_at = (1usize, tools.len());
+    tools.push(hinted(
+        icon_button::tool_icon(UNDO, s, live(undo)),
         t!(sn_undo),
         Why::Keys("Ctrl+Z"),
     ));
-    items.push(divide());
+    let seg_tools = segment_row(tools);
+
+    // Segment 2: More
     let more = Message::Menu(Menu::More);
     let s = state(e.menu == Some(Menu::More), &more);
-    at.push((Menu::More, items.len()));
-    items.push(hinted(
-        icon_button::square(Icon::More.glyph(), s, Some(more)),
+    let more_at = (2usize, 0usize);
+    let seg_more = segment_row([hinted(
+        icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
         t!(sn_more),
         Why::Icon,
-    ));
-    items.push(divide());
+    )]);
+
+    // Segment 3: Studio (OpenCircle logo) + Copy/Add step + Save + quiet x
     let studio = State {
         active: false,
         focused: focused(&Message::OpenStudio),
@@ -455,79 +462,83 @@ fn build(
         .width(size::ICON)
         .height(size::ICON)
         .opacity(if idle { 1.0 } else { 0.45_f32 });
-    items.push(hinted(
-        icon_button::option(studio_logo, studio, live(Message::OpenStudio)),
-        t!(sn_studio_btn),
-        Why::Keys("Ctrl+E"),
-    ));
-    items.push(primary(
-        e,
-        focused(&Message::AddStep) || focused(&Message::Copy),
-    ));
-    let save = button::tool(
+    let save = icon_button::tool_icon(
         SAVE,
-        button::Kind::Elevated,
-        focused(&Message::Save),
+        State {
+            active: false,
+            focused: focused(&Message::Save),
+        },
         Some(Message::Save),
     );
-    items.push(hinted(save, t!(c_save), Why::Keys("Ctrl+S")));
-
-    // the quiet x at the end (C6): closes the Snip (Esc keeps working)
     let close = Message::Close;
-    items.push(hinted(
-        icon_button::square(Icon::Close.glyph(), state(false, &close), live(close)),
-        t!(sn_close),
-        Why::Icon,
-    ));
+    let seg_actions = segment_row([
+        hinted(
+            icon_button::tool_option(studio_logo, studio, live(Message::OpenStudio)),
+            t!(sn_studio_btn),
+            Why::Keys("Ctrl+E"),
+        ),
+        primary(e, focused(&Message::AddStep) || focused(&Message::Copy)),
+        hinted(save, t!(c_save), Why::Keys("Ctrl+S")),
+        hinted(
+            icon_button::quiet_close(focused(&close), live(close)),
+            t!(sn_close),
+            Why::Icon,
+        ),
+    ]);
 
-    let toolbar = surface(
-        match e.held {
-            true => Material::Held,
-            false => Material::Widget,
-        },
-        radius::WINDOW,
-        line(items),
-    )
-    .padding(bar::PAD);
+    let segments = dir::row([seg_lead, seg_tools, seg_more, seg_actions])
+        .spacing(widget_e::TRAY_GAP)
+        .align_y(iced::Center);
+    let toolbar = tray(e.held, widget_e::TRAY_RADIUS, segments)
+        .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
+        .height(bar::HEIGHT);
     let Some(menu) = e.menu else {
-        // the first Snip ever: a one-time hint by the Studio button
+        // the first Snip ever: a one-time hint by the Studio button (seg 3, item 0)
         let hint = (e.studio_hint && idle).then(|| {
-            let (_, left) = centred_on(e, widths(steps_on(e)).len() - 4, STUDIO_HINT_W);
+            let (_, left) = centred_on(e, (3, 0), STUDIO_HINT_W);
             (studio_hint(), left)
         });
         return (toolbar.into(), hint);
     };
-    let (panel, width) = match menu {
-        Menu::Colour => (colour_panel(e), colour::PICKER_W),
-        Menu::Undo => (undo_panel(e), size::PANEL),
-        Menu::More => (more_panel(e), option_list::MENU_WIDTH),
+    let (panel, width, target) = match menu {
+        Menu::Colour => (colour_panel(e), colour::PICKER_W, colour_at),
+        Menu::Undo => (undo_panel(e), size::PANEL, undo_at),
+        Menu::More => (more_panel(e), option_list::MENU_WIDTH, more_at),
     };
-    let i = at.iter().find(|(m, _)| *m == menu).map_or(0, |(_, i)| *i);
-    (toolbar.into(), Some((panel, centred_on(e, i, width).1)))
+    (
+        toolbar.into(),
+        Some((panel, centred_on(e, target, width).1)),
+    )
 }
 
 /// The one-time hint's width, and the bubble (Snip's first run).
 const STUDIO_HINT_W: f32 = 232.0;
 
 fn studio_hint<'a>() -> Element<'a, Message> {
-    surface(
-        Material::Widget,
-        radius::CONTROL,
+    tray(
+        false,
+        widget_e::CARD_RADIUS,
         container(caption(Role::ROW_TITLE, t!(sn_studio_hint))).padding(space::PANEL),
     )
     .width(STUDIO_HINT_W)
     .into()
 }
 
-/// Item `i`'s centre and a `width`-wide panel's left edge to sit centred on it
-/// (mirrored right to left).
-fn centred_on(e: &Annotator, i: usize, width: f32) -> (f32, f32) {
-    let w = widths(steps_on(e));
-    let mut x = bar::PAD + w[..i].iter().map(|w| w + SPACING).sum::<f32>();
-    if dir::rtl() {
-        x = size_for(e).width - x - w[i];
+/// Segment `seg`, item `item`'s centre and a `width`-wide panel's left edge
+/// to sit centred on it (mirrored right to left).
+fn centred_on(e: &Annotator, (seg, item): (usize, usize), width: f32) -> (f32, f32) {
+    let groups = group_widths(steps_on(e));
+    let mut x = widget_e::TRAY_PAD_X;
+    for g in &groups[..seg] {
+        x += seg_width(g) + widget_e::TRAY_GAP;
     }
-    let centre = x + w[i] / 2.0;
+    x += widget_e::SEGMENT_PAD_X;
+    let items = &groups[seg];
+    x += items[..item].iter().map(|w| w + SEG_GAP).sum::<f32>();
+    if dir::rtl() {
+        x = size_for(e).width - x - items[item];
+    }
+    let centre = x + items[item] / 2.0;
     (centre, centre - width / 2.0)
 }
 
@@ -603,7 +614,8 @@ fn sizes<'a>(
 const SLIDER_W: f32 = size::PANEL - 2.0 * space::PANEL - 102.0 - SPACING;
 
 /// The row under the toolbar (UX C4): its room, and the gap above it.
-pub const ROW_GAP: f32 = 6.0;
+/// Attached directly under (or above) the Snip toolbar as one piece (owner, 2026-11-26).
+pub const ROW_GAP: f32 = 0.0;
 pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 8.0;
 pub const ROW_ROOM: f32 = ROW_GAP + ROW_H;
 
@@ -659,12 +671,12 @@ pub fn options_row_tips(
     let on = e.focus.and_then(|f| f.checked_sub(bar_stops(e).len()));
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
     Some(
-        surface(
-            Material::Widget,
-            radius::WINDOW,
+        tray(
+            false,
+            widget_e::TRAY_RADIUS,
             crate::shared::kit::scroll::across(row),
         )
-        .padding([4.0, bar::PAD])
+        .padding([4.0, widget_e::TRAY_PAD_X])
         .height(ROW_H)
         .max_width(max_w)
         .align_y(iced::Center)
@@ -1449,8 +1461,9 @@ mod tests {
     /// W91.2: the bar is exactly one button wider than before.
     #[test]
     fn the_bar_grew_by_one_button() {
-        let w = widths(false);
-        assert_eq!(w.len(), 3 + Group::ALL.len() + 7 + 1 + 1, "+ the x (C6)");
+        let groups = group_widths(false);
+        let count: usize = groups.iter().map(Vec::len).sum();
+        assert_eq!(count, 2 + Group::ALL.len() + 2 + 1 + 4, "+ the x (C6)");
     }
 
     /// C6: the toolbar ends with a quiet x (Tab reaches it last): it asks the host to end
@@ -1520,9 +1533,9 @@ mod tests {
         assert_eq!(e.menu, Some(Menu::Colour));
         let bar = Rectangle::new(Point::new(360.0, 220.0), size_for(&e));
         let win = Size::new(1280.0, 800.0);
-        // Colour button index: after the 4 tool groups
-        let colour_idx = 3 + crate::features::snip::annotate::Group::ALL.len();
-        let (_, left) = centred_on(&e, colour_idx, colour::PICKER_W);
+        // Colour button: segment 1, right after the tool groups
+        let colour_at = (1, crate::features::snip::annotate::Group::ALL.len());
+        let (_, left) = centred_on(&e, colour_at, colour::PICKER_W);
         let top = bar.y + bar.height + POPOVER_GAP;
         let at = Point::new(bar.x + left, top);
         let pad = 10.0_f32;
@@ -1671,5 +1684,41 @@ mod tests {
             studio_custom,
             "Studio Hide bar keeps the Custom strength slider"
         );
+    }
+
+    #[test]
+    fn style_e_toolbar_and_attached_row_use_two_tone_segments() {
+        use crate::shared::kit::testing::shot;
+        assert_eq!(
+            ROW_GAP, 0.0,
+            "options row stays attached directly under toolbar"
+        );
+        let mut e = editor();
+        e.update(Message::Tool(Tool::Rect));
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let bar_sz = size_for(&e);
+            let bar_px = shot::render(view(&e), bar_sz.width as u32, bar_sz.height as u32);
+            let row_px = shot::render(options_row(&e, 900.0).unwrap(), 900, ROW_H as u32);
+            let has = |px: &[u8], col: iced::Color| {
+                let t = col.into_rgba8();
+                px.as_chunks::<4>().0.iter().any(|p| {
+                    p[0].abs_diff(t[0]) <= 3 && p[1].abs_diff(t[1]) <= 3 && p[2].abs_diff(t[2]) <= 3
+                })
+            };
+            assert!(has(&bar_px, theme.c.track), "{}: snip tray track", theme.id);
+            assert!(
+                has(&bar_px, theme.c.widget),
+                "{}: snip segment widget",
+                theme.id
+            );
+            assert!(has(&row_px, theme.c.track), "{}: row tray track", theme.id);
+            assert!(
+                has(&row_px, theme.c.widget),
+                "{}: row raised group widget",
+                theme.id
+            );
+        }
+        themes::set(&SAPPHIRE);
     }
 }

@@ -8,7 +8,7 @@ use iced::{Border, Center, Color, Element, Fill, Length};
 
 use super::dir;
 use super::themes::{c, on};
-use super::tokens::{Role, radius};
+use super::tokens::{Role, radius, widget_e};
 
 /// What a Snip options row records while it is built (`scope`): every live cell in order, as the
 /// keyboard's stops, and which one the focus is on (a ring round it).
@@ -50,6 +50,12 @@ pub fn lightly() -> bool {
     REC.with(|r| r.borrow().as_ref().is_some_and(|r| r.light))
 }
 
+/// True while building Snip's floating options row (`scope`): groups sit on a
+/// style E `track` tray and raise to `widget` (Studio's bar stays `track`).
+fn in_scope() -> bool {
+    REC.with(|r| r.borrow().is_some())
+}
+
 /// Notes a live cell's `press`; true when the focus is on it.
 fn note<Message: Clone + 'static>(press: &Message) -> bool {
     REC.with(|r| match r.borrow_mut().as_mut() {
@@ -80,20 +86,43 @@ pub fn group<'a, Message: 'a>(
     cells: Vec<Element<'a, Message>>,
     accent: bool,
 ) -> Element<'a, Message> {
+    let raised = in_scope();
     container(dir::row(cells).spacing(GAP).align_y(Center))
         .padding(PAD)
         .height(HEIGHT)
         .center_y(HEIGHT)
-        .style(move |_| container::Style {
-            background: Some(if accent { c().accent } else { c().track }.into()),
-            border: Border::default().rounded(radius::CONTROL),
-            ..container::Style::default()
+        .style(move |_| {
+            let fill = match (accent, raised) {
+                (true, _) => c().accent,
+                (false, true) => c().widget,
+                (false, false) => c().track,
+            };
+            let corner = match raised {
+                true => widget_e::OPTION_GROUP_RADIUS,
+                false => radius::CONTROL,
+            };
+            let border = match (accent, raised) {
+                (false, true) => Border::default()
+                    .rounded(corner)
+                    .width(1)
+                    .color(super::surface::segment_edge()),
+                _ => Border::default().rounded(corner),
+            };
+            container::Style {
+                background: Some(fill.into()),
+                border,
+                ..container::Style::default()
+            }
         })
         .into()
 }
 
-/// The hairline between two groups.
+/// The hairline between two groups (hidden in style E floating rows where
+/// raised segments separate groups on their own).
 pub fn hairline<'a, Message: 'a>() -> Element<'a, Message> {
+    if in_scope() {
+        return Space::new().width(0).height(0).into();
+    }
     container(Space::new().width(1).height(HAIR_H))
         .style(|_| container::Style {
             background: Some(c().divider.into()),
@@ -112,6 +141,12 @@ fn cell<'a, Message: Clone + 'static>(
     press: Option<Message>,
 ) -> Element<'a, Message> {
     let live = press.is_some();
+    let raised = in_scope();
+    let cell_r = if raised {
+        widget_e::OPTION_CELL_RADIUS
+    } else {
+        radius::PILL
+    };
     let ring = press.as_ref().is_some_and(note);
     let pad = if width.is_some() { 0.0 } else { WORDS_PAD };
     let body = container(content).center_y(Fill).padding([0.0, pad]);
@@ -143,16 +178,13 @@ fn cell<'a, Message: Clone + 'static>(
                 background: fill.map(Into::into),
                 text_color: ink,
                 border: match ring {
-                    true => Border::default()
-                        .rounded(radius::PILL)
-                        .width(2)
-                        .color(c().accent),
+                    true => Border::default().rounded(cell_r).width(2).color(c().accent),
                     false => Border::default().rounded(radius::PILL).width(1).color(edge),
                 },
                 ..button::Style::default()
             }
         });
-    super::focus::press(b, radius::PILL, press).into()
+    super::focus::press(b, cell_r, press).into()
 }
 
 fn label<'a, Message: 'a>(words: &'a str, strong: bool) -> Element<'a, Message> {
@@ -349,5 +381,50 @@ mod tests {
         assert_eq!(tall(&group(cells, false)), Length::Fixed(HEIGHT));
         let done = group(vec![accent_cell("Done", Some(()))], true);
         assert_eq!(tall(&done), Length::Fixed(HEIGHT));
+    }
+}
+
+#[cfg(test)]
+mod style_e_tests {
+    use super::*;
+    use crate::shared::kit::testing::shot;
+    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
+
+    #[test]
+    fn style_e_scope_raises_option_groups_without_affecting_studio() {
+        for theme in [&SAPPHIRE, &DAYLIGHT] {
+            themes::set(theme);
+            let has = |px: &[u8], col: Color| {
+                let target = col.into_rgba8();
+                px.as_chunks::<4>().0.iter().any(|p| {
+                    p[0].abs_diff(target[0]) <= 3
+                        && p[1].abs_diff(target[1]) <= 3
+                        && p[2].abs_diff(target[2]) <= 3
+                })
+            };
+            // Studio (outside scope): track fill
+            let studio_px = shot::render(
+                group(vec![text_cell("Outline", false, Some(1u8))], false),
+                100,
+                36,
+            );
+            assert!(
+                has(&studio_px, theme.c.track),
+                "{}: studio group must keep track",
+                theme.id
+            );
+            // Snip floating row (inside scope): raised widget fill
+            let (snip_group, stops) = scope(None, false, || {
+                group(vec![text_cell("Outline", false, Some(1u8))], false)
+            });
+            assert_eq!(stops.len(), 1);
+            let snip_px = shot::render(snip_group, 100, 36);
+            assert!(
+                has(&snip_px, theme.c.widget),
+                "{}: snip row group must raise to widget",
+                theme.id
+            );
+        }
+        themes::set(&SAPPHIRE);
     }
 }

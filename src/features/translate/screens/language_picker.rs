@@ -23,29 +23,30 @@ use crate::shared::kit::field;
 use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::option_list::{self, Look, choice, group, keyed, needs_ai, opener};
 use crate::shared::kit::scroll;
-use crate::shared::kit::surface::{Material, surface};
+use crate::shared::kit::surface::{segment, tray};
 use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::themes::c;
-use crate::shared::kit::tokens::{Role, radius, size};
+use crate::shared::kit::tokens::{Role, size, widget_e};
 use crate::t;
 
-/// A chip, and the gaps in the pill (the design's 128 x 32 chips, 24 px
-/// arrow, 4 px gaps, 6 px in).
-pub const CHIP: Size = Size::new(128.0, 32.0);
+/// A chip, and the gaps inside each style E segment (128 x 34 chips, 24 px arrow).
+pub const CHIP: Size = Size::new(128.0, size::ICON_BUTTON);
 pub const CHIP_HEIGHT: f32 = CHIP.height;
-pub const SPACING: f32 = 4.0;
+pub const SPACING: f32 = widget_e::SEGMENT_GAP;
 const ARROW: f32 = 24.0;
-const PAD: f32 = 6.0;
-/// The chips and the arrow between them.
+const PAD: f32 = widget_e::TRAY_PAD_X;
+const SEG_EXTRA: f32 = 2.0 * widget_e::SEGMENT_PAD_X;
+/// The chips and the arrow between them (inside their raised segment).
 pub const WIDTH: f32 = 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
-/// The slot at the pill's end: a gap and the kit icon button each, for Original, Snip, the
-/// glossary and the quiet x (C6).
-pub const SLOT: f32 = 4.0 * (SPACING + size::ICON_BUTTON);
-/// The pill's vertical padding: the icon button (34) is 2 px taller than a
-/// chip, so the pill keeps its 44 px height.
-const PAD_Y: f32 = (CHIP.height + 2.0 * PAD - size::ICON_BUTTON) / 2.0;
-/// The pill: its size never changes (the Snip and glossary buttons' slot is always there).
-pub const PILL: Size = Size::new(WIDTH + 2.0 * PAD + SLOT, CHIP.height + 2.0 * PAD);
+/// The chips segment width (chips + segment padding/border).
+const CHIPS_SEG: f32 = SEG_EXTRA + WIDTH;
+/// The tail segment width: Original, Snip, Glossary (34 px each) + quiet x (28 px).
+pub const SLOT: f32 = SEG_EXTRA + 3.0 * size::ICON_BUTTON + widget_e::QUIET_X + 3.0 * SPACING;
+/// The pill: its size never changes (style E two-segment tray, 56 px tall).
+pub const PILL: Size = Size::new(
+    2.0 * PAD + CHIPS_SEG + widget_e::TRAY_GAP + SLOT,
+    CHIP.height + 2.0 * widget_e::SEGMENT_PAD_Y + 2.0 * widget_e::TRAY_PAD_Y,
+);
 /// The open list (fixed) and its gap under the pill.
 pub const LIST: Size = Size::new(248.0, 350.0);
 pub const LIST_GAP: f32 = 6.0;
@@ -470,18 +471,19 @@ impl Picker {
         .into()
     }
 
-    /// The pill (`PILL`): the chips, then `tail` (the Snip and glossary buttons, `SLOT`
-    /// wide; first when mirrored) on the widget surface, radius 18.
+    /// The pill (`PILL`): two raised style E segments (chips + tail) on a
+    /// recessed tray, capsule corners.
     pub fn pill<'a, M: Clone + 'a>(
         &'a self,
         map: fn(Msg) -> M,
         tail: Element<'a, M>,
     ) -> Element<'a, M> {
-        let line = dir::row([self.chips().map(map), tail])
-            .spacing(SPACING)
+        let chips: Element<'a, M> = segment(self.chips().map(map)).into();
+        let line = dir::row([chips, tail])
+            .spacing(widget_e::TRAY_GAP)
             .align_y(Center);
-        surface(Material::Widget, radius::DRAWER, line)
-            .padding([PAD_Y, PAD])
+        tray(false, widget_e::TRAY_RADIUS, line)
+            .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
             .into()
     }
 
@@ -490,11 +492,10 @@ impl Picker {
     /// edge on the To chip's (mirrored right to left).
     pub fn list_at(&self) -> Option<Vector> {
         let side = self.open?;
-        // (mirrored: the Snip slot is at the start side)
         let rtl = dir::rtl();
         let (start, end) = match rtl {
-            true => (PAD + SLOT, PILL.width - PAD),
-            false => (PAD, PILL.width - PAD - SLOT),
+            true => (PAD + SLOT + widget_e::TRAY_GAP, PILL.width - PAD),
+            false => (PAD, PAD + CHIPS_SEG),
         };
         let x = match (side == Side::Source) != rtl {
             true => start,
@@ -767,8 +768,8 @@ mod tests {
     fn the_list_hangs_from_its_chip_and_never_moves() {
         const MARGIN: f32 = 20.0;
         let from = PAD;
-        let to_end = PAD + 2.0 * CHIP.width + ARROW + 2.0 * SPACING;
-        assert_eq!(to_end, PILL.width - PAD - SLOT);
+        let to_end = PAD + CHIPS_SEG;
+        assert_eq!(to_end, PILL.width - PAD - SLOT - widget_e::TRAY_GAP);
         for rtl in [false, true] {
             for side in [Side::Source, Side::Target] {
                 let mut p = open(AUTO, "en", true, side);

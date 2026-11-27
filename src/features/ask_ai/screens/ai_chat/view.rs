@@ -24,7 +24,7 @@ use crate::shared::kit::dir;
 use crate::shared::kit::dropdown::dropdown;
 use crate::shared::kit::error_card::{ErrorCard, Words, error_card};
 use crate::shared::kit::icon::Icon;
-use crate::shared::kit::icon_button::{self, icon_button};
+use crate::shared::kit::icon_button::{self, pill_icon, quiet_close};
 use crate::shared::kit::markdown;
 use crate::shared::kit::markdown::Act;
 use crate::shared::kit::motion;
@@ -193,14 +193,14 @@ impl AiChat {
                 true => (Icon::Unpin, t!(chat_unpin)),
                 false => (Icon::Pin, t!(chat_pin)),
             };
-            let pin = icon_button(glyph.glyph(), state, Some(Msg::Pin));
+            let pin = pill_icon(glyph.glyph(), state, Some(Msg::Pin));
             let pin = hint(pin, tip, Why::Icon, Position::Bottom);
-            let x = icon_button(Icon::Close.glyph(), Default::default(), Some(Msg::Close));
+            let x = quiet_close(false, Some(Msg::Close));
             let x = hint(x, t!(chat_close), Why::Icon, Position::Bottom);
-            let ends = dir::row([new, pin, x]).spacing(space::GAP).align_y(Center);
+            let ends = crate::shared::kit::surface::segment_row([new, pin, x]);
             let card = frame::chat_frame(
                 header,
-                Some(ends.into()),
+                Some(ends),
                 body,
                 footer,
                 at,
@@ -477,7 +477,7 @@ impl AiChat {
     /// The drawer (the design's "Workspace"), `width` inside: back, its title
     /// and the tabs, then the tab.
     fn drawer_view(&self, tab: Tab, width: f32) -> Element<'_, Msg> {
-        let back = icon_button(
+        let back = pill_icon(
             Icon::Back.glyph(),
             icon_button::State::default(),
             Some(Msg::Drawer(None)),
