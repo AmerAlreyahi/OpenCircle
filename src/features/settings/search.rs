@@ -70,10 +70,16 @@ impl Search {
         }
     }
 
+    /// The query's words, folded; a word that folds to nothing (a lone mark) is dropped.
+    fn words(&self) -> Vec<String> {
+        let words = self.query.split_whitespace().map(fold);
+        words.filter(|w| !w.is_empty()).collect()
+    }
+
     /// Every hit for the query: every word of it in the row's title, description or
     /// page; title matches first (the page order within each).
     pub fn all_hits(&self) -> Vec<&Entry> {
-        let words: Vec<String> = self.query.split_whitespace().map(fold).collect();
+        let words = self.words();
         if words.is_empty() {
             return Vec::new();
         }
@@ -112,7 +118,7 @@ impl Search {
             folded.push_str(&f);
         }
         let mut found: Vec<(usize, usize)> = Vec::new();
-        for word in self.query.split_whitespace().map(fold) {
+        for word in self.words() {
             for (at, _) in folded.match_indices(&word) {
                 let first = folded[..at].chars().count();
                 let last = first + word.chars().count() - 1;
@@ -341,8 +347,21 @@ pub(super) fn most_used(state: &State) -> Vec<Quick> {
         .find(|c| c.0 == d.general.app_language)
         .map(|c| c.to_string());
     let provider = match d.ai.provider {
-        Provider::Browser => tr(crate::shared::app_language::S::ai_browser),
-        _ => tr(crate::shared::app_language::S::ai_provider),
+        Provider::Browser => tr(crate::shared::app_language::S::ai_browser).to_string(),
+        _ => super::state::Preset::of(&d.ai).map_or_else(
+            || tr(crate::shared::app_language::S::ai_provider).to_string(),
+            |p| p.to_string(),
+        ),
+    };
+    let mode = {
+        use crate::shared::app_language::S;
+        use crate::shared::config::Theme;
+        tr(match d.theme {
+            Theme::Light => S::ap_light,
+            Theme::Dark => S::ap_dark,
+            Theme::System => S::ap_system,
+        })
+        .to_string()
     };
     let target = super::state::TARGETS
         .iter()
@@ -353,19 +372,18 @@ pub(super) fn most_used(state: &State) -> Vec<Quick> {
         .quick_actions
         .iter()
         .position(|q| q.action == QuickId::Snip);
+    // never an empty title: the action's own name until the labels are read
     let snip_title = snip
         .and_then(|i| state.quick_text.get(i))
         .map_or("", |t| t.label.as_str());
+    let snip_title = match snip_title.is_empty() {
+        true => tr(S::nav_snip),
+        false => snip_title,
+    };
     vec![
         pick(Section::General, tr(S::g_lang), "", language, 0.0),
-        pick(Section::Appearance, tr(S::a_themes), "", None, 0.2),
-        pick(
-            Section::Ai,
-            tr(S::ai_prov),
-            "",
-            Some(provider.to_string()),
-            0.0,
-        ),
+        pick(Section::Appearance, tr(S::a_themes), "", Some(mode), 0.2),
+        pick(Section::Ai, tr(S::ai_prov), "", Some(provider), 0.0),
         pick(Section::Translate, tr(S::tr_target), "", target, 0.2),
         pick(
             Section::Shortcuts,
@@ -381,6 +399,12 @@ pub(super) fn most_used(state: &State) -> Vec<Quick> {
             on_off(d.general.autostart),
             0.5,
         ),
-        pick(Section::General, tr(S::us_updates), "", None, 1.0),
+        pick(
+            Section::General,
+            tr(S::us_updates),
+            "",
+            Some(super::pages::updates_words(state).1),
+            1.0,
+        ),
     ]
 }

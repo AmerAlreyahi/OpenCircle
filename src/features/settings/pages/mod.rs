@@ -13,6 +13,7 @@ mod appearance;
 mod custom;
 mod extensions;
 mod general;
+pub(in crate::features::settings) use general::updates_words;
 pub(crate) mod glossaries;
 mod history;
 mod labs;

@@ -1477,6 +1477,11 @@ impl Windows {
                 {
                     apply_from(before, now.clone());
                 }
+                if matches!(msg, settings::Message::StudioWritten)
+                    && let Some((_, s)) = &mut self.studio
+                {
+                    s.prefs_reread();
+                }
                 if let Some((id, state)) = &mut self.settings {
                     let id = *id;
                     let outcome = settings::update(state, msg);
@@ -1511,14 +1516,17 @@ impl Windows {
                         }
                         // a Studio row: written like the Studio's own dialog, which reads it again
                         settings::Outcome::StudioChanged => {
-                            if let Err(e) = crate::shared::config::update(|c| state.apply_studio(c))
-                            {
-                                crate::log!("[opencircle] config: {e}");
-                            }
-                            if let Some((_, s)) = &mut self.studio {
-                                s.prefs_reread();
-                            }
-                            return keys;
+                            // written off the UI thread (fsync); the Studio reads it on `StudioWritten`
+                            let Some(job) = state.studio_write() else {
+                                return keys;
+                            };
+                            return Task::batch([
+                                keys,
+                                crate::app::background::background(move |tx| {
+                                    let _ = tx.unbounded_send(job.run());
+                                })
+                                .map(Msg::Settings),
+                            ]);
                         }
                         settings::Outcome::OpenStudioPreferences => {
                             return Task::batch([

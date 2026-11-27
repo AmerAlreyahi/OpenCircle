@@ -137,8 +137,7 @@ fn language_row(state: &State) -> Element<'_, Message> {
 
 /// Updates: what waits and when GitHub last answered; Check now, or the
 /// waiting update's What's new and Restart now (Get it where the user installs it).
-fn updates_row(state: &State) -> Element<'_, Message> {
-    use crate::shared::update::How;
+pub(in crate::features::settings) fn updates_words(state: &State) -> (String, String) {
     let waiting = (state.update_waiting.as_ref()).map(|(v, how)| (v.as_str(), *how));
     use crate::shared::update::{Head, Say};
     let last = match &state.update_status {
@@ -167,6 +166,13 @@ fn updates_row(state: &State) -> Element<'_, Message> {
         (_, Say::Have(v, when)) => fmt(S::us_have, &[&v, &when_words(when)]),
         (_, Say::Answer(a)) => answer_words(&a),
     };
+    (head, line)
+}
+
+fn updates_row(state: &State) -> Element<'_, Message> {
+    use crate::shared::update::How;
+    let waiting = (state.update_waiting.as_ref()).map(|(v, how)| (v.as_str(), *how));
+    let (head, line) = updates_words(state);
     let control: Element<'_, Message> = match waiting {
         None => setting_row::action(
             t!(g_updates_check),

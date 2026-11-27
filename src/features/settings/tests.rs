@@ -5140,8 +5140,13 @@ fn the_studio_page_writes_the_studios_own_store() {
     p.reopen_last = true;
     let out = update(&mut s, Message::Studio(Msg::Prefs(Box::new(p))));
     assert!(matches!(out, Outcome::StudioChanged));
-    let mut cfg = Config::default();
-    s.apply_studio(&mut cfg);
+    let path = tmp("studio-rows");
+    s.path = Some(path.clone());
+    let job = s.studio_write().expect("the first write starts");
+    // (the write runs on a worker thread in the app: `windows.rs`)
+    assert!(!path.exists(), "the UI path writes nothing itself");
+    job.run();
+    let cfg = Config::load_from(&path).0;
     assert!(!cfg.studio.snap && cfg.studio.reopen_last);
     // no copy in the draft: the page's values are not part of what Settings saves
     assert!(s.draft.studio.snap && !s.dirty());
@@ -5194,4 +5199,175 @@ fn the_search_marks_the_matched_words_of_a_title() {
     assert_eq!(&ar[m[0].0..m[0].1], "لُغة");
     update(&mut s, Message::SearchInput("zzz".into()));
     assert!(s.search.as_ref().unwrap().marks(t).is_empty());
+}
+
+/// Review fix 1: a query word that folds to nothing (a lone Arabic mark, the tatweel) never
+/// panics the title marks, and marks nothing.
+#[test]
+fn a_lone_arabic_mark_in_the_search_is_harmless() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::SearchOpen);
+    for q in ["\u{064B}", "\u{0640}", "\u{064B} \u{0640}", "\u{0640} key"] {
+        update(&mut s, Message::SearchInput(q.into()));
+        let search = s.search.as_ref().unwrap();
+        let hits = search.all_hits().len();
+        assert!(
+            hits == 0 || q.ends_with("key"),
+            "{q:?} must not match everything"
+        );
+        for t in ["Snip shortcut key", "لُغة التطبيق", ""] {
+            let _ = search.marks(t);
+        }
+    }
+    // short mixed strings, every title: never out of range, marks stay on char boundaries
+    let alphabet = [
+        "a", "k", " ", "\u{064B}", "\u{0640}", "ل", "أ", "ة", "İ", "ß",
+    ];
+    let titles: Vec<String> = s.search.as_ref().unwrap().index_titles();
+    for i in 0..alphabet.len().pow(3) {
+        let q: String = (0..3)
+            .map(|k| alphabet[(i / alphabet.len().pow(k)) % alphabet.len()])
+            .collect();
+        update(&mut s, Message::SearchInput(q));
+        let search = s.search.as_ref().unwrap();
+        let _ = search.all_hits();
+        for t in titles.iter().map(String::as_str).chain(["لُغة", "Straße"]) {
+            for (a, b) in search.marks(t) {
+                assert!(a < b && t.is_char_boundary(a) && t.is_char_boundary(b));
+            }
+        }
+    }
+}
+
+/// Review fix 2 (TST-09): Studio-row changes never write on the UI thread, and a burst of
+/// changes (a file name typed key by key) coalesces into one write after the one on its way.
+#[test]
+fn studio_row_writes_are_off_the_ui_thread_and_coalesce() {
+    use crate::features::snip::screens::studio::preferences::Msg;
+    let (mut s, _) = state(None);
+    let path = tmp("studio-coalesce");
+    s.path = Some(path.clone());
+    let change = |s: &mut State, name: &str| {
+        let mut p = Config::default().studio;
+        p.file_name = name.into();
+        let out = update(s, Message::Studio(Msg::Prefs(Box::new(p))));
+        assert!(matches!(out, Outcome::StudioChanged));
+    };
+    change(&mut s, "a");
+    let first = s.studio_write().expect("the first starts at once");
+    change(&mut s, "ab");
+    assert!(s.studio_write().is_none(), "one on its way: no second");
+    change(&mut s, "abc");
+    assert!(s.studio_write().is_none());
+    assert!(!path.exists(), "nothing was written on the UI thread");
+    first.run();
+    assert_eq!(Config::load_from(&path).0.studio.file_name, "a");
+    // it landed: one more write for everything typed meanwhile
+    assert!(matches!(
+        update(&mut s, Message::StudioWritten),
+        Outcome::StudioChanged
+    ));
+    s.studio_write().expect("the next write").run();
+    assert_eq!(Config::load_from(&path).0.studio.file_name, "abc");
+    assert!(matches!(
+        update(&mut s, Message::StudioWritten),
+        Outcome::None
+    ));
+}
+
+/// Review fix 3: the Studio's change shows on Settings > Snip's After a capture, and an unsaved
+/// pick made there survives the refresh.
+#[test]
+fn studio_refresh_updates_after_a_capture_and_keeps_an_unsaved_pick() {
+    use crate::shared::config::StudioOpenIn;
+    let (mut s, _) = state(None);
+    let mut now = Config::default();
+    now.studio.open_in = StudioOpenIn::Studio;
+    crate::shared::config::with_test_config(now, || {
+        update(&mut s, Message::StudioRefresh);
+        assert_eq!(s.draft.studio.open_in, StudioOpenIn::Studio);
+        assert!(!s.dirty());
+    });
+    // an unsaved pick (Quick) is kept; the saved value follows the file
+    update(&mut s, Message::StudioOpenIn(StudioOpenIn::Quick));
+    let mut now = Config::default();
+    now.studio.open_in = StudioOpenIn::Studio;
+    crate::shared::config::with_test_config(now, || update(&mut s, Message::StudioRefresh));
+    assert_eq!(s.draft.studio.open_in, StudioOpenIn::Quick);
+}
+
+/// Review fix 3: Snip's "After a capture" writes `studio.open_in` (the frozen key) through Save.
+#[test]
+fn after_a_capture_writes_studio_open_in() {
+    use crate::shared::config::StudioOpenIn;
+    let path = tmp("after-capture");
+    let (mut s, _) = state(Some(path.clone()));
+    update(&mut s, Message::StudioOpenIn(StudioOpenIn::Studio));
+    assert_eq!(s.draft.studio.open_in, StudioOpenIn::Studio);
+    assert_ne!(Config::default().studio.open_in, StudioOpenIn::Studio);
+    let Outcome::Saved(_) = update(&mut s, Message::Save) else {
+        panic!("not saved: {:?}", s.problems);
+    };
+    assert_eq!(
+        Config::load_from(&path).0.studio.open_in,
+        StudioOpenIn::Studio
+    );
+}
+
+/// Review fix 3 and 4: Most used shows the current Theme mode, Updates line and AI provider name,
+/// and the Shortcuts pick never has an empty title.
+#[test]
+fn most_used_shows_current_values() {
+    use crate::shared::config::{Provider, Theme};
+    let (mut s, _) = state(None);
+    s.draft.theme = Theme::Dark;
+    s.draft.ai.provider = Provider::Browser;
+    let q = super::search::most_used(&s);
+    let val = |sec: Section, t: &str| {
+        q.iter()
+            .find(|x| x.section == sec && x.title == t)
+            .and_then(|x| x.value.clone())
+    };
+    assert_eq!(
+        val(Section::Appearance, t!(a_themes)).as_deref(),
+        Some(t!(ap_dark))
+    );
+    assert_eq!(
+        val(Section::Ai, t!(ai_prov)).as_deref(),
+        Some(t!(ai_browser))
+    );
+    assert!(val(Section::General, t!(us_updates)).is_some_and(|v| !v.is_empty()));
+    s.draft.theme = Theme::Light;
+    let q2 = super::search::most_used(&s);
+    assert_eq!(
+        q2.iter()
+            .find(|x| x.title == t!(a_themes))
+            .unwrap()
+            .value
+            .as_deref(),
+        Some(t!(ap_light))
+    );
+    assert!(q.iter().all(|x| !x.title.is_empty()));
+    // no Snip action configured: the title is still the action's name
+    s.draft.quick_actions.clear();
+    assert!(
+        super::search::most_used(&s)
+            .iter()
+            .all(|x| !x.title.is_empty())
+    );
+}
+
+/// Review fix 4: with a named provider, Most used shows that provider's name.
+#[test]
+fn most_used_names_the_real_ai_provider() {
+    let (mut s, _) = state(None);
+    s.draft.ai.provider = crate::shared::config::Provider::Anthropic;
+    let q = super::search::most_used(&s);
+    let v = q
+        .iter()
+        .find(|x| x.title == t!(ai_prov))
+        .unwrap()
+        .value
+        .clone();
+    assert_eq!(v.as_deref(), Some("Anthropic"));
 }

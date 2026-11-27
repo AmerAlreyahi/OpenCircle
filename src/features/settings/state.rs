@@ -563,6 +563,9 @@ fn quick_text(config: &Config) -> Vec<SlotText> {
 
 pub struct State {
     pub(super) section: Section,
+    /// A Studio-rows write is on a worker thread / rows changed meanwhile (`studio_write`).
+    pub(super) studio_writing: bool,
+    pub(super) studio_dirty: bool,
     /// The Studio page's rows: the Studio's own preferences model, over the config; Settings
     /// keeps no copy of those values in its draft.
     pub(super) studio: crate::features::snip::screens::studio::preferences::Dialog,
@@ -752,6 +755,8 @@ pub enum Message {
     Studio(crate::features::snip::screens::studio::preferences::Msg),
     /// The Studio changed its preferences: read them again.
     StudioRefresh,
+    /// The Studio rows' write landed (`StudioWrite::run`).
+    StudioWritten,
     /// Snip's After a capture (`studio.open_in`).
     StudioOpenIn(crate::shared::config::StudioOpenIn),
     /// Settings > General: open the welcome tour again.
@@ -1010,6 +1015,22 @@ pub enum Outcome {
     SignIn(crate::features::ask_ai::sign_in::Job),
 }
 
+/// The Studio rows' write for a worker thread.
+pub struct StudioWrite {
+    path: Option<PathBuf>,
+    dialog: Box<crate::features::snip::screens::studio::preferences::Dialog>,
+}
+
+impl StudioWrite {
+    /// Blocks on the disk (fsync): call it off the UI thread.
+    pub fn run(mut self) -> Message {
+        if let Err(e) = config::update_at(self.path.as_deref(), |c| self.dialog.apply(c)) {
+            crate::log!("[opencircle] config: {e}");
+        }
+        Message::StudioWritten
+    }
+}
+
 /// A config write for a worker thread.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Write {
@@ -1175,6 +1196,8 @@ impl State {
         let mut s = State {
             studio: crate::features::snip::screens::studio::preferences::Dialog::from(&config),
             section: Section::General,
+            studio_writing: false,
+            studio_dirty: false,
             search: None,
             marked: None,
             marked_at: None,
@@ -1261,9 +1284,22 @@ impl State {
             .collect()
     }
 
-    /// Lays the Studio rows' changes on `c` (the shell calls this inside `config::update`).
-    pub fn apply_studio(&mut self, c: &mut Config) {
-        self.studio.apply(c);
+    /// The Studio rows' write for a worker thread, or `None`: one is already on its way (the
+    /// next one starts when it lands, with everything typed meanwhile in one write, so a
+    /// file name typed key by key never queues a write per key and writes land in order).
+    pub fn studio_write(&mut self) -> Option<StudioWrite> {
+        if self.studio_writing {
+            self.studio_dirty = true;
+            return None;
+        }
+        self.studio_writing = true;
+        let job = self.studio.clone();
+        // the dialog now counts these changes as written (a throwaway config takes them)
+        self.studio.apply(&mut Config::default());
+        Some(StudioWrite {
+            path: self.path.clone(),
+            dialog: Box::new(job),
+        })
     }
 
     pub(super) fn dirty(&self) -> bool {
@@ -1714,6 +1750,7 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
         message,
         Message::Save
             | Message::Written(_)
+            | Message::StudioWritten
             | Message::Tick
             | Message::Fetch(_)
             | Message::Fetched(..)
@@ -2103,12 +2140,21 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
                 Out::None | Out::Close => Outcome::None,
             };
         }
+        Message::StudioWritten => {
+            state.studio_writing = false;
+            if std::mem::take(&mut state.studio_dirty) {
+                return Outcome::StudioChanged;
+            }
+        }
         Message::StudioRefresh => {
             let now = config::current();
             state.studio = crate::features::snip::screens::studio::preferences::Dialog::from(&now);
             // Snip's After a capture reads the same key
+            // (an unsaved pick made here is kept)
+            if state.draft.studio.open_in == state.saved.studio.open_in {
+                state.draft.studio.open_in = now.studio.open_in;
+            }
             state.saved.studio.open_in = now.studio.open_in;
-            state.draft.studio.open_in = now.studio.open_in;
         }
         Message::ShowWelcome => return Outcome::ShowWelcome,
         Message::DismissFolderNote => state.draft.general.folder_note.clear(),

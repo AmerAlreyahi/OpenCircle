@@ -159,6 +159,7 @@ impl std::fmt::Display for Choice {
 /// A group's heading and its rows, each with its title.
 type NamedGroup<'a> = (&'static str, Vec<(&'static str, Element<'a, Msg>)>);
 
+#[derive(Clone)]
 pub struct Dialog {
     tab: Tab,
     prefs: StudioPrefs,
