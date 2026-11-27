@@ -1965,3 +1965,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   where it meets the sidebar gap); if it can't be rounded, remove the dim entirely.
 - R1 bar alignment (owner, 2026-11-27, shot docs/internal/owner-shots/2026-11-27/record-bar-mic-not-centred.png): every item in the
   recording bar shares its vertical centre line exactly (the mic device picker sat too high); folded into R-04.
+
+- R-11 no menu during long capture (lead default 2026-11-27, owner may reverse): the Snip right-click / Menu-key area menu does not
+  open while a long capture runs (the capture cuts a hole over the area, so a menu there would be invisible yet take keys); the
+  toolbar's Copy / Save / Pin finish the capture as before.
