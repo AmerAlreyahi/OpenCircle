@@ -57,10 +57,21 @@ pub const MIN: Size = Size::new(960.0, 600.0);
 
 // The regions around the canvas (logical px): the stage is what they leave.
 const HEADER: f32 = 41.0; // 40 + the hairline
+const RAIL: f32 = 60.0;
+const OPTIONS: f32 = 48.0;
+// === Studio round 6 ===
 /// A hairline's width (the gap that replaced a divider).
 const HAIR: f32 = 1.0;
-const RAIL: f32 = 52.0;
-const OPTIONS: f32 = 48.0;
+/// The floating pills: their gap to the stage's edge, their height, and the stage's bottom band
+/// they cover (a fitted, centred picture stays above it; `stage()` is the room above the band).
+const PILL_EDGE: f32 = 12.0;
+const PILL_ROOM: f32 = 56.0;
+const BAND: f32 = PILL_EDGE + PILL_ROOM;
+/// The canvas card's gap to a docked Steps sidebar (to the rail it is the rail column's own room).
+const CARD_MARGIN: f32 = 8.0;
+/// The gap between the rail's tiles.
+const TILE_GAP: f32 = 8.0;
+// === end Studio round 6 ===
 /// The Steps sidebar's width.
 const SIDEBAR: f32 = 320.0;
 /// Room kept around a fitted picture.
@@ -1921,7 +1932,7 @@ impl Studio {
                 // the stage's left edge: mirrored, the Steps sidebar sits there
                 let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
                 let left = match sidebar_left {
-                    true => (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0),
+                    true => self.side_room(),
                     false => RAIL + 2.0,
                 };
                 let origin = Point::new(left, HEADER + OPTIONS + 1.0);
@@ -2403,13 +2414,19 @@ impl Studio {
         Point::new(origin.x + d.x, origin.y + d.y)
     }
 
-    /// The stage: the window less the header, the rail, the bars and the shown panels.
+    /// The Steps sidebar's room beside the stage when docked (the card's margin included).
+    pub(super) fn side_room(&self) -> f32 {
+        (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0 + CARD_MARGIN)
+    }
+
+    /// The stage: the window less the header, the rail, the bars, the shown panels and the
+    /// pills' band: the room a fitted picture is centred in (the canvas itself runs under the pills).
     pub(super) fn stage(&self) -> Size {
         // each region with its 1 px hairline, and the window's 1 px rim all round
-        let side = (self.sidebar_docked() as u8 as f32) * (SIDEBAR + 1.0);
+        let side = self.side_room();
         Size::new(
             (self.window.width - 2.0 - (RAIL + 1.0) - side).max(1.0),
-            (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0)).max(1.0),
+            (self.window.height - 2.0 - HEADER - (OPTIONS + 1.0) - BAND).max(1.0),
         )
     }
 
@@ -2483,7 +2500,7 @@ impl Studio {
             let pad = STAGE_PAD + 8.0;
             e.viewport = Some(iced::Rectangle::new(
                 Point::new(off.x - pad, off.y - pad),
-                Size::new(stage.width + 2.0 * pad, stage.height + 2.0 * pad),
+                Size::new(stage.width + 2.0 * pad, stage.height + BAND + 2.0 * pad),
             ));
         }
     }

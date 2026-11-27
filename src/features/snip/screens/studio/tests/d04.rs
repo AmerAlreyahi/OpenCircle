@@ -70,9 +70,10 @@ fn d04_ac1_no_status_bar_the_stage_reaches_the_window_bottom() {
         (canvas.y + canvas.height - (SIZE.height - 1.0)).abs() < 3.0,
         "{canvas:?}"
     );
+    // the room a fitted picture is centred in: above the pills' band
     assert_eq!(
         s.stage().height,
-        SIZE.height - 2.0 - super::HEADER - (super::OPTIONS + 1.0)
+        SIZE.height - 2.0 - super::HEADER - (super::OPTIONS + 1.0) - super::BAND
     );
 }
 
@@ -133,4 +134,29 @@ fn d04_ac3_rail_tiles_start_below_the_band_and_are_separate() {
         tiles[0].width < super::RAIL,
         "a tile is narrower than the rail's room"
     );
+}
+
+/// Fit (and the first open) keeps the whole picture, any shape, above the pills.
+#[test]
+fn d04_fit_keeps_the_picture_clear_of_the_pills() {
+    for (w, h) in [(300, 200), (3000, 2000), (800, 1500), (1600, 300)] {
+        let mut s = Studio::new(StudioConfig::default());
+        s.open(Picture::Crop(crop(w, h)));
+        s.settle_open();
+        let _ = s.update(Msg::Fit);
+        let all = bounds(&s);
+        let (size, actions) = (
+            find(&all, super::pills::SIZE_PILL),
+            find(&all, super::pills::ACTIONS_PILL),
+        );
+        let e = s.editor.as_ref().unwrap();
+        let shown = e.size();
+        let top = 1.0 + super::HEADER + super::OPTIONS + 1.0;
+        let bottom = top + super::stage_corner(s.stage(), shown).y - s.offset.y + shown.height;
+        assert!(
+            bottom <= size.y.min(actions.y),
+            "{w}x{h}: picture bottom {bottom} under the pills at {}",
+            size.y.min(actions.y)
+        );
+    }
 }

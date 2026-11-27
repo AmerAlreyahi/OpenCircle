@@ -6,7 +6,7 @@ use iced::widget::{Space, container, opaque, stack};
 use iced::{Bottom, Center, Element, Fill};
 
 use super::view::{MINUS, PLUS};
-use super::{Msg, Studio, keys};
+use super::{Msg, PILL_EDGE, Studio, keys};
 use crate::features::snip::annotate::{Annotator, Message};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::shared::kit::button::{self, Kind};
@@ -20,11 +20,6 @@ use crate::t;
 /// The pills' ids (the tests read their bounds).
 pub(super) const SIZE_PILL: &str = "studio-pill-size";
 pub(super) const ACTIONS_PILL: &str = "studio-pill-actions";
-
-/// The gap between a pill and the stage's edge, and the stage's bottom band the pills cover.
-const EDGE: f32 = 12.0;
-#[cfg(test)]
-pub(super) const BAND: f32 = EDGE + 56.0;
 
 /// `stage` with the two pills floating over its bottom corners.
 pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Element<'a, Msg> {
@@ -87,7 +82,7 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
     let line =
         crate::dir_row![opaque(size), Space::new().width(Fill), opaque(actions)].align_y(Center);
     let floating = container(line)
-        .padding(EDGE)
+        .padding(PILL_EDGE)
         .width(Fill)
         .height(Fill)
         .align_y(Bottom);

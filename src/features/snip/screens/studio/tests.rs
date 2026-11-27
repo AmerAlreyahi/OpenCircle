@@ -1948,7 +1948,7 @@ fn v3_context_menu_stays_inside_the_window_and_mirrors() {
         let _ = s.update(Msg::ContextOpen);
         let at = s.context.as_ref().unwrap().at;
         let left = match arabic {
-            true => super::SIDEBAR + 1.0,
+            true => super::SIDEBAR + 1.0 + super::CARD_MARGIN,
             false => RAIL + 2.0,
         };
         assert!(

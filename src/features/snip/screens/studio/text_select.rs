@@ -470,7 +470,7 @@ impl Studio {
         };
         let sidebar_left = self.sidebar_at_start() != crate::shared::app_language::rtl();
         let left = match sidebar_left {
-            true => (self.sidebar_docked() as u8 as f32) * (super::SIDEBAR + 1.0),
+            true => self.side_room(),
             false => super::RAIL + 2.0,
         };
         let (p, at) = (

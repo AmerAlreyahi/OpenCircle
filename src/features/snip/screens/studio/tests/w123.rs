@@ -97,7 +97,10 @@ fn w123_ac3_pinned_docks_and_the_canvas_makes_room() {
     assert!(matches!(out, Outcome::Panels(_, p) if p.library && p.pinned));
     assert!(s.sidebar_docked() && !s.steps_overlay());
     let (stage, zoom) = (s.stage(), s.editor.as_ref().unwrap().zoom);
-    assert_eq!(stage.width, wide.0.width - (super::SIDEBAR + 1.0));
+    assert_eq!(
+        stage.width,
+        wide.0.width - (super::SIDEBAR + 1.0 + super::CARD_MARGIN)
+    );
     assert_eq!(zoom, wide.1, "R-18: pinning keeps the zoom unchanged");
     // unpinned again: over the canvas, the picture gets its room back
     let _ = s.update(Msg::PinSteps);

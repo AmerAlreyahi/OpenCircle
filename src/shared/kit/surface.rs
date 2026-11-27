@@ -28,6 +28,8 @@ pub enum Material {
     Stage,
     /// Style E floating-widget recessed outer tray (`track`, rim edge).
     Tray,
+    /// A quiet chip on a window (the Studio rail's group tiles): the faint `track_glass` tint, no edge.
+    Chip,
     /// Style E floating-widget tray while dragged (`track`, `accent` edge).
     TrayHeld,
 }
@@ -57,6 +59,7 @@ pub fn surface<'a, Message: 'a>(
             Material::Held => (c().widget, c().accent),
             Material::Tray => (c().track, c().rim),
             Material::TrayHeld => (c().track, c().accent),
+            Material::Chip => (c().track_glass, Color::TRANSPARENT),
         };
         container::Style {
             background: Some(fill.into()),

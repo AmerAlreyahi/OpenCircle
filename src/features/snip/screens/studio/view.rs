@@ -72,12 +72,14 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             let left_side = match s.sidebar_docked() && side_on_left {
                 true => container(iced::widget::row![
                     super::sidebar::view(s, steps),
-                    divider::vertical(Fill)
+                    divider::vertical(Fill),
+                    Space::new().width(super::CARD_MARGIN)
                 ]),
                 false => empty_slot(),
             };
             let right_side = match s.sidebar_docked() && !side_on_left {
                 true => container(iced::widget::row![
+                    Space::new().width(super::CARD_MARGIN),
                     divider::vertical(Fill),
                     super::sidebar::view(s, steps)
                 ]),
@@ -119,12 +121,14 @@ fn build<'a>(s: &'a Studio, steps: &'a [Arc<Step>], maximised: bool) -> Element<
             let left_side = match s.sidebar_docked() && side_on_left {
                 true => container(iced::widget::row![
                     super::sidebar::view(s, steps),
-                    divider::vertical(Fill)
+                    divider::vertical(Fill),
+                    Space::new().width(super::CARD_MARGIN)
                 ]),
                 false => empty_slot(),
             };
             let right_side = match s.sidebar_docked() && !side_on_left {
                 true => container(iced::widget::row![
+                    Space::new().width(super::CARD_MARGIN),
                     divider::vertical(Fill),
                     super::sidebar::view(s, steps)
                 ]),
@@ -377,8 +381,7 @@ pub(super) const TILES: [&str; 6] = [
 
 /// A tool group as its own small rounded tile (style E tray, no container round them all).
 fn tile<'a>(id: &'static str, items: Vec<Element<'a, Msg>>) -> Element<'a, Msg> {
-    use crate::shared::kit::surface::tray;
-    tray(false, radius::CARD, column(items).align_x(Center))
+    surface(Material::Chip, radius::CARD, column(items).align_x(Center))
         .id(id)
         .padding(space::TRACK_GAP)
         .into()
@@ -430,7 +433,7 @@ fn rail(e: &Annotator, tip_at: Position) -> Element<'_, Msg> {
             ),
         ],
     );
-    let tiles = scroll::quiet(column(tiles).spacing(space::GAP).align_x(Center)).height(Fill);
+    let tiles = scroll::quiet(column(tiles).spacing(super::TILE_GAP).align_x(Center)).height(Fill);
     container(
         column![tiles, foot]
             .spacing(space::GAP + 2.0)
@@ -567,20 +570,28 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
     // Select text: the words' overlay (R-16)
     let drawn = super::text_select::over(s, drawn, shown, e.doc.view().position(), e.zoom);
     // a px less than the stage: no scrollbar for a fitted picture
-    let content = container(drawn)
-        .center_x((room.width - 2.0).max(shown.width))
-        .center_y((room.height - 2.0).max(shown.height));
+    // centred in the room above the pills' band; the band's room below keeps the bottom clear
+    let content = container(
+        container(drawn)
+            .center_x((room.width - 2.0).max(shown.width))
+            .center_y((room.height - 2.0).max(shown.height)),
+    )
+    .padding(iced::Padding {
+        bottom: super::BAND,
+        ..iced::Padding::ZERO
+    });
     let area = scroll::both(content)
         .id(super::CANVAS)
         .on_scroll(|v| Msg::Scrolled(Vector::new(v.absolute_offset().x, v.absolute_offset().y)));
     // the wheel zooms the picture at the pointer (Settings > Studio: or scrolls it); Ctrl+wheel always zooms
     let zooms = s.ctrl || prefs.wheel == StudioWheel::Zoom;
     let backdrop = match prefs.background {
-        StudioBackdrop::Checkerboard => {
-            container(super::cut::checker(Size::new(room.width, room.height)))
-                .width(Fill)
-                .height(Fill)
-        }
+        StudioBackdrop::Checkerboard => container(super::cut::checker(Size::new(
+            room.width,
+            room.height + super::BAND,
+        )))
+        .width(Fill)
+        .height(Fill),
         _ => container(Space::new().width(Fill).height(Fill))
             .width(Fill)
             .height(Fill),
