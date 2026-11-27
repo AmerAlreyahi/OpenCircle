@@ -26,7 +26,7 @@ const PILL_BOX: (f32, f32) = (PILL_BTN_H, PILL_BTN_RADIUS);
 
 /// The width of a pill button: `labelled`'s content with the pill's own side padding.
 fn pill_width(label: &str) -> f32 {
-    button::labelled_width(label) - 2.0 * (14.0 - PILL_BTN_SIDE)
+    button::labelled_width_padded(label, PILL_BTN_SIDE)
 }
 
 /// `stage` with the two pills floating over its bottom corners.

@@ -211,7 +211,7 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let list = mouse_area(column(rows.collect::<Vec<_>>()).spacing(super::STEP_GAP))
         .on_move(move |at| Msg::StepMove(at, n))
         .on_release(Msg::StepRelease);
-    let tip = muted(Role::ROW_DESC, t!(st_step_tip));
+    let tip = muted(Role::ROW_DESC, t!(st_steps_hint));
     column![
         container(list).padding([0.0, PAD]),
         container(tip).padding([space::GAP, PAD])
@@ -226,15 +226,15 @@ fn foot<'a>() -> Element<'a, Msg> {
         toolbar::COPY,
         t!(sn_step_copy_all),
         half,
-        Kind::Accent,
+        Kind::Quiet,
         false,
         Some(Msg::CopyAllSteps),
     );
     let export = button::labelled(
-        crate::shared::kit::icon::Icon::Forward.directed().glyph(),
+        toolbar::SAVE,
         t!(st_export),
         half,
-        Kind::Elevated,
+        Kind::Accent,
         false,
         Some(Msg::SidebarPage(Page::Export)),
     );

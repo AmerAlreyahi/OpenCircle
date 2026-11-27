@@ -711,14 +711,18 @@ pub fn dialog_width(labels: &[&str]) -> f32 {
 
 /// The width `labelled` needs for `label` (its glyph, the gap, 14 px each side).
 pub fn labelled_width(label: &str) -> f32 {
+    labelled_width_padded(label, 14.0)
+}
+
+/// `labelled_width` with `side` px of padding each side (the Studio's 12 px pill buttons).
+pub fn labelled_width_padded(label: &str, side: f32) -> f32 {
     use super::tokens::{Role, space};
-    const SIDE: f32 = 14.0;
     let words = super::text::width(
         label,
         super::text::size(Role::CONTROL),
         super::text::font(Role::CTA),
     );
-    (2.0 * SIDE + size::ICON_SMALL + space::GAP + words).ceil()
+    (2.0 * side + size::ICON_SMALL + space::GAP + words).ceil()
 }
 
 /// A section that opens in place (the What's new card's Fixes): a chevron

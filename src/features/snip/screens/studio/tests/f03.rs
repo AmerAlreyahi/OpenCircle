@@ -185,7 +185,7 @@ fn f03_ac5_copy_all_and_export_are_at_the_cards_foot_with_the_hint_under_the_ste
         foot - y("Copy all") < 60.0 && foot - y("Export") < 60.0,
         "at the foot"
     );
-    let hint = y("Open on the canvas · drag to reorder");
+    let hint = y("Click opens a step. Drag to reorder.");
     assert!(
         hint < y("Copy all") - 100.0,
         "the hint sits under the steps, high in the card"

@@ -1913,6 +1913,8 @@ strings! {
         | "لا توجد خطوات بعد. في لقطة الشاشة، «المزيد» > «أضف إلى الخطوات» يضع اللقطة هنا.";
     st_step_tip: "Open on the canvas · drag to reorder"
         | "افتحها على اللوحة · اسحب لتغيير الترتيب";
+    st_steps_hint: "Click opens a step. Drag to reorder."
+        | "انقر لفتح الخطوة. اسحب لإعادة الترتيب.";
     st_export: "Export"
         | "تصدير";
     st_export_back: "Back to the steps"
