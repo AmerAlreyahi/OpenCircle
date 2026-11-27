@@ -103,6 +103,15 @@ where they differ.
   assets re-downloaded: byte-identical to the gated draft, SHA256SUMS OK, minisig OK ("OpenCircle v0.5.0"), latest = v0.5.0.
   Known issues shipped (fixed in 0.5.1 R-18; kept out of the notes by the owner's word): one-word in-place translate cut off
   ("To..."); the Studio view moves on pin / Preferences / right-click.
+  v0.5.1 published 2026-11-27 01:10 UTC on tag v0.5.1 (29d0645a) by the lead (SDLC_OWNER_RELEASE=1 + the owner's overnight OK):
+  R-15 Arabic reader (Windows ar-SA in main mode only), R-16 Studio selectable text, R-18 Studio view stays put + one-word translate
+  never cut off + slider button / Picture info removed, R-19 Studio drawing on 5K/8K (5 review rounds: screen == export, no pixel
+  change outside the edit, drag ~1 ms, commits 3-8 ms; Spotlight 18-37 ms, 8K Blur ~20 ms, 100-200 % zoom drag unchanged = known
+  issues). Gates: CI green (audit), SHA256SUMS + minisig OK ("OpenCircle v0.5.1"), Windows update gate PASS (0.5.0 Setup + portable ->
+  draft, About, Setup /quiet, winget managed + plain-over-managed after fixing the gate's fake release to always-newer 0.5.99), Linux
+  VM pass + AppImage --version / run on Ubuntu. Owner tested build 2177b5b (drawing complaint -> R-19); build 29d0645 sent, not yet
+  tried by him. Published assets re-downloaded: byte-identical to the gated draft, SHA256SUMS OK, minisig OK, latest = v0.5.1.
+  G-01 GPU renderer not in 0.5.1 (waits for the owner's lab-gpu2 result).
 - Frozen contracts (since v0.1.0): the CLI (`opencircle capture …`, `run …`,
   `quit`) and the config file format: migrate, never break. The update channel
   (GitHub release assets, SHA256SUMS.txt + .minisig, trusted comment

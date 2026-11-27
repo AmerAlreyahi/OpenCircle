@@ -187,7 +187,7 @@
     {
       "version": "0.5.1",
       "name": "Fixes, GPU renderer and reading (before the redesign)",
-      "status": "active",
+      "status": "shipped",
       "why": "Owner 2026-11-26: fix what 0.5.0 users hit first (the Studio view jumping, the cut-off one-word translate) and finish the reading work, as a small fast release before the 0.6.0 redesign.",
       "outcome": "The Studio view moves only when the user moves it; one-word translate is never cut off; the extra slider button and Picture info are gone; Arabic lines with English words and digits read as one line in the right order; text in the Studio is selectable; the GPU renderer only if the owner's lab-gpu2 test is good.",
       "items": [
@@ -198,7 +198,7 @@
         },
         {
           "id": "G-01",
-          "title": "GPU renderer: iced wgpu with automatic tiny-skia fallback, after the owner's lab-gpu test (lag at 3440x1440 / 4K, memory)",
+          "title": "GPU renderer: iced wgpu with automatic tiny-skia fallback, after the owner's lab-gpu test (lag at 3440x1440 / 4K, memory) (moved out of 0.5.1: waits for the lab-gpu2 result)",
           "status": "todo"
         },
         {
@@ -215,35 +215,40 @@
           "id": "K-04",
           "title": "Kit: map the board fields so roadmap.json drives the board (sync not run yet: field names differ)",
           "status": "todo"
+        },
+        {
+          "id": "R-19",
+          "title": "Studio drawing on 5K/8K pictures: fast drags and commits, no picture pixel change, screen == export",
+          "status": "done"
         }
       ],
       "gate": [
         {
           "check": "Full gate + CI green, test count not lower",
-          "ok": false
+          "ok": true
         },
         {
           "check": "A test per Studio view path (right-click, pin, Preferences, panels, window resize)",
-          "ok": false
+          "ok": true
         },
         {
           "check": "Arabic reading measured before -> after (W109 set + English control)",
-          "ok": false
+          "ok": true
         },
         {
           "check": "Owner tried the test build",
-          "ok": false
+          "ok": true
         },
         {
           "check": "Windows VM pass + update gate (0.5.0 Setup + portable -> draft), AppImage CLI",
-          "ok": false
+          "ok": true
         }
       ]
     },
     {
       "version": "0.6.0",
       "name": "Snip recording + the new design",
-      "status": "next",
+      "status": "active",
       "why": "Owner 2026-11-24: video and audio recording in Snip next, and the design he has not approved yet is finished right after the enhancements.",
       "outcome": "Snip records an area, a window or the screen with microphone and/or computer sound; its widget changes with the mode (record mode shows record controls only, no picture tools); the new design is approved and applied.",
       "items": [
