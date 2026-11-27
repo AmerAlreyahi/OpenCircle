@@ -297,7 +297,8 @@ fn with_steps_panel<'a>(
         }
         .top(super::SLIDER_TOP)
         .bottom(super::SLIDER_BOTTOM);
-        let panel = container(super::sidebar::view(s, steps)).padding(pad);
+        // (only the card takes input: the margin strips round it stay the canvas's)
+        let panel = container(opaque(super::sidebar::view(s, steps))).padding(pad);
         let panel = crate::shared::kit::edge_slide::slide_in(
             panel.into(),
             super::SIDEBAR + super::SLIDER_EDGE,
@@ -313,7 +314,7 @@ fn with_steps_panel<'a>(
             );
         }
         layers.push(
-            container(opaque(panel))
+            container(panel)
                 .width(Fill)
                 .height(Fill)
                 .align_x(edge)
@@ -594,9 +595,9 @@ fn stage<'a>(s: &'a Studio, e: &'a Annotator) -> Element<'a, Msg> {
         );
     }
     // the card's rounded corners above the picture, whatever the zoom or scroll
-    stage_layers.push(super::corners::over(radius::CARD));
+    stage_layers.push(super::corners::over(radius::DRAWER));
     let stage: Element<'a, Msg> = iced::widget::stack(stage_layers).into();
-    surface(material, radius::CARD, stage)
+    surface(material, radius::DRAWER, stage)
         .width(Fill)
         .height(Fill)
         .into()

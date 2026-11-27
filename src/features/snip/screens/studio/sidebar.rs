@@ -24,7 +24,7 @@ use crate::t;
 pub(super) const CARD: &str = "studio-steps-card";
 
 /// The sidebar's side padding.
-pub(super) const PAD: f32 = 12.0;
+pub(super) const PAD: f32 = 14.0;
 
 /// The whole sidebar. `steps`: the Steps strip's steps.
 pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
@@ -52,7 +52,10 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
             )
         }
     };
-    let panel = card(head(s, steps.len()), body);
+    let on_steps = s.page == Page::Steps && s.slide.is_none();
+    let has_steps = !steps.is_empty() || s.steps_pending > 0;
+    let foot = (on_steps && has_steps).then(foot);
+    let panel = card(head(s, steps.len()), body, foot);
     // (a file dropped while the pointer is here is a step)
     mouse_area(panel)
         .on_enter(Msg::OverSidebar(true))
@@ -62,7 +65,11 @@ pub fn view<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
 
 /// The floating card (design r6): the header, a hairline and the scrolling body on a raised
 /// rounded card. The card is the only surface (no square fill under it), so its corners stay round.
-fn card<'a>(head: Element<'a, Msg>, body: Element<'a, Msg>) -> Element<'a, Msg> {
+fn card<'a>(
+    head: Element<'a, Msg>,
+    body: Element<'a, Msg>,
+    foot: Option<Element<'a, Msg>>,
+) -> Element<'a, Msg> {
     let head = container(head)
         .padding(iced::Padding::ZERO.left(PAD).right(PAD))
         .height(size::HEADER)
@@ -73,7 +80,8 @@ fn card<'a>(head: Element<'a, Msg>, body: Element<'a, Msg>) -> Element<'a, Msg> 
         column![
             head,
             crate::shared::kit::divider::divider(),
-            scroll::scroll(body).height(iced::Fill)
+            scroll::scroll(body).height(iced::Fill),
+            foot.unwrap_or_else(|| Space::new().into())
         ],
     )
     .id(CARD)
@@ -203,6 +211,16 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
     let list = mouse_area(column(rows.collect::<Vec<_>>()).spacing(super::STEP_GAP))
         .on_move(move |at| Msg::StepMove(at, n))
         .on_release(Msg::StepRelease);
+    let tip = muted(Role::ROW_DESC, t!(st_step_tip));
+    column![
+        container(list).padding([0.0, PAD]),
+        container(tip).padding([space::GAP, PAD])
+    ]
+    .into()
+}
+
+/// Copy all and Export, pinned at the card's foot (outside the scrolling steps).
+fn foot<'a>() -> Element<'a, Msg> {
     let half = (super::SIDEBAR - 2.0 * PAD - space::GAP) / 2.0;
     let copy = button::labelled(
         toolbar::COPY,
@@ -221,11 +239,7 @@ fn steps_list<'a>(s: &'a Studio, steps: &'a [Arc<Step>]) -> Element<'a, Msg> {
         Some(Msg::SidebarPage(Page::Export)),
     );
     let foot = crate::dir_row![copy, export].spacing(space::GAP);
-    column![
-        container(list).padding([0.0, PAD]),
-        container(foot).padding([space::GAP, PAD])
-    ]
-    .into()
+    container(foot).padding([space::GAP, PAD]).into()
 }
 
 /// The Export page: a back arrow and its title, then one row per way out. The walkthrough

@@ -6,7 +6,7 @@ use iced::widget::{Space, container, opaque, stack};
 use iced::{Bottom, Center, Element, Fill};
 
 use super::view::{MINUS, PLUS};
-use super::{Msg, PILL_EDGE, Studio, keys};
+use super::{Msg, PILL_BTN_H, PILL_BTN_RADIUS, PILL_BTN_SIDE, PILL_EDGE, Studio, keys};
 use crate::features::snip::annotate::{Annotator, Message};
 use crate::features::snip::screens::snip_toolbar::toolbar;
 use crate::shared::kit::button::{self, Kind};
@@ -20,6 +20,14 @@ use crate::t;
 /// The pills' ids (the tests read their bounds).
 pub(super) const SIZE_PILL: &str = "studio-pill-size";
 pub(super) const ACTIONS_PILL: &str = "studio-pill-actions";
+
+/// Save / Copy: height and corner (the design's 32 px pill buttons).
+const PILL_BOX: (f32, f32) = (PILL_BTN_H, PILL_BTN_RADIUS);
+
+/// The width of a pill button: `labelled`'s content with the pill's own side padding.
+fn pill_width(label: &str) -> f32 {
+    button::labelled_width(label) - 2.0 * (14.0 - PILL_BTN_SIDE)
+}
 
 /// `stage` with the two pills floating over its bottom corners.
 pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Element<'a, Msg> {
@@ -46,10 +54,11 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
     ]);
     let (save_words, copy_words) = (t!(c_save), t!(c_copy));
     let save = hint(
-        button::labelled(
+        button::labelled_sized(
             toolbar::SAVE,
             save_words,
-            button::labelled_width(save_words),
+            pill_width(save_words),
+            PILL_BOX,
             Kind::Quiet,
             false,
             Some(Msg::Editor(Message::Save)),
@@ -59,10 +68,11 @@ pub fn over<'a>(s: &'a Studio, e: &'a Annotator, below: Element<'a, Msg>) -> Ele
         Position::Top,
     );
     let copy = hint(
-        button::labelled(
+        button::labelled_sized(
             toolbar::COPY,
             copy_words,
-            button::labelled_width(copy_words),
+            pill_width(copy_words),
+            PILL_BOX,
             Kind::Accent,
             false,
             Some(Msg::Editor(Message::Copy)),

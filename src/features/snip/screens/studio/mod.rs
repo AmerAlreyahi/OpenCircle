@@ -73,6 +73,10 @@ const BAND: f32 = PILL_EDGE + PILL_ROOM;
 pub(super) const SLIDER_TOP: f32 = 12.0;
 pub(super) const SLIDER_EDGE: f32 = 8.0;
 pub(super) const SLIDER_BOTTOM: f32 = 74.0;
+/// The pills' Save / Copy buttons (build.py `.tr .tb2`): 32 px tall, 12 px each side, pill corners.
+pub(super) const PILL_BTN_H: f32 = 32.0;
+pub(super) const PILL_BTN_SIDE: f32 = 12.0;
+pub(super) const PILL_BTN_RADIUS: f32 = 16.0;
 /// The gap between the rail's tiles.
 const TILE_GAP: f32 = 8.0;
 // === end Studio round 6 ===
@@ -92,9 +96,9 @@ pub const FIELD: &str = "studio-edit-field";
 pub const DROP_SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// The Steps grid: four to a row, the cell and the gap round it.
-/// The sidebar's steps: four to a row (3 x 10 + 4 x 66 = 294 px of its 296), room for the number badge.
+/// The sidebar's steps: four to a row (3 x 10 + 4 x 65 = 290 px of its 292), room for the number badge.
 const STEP_COLS: usize = 4;
-const STEP_CELL: Size = Size::new(66.0, 44.0);
+const STEP_CELL: Size = Size::new(65.0, 44.0);
 const STEP_GAP: f32 = 10.0;
 
 /// What the Studio opens.

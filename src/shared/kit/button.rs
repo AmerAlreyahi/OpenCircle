@@ -635,6 +635,27 @@ pub fn labelled<'a, Message: Clone + 'a>(
     focused: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    labelled_sized(
+        glyph,
+        label,
+        width,
+        (size::ICON_BUTTON, radius::CONTROL),
+        kind,
+        focused,
+        on_press,
+    )
+}
+
+/// `labelled` with its own `(height, corner)` (the Studio's floating pills: 32 px, pill corners).
+pub fn labelled_sized<'a, Message: Clone + 'a>(
+    glyph: char,
+    label: impl text::IntoFragment<'a>,
+    width: f32,
+    (height, corner): (f32, f32),
+    kind: Kind,
+    focused: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
     use super::tokens::{Role, space};
     let content = row![
         text(glyph).font(super::icon::FONT).size(size::ICON_SMALL),
@@ -645,7 +666,15 @@ pub fn labelled<'a, Message: Clone + 'a>(
     ]
     .spacing(space::GAP)
     .align_y(Center);
-    tooled(content, width, kind, focused, on_press)
+    tooled_box(
+        content,
+        width,
+        (height, corner),
+        kind,
+        false,
+        focused,
+        on_press,
+    )
 }
 
 /// A dialog's button: `label` only, centred, `width` wide, the kit's tool height, the same

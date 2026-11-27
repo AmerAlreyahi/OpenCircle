@@ -3759,18 +3759,41 @@ fn a_big_picture_shown_small_is_drawn_from_a_smaller_copy() {
 /// insertion differed and the whole window was repainted: 15-35 ms a frame at 3440x1440).
 #[test]
 fn an_action_redraws_only_what_changed() {
+    // with the Steps card closed and open: neither changes what a tool or a menu repaints
+    for open in [false, true] {
+        an_action_redraws_only(open);
+    }
+}
+
+fn an_action_redraws_only(card_open: bool) {
     use crate::shared::kit::testing::shot;
     crate::shared::kit::text::load();
     let win = Size::new(1920.0, 1080.0);
-    let mut s = studio_on(1600, 900);
+    let mut s = match card_open {
+        true => studio_on(1600, 900),
+        false => {
+            let mut s = Studio::new(StudioConfig::default());
+            s.open(Picture::Crop(crop(1600, 900)));
+            s.settle_open();
+            s
+        }
+    };
     let _ = s.update(Msg::Resized(win));
+    // (the smaller copy of the picture is made on a thread and swaps in at the next event:
+    // that swap is the picture's one honest repaint, so it is taken before the frames)
+    for _ in 0..500 {
+        let _ = s.update(Msg::Editor(Message::Tool(Tool::Arrow)));
+        if s.editor.as_ref().unwrap().display.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     let acts = [
         Msg::Menu(Some(menu_bar::Menu::File)),
         Msg::Menu(None),
         Msg::Pop(Some(popovers::Pop::Actions)),
         Msg::Pop(None),
-        // (a tool change repaints the picture too when the Steps card is not docked: it did on
-        // origin/main with the card closed; the docked fixture hid it. Follow-up, see F-03 report)
+        Msg::Editor(Message::Tool(Tool::Rect)),
     ];
     let frames = shot::frames_of(win, acts.len() + 2, |i, show| {
         // frame 0 draws the picture; frame 1 is idle; then one action each

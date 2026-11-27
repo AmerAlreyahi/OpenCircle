@@ -124,3 +124,71 @@ fn f03_ac4_a_zoomed_picture_does_not_cover_the_cards_rounded_corners() {
         assert_eq!(pixel(&px, x, y), bg, "corner at {x},{y}");
     }
 }
+
+#[test]
+fn f03_ac2_pills_stay_clickable_with_the_card_open_or_pinned() {
+    motion::set_reduced(true);
+    crate::shared::kit::text::load();
+    let mut s = editor_of([255; 4], 300, 200);
+    let _ = s.update(Msg::Library);
+    let _ = s.update(Msg::PinSteps);
+    let words = shot::texts_at(view(&s, &[], false), SIZE);
+    for (word, want) in [("Copy", "Copy"), ("Save", "Save"), ("Fit", "Fit")] {
+        let r = words.iter().find(|(_, t)| t == word).expect(word).0;
+        let got = shot::click(
+            view(&s, &[], false),
+            SIZE,
+            Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0),
+        );
+        let ok = got.iter().any(|m| {
+            matches!(
+                (want, m),
+                ("Copy", Msg::Editor(Message::Copy))
+                    | ("Save", Msg::Editor(Message::Save))
+                    | ("Fit", Msg::Fit)
+            )
+        });
+        assert!(ok, "{word}: {got:?}");
+    }
+    // the card's own margin strips are the canvas's: a click there is not the card's
+    let card = find(&bounds(&s), super::sidebar::CARD);
+    let strip = Point::new(card.x + 100.0, card.y - 6.0);
+    let got = shot::click(view(&s, &[], false), SIZE, strip);
+    assert!(
+        !got.iter().any(|m| matches!(m, Msg::OverSidebar(_))),
+        "{got:?}"
+    );
+    motion::set_reduced(false);
+}
+
+#[test]
+fn f03_ac5_copy_all_and_export_are_at_the_cards_foot_with_the_hint_under_the_steps() {
+    motion::set_reduced(true);
+    crate::shared::kit::text::load();
+    let mut s = editor_of([255; 4], 300, 200);
+    let steps: Vec<std::sync::Arc<Step>> = (0..3)
+        .map(|_| std::sync::Arc::new(Step::new(&crop(300, 200)).unwrap()))
+        .collect();
+    let _ = s.update(Msg::Library);
+    let card = find(&bounds(&s), super::sidebar::CARD);
+    let words = shot::texts_at(view(&s, &steps, false), SIZE);
+    let y = |w: &str| {
+        words
+            .iter()
+            .find(|(_, t)| t == w)
+            .unwrap_or_else(|| panic!("{w}"))
+            .0
+            .y
+    };
+    let foot = card.y + card.height;
+    assert!(
+        foot - y("Copy all") < 60.0 && foot - y("Export") < 60.0,
+        "at the foot"
+    );
+    let hint = y("Open on the canvas · drag to reorder");
+    assert!(
+        hint < y("Copy all") - 100.0,
+        "the hint sits under the steps, high in the card"
+    );
+    motion::set_reduced(false);
+}
