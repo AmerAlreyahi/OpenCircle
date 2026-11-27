@@ -1896,3 +1896,32 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   cores; VP8 30 fps pass, 60 fps 5-6 % dropped) and GNOME Wayland (Mutter's ScreenCast -> pipewiresrc, all cases pass, <= 1.43 cores
   peak; Mutter delivers ~55 fps). Lead defaults (owner may reverse): 30 fps default; x264 + MP4 when present, else VP8 + WebM with an
   explicit bitrate (VP8's default 256 kbps is too low for screens); 60 fps only behind the auto-30 fallback.
+- Design fidelity (owner, 2026-11-27, on dev build bf11f77, shots docs/internal/owner-shots/2026-11-27/settings-*-design-vs-app.webp,
+  snip-toolbar-app.png): "do you think this is the same?" NO: the design is more comfortable than the app (more gaps, bigger boxes, larger
+  type); pieces are missing (Appearance theme cards with mini windows + System diagonal, screen-border look CARDS with previews, the
+  Translate model list per pair with status / Update / progress / Add a language pair, the Circle to Search "Reading language" row,
+  Glossary Edit button + its note) and some widgets don't match what he was shown. "Make it similar to the design": a fidelity pass on
+  Settings AND the widgets, measured against the design source (sizes, paddings, gaps, type sizes from the CSS), compared side by side at
+  the SAME window size and scale, every page / widget; contact sheets at 1:1, not shrunk.
+  Previews (owner, same day): "no preview, where are the preview vids? It should be there by default": each Settings page with a clip
+  shows its preview block OPEN by default (the design's "Hide the demo" state). Lead default (owner may reverse): the block shows the
+  bundled still at once; the clip itself still downloads only when he presses Play ("Previews online on demand", 2026-11-04); ask him
+  whether it should autoplay/download by itself.
+  Antigravity (owner, same day): use the Neon MEDIUM model (gemini-4-neon-medium); it has quota while Neon High is on its weekly limit.
+- Studio round 6 owner check (owner, 2026-11-27, dev build bf11f77, shots docs/internal/owner-shots/2026-11-27/studio-pills-save-boxed.png,
+  studio-slider-design-vs-app.webp): "otherwise the Studio redesign is solid". Fix: (1) Save sits in an inner white container inside the
+  bottom pill: no nested box; build exactly as drawn (and as a rule: never wrap a control in an extra container the design doesn't
+  draw; reviews check this); (2) the Steps slider becomes the FLOATING card of the design (rounded card over the canvas with a margin,
+  its own header/pin/close, Copy all + Export at its foot), not a docked full-height panel, and it never covers the bottom pills.
+  Studio Preferences: the build he tried predates the D-05 merge (d7a56d7e); the next build has it.
+  (2026-11-27, same check) (3) the Studio canvas still shows a hard square corner (top-left by the rail): every Studio surface the
+  design rounds has soft rounded corners on all four sides.
+- Dialog buttons centred (owner, 2026-11-27, every popup; extends "Report a problem popup: its BUTTONS are centred", 2026-11-25): in ANY
+  popup/dialog/confirm (e.g. Studio "Save the changes to this picture?" Don't save / Cancel / Save) the option buttons are centred
+  horizontally, built once in the kit dialog part so every dialog follows it (shot docs/internal/owner-shots/2026-11-27/dialog-buttons-not-centred.png).
+- Owner answers (2026-11-27, ~12:15): Recording Q2 = YES (Wayland window recording through the desktop's own chooser + the hint line
+  "W: a window"). Q1 (Linux whole-screen recording: bar steps into the tray) = "show me first" (a render before deciding). Design round
+  (OpenRouter card + tips) = "show me" again before deciding. Previews (SUPERSEDES "Previews online on demand" 2026-11-04 for the
+  download trigger): each page's preview block is open by default AND its clip downloads and plays automatically (sha256-pinned, from
+  the owner's release, kept on the PC; reduced motion = still frame). Steps badge corner "doesn't matter" (keep the design's); the badge
+  must be BIGGER / scale with the screen (DPI): on his 5K monitor it looks small.
