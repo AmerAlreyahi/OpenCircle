@@ -38,35 +38,35 @@ fn detailed_crop(width: u32, height: u32) -> Crop {
     }
 }
 
-struct StudioFrame {
-    update_ms: f64,
-    draw_ms: f64,
-    raster_ms: f64,
-    damage_ms: f64,
-    damage_area: f64,
+pub(super) struct StudioFrame {
+    pub(super) update_ms: f64,
+    pub(super) draw_ms: f64,
+    pub(super) raster_ms: f64,
+    pub(super) damage_ms: f64,
+    pub(super) damage_area: f64,
 }
 
 impl StudioFrame {
-    fn total_ms(&self) -> f64 {
+    pub(super) fn total_ms(&self) -> f64 {
         self.update_ms + self.draw_ms + self.raster_ms
     }
 }
 
 /// Full Studio window compositor harness: persistent iced widget Cache, Renderer, Pixmap,
 /// damage tracking and background mip settling.
-struct StudioLab {
-    s: Studio,
-    size: Size,
-    scale: f32,
-    renderer: iced::Renderer,
-    cache: Cache,
-    pixmap: tiny_skia::Pixmap,
-    mask: tiny_skia::Mask,
-    last_layers: Option<Vec<iced_tiny_skia::Layer>>,
+pub(super) struct StudioLab {
+    pub(super) s: Studio,
+    pub(super) size: Size,
+    pub(super) scale: f32,
+    pub(super) renderer: iced::Renderer,
+    pub(super) cache: Cache,
+    pub(super) pixmap: tiny_skia::Pixmap,
+    pub(super) mask: tiny_skia::Mask,
+    pub(super) last_layers: Option<Vec<iced_tiny_skia::Layer>>,
 }
 
 impl StudioLab {
-    fn open(width: u32, height: u32, window: Size, scale: f32) -> Self {
+    pub(super) fn open(width: u32, height: u32, window: Size, scale: f32) -> Self {
         motion::set_reduced(true);
         crate::shared::kit::text::load();
         let mut s = Studio::new(StudioConfig::default());
@@ -93,7 +93,7 @@ impl StudioLab {
         lab
     }
 
-    fn settle_mip(&mut self) {
+    pub(super) fn settle_mip(&mut self) {
         for _ in 0..2000 {
             if !self.s.moving() {
                 break;
@@ -103,7 +103,7 @@ impl StudioLab {
         }
     }
 
-    fn apply_scroll(&mut self, to: iced::widget::scrollable::AbsoluteOffset) {
+    pub(super) fn apply_scroll(&mut self, to: iced::widget::scrollable::AbsoluteOffset) {
         use iced::advanced::widget::{Id, operation::scrollable::scroll_to};
         let cache = std::mem::take(&mut self.cache);
         let mut ui = UserInterface::build(
@@ -117,12 +117,12 @@ impl StudioLab {
         self.cache = ui.into_cache();
     }
 
-    fn reset_scroll(&mut self) {
+    pub(super) fn reset_scroll(&mut self) {
         self.apply_scroll(iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 });
         let _ = self.s.update(Msg::Scrolled(Vector::ZERO));
     }
 
-    fn send(&mut self, msg: Msg) -> f64 {
+    pub(super) fn send(&mut self, msg: Msg) -> f64 {
         let t0 = std::time::Instant::now();
         let out = self.s.update(msg);
         let queued = self.s.take_scroll();
@@ -136,7 +136,7 @@ impl StudioLab {
         ms
     }
 
-    fn render(&mut self, update_ms: f64) -> StudioFrame {
+    pub(super) fn render(&mut self, update_ms: f64) -> StudioFrame {
         let t0 = std::time::Instant::now();
         let view = view(&self.s, &[], false);
         let cache = std::mem::take(&mut self.cache);
@@ -188,11 +188,11 @@ impl StudioLab {
         }
     }
 
-    fn pixels(&self) -> Vec<u8> {
+    pub(super) fn pixels(&self) -> Vec<u8> {
         self.pixmap.data().to_vec()
     }
 
-    fn picture_phys_rect(&self) -> [u32; 4] {
+    pub(super) fn picture_phys_rect(&self) -> [u32; 4] {
         let e = self.s.editor.as_ref().unwrap();
         let room = self.s.stage();
         let shown = e.size();
@@ -215,7 +215,7 @@ impl StudioLab {
         ]
     }
 
-    fn image_rect_to_phys(&self, r: Rectangle, pad_px: f32) -> [i32; 4] {
+    pub(super) fn image_rect_to_phys(&self, r: Rectangle, pad_px: f32) -> [i32; 4] {
         let e = self.s.editor.as_ref().unwrap();
         let room = self.s.stage();
         let shown = e.size();
@@ -236,7 +236,7 @@ impl StudioLab {
     }
 }
 
-fn diff_outside(
+pub(super) fn diff_outside(
     before: &[u8],
     after: &[u8],
     stride_px: u32,
@@ -288,7 +288,7 @@ fn drag_points(tool: Tool, w: f32, h: f32, zoom_actual: bool, n: usize) -> Vec<P
         .collect()
 }
 
-fn summarize(vals: &[f64]) -> String {
+pub(super) fn summarize(vals: &[f64]) -> String {
     let mut s = vals.to_vec();
     s.sort_by(f64::total_cmp);
     let mean = s.iter().sum::<f64>() / s.len().max(1) as f64;

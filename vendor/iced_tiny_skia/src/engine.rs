@@ -657,6 +657,16 @@ impl Engine {
                     return;
                 }
 
+                // OpenCircle patch (B-01): an enlarged opaque picture, smooth
+                if radians == 0.0
+                    && image.opacity == 1.0
+                    && under.is_none()
+                    && image.filter_method == crate::core::image::FilterMethod::Linear
+                    && self.raster_pipeline.draw_enlarged(&image.handle, *bounds, transform, _pixels, clip)
+                {
+                    return;
+                }
+
                 // (the caller skipped the clear under it: lay its colour first)
                 if let (Some(c), Ok(data)) = (
                     under,

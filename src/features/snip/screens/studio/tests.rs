@@ -7,6 +7,7 @@ use crate::features::snip::snip_more::Row;
 use crate::features::translate::Line;
 use crate::shared::config;
 
+mod b01;
 mod r16;
 mod r18;
 mod r19;

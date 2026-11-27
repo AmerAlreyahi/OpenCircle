@@ -159,6 +159,31 @@ impl Pipeline {
         true
     }
 
+    /// OpenCircle patch (B-01): `draw` for an opaque image shown Linear and
+    /// enlarged (above 100 % zoom), straight into the pixels: tiny-skia's
+    /// bilinear pipeline with a clip mask cost ~100 ms a frame on a 3K
+    /// picture, every frame of a drag. `false` (nothing drawn): not such an
+    /// image; `draw` it.
+    pub fn draw_enlarged(
+        &mut self,
+        handle: &raster::Handle,
+        bounds: Rectangle,
+        transform: tiny_skia::Transform,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        clip: [u32; 4],
+    ) -> bool {
+        let mut cache = self.cache.borrow_mut();
+        if cache.allocate(handle).is_err() {
+            return true;
+        }
+        let Some(Some(image)) = cache.entries.get(&handle.id()) else {
+            return false;
+        };
+        image.opaque
+            && !TINY_SKIA_ENLARGE.get()
+            && blit_bilinear_enlarged(image, bounds, transform, pixels, clip)
+    }
+
     /// OpenCircle patch (#89): an image's size and whether it is opaque,
     /// loaded now if it isn't (`None`: it can't be).
     pub fn loaded(&self, handle: &raster::Handle) -> Option<(u32, u32, bool)> {
@@ -255,6 +280,90 @@ fn scaled(
     true
 }
 
+/// OpenCircle patch (B-01): `draw` for an opaque image enlarged on both axes
+/// with Linear, byte for byte what tiny-skia's `draw_pixmap` (fill_rect of a
+/// Bilinear pattern) writes, minus its per-pixel pipeline and the mask: the
+/// same f32 transform and span rounding (non-AA scan conversion, 26.6 edges),
+/// the same 2x2 float weights, the same source-over and rounding. `false`:
+/// not an enlargement (flipped, skewed, shrunk), nothing drawn.
+fn blit_bilinear_enlarged(
+    image: &Entry,
+    bounds: Rectangle,
+    t: tiny_skia::Transform,
+    pixels: &mut tiny_skia::PixmapMut<'_>,
+    clip: [u32; 4],
+) -> bool {
+    use tiny_skia::{Point, Transform};
+    let (iw, ih) = (image.width as usize, image.height as usize);
+    // as `draw`: the scale, then the whole-pixel position it hands tiny-skia
+    let (ws, hs) = (bounds.width / image.width as f32, bounds.height / image.height as f32);
+    let t = t.pre_scale(ws, hs);
+    if t.kx != 0.0 || t.ky != 0.0 || !(t.sx > 1.0 && t.sy > 1.0) {
+        return false;
+    }
+    let (x, y) = ((bounds.x / ws) as i32, (bounds.y / hs) as i32);
+    // the pattern's inverse (pattern moved to x, y, then `t`)
+    let Some(inv) = Transform::from_translate(x as f32, y as f32).post_concat(t).invert() else {
+        return false;
+    };
+    // the rect path, mapped as tiny-skia maps it, then its edges in 26.6
+    let mut corners = [
+        Point::from_xy(x as f32, y as f32),
+        Point::from_xy(x as f32 + image.width as f32, y as f32 + image.height as f32),
+    ];
+    t.map_points(&mut corners);
+    let six = |v: f32| (v * 64.0) as i32;
+    let round = |v: i32| i64::from((v + 32) >> 6);
+    let (cx0, cx1) = (round(six(corners[0].x)), round(six(corners[1].x)));
+    let (cy0, cy1) = (round(six(corners[0].y)), round(six(corners[1].y)));
+    let (w, h) = (pixels.width(), pixels.height());
+    let Ok(dst) = bytemuck::try_cast_slice_mut::<u8, u32>(pixels.data_mut()) else {
+        return false;
+    };
+    let lo = |c: u32| i64::from(c);
+    let (xa, xb) = (cx0.max(lo(clip[0])).max(0), cx1.min(lo(clip[2])).min(lo(w)));
+    let (ya, yb) = (cy0.max(lo(clip[1])).max(0), cy1.min(lo(clip[3])).min(lo(h)));
+    if xa >= xb || ya >= yb {
+        return true;
+    }
+    const FACTOR: f32 = 1.0 / 255.0;
+    let lut: [f32; 256] = std::array::from_fn(|i| i as f32 * FACTOR);
+    // a sample position: (first image index, second, weight of the second)
+    let tap = |at: f32, scale: f32, shift: f32, n: usize| {
+        let c = at * scale + shift;
+        let f = (c + 0.5) - (c + 0.5).floor();
+        let top = (n as f32).next_down();
+        let pick = |v: f32| v.clamp(0.0, top) as usize;
+        let first = c + -0.5;
+        (pick(first), pick(first + 1.0), f)
+    };
+    let cols: Vec<_> = (xa..xb).map(|d| tap(d as f32 + 0.5, inv.sx, inv.tx, iw)).collect();
+    let n = cols.len();
+    rows(dst, w as usize, n, ya as usize..yb as usize, |row_y, row| {
+        let (v0, v1, fy) = tap(row_y as f32 + 0.5, inv.sy, inv.ty, ih);
+        let (r0, r1) = (&image.pixels[v0 * iw..][..iw], &image.pixels[v1 * iw..][..iw]);
+        let wy = [1.0 - fy, fy];
+        for (p, &(u0, u1, fx)) in row[xa as usize..xa as usize + n].iter_mut().zip(&cols) {
+            let wx = [1.0 - fx, fx];
+            let taps = [(r0[u0], wx[0] * wy[0]), (r0[u1], wx[1] * wy[0]), (r1[u0], wx[0] * wy[1]), (r1[u1], wx[1] * wy[1])];
+            let mut s = [0.0f32; 4];
+            for (px, wt) in taps {
+                for (c, b) in px.to_ne_bytes().into_iter().enumerate() {
+                    s[c] = wt * lut[b as usize] + s[c];
+                }
+            }
+            let ia = 1.0 - s[3];
+            let d = p.to_ne_bytes();
+            let out: [u8; 4] = std::array::from_fn(|c| {
+                let v = lut[d[c] as usize] * ia + s[c];
+                (v.clamp(0.0, 1.0) * 255.0).round_ties_even() as u8
+            });
+            *p = u32::from_ne_bytes(out);
+        }
+    });
+    true
+}
+
 /// OpenCircle patch (#89): where `scaled` puts an `iw` x `ih` image drawn
 /// in `bounds` by `t`: (x of its corner, device px per image px across, y,
 /// down). `None`: flipped or skewed.
@@ -321,6 +430,9 @@ pub(crate) fn rows(
 }
 
 thread_local! {
+    /// OpenCircle patch (B-01), tests: draw enlarged Linear pictures through
+    /// tiny-skia as before, to compare them with `blit_bilinear_enlarged`.
+    pub static TINY_SKIA_ENLARGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// OpenCircle patch (#89): how often `rows` split its work between the
     /// cores on this thread (tests: a small redraw never does).
     pub static SPLIT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
