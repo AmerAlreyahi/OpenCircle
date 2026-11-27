@@ -328,7 +328,7 @@
         {
           "id": "R-12",
           "title": "Live pin click-through: hold Ctrl over the pin to make it clickable; faint mark + tooltip while clicks pass through; tray row stays",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-13",

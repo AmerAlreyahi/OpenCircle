@@ -457,6 +457,8 @@ fn live(windows: &mut Windows, w: u32, h: u32, scale: f32) -> window::Id {
         scale,
         opacity: 0,
         through: false,
+        auto: false,
+        hint: false,
     });
     pin.reshape();
     pin.id
@@ -1336,4 +1338,102 @@ fn f04_the_live_pin_hover_bar_is_186_by_44() {
         (226, 407),
         "186 wide: the rounded ends are anti-aliased one pixel in"
     );
+}
+
+fn rule(through: bool, hint: bool) -> PinMsg {
+    PinMsg::Rule(click::Verdict { through, hint })
+}
+
+/// R12-2: a pin on the Ctrl rule takes what the watch decides; a pin without the rule (not
+/// Windows) or latched clickable ignores it; the tray row latches.
+#[test]
+fn r12_2_a_live_pin_takes_the_watchs_verdicts() {
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 400, 200, 1.0);
+    let _ = windows.update(Msg::Pin(id, rule(false, false)));
+    assert_eq!(
+        windows.rule_state(),
+        (false, false, false),
+        "no rule: untouched"
+    );
+    {
+        let live = windows.pins[0].live.as_mut().unwrap();
+        (live.auto, live.through) = (true, true);
+    }
+    let _ = windows.update(Msg::Pin(id, rule(true, true)));
+    assert_eq!(windows.rule_state(), (true, true, true), "rested: hint");
+    let _ = windows.update(Msg::Pin(id, rule(false, false)));
+    assert_eq!(
+        windows.rule_state(),
+        (true, false, false),
+        "Ctrl over it: clickable"
+    );
+    let _ = windows.update(Msg::Pin(id, rule(true, false)));
+    assert_eq!(windows.rule_state(), (true, true, false), "through again");
+    let _ = windows.clickable_pins();
+    assert_eq!(
+        windows.rule_state(),
+        (false, false, false),
+        "latched, no rule"
+    );
+    let _ = windows.update(Msg::Pin(id, rule(true, true)));
+    assert_eq!(
+        windows.rule_state(),
+        (false, false, false),
+        "a late verdict is ignored"
+    );
+}
+
+/// R12-3: the faint mark shows while clicks pass through (not while clickable); the hint too.
+#[test]
+fn r12_3_the_mark_and_the_hint_show_only_while_clicks_pass() {
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    let ink = |w: &Windows| {
+        let px = shot::render(w.view(id).unwrap(), 420, 260);
+        // the corner box where the mark sits (right, below the ring)
+        let diff =
+            |a: &[u8], b: &[u8]| a.iter().zip(b).filter(|(x, y)| x.abs_diff(**y) > 8).count();
+        (px, diff)
+    };
+    let (plain, diff) = ink(&windows);
+    {
+        let live = windows.pins[0].live.as_mut().unwrap();
+        (live.auto, live.through) = (true, true);
+    }
+    let (marked, _) = ink(&windows);
+    assert!(diff(&plain, &marked) > 100, "the mark is drawn");
+    windows.pins[0].live.as_mut().unwrap().hint = true;
+    let texts = shot::texts(windows.view(id).unwrap());
+    assert!(
+        texts.iter().any(|t| t == "Hold Ctrl to move or close"),
+        "{texts:?}"
+    );
+}
+
+/// R12-3: the mark and the hint, English and Arabic, Sapphire and Daylight.
+#[test]
+fn r12_3_the_click_through_look_matches_its_golden_images() {
+    use crate::shared::app_language::{self, Lang};
+    use crate::shared::kit::testing::golden;
+    let mut windows = Windows::default();
+    let id = live(&mut windows, 420, 260, 1.0);
+    {
+        let live = windows.pins[0].live.as_mut().unwrap();
+        (live.auto, live.through, live.hint) = (true, true, true);
+    }
+    for lang in [Lang::En, Lang::Ar] {
+        app_language::set(lang);
+        golden::each_theme(|theme, failed| {
+            let name = format!("live-pin-through-{}-{}", lang.code(), theme.id);
+            failed.extend(golden::check(
+                "screens",
+                &name,
+                Size::new(420.0, 260.0),
+                &[1.0],
+                || windows.view(id).unwrap(),
+            ));
+        });
+    }
+    app_language::set(Lang::En);
 }

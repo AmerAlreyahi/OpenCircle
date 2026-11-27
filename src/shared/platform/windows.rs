@@ -481,6 +481,13 @@ pub fn hide_from_capture<T: Send + 'static>(id: window::Id, on: bool) -> Task<T>
     .discard()
 }
 
+/// The OS handle of the window `id` (`None` where there is none).
+pub fn hwnd(id: window::Id) -> Task<Option<isize>> {
+    window::run(id, |w| {
+        (w.window_handle().ok()).and_then(|h| super::shape::raw_id(h.as_raw()))
+    })
+}
+
 /// The window `id` always stacked above the window `owner` (the AI chat over
 /// the overlay, #170), whichever of them comes to the front, while `owner`
 /// still gets every click outside it (`super::shape::keep_above`).

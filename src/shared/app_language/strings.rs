@@ -2196,6 +2196,8 @@ strings! {
         | "الشفافية: 40 %";
     pin_through: "Let clicks pass through (back: tray menu)"
         | "السماح بمرور النقرات (للعودة: قائمة علبة النظام)";
+    pin_hold_ctrl: "Hold Ctrl to move or close"
+        | "اضغط Ctrl مطولاً للتحريك أو الإغلاق";
     win_t_perm_head: "Screenshot permission"
         | "إذن التقاط الشاشة";
     win_t_pin: "OpenCircle pin"

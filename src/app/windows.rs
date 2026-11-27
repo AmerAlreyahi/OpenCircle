@@ -21,6 +21,7 @@ use crate::shared::kit::surface::{Material, surface};
 use crate::shared::kit::tokens::{radius, size, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
 use crate::shared::platform;
+use crate::shared::platform::sys::pointer;
 use crate::shared::theme;
 use crate::{
     app::screens::{update_card, update_pill, what_card},
@@ -181,6 +182,8 @@ pub struct Windows {
     onboarding: Option<(window::Id, onboarding::State)>,
     permission: Option<(window::Id, onboarding::Access)>,
     pins: Vec<Pin>,
+    /// Ctrl and the pointer, watched for the live pins on the click-through rule.
+    watch: click::Watch,
     /// Small message windows (a pill each) and their text.
     toasts: Vec<(window::Id, String, Tone, Option<&'static str>)>,
     /// The failure card window (`failure`), and whether its details are open.
@@ -277,8 +280,13 @@ struct Live {
     scale: f32,
     /// Its step in `OPACITY`.
     opacity: usize,
-    /// Clicks pass through it (back: the tray menu's "Make pins clickable").
+    /// Clicks pass through it now (the window ignores the pointer).
     through: bool,
+    /// Ctrl decides `through` (`click::verdict`): the default where the desktop lets us read
+    /// Ctrl and the pointer. Off: the pin's own button and the tray row decide.
+    auto: bool,
+    /// The pointer is over it without Ctrl: the hint shows.
+    hint: bool,
 }
 
 /// A live pin's opacity steps (its button walks them) and their tooltips.
@@ -308,6 +316,10 @@ pub enum PinMsg {
     Opacity,
     /// A live pin lets clicks pass through.
     ClickThrough,
+    /// The pin's window handle (a live pin on the Ctrl rule starts being watched).
+    Hwnd(Option<isize>),
+    /// What the watch decided (`click::Watch`).
+    Rule(click::Verdict),
 }
 
 /// A pin starts no bigger than this (logical px); a tall scrolling capture shrinks.
@@ -463,6 +475,36 @@ fn pin_view_with(pin: &Pin, drag_out: bool) -> Element<'_, PinMsg> {
                 .align_y(iced::alignment::Vertical::Top)
                 .padding(widget_e::PIN_BAR_INSET),
         );
+    }
+    if let Some(live) = pin.live.as_ref().filter(|l| l.through && !pin.hover) {
+        use crate::shared::kit::icon::glyph;
+        // clicks pass through: a faint mark in the corner (the bar is out of reach), and where
+        // the pointer is over it without Ctrl, how to take it
+        let faint = crate::shared::kit::themes::c().text_muted;
+        let mark = surface(
+            Material::Tray,
+            radius::FULL,
+            glyph(THROUGH, widget_e::PIN_MARK).color(faint),
+        )
+        .padding(crate::shared::kit::tokens::space::BAR_PAD);
+        layers = layers.push(
+            container(mark)
+                .width(Fill)
+                .height(Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Top)
+                .padding(widget_e::PIN_BAR_INSET),
+        );
+        if live.hint {
+            layers = layers.push(
+                container(crate::shared::kit::surface::hint(crate::t!(pin_hold_ctrl)))
+                    .width(Fill)
+                    .height(Fill)
+                    .center_x(Fill)
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .padding(widget_e::PIN_BAR_INSET),
+            );
+        }
     }
     if pin.live.is_some() {
         // the design's rounded frame and thin look-coloured border (the OS's own
@@ -1056,6 +1098,14 @@ impl Windows {
             return self.toast(text, Tone::Neutral, None, TOAST_MS);
         };
         let (id, open) = self.open_pin(first, at, scale, shape::radius(widget_e::PIN_CORNER));
+        // passing clicks through is the default where Ctrl can be read to take them back
+        let auto = pointer::can_probe();
+        let open = match auto {
+            true => open
+                .chain(window::enable_mouse_passthrough(id))
+                .chain(platform::windows::hwnd(id).map(move |raw| Msg::Pin(id, PinMsg::Hwnd(raw)))),
+            false => open,
+        };
         let (tx, rx) = iced::futures::channel::mpsc::unbounded();
         let (source, run) = live::source(source, pick, move |e| tx.unbounded_send(e).is_ok());
         if let Err(e) = std::thread::Builder::new()
@@ -1069,7 +1119,9 @@ impl Windows {
                 _source: source,
                 scale,
                 opacity: 0,
-                through: false,
+                through: auto,
+                auto,
+                hint: false,
             });
             pin.reshape();
         }
@@ -1081,11 +1133,20 @@ impl Windows {
     /// The tray menu's "Make pins clickable": every live pin takes clicks again.
     fn clickable_pins(&mut self) -> Task<Msg> {
         let through = self.pins.iter_mut().filter_map(|p| {
-            let live = p.live.as_mut().filter(|l| l.through)?;
-            live.through = false;
-            Some(window::disable_mouse_passthrough(p.id))
+            let live = p.live.as_mut().filter(|l| l.through || l.auto)?;
+            let was = std::mem::replace(&mut live.through, false);
+            (live.auto, live.hint) = (false, false);
+            self.watch.active(p.id, false);
+            was.then(|| window::disable_mouse_passthrough(p.id))
         });
         Task::batch(through.collect::<Vec<_>>())
+    }
+
+    /// (auto, through, hint) of the first live pin: what the Ctrl rule decided (tests).
+    #[cfg(test)]
+    fn rule_state(&self) -> (bool, bool, bool) {
+        let l = self.pins[0].live.as_ref().unwrap();
+        (l.auto, l.through, l.hint)
     }
 
     /// Some live pin lets clicks pass through (the tray menu offers them back).
@@ -2080,6 +2141,7 @@ impl Windows {
                     self.tray_menu = None;
                 }
                 self.pins.retain(|p| p.id != id); // the OS closed it: free the pixels
+                self.watch.remove(id); // and never read its handle again
                 if self.steps_window() == Some(id) {
                     match self.studio {
                         // the Studio holds the steps now: only the strip's window goes
@@ -2268,8 +2330,39 @@ impl Windows {
                     return Task::none();
                 };
                 live.through = true;
+                live.auto = pointer::can_probe(); // back to the Ctrl rule where it can run
+                if live.auto {
+                    self.watch.active(id, true);
+                }
                 pin.hover = false; // it gets no pointer from now on
                 window::enable_mouse_passthrough(id)
+            }
+            PinMsg::Hwnd(raw) => {
+                let (true, Some(raw)) = (pin.live.as_ref().is_some_and(|l| l.auto), raw) else {
+                    return Task::none();
+                };
+                self.watch.add(id, raw);
+                match self.watch.stream() {
+                    Some(rx) => Task::stream(rx).map(|(id, v)| Msg::Pin(id, PinMsg::Rule(v))),
+                    None => Task::none(),
+                }
+            }
+            PinMsg::Rule(v) => {
+                let Some(live) = pin.live.as_mut().filter(|l| l.auto) else {
+                    return Task::none(); // latched clickable meanwhile
+                };
+                live.hint = v.hint;
+                if v.through == live.through {
+                    return Task::none();
+                }
+                live.through = v.through;
+                match v.through {
+                    true => {
+                        pin.hover = false;
+                        window::enable_mouse_passthrough(id)
+                    }
+                    false => window::disable_mouse_passthrough(id),
+                }
             }
         }
     }
@@ -2939,6 +3032,7 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
     }
 }
 
+mod click;
 mod failure;
 pub use failure::capture_failed;
 mod record;

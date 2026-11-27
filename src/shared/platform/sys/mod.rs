@@ -6,6 +6,7 @@ pub mod disk;
 pub mod locale;
 pub mod mem;
 pub mod open;
+pub mod pointer;
 pub mod serve_once;
 pub mod session;
 #[cfg(target_os = "linux")]

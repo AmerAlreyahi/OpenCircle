@@ -427,6 +427,9 @@ pub mod widget_e {
     /// The hover bar's size (`.pinbar`: 44 high, 6 px + the rim in from its sides; 34 px buttons).
     pub const PIN_BAR_H: f32 = 44.0;
     pub const PIN_BAR_PAD_X: f32 = 7.0;
+
+    /// The faint click-through mark's glyph on a live pin.
+    pub const PIN_MARK: f32 = 14.0;
     /// The live pin's corner (`.pinw`, 14 px).
     pub const PIN_CORNER: f32 = super::radius::DROPDOWN;
 }
