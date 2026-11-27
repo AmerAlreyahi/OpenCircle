@@ -2,6 +2,7 @@
 //! Imports nothing of the UI's kit, screens or app (`arch_tests::platform_is_isolated`).
 
 pub(crate) mod alpha_window;
+pub(crate) mod audio;
 pub(crate) mod autostart;
 pub(crate) mod capture;
 pub(crate) mod dcomp;

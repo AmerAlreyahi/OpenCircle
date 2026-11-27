@@ -5,14 +5,10 @@
 //! the user pressed the music button (or its quick action). Free fingerprint
 //! lookups can't match a clip (an early spike showed it), so this needs a service key: AudD
 //! for now (`audd.rs`); another service = one more file + a `Service` variant.
-//! One capture file per platform: `capture_linux.rs` (the default sink's monitor
-//! over the PulseAudio protocol, also PipeWire), `capture_windows.rs` (WASAPI
-//! loopback through cpal).
+//! Audio capture lives in `crate::shared::platform::audio` (WASAPI loopback /
+//! microphone on Windows, PulseAudio / PipeWire monitor or mic on Linux).
 
 mod audd;
-#[cfg_attr(target_os = "linux", path = "capture_linux.rs")]
-#[cfg_attr(windows, path = "capture_windows.rs")]
-mod capture;
 pub(crate) mod history;
 pub(crate) mod screens;
 
@@ -22,6 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::shared::config::SongSource;
+use crate::shared::platform::audio::{self, Input, Kind, resample::Downmix};
 use crate::shared::secrets::{self, Secret, SecretsError};
 
 /// How long one search listens.
@@ -91,63 +88,6 @@ impl Clip {
 /// Samples wanted for `secs` of audio (the capture buffer's size).
 pub fn wanted(secs: u32) -> usize {
     (secs * RATE) as usize
-}
-
-/// Turns any capture format into mono at `RATE`: channels are averaged, and
-/// each output sample is the mean of the input samples in its period (a box
-/// low-pass, so 48 kHz down to 12 kHz doesn't alias much). Windows' capture
-/// uses it; on Linux the sound server converts.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub struct Downmix {
-    channels: usize,
-    /// Input frames per output sample.
-    step: f64,
-    /// Input frames since the last output sample, and their sum.
-    pos: f64,
-    sum: f64,
-    n: u32,
-    pub out: Vec<i16>,
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-impl Downmix {
-    pub fn new(rate: u32, channels: u16, capacity: usize) -> Downmix {
-        Downmix {
-            channels: channels.max(1) as usize,
-            step: f64::from(rate) / f64::from(RATE),
-            pos: 0.0,
-            sum: 0.0,
-            n: 0,
-            out: Vec::with_capacity(capacity),
-        }
-    }
-
-    /// Interleaved samples in -1..1.
-    pub fn push(&mut self, samples: impl IntoIterator<Item = f32>) {
-        let mut frame = 0.0;
-        let mut i = 0;
-        for s in samples {
-            frame += s;
-            i += 1;
-            if i < self.channels {
-                continue;
-            }
-            self.sum += f64::from(frame) / self.channels as f64;
-            self.n += 1;
-            self.pos += 1.0;
-            (frame, i) = (0.0, 0);
-            if self.pos >= self.step && self.out.len() < self.out.capacity() {
-                let v = (self.sum / f64::from(self.n)).clamp(-1.0, 1.0);
-                self.out.push((v * 32767.0) as i16);
-                self.pos -= self.step;
-                (self.sum, self.n) = (0.0, 0);
-            }
-        }
-    }
-
-    pub fn full(&self) -> bool {
-        self.out.len() >= self.out.capacity()
-    }
 }
 
 /// A found song.
@@ -294,7 +234,7 @@ pub fn listen(
     heard: &mut dyn FnMut(u32),
 ) -> Result<Clip, Error> {
     let deadline = Instant::now() + Duration::from_secs(u64::from(LISTEN_SECS));
-    let clip = capture::record(source, wanted(LISTEN_SECS), deadline, cancel, heard)?;
+    let clip = record(source, wanted(LISTEN_SECS), deadline, cancel, heard)?;
     if cancel.load(Ordering::Relaxed) {
         return Err(Error::Cancelled);
     }
@@ -303,6 +243,42 @@ pub fn listen(
         return Err(Error::Silent);
     }
     Ok(clip)
+}
+
+fn record(
+    source: SongSource,
+    want: usize,
+    deadline: Instant,
+    cancel: &AtomicBool,
+    heard: &mut dyn FnMut(u32),
+) -> Result<Clip, Error> {
+    let kind = match source {
+        SongSource::System => Kind::System,
+        SongSource::Microphone => Kind::Mic(None),
+    };
+    let mut input = Input::open(kind).map_err(|e| Error::Capture(e.to_string()))?;
+    let mut mix = Downmix::new(audio::RATE, audio::CHANNELS, RATE, want);
+    let started = Instant::now();
+    let mut said = 0;
+    while !mix.full() && Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
+        let secs = started.elapsed().as_secs() as u32;
+        if secs > said {
+            said = secs;
+            heard(secs);
+        }
+        let wait = deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_millis(100));
+        if wait.is_zero() {
+            break;
+        }
+        match input.read(wait) {
+            Ok(Some(pkt)) => mix.push(pkt.samples),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    Ok(Clip(mix.out))
 }
 
 /// Sends the clip to the service with the saved key. Blocking.
@@ -356,7 +332,7 @@ mod tests {
     fn capture_buffer_holds_exactly_the_listening_time() {
         assert_eq!(wanted(LISTEN_SECS), 120_000);
         // 48 kHz stereo (Windows' usual mix format), more than wanted: stops full.
-        let mut d = Downmix::new(48_000, 2, wanted(1));
+        let mut d = Downmix::new(48_000, 2, RATE, wanted(1));
         d.push(tone(440.0, 48_000, 2, 1.5));
         assert!(d.full());
         assert_eq!(d.out.len(), wanted(1));
@@ -366,7 +342,7 @@ mod tests {
     #[test]
     fn downmix_keeps_the_pitch_at_any_rate() {
         for (rate, ch) in [(48_000, 2), (44_100, 2), (12_000, 1), (96_000, 6)] {
-            let mut d = Downmix::new(rate, ch, wanted(2));
+            let mut d = Downmix::new(rate, ch, RATE, wanted(2));
             d.push(tone(1000.0, rate, ch, 1.0));
             let n = d.out.len() as f32;
             assert!((n - RATE as f32).abs() <= 2.0, "{rate}: {n} samples");
