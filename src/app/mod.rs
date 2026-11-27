@@ -173,6 +173,8 @@ pub(crate) struct App {
     /// pill's number (`Message::SnipUndoGone`).
     pub(crate) snip_undo: Option<(u32, Box<crate::features::snip::annotate::Annotator>)>,
     pub(crate) snip_undos: u32,
+    /// The recording (R-02): its state, clock and the fake recorder (`snip::app::record`).
+    pub(crate) rec: crate::features::snip::app::record::Recording,
     /// `can_hide_windows()`, read once at boot.
     pub(crate) can_hide: bool,
     /// The number of the capture running on its thread. Cleared by Esc or the
@@ -306,6 +308,7 @@ impl App {
             overlay_gone: None,
             snip_undo: None,
             snip_undos: 0,
+            rec: Default::default(),
             can_hide: true,
             capturing: None,
             pre_shown: false,

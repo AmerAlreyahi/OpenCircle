@@ -2933,4 +2933,10 @@ strings! {
         | "إبقاء";
     rec_discard_btn: "Discard"
         | "تجاهل";
+    win_t_record: "OpenCircle recording"
+        | "تسجيل OpenCircle";
+    rec_mute: "Mute microphone"
+        | "كتم الميكروفون";
+    rec_unmute: "Unmute microphone"
+        | "إلغاء كتم الميكروفون";
 }

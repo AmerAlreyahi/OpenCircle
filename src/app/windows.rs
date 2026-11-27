@@ -162,6 +162,11 @@ pub enum Msg {
     ToastFrame,
     /// A walkthrough's encoder: a frame done, or its end.
     StudioWalk(studio::Walked),
+    /// From the recording bar and the corner thumbnail (`snip::app::record` decides), and
+    /// the beat their timers run on.
+    Record(crate::features::snip::screens::record_bar::Msg),
+    RecordResult(crate::features::snip::screens::record_result::Msg),
+    RecordTick(Instant),
 }
 
 #[derive(Default)]
@@ -199,6 +204,15 @@ pub struct Windows {
     studio: Option<(window::Id, crate::features::snip::screens::studio::Studio)>,
     /// The walkthrough encoder that runs: set to stop it.
     walk_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// The recording bar (R1) and the corner thumbnail (S2), at most one of each, and where the
+    /// bar was dragged to (kept for the session; `grabbed`: a drag of it began).
+    record_bar: Option<(window::Id, crate::features::snip::screens::record_bar::Bar)>,
+    record_thumb: Option<(
+        window::Id,
+        crate::features::snip::screens::record_result::Thumb,
+    )>,
+    record_spot: Option<Point>,
+    record_grabbed: bool,
 }
 
 /// What `Windows::leave_frame` took out of capture number `capture`'s grab.
@@ -1719,6 +1733,7 @@ impl Windows {
             Msg::StepKey(id, key) if self.steps_window() == Some(id) => {
                 return self.on_steps(steps::Msg::Key(key));
             }
+            Msg::Moved(id, at) if self.record_bar_window() == Some(id) => self.bar_moved(at),
             Msg::Moved(id, at) if self.steps_window() == Some(id) => {
                 return self.on_steps(steps::Msg::Moved(at));
             }
@@ -1731,6 +1746,8 @@ impl Windows {
                 }
             }
             Msg::StepKey(..) | Msg::Moved(..) | Msg::EditStep(_) => {}
+            // the recording's are the App's (`snip::app::record`): it takes them first
+            Msg::Record(_) | Msg::RecordResult(_) | Msg::RecordTick(_) => {}
             Msg::Studio(msg) => return self.on_studio(msg),
             Msg::StudioEvent(id, msg) if self.studio_window() == Some(id) => {
                 return self.on_studio(msg);
@@ -1925,6 +1942,12 @@ impl Windows {
                     self.exported = None;
                 }
                 self.chrome.remove(&id);
+                if self.record_bar_window() == Some(id) {
+                    self.record_bar = None;
+                }
+                if self.record_thumb_window() == Some(id) {
+                    self.record_thumb = None;
+                }
                 self.toasts.retain(|(t, ..)| *t != id);
                 self.toast_clock.retain(|(t, ..)| *t != id);
                 if self.failure.as_ref().is_some_and(|(f, ..)| *f == id) {
@@ -2135,6 +2158,9 @@ impl Windows {
     }
 
     pub fn view(&self, window: window::Id) -> Option<Element<'_, Msg>> {
+        if let Some(rec) = self.record_bar_view(window) {
+            return Some(rec);
+        }
         if let Some((_, strip)) = self.steps.as_ref().filter(|(w, _)| *w == Some(window)) {
             return Some(strip.view(shape::radius(steps::RADIUS)).map(Msg::Steps));
         }
@@ -2285,6 +2311,9 @@ impl Windows {
         if self.studio_window() == Some(window) {
             return crate::t!(st_title);
         }
+        if self.record_bar_window() == Some(window) || self.record_thumb_window() == Some(window) {
+            return crate::t!(win_t_record);
+        }
         if self.update_card.as_ref().is_some_and(|(c, _)| *c == window) {
             return crate::t!(win_t_update);
         }
@@ -2365,6 +2394,11 @@ impl Windows {
                         .map(|t| Msg::Studio(crate::features::snip::screens::studio::Msg::Frame(t)))
                 }
                 _ => Subscription::none(),
+            },
+            // the recording's timer and the thumbnail's slide-away run on a slow beat
+            match (&self.record_bar, &self.record_thumb) {
+                (None, None) => Subscription::none(),
+                _ => crate::shared::kit::motion::beats().map(Msg::RecordTick),
             },
             // the Updating pill's logo turns (a frame clock only while it shows)
             match &self.update_pill {
@@ -2778,6 +2812,7 @@ fn save_test_shot(step: usize, name: &str, shot: &window::Screenshot) {
 
 mod failure;
 pub use failure::capture_failed;
+mod record;
 mod studio;
 #[cfg(test)]
 mod tests;

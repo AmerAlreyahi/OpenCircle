@@ -13,6 +13,7 @@ use super::monitor::Place;
 use crate::features::settings::labs::{Feature, Labs};
 #[cfg(target_os = "linux")]
 use crate::features::snip::capture::scroll::Finish;
+use crate::features::snip::record::placement::Row;
 use crate::shared::app_language::{S, fmt};
 use crate::shared::config::{Config, Target};
 use crate::{Trigger, Triggers, t};
@@ -312,6 +313,8 @@ struct Built {
     separators: [PredefinedMenuItem; 2],
     /// The menu while a long capture runs (`capturing`).
     long: Vec<(Finish, MenuItem)>,
+    /// The recording's rows (`recording`).
+    rec: Vec<(Row, MenuItem)>,
 }
 
 #[cfg(target_os = "linux")]
@@ -319,6 +322,9 @@ thread_local! {
     static BUILT: std::cell::RefCell<Option<Built>> = const { std::cell::RefCell::new(None) };
     /// A long capture runs (`capturing`): its menu is shown, not `entries`.
     static CAPTURING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A recording runs with its controls here (`recording`), and the rows it shows now.
+    static RECORDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static REC_ROWS: std::cell::RefCell<Vec<Row>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The update dot last asked for (`show_update`), put back after a capture.
     static DOT: std::cell::Cell<Option<[u8; 3]>> = const { std::cell::Cell::new(None) };
 }
@@ -392,10 +398,79 @@ pub fn capturing(label: Option<String>) {
     let _ = label;
 }
 
+/// What the tray shows of a recording: its label and its rows with their texts.
+pub type Shown = (String, Vec<(Row, &'static str)>);
+
+/// A recording in the tray (owner, Q1: where our window cannot be kept out of a whole-screen
+/// recording, this is its bar). `Some((label, rows))`: the icon has the red dot, the label
+/// ("● 00:12") sits beside it and the menu holds `rows` (each with its text); a call that only
+/// changes the label leaves the menu alone (an open menu stays). `None` puts the icon and the
+/// menu back. Elsewhere the bar is a window: nothing here.
+pub fn recording(shown: Option<Shown>) {
+    #[cfg(test)]
+    REC_SHOWN.with_borrow_mut(|s| s.push(shown.clone()));
+    #[cfg(target_os = "linux")]
+    {
+        let lang = crate::shared::app_language::current();
+        gtk::glib::idle_add_once(move || {
+            crate::shared::app_language::set(lang);
+            let on = shown.is_some();
+            let was = RECORDING.replace(on);
+            let rows: Vec<Row> = (shown.iter().flat_map(|(_, r)| r))
+                .map(|(r, _)| *r)
+                .collect();
+            let same = on && was && REC_ROWS.with_borrow(|r| *r == rows);
+            HELD.with_borrow(|held| {
+                if let Some(tray) = held {
+                    let dot = if on || CAPTURING.get() {
+                        Some(RECORD)
+                    } else {
+                        DOT.get()
+                    };
+                    let _ = tray.set_icon(Some(icon(dot)));
+                    tray.set_title(shown.as_ref().map(|(label, _)| label.as_str()));
+                }
+            });
+            if same {
+                return;
+            }
+            REC_ROWS.with_borrow_mut(|r| *r = rows);
+            BUILT.with_borrow(|b| {
+                let Some(built) = b else { return };
+                clear(built);
+                match &shown {
+                    Some((_, rows)) => {
+                        for (row, text) in rows {
+                            if let Some((_, item)) = built.rec.iter().find(|(r, _)| r == row) {
+                                item.set_text(text);
+                                let _ = built.menu.append(item as &dyn IsMenuItem);
+                            }
+                        }
+                    }
+                    None => {
+                        let labs = crate::shared::config::current().labs;
+                        fill(built, &labs, update_label().as_deref());
+                    }
+                }
+            });
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = shown;
+}
+
+#[cfg(test)]
+thread_local! {
+    /// What `recording` was asked, in order (the tests' view of the tray).
+    pub static REC_SHOWN: std::cell::RefCell<Vec<Option<Shown>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Takes every row out of the menu.
 #[cfg(target_os = "linux")]
 fn clear(built: &Built) {
-    let rows = (built.items.iter().map(|(_, i)| i)).chain(built.long.iter().map(|(_, i)| i));
+    let rows = (built.items.iter().map(|(_, i)| i))
+        .chain(built.long.iter().map(|(_, i)| i))
+        .chain(built.rec.iter().map(|(_, i)| i));
     for item in rows {
         let _ = built.menu.remove(item);
     }
@@ -449,7 +524,7 @@ pub fn refresh() {
         let apply = move || {
             // the GTK thread speaks the UI's language (it has its own copy)
             crate::shared::app_language::set(lang);
-            if !CAPTURING.get() {
+            if !CAPTURING.get() && !RECORDING.get() {
                 BUILT.with_borrow(|b| b.iter().for_each(|b| fill(b, &labs, update.as_deref())));
             }
         };
@@ -465,7 +540,11 @@ pub fn show_update(dot: Option<[u8; 3]>) {
         #[cfg(target_os = "linux")]
         let dot = {
             DOT.set(dot);
-            if CAPTURING.get() { Some(RECORD) } else { dot }
+            if CAPTURING.get() || RECORDING.get() {
+                Some(RECORD)
+            } else {
+                dot
+            }
         };
         HELD.with_borrow(|held| {
             if let Some(tray) = held {
@@ -679,6 +758,11 @@ fn desktop_menu(tx: Triggers) -> Menu {
         .map(|(how, label)| (how, MenuItem::new(label, true, None)))
         .collect();
     let long_ids: Vec<_> = (long.iter()).map(|(h, i)| (*h, i.id().clone())).collect();
+    let rec: Vec<_> = Row::ALL
+        .into_iter()
+        .map(|r| (r, MenuItem::new("", true, None)))
+        .collect();
+    let rec_ids: Vec<_> = (rec.iter()).map(|(r, i)| (*r, i.id().clone())).collect();
     let built = Built {
         menu: Menu::new(),
         items,
@@ -687,6 +771,7 @@ fn desktop_menu(tx: Triggers) -> Menu {
             PredefinedMenuItem::separator(),
         ],
         long,
+        rec,
     };
     fill(
         &built,
@@ -703,6 +788,11 @@ fn desktop_menu(tx: Triggers) -> Menu {
                 std::thread::sleep(SETTLE);
                 let _ = tx.unbounded_send(Trigger::LongCapture(how));
             }));
+            return;
+        }
+        // a recording's row: at once (it captures nothing)
+        if let Some(row) = (rec_ids.iter()).find_map(|(r, id)| (*id == event.id).then_some(*r)) {
+            let _ = tx.unbounded_send(Trigger::Record(row));
             return;
         }
         let Some(entry) = (ids.iter()).find_map(|(e, id)| (*id == event.id).then_some(*e)) else {

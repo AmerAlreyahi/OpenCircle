@@ -3,7 +3,6 @@
 //! button, the device button, the size and fps readout, level and waveform
 //! bars, the thumbnail frame with its duration chip and actions, the audio
 //! chip. Screens only compose them; nothing here reads the config or a clock.
-#![allow(dead_code)] // wired into the App in this branch's last commit
 use iced::font::Weight;
 use iced::widget::{Space, button, column, container, image, row, stack};
 use iced::{Border, Center, Color, ContentFit, Element, Fill, Length};

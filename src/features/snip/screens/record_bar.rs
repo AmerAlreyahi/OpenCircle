@@ -7,7 +7,6 @@
 //! remembered for the session (`Bar::spot`). Its error is the one calm error card
 //! under it. Placed through `windows::floating`, out of captures like every
 //! floating widget of ours.
-#![allow(dead_code)] // wired into the App in this branch's last commit
 use std::time::Duration;
 
 use iced::widget::{column, mouse_area};
@@ -60,8 +59,6 @@ pub enum Msg {
     Resume,
     Stop,
     Discard,
-    /// The mic icon: mute / unmute.
-    Mute,
     /// The device name: open / close the list.
     Menu,
     /// A microphone of the list (`None`: off).

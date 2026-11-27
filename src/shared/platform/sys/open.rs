@@ -60,6 +60,44 @@ pub fn open_file(path: &std::path::Path) -> io::Result<()> {
     spawn(path.as_os_str())
 }
 
+/// "Open with..." (owner, 2026-11-24): the SYSTEM's own chooser for `path`, like right-clicking
+/// a file in the file manager. Windows: the Open with dialog (`SHOpenWithDialog`); Linux: the
+/// OpenURI portal with `ask` (the desktop's app chooser). No list of ours. Blocks while the
+/// dialog is up on Windows: call it off the UI thread.
+pub fn open_with(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(test)]
+    {
+        LAUNCHED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(format!("open-with:{}", path.display()));
+        Ok(())
+    }
+    #[cfg(all(windows, not(test)))]
+    {
+        use windows::Win32::UI::Shell::{
+            OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPEN_AS_INFO_FLAGS, OPENASINFO, SHOpenWithDialog,
+        };
+        use windows::core::{HSTRING, PCWSTR};
+        let file = HSTRING::from(path.as_os_str());
+        let info = OPENASINFO {
+            pcszFile: PCWSTR(file.as_ptr()),
+            pcszClass: PCWSTR::null(),
+            oaifInFlags: OPEN_AS_INFO_FLAGS(OAIF_EXEC.0 | OAIF_ALLOW_REGISTRATION.0),
+        };
+        // SAFETY: `info` and the string it points to live through the call.
+        unsafe { SHOpenWithDialog(None, &info) }.map_err(io::Error::other)
+    }
+    #[cfg(all(target_os = "linux", not(test)))]
+    {
+        open_uri_asking(&file_uri(path)).map_err(io::Error::other)
+    }
+    #[cfg(not(any(windows, target_os = "linux", test)))]
+    {
+        open_file(path)
+    }
+}
+
 /// Show `path` in the file manager with it selected: Explorer on Windows, the
 /// FileManager1 D-Bus service on Linux, else (or when that fails) the folder that
 /// holds it (a folder `path` is shown inside its parent).
@@ -227,11 +265,28 @@ fn open_on_linux(target: &std::ffi::OsStr) -> bool {
 #[cfg(target_os = "linux")]
 #[cfg_attr(test, allow(dead_code))]
 fn open_uri(uri: &str) -> Result<(), String> {
+    portal_open(uri, false)
+}
+
+/// OpenURI with `ask`: the desktop shows its app chooser even when a default app is set.
+#[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))]
+fn open_uri_asking(uri: &str) -> Result<(), String> {
+    portal_open(uri, true)
+}
+
+#[cfg(target_os = "linux")]
+#[cfg_attr(test, allow(dead_code))]
+fn portal_open(uri: &str, ask: bool) -> Result<(), String> {
     use crate::shared::platform::capture::portal;
     use gtk::gio::{Cancellable, DBusCallFlags};
     use gtk::glib::{ToVariant, VariantDict};
 
-    let args = ("", uri, VariantDict::new(None)).to_variant();
+    let options = VariantDict::new(None);
+    if ask {
+        options.insert("ask", true);
+    }
+    let args = ("", uri, options).to_variant();
     portal::session_bus()?
         .call_sync(
             Some(portal::DESKTOP),
@@ -342,6 +397,14 @@ fn reap(cmd: &mut Command) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R02-20: Open with is one function that asks the system's chooser for the file (a test
+    /// records the ask instead of opening a dialog).
+    #[test]
+    fn r02_20_open_with_asks_the_system_chooser_for_the_file() {
+        open_with(std::path::Path::new("/tmp/clip.mp4")).unwrap();
+        assert!(launched().contains(&"open-with:/tmp/clip.mp4".to_string()));
+    }
 
     /// W108: Show in folder's arguments, built by pure helpers for both OS branches.
     #[test]

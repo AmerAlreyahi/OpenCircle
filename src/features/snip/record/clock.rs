@@ -1,6 +1,5 @@
 //! The recording's elapsed time: pause gaps are not counted. Pure: the caller
 //! passes `now` (time since any fixed start), so tests need no sleeping.
-#![allow(dead_code)] // wired into the bar and the App in this branch's next commits
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -30,10 +29,6 @@ impl Clock {
         if let Some(at) = self.paused_at.take() {
             self.paused += now.saturating_sub(at);
         }
-    }
-
-    pub fn is_paused(&self) -> bool {
-        self.paused_at.is_some()
     }
 
     /// Recorded time at `now`: frozen while paused, never negative.

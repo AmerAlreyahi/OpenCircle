@@ -15,8 +15,6 @@
 //! is ignored (it must not start a second recording); a second Stop while
 //! `Stopping` is ignored.
 
-#![allow(dead_code)] // wired into the App in the next commits
-
 /// Where a recording is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -54,12 +52,15 @@ pub enum State {
 pub enum Fault {
     /// The microphone is gone or was refused (recording goes on without it when
     /// the user chooses so).
+    #[cfg_attr(not(test), allow(dead_code))] // R-04's recorder raises these
     Mic,
     /// The desktop said no (permission, window gone before the start).
     Refused,
     /// The disk is nearly full: stop and keep what we have.
+    #[cfg_attr(not(test), allow(dead_code))]
     DiskLow,
     /// The captured stream ended (window closed, screen off): stop and keep.
+    #[cfg_attr(not(test), allow(dead_code))]
     StreamEnded,
 }
 
@@ -73,9 +74,12 @@ pub enum Event {
     Picked {
         ask: bool,
     },
+    #[cfg_attr(not(test), allow(dead_code))] // R-04: the desktop's answer, the countdown, the key
     Allowed,
+    #[cfg_attr(not(test), allow(dead_code))]
     Denied,
     /// One second of the countdown went by.
+    #[cfg_attr(not(test), allow(dead_code))]
     Tick,
     /// Skip / Enter on the countdown.
     Skip,
@@ -84,6 +88,7 @@ pub enum Event {
     /// The bar's Stop.
     Stop,
     /// The start key pressed again (Alt+Shift+R / M): stop and save.
+    #[cfg_attr(not(test), allow(dead_code))]
     Key,
     Esc,
     Keep,
@@ -118,6 +123,7 @@ impl State {
         )
     }
 
+    #[cfg(test)]
     pub fn audio_only(self) -> bool {
         matches!(
             self,

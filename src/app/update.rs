@@ -102,6 +102,10 @@ impl App {
                 Task::none()
             }
             Message::Windows(windows::Msg::UpdatePill(msg)) => self.on_update_pill(msg),
+            Message::Windows(windows::Msg::Record(msg)) => self.on_record_bar(msg),
+            Message::Windows(windows::Msg::RecordResult(msg)) => self.on_record_result(msg),
+            Message::Windows(windows::Msg::RecordTick(at)) => self.on_record_tick(at),
+            Message::Trigger(Trigger::Record(row)) => self.on_record_row(row),
             Message::Windows(msg) => self.windows.update(msg).map(Message::Windows),
             // A hidden (Labs) feature does nothing, whoever asks (no shortcut or tray
             // item reaches here; this is the one place that also covers a late trigger).

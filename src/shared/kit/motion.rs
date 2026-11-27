@@ -205,15 +205,23 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// came as fast as a frame could be drawn (500 a second for a small motion,
 /// a core busy for nothing).
 pub fn frames() -> iced::Subscription<Instant> {
-    iced::Subscription::run(ticks)
+    iced::Subscription::run(|| ticks(FRAME))
 }
 
-fn ticks() -> impl iced::futures::Stream<Item = Instant> {
-    iced::stream::channel(1, async |mut out| {
+/// The slow beat of a timer on screen (a recording's `00:12`, a thumbnail's 8 s).
+pub const BEAT: Duration = Duration::from_millis(250);
+
+/// One message per `BEAT` while subscribed (`frames`, slower).
+pub fn beats() -> iced::Subscription<Instant> {
+    iced::Subscription::run(|| ticks(BEAT))
+}
+
+fn ticks(period: Duration) -> impl iced::futures::Stream<Item = Instant> {
+    iced::stream::channel(1, async move |mut out| {
         std::thread::spawn(move || {
             let mut next = Instant::now();
             loop {
-                next += FRAME;
+                next += period;
                 let now = Instant::now();
                 match next.checked_duration_since(now) {
                     Some(wait) => std::thread::sleep(wait),

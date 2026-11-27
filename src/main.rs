@@ -36,6 +36,9 @@ pub enum Trigger {
     /// Wayland: the running long capture ends so (its pop-up or the tray's
     /// capturing menu).
     LongCapture(crate::features::snip::capture::scroll::Finish),
+    /// The recording's row in the tray (Linux, where the tray is the recording's bar).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Record(crate::features::snip::record::placement::Row),
     Quit,
 }
 

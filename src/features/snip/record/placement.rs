@@ -2,13 +2,14 @@
 //! our window out of what is recorded, the tray's recording state when it cannot
 //! and the whole screen is recorded (Linux). Pure: the capability comes in as a
 //! flag (`shared::platform::CAN_KEEP_WINDOWS_OUT_OF_CAPTURE`).
-#![allow(dead_code)] // wired into the App in this branch's next commits
 use super::state::State;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     WholeScreen,
+    #[cfg_attr(not(test), allow(dead_code))] // R-04's pick
     Area,
+    #[cfg_attr(not(test), allow(dead_code))]
     Window,
 }
 
@@ -39,6 +40,24 @@ pub enum Row {
     Discard,
     /// Mic toggle and the device.
     Mic,
+}
+
+impl Row {
+    /// Every row (the desktop's menu builds one item for each).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub const ALL: [Row; 5] = [Row::Pause, Row::Resume, Row::Stop, Row::Discard, Row::Mic];
+
+    /// Its text; the mic row says what a press does.
+    pub fn label(self, muted: bool) -> &'static str {
+        match (self, muted) {
+            (Row::Pause, _) => crate::t!(rec_pause),
+            (Row::Resume, _) => crate::t!(rec_resume),
+            (Row::Stop, _) => crate::t!(rec_stop),
+            (Row::Discard, _) => crate::t!(rec_discard),
+            (Row::Mic, false) => crate::t!(rec_mute),
+            (Row::Mic, true) => crate::t!(rec_unmute),
+        }
+    }
 }
 
 /// The rows while `state` runs (none when nothing is recording).

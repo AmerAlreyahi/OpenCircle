@@ -4,7 +4,6 @@
 //! system's own chooser). It slides away after `SLIDE` and waits while the
 //! pointer is on it. A recording with no picture (audio only) is the small
 //! waveform chip. A press and drag takes the file out (the App routes it).
-#![allow(dead_code)] // wired into the App in this branch's last commit
 use std::time::Duration;
 
 use iced::widget::{image, mouse_area};

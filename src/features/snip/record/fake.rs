@@ -2,7 +2,6 @@
 //! the bar and the thumbnail can be driven in tests and goldens. It does what
 //! the state machine's `Effect`s ask and answers the way the real one will:
 //! a flush ends in `Event::Flushed`; a start can be told to fail.
-#![allow(dead_code)] // wired into the App in this branch's last commit
 use std::time::Duration;
 
 use super::state::{Effect, Event, Fault};

@@ -26,15 +26,16 @@ impl Windows {
         self.record_bar.as_ref().map(|(_, bar)| bar)
     }
 
+    pub fn record_bar_window(&self) -> Option<window::Id> {
+        self.record_bar.as_ref().map(|(id, _)| *id)
+    }
+
+    #[cfg(test)]
     pub fn record_thumb(&self) -> Option<&Thumb> {
         self.record_thumb.as_ref().map(|(_, t)| t)
     }
 
-    pub(super) fn record_bar_window(&self) -> Option<window::Id> {
-        self.record_bar.as_ref().map(|(id, _)| *id)
-    }
-
-    pub(super) fn record_thumb_window(&self) -> Option<window::Id> {
+    pub fn record_thumb_window(&self) -> Option<window::Id> {
         self.record_thumb.as_ref().map(|(id, _)| *id)
     }
 
@@ -50,7 +51,8 @@ impl Windows {
                 let id = *id;
                 match resized {
                     true => {
-                        let at = spot.unwrap_or_else(|| self.record_bar().unwrap().default_spot(screen));
+                        let at =
+                            spot.unwrap_or_else(|| self.record_bar().unwrap().default_spot(screen));
                         window::move_to(id, at).chain(platform::monitor::resize(id, size))
                     }
                     false => Task::none(),
@@ -70,7 +72,7 @@ impl Windows {
                     POPUP,
                 );
                 self.record_bar = Some((id, bar));
-                open.then(move |id| appear(id, POPUP)).discard()
+                open.then(move |id| appear::<Msg>(id, POPUP))
             }
         }
     }
@@ -83,16 +85,20 @@ impl Windows {
     }
 
     /// The bar's window is dragged by its body.
-    pub(super) fn grab_record_bar(&self) -> Task<Msg> {
+    pub fn grab_record_bar(&mut self) -> Task<Msg> {
+        self.record_grabbed = true;
         match self.record_bar_window() {
             Some(id) => window::drag(id),
             None => Task::none(),
         }
     }
 
-    /// The window moved (a drag of the bar ended or is going): its spot is kept for the session.
+    /// The window moved: after a drag of the bar began, its spot is kept for the session (the
+    /// moves of opening and resizing are ours).
     pub(super) fn bar_moved(&mut self, at: Point) {
-        self.record_spot = Some(at);
+        if self.record_grabbed {
+            self.record_spot = Some(at);
+        }
     }
 
     /// Shows the thumbnail in the bottom-end corner of `screen`.
@@ -113,7 +119,7 @@ impl Windows {
             POPUP,
         );
         self.record_thumb = Some((id, thumb));
-        Task::batch([gone, open.then(move |id| appear(id, POPUP)).discard()])
+        Task::batch([gone, open.then(move |id| appear::<Msg>(id, POPUP))])
     }
 
     pub fn close_record_thumb(&mut self) -> Task<Msg> {
@@ -124,7 +130,7 @@ impl Windows {
     }
 
     /// The thumbnail's own messages (hover): the timer waits while it is on it.
-    pub(super) fn on_record_result(&mut self, msg: record_result::Msg) {
+    pub fn on_record_result(&mut self, msg: record_result::Msg) {
         if let Some((_, thumb)) = &mut self.record_thumb {
             thumb.update(msg);
         }
