@@ -1852,3 +1852,19 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   verified ("everything works perfectly, no delay, the best possible UX"), the lead merges and PUBLISHES v0.5.1 directly, no owner
   review. Every gate still runs: CI green, Linux VM pass, signed draft + minisig, Windows update gate (agent), AppImage CLI. A drawing
   fix that is not measured smooth (5K/8K) or that changes picture pixels = no publish; it waits for the owner.
+- SDLC Kit for design and architecture LOGIC, never its style (owner, 2026-11-26/27, "be careful, remove the style in this repo, keep
+  the agreed design from now"): OpenCircle follows the kit's rules, skills and agents (RULES.md ARC/UI/PLAT/COM-08, design-system
+  process, sdlc:architect / designer / builder / reviewer), but NEVER the kit's visual or copy style (profile/owner/STYLE.md "Ground
+  Station": serif titles, gold accent, mono eyebrows, its colours). The look comes only from the owner-agreed OpenCircle designs
+  ("DESIGN SOURCES", the approved canvases, shipped goldens). Every designer / builder brief says so.
+- v0.6.0 overnight plan (lead defaults 2026-11-27, owner asleep; owner may reverse):
+  (1) R-01 recording research runs FIRST for recording only (capability table + architecture doc, no code); the design build does not
+  depend on it and starts at the same time. Any "no" / "asks" in the table goes on the owner's morning list with the recommended
+  behaviour; the recording build (R-03..R-06) waits for that table, and for his pick only where a "no" changes the approved R1/S2 design.
+  (2) Design build split by area: Settings round 2 = Claude builder (src/features/settings + new settings-only kit parts); widgets
+  style E (`.sty-two` two-tone grouped segments, W119 design-widgets) = Antigravity Neon (floating widgets + their kit parts); the
+  Studio round 6 + Group chips + Preferences content comes AFTER Settings merges (it reuses the Settings parts). tokens.rs: each worker
+  adds only in its own marked block; the lead resolves the merge.
+  (3) Tips (R-17) after widgets style E merges (tips use style E). R-08..R-14 after the design build, one at a time.
+  (4) The OpenRouter sign-in connection card: design round only (sdlc:designer, PNGs), nothing built before the owner's OK.
+  (5) G-01 GPU renderer still waits for the owner's lab-gpu2 result. No tag / draft / publish of v0.6.0.
