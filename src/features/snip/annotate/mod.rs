@@ -14,7 +14,7 @@ pub(crate) mod blur;
 mod callout;
 mod chrome;
 mod crop;
-mod document;
+pub(crate) mod document;
 pub mod dragout;
 mod eraser;
 pub use eraser::SIZES as ERASER_SIZES;

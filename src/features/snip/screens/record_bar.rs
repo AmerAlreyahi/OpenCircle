@@ -72,6 +72,11 @@ pub enum Msg {
     Keep,
     /// A press on the bar's body: the window is dragged.
     Grab,
+    /// The Hide group of the list (before Record and while paused): drag an area to hide, pick
+    /// an app to hide and follow, show everything again.
+    HideArea,
+    HideApp,
+    HideClear,
 }
 
 /// What the bar shows.
@@ -97,6 +102,10 @@ pub struct Bar {
     pub count: Option<u8>,
     /// The words behind an error (the missing plugins' names): the Encoder card's hint.
     pub note: String,
+    /// Zones hidden in the recording (R-06), and whether this desktop can name an app's window
+    /// to follow (native Wayland cannot: areas only).
+    pub zones: usize,
+    pub can_hide_app: bool,
 }
 
 impl Bar {
@@ -117,7 +126,14 @@ impl Bar {
             levels: Vec::new(),
             count: None,
             note: String::new(),
+            zones: 0,
+            can_hide_app: false,
         }
+    }
+
+    /// The Hide group is in the list: a picture recording that has not started or is paused.
+    pub fn hides(&self) -> bool {
+        !self.audio_only && matches!(self.phase, Phase::Ready | Phase::Paused)
     }
 
     /// The device button's words.
@@ -144,9 +160,16 @@ impl Bar {
     }
 
     fn menu_rows(&self) -> (usize, usize) {
-        match self.sound.is_some() {
+        let (items, lines) = match self.sound.is_some() {
             true => (self.mics.len() + 3, 1),
             false => (self.mics.len() + 1, 0),
+        };
+        match self.hides() {
+            true => (
+                items + 1 + usize::from(self.can_hide_app) + usize::from(self.zones > 0),
+                lines + 1,
+            ),
+            false => (items, lines),
         }
     }
 
@@ -323,6 +346,18 @@ impl Bar {
                 Msg::Sound(false),
             ));
         }
+        if self.hides() {
+            rows.push(option_list::separator());
+            rows.push(parts::heading(t!(rec_hide)));
+            let item = |label, msg| option_list::floating_item_when(label, None, false, Some(msg));
+            rows.push(item(t!(rec_hide_area), Msg::HideArea));
+            if self.can_hide_app {
+                rows.push(item(t!(rec_hide_app), Msg::HideApp));
+            }
+            if self.zones > 0 {
+                rows.push(item(t!(rec_hide_clear), Msg::HideClear));
+            }
+        }
         option_list::floating_menu_width(crate::shared::kit::tokens::widget_e::MENU_W_REC, rows)
     }
 
@@ -410,7 +445,13 @@ mod tests {
                 muted.muted = true;
                 let mut open = bar(Phase::Recording, false);
                 open.menu = true;
+                let mut hide_ready = bar(Phase::Ready, false);
+                (hide_ready.menu, hide_ready.can_hide_app) = (true, true);
+                let mut hide_paused = bar(Phase::Paused, false);
+                (hide_paused.menu, hide_paused.zones) = (true, 2);
                 let cases = [
+                    ("hide-ready", hide_ready),
+                    ("hide-paused", hide_paused),
                     ("ready", bar(Phase::Ready, false)),
                     ("recording", bar(Phase::Recording, false)),
                     ("paused", bar(Phase::Paused, false)),
@@ -541,5 +582,66 @@ mod tests {
         assert!(bar(Phase::Error(Fault::Mic), false).size().height > plain.size().height + 80.0);
         assert!(bar(Phase::Recording, true).size().width < plain.size().width);
         assert!(bar(Phase::Paused, false).size().width > plain.size().width);
+    }
+
+    /// R06-10: the Hide group (area, app, show again) is in the list only for a picture recording
+    /// that has not started or is paused; the app item only where windows can be named, the
+    /// "show again" item only with a zone; and its rows send their messages.
+    #[test]
+    fn r06_10_the_hide_group_is_in_the_list_before_record_and_while_paused() {
+        let open = |phase, audio| {
+            let mut b = bar(phase, audio);
+            b.menu = true;
+            b
+        };
+        let plain = open(Phase::Recording, false);
+        assert!(!plain.hides() && !open(Phase::Ready, true).hides());
+        let ready = open(Phase::Ready, false);
+        assert!(ready.hides() && open(Phase::Paused, false).hides());
+        let h = |b: &Bar| b.size().height;
+        let mut with_app = ready.clone();
+        with_app.can_hide_app = true;
+        let mut with_zone = with_app.clone();
+        with_zone.zones = 1;
+        assert!(h(&ready) > h(&plain), "the group makes the list taller");
+        assert!(h(&with_app) > h(&ready) && h(&with_zone) > h(&with_app));
+        let reach = |b: &Bar| -> Vec<Msg> {
+            let size = b.size();
+            (30..size.height as u32)
+                .step_by(4)
+                .flat_map(|y| {
+                    shot::click(b.view(RADIUS), size, Point::new(size.width / 2.0, y as f32))
+                })
+                .collect()
+        };
+        let all = reach(&with_zone);
+        for want in [Msg::HideArea, Msg::HideApp, Msg::HideClear] {
+            assert!(all.contains(&want), "{want:?} not reachable");
+        }
+        let all = reach(&ready);
+        assert!(
+            all.contains(&Msg::HideArea)
+                && !all.contains(&Msg::HideApp)
+                && !all.contains(&Msg::HideClear)
+        );
+        assert!(
+            !reach(&plain).contains(&Msg::HideArea),
+            "not while recording"
+        );
+    }
+
+    /// R06-20: a zone's outline on screen matches its golden, both themes.
+    #[test]
+    fn r06_20_the_zone_outline_matches_its_golden_images() {
+        golden::each_theme(|theme, failed| {
+            let file = format!("record-zone-outline-{}", theme.id);
+            failed.extend(golden::check(
+                "screens",
+                &file,
+                Size::new(220.0, 120.0),
+                &[1.0],
+                || crate::shared::kit::recording::zone_outline::<Msg>(8.0),
+            ));
+        });
     }
 }

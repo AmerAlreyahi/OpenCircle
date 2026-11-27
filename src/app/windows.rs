@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use iced::widget::{container, image, mouse_area, row, stack};
 use iced::window::{self, Position};
-use iced::{ContentFit, Element, Fill, Point, Size, Subscription, Task, keyboard, mouse};
+use iced::{
+    ContentFit, Element, Fill, Point, Rectangle, Size, Subscription, Task, keyboard, mouse,
+};
 
 use super::screens::toast::{self, Tone};
 use super::screens::tray_menu;
@@ -224,6 +226,9 @@ pub struct Windows {
     )>,
     record_spot: Option<Point>,
     record_grabbed: bool,
+    /// The outlines of the zones hidden in the recording (R-06), one window each, and the area
+    /// (logical px) each shows.
+    zone_outlines: Vec<(window::Id, Rectangle)>,
     /// A recording is on without a bar (the tray is its bar): the beat still runs.
     pub record_beat: bool,
 }
@@ -2123,6 +2128,7 @@ impl Windows {
                 if self.record_thumb_window() == Some(id) {
                     self.record_thumb = None;
                 }
+                self.zone_outlines.retain(|(w, _)| *w != id);
                 self.toasts.retain(|(t, ..)| *t != id);
                 self.toast_clock.retain(|(t, ..)| *t != id);
                 if self.failure.as_ref().is_some_and(|(f, ..)| *f == id) {
@@ -2524,7 +2530,10 @@ impl Windows {
         if self.studio_window() == Some(window) {
             return crate::t!(st_title);
         }
-        if self.record_bar_window() == Some(window) || self.record_thumb_window() == Some(window) {
+        if self.record_bar_window() == Some(window)
+            || self.record_thumb_window() == Some(window)
+            || self.zone_outlines.iter().any(|(w, _)| *w == window)
+        {
             return crate::t!(win_t_record);
         }
         if self.what_card.as_ref().is_some_and(|(c, _)| *c == window) {

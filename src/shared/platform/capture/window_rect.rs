@@ -469,6 +469,96 @@ pub fn activate(window: Option<isize>) {
     let _ = window;
 }
 
+/// Where one window is, asked again at every frame of a recording that hides an app (R-06).
+/// Windows: `GetWindowRect` (the outer rectangle, the invisible resize border too: it hides a
+/// little more, never less). X11: the geometry in root coordinates with the window manager's
+/// frame, over one connection kept open. Native Wayland has no window positions: `None` always
+/// (the UI offers no "Hide app" there, `list` is empty).
+#[derive(Default)]
+pub struct Follow {
+    #[cfg(target_os = "linux")]
+    x11: Option<(xcb::Connection, xcb::x::Window, xcb::x::Atom)>,
+}
+
+impl Follow {
+    /// `handle`'s outer rectangle now, desktop px; `None` when it cannot be read (closed, minimised).
+    pub fn rect(&mut self, handle: isize) -> Option<WinRect> {
+        #[cfg(windows)]
+        // SAFETY: a plain query on a handle; a stale one just fails.
+        unsafe {
+            use windows::Win32::Foundation::{HWND, RECT};
+            use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic};
+            let hwnd = HWND(handle as *mut _);
+            let mut r = RECT::default();
+            if IsIconic(hwnd).as_bool() || GetWindowRect(hwnd, &mut r).is_err() {
+                return None;
+            }
+            (r.right > r.left && r.bottom > r.top).then_some((
+                r.left,
+                r.top,
+                (r.right - r.left) as u32,
+                (r.bottom - r.top) as u32,
+            ))
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use xcb::{XidNew, x};
+            if self.x11.is_none() {
+                let (conn, screen) = xcb::Connection::connect(None).ok()?;
+                let root = conn.get_setup().roots().nth(screen as usize)?.root();
+                let atom = conn
+                    .wait_for_reply(conn.send_request(&x::InternAtom {
+                        only_if_exists: true,
+                        name: b"_NET_FRAME_EXTENTS",
+                    }))
+                    .ok()?
+                    .atom();
+                self.x11 = Some((conn, root, atom));
+            }
+            let (conn, root, extents) = self.x11.as_ref()?;
+            let window = x::Window::new(handle as u32); // an id `list` gave
+            let geometry = conn
+                .wait_for_reply(conn.send_request(&x::GetGeometry {
+                    drawable: x::Drawable::Window(window),
+                }))
+                .ok()?;
+            let at = conn
+                .wait_for_reply(conn.send_request(&x::TranslateCoordinates {
+                    src_window: window,
+                    dst_window: *root,
+                    src_x: 0,
+                    src_y: 0,
+                }))
+                .ok()?;
+            let [l, r, t, b] = match conn.wait_for_reply(conn.send_request(&x::GetProperty {
+                delete: false,
+                window,
+                property: *extents,
+                r#type: x::ATOM_CARDINAL,
+                long_offset: 0,
+                long_length: 4,
+            })) {
+                Ok(e) if e.value::<u32>().len() == 4 => {
+                    let v = e.value::<u32>();
+                    [v[0], v[1], v[2], v[3]]
+                }
+                _ => [0; 4],
+            };
+            Some((
+                i32::from(at.dst_x()) - l as i32,
+                i32::from(at.dst_y()) - t as i32,
+                u32::from(geometry.width()) + l + r,
+                u32::from(geometry.height()) + t + b,
+            ))
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            let _ = handle;
+            None
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn platform() -> Result<Vec<Win>, String> {
     use xcb::x;

@@ -441,6 +441,10 @@ impl App {
                 self.select(area);
                 self.live_pin(area)
             }
+            // the recording bar's Hide an area / Hide an app
+            Some(pick::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.hide.is_some()) => {
+                self.record_hide_picked(area)
+            }
             // the record-video key: the picked area is recorded (Ready bar, then 3-2-1)
             Some(pick::Next::Edit(area)) if matches!(&self.o.purpose, Purpose::Snip(s) if s.record) => {
                 self.record_picked(area)

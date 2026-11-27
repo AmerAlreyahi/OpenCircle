@@ -300,7 +300,7 @@
         {
           "id": "R-06",
           "title": "Blur zones in recordings (areas or a followed app window) (#225)",
-          "status": "todo",
+          "status": "done",
           "depends": [
             "R-04"
           ]

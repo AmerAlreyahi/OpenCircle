@@ -266,6 +266,9 @@ pub struct Snip {
     pub live_pin: bool,
     /// Started by the record-video key: the picked area is recorded, no editor.
     pub record: bool,
+    /// Started by the recording bar's Hide: the picked area (`Some(false)`) or window (`Some(true)`)
+    /// is hidden in the recording (R-06).
+    pub hide: Option<bool>,
 }
 
 /// The pill window's size (logical px): countdown.
@@ -305,6 +308,7 @@ impl Snip {
             hinting: true,
             live_pin: false,
             record: false,
+            hide: None,
         };
         snip.relocal();
         snip

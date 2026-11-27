@@ -19,6 +19,7 @@ use crate::features::snip::record::files;
 use crate::features::snip::record::placement::{self, Ctx, Row, Surface, Target};
 use crate::features::snip::record::real::{Failure, Flushed, Real, Request};
 use crate::features::snip::record::state::{Effect, Event, Fault, State};
+use crate::features::snip::record::zones::{Zone, Zones};
 use crate::features::snip::screens::record_bar::{self, Bar, Phase};
 use crate::features::snip::screens::record_result::{self as thumb, Thumb};
 use crate::shared::platform::{self, CAN_KEEP_WINDOWS_OUT_OF_CAPTURE};
@@ -61,6 +62,8 @@ pub(crate) struct Recording {
     /// "Recording discarded . Undo" pill `.0` is over (`Message::RecDiscardGone`).
     discard: Option<(u32, PathBuf, bool)>, // (pill number, file, audio only)
     discards: u32,
+    /// What is hidden in the recording (R-06), shared with the recorder.
+    pub(crate) zones: Zones,
 }
 
 impl Default for Recording {
@@ -87,6 +90,7 @@ impl Default for Recording {
             offered: false,
             discard: None,
             discards: 0,
+            zones: Zones::default(),
         }
     }
 }
@@ -108,6 +112,43 @@ enum DragOut {
     /// It can, but there is no file yet.
     WaitsForFile,
     Go,
+}
+
+/// Whether the zones' outlines are on screen: never where windows cannot be placed and closed at
+/// will (native Wayland); while recording only where the OS keeps our windows out of the capture.
+fn shows_outlines(phase: Option<Phase>, keeps_out: bool, can_place: bool) -> bool {
+    can_place
+        && match phase {
+            Some(Phase::Ready | Phase::Paused) => true,
+            Some(Phase::Recording) => keeps_out,
+            _ => false,
+        }
+}
+
+/// Where the zones are on screen: logical px, from the monitor holding the middle of each
+/// (`monitor::holding`, `Place::logical_origin`).
+fn zone_areas(zones: &[Zone], places: &[platform::monitor::Place]) -> Vec<Rectangle> {
+    zones
+        .iter()
+        .map(|z| {
+            let (x, y, w, h) = z.rect();
+            let phys = (
+                Point::new(x as f32, y as f32),
+                Size::new(w as f32, h as f32),
+            );
+            // (physical px: scale 1 reads them as they are)
+            let place = platform::monitor::holding(places, phys.0, phys.1, 1.0);
+            let (origin, scale) = place.map_or(((0, 0), 1.0), |p| (p.origin, p.scale));
+            let at = place.map_or(Point::ORIGIN, |p| p.logical_origin());
+            Rectangle::new(
+                Point::new(
+                    at.x + (x - origin.0) as f32 / scale,
+                    at.y + (y - origin.1) as f32 / scale,
+                ),
+                Size::new(w as f32 / scale, h as f32 / scale),
+            )
+        })
+        .collect()
 }
 
 fn drag_out(supported: bool, has_file: bool) -> DragOut {
@@ -173,6 +214,8 @@ impl App {
         rec.surface = placement::surface(can_keep_out, target);
         rec.screen = Self::record_screen();
         rec.bar = Bar::new(audio_only);
+        // (areas always; an app only where the desktop can name its windows)
+        rec.bar.can_hide_app = !audio_only && !platform::capture::window_rect::list().is_empty();
         let mics = platform::audio::devices(platform::audio::Kind::Mic(None)).unwrap_or_default();
         rec.mic_ids = mics.iter().map(|d| d.id.clone()).collect();
         rec.bar.mics = mics.into_iter().map(|d| d.name).collect();
@@ -234,8 +277,44 @@ impl App {
             Target::Area
         };
         let closed = self.close();
+        self.rec.zones.clear(); // a new recording starts with nothing hidden
         let begun = self.record_begin(false, target, Some(region));
         Task::batch([closed, begun])
+    }
+
+    /// The bar's Hide an area / Hide an app (before Record, or paused): Snip's pick opens over the
+    /// screen (drag an area, or click a window); `record_hide_picked` adds the zone.
+    fn record_hide_pick(&mut self, app: bool) -> Task<Message> {
+        let at = Instant::now();
+        self.rec.bar.menu = false;
+        self.next = crate::app::message::Purpose::Search;
+        self.live_next = false;
+        let kind = match app {
+            true => crate::features::snip::screens::pick::Kind::Window,
+            false => crate::features::snip::screens::pick::Kind::Region,
+        };
+        let task = self.capture(at, Some(kind));
+        self.hide_next = Some(app); // (after: every capture clears it)
+        Task::batch([task, self.record_show(at)])
+    }
+
+    /// The pick is done: `area` becomes a zone (an app's window is followed), the overlay closes.
+    pub(crate) fn record_hide_picked(&mut self, area: Rectangle) -> Task<Message> {
+        use crate::features::snip::record::zones::Zone;
+        let (app, window) = match &self.o.purpose {
+            crate::app::message::Purpose::Snip(s) => (s.hide == Some(true), s.window_under(area)),
+            _ => (false, None),
+        };
+        let Some((_, region)) = self.pin_place(area) else {
+            return self.close();
+        };
+        match (app, window) {
+            (false, _) => self.rec.zones.add(Zone::Area(region)),
+            (true, Some(handle)) => self.rec.zones.add(Zone::app(handle, region)),
+            (true, None) => return self.close(), // not on a window: nothing to follow
+        }
+        let closed = self.close();
+        Task::batch([closed, self.record_show(Instant::now())])
     }
 
     /// Esc while recording: stop and ask Keep / Discard.
@@ -288,6 +367,7 @@ impl App {
             sound: rec.bar.sound_on,
             mic_muted: rec.bar.muted,
             fps: rec.bar.fps,
+            zones: rec.zones.clone(),
         };
         let real = rec.real.as_mut()?;
         match effect {
@@ -361,7 +441,8 @@ impl App {
                 b.phase = phase;
                 b.ask = ask;
                 b.elapsed = elapsed;
-                b.menu &= matches!(phase, Phase::Recording | Phase::Paused);
+                b.menu &= matches!(phase, Phase::Ready | Phase::Recording | Phase::Paused);
+                b.zones = rec.zones.list().len();
                 b.count = match rec.state {
                     State::Countdown(n) => Some(n),
                     _ => None,
@@ -386,6 +467,17 @@ impl App {
                 self.record_tray_off();
             }
         }
+        // (an OS that cannot keep our windows out of a capture shows no outline while it records)
+        let live = shows_outlines(
+            phase,
+            CAN_KEEP_WINDOWS_OUT_OF_CAPTURE,
+            platform::monitor::can_hide_windows(),
+        );
+        let areas = match live && !self.rec.bar.audio_only {
+            true => zone_areas(&self.rec.zones.list(), &platform::monitor::places()),
+            false => Vec::new(),
+        };
+        tasks.push(self.windows.show_zone_outlines(&areas));
         match self.rec.state {
             State::Result { audio_only } => {
                 let mut t = Thumb::new(audio_only, self.rec.clock.elapsed(now));
@@ -467,6 +559,13 @@ impl App {
             M::Stop => Event::Stop,
             M::Discard => Event::Discard,
             M::Keep => Event::Keep,
+            M::HideArea => return self.record_hide_pick(false),
+            M::HideApp => return self.record_hide_pick(true),
+            M::HideClear => {
+                self.rec.zones.clear();
+                self.rec.bar.menu = false;
+                return self.record_show(at);
+            }
             M::Menu => {
                 self.rec.bar.menu = !self.rec.bar.menu;
                 return self.record_show(at);
@@ -1830,5 +1929,136 @@ mod tests {
         assert_eq!(drag_out(true, true), DragOut::Go);
         assert_eq!(drag_out(false, true), DragOut::Unsupported);
         assert_eq!(drag_out(false, false), DragOut::Unsupported);
+    }
+
+    /// R06-8: the bar's Hide items start a pick for an area or for a window, and clear it again;
+    /// the pick flag never outlives its capture.
+    #[test]
+    fn r06_8_the_hide_items_start_a_pick_and_clear_the_zones() {
+        let mut app = app();
+        let _ = app.record_start_on(false, Target::Area, true);
+        let _ = app.on_record_bar(B::HideArea);
+        assert_eq!(app.hide_next, Some(false));
+        let _ = app.on_record_bar(B::HideApp);
+        assert_eq!(app.hide_next, Some(true));
+        let _ = app.capture(
+            Instant::now(),
+            Some(crate::features::snip::screens::pick::Kind::Region),
+        );
+        assert_eq!(app.hide_next, None, "a capture clears it");
+        app.rec.zones.add(Zone::Area((10, 10, 50, 50)));
+        let _ = app.record_show(Instant::now());
+        assert_eq!(app.windows.record_bar().map(|b| b.zones), Some(1));
+        let can = usize::from(platform::monitor::can_hide_windows());
+        assert_eq!(
+            app.windows.zone_outlines().len(),
+            can,
+            "an outline on screen"
+        );
+        let _ = app.on_record_bar(B::HideClear);
+        assert!(app.rec.zones.list().is_empty());
+        assert!(app.windows.zone_outlines().is_empty(), "and it goes");
+    }
+
+    /// R06-9: the outlines are where the zones are, in logical px of the monitor holding them.
+    #[test]
+    fn r06_9_zone_outlines_follow_the_monitors_scale() {
+        use crate::shared::platform::monitor::Place;
+        let places = [
+            Place {
+                origin: (0, 0),
+                px: (1920, 1080),
+                scale: 1.0,
+            },
+            Place {
+                origin: (1920, 0),
+                px: (3840, 2160),
+                scale: 2.0,
+            },
+        ];
+        let zones = [
+            Zone::Area((100, 50, 200, 100)),
+            Zone::app(1, (2000, 400, 800, 600)),
+        ];
+        let got = zone_areas(&zones, &places);
+        assert_eq!(
+            got[0],
+            Rectangle::new(Point::new(100.0, 50.0), Size::new(200.0, 100.0))
+        );
+        assert_eq!(
+            got[1],
+            Rectangle::new(Point::new(1000.0, 200.0), Size::new(400.0, 300.0))
+        );
+    }
+
+    /// R06-17: what a Hide pick adds: a dragged area is an area zone; a window pick is an app
+    /// zone that follows that window; an app pick that lands on no window adds nothing.
+    #[test]
+    fn r06_17_a_hide_pick_adds_an_area_an_app_or_nothing() {
+        use crate::app::message::Purpose;
+        use crate::features::snip::screens::pick::{Pick, Snip};
+        let area = Rectangle::new(Point::new(100.0, 100.0), Size::new(300.0, 200.0));
+        let pick_for = |hide: bool, over: Rectangle| {
+            let mut app = crate::app::tests::open_app(1280, 720, 1.0);
+            let window = Pick::window(
+                Rectangle::new(Point::new(50.0, 50.0), Size::new(500.0, 400.0)),
+                "App",
+                7,
+            );
+            let mut snip = Snip::new(vec![window], app.place(), true, None);
+            snip.hide = Some(hide);
+            app.o.purpose = Purpose::Snip(Box::new(snip));
+            let _ = app.record_hide_picked(over);
+            app.rec.zones.list()
+        };
+        assert_eq!(pick_for(false, area), [Zone::Area((100, 100, 300, 200))]);
+        assert_eq!(
+            pick_for(true, area),
+            [Zone::app(7, (100, 100, 300, 200))],
+            "the window under the pick"
+        );
+        let nowhere = Rectangle::new(Point::new(900.0, 600.0), Size::new(100.0, 50.0));
+        assert!(
+            pick_for(true, nowhere).is_empty(),
+            "no window there: nothing to follow"
+        );
+    }
+
+    /// R06-18: outlines show while Ready or paused anywhere, and while recording only where the OS
+    /// keeps our windows out of the capture.
+    #[test]
+    fn r06_18_no_outline_while_recording_where_it_would_be_filmed() {
+        let mut app = app();
+        let _ = app.record_start_on(false, Target::Area, true);
+        app.rec.zones.add(Zone::Area((10, 10, 50, 50)));
+        let _ = app.record_show(Instant::now());
+        let can = usize::from(platform::monitor::can_hide_windows());
+        assert_eq!(app.windows.zone_outlines().len(), can, "Ready");
+        let _ = app.on_record_bar(B::Record);
+        let _ = app.record_show(Instant::now());
+        assert_eq!(
+            app.windows.zone_outlines().len(),
+            can * usize::from(CAN_KEEP_WINDOWS_OUT_OF_CAPTURE),
+            "recording"
+        );
+        let _ = app.on_record_bar(B::Pause);
+        let _ = app.record_show(Instant::now());
+        assert_eq!(app.windows.zone_outlines().len(), can, "paused");
+    }
+
+    /// R06-25: outlines: Ready and paused where windows can be placed; while recording only where
+    /// the OS keeps them out of the capture; never on native Wayland.
+    #[test]
+    fn r06_25_outlines_follow_what_the_platform_can_do() {
+        let p = |ph| shows_outlines(Some(ph), false, true);
+        assert!(p(Phase::Ready) && p(Phase::Paused) && !p(Phase::Recording));
+        assert!(shows_outlines(Some(Phase::Recording), true, true));
+        for ph in [Phase::Ready, Phase::Paused, Phase::Recording] {
+            assert!(
+                !shows_outlines(Some(ph), true, false),
+                "native Wayland: none"
+            );
+        }
+        assert!(!shows_outlines(None, true, true));
     }
 }

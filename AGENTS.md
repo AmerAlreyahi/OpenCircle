@@ -1992,3 +1992,8 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
 - Launcher decisions (owner, 2026-11-27, "yes for both"): the launcher extension stays warm ~5 minutes after use, then exits (zero
   when idle/off); file search defaults to the no-admin crawl + change watching; the admin "fast search" (NTFS MFT/USN service, or
   Everything when present) is a later opt-in. Research: docs/internal/reports-070/l11-research.md.
+
+- R-06 blur zones built (2026-11-27); the Hide group in the R1 bar's list and the zone outline look are PENDING the owner's OK (no approved
+  design). Behaviour: zones are hidden in every frame before the encoder (`record::zones`, Snip's secure Soft Hide); "Hide an app" follows the
+  app's main window only (dialogs and menus are not covered); Linux shows no outline while recording (it would be filmed), Windows keeps it;
+  native Wayland shows no outlines at all.

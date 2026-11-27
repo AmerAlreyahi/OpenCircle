@@ -75,6 +75,26 @@ pub fn card_under<'a, M: 'a>(width: f32, content: Element<'a, M>) -> Element<'a,
         .into()
 }
 
+/// A zone hidden in the recording (R-06), drawn on screen over what it hides: a soft outline with a
+/// faint tint, in the theme's accent. Click-through, out of captures (or, where the OS cannot keep
+/// it out, inside the zone, which the recording paints over).
+pub fn zone_outline<'a, M: 'a>(corners: f32) -> Element<'a, M> {
+    let accent = current().c.accent;
+    container(Space::new())
+        .width(Fill)
+        .height(Fill)
+        .style(move |_| container::Style {
+            background: Some(faded(accent, 0.12).into()),
+            border: Border {
+                color: faded(accent, 0.7),
+                width: 2.0,
+                radius: corners.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
 /// A group heading of the device list.
 pub fn heading<'a, M: 'a>(words: &'a str) -> Element<'a, M> {
     container(super::text::muted(Role::SECTION, words))

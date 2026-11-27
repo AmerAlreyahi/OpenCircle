@@ -2983,6 +2983,14 @@ strings! {
         | "اختر الميكروفون";
     rec_sound: "Sound from your PC"
         | "صوت الجهاز";
+    rec_hide: "Hide in the recording"
+        | "إخفاء في التسجيل";
+    rec_hide_area: "Hide an area"
+        | "إخفاء منطقة";
+    rec_hide_app: "Hide an app"
+        | "إخفاء تطبيق";
+    rec_hide_clear: "Show everything again"
+        | "إظهار كل شيء من جديد";
     rec_off: "Off"
         | "إيقاف";
     rec_record: "Record"

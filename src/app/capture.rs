@@ -53,6 +53,7 @@ impl App {
         // every capture starts as no recording's pick (the record-video key sets it after this
         // call): a pick that was never finished can never turn Alt+A into a recording
         self.record_next = false;
+        self.hide_next = None;
         self.captures = self.captures.wrapping_add(1);
         let n = self.captures;
         self.capturing = Some(n);
@@ -330,6 +331,7 @@ impl App {
             }
             snip.live_pin = std::mem::take(&mut self.live_next);
             snip.record = std::mem::take(&mut self.record_next);
+            snip.hide = self.hide_next.take();
             self.o.purpose = Purpose::Snip(Box::new(snip));
             extras = self.snip_extras(read);
             if let Some(tool) = tool {

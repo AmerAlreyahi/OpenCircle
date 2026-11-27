@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use super::clock::Clock;
 use super::mix::Mixer;
 use super::state::Fault;
+use super::zones::Hook;
+use crate::shared::platform::capture::window_rect::WinRect;
 use crate::shared::platform::encode::Sink;
 
 /// Frames of the screen, RGBA, as the screen shows them.
@@ -57,6 +59,8 @@ pub struct Config {
     /// The mute state the recording STARTS in (a muted source never lets one sample in).
     pub mic_muted: bool,
     pub sound_muted: bool,
+    /// Blur zones (R-06): hidden in every frame BEFORE it is queued for the encoder.
+    pub zones: Option<Hook>,
 }
 
 impl Config {
@@ -70,6 +74,7 @@ impl Config {
             frame_bytes: None,
             mic_muted: false,
             sound_muted: false,
+            zones: None,
         }
     }
 }
@@ -117,7 +122,7 @@ pub struct Session {
 impl Session {
     /// Starts at once: `video` none = audio only. `inputs` are the sound sources in use.
     pub fn start(
-        cfg: Config,
+        mut cfg: Config,
         video: Option<OpenSource>,
         inputs: Vec<(Chan, Box<dyn AudioIn>)>,
         sink: Box<dyn Sink>,
@@ -134,9 +139,10 @@ impl Session {
         if let Some(open) = video {
             let (sh, cl, ft) = (shared.clone(), clock.clone(), fault_tx.clone());
             let (fps, bytes) = (cfg.fps, cfg.frame_bytes);
+            let hook = cfg.zones.take();
             // (opened on its own thread: a desktop's permission dialog must not stall the UI)
             threads.push(thread::spawn(move || {
-                capture(open(), (fps, bytes), origin, &sh, &cl, frames_tx, &ft)
+                capture(open(), (fps, bytes), hook, origin, &sh, &cl, frames_tx, &ft)
             }));
         }
         let (has_mic, has_sound) = (
@@ -227,10 +233,17 @@ impl Session {
     }
 }
 
-/// The capture thread: a frame every 1/fps, the newest one again while nothing new came.
+/// The raw frame, the zones it was hidden for, and its hidden copy.
+type Hidden = (Arc<Vec<u8>>, Vec<WinRect>, Arc<Vec<u8>>);
+
+/// The capture thread: a frame every 1/fps, the newest one again while nothing new came. With
+/// zones the frame kept is the raw one and every frame queued is its hidden copy (made again
+/// only when the picture or a zone moved), so a zone added in a pause hides the very next frame.
+#[allow(clippy::too_many_arguments)]
 fn capture(
     mut src: Box<dyn FrameSource>,
     (fps, frame_bytes): (u32, Option<usize>),
+    mut hook: Option<Hook>,
     origin: Instant,
     shared: &Shared,
     clock: &Mutex<Clock>,
@@ -240,6 +253,8 @@ fn capture(
     let period = Duration::from_secs(1) / fps;
     let mut next = Instant::now();
     let mut last: Option<Arc<Vec<u8>>> = None;
+    // the hidden copy of `last` and the zones it was made for
+    let mut hidden: Option<Hidden> = None;
     while !shared.stop.load(Ordering::SeqCst) {
         let now = Instant::now();
         let wait = next.saturating_duration_since(now);
@@ -274,14 +289,35 @@ fn capture(
         }
         next += period;
         if next < now {
-            next = now + period; // fell behind: no burst to catch up
+            // fell behind (a slow capture or a big zone): no burst to catch up, and the frames
+            // that were due are counted as lost
+            let lost = now.duration_since(next).as_nanos() / period.as_nanos().max(1) + 1;
+            shared.dropped.fetch_add(lost as u32, Ordering::Relaxed);
+            next = now + period;
         }
         if shared.paused.load(Ordering::SeqCst) {
             continue;
         }
-        let Some(frame) = &last else { continue };
+        let Some(raw) = &last else { continue };
+        let frame = match &mut hook {
+            None => raw.clone(),
+            Some(h) => {
+                let rects = h.rects();
+                match &hidden {
+                    _ if rects.is_empty() => raw.clone(),
+                    Some((from, was, done)) if Arc::ptr_eq(from, raw) && *was == rects => {
+                        done.clone()
+                    }
+                    _ => {
+                        let done = Arc::new(h.hidden(raw, &rects));
+                        hidden = Some((raw.clone(), rects, done.clone()));
+                        done
+                    }
+                }
+            }
+        };
         let pts = clock.lock().unwrap().elapsed(now.duration_since(origin));
-        match queue.try_send(Frame(frame.clone(), pts)) {
+        match queue.try_send(Frame(frame, pts)) {
             Ok(()) => {
                 shared.frames.fetch_add(1, Ordering::Relaxed);
             }
@@ -485,6 +521,8 @@ mod tests {
         peak: AtomicU32,
         pauses: Mutex<Vec<bool>>,
         finished: AtomicBool,
+        /// The pictures the sink was given (R-06).
+        pictures: Mutex<Vec<Vec<u8>>>,
     }
 
     struct FakeSink {
@@ -496,6 +534,9 @@ mod tests {
         fn video(&mut self, rgba: &[u8], pts: Duration) -> Result<(), String> {
             thread::sleep(self.slow);
             self.log.frames.lock().unwrap().push((rgba[0], pts));
+            if rgba.len() > 16 {
+                self.log.pictures.lock().unwrap().push(rgba.to_vec());
+            }
             Ok(())
         }
         fn audio(&mut self, pcm: &[f32], _pts: Duration) -> Result<(), String> {
@@ -895,5 +936,152 @@ mod tests {
         s.stop().unwrap();
         assert!(t.elapsed() < Duration::from_secs(2));
         assert!(log.finished.load(Ordering::SeqCst));
+    }
+
+    /// A source of one still picture, `w` x `h`.
+    struct Still(Vec<u8>);
+    impl FrameSource for Still {
+        fn next(&mut self, wait: Duration) -> Result<Option<Vec<u8>>, String> {
+            thread::sleep(wait.min(Duration::from_millis(2)));
+            Ok(Some(self.0.clone()))
+        }
+        fn fast(&self) -> bool {
+            true
+        }
+    }
+
+    fn zoned(
+        zones: &super::super::zones::Zones,
+        window: Arc<Mutex<WinRect>>,
+    ) -> (Session, Arc<Log>, Vec<u8>) {
+        let (w, h) = (200u32, 120u32);
+        let picture = super::super::zones::tests::busy(w, h);
+        let mut c = cfg(u64::MAX);
+        c.zones = Some(Hook {
+            zones: zones.clone(),
+            origin: (0, 0),
+            size: (w, h),
+            seed: 3,
+            lookup: Box::new(move |_| Some(*window.lock().unwrap())),
+            cache: Default::default(),
+        });
+        let log = Arc::new(Log::default());
+        let sink = Box::new(FakeSink {
+            log: log.clone(),
+            slow: Duration::ZERO,
+        });
+        let src = Still(picture.clone());
+        let s = Session::start(c, Some(Box::new(move || Box::new(src))), vec![], sink);
+        (s, log, picture)
+    }
+
+    fn differs(a: &[u8], b: &[u8], w: u32, (x0, y0, x1, y1): (u32, u32, u32, u32)) -> usize {
+        let mut n = 0;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = ((y * w + x) * 4) as usize;
+                n += usize::from(a[i..i + 3] != b[i..i + 3]);
+            }
+        }
+        n
+    }
+
+    /// R06-5: the encoder is given hidden frames: inside the zone replaced, outside identical;
+    /// a zone added while paused hides every frame written after the resume (the marker: the
+    /// pictures written before the pause were all queued before it).
+    #[test]
+    fn r06_5_the_sink_gets_blurred_frames_and_a_zone_added_in_a_pause_applies_at_once() {
+        use super::super::zones::Zone;
+        let zones = super::super::zones::Zones::default();
+        zones.add(Zone::Area((20, 20, 60, 40)));
+        let (s, log, raw) = zoned(&zones, Arc::new(Mutex::new((0, 0, 0, 0))));
+        thread::sleep(Duration::from_millis(150));
+        s.pause();
+        thread::sleep(Duration::from_millis(80));
+        let marker = log.pictures.lock().unwrap().len();
+        assert!(marker > 3, "frames came before the pause");
+        zones.add(Zone::Area((120, 70, 50, 30)));
+        s.resume();
+        thread::sleep(Duration::from_millis(150));
+        s.stop().unwrap();
+        let pics = log.pictures.lock().unwrap();
+        assert!(pics.len() > marker + 3, "frames came after the resume");
+        let two = |p: &Vec<u8>| differs(p, &raw, 200, (120, 70, 170, 100));
+        for p in pics.iter() {
+            assert!(
+                differs(p, &raw, 200, (20, 20, 80, 60)) > 2000,
+                "zone 1 hidden"
+            );
+            assert_eq!(
+                differs(p, &raw, 200, (0, 112, 200, 120)),
+                0,
+                "outside identical"
+            );
+        }
+        assert!(
+            pics[marker..].iter().all(|p| two(p) > 1000),
+            "zone 2 hides every frame written after the resume"
+        );
+    }
+
+    /// R06-6: a followed window's zone moves with it, frame by frame (the old place is whole again).
+    #[test]
+    fn r06_6_a_followed_window_zone_moves_with_the_window() {
+        use super::super::zones::Zone;
+        let zones = super::super::zones::Zones::default();
+        zones.add(Zone::app(1, (10, 10, 50, 40)));
+        let window = Arc::new(Mutex::new((10, 10, 50, 40)));
+        let (s, log, raw) = zoned(&zones, window.clone());
+        thread::sleep(Duration::from_millis(120));
+        *window.lock().unwrap() = (110, 60, 50, 40);
+        thread::sleep(Duration::from_millis(150));
+        s.stop().unwrap();
+        let pics = log.pictures.lock().unwrap();
+        let last = pics.last().unwrap();
+        assert!(
+            differs(last, &raw, 200, (110, 60, 160, 100)) > 1000,
+            "hidden at the new place"
+        );
+        assert_eq!(
+            differs(last, &raw, 200, (0, 0, 80, 60)),
+            0,
+            "whole at the old place"
+        );
+        assert!(
+            differs(&pics[0], &raw, 200, (10, 10, 60, 50)) > 1000,
+            "hidden at the old place first"
+        );
+    }
+
+    /// R06-19: a capture that cannot keep up (a big zone) loses frames, and they are counted in
+    /// `dropped` (not only the ones a full queue turns away).
+    #[test]
+    fn r06_19_frames_lost_to_falling_behind_are_counted() {
+        struct Slow;
+        impl FrameSource for Slow {
+            fn next(&mut self, _: Duration) -> Result<Option<Vec<u8>>, String> {
+                thread::sleep(Duration::from_millis(90));
+                Ok(Some(vec![1; 16]))
+            }
+            fn fast(&self) -> bool {
+                true
+            }
+        }
+        let log = Arc::new(Log::default());
+        let sink = Box::new(FakeSink {
+            log: log.clone(),
+            slow: Duration::ZERO,
+        });
+        // 50 fps asks for a frame every 20 ms: each 90 ms grab loses about four
+        let s = Session::start(
+            cfg(u64::MAX),
+            Some(Box::new(|| Box::new(Slow))),
+            vec![],
+            sink,
+        );
+        thread::sleep(Duration::from_millis(500));
+        let stats = s.stop().unwrap();
+        assert!(stats.dropped >= 10, "{stats:?}");
+        assert!(stats.frames >= 3);
     }
 }

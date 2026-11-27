@@ -9,6 +9,9 @@ use super::{Msg, POPUP, Windows, appear, close, floating, platform, shape};
 use crate::features::snip::screens::record_bar::{self, Bar};
 use crate::features::snip::screens::record_result::{self, Thumb};
 
+/// The corners of a zone's outline.
+const ZONE_CORNERS: f32 = 8.0;
+
 /// The thumbnail's distance from the screen's bottom-end corner.
 const CORNER: f32 = 16.0;
 
@@ -33,6 +36,11 @@ impl Windows {
     #[cfg(test)]
     pub fn record_thumb(&self) -> Option<&Thumb> {
         self.record_thumb.as_ref().map(|(_, t)| t)
+    }
+
+    #[cfg(test)]
+    pub fn zone_outlines(&self) -> Vec<Rectangle> {
+        self.zone_outlines.iter().map(|(_, a)| *a).collect()
     }
 
     pub fn record_thumb_window(&self) -> Option<window::Id> {
@@ -129,6 +137,42 @@ impl Windows {
         }
     }
 
+    /// Shows `areas` (logical px) as the outlines of the zones hidden in the recording: one
+    /// click-through window each, replaced only when the list changed.
+    pub fn show_zone_outlines(&mut self, areas: &[Rectangle]) -> Task<Msg> {
+        if self
+            .zone_outlines
+            .iter()
+            .map(|(_, a)| *a)
+            .eq(areas.iter().copied())
+        {
+            return Task::none();
+        }
+        let mut tasks: Vec<Task<Msg>> = (self.zone_outlines.drain(..))
+            .map(|(id, _)| close(id))
+            .collect();
+        for &area in areas {
+            let (id, open) = floating(
+                window::Settings {
+                    size: area.size(),
+                    position: Position::Specific(area.position()),
+                    visible: false,
+                    resizable: false,
+                    ..window::Settings::default()
+                },
+                ZONE_CORNERS,
+                POPUP,
+            );
+            self.zone_outlines.push((id, area));
+            tasks.push(open.then(move |id| {
+                appear::<Msg>(id, POPUP)
+                    .chain(window::enable_mouse_passthrough(id))
+                    .chain(platform::windows::no_pick::<Msg>(id))
+            }));
+        }
+        Task::batch(tasks)
+    }
+
     /// The thumbnail's own messages (hover): the timer waits while it is on it.
     pub fn on_record_result(&mut self, msg: record_result::Msg) {
         if let Some((_, thumb)) = &mut self.record_thumb {
@@ -146,6 +190,11 @@ impl Windows {
     }
 
     pub(super) fn record_bar_view(&self, window: window::Id) -> Option<iced::Element<'_, Msg>> {
+        if self.zone_outlines.iter().any(|(w, _)| *w == window) {
+            return Some(crate::shared::kit::recording::zone_outline(shape::radius(
+                ZONE_CORNERS,
+            )));
+        }
         if let Some((_, bar)) = self.record_bar.as_ref().filter(|(w, _)| *w == window) {
             return Some(bar.view(shape::radius(record_bar::RADIUS)).map(Msg::Record));
         }

@@ -8,8 +8,10 @@ use std::time::Duration;
 use super::files;
 use super::session::{AudioIn, Chan, Config, FrameSource, OpenSource, Session};
 use super::state::Fault;
+use super::zones::{Hook, Zones};
 use crate::shared::platform::audio::{self, Kind};
 use crate::shared::platform::capture::frames::Frames;
+use crate::shared::platform::capture::window_rect::Follow;
 use crate::shared::platform::encode::{self, FileSink, VideoFmt};
 
 /// Free space a recording needs to begin (R-01: >= 2 GB).
@@ -28,6 +30,9 @@ pub struct Request {
     /// The microphone starts muted.
     pub mic_muted: bool,
     pub fps: u32,
+    /// Areas and followed windows hidden in every frame (the list is shared: the bar edits it
+    /// while the recording is paused).
+    pub zones: Zones,
 }
 
 /// Why a start failed: what the card says, and the words for the log and the Encoder card.
@@ -127,6 +132,17 @@ impl Real {
             Box::new(move || crate::shared::platform::sys::disk::free_bytes(&probe)),
         );
         cfg.frame_bytes = video.map(|v| v.frame_bytes());
+        if let (Some(v), Some((x, y, _, _))) = (video, req.region) {
+            let mut follow = Follow::default();
+            cfg.zones = Some(Hook {
+                zones: req.zones.clone(),
+                origin: (x, y),
+                size: v.from,
+                seed: crate::features::snip::annotate::blur::seed(),
+                lookup: Box::new(move |handle| follow.rect(handle)),
+                cache: Default::default(),
+            });
+        }
         // (the start state: nothing of a muted source is ever heard, not even the first packets)
         (cfg.mic_muted, cfg.sound_muted) = (req.mic_muted, !req.sound);
         let session = Session::start(cfg, source, inputs, sink);
