@@ -1884,3 +1884,5 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   with a different account"): new coding / testing / lab jobs go to Neon first, up to the cap of 2 Neon + 2 Claude; Claude for reviews,
   design rounds and careful fix passes. When Antigravity's quota is reached the lead TELLS THE OWNER at once (notification if he is
   away) so he switches accounts; a Claude builder takes the job over only if he doesn't answer.
+- Studio zoom fix APPROVED (owner, 2026-11-27, "done and all are approved", on dev build 0a66890): drawing and moving shapes at
+  110 % / 150 % zoom are smooth and the pixels don't change (B-01, merged 0a668907). Ships with the next release.
