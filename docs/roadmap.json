@@ -543,6 +543,21 @@
       "id": "L-08",
       "title": "Privacy curtain over an area or app for other apps' streams (Teams, Zoom), Windows + X11 first (#225)",
       "status": "todo"
+    },
+    {
+      "id": "X-01",
+      "title": "Extension idea: Screen watcher (notify when an area changes or shows a text/number)",
+      "status": "idea"
+    },
+    {
+      "id": "X-02",
+      "title": "Extension idea: Presenter tools (draw on the live screen, spotlight/zoom, keystroke + click display while recording)",
+      "status": "idea"
+    },
+    {
+      "id": "X-03",
+      "title": "Extension idea: Screen to data (table -> CSV/Excel, formula -> LaTeX, code -> clean text)",
+      "status": "idea"
     }
   ]
 }
