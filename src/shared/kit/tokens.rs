@@ -42,6 +42,27 @@ pub mod focus {
     pub const MARGIN: f32 = 12.0;
 }
 
+/// Settings round 2 (owner-approved floating-card design, 2026-11-26): the shell's sizes. One block:
+/// every number of the new Settings window that no other part shares.
+pub mod settings {
+    /// The sidebar card's width, and its collapsed (icons only) width.
+    pub const NAV: f32 = 246.0;
+    pub const NAV_THIN: f32 = 60.0;
+    /// The gap round and between the two floating cards.
+    pub const GUTTER: f32 = 12.0;
+    pub const CARD_RADIUS: f32 = 18.0;
+    pub const NAV_ITEM: f32 = 38.0;
+    /// The page's widest (padding included), and its padding `[top, side]`.
+    pub const CONTENT_MAX: f32 = 880.0;
+    pub const CONTENT_PAD: [f32; 2] = [28.0, 36.0];
+    /// Between a page's sections.
+    pub const SECTION_GAP: f32 = 18.0;
+    /// The title bar's search, at its widest.
+    pub const SEARCH_W: f32 = 560.0;
+    /// The page header's icon tile.
+    pub const TILE: f32 = 40.0;
+}
+
 /// Fixed control sizes.
 pub mod size {
     use iced::Size;
@@ -52,14 +73,10 @@ pub mod size {
     pub const HEADER: f32 = 40.0;
     pub const HEADER_COMPACT: f32 = 36.0;
     pub const CAPTION_BUTTON: f32 = 46.0;
-    pub const SIDEBAR: f32 = 168.0;
     pub const NAV_ITEM: f32 = 36.0;
     /// A settings page's control column (owner, 2026-10-28: every row's
     /// control has this one left edge and width; `setting_row`).
     pub const CONTROL_COLUMN: f32 = 300.0;
-    /// The widest a settings page's content gets (a maximised window keeps a
-    /// readable column at the start edge; the preview stage's own largest width).
-    pub const PAGE_MAX: f32 = 820.0;
     /// A settings row's least height inside its padding (a one-line
     /// description beside a 36 px control).
     pub const ROW_MIN: f32 = 38.0;
@@ -93,6 +110,8 @@ const fn role(size: f32, weight: Weight) -> Role {
 
 impl Role {
     pub const PAGE_TITLE: Role = role(16.0, Weight::Semibold);
+    /// Settings round 2: a page header's title.
+    pub const PAGE_HEAD: Role = role(20.0, Weight::Semibold);
     pub const ROW_TITLE: Role = role(13.0, Weight::Medium);
     pub const ROW_DESC: Role = role(11.5, Weight::Normal);
     pub const NAV: Role = role(12.5, Weight::Medium);

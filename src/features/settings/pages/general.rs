@@ -6,12 +6,14 @@ use iced::widget::tooltip::Position;
 use iced::widget::{column, container};
 use iced::{Center, Element, Fill};
 
-use super::super::state::{Message, Pick, State, UpdateLine, issue};
+use super::super::state::{Message, State, UpdateLine, issue};
 use crate::shared::config::DefaultAction;
 use crate::shared::kit::button::{Kind, button, label, labelled, labelled_width};
+use crate::shared::kit::choice_card::{Choice, Mark, choice_cards};
 use crate::shared::kit::field::field;
 use crate::shared::kit::icon::Icon;
-use crate::shared::kit::segmented::{boolean, segmented};
+use crate::shared::kit::section::section;
+use crate::shared::kit::segmented::boolean;
 use crate::shared::kit::setting_row::{self, title};
 use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, space};
@@ -22,41 +24,68 @@ fn off_on() -> [&'static str; 2] {
 }
 
 pub fn view(state: &State) -> Element<'_, Message> {
-    let d = &state.draft;
-    let general = &d.general;
-    let (from, glide) = state.thumb(general.default_action, |p| match p {
-        Pick::Default(a) => Some(a),
-        _ => None,
-    });
+    let general = &state.draft.general;
     let actions = [
-        (DefaultAction::Lens, t!(g_default_search)),
-        (DefaultAction::Ai, t!(g_default_ai)),
-        (DefaultAction::Text, t!(g_default_text)),
-        (DefaultAction::Copy, t!(g_default_copy)),
+        (
+            DefaultAction::Lens,
+            Mark::Glyph('\u{e154}'),
+            t!(g_default_search),
+            t!(g_default_search_d),
+        ),
+        (
+            DefaultAction::Ai,
+            Mark::Logo,
+            t!(g_default_ai),
+            t!(g_default_ai_d),
+        ),
+        (
+            DefaultAction::Text,
+            Mark::Glyph('\u{e197}'),
+            t!(g_default_text),
+            t!(g_default_text_d),
+        ),
+        (
+            DefaultAction::Copy,
+            Mark::Glyph('\u{e0f9}'),
+            t!(g_default_copy),
+            t!(g_default_copy_d),
+        ),
     ];
-    let mut rows = column![
-        language_row(state),
-        setting_row::row(
-            title(t!(g_default)),
-            t!(g_default_desc),
-            segmented(
-                &actions,
-                general.default_action,
-                from,
-                glide,
-                Message::DefaultAction
-            ),
-        )
-    ];
-    rows = rows.push(welcome_row());
-    rows = rows.push(start_row(state));
-    rows = rows.push(folder_row(state));
-    if !general.folder_note.is_empty() {
-        rows = rows.push(folder_note_row(state));
-    }
-    rows = rows.push(update_row(state));
-    rows = rows.push(updates_row(state));
-    rows.into()
+    let cards: Vec<_> = (actions.iter())
+        .map(|&(_, mark, title, desc)| Choice { mark, title, desc })
+        .collect();
+    let chosen = actions
+        .iter()
+        .position(|a| a.0 == general.default_action)
+        .unwrap_or(0);
+    let default = setting_row::block(
+        title(t!(g_default)),
+        t!(g_default_desc),
+        choice_cards(&cards, chosen, move |i| {
+            Message::DefaultAction(actions[i].0)
+        }),
+    );
+    let basics = section(Some(t!(gp_basics)), None, || {
+        vec![
+            language_row(state),
+            default,
+            start_row(state),
+            welcome_row(),
+        ]
+    });
+    let saving = section(Some(t!(gp_saving)), None, || {
+        let mut rows = vec![folder_row(state)];
+        if !general.folder_note.is_empty() {
+            rows.push(folder_note_row(state));
+        }
+        rows
+    });
+    let updates = section(Some(t!(us_updates)), None, || {
+        vec![updates_row(state), update_row(state)]
+    });
+    column![basics, saving, updates]
+        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP)
+        .into()
 }
 
 /// F11: after the migration replaced a Studio folder: one line, dismissible.

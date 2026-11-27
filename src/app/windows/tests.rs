@@ -662,9 +662,13 @@ fn renders_the_header_in_both_themes() {
             );
             // The header is the window's own colour all the way across (no gray strip).
             let w = size.width as usize;
-            let bg = crate::shared::kit::themes::c().bg;
+            // (Settings round 2: the title bar is on the calm pane)
+            let bg = match what {
+                "settings" => crate::shared::kit::themes::c().sidebar,
+                _ => crate::shared::kit::themes::c().bg,
+            };
             let bg = [bg.r, bg.g, bg.b].map(|c| (c * 255.0).round() as u8);
-            let row = &px[(10 * w) * 4..(11 * w) * 4];
+            let row = &px[(3 * w) * 4..(4 * w) * 4];
             let plain = row.chunks(4).filter(|p| p[..3] == bg).count();
             assert!(plain > w * 6 / 10, "{what} {name}: {plain} of {w}");
         }

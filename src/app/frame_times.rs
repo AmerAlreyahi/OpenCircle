@@ -758,45 +758,9 @@ fn settings_frame_times() {
     crate::shared::app_language::set(crate::shared::app_language::Lang::En);
 }
 
-/// The frames after a Settings page switch: their damage (logical px).
-fn switch_damage(to: settings::Section) -> Vec<Vec<Rectangle>> {
-    use settings::Message as M;
-    let mut s = settings_at(settings::Section::General);
-    std::thread::sleep(Duration::from_millis(250));
-    let _ = settings::update(&mut s, M::Tick);
-    let still = |_| (iced::mouse::Cursor::Unavailable, Vec::new());
-    let t = drawn(
-        &mut s,
-        settings::WINDOW_SIZE,
-        1.0,
-        settings_view,
-        4,
-        false,
-        |s, i, _| {
-            if i == 1 {
-                let _ = settings::update(s, M::Section(to));
-            }
-            let _ = settings::update(s, M::Tick);
-        },
-        still,
-    );
-    // after the switch's own frame (the new page, drawn whole)
-    t.into_iter().skip(1).map(|d| d.damage).collect()
-}
-
-/// The sidebar's column (its highlight glides there).
-const SIDEBAR_RIGHT: f32 = crate::shared::kit::tokens::size::SIDEBAR + 2.0;
-
-/// A page switch moves only the sidebar's highlight: the page itself switches
-/// at once (its rise redrew the whole window every frame on the CPU renderer).
-#[test]
-fn a_settings_page_switch_redraws_only_the_sidebar_glide() {
-    let frames = switch_damage(settings::Section::Privacy);
-    assert!(frames.iter().any(|d| !d.is_empty()), "the glide redraws");
-    for r in frames.iter().flatten() {
-        assert!(r.x + r.width <= SIDEBAR_RIGHT, "{r:?} outside the sidebar");
-    }
-}
+/// The sidebar card's right edge (and the gutter after it).
+const SIDEBAR_RIGHT: f32 =
+    crate::shared::kit::tokens::settings::NAV + 2.0 * crate::shared::kit::tokens::settings::GUTTER;
 
 /// The preview player's fixture clips (`scripts/make-preview-fixture.py`).
 const CLIP: &[&[u8]] = &[
@@ -835,7 +799,7 @@ fn a_playing_preview_redraws_only_its_stage() {
     let frames = clip_damage(settings::Section::Ai);
     // the clip's place: past the sidebar, under the preview's heading and
     // above the page's rows
-    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 500.0;
+    let stage = |r: &Rectangle| r.x > SIDEBAR_RIGHT && r.y >= 150.0 && r.y + r.height <= 560.0;
     assert!(frames.iter().all(|d| !d.is_empty()), "the clip plays");
     for r in frames.iter().flatten() {
         assert!(stage(r), "{r:?} outside the stage");

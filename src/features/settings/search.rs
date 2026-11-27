@@ -15,6 +15,8 @@ pub const FIELD: &str = "settings-search";
 pub const MAX_HITS: usize = 8;
 /// The page's scroll area (`operation::snap_to`).
 pub const PAGE: &str = "settings-page-scroll";
+/// The empty search's quick picks (`most_used`).
+pub const QUICK: usize = 7;
 /// The marked row stays marked this long.
 pub const MARK: std::time::Duration = std::time::Duration::from_millis(1500);
 
@@ -106,7 +108,11 @@ impl Search {
 
     /// Up (-1) or down (+1) the list.
     pub fn step(&mut self, by: i32) {
-        let last = self.hits().len().saturating_sub(1);
+        let n = match self.query.trim().is_empty() {
+            true => QUICK,
+            false => self.hits().len(),
+        };
+        let last = n.saturating_sub(1);
         self.at = (self.at as i32 + by).clamp(0, last as i32) as usize;
     }
 
@@ -257,4 +263,95 @@ impl Search {
     pub(super) fn index_titles(&self) -> Vec<String> {
         self.index.iter().map(|e| e.title.clone()).collect()
     }
+}
+
+/// A quick pick of the empty search (Settings round 2, "Most used": the drawn list, later ordered by
+/// real use): the setting, where it lives, and what it is now.
+pub struct Quick {
+    pub section: Section,
+    pub glyph: char,
+    pub title: String,
+    pub crumb: String,
+    pub value: Option<String>,
+    /// The row it marks, as in `Entry::mark`.
+    pub mark: String,
+    pub at: f32,
+}
+
+/// The drawn list, with each setting's current value.
+pub(super) fn most_used(state: &State) -> Vec<Quick> {
+    use crate::shared::config::Provider;
+    use crate::shared::platform::hotkey::QuickId;
+    let d = &state.draft;
+    let page = |s: Section| tr(pages::of(s).title);
+    let glyph = |s: Section| pages::of(s).glyph;
+    let pick = |section: Section, title: &str, group: &str, value: Option<String>, at: f32| Quick {
+        section,
+        glyph: glyph(section),
+        title: title.to_string(),
+        crumb: match group.is_empty() {
+            true => page(section).to_string(),
+            false => format!("{} \u{203A} {}", page(section), group),
+        },
+        value,
+        mark: title.to_string(),
+        at,
+    };
+    let on_off = |on: bool| {
+        Some(
+            tr(if on {
+                crate::shared::app_language::S::c_on
+            } else {
+                crate::shared::app_language::S::c_off
+            })
+            .to_string(),
+        )
+    };
+    let language = crate::shared::app_language::CHOICES
+        .into_iter()
+        .find(|c| c.0 == d.general.app_language)
+        .map(|c| c.to_string());
+    let provider = match d.ai.provider {
+        Provider::Browser => tr(crate::shared::app_language::S::ai_browser),
+        _ => tr(crate::shared::app_language::S::ai_provider),
+    };
+    let target = super::state::TARGETS
+        .iter()
+        .find(|l| l.0.code == d.translate.target)
+        .map(|l| l.to_string());
+    use crate::shared::app_language::S;
+    let snip = d
+        .quick_actions
+        .iter()
+        .position(|q| q.action == QuickId::Snip);
+    let snip_title = snip
+        .and_then(|i| state.quick_text.get(i))
+        .map_or("", |t| t.label.as_str());
+    vec![
+        pick(Section::General, tr(S::g_lang), "", language, 0.0),
+        pick(Section::Appearance, tr(S::a_themes), "", None, 0.2),
+        pick(
+            Section::Ai,
+            tr(S::ai_prov),
+            "",
+            Some(provider.to_string()),
+            0.0,
+        ),
+        pick(Section::Translate, tr(S::tr_target), "", target, 0.2),
+        pick(
+            Section::Shortcuts,
+            snip_title,
+            "",
+            snip.map(|i| d.quick_actions[i].shortcut.clone()),
+            0.3,
+        ),
+        pick(
+            Section::General,
+            tr(S::g_start_win),
+            "",
+            on_off(d.general.autostart),
+            0.5,
+        ),
+        pick(Section::General, tr(S::us_updates), "", None, 1.0),
+    ]
 }

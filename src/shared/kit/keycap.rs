@@ -44,33 +44,3 @@ fn cap<'a, Message: 'a>(label: String, alpha: f32) -> Element<'a, Message> {
         })
         .into()
 }
-
-/// `field` with `keys` drawn at its end while `shown` (a search field's "Ctrl K"): one small cap per
-/// key, over the field, never taking a press from it.
-pub fn at_end<'a, Message: 'a>(
-    field: impl Into<Element<'a, Message>>,
-    keys: &[&str],
-    shown: bool,
-) -> Element<'a, Message> {
-    let field = field.into();
-    if !shown {
-        return field;
-    }
-    // (a plain row: keys read in their own order, "Ctrl K", in every language)
-    let caps = iced::widget::Row::with_children(
-        keys.iter()
-            .map(|k| {
-                let width = 12.0 + 7.0 * k.chars().count() as f32;
-                container(keycap(*k)).width(width).into()
-            })
-            .collect::<Vec<Element<'a, Message>>>(),
-    )
-    .spacing(2.0)
-    .align_y(iced::Center);
-    let over = container(caps)
-        .padding([0.0, 6.0])
-        .center_y(Fill)
-        .align_x(super::dir::end())
-        .width(Fill);
-    iced::widget::stack![field, over].into()
-}

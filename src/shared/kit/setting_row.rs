@@ -36,6 +36,8 @@ thread_local! {
     static LAST_TITLE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// While `harvest` runs: every (title, description) built.
     static HARVEST: std::cell::RefCell<Option<Vec<(String, String)>>> = const { std::cell::RefCell::new(None) };
+    /// While `ruled_by_section` builds a section's rows: they draw no hairline of their own.
+    static SECTION_RULES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The row title `highlighting` marks.
     static HIGHLIGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
@@ -55,6 +57,15 @@ pub fn highlighting<T>(title: Option<&str>, build: impl FnOnce() -> T) -> T {
     HIGHLIGHT.with(|h| *h.borrow_mut() = title.map(str::to_string));
     let built = build();
     HIGHLIGHT.with(|h| *h.borrow_mut() = None);
+    built
+}
+
+/// Runs `build` (a section's rows): every `row` and `block` in it draws no hairline, the section rules
+/// between them (Settings round 2: no rule after the last row).
+pub fn ruled_by_section<T>(build: impl FnOnce() -> T) -> T {
+    let before = SECTION_RULES.replace(true);
+    let built = build();
+    SECTION_RULES.set(before);
     built
 }
 
@@ -107,6 +118,7 @@ fn ruled_with<'a, Message: 'a>(
     marked: bool,
     rule: bool,
 ) -> Element<'a, Message> {
+    let rule = rule && !SECTION_RULES.get();
     let row = container(content).padding([space::ROW_Y, 0.0]);
     let row = match marked {
         true => row

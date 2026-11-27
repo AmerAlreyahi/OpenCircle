@@ -88,6 +88,24 @@ ICONS=$(printf '%s,' \
   U+E140 `# plus (Snip Studio: zoom in)` \
   U+E157 `# settings (Snip Studio: the preferences button)` \
   U+E0BE `# eye (the translate pill: show the original)` \
+  U+E1DC `# palette (Settings round 2)` \
+  U+E3FE `# circle-arrow-out-up-right (Settings round 2)` \
+  U+E119 `# message-circle (Settings round 2)` \
+  U+E283 `# keyboard (Settings round 2)` \
+  U+E29B `# puzzle (Settings round 2)` \
+  U+E0FE `# info (Settings round 2)` \
+  U+E0DA `# flask-conical (Settings round 2)` \
+  U+E0D6 `# flag (Settings round 2)` \
+  U+E17B `# sun (Settings round 2)` \
+  U+E121 `# moon (Settings round 2)` \
+  U+E120 `# monitor (Settings round 2)` \
+  U+E0EB `# globe (Settings round 2)` \
+  U+E1B3 `# zap (Settings round 2)` \
+  U+E183 `# target (Settings round 2)` \
+  U+E13F `# play (Settings round 2)` \
+  U+E148 `# refresh-cw (Settings round 2)` \
+  U+E0AD `# cpu (Settings round 2)` \
+  U+E051 `# arrow-up-right (Settings round 2)` \
 )
 uvx --from fonttools pyftsubset "$tmp/lucide.ttf" --unicodes="${ICONS%,}" \
   --output-file=lucide-subset.ttf --no-hinting --layout-features='' --name-IDs='*'

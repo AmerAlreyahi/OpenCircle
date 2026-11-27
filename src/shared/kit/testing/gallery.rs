@@ -9,8 +9,9 @@ use iced::{Element, Event, Fill, Point, Size, mouse};
 use super::super::themes::{self, c};
 use super::super::tokens::{Role, radius};
 use super::super::{
-    button, card, chip, divider, error_card, field, header, panel_frame, progress, scroll,
-    segmented, setting_row, sidebar, surface, toast,
+    button, card, chip, choice_card, divider, error_card, field, floating_card, header, nav_card,
+    page_head, panel_frame, progress, scroll, search_card, section, segmented, setting_row,
+    sidebar, surface, toast,
 };
 use super::{golden, shot};
 
@@ -492,54 +493,6 @@ fn setting_row_sheet() {
     sheet("setting_row", Size::new(560.0, 120.0), &rows);
 }
 
-#[test]
-fn sidebar_sheet() {
-    use sidebar::{Item, sidebar};
-    let view = |active: usize, from: usize, glide: f32| {
-        move |ar| {
-            let items = [
-                Item {
-                    label: s(ar, "General", "عام"),
-                    badge: None,
-                    icon: None,
-                },
-                Item {
-                    label: s(ar, "About", "حول"),
-                    badge: None,
-                    icon: None,
-                },
-                Item {
-                    label: s(ar, "Labs", "مختبرات"),
-                    badge: Some(s(ar, "Exp", "تجريبي")),
-                    icon: None,
-                },
-            ];
-            iced::widget::row![
-                sidebar(
-                    &items,
-                    active,
-                    from,
-                    glide,
-                    |_| (),
-                    ["v0.1.2", "Windows"],
-                    None
-                ),
-                iced::widget::Space::new().width(Fill),
-            ]
-            .into()
-        }
-    };
-    let rows = vec![
-        row("first", Act::Rest, view(0, 0, 1.0)),
-        row("glide 0.5", Act::Rest, view(2, 0, 0.5)),
-        Row {
-            x: Some(60.0),
-            ..row("hover", Act::Hover, view(0, 0, 1.0))
-        },
-    ];
-    sheet("sidebar", Size::new(200.0, 180.0), &rows);
-}
-
 /// A dialog's section list: icons, the active one a raised pill with an accent bar.
 #[test]
 fn sidebar_list_sheet() {
@@ -577,7 +530,7 @@ fn sidebar_list_sheet() {
             ..row("hover", Act::Hover, view(0))
         },
     ];
-    sheet("sidebar-list", Size::new(240.0, 150.0), &rows);
+    sheet("sidebar", Size::new(240.0, 150.0), &rows);
 }
 
 #[test]
@@ -2058,4 +2011,198 @@ fn modal_sheet() {
         over(base.into(), body, 160.0, ())
     })];
     sheet("modal", Size::new(200.0, 140.0), &rows);
+}
+
+/// Settings round 2: the floating card, the sidebar card (open and collapsed), a page's header, a
+/// section, the choice cards and the search card.
+#[test]
+fn floating_card_sheet() {
+    let rows = vec![row("rest", Act::Rest, |ar| {
+        floating_card::floating_card(
+            iced::widget::container(super::super::text::text(
+                Role::ROW_TITLE,
+                s(ar, "A card on the pane", "بطاقة على اللوح"),
+            ))
+            .padding(16),
+        )
+        .into()
+    })];
+    sheet("floating_card", Size::new(260.0, 90.0), &rows);
+}
+
+#[test]
+fn nav_card_sheet() {
+    let view = |active: usize, collapsed: bool| {
+        move |ar| {
+            let items = [
+                nav_card::Entry {
+                    label: s(ar, "General", "عام"),
+                    glyph: '\u{e157}',
+                    tail: None,
+                    group: 0,
+                },
+                nav_card::Entry {
+                    label: s(ar, "Snip", "لقطة الشاشة"),
+                    glyph: '\u{e151}',
+                    tail: None,
+                    group: 1,
+                },
+                nav_card::Entry {
+                    label: s(ar, "Labs", "ميزات تجريبية"),
+                    glyph: '\u{e0da}',
+                    tail: Some(s(ar, "Exp", "تجريبي")),
+                    group: 2,
+                },
+            ];
+            let foot = |label, glyph, keys: &'static [&'static str]| nav_card::Foot {
+                label,
+                glyph,
+                keys,
+                on_press: (),
+            };
+            nav_card::nav_card(
+                &items,
+                active,
+                collapsed,
+                |_| (),
+                foot(s(ar, "Report a problem", "الإبلاغ عن مشكلة"), '\u{e0d6}', &[]),
+                foot(s(ar, "Collapse", "طي"), '\u{e12d}', &["Ctrl", "B"]),
+            )
+        }
+    };
+    let rows = vec![
+        row("first", Act::Rest, view(0, false)),
+        row("second", Act::Rest, view(1, false)),
+        row("collapsed", Act::Rest, view(1, true)),
+    ];
+    sheet("nav_card", Size::new(280.0, 300.0), &rows);
+}
+
+#[test]
+fn page_head_sheet() {
+    let rows = vec![row("rest", Act::Rest, |ar| {
+        page_head::page_head(
+            '\u{e157}',
+            s(ar, "General", "عام"),
+            s(
+                ar,
+                "Language, startup, saving and updates.",
+                "اللغة والتشغيل والحفظ والتحديثات.",
+            ),
+            None,
+        )
+    })];
+    sheet("page_head", Size::new(420.0, 70.0), &rows);
+}
+
+#[test]
+fn section_sheet() {
+    let rows = vec![row("rest", Act::Rest, |ar| {
+        section::section(Some(s(ar, "Basics", "الأساسيات")), None, || {
+            vec![
+                setting_row::plain(
+                    setting_row::title(s(ar, "App language", "لغة التطبيق")),
+                    s(ar, "The language of the windows", "لغة النوافذ"),
+                    super::super::text::text(Role::CONTROL, "English"),
+                ),
+                setting_row::plain(
+                    setting_row::title(s(ar, "Welcome tour", "جولة الترحيب")),
+                    "",
+                    super::super::text::text(Role::CONTROL, "..."),
+                ),
+            ]
+        })
+    })];
+    sheet("section", Size::new(460.0, 190.0), &rows);
+}
+
+#[test]
+fn choice_card_sheet() {
+    use choice_card::{Choice, Mark, choice_cards};
+    let wide = |chosen: usize| {
+        move |ar| {
+            let options = [
+                Choice {
+                    mark: Mark::Glyph('\u{e154}'),
+                    title: s(ar, "Quick widget", "أداة سريعة"),
+                    desc: s(
+                        ar,
+                        "Mark it up in the small toolbar",
+                        "دوّن في الشريط الصغير",
+                    ),
+                },
+                Choice {
+                    mark: Mark::Logo,
+                    title: s(ar, "Studio", "الاستوديو"),
+                    desc: s(
+                        ar,
+                        "Opens the full editor window",
+                        "يفتح نافذة المحرر الكاملة",
+                    ),
+                },
+            ];
+            choice_cards(&options, chosen, |_| ())
+        }
+    };
+    let tall = move |ar| {
+        let options = [
+            Choice {
+                mark: Mark::Glyph('\u{e154}'),
+                title: s(ar, "Search", "بحث"),
+                desc: s(ar, "Opens results", "يفتح النتائج"),
+            },
+            Choice {
+                mark: Mark::Glyph('\u{e197}'),
+                title: s(ar, "Copy text", "نسخ النص"),
+                desc: s(ar, "Copies the text", "ينسخ النص"),
+            },
+            Choice {
+                mark: Mark::Glyph('\u{e0f9}'),
+                title: s(ar, "Copy image", "نسخ الصورة"),
+                desc: s(ar, "Copies the picture", "ينسخ الصورة"),
+            },
+        ];
+        choice_cards(&options, 0, |_| ())
+    };
+    let rows = vec![
+        row("two", Act::Rest, wide(0)),
+        row("two, second", Act::Rest, wide(1)),
+        row("three", Act::Rest, tall),
+    ];
+    sheet("choice_card", Size::new(520.0, 150.0), &rows);
+}
+
+#[test]
+fn search_card_sheet() {
+    use search_card::{Hit, search_card};
+    let rows = vec![row("most used", Act::Rest, |ar| {
+        let hits = vec![
+            Hit {
+                glyph: '\u{e157}',
+                title: s(ar, "App language", "لغة التطبيق").into(),
+                crumb: s(ar, "General", "عام").into(),
+                value: Some("English".into()),
+                selected: true,
+                on_press: (),
+            },
+            Hit {
+                glyph: '\u{e151}',
+                title: s(ar, "Snip shortcut", "اختصار اللقطة").into(),
+                crumb: s(ar, "Shortcuts", "الاختصارات").into(),
+                value: None,
+                selected: false,
+                on_press: (),
+            },
+        ];
+        search_card(
+            Some((
+                s(ar, "Most used", "الأكثر استخدامًا"),
+                s(ar, "Type to search", "اكتب للبحث"),
+            )),
+            hits,
+            "-",
+            (s(ar, "Enter opens", "Enter للفتح"), String::new()),
+        )
+    })];
+    sheet("search_card", Size::new(420.0, 190.0), &rows);
 }

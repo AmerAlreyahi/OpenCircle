@@ -45,8 +45,8 @@ strings! {
         | "عام";
     nav_appearance: "Appearance"
         | "المظهر";
-    nav_look: "Look & behaviour"
-        | "الشكل والسلوك";
+    nav_look: "Circle to Search"
+        | "البحث بالدائرة";
     nav_ai: "Ask AI"
         | "اسأل الذكاء الاصطناعي";
     nav_text: "Text reading"
@@ -59,8 +59,8 @@ strings! {
         | "السجل";
     nav_shortcuts: "Shortcuts"
         | "الاختصارات";
-    nav_privacy: "Privacy"
-        | "الخصوصية";
+    nav_privacy: "Privacy & data"
+        | "الخصوصية والبيانات";
     nav_about: "About"
         | "حول";
     nav_labs: "Labs"
@@ -2715,4 +2715,56 @@ strings! {
         | "لا يمكن توسيع الصورة إلى هذا الحد";
     st_grow_big: "The picture would get too large"
         | "ستصبح الصورة كبيرة جدًا";
+    nav_ai_search: "AI and Search"
+        | "الذكاء الاصطناعي والبحث";
+    nav_extensions: "Extensions"
+        | "الإضافات";
+    pg_general: "Language, startup, saving and updates."
+        | "اللغة والتشغيل والحفظ والتحديثات.";
+    pg_appearance: "Themes, and the glow around your screen while OpenCircle is open."
+        | "السمات، والتوهج حول شاشتك أثناء عمل OpenCircle.";
+    pg_ai: "Search your screen in your browser, or ask an AI about what you circled."
+        | "ابحث في شاشتك عبر المتصفح، أو اسأل ذكاءً اصطناعيًا عمّا أحطته بدائرة.";
+    pg_studio: "Edit, number steps, hide secrets and export, in a full window."
+        | "حرّر وعدّد الخطوات وأخفِ المعلومات الحساسة وصدّر، في نافذة كاملة.";
+    pg_extensions: "Optional tools you add only when you want them. Not added means nothing on disk and nothing running."
+        | "أدوات اختيارية تضيفها عندما تريد. غير المُضافة لا تشغل مساحة ولا تعمل.";
+    pg_about: "What OpenCircle is, who made it, and what it is built on."
+        | "ما هو OpenCircle، ومن صنعه، وعلى ماذا يعتمد.";
+    win_collapse: "Collapse"
+        | "طي";
+    win_search_most: "Most used"
+        | "الأكثر استخدامًا";
+    win_search_type: "Type to search every setting"
+        | "اكتب للبحث في كل إعداد";
+    win_search_count: "{} results"
+        | "{} نتائج";
+    ext_none_title: "No optional tools yet"
+        | "لا أدوات اختيارية بعد";
+    ext_none_desc: "Optional tools appear here when there are some to add. Nothing is installed or running until you add one."
+        | "تظهر الأدوات الاختيارية هنا عندما يتوفر ما يمكن إضافته. لا شيء مثبّت أو يعمل حتى تضيف واحدة.";
+    ext_tier_core: "Core"
+        | "الأساسية";
+    ext_tier_core_d: "always there"
+        | "موجودة دائمًا";
+    ext_tier_ext: "Extensions"
+        | "الإضافات";
+    ext_tier_ext_d: "added on demand"
+        | "تُضاف عند الطلب";
+    ext_tier_labs: "Labs"
+        | "ميزات تجريبية";
+    ext_tier_labs_d: "still experiments"
+        | "ما زالت تجارب";
+    gp_basics: "Basics"
+        | "الأساسيات";
+    gp_saving: "Saving"
+        | "الحفظ";
+    g_default_search_d: "Opens results in your browser"
+        | "يفتح النتائج في متصفحك";
+    g_default_ai_d: "Asks about what you selected"
+        | "يسأل عمّا حدّدته";
+    g_default_text_d: "Copies the text you selected"
+        | "ينسخ النص الذي حدّدته";
+    g_default_copy_d: "Copies the picture"
+        | "ينسخ الصورة";
 }

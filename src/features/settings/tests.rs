@@ -1303,12 +1303,17 @@ fn no_visible_tooltip_repeats_its_control() {
     // Text that says what it is shows no tooltip: Settings has none by default.
     update(&mut s, Message::Section(Section::General));
     let _ = view(&s);
-    assert_eq!(shown().len(), 0, "{:?}", shown());
+    // (the title bar's search names its key: the one tooltip Settings shows by default)
+    assert!(
+        shown().iter().all(|t| t == "Search settings · Ctrl+K"),
+        "{:?}",
+        shown()
+    );
     // A save folder cut short does: the whole path.
     let long = "/a".repeat(40);
     update(&mut s, Message::Folder(Some(PathBuf::from(&long))));
     let _ = view(&s);
-    assert_eq!(shown(), [long]);
+    assert!(shown().contains(&long), "{:?}", shown());
     assert_tips_add_something("a cut folder");
 }
 
@@ -2052,23 +2057,19 @@ fn renders_every_section_in_both_themes() {
 fn labs_pages_are_hidden_while_their_switch_is_off() {
     let path = tmp("labs-pages");
     let (mut s, _) = state(Some(path.clone()));
-    let mut side = sidebar(&s);
-    if cfg!(windows) {
-        assert_eq!(side.remove(4), "Text reading");
-    }
     assert_eq!(
-        side,
+        sidebar(&s),
         [
             "General",
             "Appearance",
-            "Look & behaviour",
-            "Ask AI",
+            "Circle to Search",
+            "AI and Search",
             "Translate",
             "Snip",
             "OpenCircle Studio",
-            "History",
             "Shortcuts",
-            "Privacy",
+            "Privacy & data",
+            "Extensions",
             "About",
             "Labs"
         ]
@@ -2082,24 +2083,14 @@ fn labs_pages_are_hidden_while_their_switch_is_off() {
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
 
-/// A page change glides the sidebar's highlight and raises the page on the
-/// design's timings, by the frame clock, which stops once both are done.
+/// A page change keeps the frame clock for one glide, then it stops; a pick glides its thumb.
 #[test]
-fn a_page_change_glides_and_rises_then_the_clock_stops() {
+fn a_page_change_runs_the_clock_once_then_it_stops() {
     let (mut s, _) = state(None);
-    assert!(s.moving().is_none());
     super::update(&mut s, Message::Section(Section::Labs));
-    let (from, glide, rise) = s.moving().expect("moving");
-    assert_eq!(from, Section::General);
-    assert!(glide < 1.0 && rise < 1.0, "{glide} {rise}");
-    // the same page again is no motion
-    s.moved = None;
-    super::update(&mut s, Message::Section(Section::Labs));
-    assert!(s.moving().is_none());
+    assert!(s.moved.is_some());
     // done: the next tick ends it
     s.moved = Some((Section::General, Instant::now() - motion::GLIDE));
-    let (_, glide, rise) = s.moving().unwrap();
-    assert_eq!((glide, rise), (1.0, 1.0));
     super::update(&mut s, Message::Tick);
     assert!(s.moved.is_none());
     // a pick glides its thumb from the old value
@@ -2130,40 +2121,6 @@ fn the_header_reports_its_caption_buttons() {
         Outcome::None
     );
     assert!(!s.dirty());
-}
-
-/// The hairline under the header and the sidebar's edge are one line
-/// (owner, 2026-10-28): the same colour, both 1 px, in both themes; the
-/// edge starts at the line under the header.
-#[test]
-fn the_header_line_and_the_sidebar_edge_are_the_same_hairline() {
-    use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
-    use crate::shared::kit::tokens::size;
-    for theme in [&SAPPHIRE, &DAYLIGHT] {
-        themes::set(theme);
-        let (mut s, _) = state(None);
-        update(&mut s, Message::Section(Section::Privacy));
-        let (w, h) = (WINDOW_SIZE.width as usize, WINDOW_SIZE.height as usize);
-        let px = shot::render(view(&s), w as u32, h as u32);
-        let at = |x: usize, y: usize| px[(y * w + x) * 4..][..3].to_vec();
-        // 1 px rim, then the header; the sidebar's last column is its edge
-        let (line_y, edge_x) = (1 + size::HEADER as usize, size::SIDEBAR as usize);
-        let line = at(w / 2, line_y);
-        assert_eq!(at(edge_x, h / 2), line, "{}: the same colour", theme.id);
-        assert_eq!(
-            at(edge_x, line_y + 1),
-            line,
-            "{}: the edge starts there",
-            theme.id
-        );
-        for (x, y) in [(w / 2, line_y - 1), (w / 2, line_y + 1)] {
-            assert_ne!(at(x, y), line, "{}: the line is 1 px tall", theme.id);
-        }
-        for x in [edge_x - 1, edge_x + 1] {
-            assert_ne!(at(x, h / 2), line, "{}: the edge is 1 px wide", theme.id);
-        }
-    }
-    themes::set(&SAPPHIRE);
 }
 
 /// Settings harmony (owner, 2026-10-28): on every page, every row's control
@@ -2204,7 +2161,10 @@ fn every_rows_control_shares_one_column(language: &'static str) {
         update(&mut s, Message::Section(page.id));
         let found = shot::containers(view(&s), WINDOW_SIZE, CONTROL);
         // (Privacy is a list; About has cards and links, no setting rows)
-        if !matches!(page.id, Section::Privacy | Section::About) {
+        if !matches!(
+            page.id,
+            Section::Privacy | Section::About | Section::Extensions
+        ) {
             assert!(
                 !found.is_empty(),
                 "{}: no rows",
@@ -3551,17 +3511,16 @@ fn the_reset_shortcuts_row_in_arabic_matches_its_golden_image() {
     app_language::set(Lang::En);
 }
 
-/// A wide window never stretches a page edge to edge: every page's content
-/// is at most `PAGE_MAX` wide, at the start edge (left in English, right in
-/// Arabic), at the smallest, the usual, a 1920 and a 3440 px window.
+/// A wide window never stretches a page edge to edge: every page's content is at most
+/// `CONTENT_MAX` less its padding wide, in the middle of the page card (which is at the end side of the
+/// sidebar card), at the smallest, the usual, a 1920 and a 3440 px window.
 #[test]
 fn every_page_keeps_its_content_width_on_a_wide_window() {
     use crate::features::settings::state::MIN_WIDTH;
     use crate::features::settings::window::PAGE_ID;
     use crate::shared::app_language::{self, Choice, Lang};
-    use crate::shared::kit::tokens::{size, space};
-    // the window's rim, the sidebar (its divider included), the page's side pad
-    let start = 1.0 + size::SIDEBAR + space::PAGE[1];
+    use crate::shared::kit::tokens::settings::{CONTENT_MAX, CONTENT_PAD, GUTTER, NAV};
+    let pad = 2.0 * CONTENT_PAD[1];
     for language in ["en", "ar"] {
         let (mut s, _) = state(None);
         s.draft.labs = Labs::all_on();
@@ -3575,17 +3534,22 @@ fn every_page_keeps_its_content_width_on_a_wide_window() {
                 let [b] = found[..] else {
                     panic!("{language} {section:?} {width}: {found:?}")
                 };
-                let room = width - start - space::PAGE[1] - 1.0;
-                let at = |v: f32, want: f32| (v - want).abs() < 0.5;
+                // the page card: after the sidebar card and a gutter (before it in Arabic)
+                let card = width - 2.0 - 2.0 * GUTTER - NAV;
+                let (left, right) = match language {
+                    "en" => (1.0 + GUTTER + NAV + GUTTER, width - 1.0 - GUTTER),
+                    _ => (1.0 + GUTTER, width - 1.0 - GUTTER - NAV - GUTTER),
+                };
+                // (the scroll bar's gutter takes up to 10 px of the card's room)
+                let at = |v: f32, want: f32| (v - want).abs() < 11.0;
                 assert!(
-                    at(b.width, room.min(size::PAGE_MAX)),
+                    at(b.width, (card - 2.0 - pad).min(CONTENT_MAX - pad)),
                     "{language} {section:?} {width}: {b:?}"
                 );
-                let edge = match language {
-                    "en" => at(b.x, start),
-                    _ => at(b.x + b.width, width - start),
-                };
-                assert!(edge, "{language} {section:?} {width}: {b:?}");
+                assert!(
+                    at(b.x + b.width / 2.0, (left + right) / 2.0),
+                    "{language} {section:?} {width}: centred {b:?}"
+                );
             }
         }
     }
@@ -3770,8 +3734,10 @@ fn the_sidebar_footer_link_matches_its_golden_images() {
 #[test]
 fn tab_walks_the_sidebar_then_the_page_in_both_directions() {
     use crate::shared::app_language::{self, Lang};
-    use crate::shared::kit::tokens::size::SIDEBAR;
     use iced::keyboard::key::Named;
+    // the sidebar card and its gutter
+    const SIDEBAR: f32 =
+        crate::shared::kit::tokens::settings::NAV + crate::shared::kit::tokens::settings::GUTTER;
     let key = |k| shot::named(k, false)[1].clone();
     for language in ["en", "ar"] {
         let (mut s, _) = state(None);
@@ -4613,7 +4579,7 @@ fn f13_the_index_has_every_page_and_each_row_its_own_title() {
         titles.dedup();
         assert!(!titles.iter().any(|t| t.is_empty()), "{:?}", page.id);
         assert_eq!(titles.len(), n, "{:?}: no title twice", page.id);
-        if !matches!(page.id, Section::Labs) {
+        if !matches!(page.id, Section::Labs | Section::Extensions) {
             assert!(n > 0, "{:?} has rows in the index", page.id);
         }
     }

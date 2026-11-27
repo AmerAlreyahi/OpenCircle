@@ -6,28 +6,29 @@
 //! design's rise (the whole page moving 14 px over 190 ms) redrew the whole
 //! window every frame on the CPU renderer (laggy on a 4K screen); it returns
 //! with the GPU renderer.
-use iced::widget::{Space, column, container};
+use iced::widget::{Space, column, container, mouse_area};
 use iced::{Center, Element, Fill, Padding};
 
-use super::state::{Message, Section, State};
+use super::state::{Message, State};
 use super::{pages, previews};
-use crate::shared::app_language::{S, count, tr};
+use crate::shared::app_language::{S, count, fmt, tr};
 use crate::shared::kit::button::{Kind, button, cancel, label};
-use crate::shared::kit::chip::{Tone, status};
-use crate::shared::kit::divider::divider;
-use crate::shared::kit::header::regular;
+use crate::shared::kit::chip::{Tone, status, tag};
+use crate::shared::kit::floating_card::floating_card;
+use crate::shared::kit::header::regular_with_chip;
 use crate::shared::kit::modal;
+use crate::shared::kit::nav_card::{Entry, Foot, nav_card};
+use crate::shared::kit::page_head::page_head;
 use crate::shared::kit::scroll::scroll;
-use crate::shared::kit::sidebar::{Item, sidebar};
-use crate::shared::kit::surface::{Material, surface};
-use crate::shared::kit::text::{sub, text};
-use crate::shared::kit::tokens::{Role, size, space};
+use crate::shared::kit::search_card::{Hit, search_card};
+use crate::shared::kit::text::sub;
+use crate::shared::kit::tokens::settings::{CONTENT_MAX, CONTENT_PAD, GUTTER, SEARCH_W};
+use crate::shared::kit::tokens::{Role, space};
+use crate::shared::kit::tooltip::{Why, hint};
 use crate::t;
 
 /// The window's 1 px rim (none when maximised: the screen's edge is the edge).
 const RIM: f32 = 1.0;
-/// Under the page's title (`mb-1.5`).
-const TITLE_GAP: f32 = 6.0;
 /// The longest the header pill's line gets (characters), before "…".
 const PILL_MAX: usize = 22;
 /// About how wide a header pill is per character, and its dot and padding (the search keeps clear of it).
@@ -39,17 +40,17 @@ const BUTTONS: f32 = 3.0 * 46.0 + 8.0;
 /// The page's content box (the tests find its width by this id).
 pub(super) const PAGE_ID: &str = "settings-page";
 
-/// The sidebar's footer: this version and this OS.
+/// The title bar's chip: this version.
 const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
-const OS: &str = if cfg!(windows) { "Windows" } else { "Linux" };
 
 pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
-    // the whole window in the app's language and direction
+    // the whole window in the app's language and direction (the title bar below is never mirrored)
     let _dir = crate::shared::kit::dir::scope(crate::shared::app_language::rtl());
     let logo = crate::shared::kit::logo::logo(16);
-    let header = regular(
+    let header = regular_with_chip(
         logo,
         t!(win_title),
+        tag(VERSION),
         pill(state),
         Some(maximised),
         Message::Caption,
@@ -62,8 +63,15 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
         SEARCH_W,
         search_margin(state),
     );
-    let body: Element<'_, Message> = crate::dir_row![nav(state), page(state)].height(Fill).into();
-    // F13: the hits hang from the field, over the page
+    // two floating cards on the calm pane: the sidebar and the page
+    let cards = crate::dir_row![nav(state), page(state)]
+        .spacing(GUTTER)
+        .height(Fill);
+    let body: Element<'_, Message> = container(cards)
+        .padding(Padding::new(GUTTER).top(0.0))
+        .height(Fill)
+        .into();
+    // F13: the card hangs from the field, over the page
     let body = match search_hits(state) {
         Some(hits) => iced::widget::stack![body, hits].into(),
         None => body,
@@ -75,7 +83,7 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     let rim = if maximised { 0.0 } else { RIM };
     // Tab / Shift+Tab walk the sidebar, then the page (`kit::focus`)
     let window = crate::shared::kit::focus::scope(
-        surface(Material::Window, 0.0, column![header, divider(), main])
+        crate::shared::kit::floating_card::pane(column![header, main])
             .padding(rim)
             .width(Fill)
             .height(Fill),
@@ -86,63 +94,86 @@ pub fn view(state: &State, maximised: bool) -> Element<'_, Message> {
     }
 }
 
-/// The search field's widest (F13).
-const SEARCH_W: f32 = 240.0;
-/// The hits' list width, and the gap between its rows.
-const HITS_W: f32 = 420.0;
-const HITS_GAP: f32 = 2.0;
-
-/// The header's search (Ctrl+K, or Ctrl+F, focuses it), centred on the window: typing opens the search; the keys
-/// are shown at its end while it is empty.
+/// The header's search (Ctrl+K, or Ctrl+F, focuses it), centred on the window: a click or typing opens
+/// it; no keys drawn in it (the tooltip names them).
 fn search_field(state: &State) -> Element<'_, Message> {
     let query = state.search.as_ref().map_or("", |s| s.query.as_str());
     let field = crate::shared::kit::field::search(t!(win_search_ph), query)
         .id(super::search::FIELD)
         .on_input(Message::SearchInput)
         .on_submit(Message::SearchGo);
-    crate::shared::kit::keycap::at_end(field, &["Ctrl", "K"], query.is_empty())
+    let field = mouse_area(field).on_press(Message::SearchOpen);
+    hint(
+        field,
+        t!(win_search_ph),
+        Why::Keys("Ctrl+K"),
+        iced::widget::tooltip::Position::Bottom,
+    )
 }
 
-/// The list of hits under the header (none while nothing is typed): "row title .
-/// page", the arrows' row marked, a hint line at its foot.
+/// The card under the field: the typed query's hits, or (open, nothing typed) "Most used" with the
+/// current values; the chosen row marked, a hint line at its foot.
 fn search_hits(state: &State) -> Option<Element<'_, Message>> {
-    use crate::shared::kit::option_list::item;
-    let search = state
-        .search
-        .as_ref()
-        .filter(|s| !s.query.trim().is_empty())?;
-    let hits = search.hits();
-    let mut list = column![].spacing(HITS_GAP);
-    if hits.is_empty() {
-        list = list.push(sub(Role::ROW_DESC, t!(win_search_none)));
-    }
-    for (i, e) in hits.iter().enumerate() {
-        let hint = (!e.is_page).then(|| e.page.to_string());
-        list = list.push(item(
-            &e.title,
-            false,
-            hint,
-            i == search.at,
-            Message::SearchPick(i),
-        ));
-    }
-    list = list
-        .push(divider())
-        .push(sub(Role::ROW_DESC, t!(win_search_keys)));
-    let panel = surface(
-        Material::Widget,
-        crate::shared::kit::tokens::radius::CARD,
-        list,
-    )
-    .padding(space::GAP)
-    .width(HITS_W);
-    Some(
-        container(iced::widget::opaque(panel))
-            .padding(Padding::ZERO.top(space::GAP))
-            .width(Fill)
-            .center_x(Fill)
-            .into(),
-    )
+    let search = state.search.as_ref()?;
+    let typed = !search.query.trim().is_empty();
+    let glyph_of = |s| pages::of(s).glyph;
+    let (head, rows, total): (_, Vec<Hit<Message>>, usize) = match typed {
+        false => (
+            Some((t!(win_search_most), t!(win_search_type))),
+            super::search::most_used(state)
+                .into_iter()
+                .enumerate()
+                .map(|(i, q)| Hit {
+                    glyph: q.glyph,
+                    title: q.title,
+                    crumb: q.crumb,
+                    value: q.value,
+                    selected: i == search.at,
+                    on_press: Message::QuickPick(i),
+                })
+                .collect(),
+            0,
+        ),
+        true => {
+            let all = search.all_hits().len();
+            (
+                None,
+                search
+                    .hits()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| Hit {
+                        glyph: glyph_of(e.section),
+                        title: e.title.clone(),
+                        crumb: match e.is_page {
+                            true => String::new(),
+                            false => e.page.to_string(),
+                        },
+                        value: None,
+                        selected: i == search.at,
+                        on_press: Message::SearchPick(i),
+                    })
+                    .collect(),
+                all,
+            )
+        }
+    };
+    let count_text = match typed {
+        true => fmt(S::win_search_count, &[&total]),
+        false => String::new(),
+    };
+    let card = search_card(
+        head,
+        rows,
+        t!(win_search_none),
+        (t!(win_search_keys), count_text),
+    );
+    // under the field, as wide as it (it narrows with the window as the field does)
+    let layer = container(container(card).max_width(SEARCH_W).width(Fill))
+        .padding(Padding::from([0.0, search_margin(state)]).top(0.0))
+        .width(Fill)
+        .center_x(Fill);
+    Some(layer.into())
 }
 
 /// The dialog's width.
@@ -215,66 +246,77 @@ fn cut(line: &str) -> String {
 
 fn nav(state: &State) -> Element<'_, Message> {
     let shown: Vec<_> = pages::visible(&state.draft.labs).collect();
-    let items: Vec<Item<'static>> = (shown.iter())
-        .map(|p| Item {
+    let items: Vec<Entry<'static>> = (shown.iter())
+        .map(|p| Entry {
             label: tr(p.title),
-            badge: p.badge.map(tr),
-            icon: None,
+            glyph: p.glyph,
+            tail: p.badge.map(tr),
+            group: p.group,
         })
         .collect();
-    let at = |id| shown.iter().position(|p| p.id == id);
-    let active = at(state.section).unwrap_or(0);
-    let (from, glide) = match state.moving() {
-        Some((from, glide, _)) => (at(from).unwrap_or(active), glide),
-        None => (active, 1.0),
+    // (a page with no row of its own highlights the row its content lives in)
+    let home = |id| match id {
+        super::state::Section::TextReading => super::state::Section::Look,
+        super::state::Section::History => super::state::Section::Privacy,
+        id => id,
     };
+    let active = shown
+        .iter()
+        .position(|p| p.id == home(state.section))
+        .unwrap_or(0);
     let ids: Vec<_> = shown.iter().map(|p| p.id).collect();
-    sidebar(
+    nav_card(
         &items,
         active,
-        from,
-        glide,
+        state.nav_collapsed,
         move |i| Message::Section(ids[i]),
-        // (in RTL the footer mirrors: the version at the right)
-        [VERSION, OS],
-        // the Report a problem dialog, from every page
-        Some((t!(ab_report), Message::ReportOpen)),
+        Foot {
+            label: t!(ab_report),
+            glyph: '\u{e0d6}',
+            keys: &[],
+            on_press: Message::ReportOpen,
+        },
+        Foot {
+            label: t!(win_collapse),
+            glyph: '\u{e12d}',
+            keys: &["Ctrl", "B"],
+            on_press: Message::ToggleNav,
+        },
     )
 }
 
 fn page(state: &State) -> Element<'_, Message> {
     let page = pages::of(state.section);
-    let mut title = vec![
-        text(Role::PAGE_TITLE, tr(page.title)).into(),
-        Space::new().width(Fill).into(),
-    ];
-    if let Some(note) = page.note {
-        title.push(sub(Role::ROW_DESC, tr(note)).into());
-    }
-    let title = crate::shared::kit::dir::row(title).align_y(Center);
-    let body =
-        column![title, Space::new().height(TITLE_GAP),]
-            // (the glossary editor is a sub-page: no preview over it)
-            .push(previews::view(state).filter(|_| {
-                !(state.section == Section::Translate && state.glossaries.is_editing())
-            }))
-            .push(crate::shared::kit::setting_row::highlighting(
-                state.marked.as_deref(),
-                || (page.view)(state),
-            ));
-    // at most `PAGE_MAX` wide, at the start edge (a maximised window)
-    let body = (container(body).id(PAGE_ID))
-        .width(Fill)
-        .max_width(size::PAGE_MAX);
-    let body = container(body)
-        .padding(space::PAGE)
-        .width(Fill)
-        .align_x(crate::shared::kit::dir::start());
-    scroll(body)
-        .id(super::search::PAGE)
-        .width(Fill)
-        .height(Fill)
-        .into()
+    let head = page_head(page.glyph, tr(page.title), tr(page.line), None);
+    let body = column![head]
+        // (the glossary editor is a sub-page: no preview over it)
+        .push(previews::view(state).filter(|_| {
+            !(state.section == super::state::Section::Translate && state.glossaries.is_editing())
+        }))
+        .push(crate::shared::kit::setting_row::highlighting(
+            state.marked.as_deref(),
+            || match page.sectioned {
+                true => (page.view)(state),
+                false => crate::shared::kit::section::framed((page.view)(state)),
+            },
+        ))
+        .spacing(crate::shared::kit::tokens::settings::SECTION_GAP);
+    // at most `CONTENT_MAX` wide, in the middle of the card
+    let body = container(container(body).id(PAGE_ID).width(Fill))
+        .padding(Padding::from([CONTENT_PAD[0], CONTENT_PAD[1]]))
+        .max_width(CONTENT_MAX)
+        .width(Fill);
+    let body = container(body).center_x(Fill).width(Fill);
+    floating_card(
+        scroll(body)
+            .id(super::search::PAGE)
+            .width(Fill)
+            .height(Fill),
+    )
+    .width(Fill)
+    .height(Fill)
+    .clip(true)
+    .into()
 }
 
 /// Closing with changes that can't be saved yet: Save / Discard / Keep editing.

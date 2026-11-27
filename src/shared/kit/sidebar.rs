@@ -1,19 +1,11 @@
-//! `.oc-sidebar`: a window's page list, 168 px wide on `sidebar` with a
-//! divider at its right. Items (`.oc-nav-item`, 36 px, 12.5 px / 500) are
-//! `text_sub`, `text` on `hover` under the cursor; the active one is `text`
-//! (no dot: owner, 2026-10-29), over ONE elevated highlight (`.oc-nav-glide`) that
-//! glides from item `from` to `active` as `glide` goes 0 → 1 (the caller's
-//! clock: `motion::GLIDE`, standard). A footer line under a hairline.
-use iced::font::Weight;
-use iced::widget::{Space, button, column, container, stack, text};
+//! A dialog's page list (`list`): items as an icon and a label, the open one a raised pill with a
+//! thin accent bar at its start edge (the Studio Preferences dialog). Settings' own sidebar is the
+//! `nav_card`.
+use iced::widget::{Space, button, column, container};
 use iced::{Border, Center, Element, Fill, Padding};
 
-use super::button::faded;
-use super::chip::badge;
-use super::divider::divider;
-use super::scroll::scroll;
 use super::themes::c;
-use super::tokens::{Role, radius, size, space};
+use super::tokens::{Role, radius, size};
 
 /// One page in the list: its name and an optional badge ("Exp").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,131 +101,11 @@ fn shell_item<'a, Message: Clone + 'a>(
 
 /// Between two items (`space-y-0.5`).
 const GAP: f32 = 2.0;
-/// An item's side padding.
-const ITEM_PAD: f32 = 12.0;
-/// What an Arabic item's end pad gives its label.
-const END_GIVE: f32 = 2.0;
-/// The footer: 10.5 px at half strength, 8 px under its hairline and at its sides.
-const FOOTER: f32 = 10.5;
-const FOOTER_PAD: f32 = 8.0;
-/// Between the footer's link and the version line.
-pub const LINK_GAP: f32 = 4.0;
-
-/// Where item `i` starts, down the list.
-fn top(i: usize) -> f32 {
-    i as f32 * (size::NAV_ITEM + GAP)
-}
-
-pub fn sidebar<'a, Message: Clone + 'a>(
-    items: &[Item<'a>],
-    active: usize,
-    from: usize,
-    glide: f32,
-    on: impl Fn(usize) -> Message,
-    footer: [&'a str; 2],
-    link: Option<(&'a str, Message)>,
-) -> Element<'a, Message> {
-    let glide = glide.clamp(0.0, 1.0);
-    let y = top(from) + (top(active) - top(from)) * glide;
-    let highlight = column![
-        Space::new().height(y),
-        container(Space::new().width(Fill).height(size::NAV_ITEM)).style(|_| container::Style {
-            background: Some(c().elevated.into()),
-            border: Border::default()
-                .rounded(radius::CONTROL)
-                .width(1)
-                .color(c().elevated_border),
-            ..container::Style::default()
-        }),
-    ];
-    let list = column(
-        items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| nav_item(*item, i == active, on(i))),
-    )
-    .spacing(GAP);
-    let nav = scroll(stack![highlight, list]).height(Fill);
-    let small = |s: &'a str| {
-        text(s)
-            .size(FOOTER)
-            .font(super::text::weight(Weight::Normal))
-            .color(faded(c().text, 0.5))
-    };
-    // under a link, the version line sits closer
-    let version_gap = if link.is_some() { LINK_GAP } else { FOOTER_PAD };
-    let mut foot = column![divider()];
-    // a quiet link line over the version (Settings: Report a problem)
-    if let Some((label, on_press)) = link {
-        let line = crate::dir_row![super::button::button(
-            text(label)
-                .size(FOOTER)
-                .font(super::text::weight(Weight::Normal)),
-            super::button::Kind::Quiet,
-            Some(on_press),
-        )]
-        .padding(Padding::from([0.0, FOOTER_PAD]).top(FOOTER_PAD));
-        foot = foot.push(line);
-    }
-    let foot = foot.push(
-        crate::dir_row![small(footer[0]), Space::new().width(Fill), small(footer[1])]
-            .padding(Padding::from([0.0, FOOTER_PAD]).top(version_gap)),
-    );
-    let body = container(column![nav, foot].spacing(GAP))
-        .padding(space::SIDEBAR_PAD)
-        .width(size::SIDEBAR - super::divider::WIDTH)
-        .height(Fill)
-        .style(|_| container::Style::default().background(c().sidebar));
-    crate::dir_row![body, super::divider::vertical(Fill)]
-        .height(Fill)
-        .into()
-}
 
 fn nav_item<'a, Message: Clone + 'a>(
     item: Item<'a>,
     active: bool,
     on_press: Message,
 ) -> Element<'a, Message> {
-    if let Some(glyph) = item.icon {
-        return shell_item(glyph, item, active, on_press);
-    }
-    let label = text(item.label)
-        .size(super::text::size(Role::NAV))
-        .font(super::text::font(Role::NAV))
-        .wrapping(iced::widget::text::Wrapping::None);
-    // the label at the start, a badge after it
-    let mut parts: Vec<Element<'a, Message>> = vec![label.into(), Space::new().width(Fill).into()];
-    if let Some(b) = item.badge {
-        parts.extend([badge(b), Space::new().width(Fill).into()]);
-    }
-    let line = super::dir::row(parts).height(Fill).align_y(Center);
-
-    super::focus::press(
-        button(line)
-            .width(Fill)
-            .height(size::NAV_ITEM)
-            // Arabic labels are 1 px larger: the longest ("Ask AI") needs 2 px of the
-            // end pad (it was drawn 2 px past its room); the start edge stays.
-            .padding(super::dir::pad(Padding {
-                left: ITEM_PAD,
-                right: ITEM_PAD - if super::dir::rtl() { END_GIVE } else { 0.0 },
-                ..Padding::ZERO
-            }))
-            .style(move |_, status| {
-                let hot = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: (hot && !active).then(|| c().hover.into()),
-                    text_color: if active || hot {
-                        c().text
-                    } else {
-                        c().text_sub
-                    },
-                    border: Border::default().rounded(radius::CONTROL),
-                    ..button::Style::default()
-                }
-            }),
-        radius::CONTROL,
-        Some(on_press),
-    )
-    .into()
+    shell_item(item.icon.unwrap_or(' '), item, active, on_press)
 }

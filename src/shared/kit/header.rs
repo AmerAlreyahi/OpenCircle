@@ -44,7 +44,19 @@ pub fn regular<'a, Message: Clone + 'a>(
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
 ) -> Element<'a, Message> {
-    with_menu(logo, None, title, false, status, maximise, on)
+    bar(logo, None, title, false, None, status, maximise, on)
+}
+
+/// `regular` with `chip` (the version) after the title (Settings round 2).
+pub fn regular_with_chip<'a, Message: Clone + 'a>(
+    logo: image::Handle,
+    title: &'a str,
+    chip: Element<'a, Message>,
+    status: impl Into<Element<'a, Message>>,
+    maximise: Option<bool>,
+    on: impl Fn(Caption) -> Message,
+) -> Element<'a, Message> {
+    bar(logo, None, title, false, Some(chip), status, maximise, on)
 }
 
 /// `regular` with a menu bar (`menu`) between the logo and the title (Studio:
@@ -55,6 +67,20 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     menu: Option<Element<'a, Message>>,
     title: &'a str,
     unsaved: bool,
+    status: impl Into<Element<'a, Message>>,
+    maximise: Option<bool>,
+    on: impl Fn(Caption) -> Message,
+) -> Element<'a, Message> {
+    bar(logo, menu, title, unsaved, None, status, maximise, on)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bar<'a, Message: Clone + 'a>(
+    logo: image::Handle,
+    menu: Option<Element<'a, Message>>,
+    title: &'a str,
+    unsaved: bool,
+    chip: Option<Element<'a, Message>>,
     status: impl Into<Element<'a, Message>>,
     maximise: Option<bool>,
     on: impl Fn(Caption) -> Message,
@@ -77,6 +103,7 @@ pub fn with_menu<'a, Message: Clone + 'a>(
     let has_menu = menu.is_some();
     let name: Element<'a, Message> = match menu {
         None => row![mark, name_text]
+            .push(chip)
             .spacing(LOGO_GAP)
             .align_y(Center)
             .into(),

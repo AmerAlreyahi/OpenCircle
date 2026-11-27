@@ -35,43 +35,30 @@ use crate::shared::history::{Counts, Kind};
 use crate::shared::kit::header::Caption;
 use crate::shared::kit::motion::{self, Curve};
 use crate::shared::kit::themes::THEMES;
-use crate::shared::kit::tokens::{size, space};
+use crate::shared::kit::tokens::{settings, size};
 use crate::shared::platform::hotkey::{DesktopKey, managed};
 use crate::shared::secrets::{KeyStore, Keyring, Secret, SecretsError};
 use crate::shared::theme;
 
+use super::pages;
 use super::pages::snip::open_keyboard_settings;
 use super::pages::text_reading::open_language_settings;
-use super::pages::{self, PAGES};
 use super::previews;
 
-/// The size the Settings window prefers (logical px), the design's 820 x 560.
+/// The size the Settings window prefers (logical px), the round 2 design's 1280 x 800.
 /// Screenshots and tests render at this size.
-pub const WINDOW_SIZE: Size = Size::new(820.0, 560.0);
+pub const WINDOW_SIZE: Size = Size::new(1280.0, 800.0);
 
-/// The sidebar's footer under its list: a 2 px gap, the hairline, 8 px and a
-/// 10.5 px line (`kit::sidebar`), and the link line.
-const SIDEBAR_FOOTER: f32 = 2.0 + 1.0 + 8.0 + 16.0 + LINK_LINE;
-/// Its Report a problem link over the version line (`kit::sidebar::LINK_GAP`
-/// and a 10.5 px line).
-const LINK_LINE: f32 = crate::shared::kit::sidebar::LINK_GAP + 14.0;
+/// The sidebar card's rows the least height shows (more scroll: only on a small screen).
+const LISTED: usize = 10;
+/// The sidebar card's padding and hairlines, and its foot (two items under a hairline).
+const NAV_CHROME: f32 = 20.0 + 3.0 * 13.0 + 13.0 + 2.0 * (settings::NAV_ITEM + 2.0);
 
-/// The sidebar's pages on this OS with every Labs switch on (Text reading is
-/// Windows only).
-const LISTED: usize = if cfg!(windows) {
-    PAGES.len()
-} else {
-    PAGES.len() - 1
-};
-
-/// The height that shows the header and every sidebar page (Labs on). With
-/// all 13 (Windows, Labs on) it is a little over the design's 560: the window
-/// then opens that much taller.
+/// The height that shows the title bar and every sidebar row (Labs on).
 pub const FIT_HEIGHT: f32 =
-    size::HEADER + 2.0 * space::SIDEBAR_PAD + LISTED as f32 * (size::NAV_ITEM + 2.0) - 2.0
-        + SIDEBAR_FOOTER;
-/// The narrowest layout that keeps the label column readable beside a control.
-pub(super) const MIN_WIDTH: f32 = 760.0;
+    size::HEADER + settings::GUTTER + LISTED as f32 * (settings::NAV_ITEM + 2.0) + NAV_CHROME;
+/// The narrowest layout that keeps the label column readable beside a control (the sidebar card 246 px).
+pub(super) const MIN_WIDTH: f32 = 900.0;
 
 /// The opening size and the smallest size for a screen whose usable area is `work`
 /// (logical px): the preferred size, kept clear of the screen's edges and the taskbar,
@@ -536,6 +523,7 @@ pub enum Section {
     Shortcuts,
     Snip,
     Studio,
+    Extensions,
     Ai,
     TextReading,
     Translate,
@@ -640,6 +628,8 @@ pub struct State {
     /// The window was asked to close with unsaved changes: the footer asks
     /// Save / Discard / Keep editing (#136).
     pub(super) asking_close: bool,
+    /// Settings round 2: the sidebar card shows icons only (Ctrl+B, or its Collapse item).
+    pub(super) nav_collapsed: bool,
     /// Save or Discard answered: the shell closes the window now.
     pub(super) leaving: bool,
     /// Every valid change is written at once (the real window; `State::new`
@@ -742,6 +732,10 @@ pub enum Message {
     SearchGo,
     SearchPick(usize),
     SearchClose,
+    /// A quick pick of the empty search (its `i`th "Most used" row).
+    QuickPick(usize),
+    /// The sidebar card's Collapse (Ctrl+B).
+    ToggleNav,
     /// The header: drag, minimise, maximise, close (the shell does them).
     Caption(Caption),
     DefaultAction(DefaultAction),
@@ -1204,6 +1198,7 @@ impl State {
             recognizers,
             profile,
             asking_close: false,
+            nav_collapsed: false,
             leaving: false,
             auto: false,
             writing: false,
@@ -1634,6 +1629,21 @@ pub(super) fn issue(problems: &[Problem], key: &str) -> Option<String> {
 
 /// Settings search: opens the `at`th hit's page and marks its row (or the choice that
 /// reveals it), scrolling to it.
+/// The empty search's `i`th quick pick: its page, the row marked.
+fn open_quick(state: &mut State, i: usize) -> Outcome {
+    let Some(pick) = super::search::most_used(state).into_iter().nth(i) else {
+        return Outcome::None;
+    };
+    state.search = None;
+    let out = update(state, Message::Section(pick.section));
+    state.marked = Some(pick.mark).filter(|m| !m.is_empty());
+    state.marked_at = state.marked.as_ref().map(|_| Instant::now());
+    match (out, state.marked.is_some()) {
+        (Outcome::None, true) => Outcome::ScrollTo(pick.at),
+        (out, _) => out,
+    }
+}
+
 fn open_hit(state: &mut State, at: Option<usize>) -> Outcome {
     let hit = (state.search.as_ref())
         .zip(at)
@@ -1692,6 +1702,8 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::SearchGo
             | Message::SearchPick(_)
             | Message::SearchClose
+            | Message::QuickPick(_)
+            | Message::ToggleNav
             | Message::CloseSave
             | Message::CloseDiscard
             | Message::CloseKeep
@@ -1753,8 +1765,17 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
         }
         Message::SearchClose => state.search = None,
+        Message::ToggleNav => state.nav_collapsed = !state.nav_collapsed,
+        Message::QuickPick(i) => return open_quick(state, i),
         Message::SearchGo => {
             let at = state.search.as_ref().map(|s| s.at);
+            if state
+                .search
+                .as_ref()
+                .is_some_and(|s| s.query.trim().is_empty())
+            {
+                return open_quick(state, at.unwrap_or(0));
+            }
             return open_hit(state, at);
         }
         Message::SearchPick(i) => return open_hit(state, Some(i)),
@@ -2365,6 +2386,9 @@ pub(super) fn find_key(event: iced::Event, open: bool) -> Option<Message> {
         {
             Some(Message::SearchOpen)
         }
+        Code::KeyB if modifiers.control() && !modifiers.alt() && !modifiers.shift() => {
+            Some(Message::ToggleNav)
+        }
         Code::ArrowDown if open && bare => Some(Message::SearchMove(1)),
         Code::ArrowUp if open && bare => Some(Message::SearchMove(-1)),
         Code::Escape if open && bare => Some(Message::SearchClose),
@@ -2479,18 +2503,6 @@ impl State {
             ),
             None => (now, 1.0),
         }
-    }
-
-    /// The page change under way: (the page it left, the glide's and the
-    /// rise's progress); `None` at rest.
-    pub(super) fn moving(&self) -> Option<(Section, f32, f32)> {
-        let (from, t) = self.moved?;
-        let now = Instant::now();
-        Some((
-            from,
-            motion::progress(t, now, motion::GLIDE, Curve::Standard),
-            motion::progress(t, now, motion::MORPH, Curve::Out),
-        ))
     }
 }
 
