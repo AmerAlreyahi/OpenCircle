@@ -20,7 +20,7 @@ use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, State};
-use crate::shared::kit::surface::{self, Join, segment_row_pad, tray, tray_joined};
+use crate::shared::kit::surface::{self, Join, segment_row_pad, tray};
 use crate::shared::kit::text::{muted, sub, text as caption};
 use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -314,7 +314,7 @@ fn long_capture_on(e: &Annotator) -> bool {
 /// The toolbar with its open panel by it (where nothing limits the room).
 #[cfg(test)]
 pub fn view(e: &Annotator) -> Element<'_, Message> {
-    let (bar, panel) = build(e, tooltip::Position::Bottom);
+    let (bar, panel) = build(e, tooltip::Position::Bottom, Join::None);
     match panel {
         None => bar,
         Some((panel, left)) => column![bar, row![Gap::new().width(left.max(0.0)), panel]]
@@ -332,8 +332,9 @@ pub fn view_at(
     bar: Rectangle,
     side: tooltip::Position,
     tips: tooltip::Position,
+    join: Join,
 ) -> (Element<'_, Message>, Option<Element<'_, Message>>) {
-    let (toolbar, panel) = build(e, tips);
+    let (toolbar, panel) = build(e, tips, join);
     let above = side == tooltip::Position::Top;
     let panel = panel.map(|(panel, left)| {
         iced::widget::float(panel)
@@ -351,8 +352,6 @@ pub fn view_at(
 }
 
 thread_local! {
-    /// Which edge of the toolbar the options row is attached to, for this build (the row's is the opposite).
-    static JOIN: std::cell::Cell<Join> = const { std::cell::Cell::new(Join::None) };
     /// Where tooltips go (the toolbar's side away from the area), for this build.
     static TIP_SIDE: std::cell::Cell<tooltip::Position> =
         const { std::cell::Cell::new(tooltip::Position::Bottom) };
@@ -399,6 +398,7 @@ fn icon<'a>(glyph: char, on: bool, message: Option<Message>, tip: &'a str) -> El
 fn build(
     e: &Annotator,
     side: tooltip::Position,
+    join: Join,
 ) -> (Element<'_, Message>, Option<(Element<'_, Message>, f32)>) {
     TIP_SIDE.set(side);
     let stops = stops(e);
@@ -541,7 +541,7 @@ fn build(
     let segments = dir::row([seg_lead, seg_tools, seg_more, seg_actions])
         .spacing(space::GAP)
         .align_y(iced::Center);
-    let toolbar = tray_joined(e.held, radius::FULL, JOIN.get(), segments)
+    let toolbar = tray(e.held, radius::FULL, join, segments)
         .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
         .height(bar::SNIP_HEIGHT);
     let Some(menu) = e.menu else {
@@ -570,6 +570,7 @@ fn studio_hint<'a>() -> Element<'a, Message> {
     tray(
         false,
         radius::WINDOW,
+        Join::None,
         container(caption(Role::ROW_TITLE, t!(sn_studio_hint))).padding(space::PANEL),
     )
     .width(STUDIO_HINT_W)
@@ -675,20 +676,6 @@ const ROW_PAD_X: f32 = 11.0;
 pub const ROW_H: f32 = crate::shared::kit::option_bar::HEIGHT + 2.0 * widget_e::TRAY_PAD_Y;
 pub const ROW_ROOM: f32 = ROW_GAP + ROW_H;
 
-/// Tell the toolbar and its row which edge they share (before building either).
-pub fn set_join(toolbar_edge: Join) {
-    JOIN.set(toolbar_edge);
-}
-
-/// The row's own joined edge: the opposite of the toolbar's.
-fn row_join() -> Join {
-    match JOIN.get() {
-        Join::Below => Join::Above,
-        Join::Above => Join::Below,
-        Join::None => Join::None,
-    }
-}
-
 /// The widest an options row is meant to get (Hide's, at 100 %): the room the host keeps for it.
 pub const ROW_WIDE: f32 = 1250.0;
 
@@ -724,7 +711,7 @@ pub fn row_span(at_x: f32, bar_w: f32, screen_w: f32, need: f32) -> (f32, f32) {
 /// on the toolbar's surface.
 #[cfg(test)]
 pub fn options_row(e: &Annotator, max_w: f32) -> Option<Element<'_, Message>> {
-    options_row_tips(e, max_w, tooltip::Position::Bottom)
+    options_row_tips(e, max_w, tooltip::Position::Bottom, Join::None)
 }
 
 /// `options_row`, its tooltips opening on `tips` (away from the toolbar and the area).
@@ -732,6 +719,7 @@ pub fn options_row_tips(
     e: &Annotator,
     max_w: f32,
     tips: tooltip::Position,
+    join: Join,
 ) -> Option<Element<'_, Message>> {
     if e.capturing {
         return None;
@@ -742,10 +730,10 @@ pub fn options_row_tips(
     let on = e.focus.filter(|f| (from..to).contains(f)).map(|f| f - from);
     let row = crate::features::snip::screens::options_row::snip_row_focused(e, on)?;
     Some(
-        tray_joined(
+        tray(
             false,
             radius::FULL,
-            row_join(),
+            join.facing(),
             crate::shared::kit::scroll::across(row),
         )
         .padding([widget_e::TRAY_PAD_Y, ROW_PAD_X])
@@ -1506,11 +1494,11 @@ mod tests {
                 .all(|r| r.message != Some(Message::OpenStudio)),
             "no second entry in More"
         );
-        let (_, panel) = build(&e, tooltip::Position::Bottom);
+        let (_, panel) = build(&e, tooltip::Position::Bottom, Join::None);
         assert!(panel.is_none(), "no hint unless it is the first Snip");
         let mut first = editor();
         first.studio_hint = true;
-        let (_, panel) = build(&first, tooltip::Position::Bottom);
+        let (_, panel) = build(&first, tooltip::Position::Bottom, Join::None);
         assert!(panel.is_some(), "the one-time hint");
     }
 
@@ -1795,6 +1783,7 @@ mod tests {
             bar,
             tooltip::Position::Bottom,
             tooltip::Position::Bottom,
+            Join::None,
         );
         let v_sq = iced::widget::stack![
             iced::widget::Space::new()
@@ -1820,6 +1809,7 @@ mod tests {
             bar,
             tooltip::Position::Bottom,
             tooltip::Position::Bottom,
+            Join::None,
         );
         let v_hue = iced::widget::stack![
             iced::widget::Space::new()

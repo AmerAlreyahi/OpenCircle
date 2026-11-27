@@ -49,6 +49,21 @@ pub fn surface<'a, Message: 'a>(
     radius: f32,
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
+    corners(material, [radius; 4], content)
+}
+
+/// `surface` with a radius per corner: top-left, top-right, bottom-right, bottom-left.
+fn corners<'a, Message: 'a>(
+    material: Material,
+    corners: [f32; 4],
+    content: impl Into<Element<'a, Message>>,
+) -> Container<'a, Message> {
+    let radius = iced::border::Radius {
+        top_left: corners[0],
+        top_right: corners[1],
+        bottom_right: corners[2],
+        bottom_left: corners[3],
+    };
     container(content).style(move |_| {
         let (fill, edge) = match material {
             Material::Window => (c().bg, c().rim),
@@ -69,23 +84,6 @@ pub fn surface<'a, Message: 'a>(
     })
 }
 
-/// Style E floating-widget tray (`track`, `rim` or `accent` while `held`).
-pub fn tray<'a, Message: 'a>(
-    held: bool,
-    radius: f32,
-    content: impl Into<Element<'a, Message>>,
-) -> Container<'a, Message> {
-    surface(
-        if held {
-            Material::TrayHeld
-        } else {
-            Material::Tray
-        },
-        radius,
-        content,
-    )
-}
-
 /// Which edge of a tray another tray is attached to (the Snip options row and its toolbar).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Join {
@@ -96,46 +94,43 @@ pub enum Join {
     Above,
 }
 
-/// The corner radius on the joined edge: small, so two trays read as one piece.
+impl Join {
+    /// The edge the neighbour sees: the opposite one.
+    pub fn facing(self) -> Join {
+        match self {
+            Join::Below => Join::Above,
+            Join::Above => Join::Below,
+            Join::None => Join::None,
+        }
+    }
+}
+
+/// The corner radius on a joined edge: small, so two trays read as one piece.
 pub const JOIN_RADIUS: f32 = 8.0;
 
-/// A tray whose `join` edge is nearly square, to sit flush against its neighbour.
-pub fn tray_joined<'a, Message: 'a>(
+/// Style E floating-widget tray (`track`, `rim` or `accent` while `held`); its `join` edge is
+/// nearly square, to sit flush against its neighbour.
+pub fn tray<'a, Message: 'a>(
     held: bool,
     radius: f32,
     join: Join,
     content: impl Into<Element<'a, Message>>,
 ) -> Container<'a, Message> {
-    let (edge, fill) = if held {
-        (c_accent(), c().track)
-    } else {
-        (c().rim, c().track)
-    };
     let j = JOIN_RADIUS.min(radius);
-    // top-left, top-right, bottom-right, bottom-left
-    let corners = match join {
+    let c = match join {
         Join::None => [radius; 4],
         Join::Below => [radius, radius, j, j],
         Join::Above => [j, j, radius, radius],
     };
-    container(content).style(move |_| container::Style {
-        background: Some(fill.into()),
-        border: Border {
-            radius: iced::border::Radius {
-                top_left: corners[0],
-                top_right: corners[1],
-                bottom_right: corners[2],
-                bottom_left: corners[3],
-            },
-            width: 1.0,
-            color: edge,
+    corners(
+        if held {
+            Material::TrayHeld
+        } else {
+            Material::Tray
         },
-        ..container::Style::default()
-    })
-}
-
-fn c_accent() -> Color {
-    c().accent
+        c,
+        content,
+    )
 }
 
 /// Style E raised pill segment (`.gp`) inside a floating tray: `widget` fill,
@@ -196,7 +191,7 @@ pub fn segment_card<'a, Message: 'a>(
 /// `MENU_RADIUS` corners, `size::PANEL` wide.
 pub fn panel<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Container<'a, Message> {
     use super::tokens::{size, space};
-    tray(false, radius::DROPDOWN, segment(content))
+    tray(false, radius::DROPDOWN, Join::None, segment(content))
         .padding(space::BAR_PAD)
         .width(size::PANEL)
 }
@@ -205,7 +200,7 @@ pub fn panel<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Conta
 /// editor's area picker, a protected capture): a style E tray pill in every theme.
 pub fn hint<'a, Message: 'a>(label: impl IntoFragment<'a>) -> Container<'a, Message> {
     let line = super::text::text(Role::NOTE, label);
-    tray(false, radius::FULL, line).padding(HINT_PAD)
+    tray(false, radius::FULL, Join::None, line).padding(HINT_PAD)
 }
 
 /// Style E live pin frame (`.pinw`): `content` with a `widget_e::PIN_BORDER` ring
@@ -250,6 +245,29 @@ mod tests {
     use crate::shared::kit::testing::shot;
     use crate::shared::kit::themes::{DAYLIGHT, SAPPHIRE};
 
+    /// Owner 2026-11-27: a tray's joined edge has small corners (it sits flush on its neighbour),
+    /// the other edge stays round.
+    #[test]
+    fn a_joined_tray_squares_the_corners_on_the_joined_edge() {
+        let corner_filled = |join: Join, top: bool| {
+            let v: Element<'_, ()> = tray(
+                false,
+                26.0,
+                join,
+                iced::widget::Space::new().width(120).height(52),
+            )
+            .into();
+            let px = shot::render(v, 120, 52);
+            let y = if top { 3 } else { 48 };
+            // a pixel just inside the left edge: tray fill when the corner is small, background when round
+            let i = ((y * 120 + 3) * 4) as usize;
+            px[i..i + 3] != themes::c().bg.into_rgba8()[..3]
+        };
+        assert!(corner_filled(Join::Below, false) && !corner_filled(Join::Below, true));
+        assert!(corner_filled(Join::Above, true) && !corner_filled(Join::Above, false));
+        assert!(!corner_filled(Join::None, true) && !corner_filled(Join::None, false));
+    }
+
     #[test]
     fn style_e_tray_and_segment_render_two_distinct_tones() {
         for theme in [&SAPPHIRE, &DAYLIGHT] {
@@ -257,6 +275,7 @@ mod tests {
             let view: Container<'_, ()> = tray(
                 false,
                 radius::FULL,
+                Join::None,
                 segment_row([super::super::text::text(Role::CONTROL, "Action").into()]),
             )
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X]);

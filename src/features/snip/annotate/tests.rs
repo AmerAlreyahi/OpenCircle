@@ -25,6 +25,7 @@ impl Annotator {
             at,
             iced::widget::tooltip::Position::Bottom,
             iced::widget::tooltip::Position::Bottom,
+            crate::shared::kit::surface::Join::None,
         )
     }
 

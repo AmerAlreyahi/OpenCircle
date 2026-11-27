@@ -482,7 +482,18 @@ pub fn compact<'a, Message: Clone + 'a>(
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let glyph = text(glyph).font(super::icon::FONT).size(size::ICON_SMALL);
-    compact_with(glyph.into(), label, width, state, on_press)
+    compact_with(glyph.into(), label, (width, COMPACT_H), state, on_press)
+}
+
+/// A round icon button `side` px across (the chat composer's send / stop, design `.send` 30 px):
+/// `compact`'s look at its own size.
+pub fn compact_round<'a, Message: Clone + 'a>(
+    glyph: char,
+    side: f32,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let glyph = text(glyph).font(super::icon::FONT).size(size::ICON_SMALL);
+    compact_with(glyph.into(), None, (side, side), (false, false), on_press)
 }
 
 /// `compact` with the kit spinner (`spinner::spinner`, `turn` of the way
@@ -497,13 +508,13 @@ pub fn compact_spinning<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let logo = super::logo::logo(size::ICON_SMALL as u32);
     let glyph = super::spinner::spinner(logo, size::ICON_SMALL, turn, still);
-    compact_with(glyph, label, width, state, on_press)
+    compact_with(glyph, label, (width, COMPACT_H), state, on_press)
 }
 
 fn compact_with<'a, Message: Clone + 'a>(
     glyph: Element<'a, Message>,
     label: Option<&'a str>,
-    width: f32,
+    (width, height): (f32, f32),
     (active, focused): (bool, bool),
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
@@ -521,7 +532,7 @@ fn compact_with<'a, Message: Clone + 'a>(
     super::focus::press(
         iced_button(container(content).center(Fill))
             .width(width)
-            .height(COMPACT_H)
+            .height(height)
             .padding(0)
             .style(move |_, status| {
                 let hot = live && matches!(status, Status::Hovered | Status::Pressed);

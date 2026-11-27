@@ -302,14 +302,11 @@ impl SnipToolbar {
             );
             // (the row's tooltips open away from the toolbar: down under it, up above it)
             let row_above_bar = row_above(at.y, size.height, toolbar::ROW_ROOM, screen.height);
-            toolbar::set_join(match row_above_bar {
-                true => Join::Above,
-                false => Join::Below,
-            });
-            let row = toolbar::options_row_tips(&self.annotator, x1 - x0, row_tips(row_above_bar));
-            if row.is_none() {
-                toolbar::set_join(Join::None);
-            }
+            let join = join_of(row_above_bar);
+            let row =
+                toolbar::options_row_tips(&self.annotator, x1 - x0, row_tips(row_above_bar), join);
+            // (no row: the toolbar's edges stay round)
+            let join = if row.is_some() { join } else { Join::None };
             let room = if row.is_some() {
                 toolbar::ROW_ROOM
             } else {
@@ -326,7 +323,7 @@ impl SnipToolbar {
             let tips = toolbar_tips(row.is_some(), above, side);
             // (panels below clear the row)
             let held = Rectangle::new(at, Size::new(size.width, size.height + room));
-            let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side, tips);
+            let (toolbar, popover) = toolbar::view_at(&self.annotator, held, side, tips, join);
             let toolbar = mouse_area(toolbar.map(map))
                 .on_press(grab.clone())
                 .interaction(mouse::Interaction::Move);
@@ -363,6 +360,14 @@ impl SnipToolbar {
 /// The row goes above the toolbar when the screen has no room under it (`room`: the row's).
 fn row_above(bar_y: f32, bar_h: f32, room: f32, screen_h: f32) -> bool {
     bar_y + bar_h + room > screen_h
+}
+
+/// The toolbar's edge the row is attached to (the row's own is the opposite one).
+fn join_of(row_above_bar: bool) -> Join {
+    match row_above_bar {
+        true => Join::Above,
+        false => Join::Below,
+    }
 }
 
 /// The row's top: under the toolbar, or above it.
@@ -513,6 +518,27 @@ mod tests {
                         let bar = e.bar_size();
                         let at = Point::new((screen.width - bar.width) / 2.0, 320.0 - bar.height);
                         let dir = if rtl { "-ar" } else { "" };
+                        // owner 2026-11-27: the same toolbar at the screen's bottom, the row ABOVE it
+                        // (joined along the toolbar's top edge)
+                        if tag.is_empty() && name == "shapes" {
+                            let low = Point::new(at.x, screen.height - bar.height - 4.0);
+                            assert!(row_above(
+                                low.y,
+                                bar.height,
+                                toolbar::ROW_ROOM,
+                                screen.height
+                            ));
+                            let file = format!("snip-dock-above-{name}{dir}-{}", theme.id);
+                            failed.extend(golden::check("screens", &file, screen, &[1.0], || {
+                                e.view(
+                                    screen,
+                                    Some(low),
+                                    canvas::ScreenMap::ONE,
+                                    |m| m,
+                                    annotate::Message::Grab,
+                                )
+                            }));
+                        }
                         let file = format!("snip-dock-{tag}{name}{dir}-{}", theme.id);
                         failed.extend(golden::check("screens", &file, screen, &[1.0], || {
                             e.view(
@@ -529,6 +555,25 @@ mod tests {
         }
         themes::set(&SAPPHIRE);
         assert!(failed.is_empty(), "{failed:#?}");
+    }
+
+    /// Owner 2026-11-27: the toolbar and its row are one piece, in both directions: the joined edge of
+    /// each tray is nearly square, the far edges stay round.
+    #[test]
+    fn the_row_is_joined_to_the_toolbar_below_and_above() {
+        use crate::shared::kit::surface::Join;
+        assert_eq!(
+            join_of(false),
+            Join::Below,
+            "row under: the toolbar's bottom edge"
+        );
+        assert_eq!(
+            join_of(true),
+            Join::Above,
+            "row over: the toolbar's top edge"
+        );
+        assert_eq!(join_of(false).facing(), Join::Above, "the row's top edge");
+        assert_eq!(join_of(true).facing(), Join::Below, "the row's bottom edge");
     }
 
     /// W107 fix 2: the row goes ABOVE the toolbar when the toolbar is near the screen's bottom (the row's
@@ -552,7 +597,7 @@ mod tests {
         // the row's own tooltips: down under the toolbar, up above it; the row builds with the host's side
         assert_eq!((row_tips(false), row_tips(true)), (Bottom, Top));
         let e = SnipToolbar::fitted(crop(300, 200), Size::new(1280.0, 720.0), 1.0);
-        let _ = toolbar::options_row_tips(&e.annotator, 900.0, Top);
+        let _ = toolbar::options_row_tips(&e.annotator, 900.0, Top, Join::None);
         assert_eq!(crate::shared::kit::option_bar::tips(), Top);
         // as drawn: the row's name sits under the toolbar, or above it near the bottom
         let screen = Size::new(1280.0, 720.0);

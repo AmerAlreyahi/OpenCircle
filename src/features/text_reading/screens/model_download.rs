@@ -14,7 +14,7 @@ use crate::shared::kit::chip::emblem;
 use crate::shared::kit::dir;
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::progress;
-use crate::shared::kit::surface::tray;
+use crate::shared::kit::surface::{Join, tray};
 use crate::shared::kit::text::paragraph;
 use crate::shared::kit::text::{accent, sub};
 use crate::shared::kit::tokens::{Role, radius};
@@ -328,7 +328,7 @@ pub fn card<'a, M: Clone + 'a>(
     let content = column![heading(model, bytes, stage)]
         .push(body(model, bytes, stage, on))
         .padding(dir::pad(CONTENT));
-    tray(false, radius::WINDOW, column![header, content])
+    tray(false, radius::WINDOW, Join::None, column![header, content])
         .width(WIDTH)
         .into()
 }

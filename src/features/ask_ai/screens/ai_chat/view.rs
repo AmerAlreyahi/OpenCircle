@@ -438,9 +438,9 @@ impl AiChat {
         top: Option<Element<'a, Msg>>,
         extra: Option<Element<'a, Msg>>,
     ) -> Element<'a, Msg> {
-        use crate::shared::kit::button::{COMPACT_H, compact};
-        let round =
-            |icon: Icon, msg| compact(icon.glyph(), None, COMPACT_H, (false, false), Some(msg));
+        use crate::shared::kit::button::compact_round;
+        use crate::shared::kit::tokens::widget_e;
+        let round = |icon: Icon, msg| compact_round(icon.glyph(), widget_e::SEND, Some(msg));
         let send = match streaming {
             true => hint(
                 round(Icon::Stop, Msg::Stop),

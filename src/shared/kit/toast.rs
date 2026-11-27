@@ -137,10 +137,15 @@ fn material<'a, Message: 'a>(
     radius: f32,
     at: Size,
 ) -> Element<'a, Message> {
-    super::surface::tray(false, radius, content.center_y(Fill))
-        .width(at.width)
-        .height(at.height)
-        .into()
+    super::surface::tray(
+        false,
+        radius,
+        super::surface::Join::None,
+        content.center_y(Fill),
+    )
+    .width(at.width)
+    .height(at.height)
+    .into()
 }
 
 /// The two-line pill (the update's, the design's board "Update"): a round

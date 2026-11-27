@@ -526,7 +526,7 @@ pub fn info<'a, Message: 'a>(
     });
     let ladder = super::surface::segment(row(ladder).spacing(2).align_y(Center)).padding([2, 4]);
     line = line.push(ladder);
-    super::surface::tray(false, radius::FULL, line)
+    super::surface::tray(false, radius::FULL, super::surface::Join::None, line)
         .padding([4, 10])
         .into()
 }

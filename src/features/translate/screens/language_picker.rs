@@ -23,7 +23,7 @@ use crate::shared::kit::field;
 use crate::shared::kit::icon::{Icon, icon};
 use crate::shared::kit::option_list::{self, Look, choice, group, keyed, needs_ai, opener};
 use crate::shared::kit::scroll;
-use crate::shared::kit::surface::tray;
+use crate::shared::kit::surface::{Join, tray};
 use crate::shared::kit::text::{muted, sub};
 use crate::shared::kit::themes::c;
 use crate::shared::kit::tokens::{Role, radius, size, space, widget_e};
@@ -484,7 +484,7 @@ impl Picker {
         )
         .into();
         let line = dir::row([chips, tail]).spacing(space::GAP).align_y(Center);
-        tray(false, radius::FULL, line)
+        tray(false, radius::FULL, Join::None, line)
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
             .into()
     }

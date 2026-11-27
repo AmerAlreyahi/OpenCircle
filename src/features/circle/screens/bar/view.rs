@@ -18,7 +18,7 @@ use crate::features::{
 use crate::shared::app_language::{S, fmt, tr};
 use crate::shared::kit::icon::Icon;
 use crate::shared::kit::icon_button::{self, pill_icon, quiet_close};
-use crate::shared::kit::surface::{segment_row, tray};
+use crate::shared::kit::surface::{Join, segment_row, tray};
 use crate::shared::kit::text::error;
 use crate::shared::kit::tokens::{Role, radius, size, widget_e};
 use crate::shared::kit::tooltip::{Why, hint};
@@ -203,7 +203,7 @@ impl App {
         let row = crate::dir_row![grip::grip(Message::BarGrab), field, pills, icons]
             .spacing(bar::SPACING)
             .align_y(iced::Center);
-        let shape = tray(self.o.bar_drag.is_some(), radius::FULL, row)
+        let shape = tray(self.o.bar_drag.is_some(), radius::FULL, Join::None, row)
             .padding([widget_e::TRAY_PAD_Y, widget_e::TRAY_PAD_X])
             .height(bar::HEIGHT);
         // A press on the padding (not taken by the field or a button) drags
@@ -301,7 +301,7 @@ impl App {
         if let Some(edit) = self.o.edit.as_ref().filter(|e| e.annotator.movable) {
             size.height = edit.bar_size().height;
         }
-        let shape = tray(false, radius::FULL, space())
+        let shape = tray(false, radius::FULL, Join::None, space())
             .width(size.width)
             .height(size.height);
         iced::widget::pin(opaque(shape)).position(at).into()
@@ -362,10 +362,15 @@ pub fn qr_chip<'a, Message: Clone + 'a>(
         // site it really opens, never cut.
         chips = chips.push(chip::action(fmt(S::bar_open_link, &[&host]), open));
     }
-    tray(false, radius::FULL, container(chips).center_y(iced::Fill))
-        .height(bar::HEIGHT)
-        .padding([0.0, bar::QR_PAD])
-        .into()
+    tray(
+        false,
+        radius::FULL,
+        Join::None,
+        container(chips).center_y(iced::Fill),
+    )
+    .height(bar::HEIGHT)
+    .padding([0.0, bar::QR_PAD])
+    .into()
 }
 
 /// The chip for a link or email read in the selected words: "Open <host>" /
