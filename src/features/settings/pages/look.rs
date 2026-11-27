@@ -13,6 +13,14 @@ use crate::shared::kit::section::section;
 use crate::shared::kit::setting_row::{self, title};
 
 pub fn view(state: &State) -> Element<'_, Message> {
+    page_for(state, cfg!(windows))
+}
+
+/// The page for a platform (a parameter so both branches run in the Linux tests).
+pub(in crate::features::settings) fn page_for(
+    state: &State,
+    windows: bool,
+) -> Element<'_, Message> {
     let style = state.draft.selection.style;
     let styles = [
         (
@@ -50,7 +58,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     let mut page = column![section(Some(t!(l_sec)), None, || vec![selection, themes])]
         .spacing(crate::shared::kit::tokens::settings::SECTION_GAP);
     // (Windows has two readers to choose from; Linux has the one)
-    if cfg!(windows) {
+    if windows {
         page = page.push(super::text_reading::view(state));
     }
     page.into()

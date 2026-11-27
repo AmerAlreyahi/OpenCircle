@@ -356,8 +356,8 @@ fn opens_at_a_size_that_fits_the_sidebar_and_the_content() {
         window_limits(work(3440.0, 1440.0, 1.0)).0,
         Size::new(WINDOW_SIZE.width, WINDOW_SIZE.height.max(FIT_HEIGHT))
     );
-    // The header and every sidebar page are what FIT_HEIGHT counts. On Windows
-    // (Text reading, then Studio) the list is two pages past what the design's 560
+    // The header and every sidebar page are what FIT_HEIGHT counts. The list
+    // (Studio, Labs on) is two pages past what the design's 560
     // holds: the window opens that much taller (two nav items), never a scrolling
     // sidebar or tighter spacing (the design's).
     const {
@@ -1883,14 +1883,20 @@ fn look_and_behaviour_edits_the_selection_and_the_custom_look() {
 fn the_text_reading_page_is_windows_only_and_saves() {
     let path = tmp("reader");
     let (mut s, _) = state(Some(path.clone()));
-    // listed on Windows only (Linux has the one reader); the page holds the engine
-    assert_eq!(sidebar(&s).contains(&"Text reading"), cfg!(windows));
-    let texts = page(&mut s, Section::TextReading);
-    for want in ["Engine", "Auto", "Fast", "Accurate"] {
-        assert!(texts.iter().any(|t| t == want), "{want}: {texts:?}");
-    }
-    let look = page(&mut s, Section::Look);
-    assert!(!look.iter().any(|t| t == "Engine"), "moved: {look:?}");
+    // no sidebar row of its own: a section of Circle to Search, on Windows only (Linux has the one reader)
+    assert!(!sidebar(&s).contains(&"Text reading"));
+    let engine = ["Engine", "Auto", "Fast", "Accurate"];
+    let has = |texts: &[String]| engine.iter().all(|w| texts.iter().any(|t| t == w));
+    update(&mut s, Message::Section(Section::Look));
+    let on = |windows| shot::texts(pages::look::page_for(&s, windows));
+    assert!(has(&on(true)), "Windows: {:?}", on(true));
+    assert!(
+        !engine.iter().any(|w| on(false).iter().any(|t| t == w)),
+        "Linux: {:?}",
+        on(false)
+    );
+    // the section's own view (the page the preview opens) holds the engine
+    assert!(has(&page(&mut s, Section::TextReading)));
     update(&mut s, Message::TextReader(TextReader::PpOcr));
     let Outcome::Saved(cfg) = update(&mut s, Message::Save) else {
         panic!("not saved: {:?}", s.notice)
@@ -3604,8 +3610,7 @@ fn about_matches_its_golden_images_in_every_state() {
     use crate::shared::kit::themes::{self, DAYLIGHT, SAPPHIRE};
     type Setup = fn(&mut State);
     let cases: [(&str, f32, f32, Setup); 4] = [
-        // the size the window really opens at: on Windows the sidebar (Text reading and
-        // Studio too) is taller than the design's 560, and the window opens as tall as it
+        // the size the window really opens at: the sidebar (Studio too) is taller than the design's 560, and the window opens as tall as it
         (
             "default",
             WINDOW_SIZE.width,

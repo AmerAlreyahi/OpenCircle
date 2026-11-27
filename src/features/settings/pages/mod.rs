@@ -18,7 +18,7 @@ pub(in crate::features::settings) use general::updates_words;
 pub(crate) mod glossaries;
 mod history;
 mod labs;
-mod look;
+pub(super) mod look;
 mod privacy;
 mod shortcuts;
 pub mod snip;
