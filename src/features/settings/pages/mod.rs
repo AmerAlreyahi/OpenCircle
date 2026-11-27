@@ -9,7 +9,7 @@ use crate::features::settings::labs::{Feature, Labs};
 use crate::shared::app_language::S;
 
 pub mod about;
-mod ai;
+pub(super) mod ai;
 mod appearance;
 mod custom;
 mod extensions;

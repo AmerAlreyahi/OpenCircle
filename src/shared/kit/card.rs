@@ -293,3 +293,361 @@ pub fn quiet_note<'a, Message: 'a>(glyph: char, line: &'a str) -> Element<'a, Me
     )
     .into()
 }
+
+/// The 4 states of the OpenRouter sign-in connection card (Option A).
+pub enum ConnectionState<'a, Message> {
+    NotConnected {
+        title: &'a str,
+        desc: &'a str,
+        cta: &'a str,
+        on_sign_in: Option<Message>,
+        error: Option<&'a str>,
+    },
+    Waiting {
+        title: &'a str,
+        desc: &'a str,
+        status: &'a str,
+        countdown: String,
+        turn: f32,
+        still: bool,
+        cancel: &'a str,
+        on_cancel: Message,
+        reopen: &'a str,
+        on_reopen: Message,
+    },
+    Connected {
+        title: &'a str,
+        saved: &'a str,
+        desc: &'a str,
+        error: Option<&'a str>,
+        test: &'a str,
+        on_test: Message,
+        disconnect: &'a str,
+        on_disconnect: Message,
+    },
+    Failed {
+        title: &'a str,
+        desc: &'a str,
+        detail: &'a str,
+        retry: &'a str,
+        on_retry: Message,
+        own_link: &'a str,
+        on_own: Message,
+    },
+}
+
+/// Lucide key glyph drawn with crisp strokes inside the 48x48 neutral tile.
+struct KeyMark {
+    colour: Color,
+}
+
+impl<Message> iced::widget::canvas::Program<Message> for KeyMark {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &iced::Renderer,
+        _: &iced::Theme,
+        bounds: iced::Rectangle,
+        _: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        use iced::Point;
+        use iced::widget::canvas::Frame;
+        use iced::widget::canvas::LineCap;
+        use iced::widget::canvas::LineJoin;
+        use iced::widget::canvas::Path;
+        use iced::widget::canvas::Stroke;
+        let mut frame = Frame::new(renderer, bounds.size());
+        let s = bounds.width.min(bounds.height) / 24.0;
+        let ox = (bounds.width - 24.0 * s) * 0.5;
+        let oy = (bounds.height - 24.0 * s) * 0.5;
+        let pt = |x: f32, y: f32| Point::new(ox + x * s, oy + y * s);
+        let stroke = Stroke::default()
+            .with_color(self.colour)
+            .with_width((2.0 * s).max(1.5))
+            .with_line_cap(LineCap::Round)
+            .with_line_join(LineJoin::Round);
+        frame.stroke(&Path::circle(pt(7.5, 15.5), 5.5 * s), stroke);
+        let shaft = Path::new(|b| {
+            b.move_to(pt(21.0, 2.0));
+            b.line_to(pt(11.4, 11.6));
+            b.move_to(pt(15.5, 7.5));
+            b.line_to(pt(18.5, 10.5));
+            b.line_to(pt(22.0, 7.0));
+            b.line_to(pt(19.0, 4.0));
+        });
+        frame.stroke(&shaft, stroke);
+        vec![frame.into_geometry()]
+    }
+}
+
+/// OpenRouter sign-in connection card (Option A, 4 states).
+pub fn connection_card<'a, Message: Clone + 'a>(
+    state: ConnectionState<'a, Message>,
+) -> Element<'a, Message> {
+    use super::button::Kind;
+    use super::button::button;
+    use super::button::compact_accent;
+    use super::button::compact_elevated;
+    use super::button::danger_pill;
+    use super::button::faded;
+    use super::button::label;
+    use super::colour::mix;
+    use super::icon::Icon;
+    use super::icon::glyph;
+    use super::logo;
+    use super::spinner;
+    use super::text::error;
+    use super::text::muted;
+    use super::text::paragraph;
+    use super::themes::current;
+    use super::tokens::fixed;
+    use super::tokens::settings;
+    use iced::Padding;
+
+    let neutral_tile = || -> Element<'a, Message> {
+        let col = c().text;
+        container(
+            iced::widget::canvas(KeyMark { colour: col })
+                .width(settings::CONCARD_ICON)
+                .height(settings::CONCARD_ICON),
+        )
+        .center(settings::CONCARD_TILE)
+        .style(|_| container::Style {
+            background: Some(c().elevated.into()),
+            border: Border::default()
+                .rounded(settings::CONCARD_TILE_RADIUS)
+                .width(1)
+                .color(c().rim),
+            ..container::Style::default()
+        })
+        .into()
+    };
+    let tone_tile = |ic: Icon, tone: Color, bg_a: f32, rim_a: f32| -> Element<'a, Message> {
+        container(glyph(ic.glyph(), settings::CONCARD_ICON).color(tone))
+            .center(settings::CONCARD_TILE)
+            .style(move |_| container::Style {
+                background: Some(faded(tone, bg_a).into()),
+                border: Border::default()
+                    .rounded(settings::CONCARD_TILE_RADIUS)
+                    .width(1)
+                    .color(faded(tone, rim_a)),
+                ..container::Style::default()
+            })
+            .into()
+    };
+    let quiet_link = |txt: &'a str, on_press: Message| -> Element<'a, Message> {
+        button(sub(Role::CONTROL, txt), Kind::Quiet, Some(on_press))
+    };
+
+    let (bg, edge, pad, body): (Color, Color, [f32; 2], Element<'a, Message>) = match state {
+        ConnectionState::NotConnected {
+            title,
+            desc,
+            cta,
+            on_sign_in,
+            error: err_line,
+        } => {
+            let btn = compact_accent(Icon::External.glyph(), cta, on_sign_in);
+            let btn = match err_line {
+                Some(why) => super::tooltip::tip(btn, why, iced::widget::tooltip::Position::Top),
+                None => btn,
+            };
+            let mut main = column![
+                text(Role::CONCARD_HEAD, title),
+                container(paragraph(sub(Role::ROW_DESC, desc)))
+                    .max_width(settings::CONCARD_DESC_MAX),
+                container(btn).padding(Padding::ZERO.top(settings::CONCARD_ACTION_TOP)),
+            ]
+            .spacing(settings::CARD_GAP)
+            .width(Fill)
+            .align_x(super::dir::start());
+            if let Some(why) = err_line {
+                main = main.push(
+                    container(paragraph(error(Role::ROW_DESC, why)))
+                        .max_width(settings::CONCARD_DESC_MAX),
+                );
+            }
+            let row = super::dir::row([neutral_tile(), main.into()]).spacing(settings::CONCARD_GAP);
+            let bg = if current().light {
+                c().bg
+            } else {
+                fixed::DEMO_DARK_BG
+            };
+            (bg, c().divider, settings::CONCARD_PAD, row.into())
+        }
+        ConnectionState::Waiting {
+            title,
+            desc,
+            status,
+            countdown,
+            turn,
+            still,
+            cancel,
+            on_cancel,
+            reopen,
+            on_reopen,
+        } => {
+            let spin = spinner::spinner(
+                logo::logo(settings::CONCARD_SPINNER as u32),
+                settings::CONCARD_SPINNER,
+                turn,
+                still,
+            );
+            let count = muted(Role::CONCARD_COUNT, countdown);
+            let wait_box = container(
+                super::dir::row([
+                    spin,
+                    sub(Role::ROW_DESC, status).into(),
+                    Space::new().width(Fill).into(),
+                    count.into(),
+                ])
+                .spacing(settings::CARD_GAP)
+                .align_y(Center),
+            )
+            .max_width(settings::CONCARD_WAIT_MAX)
+            .width(Fill)
+            .padding(settings::CONCARD_WAIT_PAD)
+            .style(|_| container::Style {
+                background: Some(c().widget.into()),
+                border: Border::default()
+                    .rounded(radius::CARD)
+                    .width(1)
+                    .color(c().divider),
+                ..container::Style::default()
+            });
+            let actions = super::dir::row([
+                compact_elevated(cancel, Some(on_cancel)),
+                quiet_link(reopen, on_reopen),
+            ])
+            .spacing(settings::CONCARD_GAP)
+            .align_y(Center);
+            let main = column![
+                text(Role::CONCARD_HEAD, title),
+                container(paragraph(sub(Role::ROW_DESC, desc)))
+                    .max_width(settings::CONCARD_DESC_MAX),
+                wait_box,
+                container(actions).padding(Padding::ZERO.top(settings::CONCARD_ACTION_TOP)),
+            ]
+            .spacing(settings::CARD_GAP)
+            .width(Fill)
+            .align_x(super::dir::start());
+            let row = super::dir::row([neutral_tile(), main.into()]).spacing(settings::CONCARD_GAP);
+            let bg = if current().light {
+                c().bg
+            } else {
+                fixed::DEMO_DARK_BG
+            };
+            (bg, c().divider, settings::CONCARD_PAD, row.into())
+        }
+        ConnectionState::Connected {
+            title,
+            saved,
+            desc,
+            error: err_line,
+            test,
+            on_test,
+            disconnect,
+            on_disconnect,
+        } => {
+            let head = super::dir::row([
+                text(Role::CONCARD_OK_HEAD, title).into(),
+                muted(Role::ROW_TITLE, "·").into(),
+                text(Role::CONCARD_OK_HEAD, saved)
+                    .color(fixed::SUCCESS)
+                    .into(),
+            ])
+            .spacing(space::GAP)
+            .align_y(Center);
+            let mut info = column![head, sub(Role::ROW_DESC, desc)]
+                .spacing(LINE_GAP)
+                .width(Fill)
+                .align_x(super::dir::start());
+            if let Some(why) = err_line {
+                info = info.push(error(Role::ROW_DESC, why));
+            }
+            let actions = super::dir::row([
+                button(label(test), Kind::Quiet, Some(on_test)),
+                danger_pill(disconnect, Some(on_disconnect)),
+            ])
+            .spacing(space::ROW_Y)
+            .align_y(Center);
+            let row = super::dir::row([
+                tone_tile(
+                    Icon::Check,
+                    fixed::SUCCESS,
+                    settings::CONCARD_OK_TILE_A,
+                    settings::CONCARD_OK_TILE_RIM_A,
+                ),
+                info.into(),
+                actions.into(),
+            ])
+            .spacing(settings::CONCARD_GAP)
+            .align_y(Center);
+            (
+                mix(c().widget, fixed::SUCCESS, settings::CONCARD_OK_TINT),
+                faded(fixed::SUCCESS, settings::CONCARD_OK_BORDER_A),
+                settings::CONCARD_OK_PAD,
+                row.into(),
+            )
+        }
+        ConnectionState::Failed {
+            title,
+            desc,
+            detail,
+            retry,
+            on_retry,
+            own_link,
+            on_own,
+        } => {
+            let actions = super::dir::row([
+                compact_accent(Icon::Refresh.glyph(), retry, Some(on_retry)),
+                quiet_link(own_link, on_own),
+            ])
+            .spacing(settings::CONCARD_GAP)
+            .align_y(Center);
+            let main = column![
+                text(Role::CONCARD_HEAD, title),
+                container(paragraph(sub(Role::ROW_DESC, desc)))
+                    .max_width(settings::CONCARD_DESC_MAX),
+                container(paragraph(muted(Role::META, detail)))
+                    .max_width(settings::CONCARD_DESC_MAX),
+                container(actions).padding(Padding::ZERO.top(settings::CONCARD_ACTION_TOP)),
+            ]
+            .spacing(settings::CARD_GAP)
+            .width(Fill)
+            .align_x(super::dir::start());
+            let row = super::dir::row([
+                tone_tile(
+                    Icon::Alert,
+                    fixed::DANGER,
+                    settings::CONCARD_ERR_TILE_A,
+                    settings::CONCARD_ERR_TILE_RIM_A,
+                ),
+                main.into(),
+            ])
+            .spacing(settings::CONCARD_GAP);
+            (
+                mix(c().widget, fixed::DANGER, settings::CONCARD_ERR_TINT),
+                faded(fixed::DANGER, settings::CONCARD_ERR_BORDER_A),
+                settings::CONCARD_PAD,
+                row.into(),
+            )
+        }
+    };
+
+    container(container(body).width(Fill).padding(pad).style(move |_| {
+        container::Style {
+            background: Some(bg.into()),
+            border: Border::default()
+                .rounded(settings::CONCARD_RADIUS)
+                .width(1)
+                .color(edge),
+            ..container::Style::default()
+        }
+    }))
+    .width(Fill)
+    .padding(Padding::from([settings::ROW_PAD_Y, 0.0]))
+    .into()
+}

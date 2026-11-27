@@ -17,7 +17,7 @@ const AUTH: &str = "https://openrouter.ai/auth";
 const EXCHANGE: &str = "https://openrouter.ai/api/v1/auth/keys";
 /// The user has this long to finish in the browser (a closed tab or a
 /// "deny" sends nothing back: the wait ends here).
-const WAIT: Duration = Duration::from_secs(300);
+pub const WAIT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignInError {

@@ -601,6 +601,7 @@ pub struct State {
     /// Connect OpenRouter: the sign-in waiting in the browser (its Cancel flag),
     /// the number of the latest one, and why the last one failed.
     pub(super) sign_in: Option<crate::features::ask_ai::sign_in::Job>,
+    pub(super) sign_in_started: Option<Instant>,
     pub(super) sign_in_job: u32,
     pub(super) sign_in_error: Option<String>,
     /// Keyring calls started by the last message; the shell runs them off the UI
@@ -1196,6 +1197,7 @@ impl State {
             cancel: Default::default(),
         };
         self.sign_in = Some(job.clone());
+        self.sign_in_started = Some(Instant::now());
         Outcome::SignIn(job)
     }
 
@@ -1203,6 +1205,7 @@ impl State {
         if let Some(job) = self.sign_in.take() {
             job.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        self.sign_in_started = None;
         self.sign_in_error = None;
     }
 
@@ -1217,6 +1220,7 @@ impl State {
         if id != self.sign_in_job || self.sign_in.take().is_none() {
             return; // cancelled, or an older one
         }
+        self.sign_in_started = None;
         let owner = self.key_owner.filter(|o| o.0 == "openrouter");
         match (got, owner) {
             (Ok(key), Some(owner)) => {
@@ -1274,6 +1278,7 @@ impl State {
             song_store: song_keyring(),
             song_key: None,
             sign_in: None,
+            sign_in_started: None,
             sign_in_job: 0,
             sign_in_error: None,
             key_jobs: Vec::new(),
@@ -2075,6 +2080,9 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::LoadModels => return state.load_models(),
         Message::ModelsLoaded(ai, n) => state.models_loaded(&ai, n),
         Message::ApiKey(k) => {
+            if matches!(k, KeyMessage::Remove) {
+                state.sign_in_error = None;
+            }
             if let Some(owner) = state.key_owner {
                 let slot = bind(&state.store, owner);
                 state
@@ -2570,9 +2578,10 @@ pub(super) fn written(state: &mut State, done: Box<Done>) -> Outcome {
 /// The frame clock while something moves; key
 /// presses only while a shortcut field is recording.
 pub fn subscription(state: &State) -> Subscription<Message> {
-    let clock = match state.animating() {
-        true => motion::frames().map(|_| Message::Tick),
-        false => Subscription::none(),
+    let clock = match state.clock() {
+        Clock::Frames => motion::frames().map(|_| Message::Tick),
+        Clock::Beats => motion::beats().map(|_| Message::Tick),
+        Clock::None => Subscription::none(),
     };
     if state.resetting
         || state.clearing_all
@@ -2662,13 +2671,34 @@ pub(crate) fn chord_of(event: iced::Event) -> Option<Chord> {
     }
 }
 
+/// Timer cadence requested by Settings in subscription().
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Clock {
+    Frames,
+    Beats,
+    None,
+}
+
 impl State {
+    /// Which timer subscription Settings needs right now: full frame rate while animating,
+    /// slow beats for the sign-in countdown under reduced motion, or none when still.
+    pub(super) fn clock(&self) -> Clock {
+        if self.animating() {
+            Clock::Frames
+        } else if self.sign_in.is_some() {
+            Clock::Beats
+        } else {
+            Clock::None
+        }
+    }
+
     /// Something moves by the clock: a glide, a preview.
     pub fn animating(&self) -> bool {
         self.moved.is_some()
             || self.picked.is_some()
             || (self.played.is_some() && !self.preview_paused)
             || self.marked_at.is_some()
+            || (self.sign_in.is_some() && !motion::reduced())
     }
 
     /// The page's previews playing `clips` (as if downloaded), as if they

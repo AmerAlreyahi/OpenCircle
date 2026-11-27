@@ -9,6 +9,16 @@ use iced::{Border, Color, Element, Fill};
 use super::themes::c;
 use super::tokens::{radius, size, space};
 
+/// Linear blend from a toward b by t (0..=1).
+pub(super) fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+}
+
 const DOT: f32 = 18.0;
 const DOT_E: f32 = 20.0;
 const CHIP: f32 = 22.0;

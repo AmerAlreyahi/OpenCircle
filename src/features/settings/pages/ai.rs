@@ -150,27 +150,32 @@ fn answer_rows(state: &State) -> Vec<Element<'_, Message>> {
     };
     let saved = state.key.status == KeyStatus::Saved;
     match now {
-        // with a key saved too: "Reconnect" replaces it
-        Some(1) => rows.push(sign_in_row(state, saved)),
+        Some(1) => {
+            rows.push(openrouter_card(state, saved));
+            // Model row appears only once connected (key is never shown for OpenRouter).
+            if saved && state.sign_in.is_none() {
+                rows.push(model_row(state, preset));
+            }
+        }
         _ => {
             rows.push(own_preset_row(state));
             rows.extend(url_row(state));
+            // a free tier's key page (A 1.7), while no key is saved
+            let free = preset.free_key_page().filter(|_| !saved).map(|url| {
+                crate::dir_row![
+                    Space::new().width(Fill),
+                    button(
+                        label(t!(ai_key_free)),
+                        Kind::Quiet,
+                        Some(Message::OpenLink(url.into()))
+                    )
+                ]
+                .into()
+            });
+            rows.push(model_row(state, preset));
+            rows.push(key_row_with(state, free));
         }
     }
-    // a free tier's key page (A 1.7), while no key is saved
-    let free = preset.free_key_page().filter(|_| !saved).map(|url| {
-        crate::dir_row![
-            Space::new().width(Fill),
-            button(
-                label(t!(ai_key_free)),
-                Kind::Quiet,
-                Some(Message::OpenLink(url.into()))
-            )
-        ]
-        .into()
-    });
-    rows.push(model_row(state, preset));
-    rows.push(key_row_with(state, free));
     rows
 }
 
@@ -188,30 +193,75 @@ fn own_preset_row(state: &State) -> Element<'_, Message> {
     )
 }
 
-/// Connect OpenRouter (one click, PKCE in the browser): the button, or while
-/// the browser is open "Finish in your browser" with Cancel; a failure under it.
-/// With a key saved (`saved`) the button reads "Reconnect" and a success
-/// replaces that key.
-fn sign_in_row(state: &State, saved: bool) -> Element<'_, Message> {
-    let connect = match saved {
-        true => t!(signin_reconnect),
-        false => t!(signin_connect),
+/// Formats the remaining OpenRouter browser sign-in wait (WAIT - elapsed) as M:SS.
+pub(crate) fn sign_in_countdown(elapsed: std::time::Duration) -> String {
+    let left = crate::features::ask_ai::sign_in::WAIT
+        .saturating_sub(elapsed)
+        .as_secs();
+    format!("{}:{:02}", left / 60, left % 60)
+}
+
+/// Renders the 4-state OpenRouter connection card (not connected, waiting, connected, failed).
+fn openrouter_card(state: &State, saved: bool) -> Element<'_, Message> {
+    use crate::shared::kit::card::ConnectionState;
+    use crate::shared::kit::card::connection_card;
+    use crate::shared::kit::motion;
+    use crate::shared::kit::spinner;
+    let key_unavailable = match &state.key.status {
+        KeyStatus::Unavailable(why) => Some(why.as_str()),
+        _ => None,
     };
-    let (desc, control) = match state.sign_in {
-        Some(_) => (
-            t!(signin_waiting),
-            setting_row::cancel(t!(c_cancel), Message::SignInCancel),
-        ),
-        None => (
-            t!(signin_desc),
-            setting_row::action(connect, Kind::Elevated, Some(Message::SignIn)),
-        ),
+    let card_state = if state.sign_in.is_some() {
+        let elapsed = state
+            .sign_in_started
+            .map_or(std::time::Duration::ZERO, |t| t.elapsed());
+        ConnectionState::Waiting {
+            title: t!(or_wait_title),
+            desc: t!(or_wait_desc),
+            status: t!(or_wait_status),
+            countdown: sign_in_countdown(elapsed),
+            turn: spinner::turn(elapsed),
+            still: motion::reduced(),
+            cancel: t!(c_cancel),
+            on_cancel: Message::SignInCancel,
+            reopen: t!(or_wait_again),
+            on_reopen: Message::SignIn,
+        }
+    } else if saved {
+        ConnectionState::Connected {
+            title: t!(or_ok_title),
+            saved: t!(or_ok_saved),
+            desc: t!(or_ok_desc),
+            error: state.key.problem(),
+            test: t!(or_test),
+            on_test: Message::LoadModels,
+            disconnect: t!(or_disconnect),
+            on_disconnect: Message::ApiKey(KeyMessage::Remove),
+        }
+    } else if let Some(detail) = state
+        .sign_in_error
+        .as_deref()
+        .or(state.key.error.as_deref())
+    {
+        ConnectionState::Failed {
+            title: t!(or_err_title),
+            desc: t!(or_err_desc),
+            detail,
+            retry: t!(md_try_again),
+            on_retry: Message::SignIn,
+            own_link: t!(or_err_own),
+            on_own: Message::Preset(OWN[0]),
+        }
+    } else {
+        ConnectionState::NotConnected {
+            title: t!(or_off_title),
+            desc: t!(or_off_desc),
+            cta: t!(or_off_cta),
+            on_sign_in: key_unavailable.is_none().then_some(Message::SignIn),
+            error: key_unavailable,
+        }
     };
-    let mut control = column![control].spacing(space::GAP);
-    if let Some(e) = &state.sign_in_error {
-        control = control.push(error(Role::ROW_DESC, e.clone()));
-    }
-    setting_row::row(title(t!(signin)), desc, control)
+    connection_card(card_state)
 }
 
 /// The model: a list of the provider's models with a search; a typed id
@@ -362,6 +412,17 @@ fn text_row<'a>(
 }
 
 impl KeyField {
+    /// Shared keyring problem text: unavailable keyring or last save/remove error.
+    pub(super) fn problem(&self) -> Option<&str> {
+        if let Some(e) = &self.error {
+            return Some(e.as_str());
+        }
+        match &self.status {
+            KeyStatus::Unavailable(why) => Some(why.as_str()),
+            _ => None,
+        }
+    }
+
     /// The write-only key: a secure field and Save (its hint "Paste your API
     /// key"); once saved, only dots (`KEY_MASK`) with Replace / Remove, never
     /// a character of the key (also in onboarding).

@@ -14,18 +14,8 @@ use super::text::{sub, text};
 use super::themes::{Theme, c, on};
 use super::tokens::{Role, fixed, radius, settings};
 
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    Color {
-        r: a.r + (b.r - a.r) * t,
-        g: a.g + (b.g - a.g) * t,
-        b: a.b + (b.b - a.b) * t,
-        a: a.a + (b.a - a.a) * t,
-    }
-}
-
-fn with_alpha(col: Color, a: f32) -> Color {
-    Color { a, ..col }
-}
+use super::button::faded as with_alpha;
+use super::colour::mix;
 
 /// Which half of the diagonal `(w, 0) -> (0, h)` to keep when drawing a mini-window.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -369,7 +359,7 @@ impl<Message> canvas::Program<Message> for LookMini {
                 frame.stroke(
                     &p,
                     Stroke::default()
-                        .with_color(with_alpha(self.b, alpha))
+                        .with_color(with_alpha(Color { a: 1.0, ..self.b }, alpha))
                         .with_width(2.5),
                 );
             }

@@ -118,6 +118,41 @@ pub mod settings {
     pub const MODEL_TILE: f32 = 30.0;
     pub const MODEL_BAR_W: f32 = 150.0;
     pub const NOTE_TILE: f32 = 28.0;
+    /// OpenRouter connection card (Option A, r2.css .concard).
+    pub const CONCARD_RADIUS: f32 = 16.0;
+    pub const CONCARD_TILE: f32 = 48.0;
+    pub const CONCARD_TILE_RADIUS: f32 = 14.0;
+    pub const CONCARD_GAP: f32 = 18.0;
+    pub const CONCARD_PAD: [f32; 2] = [22.0, 24.0];
+    pub const CONCARD_OK_PAD: [f32; 2] = [18.0, 22.0];
+    pub const CONCARD_WAIT_MAX: f32 = 420.0;
+    pub const CONCARD_DESC_MAX: f32 = 520.0;
+    pub const CONCARD_WAIT_PAD: [f32; 2] = [12.0, 14.0];
+    pub const CONCARD_ICON: f32 = 20.0;
+    pub const CONCARD_ACTION_TOP: f32 = 4.0;
+    pub const CONCARD_SPINNER: f32 = 26.0;
+    pub const CONCARD_OK_TINT: f32 = 0.07;
+    pub const CONCARD_OK_BORDER_A: f32 = 0.32;
+    pub const CONCARD_OK_TILE_A: f32 = 0.16;
+    pub const CONCARD_OK_TILE_RIM_A: f32 = 0.30;
+    pub const CONCARD_ERR_TINT: f32 = 0.05;
+    pub const CONCARD_ERR_BORDER_A: f32 = 0.22;
+    pub const CONCARD_ERR_TILE_A: f32 = 0.12;
+    pub const CONCARD_ERR_TILE_RIM_A: f32 = 0.28;
+}
+
+/// Compact kit button sizes and tints (shared across cards and dialogs).
+pub mod button {
+    pub const COMPACT_ACCENT_H: f32 = 42.0;
+    pub const COMPACT_ACCENT_RADIUS: f32 = 11.0;
+    pub const COMPACT_ACCENT_PAD_X: f32 = 24.0;
+    pub const COMPACT_ACCENT_HOVER_MIX: f32 = 0.10;
+    pub const COMPACT_ELEVATED_H: f32 = 38.0;
+    pub const COMPACT_ELEVATED_PAD_X: f32 = 20.0;
+    pub const COMPACT_PILL_H: f32 = 28.0;
+    pub const COMPACT_PILL_PAD_X: f32 = 12.0;
+    pub const COMPACT_DANGER_BORDER_A: f32 = 0.34;
+    pub const COMPACT_DANGER_HOVER_A: f32 = 0.10;
 }
 
 /// Fixed control sizes.
@@ -177,6 +212,15 @@ impl Role {
     pub const DEMO_TITLE: Role = role(15.5, Weight::Semibold);
     /// Preview maximise popup title (`build.py` `.m_ttl h2`: 21 px).
     pub const PREVIEW_MAX_TITLE: Role = role(21.0, Weight::Semibold);
+    /// OpenRouter connection card heading, connected heading, CTA label, and mono countdown.
+    pub const CONCARD_HEAD: Role = role(16.0, Weight::Semibold);
+    pub const CONCARD_OK_HEAD: Role = role(15.0, Weight::Semibold);
+    pub const CONCARD_CTA: Role = role(13.5, Weight::Semibold);
+    pub const CONCARD_COUNT: Role = Role {
+        size: 12.5,
+        weight: Weight::Normal,
+        mono: true,
+    };
     pub const ROW_TITLE: Role = role(13.0, Weight::Medium);
     pub const ROW_DESC: Role = role(11.5, Weight::Normal);
     pub const NAV: Role = role(12.5, Weight::Medium);

@@ -761,7 +761,12 @@ fn each_provider_shows_only_its_own_key() {
     );
     update(&mut s, Message::ApiKey(KeyMessage::Save));
     assert_eq!(*s.key.status(), KeyStatus::Saved);
-    assert!(saved(&s));
+    assert!(
+        shot::texts(view(&s))
+            .iter()
+            .any(|t| t == "key saved on this PC")
+    );
+    assert!(!saved(&s), "OpenRouter never shows the key field");
     for other in ["Google Gemini", "OpenAI", "Custom server", "Anthropic"] {
         update(&mut s, Message::Preset(preset(other)));
         assert_eq!(*s.key.status(), KeyStatus::NotSet, "{other}");
@@ -1155,17 +1160,32 @@ fn connect_openrouter_saves_the_key_it_gets() {
     update(&mut s, Message::Preset(PRESETS[0]));
     assert!(PRESETS[0].signs_in());
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Connect OpenRouter"), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Get a free key"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Not connected"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Sign in with OpenRouter"),
+        "{texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "Model"),
+        "model hidden until connected: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "API key"),
+        "key row never shown for OpenRouter: {texts:?}"
+    );
     let key = || Ok(Secret::new(FAKE_KEY));
     // Cancel: the answer that still comes is dropped
     let Outcome::SignIn(first) = update(&mut s, Message::SignIn) else {
         panic!("no sign-in job")
     };
+    let texts = shot::texts(view(&s));
     assert!(
-        shot::texts(view(&s))
-            .iter()
-            .any(|t| t == "Finish in your browser…")
+        texts.iter().any(|t| t == "Finish in your browser"),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "Waiting for the browser…"),
+        "{texts:?}"
     );
     update(&mut s, Message::SignInCancel);
     assert!(first.cancel.load(std::sync::atomic::Ordering::Relaxed));
@@ -1188,13 +1208,23 @@ fn connect_openrouter_saves_the_key_it_gets() {
     update(&mut s, Message::SignedIn(job.id, key()));
     assert_eq!(store.get("openrouter").as_deref(), Some(FAKE_KEY));
     assert_eq!(*s.key.status(), KeyStatus::Saved);
-    // with a key saved the row stays (the owner couldn't find it): Reconnect
+    // Connected card + Model row now visible; key never shown
     let texts = shot::texts(view(&s));
+    assert!(texts.iter().any(|t| t == "Connected"), "{texts:?}");
     assert!(
-        texts.iter().any(|t| t == "Reconnect OpenRouter"),
+        texts.iter().any(|t| t == "key saved on this PC"),
         "{texts:?}"
     );
-    assert!(!texts.iter().any(|t| t == "Get a free key"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Test"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Disconnect"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Model"),
+        "model visible when connected: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "API key"),
+        "key row never shown: {texts:?}"
+    );
     assert!(
         !format!("{s:?}{texts:?}").contains("FAKE"),
         "the key leaked"
@@ -5085,12 +5115,18 @@ fn ai_has_three_setup_path_cards() {
     assert!(!texts.iter().any(|t| t == "API key"), "browser: no key row");
     update(&mut s, Message::Preset(PRESETS[0]));
     let texts = shot::texts(view(&s));
-    assert!(texts.iter().any(|t| t == "Sign in"), "{texts:?}");
+    assert!(
+        texts.iter().any(|t| t == "Sign in with OpenRouter"),
+        "{texts:?}"
+    );
     assert!(!texts.iter().any(|t| t == "Provider"), "{texts:?}");
     update(&mut s, Message::Preset(PRESETS[1]));
     let texts = shot::texts(view(&s));
     assert!(texts.iter().any(|t| t == "Provider"), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == "Sign in"), "{texts:?}");
+    assert!(
+        !texts.iter().any(|t| t == "Sign in with OpenRouter"),
+        "{texts:?}"
+    );
 }
 
 /// Settings round 2, A3+ / A5+: a folded preview is the head's "See how it works" link; a wide window
@@ -6379,4 +6415,258 @@ fn preview_maximised_dim_rounds_with_content_card_corners() {
         assert_eq!(at(&plain, cx, cy), at(&max_img, cx, cy));
     }
     themes::set(&themes::SAPPHIRE);
+}
+
+#[test]
+fn openrouter_connection_card_four_states_and_transitions() {
+    use crate::features::ask_ai::sign_in::SignInError;
+    let (mut s, store) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preset(PRESETS[0]));
+
+    // 1. Not connected: Model & key rows hidden
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Not connected"));
+    assert!(t.iter().any(|x| x == "Sign in with OpenRouter"));
+    assert!(!t.iter().any(|x| x == "Model"));
+
+    // 2. Waiting: spinning logo animates, countdown shown, Cancel returns to Not connected
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!("expected SignIn job");
+    };
+    assert!(s.animating(), "waiting state animates logo spinner");
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Finish in your browser"));
+    assert!(t.iter().any(|x| x == "Waiting for the browser…"));
+    assert!(t.iter().any(|x| x == "Cancel"));
+    assert!(t.iter().any(|x| x == "Start again"));
+    assert!(!t.iter().any(|x| x == "Model"));
+    update(&mut s, Message::SignInCancel);
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Not connected"));
+
+    // 4. Failed: calm error card with provider detail, Try again, and Use my own provider link
+    let Outcome::SignIn(job2) = update(&mut s, Message::SignIn) else {
+        panic!();
+    };
+    assert_ne!(job.id, job2.id);
+    let err_msg = "The authorization window was closed before access was granted.";
+    update(
+        &mut s,
+        Message::SignedIn(job2.id, Err(SignInError::Failed(err_msg.into()))),
+    );
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Couldn’t sign in"));
+    assert!(t.iter().any(|x| x == err_msg));
+    assert!(t.iter().any(|x| x == "Try again"));
+    assert!(t.iter().any(|x| x == "Use my own provider and key"));
+    assert!(!t.iter().any(|x| x == "Model"));
+
+    // 3. Connected: key saved in keyring (never shown), Model row visible, Test + Disconnect
+    let Outcome::SignIn(job3) = update(&mut s, Message::SignIn) else {
+        panic!();
+    };
+    update(
+        &mut s,
+        Message::SignedIn(job3.id, Ok(Secret::new(FAKE_KEY))),
+    );
+    assert_eq!(store.get("openrouter").as_deref(), Some(FAKE_KEY));
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Connected"));
+    assert!(t.iter().any(|x| x == "key saved on this PC"));
+    assert!(t.iter().any(|x| x == "Test"));
+    assert!(t.iter().any(|x| x == "Disconnect"));
+    assert!(t.iter().any(|x| x == "Model"));
+    assert!(!t.iter().any(|x| x.contains("FAKE")));
+
+    assert!(t.iter().any(|x| x == "Signed in with OpenRouter."));
+
+    // Disconnect returns to Not connected and hides Model row
+    update(&mut s, Message::ApiKey(KeyMessage::Remove));
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Not connected"));
+    assert!(!t.iter().any(|x| x == "Model"));
+}
+
+#[test]
+fn openrouter_connection_card_matches_golden_images() {
+    use crate::features::ask_ai::sign_in::SignInError;
+    use crate::shared::app_language::{self, Choice, Lang};
+    use crate::shared::kit::testing::golden;
+    use crate::shared::kit::themes;
+    let mut failed = Vec::new();
+    let states = ["1-not-connected", "2-waiting", "3-connected", "4-failed"];
+    for st in states {
+        for (lang_code, lang_slug) in [("en", "en"), ("ar", "ar")] {
+            for theme in [&themes::DAYLIGHT, &themes::SAPPHIRE] {
+                let (mut s, _) = state(None);
+                update(&mut s, Message::AppLanguage(Choice(lang_code)));
+                update(&mut s, Message::Section(Section::Ai));
+                update(&mut s, Message::Preset(PRESETS[0]));
+                // Fold preview so the connection card and Model row sit in the viewport as designed
+                update(&mut s, Message::Preview("ai", false));
+                match st {
+                    "1-not-connected" => {}
+                    "2-waiting" => {
+                        motion::set_reduced(true);
+                        let _ = update(&mut s, Message::SignIn);
+                        s.sign_in_started = Some(Instant::now() - Duration::from_millis(17_500));
+                    }
+                    "3-connected" => {
+                        let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+                            panic!();
+                        };
+                        update(&mut s, Message::SignedIn(job.id, Ok(Secret::new(FAKE_KEY))));
+                    }
+                    "4-failed" => {
+                        let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+                            panic!();
+                        };
+                        update(
+                            &mut s,
+                            Message::SignedIn(
+                                job.id,
+                                Err(SignInError::Failed(
+                                    "The authorization window was closed before access was granted.".into(),
+                                )),
+                            ),
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+                themes::set(theme);
+                let file = format!("settings-or-{st}-{lang_slug}-{}", theme.id);
+                failed.extend(golden::check("screens", &file, WINDOW_SIZE, &[1.0], || {
+                    view(&s)
+                }));
+                motion::set_reduced(false);
+            }
+        }
+    }
+    themes::set(&themes::SAPPHIRE);
+    app_language::set(Lang::En);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+#[test]
+fn openrouter_card_surfaces_keyring_unavailable_and_save_remove_errors() {
+    use super::state::KeyDone;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preset(PRESETS[0]));
+
+    // 1. Keyring unavailable before any sign-in: Not connected card (not Failed) with calm reason
+    s.key.status = KeyStatus::Unavailable("Keyring locked".into());
+    let t = shot::texts(view(&s));
+    assert!(
+        t.iter().any(|x| x == "Not connected"),
+        "must stay Not connected: {t:?}"
+    );
+    assert!(
+        !t.iter().any(|x| x == "Couldn’t sign in"),
+        "must not show Failed: {t:?}"
+    );
+    assert!(
+        t.iter().any(|x| x == "Keyring locked"),
+        "unavailable reason: {t:?}"
+    );
+
+    // 2. Sign-in succeeds, then keyring save fails: error shown on card
+    s.key.status = KeyStatus::NotSet;
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!();
+    };
+    let _ = super::state::update(&mut s, Message::SignedIn(job.id, Ok(Secret::new(FAKE_KEY))));
+    let save_id = s.key.job;
+    let _ = super::state::update(
+        &mut s,
+        Message::ApiKey(KeyMessage::Done(
+            save_id,
+            KeyDone::Failed("Save failed".into()),
+        )),
+    );
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Save failed"), "save fail: {t:?}");
+
+    // 3. Connected, then Disconnect fails: error shown on Connected card
+    s.key.status = KeyStatus::Saved;
+    s.key.error = None;
+    let _ = super::state::update(&mut s, Message::ApiKey(KeyMessage::Remove));
+    let rem_id = s.key.job;
+    let _ = super::state::update(
+        &mut s,
+        Message::ApiKey(KeyMessage::Done(
+            rem_id,
+            KeyDone::Failed("Remove failed".into()),
+        )),
+    );
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Connected"), "still connected: {t:?}");
+    assert!(t.iter().any(|x| x == "Remove failed"), "remove fail: {t:?}");
+}
+
+#[test]
+fn openrouter_countdown_ticks_under_reduced_motion_and_handles_timeout() {
+    use crate::features::ask_ai::sign_in::SignInError;
+    use crate::features::ask_ai::sign_in::WAIT;
+    use crate::shared::app_language::S;
+    use crate::shared::app_language::tr;
+    assert_eq!(pages::ai::sign_in_countdown(Duration::ZERO), "5:00");
+    assert_eq!(
+        pages::ai::sign_in_countdown(Duration::from_millis(17_500)),
+        "4:42"
+    );
+    assert_eq!(
+        pages::ai::sign_in_countdown(WAIT + Duration::from_secs(10)),
+        "0:00"
+    );
+
+    motion::set_reduced(true);
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preset(PRESETS[0]));
+    let Outcome::SignIn(job) = update(&mut s, Message::SignIn) else {
+        panic!();
+    };
+    // Under reduced motion the logo stays still (animating() == false) while countdown updates.
+    assert!(!s.animating(), "reduced motion must not spin the logo");
+    assert!(s.sign_in.is_some());
+    s.sign_in_started = Some(Instant::now() - Duration::from_millis(17_500));
+    let t = shot::texts(view(&s));
+    assert!(
+        t.iter()
+            .any(|x| matches!(x.as_str(), "4:42" | "4:41" | "4:40")),
+        "countdown under reduced motion: {t:?}"
+    );
+    motion::set_reduced(false);
+
+    // Timeout error transitions to Failed card with the timeout sentence.
+    let timeout_msg = tr(S::signin_timeout).to_string();
+    update(
+        &mut s,
+        Message::SignedIn(job.id, Err(SignInError::Failed(timeout_msg.clone()))),
+    );
+    let t = shot::texts(view(&s));
+    assert!(t.iter().any(|x| x == "Couldn’t sign in"), "{t:?}");
+    assert!(t.contains(&timeout_msg), "{t:?}");
+}
+
+#[test]
+fn openrouter_clock_uses_beats_under_reduced_motion() {
+    use super::state::Clock;
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Ai));
+    update(&mut s, Message::Preset(PRESETS[0]));
+    // Idle: no timer
+    assert_eq!(s.clock(), Clock::None);
+    // Waiting with normal motion: full frame rate (spinner + countdown)
+    motion::set_reduced(false);
+    let _ = update(&mut s, Message::SignIn);
+    assert_eq!(s.clock(), Clock::Frames);
+    // Waiting with reduced motion: slow beats for countdown while logo stays still
+    motion::set_reduced(true);
+    assert_eq!(s.clock(), Clock::Beats);
+    motion::set_reduced(false);
+    update(&mut s, Message::SignInCancel);
+    assert_eq!(s.clock(), Clock::None);
 }

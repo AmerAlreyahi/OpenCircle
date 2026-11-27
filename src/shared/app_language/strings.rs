@@ -893,16 +893,36 @@ strings! {
         | "احصل على مفتاح مجاني";
     ai_url_lan: "Plain http on your local network: the key travels unencrypted"
         | "اتصال http عادي على شبكتك المحلية: يُرسل المفتاح دون تشفير";
-    signin: "Sign in"
-        | "تسجيل الدخول";
-    signin_desc: "Opens OpenRouter in your browser; the key is saved for you"
-        | "يفتح OpenRouter في متصفحك، ويُحفظ المفتاح تلقائيًا";
-    signin_connect: "Connect OpenRouter"
-        | "ربط OpenRouter";
-    signin_reconnect: "Reconnect OpenRouter"
-        | "إعادة ربط OpenRouter";
-    signin_waiting: "Finish in your browser…"
-        | "أكمل في متصفحك…";
+    or_off_title: "Not connected"
+        | "غير متصل";
+    or_off_desc: "Sign in once in your browser and OpenCircle saves a key on this PC. Free models included, nothing to copy."
+        | "سجّل الدخول مرة واحدة في متصفحك ويحفظ OpenCircle مفتاحًا على هذا الجهاز. نماذج مجانية متاحة ولا شيء لنسخه.";
+    or_off_cta: "Sign in with OpenRouter"
+        | "تسجيل الدخول عبر OpenRouter";
+    or_wait_title: "Finish in your browser"
+        | "أكمل في متصفحك";
+    or_wait_desc: "OpenRouter opened in your browser. Allow access there and this page updates by itself."
+        | "فُتح OpenRouter في متصفحك. اسمح بالوصول هناك وتتحدّث هذه الصفحة تلقائيًا.";
+    or_wait_status: "Waiting for the browser…"
+        | "بانتظار المتصفح…";
+    or_wait_again: "Start again"
+        | "البدء من جديد";
+    or_ok_title: "Connected"
+        | "متصل";
+    or_ok_saved: "key saved on this PC"
+        | "المفتاح محفوظ على هذا الجهاز";
+    or_ok_desc: "Signed in with OpenRouter."
+        | "تم تسجيل الدخول عبر OpenRouter.";
+    or_test: "Test"
+        | "اختبار";
+    or_disconnect: "Disconnect"
+        | "قطع الاتصال";
+    or_err_title: "Couldn’t sign in"
+        | "تعذّر تسجيل الدخول";
+    or_err_desc: "The sign-in wasn’t finished, so nothing was saved."
+        | "لم يكتمل تسجيل الدخول، ولذلك لم يُحفظ شيء.";
+    or_err_own: "Use my own provider and key"
+        | "استخدام مزوّدي ومفتاحي";
     signin_page: "OpenCircle is connected. You can close this tab."
         | "تم ربط OpenCircle. يمكنك إغلاق هذا التبويب.";
     signin_mismatch: "The sign-in answer didn't match. Try again."

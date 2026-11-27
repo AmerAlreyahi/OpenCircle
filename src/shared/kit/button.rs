@@ -102,21 +102,14 @@ fn button_stop<'a, Message: Clone + 'a>(
         None if kind == Kind::Elevated => {
             iced_button(content)
                 .padding([4.0, 8.0])
-                .style(move |_, status| iced_button::Style {
-                    background: Some(
-                        match hot(status) {
-                            true => c().elevated_hover,
-                            false => c().elevated,
-                        }
-                        .into(),
-                    ),
-                    // a status not yet known (before the first redraw) is at rest
-                    text_color: match enabled {
-                        false => c().text_muted,
-                        true => c().text,
-                    },
-                    border: Border::default().rounded(radius::CONTROL),
-                    ..iced_button::Style::default()
+                .style(move |_, status| {
+                    let (bg, fg) = elevated_colours(hot(status), enabled);
+                    iced_button::Style {
+                        background: Some(bg.into()),
+                        text_color: fg,
+                        border: Border::default().rounded(radius::CONTROL),
+                        ..iced_button::Style::default()
+                    }
                 })
         }
         None => iced_button(content)
@@ -856,6 +849,131 @@ fn tooled_box<'a, Message: Clone + 'a>(
                 }
             }),
         corner,
+        on_press,
+    )
+    .into()
+}
+
+/// Shared background and foreground colours for elevated buttons (one source of truth).
+fn elevated_colours(hot: bool, enabled: bool) -> (Color, Color) {
+    let bg = if hot && enabled {
+        c().elevated_hover
+    } else {
+        c().elevated
+    };
+    let fg = if enabled { c().text } else { c().text_muted };
+    (bg, fg)
+}
+
+/// Compact label-sized accent CTA button (icon + label, 42 px high, 24 px side pad, 11 px corners).
+pub fn compact_accent<'a, Message: Clone + 'a>(
+    glyph_char: char,
+    txt: &'a str,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::Role;
+    use super::tokens::button as tok;
+    use iced_button::Status;
+    let enabled = on_press.is_some();
+    let inner = crate::dir_row![
+        super::icon::glyph(glyph_char, size::ICON_SMALL).color(fixed::ON_ACCENT),
+        text(txt)
+            .size(super::text::size(Role::CONCARD_CTA))
+            .font(super::text::font(Role::CONCARD_CTA))
+            .color(fixed::ON_ACCENT),
+    ]
+    .spacing(super::tokens::space::GAP)
+    .align_y(Center);
+    super::focus::press(
+        iced_button(container(inner).center_y(Fill))
+            .height(tok::COMPACT_ACCENT_H)
+            .padding([0.0, tok::COMPACT_ACCENT_PAD_X])
+            .style(move |_, status| {
+                let hot = matches!(status, Status::Hovered | Status::Pressed);
+                let bg = if !enabled {
+                    faded(c().accent, 0.45)
+                } else if hot {
+                    super::colour::mix(c().accent, Color::WHITE, tok::COMPACT_ACCENT_HOVER_MIX)
+                } else {
+                    c().accent
+                };
+                iced_button::Style {
+                    background: Some(bg.into()),
+                    text_color: fixed::ON_ACCENT,
+                    border: Border::default().rounded(tok::COMPACT_ACCENT_RADIUS),
+                    ..iced_button::Style::default()
+                }
+            }),
+        tok::COMPACT_ACCENT_RADIUS,
+        on_press,
+    )
+    .into()
+}
+
+/// Compact elevated action button (38 px high, 20 px side pad, 9 px corners, 1 px rim).
+pub fn compact_elevated<'a, Message: Clone + 'a>(
+    txt: &'a str,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::button as tok;
+    use iced_button::Status;
+    let enabled = on_press.is_some();
+    super::focus::press(
+        iced_button(container(label(txt)).center_y(Fill))
+            .height(tok::COMPACT_ELEVATED_H)
+            .padding([0.0, tok::COMPACT_ELEVATED_PAD_X])
+            .style(move |_, status| {
+                let hot = matches!(status, Status::Hovered | Status::Pressed);
+                let (bg, fg) = elevated_colours(hot, enabled);
+                iced_button::Style {
+                    background: Some(bg.into()),
+                    text_color: fg,
+                    border: Border::default()
+                        .rounded(radius::CONTROL)
+                        .width(1)
+                        .color(c().rim),
+                    ..iced_button::Style::default()
+                }
+            }),
+        radius::CONTROL,
+        on_press,
+    )
+    .into()
+}
+
+/// Compact outlined danger pill button (28 px high, 12 px side pad, red text and thin red border).
+pub fn danger_pill<'a, Message: Clone + 'a>(
+    txt: &'a str,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    use super::tokens::Role;
+    use super::tokens::button as tok;
+    use iced_button::Status;
+    super::focus::press(
+        iced_button(
+            container(
+                text(txt)
+                    .size(super::text::size(Role::CONTROL))
+                    .font(super::text::font(Role::CONTROL))
+                    .color(fixed::DANGER),
+            )
+            .center_y(Fill),
+        )
+        .height(tok::COMPACT_PILL_H)
+        .padding([0.0, tok::COMPACT_PILL_PAD_X])
+        .style(|_, status| {
+            let hot = matches!(status, Status::Hovered | Status::Pressed);
+            iced_button::Style {
+                background: hot.then(|| faded(fixed::DANGER, tok::COMPACT_DANGER_HOVER_A).into()),
+                text_color: fixed::DANGER,
+                border: Border::default()
+                    .rounded(radius::CONTROL)
+                    .width(1)
+                    .color(faded(fixed::DANGER, tok::COMPACT_DANGER_BORDER_A)),
+                ..iced_button::Style::default()
+            }
+        }),
+        radius::CONTROL,
         on_press,
     )
     .into()
