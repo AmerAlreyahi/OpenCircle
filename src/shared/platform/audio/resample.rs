@@ -232,3 +232,140 @@ impl Downmix {
         self.out.len() >= self.out.capacity()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::platform::audio::RATE;
+
+    fn sine_interleaved(hz: f32, rate: u32, channels: u16, frames: usize) -> Vec<f32> {
+        (0..frames)
+            .flat_map(|i| {
+                let v = 0.5 * (std::f32::consts::TAU * hz * i as f32 / rate as f32).sin();
+                std::iter::repeat_n(v, channels as usize)
+            })
+            .collect()
+    }
+
+    fn zero_crossings_channel(stereo: &[f32], ch: usize) -> usize {
+        let vals: Vec<f32> = stereo.as_chunks::<2>().0.iter().map(|f| f[ch]).collect();
+        vals.windows(2)
+            .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+            .count()
+    }
+
+    #[test]
+    fn resample_44100_to_48000_exact_length_and_pitch() {
+        let input = sine_interleaved(1000.0, 44_100, 2, 44_100);
+        let mut r = Resampler::new(44_100, 2, RATE);
+        let mut out = Vec::new();
+        r.push(input, &mut out);
+        r.flush(&mut out);
+
+        assert_eq!(out.len(), RATE as usize * 2, "1 s at 44.1k -> 48k stereo");
+        let crossings_l = zero_crossings_channel(&out, 0) as f32;
+        let crossings_r = zero_crossings_channel(&out, 1) as f32;
+        assert!(
+            (crossings_l - 2000.0).abs() <= 4.0,
+            "L crossings: {crossings_l}"
+        );
+        assert!(
+            (crossings_r - 2000.0).abs() <= 4.0,
+            "R crossings: {crossings_r}"
+        );
+        let peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        assert!(peak > 0.45 && peak <= 0.51, "peak preserved: {peak}");
+    }
+
+    #[test]
+    fn resample_48000_passthrough_is_exact() {
+        let input = sine_interleaved(440.0, 48_000, 2, 48_000);
+        let mut r = Resampler::new(48_000, 2, RATE);
+        let mut out = Vec::new();
+        r.push(input.iter().copied(), &mut out);
+        r.flush(&mut out);
+
+        assert_eq!(out.len(), input.len());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn resample_96000_to_48000_exact_length_and_pitch() {
+        let input = sine_interleaved(1000.0, 96_000, 2, 96_000);
+        let mut r = Resampler::new(96_000, 2, RATE);
+        let mut out = Vec::new();
+        r.push(input, &mut out);
+        r.flush(&mut out);
+
+        assert_eq!(out.len(), RATE as usize * 2, "1 s at 96k -> 48k stereo");
+        let crossings = zero_crossings_channel(&out, 0) as f32;
+        assert!((crossings - 2000.0).abs() <= 4.0, "crossings: {crossings}");
+    }
+
+    #[test]
+    fn downmix_mono_duplicates_to_both_channels() {
+        let mut out = Vec::new();
+        downmix_to_stereo(&[0.25, -0.75, 1.5], 1, &mut out);
+        assert_eq!(out, vec![0.25, 0.25, -0.75, -0.75, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn downmix_5_1_to_stereo_follows_itu_bs775() {
+        let eps = 1e-6;
+        // [FL, FR, FC, LFE, BL, BR]
+        let fl = frame_to_stereo(&[0.8, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!((fl[0] - 0.8).abs() < eps && fl[1].abs() < eps);
+
+        let fr = frame_to_stereo(&[0.0, 0.6, 0.0, 0.0, 0.0, 0.0]);
+        assert!(fr[0].abs() < eps && (fr[1] - 0.6).abs() < eps);
+
+        let fc = frame_to_stereo(&[0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
+        assert!((fc[0] - FRAC_1_SQRT_2).abs() < eps && (fc[1] - FRAC_1_SQRT_2).abs() < eps);
+
+        let lfe = frame_to_stereo(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        assert!(lfe[0].abs() < eps && lfe[1].abs() < eps, "LFE omitted");
+
+        let bl = frame_to_stereo(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        assert!((bl[0] - FRAC_1_SQRT_2).abs() < eps && bl[1].abs() < eps);
+
+        let br = frame_to_stereo(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+        assert!(br[0].abs() < eps && (br[1] - FRAC_1_SQRT_2).abs() < eps);
+
+        // Full-scale sum clamps to [-1, 1].
+        let clipped = frame_to_stereo(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(clipped, [1.0, 1.0]);
+
+        // Multi-frame 5.1 -> stereo slice helper.
+        let mut stereo = Vec::new();
+        downmix_to_stereo(
+            &[
+                0.5, 0.0, 0.0, 0.0, 0.0, 0.0, // frame 0: FL only
+                0.0, 0.5, 0.0, 0.0, 0.0, 0.0, // frame 1: FR only
+            ],
+            6,
+            &mut stereo,
+        );
+        assert_eq!(stereo, vec![0.5, 0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn resample_5_1_at_44100_is_chunk_invariant() {
+        // 1 s of 5.1 at 44.1 kHz
+        let input = sine_interleaved(500.0, 44_100, 6, 44_100);
+
+        let mut whole = Resampler::new(44_100, 6, RATE);
+        let mut out_whole = Vec::new();
+        whole.push(input.iter().copied(), &mut out_whole);
+        whole.flush(&mut out_whole);
+
+        let mut chunked = Resampler::new(44_100, 6, RATE);
+        let mut out_chunked = Vec::new();
+        for chunk in input.chunks(137) {
+            chunked.push(chunk.iter().copied(), &mut out_chunked);
+        }
+        chunked.flush(&mut out_chunked);
+
+        assert_eq!(out_whole.len(), RATE as usize * 2);
+        assert_eq!(out_whole, out_chunked);
+    }
+}

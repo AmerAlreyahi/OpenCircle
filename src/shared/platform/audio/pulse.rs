@@ -1,6 +1,6 @@
-//! Linux: record streams over the PulseAudio native protocol (pure Rust, no
-//! libpulse), which PipeWire's pulse server speaks too. The sound server
-//! resamples to 48 kHz stereo `f32` for us.
+//! Linux: device enumeration and record streams over the PulseAudio native
+//! protocol (pure Rust, no libpulse), which PipeWire's pulse server speaks too.
+//! The sound server resamples to 48 kHz stereo `f32` for us.
 
 use std::ffi::CString;
 use std::io::{BufRead, BufReader, ErrorKind, Read};
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use pulseaudio::protocol::{self, Command, ProtocolError, PulseError};
 
-use super::{CHANNELS, Error, Kind, Packet, RATE, frames_duration};
+use super::{CHANNELS, Error, Kind, Packet, RATE, RawDevice, frames_duration};
 
 const DEFAULT_MONITOR: &str = "@DEFAULT_MONITOR@";
 const DEFAULT_SOURCE: &str = "@DEFAULT_SOURCE@";
@@ -17,6 +17,83 @@ const DEFAULT_SOURCE: &str = "@DEFAULT_SOURCE@";
 const FRAME_BYTES: usize = CHANNELS as usize * 4;
 /// Timeout once a packet header has started arriving so we never tear a message.
 const BODY_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[allow(dead_code)] // called by `audio::devices`
+pub(super) fn list_devices(kind: &Kind) -> Result<(Vec<RawDevice>, Option<String>), Error> {
+    let (mut sock, version) = connect()?;
+    let fail =
+        |e: ProtocolError| Error::Unavailable(format!("{e} (is PulseAudio or PipeWire running?)"));
+
+    protocol::write_command_message(sock.get_mut(), 2, &Command::GetServerInfo, version)
+        .map_err(fail)?;
+    let (_, server) =
+        protocol::read_reply_message::<protocol::ServerInfo>(&mut sock, version).map_err(fail)?;
+
+    protocol::write_command_message(sock.get_mut(), 3, &Command::GetSourceInfoList, version)
+        .map_err(fail)?;
+    let (_, sources) = protocol::read_reply_message::<protocol::SourceInfoList>(&mut sock, version)
+        .map_err(fail)?;
+
+    Ok(map_pulse_sources(&server, &sources, kind))
+}
+
+/// Maps PulseAudio `ServerInfo` + `SourceInfo` list into raw microphone or
+/// system-monitor devices plus the default device id.
+#[allow(dead_code)] // used by `list_devices` and unit tests
+fn map_pulse_sources(
+    server: &protocol::ServerInfo,
+    sources: &[protocol::SourceInfo],
+    kind: &Kind,
+) -> (Vec<RawDevice>, Option<String>) {
+    let want_monitor = matches!(kind, Kind::System);
+    let default_sink = server
+        .default_sink_name
+        .as_ref()
+        .map(|s| s.to_string_lossy().into_owned());
+    let default_source = server
+        .default_source_name
+        .as_ref()
+        .map(|s| s.to_string_lossy().into_owned());
+
+    let mut raw = Vec::new();
+    let mut default_id = None;
+
+    for src in sources {
+        let is_monitor = src.monitor_of_sink_index.is_some() || src.monitor_of_sink_name.is_some();
+        if is_monitor != want_monitor {
+            continue;
+        }
+        let id = src.name.to_string_lossy().into_owned();
+        let name = src
+            .description
+            .as_ref()
+            .map(|d| d.to_string_lossy().into_owned())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| id.clone());
+
+        if want_monitor {
+            let matches_default_sink = default_sink.as_deref().is_some_and(|sink| {
+                src.monitor_of_sink_name
+                    .as_ref()
+                    .is_some_and(|m| m.to_string_lossy() == sink)
+                    || id == format!("{sink}.monitor")
+            });
+            if matches_default_sink {
+                default_id = Some(id.clone());
+            }
+        } else if default_source.as_deref() == Some(id.as_str()) {
+            default_id = Some(id.clone());
+        }
+
+        raw.push(RawDevice {
+            id,
+            name,
+            is_default: false,
+        });
+    }
+
+    (raw, default_id)
+}
 
 pub(super) struct PulseInput {
     sock: BufReader<UnixStream>,
@@ -174,5 +251,67 @@ fn map_proto_err(err: ProtocolError, source: &str) -> Error {
     match err {
         ProtocolError::ServerError(PulseError::NoEntity) => Error::NotFound(source.to_string()),
         other => Error::Unavailable(format!("{other} (is PulseAudio or PipeWire running?)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::platform::audio::map_devices;
+
+    fn source(
+        name: &str,
+        desc: Option<&str>,
+        monitor_of: Option<(u32, &str)>,
+    ) -> protocol::SourceInfo {
+        protocol::SourceInfo {
+            name: CString::new(name).unwrap(),
+            description: desc.map(|d| CString::new(d).unwrap()),
+            monitor_of_sink_index: monitor_of.map(|(i, _)| i),
+            monitor_of_sink_name: monitor_of.map(|(_, s)| CString::new(s).unwrap()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pulse_sources_separate_mics_from_monitors_and_pick_defaults() {
+        let server = protocol::ServerInfo {
+            default_sink_name: Some(CString::new("alsa_output.hdmi").unwrap()),
+            default_source_name: Some(CString::new("alsa_input.usb_yeti").unwrap()),
+            ..Default::default()
+        };
+        let sources = vec![
+            source("alsa_input.internal", Some("Internal Mic"), None),
+            source("alsa_input.usb_yeti", Some("Yeti Stereo"), None),
+            source(
+                "alsa_output.analog.monitor",
+                Some("Monitor of Analog"),
+                Some((0, "alsa_output.analog")),
+            ),
+            source(
+                "alsa_output.hdmi.monitor",
+                None,
+                Some((1, "alsa_output.hdmi")),
+            ),
+        ];
+
+        let (raw_mics, def_mic) = map_pulse_sources(&server, &sources, &Kind::Mic(None));
+        let mics = map_devices(raw_mics, def_mic.as_deref());
+        assert_eq!(mics.len(), 2);
+        assert_eq!(mics[0].id, "alsa_input.usb_yeti");
+        assert_eq!(mics[0].name, "Yeti Stereo");
+        assert!(mics[0].is_default);
+        assert_eq!(mics[1].id, "alsa_input.internal");
+        assert!(!mics[1].is_default);
+
+        let (raw_sys, def_sys) = map_pulse_sources(&server, &sources, &Kind::System);
+        let sys = map_devices(raw_sys, def_sys.as_deref());
+        assert_eq!(sys.len(), 2);
+        assert_eq!(sys[0].id, "alsa_output.hdmi.monitor");
+        assert_eq!(sys[0].name, "alsa_output.hdmi.monitor");
+        assert!(sys[0].is_default);
+        assert_eq!(sys[1].id, "alsa_output.analog.monitor");
+        assert_eq!(sys[1].name, "Monitor of Analog");
+        assert!(!sys[1].is_default);
     }
 }

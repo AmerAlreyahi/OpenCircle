@@ -1,4 +1,4 @@
-﻿//! Windows: WASAPI through cpal. System sound = an input stream on a render
+//! Windows: WASAPI through cpal. System sound = an input stream on a render
 //! (output) device, which cpal opens as loopback; microphone = an input device.
 //! Any device mix format (44.1 / 48 / 96 kHz, mono / stereo / 5.1) is converted
 //! to 48 kHz stereo `f32` PCM via [`super::resample::Resampler`].
@@ -10,11 +10,49 @@ use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use super::resample::Resampler;
-use super::{CHANNELS, Error, Kind, Packet, RATE, frames_duration};
+use super::{CHANNELS, Error, Kind, Packet, RATE, RawDevice, frames_duration};
 
 /// Bounded channel between the real-time audio callback and the reader thread.
 /// At ~10 ms per WASAPI callback, 64 packets ≈ 640 ms of cushion without unbounded RAM.
 const CHANNEL_CAP: usize = 64;
+
+#[allow(dead_code)] // called by `audio::devices`
+pub(super) fn list_devices(kind: &Kind) -> Result<(Vec<RawDevice>, Option<String>), Error> {
+    let host = cpal::default_host();
+    let fail = |e: cpal::Error| Error::Unavailable(e.to_string());
+    let (default_id, iter): (Option<String>, Vec<cpal::Device>) = match kind {
+        Kind::Mic(_) => (
+            host.default_input_device()
+                .and_then(|d| d.id().ok())
+                .map(|id| id.to_string()),
+            host.input_devices().map_err(fail)?.collect(),
+        ),
+        Kind::System => (
+            host.default_output_device()
+                .and_then(|d| d.id().ok())
+                .map(|id| id.to_string()),
+            host.output_devices().map_err(fail)?.collect(),
+        ),
+    };
+
+    let mut raw = Vec::with_capacity(iter.len());
+    for dev in iter {
+        let Ok(id) = dev.id() else {
+            continue;
+        };
+        let name = dev
+            .description()
+            .ok()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|| dev.to_string());
+        raw.push(RawDevice {
+            id: id.to_string(),
+            name,
+            is_default: false,
+        });
+    }
+    Ok((raw, default_id))
+}
 
 pub(super) struct WasapiInput {
     _stream: cpal::Stream,
