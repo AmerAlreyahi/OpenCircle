@@ -57,6 +57,10 @@ pub(crate) struct Recording {
     write_failed: bool,
     /// The thumbnail offers a recording an earlier run left: it is never deleted, only kept.
     offered: bool,
+    /// A recording whose thumbnail slid away with Recent off: still on disk until the
+    /// "Recording discarded . Undo" pill `.0` is over (`Message::RecDiscardGone`).
+    discard: Option<(u32, PathBuf, bool)>, // (pill number, file, audio only)
+    discards: u32,
 }
 
 impl Default for Recording {
@@ -81,6 +85,8 @@ impl Default for Recording {
             flushing: None,
             write_failed: false,
             offered: false,
+            discard: None,
+            discards: 0,
         }
     }
 }
@@ -137,13 +143,15 @@ impl App {
         target: Target,
         region: Option<(i32, i32, u32, u32)>,
     ) -> Task<Message> {
-        self.record_unsaved(); // the one before (its card was still up) is kept or deleted first
+        // a pending discard is final now (its pill goes: an Undo over a new recording means nothing);
+        // the card of the last one is moved to Recent, or kept for the next start's offer
+        let closed = Task::batch([self.record_discard_now(), self.record_unsaved(false, false)]);
         self.rec.real = Some(Real::default());
         self.rec.region = region;
         self.rec.in_use = false;
         self.rec.offered = false;
         self.rec.write_failed = false;
-        let task = self.record_start(audio_only, target);
+        let task = Task::batch([closed, self.record_start(audio_only, target)]);
         if let Some((_, _, w, h)) = region {
             // what is written (scaled over the encoders' limit, never cut)
             let v = crate::shared::platform::encode::VideoFmt::of(w & !1, h & !1, 30);
@@ -192,13 +200,15 @@ impl App {
                 self.record_begin(true, Target::WholeScreen, None)
             }
             State::Idle | State::Result { .. } | State::Error(_) => {
-                self.record_unsaved(); // a card of the last one may still be up
+                // a card of the last one may still be up: Recent, or kept for the next start
+                let closed =
+                    Task::batch([self.record_discard_now(), self.record_unsaved(false, false)]);
                 self.next = crate::app::message::Purpose::Search;
                 self.live_next = false;
                 let task =
                     self.capture(at, Some(crate::features::snip::screens::pick::Kind::Region));
                 self.record_next = true; // (after: every capture clears it)
-                task
+                Task::batch([closed, task])
             }
             // the key of what runs: stop and save (the countdown swallows it)
             State::Recording { audio_only }
@@ -236,12 +246,14 @@ impl App {
     /// One event into the machine, its effect into the fake, the answer back in; then the screen.
     fn record_event(&mut self, ev: Event, at: Instant) -> Task<Message> {
         let leaving = matches!(self.rec.state, State::Result { .. });
+        let audio_only = matches!(self.rec.state, State::Result { audio_only: true });
         let rec = &mut self.rec;
         let (next, effect) = rec.state.on(ev);
         rec.state = next;
-        if leaving && next == State::Idle {
-            self.record_unsaved();
-        }
+        let discarded = match leaving && next == State::Idle {
+            true => self.record_unsaved(true, audio_only),
+            false => Task::none(),
+        };
         let rec = &mut self.rec;
         let now = at.saturating_duration_since(rec.t0);
         match effect {
@@ -254,7 +266,7 @@ impl App {
             true => Self::run_real(rec, e),
             false => rec.fake.run(e),
         });
-        let shown = self.record_show(at);
+        let shown = Task::batch([discarded, self.record_show(at)]);
         match answer {
             Some(ev) => Task::batch([shown, self.record_event(ev, at)]),
             None => shown,
@@ -274,17 +286,13 @@ impl App {
             region,
             mic,
             sound: rec.bar.sound_on,
+            mic_muted: rec.bar.muted,
             fps: rec.bar.fps,
         };
-        let (muted, sound_on) = (rec.bar.muted, rec.bar.sound_on);
         let real = rec.real.as_mut()?;
         match effect {
             Effect::Begin => match real.begin(&req) {
-                Ok(()) => {
-                    real.mute_mic(muted);
-                    real.mute_sound(!sound_on);
-                    None
-                }
+                Ok(()) => None, // (the mute state was the session's start state)
                 Err(Failure { fault, note }) => {
                     rec.bar.note = note;
                     Some(Event::StartFailed(fault))
@@ -593,7 +601,8 @@ impl App {
         let ext = file
             .extension()
             .map_or("mp4".into(), |e| e.to_string_lossy());
-        let name = files::saved_name(files::now_unix(), &ext);
+        // the pictures' name (`OpenCircle-2026-10-26_19-37-28.mp4`): one function for both
+        let name = format!("{}.{ext}", crate::features::circle::stamped_name(""));
         let moved = folder
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
             .and_then(|f| {
@@ -624,20 +633,92 @@ impl App {
     /// Recent captures are on (`snip.history`: `<recent>/recordings`, pruned like the pictures), else it is deleted. One in
     /// use (copied, opened elsewhere, a failed end) stays where it is: offered at the next start.
     /// A move that fails keeps the file: nothing is deleted because something else went wrong.
-    fn record_unsaved(&mut self) {
+    fn record_unsaved(&mut self, notify: bool, audio_only: bool) -> Task<Message> {
         let Some(file) = self.rec.file.take() else {
-            return;
+            return Task::none();
         };
         if self.rec.in_use || !file.exists() {
-            return;
+            return Task::none();
         }
         let recent = crate::shared::history::recent::recordings_dir();
         let on = crate::shared::config::current().snip.history; // Recent captures on
-        let keep = std::mem::take(&mut self.rec.offered);
+        let offered = std::mem::take(&mut self.rec.offered);
+        if notify && !on && !offered {
+            return self.record_discard_later(file, audio_only);
+        }
+        // (a new recording starting: with Recent off the file is never deleted without an Undo,
+        // it stays in the temp folder for the next start's offer)
+        let keep = offered || !notify;
         settle_unsaved(&file, recent.as_deref(), on, keep, RECENT_LIMIT);
         if !file.exists() {
             files::unmark_offered(&file);
         }
+        Task::none()
+    }
+
+    /// Recent is off and nobody saved it: the file stays for `DISCARD_MS` behind the
+    /// "Recording discarded . Undo" pill, and is deleted only then. Quit meanwhile deletes
+    /// nothing: the next start offers it.
+    fn record_discard_later(&mut self, file: PathBuf, audio_only: bool) -> Task<Message> {
+        let finished = self.record_discard_now(); // one pill at a time: an older discard is final
+        self.snip_undo = None; // (and one Undo: a pending Snip undo's pill is replaced below)
+        self.rec.discards = self.rec.discards.wrapping_add(1);
+        let n = self.rec.discards;
+        self.rec.discard = Some((n, file, audio_only));
+        let older = self.windows.close_action_toasts().map(Message::Windows);
+        let pill = (self.windows)
+            .toast_with(
+                t!(rec_discarded),
+                Tone::Neutral,
+                None,
+                DISCARD_MS,
+                Some(t!(sn_undo)),
+            )
+            .map(Message::Windows);
+        let over = crate::app::background::background(move |tx| {
+            std::thread::sleep(Duration::from_millis(DISCARD_MS));
+            let _ = tx.unbounded_send(());
+        })
+        .map(move |()| Message::RecDiscardGone(n));
+        Task::batch([finished, older, pill, over])
+    }
+
+    /// A "Recording discarded" pill is up (its Undo is the pill's word).
+    pub(crate) fn rec_discard_pending(&self) -> bool {
+        self.rec.discard.is_some()
+    }
+
+    /// The pill is over (`n` is its number: an older pill's end changes nothing): the file goes.
+    pub(crate) fn record_discard_gone(&mut self, n: u32) -> Task<Message> {
+        match self.rec.discard.as_ref().is_some_and(|(k, ..)| *k == n) {
+            true => self.record_discard_now(),
+            false => Task::none(),
+        }
+    }
+
+    /// Deletes a pending discard now (a failed delete leaves the file for the next start).
+    /// Its pill goes with it (the returned task).
+    pub(crate) fn record_discard_now(&mut self) -> Task<Message> {
+        let Some((_, file, _)) = self.rec.discard.take() else {
+            return Task::none();
+        };
+        if let Err(e) = std::fs::remove_file(&file) {
+            crate::log!("[opencircle] recording could not be deleted: {e}");
+        }
+        files::unmark_offered(&file);
+        self.windows.close_action_toasts().map(Message::Windows)
+    }
+
+    /// The pill's Undo: the recording is back on the thumbnail (Save, Copy, ...).
+    pub(crate) fn record_discard_undo(&mut self) -> Task<Message> {
+        let Some((_, file, audio_only)) = self.rec.discard.take() else {
+            return Task::none();
+        };
+        self.rec.file = Some(file);
+        self.rec.in_use = false;
+        let pill = self.windows.close_action_toasts().map(Message::Windows);
+        let back = self.record_event(Event::Offer { audio_only }, Instant::now());
+        Task::batch([pill, back])
     }
 
     /// Quit and Restart-to-update: a recording that runs is stopped and its file closed (bounded
@@ -693,6 +774,9 @@ impl App {
         recent_on: bool,
     ) -> Task<Message> {
         files::sweep_discarded(dir);
+        if !recent_on {
+            files::cap_leftovers(dir, LEFTOVERS_KEPT);
+        }
         let mut fresh = Vec::new();
         for f in files::leftovers(dir) {
             if files::was_offered(&f) {
@@ -810,6 +894,12 @@ impl App {
         self.record_event(Event::Fault(f), Instant::now())
     }
 }
+
+/// "Recording discarded . Undo" shows this long (then the file goes).
+const DISCARD_MS: u64 = 6000;
+
+/// With Recent off, how many leftovers the temp folder keeps (the newest) at a start.
+const LEFTOVERS_KEPT: usize = 5;
 
 /// How many recordings Recent keeps (the same count as its pictures, oldest out first).
 const RECENT_LIMIT: usize = crate::shared::history::recent::HISTORY;
@@ -1284,10 +1374,8 @@ mod tests {
             // (video: the pick comes first, no device opens)
             let _ = app.record_begin(false, Target::Area, Some((0, 0, 640, 360)));
         });
-        assert!(
-            !old.exists(),
-            "the old one is settled before the next starts"
-        );
+        // (Recent off: never deleted without an Undo: it stays for the next start's offer)
+        assert!(old.exists(), "the old one is kept, not deleted unasked");
         assert_eq!(app.rec.file, None);
     }
 
@@ -1542,6 +1630,196 @@ mod tests {
         assert!(
             !app.record_next,
             "a capture clears it (the record key sets it after)"
+        );
+    }
+
+    /// R04B-1: an unsaved recording whose thumbnail slid away with Recent off stays on disk behind
+    /// the "Recording discarded . Undo" pill: Undo brings it back, the pill's end deletes it
+    /// (an older pill's end changes nothing), and Quit meanwhile deletes nothing: the next
+    /// start offers it.
+    #[test]
+    fn r04b_1_a_discard_waits_for_its_undo_pill() {
+        let dir = crate::shared::paths::test_dir("rec-discard");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fresh = |name: &str| {
+            let f = dir.join(name);
+            std::fs::write(&f, b"film").unwrap();
+            f
+        };
+        let pill = |app: &App| {
+            app.windows
+                .toasts()
+                .iter()
+                .any(|(t, _)| t == "Recording discarded")
+        };
+        // Undo: the file and its card are back, the pill goes
+        let (mut app, undo) = (app(), fresh("rec-1.mp4"));
+        let _ = app.record_discard_later(undo.clone(), false);
+        assert!(undo.exists() && pill(&app), "kept, with the pill");
+        let _ = app.update(Message::Windows(crate::app::windows::Msg::ToastAction));
+        assert_eq!(app.rec.file.as_ref(), Some(&undo));
+        assert_eq!(app.rec.state, State::Result { audio_only: false });
+        assert!(undo.exists() && !pill(&app) && app.rec.discard.is_none());
+        // the pill's end deletes; another pill's end does not
+        let timed = fresh("rec-2.mp4");
+        let _ = app.record_discard_later(timed.clone(), true);
+        let n = app.rec.discard.as_ref().unwrap().0;
+        let _ = app.update(Message::RecDiscardGone(n + 1));
+        assert!(timed.exists(), "an older pill's end changes nothing");
+        let _ = app.update(Message::RecDiscardGone(n));
+        assert!(
+            !timed.exists() && app.rec.discard.is_none(),
+            "deleted at the end"
+        );
+        let _ = app.update(Message::Windows(crate::app::windows::Msg::ToastAction));
+        assert!(
+            app.rec.file.as_ref() == Some(&undo),
+            "no Undo after the end"
+        );
+        // Quit during the window: nothing is deleted, the next start offers it
+        let kept = fresh("rec-3.mp4");
+        let mut quitting = App::idle(iced::window::Id::unique());
+        let _ = quitting.record_discard_later(kept.clone(), false);
+        quitting.record_shutdown();
+        assert!(kept.exists(), "Quit keeps the file");
+        let mut next = App::idle(iced::window::Id::unique());
+        let _ = next.record_offer_leftovers_in(&dir, None, false);
+        assert!(next.rec.file.is_some(), "the next start offers a leftover");
+    }
+
+    /// R04B-5: a new recording starting closes a pending discard's pill (its Undo restores
+    /// nothing, no stray state), and never deletes the restored / open recording without an
+    /// Undo: with Recent off it stays for the next start's offer.
+    #[test]
+    fn r04b_5_a_new_recording_ends_the_pill_and_keeps_the_open_card_file() {
+        let dir = crate::shared::paths::test_dir("rec-discard2");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (pending, open) = (dir.join("rec-1.mp4"), dir.join("rec-2.mp4"));
+        for f in [&pending, &open] {
+            std::fs::write(f, b"film").unwrap();
+        }
+        let pill = |app: &App| !app.windows.toasts().is_empty();
+        let mut app = app();
+        let _ = app.record_discard_later(pending.clone(), false);
+        assert!(pill(&app));
+        // the card of the last one is up (Recent off) when the next recording begins
+        app.rec.file = Some(open.clone());
+        let _ = app.record_begin(false, Target::Area, None);
+        assert!(!pending.exists(), "the pending discard is final");
+        assert!(!pill(&app), "its pill is closed");
+        assert!(open.exists(), "never deleted without an Undo");
+        assert!(app.rec.discard.is_none() && app.rec.file.is_none());
+        let state = app.rec.state;
+        let _ = app.update(Message::Windows(crate::app::windows::Msg::ToastAction));
+        assert_eq!(app.rec.state, state, "Undo restores nothing");
+        assert!(app.rec.file.is_none() && !pill(&app));
+        // ... and it is the next start's offer
+        let mut next = App::idle(iced::window::Id::unique());
+        let _ = next.record_offer_leftovers_in(&dir, None, false);
+        assert_eq!(next.rec.file.as_ref(), Some(&open));
+    }
+
+    /// R04B-10: the discard pill's end, a replacement and the Snip pill hand back the task that
+    /// closes the old pill's WINDOW (not only the state), and a stale end closes nothing.
+    #[test]
+    fn r04b_10_ending_a_discard_returns_the_task_that_closes_its_window() {
+        let f = crate::shared::paths::test_dir("rec-discard4").join("rec-1.mp4");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, b"x").unwrap();
+        let mut app = app();
+        assert_eq!(app.record_discard_now().units(), 0, "nothing pending");
+        let _ = app.record_discard_later(f.clone(), false);
+        let n = app.rec.discard.as_ref().unwrap().0;
+        assert_eq!(app.record_discard_gone(n + 1).units(), 0, "a stale end");
+        assert!(!app.windows.toasts().is_empty());
+        assert!(app.record_discard_gone(n).units() > 0, "the window closes");
+        assert!(app.windows.toasts().is_empty() && !f.exists());
+        // a second discard replaces the first one's pill (its close is in the task)
+        std::fs::write(&f, b"x").unwrap();
+        let _ = app.record_discard_later(f.clone(), false);
+        let g = f.with_file_name("rec-2.mp4");
+        std::fs::write(&g, b"x").unwrap();
+        let again = app.record_discard_later(g, false);
+        assert!(again.units() >= 4, "{} units", again.units());
+        assert_eq!(app.windows.toasts().len(), 1, "one pill");
+    }
+
+    /// R04B-11: with Recent off a start keeps at most 5 leftovers (the newest); the oldest go.
+    #[test]
+    fn r04b_11_a_start_keeps_at_most_five_leftovers_with_recent_off() {
+        let dir = crate::shared::paths::test_dir("rec-cap");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in 1..=8 {
+            std::fs::write(dir.join(format!("rec-{n}.mp4")), b"x").unwrap();
+        }
+        let mut app = app();
+        let _ = app.record_offer_leftovers_in(&dir, None, false);
+        let left = files::leftovers(&dir);
+        assert_eq!(left.len(), 5, "{left:?}");
+        assert!(!dir.join("rec-1.mp4").exists() && dir.join("rec-8.mp4").exists());
+        // Recent on: nothing is deleted here
+        let other = crate::shared::paths::test_dir("rec-cap2");
+        let _ = std::fs::remove_dir_all(&other);
+        std::fs::create_dir_all(&other).unwrap();
+        for n in 1..=7 {
+            std::fs::write(other.join(format!("rec-{n}.mp4")), b"x").unwrap();
+        }
+        files::cap_leftovers(&other, 7);
+        assert_eq!(files::leftovers(&other).len(), 7);
+    }
+
+    /// R04B-6: a discard's pill replaces a pending Snip undo (one pill, one Undo).
+    #[test]
+    fn r04b_6_a_discard_pill_replaces_a_snip_undo() {
+        let f = crate::shared::paths::test_dir("rec-discard3").join("rec-1.mp4");
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(&f, b"x").unwrap();
+        let mut app = app();
+        let image = crate::features::snip::annotate::Image {
+            width: 2,
+            height: 2,
+            rgba: vec![0; 16],
+        };
+        app.snip_undo = Some((
+            1,
+            Box::new(crate::features::snip::annotate::Annotator::new(image, 1.0)),
+        ));
+        let _ = app.record_discard_later(f, false);
+        assert!(app.snip_undo.is_none());
+    }
+
+    /// R04B-2: a saved recording is named like the pictures (`OpenCircle-<date>_<time>.<ext>`).
+    #[test]
+    fn r04b_2_a_saved_recording_is_named_like_a_picture() {
+        let dir = crate::shared::paths::test_dir("rec-name");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = app();
+        let f = dir.join("rec-1.mp4");
+        std::fs::write(&f, b"x").unwrap();
+        app.rec.file = Some(f);
+        let _ = app.record_save(Some(dir.join("out")));
+        let name = std::fs::read_dir(dir.join("out"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let stamp = name
+            .strip_prefix("OpenCircle-")
+            .and_then(|n| n.strip_suffix(".mp4"));
+        let shape = |c: char| if c.is_ascii_digit() { '9' } else { c };
+        assert_eq!(
+            stamp
+                .map(|s| s.chars().map(shape).collect::<String>())
+                .as_deref(),
+            Some("9999-99-99_99-99-99"),
+            "{name}"
         );
     }
 

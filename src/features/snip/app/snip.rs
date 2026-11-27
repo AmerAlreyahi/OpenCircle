@@ -878,6 +878,7 @@ impl App {
         let Some(edit) = self.o.edit.take().filter(|_| drawn) else {
             return Task::none();
         };
+        let finished = self.record_discard_now(); // one pill, one Undo: a recording's discard is final
         self.snip_undos = self.snip_undos.wrapping_add(1);
         let n = self.snip_undos;
         self.snip_undo = Some((n, Box::new(edit.annotator)));
@@ -897,7 +898,7 @@ impl App {
             let _ = tx.unbounded_send(());
         })
         .map(move |()| Message::SnipUndoGone(n));
-        Task::batch([older, pill, over])
+        Task::batch([finished, older, pill, over])
     }
 
     /// Another OpenCircle window that has its own Ctrl+Z (the Studio, Settings, the AI

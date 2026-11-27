@@ -1974,3 +1974,7 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   only when Recent is on; Recent's recordings are pruned by the same count limit as pictures and are visible from the Studio's Recent
   panel (listed, or a "Show recordings" row). With Recent off nothing is moved there: an unsaved one is deleted when its thumbnail
   slides away, crash leftovers stay in the temp folder and are offered at the next start.
+
+- Recording leftovers cap (lead default 2026-11-27, owner may reverse): with Recent off, unsaved recordings kept for the next
+  start's offer are capped at 5 in the temp folder; beyond that the oldest is deleted at start (logged). A recording with sound
+  switched off never contains system sound, not even its first samples.

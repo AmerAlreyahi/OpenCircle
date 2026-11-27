@@ -69,12 +69,25 @@ fn row_of<'a>(
     desc: &'a str,
     switch: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let n = state.kept.map(|k| k.of(kind));
-    let count = match n {
-        None => t!(h_counting).to_string(),
-        Some(0) => t!(h_none).to_string(),
-        Some(1) => "1 kept".to_string(),
-        Some(n) => crate::shared::app_language::fmt(crate::shared::app_language::S::h_kept, &[&n]),
+    use crate::shared::app_language::{S, fmt};
+    let rec = state.kept.map_or(0, |k| {
+        if kind == Kind::Captures {
+            k.recordings
+        } else {
+            0
+        }
+    });
+    let n = state.kept.map(|k| shown(k, kind));
+    let count = match (n, rec) {
+        (None, _) => t!(h_counting).to_string(),
+        (Some(0), _) => t!(h_none).to_string(),
+        // Recent also holds unsaved recordings: Clear takes them too, so the count says so
+        (Some(1), 1) => t!(h_rec1).to_string(),
+        (Some(n), r) if r > 0 && n == r => fmt(S::h_recs, &[&r]),
+        (Some(n), 1) => fmt(S::h_kept_rec1, &[&(n - 1)]),
+        (Some(n), r) if r > 1 => fmt(S::h_kept_rec, &[&(n - r), &r]),
+        (Some(1), _) => "1 kept".to_string(),
+        (Some(n), _) => fmt(S::h_kept, &[&n]),
     };
     let clear = button(
         label(t!(h_clear)),
@@ -88,8 +101,18 @@ fn row_of<'a>(
     setting_row::row(title(name), desc, control)
 }
 
+/// How many a row says it keeps (and its Clear takes): Recent's recordings are in Recent's row.
+pub(in crate::features::settings) fn shown(k: crate::shared::history::Counts, kind: Kind) -> usize {
+    k.of(kind)
+        + if kind == Kind::Captures {
+            k.recordings
+        } else {
+            0
+        }
+}
+
 /// Clear all: a quiet button; pressed, the row asks to be sure.
-pub(super) fn clear_all(state: &State) -> Element<'_, Message> {
+pub(in crate::features::settings) fn clear_all(state: &State) -> Element<'_, Message> {
     if state.clearing_all {
         let buttons = crate::dir_row![
             setting_row::cancel(t!(c_cancel), Message::KeepHistory),
@@ -105,7 +128,7 @@ pub(super) fn clear_all(state: &State) -> Element<'_, Message> {
     }
     let any = state
         .kept
-        .is_some_and(|k| Kind::ALL.iter().any(|&x| k.of(x) > 0));
+        .is_some_and(|k| Kind::ALL.iter().any(|&x| shown(k, x) > 0));
     let ask = setting_row::action(
         t!(h_all_btn),
         Button::Remove,

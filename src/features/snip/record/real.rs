@@ -23,8 +23,10 @@ pub struct Request {
     pub region: Option<(i32, i32, u32, u32)>,
     /// The microphone: none = off, `Some(None)` = the OS default, `Some(Some(id))` = that one.
     pub mic: Option<Option<String>>,
-    /// The PC's sound.
+    /// The PC's sound is on (the input is open either way, muted when off).
     pub sound: bool,
+    /// The microphone starts muted.
+    pub mic_muted: bool,
     pub fps: u32,
 }
 
@@ -103,23 +105,9 @@ impl Real {
             return Err(refused("less than 2 GB free".into()));
         }
         let path = files::new_temp(&dir, plan.ext);
-        let mut inputs: Vec<(Chan, Box<dyn AudioIn>)> = Vec::new();
-        if let Some(id) = &req.mic {
-            let input = audio::Input::open(Kind::Mic(id.clone())).map_err(|e| {
-                crate::log!("[opencircle] recording: no microphone ({e})");
-                Failure {
-                    fault: Fault::Mic,
-                    note: e.to_string(),
-                }
-            })?;
-            inputs.push((Chan::Mic, Box::new(Sound(input))));
-        }
-        if req.sound {
-            match audio::Input::open(Kind::System) {
-                Ok(input) => inputs.push((Chan::Sound, Box::new(Sound(input)))),
-                Err(e) => crate::log!("[opencircle] recording: no system sound ({e})"),
-            }
-        }
+        let inputs = open_inputs(req, &|kind| {
+            audio::Input::open(kind).map(|i| Box::new(Sound(i)) as Box<dyn AudioIn>)
+        })?;
         let (video, source) = match (req.audio_only, req.region) {
             // (even sides: the picture the capture is asked for is what is pushed)
             (false, Some((x, y, w, h))) => {
@@ -139,6 +127,8 @@ impl Real {
             Box::new(move || crate::shared::platform::sys::disk::free_bytes(&probe)),
         );
         cfg.frame_bytes = video.map(|v| v.frame_bytes());
+        // (the start state: nothing of a muted source is ever heard, not even the first packets)
+        (cfg.mic_muted, cfg.sound_muted) = (req.mic_muted, !req.sound);
         let session = Session::start(cfg, source, inputs, sink);
         self.live = Some(Live { session, path });
         self.file = None;
@@ -211,6 +201,33 @@ impl Real {
     }
 }
 
+type Inputs = Vec<(Chan, Box<dyn AudioIn>)>;
+
+/// The sound inputs of a recording, opened with `open`: the microphone when asked for, and the
+/// system sound WHATEVER the switch says (it starts muted when the switch is off): turning it
+/// on mid-recording then needs no new input.
+fn open_inputs(
+    req: &Request,
+    open: &dyn Fn(Kind) -> Result<Box<dyn AudioIn>, audio::Error>,
+) -> Result<Inputs, Failure> {
+    let mut inputs = Vec::new();
+    if let Some(id) = &req.mic {
+        let input = open(Kind::Mic(id.clone())).map_err(|e| {
+            crate::log!("[opencircle] recording: no microphone ({e})");
+            Failure {
+                fault: Fault::Mic,
+                note: e.to_string(),
+            }
+        })?;
+        inputs.push((Chan::Mic, input));
+    }
+    match open(Kind::System) {
+        Ok(input) => inputs.push((Chan::Sound, input)),
+        Err(e) => crate::log!("[opencircle] recording: no system sound ({e})"),
+    }
+    Ok(inputs)
+}
+
 /// Stops the session and says how it ended.
 fn finish(live: Live) -> Flushed {
     let error = match live.session.stop() {
@@ -241,5 +258,39 @@ fn delete(path: &Path) {
             "[opencircle] recording: could not delete {}: {e}",
             path.display()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Silent;
+    impl AudioIn for Silent {
+        fn read(&mut self, _: Duration) -> Result<Option<(Vec<f32>, std::time::Instant)>, String> {
+            Ok(None)
+        }
+    }
+
+    /// R04B-8: the system input is opened even with the sound switch off (muted at the start),
+    /// and the microphone only when asked for.
+    #[test]
+    fn r04b_8_the_system_input_opens_whatever_the_switch_says() {
+        for (sound, mic) in [(false, None), (false, Some(None)), (true, None)] {
+            let req = Request {
+                sound,
+                mic: mic.clone(),
+                ..Request::default()
+            };
+            let asked = std::cell::RefCell::new(Vec::new());
+            let open = |k: Kind| -> Result<Box<dyn AudioIn>, audio::Error> {
+                asked.borrow_mut().push(k);
+                Ok(Box::new(Silent))
+            };
+            let inputs = open_inputs(&req, &open).ok().unwrap();
+            assert!(asked.borrow().contains(&Kind::System), "sound {sound}");
+            assert_eq!(asked.borrow().contains(&Kind::Mic(None)), mic.is_some());
+            assert_eq!(inputs.iter().filter(|(c, _)| *c == Chan::Sound).count(), 1);
+        }
     }
 }

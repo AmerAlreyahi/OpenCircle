@@ -2415,6 +2415,7 @@ fn the_step_33_pages_match_their_golden_images() {
                 Message::Kept(crate::shared::history::Counts {
                     captures: 12,
                     chats: 0,
+                    recordings: 3,
                 }),
             );
         }),
@@ -2424,6 +2425,7 @@ fn the_step_33_pages_match_their_golden_images() {
                 Message::Kept(crate::shared::history::Counts {
                     captures: 3,
                     chats: 7,
+                    recordings: 0,
                 }),
             );
             update(s, Message::ClearAll(false));
@@ -3091,6 +3093,7 @@ fn history_counts_clears_and_asks_before_clearing_all() {
     let kept = Counts {
         captures: 3,
         chats: 1,
+        recordings: 0,
     };
     update(&mut s, Message::Kept(kept));
     let texts = shot::texts(view(&s));
@@ -3125,6 +3128,74 @@ fn history_counts_clears_and_asks_before_clearing_all() {
     update(&mut s, Message::KeepChats(false));
     assert_eq!(s.kept.unwrap().chats, 0);
     assert!(shot::texts(view(&s)).iter().any(|t| t == "Nothing kept"));
+}
+
+/// R04B-3: Recent's count and Clear include the unsaved recordings kept in it (EN + AR); only
+/// the non-zero parts are said; Clear and Clear all are enabled with recordings only; Recent
+/// off resets the count.
+#[test]
+fn r04b_3_history_counts_the_recordings_in_recent_too() {
+    use super::pages::history::shown;
+    use crate::shared::history::{Counts, Kind};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::History));
+    let shows = |s: &State, want: &str| shot::texts(view(s)).iter().any(|t| t == want);
+    let kept = |captures, recordings| Counts {
+        captures,
+        chats: 0,
+        recordings,
+    };
+    update(&mut s, Message::Kept(kept(12, 3)));
+    assert!(shows(&s, "12 kept \u{b7} 3 recordings"));
+    update(&mut s, Message::Kept(kept(12, 1)));
+    assert!(shows(&s, "12 kept \u{b7} 1 recording"));
+    update(&mut s, Message::Kept(kept(0, 2)));
+    assert!(shows(&s, "2 recordings"), "no zero part");
+    update(&mut s, Message::Kept(kept(0, 1)));
+    assert!(shows(&s, "1 recording"));
+    // recordings only: Clear and Clear all are enabled (their count is not zero)
+    for k in [kept(0, 2), kept(0, 1)] {
+        assert!(shown(k, Kind::Captures) > 0, "Clear is enabled");
+        assert!(Kind::ALL.iter().any(|&x| shown(k, x) > 0), "Clear all too");
+    }
+    assert_eq!(shown(kept(0, 0), Kind::Captures), 0);
+    // the DRAWN Clear all button: enabled with recordings only (as with a capture), disabled with nothing
+    let drawn = |k: Counts| {
+        let (mut s, _) = state(None);
+        update(&mut s, Message::Kept(k));
+        shot::render(super::pages::history::clear_all(&s), 600, 120)
+    };
+    assert_eq!(
+        drawn(kept(0, 2)),
+        drawn(kept(1, 0)),
+        "enabled like a capture"
+    );
+    assert_ne!(
+        drawn(kept(0, 2)),
+        drawn(kept(0, 0)),
+        "disabled with nothing"
+    );
+    // Recent off: the count goes with what it deleted
+    update(&mut s, Message::Kept(kept(12, 3)));
+    let mut snip = s.draft.snip.clone();
+    snip.history = false;
+    update(&mut s, Message::Snip(snip));
+    assert_eq!(s.kept.unwrap().recordings, 0);
+    assert!(shows(&s, "Nothing kept"));
+    update(
+        &mut s,
+        Message::AppLanguage(crate::shared::app_language::Choice("ar")),
+    );
+    update(&mut s, Message::Kept(kept(12, 3)));
+    let ar = shot::texts(view(&s));
+    assert!(
+        ar.iter()
+            .any(|t| t.contains("12") && t.contains('\u{b7}') && t.contains('3')),
+        "{ar:?}"
+    );
+    update(&mut s, Message::Kept(kept(0, 3)));
+    let ar = shot::texts(view(&s));
+    assert!(!ar.iter().any(|t| t.contains('\u{b7}')), "{ar:?}");
 }
 
 /// The switches for what is kept exist once: on History, which Privacy & data shows (Snip and AI link there).

@@ -24,6 +24,8 @@ impl Kind {
 pub struct Counts {
     pub captures: usize,
     pub chats: usize,
+    /// Unsaved recordings waiting in Recent (they go with Recent's Clear).
+    pub recordings: usize,
 }
 
 impl Counts {
@@ -59,6 +61,7 @@ fn tidy_in(captures: Option<&Path>, db: Option<&Path>, clear: &[Kind]) -> Counts
     Counts {
         captures: captures.map_or(0, |d| recent::list(d).len()),
         chats: db.map_or(0, |db| crate::features::ask_ai::chats::list(db, "").len()),
+        recordings: captures.map_or(0, recent::count_recordings),
     }
 }
 
@@ -93,16 +96,23 @@ mod tests {
             };
             chats::save(&db, &chat, chats::generation()).unwrap();
         }
+        // two unsaved recordings wait in Recent: counted, and Clear takes them with the captures
+        std::fs::create_dir_all(dir.join("recordings")).unwrap();
+        for n in 0..2 {
+            std::fs::write(dir.join("recordings").join(format!("rec-{n}.mp4")), b"x").unwrap();
+        }
         let (d, b) = (Some(dir.as_path()), Some(db.as_path()));
         let both = Counts {
             captures: 3,
             chats: 2,
+            recordings: 2,
         };
         assert_eq!(tidy_in(d, b, &[]), both);
         assert_eq!(both.of(Kind::Chats), 2);
         let chats_only = Counts {
             captures: 0,
             chats: 2,
+            recordings: 0, // (cleared with Recent)
         };
         assert_eq!(tidy_in(d, b, &[Kind::Captures]), chats_only);
         assert_eq!(tidy_in(d, b, &Kind::ALL), Counts::default());

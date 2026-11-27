@@ -2236,6 +2236,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Snip(snip) => {
             if let (false, Some(kept)) = (snip.history, &mut state.kept) {
                 kept.captures = 0; // off deletes them, as with chats
+                kept.recordings = 0;
             }
             state.draft.snip = snip;
         }

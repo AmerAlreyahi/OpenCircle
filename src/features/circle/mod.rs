@@ -8,4 +8,6 @@ pub(crate) mod screens;
 // and the right-click menu on selected text.
 pub(crate) use actions::copy as clipboard;
 pub(crate) use actions::entities;
+// The pictures' file name (`OpenCircle-<date>_<time>`), which a saved recording shares.
+pub(crate) use actions::save::{stamped_name, suffix};
 pub(crate) use screens::context_menu as text_menu;

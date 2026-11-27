@@ -513,14 +513,22 @@ strings! {
         | "محادثات الذكاء الاصطناعي، نصًّا فقط، على هذا الجهاز. الإيقاف يحذفها";
     h_kept: "{} kept"
         | "المحفوظ: {}";
+    h_kept_rec: "{} kept · {} recordings"
+        | "المحفوظ: {} · التسجيلات: {}";
+    h_kept_rec1: "{} kept · 1 recording"
+        | "المحفوظ: {} · تسجيل واحد";
+    h_recs: "{} recordings"
+        | "التسجيلات: {}";
+    h_rec1: "1 recording"
+        | "تسجيل واحد";
     h_none: "Nothing kept"
         | "لا شيء محفوظ";
     h_clear: "Clear"
         | "مسح";
     h_all: "Clear all"
         | "مسح الكل";
-    h_all_desc: "Every kept capture and chat on this PC"
-        | "كل اللقطات والمحادثات المحفوظة على هذا الجهاز";
+    h_all_desc: "Every kept capture, recording and chat on this PC"
+        | "كل اللقطات والتسجيلات والمحادثات المحفوظة على هذا الجهاز";
     h_all_btn: "Clear all…"
         | "مسح الكل…";
     k_note: "Click any box to record keys"
@@ -1825,6 +1833,8 @@ strings! {
         | "اللون";
     sn_undo: "Undo"
         | "تراجع";
+    rec_discarded: "Recording discarded"
+        | "تم تجاهل التسجيل";
     sn_closed: "Snip closed"
         | "أُغلقت اللقطة";
     sn_redo: "Redo"

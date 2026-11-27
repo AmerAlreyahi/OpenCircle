@@ -119,6 +119,8 @@ pub(crate) enum Message {
     SnipUndoKey,
     /// The "Snip closed" pill `.0` is over: the kept drawings go.
     SnipUndoGone(u32),
+    /// The "Recording discarded" pill `.0` is over: the file goes.
+    RecDiscardGone(u32),
     /// The selection with this area was scanned (a stale area is ignored).
     Scanned(Rectangle, qr::Scan),
     /// The QR chip's Copy / Open link.

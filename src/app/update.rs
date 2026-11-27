@@ -101,7 +101,11 @@ impl App {
             Message::Windows(windows::Msg::StudioCutOut) => self.studio_cut_out(),
             Message::Windows(windows::Msg::StudioDownload) => self.studio_download(),
             Message::Windows(windows::Msg::StudioDismiss) => self.studio_dismissed(),
+            Message::Windows(windows::Msg::ToastAction) if self.rec_discard_pending() => {
+                self.record_discard_undo()
+            }
             Message::Windows(windows::Msg::ToastAction) => self.snip_undo_restore(),
+            Message::RecDiscardGone(n) => self.record_discard_gone(n),
             // never alongside another undo: the Studio, Settings or the chat may mean it
             Message::SnipUndoKey if self.undo_key_is_taken() => Task::none(),
             Message::SnipUndoKey => self.snip_undo_restore(),
@@ -950,6 +954,7 @@ pub(crate) fn works_closed(message: &Message) -> bool {
             | Message::Windows(_)
             | Message::SnipUndoKey
             | Message::SnipUndoGone(_)
+            | Message::RecDiscardGone(_)
             | Message::StudioTranslate(..)
             | Message::ChatHome(_)
             | Message::StudioReader(..)

@@ -41,16 +41,21 @@ fn write_into(folder: &Path, crop: &Crop, format: Format) -> Result<String, Stri
     Ok(fmt(S::pill_saved, &[&short_path(folder)]))
 }
 
+/// Nothing for the first try, `-2`, `-3`, ... after: the one collision rule of every saved file
+/// (pictures and recordings).
+pub fn suffix(n: u32) -> String {
+    match n {
+        0 | 1 => String::new(),
+        n => format!("-{n}"),
+    }
+}
+
 /// Writes `OpenCircle-<stamp>.<ext>`, or `-2`, `-3`, ... if that name is taken:
 /// a second save in the same second never overwrites the first.
 fn write_new(folder: &Path, stamp: &str, ext: &str, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    for n in 1.. {
-        let suffix = if n == 1 {
-            String::new()
-        } else {
-            format!("-{n}")
-        };
+    for n in 1u32.. {
+        let suffix = suffix(n);
         let path = folder.join(format!("OpenCircle-{stamp}{suffix}.{ext}"));
         match std::fs::OpenOptions::new()
             .write(true)

@@ -54,6 +54,9 @@ pub struct Config {
     /// Bytes of every frame a source gives (width x height x 4): another size is a fault
     /// (a stream that changed size under us), never fed to the encoder.
     pub frame_bytes: Option<usize>,
+    /// The mute state the recording STARTS in (a muted source never lets one sample in).
+    pub mic_muted: bool,
+    pub sound_muted: bool,
 }
 
 impl Config {
@@ -65,6 +68,8 @@ impl Config {
             disk_every: Duration::from_secs(10),
             free,
             frame_bytes: None,
+            mic_muted: false,
+            sound_muted: false,
         }
     }
 }
@@ -118,6 +123,8 @@ impl Session {
         sink: Box<dyn Sink>,
     ) -> Session {
         let shared = Arc::new(Shared::default());
+        shared.mic_muted.store(cfg.mic_muted, Ordering::SeqCst);
+        shared.sound_muted.store(cfg.sound_muted, Ordering::SeqCst);
         let origin = Instant::now();
         let clock = Arc::new(Mutex::new(Clock::start(Duration::ZERO)));
         let (control, control_rx) = mpsc::channel();
@@ -331,14 +338,19 @@ fn write(
         m.start(Instant::now());
         m
     };
+    // the shared mute flags go into the mixer BEFORE any sample is pushed: off means off
+    let sync = |mixer: &mut Mixer| {
+        mixer.set_mic_muted(shared.mic_muted.load(Ordering::SeqCst));
+        mixer.set_system_muted(shared.sound_muted.load(Ordering::SeqCst));
+    };
     let mut mixer = new_mixer();
+    sync(&mut mixer);
     let mut mixed = Vec::new();
     let mut last_check = Instant::now();
     let mut raised = false;
     let mut failed: Option<String> = None;
     let audio = |sink: &mut Box<dyn Sink>, mixed: &mut Vec<f32>, mixer: &mut Mixer, dead: bool| {
-        mixer.set_mic_muted(shared.mic_muted.load(Ordering::Relaxed));
-        mixer.set_system_muted(shared.sound_muted.load(Ordering::Relaxed));
+        sync(mixer);
         mixed.clear();
         let n = mixer.drain_up_to(Instant::now(), mixed);
         shared
@@ -374,12 +386,19 @@ fn write(
         while let Ok(msg) = control.try_recv() {
             idle = false;
             match msg {
-                Msg::Audio(Chan::Mic, s, at) => mixer.push_mic(&s, at),
-                Msg::Audio(Chan::Sound, s, at) => mixer.push_system(&s, at),
+                Msg::Audio(Chan::Mic, s, at) => {
+                    sync(&mut mixer);
+                    mixer.push_mic(&s, at)
+                }
+                Msg::Audio(Chan::Sound, s, at) => {
+                    sync(&mut mixer);
+                    mixer.push_system(&s, at)
+                }
                 Msg::Pause(true) => sink.pause(true),
                 Msg::Pause(false) => {
                     // the pause is not in the sound: a mixer that starts again from now
                     mixer = new_mixer();
+                    sync(&mut mixer);
                     sink.pause(false);
                 }
                 Msg::Stop => stopping = true,
@@ -462,6 +481,8 @@ mod tests {
     struct Log {
         frames: Mutex<Vec<(u8, Duration)>>,
         audio_frames: AtomicUsize,
+        /// The loudest sample the sink was given (`f32` bits).
+        peak: AtomicU32,
         pauses: Mutex<Vec<bool>>,
         finished: AtomicBool,
     }
@@ -481,6 +502,11 @@ mod tests {
             self.log
                 .audio_frames
                 .fetch_add(pcm.len() / 2, Ordering::SeqCst);
+            let loud = pcm.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+            let seen = f32::from_bits(self.log.peak.load(Ordering::SeqCst));
+            self.log
+                .peak
+                .store(seen.max(loud).to_bits(), Ordering::SeqCst);
             Ok(())
         }
         fn pause(&mut self, paused: bool) {
@@ -631,6 +657,155 @@ mod tests {
         let n = log.audio_frames.load(Ordering::SeqCst);
         assert!(n > 48_000 / 10, "{n} frames of sound");
         assert!(log.frames.lock().unwrap().is_empty());
+    }
+
+    /// A real-time 440 Hz tone in 20 ms packets, as the capture delivers them (`stamp_start`:
+    /// stamped with the packet's start, as `AudioSender` does; else with its end).
+    struct Sine {
+        n: u64,
+        amp: f32,
+        stamp_start: bool,
+    }
+    impl AudioIn for Sine {
+        fn read(&mut self, _wait: Duration) -> Result<Option<(Vec<f32>, Instant)>, String> {
+            thread::sleep(Duration::from_millis(20));
+            let now = Instant::now();
+            let mut pcm = Vec::with_capacity(1920);
+            for _ in 0..960 {
+                let v = (self.n as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * self.amp;
+                pcm.extend([v, v]);
+                self.n += 1;
+            }
+            let at = match self.stamp_start {
+                true => now - Duration::from_millis(20),
+                false => now,
+            };
+            Ok(Some((pcm, at)))
+        }
+    }
+
+    fn peak_of(inputs: Vec<(Chan, Box<dyn AudioIn>)>, mute: impl Fn(&Session)) -> f32 {
+        let log = Arc::new(Log::default());
+        let sink = Box::new(FakeSink {
+            log: log.clone(),
+            slow: Duration::ZERO,
+        });
+        let s = Session::start(cfg(u64::MAX), None, inputs, sink);
+        mute(&s);
+        thread::sleep(Duration::from_millis(600));
+        s.stop().unwrap();
+        f32::from_bits(log.peak.load(Ordering::SeqCst))
+    }
+
+    /// R04B-4: a tone from the microphone and/or the system sound reaches the sink as a tone,
+    /// not as silence (the Windows test file read exactly -91 dB): through the whole capture ->
+    /// mix -> sink path, with packets stamped at their start or at their end, one source or both,
+    /// and only a muted source is zeros.
+    #[test]
+    fn r04b_4_a_tone_through_the_capture_mix_sink_path_is_not_silent() {
+        let mic = |start| -> (Chan, Box<dyn AudioIn>) {
+            (
+                Chan::Mic,
+                Box::new(Sine {
+                    n: 0,
+                    amp: 0.5,
+                    stamp_start: start,
+                }),
+            )
+        };
+        let sys = |start| -> (Chan, Box<dyn AudioIn>) {
+            (
+                Chan::Sound,
+                Box::new(Sine {
+                    n: 0,
+                    amp: 0.25,
+                    stamp_start: start,
+                }),
+            )
+        };
+        for start in [true, false] {
+            let m = peak_of(vec![mic(start)], |_| {});
+            assert!(m > 0.4, "mic only (stamp at start: {start}): peak {m}");
+            let s = peak_of(vec![sys(start)], |_| {});
+            assert!(s > 0.2, "system only (stamp at start: {start}): peak {s}");
+            let both = peak_of(vec![mic(start), sys(start)], |_| {});
+            assert!(
+                both > 0.6,
+                "both add up (stamp at start: {start}): peak {both}"
+            );
+        }
+        assert_eq!(peak_of(vec![mic(true)], |s| s.mute_mic(true)), 0.0, "muted");
+        let only_mic = peak_of(vec![mic(true), sys(true)], |s| s.mute_sound(true));
+        assert!(only_mic > 0.4 && only_mic < 0.6, "system muted: {only_mic}");
+    }
+
+    /// R04B-7: the system sound is open from the start and muted: turning it on mid-recording
+    /// gives real (non-silent) samples from then on, and nothing before.
+    #[test]
+    fn r04b_7_system_sound_switched_on_mid_recording_is_not_silent() {
+        let log = Arc::new(Log::default());
+        let sink = Box::new(FakeSink {
+            log: log.clone(),
+            slow: Duration::ZERO,
+        });
+        let sys: Box<dyn AudioIn> = Box::new(Sine {
+            n: 0,
+            amp: 0.5,
+            stamp_start: true,
+        });
+        let s = Session::start(cfg(u64::MAX), None, vec![(Chan::Sound, sys)], sink);
+        s.mute_sound(true); // the switch is off at the start
+        thread::sleep(Duration::from_millis(400));
+        let before = f32::from_bits(log.peak.load(Ordering::SeqCst));
+        s.mute_sound(false); // turned on mid-recording
+        thread::sleep(Duration::from_millis(500));
+        let after = f32::from_bits(log.peak.load(Ordering::SeqCst));
+        s.stop().unwrap();
+        assert!(before < 0.01, "silent while off: {before}");
+        assert!(after > 0.3, "the sound is there once on: {after}");
+    }
+
+    /// Packets already waiting when the recording starts.
+    struct Waiting(Vec<(Vec<f32>, Instant)>);
+    impl AudioIn for Waiting {
+        fn read(&mut self, wait: Duration) -> Result<Option<(Vec<f32>, Instant)>, String> {
+            match self.0.pop() {
+                Some(p) => Ok(Some(p)),
+                None => {
+                    thread::sleep(wait.min(Duration::from_millis(5)));
+                    Ok(None)
+                }
+            }
+        }
+    }
+
+    /// R04B-9: off means off. A source that STARTS muted lets not one sample into the file, even
+    /// when packets were already waiting at the start (50 starts, peak exactly 0); and the same
+    /// packets are heard when it starts unmuted.
+    #[test]
+    fn r04b_9_a_source_that_starts_muted_never_leaks_a_sample() {
+        let run = |chan: Chan, muted: bool| {
+            let log = Arc::new(Log::default());
+            let sink = Box::new(FakeSink {
+                log: log.clone(),
+                slow: Duration::ZERO,
+            });
+            let now = Instant::now();
+            let packets = (0..20).map(|_| (vec![0.5; 1920], now)).collect();
+            let mut c = cfg(u64::MAX);
+            (c.mic_muted, c.sound_muted) =
+                (muted && chan == Chan::Mic, muted && chan == Chan::Sound);
+            let s = Session::start(c, None, vec![(chan, Box::new(Waiting(packets)))], sink);
+            thread::sleep(Duration::from_millis(40));
+            s.stop().unwrap();
+            f32::from_bits(log.peak.load(Ordering::SeqCst))
+        };
+        for chan in [Chan::Sound, Chan::Mic] {
+            for _ in 0..50 {
+                assert_eq!(run(chan, true), 0.0, "{chan:?} muted at the start");
+            }
+            assert!(run(chan, false) > 0.4, "{chan:?} heard when not muted");
+        }
     }
 
     /// A sink that fails after `ok` frames.

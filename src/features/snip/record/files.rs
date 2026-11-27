@@ -26,12 +26,6 @@ pub fn new_temp(dir: &Path, ext: &str) -> PathBuf {
     }
 }
 
-pub fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
-
 /// The note beside `file` that says the user discarded it: if the worker deleting it is killed
 /// (quit, crash), the next start deletes it instead of offering it.
 fn marker(file: &Path) -> PathBuf {
@@ -108,7 +102,7 @@ pub fn unmark_offered(file: &Path) {
     let _ = std::fs::remove_file(offered_marker(file));
 }
 
-/// `name` in `dir`, or `name (2)`, `name (3)` ... when taken: nothing is overwritten.
+/// `name` in `dir`, or `name-2`, `name-3` ... (the pictures' rule) when taken: nothing is overwritten.
 pub fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
@@ -122,7 +116,13 @@ pub fn free_name(dir: &Path, name: &str) -> PathBuf {
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()));
     (2..)
-        .map(|n| dir.join(format!("{stem} ({n}){}", ext.as_deref().unwrap_or(""))))
+        .map(|n| {
+            let (n, ext) = (
+                crate::features::circle::suffix(n),
+                ext.as_deref().unwrap_or(""),
+            );
+            dir.join(format!("{stem}{n}{ext}"))
+        })
         .find(|p| !p.exists())
         .expect("a free name")
 }
@@ -177,37 +177,25 @@ fn move_with(
     }
 }
 
+/// With Recent off nothing moves out of the temp folder: it keeps at most `keep` leftovers, the
+/// newest; the oldest beyond that are deleted (logged).
+pub fn cap_leftovers(dir: &Path, keep: usize) {
+    let all = leftovers(dir);
+    for old in &all[..all.len().saturating_sub(keep)] {
+        crate::log!(
+            "[opencircle] too many recordings left over: deleting {}",
+            old.display()
+        );
+        let _ = std::fs::remove_file(old);
+        unmark_offered(old);
+    }
+}
+
 /// Sets `file`'s modified time to now (best effort).
 pub fn touch(file: &Path) {
     if let Ok(f) = std::fs::OpenOptions::new().write(true).open(file) {
         let _ = f.set_modified(SystemTime::now());
     }
-}
-
-/// The default name a saved recording gets: `OpenCircle 2026-11-27 14.03.22.mp4`.
-pub fn saved_name(unix: u64, ext: &str) -> String {
-    let (y, m, d) = civil(unix / 86_400);
-    let s = unix % 86_400;
-    format!(
-        "OpenCircle {y:04}-{m:02}-{d:02} {:02}.{:02}.{:02}.{ext}",
-        s / 3600,
-        s / 60 % 60,
-        s % 60
-    )
-}
-
-/// Days since 1970-01-01 as year, month, day (UTC; Hinnant's algorithm).
-fn civil(days: u64) -> (i64, u32, u32) {
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
 }
 
 #[cfg(test)]
@@ -231,10 +219,6 @@ mod tests {
         assert_eq!(names.len(), 500, "no name twice");
         assert!(!names.contains(&first));
         assert_eq!(first.extension().unwrap(), "webm");
-        assert_eq!(
-            saved_name(1_700_000_000, "mp4"),
-            "OpenCircle 2023-11-14 22.13.20.mp4"
-        );
     }
 
     /// R04-57: a discarded file (marker) is swept at the next start, never offered; an offered
@@ -295,7 +279,7 @@ mod tests {
             assert!(!tmp.exists(), "moved");
             assert_eq!(std::fs::read_to_string(saved).unwrap(), format!("take {i}"));
         }
-        assert!(out.join("rec-9.mp4").exists() && out.join("rec-9 (2).mp4").exists());
+        assert!(out.join("rec-9.mp4").exists() && out.join("rec-9-2.mp4").exists());
     }
 
     /// R04-43: across drives the file is copied beside the target, flushed, renamed; the

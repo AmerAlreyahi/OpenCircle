@@ -86,6 +86,12 @@ pub fn prune_recordings(dir: &Path, limit: usize) {
     }
 }
 
+/// How many recordings wait in the Recent folder `dir`.
+pub fn count_recordings(dir: &Path) -> usize {
+    std::fs::read_dir(recordings_in(dir))
+        .map_or(0, |d| d.flatten().filter(|e| e.path().is_file()).count())
+}
+
 /// Recent is on and recordings wait in it (the Studio's "Show recordings" row).
 pub fn has_recordings() -> bool {
     crate::shared::config::current().snip.history

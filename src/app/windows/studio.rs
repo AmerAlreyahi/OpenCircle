@@ -676,10 +676,11 @@ fn write_file_with(
         .unwrap_or_default();
     let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
     for n in 1.. {
+        let sfx = save::suffix(n);
         let name = match (n, &ext) {
             (1, _) => path.to_path_buf(),
-            (n, Some(ext)) => path.with_file_name(format!("{stem}-{n}.{ext}")),
-            (n, None) => path.with_file_name(format!("{stem}-{n}")),
+            (_, Some(ext)) => path.with_file_name(format!("{stem}{sfx}.{ext}")),
+            (_, None) => path.with_file_name(format!("{stem}{sfx}")),
         };
         match std::fs::OpenOptions::new()
             .write(true)

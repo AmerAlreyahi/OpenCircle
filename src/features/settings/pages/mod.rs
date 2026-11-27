@@ -16,7 +16,7 @@ mod extensions;
 mod general;
 pub(in crate::features::settings) use general::updates_words;
 pub(crate) mod glossaries;
-mod history;
+pub(super) mod history;
 mod labs;
 pub(super) mod look;
 mod privacy;
