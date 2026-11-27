@@ -32,10 +32,10 @@ All tool keys are in [Snip and annotate](../snip-and-annotate.md).
 ## More than a screenshot
 
 <p align="center">
-  <img src="../images/snip-more.png" alt="The More menu: Long capture, Add to steps, Pin to screen, Share, Colour picker, Screen ruler." width="800">
+  <img src="../images/snip-more.png" alt="The More menu: Add to steps, Pin to screen, Share, Colour picker, Screen ruler." width="800">
 </p>
 
-- **Long capture** for a page taller than the screen. Pick the area, then **More > Long capture** and scroll the page yourself; OpenCircle stitches it into one tall image and shows the page so far beside the area. **Copy** or **Save** finishes it.
+- **Long capture** for a page taller than the screen. Pick the area, then press the **Long capture** button (just before More) and scroll the page yourself; OpenCircle stitches it into one tall image and shows the page so far beside the area. **Copy** or **Save** finishes it.
 
 <p align="center">
   <img src="../images/long-capture.png" alt="Long capture in progress: the area is on the left, the page so far is shown as a narrow picture at the right with its height." width="800">

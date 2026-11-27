@@ -286,6 +286,15 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
     rows
 }
 
+/// Why the Long capture button is dimmed (its tooltip says it), `None` while it is live.
+fn long_capture_why(e: &Annotator) -> Option<S> {
+    match (long_capture_on(e), e.capturing) {
+        (true, _) => None,
+        (false, true) => Some(S::sn_why_capturing),
+        (false, false) => Some(S::sn_why_no_long),
+    }
+}
+
 /// The Long capture button is live: this desktop has it and none is running.
 fn long_capture_on(e: &Annotator) -> bool {
     e.scroll && !e.capturing
@@ -441,11 +450,7 @@ fn build(
 
     // Segment 2: Long capture, More
     let long = long_capture_on(e);
-    let long_why = match (long, e.capturing) {
-        (true, _) => Why::Icon,
-        (false, true) => Why::Keys(t!(sn_why_capturing)),
-        (false, false) => Why::Keys(t!(sn_why_no_long)),
-    };
+    let long_why = long_capture_why(e).map_or(Why::Icon, |why| Why::Cut(tr(why)));
     let long_btn = hinted(
         icon_button::tool_icon(
             SCROLL,
@@ -1532,6 +1537,25 @@ mod tests {
         e.scroll = true;
         e.capturing = true;
         assert!(at(&e, &Message::Scroll).is_none(), "dimmed while capturing");
+    }
+
+    /// R-09 (F15): the dimmed Long capture button says why in its tooltip.
+    #[test]
+    fn r09_dimmed_long_capture_says_why() {
+        let mut e = editor();
+        e.scroll = true;
+        assert_eq!(long_capture_why(&e), None);
+        e.scroll = false;
+        assert_eq!(
+            tr(long_capture_why(&e).unwrap()),
+            "Not available on this desktop"
+        );
+        e.scroll = true;
+        e.capturing = true;
+        assert_eq!(
+            tr(long_capture_why(&e).unwrap()),
+            "Finish the long capture first"
+        );
     }
 
     /// R-09: the More panel centres on More (second item of its segment): right of Long capture

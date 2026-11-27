@@ -13,7 +13,7 @@ the top of its Settings page. Third-party material in them is credited in
 | | |
 |---|---|
 | ![Circle a picture: it snaps to a box, with the bar below.](../images/circle-to-search.png)<br>Circle, then choose ([guide](../features/circle-to-search.md)) | ![Select text: words highlight under the pointer.](../images/select-text.png)<br>Select text ([guide](../features/select-text.md)) |
-| ![Snip: the grouped toolbar beside a picked area.](../images/snip-toolbar.png)<br>Snip and annotate ([guide](../features/snip.md)) | ![Snip's More menu.](../images/snip-more.png)<br>More: long capture, steps, pin, share, picker, ruler |
+| ![Snip: the grouped toolbar beside a picked area.](../images/snip-toolbar.png)<br>Snip and annotate ([guide](../features/snip.md)) | ![Snip's More menu.](../images/snip-more.png)<br>More: steps, pin, share, picker, ruler |
 | ![Long capture in progress.](../images/long-capture.png)<br>Long capture | ![The Steps strip.](../images/steps-strip.png)<br>Steps strip |
 | ![A page before and after translation.](../images/translate-before-after.png)<br>Translate in place ([guide](../features/translate.md)) | ![Settings, Appearance.](../images/settings-appearance.png)<br>Settings > Appearance: 12 themes, Sapphire Glow |
 
