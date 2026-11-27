@@ -15,6 +15,10 @@ const DEFAULT_MONITOR: &str = "@DEFAULT_MONITOR@";
 const DEFAULT_SOURCE: &str = "@DEFAULT_SOURCE@";
 /// Bytes per stereo f32 frame (2 channels * 4 bytes).
 const FRAME_BYTES: usize = CHANNELS as usize * 4;
+/// Target capture packet cadence in milliseconds (~20 ms keeps meter & mixer responsive).
+const FRAGMENT_MS: u32 = 20;
+/// Bytes per fragment: 48 kHz stereo f32 = 384 B/ms -> 7,680 B for 20 ms.
+const FRAGMENT_BYTES: u32 = (RATE / 1000) * (FRAME_BYTES as u32) * FRAGMENT_MS;
 /// Timeout once a packet header has started arriving so we never tear a message.
 const BODY_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -92,6 +96,17 @@ fn map_pulse_sources(
         });
     }
 
+    if want_monitor {
+        // Only the default sink's monitor can be opened today (`PulseInput::open(Kind::System)`
+        // connects to `@DEFAULT_MONITOR@`). Upgrade path: give `Kind::System` an `Option<String>`
+        // source id, pass it through `PulseInput::open`, and remove this filter.
+        if let Some(ref def) = default_id {
+            raw.retain(|d| &d.id == def);
+        } else {
+            raw.clear();
+        }
+    }
+
     (raw, default_id)
 }
 
@@ -114,17 +129,7 @@ impl PulseInput {
             CString::new(source_str).map_err(|_| Error::NotFound(source_str.to_string()))?;
 
         let (mut sock, version) = connect()?;
-        let params = protocol::RecordStreamParams {
-            source_name: Some(source),
-            sample_spec: protocol::SampleSpec {
-                format: protocol::SampleFormat::Float32Le,
-                channels: CHANNELS as u8,
-                sample_rate: RATE,
-            },
-            channel_map: protocol::ChannelMap::stereo(),
-            cvolume: Some(protocol::ChannelVolume::norm(CHANNELS as u8)),
-            ..Default::default()
-        };
+        let params = record_stream_params(source);
         protocol::write_command_message(
             sock.get_mut(),
             2,
@@ -209,6 +214,31 @@ impl PulseInput {
             let at = now.checked_sub(frames_duration(frames)).unwrap_or(now);
             return Ok(Some(Packet { samples, at }));
         }
+    }
+}
+
+/// Builds the PulseAudio record-stream request with ~20 ms fragments and
+/// `adjust_latency` enabled so meters and mixers receive timely packets rather
+/// than the server's ~2 s default.
+fn record_stream_params(source: CString) -> protocol::RecordStreamParams {
+    protocol::RecordStreamParams {
+        source_name: Some(source),
+        sample_spec: protocol::SampleSpec {
+            format: protocol::SampleFormat::Float32Le,
+            channels: CHANNELS as u8,
+            sample_rate: RATE,
+        },
+        channel_map: protocol::ChannelMap::stereo(),
+        buffer_attr: protocol::stream::BufferAttr {
+            fragment_size: FRAGMENT_BYTES,
+            ..Default::default()
+        },
+        flags: protocol::stream::StreamFlags {
+            adjust_latency: true,
+            ..Default::default()
+        },
+        cvolume: Some(protocol::ChannelVolume::norm(CHANNELS as u8)),
+        ..Default::default()
     }
 }
 
@@ -306,12 +336,35 @@ mod tests {
 
         let (raw_sys, def_sys) = map_pulse_sources(&server, &sources, &Kind::System);
         let sys = map_devices(raw_sys, def_sys.as_deref());
-        assert_eq!(sys.len(), 2);
+        // Only the openable default monitor is exposed for Kind::System today.
+        assert_eq!(sys.len(), 1);
         assert_eq!(sys[0].id, "alsa_output.hdmi.monitor");
         assert_eq!(sys[0].name, "alsa_output.hdmi.monitor");
         assert!(sys[0].is_default);
-        assert_eq!(sys[1].id, "alsa_output.analog.monitor");
-        assert_eq!(sys[1].name, "Monitor of Analog");
-        assert!(!sys[1].is_default);
+    }
+
+    #[test]
+    fn record_stream_params_requests_20ms_fragments_with_adjust_latency() {
+        let params = record_stream_params(CString::new(DEFAULT_MONITOR).unwrap());
+        let frag = params.buffer_attr.fragment_size;
+        assert_ne!(
+            frag,
+            u32::MAX,
+            "fragment_size must not be left at server default (~2 s)"
+        );
+        assert_eq!(
+            frag as usize % FRAME_BYTES,
+            0,
+            "fragment_size must align to stereo f32 frames"
+        );
+        let bytes_per_ms = RATE * FRAME_BYTES as u32 / 1000;
+        assert!(
+            (bytes_per_ms * 10..=bytes_per_ms * 40).contains(&frag),
+            "fragment_size={frag} B outside 10..=40 ms ({}..={} B)",
+            bytes_per_ms * 10,
+            bytes_per_ms * 40
+        );
+        assert_eq!(frag, 7_680);
+        assert!(params.flags.adjust_latency);
     }
 }

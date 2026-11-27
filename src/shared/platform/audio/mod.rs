@@ -6,6 +6,7 @@
 //! stamped with a monotonic capture `Instant`. Devices are opened on demand and
 //! released when dropped so idle cost stays zero.
 
+mod channel;
 #[cfg(target_os = "linux")]
 mod pulse;
 pub mod resample;
@@ -59,8 +60,15 @@ pub trait DeviceBackend {
     fn list(&self, kind: &Kind) -> Result<(Vec<RawDevice>, Option<String>), Error>;
 }
 
-/// Lists available microphones (`Kind::Mic(_)`) or system sound endpoints (`Kind::System`),
-/// with the OS default device first and deterministic ordering thereafter.
+/// Lists available microphones (`Kind::Mic(_)`) or the openable default system
+/// sound endpoint (`Kind::System`), with the OS default device first and
+/// deterministic ordering thereafter.
+///
+/// For [`Kind::System`], only the OS default output is returned today because
+/// [`Input::open`] opens only the default loopback/monitor. Upgrade path:
+/// change `Kind::System` to `Kind::System(Option<String>)`, resolve the chosen
+/// output id in `wasapi::WasapiInput::open` and `pulse::PulseInput::open`, and
+/// remove the default-only filter here and in the backends.
 #[allow(dead_code)] // called by Settings / recording device picker (R-04)
 pub fn devices(kind: Kind) -> Result<Vec<Device>, Error> {
     struct OsBackend;
@@ -76,10 +84,20 @@ pub fn devices(kind: Kind) -> Result<Vec<Device>, Error> {
 }
 
 /// Lists and normalises devices from `backend`.
+///
+/// Restricts [`Kind::System`] to the single openable default output until
+/// per-output loopback selection (`Kind::System(Option<String>)`) is added.
 #[allow(dead_code)] // used by `devices` and unit tests
 pub fn devices_from(backend: &dyn DeviceBackend, kind: Kind) -> Result<Vec<Device>, Error> {
     let (raw, default_id) = backend.list(&kind)?;
-    Ok(map_devices(raw, default_id.as_deref()))
+    let mut devices = map_devices(raw, default_id.as_deref());
+    if matches!(kind, Kind::System) {
+        // Only the OS default system output can be opened by `Input::open(Kind::System)`.
+        // Upgrade path: add `Option<String>` to `Kind::System` and resolve by id in
+        // `wasapi::WasapiInput::open` and `pulse::PulseInput::open`, then remove this filter.
+        devices.retain(|d| d.is_default);
+    }
+    Ok(devices)
 }
 
 /// Normalises a backend's raw device list:
@@ -304,10 +322,43 @@ mod tests {
         let sys_a = devices_from(&backend_a, Kind::System).unwrap();
         let sys_b = devices_from(&backend_b, Kind::System).unwrap();
         assert_eq!(sys_a, sys_b);
-        assert_eq!(sys_a[0].id, "out-speakers");
-        assert!(sys_a[0].is_default);
-        assert_eq!(sys_a[1].id, "out-hdmi");
-        assert!(!sys_a[1].is_default);
+        assert_eq!(
+            sys_a,
+            vec![Device {
+                id: "out-speakers".into(),
+                name: "Speakers".into(),
+                is_default: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn devices_system_returns_only_openable_default_output() {
+        let with_default = FakeBackend {
+            mics: Vec::new(),
+            default_mic: None,
+            system: vec![
+                raw("out-hdmi", "HDMI Display", false),
+                raw("out-speakers", "Speakers", false),
+                raw("out-bt", "Bluetooth", false),
+            ],
+            default_system: Some("out-speakers".into()),
+            fail: None,
+        };
+        let sys = devices_from(&with_default, Kind::System).unwrap();
+        assert_eq!(sys.len(), 1);
+        assert_eq!(sys[0].id, "out-speakers");
+        assert!(sys[0].is_default);
+
+        // Without a default output, nothing can be opened via Kind::System.
+        let no_default = FakeBackend {
+            mics: Vec::new(),
+            default_mic: None,
+            system: vec![raw("out-hdmi", "HDMI Display", false)],
+            default_system: None,
+            fail: None,
+        };
+        assert!(devices_from(&no_default, Kind::System).unwrap().is_empty());
     }
 
     #[test]

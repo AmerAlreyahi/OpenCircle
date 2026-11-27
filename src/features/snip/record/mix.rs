@@ -57,16 +57,10 @@ pub fn peak_level(samples: &[f32]) -> f32 {
         .fold(0.0f32, f32::max)
 }
 
-/// Sums `mic` and `system` sample-for-sample into `out`, clamping each sample to
-/// `-1.0..=1.0`. If one slice is shorter, its missing tail is treated as `0.0`.
-pub fn mix_buffers(mic: &[f32], system: &[f32], out: &mut Vec<f32>) {
-    let len = mic.len().max(system.len());
-    out.reserve(len);
-    for i in 0..len {
-        let m = mic.get(i).copied().map(clamp_sample).unwrap_or(0.0);
-        let s = system.get(i).copied().map(clamp_sample).unwrap_or(0.0);
-        out.push((m + s).clamp(-1.0, 1.0));
-    }
+/// Sums two samples and clamps the result to `-1.0..=1.0` (non-finite -> `0.0`).
+#[inline]
+fn sum_and_clamp(a: f32, b: f32) -> f32 {
+    (clamp_sample(a) + clamp_sample(b)).clamp(-1.0, 1.0)
 }
 
 struct Track {
@@ -91,17 +85,35 @@ impl Track {
     }
 
     fn push(&mut self, samples: &[f32], at_frame: u64, gap_tol_frames: u64) {
-        let gap = at_frame.saturating_sub(self.next_frame);
-        if gap > 0 && gap >= gap_tol_frames {
-            let zeros = gap as usize * CHANNELS as usize;
-            self.buf.extend(std::iter::repeat_n(0.0f32, zeros));
-            self.next_frame += gap;
-        }
         let usable = (samples.len() / CHANNELS as usize) * CHANNELS as usize;
-        let slice = &samples[..usable];
-        let frames = (usable / CHANNELS as usize) as u64;
+        let total_frames = (usable / CHANNELS as usize) as u64;
+        if total_frames == 0 {
+            return;
+        }
+
+        let slice = if at_frame < self.next_frame {
+            // Trim any overlap before `next_frame` (e.g. a late packet arriving
+            // after `pad_to` or an overlapping timestamp) so track length always
+            // matches elapsed timeline frames.
+            let overlap = self.next_frame - at_frame;
+            if overlap >= total_frames {
+                return;
+            }
+            let skip = overlap as usize * CHANNELS as usize;
+            &samples[skip..usable]
+        } else {
+            let gap = at_frame - self.next_frame;
+            if gap > 0 && gap >= gap_tol_frames {
+                let zeros = gap as usize * CHANNELS as usize;
+                self.buf.extend(std::iter::repeat_n(0.0f32, zeros));
+                self.next_frame += gap;
+            }
+            &samples[..usable]
+        };
+
+        let frames = (slice.len() / CHANNELS as usize) as u64;
         if self.muted {
-            self.buf.extend(std::iter::repeat_n(0.0f32, usable));
+            self.buf.extend(std::iter::repeat_n(0.0f32, slice.len()));
             self.level = 0.0;
         } else {
             self.buf.extend(slice.iter().map(|&s| clamp_sample(s)));
@@ -228,34 +240,7 @@ impl Mixer {
             (false, true) => self.system.frames_buffered(),
             (false, false) => 0,
         };
-        if frames == 0 {
-            return 0;
-        }
-        let samples = frames * CHANNELS as usize;
-        let start = out.len();
-        out.reserve(samples);
-        match (self.has_mic, self.has_system) {
-            (true, true) => {
-                for _ in 0..samples {
-                    let m = self.mic.buf.pop_front().unwrap_or(0.0);
-                    let s = self.system.buf.pop_front().unwrap_or(0.0);
-                    out.push((m + s).clamp(-1.0, 1.0));
-                }
-            }
-            (true, false) => {
-                for _ in 0..samples {
-                    out.push(self.mic.buf.pop_front().unwrap_or(0.0));
-                }
-            }
-            (false, true) => {
-                for _ in 0..samples {
-                    out.push(self.system.buf.pop_front().unwrap_or(0.0));
-                }
-            }
-            (false, false) => {}
-        }
-        self.record_drained(&out[start..], frames);
-        frames
+        self.drain_frames(frames, out)
     }
 
     /// Pads any enabled track that has fallen behind `now` (at least
@@ -287,6 +272,10 @@ impl Mixer {
             (false, true) => self.system.frames_buffered(),
             (false, false) => 0,
         };
+        self.drain_frames(frames, out)
+    }
+
+    fn drain_frames(&mut self, frames: usize, out: &mut Vec<f32>) -> usize {
         if frames == 0 {
             return 0;
         }
@@ -304,7 +293,7 @@ impl Mixer {
             } else {
                 0.0
             };
-            out.push((m + s).clamp(-1.0, 1.0));
+            out.push(sum_and_clamp(m, s));
         }
         self.record_drained(&out[start..], frames);
         frames
@@ -364,19 +353,22 @@ mod tests {
     }
 
     #[test]
-    fn mix_buffers_sums_and_clamps_both_ends() {
+    fn mixer_flush_sums_clamps_sanitises_and_pads_shorter_track() {
+        let t0 = Instant::now();
+        let mut mixer = Mixer::stereo_48k(true, true);
+        mixer.start(t0);
+        mixer.push_mic(&[0.3, 0.8, -0.7, f32::NAN], t0);
+        mixer.push_system(&[0.2, 0.7, -0.6, 0.25, -0.5, 0.5], t0);
+
         let mut out = Vec::new();
-        mix_buffers(
-            &[0.3, 0.8, -0.7, f32::NAN],
-            &[0.2, 0.7, -0.6, 0.25, -0.5, 0.5],
-            &mut out,
-        );
+        let frames = mixer.flush(&mut out);
+        assert_eq!(frames, 3);
         assert_eq!(out.len(), 6);
         assert!((out[0] - 0.5).abs() < 1e-6);
         assert_eq!(out[1], 1.0, "positive sum clamped");
         assert_eq!(out[2], -1.0, "negative sum clamped");
         assert!((out[3] - 0.25).abs() < 1e-6, "NaN treated as 0");
-        assert!((out[4] - -0.5).abs() < 1e-6, "tail from longer buffer kept");
+        assert!((out[4] - -0.5).abs() < 1e-6, "tail from longer track kept");
         assert!((out[5] - 0.5).abs() < 1e-6);
     }
 
@@ -510,6 +502,72 @@ mod tests {
         let drained = mixer.drain_up_to(t0 + Duration::from_millis(200), &mut out);
         assert_eq!(drained, 9_600);
         assert!(out.iter().all(|&s| (s - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn late_and_overlapping_packets_are_trimmed_to_elapsed_time() {
+        let t0 = Instant::now();
+        let mut mixer = Mixer::stereo_48k(true, true);
+        mixer.start(t0);
+
+        // 200 ms of mic audio; system loopback is silent and gets padded to 200 ms.
+        let mic_200 = vec![0.5f32; 9_600 * 2];
+        mixer.push_mic(&mic_200, t0);
+        let mut out = Vec::new();
+        assert_eq!(
+            mixer.drain_up_to(t0 + Duration::from_millis(200), &mut out),
+            9_600
+        );
+
+        // 1) Completely late system packet covering [50 ms, 100 ms) arrives after pad_to(200 ms):
+        // must be dropped completely so no phantom time is appended.
+        let stale = vec![0.9f32; 2_400 * 2];
+        mixer.push_system(&stale, t0 + Duration::from_millis(50));
+        out.clear();
+        assert_eq!(
+            mixer.flush(&mut out),
+            0,
+            "fully late packet must be dropped"
+        );
+        assert_eq!(mixer.mixed_frames(), 9_600);
+
+        // 2) Partially overlapping system packet covering [180 ms, 230 ms) (20 ms stale + 30 ms new):
+        // first 20 ms (960 frames of 0.9) must be trimmed; only the 30 ms tail (1,440 frames of 0.25)
+        // joins the 30 ms of mic audio at [200 ms, 230 ms).
+        let mut partial = vec![0.9f32; 960 * 2];
+        partial.extend(std::iter::repeat_n(0.25f32, 1_440 * 2));
+        mixer.push_system(&partial, t0 + Duration::from_millis(180));
+        mixer.push_mic(&vec![0.1f32; 1_440 * 2], t0 + Duration::from_millis(200));
+
+        out.clear();
+        let drained = mixer.drain(&mut out);
+        assert_eq!(drained, 1_440, "only non-overlapping 30 ms tail kept");
+        assert_eq!(
+            mixer.mixed_frames(),
+            frames_for_duration(Duration::from_millis(230), RATE) as u64,
+            "total mixed length must equal elapsed time"
+        );
+        assert!(
+            out.iter().all(|&s| (s - 0.35).abs() < 1e-6),
+            "no stale overlapped 0.9 samples may leak into output"
+        );
+
+        // 3) Direct overlapping push on a single track trims the overlap without duplication.
+        let mut single = Mixer::stereo_48k(true, false);
+        single.start(t0);
+        single.push_mic(&vec![0.4f32; 960 * 2], t0); // [0, 20 ms)
+        let mut overlap_pkt = vec![0.9f32; 480 * 2]; // [10 ms, 20 ms) overlap
+        overlap_pkt.extend(std::iter::repeat_n(-0.3f32, 480 * 2)); // [20 ms, 30 ms) new
+        single.push_mic(&overlap_pkt, t0 + Duration::from_millis(10));
+
+        out.clear();
+        let frames = single.drain(&mut out);
+        assert_eq!(
+            frames, 1_440,
+            "30 ms elapsed -> 1,440 frames, no duplicates"
+        );
+        assert!(out[..960 * 2].iter().all(|&s| (s - 0.4).abs() < 1e-6));
+        assert!(out[960 * 2..].iter().all(|&s| (s - -0.3).abs() < 1e-6));
     }
 
     #[test]

@@ -64,20 +64,6 @@ pub fn frame_to_stereo(frame: &[f32]) -> [f32; 2] {
     }
 }
 
-/// Downmixes a slice of interleaved `channels`-channel samples into stereo `[L, R]`
-/// appended to `out`. Any trailing incomplete frame is ignored.
-#[allow(dead_code)] // public helper tested and available for callers
-pub fn downmix_to_stereo(interleaved: &[f32], channels: u16, out: &mut Vec<f32>) {
-    let ch = channels.max(1) as usize;
-    let frames = interleaved.len() / ch;
-    out.reserve(frames * 2);
-    for frame in interleaved.chunks_exact(ch) {
-        let [l, r] = frame_to_stereo(frame);
-        out.push(l);
-        out.push(r);
-    }
-}
-
 /// Streaming linear resampler + channel downmixer to interleaved stereo `f32`.
 ///
 /// Uses reduced integer rational phase (`in_step / out_step`) so long streams
@@ -304,8 +290,10 @@ mod tests {
 
     #[test]
     fn downmix_mono_duplicates_to_both_channels() {
+        let mut r = Resampler::new(RATE, 1, RATE);
         let mut out = Vec::new();
-        downmix_to_stereo(&[0.25, -0.75, 1.5], 1, &mut out);
+        r.push([0.25, -0.75, 1.5], &mut out);
+        r.flush(&mut out);
         assert_eq!(out, vec![0.25, 0.25, -0.75, -0.75, 1.0, 1.0]);
     }
 
@@ -335,16 +323,17 @@ mod tests {
         let clipped = frame_to_stereo(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
         assert_eq!(clipped, [1.0, 1.0]);
 
-        // Multi-frame 5.1 -> stereo slice helper.
+        // Multi-frame 5.1 -> stereo through the production Resampler path.
+        let mut r = Resampler::new(RATE, 6, RATE);
         let mut stereo = Vec::new();
-        downmix_to_stereo(
-            &[
+        r.push(
+            [
                 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, // frame 0: FL only
                 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, // frame 1: FR only
             ],
-            6,
             &mut stereo,
         );
+        r.flush(&mut stereo);
         assert_eq!(stereo, vec![0.5, 0.0, 0.0, 0.5]);
     }
 

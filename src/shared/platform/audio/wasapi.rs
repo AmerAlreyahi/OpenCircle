@@ -4,17 +4,13 @@
 //! to 48 kHz stereo `f32` PCM via [`super::resample::Resampler`].
 
 use std::str::FromStr;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
+use super::channel::{AudioReceiver, CALLBACK_CHANNEL_CAP, audio_channel};
 use super::resample::Resampler;
-use super::{CHANNELS, Error, Kind, Packet, RATE, RawDevice, frames_duration};
-
-/// Bounded channel between the real-time audio callback and the reader thread.
-/// At ~10 ms per WASAPI callback, 64 packets ≈ 640 ms of cushion without unbounded RAM.
-const CHANNEL_CAP: usize = 64;
+use super::{Error, Kind, Packet, RATE, RawDevice};
 
 #[allow(dead_code)] // called by `audio::devices`
 pub(super) fn list_devices(kind: &Kind) -> Result<(Vec<RawDevice>, Option<String>), Error> {
@@ -27,12 +23,17 @@ pub(super) fn list_devices(kind: &Kind) -> Result<(Vec<RawDevice>, Option<String
                 .map(|id| id.to_string()),
             host.input_devices().map_err(fail)?.collect(),
         ),
-        Kind::System => (
-            host.default_output_device()
+        Kind::System => {
+            // Only the OS default output can be opened today (`Input::open(Kind::System)`).
+            // Upgrade path: change `Kind::System` to `Kind::System(Option<String>)`,
+            // enumerate `host.output_devices()` here, and resolve by id in `WasapiInput::open`.
+            let dev = host.default_output_device();
+            let id = dev
+                .as_ref()
                 .and_then(|d| d.id().ok())
-                .map(|id| id.to_string()),
-            host.output_devices().map_err(fail)?.collect(),
-        ),
+                .map(|id| id.to_string());
+            (id, dev.into_iter().collect())
+        }
     };
 
     let mut raw = Vec::with_capacity(iter.len());
@@ -56,7 +57,7 @@ pub(super) fn list_devices(kind: &Kind) -> Result<(Vec<RawDevice>, Option<String
 
 pub(super) struct WasapiInput {
     _stream: cpal::Stream,
-    rx: Receiver<Result<Packet, Error>>,
+    rx: AudioReceiver,
 }
 
 impl WasapiInput {
@@ -93,13 +94,13 @@ impl WasapiInput {
         };
 
         let mut resampler = Resampler::new(config.sample_rate(), config.channels(), RATE);
-        let (tx, rx) = mpsc::sync_channel::<Result<Packet, Error>>(CHANNEL_CAP);
-        let err_tx = tx.clone();
+        let (mut data_tx, rx) = audio_channel(CALLBACK_CHANNEL_CAP);
+        let err_tx = data_tx.error_handle();
         // A dropped buffer now and then (xrun) is non-fatal: don't fail the stream.
         let error = move |e: cpal::Error| {
             if e.kind() != cpal::ErrorKind::Xrun {
                 crate::log!("[opencircle] audio capture error: {e}");
-                let _ = err_tx.try_send(Err(Error::Unavailable(e.to_string())));
+                err_tx.set_error(e.to_string());
             }
         };
 
@@ -107,7 +108,7 @@ impl WasapiInput {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 config.config(),
                 move |d: &[f32], _: &cpal::InputCallbackInfo| {
-                    send_resampled(&mut resampler, d.iter().copied(), &tx);
+                    data_tx.push_resampled(&mut resampler, d.iter().copied(), Instant::now());
                 },
                 error,
                 None,
@@ -115,10 +116,10 @@ impl WasapiInput {
             cpal::SampleFormat::I16 => device.build_input_stream(
                 config.config(),
                 move |d: &[i16], _: &cpal::InputCallbackInfo| {
-                    send_resampled(
+                    data_tx.push_resampled(
                         &mut resampler,
                         d.iter().map(|&s| f32::from(s) / 32768.0),
-                        &tx,
+                        Instant::now(),
                     );
                 },
                 error,
@@ -127,10 +128,10 @@ impl WasapiInput {
             cpal::SampleFormat::U16 => device.build_input_stream(
                 config.config(),
                 move |d: &[u16], _: &cpal::InputCallbackInfo| {
-                    send_resampled(
+                    data_tx.push_resampled(
                         &mut resampler,
                         d.iter().map(|&s| (f32::from(s) - 32768.0) / 32768.0),
-                        &tx,
+                        Instant::now(),
                     );
                 },
                 error,
@@ -139,10 +140,10 @@ impl WasapiInput {
             cpal::SampleFormat::I32 => device.build_input_stream(
                 config.config(),
                 move |d: &[i32], _: &cpal::InputCallbackInfo| {
-                    send_resampled(
+                    data_tx.push_resampled(
                         &mut resampler,
                         d.iter().map(|&s| (f64::from(s) / 2_147_483_648.0) as f32),
-                        &tx,
+                        Instant::now(),
                     );
                 },
                 error,
@@ -151,7 +152,11 @@ impl WasapiInput {
             cpal::SampleFormat::F64 => device.build_input_stream(
                 config.config(),
                 move |d: &[f64], _: &cpal::InputCallbackInfo| {
-                    send_resampled(&mut resampler, d.iter().map(|&s| s as f32), &tx);
+                    data_tx.push_resampled(
+                        &mut resampler,
+                        d.iter().map(|&s| s as f32),
+                        Instant::now(),
+                    );
                 },
                 error,
                 None,
@@ -172,31 +177,8 @@ impl WasapiInput {
     }
 
     pub(super) fn read(&mut self, wait: Duration) -> Result<Option<Packet>, Error> {
-        match self.rx.recv_timeout(wait) {
-            Ok(Ok(pkt)) => Ok(Some(pkt)),
-            Ok(Err(e)) => Err(e),
-            Err(RecvTimeoutError::Timeout) => Ok(None),
-            Err(RecvTimeoutError::Disconnected) => {
-                Err(Error::Unavailable("audio stream closed".into()))
-            }
-        }
+        self.rx.read(wait)
     }
-}
-
-fn send_resampled(
-    resampler: &mut Resampler,
-    samples: impl IntoIterator<Item = f32>,
-    tx: &SyncSender<Result<Packet, Error>>,
-) {
-    let mut out = Vec::new();
-    resampler.push(samples, &mut out);
-    if out.is_empty() {
-        return;
-    }
-    let frames = out.len() / CHANNELS as usize;
-    let now = Instant::now();
-    let at = now.checked_sub(frames_duration(frames)).unwrap_or(now);
-    let _ = tx.try_send(Ok(Packet { samples: out, at }));
 }
 
 fn find_input_device(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
