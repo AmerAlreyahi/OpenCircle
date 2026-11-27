@@ -1868,3 +1868,15 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   (3) Tips (R-17) after widgets style E merges (tips use style E). R-08..R-14 after the design build, one at a time.
   (4) The OpenRouter sign-in connection card: design round only (sdlc:designer, PNGs), nothing built before the owner's OK.
   (5) G-01 GPU renderer still waits for the owner's lab-gpu2 result. No tag / draft / publish of v0.6.0.
+- R-01 recording research done (2026-11-27, docs/internal/reports-060/r01-recording.md). Pipelines (lead default, owner may reverse):
+  Windows = DXGI duplication (area/screen) or Windows.Graphics.Capture (window) + WASAPI (cpal) -> Media Foundation (H.264 on the GPU,
+  software fallback) + AAC in MP4, audio only .m4a; Linux = XShm/XComposite or the ScreenCast portal + PipeWire + PulseAudio protocol ->
+  GStreamer (dlopen, as screencast.rs): H.264 VA-API/NVENC/x264 else VP8, Opus; audio only .ogg. No new crate; rav1e stays for the
+  walkthrough export only (too slow live); no ffmpeg helper, no bundled openh264.
+  WAITING ON THE OWNER (they change the approved R1/S2 design): Q1 whole-screen recording on a one-monitor Linux PC can't keep our bar
+  out of the video -> recommended: the bar steps aside into the tray's recording state + the keys (Windows keeps the bar). Q2 Wayland
+  has no window list -> recommended: window recording through the desktop's own chooser, one extra hint line "W: a window".
+  Lead defaults (owner may reverse): Q3 R-06 blur zones fixed on the area everywhere; "follow this window" only on Windows/X11.
+  Q4 an unsaved recording goes to Recent captures when S2 slides away (if Recent is on), else deleted; crash leftovers offered once.
+  Q5 Linux without an H.264 encoder records WebM only (Format row hidden); Windows MP4 only. R-03 audio may start; R-04/R-05 wait for
+  lab tests L1/L3/L4/L6 + Q1/Q2; R-06 waits for Q3 + L15.

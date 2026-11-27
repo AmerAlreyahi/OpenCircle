@@ -260,7 +260,7 @@
         {
           "id": "R-01",
           "title": "Recording research: capability table Windows / X11 / Wayland (capture, mic, system audio, hardware encoder)",
-          "status": "todo"
+          "status": "done"
         },
         {
           "id": "R-02",
