@@ -685,6 +685,8 @@ pub struct State {
     pub(super) preview_max: Option<&'static str>,
     /// Whether playback is paused inside the maximised preview panel.
     pub(super) preview_paused: bool,
+    /// When the paused preview stopped (its clock moves on by that much on resume).
+    pause_since: Option<Instant>,
     /// Windows opens its own screen capture with Print Screen
     /// (`hotkey::windows_snips_print_screen`), read when the window opens and
     /// at each visit of the Snip page.
@@ -861,6 +863,12 @@ pub enum Message {
     ModelsProgress(f32),
     StopModels,
     ModelsUpdated(Result<(), String>),
+    /// Add a language pair: open (`true`) or close the list of the pairs not installed, download
+    /// one (its `mt::PAIRS` index), its progress, and how it ended.
+    AddPairs(bool),
+    AddPair(usize),
+    PairProgress(f32),
+    PairAdded(Result<(), String>),
     /// The Glossary row and its editor (`pages::glossaries`).
     Glossaries(super::pages::glossaries::Msg),
     /// Open Translate's glossary editor (the pill's New / Edit glossaries).
@@ -1023,6 +1031,9 @@ pub enum Outcome {
     /// thread (`mt::update`), answering `Message::ModelsProgress`, then
     /// `Message::ModelsUpdated`.
     UpdateModels,
+    /// Download this pair on a worker thread (`mt::add` of `mt::PAIRS[i]`), answering `Message::PairProgress`, then
+    /// `Message::PairAdded`.
+    AddPair(usize),
     /// Run this file dialog on a worker thread (`Job::run`) and answer
     /// `Message::Glossaries` with its message.
     Glossaries(super::pages::glossaries::Job),
@@ -1297,6 +1308,7 @@ impl State {
             failed: Vec::new(),
             preview_max: None,
             preview_paused: false,
+            pause_since: None,
             print_screen_taken: crate::shared::platform::hotkey::windows_snips_print_screen(),
             kept: None,
             clearing_all: false,
@@ -1811,6 +1823,10 @@ pub fn update(state: &mut State, message: Message) -> Outcome {
             | Message::Tick
             | Message::Fetch(_)
             | Message::Fetched(..)
+            | Message::AddPairs(_)
+            | Message::AddPair(_)
+            | Message::PairProgress(_)
+            | Message::PairAdded(_)
             | Message::ModelsOpened
             | Message::ModelQuery(_)
             | Message::LoadModels
@@ -1913,7 +1929,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
             }
             state.section = s;
             state.preview_max = None;
-            state.preview_paused = false;
+            state.pause(false);
             state.play();
             state.recording = None;
             state.shortcut_error = None;
@@ -2126,6 +2142,14 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         // the row stays "updating" until the thread has stopped (`ModelsUpdated`)
         Message::StopModels => crate::features::translate::mt::stop_update(),
         Message::ModelsUpdated(done) => state.models.finished(done),
+        Message::AddPairs(open) => state.models.open_list(open),
+        Message::AddPair(at) => {
+            if state.models.add(at) {
+                return Outcome::AddPair(at);
+            }
+        }
+        Message::PairProgress(share) => state.models.add_progress(share),
+        Message::PairAdded(done) => state.models.added(done),
         Message::Look(t) => {
             // The first time Custom is picked it starts as the look in use.
             let look = &mut state.draft.look;
@@ -2300,12 +2324,10 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::PreviewMax(key) => {
             state.preview_max = key;
             if key.is_none() {
-                state.preview_paused = false;
+                state.pause(false);
             }
         }
-        Message::PreviewPause => {
-            state.preview_paused = !state.preview_paused;
-        }
+        Message::PreviewPause => state.pause(!state.preview_paused),
         Message::Fetch(key) => return start_fetch(state, key),
         Message::Fetched(key, ok) => {
             state.fetching.retain(|k| *k != key);
@@ -2365,7 +2387,7 @@ pub(super) fn apply(state: &mut State, message: Message) -> Outcome {
         Message::Dismiss => {
             (state.resetting, state.clearing_all, state.reporting) = (false, false, false);
             state.preview_max = None;
-            state.preview_paused = false;
+            state.pause(false);
         }
     }
     state.revalidate();
@@ -2635,7 +2657,7 @@ impl State {
     pub fn animating(&self) -> bool {
         self.moved.is_some()
             || self.picked.is_some()
-            || self.played.is_some()
+            || (self.played.is_some() && !self.preview_paused)
             || self.marked_at.is_some()
     }
 
@@ -2659,6 +2681,24 @@ impl State {
         }
         let plays = self.players.iter().any(|(_, p)| p.playing());
         self.played = plays.then(|| Instant::now() - ago);
+    }
+
+    /// Pauses the previews' clock (no frame ticks, no decoding ahead) or lets it go on from the
+    /// same frame: the time paused is taken off the clock.
+    pub(super) fn pause(&mut self, on: bool) {
+        if on == self.preview_paused {
+            return;
+        }
+        self.preview_paused = on;
+        match (on, self.pause_since.take()) {
+            (true, _) => self.pause_since = Some(Instant::now()),
+            (false, Some(since)) => {
+                if let Some(t) = &mut self.played {
+                    *t += since.elapsed();
+                }
+            }
+            (false, None) => {}
+        }
     }
 
     /// A setting changed which clip a preview plays (the AI provider): play

@@ -283,6 +283,8 @@ pub struct Maximised<'a, Message> {
     pub playing: bool,
     pub elapsed_secs: u32,
     pub total_secs: u32,
+    /// How far into the clip, 0..1 (its real length).
+    pub share: f32,
     pub reduced_motion: bool,
     pub rm_label: &'a str,
     pub on_play_pause: Option<Message>,
@@ -488,20 +490,13 @@ pub fn maximised<'a, Message: Clone + 'a>(m: Maximised<'a, Message>) -> Element<
         radius::FULL,
         m.on_play_pause.clone(),
     );
-    let share = if m.total_secs > 0 && m.elapsed_secs > 0 {
-        (m.elapsed_secs as f32 / m.total_secs as f32).clamp(0.0, 1.0)
-    } else if m.playing {
-        0.62
-    } else {
-        0.0
-    };
     let time_label = |secs: u32| {
         iced::widget::text(format_mm_ss(secs))
             .size(12.0)
             .font(super::text::MONO)
             .color(fixed::PREVIEW_WHITE_86)
     };
-    let track = container(progress::bar(share)).width(Fill);
+    let track = container(progress::bar_on(m.share, fixed::PREVIEW_WHITE_28)).width(Fill);
     let mut ctl_items: Vec<Element<'a, Message>> = vec![
         pp_btn.into(),
         time_label(m.elapsed_secs).into(),

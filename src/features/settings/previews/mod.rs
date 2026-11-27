@@ -266,7 +266,8 @@ pub fn maximised(state: &State) -> Option<Element<'_, Message>> {
     let on_disk = player.is_some_and(|(_, p)| p.on_disk());
     let playing = !reduced && !state.preview_paused && player.is_some_and(|(_, p)| p.playing());
     let elapsed_secs = player.map_or(0, |(_, p)| p.elapsed_secs());
-    let total_secs = elapsed_secs.max(5);
+    let total_secs = player.map_or(0, |(_, p)| p.total_secs());
+    let share = player.map_or(0.0, |(_, p)| p.share());
     let on_play_pause = if state.fetching.contains(&h.key) {
         None
     } else if !on_disk {
@@ -283,6 +284,7 @@ pub fn maximised(state: &State) -> Option<Element<'_, Message>> {
         playing,
         elapsed_secs,
         total_secs,
+        share,
         reduced_motion: reduced,
         rm_label: t!(c_rm_still),
         on_play_pause,

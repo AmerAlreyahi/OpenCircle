@@ -265,6 +265,7 @@ pub mod fixed {
     pub const PREVIEW_WHITE_14: Color = Color::from_rgba8(255, 255, 255, 0.14);
     pub const PREVIEW_WHITE_20: Color = Color::from_rgba8(255, 255, 255, 0.20);
     pub const PREVIEW_WHITE_22: Color = Color::from_rgba8(255, 255, 255, 0.22);
+    pub const PREVIEW_WHITE_28: Color = Color::from_rgba8(255, 255, 255, 0.28);
     pub const PREVIEW_WHITE_38: Color = Color::from_rgba8(255, 255, 255, 0.38);
     pub const PREVIEW_WHITE_42: Color = Color::from_rgba8(255, 255, 255, 0.42);
     pub const PREVIEW_WHITE_78: Color = Color::from_rgba8(255, 255, 255, 0.78);

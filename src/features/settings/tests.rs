@@ -5948,8 +5948,8 @@ fn offline_models_pair_states_use_native_names_and_single_cancel() {
         "expected native French pair name: {texts:?}"
     );
     assert!(
-        !texts.iter().any(|t| t.contains("Add a language pair")),
-        "Add a language pair must stay hidden: {texts:?}"
+        texts.iter().any(|t| t == "+ Add a language pair"),
+        "Add a language pair is the design's button: {texts:?}"
     );
 
     // While updating, Cancel appears once per outdated pair (2), never duplicated in the header.
@@ -5971,13 +5971,20 @@ fn offline_models_pair_states_use_native_names_and_single_cancel() {
     );
 }
 
+/// The pair rows in each state (up to date + older with Update / downloading with Cancel / failed
+/// with Try again) are on screen in the golden: rendered tall enough that the open demo block above
+/// does not push the model list below the fold, and the four images differ.
 #[test]
-fn offline_models_updating_and_failed_match_golden() {
+fn offline_models_pair_states_match_golden_and_differ() {
     use crate::shared::kit::testing::golden;
     use crate::shared::kit::themes;
     use pages::translate::{Models, Now, PairRow};
+    use std::collections::HashSet;
+    let tall = Size::new(WINDOW_SIZE.width, 1700.0);
     let mut failed = Vec::new();
+    let mut seen = HashSet::new();
     for (slug, now) in [
+        ("idle", Now::Idle),
         ("updating", Now::Updating(0.42)),
         ("failed", Now::Failed(crate::t!(md_err_offline).into())),
     ] {
@@ -5985,15 +5992,28 @@ fn offline_models_updating_and_failed_match_golden() {
         update(&mut s, Message::Section(Section::Translate));
         let mut m = Models::of(1, 2, 62_000_000, now);
         m.pairs = vec![
-            PairRow::from_codes("en", "ar", 54_000_000, false, 0),
-            PairRow::from_codes("fr", "en", 62_000_000, true, 62_000_000),
+            PairRow::from_codes("en", "ar", 54_000_000, true, 62_000_000),
+            PairRow::from_codes("fr", "en", 62_000_000, false, 0),
         ];
         s.models = m;
         themes::set(&themes::DAYLIGHT);
+        let texts = shot::texts(view(&s));
+        let want = match slug {
+            "idle" => ["Older version", "Update"],
+            "updating" => ["Up to date", "Cancel"],
+            _ => ["Stopped", "Try again"],
+        };
+        for w in want {
+            assert!(texts.iter().any(|t| t == w), "{slug}: {w:?} in {texts:?}");
+        }
+        let img = shot::render(view(&s), tall.width as u32, tall.height as u32);
+        // the model list is in the picture: the three states are three different images
+        assert!(
+            seen.insert(img),
+            "{slug}: the same picture as another state"
+        );
         let name = format!("settings-translate-pairs-{slug}-light");
-        failed.extend(golden::check("screens", &name, WINDOW_SIZE, &[1.0], || {
-            view(&s)
-        }));
+        failed.extend(golden::check("screens", &name, tall, &[1.0], || view(&s)));
     }
     themes::set(&themes::SAPPHIRE);
     assert!(failed.is_empty(), "{failed:#?}");
@@ -6025,8 +6045,8 @@ fn preview_maximised_dims_full_card_and_shows_times() {
     moving_update(&mut s, Message::PreviewMax(Some("look")));
     let texts = shot::texts(view(&s));
     assert!(
-        texts.iter().any(|t| t == "0:00") && texts.iter().any(|t| t == "0:05"),
-        "expected elapsed and total times in maximised player: {texts:?}"
+        texts.iter().any(|t| t == "0:00"),
+        "expected elapsed time in maximised player: {texts:?}"
     );
     let max_img = shot::render(view(&s), w, h);
     let x = (tok::GUTTER + tok::NAV + tok::GUTTER + 40.0) as usize;
@@ -6090,6 +6110,7 @@ fn preview_cover_fills_panel_and_block_for_4_3_and_21_9_clips() {
                 playing: true,
                 elapsed_secs: 3,
                 total_secs: 5,
+                share: 0.6,
                 reduced_motion: false,
                 rm_label: "Reduced motion: still picture",
                 on_play_pause: Some(()),
@@ -6163,4 +6184,140 @@ fn preview_cover_fills_panel_and_block_for_4_3_and_21_9_clips() {
         );
     }
     themes::set(&themes::SAPPHIRE);
+}
+
+/// Pause stops the previews' clock and its frame ticks; Resume goes on from the same frame (the
+/// time paused is not played).
+#[test]
+fn preview_pause_freezes_the_clock_and_resume_continues_from_the_same_frame() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    with_clip(&mut s);
+    (s.moved, s.picked) = (None, None);
+    assert!(s.animating(), "a clip is playing: it ticks");
+    moving_update(&mut s, Message::PreviewMax(Some("look")));
+    let before = s.played.unwrap().elapsed();
+    moving_update(&mut s, Message::PreviewPause);
+    assert!(
+        s.preview_paused && !s.animating(),
+        "no frame ticks while paused"
+    );
+    std::thread::sleep(Duration::from_millis(120));
+    moving_update(&mut s, Message::PreviewPause);
+    assert!(!s.preview_paused && s.animating(), "ticks again");
+    let after = s.played.unwrap().elapsed();
+    assert!(
+        after < before + Duration::from_millis(60),
+        "the 120 ms paused were played: {before:?} -> {after:?}"
+    );
+}
+
+/// "Add a language pair": a list of the offline pairs not installed (`mt::PAIRS` minus the
+/// installed), a choice downloads that pair (progress, Cancel, Try again), one at a time.
+#[test]
+fn add_a_language_pair_lists_the_missing_pairs_and_downloads_the_choice() {
+    use crate::features::translate::mt;
+    use pages::translate::{Models, Now, PairRow, candidates};
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Translate));
+    s.models = Models::of(0, 1, 0, Now::Idle);
+    s.models.pairs = vec![PairRow::from_codes("en", "ar", 54_000_000, false, 0)];
+    let has = |s: &State, w: &str| shot::texts(view(s)).iter().any(|t| t == w);
+    assert!(has(&s, "+ Add a language pair"), "the design's button");
+
+    let rest = candidates(&[("en", "ar")]);
+    assert_eq!(rest.len(), mt::PAIRS.len() - 1);
+    assert!(
+        rest.iter()
+            .all(|(i, _)| (mt::PAIRS[*i].source, mt::PAIRS[*i].target) != ("en", "ar"))
+    );
+
+    update(&mut s, Message::AddPairs(true));
+    let list = s.models.choose.clone().expect("the list is open");
+    assert!(!list.is_empty() && has(&s, "Download"));
+    let at = mt::PAIRS
+        .iter()
+        .position(|p| (p.source, p.target) == ("fr", "en"))
+        .unwrap();
+    assert!(list.iter().any(|(i, _)| *i == at));
+    assert_eq!(update(&mut s, Message::AddPair(at)), Outcome::AddPair(at));
+    assert!(s.models.choose.is_none(), "the list closes");
+    update(&mut s, Message::PairProgress(0.4));
+    assert!(has(&s, "Cancel") && has(&s, "Français \u{2192} English"));
+    assert_eq!(
+        update(&mut s, Message::AddPair(at)),
+        Outcome::None,
+        "one at a time"
+    );
+    update(&mut s, Message::PairAdded(Err("offline".into())));
+    assert!(has(&s, "Try again") && has(&s, "Stopped"));
+    assert_eq!(
+        update(&mut s, Message::AddPair(at)),
+        Outcome::AddPair(at),
+        "Try again"
+    );
+    update(&mut s, Message::PairAdded(Ok(())));
+    assert!(s.models.adding.is_none());
+}
+
+/// A demo block the user folded is not played or fetched, on this page or when it is visited again.
+#[test]
+fn a_folded_demo_block_is_not_played_or_fetched() {
+    let (mut s, _) = state(None);
+    update(&mut s, Message::Section(Section::Look));
+    update(&mut s, Message::Preview("look", false));
+    assert!(s.players.iter().all(|(k, _)| *k != "look"));
+    update(&mut s, Message::Section(Section::Translate));
+    let out = update(&mut s, Message::Section(Section::Look));
+    assert!(
+        !matches!(out, Outcome::Fetch(..)),
+        "nothing is fetched: {out:?}"
+    );
+    assert!(
+        s.players.iter().all(|(k, _)| *k != "look"),
+        "no player for the folded block"
+    );
+}
+
+/// The maximised player's progress track shows at 0 (the design's white 28% on the scrim), also in
+/// a dark theme where the kit's own track colour is as dark as the scrim.
+#[test]
+fn preview_progress_track_is_visible_at_zero() {
+    use crate::shared::kit::hero::{Maximised, maximised};
+    use crate::shared::kit::themes;
+    use iced::widget::image::Handle;
+    use std::sync::atomic::AtomicU32;
+    themes::set(&themes::SAPPHIRE);
+    let (w, h) = (1000u32, 740u32);
+    let frame = Handle::from_rgba(16, 9, [30u8, 40, 70, 255].repeat(16 * 9));
+    let img = shot::render(
+        maximised(Maximised::<()> {
+            eyebrow: "How it works",
+            title: "Circle to Search",
+            desc: "",
+            frame: Some(frame),
+            width: (Arc::new(AtomicU32::new(0)), 1.0, 800.0),
+            playing: false,
+            elapsed_secs: 0,
+            total_secs: 5,
+            share: 0.0,
+            reduced_motion: false,
+            rm_label: "",
+            on_play_pause: Some(()),
+            on_close: (),
+            pager: None,
+            prev_tip: "",
+            next_tip: "",
+        }),
+        w,
+        h,
+    );
+    let lum = |y: u32| {
+        let i = ((y * w + 500) * 4) as usize;
+        img[i] as u32 + img[i + 1] as u32 + img[i + 2] as u32
+    };
+    // the scrim is about 70 (r+g+b), the track about 260
+    let track = (540..642).map(lum).max().unwrap();
+    themes::set(&themes::SAPPHIRE);
+    assert!(track > 200, "no visible track at 0: brightest {track}");
 }

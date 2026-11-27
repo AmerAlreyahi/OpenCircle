@@ -1118,6 +1118,15 @@ fn update_decoders(
     got
 }
 
+/// Downloads `pair` (Settings > Translate's "Add a language pair"): the same
+/// downloader and pins as `Pair::ensure`, stopped by the same Cancel
+/// (`stop_update`, `OcrError::Stopped`, the `.part` kept).
+pub fn add(pair: &'static Pair, progress: impl FnMut(u64, u64)) -> Result<(), OcrError> {
+    let _one = UPDATING.lock().unwrap_or_else(|e| e.into_inner());
+    STOP.store(false, Ordering::Relaxed);
+    models::ensure_until(&pair.needed(verified), progress, &STOP)
+}
+
 /// Stops the running `update` (Settings' Cancel); the next one continues.
 pub fn stop_update() {
     STOP.store(true, Ordering::Relaxed);

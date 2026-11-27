@@ -1,6 +1,6 @@
 //! A progress bar.
 use iced::widget::{Space, container, stack};
-use iced::{Border, Element, Fill, Length};
+use iced::{Border, Color, Element, Fill, Length};
 
 use super::button::faded;
 use super::themes::c;
@@ -10,6 +10,11 @@ use super::tokens::radius;
 /// glowing (`0 0 12px` accent: drawn as two soft rounded rings, no blur on the
 /// CPU renderer). 18 px tall: the bar in its middle, the glow round it.
 pub fn bar<'a, Message: 'a>(share: f32) -> Element<'a, Message> {
+    bar_on(share, c().hover)
+}
+
+/// `bar` on a `track` colour of the caller's (the preview panel's dark scrim).
+pub fn bar_on<'a, Message: 'a>(share: f32, track: Color) -> Element<'a, Message> {
     const GLOW: f32 = 6.0;
     let share = share.clamp(0.0, 1.0);
     let portion = |s: f32| Length::FillPortion((s * 1000.0).round() as u16);
@@ -49,8 +54,8 @@ pub fn bar<'a, Message: 'a>(share: f32) -> Element<'a, Message> {
     let track = container(super::dir::row(parts.into_iter().flatten()))
         .width(Fill)
         .height(6)
-        .style(|_| container::Style {
-            background: Some(c().hover.into()),
+        .style(move |_| container::Style {
+            background: Some(track.into()),
             border: Border::default().rounded(radius::FULL),
             ..container::Style::default()
         });

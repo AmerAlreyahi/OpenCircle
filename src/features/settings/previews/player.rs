@@ -49,6 +49,8 @@ struct Frame {
     length: Duration,
     /// Which clip it is of.
     clip: usize,
+    /// The whole clip's real length (0: the still, not known yet).
+    total: Duration,
 }
 
 pub struct Player {
@@ -61,6 +63,8 @@ pub struct Player {
     until: Duration,
     /// Elapsed time within the current clip (reset when the clip changes).
     elapsed: Duration,
+    /// The current clip's real length (from its file; 0 until it is known).
+    total: Duration,
     /// The clips are on disk (else the stage offers "Play preview").
     on_disk: bool,
     files: Vec<Clip>,
@@ -106,6 +110,7 @@ impl Player {
             frames: Some(rx),
             until: Duration::ZERO,
             elapsed: Duration::ZERO,
+            total: Duration::ZERO,
             on_disk,
             files,
             clip: start,
@@ -165,8 +170,15 @@ impl Player {
         if f.clip != self.clip {
             self.elapsed = Duration::ZERO;
         }
+        if f.total > Duration::ZERO {
+            self.total = f.total;
+        }
         self.until += f.length;
         self.elapsed += f.length;
+        // a clip that loops starts its count again
+        if self.total > Duration::ZERO && self.elapsed > self.total {
+            self.elapsed = f.length;
+        }
         self.clip = f.clip;
         self.shown = Some(f.image);
     }
@@ -216,6 +228,19 @@ impl Player {
         self.elapsed.as_secs() as u32
     }
 
+    /// The current clip's real length in whole seconds (0: not known yet).
+    pub fn total_secs(&self) -> u32 {
+        self.total.as_secs_f32().round() as u32
+    }
+
+    /// How far into the clip it is, 0..1.
+    pub fn share(&self) -> f32 {
+        match self.total.is_zero() {
+            true => 0.0,
+            false => (self.elapsed.as_secs_f32() / self.total.as_secs_f32()).clamp(0.0, 1.0),
+        }
+    }
+
     /// The frame to show (`None`: the still isn't decoded yet).
     pub fn frame(&self) -> Option<&Handle> {
         self.shown.as_ref()
@@ -262,6 +287,7 @@ fn run(
         image: still_at(still, target(width))?,
         length: Duration::ZERO,
         clip: start,
+        total: Duration::ZERO,
     })
     .ok()?;
     let clips: Vec<Vec<u8>> = clips?.iter().map(Clip::load).collect::<Option<_>>()?;
@@ -275,6 +301,7 @@ fn run(
 fn play(clip: &[u8], index: usize, width: &Width, tx: &SyncSender<Frame>) -> Option<()> {
     let ivf = av1::ivf(clip)?;
     let length = ivf.frame;
+    let total = length * ivf.clone().count() as u32;
     let mut decoder = av1::Decoder::new(THREADS)?;
     for packet in ivf {
         let mut out = None;
@@ -287,6 +314,7 @@ fn play(clip: &[u8], index: usize, width: &Width, tx: &SyncSender<Frame>) -> Opt
                     image: Handle::from_rgba(w as u32, h as u32, rgba),
                     length,
                     clip: index,
+                    total,
                 });
             })
             .ok()?;
@@ -404,6 +432,30 @@ mod tests {
         let mut big = player(&[TINY_A], true, 4000);
         assert!(big.next_frame() && big.next_frame());
         assert_eq!(size(big.frame().unwrap()), (128, 72), "never upscaled");
+    }
+
+    /// The clip's real length (its frames x their time, from the file), and how far in it is;
+    /// a loop starts the count again.
+    #[test]
+    fn the_real_length_and_progress_come_from_the_clip() {
+        let ms = Duration::from_millis;
+        let mut p = player(&[TINY_A], true, 0);
+        assert_eq!(
+            (p.total_secs(), p.share()),
+            (0, 0.0),
+            "not known before it plays"
+        );
+        p.catch_up(ms(0));
+        assert_eq!(p.total, ms(300), "3 frames of 100 ms");
+        assert!((p.share() - 1.0 / 3.0).abs() < 0.01, "{}", p.share());
+        p.catch_up(ms(250));
+        assert!((p.share() - 1.0).abs() < 0.01, "{}", p.share());
+        p.catch_up(ms(300));
+        assert!(
+            (p.share() - 1.0 / 3.0).abs() < 0.01,
+            "looped: {}",
+            p.share()
+        );
     }
 
     /// Without the clips on disk, or with reduced motion: the still, then done.

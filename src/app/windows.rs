@@ -1709,6 +1709,28 @@ impl Windows {
                             });
                             return Task::batch([keys, update.map(Msg::Settings)]);
                         }
+                        settings::Outcome::AddPair(at) => {
+                            let pair = &crate::features::translate::mt::PAIRS[at];
+                            let add = crate::app::background::background(move |tx| {
+                                let progress = |done: u64, total: u64| {
+                                    let _ = tx.unbounded_send(settings::Message::PairProgress(
+                                        done as f32 / total.max(1) as f32,
+                                    ));
+                                };
+                                let got = match crate::features::translate::mt::add(pair, progress)
+                                {
+                                    // Cancel: not a failure (the pair is simply not added)
+                                    Err(crate::features::text_reading::OcrError::Stopped) => Ok(()),
+                                    got => got.map_err(|e| {
+                                        crate::features::text_reading::screens::model_download::why(
+                                            &e,
+                                        )
+                                    }),
+                                };
+                                let _ = tx.unbounded_send(settings::Message::PairAdded(got));
+                            });
+                            return Task::batch([keys, add.map(Msg::Settings)]);
+                        }
                         settings::Outcome::None => {}
                     }
                     if leaving {

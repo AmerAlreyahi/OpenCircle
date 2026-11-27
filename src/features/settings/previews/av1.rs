@@ -20,6 +20,7 @@ use rav1d::src::lib::{
 const AGAIN: c_int = -11;
 
 /// The frames of an IVF file, in order.
+#[derive(Clone)]
 pub struct Ivf<'a> {
     rest: &'a [u8],
     /// How long each frame shows (one tick of the file's time base).

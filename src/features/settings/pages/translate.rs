@@ -64,6 +64,29 @@ impl PairRow {
     }
 }
 
+/// A pair being added from "Add a language pair": downloading, or stopped by an error.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Adding {
+    /// Its index in `mt::PAIRS`.
+    at: usize,
+    row: PairRow,
+    share: f32,
+    failed: bool,
+}
+
+/// The pairs of `mt::PAIRS` that are not among `installed` (source, target), with their index.
+pub(crate) fn candidates(installed: &[(&str, &str)]) -> Vec<(usize, PairRow)> {
+    (mt::PAIRS.iter().enumerate())
+        .filter(|(_, p)| !installed.contains(&(p.source, p.target)))
+        .map(|(i, p)| {
+            (
+                i,
+                PairRow::from_codes(p.source, p.target, p.full_size(), false, 0),
+            )
+        })
+        .collect()
+}
+
 /// The model section's state: the installed pairs and how many still have the
 /// v1 decoder (with the bytes their update fetches), and the update.
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +96,10 @@ pub struct Models {
     pub(crate) bytes: u64,
     pub(crate) now: Now,
     pub(crate) pairs: Vec<PairRow>,
+    /// Add a language pair: the list of pairs not installed (`Some`: open), and the pair
+    /// being downloaded.
+    pub(crate) choose: Option<Vec<(usize, PairRow)>>,
+    pub(crate) adding: Option<Adding>,
     /// The header's description and button, made from the above.
     desc: String,
     button: String,
@@ -125,6 +152,8 @@ impl Models {
             bytes,
             now,
             pairs: Vec::new(),
+            choose: None,
+            adding: None,
             desc: String::new(),
             button: String::new(),
         };
@@ -148,13 +177,75 @@ impl Models {
     /// The page is visited: counted again, unless an update runs.
     pub(crate) fn recount(&mut self) {
         if !matches!(self.now, Now::Updating(_)) {
-            *self = Models::count();
+            self.counted();
+        }
+    }
+
+    /// Counted again from the disk; a pair being added stays.
+    fn counted(&mut self) {
+        let (choose, adding) = (self.choose.take(), self.adding.take());
+        *self = Models::count();
+        (self.choose, self.adding) = (choose, adding);
+    }
+
+    fn downloading(&self) -> bool {
+        self.adding.as_ref().is_some_and(|a| !a.failed)
+    }
+
+    /// Opens the list of the offline pairs that are not installed, or closes it.
+    pub(crate) fn open_list(&mut self, open: bool) {
+        self.choose = open.then(|| {
+            let installed = mt::installed_pairs();
+            let installed: Vec<_> = installed
+                .iter()
+                .map(|p| (p.pair.source, p.pair.target))
+                .collect();
+            candidates(&installed)
+        });
+    }
+
+    /// Download pair `at` (`mt::PAIRS`): `true` = start it (none running).
+    pub(crate) fn add(&mut self, at: usize) -> bool {
+        let Some(pair) = mt::PAIRS.get(at) else {
+            return false;
+        };
+        if self.downloading() || matches!(self.now, Now::Updating(_)) {
+            return false;
+        }
+        let row = PairRow::from_codes(pair.source, pair.target, pair.full_size(), false, 0);
+        self.adding = Some(Adding {
+            at,
+            row,
+            share: 0.0,
+            failed: false,
+        });
+        self.choose = None;
+        true
+    }
+
+    pub(crate) fn add_progress(&mut self, share: f32) {
+        if let Some(a) = self.adding.as_mut().filter(|a| !a.failed) {
+            a.share = share;
+        }
+    }
+
+    /// The download ended (Cancel too: nothing is added): counted again, or it stays as failed.
+    pub(crate) fn added(&mut self, done: Result<(), String>) {
+        let Some(a) = self.adding.as_mut() else {
+            return;
+        };
+        match done {
+            Ok(()) => {
+                self.adding = None;
+                self.counted();
+            }
+            Err(_) => a.failed = true,
         }
     }
 
     /// Update now: `true` = start it (something to fetch, none running).
     pub(crate) fn start(&mut self) -> bool {
-        if matches!(self.now, Now::Updating(_)) || self.bytes == 0 {
+        if matches!(self.now, Now::Updating(_)) || self.bytes == 0 || self.downloading() {
             return false;
         }
         self.now = Now::Updating(0.0);
@@ -247,19 +338,6 @@ fn models_header(m: &Models) -> Element<'_, Message> {
 /// One installed language pair row (`.mrow2`): translate icon tile, pair name + code/size,
 /// and status chip / Update / progress + Cancel.
 fn pair_row<'a>(pair: &'a PairRow, now: &'a Now, desc: &'a str) -> Element<'a, Message> {
-    let tile = icon_tile(
-        Icon::Translate.glyph(),
-        size::ICON_SMALL,
-        settings::MODEL_TILE,
-        radius::CONTROL,
-    );
-    let info = column![
-        text(Role::ROW_TITLE, &pair.name),
-        sub(Role::ROW_DESC, &pair.meta),
-    ]
-    .spacing(space::TRACK_GAP)
-    .width(Fill)
-    .align_x(crate::shared::kit::dir::start());
     let right: Element<'a, Message> = match (pair.outdated, now) {
         (true, Now::Updating(share)) => crate::dir_row![
             container(progress::bar(*share)).width(settings::MODEL_BAR_W),
@@ -293,6 +371,60 @@ fn pair_row<'a>(pair: &'a PairRow, now: &'a Now, desc: &'a str) -> Element<'a, M
         .into(),
         (false, _) => status(t!(tr_m_ok), Tone::Ok),
     };
+    model_row(pair, right)
+}
+
+/// The pair being added (`Adding`): its row with progress and Cancel, or Stopped and Try again.
+fn adding_row(a: &Adding) -> Element<'_, Message> {
+    let right: Element<'_, Message> = match a.failed {
+        false => crate::dir_row![
+            container(progress::bar(a.share)).width(settings::MODEL_BAR_W),
+            sub(Role::ROW_DESC, format!("{:.0}%", a.share * 100.0)),
+            button(label(t!(c_cancel)), Kind::Quiet, Some(Message::StopModels)),
+        ]
+        .spacing(space::ROW_Y)
+        .align_y(Center)
+        .into(),
+        true => crate::dir_row![
+            status(t!(tr_m_stopped), Tone::Error),
+            button(
+                label(t!(md_try_again)),
+                Kind::Elevated,
+                Some(Message::AddPair(a.at))
+            ),
+        ]
+        .spacing(space::ROW_Y)
+        .align_y(Center)
+        .into(),
+    };
+    model_row(&a.row, right)
+}
+
+/// One pair of the list "Add a language pair" opens: its Download button.
+fn candidate_row<'a>(at: usize, row: &'a PairRow, busy: bool) -> Element<'a, Message> {
+    let get = button(
+        label(t!(tr_m_get)),
+        Kind::Elevated,
+        (!busy).then_some(Message::AddPair(at)),
+    );
+    model_row(row, get)
+}
+
+/// A model row (`.mrow2`): the translate tile, the pair's name and meta, `right`.
+fn model_row<'a>(pair: &'a PairRow, right: Element<'a, Message>) -> Element<'a, Message> {
+    let tile = icon_tile(
+        Icon::Translate.glyph(),
+        size::ICON_SMALL,
+        settings::MODEL_TILE,
+        radius::CONTROL,
+    );
+    let info = column![
+        text(Role::ROW_TITLE, &pair.name),
+        sub(Role::ROW_DESC, &pair.meta),
+    ]
+    .spacing(space::TRACK_GAP)
+    .width(Fill)
+    .align_x(crate::shared::kit::dir::start());
     container(
         crate::dir_row![tile, info, right]
             .spacing(settings::CARD_GAP)
@@ -303,10 +435,14 @@ fn pair_row<'a>(pair: &'a PairRow, now: &'a Now, desc: &'a str) -> Element<'a, M
     .into()
 }
 
-/// Footer of the Offline models section: "OptimaMT on Hugging Face" external link.
-/// ("+ Add a language pair" stays hidden because pairs download automatically on first translate
-/// from the source/target pickers above; there is no separate add-pair flow.)
-fn models_footer<'a>() -> Element<'a, Message> {
+/// Footer of the Offline models section: "+ Add a language pair" (opens the list of the offline
+/// pairs not installed; a pair picked downloads) and the "OptimaMT on Hugging Face" link.
+fn models_footer(m: &Models) -> Element<'_, Message> {
+    let add = button(
+        accent(Role::CONTROL, t!(tr_m_add)),
+        Kind::Quiet,
+        (!m.downloading()).then_some(Message::AddPairs(m.choose.is_none())),
+    );
     let link = button(
         crate::dir_row![
             accent(Role::CONTROL, t!(tr_optima_link)),
@@ -318,7 +454,7 @@ fn models_footer<'a>() -> Element<'a, Message> {
         Some(Message::OpenLink(OPTIMA_MT.into())),
     );
     container(
-        crate::dir_row![Space::new().width(Fill), link]
+        crate::dir_row![add, Space::new().width(Fill), link]
             .spacing(space::GAP)
             .align_y(Center),
     )
@@ -347,7 +483,12 @@ pub fn view(state: &State) -> Element<'_, Message> {
                     rows.push(pair_row(p, &state.models.now, &state.models.desc));
                 }
             }
-            rows.push(models_footer());
+            rows.extend(state.models.adding.as_ref().map(adding_row));
+            let busy = state.models.downloading();
+            for (at, row) in state.models.choose.iter().flatten() {
+                rows.push(candidate_row(*at, row, busy));
+            }
+            rows.push(models_footer(&state.models));
             rows
         }),
         section(Some(t!(sec_games)), None, || {
