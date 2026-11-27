@@ -18,17 +18,13 @@ use super::tokens::{Role, fixed, radius, size};
 
 /// The recording red (`--rec`) and the paused amber (`--amber`) of the design.
 pub fn red() -> Color {
-    match current().light {
-        true => Color::from_rgb8(0xdc, 0x26, 0x26),
-        false => Color::from_rgb8(0xf8, 0x71, 0x71),
-    }
+    let (light, dark) = fixed::REC;
+    if current().light { light } else { dark }
 }
 
 pub fn amber() -> Color {
-    match current().light {
-        true => Color::from_rgb8(0xb4, 0x53, 0x09),
-        false => Color::from_rgb8(0xfb, 0xbf, 0x24),
-    }
+    let (light, dark) = fixed::AMBER;
+    if current().light { light } else { dark }
 }
 
 /// The bar's height and the buttons' side (`.rec` 52, `.ib` 34).
@@ -312,7 +308,7 @@ pub fn duration<'a, M: 'a>(glyph: Icon, words: &str) -> Element<'a, M> {
     .padding([0.0, 8.0])
     .center_y(22)
     .style(|_| container::Style {
-        background: Some(Color::from_rgba8(8, 12, 24, 0.72).into()),
+        background: Some(fixed::GLASS.into()),
         border: Border::default().rounded(11),
         ..container::Style::default()
     })
@@ -394,7 +390,7 @@ pub fn thumb<'a, M: 'a>(
         Some(a) => container(a).padding(8.0).align_right(Fill).into(),
         None => Space::new().into(),
     };
-    let rest = Color::from_rgba(1.0, 1.0, 1.0, 0.25);
+    let rest = fixed::GLASS_LINE;
     let line = container(
         container(Space::new())
             .width(Length::FillPortion(

@@ -11,7 +11,7 @@ use crate::app::App;
 use crate::app::message::Message;
 use crate::features::snip::record::clock::{self, Clock};
 use crate::features::snip::record::fake::Fake;
-use crate::features::snip::record::placement::{self, Row, Surface, Target};
+use crate::features::snip::record::placement::{self, Ctx, Row, Surface, Target};
 use crate::features::snip::record::state::{Effect, Event, State};
 use crate::features::snip::screens::record_bar::{self, Bar, Phase};
 use crate::features::snip::screens::record_result::{self as thumb, Thumb};
@@ -61,6 +61,24 @@ enum Act {
     Save,
     Edit,
     OpenWith,
+}
+
+/// What a press-and-drag on the thumbnail does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DragOut {
+    /// This platform cannot drag a file out.
+    Unsupported,
+    /// It can, but there is no file yet.
+    WaitsForFile,
+    Go,
+}
+
+fn drag_out(supported: bool, has_file: bool) -> DragOut {
+    match (supported, has_file) {
+        (false, _) => DragOut::Unsupported,
+        (true, false) => DragOut::WaitsForFile,
+        (true, true) => DragOut::Go,
+    }
 }
 
 impl App {
@@ -191,12 +209,24 @@ impl App {
         let muted = self.rec.bar.muted;
         let label = format!("● {}", clock::format(elapsed));
         let rows = placement::tray_rows(self.rec.state);
-        let key = format!("{label}{rows:?}{muted}");
+        let key = format!(
+            "{label}{rows:?}{muted}{}",
+            self.rec.bar.mic.unwrap_or(usize::MAX)
+        );
         if self.rec.tray.as_ref() == Some(&key) {
             return;
         }
         self.rec.tray = Some(key);
-        let rows = (rows.into_iter().map(|r| (r, r.label(muted)))).collect();
+        let bar = &self.rec.bar;
+        let ctx = Ctx {
+            muted,
+            audio_only: bar.audio_only,
+            device: bar
+                .mic
+                .and_then(|i| bar.mics.get(i).cloned())
+                .unwrap_or_default(),
+        };
+        let rows = (rows.into_iter().map(|r| (r, r.label(&ctx)))).collect();
         platform::tray::recording((phase != Phase::Saving).then_some((label, rows)));
     }
 
@@ -273,6 +303,14 @@ impl App {
             Row::Stop => self.record_event(Event::Stop, at),
             Row::Discard => self.record_event(Event::Discard, at),
             Row::Mic => self.record_mute(at),
+            Row::Record => self.on_record_bar(record_bar::Msg::Record),
+            Row::Cancel => self.on_record_bar(record_bar::Msg::Cancel),
+            Row::Keep => self.on_record_bar(record_bar::Msg::Keep),
+            Row::Retry => self.on_record_bar(record_bar::Msg::Retry),
+            Row::Fix => self.on_record_bar(record_bar::Msg::Fix),
+            Row::Dismiss => self.record_event(Event::Dismiss, at),
+            // notes: nothing to do
+            Row::Device | Row::ErrMic | Row::ErrRefused => Task::none(),
         }
     }
 
@@ -311,10 +349,17 @@ impl App {
     }
 
     /// A press and drag on the thumbnail takes the file out into another app, where Snip's
-    /// drag-out can (`dragout::SUPPORTED`). The file is R-05's: nothing to drag yet.
+    /// drag-out can (`dragout::SUPPORTED`). The file is R-05's: until it exists there is nothing
+    /// to drag (logged); with a file the drag itself is R-05's too.
     fn record_drag_out(&mut self) -> Task<Message> {
-        if crate::features::snip::annotate::dragout::SUPPORTED && self.rec.file.is_some() {
-            crate::log!("[opencircle] recording drag-out: waits for R-05 (the file)");
+        let supported = crate::features::snip::annotate::dragout::SUPPORTED;
+        match drag_out(supported, self.rec.file.is_some()) {
+            DragOut::Unsupported => {}
+            DragOut::WaitsForFile => {
+                crate::log!("[opencircle] recording drag-out: waits for R-05 (the file)");
+            }
+            // R-05: start Snip's drag-out with the file here
+            DragOut::Go => crate::log!("[opencircle] recording drag-out: R-05 starts it"),
         }
         Task::none()
     }
@@ -491,7 +536,10 @@ mod tests {
         let (label, rows) = shown(REC_SHOWN.with_borrow(Vec::len) - 1).expect("the tray's state");
         assert!(label.starts_with("● 00:0"), "{label}");
         let kinds: Vec<Row> = rows.iter().map(|(r, _)| *r).collect();
-        assert_eq!(kinds, [Row::Pause, Row::Stop, Row::Discard, Row::Mic]);
+        assert_eq!(
+            kinds,
+            [Row::Pause, Row::Stop, Row::Discard, Row::Mic, Row::Device]
+        );
         let _ = app.on_record_row(Row::Pause);
         assert_eq!(app.rec.state, State::Paused { audio_only: false });
         let _ = app.on_record_row(Row::Stop);
@@ -513,5 +561,64 @@ mod tests {
         recording(&mut app);
         let _ = app.record_fault(Fault::DiskLow);
         assert!(app.windows.record_thumb().is_some(), "what we have is kept");
+    }
+
+    /// R02-23: a Mic or Refused fault while recording stops the capture, and leaving the card
+    /// (Dismiss, Fix, Retry) deletes what the faulted capture left: nothing is orphaned.
+    #[test]
+    fn r02_23_a_fault_card_never_orphans_the_capture() {
+        for leave in [B::Cancel, B::Fix, B::Retry] {
+            for fault in [Fault::Mic, Fault::Refused] {
+                let mut app = app();
+                recording(&mut app);
+                let _ = app.record_fault(fault);
+                assert_eq!(app.rec.state, State::Error(fault));
+                let _ = app.on_record_bar(leave.clone());
+                assert_eq!(
+                    app.rec.fake.log,
+                    [Effect::Begin, Effect::Flush, Effect::DeleteTemp],
+                    "{leave:?} after {fault:?}"
+                );
+            }
+        }
+    }
+
+    /// R02-24: in the tray (whole screen), Error and the Keep question have rows and a press on
+    /// them leaves the state; Ready has Record / Cancel.
+    #[test]
+    fn r02_24_the_tray_has_a_way_out_of_every_card() {
+        let rows = || {
+            let last = REC_SHOWN.with_borrow(|s| s.last().cloned());
+            last.flatten()
+                .map(|(_, r)| r.into_iter().map(|(r, _)| r).collect::<Vec<_>>())
+        };
+        REC_SHOWN.with_borrow_mut(Vec::clear);
+        let mut app = app();
+        let _ = app.record_start_on(false, Target::WholeScreen, false);
+        assert_eq!(rows(), Some(vec![Row::Record, Row::Cancel]));
+        let _ = app.on_record_row(Row::Record);
+        let _ = app.record_event(Event::Esc, Instant::now());
+        assert_eq!(rows(), Some(vec![Row::Keep, Row::Discard]));
+        let _ = app.on_record_row(Row::Keep);
+        assert!(app.windows.record_thumb().is_some());
+        let mut app2 = App::idle(iced::window::Id::unique());
+        let _ = app2.record_start_on(false, Target::WholeScreen, false);
+        let _ = app2.on_record_row(Row::Record);
+        let _ = app2.record_fault(Fault::Refused);
+        assert_eq!(
+            rows(),
+            Some(vec![Row::ErrRefused, Row::Retry, Row::Dismiss])
+        );
+        let _ = app2.on_record_row(Row::Dismiss);
+        assert_eq!(app2.rec.state, State::Idle);
+    }
+
+    /// R02-25: drag-out waits for the file only where it is supported and there is none.
+    #[test]
+    fn r02_25_drag_out_reads_the_right_way_round() {
+        assert_eq!(drag_out(true, false), DragOut::WaitsForFile);
+        assert_eq!(drag_out(true, true), DragOut::Go);
+        assert_eq!(drag_out(false, true), DragOut::Unsupported);
+        assert_eq!(drag_out(false, false), DragOut::Unsupported);
     }
 }

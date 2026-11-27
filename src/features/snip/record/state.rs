@@ -209,13 +209,16 @@ impl State {
             (S::AskKeep { .. }, E::Dismiss) => same,
             // stopping: a second Stop is nothing; the flush ends in the thumbnail
             (S::Stopping { audio_only }, E::Flushed) => (S::Result { audio_only }, None),
-            (S::Result { .. } | S::Error(_), E::Dismiss | E::Esc) => (S::Idle, None),
+            (S::Result { .. }, E::Dismiss | E::Esc) => (S::Idle, None),
+            // the error card closed: whatever a faulted capture left is deleted (nothing: a no-op)
+            (S::Error(_), E::Dismiss | E::Esc) => (S::Idle, Some(Effect::DeleteTemp)),
             // faults
             (S::Recording { audio_only } | S::Paused { audio_only }, E::Fault(f)) => match f {
                 Fault::DiskLow | Fault::StreamEnded => {
                     (S::Stopping { audio_only }, Some(Effect::Flush))
                 }
-                Fault::Mic | Fault::Refused => (S::Error(f), None),
+                // stop capturing and close the file; leaving the card deletes it
+                Fault::Mic | Fault::Refused => (S::Error(f), Some(Effect::Flush)),
             },
             (S::Picking | S::Asking | S::Countdown(_), E::Fault(f)) => (S::Error(f), None),
             _ => same,
@@ -281,8 +284,30 @@ mod tests {
             (PAU, E::Discard, S::Idle, Some(F::DeleteTemp)),
             (REC, E::Fault(Fault::DiskLow), STOPPING, Some(F::Flush)),
             (PAU, E::Fault(Fault::StreamEnded), STOPPING, Some(F::Flush)),
-            (REC, E::Fault(Fault::Mic), S::Error(Fault::Mic), None),
-            (S::Error(Fault::Mic), E::Dismiss, S::Idle, None),
+            (
+                REC,
+                E::Fault(Fault::Mic),
+                S::Error(Fault::Mic),
+                Some(F::Flush),
+            ),
+            (
+                PAU,
+                E::Fault(Fault::Refused),
+                S::Error(Fault::Refused),
+                Some(F::Flush),
+            ),
+            (
+                S::Error(Fault::Mic),
+                E::Dismiss,
+                S::Idle,
+                Some(F::DeleteTemp),
+            ),
+            (
+                S::Error(Fault::Refused),
+                E::Esc,
+                S::Idle,
+                Some(F::DeleteTemp),
+            ),
         ];
         for (from, event, to, effect) in rows {
             assert_eq!(from.on(event), (to, effect), "{from:?} --{event:?}-->");

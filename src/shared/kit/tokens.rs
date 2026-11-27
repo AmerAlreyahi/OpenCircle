@@ -166,6 +166,18 @@ pub mod fixed {
 
     /// emerald-400.
     pub const SUCCESS: Color = Color::from_rgb8(0x34, 0xd3, 0x99);
+    /// The recording red (light, dark theme) and the paused amber (R1 bar design).
+    pub const REC: (Color, Color) = (
+        Color::from_rgb8(0xdc, 0x26, 0x26),
+        Color::from_rgb8(0xf8, 0x71, 0x71),
+    );
+    pub const AMBER: (Color, Color) = (
+        Color::from_rgb8(0xb4, 0x53, 0x09),
+        Color::from_rgb8(0xfb, 0xbf, 0x24),
+    );
+    /// The duration chip's dark glass and the thumbnail's timer line rest colour.
+    pub const GLASS: Color = Color::from_rgba8(8, 12, 24, 0.72);
+    pub const GLASS_LINE: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.25);
     /// rose-400.
     pub const DANGER: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
     /// The window's close button under the cursor, and its glyph.

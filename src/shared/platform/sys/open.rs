@@ -75,18 +75,41 @@ pub fn open_with(path: &std::path::Path) -> io::Result<()> {
     }
     #[cfg(all(windows, not(test)))]
     {
+        use windows::Win32::System::Com::{
+            COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
+        };
         use windows::Win32::UI::Shell::{
             OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPEN_AS_INFO_FLAGS, OPENASINFO, SHOpenWithDialog,
         };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId,
+        };
         use windows::core::{HSTRING, PCWSTR};
         let file = HSTRING::from(path.as_os_str());
+        // The dialog needs an STA thread (this one is fresh and ours). Uninitialise only what we
+        // initialised (a thread already in another mode keeps its own).
+        // SAFETY: plain COM init on this thread, undone below when it succeeded.
+        let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.is_ok();
+        // The owner: our own window in front (the thumbnail the user just pressed), if there is one.
+        // SAFETY: both calls only read.
+        let owner = unsafe {
+            let front = GetForegroundWindow();
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(front, Some(&mut pid));
+            (!front.is_invalid() && pid == std::process::id()).then_some(front)
+        };
         let info = OPENASINFO {
             pcszFile: PCWSTR(file.as_ptr()),
             pcszClass: PCWSTR::null(),
             oaifInFlags: OPEN_AS_INFO_FLAGS(OAIF_EXEC.0 | OAIF_ALLOW_REGISTRATION.0),
         };
         // SAFETY: `info` and the string it points to live through the call.
-        unsafe { SHOpenWithDialog(None, &info) }.map_err(io::Error::other)
+        let done = unsafe { SHOpenWithDialog(owner, &info) }.map_err(io::Error::other);
+        if com {
+            // SAFETY: pairs the successful CoInitializeEx above.
+            unsafe { CoUninitialize() };
+        }
+        done
     }
     #[cfg(all(target_os = "linux", not(test)))]
     {

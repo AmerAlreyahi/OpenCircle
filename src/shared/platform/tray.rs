@@ -324,7 +324,7 @@ thread_local! {
     static CAPTURING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// A recording runs with its controls here (`recording`), and the rows it shows now.
     static RECORDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static REC_ROWS: std::cell::RefCell<Vec<Row>> = const { std::cell::RefCell::new(Vec::new()) };
+    static REC_ROWS: std::cell::RefCell<Vec<(Row, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The update dot last asked for (`show_update`), put back after a capture.
     static DOT: std::cell::Cell<Option<[u8; 3]>> = const { std::cell::Cell::new(None) };
 }
@@ -399,7 +399,7 @@ pub fn capturing(label: Option<String>) {
 }
 
 /// What the tray shows of a recording: its label and its rows with their texts.
-pub type Shown = (String, Vec<(Row, &'static str)>);
+pub type Shown = (String, Vec<(Row, String)>);
 
 /// A recording in the tray (owner, Q1: where our window cannot be kept out of a whole-screen
 /// recording, this is its bar). `Some((label, rows))`: the icon has the red dot, the label
@@ -416,9 +416,7 @@ pub fn recording(shown: Option<Shown>) {
             crate::shared::app_language::set(lang);
             let on = shown.is_some();
             let was = RECORDING.replace(on);
-            let rows: Vec<Row> = (shown.iter().flat_map(|(_, r)| r))
-                .map(|(r, _)| *r)
-                .collect();
+            let rows: Vec<(Row, String)> = (shown.iter().flat_map(|(_, r)| r)).cloned().collect();
             let same = on && was && REC_ROWS.with_borrow(|r| *r == rows);
             HELD.with_borrow(|held| {
                 if let Some(tray) = held {
