@@ -1983,6 +1983,8 @@ strings! {
         | "لا يمكن أن يتجاوز عرض صفحة PDF 19200 بكسل. اختر حجمًا أصغر.";
     sn_pin: "Pin to screen"
         | "تثبيت على الشاشة";
+    sn_pin_still: "Pin"
+        | "تثبيت";
     sn_live_pin: "Live pin"
         | "تثبيت مباشر";
     sn_share: "Share"

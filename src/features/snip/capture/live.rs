@@ -18,6 +18,16 @@ use crate::shared::platform::capture::window_rect::WinRect;
 /// Live pins exist here.
 pub const SUPPORTED: bool = cfg!(windows);
 
+/// Live pin is offered: this desktop has it and Labs "Pins" is on (R-10: the Pin button's row
+/// and its routing).
+pub fn offered() -> bool {
+    offered_with(crate::shared::config::current().labs.pins)
+}
+
+pub(crate) fn offered_with(labs_pins: bool) -> bool {
+    SUPPORTED && labs_pins
+}
+
 /// At most this often a frame is read (~10 fps).
 pub const MIN_GAP: Duration = Duration::from_millis(100);
 /// With no frame for this long, the source checks its window still exists (one call).

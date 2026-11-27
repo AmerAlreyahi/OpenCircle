@@ -210,6 +210,7 @@ impl Config {
                 n.map_or(Ok(()), |n| within(1..=64, " px")(&n))
             });
             c.editor.eraser_whole = get(t, p, "eraser_whole", None, &mut w);
+            c.editor.pin_live = get(t, p, "pin_live", None, &mut w);
             c.editor.magnifier_outline = get(t, p, "magnifier_outline", None, &mut w);
             c.editor.magnifier_zoom = get_checked(
                 t,

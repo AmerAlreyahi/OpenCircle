@@ -1996,7 +1996,7 @@ fn toolbar_size_matches_its_layout() {
     e.update(Message::Tool(Tool::Blur));
     assert_eq!(laid_out(e.toolbar_at(Rectangle::default()).0), one);
     // (the Open in Studio button and the quiet x made it wider)
-    assert!(one.width < 700.0 && one.width > 500.0, "{one:?}");
+    assert!(one.width < 760.0 && one.width > 500.0, "{one:?}");
 }
 
 // ---- presets, copy / paste style, eyedropper -------------------------------------------

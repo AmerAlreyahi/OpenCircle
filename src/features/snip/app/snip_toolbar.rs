@@ -723,10 +723,6 @@ mod tests {
         let _ = app.on_snip_toolbar(E::Menu(crate::features::snip::annotate::Menu::More));
         let names = crate::shared::kit::testing::shot::texts(app.view(app.overlay));
         assert!(
-            names.iter().any(|n| n.starts_with("Pin to screen")),
-            "{names:?}"
-        );
-        assert!(
             !names.iter().any(|n| n.starts_with("Long capture")),
             "R-09: Long capture is a bar button, not a More row: {names:?}"
         );
@@ -734,9 +730,14 @@ mod tests {
             !names.iter().any(|n| n.starts_with("Live pin")),
             "{names:?}"
         );
-        assert!(more(&app).contains(&Some(E::Pin)));
+        // R-10: Pin is the bar's one button, not a More row
+        assert!(
+            !names.iter().any(|n| n.starts_with("Pin to screen")),
+            "{names:?}"
+        );
+        assert!(!more(&app).contains(&Some(E::Pin)));
         // a pin with every Labs switch off
-        let _ = app.on_snip_toolbar(E::Pin);
+        let _ = app.on_snip_toolbar(E::PinButton);
         assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
     }
 
@@ -753,25 +754,17 @@ mod tests {
             !texts.iter().any(|t| t == "Long capture"),
             "R-09: {texts:?}"
         );
-        for row in [
-            "Add to steps",
-            "Pin to screen",
-            "Colour picker",
-            "Screen ruler",
-        ] {
+        for row in ["Add to steps", "Colour picker", "Screen ruler"] {
             assert!(texts.iter().any(|t| t == row), "{row}: {texts:?}");
         }
         assert_eq!(texts.iter().any(|t| t == "Share"), share::SUPPORTED);
-        // Down x5: the fifth live row (Copy text, Ask AI, Translate,
-        // Add to steps, Pin); Enter pins (the overlay closes)
-        for _ in 0..5 {
+        // Down x4: the fourth live row (Copy text, Ask AI, Translate, Add to steps)
+        for _ in 0..4 {
             let _ = app.on_snip_toolbar(E::MenuStep(false));
         }
         let editor = &app.o.edit.as_ref().unwrap().annotator;
         let rows = toolbar::more_rows(editor);
-        assert_eq!(rows[editor.row.unwrap()].message, Some(E::Pin));
-        let _ = app.on_snip_toolbar(E::Activate);
-        assert!(app.hiding != Hiding::No, "pinned: the overlay closes");
+        assert_eq!(rows[editor.row.unwrap()].message, Some(E::AddStep));
     }
 
     /// Settings > Studio > Open pictures in "Studio": the picked area's editor, its

@@ -396,7 +396,32 @@ pub fn snip_row_stops(e: &Annotator) -> Vec<Message> {
         .collect()
 }
 
+/// R-10: the Pin button's row: Pin | Live pin (Live pin only while Labs "Pins" is on and the
+/// desktop has it; dimmed away from the live screen). The choice is remembered.
+pub(crate) fn pin_row(e: &Annotator, live_offered: bool) -> El<'_> {
+    let mut cells = vec![text_cell(
+        t!(sn_pin_still),
+        !(e.pin_live && live_offered),
+        Some(Message::PinLive(false)),
+    )];
+    if live_offered {
+        cells.push(text_cell(
+            t!(sn_live_pin),
+            e.pin_live,
+            e.scroll.then_some(Message::PinLive(true)),
+        ));
+    }
+    let head = text(Role::ROW_TITLE, tr(crate::shared::app_language::S::sn_pin));
+    dir::row(vec![head.into(), hairline(), group(cells, false)])
+        .spacing(GROUP_GAP)
+        .align_y(Center)
+        .into()
+}
+
 pub(crate) fn row_of(e: &Annotator) -> Option<El<'_>> {
+    if e.pin_row {
+        return Some(pin_row(e, crate::features::snip::capture::live::offered()));
+    }
     use crate::features::snip::annotate::{TextBack as B, TextFont as F};
     let tool = base_tool(e);
     let c = can(e, tool);

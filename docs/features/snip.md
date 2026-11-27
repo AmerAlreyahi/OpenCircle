@@ -32,7 +32,7 @@ All tool keys are in [Snip and annotate](../snip-and-annotate.md).
 ## More than a screenshot
 
 <p align="center">
-  <img src="../images/snip-more.png" alt="The More menu: Add to steps, Pin to screen, Share, Colour picker, Screen ruler." width="800">
+  <img src="../images/snip-more.png" alt="The More menu: Add to steps, Share, Colour picker, Screen ruler." width="800">
 </p>
 
 - **Long capture** for a page taller than the screen. Pick the area, then press the **Long capture** button (just before More) and scroll the page yourself; OpenCircle stitches it into one tall image and shows the page so far beside the area. **Copy** or **Save** finishes it.
@@ -48,7 +48,7 @@ All tool keys are in [Snip and annotate](../snip-and-annotate.md).
 </p>
 
 - **Colour picker** (click copies `#RRGGBB`) and **Screen ruler** (measure in real pixels) are in More and can have their own shortcut.
-- **Pin to screen** keeps the picture on top of your windows. **Share** opens Windows' share sheet.
+- **Pin** (a button on the toolbar, before Long capture; `Ctrl+P`) keeps the picture on top of your windows. Hover it and the row under the toolbar offers **Pin | Live pin**; your choice is remembered and a click on the button does it. **Live pin** shows only while Settings > Labs > Pins is on. **Share** (More) opens Windows' share sheet.
 - **Blur** is a fine pixel mosaic that hides text for good. **Redact** is a solid box.
 - **Snip a translated page:** with a translation on screen, the Snip button in the translate pill (or `Alt+A`) takes the page as translated.
 - OpenCircle's own floating widgets (Steps strip, pin, AI chat, pills) can be picked like any window by hovering and clicking.

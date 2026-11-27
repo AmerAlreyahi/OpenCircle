@@ -75,7 +75,8 @@ impl Labs {
     }
 }
 
-/// Is `f` on in the running app's config?
+/// Is `f` on in the running app's config? (tests; the app reads `config::current().labs`)
+#[cfg(test)]
 pub fn has(f: Feature) -> bool {
     crate::shared::config::current().labs.has(f)
 }

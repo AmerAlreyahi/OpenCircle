@@ -509,6 +509,12 @@ pub enum Message {
     Pin,
     /// Snip's Live pin: the area's part of the window under it, kept updating.
     LivePin,
+    /// R-10: the toolbar's one Pin button: pins as the options row's choice says.
+    PinButton,
+    /// The pointer is over the Pin button: its options row (Pin | Live pin) shows.
+    PinRow,
+    /// The row's choice: `true` = Live pin (remembered).
+    PinLive(bool),
     /// Snip's Share: the flattened image to the OS share sheet.
     Share,
     /// More: this picture, its drawings still editable, into OpenCircle Studio.
@@ -776,6 +782,9 @@ pub struct Annotator {
     /// The eraser's brush (display px) and "Whole drawing".
     pub(crate) eraser: f32,
     pub(crate) eraser_whole: bool,
+    /// R-10: the Pin button pins live (the options row's choice, remembered) and its row shows.
+    pub(crate) pin_live: bool,
+    pub(crate) pin_row: bool,
     /// An eraser stroke: the items before it and the pointer's last point.
     erasing: Option<(Vec<Item>, Point)>,
     /// The image's text lines (Auto's), for the image they were found in.
@@ -963,6 +972,8 @@ impl Annotator {
             capture_scale,
             eraser: saved.eraser.map_or(ERASER_SIZES[1], f32::from),
             eraser_whole: saved.eraser_whole.unwrap_or(false),
+            pin_live: saved.pin_live.unwrap_or(false),
+            pin_row: false,
             erasing: None,
             bands: None,
             movable: false,
@@ -1043,6 +1054,7 @@ impl Annotator {
             (fresh.blur_style, fresh.blur_shape, fresh.blur_custom);
         (self.eraser, self.eraser_whole, self.saved) =
             (fresh.eraser, fresh.eraser_whole, fresh.saved);
+        self.pin_live = fresh.pin_live;
     }
 
     /// The tool and options to remember: `saved` with this editor's own.
@@ -1073,12 +1085,22 @@ impl Annotator {
             group_tools: Some(self.last.to_vec()),
             eraser: Some(self.eraser.round().clamp(1.0, 255.0) as u8),
             eraser_whole: Some(self.eraser_whole),
+            pin_live: Some(self.pin_live),
             blur_style: Some(self.blur_style),
             blur_shape: Some(self.blur_shape),
             blur_custom: self.blur_custom,
             magnifier_outline: Some(d.magnifier_outline),
             magnifier_zoom: Some(d.magnifier_zoom),
             magnifier_shape: Some(d.magnifier_shape),
+        }
+    }
+
+    /// What the Pin button does now: Live pin when chosen, offered (`offered`) and over the live
+    /// screen, else a still pin.
+    pub(crate) fn pin_route(&self, offered: bool) -> Message {
+        match self.pin_live && offered && self.scroll {
+            true => Message::LivePin,
+            false => Message::Pin,
         }
     }
 
@@ -1097,6 +1119,10 @@ impl Annotator {
             .studio
             .then(|| (self.doc.selected, self.doc.extra.clone()));
         self.touch = objects::touch::of(&message);
+        // choosing a tool closes the Pin button's row
+        if matches!(message, Message::Slot(_) | Message::Tool(_) | Message::Pin) {
+            self.pin_row = false;
+        }
         let out = self.handle(message);
         self.touch = 0;
         if let Some(picked) = picked
@@ -1436,6 +1462,13 @@ impl Annotator {
             // like Long capture: the area over the live screen (Snip in place)
             Message::LivePin if self.scroll => return Some(Output::LivePin),
             Message::LivePin => {}
+            Message::PinRow => self.pin_row = true,
+            Message::PinLive(on) => self.pin_live = on,
+            // the one Pin button: Live pin only when chosen, shown (Labs) and over the live screen
+            Message::PinButton => {
+                let offered = crate::features::snip::capture::live::offered();
+                return self.handle(self.pin_route(offered));
+            }
             Message::Copy | Message::Save | Message::Pin => {
                 self.commit();
                 let flat = render(&self.doc);

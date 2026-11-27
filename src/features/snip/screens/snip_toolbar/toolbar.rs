@@ -42,7 +42,6 @@ const PIN: char = '\u{e258}'; // lucide "pin"
 const SCROLL: char = '\u{e4d6}'; // lucide "gallery-vertical-end"
 const PIPETTE: char = crate::features::snip::screens::tools::picker::ICON;
 const SHARE: char = '\u{e158}'; // lucide "share"
-const LIVE_PIN: char = '\u{e3b2}'; // lucide "picture-in-picture-2"
 const LIST_PLUS: char = '\u{e23e}'; // lucide "list-plus"
 /// The Text tool's size presets (display px).
 const TEXT_PRESETS: [f32; 3] = [16.0, 26.0, 38.0];
@@ -59,16 +58,8 @@ pub const GLYPHS: &[char] = &[
     PIPETTE,
     SHARE,
     crate::features::snip::screens::tools::ruler::ICON,
-    LIVE_PIN,
     LIST_PLUS,
 ];
-
-/// Snip's Live pin (Windows; Labs Pins); it works only over the live screen
-/// (`Annotator::scroll`). Still pins left Labs (owner, 2026-10-31): Pin is always there.
-fn live_pin() -> bool {
-    crate::features::settings::labs::has(crate::features::settings::labs::Feature::Pins)
-        && crate::features::snip::capture::live::SUPPORTED
-}
 
 /// The labelled primary in Copy's place while the Steps strip is open
 /// (fits "Update step 12").
@@ -84,7 +75,7 @@ fn group_widths(primary: bool) -> [Vec<f32>; 4] {
     let g0 = vec![bar::HANDLE, CHIP_W];
     let mut g1: Vec<f32> = Group::ALL.map(|_| CONTROL).to_vec();
     g1.extend([CONTROL, CONTROL]); // Colour, Undo
-    let g2 = vec![CONTROL, CONTROL]; // Long capture, More
+    let g2 = vec![CONTROL, CONTROL, CONTROL]; // Pin, Long capture, More
     let g3 = vec![
         CONTROL,                                   // Open in Studio
         if primary { PRIMARY_W } else { CONTROL }, // Copy / Add step N
@@ -137,6 +128,7 @@ pub fn stops(e: &Annotator) -> Vec<Message> {
 pub fn bar_stops(e: &Annotator) -> Vec<Message> {
     let mut stops: Vec<Message> = e.last.iter().map(|&t| Message::Slot(t)).collect();
     stops.extend([Message::Picker, Message::UndoClick]);
+    stops.push(Message::PinButton);
     // (dimmed while a long capture runs or where there is none: Tab skips it)
     if long_capture_on(e) {
         stops.push(Message::Scroll);
@@ -225,16 +217,6 @@ pub fn more_rows(e: &Annotator) -> Vec<MoreRow> {
         ),
         true => MoreRow::plain(COPY, S::c_copy, Some("Ctrl+C"), Some(Message::Copy)),
     });
-    rows.push(MoreRow::plain(
-        PIN,
-        S::sn_pin,
-        Some("Ctrl+P"),
-        Some(Message::Pin),
-    ));
-    if live_pin() {
-        let m = (e.scroll && idle).then_some(Message::LivePin);
-        rows.push(MoreRow::plain(LIVE_PIN, S::sn_live_pin, None, m));
-    }
     if share::SUPPORTED {
         rows.push(MoreRow::plain(
             SHARE,
@@ -448,7 +430,17 @@ fn build(
     ));
     let seg_tools = segment_row(tools);
 
-    // Segment 2: Long capture, More
+    // Segment 2: Pin (one button: click = pin, its row picks Pin | Live pin), Long capture, More
+    let pin_btn = iced::widget::mouse_area(hinted(
+        icon_button::tool_icon(
+            PIN,
+            state(e.pin_row, &Message::PinButton),
+            Some(Message::PinButton),
+        ),
+        t!(sn_pin),
+        Why::Keys("Ctrl+P"),
+    ))
+    .on_enter(Message::PinRow);
     let long = long_capture_on(e);
     let long_why = long_capture_why(e).map_or(Why::Icon, |why| Why::Cut(tr(why)));
     let long_btn = hinted(
@@ -462,8 +454,9 @@ fn build(
     );
     let more = Message::Menu(Menu::More);
     let s = state(e.menu == Some(Menu::More), &more);
-    let more_at = (2usize, 1usize);
+    let more_at = (2usize, 2usize);
     let seg_more = segment_row([
+        pin_btn.into(),
         long_btn,
         hinted(
             icon_button::tool_icon(Icon::More.glyph(), s, Some(more)),
@@ -1212,9 +1205,14 @@ mod tests {
                     ("hide", Tool::Blur),
                     ("redact", Tool::Redact),
                     ("eraser", Tool::Eraser),
+                    ("pin", Tool::Select),
                 ] {
                     let mut e = editor();
                     e.update(Message::Tool(tool));
+                    // R-10: the Pin button's row (Pin | Live pin on desktops that have it)
+                    if name == "pin" {
+                        e.update(Message::PinRow);
+                    }
                     let file = format!("snip-row-{name}{dir}-{}", theme.id);
                     let at = Size::new(1260.0, ROW_H);
                     failed.extend(golden::check("screens", &file, at, &[1.0], || {
@@ -1478,7 +1476,7 @@ mod tests {
     fn the_bar_grew_by_one_button() {
         let groups = group_widths(false);
         let count: usize = groups.iter().map(Vec::len).sum();
-        assert_eq!(count, 2 + Group::ALL.len() + 2 + 2 + 4, "+ the x (C6)");
+        assert_eq!(count, 2 + Group::ALL.len() + 2 + 3 + 4, "+ the x (C6)");
     }
 
     /// C6: the toolbar ends with a quiet x (Tab reaches it last): it asks the host to end
@@ -1539,6 +1537,80 @@ mod tests {
         assert!(at(&e, &Message::Scroll).is_none(), "dimmed while capturing");
     }
 
+    /// R-10: ONE Pin button on the bar (a Tab stop before Long capture), no Pin / Live pin row in
+    /// More, and the bar still fits 1280 px with Long capture beside it.
+    #[test]
+    fn r10_one_pin_button_no_second_entry() {
+        let e = editor();
+        let pins = stops(&e)
+            .iter()
+            .filter(|s| **s == Message::PinButton)
+            .count();
+        assert_eq!(pins, 1);
+        assert!(
+            more_rows(&e)
+                .iter()
+                .all(|r| r.name != S::sn_pin && r.name != S::sn_live_pin),
+            "no second pin entry in More"
+        );
+        assert!(size().width <= 1280.0 - 2.0 * 16.0, "{}", size().width);
+    }
+
+    /// R-10: the Pin button's row (shown while the pointer is on the button, closed by a tool)
+    /// has Pin | Live pin only while Live pin is offered (Labs Pins on).
+    #[test]
+    fn r10_row_offers_live_pin_only_with_labs() {
+        use crate::features::snip::screens::options_row::pin_row;
+        let cells = |e: &Annotator, offered| {
+            crate::shared::kit::option_bar::scope(None, true, || Some(pin_row(e, offered)))
+                .1
+                .len()
+        };
+        let mut e = editor();
+        e.scroll = true;
+        assert!(!crate::features::snip::capture::live::offered_with(false));
+        assert_eq!((cells(&e, false), cells(&e, true)), (1, 2));
+        assert!(options_row(&e, 800.0).is_none() || !e.pin_row);
+        e.update(Message::PinRow);
+        assert!(e.pin_row && options_row(&e, 800.0).is_some());
+        e.update(Message::Tool(Tool::Rect));
+        assert!(!e.pin_row);
+    }
+
+    /// R-10: the choice routes the button (still vs live pin), is remembered, and Live pin
+    /// stays a still pin where it is not offered or not over the live screen.
+    #[test]
+    fn r10_choice_routes_the_button_and_is_remembered() {
+        let mut e = editor();
+        e.scroll = true;
+        assert!(matches!(e.pin_route(true), Message::Pin));
+        e.update(Message::PinLive(true));
+        assert!(matches!(e.pin_route(true), Message::LivePin));
+        assert!(matches!(e.pin_route(false), Message::Pin), "Labs off");
+        e.scroll = false;
+        assert!(
+            matches!(e.pin_route(true), Message::Pin),
+            "not the live screen"
+        );
+        assert_eq!(e.remembered().pin_live, Some(true));
+        let still = e.update(Message::PinButton);
+        assert!(matches!(
+            still,
+            Some(crate::features::snip::annotate::Output::Pin(_))
+        ));
+    }
+
+    /// R-10: Pin sits before Long capture in the bar, mirrored in Arabic.
+    #[test]
+    fn r10_pin_mirrors_in_arabic() {
+        let e = editor();
+        let (pin, long) = (centred_on(&e, (2, 0), 0.0).0, centred_on(&e, (2, 1), 0.0).0);
+        assert!(pin < long);
+        let _ar = crate::shared::kit::testing::arabic();
+        let (pin, long) = (centred_on(&e, (2, 0), 0.0).0, centred_on(&e, (2, 1), 0.0).0);
+        assert!(pin > long);
+    }
+
     /// R-09 (F15): the dimmed Long capture button says why in its tooltip.
     #[test]
     fn r09_dimmed_long_capture_says_why() {
@@ -1564,10 +1636,10 @@ mod tests {
     fn r09_more_panel_centres_on_more_ltr_and_rtl() {
         let e = editor();
         let w = size_for(&e).width;
-        let (more, long) = (centred_on(&e, (2, 1), 0.0).0, centred_on(&e, (2, 0), 0.0).0);
+        let (more, long) = (centred_on(&e, (2, 2), 0.0).0, centred_on(&e, (2, 1), 0.0).0);
         assert!(long < more && more < w);
         let _ar = crate::shared::kit::testing::arabic();
-        let (more, long) = (centred_on(&e, (2, 1), 0.0).0, centred_on(&e, (2, 0), 0.0).0);
+        let (more, long) = (centred_on(&e, (2, 2), 0.0).0, centred_on(&e, (2, 1), 0.0).0);
         assert!(more < long && more > 0.0);
     }
 

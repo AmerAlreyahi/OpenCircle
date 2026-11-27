@@ -1172,6 +1172,9 @@ pub struct EditorConfig {
     pub eraser: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eraser_whole: Option<bool>,
+    /// R-10: the Pin button pins live (Labs Pins) instead of a still.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pin_live: Option<bool>,
     /// Hide's look, shape and the Studio's custom strength (px at scale 1): kept like the
     /// other tools' options (W111).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1227,6 +1230,7 @@ impl Default for EditorConfig {
             group_tools: None,
             eraser: None,
             eraser_whole: None,
+            pin_live: None,
             blur_style: None,
             blur_shape: None,
             blur_custom: None,

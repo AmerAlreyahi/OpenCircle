@@ -1194,9 +1194,9 @@ fn the_snip_toolbars_grip_drags_it_and_it_stays_where_dropped() {
         assert!(app.o.bar_drag.is_some(), "the grip holds the toolbar");
         let from = docked + Vector::new(10.0, 10.0);
         let _ = app.update(Message::BarMoved(from));
-        let _ = app.update(Message::BarMoved(from + Vector::new(100.0, 100.0)));
+        let _ = app.update(Message::BarMoved(from + Vector::new(60.0, 100.0)));
         let _ = app.update(Message::BarReleased);
-        let dropped = docked + Vector::new(100.0, 100.0);
+        let dropped = docked + Vector::new(60.0, 100.0);
         assert_eq!(
             app.bar_target(),
             dropped,

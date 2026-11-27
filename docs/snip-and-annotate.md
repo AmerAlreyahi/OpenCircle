@@ -73,7 +73,7 @@ One bar, in groups: a grip to move it, the size chip, **Select**, **Shapes**,
 to open its options (outline, fill, size, and so on). `Esc` closes the toolbar.
 
 **More** holds three actions on the picked area, then Open in Studio, Long
-capture, Add to steps, Pin, Live pin, Share (Windows), Colour picker and Screen
+capture, Add to steps, Share (Windows), Colour picker and Screen
 ruler:
 
 - **Copy text** puts the text of the area on the clipboard.
@@ -243,9 +243,9 @@ Both are in More, and can have their own shortcut (unset by default: see
 
 ## Pin
 
-**Pin** (`Ctrl+P`) keeps the image on screen in a small always-on-top window.
+**Pin** is one button on the toolbar (just before Long capture); `Ctrl+P` does the same. A click keeps the image on screen in a small always-on-top window. Hover the button and the row under the toolbar shows **Pin | Live pin** (your choice is remembered; Live pin only while Labs > Pins is on).
 Drag it, scroll to zoom, hover for Copy, Save and Close; `Esc` or a double-click
-closes it. **Live pin** (a Labs feature, Settings > Labs > Pins; Windows) keeps a
+closes it. **Live pin** (a Labs feature, Settings > Labs > Pins; Windows, over a live screen) keeps a
 window's picked area updating live in a pin.
 
 ## Save
