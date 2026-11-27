@@ -1925,3 +1925,14 @@ Owner style selection, 2026-11-03: **A — minimal**, chosen after reviewing the
   download trigger): each page's preview block is open by default AND its clip downloads and plays automatically (sha256-pinned, from
   the owner's release, kept on the PC; reduced motion = still frame). Steps badge corner "doesn't matter" (keep the design's); the badge
   must be BIGGER / scale with the screen (DPI): on his 5K monitor it looks small.
+- Antigravity limits (owner, 2026-11-27, "use 1 neon pls, 2 only when it is necessary, it is pro account only"; refines "Rely more on
+  Antigravity"): ONE Neon job at a time (gemini-4-neon-medium); a second only when truly necessary. agy note: in briefs, never write
+  $HOME inside the wsl.exe command (it expands on the Windows side: a build folder "C:Usersamerz/" landed in two worktrees); use the
+  literal /home/az_work/... path (briefs fixed; the folder is excluded in .git/info/exclude).
+- Design round APPROVED (owner, 2026-11-27, review page https: private link in AGENTS.local.md list; sheets
+  .claude/artifacts/design-v060-round/sheets/): A OpenRouter sign-in connection card (4 states) approved; B1 tips one-time hint approved;
+  B2 "What can I do?" card = OPTION B (tiles); B3 Settings Tips card with the "Show tips" toggle + "What can I do?" row approved.
+  Lead defaults for the round's open questions (owner may reverse): the card opens with F1 inside OpenCircle + a tray entry; a tip that
+  fades after ~8 s counts as seen; the OpenRouter waiting countdown shows only if the sign-in has a hard time limit; no "Show tips again"
+  reset for now. Build order: R-17 tips + the card after F-02 (widgets fidelity) merges; the OpenRouter card after F-01 (Settings
+  fidelity) merges. The Arabic sheets' mirrored title bar is NOT built (title bars never mirrored).
